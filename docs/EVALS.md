@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 384 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 387 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -418,6 +418,94 @@ corpus growth) lives in the bodies' *common* connective phrasing that BM25 b=0.7
 to add — closing it likely needs a ranker-side change (e.g. scoring desc+body with a length-aware
 mix), which is out of scope for a description-content round and would need its own registration.
 
+### Skill-routing consensus content gaps — PRE-REGISTERED 2026-08-11 (before any skill edit)
+
+**Evidence base.** The S1 ceiling check (blind two-rater protocol, sealed key, raters saw only the
+63 miss-set prompts + the full descriptions): labels ~95% clean, raters route 90%+ top-1 from the
+same text bm25-desc indexes — the misses are mechanism failures, and production routing is an LLM
+reading descriptions, so the bm25 arms are a regression floor, not the target. Both raters and the
+extraction lane independently converged on the same DESCRIPTION content gaps — missing FACTS, not
+vocabulary: (a) no description owns tool-diagnostics/health; (b) the `--connect` and `--lego`
+moments are unclaimed by any description; (c) the fresh-eyes↔quality-bar boundary hangs on single
+words ("shape" vs "worse"/"which fix") instead of the moment; (d) navigate's N-way relate ownership
+is implicit. This round adds those facts as informational content — the thrice-rejected
+rare-vocabulary family is not re-entered.
+
+**Mechanism (registered before any edit).** ADD-only description edits, 1–2 sentences per skill
+(BM25 b=0.75 length-penalizes; where a description is already long, a redundant clause may be
+replaced instead of pure growth, each such judgment recorded in the round record): ripwire-mcp
+claims index-staleness / server-health / "is the tool's answer trustworthy right now"; ripwire-orient
+claims the `--doctor` (setup health) and `--skipped` (what the index dropped) disclosure moments by
+flag name; ripwire-navigate claims the N-way "how do these MULTIPLE symbols relate" / `--connect`
+moment; ripwire-before-you-build claims the `--lego` interface-implementors moment (chosen over
+navigate because the moment is the start of multi-symbol NEW work against a boundary — the skill's
+existing "what should the boundary/API look like (interface)?" clause — and the labeled corpus row
+for that moment is a before-you-build row); fresh-eyes and quality-bar each gain ONE crisp boundary
+sentence — fresh-eyes = diagnose the SHAPE of code you didn't write, quality-bar = name the FIX for
+a measured shape / judge what YOU just wrote. No existing discriminative prose is removed (the
+twice-measured SWAP trap); all frontmatter stop-rule markers stay intact
+(`agentloopcodexcheck.sh`). Same round, separate change: the three two-rater-consensus label
+contradictions are relabeled with a RELABEL log in the corpus header (M040 line 233
+fresh-eyes→find-bug, M062 line 225 change-check→find-bug, M043 line 180 orient→mcp, consistent
+with the diagnostics fold-in). No new corpus rows.
+
+**TARGET ROW SET (fixed now; the three relabeled rows are excluded — a relabel fixing its own row
+is not a win).** Nine rows, opaque ceiling-check ids mapped to corpus lines via the sealed
+answer_key ("key line" = the sealed pre-relabel numbering; "line" = this commit's file, +14 after
+the RELABEL comment block):
+
+| class | row_id | key line | line | label |
+| --- | --- | --- | --- | --- |
+| diagnostics disclosure | M053 | 179 | 193 | ripwire-orient |
+| N-way connect | M005 | 204 | 218 | ripwire-navigate |
+| N-way connect | M044 | 105 | 119 | ripwire-navigate |
+| lego interface-implementors | M027 | 209 | 223 | ripwire-before-you-build |
+| fresh-eyes/quality-bar boundary | M010 | 228 | 242 | ripwire-quality-bar |
+| fresh-eyes/quality-bar boundary | M039 | 185 | 199 | ripwire-fresh-eyes |
+| fresh-eyes/quality-bar boundary | M050 | 175 | 189 | ripwire-fresh-eyes |
+| fresh-eyes/quality-bar boundary | M057 | 186 | 200 | ripwire-quality-bar |
+| fresh-eyes/quality-bar boundary | M061 | 101 | 115 | ripwire-fresh-eyes |
+
+**PRIMARY instrument.** A FRESH blind two-rater pass under the same sealed protocol as the
+2026-08-11 ceiling check (raters see prompts + full post-edit descriptions, never the key, never
+this registration), executed by the orchestrator after this lane commits — not by this lane.
+Primary metric: consensus-correct count on the 9 target rows (consensus-correct = both raters'
+top-1 equals the label). **Baseline, from the sealed 2026-08-11 ceiling pass on the pre-edit
+descriptions: 7/9** (M053 and M057 were the two rater-disagreement rows; 8/9 rows carried at least
+one rater's "description does not support this" flag).
+
+**Accept band.** ACCEPT iff consensus-correct on the 9 target rows lands in **[8, 9]** (2-wide;
+above the 7/9 baseline, i.e. the edits must resolve at least one of the two disagreement rows while
+breaking at most one previously-consensus row) AND every bm25 floor holds: `skillevalcheck.sh`
+(test 60.0% / sep-auc 0.89, dev 46.0% / 0.75) and `skillroutingjudgedcheck.sh` (judged bm25-desc ≥
+50%, for-routed ≥ 50%, cold-start row routes). Secondary, REPORTED not gated: the count of target
+rows either rater flags as unsupported-by-description (baseline 8/9), and every bm25 arm's movement
+(the arms are drift guardrails per the ceiling verdict — movement either way is reported, not
+judged). Pre-edit guardrail readings, this commit's binary: all-rows bm25-desc hit@1 66.2% /
+sep-auc 0.941; split=test 68.5% / 0.953; split=dev 61.8% / 0.896; judged-only overlap 57, name 15,
+bm25-desc 89, bm25-full 92, for-routed 91 (each /152).
+
+**Decision rule.** In-band with floors green → accept and land. Out-of-band (consensus-correct ≤ 7,
+or any floor red) → revert the DESCRIPTION edits, keep the relabels (label corrections stand on
+their two-rater-consensus provenance independent of the edits) and record the negative result here
+per METHODOLOGY §5. One fresh-rater measurement; a retry is a new round with a fresh registration.
+
+**Scope guard.** Same as S1: this measures a routing PROXY. Whether an agent actually substitutes
+ripwire calls for Read/Grep/Glob is S2's substitution meter; a verdict here is a hypothesis to
+cross-read against that log, never an agent-behavior claim.
+
+**RESULT (2026-08-11, measured once per the registration; orchestrator-executed, raters sealed).**
+Two fresh blind raters (same two-model protocol as the ceiling pass; saw only the 9 prompts + the
+post-edit descriptions, never this registration or the key): consensus-correct **9/9** against the
+band [8,9], baseline 7/9 — **ACCEPT**. Both previous rater-disagreement rows resolved; no
+previously-consensus row broke. Secondary: rows flagged unsupported-by-description by either rater
+fell **8/9 → 1/9** (the survivor asks refactor-*risk*, which no clause states; both raters still
+chose the label). Raters cited the new clauses verbatim in their notes (`--connect` "three or more
+symbols", `--skipped` "map comes back looking short", both boundary sentences). All bm25 floors
+held (readings in the accept-band paragraph above). Per the scope guard: this is a description
+CONTENT result under an LLM-reader instrument — the cross-read against the substitution log is
+still owed at the meter's first fortnight.
+
 ---
 
 ## 5. Token and output economy
@@ -682,7 +770,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **384 gate scripts**, all of which exist on disk.
+naming **387 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -1267,7 +1355,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 384. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 387. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a

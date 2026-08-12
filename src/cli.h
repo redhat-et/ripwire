@@ -19,7 +19,7 @@
 namespace rw
 {
 
-enum class RankBy { PageRank, Authority, Hub, Rrf, Churn };   // --rank-by=pagerank|authority|hub|rrf|churn
+enum class RankBy { PageRank, Authority, Hub, Rrf, Churn, ChurnDecay };   // --rank-by=pagerank|authority|hub|rrf|churn|churn-decay
 enum class ColorBy { Lang, Community, Cx, Churn, Tested };    // --color-by=lang|community|cx|churn|tested (with --html)
 
 struct Config
@@ -768,10 +768,16 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --callers' own narrowing); read/write/import/extends carry no resolution and stay name-matched.\n"
         "                               narrowed_roles=/defs_of_name=/call_sites_of_name= (file: qualifier only) disclose what narrowed and\n"
         "                               the un-narrowed totals; a file: qualifier naming a file with no such def REFUSES, like --callers/--impact\n"
-        "    --graph-query=EXPR         composable node-set query over the call graph: sources name(\"X\")/all; filters kind|cx|fanin|file;\n"
+        "    --graph-query=EXPR         composable node-set query over the call graph: sources name(\"X\")/all; filters kind|cx|fanin|file|layer;\n"
         "                               bounded closure callers|callees(SET[,depth]); joins and|or|not.  e.g. and(callers(name(\"foo\"),2),kind(all,fn))\n"
+        "                               layer(SET,NAME) keeps the architecture layer NAME (game|infra|render|math|audio|ai|test) — the SAME\n"
+        "                               built-in directory-name taxonomy the map prints as layer= on a file node, so the two cannot disagree.\n"
+        "                               It does NOT read a --arch=FILE rules file: --arch is a verb and outranks --graph-query, so the two never\n"
+        "                               run together. An unknown layer word, or ANY layer() against a tree where no path names a layer, is\n"
+        "                               REFUSED (exit 1) rather than answered count=\"0\" — 0 there would read as \"no such code\".\n"
         "                               a name(\"X\") literal matching NO indexed symbol refuses with a did-you-mean (a typo is not a count=0);\n"
-        "                               a query whose names all resolve but that selects nothing still reports count=\"0\" — that IS a measurement.\n"
+        "                               a query whose names all resolve but that selects nothing still reports count=\"0\" — that IS a measurement\n"
+        "                               (including a VALID layer with no members in a tree that does have layers).\n"
         "                               Ranked result set is capped at --top-k (default 200); --limit overrides that cap (raise or lower it),\n"
         "                               --offset pages past it — see --limit=N --offset=M above\n"
         "    --external-surface         names referenced but never defined in-corpus (the stdlib/third-party surface), by ref count;\n"
@@ -1029,7 +1035,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               \"X co-changes with {A,B,C}, none of which it depends on\" is ONE row that names the file\n"
         "                               to fix (Mo/Cai/Kazman, IEEE TSE 2019). A greedy cover, disclosed as greedy — set cover is\n"
         "                               NP-hard, so the group count is an upper bound on the minimum, not the minimum\n"
-        "    --since=REV|DATE           scope --hotspots/--cochange/--rank-by=churn to commits after this point:\n"
+        "    --since=REV|DATE           scope --hotspots/--cochange/--rank-by=churn|churn-decay to commits after this point:\n"
         "                               a revision (HEAD~20, a tag/sha — deterministic) or a git approxidate\n"
         "                               (\"2 weeks ago\" — wall-clock-relative). e.g. --hotspots --since=\"1 week ago\"\n"
         "                               ranks by RECENT churn (the regression lens). Absent ⇒ each verb's OWN\n"
@@ -1039,7 +1045,9 @@ inline void printUsage( std::FILE* out ) noexcept
         // covered the whole history. The 12-vs-18 split itself is a RECORDED residual and is not re-litigated
         // here; what is fixed is that --help now names the real numbers and says which verbs publish them.
         "                               bounded default window, NOT all history: --hotspots 12 months,\n"
-        "                               --rank-by=churn 18 months, --cochange 18 months. All three STAMP the\n"
+        "                               --rank-by=churn 18 months, --cochange 18 months (--rank-by=churn-decay is\n"
+        "                               the ONE exception: its default IS all history, because the 90-day half-life\n"
+        "                               makes a cut-off unnecessary — it stamps that too). All of them STAMP the\n"
         "                               window they used (window=\"12mo\"/\"18mo\", or the resolved --since\n"
         "                               value) — --cochange gained its window= in the same round that gave it\n"
         "                               sub_windows=, and this clause used to say it had none. An UNRESOLVABLE value is\n"
@@ -1481,8 +1489,12 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               for vulnerabilities\n"
         "    --force                    (wrap) proceed even if CRITICAL findings are found\n\n"
         "  knobs / modes\n"
-        "    --rank-by=pagerank|authority|hub|rrf|churn   ranking signal (churn = git change-frequency prior, and stamps its own\n"
-        "                               map with rank_by/window/at so it cannot pass for the structural one; default pagerank)\n"
+        "    --rank-by=pagerank|authority|hub|rrf|churn|churn-decay   ranking signal (churn = git change-frequency prior, and\n"
+        "                               stamps its own map with rank_by/window/at so it cannot pass for the structural one;\n"
+        "                               churn-decay = the same prior with each commit weighted 0.5^(age_days/90) instead of\n"
+        "                               counted equally, so recent edits outweigh old ones. Its age clock is HEAD's OWN commit\n"
+        "                               timestamp, never the wall clock, so the default (whole-history) run is byte-stable for a\n"
+        "                               fixed tree; the half-life is disclosed in window=. default pagerank)\n"
         "    --format=xml|columnar|rows output shape for the FLAT list verbs (--callers/--callees/--uses/--impact):\n"
         "                               xml (default, byte-identical) or columnar (a <paths> table + parallel arrays: fields=\n"
         "                               path,name,line,kind on --callers/--callees/--impact, path,line,role,in_id on --uses —\n"
@@ -2689,11 +2701,13 @@ inline void validateModifierGuards( Config& c ) noexcept
         c.ok = false;
     }
 
-    // --since scopes --hotspots/--cochange/--rank-by=churn to commits after a point; every other verb ignores
-    // it outright (main.cpp only reads cfg.since inside those three paths). Alone it silently no-ops; refuse loudly.
-    if( !c.since.empty() && !c.hotspots && !c.cochange && c.rankBy != RankBy::Churn )
+    // --since scopes --hotspots/--cochange/--rank-by=churn|churn-decay to commits after a point; every other
+    // verb ignores it outright (main.cpp only reads cfg.since inside those paths). Alone it silently no-ops;
+    // refuse loudly. P0-4: churn-decay joins the list — its DEFAULT walk is the whole history (the decay is
+    // the window), and an explicit --since narrows that walk exactly as it narrows churn's.
+    if( !c.since.empty() && !c.hotspots && !c.cochange && c.rankBy != RankBy::Churn && c.rankBy != RankBy::ChurnDecay )
     {
-        std::fprintf( stderr, "ripwire: --since=REV|DATE scopes --hotspots/--cochange/--rank-by=churn — pass one "
+        std::fprintf( stderr, "ripwire: --since=REV|DATE scopes --hotspots/--cochange/--rank-by=churn|churn-decay — pass one "
                               "(e.g. ripwire <dir> --hotspots --since=\"1 week ago\")\n" );
         c.ok = false;
     }
@@ -3101,9 +3115,13 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 {
                     c.rankBy = RankBy::Churn;
                 }
+                else if( v == "churn-decay" )
+                {
+                    c.rankBy = RankBy::ChurnDecay;   // P0-4: the same prior, with each commit weighted 0.5^(age/90d)
+                }
                 else
                 {
-                    std::fprintf( stderr, "ripwire: --rank-by: unknown value '%.*s' (supported: pagerank|authority|hub|rrf|churn)\n", int( v.size() ), v.data() );
+                    std::fprintf( stderr, "ripwire: --rank-by: unknown value '%.*s' (supported: pagerank|authority|hub|rrf|churn|churn-decay)\n", int( v.size() ), v.data() );
                     c.ok = false;
                     return c;
                 }

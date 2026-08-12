@@ -5,7 +5,10 @@ description: >
   before you write it — do the homework from the codebase's actual structure instead of assumptions. Use
   when starting a feature and you need any of: is this approach even viable (spike)? what's the ordered
   implementation plan? what should the boundary/API look like (interface)? how big is this change
-  (scope/effort)? Each takes ~30s and often surfaces an existing implementation to reuse. For a SINGLE
+  (scope/effort)? Each takes ~30s and often surfaces an existing implementation to reuse. Building
+  against an EXISTING interface — "my new backend must plug into StorageDriver: what has to exist, and
+  who implements it today?" — is this moment too: `--lego=Interface` lists the method contract plus every
+  current implementor to copy as the template. For a SINGLE
   function/class/helper you're about to write → ripwire-reuse-first. NOT for reviewing an already-written
   diff — that's ripwire-change-check. NOT for restructuring EXISTING code — that's ripwire-fresh-eyes; this
   skill is for NEW work. Run only the homework the task actually lacks — a small feature with an obvious
