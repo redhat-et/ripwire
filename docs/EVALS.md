@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 391 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 392 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -606,6 +606,30 @@ runs *before* the command and cannot see that it found nothing, so that trigger 
 Shipping it alongside this one would also put two new triggers behind one readout and make the
 verdict unattributable. It gets its own round once this one resolves.
 
+### Markdown section tier — G2/G3 round, PRE-REGISTERED 2026-08-12 (before the change)
+
+**What the round deletes.** The residual this tier removes is *"find the section inside the doc"*:
+before it, a doc-retrieval episode that landed on the right FILE still had to locate the section by
+hand — a follow-up heading-grep, or reading the whole doc — because headings were name-only symbols
+with no body span, `--expand` of a heading returned one line, and `--recall` served whole documents.
+The tier makes the section the retrieval unit (heading = symbol, section span = body, hierarchy =
+scope, links/mentions = edges), so the answer to a doc query TERMINATES at the section.
+
+**Registered claim, judged by the next transcript mining pass over post-deploy sessions.** Among
+doc-retrieval episodes (an episode whose retrieval target is a markdown document, per the mining
+pass's existing episode classifier), the POST-CALL section-localization rate — a heading-grep on, or
+whole-file read of, a document the preceding ripwire call already returned — should fall
+**materially: to half or less of the pass-2 recorded rate for those episodes** (the band is a
+multiple, ≥2-wide by construction: anything between "unchanged" and "halved" is a MISS and gets the
+honest REJECT). The pass-2 absolute rate stays in the local ledger (levels are ledger-local, per the
+plans-stay-local rule); this registration binds the mechanism and the multiple, not the level.
+
+**Guards.** (1) Denominator: only episodes whose doc query the tier can serve (a `.md`/`.markdown`
+corpus doc) count — docparse-extracted notebooks/html keep their whole-doc path and are out of
+scope. (2) The comparison uses the SAME episode classifier on both sides; if the classifier changes,
+re-run it over the pass-2 window first (the S2b instrument-correction discipline). (3) This is a
+tool-output-shape claim, not a task-success claim — §8's power argument stands.
+
 ---
 
 ## 5. Token and output economy
@@ -870,7 +894,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **391 gate scripts**, all of which exist on disk.
+naming **392 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -1504,7 +1528,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 391. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 392. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
