@@ -606,6 +606,61 @@ runs *before* the command and cannot see that it found nothing, so that trigger 
 Shipping it alongside this one would also put two new triggers behind one readout and make the
 verdict unattributable. It gets its own round once this one resolves.
 
+### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
+
+**The mechanism under test.** `--for` becomes terminal by default: after the ranked signatures, the
+bundle includes the top-ranked symbols' FULL bodies inline (CDATA, the `--expand` shape — body plus
+inline callee signatures), assembled by the same `packBodies` machinery `--pack-task` already uses,
+rank-first, whole-body-or-not-at-all (a body that does not fit is dropped and disclosed, never cut
+mid-def). Disclosure rides the container: the `<ctx>` root carries `bundle="auto" bodies="N"`, and
+when no body fits the remaining budget, `bodies="0" reason="budget"` — the signatures are unchanged
+either way. The candidate cap is the `--pack-task` body-candidate cap, so the default `--for`
+converges on the pack-task shape as budget allows. An explicit `--token-budget=N` stays a hard
+ceiling: bodies take only the budget the signature bundle genuinely left over, and the signature
+bytes themselves are computed exactly as before. Without an explicit budget, the default bundle
+gains a fixed body allowance (a named constant beside `kForPayloadBudgetBytes`), and `est_tokens`
+charges the bodies at the body byte rate, so the per-call cost is disclosed in the output that
+incurs it. `--signatures-only` opts out and restores the previous signatures-only bundle
+byte-identically; `--detail=N` (the explicit body knob) supersedes the automatic selection.
+
+**Why.** The month-scale transcript mine measured the map-then-read chain as the single biggest
+non-terminal pattern: a `--for` map whose named top file the agent then opens whole, or sweeps past.
+The richer terminal verb (`--pack-task`) existed and was called zero times in the same month — the
+richer answer must be the DEFAULT, not a reachable option (the one-step-smart-defaults rule).
+
+**Primary metric, measured on TRANSCRIPTS by the next mining pass over post-deploy sessions,
+per the pass-2 method:** (a) the map-then-read rate on `--for` episodes — the fraction of `--for`
+calls followed within the episode window by a native read of a file the map itself named; (b) the
+post-map sweep rate, reported DIRECTIONALLY only — it carries the question-granularity confound
+that the T2 token-bridge lane owns, so it does not gate this round.
+
+**Band, pre-registered before any post-deploy row exists.** The baseline LEVELS are operator
+telemetry and live in the operator-local registration ledger (recorded there before this change
+shipped); the band is a multiple of the ledger's baseline B for metric (a):
+
+| Verdict | map-then-read rate on `--for` episodes |
+| --- | --- |
+| **KEEP** | **≤ 2/3 × B** (a drop of at least a third) |
+| **REJECT** | otherwise |
+
+The band measures exactly what inlining the body deletes: the read of the named file. A result out
+of band REVERTS the default (signatures-only returns as the default; the explicit `--detail=N`
+opt-in already exists and stays) and is recorded per `METHODOLOGY.md` §5, exactly like the LB-3 and
+nameboost rejections.
+
+**Guard.** Per-call token cost rises by construction (the body allowance) and is allowed to — ONLY
+if session-level post-map sweep/read tokens drop. The net is the claim; a per-call increase with no
+transcript-side drop is a REJECT even if metric (a) lands in band.
+
+**Readout.** The next history-mine pass once ≥ 30 post-deploy `--for` episodes exist. Below that
+the readout is declared underpowered — not null — and waits; the T0 terminality instrument
+(`substitution_report.py` §5) doubles as the running ledger for the same verbs.
+
+**Confounds, stated.** Observational, single-operator, biased toward this repository's own
+sessions. The pass-2 episode method inherits its window definition; changing the window after
+seeing post-deploy data would be tuning the instrument — the readout uses the same pass-2 method
+that produced the baseline. Metric (b) confounded as stated above.
+
 ---
 
 ## 5. Token and output economy
