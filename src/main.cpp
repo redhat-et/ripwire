@@ -9178,7 +9178,12 @@ std::optional<int> runStructureText( const MainDispatch& d )
 // advanced) and `cfg.pageOffset + rowCap` overflowed `int` at --limit=536870912 into a confident hits="0".
 // Both die with the same rule: the window is a pure slice of the fully-collected, fully-sorted list, and
 // nothing derived from --limit/--offset reaches grepCollect() at all.
-int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing )
+// R1 (the 2026-08-12 usage mine) widened the signature beyond (cfg, ing): `g` feeds the <enc> rows'
+// callers= (in-edge CSR — data the graph already holds, zero new analysis), and amp/tested ride along
+// ONLY when a co-run (--metrics) already computed them — grep itself never triggers the qmetrics pass
+// or the git popen. Null pointers are the normal case and emit nothing.
+int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
+                    const std::vector<std::uint32_t>* amp, const std::vector<std::uint8_t>* tested )
 {
     using namespace rw;
     const std::string          pat( cfg.grep );
@@ -9262,6 +9267,16 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing )
                  "a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
                  "ORDER: SOURCE files before test/bench files before docs, then path and line. "
                  "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (collection budget reached). "
+                 // R1 (the 2026-08-12 usage mine): the two follow-up answers, defined in-band because this
+                 // legend is the only prose a mid-task agent reads. Wording duties: <suggest> must be
+                 // labeled as SUGGESTIONS (a zero stays "none found" — G4 honesty), and <enc>'s callers=
+                 // must carry the same FLOOR caveat every call-graph count carries.
+                 "After the hit rows, <enc> rows list each DISTINCT enclosing symbol NAME of THIS page (first-appearance order, bounded by the page) "
+                 "with callers= its 1-hop DISTINCT-caller count, unioned across same-named defs like the callers verb (a FLOOR — dynamic dispatch contributes no edge), "
+                 "defs= how many defs the name grouped (only when more than one), cx= complexity; "
+                 "amp=/tested= join only when a metrics co-run already computed that lens. "
+                 "On hits=\"0\" a <suggest> element may follow: SUGGESTIONS, never matches — near= the nearest indexed symbol name (did-you-mean), "
+                 "next= a ready-to-paste conceptual fallback; absent for regex/non-word-like patterns or when nothing plausible exists. "
                  "%s -->", rw::kPageRaiseCapClause );
     std::printf( "<grep pattern=\"%s\" files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\">",
                  ex( pat ).c_str(), filesMatched, hitCount,
@@ -9296,6 +9311,72 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing )
         }
         std::printf( "</hit>" );
     }
+
+    // ── R1b: the <enc> block — the map's context on the answer, no second call ─────────────────────
+    // ONE row per DISTINCT enclosing symbol of THIS page, first-appearance order (deterministic: derived
+    // from the already-deterministic hit order), so the block is bounded by the page's own row cap and
+    // repeats nothing per hit. callers= reads the in-edge CSR the graph already holds; amp=/tested= only
+    // when a co-run computed them (see the signature comment). Hits outside any symbol contribute no row.
+    {
+        for( const GrepEncRow& row : grepEnclosingRows( ing, g, hits ) )
+        {
+            const auto en = rw::escapeXml( row.chain, esc );
+            std::printf( "<enc n=\"%.*s\" callers=\"%u\"", int( en.size() ), en.data(), row.callerCount );
+            if( row.defCount > 1 )
+            {
+                std::printf( " defs=\"%u\"", row.defCount );
+            }
+            if( row.cx > 0 )
+            {
+                std::printf( " cx=\"%u\"", row.cx );
+            }
+            // the Q3 lens attrs, in serialize.h's lean grammar: only when the vector exists AND the value
+            // is worth a token. Absent vectors are the plain-grep case — no analysis was run, so no claim.
+            // Max/any over the name group, matching the row's union semantics.
+            std::uint32_t ampMax = 0;  bool anyTested = false;
+            for( const NodeId id : row.ids )
+            {
+                if( amp && id < amp->size() )
+                {
+                    ampMax = std::max( ampMax, (*amp)[id] );
+                }
+                if( tested && id < tested->size() && (*tested)[id] )
+                {
+                    anyTested = true;
+                }
+            }
+            if( ampMax > 0 )
+            {
+                std::printf( " amp=\"%u\"", ampMax );
+            }
+            if( anyTested )
+            {
+                std::printf( " tested=\"1\"" );
+            }
+            std::printf( "/>" );
+        }
+    }
+
+    // ── R1a: the zero-hit follow-up — suggestions, labeled as such, never matches ──────────────────
+    if( hitCount == 0 )
+    {
+        const GrepZeroHitSuggestions sug = grepZeroHitSuggestions( ing, pat, cfg.grepRegex );
+        if( !sug.near.empty() || sug.offerFor )
+        {
+            std::printf( "<suggest" );
+            if( !sug.near.empty() )
+            {
+                const auto nn = rw::escapeXml( sug.near, esc );
+                std::printf( " near=\"%.*s\"", int( nn.size() ), nn.data() );
+            }
+            if( sug.offerFor )
+            {
+                const auto fp = rw::escapeXml( pat, esc );
+                std::printf( " next=\"--for=&quot;%.*s&quot;\"", int( fp.size() ), fp.data() );
+            }
+            std::printf( "/>" );
+        }
+    }
     std::printf( "</grep>" );
     return 0;
 }
@@ -9306,7 +9387,9 @@ std::optional<int> runGrep( const MainDispatch& d )
     {
         return std::nullopt; // not this verb — fall through the dispatch chain
     }
-    return emitGrepReport( d.cfg, d.ing );          // body: emitGrepReport() above
+    // body: emitGrepReport() above. amp/tested are non-null only when a co-run (--metrics) computed
+    // them at dispatch build time — grep itself never asks for the analysis (R1's no-new-analysis rule).
+    return emitGrepReport( d.cfg, d.ing, d.g, d.ampPtr, d.testedPtr );
 }
 
 // --sarif: build the SARIF rule catalogue + finding list from the SAME `outs` / `allRuleNames` /
