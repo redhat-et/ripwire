@@ -16,8 +16,9 @@ deterministic call graph — what to touch, what it breaks, which tests to run �
 around and reading whole files.
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
-JavaScript · Java · Ruby · Bash · C# · JSON · TOML — [seventeen vendored grammars](#languages), and adding
-another is a vendored tree-sitter grammar plus one row in a declarative table.
+JavaScript · Java · Ruby · Bash · C# · JSON · TOML · YAML · Markdown — [nineteen vendored
+grammars](#languages), and adding another is a vendored tree-sitter grammar plus one row in a
+declarative table.
 
 ### No API key. No embeddings. No index server. No daemon.
 
@@ -513,7 +514,8 @@ cmake -S . -B build && cmake --build build -j
 ```
 
 Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust,
-Swift, C#** — plus JSON and TOML config keys, Metal, and CUDA (`<<<>>>` launches are call edges).
+Swift, C#** — plus JSON/TOML/YAML config keys, markdown sections, Metal, and CUDA (`<<<>>>`
+launches are call edges).
 
 To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
 present, `~/.local` otherwise; override with `RIPWIRE_INSTALL_PREFIX`).
@@ -770,8 +772,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:2057"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2393"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:10233"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:10348"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:10267"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:10382"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:946"/>
 </callers>
 ```
@@ -1380,17 +1382,22 @@ so `kernel<<<grid, block>>>( … )` launch sites are real call edges and `--call
 its host-side launchers; `__constant__` module tables index as symbols even uninitialized — the
 `cudaMemcpyToSymbol` idiom — and SCREAMING_SNAKE `__device__`/`__managed__` globals join them;
 dual-compile `.cuh` headers resolve from both halves), Python, TypeScript,
-JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, and JSON + TOML (config keys — a `[tool.ruff.lint]`
-table is one symbol under its full dotted name, and `pyproject.toml`/`Cargo.toml` become greppable).
-Seventeen tree-sitter grammars, all vendored.
+JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
+`[tool.ruff.lint]` table is one symbol under its full dotted name, and
+`pyproject.toml`/`Cargo.toml`/CI workflows become greppable), and **Markdown** (`.md`/`.markdown` —
+the DOC tier: every heading, ATX or setext, is a section symbol whose span runs to the next
+same-or-higher heading, so `--for` ranks the section, `--expand` serves the section body, `--recall`
+answers section-granular, and links/`backtick` mentions are doc→doc and doc→code edges).
+Nineteen tree-sitter grammars, all vendored.
 
 Want another language? The pipeline is language-agnostic past the parse: a new language is a
 vendored tree-sitter grammar, its query file, and one row in the declarative
 `extension → { grammar, queries }` table (the "declarative constexpr tables" rule in
 [`CONTRIBUTING.md`](CONTRIBUTING.md)) — open an issue naming the grammar and the repo you'd run it on.
 
-Markdown, notebooks, HTML and CSV are indexed as *documents* for `--recall` and the doc↔code edges
-behind `--mentions`; Office and PDF join them through an optional bridge.
+Notebooks, HTML and CSV are indexed as *documents* for `--recall` and the doc↔code edges behind
+`--mentions`; Office and PDF join them through an optional bridge. Markdown graduated from that
+tier: it parses with its own vendored grammar, so its headings are symbols, not just document text.
 
 ---
 
