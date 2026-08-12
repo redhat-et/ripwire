@@ -640,6 +640,15 @@ struct IngestResult
     std::vector<std::string>   rootLabels;   // root index → label (shortest unique whole-segment suffix)
     std::vector<std::string>   rootPaths;    // root index → the root path as passed (post-dedupe)
     std::vector<std::string>   rootReals;    // root index → realpath (cross-root include probes, git -C)
+
+    // ── P1-15: how many files this run actually RE-EXTRACTED (cache miss / changed / new) rather than
+    //    reusing from the content-hash cache — the number RIPWIRE_CACHE_STATS has always printed as
+    //    `reparsed=`, promoted to a field so the MCP server can disclose an incremental pass's cost
+    //    (`_reingest`) without the caller re-running the binary under an env observable. PROCESS HISTORY,
+    //    not tree state: a cold run re-extracts everything and a warm one re-extracts the drift, so nothing
+    //    that must be byte-identical warm-vs-cold may fold it in. Multi-root: the merge sums the per-root
+    //    values, so one number describes the whole pass.
+    std::size_t                reparsedFiles = 0;
 };
 
 // multi-root workspace cap: a sane bound on N crawl roots — an agent joining a
