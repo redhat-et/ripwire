@@ -426,13 +426,31 @@ Default behaviour is **always-on observation with nudges enabled** — exactly w
 the meter, plus counting. The toggle exists so that switching on a real control-vs-treatment
 comparison later costs one environment variable and no code:
 
-| Arm | Nudge | Counted | Row says |
-| --- | --- | --- | --- |
-| `treatment` (default) | yes | yes | `arm":"treatment"` |
-| `control` (`RIPWIRE_METER_ARM=control`, or `arm=control` in `meter.conf`) | **no** | yes | `arm":"control"`, `nudge":"control"` |
+| Arm | Nudge | SessionStart primer | Counted | Row says |
+| --- | --- | --- | --- | --- |
+| `treatment` (default) | yes | yes | yes | `arm":"treatment"` |
+| `control` (`RIPWIRE_METER_ARM=control`, or `arm=control` in `meter.conf`) | **no** | **no** | yes | `arm":"control"`, `nudge":"control"` |
 
 Only the literal `control` selects the control arm; any other value reads as the default, and the row
 records what was actually used rather than what was asked for.
+
+**What "no nudge" covers, and two ways it did not (fixed 2026-08-12).** The toggle shipped inert and,
+being inert, shipped broken in exactly the configuration that will first use it. Both faults are now
+gated by `test/hookcheck.sh` arms A1–A4:
+
+- **The arm is resolved before the log is.** `meter_init` used to parse `RIPWIRE_METER_ARM` *after*
+  the "no log destination, nothing to write" early return, so a control-arm run with no named
+  destination — a fixture-guarded harness, and the shape a control session runs in — kept the
+  `treatment` default and was nudged anyway. The arm is not a property of the log: it decides whether
+  the agent is *spoken to*, so a run with nowhere to write still honours it.
+- **The SessionStart primer honours the arm.** That branch injects the whole use-when blurb, by a
+  wide margin the largest thing this hook ever says, and it never consulted the arm. A control arm
+  that is silent at every PreToolUse moment and is then handed the manual at startup is not a control
+  arm; it would have made the first A/B measure the primer and call it the nudge. The session-start
+  *row* is still written in both arms — the control arm is counted, only never spoken to.
+
+A control arm that silently does not control is worse than no control arm, because the data it
+produces looks valid.
 
 **As of 2026-08-12 the arm has been 100% `treatment` on every row ever logged.** No control session
 has been run. That is worth stating plainly wherever the log is quoted: this file measures a
@@ -561,7 +579,7 @@ degrades to silence; and the classifier fixtures pin the `cd`-prefix strip (incl
 `cd x && VAR=y grep …` and the multi-line form), `build`, `gate-run`, `git-remote`, `git-misc`,
 `shell-misc`, and the still-working rtk unwrap.
 
-Section (12b), arms C4–C11, covers the classifier-gap round. C4 pins
+Section (12b), arms C4–C11 and A1–A4, covers the classifier-gap round and the arm contract. C4 pins
 the segment walk against ten compound shapes read off the live log; C5 the newline-as-separator on a
 multi-line loop; C6 the one that is easy to get wrong — the walk resumes after the segment the
 *prefix strip* handed to the head, not after the first segment, or `cd /w && bash -n f.sh &&
@@ -569,7 +587,10 @@ multi-line loop; C6 the one that is easy to get wrong — the walk resumes after
 must not become a native read and `| grep` must keep its evidence; C8 the path-component exclusion
 with `xargs /usr/bin/grep` as its counter-case; C9 `script-run`, its family, the un-walked inline
 program, and that four script runs are counted yet never nudged; C10 `cat >` as a write and the
-heredoc stop; C11 that this document carries the contract.
+heredoc stop; C11 that this document carries the contract. A1–A4 are the arm: silent control with no
+named destination, control recorded and treatment still speaking with one, the primer suppressed
+under control, and — the positive control without which A3 would pass on a hook that suppressed the
+primer unconditionally — the primer still emitted under treatment.
 
 The retired fixture in arm M16 is part of the same round and is worth knowing about: it used to be
 `for f in *.c; do grep needle $f; done`, which the walk now reads correctly. Its replacement puts the

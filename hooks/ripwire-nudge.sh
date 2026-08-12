@@ -217,17 +217,27 @@ meter_init()
         *)           sweep_n="${RIPWIRE_SWEEP_N:-$_conf_sweepn}" ;;
     esac
 
-    [ -n "$meter_file" ] || return 0          # no HOME and no explicit log path — nothing to write to
-
-    case "${RIPWIRE_METER:-$_conf_enabled}" in
-        0|off|no|false) meter_enabled=0 ;;
-        *)              meter_enabled=1 ;;
-    esac
+    # THE ARM IS RESOLVED BEFORE THE LOG IS, and that ordering is the fix for a bug this file shipped
+    # with (2026-08-12, found by the E1 lane driving the arm for real). The arm is not a property of
+    # the log — it decides whether the agent is SPOKEN TO — so a run with nowhere to write must still
+    # honour it. Below the early return, `RIPWIRE_METER_ARM=control` with no named destination (the
+    # exact shape of a fixture-guarded harness, and of the control arm the A/B phase will run) left
+    # `meter_arm` at its `treatment` default and the control session got nudged anyway: 466 bytes of
+    # advice where the contract promises none. A control arm that silently does not control is worse
+    # than no control arm, because the resulting data looks valid.
+    #
     # Only the literal `control` selects the control arm. An unrecognized value must not silently
     # invent a third arm — it reads as the default, which is what the row then honestly records.
     case "${RIPWIRE_METER_ARM:-$_conf_arm}" in
         control) meter_arm="control" ;;
         *)       meter_arm="treatment" ;;
+    esac
+
+    [ -n "$meter_file" ] || return 0          # no HOME and no explicit log path — nothing to write to
+
+    case "${RIPWIRE_METER:-$_conf_enabled}" in
+        0|off|no|false) meter_enabled=0 ;;
+        *)              meter_enabled=1 ;;
     esac
 }
 
@@ -738,6 +748,15 @@ then
     meter_tag="${meter_repo##*/}"
     meter_init
     meter_log "session-start" "meta" 0 "none" "${dir}"
+
+    # THE PRIMER IS A NUDGE, SO THE CONTROL ARM DOES NOT GET IT (2026-08-12, with the arm-ordering
+    # fix in meter_init above; found by the E1 lane). This branch injects ~1.6 KB of use-when
+    # guidance into the session's context — by a wide margin the largest single thing this hook ever
+    # says — and it was doing so in BOTH arms. A control arm that is silent at every PreToolUse
+    # moment and then hands the agent the whole manual at startup is not a control arm; it would
+    # have made the first real A/B measure the primer and call it the nudge. The session-start ROW
+    # is still written above, because the control arm is counted, only never spoken to.
+    [ "$meter_arm" = "control" ] && exit 0
 
     command -v ripwire >/dev/null 2>&1 || exit 0
     git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0

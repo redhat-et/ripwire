@@ -1104,7 +1104,7 @@ if [ -f "$EVALSDOC" ]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-# (12b) THE CLASSIFIER-GAP ROUND  (Track B §S2c, 2026-08-12)
+# (12b) THE CLASSIFIER-GAP ROUND, and the ARM CONTRACT  (Track B §S2c, 2026-08-12)
 #
 # WHY THIS SECTION EXISTS. docs/EVALS.md §4 registers the sweep-escalation readout with a secondary
 # condition it can fail on: the `unclassified` share must stay under 15%, or the readout was taken
@@ -1129,6 +1129,13 @@ fi
 #       read as a bug report; `python3 -c …` needs no rule, it needs a name — `script-run`.
 #   C10 `cat > f` IS A WRITE. And a heredoc's body is not a command sequence.
 #
+# A1-A4 are a different bug in the same file, reproduced live by the E1 lane: THE DORMANT A/B TOGGLE
+# WAS BROKEN IN EXACTLY THE CONFIGURATION THAT WILL USE IT. `meter_init` resolved the arm AFTER the
+# "no log destination" early return, so a control-arm run with no named log kept the `treatment`
+# default and was nudged anyway; and the SessionStart primer — ~1.6 KB, the largest thing this hook
+# ever says — never consulted the arm at all. Either one would have made the first real A/B measure
+# the nudge it was supposed to be withholding. A control arm that silently does not control is worse
+# than none, because the data it produces looks valid.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 # `@@` separates fixture from expectation below, because these fixtures contain `|` on purpose.
@@ -1263,6 +1270,65 @@ done
 [ -z "$C10BAD" ] \
     && ok "C10 classifier: a redirect makes it a write, and a heredoc body is never read as commands" \
     || no "C10 classifier: misclassified:$C10BAD"
+
+# ── A1-A4: THE ARM CONTRACT. The toggle must work in the configuration that will use it. ────────────
+# A1 and A3 are the two live bugs. A1 asserts the ONE configuration a real control arm runs in — the
+# arm named, the fixture guard on, no destination named — because that is exactly the configuration
+# in which it silently did the opposite of the documented thing.
+TA1="$TMP/ta1"; mkdir -p "$TA1"
+ARMHOME="$TMP/armhome"; mkdir -p "$ARMHOME"
+OUTA1="$( printf '%s' "$( grepjson armcase needle )" \
+    | env -u RIPWIRE_METER_LOG -u RIPWIRE_HOME HOME="$ARMHOME" RIPWIRE_METER_FIXTURE=1 \
+        RIPWIRE_METER_ARM=control PATH="$WITH_RIPWIRE" TMPDIR="$TA1" bash "$HOOK" )"; RCA1=$?
+[ "$RCA1" -eq 0 ] && [ -z "$OUTA1" ] \
+    && ok "A1 arm: the control arm is silent even with no log destination (the arm resolves first)" \
+    || no "A1 arm: control arm emitted ${#OUTA1} byte(s), exit=$RCA1 — meter_init resolved the arm too late"
+
+TA2="$TMP/ta2"; mkdir -p "$TA2"; LA2="$TMP/a2.jsonl"
+OUTA2="$( sweep_run "$LA2" "$TA2" "$( grepjson armlog needle )" RIPWIRE_METER_ARM=control )"
+TA2B="$TMP/ta2b"; mkdir -p "$TA2B"; LA2B="$TMP/a2b.jsonl"
+OUTA2B="$( sweep_run "$LA2B" "$TA2B" "$( grepjson armlogt needle )" )"
+[ -z "$OUTA2" ] && [ "$( meterrowget "$LA2" 1 arm )" = "control" ] && [ -n "$OUTA2B" ] \
+    && [ "$( meterrowget "$LA2B" 1 arm )" = "treatment" ] \
+    && ok "A2 arm: with a log named, control counts+records+stays silent and treatment still speaks" \
+    || no "A2 arm: control out=[${OUTA2:+set}] arm=[$( meterrowget "$LA2" 1 arm )]; treatment out=[${OUTA2B:+set}] arm=[$( meterrowget "$LA2B" 1 arm )]"
+
+# A3: the SessionStart primer is a nudge — by a wide margin the largest one — so the control arm does
+# not get it. A control arm silent all session that is then handed the whole manual at startup would
+# have made the first A/B measure the primer and call it the nudge.
+#
+# Both arms run against a stub whose `wrap` DOES emit the paste fence. The section's ordinary stub
+# prints one word, so the primer would be empty and A3 would pass on a hook that never consulted the
+# arm at all — the silence has to be attributable to the arm and to nothing else, which is what A4
+# then proves from the other side.
+WRAPBIN="$TMP/wrapbin"; mkdir -p "$WRAPBIN"
+{
+    printf '#!/bin/sh\n'
+    printf 'echo "# --- paste into CLAUDE.md ---"\n'
+    printf 'echo "ripwire: map before you read."\n'
+    printf 'echo "# --- end paste ---"\n'
+} >"$WRAPBIN/ripwire"
+chmod +x "$WRAPBIN/ripwire"
+WRAP_PATH="$WRAPBIN:$PATH"
+TA3="$TMP/ta3"; mkdir -p "$TA3"; LA3="$TMP/a3.jsonl"
+OUTA3="$( printf '%s' '{"session_id":"armss","cwd":"'"$REPO"'","source":"startup"}' \
+    | env HOME="$METERHOME" RIPWIRE_METER_LOG="$LA3" RIPWIRE_METER_FIXTURE=1 RIPWIRE_METER_ARM=control \
+        PATH="$WRAP_PATH" TMPDIR="$TA3" bash "$HOOK" --session-start )"; RCA3=$?
+[ "$RCA3" -eq 0 ] && [ -z "$OUTA3" ] \
+    && ok "A3 arm: the SessionStart primer is suppressed in the control arm" \
+    || no "A3 arm: control-arm primer emitted ${#OUTA3} byte(s), exit=$RCA3"
+[ "$( meterrowget "$LA3" 1 class )" = "session-start" ] && [ "$( meterrowget "$LA3" 1 arm )" = "control" ] \
+    && ok "A3b arm: the control arm is still COUNTED — the session boundary row is written anyway" \
+    || no "A3b arm: control session-start row = [$( meterrowget "$LA3" 1 class )/$( meterrowget "$LA3" 1 arm )]"
+
+# A4: the positive control for A3. Suppressing the primer everywhere would pass A3 for the wrong reason.
+TA4="$TMP/ta4"; mkdir -p "$TA4"; LA4="$TMP/a4.jsonl"
+OUTA4="$( printf '%s' '{"session_id":"armsst","cwd":"'"$REPO"'","source":"startup"}' \
+    | env HOME="$METERHOME" RIPWIRE_METER_LOG="$LA4" RIPWIRE_METER_FIXTURE=1 \
+        PATH="$WRAP_PATH" TMPDIR="$TA4" bash "$HOOK" --session-start )"
+[ -n "$OUTA4" ] && printf '%s' "$OUTA4" | is_valid_json \
+    && ok "A4 arm: the treatment arm still gets the SessionStart primer (A3's positive control)" \
+    || no "A4 arm: treatment primer was empty or invalid: [$OUTA4]"
 
 # ── C11: the docs carry the S2c contract ─────────────────────────────────────────────────────────────
 if [ -f "$SCHEMADOC" ]; then
