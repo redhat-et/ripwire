@@ -40,9 +40,11 @@ sigblocks(){ grep -oE '<sigs( capped="1")?>' "$1" | wc -l | tr -d ' '; }
 diff -q "$TMP/plain" "$TMP/d0" >/dev/null && ok "--detail=0 byte-identical to no --detail (flag-gated)" \
     || { no "--detail=0 changed the output (must be byte-identical)"; diff "$TMP/plain" "$TMP/d0" | head -4; }
 
-# the plain --for output must NOT carry a <bodies> block (bodies are the --detail add-on)
-grep -q '<bodies [^>]*>' "$TMP/plain" && no "plain --for already emits <bodies> (should be signatures-only)" \
-    || ok "plain --for is signatures-only (no <bodies> block)"
+# T3 (contract update, same wave — test/forautobodycheck.sh owns the new default): plain --for is now
+# terminal by default and MAY carry an auto <bodies> block; the signatures-only shape is the OPT-OUT.
+"$BIN" src --for="$TASK" --signatures-only --no-cache >"$TMP/sigonly" 2>/dev/null
+grep -q '<bodies [^>]*>' "$TMP/sigonly" && no "--signatures-only --for still emits <bodies> (the opt-out must be signatures-only)" \
+    || ok "--signatures-only --for is signatures-only (no <bodies> block)"
 
 # ── #2: --detail=3 adds a <bodies> block with AT MOST 3 bodies; the <sigs> block still present ──────────
 "$BIN" src --for="$TASK" --detail=3 --no-cache >"$TMP/d3" 2>/dev/null
