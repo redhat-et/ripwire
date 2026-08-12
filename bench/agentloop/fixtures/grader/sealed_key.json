@@ -1,0 +1,10 @@
+{
+  "F05": {
+    "verdicts": {
+      "claim-a": "TRUE",
+      "claim-b": "FALSE"
+    },
+    "sealed_by": "fixture",
+    "sealed_sha": "0000000"
+  }
+}
