@@ -20,6 +20,7 @@
 // carries its enclosing symbol chain, its matched line, and optional context lines.
 
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — graceful-degrade when regex matching throws mid-scan (never terminate)
+#include "didyoumean.h"         // R1a: the ONE near-miss suggester — the zero-hit follow-up reuses it, never a second one
 #include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
 #include "filter.h"             // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "model.h"
@@ -56,7 +57,11 @@ inline std::uint32_t triAt( const std::string& s, std::size_t i ) noexcept
 // (P5). `before`/`after` are ripgrep-style context lines (--grep-context/-before/-after, CLI-only):
 // each is the raw (unescaped, newline-joined) source text of the N lines immediately surrounding the
 // hit line, clamped to the file's bounds, and empty when no context was requested.
-struct GrepHit { std::uint32_t fileId; std::uint32_t line; std::string enclosing; std::string text; std::string before; std::string after; };
+// enclosingId (R1b, the 2026-08-12 usage mine): the enclosing symbol's NodeId — kNoNode when the hit sits
+// outside every indexed symbol. The emitters attach that symbol's 1-hop caller count straight off the
+// in-edge CSR, which needs the id, not just the breadcrumb name. Trailing with a default member
+// initializer, so the pre-field aggregate initializers keep their meaning unchanged.
+struct GrepHit { std::uint32_t fileId; std::uint32_t line; std::string enclosing; std::string text; std::string before; std::string after; NodeId enclosingId = kNoNode; };
 
 // ─── Russ Cox regex→trigram prefilter ─────────────────────────────────────────────────────────────
 //
@@ -1561,7 +1566,7 @@ inline std::vector<GrepHit> grepEnrich( const IngestResult& ing, std::span<const
         {
             chain = e->scope.empty() ? e->name : ( e->scope + "::" + e->name );
         }
-        GrepHit h{ r.fileId, r.line, std::move( chain ), {}, {}, {} };
+        GrepHit h{ r.fileId, r.line, std::move( chain ), {}, {}, {}, e ? e->id : kNoNode };
         ensureFileLoaded( r.fileId );
         h.text = grepMatchedLine( fileText, lineStarts, r.line );
         if( ctxBefore > 0 )
@@ -1586,6 +1591,140 @@ inline std::vector<GrepHit> grepHits( const IngestResult& ing, const std::string
     const GrepCollection collected = grepCollect( ing, pat, regex, noPrefilter );
     const std::size_t    rowCount  = std::min<std::size_t>( collected.raw.size(), cap > 0 ? std::size_t( cap ) : 100 );
     return grepEnrich( ing, std::span<const GrepRawHit>( collected.raw ).first( rowCount ), ctxBefore, ctxAfter );
+}
+
+// ─── R1b: the enclosing-symbol context rows (the 2026-08-12 usage mine) ───────────────────────────
+//
+// ONE row per DISTINCT enclosing symbol NAME on the served page, first-appearance order — shared by the
+// CLI <enc> emitter and the MCP `grep` verb's `enclosing` array so the two cannot diverge (the
+// grepCollect rule). callerCount is the DISTINCT-caller union across the name's defs on the page — the
+// same counting unit the callers verb reports (its defs=N rows UNION every def's neighbours), so a
+// grep answer and a follow-up `--callers` speak one number. Everything here reads data the index/graph
+// already holds (in-edge CSR, Symbol::cx); no new analysis, bounded by the page's own row cap.
+// Templated on the graph type only to keep this header free of a graph.h include.
+struct GrepEncRow
+{
+    std::string         chain;         // the in= spelling (scope::name) the rows join on
+    std::vector<NodeId> ids;           // every def of that name enclosing a hit on this page (ascending discovery order)
+    std::uint32_t       callerCount = 0; // distinct 1-hop callers, unioned across ids (a FLOOR)
+    std::uint32_t       defCount    = 0; // ids.size() — disclosed as defs= when > 1
+    std::uint32_t       cx          = 0; // max cx across ids (the decl carries 0; the def carries the number)
+};
+
+template<class GraphT>
+inline std::vector<GrepEncRow> grepEnclosingRows( const IngestResult& ing, const GraphT& g, std::span<const GrepHit> hits )
+{
+    std::vector<GrepEncRow> rows;
+    for( const GrepHit& h : hits )
+    {
+        if( h.enclosingId == kNoNode || h.enclosingId >= ing.symbols.size() || h.enclosing.empty() )
+        {
+            continue;
+        }
+        GrepEncRow* row = nullptr;
+        for( GrepEncRow& r : rows )
+        {
+            if( r.chain == h.enclosing )
+            {
+                row = &r;
+                break;
+            }
+        }
+        if( row == nullptr )
+        {
+            rows.push_back( GrepEncRow{ h.enclosing, {}, 0, 0, 0 } );
+            row = &rows.back();
+        }
+        if( std::find( row->ids.begin(), row->ids.end(), h.enclosingId ) == row->ids.end() )
+        {
+            row->ids.push_back( h.enclosingId );
+        }
+    }
+
+    const auto*       inRowOffset = g.inEdges.rowOffsets();
+    const auto*       inColIndex  = g.inEdges.colIndices();
+    const std::size_t nodeCount   = g.wOutDeg.size();
+    for( GrepEncRow& row : rows )
+    {
+        std::vector<NodeId> callerIds;
+        for( const NodeId id : row.ids )
+        {
+            row.cx = std::max( row.cx, ing.symbols[id].cx );
+            if( std::size_t( id ) >= nodeCount )
+            {
+                continue;
+            }
+            for( std::uint32_t k = inRowOffset[id]; k < inRowOffset[id + 1]; ++k )
+            {
+                callerIds.push_back( inColIndex[k] );
+            }
+        }
+        std::sort( callerIds.begin(), callerIds.end() );
+        callerIds.erase( std::unique( callerIds.begin(), callerIds.end() ), callerIds.end() );
+        row.callerCount = std::uint32_t( callerIds.size() );
+        row.defCount    = std::uint32_t( row.ids.size() );
+    }
+    return rows;
+}
+
+// ─── R1a: the zero-hit follow-up (the 2026-08-12 usage mine) ──────────────────────────────────────
+//
+// A zero-hit --grep is the measured dead-end: the agent retries with another literal and never switches
+// verb family. The answer stays an honest "none found" (hits="0" is a measurement, never softened), and
+// BOTH emitters (the CLI --grep and the MCP `grep` verb — shared here so they cannot diverge, same rule
+// as grepCollect) append two labeled SUGGESTIONS:
+//   near — the nearest indexed symbol name, from didyoumean.h's ONE suggester (the same machinery every
+//          SYM-taking verb's "not found" already uses; wiring a second, differently-tuned one is exactly
+//          what that header warns against). Empty when nothing plausible is within its edit cutoff.
+//   the --for fallback — offered only for WORD-LIKE patterns (identifier- or phrase-shaped), because that
+//          is the grep→for conversion the mine shows never happens unprompted. A regex or a
+//          punctuation-heavy pattern is neither a near-miss identifier nor a --for task, so it gets no
+//          suggestion at all and the zero-hit answer stays byte-identical to the pre-R1a bytes.
+struct GrepZeroHitSuggestions
+{
+    std::string near;            // nearest indexed symbol name; "" = no plausible near-miss
+    bool        offerFor = false; // true = suggest re-asking the pattern as a --for/`for` task
+};
+
+// word-like: letters/digits/_/./:/-/space only, at least one letter, and short enough that pasting it
+// into --for="…" reads as a task rather than a dumped blob. Deliberately conservative — a false negative
+// costs one suggestion, a false positive suggests --for of line noise.
+inline bool isGrepPatternWordLike( std::string_view pat )
+{
+    if( pat.empty() || pat.size() > 128 )
+    {
+        return false;
+    }
+    bool hasAlpha = false;
+    for( const char c : pat )
+    {
+        const unsigned char u = static_cast<unsigned char>( c );
+        if( std::isalpha( u ) )
+        {
+            hasAlpha = true;
+        }
+        else if( !std::isdigit( u ) && c != '_' && c != ' ' && c != '.' && c != ':' && c != '-' )
+        {
+            return false;
+        }
+    }
+    return hasAlpha;
+}
+
+inline GrepZeroHitSuggestions grepZeroHitSuggestions( const IngestResult& ing, const std::string& pat, bool regex )
+{
+    GrepZeroHitSuggestions out;
+    if( regex || !isGrepPatternWordLike( pat ) )
+    {
+        return out; // out of scope by design — see the block comment above
+    }
+    out.near = didYouMean( ing, pat );
+    if( out.near == pat )
+    {
+        out.near.clear(); // withDidYouMean's own guard: echoing the exact spelling back is not a suggestion
+    }
+    out.offerFor = true;
+    return out;
 }
 
 }   // namespace rw

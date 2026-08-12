@@ -509,8 +509,12 @@ rF2="$( mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"proto
   '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_symbol","arguments":{"paths":[],"symbol":"x"}}}' )"
 case "$rF2" in *'1..16'*) ok "F-LOW-3: an EMPTY paths[] refuses and states 1..16";;
                *) no "F-LOW-3: the empty-paths refusal does not say 1..16: $( echo "$rF2" | head -c 200 )";; esac
-rF3="$( mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_symbol","arguments":{"symbol":"x"}}}' )"
+# R2a: an omitted `path` on a workspace-launched bare server now ANSWERS (assumed launch cwd), so the
+# missing-path refusal under test here is reached from a launch the server cannot assume a root for
+# (cwd=/ — the startup guard). The arm's subject — the stated paths bound — is unchanged.
+rF3="$( cd / && printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_symbol","arguments":{"symbol":"x"}}}' \
+  | "$BIN" --mcp 2>/dev/null )"
 case "$rF3" in
     *'2..16'*) no "F-LOW-3: the missing-path refusal still says 2..16 while the schema and enforcement say 1..16" ;;
     *'1..16'*) ok "F-LOW-3: the missing-path refusal now states the SAME bound as the schema and the enforcement" ;;

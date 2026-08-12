@@ -539,6 +539,66 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
 // (effectiveRowCap → pageWindow → pageDisclosure) the CLI --grep applies over the same fully-collected,
 // fully-sorted list, so page N here is byte-for-byte page N there. Defaulted to {} ⇒ the un-paged answer is
 // byte-identical to what it was, `files`/`total`/`order` included.
+// R1b (the 2026-08-12 usage mine), the CLI <enc> block's JSON twin: ONE entry per DISTINCT enclosing
+// symbol NAME of the served page, first-appearance order, `callers` the distinct-caller union off the
+// in-edge CSR the index already holds — zero new analysis, bounded by the page's own row cap. Row
+// semantics live in search.h's grepEnclosingRows (shared with the CLI emitter); this is serialization.
+// Returns "" or a leading-comma fragment the caller splices before its closing brace.
+inline std::string grepEnclosingJson( const IngestResult& ing, const Graph& g, std::span<const GrepHit> hits )
+{
+    const std::vector<GrepEncRow> encRows = grepEnclosingRows( ing, g, hits );
+    if( encRows.empty() )
+    {
+        return {};
+    }
+    std::string out = ",\"enclosing\":[";
+    bool        first = true;
+    for( const GrepEncRow& row : encRows )
+    {
+        if( !first )
+        {
+            out += ",";
+        }
+        first = false;
+        out += "{\"n\":\"" + mcpdetail::jsonEscape( row.chain ) + "\",\"callers\":" + std::to_string( row.callerCount );
+        if( row.defCount > 1 )
+        {
+            out += ",\"defs\":" + std::to_string( row.defCount );
+        }
+        if( row.cx > 0 )
+        {
+            out += ",\"cx\":" + std::to_string( row.cx );
+        }
+        out += "}";
+    }
+    out += "]";
+    return out;
+}
+
+// R1a, the zero-hit follow-up (shared grepZeroHitSuggestions — the CLI and the MCP verb cannot diverge):
+// an honest total:0 stays, and a labeled `suggest` object teaches the two next moves in this surface's
+// own spelling — `near` (did-you-mean) and the `for` verb (the grep→for conversion the mine shows never
+// happens unprompted). "" for non-word-like patterns: byte-identical to the pre-R1a answer.
+inline std::string grepSuggestJson( const IngestResult& ing, const std::string& pattern )
+{
+    const GrepZeroHitSuggestions sug = grepZeroHitSuggestions( ing, pattern, /*regex=*/false );
+    if( sug.near.empty() && !sug.offerFor )
+    {
+        return {};
+    }
+    std::string out = ",\"suggest\":{\"note\":\"suggestions, not matches — hits stays an honest zero\"";
+    if( !sug.near.empty() )
+    {
+        out += ",\"near\":\"" + mcpdetail::jsonEscape( sug.near ) + "\"";
+    }
+    if( sug.offerFor )
+    {
+        out += ",\"next_verb\":\"for\",\"next_task\":\"" + mcpdetail::jsonEscape( pattern ) + "\"";
+    }
+    out += "}";
+    return out;
+}
+
 inline std::string grepHitsJson( const std::string& root, const std::string& pattern, McpPageArgs page = {} )
 {
     const McpIndex&            ix        = getIndex( root );
@@ -592,7 +652,15 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
         out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[ h.fileId ] ) + "\",\"line\":" + std::to_string( h.line )
              + ",\"in\":\"" + mcpdetail::jsonEscape( h.enclosing ) + "\"}";
     }
-    out += "]}";
+    out += "]";
+    // R1 (the 2026-08-12 usage mine): the CLI <enc>/<suggest> twins, appended AFTER "hits" so the
+    // historic key order three other gates read (files,total,shown,capped) is byte-untouched.
+    out += grepEnclosingJson( ing, ix.g, std::span<const GrepHit>( hits ) );
+    if( collected.raw.empty() )
+    {
+        out += grepSuggestJson( ing, pattern );
+    }
+    out += "}";
     return out;
 }
 
@@ -2524,19 +2592,102 @@ struct FetchOutcome
 // body is returned (the original T4 behavior, byte-identical). See sliceBodyLinesOrError for the range semantics.
 // `redact` masks credential shapes in the emitted body text (A3-F3 — the raw-JSON body seam, the highest-
 // exposure emission path of all: served straight into a cloud LLM context); null under --no-redact.
+// Declared first (defaults live HERE, per the one-declaration rule) so fetchBodyByName below and the
+// definition after it can call each other — the name path serves by re-entering the handle path.
 inline FetchOutcome fetchBody( const std::string& root, const std::string& handle,
                                long long startLine = 1, long long endLine = 0, bool hasRange = false,
-                               RedactCounts* redact = nullptr )
+                               RedactCounts* redact = nullptr );
+
+// R2c (the 2026-08-12 usage mine): serve fetch_body for a bare symbol NAME through the SAME lookup path
+// find_symbol uses (resolveAllByNameQualified → lowest-id pick, i.e. resolveFocus's convention), then
+// RECURSE into fetchBody with the freshly-minted real handle — every staleness/overload guarantee applies
+// unchanged, and the result teaches the handle for next time. Disclosed: resolved_from_name always;
+// name_defs/other_defs (file:line + handle, capped) when the name has several DISTINCT defs — the honest
+// sibling of fetchBody's same-handle overload note. An unknown name refuses with a did-you-mean (the ONE
+// shared suggester) plus the find_symbol pointer: a one-shot recovery, never a format lecture.
+inline FetchOutcome fetchBodyByName( const std::string& root, const std::string& name,
+                                     long long startLine, long long endLine, bool hasRange,
+                                     RedactCounts* redact )
+{
+    // the guard lives HERE so the caller's parse-failure branch is one call: a "sym#"-prefixed string is
+    // NEVER treated as a name (a corrupt REAL handle must keep the malformed refusal rather than
+    // mis-resolve through a name that happens to match), and an empty string has nothing to look up.
+    if( name.rfind( "sym#", 0 ) == 0 || name.empty() )
+    {
+        FetchOutcome oc;
+        oc.ok = false; oc.errCode = -32602;
+        oc.message = "malformed handle '" + name + "' (expected sym#<16hex>@<16hex>); call a read verb to obtain a valid handle";
+        return oc;
+    }
+
+    const McpIndex&           nameIx      = getIndex( root );          // same index a read verb would build
+    const std::vector<NodeId> nameMatches = resolveAllByNameQualified( nameIx.ing, name );
+    if( nameMatches.empty() )
+    {
+        FetchOutcome oc;
+        oc.ok = false; oc.errCode = -32602;
+        oc.message = withDidYouMean( nameIx.ing, name,
+                                     "'" + name + "' is neither a handle (sym#<16hex>@<16hex>) nor a known symbol name" )
+                   + " — call find_symbol for the handle, or pass the exact definition name (file:name disambiguates)";
+        return oc;
+    }
+
+    // distinct HANDLES across the matches (a decl + def in different files mint different ids);
+    // matches ascend by NodeId, so front() is the resolveFocus pick and order is deterministic.
+    std::vector<std::string> distinctHandles;
+    std::vector<NodeId>      distinctIds;
+    for( const NodeId id : nameMatches )
+    {
+        std::string h2 = handleFor( nameIx, id );
+        if( std::find( distinctHandles.begin(), distinctHandles.end(), h2 ) == distinctHandles.end() )
+        {
+            distinctHandles.push_back( std::move( h2 ) );
+            distinctIds.push_back( id );
+        }
+    }
+
+    FetchOutcome byName = fetchBody( root, distinctHandles.front(), startLine, endLine, hasRange, redact );
+    if( byName.ok && !byName.resultJson.empty() && byName.resultJson.front() == '{' )
+    {
+        std::string disclosure = "\"resolved_from_name\":\"" + mcpdetail::jsonEscape( name ) + "\",";
+        if( distinctHandles.size() > 1 )
+        {
+            disclosure += "\"name_defs\":" + std::to_string( distinctHandles.size() ) + ",\"other_defs\":[";
+            constexpr std::size_t kOtherDefCap = 4;   // disclosure, not a listing — cap the tail
+            bool first = true;
+            for( std::size_t i = 1; i < distinctIds.size() && i <= kOtherDefCap; ++i )
+            {
+                const Symbol& si = nameIx.ing.symbols[ distinctIds[i] ];
+                if( !first )
+                {
+                    disclosure += ",";
+                }
+                first = false;
+                disclosure += "{\"file\":\"" + mcpdetail::jsonEscape( nameIx.ing.files[ si.fileId ] )
+                            + "\",\"line\":" + std::to_string( si.line )
+                            + ",\"handle\":\"" + mcpdetail::jsonEscape( distinctHandles[i] ) + "\"}";
+            }
+            disclosure += "],";
+        }
+        byName.resultJson.insert( 1, disclosure );
+    }
+    return byName;
+}
+
+inline FetchOutcome fetchBody( const std::string& root, const std::string& handle,
+                               long long startLine, long long endLine, bool hasRange,
+                               RedactCounts* redact )
 {
     FetchOutcome oc;
 
     // 1. parse the handle strictly — a hand-mutated / garbage handle refuses, never mis-resolves.
+    //    R2c (the 2026-08-12 usage mine): a string that fails the parse routes to fetchBodyByName above,
+    //    which either serves it as a bare symbol NAME (disclosed) or speaks the malformed-handle /
+    //    unknown-name refusal itself — including the "sym#"-prefix guard.
     std::uint64_t idHash = 0, wantContent = 0;
     if( !mcpdetail::parseHandle( handle, idHash, wantContent ) )
     {
-        oc.ok = false; oc.errCode = -32602;
-        oc.message = "malformed handle '" + handle + "' (expected sym#<16hex>@<16hex>); call a read verb to obtain a valid handle";
-        return oc;
+        return fetchBodyByName( root, handle, startLine, endLine, hasRange, redact );
     }
 
     const McpIndex&     ix  = getIndex( root );          // refreshes the index if the tree changed (warm==cold)
