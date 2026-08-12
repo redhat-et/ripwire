@@ -34,6 +34,13 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-12, MARKDOWN SECTION TIER (test/mdsectioncheck.sh): kParserVer 62 -> 63 and the quality.h
+#   mirror with it, in the same diff. .md/.markdown now parse with the vendored tree-sitter-markdown
+#   block grammar: headings (ATX + setext) become sections with REAL SPANS (heading -> next same-or-
+#   higher heading), parent-heading scopes, and link/mention edges; html-block phantom headings vanish
+#   and .markdown joins the extension table. The extracted SET and every section's span/bodyByte
+#   change on any md-bearing tree, so v62 blobs must be rejected. An EXTRACTION change, not a
+#   Snapshot-SEMANTICS change, so kQSnapCacheScheme deliberately did NOT move.
 # 2026-08-12, MODULE-CONSTANT ROUND (test/moduleconstcheck.sh): kParserVer 61 -> 62 and the quality.h
 #   mirror with it, in the same diff. C/C++ const-qualified module constants (and class-static
 #   constants via the new field_declaration capture) now index CASE-BLIND — the const/constexpr/
