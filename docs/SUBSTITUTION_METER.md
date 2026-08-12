@@ -406,19 +406,103 @@ python3 bench/substitution_report.py -h                     # repo filter, row l
 Scrub first if the log predates 2026-08-12 — it may carry gate fixtures (above), and the report has
 no way to tell them from real rows.
 
-Stdlib only, deterministic, counts only. Four sections: the rate split by nudge exposure and by arm;
-the class composition of both sides; a per-repo breakdown; and **within-session class n-grams**
-(bigrams and trigrams in `seq` order). That last section is the one to watch — the hypothesis worth
-testing is that the real opportunity is a recurring *chain* (`grep → read → read`) that a single verb
-could absorb whole, not any single call. The script prints counts and no interpretation; which chain
-is worth absorbing is a judgment made elsewhere.
+Stdlib only, deterministic, counts only. Five sections: the rate split by nudge exposure and by arm;
+the class composition of both sides; a per-repo breakdown; **within-session class n-grams** (bigrams
+and trigrams in `seq` order); and **terminality by verb** (below). The n-gram section is the one to
+watch — the hypothesis worth testing is that the real opportunity is a recurring *chain* (`grep →
+read → read`) that a single verb could absorb whole, not any single call. The script prints counts
+and no interpretation; which chain is worth absorbing is a judgment made elsewhere.
+
+## Terminality (§5)
+
+An output only saves tokens if it **ends** the question that prompted it. One that spawns the next
+command is net-additive: the map is paid for and then the sweep is paid for as well. §4 asks which
+chains recur; §5 asks the sharper question underneath it — of the chains that *start* with ripwire,
+how many end there. It is the per-verb instrument the enrichment work is ranked by, and it doubles as
+a release-over-release ledger for output quality.
+
+### The definition, in full
+
+For every **ripwire-family** row in the log (`ripwire-cli` and `ripwire-mcp`), look ahead inside its
+own session, in `seq` order:
+
+| | |
+| --- | --- |
+| **Window** | The calls after it, up to — whichever comes **first** — the next ripwire call, the end of the session, or **5** calls. |
+| **TERMINAL** | No *sweep-class* call appears in that window. |
+| **Follow-up** | When it is not terminal, the **first** sweep-class call in the window is recorded as the follow-up class. Three greps in a row contribute one follow-up, not three. |
+| **Sweep set** | `grep` `read` `glob` `find` — and `git-diff` `git-log` `git-show-stat`. |
+| **Excluded** | `session-start` rows are session boundaries, not calls an agent chose to run, and are dropped before windowing (the same rule §4 uses). |
+
+Two of those lines are choices worth defending rather than defaults.
+
+**The sweep set is wider than the `native` family.** `git diff` / `git log` / `git show` with a stat summary are
+history *retrieval*: a map followed by a raw git-history sweep did not terminate the question any
+more than a map followed by `grep` did. They stay outside §1's substitution ratio — there they are a
+different **question**, not a different tool for the same one — and they count here, where the
+question is whether the answer landed. The state-changing git classes (`git-misc`, `git-remote`) are
+not retrieval and are in neither.
+
+**An empty window counts as TERMINAL** — the next observed call was another ripwire call, or the
+session ended, so no sweep happened. That is the definition applied honestly, and it is also the
+definition's softest spot, so the count of empty windows is **printed under the table** instead of
+being folded in silently. A run of consecutive ripwire calls manufactures terminal windows; the
+disclosure is what lets a reader discount them.
+
+### Which verb a row asked for
+
+An MCP row carries its verb in the tool name (`mcp__ripwire__for` → `mcp:for`). A CLI row carries a
+whole command line in `detail`, so the verb is read lexically: find the leading word whose basename
+is `ripwire` — it may be `./build/ripwire`, an absolute path, or sit behind `cd X && VAR=y` — then
+take the **first flag after it**, stopping at the first pipe, redirect or separator so a pipeline's
+own flags are never mistaken for the verb. A run with no flag is the core map, `(map)`.
+
+The 200-character `detail` cap defeats that in three ways, and each is **named rather than guessed
+at** — a real log hit two of them on the metric's first reading:
+
+| Cut | Label |
+| --- | --- |
+| before the ripwire word | `(unparsed)` |
+| after it, with no flag and no shell break yet — the verb may be one character past the cap | `(truncated)` |
+| in the middle of the flag | that flag with a trailing `...` |
+
+The third case is why the marking exists at all: a half-written flag filed under the prefix that
+survived would split one verb's n across two rows and understate both. A *complete* flag that happens
+to end a 200-character line cannot be told from a cut one, and is marked the same way — the label
+errs toward saying so.
+
+A short list of **verb-agnostic options** (`--no-cache`, `--token-budget`, `--top-k`, `--rank-by`,
+`--format`, `--exclude`, …) is skipped while scanning. That list is deliberately *not* a mirror of
+the binary's ~70-row dispatch table: a mirror would rot silently, and the cost of being wrong here is
+one row attributed to a modifier — which the table then shows by name, under that modifier, rather
+than hiding.
+
+### Small n is stated, never smoothed
+
+Every row prints its **n** beside its percentage, and a verb whose n is under **10** gets an explicit
+`NOTE: n=… (<10)` row under it. This is not a significance test — there is no test to run on a
+non-randomized single-operator log — it is a floor under the reader. A terminality percentage read
+without its n and its window rule is a number somebody will quote wrong.
+
+As everywhere else in this document, the mechanism is public and the **levels are not**: concrete
+readings are operator telemetry and live in the local ledger, not in the repository.
 
 ## Gate
 
-`test/hookcheck.sh` section (11), arms M1–M27b: a row is written at the default global path with the
+`test/hookcheck.sh` section (11), arms M1–M27b and T1–T11: a row is written at the default global path with the
 full field set; the rtk unwrap; the `unclassified` fallback; out-of-scope calls writing no row; the
 `nudged`/`dedup`/`post_nudge`/`post_sweep`/`seq` fields; both arms; one global log across two repos;
 and — the arm that matters most — an unwritable log costing the hooked command nothing.
+
+Arms **T1–T11** pin §5 against a **synthetic fixture log** whose right answer is known by
+construction — a terminal `--for`, a non-terminal one followed by three greps, windows truncated by
+the next ripwire call and by session end, the k=5 window edge asserted from *both* sides (five
+non-sweep calls put a grep out of the window, four leave it in), a git-history follow-up, an n<10
+verb with its NOTE row and an n≥10 verb without one, an MCP row, and a flagless map behind a `cd`
+prefix and ahead of a pipeline carrying flags of its own. The assertions are exact table values, not
+"it did not crash": every count, percentage and follow-up in the fixture's table is spelled out in
+the gate. The gate's own sink cannot serve here — its contents change with every arm anyone adds
+above it, so nothing about it is known in advance.
 
 Section (12), arms S1–S14, covers the sweep escalation and the widened classifier: three same-class
 calls produce exactly one escalation carrying the paste-ready command; two do not; a fourth is

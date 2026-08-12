@@ -32,16 +32,171 @@
 # trigrams in seq order. A chain that recurs is a candidate SCENARIO for one verb to absorb whole.
 # Counts only — which chain is worth absorbing is the S4 survey's judgment, not this script's.
 #
+# TERMINALITY (§5, Track T item T0). An output only saves tokens if it ENDS the question that prompted
+# it; one that spawns a sweep is net-additive. §5 turns that into a per-verb count: for each ripwire
+# call, look ahead within its session and ask whether a native-search call followed. The window and
+# the sweep set are stated in the section's own header and in docs/SUBSTITUTION_METER.md, because a
+# terminality number is meaningless without them. Counts and ratios only, as everywhere else here —
+# and never a percentage without the n beside it, with an explicit NOTE row under any verb whose n is
+# too small to read as a rate.
+#
 # Usage:
 #   python3 bench/substitution_report.py [~/.ripwire/substitution.jsonl] [--top N] [--tag REPO]
 import argparse
 import collections
 import json
 import os
+import re
 import sys
 
 RIPWIRE_FAMILY = "ripwire"
 NATIVE_FAMILY = "native"
+
+# ── §5 terminality: the three constants the metric is made of ───────────────────────────────────────
+# THE SWEEP SET is wider than the `native` family on purpose. `git diff`/`git log`/`git show --stat`
+# are history RETRIEVAL — a map followed by a raw git-history sweep did not terminate the question any
+# more than a map followed by grep did — so the git-history classes count here even though they are
+# deliberately outside §1's substitution ratio, where they are a different QUESTION rather than a
+# different tool for the same one. The state-changing git classes (`git-misc`, `git-remote`) are not
+# retrieval and are not in the set.
+SWEEP_CLASSES = frozenset(("grep", "read", "glob", "find", "git-diff", "git-log", "git-show-stat"))
+# The look-ahead is capped so a ripwire call is never blamed for a sweep half a session later.
+TERMINALITY_WINDOW = 5
+# Below this an n is printed with a NOTE instead of being read as a rate. Not a significance test —
+# there is no test to run on a non-randomized single-operator log — just a floor under the reader.
+SMALL_N = 10
+
+# A verb-agnostic OPTION is skipped when scanning a command line for the verb. This list is small,
+# lexical and deliberately NOT a mirror of the binary's dispatch table (src/main.cpp
+# scanReportVerbPrecedence): a mirror of ~70 verbs would rot silently, and the cost of being wrong
+# here is one row attributed to a modifier, which the table shows by name rather than hiding. A
+# modifier this list does not know is reported AS the verb — that is the disclosure, not a claim of
+# completeness.
+NON_VERB_FLAGS = frozenset((
+    "--no-cache", "--cache-dir", "--no-route", "--route", "--token-budget", "--top-k", "--rank-by",
+    "--stable", "--metrics", "--format", "--exclude", "--include", "--jobs", "--lang", "--no-color",
+))
+
+MCP_PREFIX = "mcp__ripwire__"
+# The hook caps `detail` at 200 characters, so a long command line can be cut mid-flag. Such a row is
+# LABELLED as truncated rather than counted under whatever prefix survived: silently filing `--qualit`
+# apart from `--quality-delta` would split one verb's n across two rows and understate both.
+DETAIL_CAP = 200
+FLAG_RE = re.compile(r"^(--[A-Za-z0-9][A-Za-z0-9-]*)")
+# Where the ripwire command ENDS: a pipe, a redirect (`>`, `2>`, `2>&1`), a separator. Flags after one
+# of these belong to some other program — `ripwire . | grep -n --color foo` is a map, not a --color.
+BREAK_RE = re.compile(r"^(?:[0-9]*[<>]|[|;&])")
+
+
+def ripwire_token(toks):
+    """Index of the word that IS the ripwire command, or None. Matched by basename, so
+    `./build/ripwire`, an absolute path and a bare `ripwire` all hit, and a `cd X && VAR=y` prefix in
+    front of it is simply skipped over rather than parsed."""
+    for i, tok in enumerate(toks):
+        if os.path.basename(tok.strip("'\"")) == "ripwire":
+            return i
+    return None
+
+
+def ripwire_verb(row):
+    """The verb a ripwire-family row asked for, as a label. MCP rows carry it in the tool name; CLI
+    rows carry a whole command line in `detail`, so the ripwire word is located (above) and the first
+    flag after it — before any shell break — is the verb. A flagless run is the core map.
+
+    Three ways the 200-character `detail` cap defeats that, each named rather than guessed at: cut
+    before the ripwire word at all is `(unparsed)`; cut after it with no flag and no shell break yet
+    is `(truncated)`, since the verb may be just past the cap; and cut in the MIDDLE of the flag
+    yields that flag with a trailing `...`. A complete flag that happens to end a 200-character line
+    is indistinguishable from a cut one and is marked the same way — the label errs toward saying so.
+    """
+    tool = str(row.get("tool") or "")
+    if tool.startswith(MCP_PREFIX):
+        return "mcp:" + (tool[len(MCP_PREFIX):] or "?")
+    detail = str(row.get("detail") or "")
+    toks = detail.split()
+    capped = len(detail) >= DETAIL_CAP
+    start = ripwire_token(toks)
+    if start is None:
+        return "(unparsed)"
+    for i in range(start + 1, len(toks)):
+        if BREAK_RE.match(toks[i]):
+            return "(map)"          # the ripwire command ended at a pipe/redirect: it took no verb
+        m = FLAG_RE.match(toks[i])
+        if m and m.group(1) not in NON_VERB_FLAGS:
+            return m.group(1) + ("..." if capped and i == len(toks) - 1 else "")
+    return "(truncated)" if capped else "(map)"
+
+
+def session_order(rows):
+    """Sessions -> their rows in `seq` order. `session-start` rows are boundaries, not calls, and are
+    dropped here for the same reason §4 drops them: they are not a thing an agent chose to run."""
+    sessions = collections.defaultdict(list)
+    for i, r in enumerate(rows):
+        if r.get("class") == "session-start":
+            continue
+        sessions[str(r.get("session"))].append((r.get("seq", 0), i, r))
+    out = []
+    for _sid, rs in sorted(sessions.items(), key=lambda kv: str(kv[0])):
+        rs.sort(key=lambda t: (t[0], t[1]))
+        out.append([t[2] for t in rs])
+    return out
+
+
+def window_verdict(seq_rows, idx):
+    """(follow-up class or None, calls seen) for the window after the ripwire call at `idx`.
+
+    The window is the calls after it up to — whichever comes first — the next ripwire call, the end
+    of the session, or TERMINALITY_WINDOW calls. `None` means TERMINAL: no sweep-class call appeared
+    in it. Otherwise the FIRST sweep-class call is the follow-up — three greps in a row are one
+    follow-up, not three."""
+    seen = 0
+    for nxt in seq_rows[idx + 1:idx + 1 + TERMINALITY_WINDOW]:
+        if nxt.get("family") == RIPWIRE_FAMILY:
+            break
+        seen += 1
+        if nxt.get("class") in SWEEP_CLASSES:
+            return str(nxt.get("class")), seen
+    return None, seen
+
+
+def terminality(rows):
+    """Per-verb (n, terminal, follow-up counter), plus the number of EMPTY windows.
+
+    An empty window — the very next call was another ripwire call, or the session ended — is TERMINAL
+    by the definition above, since no sweep happened. That is the definition's softest spot, so the
+    count is returned and printed rather than folded in silently: a run of consecutive ripwire calls
+    manufactures terminal windows, and the disclosure is what lets a reader discount them."""
+    stats = {}
+    empty = 0
+    for seq_rows in session_order(rows):
+        for idx, r in enumerate(seq_rows):
+            if r.get("family") != RIPWIRE_FAMILY:
+                continue
+            st = stats.setdefault(ripwire_verb(r), [0, 0, collections.Counter()])
+            st[0] += 1
+            follow, seen = window_verdict(seq_rows, idx)
+            if seen == 0:
+                empty += 1
+            if follow is None:
+                st[1] += 1
+            else:
+                st[2][follow] += 1
+    return stats, empty
+
+
+def top_followup(counter):
+    """The commonest follow-up class, ties broken alphabetically so the table is deterministic."""
+    if not counter:
+        return "(none)"
+    cls, n = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[0]
+    return "%s (%d)" % (cls, n)
+
+
+def terminality_row(verb, n, term, counter):
+    print("  %-24s %6d %10s   %s"
+          % (verb, n, "%.1f%%" % (100.0 * term / n) if n else "n/a", top_followup(counter)))
+    if 0 < n < SMALL_N:
+        print("    NOTE: n=%d (<%d) -- too few calls to read as a rate" % (n, SMALL_N))
 
 
 def load(path):
@@ -219,6 +374,33 @@ def main():
             continue
         for gram, c in sorted(grams.items(), key=lambda kv: (-kv[1], kv[0]))[:args.top]:
             print("    %-46s %6d" % (" -> ".join(gram), c))
+
+    # ── §5 terminality by verb ──────────────────────────────────────────────────────────────────────
+    # §4 asks which chains recur; this asks the sharper question underneath it — of the chains that
+    # START with ripwire, how many END there. The definitions are printed above the table rather than
+    # left to the docs, because a terminality percentage read without its window rule is a number
+    # somebody will quote wrong. The reader gets counts; which verb to enrich is Track T's judgment.
+    section("5. terminality by verb (did the output END the question, or spawn a sweep?)")
+    print("  window   : the calls after a ripwire call, up to the next ripwire call, the session end,")
+    print("             or %d calls -- whichever comes first" % TERMINALITY_WINDOW)
+    print("  TERMINAL : no sweep-class call in the window.  sweep = %s"
+          % " ".join(sorted(SWEEP_CLASSES)))
+    print("")
+    print("  %-24s %6s %10s   %s" % ("verb", "n", "terminal%", "top follow-up"))
+    stats, empty = terminality(rows)
+    if not stats:
+        print("  (no ripwire-family calls in this log -- nothing to measure)")
+        return 0
+    for verb, (n, term, counter) in sorted(stats.items(), key=lambda kv: (-kv[1][0], kv[0])):
+        terminality_row(verb, n, term, counter)
+    allc = collections.Counter()
+    for _v, (_n, _t, counter) in stats.items():
+        allc.update(counter)
+    terminality_row("(all)", sum(s[0] for s in stats.values()), sum(s[1] for s in stats.values()), allc)
+    print("")
+    print("  empty windows: %d of %d -- the next observed call was another ripwire call, or the"
+          % (empty, sum(s[0] for s in stats.values())))
+    print("                 session ended. These count TERMINAL by the definition above.")
 
     return 0
 
