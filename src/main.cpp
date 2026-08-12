@@ -2212,8 +2212,22 @@ struct ForLensHeaderParts
     std::string_view rootOpenStr;      // ctxRootOpen( task, routeNoteRaw ), pre-built (its size is charged)
     std::string_view taskNote;         // the comment's scrubbed echo of `task` (xmlCommentText)
     std::string_view adaptiveNote, mentionNote, boostNote, docMentionNote;
-    bool             anchor = false;   // --anchor's EXPERIMENTAL caveat paragraph
+    bool             anchor     = false;   // --anchor's EXPERIMENTAL caveat paragraph
+    bool             autoBundle = false;   // T3: auto mode is on (cfg.detail==0, no --signatures-only) — appends the bundle=auto legend
 };
+
+// T3 — the legend sentence for the terminal-by-default bundle, a named constant so the sigs-budget
+// exemption below (the D2 adaptiveNote precedent) subtracts EXACTLY the bytes the legend adds. No "--"
+// anywhere in it: it rides inside an XML comment, where "--" is ill-formed (G4). It also defines the
+// <bodies>/<calls> disclosure trio, because those attributes now appear on --for's first screen and the
+// legend-coverage contract is that every first-screen attribute is defined in the emitting verb's legend.
+inline constexpr std::string_view kForAutoBundleLegend =
+    "; bundle=auto: the top-ranked FULL bodies ride inline after the signatures in a bodies section "
+    "(bodies=N on this root counts them; bodies=0 reason=budget when none fit the remaining budget "
+    "whole; the signatures-only flag opts out) — read them here instead of opening the files. The "
+    "bodies element discloses the house way: total=requested, shown=printed, capped=1 when they "
+    "differ; each body's calls child lists its callee signatures, total= always, shown=/capped= only "
+    "when that list is cut";
 
 // One spelling of --for's header, three shapes of it. `withTaskEcho=false` replaces the comment's echo with a
 // note pointing at the task= attribute that still holds the verbatim copy — the duplicate goes, nothing else.
@@ -2222,7 +2236,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
                                       std::string_view extraNotes )
 {
     std::string h;
-    h.reserve( 640 + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
+    h.reserve( 640 + kForAutoBundleLegend.size() + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
                + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + extraNotes.size() );
     h += withRouteAttr ? std::string( p.rootOpenStr ) : rw::ctxRootOpen( p.task, {} );
     h += "<!-- ripwire lens for ";
@@ -2248,6 +2262,10 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     h += ": reusable building blocks + quality facts for what you're about to touch "
          "(cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) "
          "— prefer composing/reusing these; watch the high-churn/high-amp/cloned ones";
+    if( p.autoBundle )
+    {
+        h.append( kForAutoBundleLegend );   // T3: present whenever auto mode is on, whatever the fit outcome — it explains bodies="0" too
+    }
     h.append( extraNotes );
     h += " -->";
     return h;
@@ -2435,6 +2453,99 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     return 0;
 }
 
+// ── T3: the terminal-by-default auto <bodies> section (pre-registered: docs/EVALS.md §4) ─────────────────
+// The single biggest measured non-terminal chain is map-then-read: the agent runs --for, then opens the
+// file the map named. The terminal bundle that already served bodies (--pack-task) went uncalled for a
+// month, so the DEFAULT gets richer instead: the top-ranked symbols' FULL bodies ride inline after the
+// signatures, assembled by the SAME packBodies walk --pack-task uses (rank-first, skip-whole with a visible
+// marker, disclosed shown=/total=/capped=), candidates capped at the pack-task cap so the shapes converge.
+// Whole-body-or-not-at-all: truncateOversizedFirst=false, so a rank-1 def larger than the whole body budget
+// is DROPPED and disclosed, never cut mid-def.
+//
+// BUDGET: an explicit --token-budget is a hard ceiling — the bodies get only what the rendered bundle
+// genuinely left under it (`committedBytes`; the sigs/lego/compose/routes/graph bytes are computed exactly
+// as before — auto mode never shrinks them), and a ceiling too tight for even the disclosure turns the
+// whole surface off (`surfaceOff`): the output is then the pre-T3 bundle exactly, so the stated ceiling
+// holds exactly as it did before this feature (D10) and nothing present goes undisclosed. WITHOUT an
+// explicit budget, the default bundle gains the fixed kForAutoBodyBudgetBytes allowance on top of
+// kForPayloadBudgetBytes — the per-call cost the T3 registration's guard covers, disclosed through
+// est_tokens, which charges these bytes at the body rate. Every input is deterministic (ranked surface,
+// rendered byte counts, constants), so body inclusion is a pure function of (corpus, query, budget).
+//
+// DEGRADE: a chargeSection memstream failure keeps the OLD behavior — surfaceOff, no bundle= attribute for
+// that run (an est_tokens that cannot see the section must not describe it), with the alert on stderr.
+// A free function over runForLens' locals (the ForLensHeaderParts precedent) — runForLens is already one of
+// the largest functions in this file, and the decision reads better as one value than as inline branches.
+struct ForAutoBodiesResult
+{
+    rw::ChargedSection section;             // rendered auto <bodies> bytes; empty when nothing is emitted
+    std::string        attr;                // the <ctx> root disclosure; empty ⇒ no attribute (surface off / degrade)
+    bool               surfaceOff = false;  // true ⇒ the caller rebuilds the header WITHOUT the bundle=auto legend
+};
+
+ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
+                                        const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
+                                        std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr )
+{
+    ForAutoBodiesResult out;
+
+    // candidates: the positive-score head of the ranked surface — the same "top heads with a positive
+    // score" rule packTaskBundleText applies, on the same (score desc, id asc) order sigs selected with
+    std::vector<rw::NodeId> autoBodyIds;
+    for( rw::NodeId sid : lensSurfaceIds )
+    {
+        if( autoBodyIds.size() >= rw::kPackTaskBodyCandidates || lensRank[sid] <= 0.0f )
+        {
+            break;
+        }
+        autoBodyIds.push_back( sid );
+    }
+
+    std::size_t leftBytes = bundleBudget > committedBytes ? bundleBudget - committedBytes : 0;
+    if( cfg.tokenBudget == 0 )
+    {
+        leftBytes += rw::kForAutoBodyBudgetBytes;   // the default bundle's body allowance (see serialize.h)
+    }
+
+    if( cfg.tokenBudget > 0 && leftBytes == 0 )
+    {
+        out.surfaceOff = true;                      // explicit ceiling too tight for even the disclosure
+        return out;
+    }
+    if( autoBodyIds.empty() )
+    {
+        out.attr = " bundle=\"auto\" bodies=\"0\" reason=\"no_candidates\"";
+        return out;
+    }
+
+    // noteIndex=nullptr, deliberately: every auto-body symbol is by construction in the <sigs> head, whose
+    // <d> row ALREADY surfaces its field notes — repeating them on the body would spend allowance bytes on
+    // duplicates AND desync the --json dialect's notes_kept from the XML sibling's note count
+    // (fornotesjsoncheck), since the JSON bundle renders no bodies.
+    const std::size_t  autoBodyBudget = std::min( leftBytes, cfg.packBudgetBytes );
+    rw::EmittedBodies autoEmitted;
+    out.section = rw::chargeSection( [ & ]( std::FILE* f )
+        { rw::packBodies( f, ing, autoBodyIds, autoBodyBudget, g.outOff, g.outTargets, cfg.compress, redactPtr,
+                           /*ranges=*/nullptr, /*noteIndex=*/nullptr, &autoEmitted, /*truncateOversizedFirst=*/false ); },
+        rw::kBytesPerTokenBody );
+
+    if( !out.section.isRendered )
+    {
+        out.surfaceOff = true;                      // degrade: pre-T3 output exactly (alert already on stderr)
+        out.section    = rw::ChargedSection{};
+    }
+    else if( autoEmitted.kept.empty() )
+    {
+        out.section = rw::ChargedSection{};  out.section.isRendered = true;   // drop the empty section whole
+        out.attr    = " bundle=\"auto\" bodies=\"0\" reason=\"budget\"";
+    }
+    else
+    {
+        out.attr = " bundle=\"auto\" bodies=\"" + std::to_string( autoEmitted.kept.size() ) + "\"";
+    }
+    return out;
+}
+
 std::optional<int> runForLens( const MainDispatch& d )
 {
     using namespace rw;
@@ -2566,8 +2677,16 @@ std::optional<int> runForLens( const MainDispatch& d )
         // through forLensHeaderText (above) rather than being appended once, because the ceiling ladder below has
         // to PRICE a header without the comment's task echo or without route= and then emit that exact shape.
         const std::string        rootOpenStr = ctxRootOpen( cfg.forTask, routeNoteRaw );
-        const ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
-                                              mentionNote, boostNote, docMentionNote, cfg.anchor };
+        // T3 (pre-registered: docs/EVALS.md §4, T3 round): terminal-by-default — the auto <bodies> mode is on
+        // unless the caller took an explicit body posture (--detail=N) or opted out (--signatures-only). The
+        // --json and --format=candidates dialects never reach the auto machinery (candidates returned above;
+        // --json returns before it below), so this mode is an XML-bundle fact only.
+        const bool         autoBundleMode = cfg.detail == 0 && !cfg.signaturesOnly;
+        // NOT const: the tight-explicit-budget path in the auto block below may turn the auto surface off
+        // (autoBundle=false) and rebuild the header without the legend — the ladder's later rebuilds read
+        // this struct through buildForHeader and must honor that decision.
+        ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
+                                        mentionNote, boostNote, docMentionNote, cfg.anchor, autoBundleMode };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -2764,7 +2883,16 @@ std::optional<int> runForLens( const MainDispatch& d )
         // that was not inert. The note is still real bytes everywhere it matters downstream: est_tokens and
         // the ceiling ladder measure the emitted header, so nothing under-reports; only the global default
         // budget can overshoot, by at most the note (~0.5% of kForPayloadBudgetBytes), disclosed here.
-        const std::size_t fixedBytes = headerStr.size() - adaptiveNote.size()
+        // T3: the bundle=auto legend's bytes are EXEMPT from the <sigs> trim charge, exactly like the
+        // adaptive note above (the D2 precedent): the contract is that auto mode changes NOTHING about the
+        // signatures — the same corpus/query/budget produces byte-identical <sigs> with and without
+        // --signatures-only, in BOTH budget regimes. The legend is still real bytes downstream: under an
+        // explicit --token-budget the whole auto surface (legend + root attribute + bodies) must fit the
+        // leftover under the stated ceiling or is turned off entirely (see the auto block below), and
+        // est_tokens always measures the emitted header.
+        constexpr std::size_t kAutoAttrReserve = 48;   // ' bundle="auto" bodies="0" reason="no_candidates"' — the widest spelling
+        const std::size_t autoLegendBytes = autoBundleMode ? kForAutoBundleLegend.size() : 0u;
+        const std::size_t fixedBytes = headerStr.size() - adaptiveNote.size() - autoLegendBytes
                                      + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
         const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;   // ≥1: 0 would mean "no budget"
 
@@ -2879,6 +3007,31 @@ std::optional<int> runForLens( const MainDispatch& d )
                               /*ranges=*/nullptr, notesPtr ); },   // L3: --detail bodies surface notes too (part of the --for bundle)
                 rw::kBytesPerTokenBody );
         }
+
+        // ── T3: the terminal-by-default auto <bodies> section (pre-registered: docs/EVALS.md §4) ────────────
+        // The decision + render live in buildForAutoBodies (above runForLens — this function is already one
+        // of the largest in the file); this site only wires its verdict in: keep the section + attribute, or
+        // rebuild the header WITHOUT the legend when the surface turned off (tight explicit ceiling, or the
+        // chargeSection degrade), so the ladder's later rebuilds honor the decision too.
+        rw::ChargedSection autoSection;
+        std::string        autoAttr;   // spliced onto the <ctx> root after the ladder; its exact bytes are priced there
+        if( autoBundleMode && sigsPreRendered )
+        {
+            // committed so far: the real header (legend included), the rendered sections, "</ctx>", and the
+            // post-ladder splices (est_tokens/weak reserves + the root attribute's worst case, kAutoAttrReserve)
+            const std::size_t committedBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
+                                             + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + kAutoAttrReserve;
+            ForAutoBodiesResult autoBodies = buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank,
+                                                                 committedBytes, bundleBudget, redactPtr );
+            autoSection = std::move( autoBodies.section );
+            autoAttr    = std::move( autoBodies.attr );
+            if( autoBodies.surfaceOff )
+            {
+                headerParts.autoBundle = false;
+                headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
+            }
+        }
+
         // W3FIX H2 — the ceiling ladder (rungs + rationale: serialize.h climbCeilingLadder), same rungs in the
         // same order --pack-task climbs. The header IS charged to the budget above, but charging is not FITTING: at
         // an explicit --token-budget the header floor (fixed legend + the task echoed twice) can exceed the stated
@@ -2896,9 +3049,24 @@ std::optional<int> runForLens( const MainDispatch& d )
             // see its definition for why a reserve rather than a measurement.
             headerStr = rw::climbCeilingLadder( buildForHeader, headerStr,
                                                  sigsStr.size() + legoStr.size() + composeStr.size() + routeStr.size()
-                                                     + detailSection.xml.size() + graphSection.xml.size() + 6 + headerSpliceReserve,   // + "</ctx>" + the header splices below
+                                                     + detailSection.xml.size() + autoSection.xml.size() + graphSection.xml.size()
+                                                     + autoAttr.size() + 6 + headerSpliceReserve,   // + "</ctx>" + the header splices below (autoAttr exact-counted)
                                                  rw::ceilingAllowanceBytes( cfg.tokenBudget ),
                                                  /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
+        }
+
+        // T3: the bundle=auto disclosure attributes, spliced onto the <ctx> root AFTER the ladder (a rung
+        // rebuild would lose an earlier splice — the same reason weak=/est_tokens= splice late). The literal
+        // "><!--" boundary is unambiguous: escapeXml entity-escapes '<' inside attribute values, so the first
+        // occurrence is the root element's own close. Spliced BEFORE est_tokens is computed, so the number
+        // measures a header that already carries these bytes exactly.
+        if( !autoAttr.empty() )
+        {
+            const std::size_t rootCloseAt = headerStr.find( "><!--" );
+            if( rootCloseAt != std::string::npos )
+            {
+                headerStr.insert( rootCloseAt, autoAttr ); // else: unexpected shape, header left as-is (attr dropped, section still disclosed by its own element)
+            }
         }
 
         // R4 + §L2: weak="1" — same insert-before-"-->" mechanism as est_tokens below, but unconditional on
@@ -2941,7 +3109,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // its real shape is ~3.6.
             const std::size_t markupBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
                                           + routeStr.size() + graphSection.xml.size() + 6;   // + "</ctx>"
-            const std::size_t bodyTokens  = detailSection.tokens;
+            const std::size_t bodyTokens  = detailSection.tokens + autoSection.tokens;   // T3: the auto bodies are charged at the body rate too
             std::size_t estTokens = rw::tokensForEmittedBytes( markupBytes, kBytesPerTokenDefault ) + bodyTokens;
             std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
             for( int pass = 0; pass < 4; ++pass )
@@ -3005,6 +3173,14 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             rw::emitChargedSection( stdout, detailSection, [ & ]{ packBodies( stdout, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets,
                                                                               cfg.compress, redactPtr, /*ranges=*/nullptr, notesPtr ); } );
+        }
+        else if( autoSection.isRendered && !autoSection.xml.empty() )
+        {
+            // T3: the auto <bodies> section — same slot as --detail's (after the signature-shaped sections, so
+            // the rest of the bundle keeps its shape). Emitted from the exact bytes est_tokens charged; the
+            // degrade path (isRendered=false) deliberately emits NOTHING — the pre-T3 bundle is the fallback
+            // contract for this optional enrichment, unlike --detail's explicit request (see the block above).
+            std::fwrite( autoSection.xml.data(), 1, autoSection.xml.size(), stdout );
         }
 
         // R8: --with-graph — a compact mermaid flowchart of the ranked bundle's anchor neighborhood,
