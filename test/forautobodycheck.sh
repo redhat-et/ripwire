@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# forautobodycheck.sh — T3 terminal-by-default --for (pre-registered: docs/EVALS.md §4, T3 round).
+# The default --for bundle serves the top-ranked symbols' FULL bodies inline after the signatures,
+# under the bundle budget, assembled by the SAME packBodies machinery --pack-task uses — rank-first,
+# whole-body-or-not-at-all, disclosed on the container.
+#
+# Contract:
+#   1) default --for emits an auto <bodies> section (CDATA bodies, the --expand shape) AFTER the
+#      signatures, and the <ctx> root discloses it: bundle="auto" bodies="N" (N >= 1 when any fit).
+#   2) the header legend explains the bundle=auto attributes (a reader never guesses).
+#   3) a TIGHT explicit --token-budget drops the bodies (never cuts one mid-def): bundle="auto"
+#      bodies="0" reason="budget", NO <bodies> section, and the <sigs> block intact.
+#   4) --signatures-only opts out: no bundle= attribute, no <bodies> — the pre-T3 bundle shape.
+#      It refuses loudly without --for, and refuses the contradictory --signatures-only --detail=N.
+#   5) escalation is capped and disclosed: bodies= on the root equals the emitted <b> count and
+#      never exceeds the pack-task body-candidate cap (6).
+#   6) auto bodies take only genuine LEFTOVER budget: at the same explicit --token-budget, the
+#      <sigs> block is byte-identical with and without --signatures-only.
+#   7) the budget ledger accounts the bodies: est_tokens(default) > est_tokens(--signatures-only).
+#   8) deterministic (x3 byte-identical); xmllint-clean (G4).
+#   9) --detail=N supersedes auto (explicit shape: <bodies> present, no bundle="auto" attribute).
+#
+# Usage:  RIPWIRE_BIN=build/ripwire bash test/forautobodycheck.sh
+# Exits non-zero on any failure.
+
+set -u
+ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+fail=0
+ok(){ printf '  PASS  %s\n' "$*"; }
+no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+
+[ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
+cd "$ROOT"
+echo "forautobodycheck: BIN=$BIN"
+
+TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+TASK="pageRankDouble"                        # name-exact: rank-1 is a small, stable symbol
+
+bodycount(){ grep -o '<b t=' "$1" | wc -l | tr -d ' '; }
+rootattr(){ grep -o "$2" "$1" | head -1; }   # first match of an attr pattern in the file
+# the <sigs>…</sigs> span, extracted byte-exactly (python3 is a suite prerequisite; sed's pattern-space
+# handling of the very long minified line proved unreliable for a byte-identity assertion)
+sigsblock(){ python3 -c 'import sys; s=open(sys.argv[1],"rb").read(); a=s.find(b"<sigs"); b=s.find(b"</sigs>"); sys.stdout.buffer.write(s[a:b+7] if a>=0 and b>=0 else b"")' "$1"; }
+
+# ── presence guard: the fixture symbol must exist and rank (a gate that cannot observe is inert) ────────
+grep -rq "pageRankDouble" src/pagerank.h src/pagerank.cpp 2>/dev/null \
+    && ok "presence: pageRankDouble exists in the fixture corpus" \
+    || no "presence: pageRankDouble missing from src/ — the arms below cannot observe what they assert"
+
+# ── #1: default --for serves the rank-1 body inline, disclosed on the container ─────────────────────────
+"$BIN" src --for="$TASK" --no-cache >"$TMP/auto" 2>/dev/null; rc=$?
+[ "$rc" = 0 ] || no "default --for exited $rc"
+NB=$( bodycount "$TMP/auto" )
+{ grep -q '<bodies [^>]*>' "$TMP/auto" && [ "$NB" -ge 1 ]; } \
+    && ok "default --for includes $NB full bod(ies) inline (auto <bodies> section)" \
+    || no "default --for has no inline body (expected the rank-1 body under the default allowance)"
+grep -q '<b [^>]*n="pageRankDouble"[^>]*><!\[CDATA\[' "$TMP/auto" \
+    && ok "the rank-1 body is pageRankDouble, in CDATA (the --expand shape)" \
+    || no "rank-1 body missing or not CDATA (expected <b ... n=\"pageRankDouble\"><![CDATA[...)"
+ATTR=$( rootattr "$TMP/auto" 'bundle="auto" bodies="[0-9]*"' )
+DN=${ATTR##*bodies=\"}; DN=${DN%\"}
+{ [ -n "$ATTR" ] && [ "${DN:-x}" = "$NB" ]; } \
+    && ok "container disclosure: <ctx ... $ATTR> matches the emitted body count" \
+    || no "container disclosure wrong (attr='$ATTR' vs emitted $NB bodies)"
+
+# ── #2: the legend explains the disclosure ──────────────────────────────────────────────────────────────
+grep -q 'bundle="auto"' "$TMP/auto" && grep -qi 'bodies.*inline\|inline.*bod' "$TMP/auto" \
+    && ok "header legend names the bundle=auto mechanism" \
+    || no "header legend does not explain bundle=auto"
+
+# ── #3a: an explicit --token-budget too tight for even the disclosure turns the WHOLE auto surface off —
+#         the old signatures-only bundle is the degraded path, byte-identical, ceiling honored (D10) ─────
+"$BIN" src --for="$TASK" --token-budget=400 --no-cache >"$TMP/tight" 2>/dev/null; rc=$?
+[ "$rc" = 0 ] || no "tight-budget --for exited $rc (D10: --token-budget shapes, never gates, this bundle)"
+"$BIN" src --for="$TASK" --token-budget=400 --signatures-only --no-cache >"$TMP/tightso" 2>/dev/null
+{ ! grep -q 'bundle=' "$TMP/tight" && ! grep -q '<bodies [^>]*>' "$TMP/tight" \
+      && diff -q "$TMP/tight" "$TMP/tightso" >/dev/null; } \
+    && ok "ultra-tight budget: auto surface off, byte-identical to --signatures-only (the degraded path IS the old bundle)" \
+    || no "ultra-tight budget: auto surface leaked bytes past the stated ceiling (or drifted from the opt-out shape)"
+grep -q '<sigs' "$TMP/tight" && ok "ultra-tight budget: the <sigs> block is intact" \
+    || no "ultra-tight budget: the <sigs> block vanished (signatures must survive)"
+
+# ── #3b: candidates exist but none fits the body budget whole → dropped and DISCLOSED, never truncated ──
+#         (--pack-budget-bytes=64 forces the no-fit case corpus-robustly; the default budget is generous)
+"$BIN" src --for="$TASK" --pack-budget-bytes=64 --no-cache >"$TMP/nofit" 2>/dev/null
+grep -q 'bundle="auto" bodies="0" reason="budget"' "$TMP/nofit" \
+    && ok "no body fits whole: disclosed (bodies=\"0\" reason=\"budget\")" \
+    || no "no-fit case: missing bodies=\"0\" reason=\"budget\" disclosure"
+grep -q '<bodies [^>]*>' "$TMP/nofit" \
+    && no "no-fit case still emitted a <bodies> section (must drop whole, never truncate mid-def)" \
+    || ok "no-fit case: no <bodies> section (whole-body-or-nothing)"
+grep -q '<b [^>]*><!\[CDATA\[' "$TMP/nofit" \
+    && no "no-fit case emitted a truncated body (never cut mid-def)" \
+    || ok "no-fit case: no body bytes at all (never a truncated one)"
+
+# ── #4: --signatures-only opts out; guarded against misuse ──────────────────────────────────────────────
+"$BIN" src --for="$TASK" --signatures-only --no-cache >"$TMP/sigonly" 2>/dev/null; rc=$?
+{ [ "$rc" = 0 ] && ! grep -q 'bundle=' "$TMP/sigonly" && ! grep -q '<bodies [^>]*>' "$TMP/sigonly"; } \
+    && ok "--signatures-only restores the signatures-only bundle (no bundle= attr, no <bodies>)" \
+    || no "--signatures-only did not restore the pre-T3 shape (rc=$rc)"
+"$BIN" src --signatures-only --no-cache >/dev/null 2>"$TMP/err1"; rc=$?
+{ [ "$rc" != 0 ] && grep -qi 'signatures-only' "$TMP/err1"; } \
+    && ok "--signatures-only without --for refuses loudly" \
+    || no "--signatures-only without --for did not refuse (rc=$rc)"
+"$BIN" src --for="$TASK" --signatures-only --detail=3 --no-cache >/dev/null 2>"$TMP/err2"; rc=$?
+{ [ "$rc" != 0 ] && grep -qi 'signatures-only' "$TMP/err2"; } \
+    && ok "--signatures-only + --detail refuses loudly (contradictory)" \
+    || no "--signatures-only + --detail did not refuse (rc=$rc)"
+
+# ── #5: escalation capped at the pack-task candidate cap (6) and disclosed ──────────────────────────────
+"$BIN" src --for="$TASK" --token-budget=20000 --no-cache >"$TMP/big" 2>/dev/null
+BB=$( bodycount "$TMP/big" )
+BATTR=$( rootattr "$TMP/big" 'bundle="auto" bodies="[0-9]*"' )
+BN=${BATTR##*bodies=\"}; BN=${BN%\"}
+{ [ -n "$BATTR" ] && [ "${BN:-x}" = "$BB" ] && [ "$BB" -ge 1 ] && [ "$BB" -le 6 ]; } \
+    && ok "generous budget escalates to $BB bodies — capped at 6, disclosed ($BATTR)" \
+    || no "escalation cap/disclosure wrong (attr='$BATTR', emitted $BB, expected 1..6)"
+
+# ── #6: auto bodies ride only the LEFTOVER — <sigs> byte-identical with and without the opt-out ─────────
+"$BIN" src --for="$TASK" --token-budget=6000 --no-cache >"$TMP/b6a" 2>/dev/null
+"$BIN" src --for="$TASK" --token-budget=6000 --signatures-only --no-cache >"$TMP/b6s" 2>/dev/null
+sigsblock "$TMP/b6a" >"$TMP/s_a"; sigsblock "$TMP/b6s" >"$TMP/s_s"
+[ -s "$TMP/s_a" ] || no "#6 presence: could not extract a <sigs> block from the auto run"
+diff -q "$TMP/s_a" "$TMP/s_s" >/dev/null \
+    && ok "the <sigs> block is byte-identical with/without --signatures-only (bodies take leftover only)" \
+    || no "auto mode changed the <sigs> bytes (bodies must never eat the signature budget)"
+
+# ── #7: the budget ledger accounts the bodies' tokens ───────────────────────────────────────────────────
+ETA=$( grep -o 'est_tokens="[0-9]*"' "$TMP/auto"    | head -1 | grep -o '[0-9]*' )
+ETS=$( grep -o 'est_tokens="[0-9]*"' "$TMP/sigonly" | head -1 | grep -o '[0-9]*' )
+{ [ -n "${ETA:-}" ] && [ -n "${ETS:-}" ] && [ "$ETA" -gt "$ETS" ]; } \
+    && ok "est_tokens charges the bodies (auto $ETA > signatures-only $ETS)" \
+    || no "est_tokens does not account the bodies (auto='$ETA' vs signatures-only='$ETS')"
+
+# ── #8: determinism x3 — auto body inclusion is a pure function of (corpus, query, budget) ──────────────
+"$BIN" src --for="$TASK" --no-cache >"$TMP/x1" 2>/dev/null
+"$BIN" src --for="$TASK" --no-cache >"$TMP/x2" 2>/dev/null
+"$BIN" src --for="$TASK" --no-cache >"$TMP/x3" 2>/dev/null
+{ diff -q "$TMP/x1" "$TMP/x2" >/dev/null && diff -q "$TMP/x2" "$TMP/x3" >/dev/null; } \
+    && ok "default --for deterministic (byte-identical x3)" \
+    || no "default --for NON-deterministic across three runs"
+
+# ── #9: --detail=N supersedes auto (explicit shape, no auto disclosure) ─────────────────────────────────
+"$BIN" src --for="$TASK" --detail=2 --no-cache >"$TMP/det" 2>/dev/null
+{ grep -q '<bodies [^>]*>' "$TMP/det" && ! grep -q 'bundle="auto"' "$TMP/det"; } \
+    && ok "--detail=2 supersedes auto (explicit <bodies>, no bundle=\"auto\" attr)" \
+    || no "--detail=2 did not supersede auto cleanly"
+
+# ── #10: xmllint-clean (G4) ─────────────────────────────────────────────────────────────────────────────
+if command -v xmllint >/dev/null 2>&1; then
+    lint=1
+    for F in "$TMP/auto" "$TMP/tight" "$TMP/sigonly" "$TMP/big" "$TMP/b6a" "$TMP/det"; do
+        xmllint --noout "$F" 2>/dev/null || { echo "    malformed: $F"; lint=0; }
+    done
+    [ "$lint" = 1 ] && ok "all shapes well-formed XML (G4)" || no "malformed XML"
+else
+    printf '  SKIP  xmllint (not installed)\n'
+fi
+
+[ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
+exit $fail

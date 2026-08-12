@@ -67,14 +67,20 @@ diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \
 # ── 2) the targeted expansion case — a lexically-invisible direct callee, top-4 window ────────────────
 PLAIN="$( "$BIN" anchorfix --no-cache --for="$QUERY" --pack-top-n=4 2>/dev/null )"
 ANCH="$(  "$BIN" anchorfix --no-cache --for="$QUERY" --pack-top-n=4 --anchor 2>/dev/null )"
-printf '%s' "$PLAIN" | grep -q 'flushEvictionQueue' \
+# T3 (contract update, same wave): the default bundle now appends the top symbol's FULL body with its
+# callee signatures, where a direct callee's name legitimately appears — the property THIS gate pins is
+# the RANKED top-4 window, so both membership probes scope to the <sigs> span, not the whole document.
+sigspan(){ python3 -c 'import sys; s=sys.stdin.buffer.read(); a=s.find(b"<sigs"); b=s.find(b"</sigs>"); sys.stdout.buffer.write(s[a:b+7] if a>=0 and b>=0 else b"")'; }
+PLAIN_SIGS="$( printf '%s' "$PLAIN" | sigspan )"
+ANCH_SIGS="$(  printf '%s' "$ANCH"  | sigspan )"
+printf '%s' "$PLAIN_SIGS" | grep -q 'flushEvictionQueue' \
     && no "plain lexical top-4 wrongly contains the zero-overlap callee (fixture no longer discriminates)" \
     || ok "plain lexical top-4 excludes flushEvictionQueue (lexically invisible, as designed)"
-printf '%s' "$ANCH" | grep -q 'flushEvictionQueue' \
+printf '%s' "$ANCH_SIGS" | grep -q 'flushEvictionQueue' \
     && ok "anchored top-4 surfaces flushEvictionQueue (graph expansion from the lexical anchor)" \
     || no "anchored top-4 missing flushEvictionQueue — expansion did not propagate to the direct callee"
 # the anchors themselves must survive the blend (lexical stays dominant — never drowned by the walk)
-printf '%s' "$ANCH" | grep -q 'frobnicateWidgetCache' \
+printf '%s' "$ANCH_SIGS" | grep -q 'frobnicateWidgetCache' \
     && ok "anchored top-4 keeps the lexical anchor itself (frobnicateWidgetCache)" \
     || no "anchored rank drowned the top lexical anchor — blend is broken"
 
@@ -102,7 +108,7 @@ env -u RIPWIRE_DEV "$BIN" anchorfix --no-cache --for="$QUERY" --anchor >/dev/nul
                                                      || no "--anchor without RIPWIRE_DEV=1 did not refuse loudly"
 
 # ── 5) MUTATION self-test — the expansion assertion must FAIL against the un-anchored output ──────────
-MUT="$( printf '%s' "$PLAIN" | grep -q 'flushEvictionQueue' && echo BAD || echo TRIPPED )"
+MUT="$( printf '%s' "$PLAIN_SIGS" | grep -q 'flushEvictionQueue' && echo BAD || echo TRIPPED )"
 [ "$MUT" = "TRIPPED" ] && ok "mutation self-test (the expansion assertion fails on the plain run, so it is live)" \
                        || no "mutation self-test broke — the expansion assertion cannot fail"
 

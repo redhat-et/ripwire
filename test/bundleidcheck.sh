@@ -225,16 +225,21 @@ else
     done
 fi
 
-# --for's est_tokens must still describe the bytes actually delivered (mid-band rate ~2.5 B/token, ±10%)
+# --for's est_tokens must still describe the bytes actually delivered. T3 (contract update, same wave):
+# the default bundle is MIXED-rate — markup at ~2.50 B/token plus the auto <bodies> span at ~3.80 — so the
+# band is checked against the blended expectation for THIS document's own markup/body split, ±10%.
 EST="$( grep -o 'est_tokens="[0-9]*"' "$TMP/for.xml" | head -1 | tr -dc '0-9' )"
 FORBYTES="$( wc -c < "$TMP/for.xml" | tr -d ' ' )"
 if [ -n "$EST" ] && [ "$EST" -gt 0 ]; then
     python3 -c "
 import sys
 est, b = $EST, $FORBYTES
-rate = b / est
-sys.exit( 0 if 2.25 <= rate <= 2.75 else 1 )" \
-        && ok "--for est_tokens=$EST still describes the delivered $FORBYTES B (rate in band)" \
+d = open( '$TMP/for.xml', 'rb' ).read()
+a2 = d.find( b'<bodies ' ); b2 = d.find( b'</bodies>' )
+span = ( b2 + 9 ) - a2 if a2 >= 0 and b2 >= 0 else 0
+expected = ( b - span ) / 2.50 + span / 3.80
+sys.exit( 0 if 0.90 <= est / expected <= 1.10 else 1 )" \
+        && ok "--for est_tokens=$EST still describes the delivered $FORBYTES B (blended rate in band)" \
         || no "--for est_tokens=$EST does not match the delivered $FORBYTES B — the estimate drifted"
 else
     no "--for emitted no est_tokens — the budget report vanished"
