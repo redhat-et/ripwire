@@ -525,26 +525,25 @@ sweep (grep→grep→grep ×357 as a trigram, read×3 ×187, git-diff×3 ×119).
 is narrow: *a nudge converts when it arrives at the sweep moment carrying the exact command, and not
 before.* It is falsifiable and it is expected to be able to fail.
 
-**THE BASELINE IS CORRECTED, AND BOTH NUMBERS ARE STATED.** The 0.8% figure that motivated this lane
-was produced by the v1 classifier, and the v1 classifier was wrong in a way that biased exactly the
-numerator. 924 of the frozen 2,155-row log's rows were `unclassified`; 742 of those were multi-line
-or `cd <dir> && …` command lines — the worktree-session idiom — which `@tsv` newline escaping and a
-missing prefix-strip rule together made unreadable. Replaying the v2 classifier over the **same
-frozen log** (`unclassified` 924 → 160, −82.7%) moves the readings:
+**THE BASELINE IS CORRECTED, AND WHERE IT LIVES.** The v1 classifier was wrong in a way that biased
+exactly the numerator: a large share of the log's rows were `unclassified` because `@tsv` newline
+escaping plus a missing prefix-strip rule made multi-line and `cd <dir> && …` command lines — the
+worktree-session idiom — unreadable. Replaying the v2 classifier over the same frozen log cut
+`unclassified` by more than four-fifths and materially raised the measured substitution rate (the
+tool's own invocations were the most-undercounted class, since `cd <worktree> && ./build/ripwire …`
+is exactly the form the strip was missing). Two consequences are load-bearing. First, the v1
+baseline may not be used as this round's bar — a bar measured with a broken instrument is not a bar.
+Second, the correction *sharpens* the motivating finding rather than dissolving it: under v2 the
+post-nudge substitution rate is a multiple LOWER than the pre-nudge rate, not equal to it. That is
+observational and confounded by selection — a session reaches `post_nudge=1` precisely by having
+grepped — so it is reported as a description of the log, never as "the nudge makes agents worse".
 
-| Reading (same 2,155-row log) | v1, as logged | v2, replayed |
-| --- | --- | --- |
-| substitution rate, overall | 1.05% (9/859) | **5.62%** (73/1298) |
-| pre-nudge (`post_nudge=0`) | 1.09% (8/733) | **6.14%** (72/1172) |
-| post-nudge (`post_nudge=1`) | 0.79% (1/126) | **0.79%** (1/126) |
-
-ripwire calls were undercounted **8×** (9 → 73). Two consequences are load-bearing. First, the
-"0.8% baseline" may not be used as this round's bar — a bar measured with a broken instrument is not
-a bar. Second, the correction *sharpens* the motivating finding rather than dissolving it: under v2
-the post-nudge rate (0.79%) is not merely equal to the pre-nudge rate, it is **~8× lower** than it
-(6.14%). That is observational and confounded by selection — a session reaches `post_nudge=1`
-precisely by having grepped — so it is reported as a description of this log, never as "the nudge
-makes agents worse".
+**The concrete numeric readings are operator telemetry, not tool measurements, and are deliberately
+kept in the operator-local registration ledger** (with the frozen log snapshot) rather than in this
+public document: they describe one machine's usage levels under known biases, and quoting a level
+here would invite reading it as a property of the tool. The BANDS below are defined as multiples of
+the ledger's corrected baseline B, recorded there before the first readout row existed; the readout
+resolves against the ledger.
 
 **Primary metric.** Substitution rate — `ripwire / (ripwire + native)`, v2 classifier, the same
 ratio `bench/substitution_report.py` §1 prints — computed over rate-eligible rows carrying
@@ -552,17 +551,17 @@ ratio `bench/substitution_report.py` §1 prints — computed over rate-eligible 
 written by the hook (`nudge":"sweep3"` on the firing row, `post_sweep":1` on every row after it), so
 the grouping variable is recorded at observation time and never reconstructed at analysis time.
 
-**Band, pre-registered before the first readout row exists.** Measured against the corrected overall
-level of **5.62%**, which is what this same population produces under the same classifier the
-readout will use:
+**Band, pre-registered before the first readout row exists.** Measured against the corrected
+baseline B in the operator-local registration ledger — the level this same population produces under
+the same classifier the readout will use:
 
 | Verdict | `post_sweep=1` substitution rate |
 | --- | --- |
-| **KEEP** | **≥ 16.9%** (≥3× the corrected baseline) |
-| **REWORD** (inconclusive) | 8.0% – 16.8% |
-| **DISABLE** | **< 8.0%** (< ~1.4× the corrected baseline) |
+| **KEEP** | **≥ 3×B** |
+| **REWORD** (inconclusive) | ~1.4×B – 3×B |
+| **DISABLE** | **< ~1.4×B** |
 
-The inconclusive region is 8.9 points wide on purpose: at the sample size a fortnight of
+The inconclusive region spans more than a doubling on purpose: at the sample size a fortnight of
 single-operator sessions produces, a knife-edge threshold is decided by noise, and this repo has
 twice rejected rounds whose bands were narrower than their instruments.
 
