@@ -9338,9 +9338,11 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (collection budget reached). "
                  // R1 (the 2026-08-12 usage mine): the two follow-up answers, defined in-band — the legend is the only prose a mid-task agent
                  // reads, so it carries the honesty duties: <suggest> is labeled SUGGESTIONS (a zero stays "none found"), callers= carries the FLOOR caveat.
+                 // Deliberately NO attribute=value literal in the added sentences ("a zero-hit answer", never a quoted hits value): several gates
+                 // parse this verb's header counters by grep, and a quoted numeric example here would be matched first — the quality-delta legend's rule.
                  "After the hit rows, <enc> rows list each DISTINCT enclosing symbol NAME of THIS page (first-appearance order, bounded by the page) with callers= its 1-hop DISTINCT-caller count, "
                  "unioned across same-named defs like the callers verb (a FLOOR — dynamic dispatch contributes no edge), defs= how many defs the name grouped (only when more than one), cx= complexity; "
-                 "amp=/tested= join only when a metrics co-run already computed that lens. On hits=\"0\" a <suggest> element may follow: SUGGESTIONS, never matches — near= the nearest indexed "
+                 "amp=/tested= join only when a metrics co-run already computed that lens. On a zero-hit answer a <suggest> element may follow: SUGGESTIONS, never matches — near= the nearest indexed "
                  "symbol name (did-you-mean), next= a ready-to-paste conceptual fallback; absent for regex/non-word-like patterns or when nothing plausible exists. "
                  "%s -->", rw::kPageRaiseCapClause );
     std::printf( "<grep pattern=\"%s\" files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\">",
