@@ -556,6 +556,45 @@ case "$( c_inner_text "$TMP/d5d_out" )" in
     && ok "(D-5d) with the root assumed, grep{} is refused for PATTERN (the actionable field), with an example" \
     || no "(D-5d) unexpected: $( c_inner_text "$TMP/d5d_out" )"
 
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== Part E: R2b — every schema error names its key + the expected shape ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# The 2026-08-12 usage mine's second MCP finding: failures teach nothing when the error is generic. The
+# missing-path collapse is gone (Part D-5); these arms pin the one-shot-recovery guarantee on the
+# remaining schema-error classes, so a regression to a generic sentence names itself here.
+
+# (E-1) a tools/call with NO name used to be masked by the path refusal; with the root assumed it must
+#       name the actually-missing key: `name`, with an example and the tools/list pointer.
+( cd "$FIX" && printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{}}' \
+    | "$BIN" --mcp 2>/dev/null ) >"$TMP/e1_out"
+case "$( c_inner_text "$TMP/e1_out" )" in
+    "__ERROR__:missing required field: name"*'e.g. name='*'tools/list'*) e1=ok;; *) e1=no;; esac
+[ "$e1" = ok ] \
+    && ok "(E-1) a name-less tools/call names 'name' + an example + tools/list (was masked by the path refusal)" \
+    || no "(E-1) unexpected: $( c_inner_text "$TMP/e1_out" )"
+
+# (E-2) presence guard for the unknown-field guarantee: the refusal names the typed key AND the verb's
+#       accepted set (a caller can fix the request from the error alone).
+mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FIX\",\"query\":\"x\"}}}" >"$TMP/e2_out"
+case "$( c_inner_text "$TMP/e2_out" )" in
+    "__ERROR__:unknown field: 'query'"*'grep accepts:'*pattern*) e2=ok;; *) e2=no;; esac
+[ "$e2" = ok ] \
+    && ok "(E-2) an unknown field is refused naming the key AND grep's accepted set" \
+    || no "(E-2) unexpected: $( c_inner_text "$TMP/e2_out" )"
+
+# (E-3) presence guard for the bad-shape guarantee: a wrong-typed value names the field, the expected
+#       type, the value as typed, and an example.
+mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FIX\",\"pattern\":\"x\",\"limit\":\"ten\"}}}" >"$TMP/e3_out"
+case "$( c_inner_text "$TMP/e3_out" )" in
+    "__ERROR__:invalid value for field: limit"*"got 'ten'"*'e.g. limit='*) e3=ok;; *) e3=no;; esac
+[ "$e3" = ok ] \
+    && ok "(E-3) a wrong-typed value names the field + expected type + the value as typed + an example" \
+    || no "(E-3) unexpected: $( c_inner_text "$TMP/e3_out" )"
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo
 if [ "$fail" -eq 0 ]; then
