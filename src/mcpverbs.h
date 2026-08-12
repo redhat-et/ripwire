@@ -633,12 +633,20 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     char       pagebuf[ kPageDisclosureCap ];
     const bool isPaging = page.limit > 0 || page.offset > 0;
 
+    // T1: the completeness claim, the SAME four conditions as the CLI emitter (main.cpp's emitGrepReport)
+    // minus the regex arm — this verb is literal-only, so every scan is a full end-to-end read. Appended
+    // after hits_capped so the historic key order other gates read is byte-untouched; absent when any
+    // condition fails (the floor vocabulary already covers partial answers).
+    const bool scanExhaustive = collected.cleanScan();
+    const bool windowWhole    = grepPage.begin == 0 && grepPage.end == collected.raw.size();
+
     std::string out = "{\"pattern\":\"" + mcpdetail::jsonEscape( pattern )
                     + "\",\"files\":" + std::to_string( filesMatched )
                     + ( isPaging ? std::string{} : ( ",\"total\":" + std::to_string( collected.raw.size() ) ) )
                     + pageDisclosure( pagebuf, sizeof( pagebuf ), rowCount, collected.raw.size(), grepPage.end,
                                       page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax )
                     + ",\"hits_capped\":" + ( collected.isBudgetReached ? "true" : "false" )
+                    + ( scanExhaustive && windowWhole ? ",\"complete\":true" : "" )
                     + ",\"order\":\"SOURCE files before test/bench files before docs, then path and line\""
                     + ",\"hits\":[";
     bool first = true;

@@ -438,9 +438,36 @@ inline bool isRevisionToken( std::string_view s ) noexcept
 // tens of thousands of shas, far past ARG_MAX, and popen is read-only so stdin cannot be fed directly. The
 // temp file lives under the same hardened cache dir the rest of the tool uses and is unlinked on every exit
 // path (including the early returns below).
-template<class OnBlob>
-inline void streamBlobs( const std::string& root, const std::vector<std::string>& shas, OnBlob onBlob )
+//
+// T1 (completeness claims): `stats`, when supplied, records the degrade shapes this streamer previously
+// swallowed — a caller that wants to CLAIM its scan was exhaustive (whereis' complete=) needs to know
+// whether any blob went unread. `binary` is counted separately from the failure shapes on purpose: a
+// binary blob cannot carry a text symbol, so it does not defeat a text-scoped claim, while an OVERSIZED
+// text blob genuinely could and must.
+struct StreamBlobStats
 {
+    std::uint32_t missing    = 0;      // "<oid> missing" / malformed header — the object could not be read
+    std::uint32_t nonBlob    = 0;      // wrong object type or negative size — never scanned
+    std::uint32_t oversized  = 0;      // > kMaxBlobBytes, consumed but DISCARDED unread
+    std::uint32_t binary     = 0;      // NUL in the probe window — outside a text-scoped claim, not a failure
+    bool          endedEarly = false;  // the batch pipe died before serving every sha
+    bool          startFailed = false; // the batch never started (list file / popen failure)
+
+    bool exhaustiveOverText() const noexcept
+    {
+        return !startFailed && !endedEarly && missing == 0 && nonBlob == 0 && oversized == 0;
+    }
+};
+
+template<class OnBlob>
+inline void streamBlobs( const std::string& root, const std::vector<std::string>& shas, OnBlob onBlob,
+                         StreamBlobStats* stats = nullptr )
+{
+    // Null-object: count unconditionally into a local sink when the caller did not ask, so the body below
+    // carries no per-site null test (the branch count stays what the streaming logic needs, nothing more).
+    StreamBlobStats  localStats;
+    StreamBlobStats& st = stats != nullptr ? *stats : localStats;
+
     if( shas.empty() )
     {
         return;
@@ -451,6 +478,7 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
         std::FILE* lf = std::fopen( listPath.c_str(), "wb" );
         if( !lf )
         {
+            st.startFailed = true;
             DEGRADED_PATH_ALERT( "crossref: cannot write the blob-batch list — cross-branch content unavailable" );
             return;
         }
@@ -467,6 +495,7 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
     if( !pipe )
     {
         ::unlink( listPath.c_str() );
+        st.startFailed = true;
         DEGRADED_PATH_ALERT( "crossref: git cat-file --batch failed to start — cross-branch content unavailable" );
         return;
     }
@@ -483,16 +512,17 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
         }
         if( header.empty() )
         {
+            st.endedEarly = true;
             break; // pipe ended early — degrade quietly
         }
 
         const std::size_t sp2 = header.rfind( ' ' );
         const std::size_t sp1 = ( sp2 == std::string::npos ) ? std::string::npos : header.rfind( ' ', sp2 - 1 );
-        if( sp1 == std::string::npos ) { onBlob( shas[ served ], std::string_view{}, false ); continue; }
+        if( sp1 == std::string::npos ) { ++st.missing;  onBlob( shas[ served ], std::string_view{}, false ); continue; }
 
         const std::string_view type( header.data() + sp1 + 1, sp2 - sp1 - 1 );
         const long long        size = std::strtoll( header.c_str() + sp2 + 1, nullptr, 10 );
-        if( type != "blob" || size < 0 ) { onBlob( shas[ served ], std::string_view{}, false ); continue; }
+        if( type != "blob" || size < 0 ) { ++st.nonBlob;  onBlob( shas[ served ], std::string_view{}, false ); continue; }
 
         // The payload must be CONSUMED whatever its size — the stream is framed, so skipping bytes would
         // desync every subsequent header and start attributing content to the wrong sha. But an oversized
@@ -527,6 +557,7 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
         // WRONG answer, which is worse than a short one. Report this blob as unreadable and stop.
         if( got != std::size_t( size ) )
         {
+            st.endedEarly = true;
             onBlob( shas[ served ], std::string_view{}, false );
             DEGRADED_PATH_ALERT( "crossref: git cat-file stream ended mid-blob — stopping the batch rather than risk misattributing content" );
             break;
@@ -536,6 +567,7 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
         const bool             binary = bytes.substr( 0, std::min( bytes.size(), kBinaryProbe ) ).find( '\0' ) != std::string_view::npos;
         if( tooBig || binary )
         {
+            if( tooBig ) { ++st.oversized; } else { ++st.binary; }
             onBlob( shas[served], std::string_view {}, false );
         }
         else
@@ -1238,6 +1270,14 @@ struct WhereResult
     std::size_t           distinctBlobs = 0;
     std::vector<WhereHit> hits;
 
+    // T1 (completeness claims): true iff the scan PROVABLY covered every text blob of every scanned ref's
+    // full tree — no missing/oversized/short-read blob, the batch served every sha, and no ref's tree
+    // listing came back empty (an empty listing from a non-empty repo is indistinguishable from a failed
+    // `git ls-tree`, so it forfeits the claim rather than risk a false one). Binary blobs do NOT forfeit
+    // it: the claim is text-scoped, and a text symbol cannot occur in one. The writer ANDs this with
+    // "every hit printed" before emitting complete= on the root.
+    bool                  scanExhaustive = false;
+
     // The --with-history lane: a non-owning view of the caller's oracle index (nullptr ⇒ not asked for) plus
     // THIS symbol's verdict, resolved once at compute time so emission stays a pure print. Views at the seam:
     // the caller owns the index and outlives both calls.
@@ -1589,10 +1629,16 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
 
     // blob sha → every (ref index, path) that points at it, in a deterministic order.
     struct Site { std::uint32_t refIndex; std::string path; };
+    bool anyEmptyTree = false;   // T1: a zero-row ls-tree could be a FAILED listing — it forfeits complete=
     gtl::btree_map<std::string, std::vector<Site>> sites;
     for( std::uint32_t i = 0; i < refs.size(); ++i )
     {
-        for( const RawRow& r : lsTree( root, refs[i].tip ) )
+        const std::vector<RawRow> rows = lsTree( root, refs[i].tip );
+        if( rows.empty() )
+        {
+            anyEmptyTree = true;
+        }
+        for( const RawRow& r : rows )
         {
             sites[ r.bSha ].push_back( Site{ i, r.path } );
         }
@@ -1605,6 +1651,7 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     result.distinctBlobs = shas.size();
     result.refsScanned   = refs.size() - 1;                                   // HEAD is not one of the swept refs
 
+    StreamBlobStats blobStats;   // T1: the degrade census that decides whether this scan may claim complete=
     streamBlobs( root, shas, [ & ]( const std::string& sha, std::string_view bytes, bool isText )
                  {
         if( !isText || bytes.find( sym ) == std::string_view::npos ) { return;   // cheap reject before the line walk
@@ -1617,7 +1664,11 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
             if( refs[ s.refIndex ].name == "HEAD" ) { result.onHead = true;
 }
             scanBlobForSymbol( bytes, sym, refs[ s.refIndex ], s.path, result.hits );
-        } } );
+        } }, &blobStats );
+
+    // T1: exhaustive-over-text iff every sha streamed clean AND no ref's tree listing was suspect. An empty
+    // sha list (every scanned tree empty, or none) trivially streamed clean — anyEmptyTree covers that shape.
+    result.scanExhaustive = blobStats.exhaustiveOverText() && !anyEmptyTree;
 
     // §A7: HEAD's rows are the INDEX's answer, not the shape test's — before the sort, because "definitions
     // before references" is a sort key and a wrong label re-orders the first screen.
@@ -2000,17 +2051,31 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
                        "vocabulary to page by: it is the SAME fact shown= / capped= / next_offset= carry, restated from "
                        "the other end (what this page did not print). Page with limit= and offset=; the more element is "
                        "absent exactly when this page reached the end of the hit list. "
+                       // T1 — the completeness claim, the mirror of the truncation vocabulary, defined where it appears.
+                       "COMPLETENESS: complete= on the root (value 1) means this listing is EXHAUSTIVE and a consumer need not "
+                       "re-derive it: every occurrence of the symbol in every TEXT blob of every scanned ref's full tree is printed "
+                       "above — nothing was capped or paged out, and no blob was oversized (over the 2 MB blob ceiling), missing or "
+                       "cut short by the stream. The denominator is refs_scanned= plus HEAD, under SCOPE above (local heads only), "
+                       "so with complete= present a ref absent from the rows genuinely lacks the symbol in its committed tree. "
+                       "Binary blobs are outside the claim (a text symbol cannot occur in one); an oversized TEXT blob suppresses "
+                       "the claim instead of being silently skipped. Its ABSENCE claims nothing. "
                        "raise the default cap with limit=N (offset=M pages) -->" );
     char pab[ kPageDisclosureCap ];
     // §A7(iii): refs_scanned=, not refs=. --stray-content and --abi both spell the MATCHED set refs=; this one
     // counted every branch the sweep READ (73 here, matched or not) under the same attribute name — one noun,
     // two meanings, across sibling verbs an agent reads together.
-    std::fprintf( out, "<whereis sym=\"%s\" on-head=\"%d\" refs_scanned=\"%zu\" blobs=\"%zu\" hits=\"%zu\" head_labels=\"%s\"%s at=\"%.9s\">",
+    // T1: the claim is scan-exhaustiveness AND listing-wholeness — an uncut page over a clean scan. Appended
+    // LAST (after at=) so no existing attribute-adjacency assertion can break on it, the same placement rule
+    // the graph verbs' floor marker follows. When either half fails, NOTHING is added: the truncation
+    // vocabulary above already covers every partial shape, and complete-equals-zero would be noise.
+    const bool completeClaim = res.scanExhaustive && hitPage.begin == 0 && hitPage.end == res.hits.size();
+    std::fprintf( out, "<whereis sym=\"%s\" on-head=\"%d\" refs_scanned=\"%zu\" blobs=\"%zu\" hits=\"%zu\" head_labels=\"%s\"%s at=\"%.9s\"%s>",
                   ex( res.sym ).c_str(), res.onHead ? 1 : 0, res.refsScanned, res.distinctBlobs, res.hits.size(),
                   res.headLabelsFromIndex ? "index" : "lexical",
                   pageDisclosure( pab, sizeof( pab ), hitPage.end - hitPage.begin, res.hits.size(), hitPage.end,
                                   pageLimit, pageOffset, true ),
-                  res.headSha.c_str() );
+                  res.headSha.c_str(),
+                  completeClaim ? " complete=\"1\"" : "" );
 
     // §B11.2 — a zero that is a SPELLING fact, not a repository fact, says so. Emitted first, before the
     // history lane, so it is the first thing after the root on the one shape where it fires: hits="0" AND a
