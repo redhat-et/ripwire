@@ -9,7 +9,10 @@ description: >
   Use when taking ownership of an existing module, planning a refactor, hunting consolidation, deciding who
   should review, or producing a health snapshot. Reads a function's nesting PROFILE (`humps=`/`deep=`/
   `locals=`), not `nest=` alone, so a tangle and a long blocked-sequential body stop looking identical — then
-  routes to ripwire-quality-bar for which refactor that shape calls for.
+  routes to ripwire-quality-bar for which refactor that shape calls for. Boundary in one line: fresh-eyes
+  DIAGNOSES the shape of code you didn't write — "what shape is this function actually, and can I trust
+  the reported number?"; naming the FIX for an already-measured shape, or judging what YOU just wrote, is
+  ripwire-quality-bar.
   Everything emits FACTS, not verdicts — you judge. Backed
   by ripwire (deterministic, on PATH). This is for an explicit risk/rot/refactor question after the target
   area is identified; cold structure mapping belongs to ripwire-orient. For any DIFF — yours or an incoming
