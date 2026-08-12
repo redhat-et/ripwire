@@ -703,10 +703,18 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 return buf;
             };
 
+            // P1-15 `_reingest` (a second envelope sibling, same reasoning as `_index`): `_index` says which
+            // tree STATE answered, `_reingest` what the server had to DO to get there. Contract on
+            // McpIndex::incrementalPasses, gate test/mcpincrementalcheck.sh. Read BEFORE the verb runs.
+            const std::uint64_t passesAtEntry = mcpIndexSlot().incrementalPasses;
             const auto textResult = [ & ]( const std::string& text )
             {
+                // stamp FIRST, then the pass count: on a verb that never touched the index, building the
+                // stamp is what forces the rebuild, and one `+` chain would not sequence those two reads.
+                const std::string stamp = indexStamp( path );
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
-                     + mcpdetail::jsonEscape( text ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( indexStamp( path ) ) + "\"}}";
+                     + mcpdetail::jsonEscape( text ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
+                     + "\"" + mcpReingestField( passesAtEntry ) + "}}";
             };
             const auto errResult = [ & ]( int code, const char* msg )
             { return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\"" + msg + "\"}}"; };

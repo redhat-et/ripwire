@@ -525,6 +525,23 @@ struct McpIndex
     // working-set personalization (feature 2, Cody-style): the uncommitted-diff mask `rank` was teleport-biased
     // toward, as of the LAST rebuild — kept so mcpStale() can detect "same tree, different diff" (see below).
     std::uint64_t                     workingSetHash = 0;   // FNV-1a of the changed-file id list used to build `rank`
+
+    // ── P1-15 incremental-pass disclosure (the `_reingest` envelope field; mcpReingestField below).
+    //
+    // incrementalPasses counts ONLY rebuilds that refreshed an index this process ALREADY held for this
+    // root — never the initial build, and that exclusion is the load-bearing part. A first build re-extracts
+    // the whole corpus against a cold cache blob and nothing at all against a warm one, so disclosing its
+    // cost would make two runs of the same request answer with different bytes and break MCP cache
+    // transparency (gated by mcpverbscheck / mcprobustcheck / mcpclidiffcheck). Counting only refreshes
+    // makes the disclosed number a function of the session's own EDITS, which replay identically either way,
+    // so the disclosure and the determinism contract stop competing. The initial build's cost stays where it
+    // always was: the RIPWIRE_CACHE_STATS stderr line.
+    //
+    // lastReingestFiles is that pass's cost (ing.reparsedFiles, latched at the rebuild rather than read live
+    // off `ing`, so a later warm reuse cannot re-report an older pass's cost as its own). Neither field may
+    // ever reach an output byte that must match a cold run — both are process history, not tree state.
+    std::uint64_t                     incrementalPasses = 0;
+    std::size_t                       lastReingestFiles = 0;
 };
 
 // Cache file path, deterministic per (user, root), under the shared private cache ladder and its existing
@@ -688,6 +705,22 @@ inline std::atomic<std::uint64_t>& mcpRebuildCounter()
 {
     static std::atomic<std::uint64_t> n{ 0 };
     return n;
+}
+
+// P1-15 — the `_reingest` envelope field for a response whose handling ran an INCREMENTAL pass, or "" when
+// it did not. `passesAtEntry` is McpIndex::incrementalPasses as read before the verb ran; a difference means
+// a pass refreshed the index while this request was being served, and lastReingestFiles is that pass's cost.
+// Absent field / 0 / N are three distinct facts — see the field's contract on McpIndex::incrementalPasses.
+// A free function rather than three lines inside the response builder: it keeps the branch out of
+// dispatchMcpLine, which is already the largest symbol in the file.
+inline std::string mcpReingestField( std::uint64_t passesAtEntry )
+{
+    const McpIndex& ix = mcpIndexSlot();
+    if( ix.incrementalPasses == passesAtEntry )
+    {
+        return {};
+    }
+    return ",\"_reingest\":" + std::to_string( ix.lastReingestFiles );
 }
 
 // ── Multi-root workspaces over MCP (A11): the additive `paths` array. A request
@@ -931,6 +964,11 @@ inline const McpIndex& getIndex( const std::string& root )
         }
     }
 
+    // P1-15: read BEFORE the rebuild overwrites `ix`. `valid` alone is not enough — a request that switches
+    // roots finds a valid index belonging to a DIFFERENT tree, and building for the new root is an initial
+    // build for it, not a refresh of anything.
+    const bool isIncrementalPass = ix.valid && ix.root == root;
+
     // Multi-root workspace key (A11): per-root ingest (each with ITS OWN mcpCachePath blob — an edit in
     // one root never reparses another) merged into one IngestResult; else the single-root path unchanged.
     const auto wsIt = mcpWorkspaceRegistry().find( root );
@@ -1042,6 +1080,8 @@ inline const McpIndex& getIndex( const std::string& root )
 
     ix.root  = root;
     ix.valid = true;
+    ix.lastReingestFiles = ix.ing.reparsedFiles;              // P1-15: latch what THIS pass cost
+    ix.incrementalPasses += isIncrementalPass ? 1u : 0u;      // …and whether it refreshed an index we already held
     mcpRebuildCounter().fetch_add( 1, std::memory_order_relaxed );   // MEASURE-FIRST: a real (cache-miss) rebuild just happened
     maybePrefetchHeadSnapshot( root, ix.ing.files.size() );          // Phase-M: seed the HEAD token on the first build; observe a move on later rebuilds
     return ix;

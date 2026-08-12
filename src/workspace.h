@@ -208,6 +208,9 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
         totFiles += p.files.size();   totSyms  += p.symbols.size();   totRefs += p.references.size();
         totIncs  += p.includes.size(); totBinds += p.bindings.size(); totFfis += p.bindingAliases.size();
         totRouteDefs += p.routeDefs.size();   totRouteUses += p.routeUses.size();   // B6.3
+        m.reparsedFiles += p.reparsedFiles;   // P1-15: ONE drift count for the whole multi-root pass —
+                                              //   each root stat-gates against its own blob, so the sum is
+                                              //   the honest "files re-extracted this pass" across roots.
     }
     m.files.reserve( totFiles );          m.realPaths.reserve( totFiles );   m.fileRoot.reserve( totFiles );
     m.symbols.reserve( totSyms );         m.references.reserve( totRefs );
