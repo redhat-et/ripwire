@@ -400,6 +400,21 @@ add_ts_grammar(toml   https://github.com/tree-sitter-grammars/tree-sitter-toml.g
 # pathological indentation BEFORE any parse (ingest.h kMaxYamlNestDepth prescan).
 # Data only: mapping keys become def nodes (t="sec"), NO call edges (see queries/yaml/tags.scm).
 add_ts_grammar(yaml   https://github.com/tree-sitter-grammars/tree-sitter-yaml.git 7708026449bed86239b1cd5bce6e3c34dbca6415)  # v0.7.2
+# Markdown (.md/.markdown): the DOC tier — headings become sections (t="sec") with real spans, so
+# --for/--expand/--recall serve the SECTION, not the whole doc. tree-sitter-grammars/, not
+# tree-sitter/ — there is no first-party markdown grammar. The upstream repo hosts TWO grammars in
+# subdirectories; only the BLOCK grammar (tree-sitter-markdown/) is vendored, FLATTENED to the house
+# deps/<name>/src layout (the inline grammar is deferred: inline constructs are extracted by
+# ingest's own fence-aware line scan — see extractMarkdown). v0.5.3 → ABI 15, in [MIN_COMPATIBLE,
+# LANGUAGE_VERSION]=[13,15] for core v0.26.9. Its scanner.c is STATEFUL (an open-blocks stack
+# serialized between runs) and — LIKE yaml, worse — its serialize() had NO bounds check at all
+# (5-byte header + a raw memcpy of the stack; SIGABRT at ~255 nested blockquote/list markers,
+# SILENT heap corruption under NDEBUG): the vendored tree carries the whole-write clamp under
+# third_party/patches/markdown/ (drift-gated by test/vendorpatchcheck.sh arm H, class "upfront"),
+# and ingest refuses pathological nesting BEFORE any parse (ingest.h kMaxMdBlockDepth prescan).
+# NO tags.scm: extraction is a custom tree walk (section spans + heading hierarchy need the tree,
+# not a capture list), so this grammar is deliberately absent from _ripwire_query_names.
+add_ts_grammar(markdown https://github.com/tree-sitter-grammars/tree-sitter-markdown.git f969cd3ae3f9fbd4e43205431d0ae286014c05b5)  # v0.5.3 (subdir tree-sitter-markdown/, flattened)
 # C# (.cs): the official tree-sitter org grammar (classes/structs/interfaces/records/enums/methods/
 # properties/ctors + invocation & object-creation calls). v0.23.5 → ABI 15, in [MIN_COMPATIBLE,
 # LANGUAGE_VERSION]=[13,15] for core v0.26.9. Ships a scanner.c (raw/interpolated string literals)
@@ -466,6 +481,7 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_csharp>
   $<TARGET_OBJECTS:ts_c>
   $<TARGET_OBJECTS:ts_cuda>
+  $<TARGET_OBJECTS:ts_markdown>
 )
 
 # ---- threading: std::thread / std::mutex need an explicit link on most Unixes ----
@@ -650,7 +666,7 @@ endif()
 # ---- G1 sanitizer build (CONTRIBUTING.md §4): owned code + tree-sitter core + every grammar ----
 set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
-  ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_yaml ts_csharp ts_c ts_cuda)
+  ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_yaml ts_csharp ts_c ts_cuda ts_markdown)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
 # The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so

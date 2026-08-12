@@ -223,6 +223,9 @@ fi
 serializeClassOf(){
     case "$1" in
         bash|csharp|ruby) echo upfront ;;
+        markdown)         echo upfront ;;  # patch 001-serialize-bounds: whole-write clamp BEFORE the
+                                           # memcpy (upstream had NO guard at all — the yaml class,
+                                           # minus even the bare per-iteration check)
         cpp|cuda)         echo static ;;
         python)           echo loop1 ;;
         yaml)             echo loopwide ;;
