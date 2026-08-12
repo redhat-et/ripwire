@@ -34,6 +34,13 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-12, MODULE-CONSTANT ROUND (test/moduleconstcheck.sh): kParserVer 61 -> 62 and the quality.h
+#   mirror with it, in the same diff. C/C++ const-qualified module constants (and class-static
+#   constants via the new field_declaration capture) now index CASE-BLIND — the const/constexpr/
+#   constinit keyword is the evidence, closing the gap where the repo's own `constexpr std::uint32_t
+#   kParserVer` was invisible to `--for`/`--uses` (the 2026-08-12 census's 21.4% constant-shaped
+#   lookup family). The extracted SET grows on any C/C++ tree, so v61 blobs must be rejected. An
+#   EXTRACTION change, not a Snapshot-SEMANTICS change, so kQSnapCacheScheme deliberately did NOT move.
 # 2026-08-11, W1-S2 CROSS-FILE CHURN FIX: kQSnapCacheScheme 5 -> 6 (and kQBodyCacheScheme 2 -> 3, the
 #   sidecar body-record tag body -> bodyq). bodyHashBySym's KEYS changed meaning — pathQualifiedKey
 #   (path\0scope\0name) replaces hash(canonicalId), whose bare-name degrade folded every scope-less

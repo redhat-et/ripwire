@@ -59,10 +59,10 @@ mkRepo( rA, { "alpha.cpp": "// alphaOne does a thing.\nint alphaOne( int x ) { r
 mkRepo( rB, { "beta.cpp":  "int betaOne( int y ) { return y * 3; }\n" } )
 
 class Stdio:
-    def __init__( self, root = None ):
+    def __init__( self, root = None, cwd = None ):
         argv = [ BIN ] + ( [ root ] if root else [] ) + [ "--mcp" ]
         self.p = subprocess.Popen( argv, stdin = subprocess.PIPE, stdout = subprocess.PIPE,
-                                   stderr = subprocess.DEVNULL )
+                                   stderr = subprocess.DEVNULL, cwd = cwd )
         self.n = 0
     def raw( self, line ):
         self.p.stdin.write( line.encode() + b"\n" ); self.p.stdin.flush()
@@ -131,8 +131,17 @@ totalProps = sum( len( t[ "inputSchema" ][ "properties" ] ) for t in tools )
 print( "  INFO  (A) %d declared properties across 30 verbs" % totalProps )
 
 # ═══ (B) M4 — `path` is required exactly when this server cannot supply a root ═════════════════════════════
-badReq = [ t[ "name" ] for t in tools if "path" not in t[ "inputSchema" ].get( "required", [] ) ]
-check( not badReq, "(B/M4) rootless server: `path` in every verb's required (%d missing)" % len( badReq ) )
+# R2a (the 2026-08-12 usage mine) changed WHICH servers can: a bare `--mcp` launched inside a workspace
+# now supplies its own launch cwd (assumedRoot), so the shipped install's schema stops demanding `path`.
+# The M4 principle is unchanged; the truly root-less server is one launched from "/" (the startup guard
+# refuses to assume "/" or $HOME), and THAT schema must still require `path` on all 30 verbs.
+stillReq0 = [ t[ "name" ] for t in tools if "path" in t[ "inputSchema" ].get( "required", [] ) ]
+check( not stillReq0, "(B/M4+R2a) bare `--mcp` launched in a workspace cwd: `path` NOT required (%d wrongly required)" % len( stillReq0 ) )
+rootless = Stdio( cwd = "/" )
+rltools  = rootless.call( "tools/list" )[ "result" ][ "tools" ]
+badReq   = [ t[ "name" ] for t in rltools if "path" not in t[ "inputSchema" ].get( "required", [] ) ]
+check( not badReq, "(B/M4) truly rootless server (cwd=/): `path` in every verb's required (%d missing)" % len( badReq ) )
+rootless.close()
 
 exemplar = [ t for t in tools if t[ "name" ] == "exemplar" ][ 0 ][ "inputSchema" ]
 anyOf    = exemplar.get( "anyOf", [] )
