@@ -409,12 +409,12 @@ echo "-- meter default-path row --"; [ -f "$DEFAULT_LOG" ] && cat "$DEFAULT_LOG"
     && ok "M1 meter: one row lazily created at ~/.ripwire/substitution.jsonl" \
     || no "M1 meter: expected 1 row at $DEFAULT_LOG, got $( meterrows "$DEFAULT_LOG" )"
 M2_MISSING=""
-for k in v ts seq session repo tag tool class family nudged nudge post_nudge arm detail; do
+for k in v ts seq session repo tag tool class family nudged nudge post_nudge post_sweep arm detail; do
     val="$( meterrowget "$DEFAULT_LOG" 1 "$k" )"
     case "$val" in ""|"<missing>") M2_MISSING="$M2_MISSING $k" ;; esac
 done
-# `nudged`/`post_nudge` are legitimately 0 and `detail` legitimately empty — re-check those by presence
-for k in nudged post_nudge detail; do
+# `nudged`/`post_nudge`/`post_sweep` are legitimately 0 and `detail` legitimately empty — by presence
+for k in nudged post_nudge post_sweep detail; do
     python3 -c 'import json,sys; d=json.loads(open(sys.argv[1]).readline()); sys.exit(0 if sys.argv[2] in d else 1)' \
         "$DEFAULT_LOG" "$k" 2>/dev/null && M2_MISSING="$( printf '%s' "$M2_MISSING" | sed "s/ $k//" )"
 done
@@ -502,12 +502,16 @@ run_meter "$L16" "$( bashjson meter16 'for f in *.c; do grep needle $f; done' )"
 [ "$( meterrowget "$L16" 1 class )" = "unclassified" ] \
     && ok "M16 meter: an ambiguous search line is logged as unclassified, never silently dropped" \
     || no "M16 meter: ambiguous line classified as [$( meterrowget "$L16" 1 class )], expected unclassified"
+# M17 changed contract at S2b (2026-08-11). `cmake --build` and `git status` used to write no row;
+# they now write `build`/`git-misc` rows, because Track B §S4 ranks the absorption queue from the
+# command mix an agent ACTUALLY runs and a class that writes no row is one that survey cannot see.
+# What must still write no row is a line this meter has no name for at all.
 TM17="$TMP/tm17"; mkdir -p "$TM17"; L17="$TMP/m17.jsonl"
-run_meter "$L17" "$( bashjson meter17 'cmake --build build -j 8' )" "$TM17" >/dev/null 2>&1
-run_meter "$L17" "$( bashjson meter17b 'git status' )" "$TM17" >/dev/null 2>&1
+run_meter "$L17" "$( bashjson meter17 'npx create-thing --yes' )" "$TM17" >/dev/null 2>&1
+run_meter "$L17" "$( bashjson meter17b 'brew upgrade' )" "$TM17" >/dev/null 2>&1
 [ "$( meterrows "$L17" )" = "0" ] \
-    && ok "M17 meter: out-of-scope Bash (cmake --build / git status) writes no row" \
-    || no "M17 meter: out-of-scope commands wrote $( meterrows "$L17" ) row(s): $( cat "$L17" 2>/dev/null )"
+    && ok "M17 meter: a Bash line this meter has no name for still writes no row" \
+    || no "M17 meter: unnamed commands wrote $( meterrows "$L17" ) row(s): $( cat "$L17" 2>/dev/null )"
 
 # ── M18: ONE global log across repos, rows tagged by repo ───────────────────────────────────────────
 REPO2="$TMP/repo2"; mkdir -p "$REPO2"; git -C "$REPO2" init -q
@@ -616,6 +620,288 @@ if [ -f "$REPORT" ]; then
 else
     no "M26 meter: bench/substitution_report.py does not exist"
     no "M27b meter: bench/substitution_report.py does not exist"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (12) §SWEEP — the sweep-escalation nudge, and the widened classifier  (Track B §S2b, 2026-08-12)
+#
+# WHY THIS SECTION EXISTS. The meter's first 12 hours measured the one-time nudges converting at
+# ZERO — 455 fired, substitution after them 0.8%, indistinguishable from before them — while the
+# dominant behaviour was the SAME-CLASS SWEEP (grep→grep→grep ×357 as a trigram, read×3 ×187,
+# git-diff×3 ×119). The escalation is the falsifiable response: at the Nth call of a class, say the
+# EXACT command instead of the verb. Its efficacy verdict is pre-registered in docs/EVALS.md §4 and
+# is NOT this gate's business — this gate pins the mechanism's contract, all of which is behaviour a
+# reader would otherwise have to take on trust:
+#
+#   - it fires at N and not before, exactly once per class per session (S1-S4, S10);
+#   - the text is PASTE-READY: the grep escalation carries the agent's own patterns inside a runnable
+#     --for="…", the read escalation the directory of the file just read (S2, S7, S14) — a nudge that
+#     names a verb and an ellipsis is the thing measured not to work;
+#   - the escalation is RECORDED (nudge=sweep3 on the firing row, post_sweep=1 after it), because an
+#     unmeasurable nudge is one nobody can ever turn off on evidence (S5);
+#   - it never blocks, never denies, degrades to silence off its preconditions (S6, S13);
+#   - RIPWIRE_SWEEP=0 and the control arm suppress it, and with it suppressed the first two calls are
+#     BYTE-IDENTICAL to a run with it on — the feature is additive or it is not shipped (S11-S12);
+#   - and the classifier fixtures pin the `cd`-prefix strip that recovered 82.7% of the live log's
+#     `unclassified` rows, plus the new non-retrieval classes (C1-C2).
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+sweep_run()
+{
+    # sweep_run LOGFILE TMPDIRVAL JSON [VAR=VAL ...] -> stdout of the hook
+    _l="$1"; _t="$2"; _j="$3"; shift 3
+    printf '%s' "$_j" | env HOME="$METERHOME" RIPWIRE_METER_LOG="$_l" PATH="$WITH_RIPWIRE" \
+        TMPDIR="$_t" "$@" bash "$HOOK"
+}
+grepjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Grep","tool_input":{"pattern":"%s"}}' "$1" "$REPO" "$2"; }
+readjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Read","tool_input":{"file_path":"%s"}}' "$1" "$REPO" "$2"; }
+globjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Glob","tool_input":{"pattern":"%s"}}' "$1" "$REPO" "$2"; }
+
+# ── S1-S6: the grep sweep. Three calls, one escalation, on the third, carrying the observed patterns
+TS1="$TMP/ts1"; mkdir -p "$TS1"; LS1="$TMP/s1.jsonl"
+SW1="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep alpha )" )"
+SW2="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep beta )" )"
+SW3="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep gamma )" )"; RCS3=$?
+SW4="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep delta )" )"
+echo "-- sweep escalation (grep, 3rd call) --"; echo "$SW3"
+
+[ -n "$SW1" ] && printf '%s' "$SW1" | grep -Fq 'ripwire tip: ' && ok "S1 sweep: call 1 is the ordinary one-time tip" \
+    || no "S1 sweep: call 1 was not the base nudge: [$SW1]"
+[ -z "$SW2" ] && ok "S3 sweep: call 2 does NOT escalate (two same-class calls are not a sweep)" \
+    || no "S3 sweep: call 2 fired something: [$SW2]"
+[ "$RCS3" -eq 0 ] && [ -n "$SW3" ] && printf '%s' "$SW3" | grep -Fq 'SWEEP' \
+    && ok "S2 sweep: call 3 escalates (exit 0, names itself a SWEEP)" \
+    || no "S2 sweep: call 3 did not escalate: exit=$RCS3 out=[$SW3]"
+printf '%s' "$SW3" | grep -Fq -- '--for=\"alpha beta gamma\"' \
+    && ok "S2b sweep: the escalation is PASTE-READY — --for= carries the 3 observed patterns" \
+    || no "S2b sweep: escalation lacks --for=\"alpha beta gamma\": [$SW3]"
+# the hook tags rows with `git rev-parse --show-toplevel`, which resolves symlinks — on macOS
+# $TMPDIR lives under /var -> /private/var, so compare against the resolved path the hook will use
+REPO_TOP="$( git -C "$REPO" rev-parse --show-toplevel 2>/dev/null )"
+printf '%s' "$SW3" | grep -Fq "ripwire $REPO_TOP --for" \
+    && ok "S2c sweep: the pasted command names the repo directory, not a placeholder" \
+    || no "S2c sweep: escalation does not name $REPO_TOP"
+[ -z "$SW4" ] && ok "S4 sweep: call 4 is silent (one escalation per class per session)" \
+    || no "S4 sweep: call 4 escalated a second time: [$SW4]"
+printf '%s' "$SW3" | is_valid_json && ok "S6 sweep: escalation is valid JSON" \
+    || no "S6 sweep: escalation is not valid JSON"
+printf '%s' "$SW3" | grep -q '"permissionDecision"[[:space:]]*:[[:space:]]*"allow"' \
+    && ok "S6b sweep: escalation is permissionDecision allow (advisory, never a blocker)" \
+    || no "S6b sweep: escalation is not an allow"
+printf '%s' "$SW3" | grep -qi 'deny\|"ask"\|updatedInput' \
+    && no "S6c sweep: escalation mentions deny/ask/updatedInput (must never)" \
+    || ok "S6c sweep: no deny/ask/updatedInput anywhere in the escalation"
+
+# ── S5: the escalation is on the ROW. Without this the efficacy question cannot be asked at all ─────
+[ "$( meterrowget "$LS1" 3 nudge )" = "sweep3" ] && [ "$( meterrowget "$LS1" 3 nudged )" = "1" ] \
+    && ok "S5 sweep: the firing row is logged nudged=1 nudge=sweep3" \
+    || no "S5 sweep: row 3 = nudged=[$( meterrowget "$LS1" 3 nudged )] nudge=[$( meterrowget "$LS1" 3 nudge )]"
+[ "$( meterrowget "$LS1" 3 post_sweep )" = "0" ] && [ "$( meterrowget "$LS1" 4 post_sweep )" = "1" ] \
+    && ok "S5b sweep: post_sweep marks the calls AFTER the escalation, not the one it fired on" \
+    || no "S5b sweep: post_sweep was [$( meterrowget "$LS1" 3 post_sweep )] then [$( meterrowget "$LS1" 4 post_sweep )]"
+[ "$( meterrows "$LS1" )" = "4" ] \
+    && ok "S5c sweep: all four calls are still counted (escalating does not drop a row)" \
+    || no "S5c sweep: expected 4 rows, got $( meterrows "$LS1" )"
+
+# ── S7: the read sweep names the directory of the file just read, not a placeholder ─────────────────
+TS7="$TMP/ts7"; mkdir -p "$TS7"; LS7="$TMP/s7.jsonl"
+sweep_run "$LS7" "$TS7" "$( readjson sweepread /w/proj/src/a.cpp )" >/dev/null
+sweep_run "$LS7" "$TS7" "$( readjson sweepread /w/proj/src/b.cpp )" >/dev/null
+SW7="$( sweep_run "$LS7" "$TS7" "$( readjson sweepread /w/proj/src/c.cpp )" )"
+echo "-- sweep escalation (read, 3rd call) --"; echo "$SW7"
+printf '%s' "$SW7" | grep -Fq -- '--pack-task' && printf '%s' "$SW7" | grep -Fq -- '--expand' \
+    && ok "S7 sweep: the read escalation names --pack-task and --expand" \
+    || no "S7 sweep: read escalation missing --pack-task/--expand: [$SW7]"
+printf '%s' "$SW7" | grep -Fq 'ripwire /w/proj/src --pack-task' \
+    && ok "S7b sweep: it is scoped to the directory of the file just read" \
+    || no "S7b sweep: read escalation does not name /w/proj/src"
+
+# ── S8-S9: the glob and git-history sweeps name their one-call substitutes ──────────────────────────
+TS8="$TMP/ts8"; mkdir -p "$TS8"; LS8="$TMP/s8.jsonl"
+sweep_run "$LS8" "$TS8" "$( globjson sweepglob '**/*.c' )" >/dev/null
+sweep_run "$LS8" "$TS8" "$( globjson sweepglob '**/*.h' )" >/dev/null
+SW8="$( sweep_run "$LS8" "$TS8" "$( globjson sweepglob '**/*.py' )" )"
+printf '%s' "$SW8" | grep -Fq 'SWEEP' && printf '%s' "$SW8" | grep -Fq -- '--for=' \
+    && ok "S8 sweep: the glob sweep escalates and names --for" \
+    || no "S8 sweep: glob escalation = [$SW8]"
+TS9="$TMP/ts9"; mkdir -p "$TS9"; LS9="$TMP/s9.jsonl"
+sweep_run "$LS9" "$TS9" "$( bashjson sweepgit 'git diff HEAD' )" >/dev/null
+sweep_run "$LS9" "$TS9" "$( bashjson sweepgit 'git diff --stat' )" >/dev/null
+SW9="$( sweep_run "$LS9" "$TS9" "$( bashjson sweepgit 'git diff -- src/' )" )"
+printf '%s' "$SW9" | grep -Fq 'SWEEP' && printf '%s' "$SW9" | grep -Fq -- '--situ' \
+    && ok "S9 sweep: the git-history sweep escalates and names --situ" \
+    || no "S9 sweep: git-diff escalation = [$SW9]"
+
+# ── S10: classes dedup INDEPENDENTLY — a spent grep escalation must not silence a read sweep ────────
+TS10="$TMP/ts10"; mkdir -p "$TS10"; LS10="$TMP/s10.jsonl"
+for p in a b c; do sweep_run "$LS10" "$TS10" "$( grepjson sweepboth "$p" )" >/dev/null; done
+for f in /q/x/1.c /q/x/2.c; do sweep_run "$LS10" "$TS10" "$( readjson sweepboth "$f" )" >/dev/null; done
+SW10="$( sweep_run "$LS10" "$TS10" "$( readjson sweepboth /q/x/3.c )" )"
+printf '%s' "$SW10" | grep -Fq -- '--pack-task' \
+    && ok "S10 sweep: a spent grep escalation does not consume the read escalation" \
+    || no "S10 sweep: read sweep did not escalate after a grep sweep: [$SW10]"
+
+# ── S11: NON-SWEEP BEHAVIOUR IS BYTE-UNCHANGED. The feature is additive or it is not shipped. ───────
+# Same inputs, escalation off vs on: calls 1 and 2 of every category must match byte for byte.
+S11BAD=""
+for spec in "grep|$( grepjson X alpha )|$( grepjson X beta )" \
+            "read|$( readjson X /w/p/a.c )|$( readjson X /w/p/b.c )" \
+            "glob|$( globjson X '**/*.c' )|$( globjson X '**/*.h' )" \
+            "gitdiff|$( bashjson X 'git diff HEAD' )|$( bashjson X 'git diff --stat' )"; do
+    lbl="${spec%%|*}"; rest="${spec#*|}"; j1="${rest%%|*}"; j2="${rest#*|}"
+    TA="$TMP/s11a_$lbl"; TB="$TMP/s11b_$lbl"; mkdir -p "$TA" "$TB"
+    A1="$( sweep_run "$TMP/s11a.jsonl" "$TA" "$j1" )"; A2="$( sweep_run "$TMP/s11a.jsonl" "$TA" "$j2" )"
+    B1="$( sweep_run "$TMP/s11b.jsonl" "$TB" "$j1" RIPWIRE_SWEEP=0 )"
+    B2="$( sweep_run "$TMP/s11b.jsonl" "$TB" "$j2" RIPWIRE_SWEEP=0 )"
+    [ "$A1" = "$B1" ] && [ "$A2" = "$B2" ] || S11BAD="$S11BAD $lbl"
+done
+[ -z "$S11BAD" ] \
+    && ok "S11 sweep: calls 1-2 are byte-identical with the escalation on and off (purely additive)" \
+    || no "S11 sweep: pre-sweep output differs with the feature on, for:$S11BAD"
+
+# ── S12: the two off-switches. RIPWIRE_SWEEP=0 is what a null EVALS §4 readout ships. ───────────────
+TS12="$TMP/ts12"; mkdir -p "$TS12"; LS12="$TMP/s12.jsonl"
+for p in a b; do sweep_run "$LS12" "$TS12" "$( grepjson sweepoff "$p" )" RIPWIRE_SWEEP=0 >/dev/null; done
+SW12="$( sweep_run "$LS12" "$TS12" "$( grepjson sweepoff c )" RIPWIRE_SWEEP=0 )"
+[ -z "$SW12" ] && [ "$( meterrowget "$LS12" 3 nudge )" = "dedup" ] \
+    && ok "S12 sweep: RIPWIRE_SWEEP=0 disables the escalation and leaves counting intact" \
+    || no "S12 sweep: with RIPWIRE_SWEEP=0 the 3rd call gave out=[$SW12] nudge=[$( meterrowget "$LS12" 3 nudge )]"
+TS12B="$TMP/ts12b"; mkdir -p "$TS12B"; LS12B="$TMP/s12b.jsonl"
+for p in a b c; do sweep_run "$LS12B" "$TS12B" "$( grepjson sweepctl "$p" )" RIPWIRE_METER_ARM=control >/dev/null; done
+[ "$( meterrowget "$LS12B" 3 nudge )" = "control" ] \
+    && ok "S12b sweep: the control arm never escalates (the A/B stays clean)" \
+    || no "S12b sweep: control-arm 3rd call logged nudge=[$( meterrowget "$LS12B" 3 nudge )]"
+TS12C="$TMP/ts12c"; mkdir -p "$TS12C"; LS12C="$TMP/s12c.jsonl"
+for p in a b c; do sweep_run "$LS12C" "$TS12C" "$( grepjson sweepn4 "$p" )" RIPWIRE_SWEEP_N=4 >/dev/null; done
+SW12C="$( sweep_run "$LS12C" "$TS12C" "$( grepjson sweepn4 d )" RIPWIRE_SWEEP_N=4 )"
+[ "$( meterrowget "$LS12C" 3 nudge )" = "dedup" ] && printf '%s' "$SW12C" | grep -Fq 'SWEEP' \
+    && [ "$( meterrowget "$LS12C" 4 nudge )" = "sweep4" ] \
+    && ok "S12c sweep: RIPWIRE_SWEEP_N=4 moves the threshold, and the row says sweep4" \
+    || no "S12c sweep: N=4 gave row3=[$( meterrowget "$LS12C" 3 nudge )] row4=[$( meterrowget "$LS12C" 4 nudge )]"
+
+# ── S13: the escalation degrades to SILENCE off its preconditions, and never onto stderr ────────────
+TS13="$TMP/ts13"; mkdir -p "$TS13"; ERR13="$TMP/s13.err"
+S13BAD=""
+for p in a b c; do
+    O="$( printf '%s' '{"session_id":"sweepnongit","cwd":"'"$NONREPO"'","tool_name":"Grep","tool_input":{"pattern":"'"$p"'"}}' \
+        | env HOME="$METERHOME" RIPWIRE_METER_LOG="$TMP/s13.jsonl" PATH="$WITH_RIPWIRE" TMPDIR="$TS13" bash "$HOOK" 2>>"$ERR13" )"
+    R=$?; [ "$R" -eq 0 ] && [ -z "$O" ] || S13BAD="$S13BAD [nongit:$R:$O]"
+done
+TS13B="$TMP/ts13b"; mkdir -p "$TS13B"
+for p in a b c; do
+    O="$( printf '%s' "$( grepjson sweepnorip "$p" )" \
+        | env HOME="$METERHOME" RIPWIRE_METER_LOG="$TMP/s13b.jsonl" PATH="$NO_RIPWIRE" TMPDIR="$TS13B" bash "$HOOK" 2>>"$ERR13" )"
+    R=$?; [ "$R" -eq 0 ] && [ -z "$O" ] || S13BAD="$S13BAD [norip:$R:$O]"
+done
+[ -z "$S13BAD" ] && ok "S13 sweep: a 3-call sweep in a non-git dir / with no ripwire stays silent, exit 0" \
+    || no "S13 sweep: fired or failed off its preconditions:$S13BAD"
+[ ! -s "$ERR13" ] && ok "S13b sweep: the escalation path writes nothing to the hooked call's stderr" \
+    || no "S13b sweep: stderr leaked: $( cat "$ERR13" )"
+
+# ── S14: a Bash grep sweep escalates too, and the patterns come off the command line ────────────────
+# Grep-the-tool and `grep -rn` on the command line are the SAME habit and must count toward one sweep.
+TS14="$TMP/ts14"; mkdir -p "$TS14"; LS14="$TMP/s14.jsonl"
+sweep_run "$LS14" "$TS14" "$( bashjson sweepbash 'grep -rn needleone .' )" >/dev/null
+sweep_run "$LS14" "$TS14" "$( bashjson sweepbash 'rg needletwo src/' )" >/dev/null
+SW14="$( sweep_run "$LS14" "$TS14" "$( grepjson sweepbash needlethree )" )"
+echo "-- sweep escalation (mixed Bash-grep + Grep tool) --"; echo "$SW14"
+printf '%s' "$SW14" | grep -Fq -- '--for=\"needleone needletwo needlethree\"' \
+    && ok "S14 sweep: Bash grep/rg and the Grep tool count as ONE sweep, patterns from both" \
+    || no "S14 sweep: mixed grep sweep gave [$SW14]"
+
+# ── C1: the `cd`-prefix strip. 816 of the live log's 927 unclassified rows began with `cd <path> &&`
+#        — the worktree idiom — and stripping it is what took `unclassified` from 42.9% to 7.4%. ─────
+TC1="$TMP/tc1"; mkdir -p "$TC1"; LC1="$TMP/c1.jsonl"
+C1BAD=""
+i=0
+for pair in "cd /w && grep -rn needle .|grep" \
+            "cd /w && VAR=y grep -rn needle .|grep" \
+            "cd /w && rtk grep -rn needle .|grep" \
+            "VAR=1 cd /w && env FOO=2 rg needle src|grep" \
+            "cd /w && cd sub && cat x.txt|read" \
+            "cd /w && sed -n '1,80p' src/a.cpp|read" \
+            "cd /w && ./build/ripwire . --for=x|ripwire-cli" \
+            "cd /w && git -C /o diff HEAD|git-diff"; do
+    c="${pair%|*}"; want="${pair#*|}"; i=$(( i + 1 ))
+    sweep_run "$LC1" "$TC1" "$( bashjson "cdcase_$i" "$( printf '%s' "$c" | sed 's/"/\\"/g' )" )" >/dev/null 2>&1
+    got="$( meterrowget "$LC1" "$i" class )"
+    [ "$got" = "$want" ] || C1BAD="$C1BAD [$c -> $got, want $want]"
+done
+[ -z "$C1BAD" ] && ok "C1 classifier: cd/pushd + assignments + rtk strip recursively, in any order" \
+    || no "C1 classifier: misclassified:$C1BAD"
+
+# ── C1b: a MULTI-LINE command. jq's @tsv escapes the newline, so without the un-escape the whole
+#         line is one token (`/a/b\ngit`) and the row lands as unclassified — 742 rows' worth. ───────
+TC1B="$TMP/tc1b"; mkdir -p "$TC1B"; LC1B="$TMP/c1b.jsonl"
+printf '%s' '{"session_id":"multiline","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"cd /w\ngit diff HEAD\ngit status"}}' \
+    | env HOME="$METERHOME" RIPWIRE_METER_LOG="$LC1B" PATH="$WITH_RIPWIRE" TMPDIR="$TC1B" bash "$HOOK" >/dev/null 2>&1
+[ "$( meterrowget "$LC1B" 1 class )" = "git-diff" ] \
+    && ok "C1b classifier: a MULTI-LINE 'cd <dir>\\ngit diff' classifies as git-diff, not unclassified" \
+    || no "C1b classifier: multi-line command classified as [$( meterrowget "$LC1B" 1 class )]"
+[ "$( meterrows "$LC1B" )" = "1" ] \
+    && ok "C1c classifier: a multi-line command is still exactly one JSONL row" \
+    || no "C1c classifier: multi-line command wrote $( meterrows "$LC1B" ) row(s)"
+
+# ── C2: the non-retrieval classes. Never in the rate (family other/meta/git) — they exist so the S4
+#        absorption survey can rank the command mix an agent actually runs. ─────────────────────────
+TC2="$TMP/tc2"; mkdir -p "$TC2"; LC2="$TMP/c2.jsonl"
+C2BAD=""
+i=0
+for triple in "cmake --build build -j 8|build|other" \
+              "make -j4|build|other" \
+              "cargo build --release|build|other" \
+              "npm test|gate-run|meta" \
+              "python3 test/pargates.py . ./build/ripwire -j 6|gate-run|meta" \
+              "bash test/hookcheck.sh|gate-run|meta" \
+              "cd /w && ./test/lintcheck.sh|gate-run|meta" \
+              "git push origin main|git-remote|git" \
+              "git fetch origin|git-remote|git" \
+              "gh pr view 31|git-remote|git" \
+              "git status --porcelain|git-misc|git" \
+              "git add src/ && git commit -q -m x|git-misc|git" \
+              "mkdir -p /tmp/x|shell-misc|other" \
+              "wc -l a.txt|shell-misc|other" \
+              "ls -la docs/|shell-misc|other"; do
+    c="${triple%%|*}"; rest="${triple#*|}"; wc_="${rest%|*}"; wf="${rest#*|}"; i=$(( i + 1 ))
+    sweep_run "$LC2" "$TC2" "$( bashjson "clscase_$i" "$( printf '%s' "$c" | sed 's/"/\\"/g' )" )" >/dev/null 2>&1
+    gc="$( meterrowget "$LC2" "$i" class )"; gf="$( meterrowget "$LC2" "$i" family )"
+    [ "$gc" = "$wc_" ] && [ "$gf" = "$wf" ] || C2BAD="$C2BAD [$c -> $gc/$gf, want $wc_/$wf]"
+done
+[ -z "$C2BAD" ] && ok "C2 classifier: build / gate-run / git-remote / git-misc / shell-misc, with their families" \
+    || no "C2 classifier: misclassified:$C2BAD"
+
+# ── C2b: the new classes are counted but NEVER nudged and NEVER swept. A build is not a retrieval. ──
+TC2B="$TMP/tc2b"; mkdir -p "$TC2B"; LC2B="$TMP/c2b.jsonl"
+C2BBAD=""
+for i in 1 2 3 4; do
+    O="$( sweep_run "$LC2B" "$TC2B" "$( bashjson buildsweep 'cmake --build build -j 8' )" )"
+    [ -z "$O" ] || C2BBAD="$C2BBAD [call$i fired: $O]"
+done
+[ -z "$C2BBAD" ] && [ "$( meterrows "$LC2B" )" = "4" ] \
+    && ok "C2b classifier: four builds in a session are counted and never nudged or escalated" \
+    || no "C2b classifier: build calls nudged$C2BBAD (rows=$( meterrows "$LC2B" ))"
+
+# ── C2c: `ls test | grep -i doc` stays unclassified — shell-misc must not destroy grep evidence ─────
+TC2C="$TMP/tc2c"; mkdir -p "$TC2C"; LC2C="$TMP/c2c.jsonl"
+sweep_run "$LC2C" "$TC2C" "$( bashjson lspipe 'ls test | grep -i doccommand' )" >/dev/null 2>&1
+[ "$( meterrowget "$LC2C" 1 class )" = "unclassified" ] \
+    && ok "C2c classifier: shell-misc defers to the vocabulary scan (a piped grep keeps its evidence)" \
+    || no "C2c classifier: 'ls test | grep …' classified as [$( meterrowget "$LC2C" 1 class )]"
+
+# ── C3: the docs carry the new contract — the schema doc is part of the deliverable ────────────────
+if [ -f "$SCHEMADOC" ]; then
+    C3MISS=""
+    for needle in 'post_sweep' 'RIPWIRE_SWEEP' 'sweep3' 'shell-misc' 'gate-run' 'git-remote' 'cd'; do
+        grep -Fq "$needle" "$SCHEMADOC" || C3MISS="$C3MISS $needle"
+    done
+    [ -z "$C3MISS" ] && ok "C3 docs: SUBSTITUTION_METER.md documents the escalation and the new classes" \
+        || no "C3 docs: SUBSTITUTION_METER.md is missing:$C3MISS"
+fi
+EVALSDOC="$ROOT/docs/EVALS.md"
+if [ -f "$EVALSDOC" ]; then
+    grep -Fq 'Nudge sweep-escalation efficacy' "$EVALSDOC" && grep -Fq 'post_sweep' "$EVALSDOC" \
+        && ok "C3b docs: EVALS.md carries the pre-registered efficacy readout for the escalation" \
+        || no "C3b docs: EVALS.md has no sweep-escalation registration — the verdict is unregistered"
 fi
 
 echo

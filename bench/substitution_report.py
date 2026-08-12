@@ -12,10 +12,14 @@
 #   substitution rate = ripwire / (ripwire + native)
 #
 # where `ripwire` is the ripwire-cli + ripwire-mcp families and `native` is the grep/find/read/glob
-# family — the calls ripwire is a substitute FOR. The `git` family (git diff/log/show --stat) and
-# `unclassified` are counted and printed but kept OUT of the ratio: the first is a different question
-# than retrieval, the second is by definition a call this tool could not read, and folding either into
-# a headline rate would launder an unknown into a denominator.
+# family — the calls ripwire is a substitute FOR. The `git`, `other` and `meta` families (git
+# diff/log/remote/state, build, gate runs, shell plumbing) and `unclassified` are counted and printed
+# but kept OUT of the ratio: the first are different questions than retrieval, the last is by
+# definition a call this tool could not read, and folding either into a headline rate would launder
+# an unknown into a denominator.
+#
+# THE ARM HAS ALWAYS BEEN `treatment`. No control session has ever been run, so every rate below is a
+# LEVEL, never a difference, and nothing here is a causal claim about the nudge.
 #
 # THE CONFOUND, MADE VISIBLE RATHER THAN CORRECTED. The hook's own nudge is a cause of the next
 # ripwire call, so a single pooled rate partly measures the hook talking to itself. The split below is
@@ -130,6 +134,28 @@ def main():
         sub = [r for r in rows if pred(r)]
         print("    %-27s %s" % (label, fmt_rate(*split_counts(sub))))
     print("    %-27s %s" % ("calls a nudge fired on", "%d" % sum(1 for r in rows if r.get("nudged"))))
+
+    # The pre-registered readout in docs/EVALS.md §4 reads exactly this block. `post_sweep` is
+    # RECORDED by the hook, not reconstructed here, so the grouping is an assignment the analysis
+    # reads rather than one it infers. A v1 row has no `post_sweep` field at all; absent reads as 0,
+    # which is correct — the escalation did not exist when that row was written.
+    print("")
+    print("  by SWEEP-escalation exposure (docs/EVALS.md §4 registers the band on the 2nd line):")
+    for label, pred in (
+        ("pre-sweep   (post_sweep=0)", lambda r: not r.get("post_sweep")),
+        ("post-sweep  (post_sweep=1)", lambda r: bool(r.get("post_sweep"))),
+    ):
+        sub = [r for r in rows if pred(r)]
+        print("    %-27s %s" % (label, fmt_rate(*split_counts(sub))))
+    esc = [r for r in rows if str(r.get("nudge", "")).startswith("sweep")]
+    print("    %-27s %d  in %d session(s)"
+          % ("escalations fired", len(esc), len({r.get("session") for r in esc})))
+    byv = collections.Counter(r.get("v", "?") for r in rows)
+    if len(byv) > 1:
+        print("    %-27s %s" % ("SCHEMA MIX", ", ".join("v%s=%d" % (k, n) for k, n in sorted(byv.items(),
+                                                                                            key=str))))
+        print("      counts are NOT comparable across the v1/v2 boundary — the classifier widened.")
+        print("      Replay the v1 rows' `detail` through the current hook before comparing rates.")
 
     print("")
     print("  by arm (dormant until alternation is switched on — expect all-treatment for now):")

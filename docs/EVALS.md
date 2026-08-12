@@ -506,6 +506,107 @@ held (readings in the accept-band paragraph above). Per the scope guard: this is
 CONTENT result under an LLM-reader instrument — the cross-read against the substitution log is
 still owed at the meter's first fortnight.
 
+### Nudge sweep-escalation efficacy — S2b round, PRE-REGISTERED 2026-08-12 (before any readout)
+
+This is the first round whose instrument is the substitution meter itself, so the registration
+states the instrument's own correction before it states the band.
+
+**What is being measured.** `hooks/ripwire-nudge.sh` gained a SWEEP ESCALATION: when the same
+retrieval class fires for the Nth time in a session (N=3), the generic one-time tip is replaced by
+the exact one-call substitute built from what was observed — for a grep sweep, a runnable
+`--for="<the agent's own last patterns>"`; for a read sweep, `--pack-task`/`--expand` scoped to the
+directory of the file just read; for a git-history sweep, `--situ`; for a glob sweep, `--for` or the
+flagless map. The mechanism landed on gates green (additive, advisory-only, never blocks a call).
+**Its efficacy verdict did not land with it, and is registered here.**
+
+**Why a second nudge exists at all.** The meter's first 12 hours (2,095 rows) said the one-time
+nudges FIRE — 455 of them — and do not convert, while the dominant behaviour is the same-class
+sweep (grep→grep→grep ×357 as a trigram, read×3 ×187, git-diff×3 ×119). The hypothesis under test
+is narrow: *a nudge converts when it arrives at the sweep moment carrying the exact command, and not
+before.* It is falsifiable and it is expected to be able to fail.
+
+**THE BASELINE IS CORRECTED, AND BOTH NUMBERS ARE STATED.** The 0.8% figure that motivated this lane
+was produced by the v1 classifier, and the v1 classifier was wrong in a way that biased exactly the
+numerator. 924 of the frozen 2,155-row log's rows were `unclassified`; 742 of those were multi-line
+or `cd <dir> && …` command lines — the worktree-session idiom — which `@tsv` newline escaping and a
+missing prefix-strip rule together made unreadable. Replaying the v2 classifier over the **same
+frozen log** (`unclassified` 924 → 160, −82.7%) moves the readings:
+
+| Reading (same 2,155-row log) | v1, as logged | v2, replayed |
+| --- | --- | --- |
+| substitution rate, overall | 1.05% (9/859) | **5.62%** (73/1298) |
+| pre-nudge (`post_nudge=0`) | 1.09% (8/733) | **6.14%** (72/1172) |
+| post-nudge (`post_nudge=1`) | 0.79% (1/126) | **0.79%** (1/126) |
+
+ripwire calls were undercounted **8×** (9 → 73). Two consequences are load-bearing. First, the
+"0.8% baseline" may not be used as this round's bar — a bar measured with a broken instrument is not
+a bar. Second, the correction *sharpens* the motivating finding rather than dissolving it: under v2
+the post-nudge rate (0.79%) is not merely equal to the pre-nudge rate, it is **~8× lower** than it
+(6.14%). That is observational and confounded by selection — a session reaches `post_nudge=1`
+precisely by having grepped — so it is reported as a description of this log, never as "the nudge
+makes agents worse".
+
+**Primary metric.** Substitution rate — `ripwire / (ripwire + native)`, v2 classifier, the same
+ratio `bench/substitution_report.py` §1 prints — computed over rate-eligible rows carrying
+`post_sweep=1`, i.e. every call in a session **after** a sweep escalation fired in it. The marker is
+written by the hook (`nudge":"sweep3"` on the firing row, `post_sweep":1` on every row after it), so
+the grouping variable is recorded at observation time and never reconstructed at analysis time.
+
+**Band, pre-registered before the first readout row exists.** Measured against the corrected overall
+level of **5.62%**, which is what this same population produces under the same classifier the
+readout will use:
+
+| Verdict | `post_sweep=1` substitution rate |
+| --- | --- |
+| **KEEP** | **≥ 16.9%** (≥3× the corrected baseline) |
+| **REWORD** (inconclusive) | 8.0% – 16.8% |
+| **DISABLE** | **< 8.0%** (< ~1.4× the corrected baseline) |
+
+The inconclusive region is 8.9 points wide on purpose: at the sample size a fortnight of
+single-operator sessions produces, a knife-edge threshold is decided by noise, and this repo has
+twice rejected rounds whose bands were narrower than their instruments.
+
+**Minimum data, and what happens below it.** ≥ 200 rate-eligible `post_sweep=1` calls across ≥ 10
+distinct sessions that saw an escalation. Below that the readout is declared **underpowered** — not
+null — the escalation stays on, and the clock extends by one week, once. A second underpowered
+readout is a DISABLE: a nudge that cannot accumulate 200 observations in three weeks of daily use is
+not reaching enough moments to matter.
+
+**Secondary readings, reported but not gating.** (a) The same rate restricted to the escalated
+class — a grep escalation should move grep→ripwire, not read→ripwire; a whole-log lift with no
+within-class lift is a confound, not an effect. (b) The `nudge="sweep3"` row count, as the
+fires-at-all sanity check; zero fires is a mechanism bug, not a null. (c) The `unclassified` share,
+which must stay under 15% or the readout was taken with a drifting instrument.
+
+**Decision rule.** One readout, at one week (or two, under the extension). KEEP → the escalation
+stays as shipped. REWORD → one text revision, then a fresh registration with a new band; the
+mechanism itself is not re-litigated. DISABLE → `RIPWIRE_SWEEP=0` becomes the shipped default
+(`sweep=0` in `meter.conf`), which is why that switch was built before the measurement: turning this
+off costs a config default and no code. **A null readout disables it.** An escalation that does not
+convert is noise in an agent's context window, and the whole argument for adding one was that the
+generic tip already was.
+
+**Confounds, stated in full.** Observational, not randomized — `arm` has been **100% treatment**
+across every row ever logged, so this log measures a LEVEL and cannot measure a DIFFERENCE.
+Single-operator. Heavily biased toward the ripwire repository itself, the least representative
+corpus available, whose sessions are dominated by gate runs and worktree plumbing. The nudge is a
+cause of the call it counts — the reason `post_nudge` and `post_sweep` exist as separate fields. And
+the classifier changed between v1 and v2, so **row counts and rates are not comparable across the
+schema boundary**: every number in this registration is the v2 replay of one frozen log, and the
+readout must be computed with the same classifier that produced them.
+
+**Scope guard.** This measures TOOL CHOICE — whether an agent reaches for ripwire instead of
+grep/read — which is precisely and only what Track B §S2 exists to measure. It is **not** a
+task-success claim; see §8, which explains why that instrument stays unrun.
+
+**Registered follow-on, deliberately NOT in this round.** History mining finds ~1,186 zero-hit greps
+in a month, and a grep that returns nothing is an unambiguous "the map would have answered" moment —
+a better trigger than any count. It is not built here, for a mechanical reason: a `PreToolUse` hook
+runs *before* the command and cannot see that it found nothing, so that trigger needs a
+`PostToolUse` registration — a second hook event, a second installer entry, a second dedup domain.
+Shipping it alongside this one would also put two new triggers behind one readout and make the
+verdict unattributable. It gets its own round once this one resolves.
+
 ---
 
 ## 5. Token and output economy
