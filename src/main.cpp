@@ -9325,6 +9325,22 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // `hits=` is itself a FLOOR, not a total. §A1: that ceiling no longer moves with --limit/--offset, so
     // hits=/files=/total= now read the SAME on every page of a walk.
     const int         hitsCapped = found.isBudgetReached ? 1 : 0;
+    // T1 (completeness claims — the mirror of the floor vocabulary). complete="1" appears on the root
+    // exactly when this listing is EXHAUSTIVE over the index, so a consumer need not re-derive (re-grep)
+    // the answer. Four conditions, each with a mutation arm in test/completecheck.sh:
+    //   scan   — every indexed file read end to end: LITERAL scans only. A regex answer never claims, in
+    //            EITHER prefilter mode: prefiltered, the claim would rest on the analyzer rather than on a
+    //            full read; and no-prefilter may not claim what prefiltered does not, because the two modes
+    //            are contractually byte-identical (test/regexcheck.sh's soundness oracle diffs them — the
+    //            prefilter is a performance switch, never an answer switch);
+    //   ceiling — the collection budget was not reached (hits_capped="0"), or hits= is itself a floor;
+    //   read   — no indexed file was unreadable and no worker degraded (found's own honesty bits);
+    //   window — the printed page starts at row 0 and reaches the last hit (shown == hits).
+    // A FALSE claim here is the worst bug this tool can ship; when any condition fails, NOTHING is added
+    // (the floor/truncation vocabulary already covers partial answers — no complete="0" noise).
+    const bool scanExhaustive = found.cleanScan() && !cfg.grepRegex;
+    const bool windowWhole    = grepPage.begin == 0 && grepPage.end == hitCount;
+    const char* const completeAttr = ( scanExhaustive && windowWhole ) ? " complete=\"1\"" : "";
     char              grab[ 192 ];
     // §P8 collision, documented not renamed: both `in=` meanings are load-bearing (10 and 13+ consumers,
     // two byte-exact goldens, five SKILL.md files), so the legend names the other one instead.
@@ -9344,12 +9360,22 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "unioned across same-named defs like the callers verb (a FLOOR — dynamic dispatch contributes no edge), defs= how many defs the name grouped (only when more than one), cx= complexity; "
                  "amp=/tested= join only when a metrics co-run already computed that lens. On a zero-hit answer a <suggest> element may follow: SUGGESTIONS, never matches — near= the nearest indexed "
                  "symbol name (did-you-mean), next= a ready-to-paste conceptual fallback; absent for regex/non-word-like patterns or when nothing plausible exists. "
+                 // T1: the completeness claim, defined where it appears (no attribute=value literal in these
+                 // sentences, same rule as the R1 additions above — gates parse this legend by grep).
+                 "COMPLETENESS: complete= on the root (value 1) means this listing is EXHAUSTIVE and a consumer need not re-derive it: "
+                 "a LITERAL scan read every indexed file end to end, hit no collection ceiling, and printed every hit it found — so on "
+                 "this answer a zero really is zero and a hit absent above is absent from every indexed file. The claim is "
+                 "complete-within-the-index ONLY: files the ingest skipped were never scanned (the skipped verb lists exactly which, "
+                 "with reasons), and files outside the indexed roots are outside the claim. It never appears on a regex answer (the "
+                 "prefilter is a performance switch that may not change the answer, so neither mode claims), a capped or paged listing, "
+                 "or a scan that could not read a file; its ABSENCE claims nothing. The enc rows' caller counts stay FLOORS regardless "
+                 "— complete= speaks for the hit rows alone. "
                  "%s -->", rw::kPageRaiseCapClause );
-    std::printf( "<grep pattern=\"%s\" files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\">",
+    std::printf( "<grep pattern=\"%s\" files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s>",
                  ex( pat ).c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
                                  cfg.pageLimit, cfg.pageOffset, true ),
-                 hitsCapped );
+                 hitsCapped, completeAttr );
     // <m> = the Matched line itself, in the same one-letter CDATA shape as <b>efore and <a>fter (P5:
     // a hit used to say WHERE the pattern is but never WHAT it matched — with the context flags it
     // printed the lines around the hit and skipped the hit's own line, and without them it printed no
