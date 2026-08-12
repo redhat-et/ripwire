@@ -69,6 +69,12 @@
 #     rel|type' is the <field name= type= owner= rel=/> row emitted at src/serialize.h:3071, and the four
 #     --pr-context lines live in src/prcontext.h. Both files were owned by other lanes when the cap came off,
 #     which is why they are recorded rather than closed.
+#   * 'pack-task | d@pure' surfaced in the module-constant round (2026-08-12): const-qualified module
+#     constants became indexed symbols, the repo's ranked pool shifted, and a pure="1" signature row reached
+#     pack-task's first screen for the first time. The pack-task legend is byte-budget-charged (Trap #8 in
+#     src/packtask.h fired twice on a one-clause addition), so the gap is recorded here rather than closed.
+#     'cochange | pair@b' left in the same wave: the live cochange legend now spells "conf_ba= over b='s",
+#     meeting the definitional predicate.
 #   * 'for | field@name' surfaced when the L1 density fix (2026-08-08) dropped the route note's comment echo:
 #     the word "name" only ever appeared in that echo's routing prose ("names a symbol"), so the attribute
 #     was covered by ACCIDENT, never defined. Same <field> row as the owner|rel|type trio above; recorded
@@ -77,7 +83,6 @@ affected | affected@seeds
 clones | group@tokens
 cochange | cochange@capped
 cochange | cochange@shown
-cochange | pair@b
 cochange-file | cochange@capped
 cochange-file | cochange@partners
 cochange-file | cochange@shown
@@ -174,6 +179,7 @@ merge-scout | pair@risks
 owners | f@share
 owners | f@top
 pack-task | ctx@route
+pack-task | d@pure
 path | path@from
 path | path@from_defs
 path | path@from_p

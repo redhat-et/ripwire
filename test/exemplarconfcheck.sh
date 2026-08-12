@@ -43,11 +43,17 @@ printf '%s' "$WHDR" | grep -q 'low_confidence="1"' \
 # Verified independently (against --for and manual corpus inspection) that this repo genuinely has a parse*
 # cluster (parseGeneric/parseHeaderLine/parseMinedLine/parsePython/parseCorpus/parseNode/...) before pinning
 # this as a "strong match" assertion — this is the reported false-positive direction of the same bug.
-STRONG1="$( "$BIN" "$ROOT" --no-cache --exemplar="parse command line arguments" 2>/dev/null )"
+# QUERY REWORDED 2026-08-12 (module-constant round): the original "parse command line arguments" is quoted
+# VERBATIM in src/exemplar.h's own comments, and once const-qualified module constants became indexed
+# symbols (kParserVer 62), the constant carrying that comment (kExemplarConfWindow) became the top lexical
+# hit and donated kind=var — a self-referential corpus artifact, not a donation bug. Arm 3's differential
+# claim needs three queries that donate the SAME kind, so the query keeps its meaning (the same argv-parse
+# cluster) but no longer matches its own gate's quotation.
+STRONG1="$( "$BIN" "$ROOT" --no-cache --exemplar="parse the command line argv into config flags" 2>/dev/null )"
 SHDR1="$( exemhdr "$STRONG1" )"
 printf '%s' "$SHDR1" | grep -q 'low_confidence' \
-    && no "strong query (parse command line arguments) wrongly fired low_confidence: $SHDR1" \
-    || ok "strong query (parse command line arguments) does not fire low_confidence: $SHDR1"
+    && no "strong query (argv parsing) wrongly fired low_confidence: $SHDR1" \
+    || ok "strong query (argv parsing) does not fire low_confidence: $SHDR1"
 
 # a second independent strong query (a dense literal "compute" cluster in this repo).
 STRONG2="$( "$BIN" "$ROOT" --no-cache --exemplar="compute pagerank" 2>/dev/null )"
