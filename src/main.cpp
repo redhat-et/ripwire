@@ -42,6 +42,7 @@
 #include "arch.h"
 #include "search.h"
 #include "query.h"
+#include "verify.h"                // G4 verify-a-claim: the --verify closed claim grammar + verdict/limit vocabularies (runVerify below)
 #include "quality.h"
 #include "gitstamp.h"              // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
                                    // --hotspots / --quality-delta / --doctor below (each verb's own file pulls it too)
@@ -5987,6 +5988,326 @@ std::optional<int> runUses( const MainDispatch& d )
     return std::nullopt;
 }
 
+// ── G4 VERIFY-A-CLAIM: --verify="CLAIM" — one structured claim, a three-valued verdict, evidence inline ──
+//
+// The claim grammar and the verdict/limit vocabularies live in src/verify.h; test/verifycheck.sh pins the
+// whole contract. This handler REUSES the sibling machinery verb-for-verb — shortestPathAny (--path),
+// collectUseSites (--uses), grepCollect/grepEnrich (--grep), transitiveCallers (--impact) — because the gap
+// the usage mine measured was never the data: it was that verification took a multi-call chain plus manual
+// reading. The honesty split is the heart: a witness CONFIRMS; only a complete literal scan (or a printed
+// witness against an absence-claim) REFUTES; every model-bounded absence is NOT-ESTABLISHED with limit=
+// naming the bound. complete= is computed from the scan's own honesty bits (T1) and never co-occurs with
+// counts_floor= — a false completeness claim is the worst bug this tool can ship.
+std::optional<int> runVerify( const MainDispatch& d )
+{
+    using namespace rw;
+    const Config&       cfg = d.cfg;
+    const IngestResult& ing = d.ing;
+    const Graph&        g   = d.g;
+
+    if( cfg.verifyClaim.empty() )
+    {
+        return std::nullopt;
+    }
+
+    const verify::Claim claim = verify::parseClaim( cfg.verifyClaim );
+    if( !claim.ok )
+    {
+        std::fprintf( stderr, "%s\n", claim.err.c_str() );
+        return 1;
+    }
+
+    // bounded evidence SAMPLE — verdicts are always computed on the FULL sets, only the printed rows
+    // window; the root's disclosure pair says so per the truncation vocabulary (src/pageview.h rules 1-3).
+    constexpr int kEvidenceCap = 20;
+
+    std::vector<char> esc;
+    const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+
+    // the sibling verbs' own row grammar for symbol evidence (--path/--graph-query rows)
+    const auto emitSymRow = [ & ]( NodeId n )
+    {
+        const Symbol& s = ing.symbols[n];
+        std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line );
+    };
+
+    // the FILE argument: a path substring over the indexed tree (filePathContains — the file: qualifier's
+    // own rule). A claim about a file the index never saw REFUSES: no verdict about it could be a
+    // measurement, and the skipped verb is where "why is it not indexed" lives.
+    std::vector<char> fileFlags;
+    const auto        matchFiles = [ & ]( std::string_view filePat ) -> bool
+    {
+        fileFlags.assign( ing.files.size(), 0 );
+        bool any = false;
+        for( std::size_t fileIndex = 0; fileIndex < ing.files.size(); ++fileIndex )
+        {
+            if( filePathContains( ing.files[ fileIndex ], filePat ) )
+            {
+                fileFlags[ fileIndex ] = 1;
+                any = true;
+            }
+        }
+        return any;
+    };
+    const auto refuseFile = [ & ]( std::string_view filePat ) -> int
+    {
+        std::fprintf( stderr, "ripwire: --verify file matched nothing indexed: %.*s — FILE is a path substring over the indexed tree; "
+                              "files the ingest skipped are not searchable (the --skipped verb lists exactly which, with reasons)\n",
+                      int( filePat.size() ), filePat.data() );
+        return 1;
+    };
+
+    // the root opener, shared by every shape so the attribute ORDER is fixed: claim, shape, verdict,
+    // shape-specific facts, limit=, then the honesty attribute (complete= XOR counts_floor=), then the
+    // disclosure pair. `honesty` is exactly one of kGraphCountFloorAttrXml / " complete=\"1\"" / "".
+    const auto openRoot = [ & ]( const char* verdict, const std::string& facts, const char* limit, const char* honesty, const char* pageTail )
+    {
+        VERIFY( std::size_t( claim.shape ) < std::size( verify::kShapeTags ) );   // the parser is the only producer, every value in range
+        std::printf( "%s<verify claim=\"%s\" shape=\"%s\" verdict=\"%s\"%s", verify::kVerifyLegend,
+                     ex( cfg.verifyClaim ).c_str(), verify::kShapeTags[ std::size_t( claim.shape ) ], verdict, facts.c_str() );
+        if( limit[0] != '\0' )
+        {
+            std::printf( " limit=\"%s\"", limit );
+        }
+        std::printf( "%s%s>", honesty, pageTail );
+    };
+
+    char              pab[ kPageDisclosureCap ];
+    const auto        pageTailOf = [ & ]( std::size_t shownRows, std::size_t total, std::size_t windowEnd ) -> const char*
+    { return pageDisclosure( pab, sizeof( pab ), shownRows, total, windowEnd, 0, 0, true ); };
+
+    // ── calls( A , B ) — does A transitively call B (directed, name-based call graph) ────────────────
+    if( claim.shape == verify::ClaimShape::Calls )
+    {
+        const std::vector<NodeId> srcDefs = resolveAllByNameQualified( ing, claim.arg1 );
+        const std::vector<NodeId> dstDefs = resolveAllByNameQualified( ing, claim.arg2 );
+        if( srcDefs.empty() || dstDefs.empty() )
+        {
+            const std::string_view missing = srcDefs.empty() ? claim.arg1 : claim.arg2;
+            std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --verify symbol not found: ", missing, "--verify=" ).c_str() );
+            return 1;
+        }
+        const std::vector<NodeId> path = rw::shortestPathAny( g, srcDefs, dstDefs );
+        const std::string         facts = " from_defs=\"" + std::to_string( srcDefs.size() ) + "\" to_defs=\"" + std::to_string( dstDefs.size() ) + "\""
+                                        + ( path.empty() ? std::string{} : " hops=\"" + std::to_string( path.size() - 1 ) + "\"" );
+        if( !path.empty() )
+        {
+            openRoot( "confirmed", facts, "", rw::kGraphCountFloorAttrXml, pageTailOf( path.size(), path.size(), path.size() ) );
+            for( NodeId n : path )
+            {
+                emitSymRow( n );
+            }
+        }
+        else
+        {
+            openRoot( "not-established", facts, verify::kLimitCallGraphFloor, rw::kGraphCountFloorAttrXml, pageTailOf( 0, 0, 0 ) );
+        }
+        std::printf( "</verify>" );
+        return 0;
+    }
+
+    // ── uses( SYM ) / unused( SYM ) — rides the --uses reference index (a FLOOR, and the verdicts obey it) ─
+    if( claim.shape == verify::ClaimShape::Uses || claim.shape == verify::ClaimShape::Unused )
+    {
+        const std::string_view    sym  = claim.arg1;
+        const std::vector<NodeId> defs = resolveAllByNameQualified( ing, sym );
+        const UsesSelector        sel  = resolveUsesSelector( ing, sym, defs.size() );
+        const std::vector<char>   isChosenCaller = sel.fileQualified ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
+        const auto [ sites, callSitesOfName ]    = collectUseSites( ing, sel, isChosenCaller );
+        (void) callSitesOfName;
+        if( defs.empty() && sites.empty() )
+        {
+            std::fprintf( stderr, "%s\n", withDidYouMean( ing, sel.suggestName,
+                          "ripwire: --verify symbol not found: " + std::string( sym ) ).c_str() );
+            return 1;
+        }
+        const bool        external = defs.empty() && sel.defsOfName == 0;
+        const std::size_t total    = sites.size();
+        const PageWindow  w        = pageWindow( total, kEvidenceCap, 0 );
+        const std::string facts    = " defs=\"" + std::to_string( defs.size() ) + "\" external=\"" + ( external ? "1" : "0" )
+                                   + "\" count=\"" + std::to_string( total ) + "\"";
+        const bool        anySites = total > 0;
+        const char*       verdict  = claim.shape == verify::ClaimShape::Uses ? ( anySites ? "confirmed" : "not-established" )
+                                                                        : ( anySites ? "refuted"   : "not-established" );
+        openRoot( verdict, facts, anySites ? "" : verify::kLimitReferenceFloor, rw::kGraphCountFloorAttrXml,
+                  pageTailOf( w.end - w.begin, total, w.end ) );
+        for( std::size_t siteIndex = w.begin; siteIndex < w.end; ++siteIndex )
+        {
+            const UseSite& u = sites[ siteIndex ];
+            std::printf( "<u role=\"%s\" p=\"%s:%u\"", refRoleTag( u.role ), ex( ing.files[ u.fileId ] ).c_str(), u.line );
+            if( !u.in.empty() )
+            {
+                std::printf( " in_id=\"%s\"", ex( u.in ).c_str() );
+            }
+            std::printf( "/>" );
+        }
+        std::printf( "</verify>" );
+        return 0;
+    }
+
+    // ── contains( FILE , "LIT" ) — the literal-scan shape, and the one that can serve a TRUE complete no ─
+    if( claim.shape == verify::ClaimShape::Contains )
+    {
+        if( !matchFiles( claim.arg1 ) )
+        {
+            return refuseFile( claim.arg1 );
+        }
+        const GrepCollection    found = grepCollect( ing, std::string( claim.arg2 ) );
+        std::vector<GrepRawHit> inFile;
+        for( const GrepRawHit& r : found.raw )
+        {
+            if( fileFlags[ r.fileId ] )
+            {
+                inFile.push_back( r );
+            }
+        }
+        const std::size_t total       = inFile.size();
+        const bool        clean       = found.cleanScan();
+        const PageWindow  w           = pageWindow( total, kEvidenceCap, 0 );
+        const bool        windowWhole = w.begin == 0 && w.end == total;
+        const bool        complete    = clean && windowWhole;   // T1: the scan's own honesty bits decide, never the verdict
+        const char*       verdict     = total > 0 ? "confirmed" : ( clean ? "refuted" : "not-established" );
+        const char*       limit       = ( total == 0 && !clean ) ? ( found.isBudgetReached ? verify::kLimitCollectionCeiling : verify::kLimitScanDegraded ) : "";
+        const char*       honesty     = complete ? " complete=\"1\"" : ( !clean ? rw::kGraphCountFloorAttrXml : "" );
+        openRoot( verdict, " hits=\"" + std::to_string( total ) + "\"", limit, honesty, pageTailOf( w.end - w.begin, total, w.end ) );
+        const std::vector<GrepHit> hits = grepEnrich( ing, std::span<const GrepRawHit>( inFile ).subspan( w.begin, w.end - w.begin ) );
+        for( const GrepHit& h : hits )
+        {
+            std::printf( "<hit p=\"%s:%u\" in=\"%s\"><m><![CDATA[", ex( ing.files[ h.fileId ] ).c_str(), h.line, ex( h.enclosing ).c_str() );
+            std::string safe;
+            appendCdataSafe( h.text, safe );
+            std::fwrite( safe.data(), 1, safe.size(), stdout );
+            std::printf( "]]></m></hit>" );
+        }
+        std::printf( "</verify>" );
+        return 0;
+    }
+
+    // ── defines( FILE , SYM ) — symbol-table witness first, then the literal check that can refute ────
+    if( claim.shape == verify::ClaimShape::Defines )
+    {
+        if( !matchFiles( claim.arg1 ) )
+        {
+            return refuseFile( claim.arg1 );
+        }
+        // deliberately NO unknown-symbol refusal here: the claim is about the FILE, and "no file defines
+        // this name anywhere" is a legitimate answer an agent asks for — the legend says so.
+        const std::vector<NodeId> defsOfName = resolveAllByName( ing, claim.arg2 );
+        std::vector<NodeId>       defsInFile;
+        for( NodeId n : defsOfName )
+        {
+            if( fileFlags[ ing.symbols[n].fileId ] )
+            {
+                defsInFile.push_back( n );
+            }
+        }
+        if( !defsInFile.empty() )
+        {
+            const PageWindow  w     = pageWindow( defsInFile.size(), kEvidenceCap, 0 );
+            const std::string facts = " defs=\"" + std::to_string( defsInFile.size() ) + "\" defs_of_name=\"" + std::to_string( defsOfName.size() ) + "\"";
+            openRoot( "confirmed", facts, "", rw::kGraphCountFloorAttrXml, pageTailOf( w.end - w.begin, defsInFile.size(), w.end ) );
+            for( std::size_t defIndex = w.begin; defIndex < w.end; ++defIndex )
+            {
+                emitSymRow( defsInFile[ defIndex ] );
+            }
+            std::printf( "</verify>" );
+            return 0;
+        }
+        // no extracted definition — the literal check: does the name token occur in the file's bytes at
+        // all? Absent under a clean scan ⇒ a COMPLETE no (the file cannot define what it never spells;
+        // preprocessor token-pasting is outside the claim, like every literal claim is index-scoped).
+        // Present ⇒ the extraction floor, never a refutation.
+        const GrepCollection    found = grepCollect( ing, std::string( claim.arg2 ) );
+        std::vector<GrepRawHit> inFile;
+        for( const GrepRawHit& r : found.raw )
+        {
+            if( fileFlags[ r.fileId ] )
+            {
+                inFile.push_back( r );
+            }
+        }
+        const std::size_t occ   = inFile.size();
+        const bool        clean = found.cleanScan();
+        const std::string facts = " defs=\"0\" defs_of_name=\"" + std::to_string( defsOfName.size() ) + "\" occurrences=\"" + std::to_string( occ ) + "\"";
+        if( occ > 0 )
+        {
+            const PageWindow w = pageWindow( occ, kEvidenceCap, 0 );
+            openRoot( "not-established", facts, verify::kLimitExtractionFloor, rw::kGraphCountFloorAttrXml, pageTailOf( w.end - w.begin, occ, w.end ) );
+            const std::vector<GrepHit> hits = grepEnrich( ing, std::span<const GrepRawHit>( inFile ).subspan( w.begin, w.end - w.begin ) );
+            for( const GrepHit& h : hits )
+            {
+                std::printf( "<hit p=\"%s:%u\" in=\"%s\"><m><![CDATA[", ex( ing.files[ h.fileId ] ).c_str(), h.line, ex( h.enclosing ).c_str() );
+                std::string safe;
+                appendCdataSafe( h.text, safe );
+                std::fwrite( safe.data(), 1, safe.size(), stdout );
+                std::printf( "]]></m></hit>" );
+            }
+        }
+        else if( clean )
+        {
+            openRoot( "refuted", facts, "", " complete=\"1\"", pageTailOf( 0, 0, 0 ) );
+        }
+        else
+        {
+            openRoot( "not-established", facts, found.isBudgetReached ? verify::kLimitCollectionCeiling : verify::kLimitScanDegraded,
+                      rw::kGraphCountFloorAttrXml, pageTailOf( 0, 0, 0 ) );
+        }
+        std::printf( "</verify>" );
+        return 0;
+    }
+
+    // ── reaches( SYM , "FILE" | LAYER ) — does code there transitively CALL the target (impact-based) ─
+    VERIFY( claim.shape == verify::ClaimShape::Reaches );
+    const std::vector<NodeId> targetDefs = resolveAllByNameQualified( ing, claim.arg1 );
+    if( targetDefs.empty() )
+    {
+        std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --verify symbol not found: ", claim.arg1, "--verify=" ).c_str() );
+        return 1;
+    }
+    if( claim.arg2Quoted )
+    {
+        if( !matchFiles( claim.arg2 ) )
+        {
+            return refuseFile( claim.arg2 );
+        }
+    }
+    else if( !query::isKnownLayerWord( claim.arg2 ) )
+    {
+        std::fprintf( stderr, "ripwire: --verify reaches: '%.*s' is not a built-in layer (%.*s) — quote it (\"%.*s\") to mean a FILE path substring\n",
+                      int( claim.arg2.size() ), claim.arg2.data(),
+                      int( std::string_view( query::kLayerVocabulary ).size() ), std::string_view( query::kLayerVocabulary ).data(),
+                      int( claim.arg2.size() ), claim.arg2.data() );
+        return 1;
+    }
+    const std::vector<NodeId> reach = rw::transitiveCallers( g, targetDefs );
+    std::vector<NodeId>       witnesses;
+    for( NodeId n : reach )
+    {
+        const std::uint32_t fileId = ing.symbols[n].fileId;
+        if( claim.arg2Quoted ? bool( fileFlags[ fileId ] ) : ( builtinLayer( ing.files[ fileId ] ) != nullptr && claim.arg2 == builtinLayer( ing.files[ fileId ] ) ) )
+        {
+            witnesses.push_back( n );
+        }
+    }
+    const std::string facts = " target_defs=\"" + std::to_string( targetDefs.size() ) + "\" witnesses=\"" + std::to_string( witnesses.size() ) + "\"";
+    if( !witnesses.empty() )
+    {
+        const std::vector<NodeId> path = rw::shortestPathAny( g, witnesses, targetDefs );
+        openRoot( "confirmed", facts + ( path.empty() ? std::string{} : " hops=\"" + std::to_string( path.size() - 1 ) + "\"" ),
+                  "", rw::kGraphCountFloorAttrXml, pageTailOf( path.size(), path.size(), path.size() ) );
+        for( NodeId n : path )
+        {
+            emitSymRow( n );
+        }
+    }
+    else
+    {
+        openRoot( "not-established", facts, verify::kLimitCallGraphFloor, rw::kGraphCountFloorAttrXml, pageTailOf( 0, 0, 0 ) );
+    }
+    std::printf( "</verify>" );
+    return 0;
+}
+
 // §P11.9: --external-surface's accumulation + row-building, pulled out of runExternalSurface so the extra
 // per-REFERENCING-LANGUAGE bookkeeping (a name called from several languages, e.g. `printf` — C's stdio
 // call AND Bash's builtin, used to merge into one row, summing unrelated surfaces and burying the smaller
@@ -11425,6 +11746,7 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
         { "--eval-retrieval",    c.evalRetrieval          }, { "--eval-skills",  !c.evalSkills.empty()    },
         { "--callers",          !c.callers.empty()        }, { "--callees",      !c.callees.empty()       },
         { "--graph-query",      !c.graphQuery.empty()     }, { "--uses",         !c.usesSym.empty()       },
+        { "--verify",           !c.verifyClaim.empty()    },   // G4: dispatches between --uses and --external-surface (runVerify)
         { "--external-surface",  c.externalSurface        }, { "--path",         !c.pathSpec.empty()      },
         { "--connect",          !c.connectSpec.empty()    }, { "--impact",       !c.impactSym.empty()     },
         { "--mentions",         !c.mentionsSym.empty()    }, { "--affected",     !c.affectedFiles.empty() },
@@ -11694,6 +12016,10 @@ const char* jsonUnsupportedVerb( const rw::Config& c )
     if( !c.usesSym.empty() )
     {
         return "--uses";
+    }
+    if( !c.verifyClaim.empty() )
+    {
+        return "--verify";
     }
     if( !c.graphQuery.empty() )
     {
@@ -12547,7 +12873,8 @@ int main( int argc, char** argv )
     // nonlocal-state's attribution is read/write USE SITES by definition, so a lean ingest would hand either a
     // confident, wrong zero; --quality-panel builds two of its six families out of exactly those two lenses.
     const bool needsValueUses = !cfg.usesSym.empty() || cfg.metrics || !cfg.forTask.empty() || !cfg.exemplar.empty()
-                                || cfg.contextRatio || cfg.nonlocalState || cfg.qualityPanel;
+                                || cfg.contextRatio || cfg.nonlocalState || cfg.qualityPanel
+                                || !cfg.verifyClaim.empty();   // G4: uses()/unused() claims count read/write use-sites — a lean ingest would hand a confident, wrong zero
     IngestResult ing;
     if( multiRoot )
     {
@@ -12867,6 +13194,11 @@ int main( int argc, char** argv )
     }
 
     if( std::optional<int> handled = runUses( dsp ) )
+    {
+        return *handled;
+    }
+
+    if( std::optional<int> handled = runVerify( dsp ) )
     {
         return *handled;
     }
