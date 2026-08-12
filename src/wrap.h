@@ -72,21 +72,17 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
     namespace fs = std::filesystem;
     std::error_code ec;
 
-    // The `--hook` line rides along on the SAME resolved installer, claude-only (it registers Claude
-    // Code PreToolUse/SessionStart entries; Codex has no equivalent). It is printed as RECOMMENDED
+    // The `--hook` line rides along on the SAME resolved installer for Claude and Codex. It is RECOMMENDED
     // because it is the only lever here that intercepts a default at the moment it is chosen: a skill
     // fires only if the agent recognizes a moment AND spends a call to load it, whereas reaching for
     // Read costs nothing. Still a SEPARATE command, never folded into the line above — opt-in is the
     // hook's design contract, and hookcheck.sh asserts a bare install never touches settings.json.
     const auto hookLine = [ out, isCodex ]( const char* installer, const bool quoted )
     {
-        if( isCodex )
-        {
-            return;
-        }
-        std::fprintf( out, quoted ? "bash \"%s\" --hook   # RECOMMENDED: advisory Read/Grep -> ripwire nudge + session primer (opt-in, never blocks)\n"
-                                  : "bash %s --hook   # RECOMMENDED: advisory Read/Grep -> ripwire nudge + session primer (opt-in, never blocks)\n",
-                      installer );
+        const char* hookFlags = isCodex ? " --codex --hook" : " --hook";
+        std::fprintf( out, quoted ? "bash \"%s\"%s   # RECOMMENDED: advisory Read/Grep -> ripwire CLI nudge + session primer (opt-in, never blocks)\n"
+                                  : "bash %s%s   # RECOMMENDED: advisory Read/Grep -> ripwire CLI nudge + session primer (opt-in, never blocks)\n",
+                      installer, hookFlags );
     };
 
     // (a) checkout cwd — the repo's own installer is right here
@@ -410,12 +406,13 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     {
         const std::string command = wrapTomlString( executablePath );
         std::printf(
-            "# ripwire -> OpenAI Codex CLI (supported one-command registration)\n"
-            "codex mcp add ripwire -- ripwire --mcp\n"
-            "# Fallback for Codex Desktop or a non-interactive PATH — add this absolute command to ~/.codex/config.toml:\n"
+            "# ripwire -> OpenAI Codex (CLI-first; optional MCP is restricted to audit/health verbs)\n"
+            "# Add this absolute command to ~/.codex/config.toml (Desktop may not inherit shell PATH):\n"
             "[mcp_servers.ripwire]\n"
             "command = \"%s\"\n"
-            "args = [\"--mcp\"]\n", command.c_str() );
+            "args = [\"--mcp\"]\n"
+            "enabled_tools = [\"analyze\", \"quality_delta\", \"flags\", \"doc_drift\"]\n"
+            "default_tools_approval_mode = \"approve\"\n", command.c_str() );
     }
     else if( agent == "opencode" )
     {

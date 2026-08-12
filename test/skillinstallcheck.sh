@@ -57,6 +57,40 @@ codexFound=$( find -L "$AGENTS_ROOT/skills" -mindepth 2 -maxdepth 2 -name SKILL.
     && ok "--codex does not silently install into the Claude skill home" \
     || no "--codex also created a Claude skill home"
 
+# Codex hook install is explicit, composes with the skill destination, and uses Codex's native
+# hooks.json schema through the bundled adapter. It must never touch Claude settings.
+HOME="$CODEX_FALLBACK_HOME" AGENTS_HOME="$AGENTS_ROOT" bash "$SK/install.sh" --codex --hook >/dev/null 2>&1
+CODEX_HOOKS="$CODEX_FALLBACK_HOME/.codex/hooks.json"
+if [ -f "$CODEX_HOOKS" ]; then
+    jq -e '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-codex-nudge")) |
+           .matcher == "^(Bash|Read|Glob|Grep|mcp__ripwire__.*)$"' "$CODEX_HOOKS" >/dev/null \
+        && ok "--codex --hook installs the Codex-native PreToolUse adapter" \
+        || no "--codex --hook wrote the wrong PreToolUse command or matcher"
+    jq -e '(.hooks.SessionStart // [])[] | select(.hooks[]?.command | test("ripwire-codex-nudge.*--session-start")) |
+           .matcher == "^(startup|resume|clear|compact)$"' "$CODEX_HOOKS" >/dev/null \
+        && ok "--codex --hook installs the Codex SessionStart primer including compact" \
+        || no "--codex --hook wrote the wrong SessionStart command or matcher"
+else
+    no "--codex --hook did not create ~/.codex/hooks.json"
+fi
+[ ! -e "$CODEX_FALLBACK_HOME/.claude/settings.json" ] \
+    && ok "--codex --hook does not touch Claude settings" \
+    || no "--codex --hook unexpectedly touched Claude settings"
+
+CODEX_ADAPTER="$ROOT/hooks/ripwire-codex-nudge.sh"
+ADAPTER_TMP="$TMP/adapter"; mkdir -p "$ADAPTER_TMP"
+ADAPTER_BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+[ "${ADAPTER_BIN#/}" = "$ADAPTER_BIN" ] && ADAPTER_BIN="$ROOT/$ADAPTER_BIN"
+ADAPTER_JSON='{"session_id":"codex-adapter","cwd":"'"$ROOT"'","tool_name":"Grep","tool_input":{"pattern":"releaseTag","path":"."}}'
+ADAPTER_OUT="$( printf '%s' "$ADAPTER_JSON" | PATH="$( dirname "$ADAPTER_BIN" ):$PATH" TMPDIR="$ADAPTER_TMP" \
+    RIPWIRE_HOME="$ADAPTER_TMP" RIPWIRE_METER_FIXTURE=1 bash "$CODEX_ADAPTER" )"
+printf '%s' "$ADAPTER_OUT" | jq -e '.hookSpecificOutput.additionalContext | length > 0' >/dev/null \
+    && ok "Codex adapter preserves model-visible advisory context" \
+    || no "Codex adapter dropped the advisory context"
+printf '%s' "$ADAPTER_OUT" | jq -e '.hookSpecificOutput.permissionDecision == null' >/dev/null \
+    && ok "Codex adapter removes allow-without-updatedInput" \
+    || no "Codex adapter emitted an invalid Codex permissionDecision"
+
 HOME="$CODEX_FALLBACK_HOME" CODEX_HOME="$CODEX_ROOT" bash "$SK/install.sh" --codex-legacy >/dev/null 2>&1
 legacyFound=$( find -L "$CODEX_ROOT/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
 [ "$legacyFound" -eq "$shipped" ] \
@@ -135,6 +169,9 @@ if [ -n "$BIN" ] && [ -x "$BIN" ]; then
       && grep -q '^bash skills/install\.sh --codex' "$TMP/wrap-codex"; } \
         && ok "wrap codex emits Codex MCP config plus the Codex skill-install command" \
         || no "wrap codex does not emit a complete Codex install/discovery recipe"
+    grep -q '^bash skills/install\.sh --codex --hook' "$TMP/wrap-codex" \
+        && ok "wrap codex recommends the Codex-native advisory hook" \
+        || no "wrap codex omits the Codex-native advisory hook install"
 
     # Codex Desktop does not promise to inherit the user's interactive-shell PATH. A bare
     # `command = "ripwire"` can therefore produce a valid-looking registration whose server never

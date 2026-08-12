@@ -147,7 +147,7 @@ the kit-style default-lean posture (measured ~90% cut on comparable extract-symb
 
 ## The 3 edit verbs — span-addressed writes, no read-then-diff
 
-`replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` — the last 3 of the 26 (see above),
+`replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` — the last 3 of the 30 (see above),
 ripwire's WRITE verbs. Each locates a symbol's definition in the already-parsed index and splices text at
 its byte span: `replace_symbol_body`
 swaps signature-through-closing-brace verbatim, `insert_before_symbol`/`insert_after_symbol` splice text at

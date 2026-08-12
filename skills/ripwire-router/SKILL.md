@@ -23,6 +23,7 @@ ONE skill to enter. If you routed wrong, each skill's own routing header sends y
 | **Resuming after a context compaction / a new session on work already in flight** — you have a task but no longer the reasoning that got you here | **ripwire-orient** | rebuild state instead of re-reading files: `--recall="<the task>"` (what past sessions WROTE down) → `--situ` (what the working tree currently has changed + tests to run) → `--notes` (gotchas already paid for). Cheaper and more accurate than re-deriving from source. |
 | **Understand X** — "how does X work / where is Y / architecture overview" | **ripwire-orient** | `--for="X"` |
 | **Trace one symbol** — who calls it, what it calls, is it safe to change, locate a literal | **ripwire-navigate** | `--callers`/`--callees`/`--impact`/`--grep` |
+| **Verify one closed code claim** — does A call B, is X unused, does a file define/contain Y? | **ripwire-navigate** | `--verify='calls(A,B)'` (also `uses`/`unused`/`contains`/`defines`/`reaches`) |
 | **My task touches A, B and C — how do they relate?** — N (>2) task symbols, or a pair `--path` can't reach | **ripwire-navigate** | `--connect=A,B,C` (the shared-caller join a directed `--path` can't see) |
 | **Planning a FEATURE** — multi-symbol work needing a plan / interface / size estimate | **ripwire-before-you-build** | `--recall` + `--for` + `--seams` |
 | **Implementing against an interface** — writing a class/type that must satisfy interface `I` | **ripwire-before-you-build** | `--lego=I` (I's method contract + every existing implementor to copy) |
@@ -131,4 +132,6 @@ The always-loaded ripwire primer trains the READ verbs (`--for`/`--recall`/`--ca
 `ripwire --help` is the full flag catalog; every skill re-verifies its commands against the shipped binary.
 
 **Installing these skills:** `bash skills/install.sh` symlinks every `ripwire-*` skill into the Claude
-skill home (its codex mode targets `CODEX_HOME/skills` instead) and prunes dangling links from removed skills.
+skill home (its codex mode targets `${AGENTS_HOME:-~/.agents}/skills`; `--codex-legacy` retains
+`${CODEX_HOME:-~/.codex}/skills`) and prunes dangling links from removed skills. Add `--hook` explicitly
+for the advisory nudge (`--codex --hook` for Codex).
