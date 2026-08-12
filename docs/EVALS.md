@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 392 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 393 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -606,6 +606,41 @@ runs *before* the command and cannot see that it found nothing, so that trigger 
 Shipping it alongside this one would also put two new triggers behind one readout and make the
 verdict unattributable. It gets its own round once this one resolves.
 
+### `--verify` terminality — G4 verify-a-claim round, PRE-REGISTERED 2026-08-12 (before any post-deploy row)
+
+**What shipped.** `--verify="CLAIM"` — a closed claim language (`calls`/`uses`/`unused`/`contains`/
+`defines`/`reaches`) answered with a three-valued verdict (`confirmed` / `refuted` / `not-established`)
+plus inline evidence, gated by `test/verifycheck.sh`. It is built entirely from machinery that already
+existed (`--path`'s BFS, `--uses`' reference index, `--grep`'s exhaustive literal scan with its
+completeness bits, `--impact`'s transitive reach): the round's claim is not new data but a COLLAPSE —
+the residual it deletes is the manual verification grep-chain, the transcript mine's largest verb-less
+intent class.
+
+**Primary metric (transcript-observable, no meter accrual needed).** Verification-intent episode
+CHAIN LENGTH: the number of native-search calls (grep/read/glob families, rtk-unwrapped) an agent
+spends per verification-intent episode, measured by the next mining pass over post-deploy sessions
+with the same intent-classification the month-scale mine used. The baseline B is the same statistic
+computed over PRE-deploy sessions by the same pass — computed at readout, recorded in the
+operator-local registration ledger before the post-deploy half is read (levels stay in the ledger per
+the telemetry rule; this document carries the mechanism and the band shape only).
+
+**Band, pre-registered.** KEEP ⇔ post-deploy mean chain length ≤ 2/3×B on episodes where `--verify`
+fired (the T3 convention); inconclusive between 2/3×B and B extends the window once; ≥ B on
+verify-using episodes, or a false-verdict report of any kind, is a REVISIT with this section updated
+per METHODOLOGY §5. Minimum data: ≥ 30 post-deploy verification-intent episodes; below that the
+readout is declared underpowered, not null.
+
+**Adoption guard, stated up front.** A verb nobody calls collapses nothing: if the readout window
+shows near-zero organic `--verify` calls, that is a ROUTING failure in the adoption-loop's domain
+(nudge/skills — the `--run-trace` precedent, which also shipped verb-first and waited on routing),
+and it must not be reported as a verdict on the bundle's design. The chain-length band is only
+readable on episodes where the verb actually fired.
+
+**Honesty invariants carried by the verb itself, gate-pinned rather than registered:** `refuted`
+only ever rides complete evidence (a clean uncapped literal scan, or printed witness sites against an
+absence-claim); a graph or reference zero is `not-established` with `limit=` naming the floor;
+`complete=` and `counts_floor=` never co-occur on one root (`test/verifycheck.sh`, mutation arms).
+
 ---
 
 ## 5. Token and output economy
@@ -870,7 +905,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
 tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **392 gate scripts**, all of which exist on disk.
+naming **393 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -1504,7 +1539,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 392. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 393. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
