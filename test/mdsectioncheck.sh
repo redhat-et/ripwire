@@ -86,11 +86,19 @@ guard "$G" '`codeIdentFn`'                 'the backtick doc→code mention'
 grep -qE '^#' "$FIX/plainprose.md" && no "plainprose.md grew a heading — the whole-doc fallback arm is dead" \
     || ok "plainprose.md is heading-less (the whole-doc fallback arm has its subject)"
 grep -qF 'zqplainprose' "$FIX/plainprose.md" && ok "plainprose.md carries zqplainprose" || no "plainprose.md lost zqplainprose"
-[ "$( head -c 300 "$FIX/deepquote.md" | tr -dc '>' | wc -c | tr -d ' ' )" -eq 300 ] \
-    && ok "deepquote.md still opens 300 blockquote markers" || no "deepquote.md lost its 300-deep marker run"
+# deepquote.md is GENERATED, never committed: a committed 300-deep file would put the guard's stderr
+# note into every repo-wide run (xmlwellformed's --owners arm merges stderr and caught exactly that).
+DEEPFIX="$TMP/deepfix"
+mkdir -p "$DEEPFIX"
+python3 -c "open('$DEEPFIX/deepquote.md','w').write('>'*300 + ' three hundred nested blockquote markers on one line\n')"
+[ "$( head -c 300 "$DEEPFIX/deepquote.md" | tr -dc '>' | wc -c | tr -d ' ' )" -eq 300 ] \
+    && ok "deepquote.md (generated) opens 300 blockquote markers" || no "deepquote.md generation failed"
 grep -q $'\r' "$FIX/crlf.md" && ok "crlf.md really has CRLF line endings" || no "crlf.md lost its CR bytes"
 grep -qF 'zqaltextension' "$FIX/alt.markdown" && ok "alt.markdown carries zqaltextension" || no "alt.markdown lost zqaltextension"
 grep -qF 'zqCodeAnchorFn' "$FIX/helpers.c" && ok "helpers.c defines zqCodeAnchorFn" || no "helpers.c lost zqCodeAnchorFn"
+head -1 "$FIX/setext0.md" | grep -qx 'Setext At Byte Zero' \
+    && ok "setext0.md opens with setext heading TEXT at byte 0 (the identity-collision shape)" \
+    || no "setext0.md no longer opens with its setext heading at byte 0"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -102,17 +110,20 @@ RC=$?
 [ "$RC" -eq 0 ] && ok "default map exits 0" || no "default map exited $RC: $( head -3 "$TMP/map.err" )"
 xmllint --noout "$MAP" 2>/dev/null && ok "map passes xmllint --noout" || no "map is not well-formed XML"
 
-# deep-quote guard: deepquote.md is refused BEFORE the parse with a one-line note (the yaml
-# posture); nearlimit.md (150 deep) parses fine and gets NO note.
-grep -q 'deepquote\.md.*nesting' "$TMP/map.err" \
+# deep-quote guard, on its own GENERATED corpus: refused BEFORE the parse with a one-line note (the
+# yaml posture). The committed fixture dir stays note-free — nearlimit.md (150 deep) parses fine.
+$BIN "$DEEPFIX" --no-cache >"$TMP/deep.xml" 2>"$TMP/deep.err"
+DEEP_RC=$?
+[ "$DEEP_RC" -eq 0 ] && ok "deep corpus exits 0" || no "deep corpus exited $DEEP_RC"
+grep -q 'deepquote\.md.*nesting' "$TMP/deep.err" \
     && ok "deepquote.md refused with a nesting note (scanner OOB depth never reaches the parser)" \
     || no "deepquote.md was NOT refused — the markdown depth guard is missing (scanner serialize() OOB class)"
 grep -q 'nearlimit\.md' "$TMP/map.err" \
     && no "nearlimit.md (150 deep) drew a stderr note — the guard is overbroad" \
     || ok "nearlimit.md (150 deep) parses without a note (guard is not overbroad)"
-[ "$( grep -cv 'deepquote\.md' "$TMP/map.err" )" -eq 0 ] \
-    && ok "no other stderr beyond the deepquote note" \
-    || no "unexpected stderr: $( grep -v 'deepquote\.md' "$TMP/map.err" | head -2 )"
+[ -s "$TMP/map.err" ] \
+    && no "unexpected stderr on the committed fixture: $( head -2 "$TMP/map.err" )" \
+    || ok "clean stderr on the committed fixture (no note pollutes repo-wide runs)"
 
 sec(){ # sec NAME — the map carries a t="sec" symbol with exactly this name
     if grep -qF "<s t=\"sec\" n=\"$1\"" "$MAP"; then ok "section symbol present: $1"; else no "section symbol MISSING: $1"; fi
@@ -128,6 +139,12 @@ sec "Alt Extension Doc"
 echo "--- setext headings are sections too (=== is H1, --- is H2) ---"
 sec "Deployment Rollout Setext"
 sec "Rollback Plan"
+# the byte-0 identity collision (caught 2026-08-12): a setext heading whose paragraph OPENS the file
+# puts its name at byte 0, where the whole-file node's dedup identity used to sit — the two then tied
+# on every sort key and std::sort's instability flipped the unique() survivor with worker arrival
+# order (bench scoreboards flapping in --merge-scout). BOTH symbols must exist, every run.
+sec "Setext At Byte Zero"
+sec "setext0"
 [ "$( grep -oF '<s t="sec" n="Install Steps"' "$MAP" | wc -l | tr -d ' ' )" -eq 2 ] \
     && ok "Install Steps exists TWICE — one per file, identity path-qualified, never merged" \
     || no "Install Steps did not survive as two per-file symbols"
@@ -198,7 +215,9 @@ $BIN "$FIX" --no-cache --for="zqCodeAnchorFn" >"$TMP/forcode.xml" 2>/dev/null
 python3 - "$TMP/forcode.xml" <<'PYEOF' && ok "--for=zqCodeAnchorFn: first row is the C function, not a doc section" || no "--for=zqCodeAnchorFn: a doc section displaced the code answer"
 import sys, re
 xml = open(sys.argv[1], encoding='utf-8').read()
-m = re.search(r'<d [^>]*n="([^"]*)"', xml)
+# \bn= would still bite on in=/churn= tails after greedy backtracking; anchor on the attribute
+# BOUNDARY (a preceding space) and take the FIRST <d row's n= non-greedily.
+m = re.search(r'<d (?:[^>]*? )?n="([^"]*)"', xml)
 sys.exit(0 if m and m.group(1) == 'zqCodeAnchorFn' else 1)
 PYEOF
 

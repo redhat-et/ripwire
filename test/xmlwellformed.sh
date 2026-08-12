@@ -217,13 +217,19 @@ fi
 around_syms=$( "$BIN" "$CORPUS_FULL" --top-k="$AROUND_SAMPLE" 2>/dev/null \
                | grep -o '<s t="[^"]*" n="[^"]*"' | sed 's/.* n="//;s/"$//' | sort -u )
 around_n=0; around_bad=0; around_first=""
-for sym in $around_syms; do
+# read LINES, not words: markdown section symbols (t="sec") carry spaces in their names, and the old
+# unquoted `for sym in $around_syms` split "Where to look" into three bogus selectors whose empty
+# error documents then failed xmllint (2026-08-12, markdown section tier).
+while IFS= read -r sym; do
+    [ -n "$sym" ] || continue
     around_n=$(( around_n + 1 ))
     "$BIN" "$CORPUS_FULL" --around="$sym" >"$TMP/around.xml" 2>/dev/null
     xmllint --noout "$TMP/around.xml" 2>/dev/null && continue
     around_bad=$(( around_bad + 1 ))
     [ -z "$around_first" ] && around_first="$sym"
-done
+done <<EOF_AROUND
+$around_syms
+EOF_AROUND
 if [ "$around_n" -eq 0 ]; then
     no "--around symbol sample — derived ZERO symbols from the top-$AROUND_SAMPLE map (the sample's own premise failed)"
 elif [ "$around_bad" -eq 0 ]; then
