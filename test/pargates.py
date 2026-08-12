@@ -112,6 +112,9 @@ GATE_BUDGET_SEC = {
     "pyimportprecisecheck.sh":    900,
     "rustimportprecisecheck.sh":  900,
     "tsimportprecisecheck.sh":    900,
+    "bodydialectcheck.sh":        900,   # T3 gave --for/--pack-task real body assembly (v0.3.5/6);
+                                         # ~160 s CPU -- a plain -O0 CI runner overruns the flat cap
+                                         # while a healthy local run takes ~17 s wall.
     "cppbenchcheck.sh":          1200,
     "regexbombcheck.sh":         1200,
 }
