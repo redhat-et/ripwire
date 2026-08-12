@@ -638,6 +638,20 @@ inline constexpr std::size_t kForTailSigBytes        = 160;
 inline constexpr std::size_t kForPayloadBudgetBytes = 7500;
 inline constexpr std::size_t kForCapTailSigBytes    = 96;
 
+// ── T3 terminal-by-default --for (pre-registered: docs/EVALS.md §4, T3 round) ────────────────────────
+// The default --for bundle serves the top-ranked symbols' FULL bodies inline after the signatures — the
+// month-scale transcript mine measured map-then-read as the single biggest non-terminal chain, and the
+// terminal verb that already carried bodies (--pack-task) was called zero times in the same month, so
+// the DEFAULT gets richer rather than a richer verb staying unreachable. This allowance is the body
+// budget the DEFAULT bundle gains ON TOP of kForPayloadBudgetBytes (~1.6K tokens at kBytesPerTokenBody):
+// the signature budget above is untouched, so the ranked map is byte-identical to the signatures-only
+// run and the bodies ride only on this disclosed extra. An EXPLICIT --token-budget=N is a hard ceiling —
+// no allowance; bodies take only the budget the signature bundle genuinely left over. Disclosure is on
+// the <ctx> root (bundle="auto" bodies="N", reason="budget" when none fit) plus a legend sentence;
+// --signatures-only opts out byte-identically; --detail=N (the explicit knob) supersedes the automatic
+// selection. Candidate cap: kPackTaskBodyCandidates — the default --for converges on the pack-task shape.
+inline constexpr std::size_t kForAutoBodyBudgetBytes = 6000;
+
 // deterministic UTF-8-safe prefix cut + a visible ellipsis (the honest "there was more" marker); the
 // boundary back-off mirrors docCommentBefore's cap cut. No-op when the text already fits.
 inline void truncateUtf8WithEllipsis( std::string& s, std::size_t maxBytes )
@@ -3360,8 +3374,14 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                         const HashMap<NodeId, LineRange>* ranges = nullptr,
                         const notes::NoteIndex* noteIndex = nullptr,    // L3: field notes — surfaces <note> children on each
                                                                         //   <b> body (canonical-id target). nullptr ⇒ INERT (byte-identical).
-                        EmittedBodies* outEmitted = nullptr )           // §H5: what this call actually emitted — see EmittedBodies.
+                        EmittedBodies* outEmitted = nullptr,            // §H5: what this call actually emitted — see EmittedBodies.
                                                                         //   nullptr ⇒ not recorded (every XML-only caller).
+                        bool truncateOversizedFirst = true )            // T3: false ⇒ whole-body-or-not-at-all — a first body larger
+                                                                        //   than the WHOLE budget takes the omission-marker path instead
+                                                                        //   of the head-truncation below. The auto --for bundle passes
+                                                                        //   false (its contract is "the FULL body if it fits, else
+                                                                        //   dropped and disclosed"); every pre-existing caller keeps the
+                                                                        //   default and is byte-identical.
 {
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F2): the MCP `exemplar` verb has no byte budget, and 0 must never
     // mean "cap at zero bytes" (the cap fired before the first body and emitted a bare <bodies></bodies>).
@@ -3489,7 +3509,9 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
             bool              truncated      = false;
             if( body.size() > remainingBytes )                     // doesn't fit the remaining budget
             {
-                if( used == 0 && body.size() > budgetBytes )       // a single def larger than the WHOLE budget → truncate it (UTF-8 safe)
+                // a single def larger than the WHOLE budget → truncate it (UTF-8 safe) — unless the caller
+                // asked for whole-body-or-not-at-all (T3 auto bundle), in which case it takes the marker path.
+                if( used == 0 && body.size() > budgetBytes && truncateOversizedFirst )
                 {
                     std::size_t cut = body.rfind( '\n', budgetBytes );
                     if( cut == std::string::npos )
