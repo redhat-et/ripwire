@@ -1268,7 +1268,7 @@ config — you read the line, then run it.
 ```bash
 ripwire wrap claude      # MCP:      claude mcp add ripwire -- ripwire --mcp
 ripwire wrap cursor      # MCP:      the mcpServers stanza for .cursor/mcp.json (or ~/.cursor/mcp.json)
-ripwire wrap codex       # MCP:      codex mcp add ripwire -- ripwire --mcp (+ TOML fallback)
+ripwire wrap codex       # CLI-first: optional MCP restricted to audit/health verbs in Codex TOML
 ripwire wrap windsurf    # MCP:      that client's stanza
 ripwire wrap gemini      # MCP:      that client's stanza
 ripwire wrap opencode    # CLI-1st:  the AGENTS.md wiring; its "mcp" stanza offered as the alternative
@@ -1311,7 +1311,7 @@ socket instead of stdio, `ripwire --listen=HOST:PORT` serves the same verbs.
 
 ### 2. Install the skills
 
-`skills/` ships **seventeen task-shaped skills** that tell an agent *which* verb answers the moment it
+`skills/` ships **eighteen task-shaped skills** that tell an agent *which* verb answers the moment it
 is in — orienting cold, tracing a call, sizing a refactor, checking a diff, hunting a bug, writing
 tests, reviewing security. Without them an agent has 30 verbs and no map of when each applies; the skills name the moment
 each verb is for. Install as symlinks back into this repo, so edits here take effect
@@ -1320,6 +1320,7 @@ immediately:
 ```bash
 skills/install.sh                 # → ~/.claude/skills
 skills/install.sh --codex         # → ${AGENTS_HOME:-~/.agents}/skills (canonical Codex/agent path)
+skills/install.sh --codex --hook  # → also install Codex's advisory CLI nudge + session primer
 skills/install.sh --codex-legacy  # → ${CODEX_HOME:-~/.codex}/skills (older Codex installs)
 skills/install.sh /some/path      # → an explicit destination
 ripwire --scan-skills=skills      # read the security scanner's verdict first, if you would rather

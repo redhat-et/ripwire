@@ -117,12 +117,17 @@ jobs:
       - name: Package
         id: package
         run: |
+          releaseTag="${{ inputs.tag || github.ref_name }}"
           version="$( ./build/ripwire --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 )"
+          if [ "v${version}" != "$releaseTag" ]; then
+            echo "release: binary version v${version} does not match release tag ${releaseTag}" >&2
+            exit 1
+          fi
           asset="ripwire-${version}-${{ matrix.asset_os }}-${{ matrix.asset_arch }}"
           mkdir -p "dist/${asset}"
           cp build/ripwire "dist/${asset}/ripwire"
           cp README.md LICENSE "dist/${asset}/" 2>/dev/null || cp README.md "dist/${asset}/"
-          # skills/ is the payload that teaches an agent WHEN to reach for ripwire (17 ripwire-*/ dirs +
+          # skills/ is the payload that teaches an agent WHEN to reach for ripwire (18 ripwire-*/ dirs +
           # skills/install.sh, which symlinks from its OWN location — so it must travel with the tarball,
           # not just live in the repo checkout). scripts/install.sh stages this subtree straight into
           # $prefix/share/ripwire/skills; asset names and the top-level ripwire/README.md/LICENSE layout
@@ -133,6 +138,10 @@ jobs:
           mkdir -p "dist/${asset}/skills"
           cp -R skills/ripwire-* "dist/${asset}/skills/"
           cp skills/install.sh "dist/${asset}/skills/"
+          # The opt-in agent hooks are a sibling of skills/ because skills/install.sh resolves them via
+          # ../hooks. Package both the shared nudge and the Codex output adapter; omitting this subtree
+          # leaves every prebuilt user's advertised --hook command pointing at a nonexistent file.
+          cp -R hooks "dist/${asset}/hooks"
           tar -C dist -czf "dist/${asset}.tar.gz" "${asset}"
           # basename inside the checksum file — `shasum -a 256 "dist/..."` bakes the dist/ prefix into
           # the published .sha256, which breaks `shasum -c` beside the downloaded pair (and therefore

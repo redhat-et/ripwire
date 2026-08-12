@@ -2,9 +2,9 @@
 # Install ripwire's agent skills (symlinks back to this repo's skills/, so they stay version-controlled and
 # edits here take effect immediately). Default: Claude. Codex: skills/install.sh --codex installs to the
 # current cross-agent ~/.agents/skills discovery root; --codex-legacy retains the older CODEX_HOME/skills
-# destination. An explicit path remains supported for CI and other clients: skills/install.sh PATH. OPT-IN PreToolUse hook (advisory
-# grep->ripwire nudge B5.2): skills/install.sh --hook — a SEPARATE action,
-# never bundled into the flags above, so it only ever runs on explicit invocation.
+# destination. An explicit path remains supported for CI and other clients: skills/install.sh PATH.
+# Add --hook explicitly to install the advisory PreToolUse + SessionStart hook for the selected client:
+# skills/install.sh --hook (Claude) or skills/install.sh --codex --hook (Codex).
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"
 
@@ -14,6 +14,7 @@ src="$( cd "$( dirname "$0" )" && pwd )"
 #    hook's other job, the substitution meter (docs/SUBSTITUTION_METER.md), whose numerator would
 #    otherwise miss every agent that prefers the MCP server to the CLI.
 hookMatcher="Read|Glob|Grep|Bash|mcp__ripwire__"
+codexHookMatcher="^(Bash|Read|Glob|Grep|mcp__ripwire__.*)$"
 
 # ── refresh_hook_matcher SETTINGS HOOKSCRIPT — bring an ALREADY-registered entry's matcher up to date.
 # An entry written by an older installer carries an older matcher, and a stale one undercounts forever,
@@ -21,23 +22,23 @@ hookMatcher="Read|Glob|Grep|Bash|mcp__ripwire__"
 # agrees is left untouched, and this never adds, removes or reorders an entry.
 refresh_hook_matcher()
 {
-    if ! jq -e --arg cmd "$2" --arg m "$hookMatcher" \
+    if ! jq -e --arg cmd "$2" --arg m "$3" \
         'any((.hooks.PreToolUse // [])[]?; (any(.hooks[]?; .command == $cmd)) and (.matcher != $m))' \
         "$1" >/dev/null 2>&1; then
         echo "ripwire PreToolUse hook already registered in $1 ($2) — nothing to do."
         return 0
     fi
     tmp="$( mktemp )"
-    jq --arg cmd "$2" --arg m "$hookMatcher" \
+    jq --arg cmd "$2" --arg m "$3" \
         '.hooks.PreToolUse |= map( if any(.hooks[]?; .command == $cmd) then .matcher = $m else . end )' \
         "$1" >"$tmp" && mv "$tmp" "$1"
-    echo "ripwire PreToolUse hook already registered in $1 — refreshed its matcher to \"$hookMatcher\"."
+    echo "ripwire PreToolUse hook already registered in $1 — refreshed its matcher to \"$3\"."
 }
 
 # ── --hook: register hooks/ripwire-nudge.sh as a PreToolUse hook in ~/.claude/settings.json ──
 # Advisory-only (see the script's own header): never blocks/denies/rewrites a tool call, fires at most
 # once per session per pattern. Idempotent — re-running does not duplicate the settings.json entry.
-install_hook()
+install_claude_hook()
 {
     settings="$HOME/.claude/settings.json"
     hookScript="$( dirname "$src" )/hooks/ripwire-nudge.sh"
@@ -57,7 +58,7 @@ install_hook()
     if jq -e --arg cmd "$hookScript" \
         'any((.hooks.PreToolUse // [])[]?.hooks[]?; .command == $cmd)' \
         "$settings" >/dev/null 2>&1; then
-        refresh_hook_matcher "$settings" "$hookScript"
+        refresh_hook_matcher "$settings" "$hookScript" "$hookMatcher"
         return 0
     fi
 
@@ -87,13 +88,76 @@ install_hook()
     echo "done. Registered ripwire's PreToolUse nudge + SessionStart primer hooks in $settings."
 }
 
-case "${1:-}" in
-    --hook)   install_hook; exit 0 ;;
-    --codex)  dst="${AGENTS_HOME:-$HOME/.agents}/skills" ;;
-    --codex-legacy) dst="${CODEX_HOME:-$HOME/.codex}/skills" ;;
-    --claude) dst="$HOME/.claude/skills" ;;
-    "")       dst="$HOME/.claude/skills" ;;
-    *)        dst="$1" ;;
+install_codex_hook()
+{
+    settings="${CODEX_HOME:-$HOME/.codex}/hooks.json"
+    hookScript="$( dirname "$src" )/hooks/ripwire-codex-nudge.sh"
+    sharedHook="$( dirname "$src" )/hooks/ripwire-nudge.sh"
+    [ -f "$hookScript" ] && [ -f "$sharedHook" ] || {
+        echo "skills/install.sh: bundled Codex hooks are missing beside $src" >&2
+        exit 1
+    }
+    chmod +x "$hookScript" "$sharedHook" 2>/dev/null || true
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "skills/install.sh --codex --hook needs jq on PATH to safely merge $settings (not found)." >&2
+        exit 1
+    fi
+
+    mkdir -p "$( dirname "$settings" )"
+    [ -f "$settings" ] || echo '{}' >"$settings"
+
+    echo "skills/install.sh --codex --hook will add or refresh advisory-only entries in $settings."
+    tmp="$( mktemp )"
+    jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" --arg m "$codexHookMatcher" '
+        .hooks //= {} |
+        .hooks.PreToolUse //= [] |
+        .hooks.SessionStart //= [] |
+        if any(.hooks.PreToolUse[]?.hooks[]?; .command == $cmd) then
+            .hooks.PreToolUse |= map(if any(.hooks[]?; .command == $cmd) then .matcher = $m else . end)
+        else
+            .hooks.PreToolUse += [{ matcher: $m, hooks: [{ type: "command", command: $cmd,
+                timeout: 3, statusMessage: "Checking for a cheaper Ripwire CLI query" }] }]
+        end |
+        if any(.hooks.SessionStart[]?.hooks[]?; .command == $scmd) then
+            .hooks.SessionStart |= map(if any(.hooks[]?; .command == $scmd) then .matcher = "^(startup|resume|clear|compact)$" else . end)
+        else
+            .hooks.SessionStart += [{ matcher: "^(startup|resume|clear|compact)$", hooks: [{ type: "command",
+                command: $scmd, timeout: 3, statusMessage: "Loading Ripwire CLI-first guidance",
+                additionalContextLimit: 2000 }] }]
+        end
+    ' "$settings" >"$tmp" && mv "$tmp" "$settings"
+    echo "done. Registered Ripwire's Codex PreToolUse nudge + SessionStart primer in $settings."
+    echo "Open /hooks in Codex to review and trust the installed command hooks."
+}
+
+mode="claude"
+explicitMode=0
+wantHook=0
+explicitPath=""
+for arg in "$@"; do
+    case "$arg" in
+        --hook) wantHook=1 ;;
+        --codex) mode="codex"; explicitMode=1 ;;
+        --codex-legacy) mode="codex-legacy"; explicitMode=1 ;;
+        --claude) mode="claude"; explicitMode=1 ;;
+        --*) echo "skills/install.sh: unknown option $arg" >&2; exit 2 ;;
+        *) [ -z "$explicitPath" ] || { echo "skills/install.sh: only one destination path is allowed" >&2; exit 2; }
+           explicitPath="$arg"; mode="path"; explicitMode=1 ;;
+    esac
+done
+
+# Preserve the established hook-only invocation: `--hook` changes settings but does not also install skills.
+if [ "$wantHook" -eq 1 ] && [ "$explicitMode" -eq 0 ]; then
+    install_claude_hook
+    exit 0
+fi
+
+case "$mode" in
+    codex) dst="${AGENTS_HOME:-$HOME/.agents}/skills" ;;
+    codex-legacy) dst="${CODEX_HOME:-$HOME/.codex}/skills" ;;
+    claude) dst="$HOME/.claude/skills" ;;
+    path) dst="$explicitPath" ;;
 esac
 mkdir -p "$dst"
 
@@ -120,3 +184,11 @@ for d in "$src"/ripwire-*/; do
     count=$(( count + 1 ))
 done
 echo "done. $count ripwire skills active in every session (${pruned} stale pruned) — every ripwire-* above."
+
+if [ "$wantHook" -eq 1 ]; then
+    case "$mode" in
+        codex|codex-legacy) install_codex_hook ;;
+        claude) install_claude_hook ;;
+        path) echo "skills/install.sh: --hook needs --claude or --codex, not an explicit skill path" >&2; exit 2 ;;
+    esac
+fi

@@ -3,10 +3,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/<owner>/ripwire/main/scripts/install.sh | bash
 #
-# VALIDATED against v0.2.1 on 2026-08-07: the happy path (resolve latest release, download the
-# macos-arm64 asset, list it) was exercised live against the real GitHub Releases API and worked. v0.2.1
-# published all 8 assets (4 platforms x tarball + .sha256). Re-check this note if release.yml's asset
-# naming or layout changes again.
+# The release contract is gate-pinned by test/releaseinstallcheck.sh: tag, binary version, asset name,
+# mandatory checksum, archive root, skills, and hooks must agree before installation.
 #
 # This is DIFFERENT from the repo-root `install.sh`: that one builds ripwire FROM SOURCE (clones this repo,
 # runs cmake). This one downloads a prebuilt binary from GitHub Releases — no compiler, no FetchContent, no
@@ -107,25 +105,46 @@ echo "install.sh: downloading $assetName ..."
 curl -fsSL -o "$work/$assetName" "$assetUrl"
 
 checksumUrl="${assetUrl}.sha256"
-if curl -fsSL -o "$work/${assetName}.sha256" "$checksumUrl" 2>/dev/null; then
-    (
-        cd "$work"
-        if command -v shasum >/dev/null 2>&1; then
-            shasum -a 256 -c "${assetName}.sha256"
-        elif command -v sha256sum >/dev/null 2>&1; then
-            sha256sum -c "${assetName}.sha256"
-        else
-            echo "install.sh: no shasum/sha256sum on PATH — skipping checksum verification" >&2
-        fi
-    )
-else
-    echo "install.sh: no .sha256 checksum file published for this asset — skipping verification" >&2
-fi
+curl -fsSL -o "$work/${assetName}.sha256" "$checksumUrl" 2>/dev/null || {
+    echo "install.sh: release $resolvedTag has no checksum for $assetName — refusing an unverified binary" >&2
+    exit 1
+}
+(
+    cd "$work"
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 -c "${assetName}.sha256"
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum -c "${assetName}.sha256"
+    else
+        echo "install.sh: shasum or sha256sum is required to verify the release" >&2
+        exit 1
+    fi
+)
+
+# Refuse absolute/traversal paths before extraction. The archive must have exactly the release asset's
+# expected top-level directory; never let `find | head` select an attacker-controlled sibling.
+expectedDirName="${assetName%.tar.gz}"
+archiveList="$( tar -tzf "$work/$assetName" )" || { echo "install.sh: could not list $assetName" >&2; exit 1; }
+while IFS= read -r entry; do
+    case "$entry" in
+        /*|../*|*/../*|*/..) echo "install.sh: unsafe archive path '$entry'" >&2; exit 1 ;;
+        "$expectedDirName"|"$expectedDirName"/*) ;;
+        *) echo "install.sh: unexpected archive entry '$entry' (expected root $expectedDirName)" >&2; exit 1 ;;
+    esac
+done <<EOF
+$archiveList
+EOF
 
 tar -C "$work" -xzf "$work/$assetName"
-extractedDir="$( find "$work" -maxdepth 1 -type d -name 'ripwire-*' | head -1 )"
-[ -n "$extractedDir" ] || { echo "install.sh: unexpected archive layout — no ripwire-* directory found" >&2; exit 1; }
+extractedDir="$work/$expectedDirName"
+[ -d "$extractedDir" ] || { echo "install.sh: unexpected archive layout — no $expectedDirName directory found" >&2; exit 1; }
 [ -x "$extractedDir/ripwire" ] || { echo "install.sh: extracted archive has no executable ripwire binary" >&2; exit 1; }
+
+binaryVersion="$( "$extractedDir/ripwire" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 )"
+[ "$binaryVersion" = "$resolvedVersion" ] || {
+    echo "install.sh: release $resolvedTag contains ripwire ${binaryVersion:-<unknown>} — refusing version mismatch" >&2
+    exit 1
+}
 
 mkdir -p "$binDir"
 cp "$extractedDir/ripwire" "$binDir/ripwire"
@@ -144,7 +163,9 @@ esac
 # the toolchain (other pieces are being wired to look there) — do not relocate this path independently.
 # This directory is a STAGING AREA OWNED BY THIS INSTALLER (nothing else writes here), so blowing it away
 # and recopying on every run is safe and keeps a stale skill from a previous version lingering forever.
-skillsShareDir="$prefix/share/ripwire/skills"
+shareDir="$prefix/share/ripwire"
+skillsShareDir="$shareDir/skills"
+hooksShareDir="$shareDir/hooks"
 if [ -d "$extractedDir/skills" ]; then
     rm -rf "$skillsShareDir"
     mkdir -p "$( dirname "$skillsShareDir" )"
@@ -155,6 +176,16 @@ if [ -d "$extractedDir/skills" ]; then
     echo "  Activate them (symlinks into the agent's skill dir, safe to re-run):"
     echo "    Claude Code: bash \"$skillsShareDir/install.sh\""
     echo "    Codex:       bash \"$skillsShareDir/install.sh\" --codex"
+    if [ -d "$extractedDir/hooks" ]; then
+        rm -rf "$hooksShareDir"
+        cp -R "$extractedDir/hooks" "$hooksShareDir"
+        chmod +x "$hooksShareDir/"*.sh 2>/dev/null || true
+        echo "  Optional advisory hooks:"
+        echo "    Claude Code: bash \"$skillsShareDir/install.sh\" --hook"
+        echo "    Codex:       bash \"$skillsShareDir/install.sh\" --codex --hook"
+    else
+        echo "install.sh: this release has no bundled hooks; skills remain usable without them" >&2
+    fi
 else
     # Older releases (pre-skills-bundling) simply don't have this directory — never fail the install over
     # a missing extra; just tell the user honestly how to get them.
