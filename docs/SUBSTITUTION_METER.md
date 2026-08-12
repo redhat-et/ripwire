@@ -39,6 +39,7 @@ One **global** file, all repos:
 | Override the file | `RIPWIRE_METER_LOG=/some/file.jsonl` |
 | Optional config | `~/.ripwire/meter.conf` — `enabled=0` / `arm=control` / `sweep=0` / `sweep_n=N`, one `key=value` per line |
 | Turn counting off | `RIPWIRE_METER=0` (the nudge keeps working) |
+| Declare a test harness | `RIPWIRE_METER_FIXTURE=1` — see [Fixture isolation](#fixture-isolation) |
 | Turn the sweep escalation off | `RIPWIRE_SWEEP=0` (counting and the one-time nudges keep working) |
 | Change the sweep threshold | `RIPWIRE_SWEEP_N=4` (default 3) |
 
@@ -52,6 +53,72 @@ recorded on purpose — this log never leaves the machine.
 **Failure is silent by contract.** No `HOME`, an unwritable directory, no `date`, no `jq`, a full
 disk: every write path returns quietly. Nothing in the meter may change the hook's exit status, its
 stdout, or the tool call it is watching. A tool that breaks the thing it measures has no readings.
+
+<a id="fixture-isolation"></a>
+### Fixture isolation: a test run may never reach this file
+
+The hook has a gate, `test/hookcheck.sh`, which drives it with invented PreToolUse payloads by the
+dozen. Those invocations produce rows in the ordinary way, and a fixture row is **indistinguishable
+from a real one at analysis time** — same schema, same classes, a plausible session id. Until
+2026-08-12 the gate ran with the ambient environment, so the meter resolved the operator's real
+`$HOME` and every gate run appended a burst of synthetic rows to the live log. The contamination is
+not uniform, which is what makes it dangerous rather than merely noisy: a gate run is a burst of
+nudge-firing *native* calls with no ripwire call in it at all, so it drags the headline rate toward
+zero and lands specifically in the nudge-efficacy denominator.
+
+The contract is now that **a gate run cannot touch the default log**, held up by two independent
+layers, because one layer is a thing a future test can forget:
+
+| | |
+| --- | --- |
+| **Named destination** | The gate exports `RIPWIRE_METER_LOG` (and `RIPWIRE_HOME`, so `meter.conf` comes from the sandbox too) once, at the top. Every invocation inherits it, including one added later by someone who never read the comment. |
+| **`RIPWIRE_METER_FIXTURE`** | Set by the gate to declare "a harness is driving this hook". If a destination has *not* been named — an invocation that strips the environment — the hook refuses to fall back to `$HOME` and **writes no row at all**, rather than writing to the real log. |
+
+Refusing is silent, like every other meter failure: the meter stays subordinate to the tool call it
+observes, and that rule gets no exception for the case where the meter is under test. A harness that
+wants rows says where they go; a harness that says nothing gets none.
+
+`test/hookcheck.sh` section (13) asserts both layers held. Its central arm does **not** compare byte
+sizes — on a machine where the hook is installed, a real session can append while the gate runs, so a
+size assertion is flaky in exactly the situation it exists for. It asserts *provenance* instead:
+every fixture repository in that gate lives under a per-run `mktemp -d` path that no other process
+can produce, so a row in the operator's log naming it is proof that this run leaked, and concurrent
+real activity cannot forge one.
+
+If you write another harness that invokes the hook, do both: name a destination, and set
+`RIPWIRE_METER_FIXTURE=1`.
+
+### Repairing a log that was already polluted
+
+A guard stops new pollution; it cannot repair a log that already has some. `bench/substitution_scrub.py`
+separates fixture rows from real observations in an existing log:
+
+```bash
+python3 bench/substitution_scrub.py                                  # read-only report
+python3 bench/substitution_scrub.py LOG --out cleaned.jsonl          # + write the clean copy
+python3 bench/substitution_scrub.py LOG --out cleaned.jsonl --ids-only
+```
+
+It is **never destructive**: the input is opened read-only, `--out` names a new file and is refused
+if it resolves to the input, and with no `--out` the run is a report. Four rules are tried in order,
+and each removed row is attributed to the first that matched, so the counts partition the removals:
+
+| Rule | Removes |
+| --- | --- |
+| `fixture-session-id` | The session id is one `test/hookcheck.sh` writes — an exact list, not a guess. |
+| `synthetic-session-id` | The session id is neither a UUID (what an agent harness issues) nor the hook's own `ppid<N>` fallback: somebody hand-drove the hook. |
+| `fixture-repo-temp` | `repo` is inside a temp tree — where throwaway gate fixtures live and real work does not. |
+| `fixture-payload` | A synthetic payload (`needle`, `alpha`, `**/*.cpp`) **and** a fixture repo basename. Deliberately narrow: the net for a fixture that reused a real-looking session id, not a content filter. |
+
+Every rule's count and a sample of its evidence are printed whichever mode runs, so an operator can
+see what a heuristic *would* have taken before allowing it; `--ids-only` keeps everything the three
+heuristics matched. Line order and bytes are preserved exactly — the cleaned file is the input minus
+some lines, never a re-serialization — and a line that does not parse is carried through rather than
+dropped. The report ends with the surviving session ids and their row counts, which is the number a
+baseline recomputation actually needs.
+
+Rerun `bench/substitution_report.py` against the cleaned copy; any baseline taken before the scrub is
+a reading off a contaminated instrument.
 
 ## The row schema (v2)
 
@@ -336,6 +403,9 @@ python3 bench/substitution_report.py /path/to/log.jsonl
 python3 bench/substitution_report.py -h                     # repo filter, row limit
 ```
 
+Scrub first if the log predates 2026-08-12 — it may carry gate fixtures (above), and the report has
+no way to tell them from real rows.
+
 Stdlib only, deterministic, counts only. Four sections: the rate split by nudge exposure and by arm;
 the class composition of both sides; a per-repo breakdown; and **within-session class n-grams**
 (bigrams and trigrams in `seq` order). That last section is the one to watch — the hypothesis worth
@@ -358,3 +428,11 @@ silent; the classes dedup independently; the row carries `nudge":"sweep3"` and t
 degrades to silence; and the classifier fixtures pin the `cd`-prefix strip (including
 `cd x && VAR=y grep …` and the multi-line form), `build`, `gate-run`, `git-remote`, `git-misc`,
 `shell-misc`, and the still-working rtk unwrap.
+
+Section (13), arms I1–I6, is the fixture-isolation contract: the rows sections (1)–(10) used to leak
+now land in the gate's own sink rather than being dropped (the positive control, without which the
+canary could pass for the wrong reason); `RIPWIRE_METER_FIXTURE` with no named destination writes no
+row while the nudge still fires; the production `$HOME` fallback still resolves, in the one arm that
+deliberately runs without the guard; `bench/substitution_scrub.py` empties a gate-written log,
+refuses to overwrite its input and leaves it byte-identical; and the canary — no row in the
+operator's real log carries this run's scratch path.

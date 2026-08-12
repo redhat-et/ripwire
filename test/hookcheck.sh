@@ -12,7 +12,8 @@
 #
 # Usage:  test/hookcheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success. Never touches the
-# real ~/.claude — every run is sandboxed under a scratch TMPDIR/HOME.
+# real ~/.claude, and — since 2026-08-12, enforced by section (13) rather than asserted here — never
+# the real ~/.ripwire/substitution.jsonl either. See FIXTURE ISOLATION below before adding an arm.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -27,6 +28,41 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -f "$INSTALL" ] || { echo "no $INSTALL"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# FIXTURE ISOLATION (2026-08-12) — READ THIS BEFORE ADDING AN ARM.
+#
+# The hook's second job is the substitution meter: it appends one JSONL row per observed tool call to
+# ~/.ripwire/substitution.jsonl. This gate feeds it invented payloads by the dozen, and every one of
+# those rows is indistinguishable at analysis time from a row a real agent produced. Until 2026-08-12
+# the arms below ran with the ambient environment, so the meter resolved the REAL $HOME and one run
+# of this gate appended 30 synthetic rows across 24 fixture "sessions" to the operator's live log —
+# while printing ALL PASS. The instrument was measuring its own test fixtures.
+#
+# The contract is now: A GATE RUN CAN NEVER TOUCH THE DEFAULT LOG. Two independent layers, because a
+# single layer is a thing a future arm can forget:
+#
+#   L1  this block exports a sandbox destination ONCE. Every invocation below inherits it through
+#       `env`, including one written later by someone who never read this comment. An arm that wants
+#       its own file still passes RIPWIRE_METER_LOG explicitly; that simply overrides the sandbox
+#       with another sandbox.
+#   L2  RIPWIRE_METER_FIXTURE tells the hook a harness is driving it. If an arm actively strips L1
+#       (`env -u`), the hook refuses to fall back to $HOME and writes nothing — see §FIXTURE in
+#       hooks/ripwire-nudge.sh.
+#
+# Section (13) asserts that both layers held. Exactly two arms there run without L2, deliberately, to
+# keep the production HOME-fallback path gated; both sandbox $HOME, and arm I2 is what catches it if
+# either one ever stops.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# Captured BEFORE the exports below, so it names the operator's real log and not the sandbox.
+REAL_METER_LOG="${RIPWIRE_METER_LOG:-${RIPWIRE_HOME:-$HOME/.ripwire}/substitution.jsonl}"
+REAL_METER_BYTES=0
+[ -f "$REAL_METER_LOG" ] && REAL_METER_BYTES="$( wc -c <"$REAL_METER_LOG" 2>/dev/null | tr -d ' ' )"
+GATEHOME="$TMP/gatehome"; mkdir -p "$GATEHOME"
+export RIPWIRE_HOME="$GATEHOME"                          # meter.conf comes from here too, i.e. nowhere
+export RIPWIRE_METER_LOG="$GATEHOME/substitution.jsonl"  # the sandbox every unnamed arm lands in
+export RIPWIRE_METER_FIXTURE=1                           # L2: refuse a $HOME fallback if L1 is stripped
+GATE_SINK="$RIPWIRE_METER_LOG"
 
 # ---- shared fixtures: a real (but tiny) git repo, and a stub `ripwire` binary on a scratch PATH ----
 REPO="$TMP/repo"; mkdir -p "$REPO"
@@ -375,6 +411,11 @@ HOME="$DEFAULT_HOME" bash "$INSTALL" >/dev/null 2>&1
 
 METERHOME="$TMP/meterhome"; mkdir -p "$METERHOME"
 DEFAULT_LOG="$METERHOME/.ripwire/substitution.jsonl"
+# M1/M18 are about the meter RESOLVING its own default filename, so they are the two arms that must
+# not simply be handed one. Passing $DEFAULTS drops L1's explicit path (an empty value reads as unset
+# to the hook) and names the meter home instead, so what those arms exercise is the resolution — but
+# inside a sandbox, never against $HOME. The bare-$HOME rung below it is gated separately, by arm I4.
+DEFAULTS="RIPWIRE_METER_LOG= RIPWIRE_HOME=$METERHOME/.ripwire"
 
 run_meter()
 {
@@ -402,11 +443,11 @@ bashjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Bash","tool_inpu
 # ── M1-M3: a classified call writes one row, at the DEFAULT global path, with the full field set ────
 TM1="$TMP/tm1"; mkdir -p "$TM1"
 M1_JSON='{"session_id":"meter1","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"needle"}}'
-run_meter "" "$M1_JSON" "$TM1" >/dev/null 2>&1; RCM1=$?
+run_meter "" "$M1_JSON" "$TM1" $DEFAULTS >/dev/null 2>&1; RCM1=$?
 echo "-- meter default-path row --"; [ -f "$DEFAULT_LOG" ] && cat "$DEFAULT_LOG"
 [ "$RCM1" -eq 0 ] && ok "M1 meter: hooked call still exits 0" || no "M1 meter: exit was $RCM1"
 [ "$( meterrows "$DEFAULT_LOG" )" = "1" ] \
-    && ok "M1 meter: one row lazily created at ~/.ripwire/substitution.jsonl" \
+    && ok "M1 meter: one row lazily created at <meter home>/substitution.jsonl (the default filename)" \
     || no "M1 meter: expected 1 row at $DEFAULT_LOG, got $( meterrows "$DEFAULT_LOG" )"
 M2_MISSING=""
 for k in v ts seq session repo tag tool class family nudged nudge post_nudge post_sweep arm detail; do
@@ -517,7 +558,7 @@ run_meter "$L17" "$( bashjson meter17b 'brew upgrade' )" "$TM17" >/dev/null 2>&1
 REPO2="$TMP/repo2"; mkdir -p "$REPO2"; git -C "$REPO2" init -q
 git -C "$REPO2" config user.email "dev@x.com"; git -C "$REPO2" config user.name "Dev"
 TM18="$TMP/tm18"; mkdir -p "$TM18"
-run_meter "" '{"session_id":"meter18","cwd":"'"$REPO2"'","tool_name":"Grep","tool_input":{"pattern":"n"}}' "$TM18" >/dev/null 2>&1
+run_meter "" '{"session_id":"meter18","cwd":"'"$REPO2"'","tool_name":"Grep","tool_input":{"pattern":"n"}}' "$TM18" $DEFAULTS >/dev/null 2>&1
 LASTROW="$( meterrows "$DEFAULT_LOG" )"
 [ "$LASTROW" = "2" ] && [ "$( meterrowget "$DEFAULT_LOG" 2 tag )" = "repo2" ] && [ "$( meterrowget "$DEFAULT_LOG" 1 tag )" = "repo" ] \
     && ok "M18 meter: two repos append to the ONE global log, each row tagged by repo" \
@@ -902,6 +943,105 @@ if [ -f "$EVALSDOC" ]; then
     grep -Fq 'Nudge sweep-escalation efficacy' "$EVALSDOC" && grep -Fq 'post_sweep' "$EVALSDOC" \
         && ok "C3b docs: EVALS.md carries the pre-registered efficacy readout for the escalation" \
         || no "C3b docs: EVALS.md has no sweep-escalation registration — the verdict is unregistered"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (13) FIXTURE ISOLATION — the arms that prove a gate run cannot reach the operator's log
+#
+# The design and the bug are documented at the top of this file. This section runs LAST because I2,
+# the arm that matters, is a statement about everything above it.
+#
+# I2 does not compare byte sizes. On a machine where the hook is installed, a real agent session can
+# append to the live log while this gate is running, so a size assertion is flaky in exactly the
+# situation the assertion is for. Provenance is exact instead: every fixture repo in this gate lives
+# under `$TMP`, a per-run `mktemp -d` path that no other process on the machine can produce, so a row
+# in the operator's log naming it is proof that THIS run leaked — and no amount of concurrent real
+# activity can forge one. The byte delta is printed alongside as information, never as a verdict.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+# ── I1: isolation REDIRECTS the rows, it does not silently drop them ────────────────────────────────
+# The positive control for I2. If L1 were implemented by turning the meter off, I2 would pass for the
+# wrong reason and every arm in section (11) would still be exercising the write path by luck.
+GS_ROWS="$( meterrows "$GATE_SINK" )"
+[ "$GS_ROWS" -ge 20 ] \
+    && ok "I1 isolation: the rows sections (1)-(10) used to leak land in the gate's own sink ($GS_ROWS rows)" \
+    || no "I1 isolation: gate sink holds $GS_ROWS row(s) — isolation must redirect the rows, not drop them"
+
+# ── I3: the L2 guard. A harness that names no destination writes NO row, and still nudges ───────────
+TI3="$TMP/ti3"; mkdir -p "$TI3"
+GUARDHOME="$TMP/guardhome"; mkdir -p "$GUARDHOME"
+OUTI3="$( printf '%s' "$( grepjson guardcase needle )" \
+    | env -u RIPWIRE_METER_LOG -u RIPWIRE_HOME HOME="$GUARDHOME" RIPWIRE_METER_FIXTURE=1 \
+        PATH="$WITH_RIPWIRE" TMPDIR="$TI3" bash "$HOOK" )"; RCI3=$?
+[ "$RCI3" -eq 0 ] && [ -n "$OUTI3" ] && [ ! -f "$GUARDHOME/.ripwire/substitution.jsonl" ] \
+    && ok "I3 isolation: RIPWIRE_METER_FIXTURE with no named destination writes no row, and the nudge still fires" \
+    || no "I3 isolation: exit=$RCI3 nudge=[${OUTI3:+set}] rows=$( meterrows "$GUARDHOME/.ripwire/substitution.jsonl" )"
+
+# ── I4: with the guard absent, the production $HOME fallback still resolves ─────────────────────────
+# THE ONE ARM THAT OPTS OUT OF L2, so that the resolution real installs actually use stays gated. It
+# sandboxes $HOME to do it; if that sandbox is ever dropped, I2 below is what fails.
+TI4="$TMP/ti4"; mkdir -p "$TI4"
+FALLHOME="$TMP/fallbackhome"; mkdir -p "$FALLHOME"
+printf '%s' "$( grepjson fallbackcase needle )" \
+    | env -u RIPWIRE_METER_LOG -u RIPWIRE_HOME -u RIPWIRE_METER_FIXTURE HOME="$FALLHOME" \
+        PATH="$WITH_RIPWIRE" TMPDIR="$TI4" bash "$HOOK" >/dev/null 2>&1
+[ "$( meterrows "$FALLHOME/.ripwire/substitution.jsonl" )" = "1" ] \
+    && ok "I4 isolation: without the guard, \$HOME/.ripwire/substitution.jsonl is still the default (production path gated)" \
+    || no "I4 isolation: the HOME fallback wrote $( meterrows "$FALLHOME/.ripwire/substitution.jsonl" ) row(s), expected 1"
+
+# ── I5-I6: the scrub tool. A guard stops NEW pollution; existing logs still need repairing ──────────
+SCRUB="$ROOT/bench/substitution_scrub.py"
+if [ -f "$SCRUB" ]; then
+    # The gate's own sink is the ideal fixture: by construction every row in it is synthetic, so a
+    # correct scrub leaves nothing. This is a stronger test than a hand-built sample — it re-derives
+    # itself from whatever arms this file grows.
+    SZ_BEFORE="$( wc -c <"$GATE_SINK" 2>/dev/null | tr -d ' ' )"
+    python3 "$SCRUB" "$GATE_SINK" --out "$TMP/scrubbed.jsonl" >"$TMP/scrub.out" 2>&1; RCSC=$?
+    SZ_AFTER="$( wc -c <"$GATE_SINK" 2>/dev/null | tr -d ' ' )"
+    echo "-- substitution_scrub.py output (tail) --"; tail -n 12 "$TMP/scrub.out"
+    # not `meterrows`: on a file that EXISTS but is empty, `grep -c` prints 0 and exits 1, so that
+    # helper's `|| echo 0` fires on top of the 0 it already printed. An empty cleaned copy is exactly
+    # the expected result here, so this arm counts its own way.
+    SCRUBROWS="$( grep -c . "$TMP/scrubbed.jsonl" 2>/dev/null )"; [ -n "$SCRUBROWS" ] || SCRUBROWS=0
+    [ "$RCSC" -eq 0 ] && [ "$SCRUBROWS" -eq 0 ] \
+        && ok "I5 scrub: bench/substitution_scrub.py removes every fixture row from a gate-written log" \
+        || no "I5 scrub: exit=$RCSC, $SCRUBROWS row(s) survived — see $TMP/scrub.out"
+    [ "$SZ_BEFORE" = "$SZ_AFTER" ] \
+        && ok "I5b scrub: the input log is never modified in place" \
+        || no "I5b scrub: input changed size $SZ_BEFORE -> $SZ_AFTER"
+    if python3 "$SCRUB" "$GATE_SINK" --out "$GATE_SINK" >/dev/null 2>&1; then
+        no "I5c scrub: writing the cleaned copy OVER its input must be refused"
+    else
+        ok "I5c scrub: refuses to write the cleaned copy over its input"
+    fi
+    grep -qi 'removed' "$TMP/scrub.out" \
+        && ok "I5d scrub: the run reports what it removed and why" \
+        || no "I5d scrub: no removal report in the output"
+else
+    no "I5 scrub: bench/substitution_scrub.py does not exist"
+fi
+if [ -f "$SCHEMADOC" ]; then
+    I6MISS=""
+    for needle in 'RIPWIRE_METER_FIXTURE' 'substitution_scrub.py'; do
+        grep -Fq "$needle" "$SCHEMADOC" || I6MISS="$I6MISS $needle"
+    done
+    [ -z "$I6MISS" ] && ok "I6 docs: SUBSTITUTION_METER.md carries the isolation contract and the scrub tool" \
+        || no "I6 docs: SUBSTITUTION_METER.md is missing:$I6MISS"
+fi
+
+# ── I2: THE CANARY. No row in the operator's real log came from this run. ───────────────────────────
+NOW_BYTES=0
+[ -f "$REAL_METER_LOG" ] && NOW_BYTES="$( wc -c <"$REAL_METER_LOG" 2>/dev/null | tr -d ' ' )"
+echo "  (operator log $REAL_METER_LOG: ${REAL_METER_BYTES} -> ${NOW_BYTES} bytes during this run;"
+echo "   a delta here is concurrent REAL agent activity, which is why the assertion is provenance, not size)"
+if [ -f "$REAL_METER_LOG" ]; then
+    LEAKED="$( grep -c -F "$TMP" "$REAL_METER_LOG" 2>/dev/null )"
+    [ -n "$LEAKED" ] || LEAKED=0
+    [ "$LEAKED" -eq 0 ] \
+        && ok "I2 isolation: the operator's meter log contains NO row from this run's fixtures" \
+        || no "I2 isolation: $LEAKED fixture row(s) LEAKED into $REAL_METER_LOG — an arm escaped both layers"
+else
+    ok "I2 isolation: no operator meter log on this machine — nothing this run could have polluted"
 fi
 
 echo
