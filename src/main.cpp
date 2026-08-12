@@ -102,6 +102,11 @@
 #include <climits>
 #include <sys/stat.h>
 #include <unistd.h>           // getpid — unique temp-dir suffix for the HEAD-snapshot path (T0.1)
+#include <chrono>             // VT-1 --run-trace: the wall clock behind duration_ms/timeout (steady_clock)
+#include <csignal>            // VT-1 --run-trace: SIGKILL for the timeout's process-group kill
+#include <fcntl.h>            // VT-1 --run-trace: /dev/null for the child's stdin
+#include <poll.h>             // VT-1 --run-trace: the capture loop's deadline wait
+#include <sys/wait.h>         // VT-1 --run-trace: waitpid — the command's exit status, honestly decoded
 #include <tree_sitter/api.h>  // --doctor's grammar-probe check (ts_query_new against each grammar's tags.scm)
 #if defined( __APPLE__ )
 #include <mach-o/dyld.h>       // --doctor's self-exe-path check (_NSGetExecutablePath)
@@ -6752,6 +6757,461 @@ std::optional<int> runFromTrace( const MainDispatch& d )
     return 0;
 }
 
+// ── VT-1 — --run-trace="CMD": the exec-mode entry of the --from-trace family ─────────────────────────────
+// An agent's fix loop today is three steps: run the build/test via its own shell, read the (possibly huge)
+// output, paste the error into --from-trace. This collapses it to ONE call: execute CMD, capture its output,
+// and on failure serve the EXISTING from-trace bundle (fromTraceBundleText — reuse, never a second mapper)
+// plus a token-frugal <lines> view of the trace-relevant output lines. Trust model: `sh -c` at user
+// privileges with the inherited environment, exactly like make — no sandbox, and the legend says so.
+// Determinism, honestly scoped: the <run> record (duration_ms) and the captured output are MEASURED; every
+// byte derived FROM the captured text (the lines cut, the mapping) is a deterministic function of it.
+
+inline constexpr std::uint32_t kRunTraceTimeoutSecDefault = 600;                 // the cap when --run-timeout is not given
+inline constexpr std::size_t   kRunTraceHeadCapBytes      = 8u * 1024 * 1024;    // capture cap: first 8 MB kept …
+inline constexpr std::size_t   kRunTraceTailCapBytes      = 24u * 1024 * 1024;   // … plus the last 24 MB; the dropped middle is COUNTED
+inline constexpr std::size_t   kRunTraceRelevantLinesCap  = 40;                  // <lines view="relevant"> cap (first/last half split past it)
+inline constexpr std::size_t   kRunTraceTailLines         = 10;                  // success record: the disclosed tail length
+inline constexpr std::size_t   kRunTraceFallbackTailLines = 25;                  // failure with zero relevant lines: fall back to this tail
+inline constexpr int           kRunTraceExitCommandFailed = 4;                   // ripwire's own exit when the COMMAND failed/timed out (report served)
+
+// the error-line marks the relevant-lines cut recognizes beyond frame-shaped lines: compiler/linker primary
+// diagnostics, test failures, sanitizer banners, shell spawn errors. Substring match over a fixed table —
+// deterministic; the legend names the classes rather than restating the spellings.
+inline constexpr std::string_view kRunTraceErrorMarks[] =
+{
+    "error", "Error", "ERROR", "fatal", "FAIL", "fail", "Assertion", "assert", "Traceback", "panic",
+    "Segmentation fault", "not found", "No such file", "Exception", "Sanitizer", "SUMMARY:", "Abort", "abort",
+    "undefined reference", "Undefined symbols",
+};
+
+// everything one command execution produced, capture caps applied. The exit facts are decoded, never
+// re-derived downstream: isExitedNormally/exitCode vs termSignal vs isTimedOut are three different truths.
+struct RunCapture
+{
+    bool          isSpawnFailed    = false;   // ripwire's own machinery (pipe/fork) failed — nothing was executed
+    bool          isTimedOut       = false;   // the cap killed the process group
+    bool          isExitedNormally = false;   // WIFEXITED — exitCode is meaningful
+    int           exitCode         = -1;
+    int           termSignal       = 0;       // WTERMSIG when the command died to a signal (incl. our SIGKILL)
+    std::uint64_t durationMs       = 0;
+    std::uint64_t totalBytes       = 0;       // bytes the command actually produced (pre-cap)
+    std::uint64_t droppedBytes     = 0;       // middle bytes the head+tail cap dropped — disclosed, never silent
+    std::string   head;                        // first kRunTraceHeadCapBytes
+    std::string   tail;                        // overflow past the head cap, trimmed from the front to the tail cap
+};
+
+// append one read() chunk under the head+tail cap. The head fills once; overflow accumulates in the tail,
+// which is trimmed from the FRONT so the newest bytes always survive (a build log's failure is at the end).
+void runCaptureAppend( RunCapture& cap, const char* data, std::size_t byteCount )
+{
+    cap.totalBytes += byteCount;
+    std::size_t take = 0;
+    if( cap.head.size() < kRunTraceHeadCapBytes )
+    {
+        take = std::min( byteCount, kRunTraceHeadCapBytes - cap.head.size() );
+        cap.head.append( data, take );
+    }
+    if( take < byteCount )
+    {
+        cap.tail.append( data + take, byteCount - take );
+        if( cap.tail.size() > 2 * kRunTraceTailCapBytes )
+        {
+            cap.droppedBytes += cap.tail.size() - kRunTraceTailCapBytes;
+            cap.tail.erase( 0, cap.tail.size() - kRunTraceTailCapBytes );
+        }
+    }
+}
+
+// the captured text, reassembled for classification + mapping. A drop splices head onto tail: one newline at
+// the seam keeps two partial lines from fusing into a frankenline (the drop itself is dropped_bytes=).
+std::string runCaptureText( RunCapture& cap )
+{
+    if( cap.tail.size() > kRunTraceTailCapBytes )
+    {
+        cap.droppedBytes += cap.tail.size() - kRunTraceTailCapBytes;
+        cap.tail.erase( 0, cap.tail.size() - kRunTraceTailCapBytes );
+    }
+    if( cap.tail.empty() )
+    {
+        return cap.head;
+    }
+    std::string text = cap.head;
+    if( cap.droppedBytes > 0 )
+    {
+        text += '\n';
+    }
+    text += cap.tail;
+    return text;
+}
+
+// fork/exec `sh -c CMD` in its own process group, drain the pipe under a poll() deadline, SIGKILL the whole
+// group at the cap, and decode the exit honestly. Zero new dependencies — POSIX only (G3/G5).
+RunCapture runCommandCapture( const std::string& cmd, std::uint32_t timeoutSec )
+{
+    RunCapture cap;
+    int fds[2];
+    if( pipe( fds ) != 0 )
+    {
+        cap.isSpawnFailed = true;
+        return cap;
+    }
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto elapsedMs = [ & ]() -> std::int64_t
+    { return std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - t0 ).count(); };
+
+    const pid_t childPid = fork();
+    if( childPid < 0 )
+    {
+        close( fds[0] );  close( fds[1] );
+        cap.isSpawnFailed = true;
+        return cap;
+    }
+    if( childPid == 0 )
+    {
+        // child: own process group (the timeout kills the whole tree), stdin from /dev/null (a command that
+        // reads its terminal must not hang the report), both streams into ONE pipe (interleaved, as a
+        // terminal would see them), then the shell. _exit(127) mirrors sh's own command-not-found code.
+        setpgid( 0, 0 );
+        const int devNull = open( "/dev/null", O_RDONLY );
+        if( devNull >= 0 ) { dup2( devNull, STDIN_FILENO );  close( devNull ); }
+        dup2( fds[1], STDOUT_FILENO );  dup2( fds[1], STDERR_FILENO );
+        close( fds[0] );  close( fds[1] );
+        execl( "/bin/sh", "sh", "-c", cmd.c_str(), static_cast<char*>( nullptr ) );
+        _exit( 127 );
+    }
+
+    setpgid( childPid, childPid );   // parent side of the same race — both settings agree, whichever runs first
+    close( fds[1] );
+
+    // ── drain the pipe under the deadline; after a kill, keep draining briefly (an orphaned grandchild may
+    //    still hold the write side open — stop at the drain deadline rather than hanging on its EOF) ───────
+    const std::int64_t timeoutMs     = std::int64_t( timeoutSec ) * 1000;
+    const std::int64_t drainWindowMs = 2000;
+    std::int64_t       drainDeadlineMs = 0;
+    char               buf[ 65536 ];
+    for( ;; )
+    {
+        const std::int64_t nowMs = elapsedMs();
+        if( !cap.isTimedOut && nowMs >= timeoutMs )
+        {
+            cap.isTimedOut  = true;
+            drainDeadlineMs = nowMs + drainWindowMs;
+            kill( -childPid, SIGKILL );
+            kill( childPid, SIGKILL );
+        }
+        if( cap.isTimedOut && elapsedMs() >= drainDeadlineMs )
+        {
+            break;
+        }
+        const std::int64_t untilMs = ( cap.isTimedOut ? drainDeadlineMs : timeoutMs ) - elapsedMs();
+        struct pollfd pfd { fds[0], POLLIN, 0 };
+        const int ready = poll( &pfd, 1, int( std::clamp<std::int64_t>( untilMs, 0, 1000 ) ) );
+        if( ready > 0 )
+        {
+            const ssize_t n = read( fds[0], buf, sizeof buf );
+            if( n <= 0 ) { break; }                       // EOF: every writer closed the pipe
+            runCaptureAppend( cap, buf, std::size_t( n ) );
+        }
+        else if( ready < 0 && errno != EINTR )
+        {
+            break;
+        }
+    }
+    close( fds[0] );
+
+    // ── harvest the exit status, still under the cap: EOF can precede exit (a command that closed its own
+    //    stdout/stderr and kept running), so the wait polls the SAME deadline instead of blocking past it ──
+    int status = 0;
+    for( ;; )
+    {
+        const pid_t waited = waitpid( childPid, &status, cap.isTimedOut ? 0 : WNOHANG );
+        if( waited == childPid || waited < 0 )
+        {
+            break;
+        }
+        if( elapsedMs() >= timeoutMs )
+        {
+            cap.isTimedOut = true;
+            kill( -childPid, SIGKILL );
+            kill( childPid, SIGKILL );
+            continue;                                      // next iteration blocks: the group is dead
+        }
+        poll( nullptr, 0, 20 );
+    }
+    cap.durationMs = std::uint64_t( elapsedMs() );
+    if( WIFEXITED( status ) )
+    {
+        cap.isExitedNormally = true;
+        cap.exitCode         = WEXITSTATUS( status );
+    }
+    else if( WIFSIGNALED( status ) )
+    {
+        cap.termSignal = WTERMSIG( status );
+    }
+    return cap;
+}
+
+// split the captured text into its NON-EMPTY lines (views into `text`) — wsdetail::segmentsOf is the shared
+// split primitive (workspace.h), reused rather than re-rolled. Blank lines carry no signal for either the
+// relevant cut or the tail, so lines= counts non-empty captured lines (the legend says so).
+std::vector<std::string_view> runTraceSplitLines( std::string_view text )
+{
+    return rw::wsdetail::segmentsOf( text, '\n' );
+}
+
+// is this output line trace-relevant? An error mark (fixed table) or a frame-shaped line (the SAME per-line
+// extractor the mapper runs, so "frames that mapped" and "lines shown" can never disagree about shape).
+bool isRunTraceRelevantLine( std::string_view line )
+{
+    const bool hasErrorMark = std::any_of( std::begin( kRunTraceErrorMarks ), std::end( kRunTraceErrorMarks ),
+                                           [ line ]( std::string_view mark ) { return line.find( mark ) != std::string_view::npos; } );
+    return hasErrorMark || rw::tracein::extractFrames( line ).frameShapedLines > 0;
+}
+
+// the <lines> element: view="relevant" on failure (error-marked / frame-shaped lines, first+last halves kept
+// past the cap, the omitted middle disclosed INLINE), view="tail" on success or when nothing classified.
+// Empty capture ⇒ empty string (the <run> record's lines="0" already says why).
+std::string renderRunTraceLines( const std::vector<std::string_view>& lines, bool isFailure )
+{
+    std::vector<std::size_t> picked;
+    bool isRelevantView = false;
+    bool isCapped       = false;
+    std::size_t relevantCount = 0;
+
+    if( isFailure )
+    {
+        std::vector<std::size_t> relevant;
+        for( std::size_t i = 0; i < lines.size(); ++i )
+        {
+            if( isRunTraceRelevantLine( lines[i] ) )
+            {
+                relevant.push_back( i );
+            }
+        }
+        relevantCount = relevant.size();
+        if( !relevant.empty() )
+        {
+            isRelevantView = true;
+            if( relevant.size() <= kRunTraceRelevantLinesCap )
+            {
+                picked = relevant;
+            }
+            else
+            {
+                isCapped = true;
+                const std::size_t half = kRunTraceRelevantLinesCap / 2;
+                picked.assign( relevant.begin(), relevant.begin() + std::ptrdiff_t( half ) );
+                picked.insert( picked.end(), relevant.end() - std::ptrdiff_t( half ), relevant.end() );
+            }
+        }
+    }
+    if( !isRelevantView )
+    {
+        const std::size_t tailLines = isFailure ? kRunTraceFallbackTailLines : kRunTraceTailLines;
+        const std::size_t begin     = lines.size() > tailLines ? lines.size() - tailLines : 0;
+        for( std::size_t i = begin; i < lines.size(); ++i )
+        {
+            picked.push_back( i );
+        }
+    }
+    if( picked.empty() )
+    {
+        return {};
+    }
+
+    std::string cdata;
+    const std::size_t halfCount = kRunTraceRelevantLinesCap / 2;
+    for( std::size_t k = 0; k < picked.size(); ++k )
+    {
+        if( k > 0 )
+        {
+            cdata += '\n';
+        }
+        if( isCapped && k == halfCount )
+        {
+            cdata += "[... ";
+            cdata += std::to_string( relevantCount - kRunTraceRelevantLinesCap );
+            cdata += " relevant lines omitted (middle) ...]\n";
+        }
+        rw::appendCdataSafe( lines[ picked[k] ], cdata );
+    }
+
+    std::string out = "<lines view=\"";
+    out += isRelevantView ? "relevant" : "tail";
+    out += "\" shown=\"";  out += std::to_string( picked.size() );
+    if( isFailure )
+    {
+        out += "\" relevant=\"";  out += std::to_string( relevantCount );
+    }
+    out += "\" total=\"";  out += std::to_string( lines.size() );
+    out += "\"";
+    if( isCapped )
+    {
+        out += " capped=\"1\"";
+    }
+    out += "><![CDATA[";  out += cdata;  out += "]]></lines>";
+    return out;
+}
+
+// the <run> record — the command's exit ALWAYS disclosed: exit= when it exited, signal= when a signal killed
+// it, timed_out="1" when that signal was the cap's. framesFound carries the frameless-failure disclosure.
+std::string renderRunTraceRecord( const RunCapture& cap, std::uint32_t timeoutSec, std::size_t lineCount, bool isFrameless )
+{
+    std::string r = "<run";
+    if( cap.isTimedOut )
+    {
+        r += " timed_out=\"1\"";
+    }
+    if( cap.isExitedNormally )
+    {
+        r += " exit=\"";  r += std::to_string( cap.exitCode );  r += "\"";
+    }
+    else if( cap.termSignal != 0 )
+    {
+        r += " signal=\"";  r += std::to_string( cap.termSignal );  r += "\"";
+    }
+    r += " duration_ms=\"";  r += std::to_string( cap.durationMs );
+    r += "\" timeout_s=\"";  r += std::to_string( timeoutSec );
+    r += "\" lines=\"";      r += std::to_string( lineCount );
+    r += "\" bytes=\"";      r += std::to_string( cap.totalBytes );
+    r += "\"";
+    if( cap.droppedBytes > 0 )
+    {
+        r += " dropped_bytes=\"";  r += std::to_string( cap.droppedBytes );  r += "\"";
+    }
+    if( isFrameless )
+    {
+        r += " frames=\"0\"";
+    }
+    r += "/>";
+    return r;
+}
+
+// which of the three run-trace documents is this comment for? The legend body is shared; only the closing
+// sentence differs, and each states its own truth plainly.
+enum class RunTraceDocKind : std::uint8_t { Success, FramelessFailure, Bundle };
+
+// the run-trace legend comment. NOTE the double-dash rule: an XML comment may not contain "--", so flag
+// names appear single-dashed here and the command echo goes through xmlCommentText (the srcNote precedent).
+std::string runTraceLegendComment( std::string_view cmd, RunTraceDocKind kind )
+{
+    std::string c = "<!-- ripwire run-trace: executed \"";
+    c += rw::xmlCommentText( cmd );
+    c += "\" under sh -c (the make trust model: your user, inherited environment, stdin=/dev/null, NO sandbox), "
+         "stdout+stderr captured interleaved. On <run>: exit= the command's OWN exit code; signal= the signal that "
+         "killed it; timed_out=\"1\" = the timeout_s= cap killed the whole process group (an honest TIMEOUT, never an "
+         "empty success); duration_ms= wall clock; lines= the capture's non-empty line count; bytes= the whole "
+         "capture; dropped_bytes= middle bytes the capture cap dropped (head+tail kept). duration_ms and the "
+         "captured output are MEASURED, not deterministic "
+         "(and not claimed to be); every byte derived FROM the captured text - the <lines> cut and any mapping - is a "
+         "deterministic function of it. <lines view=\"tail\"> = the last shown= of total= output lines; "
+         "view=\"relevant\" = shown= of the relevant= error-marked / frame-shaped lines out of total= (capped=\"1\" = "
+         "first+last halves kept, the omitted middle disclosed inline). ";
+    switch( kind )
+    {
+        case RunTraceDocKind::Success:
+            c += "The command exited 0: nothing failed, so there is NOTHING TO MAP - no trace bundle is served for a "
+                 "passing command.";
+            break;
+        case RunTraceDocKind::FramelessFailure:
+            c += "The command FAILED but the captured output carried no stack-trace / sanitizer / compiler frames "
+                 "(frames=\"0\" on <run>): nothing to map onto the corpus - the run record and lines here are the whole "
+                 "answer.";
+            break;
+        case RunTraceDocKind::Bundle:
+            c += "The command FAILED and the captured text carried mappable frames: the <trace>/<sigs>/<bodies> bundle "
+                 "below is the byte-deterministic from-trace mapping of that text (its own legend precedes it above).";
+            break;
+    }
+    c += " -->";
+    return c;
+}
+
+// VT-1 — --run-trace="CMD": execute, capture, and on failure map. One call, one document, the whole
+// fix-loop entry. Exit: 0 = the command succeeded; kRunTraceExitCommandFailed (4) = it failed or timed out
+// (the report is on stdout either way); 1 = ripwire's own spawn machinery failed.
+std::optional<int> runRunTrace( const MainDispatch& d )
+{
+    using namespace rw;
+    const Config& cfg = d.cfg;
+    if( cfg.runTrace.empty() )
+    {
+        return std::nullopt;
+    }
+
+    const std::string   cmd( cfg.runTrace );
+    const std::uint32_t timeoutSec = cfg.runTimeoutSec > 0 ? std::uint32_t( cfg.runTimeoutSec ) : kRunTraceTimeoutSecDefault;
+
+    RunCapture cap = runCommandCapture( cmd, timeoutSec );
+    if( cap.isSpawnFailed )
+    {
+        std::fprintf( stderr, "ripwire: --run-trace: cannot spawn '/bin/sh -c' (pipe/fork failed) — nothing was executed\n" );
+        return 1;
+    }
+    if( cap.isTimedOut )
+    {
+        std::fprintf( stderr, "ripwire: --run-trace: TIMEOUT — the command exceeded the %u s cap; its process group was killed\n", timeoutSec );
+    }
+
+    const std::string                   text    = runCaptureText( cap );
+    const std::vector<std::string_view> lines   = runTraceSplitLines( text );
+    const bool isSuccess = !cap.isTimedOut && cap.isExitedNormally && cap.exitCode == 0;
+    const std::string label = "run-trace: " + cmd;
+
+    // ── exit 0: the minimal success record — no bundle, and the legend says plainly why ─────────────────
+    if( isSuccess )
+    {
+        std::string doc = ctxRootOpen( label, {} );
+        doc += runTraceLegendComment( cmd, RunTraceDocKind::Success );
+        doc += renderRunTraceRecord( cap, timeoutSec, lines.size(), /*isFrameless=*/false );
+        doc += renderRunTraceLines( lines, /*isFailure=*/false );
+        doc += "</ctx>";
+        std::fwrite( doc.data(), 1, doc.size(), stdout );
+        return 0;
+    }
+
+    // ── failure: the run record + relevant-lines cut ride INSIDE the from-trace bundle as its prelude, so
+    //    the whole answer is ONE document under ONE budget ledger ─────────────────────────────────────────
+    const std::string linesBlock = renderRunTraceLines( lines, /*isFailure=*/true );
+
+    FromTraceInputs in;
+    in.bundleBudgetBytes = cfg.tokenBudget > 0
+        ? std::size_t( double( cfg.tokenBudget ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
+        : rw::kForPayloadBudgetBytes;
+    in.sigLadderBudgetBytes = cfg.packBudgetBytes;
+    in.bodyBudgetBytes      = cfg.packBudgetBytes;
+    in.compress = cfg.compress;
+    in.fanIn    = d.fanInPtr;
+    in.impure   = d.impurePtr;
+    in.tested   = d.testedPtr;
+    in.amp      = d.ampPtr;
+    in.redact   = d.redactPtr;
+    in.notes    = d.notesPtr;
+
+    std::string prelude = runTraceLegendComment( cmd, RunTraceDocKind::Bundle );
+    prelude += renderRunTraceRecord( cap, timeoutSec, lines.size(), /*isFrameless=*/false );
+    prelude += linesBlock;
+    in.preludeXml = prelude;
+
+    const FromTraceResult res = fromTraceBundleText( d.ing, d.g, text, label, in );
+    if( res.ok )
+    {
+        std::fwrite( res.xml.data(), 1, res.xml.size(), stdout );
+        reportRedactions( stderr, d.redactCounts );
+        return kRunTraceExitCommandFailed;
+    }
+
+    // ── failure with NO mappable frames: still a full report — never a refusal, never a silent success ──
+    std::string doc = ctxRootOpen( label, {} );
+    doc += runTraceLegendComment( cmd, RunTraceDocKind::FramelessFailure );
+    doc += renderRunTraceRecord( cap, timeoutSec, lines.size(), /*isFrameless=*/true );
+    doc += linesBlock;
+    doc += "</ctx>";
+    std::fwrite( doc.data(), 1, doc.size(), stdout );
+    return kRunTraceExitCommandFailed;
+}
+
 // L3 — repo field notes: the WRITE side (surfacing at retrieval is wired into
 // packSignatures/packBodies above). Two verbs share this handler:
 //   --note-add="TARGET: text" — append a note to the committed, sorted root/.ripwire_notes and print the exact
@@ -10650,7 +11110,8 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
         { "--layout",            c.layoutFlag             },
         { "--field-affinity",    c.fieldAffinity          },   // §F1: runFieldAffinity, between --layout and --doc-drift
         { "--doc-drift",         c.docDrift               },
-        { "--from-trace",       !c.fromTrace.empty()      }, { "--note-add",      c.noteAddFlag           },
+        { "--from-trace",       !c.fromTrace.empty()      }, { "--run-trace",     !c.runTrace.empty()     },
+        { "--note-add",          c.noteAddFlag            },
         { "--notes",             c.notesList              }, { "--skipped",       c.skippedList           },
         { "--communities",       c.communities            },
         { "--community",         c.communityFlag          }, { "--zoom",          c.zoom                  },
@@ -10968,6 +11429,10 @@ const char* jsonUnsupportedVerb( const rw::Config& c )
     if( !c.fromTrace.empty() )
     {
         return "--from-trace";
+    }
+    if( !c.runTrace.empty() )
+    {
+        return "--run-trace";
     }
     if( c.noteAddFlag )
     {
@@ -11963,7 +12428,7 @@ int main( int argc, char** argv )
     // "will something below ask for impurePtr", and a verb that reads d.impurePtr must appear here.
     std::vector<char>        impure;
     const std::vector<char>* impurePtr = nullptr;
-    if( !cfg.forTask.empty() || cfg.packSignatures || !cfg.fromTrace.empty() || cfg.packTaskFlag )
+    if( !cfg.forTask.empty() || cfg.packSignatures || !cfg.fromTrace.empty() || !cfg.runTrace.empty() || cfg.packTaskFlag )
     {
         impure    = computeImpure( ing, g );
         impurePtr = &impure;
@@ -12150,6 +12615,13 @@ int main( int argc, char** argv )
     }
 
     if( std::optional<int> handled = runFromTrace( dsp ) )
+    {
+        return *handled;
+    }
+
+    // VT-1: the exec-mode sibling, immediately after --from-trace (the two are read together; a command line
+    // passing both is answered by the file/stdin form, and the X9 slots table discloses the collision).
+    if( std::optional<int> handled = runRunTrace( dsp ) )
     {
         return *handled;
     }

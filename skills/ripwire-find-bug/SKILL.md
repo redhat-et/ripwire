@@ -89,6 +89,13 @@ clang/gcc diagnostic) — don't hand-translate its frames into queries one by on
    inline, the other suspects as signatures. `skipped=` tells you how many frames fell outside every root.
 3. **Compose the budget** — `--from-trace=FILE --token-budget=N` fits the bundle to N tokens for a tight
    context window. Unparseable input refuses loudly (never a misleading empty map).
+4. **Or skip the run-read-paste loop entirely** — `ripwire <dir> --run-trace="make -j"` RUNS the
+   build/test command itself (`sh -c`, your user, your environment — the make trust model, no sandbox)
+   and, on a non-zero exit, serves the SAME from-trace bundle for the captured output plus a token-frugal
+   `<lines view="relevant">` cut of the error/frame-shaped output lines. Exit 0 gets a minimal success
+   record and no bundle — nothing failed, nothing to map. The command's own exit code is always disclosed
+   (`<run exit=>`), and `--run-timeout=SECONDS` caps a hanging command (default 600 s, reported
+   `timed_out="1"` honestly, never as an empty success).
 
 ## Output
 

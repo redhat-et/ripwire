@@ -363,6 +363,18 @@ struct Config
                                                              // table-driven frame extraction (python/asan/node/compiler/generic),
                                                              // innermost-first ranking over IN-CORPUS frames only (out-of-corpus
                                                              // frames listed+counted, never ranked), emits a --for-style bundle.
+    std::string_view runTrace;                              // --run-trace="CMD" (VT-1): EXEC-MODE --from-trace. Run CMD under
+                                                             // `sh -c` (the make trust model: user privileges, inherited env,
+                                                             // stdin=/dev/null, NO sandbox), capture stdout+stderr interleaved,
+                                                             // and on a non-zero exit serve the from-trace bundle for the
+                                                             // captured text plus a token-frugal <lines> cut of the relevant
+                                                             // output lines; exit 0 gets a minimal success record, NO bundle.
+                                                             // The command's exit code is ALWAYS disclosed on <run exit=>.
+    int              runTimeoutSec   = 0;                   // --run-timeout=SECONDS: cap for --run-trace's command (0 = the
+                                                             // default 600 s, disclosed as timeout_s=). At the cap the whole
+                                                             // process group is killed and the record says timed_out="1" — an
+                                                             // honest TIMEOUT, never an empty success. Modifier of --run-trace
+                                                             // only; refused loudly alone (validateConfig).
     bool             noteAddFlag     = false;               // --note-add was given at all (a bare/empty value still routes to the
                                                              // handler and refuses loudly rather than falling through to the map)
     std::string_view noteAdd;                               // --note-add="TARGET: text" (B11/L3): append a field note (target = a
@@ -647,7 +659,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               plain --query, and --format=candidates (incl. with --for). --for's OWN\n"
         "                               signature/lego/compose bundle self-limits via --pack-top-n instead — --top-k is\n"
         "                               INERT there (documented, not fixed — a real fix is a behavior change).\n"
-        "                               --pack-task/--from-trace/--situ self-budget via --token-budget, not --top-k.\n"
+        "                               --pack-task/--from-trace/--run-trace/--situ self-budget via --token-budget, not --top-k.\n"
         "                               --top-k=0 emits NO ranked map at all — ONLY the payload you asked for\n"
         "                               (--expand/--outline/--pack-signatures/--pack-top-n). Use it when you want the\n"
         "                               body and not the ~200-symbol map that otherwise rides along with it.\n"
@@ -689,7 +701,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                                   same map is smaller than the XML one (MEASURED on src/ --top-k=200:\n"
         "                                   est_tokens 577 XML vs 435 JSON, ~25%% apart). So the same N can pass under\n"
         "                                   --json and fail without it — pick the budget for the dialect you emit.\n"
-        "                                 - --for / --pack-task / --from-trace: SHAPES instead of gating — overrides that\n"
+        "                                 - --for / --pack-task / --from-trace / --run-trace: SHAPES instead of gating — overrides that\n"
         "                                   lens's own default payload budget and trims to fit, always exit 0. --for's\n"
         "                                   header reports est_tokens=\"N\" so its fit is checkable; --pack-task/--from-trace\n"
         "                                   report their budget ledger in the header report line instead.\n"
@@ -1401,6 +1413,25 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               the six shapes that do, alongside the default map, --recall, --connect, --pr-context and\n"
         "                               --for --detail=N. --top-k is NOT read here (the frame order is the trace's, not a rank).\n"
         "                               Unparseable input refuses loudly (never an empty map).\n"
+        "    --run-trace=\"CMD\"          EXEC-MODE --from-trace — the whole fix-loop entry in ONE call. Runs CMD under `sh -c`\n"
+        "                               (the make trust model: your user, your environment, stdin=/dev/null, NO sandbox),\n"
+        "                               captures stdout+stderr interleaved, and on a NON-ZERO exit serves the --from-trace\n"
+        "                               bundle for the captured text (frames mapped innermost-first, the innermost in-corpus\n"
+        "                               symbol's FULL body) plus a token-frugal <lines view=\"relevant\"> cut of the error /\n"
+        "                               frame-shaped output lines — shown=/relevant=/total= all disclosed, the cut never\n"
+        "                               silent. The command's own exit code is ALWAYS disclosed on <run exit=>; a command\n"
+        "                               that exits 0 gets a minimal success record (exit, measured duration_ms, a disclosed\n"
+        "                               tail of output) and NO bundle — nothing failed, so there is nothing to map. The <run>\n"
+        "                               record and captured lines are MEASURED (not deterministic, not claimed to be); the\n"
+        "                               MAPPING of the captured text is byte-deterministic, and the document says which part\n"
+        "                               is which. Composes with --token-budget (it bounds the bundle half, like --from-trace);\n"
+        "                               --top-k / --max-tokens are not read here. ripwire's exit: 0 = the command succeeded;\n"
+        "                               4 = it failed or timed out (the report is on stdout either way); 1 = ripwire itself\n"
+        "                               could not spawn it.\n"
+        "    --run-timeout=SECONDS      cap for --run-trace's command (default 600 s; always disclosed as timeout_s=). A\n"
+        "                               command still running at the cap has its whole process group killed and is reported\n"
+        "                               timed_out=\"1\" — an honest TIMEOUT, never an empty success. Modifies --run-trace\n"
+        "                               only; refused loudly alone.\n"
         "    --note-add=\"TARGET: text\"  pin a field note (write-side memory) to TARGET — a canonical id (path::scope::name, as\n"
         "                               --for/--expand emit it) or a file path — in the committed, sorted .ripwire_notes at the\n"
         "                               repo root. The date is git's committer clock (HEAD), not wall time, so the line is\n"
@@ -1832,6 +1863,7 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--edit-check=",  &Config::editCheckSym    , EmptyValue::Refuse, "a symbol name (file:name disambiguates)", "--edit-check=parseArgs" },
     { "--eval-stray=",  &Config::evalStray       , EmptyValue::Refuse, "a labelled TSV file path",               "--eval-stray=bench/strayverdicts.tsv" },
     { "--from-trace=",  &Config::fromTrace       , EmptyValue::Refuse, "a trace file path, or - for stdin",      "--from-trace=crash.txt" },
+    { "--run-trace=",   &Config::runTrace        , EmptyValue::Refuse, "a shell command line to execute",        "--run-trace=\"make -j\"" },
     { "--with-profile=",&Config::withProfile     , EmptyValue::Refuse, "a profile report holding a #PROF_TSV block", "--with-profile=report.txt" },
 
     // the lane plan's two inputs (each refused alone by validateConfig)
@@ -2005,6 +2037,9 @@ inline constexpr IntFlag kIntFlags[] =
     // kBoolFlags row above); 2..16 is enforced in validateConfig alongside the task-xor-brief contract.
     { "--plan-lanes=",       &Config::planLaneCount,   false, kIntFlagMax,     "a positive integer",         "--plan-lanes=3",
       nullptr, nullptr, &Config::planLanesFlag },
+    // VT-1: --run-trace's command cap in SECONDS (default 600 when unset; the cross-flag "modifies
+    // --run-trace only" contract is validateConfig's, not a parse-time domain — same split as --partition).
+    { "--run-timeout=",      &Config::runTimeoutSec,   false, kIntFlagMax,     "a positive integer (seconds)", "--run-timeout=60" },
 };
 
 // Tripwire (house style): the `--` surface is 149 arms. Adding or removing one must move exactly one of
@@ -2028,7 +2063,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 18;   // +1: --color-by= (enum-value arm)
-inline constexpr std::size_t kTotalFlagArms       = 170;  // +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint)
+inline constexpr std::size_t kTotalFlagArms       = 172;  // +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2351,8 +2386,8 @@ inline bool honorsTopK( const Config& c ) noexcept
 }
 
 // §H4 / V3 M-4 — the THIRD budget flag, and the one the two original guards missed. --token-budget is read in
-// exactly five places outside cli.h (runForLens + emitForLensJson, runTargetedViews' --recall arm,
-// runFromTrace, runPackTask, runDefaultMap — re-derivable with `ripwire . --grep=tokenBudget`), none of them
+// exactly six places outside cli.h (runForLens + emitForLensJson, runTargetedViews' --recall arm,
+// runFromTrace, runRunTrace, runPackTask, runDefaultMap — re-derivable with `ripwire . --grep=tokenBudget`), none of them
 // in the report/paging family. So every member of that family — including four of the five graph-count verbs
 // this round disclosed — ACCEPTED it at exit 0 with an empty stderr and emitted the full document, while the
 // default map on the same flag refuses with rc=3 and a withheld_est_tokens= body. Accepted-and-ignored is a
@@ -2395,8 +2430,8 @@ inline constexpr PagingFamilyFlagGuard kMaxTokensGuard
 };
 inline constexpr PagingFamilyFlagGuard kTokenBudgetGuard
 {
-    "--token-budget is honored by the default map (the CI gate), --for, --pack-task, --recall and "
-    "--from-trace — none of them in the --limit/--offset-honoring set (",
+    "--token-budget is honored by the default map (the CI gate), --for, --pack-task, --recall, "
+    "--from-trace and --run-trace — none of them in the --limit/--offset-honoring set (",
     ")",
     "no byte budget to gate",
     "ripwire <dir> --callers=SYM --limit=3"
@@ -2576,7 +2611,7 @@ inline void noticeShapingFlagIgnored( const Config& c ) noexcept
     if( c.tokenBudget > 0 && !verb->honorsTokenBudget )
     {
         std::fprintf( stderr, "ripwire: --token-budget is not read by %.*s — it gates the default map and bounds "
-                              "--for, --pack-task, --recall and --from-trace. %.*s emitted its full result "
+                              "--for, --pack-task, --recall, --from-trace and --run-trace. %.*s emitted its full result "
                               "(nothing was withheld)\n",
                       int( verb->name.size() ), verb->name.data(), int( verb->name.size() ), verb->name.data() );
     }
@@ -2650,6 +2685,14 @@ inline void validateModifierGuards( Config& c ) noexcept
     {
         std::fprintf( stderr, "ripwire: --force only applies to `ripwire wrap <agent>` (proceed past CRITICAL skill findings) — "
                               "pass it there instead (e.g. ripwire wrap claude --force)\n" );
+        c.ok = false;
+    }
+
+    // --run-timeout caps --run-trace's command and reaches nothing anywhere else; alone it would silently
+    // no-op exactly like the modifiers around it. Refuse loudly, naming both flags.
+    if( c.runTimeoutSec > 0 && c.runTrace.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --run-timeout=SECONDS modifies --run-trace — pass it too (e.g. ripwire <dir> --run-trace=\"make -j\" --run-timeout=60)\n" );
         c.ok = false;
     }
 
