@@ -113,7 +113,7 @@ function row(s, y, h, cols, opts={}){
     ["byte-identical", "two runs, same bytes — a gate on every push, not a tendency; warm equals cold"],
     ["zero runtime deps", "CMake + a C++23 compiler; builds with the network off — vendored everything"],
     ["the languages", "Rust · C++ · ObjC/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript · JavaScript · Java · Ruby · Bash · C# · JSON — Metal and ObjC ride a shared grammar"],
-    ["agent-native", "an MCP server and 145 long flags behind one `--help` that is always the authority"],
+    ["agent-native", "an MCP server and 146 long flags behind one `--help` that is always the authority"],
   ];
   let y = 4.15;
   for (const [h2, b] of props){
@@ -146,7 +146,7 @@ function row(s, y, h, cols, opts={}){
     s.addText(flags, { x: MX+6.3,  y: y+0.04, w: 5.65, h: 0.58, fontFace: MONO, fontSize: 9, color: CYAN, valign: "middle", margin: 0 });
     y += 0.74;
   }
-  foot(s, "--help is generated from the binary's own flag table — 145 long flags; docs/COMMANDS.md documents 117 with recorded output");
+  foot(s, "--help is generated from the binary's own flag table — 146 long flags; docs/COMMANDS.md documents 92 with recorded output");
 }
 
 /* ── S5 · the moments ───────────────────────────────────────────────────── */
@@ -530,7 +530,7 @@ function row(s, y, h, cols, opts={}){
   kicker(s, "// how it stays true", AMBER);
   title(s, "Proven, not promised");
   const cards = [
-    ["373 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"],
+    ["397 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"],
     ["byte-identical, always", "two runs over the same tree produce the same bytes; warm equals cold. Enforced in CI, twice — Release AND a plain flavour, because NDEBUG once blinded a whole class of checks"],
     ["differential refactoring", "a refactor must prove it changed nothing observable: two binaries, hundreds of argv vectors, stdout + stderr + exit codes byte-identical"],
     ["held-out labels, authored blind", "eval labels were written by reading source before the ranker ever ran on them — so the eval is allowed to say the ranker is wrong. It has."],
@@ -720,10 +720,10 @@ function row(s, y, h, cols, opts={}){
   kicker(s, "// do not take any of it on trust", AMBER);
   title(s, "Every claim, and the command that re-derives it");
   const claims = [
-    ["145 long flags · 23 slides",        "bash test/deckclaimcheck.sh"],
+    ["146 long flags · 23 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["67.0% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
-    ["373 gate scripts",                  "bash test/manifestcheck.sh"],
+    ["397 gate scripts",                  "bash test/manifestcheck.sh"],
     ["34 repos · 54 papers · 221 surveyed","bash test/readmedriftcheck.sh"],
     ["the ten moments, any row",          "ripwire . --callers=SYM | wc -c"],
     ["the head-to-head table",            "bench/headtohead/r4-2026-08-06/"],
