@@ -1,0 +1,98 @@
+split	state	permitted	provenance	prompt
+dev	clean	verify-claim	templated	calls(betaNode, alphaNode)
+dev	clean	verify-claim	templated	uses(CacheNode, cacheValue)
+dev	clean	verify-claim	templated	unused(StorageDriver)
+dev	clean	verify-claim	templated	contains(HttpClient, sendRequest)
+dev	clean	verify-claim	templated	reaches(parseConfigValue, renderXmlRow)
+dev	clean	connect-symbols	templated	How do alphaNode, betaNode, and gammaNode connect?
+dev	clean	connect-symbols	templated	Relate CacheNode, HttpClient, StorageDriver, and renderXmlRow
+dev	clean	connect-symbols	templated	Show the shared flow across parseConfigValue, sendRequest, and cacheValue
+dev	clean	connect-symbols	templated	Where do renderXmlRow, CacheNode, and alphaNode meet?
+dev	clean	connect-symbols	templated	Trace connections among HttpClient, StorageDriver, and gammaNode
+dev	clean	understand-symbol	templated	Help me understand the implementation of targetSymbol
+dev	clean	understand-symbol	templated	How does CacheNode work?
+dev	clean	understand-symbol	templated	Explain the implementation of HttpClient
+dev	clean	understand-symbol	templated	I need to understand parseConfigValue
+dev	clean	understand-symbol	templated	How does renderXmlRow work internally?
+dev	clean	trace-debug	templated	AddressSanitizer: heap-use-after-free\n#0 0x123 in targetSymbol router.cpp:4
+dev	clean	trace-debug	templated	ThreadSanitizer: data race\n#0 0xbeef in CacheNode router.cpp:5
+dev	clean	trace-debug	templated	Traceback (most recent call last):\n  File "worker.py", line 4, in sendRequest
+dev	clean	trace-debug	templated	Stack trace from the failing worker: frame targetSymbol
+dev	clean	trace-debug	templated	#0 0xdead in renderXmlRow at router.cpp:9
+dev	dirty	review-diff	templated	Review my current changes before I push
+dev	dirty	review-diff	templated	Am I ready to push this diff?
+dev	dirty	review-diff	templated	Is my diff safe to merge?
+dev	dirty	review-diff	templated	Review my changes before pushing
+dev	dirty	review-diff	templated	Which tests should I run for my current changes before I push?
+dev	clean	plan-feature	templated	Plan the implementation and scope of a new cache feature
+dev	clean	plan-feature	templated	Plan a new multi-symbol feature
+dev	clean	plan-feature	templated	Scope the implementation of the new retry feature
+dev	clean	plan-feature	templated	Plan implementation before building this feature
+dev	clean	plan-feature	templated	I need an implementation plan and scope for a feature
+dev	clean	reuse-one-symbol	templated	I am about to write one helper function for cache keys
+dev	clean	reuse-one-symbol	templated	About to write one class for request state
+dev	clean	reuse-one-symbol	templated	I am about to write a helper function
+dev	clean	reuse-one-symbol	templated	Before coding, I am about to write one helper
+dev	clean	reuse-one-symbol	templated	About to write one function for XML output
+dev	clean	locate-task	templated	Find the code responsible for this retry timeout bug
+dev	clean	locate-task	templated	Locate the code behind the wrong output bug
+dev	clean	locate-task	templated	Find the code responsible for this crash
+dev	clean	locate-task	templated	Locate the request parsing symptom
+dev	clean	locate-task	templated	Find the code responsible for the wrong output
+dev	clean	abstain	templated	Write a cheerful release announcement
+dev	clean	abstain	templated	Summarize this paragraph for a new reader
+dev	clean	abstain	templated	What color should the logo use?
+dev	clean	abstain	templated	Translate this sentence into French
+dev	clean	abstain	templated	Draft a polite email to the team
+dev	clean	abstain	templated	Review my current changes before I push
+dev	clean	abstain	templated	Tell me a short joke about compilers
+dev	clean	abstain	templated	Create a weekly meeting agenda
+dev	clean	abstain	templated	Rewrite this headline in title case
+dev	clean	abstain	templated	Compare two travel destinations
+test	clean	verify-claim	handwritten-digD-1	calls(cacheValue, sendRequest)
+dev	clean	verify-claim	handwritten-digD-1	reaches(targetSymbol, "router.cpp")
+test	clean	verify-claim	handwritten-digD-1	now i'm checking whether calls(betaNode, alphaNode) still holds before i touch anything
+dev	clean	verify-claim	handwritten-digD-1	the design notes say cacheValue is orphaned by now — checking unused(cacheValue) before i rip it out
+test	clean	verify-claim	handwritten-digD-1	before deleting anything i want proof that unused(StorageDriver) comes back confirmed
+dev	clean	connect-symbols	handwritten-digD	let me trace through how parseConfigValue feeds into sendRequest and where cacheValue picks the result up
+test	clean	connect-symbols	handwritten-digD-10	i'm trying to see how HttpClient, StorageDriver and renderXmlRow end up talking to each other
+dev	clean	connect-symbols	handwritten-digD	now i need to check where alphaNode, betaNode and targetSymbol all come together — there must be a shared caller somewhere
+test	clean	connect-symbols	handwritten-digD	the ticket names CacheNode, cacheValue and sendRequest but i cannot see the relationship between the three from here
+dev	clean	understand-symbol	handwritten-digD-10	i need to understand what targetSymbol actually does before i change its return value
+test	clean	understand-symbol	handwritten-digD-10	let me read the implementation of renderXmlRow — the doc comment does not match what i saw at the call site
+test	clean	understand-symbol	handwritten-digD-10	how does StorageDriver decide which backend it hands back?
+test	clean	understand-symbol	handwritten-digD-10	i'm going to read through parseConfigValue line by line — the fallback path is the part i care about
+dev	clean	understand-symbol	handwritten-digD-10	let me look at CacheNode more closely, i still do not get what the eviction branch is for
+test	dirty	review-diff	handwritten-digD-22	one last look over what i changed before pushing
+test	dirty	review-diff	handwritten-digD-31	i want a sanity pass over my diff — which tests do i even need here?
+dev	dirty	review-diff	handwritten-digD-22	give my current changes a once-over before pushing anything
+test	dirty	review-diff	handwritten-digD-22	is this diff actually ok to merge or am i missing something?
+dev	dirty	review-diff	handwritten-digD-22	time to review my current changes and run whatever tests still matter
+dev	clean	abstain	handwritten-digD-22	give my current changes a review before pushing this branch
+dev	clean	plan-feature	handwritten-digD-11	i need to scope out the new export feature before building anything
+dev	clean	plan-feature	handwritten-digD-11	let me plan how the retry feature should be broken into pieces before i write any of it
+dev	clean	plan-feature	handwritten-digD-11	sketch the scope of this caching feature first — i want an ordered list of the pieces
+dev	clean	plan-feature	handwritten-digD-11	before starting this feature i want a rough plan of which files it touches and how big it gets
+test	clean	plan-feature	handwritten-digD-11	i'm about to start on the bulk import work — what already exists that i should build on top of?
+test	clean	reuse-one-symbol	handwritten-digD-3	i'm going to add one helper function for backoff timing unless something like it already exists
+test	clean	reuse-one-symbol	handwritten-digD-3	need one helper function that formats byte counts — checking for prior art first
+test	clean	reuse-one-symbol	handwritten-digD-3	writing a small utility to dedupe the id list — want it to match how this repo usually does things
+dev	clean	reuse-one-symbol	handwritten-digD-3	adding one class to hold the parsed flags, is there a shape here i should copy?
+test	clean	trace-debug	handwritten-digD-17	the worker fell over again, this is what came out:\n#0 0x4f2 in sendRequest router.cpp:12\n#1 0x9aa in cacheValue router.cpp:14
+test	clean	trace-debug	handwritten-digD-17	Traceback (most recent call last):\n  File "loader.py", line 9, in parseConfigValue\nKeyError: 'root'
+dev	clean	trace-debug	handwritten-digD-17	AddressSanitizer: heap-buffer-overflow on address 0x603000000010\n#0 0x11b in renderXmlRow router.cpp:9\nnot sure which caller feeds it the bad length
+dev	clean	trace-debug	handwritten-digD-17	here is the stack trace from the nightly run, innermost frame first:\n#0 0x77 in targetSymbol router.cpp:4
+test	clean	locate-task	handwritten-digD-17	let me locate the code path behind this crash before i start guessing at a fix
+dev	clean	locate-task	handwritten-digD-6	something is emitting the wrong output for empty configs and i need to find where that happens
+test	clean	locate-task	handwritten-digD-17	users hit a crash on startup and i have no idea which part of the codebase is responsible
+test	clean	locate-task	handwritten-digD-17	i need to locate whatever is behind this retry storm — the symptom smells like the queue layer
+test	clean	locate-task	handwritten-digD-6	now i need to find the bit of code that owns config reloading — the bug is somewhere in there
+test	clean	abstain	handwritten-digD-4	now let's run the full gate suite and see if anything comes back red
+test	clean	abstain	handwritten-digD-8	i need to pull the timing column out of this tsv and pivot it by day
+dev	clean	abstain	handwritten-digD-20	when did this default flip to on? i want the commit that did it and the reasoning behind it
+test	clean	abstain	handwritten-digD-7	compare the two benchmark runs and tell me which numbers actually moved
+test	clean	abstain	handwritten-digD-2	take me to the part of the design doc that covers cache eviction — i do not want to read the whole thing
+test	clean	abstain	handwritten-digD	draft a friendly standup note about what shipped this week
+test	dirty	abstain	handwritten-digD	write up the release notes for this sprint while the build runs
+dev	clean	abstain	handwritten-digD-4	kick off the asan build and keep an eye on it until it finishes
+test	clean	abstain	handwritten-digD-5	which branch still has the columnar formatter work stranded on it?

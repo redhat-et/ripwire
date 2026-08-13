@@ -22,8 +22,6 @@ section, and it is not an afterthought.
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
 | **The gate suite** | `test/regression.sh`, `test/pargates.py` | 397 gate scripts plus the determinism, cache-transparency and golden contracts. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 397 gate scripts plus the determinism, cache-transparency and golden contracts. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 397 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -719,6 +717,65 @@ readable on episodes where the verb actually fired.
 only ever rides complete evidence (a clean uncapped literal scan, or printed witness sites against an
 absence-claim); a graph or reference zero is `not-established` with `limit=` naming the floor;
 `complete=` and `counts_floor=` never co-occur on one root (`test/verifycheck.sh`, mutation arms).
+### `--help-task` adoption — forward readout, PRE-REGISTERED 2026-08-12 (before any post-deploy row)
+
+**What shipped.** `--help-task="TASK"` — deterministic enhanced help: ONE recommended executable
+ripwire command for this repository and task with the evidence behind the pick (intent, integer
+score/margin, repository facts), or an honest abstention when evidence/applicability is
+insufficient. Advice only: it never calls a model, never executes the recommendation, never touches
+the network. Gated by `test/taskroutecheck.sh`. The residual it targets is the "what do I run?"
+hop — a help surface either terminates that question or adds a hop, and this registration is how
+we find out which.
+
+**Primary metric (transcript-observable, no meter accrual needed).** ADOPTION-WITHIN-2: among
+post-deploy episodes containing a `--help-task` call, the fraction in which the RECOMMENDED command
+is among the next two ripwire calls of the same episode, measured by the next mining pass over
+post-deploy sessions with the same episode-window method the month-scale mine used — unified with
+the existing mining-pass window instrument, never a bespoke grader. Episodes where `--help-task`
+abstained are counted separately (an abstention adopted-as-stop is a different outcome from a
+recommendation ignored) and do not enter the adoption denominator.
+
+**Band, pre-registered.** Band SHAPE is public; LEVELS resolve in the operator-local registration
+ledger, recorded there before the post-deploy half is read (the telemetry rule: this document
+carries the mechanism and the band shape only). Minimum data: ≥ 30 post-deploy episodes containing
+a `--help-task` call; below that the readout is declared underpowered, not null.
+
+**Adoption guard, stated up front.** A help surface nobody calls terminates nothing: if the readout
+window shows near-zero organic `--help-task` calls, that is a ROUTING failure in the adoption-loop's
+domain (nudge/skills — the `--run-trace` precedent, which also shipped verb-first and waited on
+routing), and it must not be reported as a verdict on the surface's design. The adoption-within-2
+band is only readable on episodes where the verb actually fired.
+
+### `--help-task` command-routing floors — the honest fixture result (2026-08-12)
+
+**The instrument, and why it was rebuilt before it was believed.** The first fixture corpus scored
+held-out accuracy/precision/coverage = 1.000 — and a perfect score on a routing eval is a red flag,
+not a result: those fixtures templated the intent cards' own vocabulary, so the floors were met by
+self-quotation. The corpus was rebuilt under provenance rules before any number was accepted:
+every original templated row quarantined to the dev split (`provenance=templated`); 47 new rows
+hand-written from real agent phrasing (`provenance=handwritten-digD`, seeded by paraphrase classes
+from mined session history, never copied); a word-trigram contamination screen
+(`test/taskroutefix/contamination_screen.py`, power-checked against known-contaminated probes)
+proving zero overlap with the intent cards and the recommended verbs' `--help` text; and the
+dev/test split sealed by content hash BEFORE scoring (rule and corpus sha256 recorded in
+`test/taskroutefix/PROVENANCE.md`).
+
+**Pre-registered floors and the sealed result** (28 hand-written held-out rows, one scoring run):
+high-confidence **precision 1.000** (floor ≥ 0.90) · **harmful-route rate 0.000** (ceiling ≤ 0.02) ·
+**negative-abstention specificity 1.000** (floor ≥ 0.90) — all three floors HOLD. **Coverage 0.667**,
+reported separately per the round's own rule (no coverage floor in round 1): all 7 misses are
+deliberate abstentions, never a wrong recommendation — 2 are prose-embedded closed claims the
+whole-string claim detector cannot see (registered v1.1 work). The self-quotation artifact is
+quantified by the split gap: the dev split (which holds the quarantined templated rows) scores
+coverage 0.893 vs the honest 0.667.
+
+**A contract violation the byte-compat arm caught before landing.** The router recommended
+`--verify='reaches(A, B)'` for symbol-to-symbol reaches phrasing — a command the shipped `--verify`
+parser refuses (its unquoted second argument must be a built-in layer word). Fixed by delegating
+the router's claim recognition to the real parser (`rw::verify::parseClaim`) plus the verb's own
+layer validation — the router can no longer recommend a claim the verb would refuse, and
+`test/taskroutecheck.sh` holds both directions: emitted claims execute through the real parser
+byte-identically, and the parser-refused form never routes to `--verify`.
 
 ---
 
@@ -991,9 +1048,9 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 
 `test/regression.sh` is the authoritative list. It runs three tiers: inline contract checks
 (determinism run four times for byte-identity, cache transparency, the golden snapshot, architecture
-tags, wrap, stable-order defaults), five individually invoked standalone gates, and a single loop
-naming **397 gate scripts**, all of which exist on disk.
-naming **397 gate scripts**, all of which exist on disk.
+tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
+`skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
+`taskroutecheck`), and a single loop
 naming **397 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
@@ -1628,8 +1685,6 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 397. The
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 397. The
   ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 397. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.

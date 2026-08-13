@@ -17,6 +17,13 @@ allowed-tools: Bash, Read
 Agents route by **moment**, not by feature. Find the row that matches what you're about to do; it names the
 ONE skill to enter. If you routed wrong, each skill's own routing header sends you one hop to the right one.
 
+## Not sure which verb fits? Ask the tool itself
+
+`ripwire <dir> --help-task="<the task in words>"` returns ONE recommended command with the evidence
+behind the pick (intent, score/margin, repository facts) — or honestly abstains when the evidence is
+too thin to name a winner. One hop cheaper than reading this whole map: paste the task, run what it
+recommends. Advice only — it never executes the recommendation.
+
 | The moment you're in | The ONE skill | Its opening move |
 |---|---|---|
 | **Cold-start** — landed in an unfamiliar repo, "what is this / what matters here" | **ripwire-orient** | `--recall` then `--report` |

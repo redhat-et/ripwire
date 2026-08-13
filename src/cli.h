@@ -65,6 +65,7 @@ struct Config
     std::string_view usesSym;                              // --uses=SYM (or file:name): the statically resolvable use-sites of SYM (call/read/write/import/extends) + external flag (ABS-3); file: narrows defs= + the call-role sites, other roles stay name-wide (§P10.2/§A6b)
     std::string_view graphQuery;                           // --graph-query=EXPR: composable node-set operators over the call graph (ABS-5)
     std::string_view verifyClaim;                          // --verify=CLAIM (G4): one structured claim in, a three-valued verdict + inline evidence out (src/verify.h owns the closed grammar)
+    std::string_view helpTask;                             // --help-task=TASK: deterministic task -> one recommended Ripwire command (or honest abstention)
     bool             externalSurface = false;              // --external-surface: names referenced but never defined in-corpus (stdlib/3p surface)
     int              aroundDepth     = 2;                  // --around-depth=
     int              aroundFanout    = 32;                 // --around-fanout=
@@ -712,6 +713,11 @@ inline void printUsage( std::FILE* out ) noexcept
         "                                   header floor alone exceeds the ceiling: the lens drops the comment's DUPLICATE echo\n"
         "                                   first (task_echo: dropped (ceiling); task= keeps the verbatim copy), then labels it\n"
         "                                   over_ceiling (--recall: over_ceiling=1) — never a trim it did not actually do.\n"
+        "    --help-task=TASK           deterministic enhanced help: recommend ONE executable Ripwire CLI command for this\n"
+        "                               repository and task, or abstain when evidence/applicability is insufficient. Reports\n"
+        "                               the intent, integer score/margin and repository facts; never calls a model, executes\n"
+        "                               the recommendation, or accesses the network. Structured claims/traces/symbols outrank\n"
+        "                               lexical cues. Recommendation only; pipe trace text to stdin for --from-trace=-.\n"
         "    --for=TASK                 the task lens: ranked signatures + metrics framed for reuse. The bundle enforces a\n"
         // §B7.5 (CA4): this said <sigs payload="capped"> — the STRING ENUM the §P8 vocabulary migration
         // replaced with the boolean capped="1" every other truncating element spells (serialize.h's own
@@ -1859,6 +1865,7 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--mentions=",    &Config::mentionsSym     , EmptyValue::Refuse, "a symbol name",                          "--mentions=parseArgs" },
     { "--affected=",    &Config::affectedFiles   , EmptyValue::Refuse, "changed files or a symbol name",         "--affected=src/cli.h" },
     { "--verify=",      &Config::verifyClaim     , EmptyValue::Refuse, "a claim expression",                     "--verify='calls(parseArgs, readFile)'" },
+    { "--help-task=",   &Config::helpTask        , EmptyValue::Refuse, "a task in words",                        "--help-task=\"review my changes before push\"" },
 
     // cache, index, history
     { "--cache=",       &Config::cacheFile       , EmptyValue::Refuse, "a cache file path",                      "--cache=.ripwirecache" },
@@ -2089,7 +2096,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 18;   // +1: --color-by= (enum-value arm)
-inline constexpr std::size_t kTotalFlagArms = 174;  // +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out)
+inline constexpr std::size_t kTotalFlagArms = 175;  // +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 

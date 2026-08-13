@@ -1115,3 +1115,164 @@ sample of the addressable sites to confirm they are real rather than probe artif
   re-measured, not silently edited.
 * **`.dSYM` is not in `kCrawlSkipDirs`** (`src/ingest.h`). Harmless today; a prerequisite of the
   YAML round.
+
+---
+
+## 2026-08-12 — deterministic task-to-command router (`--help-task`) execution ledger
+
+### Objective and non-negotiable boundary
+
+Build a zero-runtime-dependency, deterministic enhanced-help surface that maps an agent's plain-language
+task plus cheap repository facts to **one recommended Ripwire command**, with an honest confidence/margin
+and at most one ambiguity fallback. It must not call an AI model, execute the recommendation, access the
+network, or weaken the existing deterministic-output contract. The same intent vocabulary should be
+reusable by the advisory hook and generated skill/help surfaces without requiring those integrations to
+all land in v1.
+
+**Chosen working spelling:** `ripwire <root> --help-task="TASK"`. The obvious `--route` name is unavailable:
+Ripwire already uses `--route` as the backward-compatible/default-on query-shape ranker selector for
+`--for`/`--query` (`chooseForRanker` in `src/lexical.h`). Reusing it would create an ambiguous CLI grammar
+and erase established evaluation history. `--help-task` also states the v1 contract: advice, not execution.
+
+### Orchestration state
+
+| Lane | Owner | Model fit | Status | Deliverable |
+|---|---|---|---|---|
+| CLI/router architecture | `router_architecture` subagent | code graph, parser/dispatch, lexical reuse | in progress | smallest interface, symbols/files, output contract, risks |
+| intent manifest + generated surfaces | `intent_manifest` subagent | schema/drift/generation analysis | in progress | single-source feasibility, schema, generators, gates |
+| hook + behavioral evaluation | `hook_eval` subagent | shell hooks, fixtures, metrics | in progress | shared-core integration and measured routing plan |
+| synthesis, gates, implementation, release review | root orchestrator | cross-lane decisions and writes | in progress | landed feature, complete verification, handoff ledger |
+
+Subagents are read-only during discovery so concurrent edits cannot invalidate the build or each other's
+evidence. The root agent owns all writes until the design and first failing gate are agreed.
+
+### Evidence collected before code
+
+1. Branch/workspace: clean `/tmp/ripwire-v036-fix`, branch `codex/deterministic-task-router`, based on
+   `origin/main` at merge `6dbebd7`; the user's separate dirty checkout is not touched.
+2. `ripwire . --pack-task="deterministic task router algorithmic enhanced help shared with hooks and skills"`
+   ranked `chooseForRanker`, `lexicalScores`, `runEvalSkills`, `runPackTask`, wrapper emission, and hook
+   installers as existing building blocks. This makes a small deterministic classifier feasible without a
+   new dependency.
+3. `ripwire . --recall="deterministic task router algorithmic enhanced help" --max-tokens=12000` found the
+   existing `--for --route` experiment and its known-item evaluation. Its most important reusable lesson is
+   the confidence gate: conservative abstention/fallback repaired the conceptual-query crater while keeping
+   exact-name routing gains. The task router must apply the same discipline and expose why it chose a route.
+4. Current public skill routing proxy from the v0.3.6 audit was 65.7% overall versus 66.7% for v0.3.3;
+   wording-only changes did not produce a gain. The acceptance instrument therefore cannot be skill BM25
+   alone. It needs deterministic intent fixtures now and substitution/episode measurement for hook adoption.
+
+### Provisional v1 contract (subject to discovery evidence)
+
+Input:
+
+```sh
+ripwire <root> --help-task="I changed the release installer; what should I run before pushing?"
+```
+
+High-confidence output: one intent and one command, with the facts and score margin that made it win.
+Low-confidence output: an explicit ambiguous/abstained verdict and no more than two conditional choices.
+All commands must be constructed from the binary's authoritative flag catalog; impossible combinations
+must never be recommended.
+
+Candidate deterministic evidence, in precedence order:
+
+1. Structured shape: stack trace, closed `calls/uses/unused/contains/defines/reaches` claim, exact symbol,
+   multiple resolved symbols, test path, or hook tool/input shape.
+2. Repository applicability: git/non-git, dirty/clean worktree, target exists, symbol resolution, root count.
+3. Lexical score over a small compiled intent-card catalog: positive phrases, negative boundaries, and
+   opening command.
+4. Confidence/margin gate. Abstention is preferable to a plausible but wrong command.
+
+### Gate-first checklist
+
+- [ ] Freeze the v1 intent inventory and command templates before implementation.
+- [ ] Add a standalone failing `test/*check.sh` gate and register it in `test/regression.sh` in the same diff.
+- [ ] Assert deterministic byte-identical output and well-formed XML.
+- [ ] Assert high-confidence exact routes: trace, closed verification claim, dirty-diff review, exact symbol,
+      multi-symbol connection, feature planning, one-symbol reuse, unfamiliar-code review.
+- [ ] Assert negative/applicability boundaries and at least two deliberate abstentions.
+- [ ] Assert every emitted flag exists in the authoritative catalog and no recommendation executes.
+- [ ] Add judged confusion-matrix measurement separated from the hard contract gate; preregister floors before
+      tuning classifier weights.
+- [ ] Update `--help`, generated `docs/COMMANDS.md`, router skill, README/example, and drift gates only after the
+      binary contract is green.
+- [ ] Run focused gate, full `pargates`, ASAN, determinism/XML, `--quality-delta`, and `--pr-context`.
+
+### Decision log
+
+| UTC | Decision/evidence | Consequence |
+|---|---|---|
+| 2026-08-13T01:00Z | User requested an orchestrated build with durable ledger. | This section is append-only during the feature; every material decision/test result lands here. |
+| 2026-08-13T01:00Z | Existing `--route` is query-ranker routing, not free. | Use `--help-task`; do not overload or rename the established flag. |
+| 2026-08-13T01:00Z | Existing known-item router succeeded only after conservative confidence gating. | V1 must expose margin/reason and abstain; a forced answer is a design failure. |
+| 2026-08-13T01:24Z | Three read-only discovery lanes converged on a deterministic, recommendation-only classifier. | No model, network, command execution/rewrite, MCP selection, or runtime learning in v1. |
+| 2026-08-13T01:24Z | Generating all skill, hook, docs, CMake and MCP surfaces in the first classifier diff would obscure whether routing itself works. | Land and measure the binary contract first; manifest-driven hook/skill generation is Phase 2. |
+| 2026-08-13T01:24Z | Generic hook nudges measured poorly and the skill-labelled corpus is not command truth. | Keep command-labelled fixtures separate and measure hook parity/adoption after the CLI contract lands. |
+
+### Frozen v1 routing inventory
+
+The first implementation covers eight high-signal moments. Everything else abstains; coverage is reported
+rather than inflated with guesses.
+
+| Intent id | Required evidence | Primary command family |
+|---|---|---|
+| `verify-claim` | closed `calls/uses/unused/contains/defines/reaches` expression | `--verify=CLAIM` |
+| `connect-symbols` | at least three exact indexed symbol names in the task | `--connect=A,B,C` |
+| `understand-symbol` | exactly one indexed symbol plus understand/implementation wording | `--expand=SYM` |
+| `review-diff` | Git worktree is dirty plus review/pre-push/current-change wording | `--situ` |
+| `plan-feature` | prospective feature/plan/scope wording | `--pack-task=TASK` |
+| `reuse-one-symbol` | about-to-write/new function/class/helper wording | `--exemplar=TASK` |
+| `trace-debug` | stack-trace-shaped task text | `--from-trace=-` |
+| `locate-task` | locate/find-code/debug symptom wording with no stronger shape | `--for=TASK` |
+
+Structured shapes outrank lexical cards. Unmet applicability is rejection, not a score penalty. Integer
+scores sort by score descending, priority descending, then intent id ascending. A lexical answer needs an
+absolute floor and a margin; below either, output is `ambiguous` (maximum two choices) or `abstain` (zero
+commands). Output numbers are scores and margins, never probabilities.
+
+### Pre-registered v1 measurement floors
+
+- Contract/safety: 100% byte determinism; well-formed XML; zero executed recommendations; zero unknown
+  flags; zero prerequisite-violating recommendations; one command on `recommend`, none on `abstain`, at
+  most two on `ambiguous`.
+- Frozen command-labelled fixture: high-confidence precision at least 90%; harmful-route rate at most 2%;
+  negative abstention specificity at least 90%. Report coverage separately; no coverage floor in round 1.
+- Hook Phase 2 parity: direct binary and rendered hook route agree 100% on structured fixtures; control emits
+  no advice.
+- Behavioral Phase 2 (at least 30 graded episodes per arm): retain hook routing only if exact suggested-command
+  adoption within two calls improves by at least 15 percentage points over skills-only, with Wilson intervals,
+  and answer accuracy falls no more than 5 points. Under 30/arm is underpowered, not a win.
+
+### Resume protocol
+
+On a fresh task, start here, then run:
+
+```sh
+git -C /tmp/ripwire-v036-fix status --short --branch
+ripwire /tmp/ripwire-v036-fix --situ
+rg -n "2026-08-12 — deterministic task-to-command router" /tmp/ripwire-v036-fix/PLAN.md
+```
+
+Read the lane results and newest decision/test rows in this section before opening implementation files.
+Do not restart discovery from scratch, edit the user's separate checkout, or trust a build that was running
+across a branch/source change.
+
+### Orchestrator review addendum (2026-08-13, from the main-session orchestrator — append-only honored)
+
+| UTC | Decision/evidence | Consequence |
+|---|---|---|
+| 2026-08-13 | Gate is ALL PASS with held-out accuracy/precision/coverage = 1.000 on 40 rows. A perfect score on a routing eval is the S1-round red flag: the fixtures template the intent cards' own vocabulary ("How do A, B, C connect?" mirrors `connect-symbols`), so the floors are met by self-quotation. | The 90%/2%/90% floors are NOT considered discharged. Before tuning anything: add a provenance column to prompts.tsv; write ≥40 new judged rows HAND-WRITTEN from real agent phrasing (source pool: the 2026-08-12 history-mine dig-D phrasing classes, scratchpad `history-mine/` + `history-mine2/`); run the 2b-round trigram contamination screen (reword any row overlapping an intent card or verb doc); seal the held-out split by hash before the next scoring run. 1.000 after THAT is a result; 1.000 before it is an artifact. |
+| 2026-08-13 | The v1 inventory (8 intents) omits the ledger's #2 traffic class entirely — doc retrieval (level in the operator-local ledger → `--recall`) — and both LATENT rows (safe-to-change → `--impact`+`--uses`; which-tests → `--affected`), which a help surface is uniquely positioned to serve because the agent ASKS it things it never asks the repo. Also missing: tool-health doubt → `--doctor` (the 2b consensus-gap class). | v1 stays frozen at 8 (the freeze is right). A v1.1 list is REGISTERED now, ranked by ledger volume: `doc-question`→`--recall`, `safe-to-change`→`--impact`, `which-tests`→`--affected`, `health-doubt`→`--doctor`. Each lands only with hand-written judged rows per the provenance rule above. |
+| 2026-08-13 | `--verify` shipped on main 2026-08-12 (v0.3.6) with a closed claim grammar and three-valued verdicts; the sweep-escalation nudge (S2b) is LIVE with an unread one-week efficacy registration; the one-Class-B-intervention-per-readout-cycle rule is standing (board rule 10b). | The verify-claim template must emit the SHIPPED `--verify` grammar byte-exactly (gate arm against the real verb's parser, not a copy of its syntax). Phase-2 hook wiring of `--help-task` is a Class-B behavior intervention: it QUEUES for the next intervention window behind the sweep-nudge readout — shipping it now would make both effects unattributable. The CLI verb itself is Class-A and lands freely. |
+| 2026-08-13 | Landing mechanics this checkout has not yet done: three `docs/EVALS.md` gate-count sites recomputed from the ACTUAL regression loop (base moved to 398 with `releaseinstallcheck`; +taskroutecheck ⇒ 399 — never increment blindly); flag footprint (`--help` table, `docs/COMMANDS.md` regen via the generator arm-G byte-parity, README/deck flag counts 145→146); `test/taskroutecheck.sh` needs `chmod 755` + `git add` (currently untracked, mode 644); skill home for the new flag = `ripwire-router`'s body (the moment→command map IS that skill's charter; skills pre-approval covers it; else `skillinstallcheck` UNROUTED allowlist per the `--run-trace` precedent); `--quality-delta` gating=0; full plain suite FOREGROUND + ASan family; determinism ×3; xmllint; land via PR on a named branch, release per H6b cadence. | The gate-first checklist above gains these as explicit unchecked items; none are optional. |
+| 2026-08-13 | Terminality (board TRACK T) is the standing lens: a help surface that recommends a command either terminates the "what do I run?" question or adds a hop. | Pre-register `--help-task`'s own forward readout in EVALS alongside the others: on post-deploy transcripts (pass-2 window method), episodes containing a `--help-task` call are judged by whether the RECOMMENDED command is the next ripwire call (adoption-within-2, the plan's own Phase-2 metric — unify with the existing mining-pass instrument rather than a bespoke grader; ≥30 episodes; adoption guard per the `--run-trace` precedent). Level baselines live in the operator-local ledger, never here. |
+| 2026-08-13 | Second-pass review: the intent-manifest single-source idea (this plan's own `intent_manifest` lane) is the strongest long-term piece and was under-weighted in the first addendum pass. One manifest generating router cards + hook advice + skill descriptions makes description drift structurally impossible. GUARD: the current skill descriptions passed a blind two-rater acceptance (9/9, 2026-08-12); generated replacements must re-pass an equivalent pre-registered rater band before replacing measured hand-written prose — a manifest that regresses an accepted result is a rejection. | Manifest = Phase 2's headline, with the rater-band guard registered before generation. |
+| 2026-08-13 | The live sweep-escalation nudge hardcodes its paste-ready command templates; taskroute constructs better ones from repo facts. Unifying them is the natural Phase-2 hook payload — same shared-core objective this plan states. | Sequencing: the nudge's one-week efficacy readout must land FIRST (changing an intervention mid-readout-window contaminates its own measurement); then taskroute-powered nudge is the next Class-B intervention, one registration, one window. |
+| 2026-08-13 | Mine pass 2's win-exemplar finding: the cleanest recorded session ran on a MOMENT-NAMED project-local skill. Taskroute's intent ids are moment names. | When the R3 moment-named-skill experiment window opens, the frozen intent inventory is its naming vocabulary — do not invent a second taxonomy. |
+| 2026-08-13 | THE FIELD REPORT (owner's real-usage session) is the missing discovery context — key mechanical finding: skill frontmatter descriptions are VISIBLY TRUNCATED in the agent's selector catalog, so decisive routing language never reaches the selector; the v0.3.6 proxy dip (65.7 vs 66.7) is plausibly accepted-content-pushed-past-the-cut. Every routing eval to date scored FULL text the selector never sees. | INSTRUMENT FIX OUTRANKS CONTENT FIX: (1) measure the actual truncation limit empirically; (2) make skilleval score the TRUNCATED view (the honest proxy); (3) THEN rewrite all 18 frontmatters to ~50–100 words on the field report's template (positive trigger + strongest negative boundary + one opening command), moving everything else to bodies — under a pre-registered rater band since 2b's accepted text is being touched. This precedes any further proxy measurement, including this round's. |
+| 2026-08-13 | Field report's priority order adopted: ① intent manifest ② shorter frontmatter ③ task-aware hook w/ substitution telemetry ④ --route/--help-task ⑤ compact output ⑥ shell-test graph ⑦ local agent policy ⑧ churn-gate refinement. Note ④ is already built here — sequencing means its LANDING proceeds, while ①–③ are the adoption payload around it. | The manifest schema in the field report (intent/moments/skill/primary_command/next_commands/avoid_when) is the v1 card schema — adopt it verbatim so Phase 2 generates rather than re-designs. Hook substitutions table (Grep-resolved-symbol→--uses, whole-file-read→--expand, etc.) is the taskroute-powered-nudge spec, still queued behind the sweep-nudge readout. |
+| 2026-08-12 | LANDING EXECUTION (main-session orchestrator): honest-fixture round run to completion. 47 hand-written rows from mined phrasing classes; contamination screen clean (power-checked); split hash-sealed pre-scoring; sealed result on 28 held-out rows: precision 1.000 / harmful 0.000 / specificity 1.000 — ALL pre-registered floors HOLD — coverage 0.667 reported separately (7 misses, all abstentions, six confusion lines = the v1.1 backlog). Dev-split reference 0.893 coverage: the dev–test gap is the measured self-quotation artifact. | Floors are now considered DISCHARGED on real phrasing. Corpus + seal + screen live in `test/taskroutefix/`; the honest result is published in docs/EVALS.md §"--help-task command-routing floors". |
+| 2026-08-12 | Byte-compat gate arms (run the emitted claim through the real `--verify` parser) caught a live contract violation: `reaches(SYM, SYM)` routed to a command the parser refuses (unquoted second arg must be a built-in layer word). | Fixed in src/taskroute.h by delegating claim recognition to `rw::verify::parseClaim` + `query::isKnownLayerWord` — the router consults the shipped grammar instead of re-implementing it. Red-first gate arm added (reaches(SYM,SYM) must abstain), proven FAIL on the pre-fix binary, PASS post-fix. Fixture eval numbers unchanged (no corpus row hit the sub-shape). |
+| 2026-08-12 | Landing-mechanics corrections from recomputation: the enforced gate count is **397** (manifestcheck counts the regression loop; `releaseinstallcheck`/`taskroutecheck` are standalone-invoked, not loop entries — the addendum's 398/399 expectation was wrong); flag count 146 confirmed by the repo's own derivation; the three EVALS count sites were also TRIPLICATED (the auto-merge artifact) and are deduped. Two stale ungated count sites found and fixed (README "334", deck "373"). | Counts recomputed, never incremented — the discipline caught its own briefing's error. `--help-task` homed in ripwire-router SKILL body (FLAG-HOME arm green); forward readout pre-registered in EVALS; capture regenerated with two recorded `--help-task` samples (recommend + abstain). |
+| 2026-08-13 | Field-reported product defects, registered as backlog (none block this round): --test-gate cannot model shell gate runners (test/*.sh→binary, regression.sh→gates, pargates discovery) → false "untested path" on CLI/tooling repos · quality-delta short-horizon churn too strong as a hard verdict alone → advisory unless combined with a second risk signal (contract change / fan-in / complexity / untested) · `ripwire doctor` parses as a path → positional-verb did-you-mean + aliases · --pr-context spends budget on schema prose before evidence → --legend=once / schema= id + --explain-schema=SURFACE (distinct from the rejected M4: per-call suppression with on-demand schema, not deletion) · upgrades clobber local skill edits → ~/.config/ripwire/agent.toml policy file consulted by wrap/hooks/doctor · MCP: the owner's 4-tool audit allowlist posture is evidence FOR the pending 21-verb trim. | Each lands as its own gated round; the churn and test-gate items feed the existing quality/test families. |
