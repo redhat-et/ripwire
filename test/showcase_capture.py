@@ -145,6 +145,8 @@ add(S1, f'{BIN} . --for="why does src/lexical.h chooseForRanker pick name-exact 
 add(S1, f'{BIN} . --for="why does src/lexical.h chooseForRanker pick name-exact BM25" --no-mention-boost', "Same task with the anchor disabled — the contrast the flag exists for.")
 add(S1, f"{BIN} . --lego=Vehicle", "Interface -> implementors view: method contract + every existing impl.")
 add(S1, f'{BIN} . --exemplar="format byte sizes for humans"', "The repo's best-in-class instance to imitate before writing new code (picked by ROLE).")
+add(S1, f'{BIN} . --help-task="calls(runDefaultMap, rankGraphTeleport)"', "Deterministic enhanced help: a closed claim in the task is a structured shape, so the router recommends the ONE command that answers it (--verify) with the evidence behind the pick. Advice only — nothing executes.")
+add(S1, f'{BIN} . --help-task="write a cheerful release announcement"', "The honest half of the contract: a task with no ripwire-shaped evidence ABSTAINS with zero commands rather than guessing.")
 add(S1, f'{BIN} . --recall="quality delta gating exit codes"', "Most relevant DOCS' full bodies (markdown only) — recall what is already written down.")
 add(S1, f"{BIN} . --tree", "File-by-file orientation map (top symbols per file).")
 add(S1, f"{BIN} . --html={html_out}", "Self-contained HTML force-directed call graph.", post=f"wc -c {html_out}")
