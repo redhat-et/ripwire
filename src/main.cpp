@@ -43,6 +43,7 @@
 #include "search.h"
 #include "query.h"
 #include "verify.h"                // G4 verify-a-claim: the --verify closed claim grammar + verdict/limit vocabularies (runVerify below)
+#include "taskroute.h"             // --help-task: deterministic task -> one safe CLI recommendation or abstention
 #include "quality.h"
 #include "gitstamp.h"              // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
                                    // --hotspots / --quality-delta / --doctor below (each verb's own file pulls it too)
@@ -11726,6 +11727,7 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
     const ReportVerbSlot slots[] = {
         // §F1: --index-out dispatches BEFORE ingest, so it outranks even the query family. One row, at the top.
         { "--index-out",        !c.indexOut.empty()       },
+        { "--help-task",        !c.helpTask.empty()       },
         // §A2: the query family, contiguous and first among the report verbs — these three outrank every one below.
         { "--for",              !c.forTask.empty(), true  }, { "--pack-task",     c.packTaskFlag,    true },
         { "--query",            !c.query.empty(),   true  },
@@ -11890,6 +11892,10 @@ void warnMapModifierDiscarded( const rw::Config& c, const VerbPrecedence& prec )
 
 const char* jsonUnsupportedVerb( const rw::Config& c )
 {
+    if( !c.helpTask.empty() )
+    {
+        return "--help-task";
+    }
     if( c.mcp )
     {
         return "--mcp";
@@ -12218,6 +12224,34 @@ inline bool isJsonShapeModifier( const char* flag ) noexcept
     return false;
 }
 
+int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::string& root )
+{
+    const std::string stamp = rw::gitstamp::stampAt( root );
+    const bool        git   = !stamp.empty();
+    const bool        dirty = stamp.ends_with( "+dirty" );
+    const rw::taskroute::TaskRouteResult route = rw::taskroute::classify( cfg.helpTask, root, ing, git, dirty );
+
+    std::vector<char> esc;
+    const auto ex = [&]( std::string_view s ) { return std::string( rw::escapeXml( s, esc ) ); };
+    std::string out = "<task-route status=\"";
+    out += rw::taskroute::statusName( route.status );
+    out += "\" confidence=\"";
+    out += route.status == rw::taskroute::RouteStatus::Recommend ? "high" :
+           route.status == rw::taskroute::RouteStatus::Ambiguous ? "low" : "none";
+    out += "\" score=\"" + std::to_string( route.score ) + "\" margin=\"" + std::to_string( route.margin ) + "\">";
+    out += "<facts git=\"" + std::to_string( int( route.facts.git ) ) + "\" dirty=\"" + std::to_string( int( route.facts.dirty ) );
+    out += "\" trace=\"" + std::to_string( int( route.facts.trace ) ) + "\" resolved_symbols=\"";
+    out += std::to_string( route.facts.resolvedSymbols.size() ) + "\"/>";
+    for( const rw::taskroute::RouteChoice& choice : route.choices )
+    {
+        out += "<choice intent=\"" + ex( choice.id ) + "\" skill=\"" + ex( choice.skill ) + "\" reason=\"" + ex( choice.reason );
+        out += "\" score=\"" + std::to_string( choice.score ) + "\"><run>" + ex( choice.command ) + "</run></choice>";
+    }
+    out += "</task-route>\n";
+    std::fputs( out.c_str(), stdout );
+    return 0;
+}
+
 }   // namespace
 
 int main( int argc, char** argv )
@@ -12372,6 +12406,10 @@ int main( int argc, char** argv )
         if( cfg.qualityDelta || cfg.qualityBaseline )
         {
             return refuse( "--quality-delta/--quality-baseline", "its baseline is keyed to ONE repo's HEAD; run it per root" );
+        }
+        if( !cfg.helpTask.empty() )
+        {
+            return refuse( "--help-task", "its repository applicability and exact-symbol facts are single-root; run it per root" );
         }
         if( cfg.dmm )
         {
@@ -12910,6 +12948,13 @@ int main( int argc, char** argv )
     if( cfg.ignoreTests )
     {
         applyIgnoreTests( ing );
+    }
+
+    // Enhanced help needs only the parsed symbol inventory plus cheap Git facts. Answer before graph/QMetrics/
+    // history mining so a hook or agent asking where to start pays the least repository-aware cost available.
+    if( !cfg.helpTask.empty() )
+    {
+        return runHelpTask( cfg, ing, root );
     }
 
     if( std::getenv( "RIPWIRE_STATS" ) )   // how many std::strings the stored model holds (+ their bytes)
