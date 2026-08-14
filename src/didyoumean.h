@@ -94,37 +94,55 @@ inline int boundedEditDistance( std::string_view a, std::string_view b, int maxD
 // mistyped C++ function name) — a confusing, useless hint. Excluded here, once, for every caller; if a
 // future verb genuinely wants Section suggestions (a markdown-title lookup), it needs its own pool, not
 // this shared one.
-inline std::string didYouMean( const IngestResult& ing, std::string_view name )
+// The shared "closest candidate" core behind didYouMean() and any OTHER near-miss finder over a
+// different pool (e.g. lintcatalog.h's rule-name near-miss for --lint-select=/--lint-ignore=): bounded
+// edit distance, tie-broken by (1) smaller distance, (2) longer case-insensitive shared prefix, (3)
+// lexicographic order — one implementation of that contract instead of one per pool. `nameOf` projects
+// one pool item to its comparable name; an item whose projected name is empty is skipped (didYouMean's
+// own "s.name.empty() || Section" exclusion is just a nameOf that returns "" for those).
+template <class It, class NameOf>
+inline std::string_view nearestNameByEditDistance( It first, It last, std::string_view typed, int maxEditDistance, NameOf&& nameOf )
 {
-    constexpr int kMaxEditDistance = 3;   // bandwidth cutoff (§P12.1): beyond this a "hint" is noise, not help
     struct Cand { int dist; std::size_t prefixLen; std::string_view n; };
-    Cand best{ kMaxEditDistance + 1, 0, {} };
-    for( const Symbol& s : ing.symbols )
+    Cand best{ maxEditDistance + 1, 0, {} };
+    for( It it = first; it != last; ++it )
     {
-        if( s.name.empty() || s.kind == SymKind::Section )
+        const std::string_view cand = nameOf( *it );
+        if( cand.empty() )
         {
             continue;
         }
-        const int dist = boundedEditDistance( s.name, name, kMaxEditDistance );
-        if( dist > kMaxEditDistance )
+        const int dist = boundedEditDistance( cand, typed, maxEditDistance );
+        if( dist > maxEditDistance )
         {
             continue;
         }
-        std::size_t pfx = 0;
-        const std::size_t lim = std::min( s.name.size(), name.size() );
-        while( pfx < lim && std::tolower( static_cast<unsigned char>( s.name[pfx] ) ) == std::tolower( static_cast<unsigned char>( name[pfx] ) ) )
+        std::size_t       pfx = 0;
+        const std::size_t lim = std::min( cand.size(), typed.size() );
+        while( pfx < lim && std::tolower( static_cast<unsigned char>( cand[pfx] ) ) == std::tolower( static_cast<unsigned char>( typed[pfx] ) ) )
         {
             ++pfx;
         }
         const bool better = dist < best.dist
                           || ( dist == best.dist && pfx > best.prefixLen )
-                          || ( dist == best.dist && pfx == best.prefixLen && ( best.n.empty() || s.name < best.n ) );
+                          || ( dist == best.dist && pfx == best.prefixLen && ( best.n.empty() || cand < best.n ) );
         if( better )
         {
-            best = { dist, pfx, std::string_view( s.name ) };
+            best = { dist, pfx, cand };
         }
     }
-    return best.n.empty() ? std::string() : std::string( best.n );
+    return best.n;
+}
+
+inline std::string didYouMean( const IngestResult& ing, std::string_view name )
+{
+    constexpr int kMaxEditDistance = 3;   // bandwidth cutoff (§P12.1): beyond this a "hint" is noise, not help
+    const std::string_view best = nearestNameByEditDistance( ing.symbols.begin(), ing.symbols.end(), name, kMaxEditDistance,
+                                                              []( const Symbol& s ) -> std::string_view
+                                                              {
+                                                                  return s.kind == SymKind::Section ? std::string_view() : std::string_view( s.name );
+                                                              } );
+    return best.empty() ? std::string() : std::string( best );
 }
 
 // appends " (did you mean 'Y'?)" to a "not found"-style stderr message when a plausible nearest name

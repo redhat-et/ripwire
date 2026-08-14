@@ -107,6 +107,13 @@ struct Config
                                                              // with --match (SARIF covers --lint findings only), with --with-profile
                                                              // (the heat_* join has no SARIF field yet) and with paging (SARIF always
                                                              // emits the FULL result set — GitHub's action wants one complete document).
+    bool             lintCatalog = false;                  // --lint-catalog: the built-in rule registry (name/sev/category/rationale/
+                                                             // languages/since), one row per rule — src/lintcatalog.h. Standalone: needs
+                                                             // neither --lint nor --lint-rules, and ignores the corpus entirely.
+    std::string_view lintSelect;                            // --lint-select=PREFIX[,...]: run only rules whose name starts with one of
+                                                             // these (or "*" for all) — modifies --lint / --lint-rules; refused alone.
+    std::string_view lintIgnore;                            // --lint-ignore=PREFIX[,...]: drop rules whose name starts with one of these
+                                                             // (or "*" to drop everything) — applied AFTER --lint-select narrows the set.
     std::vector<std::string> expand;                       // --expand=NAME,...: emit full def bodies for these symbols; NAME:START-END slices to 1-based lines START..END of the def (octocode partial-fetch)
     std::vector<std::string> outline;                      // --outline=NAME,...: control-flow skeletons (L3 scoped snippet)
     std::string_view forTask;                              // --for=TASK: the task lens — ranked signatures inventory + metrics, framed for reuse
@@ -1105,8 +1112,24 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --lint                     built-in AST checks (c-cast, goto, unsafe-c-fn, naming-*, cache-* data-layout, ...). naming-uninformative\n"
         "                               is ONE-SIDED by design: it fires only when a name's subtokens are ALL corpus-common\n"
         "                               (BM25 idf over the identifier-name corpus) AND its body clears a size floor — a\n"
-        "                               high-idf (distinctive) name is never penalised, unlike the withdrawn name<->body rule\n"
+        "                               high-idf (distinctive) name is never penalised, unlike the withdrawn name<->body rule.\n"
+        "                               Each <rule> row's applicability is per-LANGUAGE, not per-file-content: a rule whose\n"
+        "                               registered languages (see --lint-catalog) intersect NONE of the corpus' languages carries\n"
+        "                               applicable=\"0\" (its count=\"0\" is then structural inertness, not a measurement), and the\n"
+        "                               root tallies inert_rules=\"N\"; see --lint-catalog for the full registry\n"
+        "    --lint-catalog             the built-in rule registry: one row per rule with sev=/category=/rationale/lang=/since= — no\n"
+        "                               corpus needed. Every built-in rule from every pack (base checks, atoms-*, cache-*, naming-*, the\n"
+        "                               symbol-level checks) has exactly one row; lang= is the SAME token spelling --lint-rules'\n"
+        "                               language: field accepts, so it round-trips into a user rule\n"
         "    --lint-rules=DIR           load user lint rules (YAML, ast-grep style) from DIR — runs with, or instead of, --lint\n"
+        "    --lint-select=PREFIX[,...] (with --lint / --lint-rules) run ONLY rules whose name starts with one of these PREFIXes (or\n"
+        "                               '*' for all) — comma-separated, e.g. cache- selects the whole cache-* family. The root then\n"
+        "                               carries selected=\"K of N\" plus the raw select=/ignore= you passed, so a filtered zero is never\n"
+        "                               confusable with an unfiltered one. An unresolvable PREFIX (matches no rule) refuses (exit 1),\n"
+        "                               naming the nearest rule/family by edit distance\n"
+        "    --lint-ignore=PREFIX[,...] (with --lint / --lint-rules) DROP rules whose name starts with one of these PREFIXes (or '*' to\n"
+        "                               drop everything, e.g. paired with --lint-select elsewhere to isolate one family) — applied AFTER\n"
+        "                               --lint-select narrows the set; same unresolvable-PREFIX refusal and root disclosure as --lint-select\n"
         "    --sarif                    (with --lint / --lint-rules) the SAME findings as SARIF 2.1.0 instead of the native XML\n"
         "                               <lint> block — the shape github/codeql-action/upload-sarif consumes for code scanning.\n"
         "                               Pure re-serialization (zero new analysis); results count == the native run's findings\n"
@@ -1800,6 +1823,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     // search
     { "--no-prefilter",       &Config::noPrefilter        },
     { "--lint",               &Config::lint               },
+    { "--lint-catalog",       &Config::lintCatalog        },   // the built-in rule registry — src/lintcatalog.h
     { "--sarif",              &Config::sarif              },   // (with --lint / --lint-rules) SARIF 2.1.0 instead of native XML
 
     // the --for lens modifiers (each refused alone by validateConfig)
@@ -1878,6 +1902,8 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--grep=",        &Config::grep            , EmptyValue::Refuse, "a literal string to search for",         "--grep=parseArgs" },
     { "--match=",       &Config::match           , EmptyValue::Refuse, "a tree-sitter s-expression pattern",     "--match='(call_expression)'" },
     { "--lint-rules=",  &Config::lintRulesDir    , EmptyValue::Refuse, "a rules directory path",                 "--lint-rules=lintrules/" },
+    { "--lint-select=", &Config::lintSelect      , EmptyValue::Refuse, "a comma-separated PREFIX list, or '*'",  "--lint-select=cache-,goto" },
+    { "--lint-ignore=", &Config::lintIgnore      , EmptyValue::Refuse, "a comma-separated PREFIX list, or '*'",  "--lint-ignore=naming-" },
     { "--for=",         &Config::forTask         , EmptyValue::Refuse, "a task in words",                        "--for=\"add retry to the http client\"" },
     { "--lego=",        &Config::legoType        , EmptyValue::Refuse, "an interface or base-type name",         "--lego=Shape" },
     { "--exemplar=",    &Config::exemplar        , EmptyValue::Refuse, "what you are about to write",            "--exemplar=\"a JSON writer\"" },
@@ -2096,7 +2122,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 18;   // +1: --color-by= (enum-value arm)
-inline constexpr std::size_t kTotalFlagArms = 175;  // +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out)
+inline constexpr std::size_t kTotalFlagArms = 178;  // +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2687,6 +2713,24 @@ inline void validateSarifModifierGuards( Config& c ) noexcept
     }
 }
 
+// --lint-select=/--lint-ignore='s ONE companion guard, split out for the same reason
+// validateSarifModifierGuards is: a flag's own guard cluster stays one small function instead of
+// growing the caller's branch count. The PREFIX list itself (malformed entries, unresolvable prefixes)
+// is validated inside runLint, not here — see resolveLintSelection's own header for why.
+inline void validateLintSelectionModifierGuards( Config& c ) noexcept
+{
+    if( !c.lintSelect.empty() && !c.lint && c.lintRulesDir.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --lint-select=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-select=cache-)\n" );
+        c.ok = false;
+    }
+    if( !c.lintIgnore.empty() && !c.lint && c.lintRulesDir.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --lint-ignore=PREFIX modifies --lint or --lint-rules=DIR — pass one (e.g. ripwire <dir> --lint --lint-ignore=naming-)\n" );
+        c.ok = false;
+    }
+}
+
 inline void validateModifierGuards( Config& c ) noexcept
 {
     validatePagingHonored( c );      // §P8/G2: --limit/--offset on a verb that windows nothing (see its header)
@@ -2737,8 +2781,9 @@ inline void validateModifierGuards( Config& c ) noexcept
         c.ok = false;
     }
 
-    validateSarifModifierGuards( c );   // --sarif's four companion guards, split out for the same reason
-                                         // the rows above it are (see its own header)
+    validateSarifModifierGuards( c );          // --sarif's four companion guards, split out for the same reason
+                                                // the rows above it are (see its own header)
+    validateLintSelectionModifierGuards( c );  // --lint-select=/--lint-ignore='s companion guard, same reason
 
     // --with-history is the OPT-IN git-history name oracle for --doc-drift and --whereis (src/gitoracle.h) —
     // main.cpp's buildHistoryIndex() is only ever CALLED from those two verbs' dispatch, so the flag alone
