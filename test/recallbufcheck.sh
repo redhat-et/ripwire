@@ -209,9 +209,17 @@ grep -aqE '\[truncated: [0-9]+ of [0-9]+ bytes' "$TMP/d1.out" \
 D1_CTRL="$( clean_bytes "$TMP/d1.out" )"
 [ "${D1_CTRL%% *}" = "0" ] && ok "d1: zero control bytes" || no "d1: control bytes leaked: $D1_CTRL"
 
-# (d1b) the marker's WIDEST form — its second interpoland, ", fence_closed", which only appears when the cut
-# landed inside a ``` block. Its own corpus (one deep-path doc that is almost entirely one fenced block) so
-# it cannot perturb d1/d2's ranking.
+# (d1b) L4 UPDATE (recall.h's protected-range fix, same commit): this arm used to force the cut to land
+# INSIDE the ``` block and assert the ", fence_closed" repair note fired. §L4.2 now protects a fenced block
+# as WHOLE-OR-NOTHING — the forced cut is moved to BEFORE the fence instead of landing inside it, so
+# closeOpenMarkdownFence's repair is no longer the mechanism that keeps this doc's fence balanced (it
+# remains in place as a last-resort safety net for any shape the protected-range scan doesn't cover, but a
+# ``` block this large, this ordinary, is never one of them). The property this arm actually exists to
+# guard — a long absolute path never corrupts the sibling formatters, and a fenced doc never comes out with
+# a dangling open fence — still holds and is asserted directly: the emitted payload's ``` markers are
+# BALANCED (an even count: either the whole fence survived, or none of it did — never a torn half).
+# Its own corpus (one deep-path doc that is almost entirely one fenced block) so it cannot perturb d1/d2's
+# ranking.
 F_ROOT="$TMP/dfence"
 python3 - "$F_ROOT" <<'PY'
 import os, sys
@@ -230,9 +238,13 @@ with open( os.path.join( d, "kafka.md" ), "w" ) as fh:
 PY
 recall "$F_ROOT" "$TMP/d1b.out" --max-tokens=1400; d1b_exit=$?
 [ "$d1b_exit" -eq 0 ] && ok "d1b --max-tokens (fenced doc): exit 0" || no "d1b: exit $d1b_exit (expected 0)"
-grep -aqE '\[truncated: [0-9]+ of [0-9]+ bytes, fence_closed\]' "$TMP/d1b.out" \
-    && ok "d1b truncateRecallBody: widest marker form ', fence_closed' intact" \
-    || no "d1b truncateRecallBody: fence_closed form absent: $( grep -aoE '\[trunc.{0,60}' "$TMP/d1b.out" | head -1 | cat -v )"
+grep -aqE '\[truncated: [0-9]+ of [0-9]+ bytes' "$TMP/d1b.out" \
+    && ok "d1b truncateRecallBody: '[truncated: N of M bytes…]' fired" \
+    || no "d1b truncateRecallBody: marker missing: $( grep -aoE '\[trunc.{0,60}' "$TMP/d1b.out" | head -1 | cat -v )"
+D1B_TICKS="$( grep -ao '```' "$TMP/d1b.out" | wc -l | tr -d ' ' )"
+[ "$(( D1B_TICKS % 2 ))" -eq 0 ] \
+    && ok "d1b fence markers balanced (even count: $D1B_TICKS) — whole-or-nothing under the protected-range cut, never torn" \
+    || no "d1b fence markers UNBALANCED (odd count: $D1B_TICKS) — the forced cut tore the fenced block"
 D1B_CTRL="$( clean_bytes "$TMP/d1b.out" )"
 [ "${D1B_CTRL%% *}" = "0" ] && ok "d1b: zero control bytes" || no "d1b: control bytes leaked: $D1B_CTRL"
 
