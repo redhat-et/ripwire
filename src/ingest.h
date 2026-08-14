@@ -164,8 +164,22 @@ static_assert( std::is_sorted( std::begin( kNonTextExts ), std::end( kNonTextExt
 // real refactor for a lane that owns them; picking a different algorithm is the honest local answer.
 inline bool isNonTextExtension( std::string_view ext ) noexcept
 {
+    // Hand-rolled comparator instead of string_view's operator<: libstdc++'s _S_compare subtracts the two
+    // lengths in size_type, and G1's -fsanitize=integer (correctly) flags that unsigned wrap on every
+    // shorter-vs-longer compare — Linux-ASan-only, libc++ compares differently. memcmp-then-length never
+    // subtracts.
+    const auto extLess = []( std::string_view a, std::string_view b ) noexcept
+    {
+        const std::size_t common = a.size() < b.size() ? a.size() : b.size();
+        const int cmp            = common == 0 ? 0 : std::memcmp( a.data(), b.data(), common );
+        if( cmp != 0 )
+        {
+            return cmp < 0;
+        }
+        return a.size() < b.size();
+    };
     return ext.empty() || ext == "."
-        || std::binary_search( std::begin( kNonTextExts ), std::end( kNonTextExts ), ext );
+        || std::binary_search( std::begin( kNonTextExts ), std::end( kNonTextExts ), ext, extLess );
 }
 
 // The crawl's default directory denylist (a .gitignore-lite): noise/vendor/build subtrees pruned entirely.
