@@ -10,6 +10,8 @@
 
 #include "docparse.h"    // §P2b: the generated-document signals (marker / size+fences) + the ONE markdown
                          //       fence scanner — a doc-side property, computed from the file's own bytes
+#include "layout.h"      // §L4.3: layout::lineOf — the ONE byte-offset-to-line-number helper (reused, not
+                         //        re-derived, for the `lines="LO-HI"` section anchor below)
 #include "model.h"
 #include "redact.h"      // redact secrets from recalled doc bodies (incl. extracted docText)
 #include "serialize.h"   // §P2: kMinBytesPerToken / kBudgetHeadroom / bytesPerTokenFor / truncateUtf8WithEllipsis
@@ -314,23 +316,197 @@ inline bool closeOpenMarkdownFence( std::string& body )
     return true;
 }
 
-// Cut ONE doc body down to `keepBytes` and return the marker that DISCLOSES the cut. Split out of
-// buildRecall's budget loop so the whole truncation policy — UTF-8-safe prefix, fence repair, and what the
-// marker admits to — reads in one place. `body` is edited in place; the returned text is appended to the
-// doc's separator line, ahead of the body itself. Truncating BEFORE formatting is what lets the marker
-// report fence_closed: whether a fence had to be closed is only knowable once the cut has been made.
+// §L4.1 — a bounded lookback SEARCH for a clean place to land a forced cut, instead of the raw byte
+// ceiling. `cut` is already a UTF-8-safe prefix length (never exceeded — this only ever moves it
+// EARLIER); the window is the last `lookbackBytes` bytes before it. Priority, most specific first:
+// a blank line (paragraph end), a sentence end (". "/"! "/"? ", or the same three followed by a
+// newline instead of a space), any newline. No boundary found in-window ⇒ today's byte cut (`cut`
+// unchanged) — the honest fallback the brief calls for. Hand-rolled rfind scans; no regex.
+inline constexpr std::size_t kRecallBoundaryLookbackBytes = 400;
+
+inline std::size_t findRecallBoundaryCut( std::string_view body, std::size_t cut, std::size_t lookbackBytes ) noexcept
+{
+    if( cut == 0 || cut > body.size() )
+    {
+        return cut;
+    }
+    const std::size_t     windowStart = ( cut > lookbackBytes ) ? cut - lookbackBytes : 0;
+    const std::string_view window     = body.substr( windowStart, cut - windowStart );
+
+    if( const std::size_t p = window.rfind( "\n\n" ); p != std::string_view::npos )
+    {
+        return windowStart + p + 2;   // land right after the blank line — a paragraph boundary
+    }
+    std::size_t bestSentence = std::string_view::npos;
+    for( const char* term : { ". ", "! ", "? ", ".\n", "!\n", "?\n" } )
+    {
+        const std::size_t p = window.rfind( term );
+        if( p != std::string_view::npos && ( bestSentence == std::string_view::npos || p > bestSentence ) )
+        {
+            bestSentence = p;
+        }
+    }
+    if( bestSentence != std::string_view::npos )
+    {
+        return windowStart + bestSentence + 2;   // every candidate term is exactly 2 bytes wide
+    }
+    if( const std::size_t p = window.rfind( '\n' ); p != std::string_view::npos )
+    {
+        return windowStart + p + 1;   // a bare line break beats a mid-word tear
+    }
+    return cut;   // nothing in-window — the byte cut is the honest fallback
+}
+
+// §L4.2 — fenced code blocks and pipe-table row runs are WHOLE-OR-NOTHING under a forced cut: the cut
+// point may not land inside one. `end` is exclusive (the byte just past the element). Detected in one
+// pass over lines, mirroring docparse::scanMarkdownFences' own fence rule (three-or-more backticks,
+// first non-space characters on the line, toggles state) so "inside a fence" cannot mean two different
+// things in this file. A pipe-table run is ≥2 consecutive non-blank lines outside any fence that each
+// contain a `|` — deliberately loose (no header/separator-row validation): a hand-rolled table detector
+// that DEMANDS GFM's exact grammar would silently stop protecting a body whose table is slightly
+// off-spec, which is a worse failure than over-protecting a pipe-heavy paragraph run.
+struct RecallProtectedRange
+{
+    std::size_t start = 0;
+    std::size_t end   = 0;   // exclusive
+};
+
+inline std::vector<RecallProtectedRange> findRecallProtectedRanges( std::string_view body )
+{
+    std::vector<RecallProtectedRange> ranges;
+    bool        insideFence  = false;
+    std::size_t fenceStart   = 0;
+    std::size_t tableStart   = std::string_view::npos;
+    std::size_t tableLines   = 0;
+
+    const auto flushTable = [ & ]( std::size_t atByte )
+    {
+        if( tableStart != std::string_view::npos && tableLines >= 2 )
+        {
+            ranges.push_back( { tableStart, atByte } );
+        }
+        tableStart = std::string_view::npos;
+        tableLines = 0;
+    };
+
+    for( std::size_t lineStart = 0; lineStart < body.size(); )
+    {
+        std::size_t lineEnd     = body.find( '\n', lineStart );
+        const bool  hasNewline  = lineEnd != std::string_view::npos;
+        if( !hasNewline )
+        {
+            lineEnd = body.size();
+        }
+        const std::string_view line       = body.substr( lineStart, lineEnd - lineStart );
+        const std::size_t      lineFullEnd = hasNewline ? lineEnd + 1 : body.size();
+
+        std::size_t cursor = 0;
+        while( cursor < line.size() && ( line[cursor] == ' ' || line[cursor] == '\t' ) ) { ++cursor; }
+        std::size_t tickCount = 0;
+        while( cursor + tickCount < line.size() && line[cursor + tickCount] == '`' ) { ++tickCount; }
+
+        if( tickCount >= 3 )
+        {
+            flushTable( lineStart );
+            if( !insideFence )
+            {
+                insideFence = true;
+                fenceStart  = lineStart;
+            }
+            else
+            {
+                insideFence = false;
+                ranges.push_back( { fenceStart, lineFullEnd } );
+            }
+        }
+        else if( insideFence )
+        {
+            // absorbed into the open fence's range once it closes (or at EOF, below) — no per-line work
+        }
+        else
+        {
+            const bool isBlank     = line.find_first_not_of( " \t\r" ) == std::string_view::npos;
+            const bool isTableLine = !isBlank && line.find( '|' ) != std::string_view::npos;
+            if( isTableLine )
+            {
+                if( tableStart == std::string_view::npos ) { tableStart = lineStart; tableLines = 1; }
+                else                                       { ++tableLines; }
+            }
+            else
+            {
+                flushTable( lineStart );
+            }
+        }
+        lineStart = lineFullEnd;
+    }
+    if( insideFence )
+    {
+        ranges.push_back( { fenceStart, body.size() } );   // unterminated fence protects through EOF
+    }
+    flushTable( body.size() );
+    return ranges;
+}
+
+// Move `cut` to the start of any protected range it falls strictly inside — never later, only earlier,
+// so a caller's byte ceiling is never exceeded. Loops because moving out of one range can start it
+// inside an earlier one when ranges abut; `cut` only ever decreases, so this always terminates.
+inline std::size_t adjustCutForProtectedRanges( std::size_t cut, const std::vector<RecallProtectedRange>& ranges ) noexcept
+{
+    bool moved = true;
+    while( moved )
+    {
+        moved = false;
+        for( const RecallProtectedRange& r : ranges )
+        {
+            if( cut > r.start && cut < r.end )
+            {
+                cut   = r.start;
+                moved = true;
+            }
+        }
+    }
+    return cut;
+}
+
+// Cut ONE doc body down to AT MOST `keepBytes` and return the marker that DISCLOSES the cut. Split out
+// of buildRecall's budget loop so the whole truncation policy reads in one place: UTF-8-safe prefix,
+// §L4.1's boundary cascade (land on a paragraph/sentence/line boundary instead of mid-word when one is
+// reachable within the lookback window), §L4.2's protected ranges (never tear a fenced block or a table
+// row), fence repair as the last safety net, and what the marker admits to. `body` is edited in place;
+// the returned text is appended to the doc's separator line, ahead of the body itself. Every step below
+// only ever moves the cut EARLIER than the requested `keepBytes` — the byte-budget ceiling a caller
+// computed is never exceeded, only under-used in exchange for landing somewhere readable. Truncating
+// BEFORE formatting is what lets the marker report fence_closed: whether a fence had to be closed is
+// only knowable once the cut has been made.
 inline std::string truncateRecallBody( std::string& body, std::size_t keepBytes )
 {
     const std::size_t fullBytes = body.size();
-    truncateUtf8WithEllipsis( body, keepBytes );                                     // deterministic UTF-8-safe prefix + a visible "…"
-    const char* fenceNote = closeOpenMarkdownFence( body ) ? ", fence_closed" : "";   // §B2 — never hand back an open fence
+
+    std::size_t cut = std::min( keepBytes, fullBytes );
+    while( cut > 0 && ( static_cast<unsigned char>( body[cut] ) & 0xC0 ) == 0x80 ) { --cut; }   // UTF-8-safe backoff
+
+    cut = findRecallBoundaryCut( body, cut, kRecallBoundaryLookbackBytes );
+    cut = adjustCutForProtectedRanges( cut, findRecallProtectedRanges( body ) );
+
+    while( cut > 0 && ( static_cast<unsigned char>( body[cut] ) & 0xC0 ) == 0x80 ) { --cut; }   // re-verify: both
+                                                                                                  // moves above land
+                                                                                                  // on '\n' bytes
+                                                                                                  // (always safe),
+                                                                                                  // but a stale
+                                                                                                  // assumption
+                                                                                                  // costs nothing
+                                                                                                  // to re-check.
+    const std::size_t actualKeepBytes = cut;
+
+    truncateUtf8WithEllipsis( body, actualKeepBytes );                                // deterministic UTF-8-safe prefix + a visible "…"
+    const char* fenceNote = closeOpenMarkdownFence( body ) ? ", fence_closed" : "";    // §B2 — never hand back an open fence
 
     // CA4 H1 sibling sweep: this one was PROVABLY bounded (fixed prose + two %zu + the two-valued fenceNote =
     // 79 bytes worst case in a 160-byte buffer), so it never overflowed. It is composed on std::string anyway,
     // because the SHAPE is the defect, not the arithmetic: "snprintf into a fixed buffer, then append its
     // WOULD-BE return length" is safe only for as long as nobody widens the prose or adds an interpoland, and
     // that safety is invisible at the call site. Byte-identical to the format string it replaces.
-    return "  [truncated: " + std::to_string( keepBytes ) + " of " + std::to_string( fullBytes ) + " bytes"
+    return "  [truncated: " + std::to_string( actualKeepBytes ) + " of " + std::to_string( fullBytes ) + " bytes"
            + fenceNote + "]";
 }
 
@@ -584,6 +760,7 @@ inline std::optional<std::pair<std::string, std::string>> buildSectionGranularBo
     const std::string raw = ss.str();
 
     std::string body;
+    std::string linesAttr;   // §L4.3 — "LO-HI[,LO-HI…]", one range per kept section, document order
     for( const std::uint32_t k : kept )
     {
         const Symbol& s = ing.symbols[ k ];
@@ -598,10 +775,18 @@ inline std::optional<std::pair<std::string, std::string>> buildSectionGranularBo
             body += '\n';
         }
         body += slice;
+
+        const std::uint32_t lo = layout::lineOf( raw, s.sigStartByte );
+        const std::uint32_t hi = layout::lineOf( raw, s.endByte - 1 );   // last INCLUDED byte — endByte is exclusive
+        if( !linesAttr.empty() )
+        {
+            linesAttr += ",";
+        }
+        linesAttr += std::to_string( lo ) + "-" + std::to_string( hi );
     }
     std::string note = "  [sections: " + std::to_string( kept.size() ) + " of "
                        + std::to_string( sectionCount ) + ", section-granular; whole doc "
-                       + std::to_string( raw.size() ) + " B]";
+                       + std::to_string( raw.size() ) + " B; lines=\"" + linesAttr + "\"]";
     return std::make_pair( std::move( body ), std::move( note ) );
 }
 
