@@ -10151,6 +10151,30 @@ void emitRunLintSarif( const rw::IngestResult& ing, const std::string& root, boo
     rw::sarif::emitLintSarif( stdout, sarifRules, sarifFindings, !saturatedRules.empty(), root );
 }
 
+// §L3: runs a --match query, returning its hits plus the grammar-applicability disclosure — grammarsAttrOut
+// pre-joined (see AstQueryGroup::grammarsOut/eligibleFilesOut in ingest.h and mcprefusal.h's joinClauses) —
+// so a query that compiles for SOME grammars but none are present in the corpus can say so instead of
+// reporting a bare hits="0" indistinguishable from "this pattern does not occur" (§P0.1's gap, one level up
+// the stack). Standalone so runLint's own dispatcher body, already one of the largest in this file, doesn't
+// grow by the plumbing.
+static std::vector<rw::AstMatch> runMatchQuery( const rw::IngestResult& ing, const std::string& matchQuery, std::size_t maxHits,
+                                                std::vector<std::string>& uncompiledOut, std::string& grammarsAttrOut,
+                                                std::size_t& eligibleFilesOut )
+{
+    const std::vector<rw::AstQuerySpec> specs{ { matchQuery, std::string() } };
+    std::vector<std::string>            grammarsOut;
+    rw::AstQueryGroup                   grp;
+    grp.specs            = &specs;
+    grp.maxMatches       = maxHits;
+    grp.uncompiledOut    = &uncompiledOut;
+    grp.grammarsOut      = &grammarsOut;
+    grp.eligibleFilesOut = &eligibleFilesOut;
+    std::vector<rw::AstMatch>           ms( rw::astQueryGrouped( ing, { grp } )[0] );
+    const std::vector<std::string_view> views( grammarsOut.begin(), grammarsOut.end() );
+    grammarsAttrOut = rw::mcprefuse::joinClauses( views, "," );
+    return ms;
+}
+
 std::optional<int> runLint( const MainDispatch& d )
 {
     using namespace rw;
@@ -10252,7 +10276,9 @@ std::optional<int> runLint( const MainDispatch& d )
             }
             constexpr std::size_t       kMatchMaxHits = 5000;   // astQuery's per-spec budget, named not implied
             std::vector<std::string>    uncompiled;
-            const std::vector<AstMatch> ms            = astQuery( ing, { { matchQuery, std::string() } }, kMatchMaxHits, &uncompiled );
+            std::string                 grammarsAttr;    // §L3: which grammars the query compiled against (runMatchQuery)
+            std::size_t                 eligibleFiles = 0;
+            const std::vector<AstMatch> ms = runMatchQuery( ing, matchQuery, kMatchMaxHits, uncompiled, grammarsAttr, eligibleFiles );
             // §P0.4's rule, applied to --match's own engine: a query no grammar compiled measured NOTHING,
             // so a hits="0" here would be a failure wearing a result. Refuse, exactly like an invalid --regex.
             if( !uncompiled.empty() )
@@ -10270,16 +10296,22 @@ std::optional<int> runLint( const MainDispatch& d )
             const PageWindow  matchPage  = pageWindow( ms.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
             const std::size_t matchShown = matchPage.end - matchPage.begin;
             char              mpab[ kPageDisclosureCap ];
+            // §L3: no `attr="value"` spelled out below for grammars=/eligible_files=/of_files= — a naive
+            // whole-line grep (matchcapturecheck.sh's own idiom) would match the WORDED example first.
             std::printf( "<!-- ripwire match: tree-sitter structural query; each hit = a captured node + its enclosing symbol. "
                          "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (engine match limit reached). "
                          "auto_captured=\"1\" ⇒ the query bound no @capture and ripwire appended `@m` to its single top-level pattern. "
-                         "raise the default cap with limit=N (offset=M pages) -->" );
-            std::printf( "<match hits=\"%zu\"%s hits_capped=\"%d\"%s>",
+                         "grammars= names every grammar the query compiled against; eligible_files=/of_files= are corpus files in that "
+                         "language set vs total indexed files. raise the default cap with limit=N (offset=M pages) -->" );
+            std::printf( "<match hits=\"%zu\"%s hits_capped=\"%d\"%s grammars=\"%s\" eligible_files=\"%zu\" of_files=\"%zu\">",
                          ms.size(),
                          pageDisclosure( mpab, sizeof( mpab ), matchShown, ms.size(), matchPage.end,
                                          cfg.pageLimit, cfg.pageOffset, true ),
                          ms.size() >= kMatchMaxHits ? 1 : 0,
-                         autoCaptured ? " auto_captured=\"1\"" : "" );
+                         autoCaptured ? " auto_captured=\"1\"" : "",
+                         ex( grammarsAttr ).c_str(),
+                         eligibleFiles,
+                         ing.files.size() );
             for( std::size_t hitIndex = matchPage.begin; hitIndex < matchPage.end; ++hitIndex )
             {
                 const AstMatch& m = ms[ hitIndex ];
