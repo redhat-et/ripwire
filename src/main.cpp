@@ -73,6 +73,7 @@
 #include "skillscan.h"
 #include "htmlexport.h"
 #include "lintrules.h"
+#include "lintcatalog.h"           // L7: --lint-catalog + --lint-select=/--lint-ignore= — the built-in rule registry
 #include "atoms.h"                 // --lint: the atoms-of-confusion pack (Gopstein FSE 2017), C-family only
 #include "cachelint.h"             // --lint: the cache-friendliness pack (access-pattern half; layout half is --field-affinity)
 #include "naminglens.h"            // identifier-naming lens v1: the naming-* built-in --lint rules (deterministic, dictionary-free)
@@ -1618,6 +1619,24 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing, co
 // (not local to runLint) so dedupeLintFindings below can share it.
 struct LintOut { std::uint32_t fileId, startByte, line; std::string rule, sev, text; };
 
+// One <rule> tally row. The built-in and user-rule tally loops in runLint differ ONLY in whether sev=
+// is present (nullptr ⇒ omitted, a built-in row) — everything else (capped=, and L7's applicable=) is
+// identical branching duplicated twice; this is the one copy. Callers pass already-escaped strings
+// (name/sev safety differs: built-in names are compile-time-known, user ids/severities are ex()'d at
+// the call site) so this stays a pure formatter with no XML-escaping policy of its own.
+void printLintRuleTallyRow( const std::string& name, const std::string* sev, std::uint32_t count, bool capped, bool applicable )
+{
+    const char* sevPart        = "";
+    std::string sevBuf;
+    if( sev != nullptr )
+    {
+        sevBuf   = " sev=\"" + *sev + "\"";
+        sevPart  = sevBuf.c_str();
+    }
+    std::printf( "<rule name=\"%s\"%s count=\"%u\"%s%s/>", name.c_str(), sevPart, count,
+                 capped ? " capped=\"1\"" : "", applicable ? "" : " applicable=\"0\"" );
+}
+
 // §P0.2: rules whose RAW capture stream spent its whole per-rule budget — their count= is a floor, not
 // a total, and must say so (the contract --match already honours with hits_capped="1"). Keyed by
 // (name, namespace): a user rule may share a built-in rule's name, and a cap must never leak across
@@ -1875,6 +1894,129 @@ void mergeNamingLens( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms
     {
         saturatedRules.push_back( { std::move( namingRule ), false } );
     }
+}
+
+// --lint-catalog: print the static rule registry (src/lintcatalog.h) and nothing else — needs no
+// corpus. Lifted out of runLint for the same reason mergeAtomsPack/mergeNamingLens were: runLint was
+// already the file's largest function, and this branch is fully self-contained.
+int emitLintCatalog()
+{
+    std::vector<char> esc;
+    const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( rw::escapeXml( s, esc ) ); };
+    std::printf( "<!-- ripwire lint-catalog: the built-in lint rule registry, one row per rule, in the SAME order the plain lint "
+                 "run's own tally uses. sev/cat/rationale describe the rule; lang= is the language TOKEN SET (the spelling the "
+                 "lint-rules loader's own language: field accepts) whose grammar can ever satisfy this rule's query or scan — a "
+                 "STRUCTURAL ceiling, not which languages happen to be in any one corpus (that disclosure is the lint run's own "
+                 "applicable=/inert_rules=). since= is the ripwire release the rule first shipped in. -->" );
+    std::printf( "<lintcatalog rules=\"%zu\">", rw::lintcatalog::kLintCatalog.size() );
+    for( const rw::lintcatalog::LintCatalogRow& row : rw::lintcatalog::kLintCatalog )
+    {
+        std::printf( "<rule name=\"%s\" sev=\"%s\" cat=\"%s\" lang=\"%s\" since=\"%s\">%s</rule>",
+                     ex( row.name ).c_str(), ex( row.severity ).c_str(), ex( row.category ).c_str(),
+                     ex( rw::lintcatalog::lintCatalogLangList( row.langMask ) ).c_str(), ex( row.since ).c_str(),
+                     ex( row.rationale ).c_str() );
+    }
+    std::printf( "</lintcatalog>" );
+    return 0;
+}
+
+// --lint-select=/--lint-ignore=PREFIX[,...]: resolve BOTH into a LintSelection, validating every token
+// against the combined rule-name pool (the static catalog ∪ whatever user rule ids --lint-rules=DIR
+// just loaded ∪ the family stems) — done HERE, not in validateConfig, because a token can legitimately
+// name a user rule id that is only known after --lint-rules=DIR has been read. nullopt ⇒ a refusal
+// was already printed to stderr; the caller's job is just to `return 1`. Lifted out of runLint for the
+// same reason emitLintCatalog was — this block alone was worth a third of runLint's complexity growth.
+std::optional<rw::lintcatalog::LintSelection> resolveLintSelection( const rw::Config& cfg, const std::vector<rw::LintRule>& userRules )
+{
+    rw::lintcatalog::LintSelection sel;
+    if( cfg.lintSelect.empty() && cfg.lintIgnore.empty() )
+    {
+        return sel;   // inactive — every rule kept, nothing to disclose
+    }
+
+    std::vector<std::string_view> pool;
+    pool.reserve( rw::lintcatalog::kLintCatalog.size() + userRules.size() + rw::lintcatalog::kLintFamilyStems.size() );
+    for( const rw::lintcatalog::LintCatalogRow& row : rw::lintcatalog::kLintCatalog ) { pool.push_back( row.name ); }
+    for( const rw::LintRule& r : userRules ) { pool.push_back( r.id ); }
+    for( std::string_view stem : rw::lintcatalog::kLintFamilyStems ) { pool.push_back( stem ); }
+
+    const auto resolve = [ & ]( std::string_view raw, std::vector<std::string>& tokens, const char* flagName ) -> bool
+    {
+        if( !rw::lintcatalog::splitLintPrefixList( raw, tokens ) )
+        {
+            std::fprintf( stderr, "ripwire: %s: malformed PREFIX list (empty entry) — comma-separate PREFIXes, e.g. %s=cache-,goto\n",
+                          flagName, flagName );
+            return false;
+        }
+        for( const std::string& tok : tokens )
+        {
+            if( tok == "*" )
+            {
+                continue;   // the reserved "everything" sentinel — never itself a rule-name prefix
+            }
+            const bool found = std::any_of( pool.begin(), pool.end(),
+                                            [ & ]( std::string_view n ) { return rw::lintcatalog::lintPrefixMatches( tok, n ); } );
+            if( !found )
+            {
+                const std::string near = rw::lintcatalog::lintNameNearMiss( pool, tok );
+                std::string        msg = "ripwire: " + std::string( flagName ) + ": '" + tok + "' matches no rule or family";
+                if( !near.empty() )
+                {
+                    msg += " (did you mean '" + near + "'?)";
+                }
+                msg += " — see --lint-catalog for the full registry\n";
+                std::fprintf( stderr, "%s", msg.c_str() );
+                return false;
+            }
+        }
+        return true;
+    };
+    if( !resolve( cfg.lintSelect, sel.selectPrefixes, "--lint-select" ) ) { return std::nullopt; }
+    if( !resolve( cfg.lintIgnore, sel.ignorePrefixes, "--lint-ignore" ) ) { return std::nullopt; }
+    sel.active = true;
+
+    // selected="K of N" counts actual RULES (built-ins + loaded user rules) — the family stems above
+    // exist only to widen the near-miss pool and are never rules themselves.
+    for( const rw::lintcatalog::LintCatalogRow& row : rw::lintcatalog::kLintCatalog )
+    {
+        ++sel.totalCount;
+        if( rw::lintcatalog::lintSelectionKeeps( sel, row.name ) ) { ++sel.selectedCount; }
+    }
+    for( const rw::LintRule& r : userRules )
+    {
+        ++sel.totalCount;
+        if( rw::lintcatalog::lintSelectionKeeps( sel, r.id ) ) { ++sel.selectedCount; }
+    }
+    return sel;
+}
+
+// The corpus' own language mask plus how many of the PRINTED <rule> rows (post --lint-select/-ignore
+// filtering — a filtered-out rule was never a row, so it cannot be inert either) are structurally
+// inert on it: none of the rule's registered languages (lintcatalog.h) are present at all. Lifted out
+// of runLint for the same reason resolveLintSelection was.
+struct LintApplicability { std::uint32_t corpusLangs = 0; std::size_t inertRuleCount = 0; };
+
+LintApplicability computeLintApplicability( const rw::IngestResult& ing, bool builtinsRan, const std::vector<std::string>& allRuleNames,
+                                            const std::vector<rw::LintRule>& userRules, const rw::lintcatalog::LintSelection& sel )
+{
+    LintApplicability out;
+    out.corpusLangs = rw::lintcatalog::corpusLangMask( ing );
+    const auto kept  = [ & ]( std::string_view name ) { return !sel.active || rw::lintcatalog::lintSelectionKeeps( sel, name ); };
+    if( builtinsRan )
+    {
+        for( const std::string& rn : allRuleNames )
+        {
+            if( !kept( rn ) ) { continue; }
+            const rw::lintcatalog::LintCatalogRow* row = rw::lintcatalog::lintCatalogFind( rn );
+            if( row != nullptr && ( row->langMask & out.corpusLangs ) == 0 ) { ++out.inertRuleCount; }
+        }
+    }
+    for( const rw::LintRule& r : userRules )
+    {
+        if( !kept( r.id ) ) { continue; }
+        if( ( rw::langBit( r.lang ) & out.corpusLangs ) == 0 ) { ++out.inertRuleCount; }
+    }
+    return out;
 }
 
 // THE emitted order of --lint's rows: (file path, startByte, rule, sev, text). sev and text are part of
@@ -10015,6 +10157,13 @@ std::optional<int> runLint( const MainDispatch& d )
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
 
+    // --lint-catalog: the built-in rule registry, standalone — needs no corpus at all (lintcatalog.h's
+    // table is static), so it is handled before the match/lint/lint-rules setup below even starts.
+    if( cfg.lintCatalog )
+    {
+        return emitLintCatalog();
+    }
+
     // --match=QUERY (structural search) and --lint (built-in checks) both ride the shared AST-query pass and
     // annotate each hit with its enclosing symbol — so they share this setup.
     if( !cfg.match.empty() || cfg.lint || !cfg.lintRulesDir.empty() )
@@ -10449,6 +10598,22 @@ std::optional<int> runLint( const MainDispatch& d )
             }
         }
 
+        // --lint-select=PREFIX[,...] / --lint-ignore=PREFIX[,...]: resolved HERE, not in validateConfig,
+        // because a PREFIX can legitimately name a user rule id that --lint-rules=DIR has only just
+        // loaded above. See resolveLintSelection's own header for the pool it validates against.
+        const std::optional<rw::lintcatalog::LintSelection> lintSelOpt = resolveLintSelection( cfg, userRules );
+        if( !lintSelOpt )
+        {
+            return 1;   // refusal already printed
+        }
+        const rw::lintcatalog::LintSelection& lintSel = *lintSelOpt;
+        if( lintSel.active )
+        {
+            outs.erase( std::remove_if( outs.begin(), outs.end(),
+                                        [ & ]( const LintOut& o ) { return !rw::lintcatalog::lintSelectionKeeps( lintSel, o.rule ); } ),
+                       outs.end() );
+        }
+
         // Final deterministic order over the COMBINED set — see sortLintRows for why the key runs all the
         // way out to the row's own text.
         sortLintRows( ing, outs );
@@ -10478,6 +10643,15 @@ std::optional<int> runLint( const MainDispatch& d )
         };
         const bool anyRuleCapped = !saturatedRules.empty();
 
+        // §L7: per-rule LANGUAGE applicability — a rule whose registered languages (lintcatalog.h) never
+        // intersect the corpus' own languages is not "measured zero", it is structurally inert here.
+        // Applicability is per-LANGUAGE granularity (does the corpus contain ANY file of a language this
+        // rule's grammar could ever satisfy), never per-file-content — a rule can be "applicable" and
+        // still find nothing. See computeLintApplicability's own header for why it lives outside this function.
+        const LintApplicability lintApplicability = computeLintApplicability( ing, cfg.lint, allRuleNames, userRules, lintSel );
+        const std::uint32_t     corpusLangs        = lintApplicability.corpusLangs;
+        const std::size_t       inertRuleCount      = lintApplicability.inertRuleCount;
+
         // --sarif: `outs` re-serialized as SARIF instead of the native XML below (emitRunLintSarif above).
         // validateConfig already refused this alongside --match / --with-profile / paging.
         if( cfg.sarif )
@@ -10501,6 +10675,31 @@ std::optional<int> runLint( const MainDispatch& d )
             heatJoinedAttr = std::move( heat->second );
         }
 
+        // §L7 root disclosure: inert_rules= (only when >0 — same "absent = nothing to say" convention as
+        // findings_capped=) and, only when --lint-select/--lint-ignore were given, selected="K of N" plus
+        // the raw select=/ignore= you passed, so a filtered zero is never confusable with an unfiltered one.
+        std::string lintRootExtra;
+        if( inertRuleCount > 0 )
+        {
+            char buf[ 48 ];
+            std::snprintf( buf, sizeof( buf ), " inert_rules=\"%zu\"", inertRuleCount );
+            lintRootExtra += buf;
+        }
+        if( lintSel.active )
+        {
+            char buf[ 64 ];
+            std::snprintf( buf, sizeof( buf ), " selected=\"%zu of %zu\"", lintSel.selectedCount, lintSel.totalCount );
+            lintRootExtra += buf;
+            if( !cfg.lintSelect.empty() )
+            {
+                lintRootExtra += " select=\"" + ex( cfg.lintSelect ) + "\"";
+            }
+            if( !cfg.lintIgnore.empty() )
+            {
+                lintRootExtra += " ignore=\"" + ex( cfg.lintIgnore ) + "\"";
+            }
+        }
+
         // §P8 collision, documented not renamed — see the --grep legend above for the full reasoning.
         std::printf( "<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
                      "in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
@@ -10508,7 +10707,11 @@ std::optional<int> runLint( const MainDispatch& d )
                      "Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. "
                      "A rule that spends its whole budget carries capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
                      "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one rule is a floor. "
-                     "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). -->" );
+                     "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). "
+                     "A rule row's applicable=\"0\" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this "
+                     "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
+                     "how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a "
+                     "family (e.g. cache-); the root then carries selected=\"K of N\" plus the raw select=/ignore= you passed. -->" );
         if( !cfg.withProfile.empty() )
         {
             std::printf( "<!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest "
@@ -10527,19 +10730,24 @@ std::optional<int> runLint( const MainDispatch& d )
             // exact position (immediately after shown=) so the two are attribute-for-attribute identical.
             // Distinct from findings_capped= below, which is rule 4's FLOOR marker on the total itself.
             const unsigned isLintCapped = unsigned( shownCount < outs.size() );
-            std::printf( "<lint findings=\"%zu\" shown=\"%zu\" capped=\"%u\" total=\"%zu\" has_more=\"%u\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"%s%s>",
+            std::printf( "<lint findings=\"%zu\" shown=\"%zu\" capped=\"%u\" total=\"%zu\" has_more=\"%u\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"%s%s%s>",
                          outs.size(), shownCount, isLintCapped, outs.size(), hasMore ? 1u : 0u, nextOffset,
                          cfg.pageOffset > 0 ? cfg.pageOffset : 0, cfg.pageLimit > 0 ? cfg.pageLimit : 0,
-                         anyRuleCapped ? " findings_capped=\"1\"" : "", heatJoinedAttr.c_str() );
+                         anyRuleCapped ? " findings_capped=\"1\"" : "", heatJoinedAttr.c_str(), lintRootExtra.c_str() );
         }
         else
         {
-            std::printf( "<lint findings=\"%zu\"%s%s>", outs.size(), anyRuleCapped ? " findings_capped=\"1\"" : "", heatJoinedAttr.c_str() );
+            std::printf( "<lint findings=\"%zu\"%s%s%s>", outs.size(), anyRuleCapped ? " findings_capped=\"1\"" : "",
+                         heatJoinedAttr.c_str(), lintRootExtra.c_str() );
         }
         if( cfg.lint )
         { // built-in per-rule tally (order → deterministic)
             for( const std::string& rn : allRuleNames )
             {
+                if( lintSel.active && !rw::lintcatalog::lintSelectionKeeps( lintSel, rn ) )
+                { // deselected — no row at all, so it can never look like a checked-and-empty rule
+                    continue;
+                }
                 std::uint32_t n = 0;
                 for( const LintOut& m : outs )
                 {
@@ -10548,18 +10756,17 @@ std::optional<int> runLint( const MainDispatch& d )
                         ++n;
                     }
                 }
-                if( capOf( rn, false ) != nullptr )
-                { // budget spent → count= is a floor, say so
-                    std::printf( "<rule name=\"%s\" count=\"%u\" capped=\"1\"/>", rn.c_str(), n );
-                }
-                else
-                {
-                    std::printf( "<rule name=\"%s\" count=\"%u\"/>", rn.c_str(), n );
-                }
+                const rw::lintcatalog::LintCatalogRow* catRow = rw::lintcatalog::lintCatalogFind( rn );
+                const bool applicable = catRow == nullptr || ( catRow->langMask & corpusLangs ) != 0;
+                printLintRuleTallyRow( rn, nullptr, n, capOf( rn, false ) != nullptr, applicable );
             }
         }
         for( const LintRule& r : userRules )                          // user per-rule tally (declaration order → deterministic)
         {
+            if( lintSel.active && !rw::lintcatalog::lintSelectionKeeps( lintSel, r.id ) )
+            {
+                continue;
+            }
             std::uint32_t n = 0;
             for( const LintOut& m : outs )
             {
@@ -10568,15 +10775,9 @@ std::optional<int> runLint( const MainDispatch& d )
                     ++n;
                 }
             }
-            if( capOf( r.id, true ) != nullptr )
-            { // budget spent → count= is a floor, say so
-                std::printf( "<rule name=\"%s\" sev=\"%s\" count=\"%u\" capped=\"1\"/>",
-                             ex( r.id ).c_str(), ex( r.severity ).c_str(), n );
-            }
-            else
-            {
-                std::printf( "<rule name=\"%s\" sev=\"%s\" count=\"%u\"/>", ex( r.id ).c_str(), ex( r.severity ).c_str(), n );
-            }
+            const bool  applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
+            const std::string sevEx = ex( r.severity );
+            printLintRuleTallyRow( ex( r.id ), &sevEx, n, capOf( r.id, true ) != nullptr, applicable );
         }
         for( std::size_t findingIndex = lintPage.begin; findingIndex < lintPage.end; ++findingIndex )
         {

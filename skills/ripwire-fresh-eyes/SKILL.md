@@ -173,6 +173,18 @@ sections your question needs.
    per-rule floor) with a `pairs=` sample size and its own legend calling itself a **noisy proxy**, not a
    verdict on any function you're looking at. It always exits 0.
 
+   **What rules exist, and are they even structurally possible on this corpus? — `ripwire <dir>
+   --lint-catalog`.** The full built-in registry: every rule's severity, category, one-line rationale, its
+   registered languages, and the release it shipped in — no corpus needed, so it answers "what could `--lint`
+   ever find here" before you run it. A plain `--lint` run then discloses the corpus-specific half:
+   `applicable="0"` on a `<rule>` row means none of that rule's registered languages are present at all (its
+   `count="0"` is structural inertness, not a measurement — e.g. `magic-number` is C/C++/ObjC-only and reports
+   `applicable="0"` on a pure-Go tree), and the root's `inert_rules=N` tallies how many rows that is true for.
+   **Scoping a `--lint` run to one family — `--lint-select=PREFIX[,...]` / `--lint-ignore=PREFIX[,...]`**
+   (comma-separated, `*` for "every rule"): `--lint-select=cache-` runs only the `cache-*` family, disclosing
+   `selected="K of N"` on the root so a filtered zero is never confusable with an unfiltered one; an
+   unresolvable PREFIX refuses with a near-miss rather than silently matching nothing.
+
    **The one naming lens that proposes a FIX, not just evidence — `ripwire <dir> --naming-consistency`.**
    Every other pass on this page tells you WHAT is wrong; this one is the deliberate exception, and only for
    one narrow reason: case-CONVENTION is Tier A (the research record's own tiering for "propose a fix only

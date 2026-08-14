@@ -318,6 +318,10 @@ subAfter="$(   countRule atom-reversed-subscript "$TMP/mut" )"
 
 # ── G) a corpus with no C-family file still DECLARES every atom rule at count="0" ─────────────────
 #     (honesty: a zero means "none found here", and the reader must be able to see the rule ran).
+#     L7: since src/lintcatalog.h, that same corpus makes every atom-* rule structurally INERT (its
+#     registered languages — cpp/c/objc — intersect none of a JS-only corpus), so the honest row now
+#     also carries applicable="0" — a stronger disclosure than the bare zero this arm used to check,
+#     not a different fact. See --lint-catalog.
 JSONLY="$TMP/jsonly"; mkdir -p "$JSONLY"
 cp "$FIXTURE/guard.js" "$JSONLY/guard.js"
 "$BIN" "$JSONLY" --lint --no-cache >"$TMP/js" 2>/dev/null
@@ -325,10 +329,10 @@ zeroed=1
 for rule in atom-comma-operator atom-embedded-crement atom-assign-as-value atom-nested-ternary \
             atom-implicit-predicate atom-octal-literal atom-reversed-subscript
 do
-    grep -q "<rule name=\"$rule\" count=\"0\"/>" "$TMP/js" || { zeroed=0; echo "    (missing zero row for $rule)"; }
+    grep -q "<rule name=\"$rule\" count=\"0\" applicable=\"0\"/>" "$TMP/js" || { zeroed=0; echo "    (missing zero+inert row for $rule)"; }
 done
 [ "$zeroed" = 1 ] \
-    && ok "a JavaScript-only corpus declares all seven atom rules at count=\"0\"" \
+    && ok "a JavaScript-only corpus declares all seven atom rules at count=\"0\" applicable=\"0\"" \
     || no "a JavaScript-only corpus does not declare every atom rule at count=\"0\""
 
 # ── H) G5: --lint without any C-family atom is byte-identical to a flagless run's map ─────────────
