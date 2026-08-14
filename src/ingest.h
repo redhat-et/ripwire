@@ -181,6 +181,9 @@ struct AstMatch     { std::uint32_t fileId; std::uint32_t startByte; std::uint32
 // house rule --match already follows with hits_capped="1").
 // uncompiledOut (optional): receives the query text of every spec that compiled for NO grammar — the
 // caller can then refuse instead of presenting the resulting zero as a measurement (§P0.1's last gap).
+// A caller that also wants the §L3 grammar-applicability disclosure (grammarsOut / eligibleFilesOut on
+// AstQueryGroup, below) builds its own one-element AstQueryGroup vector and calls astQueryGrouped directly
+// — kept off this convenience wrapper so its signature (and every existing call site) is untouched.
 std::vector<AstMatch> astQuery( const IngestResult& ing, const std::vector<AstQuerySpec>& specs, std::size_t maxMatches = 5000,
                                 std::vector<std::string>* uncompiledOut = nullptr );
 
@@ -231,6 +234,23 @@ struct AstQueryGroup
     std::size_t                      maxMatches    = 5000;      // per-TAG budget, same semantics as astQuery's
     std::vector<std::string>*        uncompiledOut = nullptr;   // optional, same semantics as astQuery's
     AstWalk                          walk          = AstWalk::None;   // non-None ⇒ built-in walk, no specs
+
+    // §L3: a query that DID compile (for at least one grammar) still tells the caller nothing about WHICH
+    // grammars accepted it, or how much of the corpus could even ask it the question. `(interface_declaration)
+    // @m` against a Python-only corpus compiles fine (java/csharp/typescript all have that node) and returns
+    // a bare hits="0" — indistinguishable from "this pattern does not occur", which the honesty contract
+    // forbids (CLAUDE.md: a zero means "none found", never "none exists"). Both fields are opt-in (default
+    // nullptr ⇒ zero cost, every existing caller unaffected) and are populated by probing the query against
+    // the FULL kLangTable, not just the grammars the corpus happens to hold — so the disclosure is honest
+    // even when eligible_files ends up zero.
+    std::vector<std::string>*        grammarsOut      = nullptr;   // optional: canonical names of every grammar
+                                                                     // this group's specs compiled against
+                                                                     // (dedup, kLangTable row order — fixed and
+                                                                     // deterministic, independent of corpus content)
+    std::size_t*                      eligibleFilesOut = nullptr;   // optional: corpus files whose extension maps
+                                                                     // to one of those grammars (same extension-
+                                                                     // based convention the grammar-presence scan
+                                                                     // above already uses — not content-sniffed)
 };
 
 // keptBytesOut (optional): the walk is where the corpus gets READ, so a pass that runs after it and needs

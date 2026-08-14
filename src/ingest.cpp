@@ -11146,6 +11146,91 @@ inline void runWalkGroups( const std::vector<AstQueryGroup>& groups, TSNode root
     }
 }
 
+// §L3: grammar-applicability disclosure for AstQueryGroup::grammarsOut / eligibleFilesOut (see ingest.h for
+// the field docs). A SEPARATE probe over the full kLangTable rather than a read of astQueryGrouped's own
+// byGrammar table, because byGrammar only ever holds grammars the CORPUS is present for — exactly the
+// information this exists to supply when the honest answer is "none of them" (a query that compiles fine
+// for java/csharp/typescript but the corpus is Python-only). Cost is bounded by kLangTable's size (~37
+// rows) per requesting group's specs, paid only when a caller asks — every existing --lint / --lint-rules
+// call site leaves both fields null, so this is a no-op for them.
+static void computeGrammarDisclosure( const IngestResult& ing, const std::vector<AstQueryGroup>& groups )
+{
+    for( const AstQueryGroup& grp : groups )
+    {
+        if( grp.grammarsOut == nullptr && grp.eligibleFilesOut == nullptr )
+        {
+            continue;
+        }
+        if( grp.specs == nullptr )
+        {
+            continue;   // a walk-only group has no query to probe grammars for
+        }
+        std::vector<const TSLanguage*> triedGrammars;   // dedup tracker: several extensions share one grammar
+        std::vector<const TSLanguage*> okGrammars;       // grammars at least one spec in this group compiled against
+        std::vector<std::string>       okNames;          // grammarsOut dedup: TWO distinct grammar OBJECTS can
+                                                          // share one display NAME (tree_sitter_typescript and
+                                                          // tree_sitter_tsx are both querySub "typescript"; the
+                                                          // CUDA grammar reuses "cpp") — okGrammars stays one
+                                                          // entry per compiling OBJECT (eligible_files needs
+                                                          // every one of them), grammarsOut stays one per NAME.
+        for( const LangEntry& le : kLangTable )
+        {
+            if( le.grammar == nullptr || le.querySub.empty() )
+            {
+                continue;   // no grammar (markdown) or no tags.scm surface to compile a --match query against
+            }
+            const TSLanguage* g = le.grammar();
+            if( std::find( triedGrammars.begin(), triedGrammars.end(), g ) != triedGrammars.end() )
+            {
+                continue;
+            }
+            triedGrammars.push_back( g );
+            bool compiledAny = false;
+            for( const AstQuerySpec& spec : *grp.specs )
+            {
+                std::uint32_t off = 0; TSQueryError err = TSQueryErrorNone;
+                if( TSQuery* probe = ts_query_new( g, spec.query.data(), static_cast<std::uint32_t>( spec.query.size() ), &off, &err ) )
+                {
+                    ts_query_delete( probe );
+                    compiledAny = true;
+                    break;
+                }
+            }
+            if( compiledAny )
+            {
+                okGrammars.push_back( g );
+                if( grp.grammarsOut != nullptr )
+                {
+                    const std::string name( le.querySub );
+                    if( std::find( okNames.begin(), okNames.end(), name ) == okNames.end() )
+                    {
+                        okNames.push_back( name );
+                        grp.grammarsOut->push_back( name );
+                    }
+                }
+            }
+        }
+        if( grp.eligibleFilesOut != nullptr )
+        {
+            std::size_t eligible = 0;
+            for( std::size_t fileId = 0; fileId < ing.files.size(); ++fileId )
+            {
+                const std::string ext = lowerExtensionOf( diskPath( ing, std::uint32_t( fileId ) ) );
+                const LangEntry*  fle = lookupLang( ext );
+                if( fle == nullptr || fle->grammar == nullptr )
+                {
+                    continue;
+                }
+                if( std::find( okGrammars.begin(), okGrammars.end(), fle->grammar() ) != okGrammars.end() )
+                {
+                    ++eligible;
+                }
+            }
+            *grp.eligibleFilesOut = eligible;
+        }
+    }
+}
+
 std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, const std::vector<AstQueryGroup>& groups,
                                                     std::vector<std::string>* keptBytesOut )
 {
@@ -11312,6 +11397,11 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                 }
         }
     }
+
+    // §L3: grammar-applicability disclosure, opt-in per group (grammarsOut / eligibleFilesOut) — a standalone
+    // pass so the existing groups[] loops above stay exactly as complex as they were for every caller that
+    // doesn't ask for this (--lint, --lint-rules leave both null; zero cost, zero shape change for them).
+    computeGrammarDisclosure( ing, groups );
 
     const std::size_t nfiles = ing.files.size();
     unsigned hw = std::thread::hardware_concurrency();
