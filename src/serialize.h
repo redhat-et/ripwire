@@ -1256,9 +1256,18 @@ constexpr std::size_t kUnindexedHeaderExts = 6;
 //
 // Only source/text-looking extensions are counted (ingest.h::isNonTextExtension names the rule); an
 // unindexed .png is a picture, not a language ripwire failed to read. Returns "" when there are none, so a
-// fully-indexable tree's map stays byte-identical. The DEFINITION of the attribute lives in the skipped
-// verb's legend and docs/COMMANDS.md, not inline: the fixed legend cannot grow a clause without changing
-// every map's bytes, and a parenthetical gloss here costs the same envelope this note is protecting.
+// fully-indexable tree's map stays byte-identical.
+//
+// WHERE THE DEFINITION LIVES, AND THE MEASUREMENT THAT KEEPS IT THERE. Both attributes are defined in the
+// --skipped verb's legend and docs/COMMANDS.md, NOT in the map legend the reader meets them on. That is a
+// real disclosure gap and it is recorded here rather than fixed, because it was attempted and MEASURED:
+// even the conditional form (append the clause only to a map that carries the attribute, the way
+// kMetricsLegend / kAtStampLegend / kMaxTokensFitLegend are charged) breaks test/tokenbudgetcheck.sh arm
+// #3. On `src` at --max-tokens=500 the map's fixed floor is 1173 B against a 1180 B allowance — SEVEN bytes
+// of headroom, so no clause of any wording fits, and the shortest honest one is ~150 B. Growing the floor
+// there would make --max-tokens overshoot its own ceiling (disclosed as over_ceiling=1, but overshooting
+// nonetheless) to define an attribute that IS defined one verb away. If that headroom is ever reclaimed,
+// this is the clause to add back.
 inline std::string buildUnindexedAttr( const CrawlSkips& skips )
 {
     if( skips.unindexedExts.empty() )
@@ -1443,7 +1452,6 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += kMaxTokensFitLegend; // §B13.4, --max-tokens-only (ditto)
     }
-
     // header honesty gauges: ambiguous=resolver guessed among >1 in-repo def (read source); unresolved=the callee
     // name IS defined in-repo but EVERY def was language-filtered — a plausibly-internal, cross-language-filtered
     // edge (NOT counted for genuine externals like stdlib/third-party, whose name has no in-repo def at all).

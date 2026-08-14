@@ -540,6 +540,16 @@ inline std::optional<std::string> loadRecallBody( const IngestResult& ing, std::
 // total=/shown=/capped=/truncated=/generated_demoted=/est_tokens= tail. `truncated=` appears only when
 // something WAS cut; `generated_demoted=` only when the ranking actually moved a generated doc down — an
 // absent field means it did not happen, never that it was not looked for (the §P0.1 honest-limit rule).
+//
+// §L4.3 loop-closer, and why it rides HERE. A per-doc `lines="LO-HI[,…]"` names the SELECTED section spans —
+// where the picked sections start and end in the file — and that stays true after the byte budget cuts the
+// last body mid-section. The adjacent `[truncated: X of Y bytes]` marker already says the text was cut, so
+// the form is honest, but nothing on the screen said which of the two numbers `lines=` belongs to, and a
+// reader who assumed "the range I am looking at" would be wrong by however much was trimmed. The clause is
+// charged only to a run that actually truncated something: with `truncated=` absent, lines= and the emitted
+// text agree exactly and there is nothing to disambiguate — the same "charged where the attribute is" rule
+// the map legend's conditional clauses follow. It is appended AFTER the last attribute, never between two,
+// so the header's `name=value` tail stays scannable.
 inline std::string formatRecallHeader( std::string_view task, const RecallShape& shape, std::size_t estTokens )
 {
     // W3FIX M1 (same class as --for/--pack-task): `over_ceiling=1` — the artifact is larger than the --max-tokens
@@ -553,9 +563,12 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
         overCeilingAttr = " over_ceiling=1";
     }
     std::string truncAttr;
+    std::string linesNote;   // §L4.3 — see the header comment for why it is conditional and why it trails
     if( shape.truncatedCount > 0 )
     {
         truncAttr = " truncated=" + std::to_string( shape.truncatedCount );
+        linesNote = "  [lines= on a doc is its SELECTED section range — pre-truncation; the per-doc"
+                    " truncation marker names the bytes actually emitted]";
     }
     std::string demotedAttr;
     if( shape.demotedCount > 0 )
@@ -574,7 +587,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     // §B9.2: "document files" is docFileMask()'s population and says so — it is a SUPERSET of
     // --doc-drift's docs= (markdown by extension), and the two must not share a noun.
     std::string line;
-    line.reserve( 160 + task.size() + truncAttr.size() + demotedAttr.size() + overCeilingAttr.size() );
+    line.reserve( 160 + task.size() + truncAttr.size() + demotedAttr.size() + overCeilingAttr.size() + linesNote.size() );
     line += "ripwire recall — \"";
     line += task;
     line += "\" — ";
@@ -592,6 +605,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     line += overCeilingAttr;
     line += " est_tokens=";
     line += std::to_string( estTokens );
+    line += linesNote;
     line += "\n";
     return line;
 }

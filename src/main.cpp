@@ -8104,8 +8104,14 @@ constexpr const char* kSkippedLegend =
                  " population the crawl ENUMERATED, at every ceiling and exclude setting. unsupported_ext= counts source/text-looking files"
                  " outside that population (binary/asset extensions are deliberately not counted — an unindexed .png is a picture, not a"
                  " language this build failed to read); its per-extension breakdown is the <e x= files=/> rows, which the map header rolls"
-                 " up as unindexed=. excluded_dirs= counts SUBTREES an exclude pruned: the walk stopped at the directory, so how many files"
-                 " are under them is UNKNOWN, not zero, and they are in no count here. degraded_parse= / minified_suspect= count the h rows."
+                 " up as unindexed= — a TOP-6 list, and the map's unindexed_exts= beside it names how many DISTINCT such"
+                 " extensions exist, present exactly when that list was cut and absent when it is complete."
+                 " excluded_dirs= counts SUBTREES an exclude pruned: the walk stopped at the directory, so how many files"
+                 " are under them is UNKNOWN, not zero, and they are in no count here. pruned_dirs= counts the subtrees this build ALWAYS"
+                 " prunes by policy — the committed noise/vendor/build denylist and any directory holding a CMakeCache.txt — with the same"
+                 " consequence: the walk stopped there, their contents are UNKNOWN rather than zero, and they are in no count here. The two"
+                 " are separate because the answer to \"why is my tree missing\" differs: one is a rule you passed, the other is a rule this"
+                 " build carries. degraded_parse= / minified_suspect= count the h rows."
                  " unmeasured= counts indexed files this run never parsed (a doc-format file extracted by the doc pass, a binary sniff or"
                  " nesting guard refusal, a read failure) — they are absent from the health counts, not clean. rows_capped=\"1\" means a row"
                  " list hit its 500-row ceiling, so the rows are a SAMPLE of the count beside them; every count stays exact. A zero means"
@@ -8270,18 +8276,19 @@ std::optional<int> runSkipped( const MainDispatch& d )
         const SkipHealthReport health = classifySkipHealth( ing );
 
         w.write( kSkippedLegend );
-        char hdr[ 512 ];
+        char hdr[ 640 ];   // twelve counters, each up to 20 digits — sized well clear of a truncated count
         // mirror ingest()'s own zero-ceiling clamp so the header states the EFFECTIVE bound, never a raw 0
         const std::size_t effectiveMax = cfg.maxFileBytes == 0 ? kDefaultMaxFileBytes : cfg.maxFileBytes;
         const CrawlSkips& cs           = ing.crawlSkips;
         const bool        rowsCapped   = cs.excluded.size() < cs.excludedFiles || cs.unsupported.size() < cs.unsupportedFiles;
         std::snprintf( hdr, sizeof( hdr ),
                        "<skipped indexed=\"%zu\" oversize=\"%zu\" excluded=\"%llu\" unsupported_ext=\"%llu\" excluded_dirs=\"%llu\""
+                       " pruned_dirs=\"%llu\""
                        " degraded_parse=\"%zu\" minified_suspect=\"%zu\" unmeasured=\"%zu\" max_file_size=\"%zu\" json_ceiling=\"%zu\""
                        " yaml_ceiling=\"%zu\"%s>",
                        ing.files.size(), ing.skippedOversize.size(),
                        ( unsigned long long ) cs.excludedFiles, ( unsigned long long ) cs.unsupportedFiles,
-                       ( unsigned long long ) cs.excludedDirs,
+                       ( unsigned long long ) cs.excludedDirs, ( unsigned long long ) cs.prunedDirs,
                        health.degraded, health.minified, health.unmeasured,
                        effectiveMax, kMaxJsonConfigBytes, kMaxYamlConfigBytes,
                        rowsCapped ? " rows_capped=\"1\"" : "" );
@@ -10287,13 +10294,25 @@ std::optional<int> runGrep( const MainDispatch& d )
 // buildHeatAnnotations above were — pure re-serialization, zero new analysis, and runLint was already
 // the file's largest verb. `capOf` is redefined locally (a small linear scan over `saturatedRules`,
 // mirroring runLint's own) rather than shared by reference, so this stays a self-contained call.
+// The two per-rule DISCLOSURES the XML path states and this one has to state differently. Both are read
+// off the SAME inputs the XML arm below uses (lintSelectionKeeps for the row it would have dropped,
+// lintCatalogFind ∧ corpusLangs for its applicable="0"), never recomputed from a second source of truth —
+// see sarif.h's own header for why SARIF spells them as defaultConfiguration.enabled / properties.applicable
+// instead of "omit the row" / "omit the attribute".
+// `d` replaces the ing/root/cfg trio this used to take one by one — the same MainDispatch every other verb
+// handler in this file is already given, and the reason the two new disclosures below cost no signature
+// growth: the run's flags (builtinsActive, the raw select=/ignore=) are fields of d.cfg, so the next fact
+// the XML root grows will not widen this signature either.
 template <class EnclosingFn>
-void emitRunLintSarif( const rw::IngestResult& ing, const std::string& root, bool builtinsActive,
+void emitRunLintSarif( const MainDispatch& d,
                        const std::vector<std::string>& allRuleNames, const std::vector<rw::LintRule>& userRules,
                        const std::vector<RuleCap>& saturatedRules, const std::vector<LintOut>& outs,
+                       const rw::lintcatalog::LintSelection& lintSel, std::uint32_t corpusLangs,
                        EnclosingFn&& enclosing )
 {
     using namespace rw;
+    const Config&       cfg = d.cfg;
+    const IngestResult& ing = d.ing;
     const auto capOf = [ & ]( const std::string& ruleName, bool isUserRule ) -> const RuleCap*
     {
         for( const RuleCap& rc : saturatedRules )
@@ -10305,19 +10324,26 @@ void emitRunLintSarif( const rw::IngestResult& ing, const std::string& root, boo
         }
         return nullptr;
     };
+    const auto keptBySelection = [ & ]( std::string_view name ) noexcept
+    {
+        return !lintSel.active || rw::lintcatalog::lintSelectionKeeps( lintSel, name );
+    };
 
     std::vector<rw::sarif::SarifRuleDecl> sarifRules;
     sarifRules.reserve( allRuleNames.size() + userRules.size() );
-    if( builtinsActive )   // built-in rule catalogue only enters the tally under --lint (mirrors the XML arm)
+    if( cfg.lint )   // built-in rule catalogue only enters the tally under --lint (mirrors the XML arm)
     {
         for( const std::string& rn : allRuleNames )
         {
-            sarifRules.push_back( { rn, false, capOf( rn, false ) != nullptr } );
+            const rw::lintcatalog::LintCatalogRow* catRow = rw::lintcatalog::lintCatalogFind( rn );
+            const bool applicable = catRow == nullptr || ( catRow->langMask & corpusLangs ) != 0;
+            sarifRules.push_back( { rn, false, capOf( rn, false ) != nullptr, keptBySelection( rn ), applicable } );
         }
     }
     for( const LintRule& r : userRules )
     {
-        sarifRules.push_back( { r.id, true, capOf( r.id, true ) != nullptr } );
+        const bool applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
+        sarifRules.push_back( { r.id, true, capOf( r.id, true ) != nullptr, keptBySelection( r.id ), applicable } );
     }
 
     std::vector<rw::sarif::SarifFinding> sarifFindings;
@@ -10327,7 +10353,15 @@ void emitRunLintSarif( const rw::IngestResult& ing, const std::string& root, boo
         const Symbol* e = enclosing( m.fileId, m.startByte );
         sarifFindings.push_back( { m.rule, m.sev, ing.files[ m.fileId ], m.line, e ? e->name : std::string(), m.text } );
     }
-    rw::sarif::emitLintSarif( stdout, sarifRules, sarifFindings, !saturatedRules.empty(), root );
+
+    rw::sarif::SarifRunProperties props;
+    props.anyRuleCapped   = !saturatedRules.empty();
+    props.selectionActive = lintSel.active;
+    props.selectedCount   = lintSel.selectedCount;
+    props.totalCount      = lintSel.totalCount;
+    props.select.assign( cfg.lintSelect );
+    props.ignore.assign( cfg.lintIgnore );
+    rw::sarif::emitLintSarif( stdout, sarifRules, sarifFindings, props, d.root );
 }
 
 // §L3: runs a --match query, returning its hits plus the grammar-applicability disclosure — grammarsAttrOut
@@ -10867,7 +10901,7 @@ std::optional<int> runLint( const MainDispatch& d )
         // validateConfig already refused this alongside --match / --with-profile / paging.
         if( cfg.sarif )
         {
-            emitRunLintSarif( ing, d.root, cfg.lint, allRuleNames, userRules, saturatedRules, outs, enclosing );
+            emitRunLintSarif( d, allRuleNames, userRules, saturatedRules, outs, lintSel, corpusLangs, enclosing );
             return 0;
         }
 

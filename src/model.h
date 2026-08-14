@@ -651,6 +651,15 @@ struct CrawlSkips
     std::uint64_t             excludedFiles   = 0;  // EXACT count (rows may be fewer)
     std::uint64_t             unsupportedFiles = 0; // EXACT count (rows may be fewer)
     std::uint64_t             excludedDirs    = 0;  // subtrees pruned by --exclude: contents NEVER enumerated
+    // Subtrees pruned by BUILT-IN POLICY, not by anything the caller asked for: the committed denylist
+    // (ingest.h kCrawlSkipDirs — node_modules/.git/build/…) and the CMakeCache.txt build-output sentinel.
+    // Kept apart from excludedDirs on purpose. Both classes stop the walk at the directory, so both leave
+    // the contents UNKNOWN rather than zero — but a reader debugging "why is my tree not in the map"
+    // needs to tell "this build always skips that" from "you asked me to skip that", and one counter
+    // cannot say both. Before this existed, all three prune paths converged on
+    // disable_recursion_pending() and only the --exclude one incremented anything, so `--skipped` over a
+    // tree with node_modules/ reported EVERY counter zero while whole subtrees had been dropped.
+    std::uint64_t             prunedDirs      = 0;
     std::vector<UnindexedExt> unindexedExts;        // EXACT histogram, sorted files desc then ext asc
 };
 
