@@ -11,6 +11,7 @@
 #include "smallvec.h"   // rw::SmallVec — THE ONE ALIAS; the per-key span lists and per-file id buckets below
 
 #include <algorithm>   // std::sort — symbolsByFile below
+#include <tuple>       // std::tie — lessUnindexedExt's mixed-direction compare
 #include <array>       // Symbol::evWhy — the fixed-size ev_why tag counters
 #include <cstdint>
 #include <string>
@@ -588,6 +589,87 @@ struct SkippedOversize
     std::uint64_t limitBytes = 0;
 };
 
+// §L1 — THE SKIP TAXONOMY. `oversize` above was the only drop reason the tool could NAME, so every
+// other way a file left the corpus read as "nothing was dropped": --skipped reported oversize="0" on a
+// tree where the crawl had passed over thousands of files, which is the honesty contract's own failure
+// mode (a zero that means "none exists" rather than "none found"). These two classes complete it.
+//
+// `excluded` — matched a --exclude substring while carrying an INDEXABLE extension. Only files the walk
+// actually enumerated appear: an --exclude that prunes a whole DIRECTORY stops the walk at the directory,
+// so its contents are never seen and CANNOT be listed. Those prunes are counted separately
+// (excludedDirs) and the verb says out loud that the file count under them is unknown, not zero.
+//
+// `unsupported` — a source/text-looking extension with no grammar and no doc handler. This is the class
+// that hides a whole LANGUAGE: on facebook/infer (11 923 files, ~60% OCaml) the map header gave no
+// indication that the repo's primary language contributed nothing to it.
+struct SkippedFile
+{
+    std::string   path;
+    std::uint64_t sizeBytes = 0;
+    std::string   ext;        // lowercased, leading '.'; "" when the name carries no extension
+};
+
+// One unindexed extension and how many files wore it — the header's `unindexed=` roll-up, itemized.
+struct UnindexedExt
+{
+    std::string   ext;
+    std::uint64_t files = 0;
+};
+
+// The ONE ordering `unindexed=` is emitted in — most files first, extension name as the tiebreak. Shared
+// (not re-spelled at each sort site) because it rides the DEFAULT map header from two different producers:
+// the single-root crawl, and the multi-root merge that unions their histograms. An order that differed
+// between those two, or that depended on hash-map iteration, would be a determinism bug.
+inline bool lessUnindexedExt( const UnindexedExt& a, const UnindexedExt& b ) noexcept
+{
+    // MIXED-DIRECTION sort via one swapped std::tie: `files` compares with the operands reversed (so the
+    // LARGER count sorts first) while `ext` compares in normal order (so the smaller name breaks the tie).
+    // Written this way rather than as the two-branch comparator it replaces because that shape is one the
+    // clone lens groups with every other two-field comparator in the tree — this tree already holds several.
+    return std::tie( b.files, a.ext ) < std::tie( a.files, b.ext );
+}
+
+// The non-oversize crawl disclosures. Row vectors are CAPPED (kMaxSkipRowsPerClass) so a tree with a
+// million unindexed files cannot be a memory hazard; the counts beside them are EXACT and the cap is
+// disclosed on the emitted row set, never silent.
+// Deliberately NOT merged into IngestResult::skippedOversize: that vector's SIZE is the map header's
+// skipped_oversize= count, and one accounting number must keep one meaning (the "one source, never two
+// counters" rule above).
+struct CrawlSkips
+{
+    std::vector<SkippedFile>  excluded;             // capped rows, path-sorted
+    std::vector<SkippedFile>  unsupported;          // capped rows, path-sorted
+    std::uint64_t             excludedFiles   = 0;  // EXACT count (rows may be fewer)
+    std::uint64_t             unsupportedFiles = 0; // EXACT count (rows may be fewer)
+    std::uint64_t             excludedDirs    = 0;  // subtrees pruned by --exclude: contents NEVER enumerated
+    std::vector<UnindexedExt> unindexedExts;        // EXACT histogram, sorted files desc then ext asc
+};
+
+// §L1 — PARSE HEALTH: a per-indexed-file record of how much of the file the parser actually understood,
+// and whether the file looks machine-written. Both classes are DISCLOSURE ONLY — the file stays indexed
+// and every symbol it contributed stays in the map. The point is that a reader can tell the difference
+// between "no symbols here" and "symbols we cannot vouch for".
+//
+// errNodes/errBytes are a PARSER-STATE fact, never a syntax verdict: tree-sitter error recovery fires on
+// a valid file written in a dialect the vendored grammar predates just as it fires on a truncated one, and
+// a reader needs to be told about BOTH. Hence the label "degraded-parse", not "invalid syntax".
+//
+// fileBytes == 0 is the NOT-MEASURED sentinel (an indexed file always has a size): the ingest never
+// parsed that file — a doc-format file handled by the doc post-pass, a file the binary sniff or a nesting
+// guard refused, or a read failure. The verb reports those as a separate count, never as zero findings.
+// The doc post-pass is deliberately left on that side of the line: a notebook's EXTRACTED prose has no
+// tree-sitter parse that could be degraded, and inventing a clean reading for it would be exactly the
+// guess this lane exists to remove.
+// Round-trips the incremental cache (ingest.cpp kCacheVersion 13): the auto-cache is the DEFAULT path, and
+// a disclosure that evaporates on the warm run is worse than none.
+struct FileHealth
+{
+    std::uint32_t errNodes  = 0;   // ERROR + MISSING nodes in the file's parse tree
+    std::uint32_t errBytes  = 0;   // bytes covered by the TOP-MOST ERROR nodes (MISSING is zero-width)
+    std::uint32_t fileBytes = 0;   // the parsed byte length; 0 ⇒ NOT MEASURED (see above)
+    std::uint32_t wsBytes   = 0;   // whitespace bytes in the leading min(fileBytes, 4096) sample
+};
+
 // Output of ingestion. Deterministic: files sorted lexicographically, symbol ids assigned
 // in (file, line, name) order so the whole pipeline is reproducible run-to-run.
 struct IngestResult
@@ -603,6 +685,9 @@ struct IngestResult
     // population the crawl considered, at EVERY --max-file-size setting. The header emits size() as
     // skipped_oversize=; --skipped itemizes the rows (one source, never two counters). Sorted by path.
     std::vector<SkippedOversize> skippedOversize;
+
+    CrawlSkips              crawlSkips;   // §L1 skip taxonomy + unindexed-ext histogram — see CrawlSkips
+    std::vector<FileHealth> fileHealth;   // §L1 parse health, parallel to `files` — see FileHealth
 
     std::vector<Symbol>      symbols;      // definitions
     std::vector<Reference>   references;   // unresolved calls

@@ -1234,6 +1234,61 @@ inline constexpr const char* kMaxTokensFitLegend =
 //              auto-flips to important-last once est_tokens crosses kFillOrderThreshold. Callers that
 //              want the pre-T3 behaviour (e.g. --around's ego-graph, or the --max-tokens probe pass)
 //              pass autoOrder=false and keep the prior explicit-only semantics.
+// §L1 — how many extensions the map header's `unindexed=` list may name before it is capped. ONE
+// definition: the XML and JSON header lanes must cap identically or the two surfaces disagree about what
+// "capped" means, and a consumer joining them would see a phantom difference.
+constexpr std::size_t kUnindexedHeaderExts = 6;
+
+// §L1 — `unindexed=` for the map header: the LANGUAGES this build could not read at all.
+// skipped_oversize= disclosed the files a ceiling dropped; nothing disclosed the files whose EXTENSION has
+// no grammar, and that is how a whole language disappears silently. On facebook/infer (11 923 files, ~60%
+// OCaml) the header gave no hint that the repo's primary language contributed nothing and the top-ranked
+// symbols were test fixtures.
+//
+// Top extensions by file count, `ext:count`. THE CAP IS ALWAYS DISCLOSED: the list stops at
+// kUnindexedHeaderExts and `unindexed_exts=N` rides alongside it exactly when the cap bit, naming how many
+// DISTINCT extensions exist — so the list is either complete or labelled, never a top-6 mistakable for a
+// total. Absent when nothing was cut, the same absent-means-nothing-happened rule skipped_oversize= and
+// overloads= already use, AND what keeps the disclosure inside the map's fixed envelope: at the smallest
+// --max-tokens budgets the floor has ~24 bytes of headroom (test/tokenbudgetcheck.sh arm #3), so a 17-byte
+// counter whose only message is "nothing was capped" is a counter that pushes the floor past a ceiling it
+// never needed to.
+//
+// Only source/text-looking extensions are counted (ingest.h::isNonTextExtension names the rule); an
+// unindexed .png is a picture, not a language ripwire failed to read. Returns "" when there are none, so a
+// fully-indexable tree's map stays byte-identical. The DEFINITION of the attribute lives in the skipped
+// verb's legend and docs/COMMANDS.md, not inline: the fixed legend cannot grow a clause without changing
+// every map's bytes, and a parenthetical gloss here costs the same envelope this note is protecting.
+inline std::string buildUnindexedAttr( const CrawlSkips& skips )
+{
+    if( skips.unindexedExts.empty() )
+    {
+        return {};
+    }
+    const std::size_t shown = skips.unindexedExts.size() < kUnindexedHeaderExts
+                            ? skips.unindexedExts.size() : kUnindexedHeaderExts;
+    std::string attr = " unindexed=\"";
+    for( std::size_t i = 0; i < shown; ++i )
+    {
+        const UnindexedExt& ue = skips.unindexedExts[ i ];
+        if( i != 0 )
+        {
+            attr += ',';
+        }
+        // the leading '.' is dropped — `ml:7231` reads as a language, `.ml:7231` reads as a path
+        attr += ue.ext.size() > 1 && ue.ext[ 0 ] == '.' ? ue.ext.substr( 1 ) : ue.ext;
+        attr += ':';
+        attr += std::to_string( ue.files );
+    }
+    attr += '"';
+    if( skips.unindexedExts.size() > shown )
+    {
+        attr += " unindexed_exts=";
+        attr += std::to_string( skips.unindexedExts.size() );
+    }
+    return attr;
+}
+
 inline void serialize( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                        const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                        int topK, bool mostImportantLast = false,
@@ -1447,6 +1502,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         std::snprintf( skippedAttr, sizeof( skippedAttr ), " skipped_oversize=%zu", ing.skippedOversize.size() );
     }
+    // §L1: the LANGUAGES this build could not read at all — buildUnindexedAttr carries the whole rule.
+    const std::string unindexedAttr = buildUnindexedAttr( ing.crawlSkips );
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
     // one. Emitted ONLY under --max-tokens (nullptr for every other caller ⇒ byte-identical default map).
@@ -1490,7 +1547,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         stats += " est_tokens="; stats += std::to_string( estTokens );
         stats += " ambiguous=";  stats += std::to_string( ambTotal );
         stats += " unresolved="; stats += std::to_string( unresolvedTotal );
-        stats += precAttr;  stats += rootsAttr;  stats += changedAttr;  stats += skippedAttr;  stats += fitAttr;
+        stats += precAttr;  stats += rootsAttr;  stats += changedAttr;  stats += skippedAttr;  stats += unindexedAttr;  stats += fitAttr;
         stats += " order=";      stats += orderAttr;
         stats += " -->";
         return stats;
@@ -4976,6 +5033,45 @@ inline void writeJsonMapStamp( JsonWriter& w, std::string& esc, const MapAnnotat
     }
 }
 
+// §L1, JSON lane: the same reasoning as the XML header's buildUnindexedAttr — an MCP client is the
+// audience LEAST able to notice on its own that the repo's primary language has no grammar in this build.
+// Object form ("ml":7231) rather than the XML lane's packed string, because a JSON consumer should not have
+// to re-parse a comma list; `unindexed_exts` appears exactly when the list was capped, so its ABSENCE means
+// the object is complete — the same rule, and the same cap (kUnindexedHeaderExts), as the XML lane.
+// Writes nothing at all when there is nothing unindexed.
+inline void writeJsonUnindexed( JsonWriter& w, std::string& esc, const CrawlSkips& skips )
+{
+    if( skips.unindexedExts.empty() )
+    {
+        return;
+    }
+    char num[ 64 ];
+    w.write( "\"unindexed\":{" );
+    const std::size_t shown = skips.unindexedExts.size() < kUnindexedHeaderExts
+                            ? skips.unindexedExts.size() : kUnindexedHeaderExts;
+    for( std::size_t i = 0; i < shown; ++i )
+    {
+        const UnindexedExt& ue   = skips.unindexedExts[ i ];
+        const std::string   bare = ue.ext.size() > 1 && ue.ext[ 0 ] == '.' ? ue.ext.substr( 1 ) : ue.ext;
+        if( i != 0 )
+        {
+            w.write( "," );
+        }
+        writeJsonStr( w, bare, esc );
+        std::snprintf( num, sizeof( num ), ":%llu", ( unsigned long long ) ue.files );
+        w.write( num );
+    }
+    if( skips.unindexedExts.size() > shown )
+    {
+        std::snprintf( num, sizeof( num ), "},\"unindexed_exts\":%zu,", skips.unindexedExts.size() );
+    }
+    else
+    {
+        std::snprintf( num, sizeof( num ), "}," );   // complete list ⇒ no cap to disclose
+    }
+    w.write( num );
+}
+
 inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHeader& h )
 {
     char hdr[ 256 ];   // the gauge line has 7 size_t fields — wider than the per-symbol scratch
@@ -4991,6 +5087,8 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
         std::snprintf( hdr, sizeof( hdr ), "\"skipped_oversize\":%zu,", h.ing.skippedOversize.size() );
         w.write( hdr );
     }
+
+    writeJsonUnindexed( w, esc, h.ing.crawlSkips );   // §L1, JSON lane — see its own header
     // §A4d: `precise=N` — how many out-edges the SCIP overlay / an FFI binding actually pinned.
     // Emitted ONLY when a provenance vector was supplied, exactly like the XML attribute (absent ⇒ nothing
     // was measured, never a fabricated 0 that would read as "no edge is precise").
