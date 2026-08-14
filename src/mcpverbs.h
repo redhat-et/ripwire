@@ -2078,6 +2078,7 @@ struct QualityDeltaOutcome
     std::string                       baseMarker;    // "sidecar" | "git-HEAD" | "git-HEAD (stale sidecar …)" — see §B6 M10 below
     std::vector<rw::quality::Regression> regs;
     std::size_t                       ackedCount = 0;// findings suppressed by the .ripwire_quality_acks ratchet (honest suppression)
+    std::vector<rw::quality::StaleAck> staleAcks;     // L2 — acks whose target no longer applies to this working tree (see quality::computeStaleAcks)
 };
 
 // §B6 M10 — a CORRUPT sidecar used to read as "no sidecar". readBaseline reports a file that yields no header,
@@ -2161,6 +2162,15 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     const auto acks = rw::quality::readAckRecords( qualityAcksPath( root ) );
     oc.ackedCount   = rw::quality::applyAckRatchet( oc.regs, acks );
 
+    // L2 — same stale-ack disclosure the CLI's --quality-delta reports (see quality.h's computeStaleAcks):
+    // checked against THIS working tree, never the baseline above, so it costs one more computeSnapshot pass
+    // over `ing`/`g` already built here; skipped when the ledger is empty (test/mcpclidiffcheck.sh's LENS2
+    // pins the two surfaces to the same JSON key set).
+    if( !acks.empty() )
+    {
+        oc.staleAcks = rw::quality::computeStaleAcks( acks, rw::quality::computeSnapshot( ing, g, root ) );
+    }
+
     // R3: the marker spelling table lives in selectBaseline, so CLI and MCP name the same state the same way;
     // §B6 M10: plus this arm's own unreadable-sidecar state (mcpBaselineMarker, above).
     oc.baseMarker = mcpBaselineMarker( baseSel, sidecar );
@@ -2211,6 +2221,7 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
                     + "\",\"regressions\":" + std::to_string( oc.regs.size() )
                     + ",\"minor\":" + std::to_string( minorCount )
                     + ",\"acked\":" + std::to_string( oc.ackedCount )
+                    + ",\"stale\":" + std::to_string( oc.staleAcks.size() )
                     + ",\"preexisting-worse\":" + std::to_string( oc.regs.size() - newSymbolCount )
                     + ",\"new-symbol\":" + std::to_string( newSymbolCount )
                     + ",\"gating\":" + std::to_string( gatingCount )
@@ -2267,7 +2278,9 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
         }
         out += "}";
     }
-    out += "]}";
+    out += "],";     // L2 — "sa":[...], same taxonomy the CLI's <sa kind= key= why=/> rows carry (shared builder, quality::staleAcksJsonArray)
+    out += rw::quality::staleAcksJsonArray( oc.staleAcks );
+    out += "}";
     return out;
 }
 
