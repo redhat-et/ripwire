@@ -282,6 +282,15 @@ struct Symbol
                                        // args, and NOT an implicit-`self` method) → a same-name candidate whose
                                        // params ≠ the call-site arg count is provably wrong and may be dropped.
                                        // 0 (default, the SAFE state) ⇒ never arity-filter this def. See ingest.cpp.
+    // L8 IN-FILE TEST SCOPE: 1 ⇒ a syntactic in-file test convention encloses (or IS) this def — Rust
+    // `#[cfg(test)] mod` / `#[test] fn`, Python `class Test*` / a module-level `def test_*`, a JS/TS
+    // helper inside `describe(`/`it(`/`test(`, a C# `[Fact]`/`[Test]`/`[TestMethod]` member. Computed at
+    // extraction by ingest.cpp::inFileTestScope (see its banner for what each rule deliberately does NOT
+    // cover) and rides the per-file cache record, so kParserVer gates it like any other extracted fact.
+    // 0 (the SAFE state) means "no in-file convention found", NEVER "this is production": the path
+    // signal is the other half, and filter.h::isTestSymbol is the ONE predicate that ORs them — every
+    // symbol-keyed consumer of the test partition must route through it so the two halves cannot drift.
+    std::uint8_t  testScope     = 0;
     std::string   name;                // final identifier segment
     std::string   scope;               // enclosing class/namespace name (C++), for canonical scope::name resolution; "" if none
 };
