@@ -4889,6 +4889,12 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             return wroteAcks ? 0 : 1;
         }
 
+        // L2 — stale-ack disclosure (rationale: quality.h's computeStaleAcks). Checked against the CURRENT
+        // tree, not the baseline above, so it costs one more computeSnapshot; skipped when the ledger is
+        // empty. Reported, never gated — the exit code below reads `regs` alone.
+        const std::vector<quality::StaleAck> staleAcks = acks.empty() ? std::vector<quality::StaleAck>{}
+                                                         : quality::computeStaleAcks( acks, quality::computeSnapshot( ing, g, cfg.rootPath ) );
+
         // r26 ORIGIN SPLIT — three counts over the VISIBLE (post-ack) findings, one pass:
         //   minorCount      — the materiality tier (unchanged axis).
         //   newSymbolCount  — findings that exist only because the code is NEW (quality.h's origin axis).
@@ -4947,9 +4953,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             // The JSON sibling of the XML at= anchor — "at":null (never a fake sha) on a non-git root.
             const std::string atValJ  = gitstamp::stampAt( root );
             const std::string atJsonJ = atValJ.empty() ? std::string( "null" ) : ( "\"" + atValJ + "\"" );
-            std::printf( "{\"baseline\":\"%s\",\"regressions\":%zu,\"minor\":%zu,\"acked\":%zu,"
+            std::printf( "{\"baseline\":\"%s\",\"regressions\":%zu,\"minor\":%zu,\"acked\":%zu,\"stale\":%zu,"
                          "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"at\":%s,\"r\":[",
-                         jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount,
+                         jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount, staleAcks.size(),
                          preexistingCount, newSymbolCount, gatingCount, atJsonJ.c_str() );
             bool firstR = true;
             for( const quality::Regression& r : regs )
@@ -5000,7 +5006,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 }
                 std::printf( "}" );
             }
-            std::printf( "]}" );
+            std::printf( "]," );
+            std::fputs( quality::staleAcksJsonArray( staleAcks ).c_str(), stdout );   // L2 — "sa":[...], same taxonomy as the XML sa= rows below
+            std::printf( "}" );
             return gatingCount > 0 ? 2 : 0;
         }
 
@@ -5039,7 +5047,12 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                      "worse, but the new debt is yours: read them. LIMIT: origin is canonId identity "
                      "(path::scope::name), so a RENAMED or MOVED symbol reads as new — a regression carried in "
                      "with a move classifies new-symbol and will not gate. Descriptive: weigh + fix the real "
-                     "ones, do not game the number (a wrong abstraction beats a low score). Each row carries "
+                     "ones, do not game the number (a wrong abstraction beats a low score). "
+                     "stale=\"N\" is a SEPARATE axis, never gating, over the .ripwire_quality_acks ledger: an "
+                     "ack whose target no longer applies. Each sa row's why is target-gone (the key names no "
+                     "symbol/group any more) or finding-gone (the target survived, this kind just does not "
+                     "fire on it) — hygiene disclosure only, the ledger file is never auto-edited. "
+                     "Each row carries "
                      // Found by this lane's own legend-coverage sweep, not by the brief: the two attributes
                      // that IDENTIFY a row — which axis regressed, and on what — were the only ones the
                      // dictionary below never named, while it defines p=, sev=, origin= and gating=.
@@ -5061,8 +5074,8 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                      "first.) -->" );
         const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
         // at= anchors this regression list to the commit (+dirty state) it was computed against.
-        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\"%s>",
-                     baseMarker, regs.size(), minorCount, ackedCount, preexistingCount, newSymbolCount, gatingCount,
+        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\"%s>",
+                     baseMarker, regs.size(), minorCount, ackedCount, staleAcks.size(), preexistingCount, newSymbolCount, gatingCount,
                      gitstamp::atAttr( root ).c_str() );
         for( const quality::Regression& r : regs )
         {
@@ -5123,6 +5136,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 std::printf( "<r kind=\"%s\" sym=\"%s\" was=\"%u\" now=\"%u\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, root ) ).c_str(), r.was, r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
             }
         }
+        std::fputs( quality::staleAcksXml( staleAcks ).c_str(), stdout );   // L2 — one <sa> row per stale ack (quality::staleAcksXml)
         std::printf( "</quality-delta>" );
         return gatingCount > 0 ? 2 : 0;   // r26: only a PREEXISTING-worse AND major regression gates (== gating=)
     }
