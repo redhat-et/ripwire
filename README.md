@@ -43,8 +43,13 @@ the tests that reach them.
 | finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
 | pays for every line it read, right or wrong | measured at **7.3%** of what that grep-and-read pass spends |
 
-**Nothing it is unsure about reaches your agent unlabelled.** Every guess is marked in the output,
-and every mark has a next step — up to handing it a compiler-grade index.
+**Nothing it is unsure about reaches your agent unlabelled — and nothing it could not see goes
+unnamed.** Every guess is marked in the output, and every mark has a next step — up to handing it a
+compiler-grade index. Point it at a repository whose main language it has no grammar for and the
+map's first line says so (`unindexed="ml:793,mli:607,…"` on a facebook/infer clone); a file it
+indexed but cannot vouch for carries a parse-health row; every file the crawl passed over is
+itemized with its reason. A confident-looking map that lies by omission is the failure mode this
+tool refuses.
 [What it misses, and what to run next →](#what-it-misses-and-what-to-run-next)
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
@@ -152,6 +157,13 @@ bought for +3.4% warm latency and **−39.4%** tokens. Full provenance, the losi
 and a third round against a compression-layer competitor: [Measured](#measured) and
 [`bench/headtohead/r4-2026-08-06/`](bench/headtohead/r4-2026-08-06/), whose harness is committed so
 anyone can re-run the whole comparison.
+
+Test scaffolding does not pollute the ranking from inside source files either: `#[cfg(test)] mod
+tests`, `describe()` blocks, `Test*` classes and `[Fact]` attributes are detected syntactically,
+wherever they live — not by file path alone. On an astral-sh/ruff clone (5,945 files),
+`--ignore-tests` removes **23,907** test symbols where path rules alone caught 18,532
+(`ripwire <ruff> --ignore-tests`, 2026-08-14; the per-language fixtures are pinned by
+`test/testscopecheck.sh`).
 
 ---
 
@@ -1172,7 +1184,7 @@ across the tree; a rise there means the map is disclosing more overloading, not 
 | `counts_floor="1"` | a floor, not a total — a zero means *none found*, never *none exists* |
 | `unresolved=N` | call sites recognized and deliberately not resolved — counted, never dropped in silence |
 | `external="1"` | no definition anywhere in the indexed tree — stdlib or third-party, not a miss |
-| `--skipped` | the files the crawl dropped for size, itemized, so `files=` + oversize = everything it considered |
+| `--skipped` | every file the index does not contain, itemized with its reason — `oversize`, `excluded`, `unsupported-ext`, a pruned vendor tree (`pruned_dirs=`, contents unknown, not zero) — plus the files it DOES contain but cannot vouch for: `degraded-parse` (tree-sitter error spans, with `err_ratio=`) and `minified-suspect` (`ws_freq=`) |
 
 </details>
 
