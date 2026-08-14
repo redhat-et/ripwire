@@ -1172,6 +1172,7 @@ struct RawDef
     std::uint16_t params    = 0;   // Q4: parameter count (from the def's parameter-list child); fns/methods
     std::uint8_t  maxNest   = 0;   // Q4: max control-structure nesting depth inside the def (from cc_walk)
     std::uint8_t  arityExact = 0;  // B2.2: 1 ⇒ params is a fixed call-comparable arity (no variadic/default, not implicit-self)
+    std::uint8_t  testScope = 0;   // L8: 1 ⇒ an IN-FILE test convention encloses this def (see inFileTestScope)
     SymKind       kind      = SymKind::Other;
     Lang          lang      = Lang::Unknown;
     std::string   name;
@@ -1284,7 +1285,15 @@ constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 63;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 64;           // bump on any grammar/.scm/extraction change
+                                                      // 64 (2026-08-14 in-file test scope, test/testscopecheck.sh):
+                                                      //    every def carries a new syntactic `testScope` bit
+                                                      //    (Rust `#[cfg(test)] mod` / `#[test] fn`, Python
+                                                      //    `class Test*` / module-level `def test_*`, JS/TS
+                                                      //    `describe(`/`it(`/`test(` blocks, C# `[Fact]`/`[Test]`/
+                                                      //    `[TestMethod]`), written into the cache record — so a
+                                                      //    v63 blob has no such field and must be rejected.
+                                                      //    quality.h kIngestParserVerMirror bumped in the SAME commit.
                                                       // 63 (2026-08-12 markdown section tier, test/mdsectioncheck.sh):
                                                       //    .md/.markdown now parse with the vendored tree-sitter-markdown
                                                       //    block grammar — headings (ATX + setext) become sections with
@@ -1756,7 +1765,7 @@ inline unsigned lexDictIndexWidth( std::size_t dictCount ) noexcept
 }
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
-    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
+    w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( d.testScope ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
     for( const std::uint8_t tagCount : d.evWhy ) { w.u8( tagCount ); }   // 8×u8, fixed order (model.h kEvWhyTagTable)
     if( withLex )
     {
@@ -1846,16 +1855,17 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
 // an allocator. The minima below are named + pinned here (not hand-recounted inline at the call site) so
 // they sit next to the writer functions whose field list they must match. A LEAN def record is 14 u32 +
-// 12 u8 + 2 empty str(len u32) fields = 14*4 + 12*1 + 2*4 = 76 bytes (Phase 1, local-variable-indexing,
+// 13 u8 + 2 empty str(len u32) fields = 14*4 + 13*1 + 2*4 = 77 bytes (Phase 1, local-variable-indexing,
 // PLAN.md 2026-08-06 evening: `locals` u32 joined the run — 9 -> 10; the ppalt disclosure added `ppAlt`,
 // written as a u32 — 10 -> 11; the nesting profile then added `humps` and `deepLoc`, written as u32 each —
 // 11 -> 13; essential complexity then added `ev` as a u32 in the run plus the 8×u8 evWhy tag counters
-// after the strings — 13 -> 14 u32 and 4 -> 12 u8, so 56 + 12 + 8 = 76); the RICH (withLex) extra is
+// after the strings — 13 -> 14 u32 and 4 -> 12 u8, so 56 + 12 + 8 = 76; L8's in-file `testScope` then
+// added one u8 in the run — 12 -> 13 u8, so 56 + 13 + 8 = 77); the RICH (withLex) extra is
 // dlWeighted u32 + tokenCount u32 + tfWidth u8 = 9 bytes. A ref record is 3 u32 + 7 u8 + 5 empty
 // str(len u32) fields = 3*4 + 7*1 + 5*4 = 39 bytes. verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 76;   // 14×u32 + 12×u8 + 2×str(len u32, empty)
+inline constexpr std::size_t kMinDefRecordBytesLean      = 77;   // 14×u32 + 13×u8 + 2×str(len u32, empty)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 39;   // 3×u32 + 7×u8 + 5×str(len u32, empty)
 
@@ -1885,7 +1895,7 @@ inline void verifyCacheRecordMinimaTripwire() noexcept
 
 inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>& fileDict )
 {
-    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = std::uint16_t( r.u32() ); d.humps = std::uint16_t( r.u32() ); d.deepLoc = std::uint16_t( r.u32() ); d.ev = std::uint16_t( r.u32() ); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
+    RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = std::uint16_t( r.u32() ); d.humps = std::uint16_t( r.u32() ); d.deepLoc = std::uint16_t( r.u32() ); d.ev = std::uint16_t( r.u32() ); d.params = std::uint16_t( r.u32() ); d.maxNest = r.u8(); d.arityExact = r.u8(); d.testScope = r.u8(); d.kind = SymKind( r.u8() ); d.lang = Lang( r.u8() ); d.name = r.str(); d.scope = r.str();
     for( std::uint8_t& tagCount : d.evWhy ) { tagCount = r.u8(); }   // mirrors writeDef's fixed 8×u8 order
     if( withLex && r.ok )
     {
@@ -5853,6 +5863,255 @@ inline bool isSwiftLocalBinding( TSNode declNode ) noexcept
     return false;
 }
 
+// ── L8: IN-FILE TEST SCOPE ───────────────────────────────────────────────────────────────────────────
+// filter.h::isTestPath answers "is this a test?" from the PATH alone. Four mainstream conventions put
+// test code INSIDE a production source file, where no path signal exists:
+//
+//   Rust    `#[cfg(test)] mod tests { … }` / `#[test] fn …` inside src/*.rs — the language's OWN
+//           documented convention, so essentially every crate is affected.
+//   Python  `class TestFoo:` / a module-level `def test_bar():` beside production defs.
+//   JS/TS   helpers declared inside a `describe(…)` / `it(…)` / `test(…)` block.
+//   C#      a `[Fact]` / `[Test]` / `[TestMethod]` member beside a production class.
+//
+// Measured on astral-sh/ruff (5945 files) before this existed: the #1-ranked symbol of the entire map
+// was `CursorTest::builder`, a `#[cfg(test)]` helper inside `crates/ty_ide/src/lib.rs`, and
+// `--ignore-tests` dropped 15,811 path-classified symbols WITHOUT changing the top-5 — the top-5 were
+// all in-file tests the path filter cannot see.
+//
+// The bit is SYNTACTIC and PRECISION-FIRST. A mis-marked production symbol vanishes from
+// --ignore-tests output and is de-prioritized in retrieval, which is strictly worse than a missed
+// test — so every rule below keys on a convention that is unambiguous in its own language, and
+// nothing is inferred from a name that merely looks test-ish. The negative controls that pin this
+// live in test/testscopecheck.sh: a non-test `mod utils`, a Python `class Testament`, a JS function
+// named `describe_thing`, and an unattributed C# class next to an attributed method. What each rule
+// deliberately does NOT cover is recorded at the rule itself — a documented gap, never a guess.
+//
+// Consumed by Symbol::testScope, which filter.h::isTestSymbol ORs with the path signal; it rides the
+// per-file cache record, so kParserVer gates it like every other extraction fact.
+
+// `a` equals `b` after every ASCII space/tab/CR/LF in `a` is removed. Attribute spellings vary
+// (`cfg(test)` and `cfg( test )` are the same attribute), and the whitespace is the only variation a
+// syntactic comparison must absorb — `b` is always a caller-supplied literal with none.
+inline bool equalsIgnoringAsciiSpace( std::string_view a, std::string_view b ) noexcept
+{
+    std::size_t matched = 0;
+    for( char c : a )
+    {
+        if( c == ' ' || c == '\t' || c == '\n' || c == '\r' )
+        {
+            continue;
+        }
+        if( matched >= b.size() || b[matched] != c )
+        {
+            return false;
+        }
+        ++matched;
+    }
+    return matched == b.size();
+}
+
+// One Rust attribute's inner text (the `cfg(test)` of `#[cfg(test)]`), judged as a test marker.
+// MATCHES: `cfg(test)`, `test`, and any path attribute whose FINAL segment is `test` (`tokio::test`,
+// `async_std::test`, `actix_rt::test` — every async runtime spells its harness that way).
+// DELIBERATELY NOT MATCHED: the compound `cfg(all(test, …))` / `cfg(any(test, …))` forms. Deciding
+// that such a module is test-only means reasoning about which arm a build selects, which depends on
+// feature flags ripwire never sees — the same "never quietly guess" rule that keeps ppalt a
+// disclosure instead of a branch choice.
+inline bool rustAttrIsTestMarker( std::string_view attr ) noexcept
+{
+    if( equalsIgnoringAsciiSpace( attr, "cfg(test)" ) || equalsIgnoringAsciiSpace( attr, "test" ) )
+    {
+        return true;
+    }
+    const std::size_t sep = attr.rfind( "::" );
+    return sep != std::string_view::npos && equalsIgnoringAsciiSpace( attr.substr( sep + 2 ), "test" );
+}
+
+// Does the contiguous attribute run PRECEDING `item` carry a test marker? Rust attributes are SIBLING
+// `attribute_item` nodes in front of the item they decorate, not children of it (verified by --match
+// probes on real parses, not assumed) — so the scan walks backwards and stops at the first sibling
+// that is neither an attribute nor a comment, which is where this item's own attribute run began.
+inline bool rustItemCarriesTestAttr( TSNode item, std::string_view src ) noexcept
+{
+    for( TSNode prev = ts_node_prev_sibling( item ); !ts_node_is_null( prev ); prev = ts_node_prev_sibling( prev ) )
+    {
+        const char* t = ts_node_type( prev );
+        if( std::strcmp( t, "attribute_item" ) == 0 )
+        {
+            const std::uint32_t childCount = ts_node_child_count( prev );
+            for( std::uint32_t ci = 0; ci < childCount; ++ci )
+            {
+                const TSNode ch = ts_node_child( prev, ci );
+                if( std::strcmp( ts_node_type( ch ), "attribute" ) == 0 && rustAttrIsTestMarker( nodeTextOf( ch, src ) ) )
+                {
+                    return true;
+                }
+            }
+            continue;
+        }
+        if( std::strcmp( t, "line_comment" ) == 0 || std::strcmp( t, "block_comment" ) == 0 )
+        {
+            continue;   // a doc comment may sit between an attribute and its item
+        }
+        break;
+    }
+    return false;
+}
+
+// Python `class Test<Something>` — the unittest/pytest convention. The character after `Test` MUST be
+// uppercase or '_', which is exactly what stops `class Testament` (a real English word, and the
+// gate's negative control) from matching. A class named exactly `Test` is also left alone: four
+// characters are too short to be a convention and it is a plausible production type name.
+inline bool pyTestClassName( std::string_view name ) noexcept
+{
+    if( name.size() < 5 || name.compare( 0, 4, "Test" ) != 0 )
+    {
+        return false;
+    }
+    const unsigned char after = static_cast<unsigned char>( name[4] );
+    return ( after >= 'A' && after <= 'Z' ) || after == '_';
+}
+
+// A C# attribute's name, judged as a test marker: the three framework markers that are unambiguous
+// across xUnit (`Fact`), NUnit (`Test`) and MSTest (`TestMethod`), matched on the FINAL segment so a
+// fully-qualified `Xunit.FactAttribute`-style spelling still resolves. DELIBERATELY NOT MATCHED:
+// `Theory`/`TestCase` (data-driven variants) and the class-level `[TestFixture]`/`[TestClass]` — each
+// is a separate convention that deserves its own probe and its own gate arm rather than a guess here.
+inline bool csharpAttrIsTestMarker( std::string_view name ) noexcept
+{
+    const std::size_t      dot = name.rfind( '.' );
+    const std::string_view fin = ( dot == std::string_view::npos ) ? name : name.substr( dot + 1 );
+    return fin == "Test" || fin == "Fact" || fin == "TestMethod";
+}
+
+// Does `n` carry a test-marking attribute? C# attribute lists are direct CHILDREN of the declaration
+// they decorate (the mirror image of Rust's sibling placement — again verified by --match probe).
+inline bool csharpNodeCarriesTestAttr( TSNode n, std::string_view src ) noexcept
+{
+    const std::uint32_t childCount = ts_node_child_count( n );
+    for( std::uint32_t ci = 0; ci < childCount; ++ci )
+    {
+        const TSNode list = ts_node_child( n, ci );
+        if( std::strcmp( ts_node_type( list ), "attribute_list" ) != 0 )
+        {
+            continue;
+        }
+        const std::uint32_t attrCount = ts_node_child_count( list );
+        for( std::uint32_t ai = 0; ai < attrCount; ++ai )
+        {
+            const TSNode attr = ts_node_child( list, ai );
+            if(    std::strcmp( ts_node_type( attr ), "attribute" ) == 0
+                && csharpAttrIsTestMarker( nodeTextOf( ts_node_child_by_field_name( attr, "name", 4 ), src ) ) )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Python's rule, written as its own pass because the two halves are ORDERED: a `def test_*` counts
+// only at MODULE level (the pytest convention), so the enclosing-class question must be answered
+// before the name question. Walking outward once and testing names as they appear would mark a method
+// named `test_bar` inside a production class — precisely the over-trigger this shape forbids.
+inline bool pythonInFileTestScope( TSNode defNode, std::string_view src ) noexcept
+{
+    bool enclosedByClass = false;
+    for( TSNode n = defNode; !ts_node_is_null( n ); n = ts_node_parent( n ) )
+    {
+        if( std::strcmp( ts_node_type( n ), "class_definition" ) != 0 )
+        {
+            continue;
+        }
+        if( pyTestClassName( nodeTextOf( ts_node_child_by_field_name( n, "name", 4 ), src ) ) )
+        {
+            return true;    // a member of a Test* class, at any nesting depth
+        }
+        enclosedByClass = true;
+    }
+    if( enclosedByClass || std::strcmp( ts_node_type( defNode ), "function_definition" ) != 0 )
+    {
+        return false;
+    }
+    return nodeTextOf( ts_node_child_by_field_name( defNode, "name", 4 ), src ).rfind( "test_", 0 ) == 0;
+}
+
+// Is `pred` true of `node` itself or of any of its ancestors? Three of the four in-file test rules ask
+// exactly that and differ ONLY in the predicate, so the walk lives here once. Written after
+// --quality-delta flagged the first hand-rolled copy as a 101-token clone of yamlKeyCaptureDropped's
+// unrelated ancestor scan — the detector was right that the loop is one body, and three more copies of
+// it would have been three more.
+template<class NodePred>
+inline bool anySelfOrAncestor( TSNode node, NodePred pred ) noexcept
+{
+    for( TSNode n = node; !ts_node_is_null( n ); n = ts_node_parent( n ) )
+    {
+        if( pred( n ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Rust: the def itself, or any enclosing `mod`/`fn`, carries a test attribute.
+inline bool rustInFileTestScope( TSNode defNode, std::string_view src ) noexcept
+{
+    return anySelfOrAncestor( defNode, [ & ]( TSNode n ) noexcept
+                                       {
+                                           const char* t = ts_node_type( n );
+                                           return    ( std::strcmp( t, "mod_item" ) == 0 || std::strcmp( t, "function_item" ) == 0 )
+                                                  && rustItemCarriesTestAttr( n, src );
+                                       } );
+}
+
+// JS/TS: the harness block is a CALL whose callee is one of three bare identifiers, and the def is
+// declared somewhere inside its arguments. The member forms (`it.only`, `test.each`, `describe.skip`)
+// are a DOCUMENTED GAP, not an oversight — they need their own probe and gate arm, and the bare forms
+// are what the measured corpora spell.
+inline bool jsInFileTestScope( TSNode defNode, std::string_view src ) noexcept
+{
+    return anySelfOrAncestor( defNode, [ & ]( TSNode n ) noexcept
+                                       {
+                                           if( std::strcmp( ts_node_type( n ), "call_expression" ) != 0 )
+                                           {
+                                               return false;
+                                           }
+                                           const std::string_view callee = nodeTextOf( ts_node_child_by_field_name( n, "function", 8 ), src );
+                                           return callee == "describe" || callee == "it" || callee == "test";
+                                       } );
+}
+
+// C#: the def itself, or an enclosing declaration, carries a test-marking attribute list.
+inline bool csharpInFileTestScope( TSNode defNode, std::string_view src ) noexcept
+{
+    return anySelfOrAncestor( defNode, [ & ]( TSNode n ) noexcept { return csharpNodeCarriesTestAttr( n, src ); } );
+}
+
+// The one entry point: is this def (or an enclosing scope of it) test code by an IN-FILE convention?
+// A language with no modeled convention returns false and keeps path-only classification — a zero
+// here means "no in-file convention found", never "this is production" (filter.h::isTestSymbol ORs
+// the path signal back in). One flat dispatch, one walk per language: the four rules have genuinely
+// different SHAPES (Rust reads preceding siblings, Python must answer the enclosing-class question
+// before the name question, JS/TS reads a callee, C# reads child attribute lists), so folding them
+// into a single loop bought a nested language test on every ancestor and nothing else.
+inline bool inFileTestScope( TSNode defNode, std::string_view src, Lang lang ) noexcept
+{
+    if( ts_node_is_null( defNode ) )
+    {
+        return false;
+    }
+    switch( lang )
+    {
+        case Lang::Rust:       return rustInFileTestScope( defNode, src );
+        case Lang::Python:     return pythonInFileTestScope( defNode, src );
+        case Lang::TypeScript:
+        case Lang::JavaScript: return jsInFileTestScope( defNode, src );
+        case Lang::CSharp:     return csharpInFileTestScope( defNode, src );
+        default:               return false;
+    }
+}
+
 // r3 q10 (bench/headtohead/r3-headroom-2026-08-03 REPORT.md §(v) item 1): SCREAMING_SNAKE — an
 // ALL-CAPS identifier of ≥2 chars ([A-Z][A-Z0-9_]+), the cross-language naming convention for a
 // module-level settings/config constant. The ≥2 floor drops single-letter names (a top-level `X = …`
@@ -8922,6 +9181,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             }
             d.params    = fnOrMethod ? countParams( defNode ) : std::uint16_t( 0 );
             d.arityExact = fnOrMethod ? std::uint8_t( cc_paramArityExact( defNode, le.lang, kind ) ? 1 : 0 ) : std::uint8_t( 0 );   // B2.2
+            // L8: the in-file test-scope bit, for EVERY kind (a `#[cfg(test)] mod` and a `class TestFoo`
+            // are themselves symbols, and dropping the members while keeping the shell would be a worse
+            // answer than either). Runs on defNode, whose ancestors are the enclosing scopes.
+            d.testScope = std::uint8_t( inFileTestScope( defNode, src, le.lang ) );
             d.maxNest   = fnOrMethod ? std::uint8_t( nestVal > 255u ? 255u : nestVal ) : std::uint8_t( 0 );
             // The nesting profile (model.h Symbol::humps/deepLoc). Saturating at 65535 on purpose: a def past
             // either bound is beyond every triage threshold, and deepLoc is a floor already, so a clamp there
@@ -10452,6 +10715,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             s.ppAlt        = d.ppAlt;    // ppalt disclosure: preproc alternative branches in the body (model.h)
             s.params       = d.params;   // Q4: parameter count (fns/methods)
             s.arityExact   = d.arityExact;   // B2.2: params is a fixed call-comparable arity
+            s.testScope    = d.testScope;    // L8: an in-file test convention encloses this def
             s.maxNest      = d.maxNest;  // Q4: max control nesting (fns/methods)
             s.humps        = d.humps;   // nesting profile: regions reaching quality::kNestBar (model.h)
             s.deepLoc      = d.deepLoc; // nesting profile: lines inside them, a FLOOR (model.h)

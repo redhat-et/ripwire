@@ -760,7 +760,13 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 63;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 64;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 64 = 2026-08-14 in-file test scope: every def carries a new
+                                                          // syntactic testScope bit (Rust #[cfg(test)] mod / #[test] fn,
+                                                          // Python class Test* / module-level def test_*, JS/TS
+                                                          // describe(/it(/test( blocks, C# [Fact]/[Test]/[TestMethod])
+                                                          // written into the cache record — a v63 blob has no such
+                                                          // field, so it must be rejected. See test/testscopecheck.sh.
                                                           // 63 = 2026-08-12 markdown section tier: .md/.markdown parse
                                                           // with the vendored block grammar — headings (ATX + setext)
                                                           // become sections with REAL SPANS, parent-heading scopes and

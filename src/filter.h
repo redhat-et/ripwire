@@ -61,6 +61,36 @@ inline bool isTestPath( std::string_view p ) noexcept
     return false;
 }
 
+// ── L8: the WHOLE test partition — path OR in-file convention ────────────────────────────────────────────
+// isTestPath above is a FILE question and cannot see the four mainstream conventions that put test code
+// inside a production source file (Rust's own `#[cfg(test)] mod tests`, Python `class Test*` / module-level
+// `def test_*`, a JS/TS helper inside `describe(`/`it(`/`test(`, a C# `[Fact]`/`[Test]`/`[TestMethod]`
+// member). Measured on astral-sh/ruff: `--ignore-tests` dropped 15,811 path-classified symbols and left the
+// top-5 of the map untouched, because every one of them was a `#[cfg(test)]` helper inside `src/`.
+//
+// ingest.cpp fills the syntactic half into Symbol::testScope at extraction. THIS predicate is the only
+// place the two halves meet, and every SYMBOL-keyed consumer of "is this a test?" must ask it rather than
+// re-deriving either half — the second copy is what would drift, exactly as hasDirSegment was factored out
+// above for the same reason.
+//
+// Deliberately NOT rerouted through this predicate: the FILE-keyed verbs (--affected / --situ /
+// --test-gate / --pr-context / --exercises) which answer "which test FILES should I run?". An in-file test
+// gives an agent no separate file to run, and naming a `src/` file as a test to run would be a wrong
+// answer, not a better one. Those keep asking isTestPath, and test/testscopecheck.sh arm 10b pins it.
+inline bool isTestSymbol( const IngestResult& ing, std::size_t symbolIndex ) noexcept
+{
+    if( symbolIndex >= ing.symbols.size() )
+    {
+        return false;
+    }
+    const Symbol& s = ing.symbols[symbolIndex];
+    if( s.testScope != 0 )
+    {
+        return true;
+    }
+    return s.fileId < ing.files.size() && isTestPath( ing.files[s.fileId] );
+}
+
 // ── §P11 first-screen ORDERING tiers ─────────────────────────────────────────────────────────────────────
 // Several LISTING verbs serialized their rows in plain path-alphabetical order, which on a doc-heavy repo is
 // a systematic bias against code: `AGENTS.md` and other long-named docs sort above `src/`, and a fixed row cap then cuts
@@ -170,6 +200,13 @@ inline std::vector<float> rankTierSymbolMultipliers( const IngestResult& ing )
         {
             mul[i] = fileMul[ing.symbols[i].fileId];
         }
+        // L8: an in-file test symbol earns the SAME tier factor its path-classified twin already gets —
+        // the file it lives in is production, so fileMul above left it at 1.0. min(), not assignment, so a
+        // file that is ALREADY down-weighted (a fixture, a deck) can never be lifted back up by this line.
+        if( ing.symbols[i].testScope != 0 )
+        {
+            mul[i] = std::min( mul[i], kRankTierTestMul );
+        }
     }
     return mul;
 }
@@ -204,6 +241,13 @@ inline void orderIdsByKeyDescPathAsc( std::vector<std::uint32_t>& ids, const std
 }
 
 // remove defs + refs in test files; remap remaining symbol ids to a dense [0,N) range.
+//
+// L8: the DEF side is now SYMBOL-keyed (isTestSymbol), so a `#[cfg(test)] mod` member inside a production
+// .rs file is dropped like a symbol under `tests/`. The REF/BINDING side stays FILE-keyed on purpose: a
+// whole test FILE contributes nothing, while a production file that merely contains a test module still
+// holds production references that must survive. What that leaves behind is exactly the FILE-SCOPE
+// references inside an in-file test block (fromSymbol == kNoNode, so no dropped owner identifies them) —
+// a floor, not a claim of completeness, and the same honest shape the resolver's `amb=` already takes.
 inline void applyIgnoreTests( IngestResult& ing )
 {
     std::vector<char> drop( ing.files.size(), 0 );
@@ -215,11 +259,12 @@ inline void applyIgnoreTests( IngestResult& ing )
     std::vector<NodeId> remap( ing.symbols.size(), kNoNode );
     std::vector<Symbol> keptSyms;
     keptSyms.reserve( ing.symbols.size() );
-    for( const Symbol& s : ing.symbols )
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
     {
-        if( !drop[ s.fileId ] )
+        if( !isTestSymbol( ing, i ) )
         {
-            const NodeId nid = NodeId( keptSyms.size() );
+            const Symbol& s   = ing.symbols[i];
+            const NodeId  nid = NodeId( keptSyms.size() );
             remap[ s.id ] = nid;
             Symbol c = s;  c.id = nid;
             keptSyms.push_back( std::move( c ) );

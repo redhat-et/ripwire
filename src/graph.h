@@ -2690,12 +2690,17 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
 
     // ── tested=: the same transitive test-seed reach used by --exercises and --seams. A direct-reference
     //    pass silently marked outer() but not outer()->leaf(), contradicting those verbs and the documented
-    //    "a test reaches it" contract. Test-path symbols are seeds, not production coverage rows themselves.
+    //    "a test reaches it" contract. Test symbols are seeds, not production coverage rows themselves.
+    //    L8: the seed set is isTestSymbol, not isTestPath — a Rust crate whose tests all live in
+    //    `#[cfg(test)] mod tests` inside src/ has NO test-path file at all, so a path-keyed seed set
+    //    reported tested= as if the crate were untested everywhere. Both loops move together; using the
+    //    wider predicate for the seed and the narrower one for the row would mark a test symbol as
+    //    covered production.
     std::vector<NodeId> testSeeds;
     testSeeds.reserve( S );
     for( NodeId i = 0; i < NodeId( S ); ++i )
     {
-        if( isTestPath( ing.files[ing.symbols[i].fileId] ) )
+        if( isTestSymbol( ing, i ) )
         {
             testSeeds.push_back( i );
         }
@@ -2703,7 +2708,7 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
     const std::vector<char> testReach = forwardReach( g, testSeeds );
     for( NodeId i = 0; i < NodeId( S ); ++i )
     {
-        if( testReach[i] && !isTestPath( ing.files[ing.symbols[i].fileId] ) )
+        if( testReach[i] && !isTestSymbol( ing, i ) )
         {
             q.tested[i] = 1u;
         }
