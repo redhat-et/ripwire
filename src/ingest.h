@@ -106,6 +106,68 @@ constexpr std::uint32_t kMaxYamlNestDepth = 64u;
 // deepest real nesting in this repo's own docs is 4.
 constexpr std::uint32_t kMaxMdBlockDepth = 200u;
 
+// ── §L1 skip taxonomy / parse health ────────────────────────────────────────────────────────────────
+// How many ROWS --skipped will itemize per drop class before it stops collecting them. The COUNTS
+// beside the rows stay exact (they are incremented past the cap); only the itemization is bounded, and
+// the verb discloses `*_shown=` whenever it bit. A cap is needed at all because the unsupported-extension
+// class is unbounded by construction — an asset-heavy monorepo has hundreds of thousands of members —
+// and holding a std::string per member to print 500 of them is a memory hazard, not a feature.
+constexpr std::size_t kMaxSkipRowsPerClass = 500;
+
+// The leading window sampled for the whitespace-frequency (minified) heuristic, and the threshold it is
+// compared against. 0.07 is semgrep's published minified-file threshold (their `is_minified` check reads
+// the same leading window); it is stated in per-mille here so the comparison is integer and the emitted
+// ws_freq= can be reproduced exactly by a reader dividing the same two numbers.
+constexpr std::size_t   kHealthWsSampleBytes   = 4096;
+constexpr std::uint32_t kMinifiedWsPerMille    = 70;    // ws_freq < 0.070 ⇒ minified-suspect
+// …but only once there is enough text to judge. A 40-byte header file has no meaningful whitespace
+// frequency, and flagging it would bury the real bundles under noise. Files under this size are never
+// flagged, and the floor is disclosed in the verb's legend.
+constexpr std::size_t   kMinifiedMinBytes      = 256;
+
+// Extensions that are NOT source or text, so their absence from the index is not a disclosure the reader
+// needs: an unindexed .png is a picture, not a language ripwire failed to read. This is the rule the
+// `unindexed=` header and the unsupported-extension rows apply, stated once here and named in the legend
+// so a reader can see exactly what was withheld. A file with NO extension is likewise not counted (the
+// class is "extensions this build has no grammar for" — an extensionless LICENSE/Makefile has no
+// extension to report, and inventing one would be a guess).
+// SORT ORDER IS LOAD-BEARING: isNonTextExtension binary-searches this table, so the entries are byte-sorted,
+// not grouped by media kind. The static_assert below is the guard, and it is not decoration — an
+// out-of-order entry does not fail to compile on its own, it silently stops matching, and the only symptom
+// is one asset extension quietly appearing in `unindexed=`.
+constexpr std::string_view kNonTextExts[] = {
+    ".7z", ".a", ".apk", ".avi", ".avif", ".avro", ".bcsymbolmap",
+    ".bin", ".bmp", ".bz2", ".car", ".class", ".d", ".dat",
+    ".db", ".deb", ".dll", ".dmg", ".doc", ".docx", ".ds_store",
+    ".dylib", ".eot", ".exe", ".flac", ".gif", ".gz", ".icns",
+    ".ico", ".idx", ".ipa", ".jar", ".jpeg", ".jpg", ".jpg_large",
+    ".lib", ".m4a", ".m4v", ".mkv", ".mo", ".mov", ".mp3",
+    ".mp4", ".nib", ".node", ".npy", ".npz", ".o", ".obj",
+    ".ogg", ".onnx", ".otf", ".pack", ".parquet", ".pb", ".pdb",
+    ".pdf", ".pkg", ".png", ".ppt", ".pptx", ".psd", ".pt",
+    ".pth", ".pyc", ".pyo", ".rar", ".rlib", ".rmeta", ".rpm",
+    ".so", ".sqlite", ".tar", ".tgz", ".tif", ".tiff", ".ttf",
+    ".war", ".wasm", ".wav", ".webm", ".webp", ".whl", ".woff",
+    ".woff2", ".xls", ".xlsx", ".xz", ".zip", ".zst" };
+
+static_assert( std::is_sorted( std::begin( kNonTextExts ), std::end( kNonTextExts ) ),
+               "kNonTextExts must stay byte-sorted — isNonTextExtension binary-searches it" );
+
+// Is this (lowercased, dot-prefixed) extension one the `unindexed=` roll-up deliberately withholds?
+// Empty extension ⇒ true (nothing to report; see kNonTextExts).
+//
+// SORTED table + binary_search, not the linear scan every other extension test in this tree writes. Two
+// reasons, and the second is the interesting one: the table is 5-10x longer than any of them (a linear scan
+// pays 50 string compares per non-source file on an asset-heavy crawl), AND a sixth copy of the
+// `for( x : table ) if( x == v ) return true;` shape makes this a clone of five unrelated helpers at once —
+// ripwire's own --clones lens said so about the first draft of this function. Consolidating those five is a
+// real refactor for a lane that owns them; picking a different algorithm is the honest local answer.
+inline bool isNonTextExtension( std::string_view ext ) noexcept
+{
+    return ext.empty() || ext == "."
+        || std::binary_search( std::begin( kNonTextExts ), std::end( kNonTextExts ), ext );
+}
+
 // The crawl's default directory denylist (a .gitignore-lite): noise/vendor/build subtrees pruned entirely.
 // Shared, not private to ingest.cpp, because a second crawler now exists — darkflags.h walks for CMake files,
 // which ingest deliberately never collects (CMake is not one of the indexed grammars) — and a crawl that

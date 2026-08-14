@@ -196,6 +196,54 @@ inline std::string labeledWorkspacePath( const std::string& label, const std::st
 //   * ing.fileRoot[f]  = index into roots (canonical order)
 //   * symbol/reference/include/binding ids re-based by one offset pass (§4)
 // Node ids follow the concatenation order = (label, relPath) — the same global-sort discipline as today.
+// §L1 — fold one root's crawl DISCLOSURES into the merged result. Split out of the merge loop because it
+// is a self-contained transfer with its own rules, and inlining it cost mergeWorkspaceIngests 17 points of
+// complexity and 48 lines for facts that have nothing to do with symbol/edge renumbering.
+//
+// Rows relabel exactly like files (`<label>/./<rel>`), so a skipped row speaks the same path vocabulary as
+// every other emitted path. Parts arrive in canonical label order and each is already path-sorted, so the
+// concatenation stays sorted. The row vectors were capped PER ROOT, so a merged row set can be SHORT of the
+// merged count — which is what the counts are for, and what the verb's rows_capped= discloses rather than
+// implying a total. Parse health is per-fileId, so it concatenates in the same order as files; a part that
+// never measured contributes default rows, which read as UNMEASURED — the honest answer for a root whose
+// ingest never ran the parse pool, not a clean bill of health for it.
+inline void mergeCrawlDisclosures( IngestResult& m, IngestResult& part, const WorkspaceRoot& root )
+{
+    const auto relabel = [ & ]( std::vector<SkippedFile>& src, std::vector<SkippedFile>& dst )
+    {
+        for( SkippedFile& sf : src )
+        {
+            sf.path = labeledWorkspacePath( root.label, root.arg, sf.path );
+            dst.push_back( std::move( sf ) );
+        }
+    };
+    relabel( part.crawlSkips.excluded,    m.crawlSkips.excluded );
+    relabel( part.crawlSkips.unsupported, m.crawlSkips.unsupported );
+
+    m.crawlSkips.excludedFiles    += part.crawlSkips.excludedFiles;
+    m.crawlSkips.unsupportedFiles += part.crawlSkips.unsupportedFiles;
+    m.crawlSkips.excludedDirs     += part.crawlSkips.excludedDirs;
+
+    for( const UnindexedExt& ue : part.crawlSkips.unindexedExts )
+    {
+        const auto it = std::find_if( m.crawlSkips.unindexedExts.begin(), m.crawlSkips.unindexedExts.end(),
+                                      [ & ]( const UnindexedExt& e ) noexcept { return e.ext == ue.ext; } );
+        if( it != m.crawlSkips.unindexedExts.end() )
+        {
+            it->files += ue.files;
+        }
+        else
+        {
+            m.crawlSkips.unindexedExts.push_back( ue );
+        }
+    }
+
+    for( std::size_t i = 0; i < part.files.size(); ++i )
+    {
+        m.fileHealth.push_back( i < part.fileHealth.size() ? part.fileHealth[ i ] : FileHealth{} );
+    }
+}
+
 inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roots,
                                            std::vector<IngestResult>&        parts )
 {
@@ -295,6 +343,8 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
             m.skippedOversize.push_back( std::move( sk ) );
         }
 
+        mergeCrawlDisclosures( m, p, roots[r] );   // §L1 — see its own header
+
         for( Symbol& s : p.symbols )
         {
             s.id     += symOff;
@@ -373,6 +423,11 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
     // must re-judge. Idempotent (a suppressed reference is simply gone). AFTER the retag, so a site the
     // retag just relabelled role="macro" is out of the erase's role set.
     suppressShadowedReferences( m );
+
+    // §L1: the merged extension histogram is a per-root union, so it inherits no order. Re-establish the
+    // single-root ordering contract (count DESC, extension ASC) here — `unindexed=` rides the default map
+    // header, and a header attribute whose order depended on merge arrival order would be a determinism bug.
+    std::sort( m.crawlSkips.unindexedExts.begin(), m.crawlSkips.unindexedExts.end(), lessUnindexedExt );
 
     return m;
 }

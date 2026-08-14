@@ -525,6 +525,75 @@ bool looksBinary( std::string_view bytes ) noexcept
     return std::memchr( bytes.data(), '\0', n ) != nullptr;
 }
 
+// §L1 — PARSE HEALTH, measured on the tree the ingest ALREADY built (no second parse, no second read).
+//
+// What it answers: of the files that ARE in the index, which ones did the parser only partly understand,
+// and which ones look machine-written? Before this, a corpus of 252 deliberately-invalid Python files
+// reported oversize="0" — "index complete" — while every symbol drawn from it was garbage.
+//
+// COST. `ts_node_has_error` is a flag on the subtree, so a clean file pays one O(1) test and nothing
+// else; the walk below descends only into children that carry the flag, so it is proportional to the
+// damage rather than to the file. The whitespace sample is a bounded 4 KB scan of bytes already in cache.
+//
+// WHY TOP-MOST ERROR SPANS. An ERROR node's subtree is itself full of error-flagged nodes; summing all of
+// them would count the same bytes many times and produce a ratio above 1. Descent stops at the outermost
+// ERROR, so errBytes is a true byte measure of "what the parser could not interpret". MISSING nodes are
+// zero-width by construction (the parser inserted a token that was not there), so they contribute to
+// errNodes and nothing to errBytes — which is exactly why BOTH numbers are disclosed, not just a ratio.
+FileHealth measureFileHealth( TSNode root, std::string_view bytes )
+{
+    FileHealth h;
+    h.fileBytes = std::uint32_t( bytes.size() > 0xFFFFFFFFull ? 0xFFFFFFFFull : bytes.size() );
+
+    const std::size_t sample = bytes.size() < kHealthWsSampleBytes ? bytes.size() : kHealthWsSampleBytes;
+    std::uint32_t     ws     = 0;
+    for( std::size_t i = 0; i < sample; ++i )
+    {
+        const unsigned char c = ( unsigned char ) bytes[ i ];
+        if( c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v' )
+        {
+            ++ws;
+        }
+    }
+    h.wsBytes = ws;
+
+    if( !ts_node_has_error( root ) )
+    {
+        return h;
+    }
+
+    std::vector<TSNode> stack;
+    stack.push_back( root );
+    while( !stack.empty() )
+    {
+        const TSNode n = stack.back();
+        stack.pop_back();
+        if( ts_node_is_error( n ) )
+        {
+            ++h.errNodes;
+            const std::uint32_t lo = ts_node_start_byte( n );
+            const std::uint32_t hi = ts_node_end_byte( n );
+            h.errBytes += hi > lo ? hi - lo : 0u;
+            continue;   // top-most only — see the note above
+        }
+        if( ts_node_is_missing( n ) )
+        {
+            ++h.errNodes;
+            continue;
+        }
+        const std::uint32_t kids = ts_node_child_count( n );
+        for( std::uint32_t i = 0; i < kids; ++i )
+        {
+            const TSNode c = ts_node_child( n, i );
+            if( ts_node_has_error( c ) || ts_node_is_missing( c ) )
+            {
+                stack.push_back( c );
+            }
+        }
+    }
+    return h;
+}
+
 // True when raw bracket/brace nesting exceeds kMaxJsonNestDepth — degenerate or hostile DATA, never config
 // (found live by bench/multiswe: tree-sitter-json's error recovery is superlinear on unclosed
 // nesting; a 100 KB file of "[[[[…" from nlohmann/json's own parser-torture suite measured 43 s). One O(n)
@@ -718,10 +787,86 @@ bool looksObjC( std::string_view bytes ) noexcept
 // the .json lane applies on top of it — and the list covers both, because a file the reader cannot see is
 // equally invisible whichever ceiling dropped it. They are mutually exclusive per file (see the drop sites);
 // each row records the ceiling that dropped it as limitBytes.
+// §L1: record ONE non-size drop. The count is exact and always incremented; the ROW is collected only
+// while the class is under its ceiling, and `file_size()` is only paid for a row that will actually be
+// printed — the tally itself must not cost a stat per asset file on a monorepo crawl. Extracted rather
+// than written twice inside the crawl loop: two copies added a nesting level and 27 points of complexity
+// to collectSources, which is what ripwire's own --quality-delta said about the first draft of this lane.
+
+void recordCrawlDrop( std::vector<SkippedFile>& rows, std::uint64_t& exactCount,
+                      const std::string& path, std::string_view ext, const fs::directory_entry& entry )
+{
+    ++exactCount;
+    if( rows.size() >= kMaxSkipRowsPerClass )
+    {
+        return;
+    }
+    std::error_code     ec;
+    const std::uintmax_t sz = entry.file_size( ec );
+    rows.push_back( { path, ec ? 0ull : std::uint64_t( sz ), std::string( ext ) } );
+}
+
+// §L1: the crawl's two NON-SIZE drop tests, together, because they are one decision with one ordering
+// contract — is this file a crawl candidate at all, and if not, is its absence something the reader needs
+// told about? Returns true when the caller must skip the file (the drop, if reportable, is already
+// recorded).
+//
+// ORDER IS THE CONTRACT. The EXTENSION is classified first and the --exclude match second, so `excluded`
+// only ever describes a file that would OTHERWISE have been indexed (an --exclude'd .png is not a
+// disclosure, it is a picture the user asked not to see) and `unsupported-ext` only ever describes a file
+// the user did NOT ask to hide (an --exclude'd .ml is requested absence, not a language this build cannot
+// read). Swap the two and both classes start lying.
+//
+// `fullPath` is the caller's LAZY path materializer, taken as a template parameter rather than a
+// std::string: a monorepo crawl walks far more non-source files than source ones, and stringifying every
+// one of them to record the handful that are reportable would be a real per-file cost for nothing.
+template< typename PathFn >
+bool recordPreSizeDrop( CrawlSkips& skips, HashMap<std::string, std::uint64_t>& extTally,
+                        const std::string& ext, bool excluded, const fs::directory_entry& entry, PathFn&& fullPath )
+{
+    if( lookupLang( ext ) == nullptr && !docparse::isDocExtension( ext ) )
+    {
+        if( !excluded && !isNonTextExtension( ext ) )
+        {
+            ++extTally[ ext ];
+            recordCrawlDrop( skips.unsupported, skips.unsupportedFiles, fullPath(), ext, entry );
+        }
+        return true;
+    }
+    if( excluded )
+    {
+        recordCrawlDrop( skips.excluded, skips.excludedFiles, fullPath(), ext, entry );
+        return true;
+    }
+    return false;
+}
+
+// §L1: establish the ordering contract on everything the crawl collected out of order. The row vectors
+// sort by path; the extension histogram comes out of a HashMap, whose iteration order is an implementation
+// detail, so it sorts by count DESC then extension ASC. That last one matters more than usual: it rides
+// the DEFAULT map header, where an order that depended on hash iteration would be a determinism bug.
+void finalizeCrawlSkips( CrawlSkips& skips, const HashMap<std::string, std::uint64_t>& extTally )
+{
+    const auto byPath = []( const SkippedFile& a, const SkippedFile& b ) noexcept { return a.path < b.path; };
+    std::sort( skips.excluded.begin(), skips.excluded.end(), byPath );
+    std::sort( skips.unsupported.begin(), skips.unsupported.end(), byPath );
+    skips.unindexedExts.reserve( extTally.size() );
+    for( const auto& [ ext, count ] : extTally )
+    {
+        skips.unindexedExts.push_back( { ext, count } );
+    }
+    std::sort( skips.unindexedExts.begin(), skips.unindexedExts.end(), lessUnindexedExt );
+}
+
+// §L1: the same walk now also reports the OTHER two ways a file leaves the corpus — an --exclude hit and
+// an extension with no grammar — plus the unindexed-extension histogram the map header rolls up. Nothing
+// new is dropped here: every one of those files was already absent, it was merely absent ANONYMOUSLY, so
+// `--skipped` could answer "oversize=0" on a tree it had passed over wholesale. See model.h::CrawlSkips.
 struct CrawlResult
 {
     std::vector<std::string>     paths;
     std::vector<SkippedOversize> skipped;
+    CrawlSkips                   skips;
 };
 
 CrawlResult collectSources( const char* rootDir, const std::vector<std::string>& excludeSubstr,
@@ -729,6 +874,8 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
 {
     std::vector<std::string>     out;
     std::vector<SkippedOversize> skipped;
+    CrawlSkips                   skips;
+    HashMap<std::string, std::uint64_t> extTally;   // unindexed source/text-looking ext -> file count
 
     std::error_code ec;
     fs::path root = fs::path( rootDir );
@@ -738,7 +885,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
     if( ec )
     {
         DEGRADED_PATH_ALERT( "ingest: cannot open root directory — empty result" );
-        return { std::move( out ), std::move( skipped ) };
+        return { std::move( out ), std::move( skipped ), std::move( skips ) };
     }
 
     const fs::recursive_directory_iterator end;
@@ -804,14 +951,14 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
             if( skip )
             {
                 it.disable_recursion_pending();
+                if( excluded )
+                {
+                    ++skips.excludedDirs;   // §L1: contents UNKNOWN past here — see CrawlSkips::excludedDirs
+                }
             }
             continue;
         }
 
-        if( excluded )
-        {
-            continue;
-        }
         if( !it->is_regular_file( ec ) )
         {
             continue;
@@ -827,8 +974,11 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         // like code so they get a fileId; they're skipped by the tree-sitter parse loop and handled in the
         // doc post-pass instead). Use the filename here so rejected regular files do not pay to stringify the
         // full path; materialize the full path only after the extension survives.
-        std::string ext = lowerExtensionOf( name );
-        if( lookupLang( ext ) == nullptr && !docparse::isDocExtension( ext ) )
+        //
+        // §L1: the two NON-SIZE drops are classified and recorded together (recordPreSizeDrop) — see its
+        // header for why the two tests must run in that order, and why they are not written inline here.
+        const std::string ext = lowerExtensionOf( name );
+        if( recordPreSizeDrop( skips, extTally, ext, excluded, *it, fullPath ) )
         {
             continue;
         }
@@ -890,7 +1040,8 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
     // reach output (--skipped rows are emitted in this order).
     std::sort( skipped.begin(), skipped.end(),
                []( const SkippedOversize& a, const SkippedOversize& b ) noexcept { return a.path < b.path; } );
-    return { std::move( out ), std::move( skipped ) };
+    finalizeCrawlSkips( skips, extTally );   // §L1: the two new row classes + the extension histogram
+    return { std::move( out ), std::move( skipped ), std::move( skips ) };
 }
 
 // ---- read a file's bytes (returns false on open failure) ----
@@ -1245,7 +1396,17 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 12;           // 12 (B6.3): FILE records gain two new record arrays —
+constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health): each FILE record gains the
+                                                      //    four FileHealth u32s (errNodes, errBytes, fileBytes,
+                                                      //    wsBytes) right after the stat-gate pair. The auto-cache
+                                                      //    is the DEFAULT path, so a health measurement that did
+                                                      //    not round-trip it would evaporate on the second run and
+                                                      //    report "nothing degraded" on a corpus it had never
+                                                      //    re-read — the exact zero-means-none-exists defect the
+                                                      //    lane exists to kill. A v12 blob has no such bytes, so
+                                                      //    the version guard rejects it (self-healing full reparse
+                                                      //    repopulates health).
+                                                      // 12 (B6.3): FILE records gain two new record arrays —
                                                       //    RouteDef (server-side route registrations) and
                                                       //    RawRouteUse (client-side HTTP calls). A v11 (or older)
                                                       //    blob has neither, so the version guard rejects it
@@ -1708,7 +1869,7 @@ inline std::uint64_t blobChecksum( std::string_view s ) noexcept
 // sizeBytes/mtimeNs (A4-P7): the file's stat at the run that HASHED it — the warm-run stat-gate trusts
 // this record (skips read+hash) only when the current stat still matches AND mtimeNs is not racy. -1 ⇒
 // unknown (cache built before v6, or the file was unstatable at hash time) → the gate always re-hashes.
-struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; };
+struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; };
 
 // tiny native-endian binary (de)serializer (the cache is host-local, never shipped)
 struct ByteW
@@ -2092,7 +2253,7 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     constexpr std::size_t kMinFfiRecordBytes  = 14;   // 2×u8 (kind,lowConf) + 3×str(len u32, empty)
     constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (line) + 1×u8 (method) + 2×str(len u32, empty)
     constexpr std::size_t kMinRouteUseRecordBytes = 13;   // B6.3: 2×u32 (startByte,line) + 1×u8 (method) + 1×str(len u32, empty)
-    const std::size_t kMinFileRecordBytes = 52 + ( captureValueUses ? 4 : 0 );   // path str + hash + sizeBytes + mtimeNs + six record counts, all empty (v6: +2×u64; v10 rich: + dict count u32; v12/B6.3: +2×u32 route counts)
+    const std::size_t kMinFileRecordBytes = 68 + ( captureValueUses ? 4 : 0 );   // path str + hash + sizeBytes + mtimeNs + FileHealth + six record counts, all empty (v6: +2×u64; v10 rich: + dict count u32; v12/B6.3: +2×u32 route counts; v13/§L1: +4×u32 health)
     const auto countFits = [ &r ]( std::uint32_t recordCount, std::size_t minRecordBytes ) noexcept
     {
         if( recordCount <= std::size_t( r.end - r.p ) / minRecordBytes )
@@ -2127,6 +2288,10 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
             ff.hash      = r.u64();
             ff.sizeBytes = (long long)r.u64();   // A4-P7 stat-gate discriminator
             ff.mtimeNs   = (long long)r.u64();   // A4-P7 stat-gate discriminator + racy-rule input
+            ff.health.errNodes  = r.u32();       // §L1 parse health (v13) — fileBytes==0 keeps its
+            ff.health.errBytes  = r.u32();       //   NOT-MEASURED meaning across the round trip
+            ff.health.fileBytes = r.u32();
+            ff.health.wsBytes   = r.u32();
             if( captureValueUses )
             {
                 // H3 (v10): the file's subtoken dictionary — def rows below index into it. Must be
@@ -2246,6 +2411,7 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
 inline void saveCache( const std::string& path, std::string_view rootDir, const std::vector<std::string>& files,
                        const std::vector<std::uint64_t>& fileHash,
                        const std::vector<long long>& fileSize, const std::vector<long long>& fileMtime,
+                       const std::vector<FileHealth>& fileHealth,   // §L1 (v13): parse health, per fileId
                        const std::vector<RawDef>& defs, const std::vector<RawRef>& refs, const std::vector<Include>& incs,
                        const std::vector<RawBind>& binds, const std::vector<BindingAlias>& ffis,
                        const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,   // B6.3
@@ -2354,6 +2520,13 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             w.u64( f < fileHash.size() ? fileHash[f] : 0 );
             w.u64( f < fileSize.size() ? (std::uint64_t)fileSize[f] : (std::uint64_t)-1 ); // A4-P7 stat-gate: size at hash time (-1 ⇒ unknown → gate re-hashes)
             w.u64( f < fileMtime.size() ? (std::uint64_t)fileMtime[f] : (std::uint64_t)-1 ); // A4-P7 stat-gate: mtimeNs at hash time (-1 ⇒ unknown)
+            {
+                // §L1 (v13): parse health, at a FIXED wire offset right after the stat-gate pair. An
+                // out-of-range f writes the default (fileBytes 0), which the reader already means as
+                // NOT MEASURED — no sentinel of its own, and no way to mistake it for "clean".
+                const FileHealth fh = f < fileHealth.size() ? fileHealth[f] : FileHealth{};
+                w.u32( fh.errNodes );  w.u32( fh.errBytes );  w.u32( fh.fileBytes );  w.u32( fh.wsBytes );
+            }
             if( captureValueUses )
             {
                 // H3 (v10): the sorted union of this file's def rows — subtokens repeat heavily across a
@@ -9217,9 +9390,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // 1) deterministic crawl -> sorted file list (this list IS result.files / the fileId space)
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: crawl (collectSources)" );
-        auto [ crawledPaths, oversizeSkipped ] = collectSources( rootDir, excludeSubstr, maxFileBytes, excludeLabel );
+        auto [ crawledPaths, oversizeSkipped, taxonomySkips ] = collectSources( rootDir, excludeSubstr, maxFileBytes, excludeLabel );
         result.files           = std::move( crawledPaths );
         result.skippedOversize = std::move( oversizeSkipped );
+        result.crawlSkips      = std::move( taxonomySkips );   // §L1: excluded / unsupported-ext / unindexed exts
     }
 
     // 2) parse every file IN PARALLEL — one TSParser per worker thread (parsers aren't
@@ -9259,6 +9433,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // so a future warm run can trust an unchanged file without reading it. -1 ⇒ not captured (never trusted).
     std::vector<long long> fileStatSize( nfilesEarly, -1 );
     std::vector<long long> fileStatMtime( nfilesEarly, -1 );
+    std::vector<FileHealth> fileHealth( nfilesEarly );   // §L1: one slot per fileId, one WRITER per slot
     std::vector<const LangEntry*> fileLang( nfilesEarly, nullptr );
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: classify file languages" );
@@ -9893,6 +10068,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                             }
                             if( hit != nullptr )   // unchanged → reuse cached facts, skip parse
                             {
+                                fileHealth[ fileId ] = hit->health;   // §L1: health is a cached FACT, not a re-derivation
                                 for( RawDef& d : hit->defs )
                                 {
                                     d.fileId = std::uint32_t( fileId );
@@ -9999,6 +10175,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                             {
                                 continue;
                             }
+                            fileHealth[ fileId ] = measureFileHealth( ts_tree_root_node( mdTree.get() ), bytes );
                             const std::string stem = fs::path( path ).stem().string();
                             const std::size_t firstNewDefIndex = tDefs[ t ].size();
                             extractMarkdown( static_cast<std::uint32_t>( fileId ), bytes, stem, ts_tree_root_node( mdTree.get() ), tDefs[ t ], tRefs[ t ] );
@@ -10018,6 +10195,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                             }
 
                             const TSNode root = ts_tree_root_node( tree.get() );
+                            fileHealth[ fileId ] = measureFileHealth( root, bytes );   // §L1 — before `bytes` can be moved below
                             captureSideFacts( *le, static_cast<std::uint32_t>( fileId ), bytes, root, tRefs[ t ], tIncs[ t ], tBinds[ t ], tFfis[ t ], tRouteDefs[ t ], tRouteUses[ t ], captureValueUses );
 
                             const bool canQueueParsed = !queryPrewarmReady.load( std::memory_order_acquire )
@@ -10157,9 +10335,11 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         // Skips the ~11ms / 7 MB serialization+write on a no-change warm run.
         if( !cacheFile.empty() && dirty.load() )
         {
-            saveCache( std::string( cacheFile ), rootDir, result.files, fileHash, fileStatSize, fileStatMtime, rawDefs, rawRefs, rawIncs, rawBinds, rawFfis, rawRouteDefs, rawRouteUses, captureValueUses );
+            saveCache( std::string( cacheFile ), rootDir, result.files, fileHash, fileStatSize, fileStatMtime, fileHealth, rawDefs, rawRefs, rawIncs, rawBinds, rawFfis, rawRouteDefs, rawRouteUses, captureValueUses );
         }
     }
+
+    result.fileHealth = std::move( fileHealth );   // §L1: after saveCache, before the (unmeasured) doc pass
 
     // ── doc post-pass (P1-B): for every collected document file (notebook/html/csv/…), extract its text and
     //    record it as the docText override + add ONE whole-file Section node so the doc is rankable + recall-
