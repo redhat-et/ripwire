@@ -775,8 +775,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:2057"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2393"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:10791"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:10906"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:10956"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:11071"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:946"/>
 </callers>
 ```
@@ -1151,7 +1151,7 @@ When a mark says the cheap answer is not enough, escalate on purpose — never b
    name-based guesses, tagged `prov="scip"`. Missing or corrupt index degrades; it never fails.
 
 <details>
-<summary>The six marks the output uses — <code>amb=</code>, <code>ambiguous=</code>, <code>counts_floor=</code>, <code>unresolved=</code>, <code>external=</code>, <code>--skipped</code></summary>
+<summary>The seven marks the output uses — <code>amb=</code>, <code>ambiguous=</code>, <code>counts_floor=</code>, <code>unresolved=</code>, <code>external=</code>, <code>unindexed=</code>, <code>--skipped</code></summary>
 
 The map for this repository's own `src/` grades itself in the header before a single answer
 (2026-08-10, at `4e245d7`): `files=109 symbols=3233 edges=10132 ambiguous=4768 unresolved=1097`.
@@ -1172,7 +1172,8 @@ across the tree; a rise there means the map is disclosing more overloading, not 
 | `counts_floor="1"` | a floor, not a total — a zero means *none found*, never *none exists* |
 | `unresolved=N` | call sites recognized and deliberately not resolved — counted, never dropped in silence |
 | `external="1"` | no definition anywhere in the indexed tree — stdlib or third-party, not a miss |
-| `--skipped` | the files the crawl dropped for size, itemized, so `files=` + oversize = everything it considered |
+| `unindexed="ml:7231,…"` | source/text extensions this build has no grammar for, top-N by file count — a whole LANGUAGE the map could not see says so in the header, instead of the map reading complete |
+| `--skipped` | WHY each file is absent — `why="oversize\|excluded\|unsupported-ext"` — so `indexed=` + oversize + excluded = everything the crawl enumerated; plus `<h why="degraded-parse\|minified-suspect">` rows for files that ARE indexed and whose extraction the tool cannot vouch for, and `unmeasured=` for the ones it never parsed |
 
 </details>
 

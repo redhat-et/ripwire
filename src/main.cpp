@@ -7929,14 +7929,174 @@ std::optional<int> runNotes( const MainDispatch& d )
     return std::nullopt;
 }
 
-// §P0.5d — --skipped: itemize the map header's skipped_oversize= count. The header discloses HOW MANY
-// otherwise-indexable files the crawl dropped for exceeding a size ceiling; this verb names WHICH — the
-// disclosure doctrine ("every truncation is disclosed") applied to the corpus itself, where the count kept
-// the accounting honest while the missing population stayed anonymous. One row per drop, path-sorted at
-// crawl time (ingest.cpp collectSources), each carrying the ceiling that dropped it, so bytes > limit is
-// self-evident per row. The binary-sniff and read-failure parse skips are deliberately NOT here: those
-// files keep their fileId and stay inside files= (present with zero symbols), so they are not absent from
-// the accounting this verb itemizes. Read-only; exit 0 always: a report, not a gate.
+// §L1 — the skipped verb's legend, hoisted to file scope. A 20-line string literal inside the emitter is
+// 20 lines of runSkipped's measured LOC for zero branching, and this text is the reader's ONLY definition
+// of every attribute below it, so it earns its own name. NB: a literal `--flag` spelling is illegal inside
+// an XML comment (no `--` in a comment), so it names flags in prose and leans on the attribute names.
+constexpr const char* kSkippedLegend =
+    "<ctx><!-- ripwire skipped report: WHY the index does not contain a file, and which files it DOES contain but cannot"
+                 " vouch for. Two row kinds. <f p= why= bytes= .../> = a file the crawl passed over, one row per drop, why= being"
+                 " oversize (exceeded a size ceiling; limit= names which — the max-file-size flag's value in max_file_size=, or the fixed"
+                 " .json/.yaml config ceilings that flag does not raise, json_ceiling=), excluded (matched an exclude substring; ext= is"
+                 " its extension), or unsupported-ext (ext= has no grammar and no doc handler in this build — the class that hides a whole"
+                 " LANGUAGE). <h p= why= .../> = a file that IS indexed and stays indexed, flagged for the reader: why=degraded-parse means"
+                 " the parse contains ERROR/MISSING nodes (err= counts them, err_ratio= is the share of the file's bytes covered by top-most"
+                 " ERROR spans) and is a PARSER-STATE fact, never a syntax verdict — a valid file in a dialect this grammar predates reads"
+                 " degraded too; why=minified-suspect means whitespace frequency ws_freq= is under 0.070 across the leading 4096 bytes"
+                 " (files under 256 bytes are never flagged — too little text to judge). Nothing here is dropped by these two flags."
+                 " HEADER: indexed= is files= on the map; the ACCOUNTING INVARIANT is indexed= + oversize= + excluded= = the candidate"
+                 " population the crawl ENUMERATED, at every ceiling and exclude setting. unsupported_ext= counts source/text-looking files"
+                 " outside that population (binary/asset extensions are deliberately not counted — an unindexed .png is a picture, not a"
+                 " language this build failed to read); its per-extension breakdown is the <e x= files=/> rows, which the map header rolls"
+                 " up as unindexed=. excluded_dirs= counts SUBTREES an exclude pruned: the walk stopped at the directory, so how many files"
+                 " are under them is UNKNOWN, not zero, and they are in no count here. degraded_parse= / minified_suspect= count the h rows."
+                 " unmeasured= counts indexed files this run never parsed (a doc-format file extracted by the doc pass, a binary sniff or"
+                 " nesting guard refusal, a read failure) — they are absent from the health counts, not clean. rows_capped=\"1\" means a row"
+                 " list hit its 500-row ceiling, so the rows are a SAMPLE of the count beside them; every count stays exact. A zero means"
+                 " none found. -->";
+
+// §L1 — one indexed file the health pass flagged. `fileIndex` indexes IngestResult::files.
+struct SkipHealthFinding
+{
+    std::size_t fileIndex = 0;
+    bool        degraded  = false;   // the parse holds ERROR/MISSING nodes
+    bool        minified  = false;   // whitespace frequency under the threshold
+};
+
+// §L1 — the health pass's whole answer: the flagged files, plus the three counts the root discloses.
+struct SkipHealthReport
+{
+    std::vector<SkipHealthFinding> findings;
+    std::size_t                    degraded   = 0;
+    std::size_t                    minified   = 0;
+    std::size_t                    unmeasured = 0;   // indexed but never parsed — NOT the same as clean
+};
+
+// §L1 — classify every indexed file's recorded health against the two disclosure thresholds.
+//
+// The thresholds live HERE and not in ingest deliberately: the ingest carries facts (error-node counts,
+// whitespace counts), this carries the presentation choice about where to draw a line, and keeping the two
+// apart is what lets the legend state the threshold beside the raw numbers a reader would use to
+// second-guess it. Cheap — four u32s per file, no I/O.
+//
+// fileBytes == 0 is the ingest's NOT-MEASURED sentinel (an indexed file always has a size): the file was
+// never parsed — a doc-format file the doc post-pass extracted, a binary-sniff or nesting-guard refusal, a
+// read failure. Those are counted as unmeasured and are absent from the other two counts, because "we did
+// not look" is not "we looked and it was clean".
+SkipHealthReport classifySkipHealth( const rw::IngestResult& ing )
+{
+    using namespace rw;
+    SkipHealthReport out;
+    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
+        const FileHealth h = f < ing.fileHealth.size() ? ing.fileHealth[ f ] : FileHealth{};
+        if( h.fileBytes == 0 )
+        {
+            ++out.unmeasured;
+            continue;
+        }
+        const std::size_t   sample   = h.fileBytes < kHealthWsSampleBytes ? h.fileBytes : kHealthWsSampleBytes;
+        const std::uint32_t wsPerMil = sample == 0 ? 1000u : std::uint32_t( ( std::uint64_t( h.wsBytes ) * 1000ull ) / sample );
+        const bool          degraded = h.errNodes > 0;
+        const bool          minified = h.fileBytes >= kMinifiedMinBytes && wsPerMil < kMinifiedWsPerMille;
+        out.degraded += degraded ? 1u : 0u;
+        out.minified += minified ? 1u : 0u;
+        if( degraded || minified )
+        {
+            out.findings.push_back( { f, degraded, minified } );
+        }
+    }
+    return out;
+}
+
+// §L1 — the <f why="oversize"> rows (§P0.5d's original population), each carrying the ceiling that dropped
+// it so `bytes > limit` is self-evident per row.
+void writeOversizeRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vector<rw::SkippedOversize>& rows )
+{
+    for( const rw::SkippedOversize& sk : rows )
+    {
+        char row[ 96 ];
+        w.write( "<f p=\"" );  w.write( rw::escapeXml( sk.path, esc ) );
+        std::snprintf( row, sizeof( row ), "\" why=\"oversize\" bytes=\"%llu\" limit=\"%llu\"/>",
+                       ( unsigned long long ) sk.sizeBytes, ( unsigned long long ) sk.limitBytes );
+        w.write( row );
+    }
+}
+
+// §L1 — the <f> rows for the two non-size drop classes. `why` is a caller-supplied literal from a CLOSED
+// vocabulary (excluded / unsupported-ext), never data — see test/fixedbufsweep.sh's row for this buffer.
+void writeDropRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vector<rw::SkippedFile>& rows, const char* why )
+{
+    for( const rw::SkippedFile& sf : rows )
+    {
+        char row[ 96 ];
+        w.write( "<f p=\"" );  w.write( rw::escapeXml( sf.path, esc ) );
+        std::snprintf( row, sizeof( row ), "\" why=\"%s\" bytes=\"%llu\" ext=\"", why, ( unsigned long long ) sf.sizeBytes );
+        w.write( row );
+        w.write( rw::escapeXml( sf.ext, esc ) );
+        w.write( "\"/>" );
+    }
+}
+
+// §L1 — the <e> rows: the FULL unindexed-extension histogram. Uncapped here on purpose; the map header's
+// unindexed= is the capped roll-up, and this verb is the surface a reader comes to for the whole list.
+void writeUnindexedExtRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vector<rw::UnindexedExt>& rows )
+{
+    for( const rw::UnindexedExt& ue : rows )
+    {
+        char row[ 64 ];
+        w.write( "<e x=\"" );  w.write( rw::escapeXml( ue.ext, esc ) );
+        std::snprintf( row, sizeof( row ), "\" files=\"%llu\"/>", ( unsigned long long ) ue.files );
+        w.write( row );
+    }
+}
+
+// §L1 — the <h> rows: files that ARE indexed and STAY indexed, flagged for the reader. Both raw numbers and
+// both ratios are emitted on every row, whichever class fired, so a reader can second-guess either
+// threshold without re-running anything. err_ratio is over the FILE's bytes; ws_freq is over the leading
+// sample, which is its own denominator — hence two ratios and not one.
+void writeHealthRows( rw::XmlWriter& w, std::vector<char>& esc, const rw::IngestResult& ing,
+                      const std::vector<SkipHealthFinding>& findings )
+{
+    for( const SkipHealthFinding& hr : findings )
+    {
+        const rw::FileHealth h       = ing.fileHealth[ hr.fileIndex ];
+        const std::size_t    sample  = h.fileBytes < rw::kHealthWsSampleBytes ? h.fileBytes : rw::kHealthWsSampleBytes;
+        const double         errFrac = double( h.errBytes ) / double( h.fileBytes );
+        const double         wsFrac  = sample == 0 ? 1.0 : double( h.wsBytes ) / double( sample );
+        char row[ 192 ];
+        w.write( "<h p=\"" );  w.write( rw::escapeXml( ing.files[ hr.fileIndex ], esc ) );
+        std::snprintf( row, sizeof( row ), "\" why=\"%s%s%s\" err=\"%u\" err_ratio=\"%.3f\" ws_freq=\"%.3f\" bytes=\"%u\"/>",
+                       hr.degraded ? "degraded-parse" : "",
+                       ( hr.degraded && hr.minified ) ? "," : "",
+                       hr.minified ? "minified-suspect" : "",
+                       h.errNodes, errFrac, wsFrac, h.fileBytes );
+        w.write( row );
+    }
+}
+
+// §P0.5d / §L1 — --skipped: WHY the index does not contain a file, and which files it DOES contain but
+// cannot vouch for. The disclosure doctrine ("every truncation is disclosed") applied to the corpus itself.
+//
+// §P0.5d built this verb around ONE drop reason: the header said HOW MANY files a size ceiling dropped and
+// this verb named WHICH. §L1 closes what that left open — the verb answered `oversize="0"` on a tree it had
+// passed over wholesale, which reads as "index complete" and is the honesty contract's own failure mode (a
+// zero meaning "none exists" rather than "none found"). Two additions, both measured against real corpora:
+//
+//   * the DROP taxonomy grows why=excluded and why=unsupported-ext beside why=oversize. The second is the
+//     load-bearing one: it is how a whole LANGUAGE disappears. On facebook/infer (11 923 files, ~60% OCaml,
+//     which this build has no grammar for) the map's top-ranked symbols were meaningless test fixtures and
+//     nothing anywhere said the primary language had contributed nothing.
+//   * a SECOND row kind, <h>, for files that ARE indexed and stay indexed but whose extraction cannot be
+//     vouched for: degraded-parse (ERROR/MISSING nodes in the tree) and minified-suspect (whitespace
+//     frequency under the threshold). Run over 252 deliberately-invalid Python files this verb used to
+//     report a clean bill of health while every symbol it had drawn from them was garbage. NOTHING is
+//     dropped by either flag — this lane only ever adds disclosure.
+//
+// The binary-sniff and read-failure parse skips are still deliberately NOT drop rows: those files keep their
+// fileId and stay inside files=. They now surface as unmeasured= instead — present in the corpus, absent
+// from the health counts, which is the honest position for a file that was never parsed.
+// Read-only; exit 0 always: a report, not a gate.
 std::optional<int> runSkipped( const MainDispatch& d )
 {
     using namespace rw;
@@ -7950,27 +8110,32 @@ std::optional<int> runSkipped( const MainDispatch& d )
     {
         XmlWriter         w( stdout );
         std::vector<char> esc;
-        // NB: a literal `--flag` spelling is illegal inside an XML comment (no `--` in comments), so the
-        // legend names the flag as "the max-file-size flag" and leans on the attribute names.
-        w.write( "<ctx><!-- ripwire skipped-oversize report: one <f p= bytes= limit=/> row per otherwise-indexable file the crawl DROPPED for"
-                 " exceeding a size ceiling — these files are absent from files= and every other surface (files= + oversize= = the population"
-                 " the crawl considered). limit= is the ceiling that dropped the row: the max-file-size flag's value (max_file_size=) or the"
-                 " fixed .json config ceiling that flag does not raise (json_ceiling=); oversize=\"0\" means nothing was dropped at these"
-                 " ceilings. -->" );
-        char hdr[ 128 ];
+
+        const SkipHealthReport health = classifySkipHealth( ing );
+
+        w.write( kSkippedLegend );
+        char hdr[ 512 ];
         // mirror ingest()'s own zero-ceiling clamp so the header states the EFFECTIVE bound, never a raw 0
         const std::size_t effectiveMax = cfg.maxFileBytes == 0 ? kDefaultMaxFileBytes : cfg.maxFileBytes;
-        std::snprintf( hdr, sizeof( hdr ), "<skipped oversize=\"%zu\" max_file_size=\"%zu\" json_ceiling=\"%zu\">",
-                       ing.skippedOversize.size(), effectiveMax, kMaxJsonConfigBytes );
+        const CrawlSkips& cs           = ing.crawlSkips;
+        const bool        rowsCapped   = cs.excluded.size() < cs.excludedFiles || cs.unsupported.size() < cs.unsupportedFiles;
+        std::snprintf( hdr, sizeof( hdr ),
+                       "<skipped indexed=\"%zu\" oversize=\"%zu\" excluded=\"%llu\" unsupported_ext=\"%llu\" excluded_dirs=\"%llu\""
+                       " degraded_parse=\"%zu\" minified_suspect=\"%zu\" unmeasured=\"%zu\" max_file_size=\"%zu\" json_ceiling=\"%zu\""
+                       " yaml_ceiling=\"%zu\"%s>",
+                       ing.files.size(), ing.skippedOversize.size(),
+                       ( unsigned long long ) cs.excludedFiles, ( unsigned long long ) cs.unsupportedFiles,
+                       ( unsigned long long ) cs.excludedDirs,
+                       health.degraded, health.minified, health.unmeasured,
+                       effectiveMax, kMaxJsonConfigBytes, kMaxYamlConfigBytes,
+                       rowsCapped ? " rows_capped=\"1\"" : "" );
         w.write( hdr );
-        for( const SkippedOversize& sk : ing.skippedOversize )
-        {
-            char row[ 96 ];
-            w.write( "<f p=\"" );  w.write( escapeXml( sk.path, esc ) );
-            std::snprintf( row, sizeof( row ), "\" bytes=\"%llu\" limit=\"%llu\"/>",
-                           ( unsigned long long ) sk.sizeBytes, ( unsigned long long ) sk.limitBytes );
-            w.write( row );
-        }
+
+        writeOversizeRows( w, esc, ing.skippedOversize );
+        writeDropRows( w, esc, cs.excluded,    "excluded" );
+        writeDropRows( w, esc, cs.unsupported, "unsupported-ext" );
+        writeUnindexedExtRows( w, esc, cs.unindexedExts );
+        writeHealthRows( w, esc, ing, health.findings );
         w.write( "</skipped></ctx>" );
     }
     std::fputc( '\n', stdout );

@@ -2568,15 +2568,15 @@ $ ./build/ripwire . --doctor
 
 ### `--skipped`
 
-**Answers:** itemize the map header's skipped_oversize= count: one <f p= bytes= limit=/> row per otherwise-indexable file the crawl DROPPED for exceeding a size ceiling — the files absent from files= and every other surface (files= + oversize= = the population the crawl considered).
+**Answers:** WHY the index does not contain a file, and which files it DOES contain but cannot vouch for.
 
-limit= is the ceiling that dropped the row: --max-file-size, or the fixed 256KB .json config ceiling --max-file-size does not raise; the root repeats both effective ceilings (max_file_size= json_ceiling=) so a zero-row report still states its bounds, and oversize="0" means nothing was dropped at them. Rows sort by path; composes with --max-file-size/--exclude and multi-root (rows carry the <label>/./<rel> spelling). Read-only; exit 0 always: a report, not a gate.
+<f p= why= bytes=/> per DROPPED file: why=oversize (limit= names the ceiling — --max-file-size, or the fixed .json/.yaml config ceilings it does not raise), why=excluded (--exclude hit), why=unsupported-ext (ext= has no grammar in this build — the class that hides a whole LANGUAGE). <h p= why= err= err_ratio= ws_freq=/> per INDEXED-but-suspect file, nothing dropped: why=degraded-parse (the parse holds ERROR/MISSING nodes — a parser-state fact, never a syntax verdict) and/or why=minified-suspect (ws_freq under 0.070 over the leading 4KB). <e x= files=/> per unindexed extension — what the map header rolls up as unindexed=. The root states the ACCOUNTING INVARIANT indexed= + oversize= + excluded= = the enumerated candidate population, plus unsupported_ext=, excluded_dirs= (pruned SUBTREES: contents UNKNOWN, not zero), degraded_parse=, minified_suspect=, unmeasured= (indexed files this run never parsed) and the effective ceilings, so a zero-row report still states its bounds. rows_capped="1" ⇒ rows are a sample of an exact count. Rows sort by path; composes with --max-file-size/--exclude and multi-root (rows carry the <label>/./<rel> spelling). Read-only; exit 0 always: a report, not a gate.
 
 **Caveats (stated by the binary):**
 
-- itemize the map header's skipped_oversize= count: one <f p= bytes= limit=/> row per otherwise-indexable file the crawl DROPPED for exceeding a size ceiling — the files absent from files= and every other surface (files= + oversize= = the population the crawl considered).
-- limit= is the ceiling that dropped the row: --max-file-size, or the fixed 256KB .json config ceiling --max-file-size does not raise;
-- exit 0 always: a report, not a gate.
+- WHY the index does not contain a file, and which files it DOES contain but cannot vouch for.
+- <f p= why= bytes=/> per DROPPED file: why=oversize (limit= names the ceiling — --max-file-size, or the fixed .json/.yaml config ceilings it does not raise), why=excluded (--exclude hit), why=unsupported-ext (ext= has no grammar in this build — the class that hides a whole LANGUAGE).
+- <h p= why= err= err_ratio= ws_freq=/> per INDEXED-but-suspect file, nothing dropped: why=degraded-parse (the parse holds ERROR/MISSING nodes — a parser-state fact, never a syntax verdict) and/or why=minified-suspect (ws_freq under 0.070 over the leading 4KB).
 
 ---
 
