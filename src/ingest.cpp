@@ -951,9 +951,17 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
             if( skip )
             {
                 it.disable_recursion_pending();
+                // §L1: contents UNKNOWN past here, whichever rule stopped us — but WHICH rule is itself the
+                // disclosure, so the two classes carry two counters (see CrawlSkips::excludedDirs /
+                // ::prunedDirs). `excluded` is the only user-driven prune; everything else that reached this
+                // branch is built-in policy (kCrawlSkipDirs or the CMakeCache.txt build-output sentinel).
                 if( excluded )
                 {
-                    ++skips.excludedDirs;   // §L1: contents UNKNOWN past here — see CrawlSkips::excludedDirs
+                    ++skips.excludedDirs;
+                }
+                else
+                {
+                    ++skips.prunedDirs;
                 }
             }
             continue;

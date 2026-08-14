@@ -16,6 +16,20 @@
 #      leading '/', no drive letter, no '..' escape)
 #   7. a known fixture (test/lintfix/bad.cpp's typedef-over-using at line 9) produces the expected
 #      ruleId at the expected line
+#   8. SELECTION crosses over. The XML path drops a --lint-select=/--lint-ignore= deselected rule's row
+#      entirely and states selected="K of N" + the raw select= on its root; the SARIF path emitted the
+#      full 39-rule catalogue BYTE-IDENTICAL whether a rule was selected in or out, and said nothing at
+#      the run level. A consumer reading that document could not tell a filtered run from an unfiltered
+#      one. SARIF's own field for "in the catalogue but not enabled this run" is
+#      defaultConfiguration.enabled — present-and-false on a deselected rule, ABSENT (SARIF's own
+#      default of true) on a kept one — and the run-level mirror rides properties beside findingsCapped.
+#   9. INERTNESS crosses over. A rule row's applicable="0" in the XML means NONE of its registered
+#      languages exist in this corpus, so its count="0" is structural, never a measurement. In SARIF
+#      those rules read as ran-and-found-nothing. properties.applicable carries the same fact, and it is
+#      emitted for EVERY rule (true as well as false) so its absence can never be read as "true".
+#  10. MUTATION CONTROL for 8+9 — the unfiltered run over a C-family corpus must show the negative of
+#      both: no rule disabled, and the C-family rules applicable. Without it, a serializer that hard-coded
+#      enabled:false / applicable:false everywhere would pass arms 8 and 9.
 #
 #   RIPWIRE_BIN=build/ripwire bash test/sarifcheck.sh
 #   RIPWIRE_BIN=asan/ripwire  bash test/sarifcheck.sh
@@ -147,6 +161,99 @@ PY
 )"
 [ "$HIT" = "FOUND" ] && ok "typedef-over-using at test/lintfix/bad.cpp:9 present with the expected ruleId+line" \
     || no "typedef-over-using at bad.cpp:9 NOT found in SARIF results"
+
+# ── 8. --lint-select= crosses over: deselected rules are disabled, and the run says so ───────────────
+"$BIN" "$CORPUS" --lint --lint-select=cache- --sarif --no-cache >"$TMP/sel.json" 2>/dev/null
+SEL="$( python3 - "$TMP/sel.json" <<'PY'
+import json, sys
+try:
+    d = json.load( open( sys.argv[1] ) )
+except Exception as exc:
+    print( "PARSE_FAIL", exc ); raise SystemExit( 0 )
+run   = d[ "runs" ][ 0 ]
+rules = run[ "tool" ][ "driver" ][ "rules" ]
+def enabled( r ):
+    return r.get( "defaultConfiguration", {} ).get( "enabled", True )
+offDisabled = [ r["id"] for r in rules if not r["id"].startswith( "cache-" ) and not enabled( r ) ]
+offEnabled  = [ r["id"] for r in rules if not r["id"].startswith( "cache-" ) and     enabled( r ) ]
+inDisabled  = [ r["id"] for r in rules if     r["id"].startswith( "cache-" ) and not enabled( r ) ]
+print( "SELECTED_OUT_DISABLED", len( offDisabled ) )
+print( "SELECTED_OUT_STILL_ENABLED", len( offEnabled ) )
+print( "SELECTED_IN_DISABLED", len( inDisabled ) )
+props = run.get( "properties", {} )
+print( "PROP_SELECTED", props.get( "selected", "<absent>" ) )
+print( "PROP_SELECT", props.get( "select", "<absent>" ) )
+PY
+)"
+echo "$SEL" | sed 's/^/          /'
+n(){ printf '%s' "$SEL" | grep "^$1 " | awk '{print $2}'; }
+[ "$( n SELECTED_OUT_DISABLED )" -gt 0 ] 2>/dev/null \
+    && ok "8. a selected-OUT rule carries defaultConfiguration.enabled=false ($( n SELECTED_OUT_DISABLED ) of them)" \
+    || no "8. NO selected-out rule is marked disabled — the catalogue reads identical filtered or not"
+[ "$( n SELECTED_OUT_STILL_ENABLED )" = "0" ] \
+    && ok "8. EVERY selected-out rule is marked disabled (none left reading as enabled)" \
+    || no "8. $( n SELECTED_OUT_STILL_ENABLED ) selected-out rule(s) still read as enabled"
+[ "$( n SELECTED_IN_DISABLED )" = "0" ] \
+    && ok "8. no selected-IN (cache-*) rule was disabled — the filter is not inverted" \
+    || no "8. $( n SELECTED_IN_DISABLED ) selected-IN rule(s) were marked disabled"
+printf '%s' "$SEL" | grep -q '^PROP_SELECTED [0-9]* of [0-9]*$' \
+    && ok "8. run properties mirror the XML root's selected=\"K of N\"" \
+    || no "8. run-level properties carry no selected=\"K of N\" mirror"
+printf '%s' "$SEL" | grep -q '^PROP_SELECT cache-$' \
+    && ok "8. run properties echo the raw select= you passed (cache-)" \
+    || no "8. run-level properties do not echo the raw select= argument"
+
+# ── 9. a Python-only corpus marks the C-family rules structurally inert ──────────────────────────────
+mkdir -p "$TMP/pyonly"
+printf 'def alpha( x ):\n    return x + 1\n' > "$TMP/pyonly/a.py"
+"$BIN" "$TMP/pyonly" --lint --sarif --no-cache >"$TMP/py.json" 2>/dev/null
+PY_APP="$( python3 - "$TMP/py.json" <<'PY'
+import json, sys
+try:
+    d = json.load( open( sys.argv[1] ) )
+except Exception as exc:
+    print( "PARSE_FAIL", exc ); raise SystemExit( 0 )
+rules = { r["id"]: r for r in d[ "runs" ][ 0 ][ "tool" ][ "driver" ][ "rules" ] }
+r = rules.get( "typedef-over-using" )
+print( "PRESENT", "yes" if r else "no" )
+if r:
+    print( "APPLICABLE", r.get( "properties", {} ).get( "applicable", "<absent>" ) )
+print( "MISSING_PROP", sum( 1 for x in rules.values() if "applicable" not in x.get( "properties", {} ) ) )
+PY
+)"
+echo "$PY_APP" | sed 's/^/          /'
+printf '%s' "$PY_APP" | grep -q '^PRESENT yes$' \
+    && ok "9. the C-family rule typedef-over-using is in the Python-only catalogue (guard for the arm below)" \
+    || no "9. typedef-over-using absent from the Python-only catalogue — the arm below would pass vacuously"
+printf '%s' "$PY_APP" | grep -q '^APPLICABLE False$' \
+    && ok "9. it carries properties.applicable=false — inert here, not measured-clean" \
+    || no "9. properties.applicable is not false on a C-family rule over a Python-only corpus"
+printf '%s' "$PY_APP" | grep -q '^MISSING_PROP 0$' \
+    && ok "9. every rule carries properties.applicable — absence can never be misread as true" \
+    || no "9. some rules omit properties.applicable"
+
+# ── 10. mutation control — the unfiltered C-family run must show the NEGATIVE of both ────────────────
+MUT="$( python3 - "$TMP/out1.json" <<'PY'
+import json, sys
+d     = json.load( open( sys.argv[1] ) )
+rules = d[ "runs" ][ 0 ][ "tool" ][ "driver" ][ "rules" ]
+dis   = [ r["id"] for r in rules if not r.get( "defaultConfiguration", {} ).get( "enabled", True ) ]
+inert = [ r["id"] for r in rules if r.get( "properties", {} ).get( "applicable" ) is False ]
+print( "DISABLED", len( dis ) )
+print( "CFAMILY_INERT", 1 if "typedef-over-using" in inert else 0 )
+print( "PROPS", json.dumps( d[ "runs" ][ 0 ].get( "properties", {} ), sort_keys = True ) )
+PY
+)"
+echo "$MUT" | sed 's/^/          /'
+printf '%s' "$MUT" | grep -q '^DISABLED 0$' \
+    && ok "10. an unfiltered run disables nothing (enabled:false is not hard-coded)" \
+    || no "10. an unfiltered run marks rules disabled — the selection mirror is not reading the selection"
+printf '%s' "$MUT" | grep -q '^CFAMILY_INERT 0$' \
+    && ok "10. typedef-over-using is APPLICABLE over the C-family fixture (applicable:false is not hard-coded)" \
+    || no "10. typedef-over-using reads inert over a C++ corpus"
+printf '%s' "$MUT" | grep -q '"selected"' \
+    && no "10. an unfiltered run still emits a selected= mirror — absent must mean no selection was given" \
+    || ok "10. no selection mirror on an unfiltered run (absent = nothing to say)"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"

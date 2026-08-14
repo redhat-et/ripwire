@@ -223,6 +223,7 @@ inline void mergeCrawlDisclosures( IngestResult& m, IngestResult& part, const Wo
     m.crawlSkips.excludedFiles    += part.crawlSkips.excludedFiles;
     m.crawlSkips.unsupportedFiles += part.crawlSkips.unsupportedFiles;
     m.crawlSkips.excludedDirs     += part.crawlSkips.excludedDirs;
+    m.crawlSkips.prunedDirs       += part.crawlSkips.prunedDirs;   // built-in policy prunes sum the same way
 
     for( const UnindexedExt& ue : part.crawlSkips.unindexedExts )
     {

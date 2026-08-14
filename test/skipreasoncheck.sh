@@ -23,6 +23,21 @@
 #       (purely additive, G5/G4: the default map over a fully-indexable tree stays byte-identical)
 #   (6) determinism — two --skipped runs, byte-identical
 #   (7) well-formedness (G4) — --skipped pipes clean through xmllint when xmllint is available
+#   (8) BUILT-IN subtree prunes are counted too, and SEPARATELY from the user ones. Three prune paths
+#       converge on `it.disable_recursion_pending()` in ingest.cpp — a --exclude match, the committed
+#       denylist (ingest.h kCrawlSkipDirs), and the CMakeCache.txt build-output sentinel — but only the
+#       FIRST incremented a counter. So `--skipped` on a tree with node_modules/ reported every counter
+#       zero while whole subtrees had been dropped: the same "a zero that means none exists" failure the
+#       arms above exist to close, one level up. pruned_dirs= is its OWN attribute, never folded into
+#       excluded_dirs=, because the reader must be able to tell a policy prune (this build always does
+#       this) from a prune THEY asked for (--exclude).
+#   (9) BOTH header attributes arm (3) can produce — unindexed= and its unindexed_exts= cap bit — are
+#       DEFINED somewhere in the tool's own output. The map legend is not that place and this arm does not
+#       ask it to be: putting the clause there was tried and MEASURED, and on `src` at --max-tokens=500 the
+#       map's fixed floor sits 7 bytes under its allowance (test/tokenbudgetcheck.sh arm #3), so no wording
+#       fits. The --skipped legend is under no such budget and is where the definition lives; unindexed_exts=
+#       had no definition anywhere, which is the half that was genuinely undefined. The arm ALSO pins the
+#       negative — the map legend must stay byte-identical — so a future clause cannot land there silently.
 #
 # Usage:  bash test/skipreasoncheck.sh      [RIPWIRE_BIN=path/to/binary]
 # Exits non-zero on any failure.
@@ -145,6 +160,95 @@ if command -v xmllint >/dev/null 2>&1; then
 else
   echo "  SKIP  (7) xmllint unavailable"
 fi
+
+# ── (8) built-in subtree prunes are counted, and counted apart from the user ones ────────────────────
+# pruned/: one indexable .cpp at the top, three subtrees the CRAWL prunes by policy (node_modules and
+# dist from kCrawlSkipDirs, buildout/ via the CMakeCache.txt build-output sentinel) and one the USER
+# prunes (--exclude=genstuff). The two classes must land in two different counters.
+mkdir -p "$TMP/pruned/node_modules/pkg" "$TMP/pruned/dist" "$TMP/pruned/buildout" "$TMP/pruned/genstuff"
+printf 'int prunedKeep( void ) { return 1; }\n'  > "$TMP/pruned/keep.cpp"
+printf 'int nodeThing( void ) { return 2; }\n'   > "$TMP/pruned/node_modules/pkg/m.cpp"
+printf 'int distThing( void ) { return 3; }\n'   > "$TMP/pruned/dist/gen.cpp"
+printf '# CMake cache stub\n'                    > "$TMP/pruned/buildout/CMakeCache.txt"
+printf 'int builtThing( void ) { return 4; }\n'  > "$TMP/pruned/buildout/obj.cpp"
+printf 'int genThing( void ) { return 5; }\n'    > "$TMP/pruned/genstuff/g.cpp"
+
+# (8a) presence guard — the fixture really holds a file under each pruned subtree
+[ -f "$TMP/pruned/node_modules/pkg/m.cpp" ] && [ -f "$TMP/pruned/dist/gen.cpp" ] && [ -f "$TMP/pruned/buildout/obj.cpp" ] \
+    && ok "(8) fixture has a source file under each of the 3 built-in-pruned subtrees" \
+    || no "(8) fixture is missing a pruned-subtree source file — the arms below would pass by finding nothing"
+
+"$BIN" pruned --skipped --no-cache > "$TMP/prune_plain.xml" 2>/dev/null
+PR_PLAIN="$( attr "$TMP/prune_plain.xml" pruned_dirs )"
+EX_PLAIN="$( attr "$TMP/prune_plain.xml" excluded_dirs )"
+echo "    (8) no --exclude: pruned_dirs=\"$PR_PLAIN\" excluded_dirs=\"$EX_PLAIN\""
+if [ -n "$PR_PLAIN" ] && [ "$PR_PLAIN" -ge 3 ] 2>/dev/null; then
+  ok "(8) built-in prunes are COUNTED — pruned_dirs=$PR_PLAIN (node_modules, dist, the CMakeCache sentinel)"
+else
+  no "(8) pruned_dirs=\"${PR_PLAIN:-absent}\" — built-in subtree prunes are invisible (want >= 3)"
+fi
+[ "$EX_PLAIN" = "0" ] && ok "(8) excluded_dirs=0 with no --exclude — a policy prune is never miscounted as a user one" \
+                      || no "(8) excluded_dirs=\"$EX_PLAIN\" with no --exclude given — want 0"
+
+"$BIN" pruned --skipped --exclude=genstuff --no-cache > "$TMP/prune_exc.xml" 2>/dev/null
+PR_EXC="$( attr "$TMP/prune_exc.xml" pruned_dirs )"
+EX_EXC="$( attr "$TMP/prune_exc.xml" excluded_dirs )"
+echo "    (8) with --exclude=genstuff: pruned_dirs=\"$PR_EXC\" excluded_dirs=\"$EX_EXC\""
+[ "$EX_EXC" = "1" ] && ok "(8) the USER prune still lands in excluded_dirs=1, separately" \
+                    || no "(8) excluded_dirs=\"$EX_EXC\" under --exclude=genstuff — want 1"
+[ -n "$PR_EXC" ] && [ "$PR_EXC" = "$PR_PLAIN" ] && ok "(8) pruned_dirs is unchanged by --exclude ($PR_EXC) — the two counters do not bleed" \
+                    || no "(8) pruned_dirs moved from \"$PR_PLAIN\" to \"$PR_EXC\" when --exclude was added — the classes are folded together"
+
+LEG_SK="$( python3 - "$TMP/prune_plain.xml" <<'PY'
+import re,sys
+x=open(sys.argv[1]).read(); m=re.match(r'\A(?:\s*<ctx>)?(?:\s*<!--.*?-->)+', x, re.S)
+print(m.group(0) if m else "")
+PY
+)"
+case "$LEG_SK" in
+  *pruned_dirs=*) ok '(8) the skipped legend DEFINES pruned_dirs=' ;;
+  *)              no '(8) the skipped legend never spells pruned_dirs= — a counter no reader can read' ;;
+esac
+# The UNKNOWN language must belong to the pruned_dirs CLAUSE, not merely be present somewhere in a legend
+# that already says it about excluded_dirs= — otherwise this arm passes on the unfixed binary.
+if printf '%s' "$LEG_SK" | python3 -c '
+import re,sys
+leg = sys.stdin.read()
+m = re.search( r"pruned_dirs=", leg )
+sys.exit( 0 if m and "UNKNOWN" in leg[ m.start() : m.start() + 320 ] else 1 )
+'; then
+  ok '(8) the pruned_dirs clause itself carries the "contents UNKNOWN, not zero" language'
+else
+  no '(8) the pruned_dirs clause does not say the contents are UNKNOWN — a pruned subtree is not an empty one'
+fi
+
+# ── (9) unindexed= and unindexed_exts= are both DEFINED, and the map floor stays where it was ────────
+# The --skipped legend is the definition site (see the arm note in the header for the 7-byte measurement
+# that keeps it out of the map legend). LEG_SK is that legend, already extracted for arm (8).
+case "$LEG_SK" in
+  *unindexed=*) ok '(9) the skipped legend defines unindexed=' ;;
+  *)            no '(9) unindexed= is emitted (arm 3) and defined nowhere in the output' ;;
+esac
+case "$LEG_SK" in
+  *unindexed_exts=*) ok '(9) the skipped legend defines unindexed_exts= (the TOP-6 cap bit)' ;;
+  *)                 no '(9) unindexed_exts= is undefined everywhere — a cap disclosure no reader can read' ;;
+esac
+# The negative half: the MAP legend must not grow. Its leading comments are the v1 legend, any conditional
+# clause, then the stats header — the stats header is DATA (it literally contains unindexed="ml:3"), so it
+# is dropped before the check, or this arm could never see a clause land.
+maplegOf(){ python3 - "$1" <<'PY'
+import re,sys
+x = open( sys.argv[1] ).read()
+m = re.match( r'\A(?:\s*<!--.*?-->)+', x, re.S )
+lead = m.group( 0 ) if m else ""
+print( "".join( c for c in re.findall( r'<!--.*?-->', lead, re.S ) if not c.startswith( "<!-- files=" ) ) )
+PY
+}
+MAPLEG="$( maplegOf "$TMP/map.xml" )"
+case "$MAPLEG" in
+  *unindexed*) no '(9) a clause defining unindexed= landed in the MAP legend — re-run tokenbudgetcheck arm #3 before keeping it (the floor had 7 B of headroom)' ;;
+  *)           ok '(9) the map legend is unchanged — the --max-tokens floor keeps its headroom' ;;
+esac
 
 echo
 [ "$fail" -eq 0 ] && { echo "ALL PASS"; exit 0; } || { echo "FAILURES"; exit 1; }
