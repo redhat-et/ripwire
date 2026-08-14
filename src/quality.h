@@ -759,7 +759,7 @@ inline std::string headSnapRepoHex( const std::string& root )
 // lines too. Bumping kParserVer without updating these two lines is a hard gate failure, not a silent miss.
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
-constexpr std::uint32_t kIngestCacheVersionMirror = 12;   // MUST equal ingest.cpp's kCacheVersion (gated)
+constexpr std::uint32_t kIngestCacheVersionMirror = 13;   // MUST equal ingest.cpp's kCacheVersion (gated)
 constexpr std::uint32_t kIngestParserVerMirror    = 63;   // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 63 = 2026-08-12 markdown section tier: .md/.markdown parse
                                                           // with the vendored block grammar — headings (ATX + setext)

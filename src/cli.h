@@ -421,9 +421,11 @@ struct Config
     bool             doctor           = false;              // --doctor: self-diagnosis (binary/PATH staleness, grammar load, cache-dir
                                                              // health, git reachability, tree-sitter version) — a DIAGNOSTIC verb, not
                                                              // the deterministic map; environment-dependent lines are its whole point.
-    bool             skippedList      = false;              // --skipped (§P0.5d): itemize the map header's skipped_oversize= count —
-                                                             // one row per otherwise-indexable file the crawl dropped for exceeding a
-                                                             // size ceiling (p= bytes= limit=). Read-only; exit 0 always.
+    bool             skippedList      = false;              // --skipped (§P0.5d, §L1): WHY the index does not contain a file, and
+                                                             // which files it DOES contain but cannot vouch for — one <f p= why=/> row
+                                                             // per drop (oversize/excluded/unsupported-ext) plus <h p= why=/> rows for
+                                                             // indexed-but-suspect files (degraded-parse/minified-suspect) and <e x=/>
+                                                             // per unindexed extension. Read-only; exit 0 always.
     std::string_view since;                                 // --since=REV|DATE: scope churn/co-change mining to commits after this point
                                                               // (--hotspots/--cochange/--rank-by=churn). REV (e.g. HEAD~20, a tag) is
                                                               // deterministic; a git approxidate ("2 weeks ago") is wall-clock-relative
@@ -1549,14 +1551,21 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               row (ok=\"0\") also carries hint=, the derived verdict (which of self=/which=\n"
         "                               is stale and the fix, which grammar(s) failed to compile, why the cache dir\n"
         "                               isn't writable, ...) — a passing row never carries hint=.\n"
-        "    --skipped                  itemize the map header's skipped_oversize= count: one <f p= bytes= limit=/> row per\n"
-        "                               otherwise-indexable file the crawl DROPPED for exceeding a size ceiling — the files\n"
-        "                               absent from files= and every other surface (files= + oversize= = the population the\n"
-        "                               crawl considered). limit= is the ceiling that dropped the row: --max-file-size, or\n"
-        "                               the fixed 256KB .json config ceiling --max-file-size does not raise; the root repeats\n"
-        "                               both effective ceilings (max_file_size= json_ceiling=) so a zero-row report still\n"
-        "                               states its bounds, and oversize=\"0\" means nothing was dropped at them. Rows sort by\n"
-        "                               path; composes with --max-file-size/--exclude and multi-root (rows carry the\n"
+        "    --skipped                  WHY the index does not contain a file, and which files it DOES contain but cannot\n"
+        "                               vouch for. <f p= why= bytes=/> per DROPPED file: why=oversize (limit= names the ceiling\n"
+        "                               — --max-file-size, or the fixed .json/.yaml config ceilings it does not raise),\n"
+        "                               why=excluded (--exclude hit), why=unsupported-ext (ext= has no grammar in this build —\n"
+        "                               the class that hides a whole LANGUAGE). <h p= why= err= err_ratio= ws_freq=/> per\n"
+        "                               INDEXED-but-suspect file, nothing dropped: why=degraded-parse (the parse holds\n"
+        "                               ERROR/MISSING nodes — a parser-state fact, never a syntax verdict) and/or\n"
+        "                               why=minified-suspect (ws_freq under 0.070 over the leading 4KB). <e x= files=/> per\n"
+        "                               unindexed extension — what the map header rolls up as unindexed=. The root states the\n"
+        "                               ACCOUNTING INVARIANT indexed= + oversize= + excluded= = the enumerated candidate\n"
+        "                               population, plus unsupported_ext=, excluded_dirs= (pruned SUBTREES: contents UNKNOWN,\n"
+        "                               not zero), degraded_parse=, minified_suspect=, unmeasured= (indexed files this run\n"
+        "                               never parsed) and the effective ceilings, so a zero-row report still states its\n"
+        "                               bounds. rows_capped=\"1\" ⇒ rows are a sample of an exact count. Rows sort by path;\n"
+        "                               composes with --max-file-size/--exclude and multi-root (rows carry the\n"
         "                               <label>/./<rel> spelling). Read-only; exit 0 always: a report, not a gate.\n\n"
         "  security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,\n"
         "                               0 = clean; exit 3 = the path could not be read at all — refused,\n"

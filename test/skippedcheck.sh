@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # skippedcheck.sh — `--skipped` itemizes the map header's skipped_oversize= count.
 #
+# SCOPE, since §L1 widened the verb: this gate owns the OVERSIZE class and the root's accounting join,
+# and nothing else. The other drop reasons (excluded / unsupported-ext) and the indexed-but-suspect
+# parse-health rows are test/skipreasoncheck.sh and test/parsehealthcheck.sh. That is why every assertion
+# below matches its row by `why="oversize"` and matches root attributes INDIVIDUALLY rather than pinning
+# the whole `<skipped …>` open tag: a sibling class landing a new counter must not red this gate, and a
+# change to the oversize rows themselves still must.
+#
 # Why this gate exists. The header discloses HOW MANY otherwise-indexable files the crawl dropped for
 # exceeding a size ceiling (skipped_oversize=N), but nothing anywhere named WHICH files — a reader could
 # know the corpus was truncated without being able to say what was absent from it. That is a disclosure
@@ -60,28 +67,28 @@ cd "$TMP"   # crawl arg `corpus` → rows spell p="corpus/..." machine-independe
 "$BIN" corpus --skipped --max-file-size=1K --no-cache > "$TMP/one.xml" 2>/dev/null
 rc=$?
 [ "$rc" -eq 0 ] && ok "(1) --skipped exits 0 (a report, not a gate)" || no "(1) --skipped exited $rc, expected 0"
-grep -q "<f p=\"corpus/big.cpp\" bytes=\"$bigBytes\" limit=\"1024\"/>" "$TMP/one.xml" \
+grep -q "<f p=\"corpus/big.cpp\" why=\"oversize\" bytes=\"$bigBytes\" limit=\"1024\"/>" "$TMP/one.xml" \
     && ok "(1) big.cpp row carries its exact bytes= and the generic limit=\"1024\"" \
     || { no "(1) big.cpp row missing or wrong (want bytes=\"$bigBytes\" limit=\"1024\")"; head -c 400 "$TMP/one.xml"; echo; }
-grep -q "<f p=\"corpus/data.json\" bytes=\"$jsonBytes\" limit=\"1024\"/>" "$TMP/one.xml" \
+grep -q "<f p=\"corpus/data.json\" why=\"oversize\" bytes=\"$jsonBytes\" limit=\"1024\"/>" "$TMP/one.xml" \
     && ok "(1) data.json over BOTH ceilings is counted once, at the generic ceiling tested first" \
     || no "(1) data.json row missing or wrong (want bytes=\"$jsonBytes\" limit=\"1024\" — generic ceiling wins)"
 grep -q 'p="corpus/small.cpp"' "$TMP/one.xml" \
     && no "(1) small.cpp is listed but was never dropped" \
     || ok "(1) the under-ceiling file is not listed"
-grep -q '<skipped oversize="2" max_file_size="1024" json_ceiling="262144">' "$TMP/one.xml" \
+grep -q 'oversize="2"' "$TMP/one.xml" && grep -q 'max_file_size="1024"' "$TMP/one.xml" && grep -q 'json_ceiling="262144"' "$TMP/one.xml" \
     && ok "(1) root reports oversize=\"2\" and both effective ceilings" \
     || { no "(1) root element wrong (want oversize=\"2\" max_file_size=\"1024\" json_ceiling=\"262144\")"; head -c 400 "$TMP/one.xml"; echo; }
 
 # ── (2) json lane: default ceiling → only data.json, at the fixed json ceiling ───────────────────────────
 "$BIN" corpus --skipped --no-cache > "$TMP/two.xml" 2>/dev/null
-grep -q "<f p=\"corpus/data.json\" bytes=\"$jsonBytes\" limit=\"262144\"/>" "$TMP/two.xml" \
+grep -q "<f p=\"corpus/data.json\" why=\"oversize\" bytes=\"$jsonBytes\" limit=\"262144\"/>" "$TMP/two.xml" \
     && ok "(2) >256KB .json is dropped by the json lane and says so (limit=\"262144\")" \
     || { no "(2) data.json row missing or wrong under the default ceiling"; head -c 400 "$TMP/two.xml"; echo; }
 grep -q 'p="corpus/big.cpp"' "$TMP/two.xml" \
     && no "(2) big.cpp listed under the default 4MB ceiling it does not exceed" \
     || ok "(2) big.cpp is not listed under the default ceiling"
-grep -q '<skipped oversize="1" ' "$TMP/two.xml" && ok "(2) root reports oversize=\"1\"" || no "(2) root does not report oversize=\"1\""
+grep -q 'oversize="1"' "$TMP/two.xml" && ok "(2) root reports oversize=\"1\"" || no "(2) root does not report oversize=\"1\""
 
 # ── (3) accounting join: verb count == map header count, and files= + oversize= = population ─────────────
 "$BIN" corpus --max-file-size=1K --no-cache > "$TMP/map.xml" 2>/dev/null
@@ -95,7 +102,7 @@ mapFiles="$(   grep -o 'files=[0-9]*'            "$TMP/map.xml" | head -1 | cut 
 # ── (4) zero means none found ────────────────────────────────────────────────────────────────────────────
 mkdir -p "$TMP/clean"; printf 'int keep( void ) { return 1; }\n' > "$TMP/clean/small.cpp"
 "$BIN" clean --skipped --no-cache > "$TMP/zero.xml" 2>/dev/null
-grep -q '<skipped oversize="0" ' "$TMP/zero.xml" && ok "(4) clean corpus reports oversize=\"0\"" || no "(4) clean corpus does not report oversize=\"0\""
+grep -q 'oversize="0"' "$TMP/zero.xml" && ok "(4) clean corpus reports oversize=\"0\"" || no "(4) clean corpus does not report oversize=\"0\""
 grep -q '<f p="' "$TMP/zero.xml" && no "(4) zero-count report still emits rows" || ok "(4) zero-count report emits no rows"
 
 # ── (5) purely additive (G5) + default header unchanged (G4) ─────────────────────────────────────────────
@@ -119,9 +126,9 @@ mkdir -p "$TMP/alpha" "$TMP/beta"
 cp "$TMP/corpus/big.cpp" "$TMP/alpha/big.cpp"
 printf 'int beta_fn( void ) { return 2; }\n' > "$TMP/beta/lib.cpp"
 "$BIN" alpha beta --skipped --max-file-size=1K --no-cache > "$TMP/multi.xml" 2>/dev/null
-grep -q "<f p=\"alpha/./big.cpp\" bytes=\"$bigBytes\" limit=\"1024\"/>" "$TMP/multi.xml" \
+grep -q "<f p=\"alpha/./big.cpp\" why=\"oversize\" bytes=\"$bigBytes\" limit=\"1024\"/>" "$TMP/multi.xml" \
     && ok "(8) multi-root row carries the labeled <label>/./<rel> spelling" \
     || { no "(8) multi-root row missing or unlabeled (want p=\"alpha/./big.cpp\")"; head -c 400 "$TMP/multi.xml"; echo; }
-grep -q '<skipped oversize="1" ' "$TMP/multi.xml" && ok "(8) multi-root count sums across roots" || no "(8) multi-root count wrong (want oversize=\"1\")"
+grep -q 'oversize="1"' "$TMP/multi.xml" && ok "(8) multi-root count sums across roots" || no "(8) multi-root count wrong (want oversize=\"1\")"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "FAILURES ABOVE"; exit 1; }
