@@ -24,6 +24,7 @@
 #include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
 #include "filter.h"             // B10.1a: isTestPath — the general test-dir convention behind isTestScriptPath
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — the degrade path when git archive/ingest fails (no-op under NDEBUG; a gate-visible degrade line needs its own fprintf)
+#include "infra/jsonesc.h"      // L2 — rw::jsonesc::escapeMcp for staleAcksJsonArray's kind= field (the same posture serialize.h's jsonStr uses)
 
 #include "btree.hpp"              // gtl btree_map — sorted like std::map, cache-friendly nodes (house rule: never std::map)
 #include "infra/dynamic_map.hpp"  // S+tree scratch maps — bounded, no per-operation allocation in hot seen-set paths
@@ -42,6 +43,7 @@
 #include <fstream>
 #include <limits>       // std::numeric_limits<std::size_t>::max() — "no count cap" sentinel (evictOldCacheFamily)
 #include <mutex>        // Phase-M: serialize concurrent ingest() (prefetch worker vs request thread)
+#include <optional>     // L2 — computeStaleAcks' per-kind dispatch: nullopt = "not stale"
 #include <sstream>
 #include <string>
 #include <type_traits>  // std::is_trivially_copyable_v — the qsnap POD put/get static_assert
@@ -2805,6 +2807,224 @@ inline std::size_t applyAckRatchet( std::vector<Regression>& regs, const gtl::bt
                                 } ),
                 regs.end() );
     return before - regs.size();
+}
+
+// ─── L2 — STALE-ACK DISCLOSURE ─────────────────────────────────────────────────────────────────────────
+//
+// `.ripwire_quality_acks` has acquisition (--quality-ack) and a worsen-past-acked-magnitude ratchet
+// (applyAckRatchet above) but no retirement surface: an ack whose target symbol was deleted, or whose
+// finding kind no longer fires on a symbol that survived, sits in the ledger forever, invisibly. A past
+// round hand-retired 109 such dead rows out of this repo's own committed acks file — a whole session of
+// manual audit for a question the tool could answer in one pass. The in-repo precedent for exactly this
+// shape is --notes: a note whose target no longer resolves is flagged dangling="1" against the LIVE
+// symbol/file set (main.cpp's --notes handler). This mirrors that pattern for acks.
+//
+// The wrinkle notes does not have: an ack's identity is a ONE-WAY HASH (`ackMapKey` = kind + hex(key)),
+// never the plain canonId, so there is no string to re-resolve — the check has to go the other direction,
+// hashing every CURRENT candidate and asking whether the acked key is still among them. `Snapshot` already
+// carries exactly the per-kind key spaces needed, computed once via computeSnapshot on the WORKING TREE
+// (never the regression baseline — staleness asks "does this still describe reality", not "would it
+// regress again relative to some floor"):
+//   complexity/verbosity/nesting/params — ccxBySym/locBySym/nestBySym/paramsBySym. locBySym is the
+//     existence oracle (computeSnapshot populates it for EVERY symbol with a canonId, the same fact
+//     computeDelta's r26 origin axis leans on); if the key survives, the matching metric's CURRENT value
+//     decides whether it still crosses that kind's bar.
+//   dead-code / api-surface — locBySym for existence, membership in the current `dead` / `publicApi` set
+//     for whether the state the finding named is still true right now.
+//   error-masking — locBySym for existence, `maskBySym[key] > 0` for whether a masking construct is still
+//     there (maskBySym only carries symbols with at least one hit — see errorMaskCountsBySym — so absence
+//     IS zero, not "unknown").
+//   duplication / new-clone-of-reused-helper — the ack key IS a member-set hash (cloneGroupHash), not a
+//     single symbol's key, so there is no one "target" to test existence of; only whether that EXACT group
+//     still clones today is checkable. Its absence is reported finding-gone, never target-gone: decomposing
+//     the hash back to its members is not possible from the ledger alone, and this project reports floors,
+//     not guesses (CLAUDE.md's honesty contract) — claiming a symbol is "gone" with no evidence for it
+//     would be exactly the kind of guess that contract forbids.
+//   short-horizon-churn — the key is pathQualifiedKey, a third space; bodyHashBySym (populated for every
+//     symbol with a real body) is its existence oracle. Whether the churn condition itself still holds
+//     needs a HISTORICAL reference this function does not have, so a churn ack whose key still resolves to
+//     a body is left alone: reporting finding-gone without evidence would be the same forbidden guess.
+// An unrecognized kind (a future addition, or a hand-edited line) is left unclassified rather than guessed
+// — same "degrade, do not fabricate" rule readAckRecords already applies to a malformed line.
+//
+// Deterministic by construction: `acks` is a gtl::btree_map, so iterating it is already (kind,key) sorted
+// — the emitted row order needs no extra sort.
+enum class StaleAckWhy : std::uint8_t
+{
+    TargetGone,   // no symbol/group this key could refer to exists at HEAD/current
+    FindingGone,  // the target still exists, but no finding of the acked kind currently fires on it
+};
+
+struct StaleAck
+{
+    std::string  kind;          // the RAW ack kind token, including any :new-symbol/:preexisting facet (P0.3)
+    std::uint64_t key = 0;
+    StaleAckWhy  why  = StaleAckWhy::TargetGone;
+};
+
+// One per-kind oracle, each returning nullopt for "not stale" — split out so the dispatcher below reads as
+// a flat kind->oracle table instead of one large branch-and-compute body (that shape was the round's own
+// first draft, at ccx=64: --quality-delta flagged it against itself, which is the gate this file's own
+// contract asks for — see the L2 header comment above for the per-kind RATIONALE these implement).
+//
+// complexity/verbosity/nesting/params share one shape: locBySym is the existence oracle, then the kind's
+// own metric map decides whether it still crosses that kind's bar.
+inline std::optional<StaleAckWhy> staleForMetricKind( std::string_view base, std::uint64_t key, const Snapshot& snap )
+{
+    if( snap.locBySym.find( key ) == snap.locBySym.end() )
+    {
+        return StaleAckWhy::TargetGone;
+    }
+    const gtl::btree_map<std::uint64_t, std::uint32_t>* m
+        = ( base == "complexity" ) ? &snap.ccxBySym
+        : ( base == "verbosity" )  ? &snap.locBySym
+        : ( base == "nesting" )    ? &snap.nestBySym
+                                    : &snap.paramsBySym;
+    const std::uint32_t bar
+        = ( base == "complexity" ) ? kCcxBar
+        : ( base == "verbosity" )  ? kLocBar
+        : ( base == "nesting" )    ? kNestBar
+                                    : kParamBar;
+    const auto           it  = m->find( key );
+    const std::uint32_t  now = ( it == m->end() ) ? 0u : it->second;
+    return ( now <= bar ) ? std::optional<StaleAckWhy>( StaleAckWhy::FindingGone ) : std::nullopt;
+}
+
+// dead-code / api-surface share one shape too: locBySym for existence, membership in the CURRENT set
+// (`dead` / `publicApi`) for whether the state the finding named is still true right now.
+inline std::optional<StaleAckWhy> staleForSetMembership( std::uint64_t key, const Snapshot& snap, const std::vector<std::uint64_t>& liveSet )
+{
+    if( snap.locBySym.find( key ) == snap.locBySym.end() )
+    {
+        return StaleAckWhy::TargetGone;
+    }
+    return std::binary_search( liveSet.begin(), liveSet.end(), key ) ? std::nullopt : std::optional<StaleAckWhy>( StaleAckWhy::FindingGone );
+}
+
+inline std::optional<StaleAckWhy> staleForErrorMasking( std::uint64_t key, const Snapshot& snap )
+{
+    if( snap.locBySym.find( key ) == snap.locBySym.end() )
+    {
+        return StaleAckWhy::TargetGone;
+    }
+    const auto it = snap.maskBySym.find( key );   // absent or zero — maskBySym only carries symbols with >=1 hit
+    return ( it == snap.maskBySym.end() || it->second == 0 ) ? std::optional<StaleAckWhy>( StaleAckWhy::FindingGone ) : std::nullopt;
+}
+
+// duplication / new-clone-of-reused-helper: the key IS a member-set hash, not one symbol's key, so a miss
+// here is always finding-gone — never target-gone (decomposing the hash back to its members is not
+// possible from the ledger alone; see the L2 header comment for why that is the honest classification).
+inline std::optional<StaleAckWhy> staleForCloneKind( std::uint64_t key, const Snapshot& snap )
+{
+    return std::binary_search( snap.cloneGroups.begin(), snap.cloneGroups.end(), key ) ? std::nullopt : std::optional<StaleAckWhy>( StaleAckWhy::FindingGone );
+}
+
+// short-horizon-churn: bodyHashBySym (pathQualifiedKey-keyed) is its existence oracle; whether the churn
+// condition itself still holds needs a historical reference this function does not have, so a surviving
+// key is left alone rather than guessed finding-gone (see the L2 header comment).
+inline std::optional<StaleAckWhy> staleForChurn( std::uint64_t key, const Snapshot& snap )
+{
+    return ( snap.bodyHashBySym.find( key ) == snap.bodyHashBySym.end() ) ? std::optional<StaleAckWhy>( StaleAckWhy::TargetGone ) : std::nullopt;
+}
+
+inline std::vector<StaleAck> computeStaleAcks( const gtl::btree_map<std::string, AckRecord>& acks, const Snapshot& snap )
+{
+    std::vector<StaleAck> out;
+    for( const auto& [ mapKey, rec ] : acks )
+    {
+        (void) mapKey; // the (kind,key) it was derived from — rec already carries both fields
+        // The ':new-symbol' / ':preexisting' suffix (see ackKindToken) is an ORIGIN facet on a
+        // zero-magnitude finding, not a different finding kind — strip it before dispatching so
+        // "dead-code:preexisting" and "dead-code:new-symbol" both resolve to the one dead-code oracle.
+        const std::size_t      colon = rec.kind.find( ':' );
+        const std::string_view base  = ( colon == std::string::npos ) ? std::string_view( rec.kind )
+                                                                       : std::string_view( rec.kind ).substr( 0, colon );
+
+        std::optional<StaleAckWhy> why;
+        if( base == "complexity" || base == "verbosity" || base == "nesting" || base == "params" )
+        {
+            why = staleForMetricKind( base, rec.key, snap );
+        }
+        else if( base == "dead-code" )
+        {
+            why = staleForSetMembership( rec.key, snap, snap.dead );
+        }
+        else if( base == "api-surface" )
+        {
+            why = staleForSetMembership( rec.key, snap, snap.publicApi );
+        }
+        else if( base == "error-masking" )
+        {
+            why = staleForErrorMasking( rec.key, snap );
+        }
+        else if( base == "duplication" || base == "new-clone-of-reused-helper" )
+        {
+            why = staleForCloneKind( rec.key, snap );
+        }
+        else if( base == "short-horizon-churn" )
+        {
+            why = staleForChurn( rec.key, snap );
+        }
+        // an unrecognized kind (a future addition, or a hand-edited line) is left unclassified rather than
+        // guessed — same "degrade, do not fabricate" rule readAckRecords already applies to a malformed line.
+        if( why.has_value() )
+        {
+            out.push_back( { rec.kind, rec.key, *why } );
+        }
+    }
+    return out;
+}
+
+// The XML `<sa kind= key= why=/>` rows and their JSON `"sa":[...]` sibling, extracted here so neither
+// caller repeats the loop: main.cpp's runQualityDelta (already well over budget before this feature) would
+// otherwise carry the branch twice (XML and JSON), and mcpverbs.h's qualityDeltaJson is a THIRD site that
+// needs the identical JSON shape (test/mcpclidiffcheck.sh LENS2 pins the CLI and MCP surfaces to the same
+// key set). XML's kind is never escaped, matching the existing `<r kind=…>` regression rows (main.cpp
+// prints those unescaped too) — both are drawn from the closed kind vocabulary, so a hand-edited ack file
+// can only make it a different plain token, never markup. JSON's kind IS escaped (rw::jsonesc::escapeMcp,
+// the same posture serialize.h's jsonStr already uses for --json): unlike an XML attribute, one stray `"`
+// in a hand-edited ack line would otherwise emit syntactically invalid JSON, not just an ugly value.
+inline std::string staleAcksXml( const std::vector<StaleAck>& staleAcks )
+{
+    std::string out;
+    for( const StaleAck& sa : staleAcks )
+    {
+        char hex[ 20 ];
+        std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( sa.key ) );
+        out += "<sa kind=\"";
+        out += sa.kind;
+        out += "\" key=\"";
+        out += hex;
+        out += "\" why=\"";
+        out += ( sa.why == StaleAckWhy::TargetGone ? "target-gone" : "finding-gone" );
+        out += "\"/>";
+    }
+    return out;
+}
+
+inline std::string staleAcksJsonArray( const std::vector<StaleAck>& staleAcks )   // returns `"sa":[...]`, ready to splice in
+{
+    std::string out = "\"sa\":[";
+    bool        first = true;
+    for( const StaleAck& sa : staleAcks )
+    {
+        if( !first )
+        {
+            out += ",";
+        }
+        first = false;
+        char hex[ 20 ];
+        std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( sa.key ) );
+        out += "{\"kind\":\"";
+        out += rw::jsonesc::escapeMcp( sa.kind );
+        out += "\",\"key\":\"";
+        out += hex;
+        out += "\",\"why\":\"";
+        out += ( sa.why == StaleAckWhy::TargetGone ? "target-gone" : "finding-gone" );
+        out += "\"}";
+    }
+    out += "]";
+    return out;
 }
 
 // current state vs baseline → only what got worse.
