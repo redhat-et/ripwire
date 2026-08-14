@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor) · [`--skipped`](#skipped)
 
@@ -1600,7 +1600,7 @@ $ ./build/ripwire . --arch=test/archfix/rules.txt
 
 **Answers:** built-in AST checks (c-cast, goto, unsafe-c-fn, naming-*, cache-* data-layout, ...).
 
-naming-uninformative is ONE-SIDED by design: it fires only when a name's subtokens are ALL corpus-common (BM25 idf over the identifier-name corpus) AND its body clears a size floor — a high-idf (distinctive) name is never penalised, unlike the withdrawn name<->body rule
+naming-uninformative is ONE-SIDED by design: it fires only when a name's subtokens are ALL corpus-common (BM25 idf over the identifier-name corpus) AND its body clears a size floor — a high-idf (distinctive) name is never penalised, unlike the withdrawn name<->body rule. Each <rule> row's applicability is per-LANGUAGE, not per-file-content: a rule whose registered languages (see --lint-catalog) intersect NONE of the corpus' languages carries applicable="0" (its count="0" is then structural inertness, not a measurement), and the root tallies inert_rules="N"; see --lint-catalog for the full registry
 
 **Try it**
 
@@ -1625,15 +1625,26 @@ $ ./build/ripwire . --lint
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--affected`, `--expand`, `--naming-calibration`, `--naming-locals`, `--lint-rules`, `--sarif`, `--with-profile`, `--json`
+**Shaped by:** `--affected`, `--expand`, `--naming-calibration`, `--naming-locals`, `--lint-catalog`, `--lint-rules`, `--sarif`, `--with-profile`
 
 **Caveats (stated by the binary):**
 
-- naming-uninformative is ONE-SIDED by design: it fires only when a name's subtokens are ALL corpus-common (BM25 idf over the identifier-name corpus) AND its body clears a size floor — a high-idf (distinctive) name is never penalised, unlike the withdrawn name<->body rule
+- naming-uninformative is ONE-SIDED by design: it fires only when a name's subtokens are ALL corpus-common (BM25 idf over the identifier-name corpus) AND its body clears a size floor — a high-idf (distinctive) name is never penalised, unlike the withdrawn name<->body rule.
+- Each <rule> row's applicability is per-LANGUAGE, not per-file-content: a rule whose registered languages (see --lint-catalog) intersect NONE of the corpus' languages carries applicable="0" (its count="0" is then structural inertness, not a measurement), and the root tallies inert_rules="N";
+
+### `--lint-catalog`
+
+**Answers:** the built-in rule registry: one row per rule with sev=/category=/rationale/lang=/since= — no corpus needed.
+
+Every built-in rule from every pack (base checks, atoms-*, cache-*, naming-*, the symbol-level checks) has exactly one row; lang= is the SAME token spelling --lint-rules' language: field accepts, so it round-trips into a user rule
+
+**Shaped by:** `--lint`
 
 ### `--lint-rules=DIR`
 
-**Answers:** load user lint rules (YAML, ast-grep style) from DIR — runs with, or instead of, --lint
+**Answers:** load user lint rules (YAML, ast-grep style) from DIR — runs with, or instead of, --lint --lint-select=PREFIX[,...] (with --lint / --lint-rules) run ONLY rules whose name starts with one of these PREFIXes (or '*' for all) — comma-separated, e.g.
+
+cache- selects the whole cache-* family. The root then carries selected="K of N" plus the raw select=/ignore= you passed, so a filtered zero is never confusable with an unfiltered one. An unresolvable PREFIX (matches no rule) refuses (exit 1), naming the nearest rule/family by edit distance --lint-ignore=PREFIX[,...] (with --lint / --lint-rules) DROP rules whose name starts with one of these PREFIXes (or '*' to drop everything, e.g. paired with --lint-select elsewhere to isolate one family) — applied AFTER --lint-select narrows the set; same unresolvable-PREFIX refusal and root disclosure as --lint-select
 
 **Try it**
 
@@ -1653,7 +1664,12 @@ $ ./build/ripwire . --lint-rules=test/lintrulesfix/rules
 </lint>
 ```
 
-**Shaped by:** `--sarif`
+**Shaped by:** `--lint-catalog`, `--sarif`
+
+**Caveats (stated by the binary):**
+
+- The root then carries selected="K of N" plus the raw select=/ignore= you passed, so a filtered zero is never confusable with an unfiltered one.
+- An unresolvable PREFIX (matches no rule) refuses (exit 1), naming the nearest rule/family by edit distance --lint-ignore=PREFIX[,...] (with --lint / --lint-rules) DROP rules whose name starts with one of these PREFIXes (or '*' to drop everything, e.g.
 
 ### `--sarif`
 
