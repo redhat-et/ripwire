@@ -7,9 +7,13 @@
 #       carrying C; --grep-scope=file widens "same line" to "same file, any line"
 #   (2) refusals: --and=/--not=/--grep-scope= alone (no --grep), combined with --regex=, and an empty
 #       --and=/--not= value, all refuse at exit 1 naming the flag
-#   (3) ORACLE: the AND result equals a POST-FILTER of the un-AND-ed scan (same oracle SHAPE as
-#       test/grepscancheck.sh's --no-prefilter check) — computed independently of search.h's own
-#       grepApplyBooleanTerms, so the gate cannot be biased by the code it is checking
+#   (3) ORACLE: truth comes from /usr/bin/grep (a DIFFERENT program, called by absolute path so a shell
+#       function or $PATH shim cannot make it the tool under test), over the same fixture bytes — the
+#       previous oracle filtered ripwire's own <m> CDATA, which is produced by the same 512-byte-capped
+#       helper the boolean filter was misusing, so oracle and subject shared the defect and the arm passed
+#       green while --and= dropped hits and --not= kept excluded ones. Includes a fixture line whose second
+#       term sits past byte 512 in BOTH directions (required → must survive; forbidden → must be excluded),
+#       the --and=X-over---grep=X identity, and a byte-identical repeat that exercises the collapse fold
 #   (4) terms=/scope=/terms_suppressed= are disclosed on the root, and the legend defines them in-band
 #   (5) determinism: an AND/NOT run is byte-identical across two invocations
 #   (6) [KILL CONDITION] 6 frozen (pattern,and-term) pairs, each with a known GOLD line: the gold line
@@ -34,8 +38,15 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "grepandcheck: BIN=$BIN"
 
-# G1: extract "path|line|in" rows in document order from a grouped (<f p=…><hit l=…>) grep answer, past
-# the legend comment (whose own prose could false-match a naive tag regex).
+# G1: extract "path:line" rows in document order from a grouped (<f p=…><hit l=…>) grep answer, past the
+# legend comment (whose own prose could false-match a naive tag regex).
+#
+# BOTH row markers, and this is load-bearing (fix-grep lane, 2026-08-15): on the unpaginated default view
+# byte-identical match text within one file FOLDS into one <hit l=…> plus an at-tagged sibling per extra
+# site. Counting <hit> alone therefore UNDER-counts by exactly the number of folded sites — invisible while
+# every fixture line was unique, and silently wrong the moment a real corpus (or the repeat fixture added
+# below) has two identical lines. The at= sites are answer rows, not decoration; sum(n=) == shown= is the
+# emitter's own contract, so a row extractor that skips them is not reading the answer.
 rowid(){
     python3 -c '
 import re, sys
@@ -45,7 +56,7 @@ for tag in re.findall( r"<[^>]+>", xml ):
     m = re.match( r"<f p=\"([^\"]*)\"", tag )
     if m:
         cur = m.group( 1 ); continue
-    m = re.match( r"<hit l=\"([0-9]+)\"", tag )
+    m = re.match( r"<(?:hit|at) l=\"([0-9]+)\"", tag )
     if m and cur is not None:
         print( cur + ":" + m.group( 1 ) )
 '
@@ -126,30 +137,109 @@ refuse "empty --not="                        --grep=ANDTOKEN_A --not=
 refuse "unknown --grep-scope= value"         --grep=ANDTOKEN_A --grep-scope=bogus
 
 # ═══════════════════════════════════════════════════════════════════════════
-echo "=== (3) ORACLE: AND result == post-filter of the un-AND-ed scan ==="
+echo "=== (3) ORACLE: /usr/bin/grep is the truth, not ripwire's own output ==="
 # ═══════════════════════════════════════════════════════════════════════════
-# Independent of search.h's grepApplyBooleanTerms: run the PLAIN scan, pull each hit's own matched-line
-# text out of the XML (<m> CDATA), keep only the ones ALSO containing the and-term, and compare that row
-# set to the --and= answer's row set.
-PLAIN_XML="$( run --limit=1000 )"
-python3 - "$PLAIN_XML" >"$TMP/oracle.rows" <<'PY'
-import re, sys
-xml = sys.argv[1].split("-->", 1)[-1]
-cur = None
-for fm in re.finditer(r'<f p="([^"]*)">(.*?)</f>', xml, re.S):
-    path = fm.group(1)
-    for hm in re.finditer(r'<hit l="(\d+)"[^>]*>(.*?)</hit>', fm.group(2), re.S):
-        line = hm.group(1)
-        text = "".join(re.findall(r'<m><!\[CDATA\[(.*?)\]\]></m>', hm.group(2), re.S))
-        if "ANDTOKEN_B" in text:
-            print(f"{path}:{line}")
+# WHY THIS ARM WAS REWRITTEN (fix-grep lane, 2026-08-15). The previous oracle re-derived truth from
+# ripwire's OWN <m> CDATA — the same binary, and worse, the same 512-byte-capped display helper
+# (grepMatchedLine) that the boolean filter was wrongly using. Oracle and subject shared the defect, so the
+# arm was CIRCULAR: it passed green while --and= was dropping real hits and --not= was RETAINING rows it had
+# been asked to exclude. An oracle that can only agree is not an oracle.
+#
+# The replacement derives truth from /usr/bin/grep — a different program, reading the fixture bytes off
+# disk, with no 512-byte anything. Called by ABSOLUTE PATH on purpose: `grep` on a bare name is one
+# `export -f grep` or one $PATH shim away from being the very tool under test, which would quietly restore
+# the circularity this arm exists to remove.
+#
+# Semantics mirrored exactly: literal/fixed-string terms (-F, matching grepTextSatisfiesTerms' substring
+# rule and the CLI's regex refusal), LINE scope = every required term present on the SAME line and every
+# forbidden term absent from it.
+GREP=/usr/bin/grep
+[ -x "$GREP" ] || { echo "no $GREP — this gate needs the system grep as its independent oracle"; exit 2; }
+
+# oracle_rows <sandbox> <relpath> <base-pattern> <mode: and|not> <second-term>  -> "relpath:line" per row
+oracle_rows(){
+    local sb="$1" rel="$2" pat="$3" mode="$4" term="$5"
+    # -n gives "LINE:text"; the second pass filters that text on the extra term (keep for and, drop for not).
+    if [ "$mode" = and ]; then
+        "$GREP" -F -n -- "$pat" "$sb/$rel" | "$GREP" -F -- "$term"
+    else
+        "$GREP" -F -n -- "$pat" "$sb/$rel" | "$GREP" -F -v -- "$term"
+    fi | sed "s|^\([0-9][0-9]*\):.*|$rel:\1|"
+}
+
+# ── The fixture the old oracle could never have caught anything on ────────────────────────────────────
+# Two lines whose SECOND term sits far past byte 512, one for each direction of the bug:
+#   wideAndGold  — required term at ~col 640: the pre-fix binary DROPPED this row (--and= lost a real hit)
+#   wideNotVictim— forbidden term at ~col 640: the pre-fix binary KEPT this row (--not= failed to exclude)
+# Plus three BYTE-IDENTICAL repeat lines, so the collapse fold (one <hit n="3"> + two at-tagged siblings) is
+# actually exercised — the old rowid counted <hit> only and would have scored these three rows as one.
+WSB="$TMP/widesandbox"
+mkdir -p "$WSB/src"
+python3 - "$WSB/src/wide.cpp" <<'PY'
+import sys
+pad = "x" * 600                       # pushes the trailing token to ~col 640, well past the 512-byte display cap
+lines = [
+    "void wideAndGold()   { WIDE_A(); /* %s */ WIDE_B(); }" % pad,   # required term past 512
+    "void wideNotVictim() { WIDE_A(); /* %s */ WIDE_C(); }" % pad,   # forbidden term past 512
+    "void nearAndGold()   { WIDE_A(); WIDE_B(); }",                  # both terms inside 512 (control)
+    "void plainA()        { WIDE_A(); }",                            # base only
+    "void nearNotVictim() { WIDE_A(); WIDE_C(); }",                  # forbidden term inside 512 (control)
+    "void deepOnly()      { /* %s */ WIDE_A(); }" % pad,             # the BASE pattern itself only past 512 — makes (3c) a detector
+    "  WIDE_A(); WIDE_B(); /* identical repeat */",                  # three BYTE-IDENTICAL lines: the fold
+    "  WIDE_A(); WIDE_B(); /* identical repeat */",
+    "  WIDE_A(); WIDE_B(); /* identical repeat */",
+]
+open( sys.argv[1], "w", encoding="utf-8" ).write( "\n".join( lines ) + "\n" )
 PY
-sort "$TMP/oracle.rows" >"$TMP/oracle.sorted"
-run --and=ANDTOKEN_B --limit=1000 | rowid | sort >"$TMP/actual.sorted"
-if diff -q "$TMP/oracle.sorted" "$TMP/actual.sorted" >/dev/null; then
-    ok "(3) AND result == independent post-filter of the un-AND-ed scan ($( wc -l <"$TMP/actual.sorted" | tr -d ' ' ) row(s))"
+
+# Deliberately NO --limit: the collapse fold runs only on the UNPAGINATED default view (main.cpp's
+# collapseOn), so passing any limit= here would silently switch off the very fold arm (3d) exists to
+# exercise — and the 8-line fixture is far inside the default row cap anyway.
+wrun(){ "$BIN" "$WSB" --no-cache --grep=WIDE_A "$@" 2>/dev/null; }
+
+# (3a) AND, with a required term past byte 512 — RED against the pre-fix binary (it drops wideAndGold).
+oracle_rows "$WSB" src/wide.cpp WIDE_A and WIDE_B | sort >"$TMP/o.and"
+wrun --and=WIDE_B | rowid | sort >"$TMP/a.and"
+if diff -q "$TMP/o.and" "$TMP/a.and" >/dev/null; then
+    ok "(3a) AND == /usr/bin/grep oracle incl. a required term past byte 512 ($( wc -l <"$TMP/a.and" | tr -d ' ' ) row(s))"
 else
-    no "(3) AND result != post-filter oracle"; diff "$TMP/oracle.sorted" "$TMP/actual.sorted" | head -6
+    no "(3a) AND != /usr/bin/grep oracle (a term past byte 512 is being missed)"
+    diff "$TMP/o.and" "$TMP/a.and" | head -8
+fi
+
+# (3b) NOT, with a forbidden term past byte 512 — RED against the pre-fix binary (it RETAINS wideNotVictim).
+oracle_rows "$WSB" src/wide.cpp WIDE_A not WIDE_C | sort >"$TMP/o.not"
+wrun --not=WIDE_C | rowid | sort >"$TMP/a.not"
+if diff -q "$TMP/o.not" "$TMP/a.not" >/dev/null; then
+    ok "(3b) NOT == /usr/bin/grep oracle incl. a forbidden term past byte 512 ($( wc -l <"$TMP/a.not" | tr -d ' ' ) row(s))"
+else
+    no "(3b) NOT != /usr/bin/grep oracle (a term past byte 512 is not excluding its row)"
+    diff "$TMP/o.not" "$TMP/a.not" | head -8
+fi
+
+# (3c) The IDENTITY the G3 header claims by construction: --and=X over --grep=X keeps every row. Stated as
+# its own arm because it needs no oracle at all and is the cheapest possible statement of the same bug.
+ID_PLAIN="$( wrun | rowid | sort )"
+ID_SELF="$(  wrun --and=WIDE_A | rowid | sort )"
+[ "$ID_PLAIN" = "$ID_SELF" ] \
+    && ok "(3c) identity: --and=X over --grep=X is row-for-row the plain scan ($( printf '%s\n' "$ID_PLAIN" | wc -l | tr -d ' ' ) row(s))" \
+    || { no "(3c) identity BROKEN: --and=X over --grep=X changed the row set"; diff <( printf '%s\n' "$ID_PLAIN" ) <( printf '%s\n' "$ID_SELF" ) | head -8; }
+
+# (3d) the fold is actually exercised — otherwise (3a)-(3c) would pass with a row extractor that ignores
+# at-tagged sites, which is exactly the collapse-blindness this rewrite closes.
+# (the legend is split off first: its own prose discusses n= and would false-match a bare tag scan)
+FOLD_N="$( wrun --and=WIDE_B | sed 's|^.*-->||' | "$GREP" -o ' n="[0-9]*"' | head -1 | tr -d ' ' )"
+[ "$FOLD_N" = 'n="3"' ] \
+    && ok "(3d) collapse exercised: the 3 byte-identical repeat lines fold into one row with $FOLD_N" \
+    || no "(3d) collapse NOT exercised (expected n=\"3\" on the folded row, got '${FOLD_N:-none}') — the row extractor is not being tested"
+
+# (3e) the original mix.cpp sandbox, same independent oracle (regression cover for the small-line case).
+oracle_rows "$SB" src/mix.cpp ANDTOKEN_A and ANDTOKEN_B | sort >"$TMP/o.mix"
+run --and=ANDTOKEN_B --limit=1000 | rowid | sort >"$TMP/a.mix"
+if diff -q "$TMP/o.mix" "$TMP/a.mix" >/dev/null; then
+    ok "(3e) AND == /usr/bin/grep oracle on the short-line sandbox ($( wc -l <"$TMP/a.mix" | tr -d ' ' ) row(s))"
+else
+    no "(3e) AND != /usr/bin/grep oracle on the short-line sandbox"; diff "$TMP/o.mix" "$TMP/a.mix" | head -6
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════

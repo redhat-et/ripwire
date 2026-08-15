@@ -10386,16 +10386,27 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "root= on the root element is the crawl root every <f p=…> is now RELATIVE to (single-root runs only; absent ⇒ p= is the "
                  "path ingest itself used, unchanged). ORDER: SOURCE files before test/bench files before docs, then path and line. "
                  "shown=/capped= = rows printed vs found (a count of underlying HITS, the same unit hits= uses, not of printed <hit> "
-                 "elements); hits_capped=\"1\" ⇒ hits= is a FLOOR (collection budget reached). "
-                 // G3 (2026-08-15 harvest): terms=/scope=/terms_suppressed= appear ONLY when the run passed
-                 // and/not — deliberately no literal "--and"/"--not" substring (illegal "--" digraph inside
-                 // an XML comment; spelled without the leading dashes, matching this legend's own convention).
-                 "terms= (present only with and/not) restates the whole boolean query as it was EVALUATED: the base pattern, then "
-                 "each and term prefixed +, each not term prefixed -. scope=line (default) requires every term on the SAME matched "
-                 "line as the base pattern; scope=file requires every term ANYWHERE in the file, independent of which line matched. "
-                 "terms_suppressed= counts the raw hits the boolean filter REJECTED — a different axis from hits_capped= (a collection-"
-                 "budget ceiling): hits=/shown=/etc. already read the FILTERED count, so terms_suppressed= exists only so a reader can "
-                 "recover how many the un-filtered scan would have shown. "
+                 "elements); hits_capped=\"1\" ⇒ hits= is a FLOOR (collection budget reached). " );
+    // G3 (2026-08-15 harvest): terms=/scope=/terms_suppressed= appear ONLY when the run passed and/not —
+    // deliberately no literal "--and"/"--not" substring (illegal "--" digraph inside an XML comment; spelled
+    // without the leading dashes, matching this legend's own convention) — and so does the PROSE defining
+    // them. It is ~630 B that used to ride on EVERY answer, including the overwhelming majority that can
+    // never emit those three attributes: a zero-hit answer paid 631 of its bytes defining what was not
+    // there. Legend text is the one part of a grep answer that does NOT amortize over hits, so on small
+    // answers it IS the answer. legendcoveragecheck is unharmed by construction — it asks whether every
+    // attribute the answer EMITS is defined where the reader meets it, and a clause gated on exactly its
+    // attributes' own condition is present precisely when it can be needed. Gates: grepbytescheck's
+    // uncapped small-hit arm; grepandcheck (4d)/(4e) still assert the prose IS there on an and/not run.
+    if( !grepTerms.empty() )
+    {
+        std::printf( "terms= (present only with and/not) restates the whole boolean query as it was EVALUATED: the base pattern, then "
+                     "each and term prefixed +, each not term prefixed -. scope=line (default) requires every term on the SAME matched "
+                     "line as the base pattern; scope=file requires every term ANYWHERE in the file, independent of which line matched. "
+                     "terms_suppressed= counts the raw hits the boolean filter REJECTED — a different axis from hits_capped= (a collection-"
+                     "budget ceiling): hits=/shown=/etc. already read the FILTERED count, so terms_suppressed= exists only so a reader can "
+                     "recover how many the un-filtered scan would have shown. " );
+    }
+    std::printf(
                  // G1 (2026-08-15 harvest): byte-identical match text within one file's hits on the UNPAGINATED default view folds into
                  // ONE <hit> row plus <at l=… in=…/> children for the extra sites — n= on the <hit> (present only when >1) is 1+the <at>
                  // count, so summing n= across a page's <hit> rows recovers shown=. Paging or --grep-context/-before/-after disables the

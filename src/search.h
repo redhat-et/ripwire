@@ -958,6 +958,38 @@ inline std::string grepMatchedLine( const std::string& s, const std::vector<std:
     return text;
 }
 
+// The WHOLE matched line, uncapped, as a zero-copy view into `s` — the ANSWER-BEARING twin of
+// grepMatchedLine above, which is a DISPLAY helper and truncates at kGrepMatchedLineMaxBytes. The two must
+// never be confused: the boolean --and=/--not= filter (G3) evaluated its terms against the display string
+// and so read only the first 512 bytes of every line, which broke it in both directions — a required term
+// past byte 512 dropped a hit that a pure identity (--grep=X --and=X) must keep, and a forbidden term past
+// byte 512 went unseen so --not RETAINED the row it was asked to exclude. No UTF-8 back-off here on
+// purpose: term matching is a BYTE substring search (grepTextSatisfiesTerms), and trimming a trailing
+// partial codepoint could only ever cut a byte a term might need. Empty view when the line is out of range
+// (degrade, never OOB) — an empty line satisfies no required term, which is the safe verdict.
+inline std::string_view grepWholeLine( const std::string& s, const std::vector<std::size_t>& lineStarts, std::uint32_t line ) noexcept
+{
+    const std::uint32_t lineCount = grepRealLineCount( s, lineStarts );
+    if( line < 1 || line > lineCount )
+    {
+        return {};
+    }
+    // Same slicing rule as grepLineRangeText: exclude the line's own trailing '\n', and on the last real
+    // line stop before the file's trailing '\n' if it has one.
+    const std::size_t byteStart = lineStarts[ line - 1 ];
+    std::size_t       byteEnd   = ( line < lineCount ) ? ( lineStarts[ line ] - 1 )
+                                : ( !s.empty() && s.back() == '\n' ) ? s.size() - 1 : s.size();
+    if( byteEnd > s.size() )
+    {
+        byteEnd = s.size();   // defensive (shouldn't happen: lineStarts derived from s)
+    }
+    if( byteEnd < byteStart )
+    {
+        return {};            // defensive: an inverted range yields nothing, never a negative length
+    }
+    return std::string_view( s ).substr( byteStart, byteEnd - byteStart );
+}
+
 // One un-enriched match WITHIN a file: 1-based line + the byte offset the match starts at. This is all a
 // scanning worker produces (8 B, POD) — the owning file is the slot index, and the strings (enclosing
 // chain, matched line, context) are built later, only for the matches that survive the budget, so a common
@@ -1731,9 +1763,11 @@ inline bool grepTextSatisfiesTerms( std::string_view text, std::span<const GrepT
 }
 
 // Filters `collected.raw` order-preserving (already tier-then-path sorted — filtering never reorders).
-// LINE scope re-reads each candidate hit's own line (grepMatchedLine, the same helper grepEnrich uses);
-// FILE scope reads each candidate file ONCE and keeps/drops its whole hit run against the WHOLE file
-// text. `suppressedOut` receives the count of raw hits the filter removed — disclosed as suppressed= on
+// LINE scope re-reads each candidate hit's own WHOLE line (grepWholeLine — NOT grepMatchedLine, which is
+// the 512-byte-capped display helper: see its comment for the two-directional bug that caused); FILE scope
+// reads each candidate file ONCE and keeps/drops its whole hit run against the WHOLE file text. Both scopes
+// therefore evaluate terms against uncapped text, which is what makes `--grep=X --and=X` the identity the
+// G3 header claims it is. `suppressedOut` receives the count of raw hits the filter removed — disclosed as suppressed= on
 // the root, a DIFFERENT honesty axis from hits_capped= (a budget ceiling, not a term rejection).
 inline GrepCollection grepApplyBooleanTerms( const IngestResult& ing, GrepCollection collected,
                                              std::span<const GrepTerm> terms, GrepScope scope,
@@ -1783,7 +1817,7 @@ inline GrepCollection grepApplyBooleanTerms( const IngestResult& ing, GrepCollec
         ensureFileLoaded( r.fileId );
         const bool keep = ( scope == GrepScope::File )
                          ? fileOk
-                         : grepTextSatisfiesTerms( grepMatchedLine( fileText, lineStarts, r.line ), terms );
+                         : grepTextSatisfiesTerms( grepWholeLine( fileText, lineStarts, r.line ), terms );
         if( keep )
         {
             kept.push_back( r );
