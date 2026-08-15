@@ -2402,7 +2402,7 @@ struct ForLensHeaderParts
 inline constexpr std::string_view kForAutoBundleLegend =
     "; bundle=auto: the top-ranked FULL bodies ride inline after the signatures in a bodies section "
     "(bodies=N on this root counts them; bodies=0 reason=budget when none fit the remaining budget "
-    "whole; the signatures-only flag opts out) — read them here instead of opening the files. The "
+    "whole; the signatures-only flag (no-bodies mode) opts out) — read them here instead of opening the files. The "
     "bodies element discloses the house way: total=requested, shown=printed, capped=1 when they "
     "differ; each body's calls child lists its callee signatures, total= always, shown=/capped= only "
     "when that list is cut";
@@ -5725,6 +5725,20 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         const char*       tag = wantCallers ? "callers" : "callees";
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+
+        // Count bodyless definitions (declarations with no body): sigEndByte == endByte means no body
+        std::size_t bodylessDefsCount = 0;
+        if( !wantCallers )  // Only relevant for callees; callers don't have this concern
+        {
+            for( NodeId x : matches )
+            {
+                const Symbol& sym = ing.symbols[x];
+                if( sym.sigEndByte == sym.endByte )
+                {
+                    ++bodylessDefsCount;
+                }
+            }
+        }
         // T2 + §P8 G1: paginate the sorted result. count= stays the un-windowed total (V3 L-4: "TRUE" is the
         // word this comment used, and it contradicts the counts_floor= marker the emitter ten lines below now
         // prints — the total is true of the PAGE, never of the world); the disclosure appears only
@@ -5758,6 +5772,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             // {callers, callees, uses, impact} and this is the last shared site of the first two.
             const std::string attr = "of=\"" + ex( sym ) + "\" defs=\"" + std::to_string( matches.size() )
                                    + "\" count=\"" + std::to_string( result.size() ) + "\""
+                                   + ( !wantCallers && bodylessDefsCount > 0 ? " bodyless_defs=\"" + std::to_string( bodylessDefsCount ) + "\"" : "" )
                                    + pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                                      cfg.pageLimit, cfg.pageOffset, false )
                                    + rw::kGraphCountFloorAttrXml;   // §H4 §3.4 — every dialect carries the marker
@@ -5771,9 +5786,13 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // for the same reason: these two verbs have no display cap of their own, so un-paged discloses nothing).
         if( cfg.json )
         {
-            std::printf( "{\"of\":\"%s\",\"defs\":%zu,\"count\":%zu%s%s", jsonStr( sym ).c_str(), matches.size(), result.size(),
-                         pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
-                                         cfg.pageLimit, cfg.pageOffset, false, kJsonPageSyntax ),
+            std::printf( "{\"of\":\"%s\",\"defs\":%zu,\"count\":%zu", jsonStr( sym ).c_str(), matches.size(), result.size() );
+            if( !wantCallers && bodylessDefsCount > 0 )
+            {
+                std::printf( ",\"bodyless_defs\":%zu", bodylessDefsCount );
+            }
+            std::printf( "%s%s", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
+                                        cfg.pageLimit, cfg.pageOffset, false, kJsonPageSyntax ),
                          rw::kGraphCountFloorAttrJson );   // §H4 §3.4 — the JSON dialect's spelling of the same marker
             std::printf( ",\"%s\":[", tag );
             printJsonSymbolRows( ing, result, pw.begin, pw.end );
@@ -5783,9 +5802,13 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
 
         // §P10.6: defs= = resolved definitions this name matched (matches.size()) — the rows below UNION the
         // neighbors of every def, which --uses/--impact already disclose and these two verbs silently hid.
-        std::printf( "<%s of=\"%s\" defs=\"%zu\" count=\"%zu\"%s%s>", tag, ex( sym ).c_str(), matches.size(), result.size(),
-                     pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
-                                     cfg.pageLimit, cfg.pageOffset, false ),
+        std::printf( "<%s of=\"%s\" defs=\"%zu\" count=\"%zu\"", tag, ex( sym ).c_str(), matches.size(), result.size() );
+        if( !wantCallers && bodylessDefsCount > 0 )
+        {
+            std::printf( " bodyless_defs=\"%zu\"", bodylessDefsCount );
+        }
+        std::printf( "%s%s>", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
+                                    cfg.pageLimit, cfg.pageOffset, false ),
                      rw::kGraphCountFloorAttrXml );
         for( std::size_t i = pw.begin; i < pw.end; ++i )
         {
@@ -13286,7 +13309,18 @@ int main( int argc, char** argv )
             std::error_code rootEc;
             if( !fs::exists( fs::path( resolvedRoot ), rootEc ) || rootEc )
             {
-                std::fprintf( stderr, "ripwire: root path does not exist: %s\n", resolvedRoot.c_str() );
+                // If the path looks like a flag (contains '='), suggest the flag spelling
+                if( resolvedRoot.find( '=' ) != std::string::npos )
+                {
+                    const auto eqPos = resolvedRoot.find( '=' );
+                    const std::string flagName = resolvedRoot.substr( 0, eqPos );
+                    std::fprintf( stderr, "ripwire: root path does not exist: %s\n", resolvedRoot.c_str() );
+                    std::fprintf( stderr, "ripwire: did you mean --%s=%s ?\n", flagName.c_str(), resolvedRoot.substr( eqPos + 1 ).c_str() );
+                }
+                else
+                {
+                    std::fprintf( stderr, "ripwire: root path does not exist: %s\n", resolvedRoot.c_str() );
+                }
                 return 1;
             }
         }
