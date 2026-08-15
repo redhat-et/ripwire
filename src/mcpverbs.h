@@ -662,6 +662,10 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
                                       page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax )
                     + ",\"hits_capped\":" + ( collected.isBudgetReached ? "true" : "false" )
                     + ( scanExhaustive && windowWhole ? ",\"complete\":true" : "" )
+                    // G4 (2026-08-15 harvest, report-ugrep §F6): the CLI's corpus_excluded=/corpus_oversize=
+                    // twins — present only when non-zero, same condition as the CLI emitter.
+                    + ( ing.crawlSkips.excludedFiles > 0 ? ( ",\"corpus_excluded\":" + std::to_string( ing.crawlSkips.excludedFiles ) ) : std::string() )
+                    + ( !ing.skippedOversize.empty() ? ( ",\"corpus_oversize\":" + std::to_string( ing.skippedOversize.size() ) ) : std::string() )
                     + ",\"order\":\"SOURCE files before test/bench files before docs, then path and line\""
                     + ",\"hits\":[";
     bool first = true;

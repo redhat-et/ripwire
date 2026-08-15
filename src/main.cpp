@@ -10244,7 +10244,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // the two verbs an agent walks most, not only in --help and pageview.h.
     std::printf( "<!-- ripwire grep: parallel literal/regex scan; hits GROUP by file under <f p=\"…\">, each <hit> carrying its LINE "
                  "(l=), matched text (m) and enclosing symbol (in=, a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar; "
-                 "ABSENT — never in=\"\" — when no symbol encloses the hit, which is NOT the same claim as file scope). "
+                 "ABSENT (never an empty in= value) when no symbol encloses the hit, which is NOT the same claim as file scope). "
                  "root= on the root element is the crawl root every <f p=…> is now RELATIVE to (single-root runs only; absent ⇒ p= is the "
                  "path ingest itself used, unchanged). ORDER: SOURCE files before test/bench files before docs, then path and line. "
                  "shown=/capped= = rows printed vs found (a count of underlying HITS, the same unit hits= uses, not of printed <hit> "
@@ -10286,6 +10286,14 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "prefilter is a performance switch that may not change the answer, so neither mode claims), a capped or paged listing, "
                  "or a scan that could not read a file; its ABSENCE claims nothing. The enc rows' caller counts stay FLOORS regardless "
                  "— complete= speaks for the hit rows alone. "
+                 // G4 (2026-08-15 harvest): corpus_excluded=/corpus_oversize= — present only when non-zero,
+                 // same absent-means-none convention as skippedOversize itself (model.h). Deliberately no
+                 // literal 'hits="0"' example below (a quoted numeric example — the quality-delta legend's
+                 // own rule, restated here after it bit a naive ` hits="N"` extraction downstream twice).
+                 "corpus_excluded= counts files an exclude filter (or built-in crawl policy) kept OUT of the index entirely; "
+                 "corpus_oversize= counts files the crawl SAW but dropped for exceeding the size ceiling. Both answer what an "
+                 "otherwise-empty answer alone cannot: not in this repo, or in a file that was never scanned — the skipped "
+                 "verb itemizes the rows behind either count. "
                  "%s -->", rw::kPageRaiseCapClause );
     // G3: terms=/scope=/suppressed= — only when AND/NOT was actually given, so a plain --grep answer
     // stays byte-identical to before G3 landed (the "purely additive" rule every ripwire flag follows).
@@ -10301,11 +10309,24 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
         termsAttr = " terms=\"" + termsList + "\" scope=\"" + ( grepScopeVal == GrepScope::File ? "file" : "line" ) + "\""
                   + " terms_suppressed=\"" + std::to_string( termsSuppressed ) + "\"";
     }
-    std::printf( "<grep pattern=\"%s\"%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s>",
+    // G4 (2026-08-15 harvest, report-ugrep §F6): corpus_excluded=/corpus_oversize= — so hits="0" can
+    // distinguish "not in this repo" from "in a file the crawl never scanned" (an --exclude= match, or a
+    // file past --max-file-size). Absent when zero, matching skippedOversize's own "absent means nothing
+    // was skipped" convention (model.h) — never a re-run hint (--skipped already itemizes the rows).
+    std::string corpusAttr;
+    if( ing.crawlSkips.excludedFiles > 0 )
+    {
+        corpusAttr += " corpus_excluded=\"" + std::to_string( ing.crawlSkips.excludedFiles ) + "\"";
+    }
+    if( !ing.skippedOversize.empty() )
+    {
+        corpusAttr += " corpus_oversize=\"" + std::to_string( ing.skippedOversize.size() ) + "\"";
+    }
+    std::printf( "<grep pattern=\"%s\"%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s>",
                  ex( pat ).c_str(), rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
                                  cfg.pageLimit, cfg.pageOffset, true ),
-                 hitsCapped, completeAttr );
+                 hitsCapped, completeAttr, corpusAttr.c_str() );
     // G1 (2026-08-15 harvest): hits GROUP by file under <f p="…">, root-relative when this is a single-root
     // run (report-memgraph §F6: the absolute root prefix alone was 42.5% of a real --grep payload; the
     // repeated-per-hit path was report-octocode §F1's 31.4%). Byte-identical text within one file's group
