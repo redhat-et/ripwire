@@ -1454,7 +1454,21 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 64;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 65;           // bump on any grammar/.scm/extraction change
+                                                      // 65 (2026-08-15 C++ nested out-of-line defs, cppqualcheck.sh §11):
+                                                      //    queries/cpp/tags.scm gains a second out-of-line
+                                                      //    definition pattern (`qualified_identifier name:
+                                                      //    (qualified_identifier)`), so a C++ definition written
+                                                      //    with TWO OR MORE qualifier segments
+                                                      //    (`void nsD::OuterD::InnerD::deep3(){}`) is indexed at
+                                                      //    last — it was dropped at extraction, silently, at every
+                                                      //    depth past one. The extracted SET grows on any C++ tree
+                                                      //    using that spelling (memgraph: 575 defs), so v64 blobs
+                                                      //    must be rejected. quality.h kIngestParserVerMirror
+                                                      //    bumped in the SAME commit. NOTE for whoever lands the
+                                                      //    unmerged integration/lang-round, which also holds a
+                                                      //    kParserVer bump: resolve a collision by RE-BUMPING to
+                                                      //    the next free number, never by keeping one side's value.
                                                       // 64 (2026-08-14 in-file test scope, test/testscopecheck.sh):
                                                       //    every def carries a new syntactic `testScope` bit
                                                       //    (Rust `#[cfg(test)] mod` / `#[test] fn`, Python
@@ -5846,6 +5860,98 @@ inline bool hasPhantomScopeSeparator( TSNode qualified ) noexcept
     const TSNode sep = firstChildOfType( qualified, "::" );
     return !ts_node_is_null( sep ) && ts_node_is_missing( sep );   // no separator child at all → pre-existing behaviour untouched (false)
 }
+// The innermost `name:` link of a C++ qualified_identifier chain (C1 — the DEFINITION half of the §H4
+// recursion). tree-sitter-cpp nests qualified_identifier RIGHT-recursively, so the tags pattern for an
+// out-of-line definition at 2+ segments binds an INNER qualified_identifier rather than the identifier
+// itself: for `void nsD::OuterD::InnerD::deep3()` the capture spans `OuterD::InnerD::deep3`. Descending to
+// the last link hands back exactly the node the depth-1 pattern binds directly, which is what makes the
+// widened capture need no special case anywhere downstream — three properties are restored at once:
+//   * TEXT is the bare final name, so defNameFromCapture()/finalSegment() need no text re-split (the one
+//     the REFERENCE side needs, because its capture may carry template arguments a '<'-truncation would
+//     mangle — see lastTopLevelScopeSep). A def's captured chain is a declarator, and its final link is an
+//     identifier or an operator_name, never a template_function.
+//   * START BYTE is the identifier's own, so `nameByte`/`nameRow` keep pointing at the name a selector
+//     (--expand=file:line, --grep attribution, the flipimpact line index) matches on.
+//   * PARENT is the IMMEDIATE scope's qualified_identifier, which is the node qualifierOf() reads — so
+//     `deep3` keys as `InnerD::deep3` rather than the outermost `nsD::deep3`, and the phantom-`::`
+//     error-recovery guard is applied to the separator that actually qualifies the name.
+// Returns `n` unchanged for every node that is not a qualified_identifier — i.e. for every capture that
+// existed before this fix — so it is inert by construction on the depth-1 path.
+// The hop cap is defensive only: each step moves strictly down a finite tree, so it cannot spin. A chain
+// deeper than the cap would return a still-qualified node, which finalSegment() still names correctly (it
+// splits on the last `::`); only the immediate-scope precision would degrade, so there is nothing here a
+// DEGRADED_PATH_ALERT could truthfully claim.
+inline TSNode innermostQualifiedName( TSNode n ) noexcept
+{
+    constexpr int kMaxQualifierHops = 32;   // `a::b::c::…` past 32 segments is not written C++
+    for( int hop = 0; hop < kMaxQualifierHops; ++hop )
+    {
+        if( ts_node_is_null( n ) || std::strcmp( ts_node_type( n ), "qualified_identifier" ) != 0 )
+        {
+            break;
+        }
+        const TSNode inner = ts_node_child_by_field_name( n, "name", 4 );
+        if( ts_node_is_null( inner ) )
+        {
+            break;
+        }
+        n = inner;
+    }
+    return n;
+}
+
+// The four name facts captureTagsFacts carries per match: the @name node itself, its text, its start byte
+// and its 0-based row. Named as a struct so the re-seat below can hand back all four at once and be
+// consumed by a structured binding.
+struct DefNameFacts
+{
+    TSNode           node;
+    std::string_view text;
+    std::uint32_t    byte;
+    std::uint32_t    row;
+};
+
+// C1 (memgraph F1): the re-seat a C++ out-of-line DEFINITION needs when the tags pattern bound an INNER
+// qualified_identifier — i.e. when the definition was written with two or more qualifier segments. Returns
+// the innermost link's four facts, or a NULL node meaning "nothing to re-seat", which is the answer for
+// every capture that existed before this fix (a bare identifier/operator_name is not a qualified_identifier,
+// so innermostQualifiedName hands it straight back).
+//
+// `applies` carries the caller's whole precondition (this is a DEFINITION capture, in a C++ file) rather
+// than being tested at the call site: captureTagsFacts is the file's largest function and every branch
+// point spent there is measured — see the note at the bottom of this comment.
+//
+// The descent has to happen before ANY consumer reads the facts — the gated-capture drop, the RawDef built
+// from them, and qualifierOf()'s parent lookup must all see exactly what the depth-1 pattern hands over.
+//
+// DEFS ONLY, deliberately. The REFERENCE path's capture may carry template arguments (`numeric_limits<
+// std::size_t>::max`) that its own text re-split (operatorNameStart + lastTopLevelScopeSep) is written to
+// survive; descending there would change resolved edges, which §H4's arms pin and this fix has no business
+// moving. A definition's chain is a declarator, whose final link is an identifier or an operator_name.
+//
+// This lives OUTSIDE captureTagsFacts for the reason defNameFromCapture states above: that function is
+// already the file's largest and well over the complexity bar, and a branch buried in it is both invisible
+// and a measured --quality-delta regression (this one scored +11 cx / +27 LOC inline before it moved here).
+inline DefNameFacts cppDefNameReseat( bool applies, TSNode nameNode, std::string_view src ) noexcept
+{
+    constexpr DefNameFacts kNoReseat { TSNode {}, {}, 0u, 0u };
+    if( !applies || ts_node_is_null( nameNode ) )
+    {
+        return kNoReseat;
+    }
+    const TSNode inner = innermostQualifiedName( nameNode );
+    if( ts_node_eq( inner, nameNode ) )
+    {
+        return kNoReseat;
+    }
+    const std::uint32_t a = ts_node_start_byte( inner );
+    const std::uint32_t b = ts_node_end_byte( inner );
+    if( a > b || b > src.size() )
+    {
+        return kNoReseat;   // out-of-range span — keep the capture's own facts, exactly as the caller did
+    }
+    return { inner, src.substr( a, b - a ), a, ts_node_start_point( inner ).row };
+}
 inline std::string qualifierOf( TSNode nameNode, std::string_view src )
 {
     const TSNode parent = ts_node_parent( nameNode );
@@ -9216,6 +9322,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             if( !haveRole )
             {
                 continue;
+            }
+
+            // C1 (memgraph F1) — see cppDefNameReseat. A null node is "nothing to re-seat".
+            const auto [ reNode, reTxt, reByte, reRow ] = cppDefNameReseat( isDef && le.lang == Lang::Cpp, nameNode, src );
+            if( !ts_node_is_null( reNode ) )
+            {
+                nameNode = reNode;  nameTxt = reTxt;  nameByte = reByte;  nameRow = reRow;
             }
 
             // F5: drop Swift function-local `let`/`var` bindings — they are not module symbols and, left in,

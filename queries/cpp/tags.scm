@@ -13,6 +13,32 @@
 
 (function_declarator declarator: (qualified_identifier name: (identifier) @name)) @definition.method
 
+; ---- out-of-line definitions at 2+ qualifier segments (ripwire addition — C1, memgraph F1) ----
+; The upstream pattern above is the DEFINITION twin of the 2-segment CALL pattern the §H4 round replaced,
+; and it fails for the same reason: tree-sitter-cpp nests qualified_identifier RIGHT-recursively, so
+; `void nsD::OuterD::InnerD::deep3()` is qualified_identifier(scope: nsD, name: qualified_identifier(
+; scope: OuterD, name: qualified_identifier(scope: InnerD, name: deep3))) and `name: (identifier)` binds
+; nothing past the second `::`. The def was dropped at EXTRACTION — no `--skipped` row, no floor, no
+; `unresolved=` — so every caller of such a method read as a leaf and the symbol was unreachable from every
+; verb. Measured on memgraph (whose house style is exactly this shape): 575 of 4526 qualified out-of-line
+; defs invisible, 16 of 29 extracted in one 35 KB file. ripwire's own src/ has ZERO instances, which is
+; precisely why the definition half survived the round that fixed the reference half.
+;
+; WHY A SECOND PATTERN RATHER THAN WIDENING THE FIRST TO `name: (_)`. The reference side widened in place
+; because its 2-segment pattern would otherwise DOUBLE-MINT (ingest.cpp performs no ref-level dedup). Here
+; the two patterns are disjoint by construction: `declarator:` anchors both to the function_declarator, and
+; the inner qualified_identifier this pattern binds is the OUTER one's `name:` child, never a declarator —
+; so a given definition matches exactly one of them at every depth. Keeping them separate leaves every
+; pre-fix capture byte-identical and keeps the depth-1 operator pattern below unambiguous. Widening to
+; `(_)` would additionally sweep in `destructor_name` and `template_function` declarators, which are a
+; different (still open, still disclosed) gap and not this one.
+;
+; The captured node is the INNER qualified_identifier — ingest.cpp descends it to the innermost `name:`
+; link (innermostQualifiedName), which restores all three properties the depth-1 path already has: the
+; bare final name, a `nameByte` on the identifier itself, and a PARENT whose `scope:` field is the
+; IMMEDIATE enclosing type — so `deep3` keys as `InnerD::deep3`, not as the outermost `nsD::deep3`.
+(function_declarator declarator: (qualified_identifier name: (qualified_identifier) @name)) @definition.method
+
 ; ---- operator methods (ripwire addition) ----
 ; The upstream C++ tags capture methods only via identifier/field_identifier/qualified_identifier
 ; declarators; an OPERATOR's declarator is a distinct node kind (operator_name for symbolic/subscript/
