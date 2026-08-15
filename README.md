@@ -801,8 +801,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:2057"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2393"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:11489"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:11604"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:11537"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:11652"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:946"/>
 </callers>
 ```
@@ -1025,11 +1025,14 @@ is not publicly reproducible from this tree, and it proves *cheaper and faster*,
 outcomes*.
 
 **The losses ship next to the wins.** `--grep`'s 2026-06 anti-headline (+19.7% / −11.2% vs raw grep)
-was re-derived 2026-08-15 after the emission overhaul: the default view now lands at **+1.2% / +7.6%**
-of a clean grep dump while carrying enclosing symbols and in-band honesty grep cannot give — but an
-*exhaustive* uncapped dump remains token-negative (**+153% / +217%**), and this project still says so.
-When the agent knows a second term, `--grep=A --and=B` flips hard positive (**−78.4%** measured,
-complete both sides). `--pack-signatures` inverts on a short symbol: 303 bytes of
+was re-derived 2026-08-15 after the emission overhaul: the default view now lands at **−1.9% / +4.3%**
+of a clean grep dump while carrying enclosing symbols and in-band honesty grep cannot give — one term
+either side of parity, which is not a headline in either direction — but an *exhaustive* uncapped dump
+remains token-negative (**+150% / +214%**), and this project still says so. Nor is that the worst
+regime: on *small-hit uncapped* answers the fixed per-answer legend is not amortized over anything, and
+a gated set of twelve such queries on this repository runs **+65.1% median, larger than plain grep on
+12 of 12**. When the agent knows a second term, `--grep=A --and=B` flips hard positive (**−77.7%**
+measured, complete both sides). `--pack-signatures` inverts on a short symbol: 303 bytes of
 signature-plus-doc-comment against a 158-byte body. The headline is a property of large result sets,
 and [the full counterexample list](#in-the-numbers) is part of the contract, not an appendix — the
 four-fact grep re-derivation lives in [`docs/EVALS.md` §5](docs/EVALS.md).
