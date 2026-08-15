@@ -841,23 +841,46 @@ C++ corpus — *historical, private, not publicly reproducible*. Every figure be
   (tiktoken `cl100k_base`, `--no-cache`, same two terms), on the same private corpus advanced from
   366 to 405 files. Four disclosed facts, not one number:
   1. **The wave's causal cut, binary-to-binary** (identical corpus, queries, cap state):
-     `--grep frantic` 6,568 → 4,552 tok (**−30.7%**), `--grep FirePolicy` 6,531 → 4,556 (**−30.2%**)
-     at the capped default view; −22.2% / −21.5% uncapped (`--limit=1000`). Independent corroboration:
-     `test/grepbytescheck.sh` re-derives a **−40.3% median** payload cut on this repository's five
-     frozen queries every run.
-  2. **Default view vs a clean raw-grep dump**: **+1.2% / +7.6%** (was +19.7% / −11.2% in 2026-06).
-     Not same-answer: ripwire shows 100 of 172/190 occurrence-hits (capped, disclosed in-band) with
-     enclosing symbols; grep's 90/86-line dump is complete. "Clean" = `--exclude-dir=.claude` — the
-     corpus now carries agent-worktree duplicates ripwire's crawler skips; without that exclusion the
-     grep arm balloons 4.7× and ripwire reads −80%, a litter artifact this row refuses to quote.
+     `--grep frantic` 6,568 → 4,552 → **4,415** tok (**−30.7%** at the wave, **−32.8%** after the
+     fix-grep lane's conditional-legend fix), `--grep FirePolicy` 6,531 → 4,556 → **4,419**
+     (**−30.2%** → **−32.3%**) at the capped default view; −22.2% / −21.5% → **−23.1% / −22.3%**
+     uncapped (`--limit=1000`). Independent corroboration:
+     `test/grepbytescheck.sh` re-derives a **−40.2% median** payload cut on this repository's five
+     frozen *capped* queries every run — and, on twelve frozen *uncapped* small-hit queries, a
+     **+65.1% median** payload *increase*, larger than plain grep on **12 of 12**. Both medians are
+     re-derived on every run and banded to ±1.5 points against this paragraph, so neither can drift
+     from the binary silently. *(Re-measured 2026-08-15 by the fix-grep lane, which corrected three
+     instrument defects in that gate: the two arms were reading different corpora (ripwire the whole
+     repo, grep only `src/`), `grep` was invoked by bare name, and all five frozen queries were
+     row-capped — so the statistic tracked grep's verbosity rather than ripwire's encoding, and the
+     regime where ripwire is LARGER was structurally invisible. The same lane made the boolean-terms
+     legend clause conditional on `--and`/`--not` actually being passed, which is what moved the capped
+     median from −38.6% to −40.2% and the uncapped one from +78.0% to +65.1%. One residual is disclosed
+     in the gate's own header rather than acted on: both arms are handed an ABSOLUTE corpus path, so
+     grep repeats a ~60-byte prefix on every output line while ripwire prints a root-relative path once
+     per file; re-running the capped set with a relative path for both arms reads **≈ −14%**, not
+     −40.2%. Re-basing a published headline by ~25 points is an owner call, and it is recorded as the
+     open item in `PLAN_HARVEST_REPORTS_2026-08-15/ROUTING_LEDGER.md`.)*
+  2. **Default view vs a clean raw-grep dump**: **−1.9% / +4.3%** *(re-measured 2026-08-15 after the
+     fix-grep lane; the wave itself read +1.2% / +7.6%, and 2026-06 read +19.7% / −11.2%)*. The
+     `frantic` arm crosses zero for the first time — the default view is now marginally *smaller* than
+     a clean grep dump on that term, and still larger on `FirePolicy`; one term either side of parity
+     is not a headline, which is why the row prints both. Not same-answer: ripwire shows 100 of 172/190
+     occurrence-hits (capped, disclosed in-band) with enclosing symbols; grep's 90/86-line dump is
+     complete. "Clean" = `--exclude-dir=.claude` — the corpus now carries agent-worktree duplicates
+     ripwire's crawler skips; without that exclusion the grep arm balloons 4.7× and ripwire reads −80%,
+     a litter artifact this row refuses to quote.
   3. **Same-answer uncapped parity — the anti-headline stands**: showing every hit, `--grep` remains
-     token-negative vs clean grep, **+153% / +217%** (down from +225% / +304% pre-wave on the same
-     measurement). `--grep` buys enclosing-symbol structure and in-band honesty, not fewer tokens,
-     on exhaustive dumps.
+     token-negative vs clean grep, **+150% / +214%** *(re-measured 2026-08-15 after the fix-grep lane;
+     +153% / +217% at the wave, down from +225% / +304% pre-wave on the same measurement)*. `--grep`
+     buys enclosing-symbol structure and in-band honesty, not fewer tokens, on exhaustive dumps. The
+     fixed per-answer legend is why the gap barely moves here: it is amortized over every hit on an
+     exhaustive dump, and dominant only on the small-hit answers fact 1's uncapped gate set measures.
   4. **Boolean AND is the flip**: `--grep=frantic --and=state` answers the narrowed question complete
-     (uncapped) at **−78.4%** vs the single-term capped view; on this repository's frozen pairs the
-     G3 gate holds 6/6 gold lines. When the agent knows a second term, `--grep` is now firmly
-     token-positive.
+     (uncapped) at **−77.7%** vs the single-term capped view *(re-measured 2026-08-15; −78.4% at the
+     wave — the AND answer is byte-identical across the two binaries at 985 tok, so the whole move is
+     the single-term baseline getting smaller)*; on this repository's frozen pairs the G3 gate holds
+     6/6 gold lines. When the agent knows a second term, `--grep` is now firmly token-positive.
 - *(historical, 2026-06-20)* **`--grep` was +19.7% / −11.2%** — published deliberately as the
   anti-headline. `--grep` is not a token reducer, and saying so is cheaper than being caught.
 
