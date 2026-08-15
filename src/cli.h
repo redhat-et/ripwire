@@ -92,6 +92,9 @@ struct Config
     bool             packSignatures  = false;              // --pack-signatures: body-elided decl skeletons (~59-68% fewer bytes at top-10/50/100, 68% at the default top-50; root-neutralised, since the repeated path prefix is charged in both forms and is not what this elides)
     std::string_view query;                                // --query=TERMS: pure lexical (BM25) retrieval
     std::string_view grep;                                 // --grep=STR: parallel literal scan + enclosing symbol + the matched line
+    bool             grepGiven = false;                    // G1/F1: --grep=/--regex= was already given once this run — a SECOND occurrence
+                                                             // used to silently overwrite the first (the pattern a caller reaches for when they
+                                                             // MEAN "and"); refused instead, naming the real AND spelling. See kViewFlags' dupGuardFlag.
     bool             grepRegex = false;                    // --regex=PAT: like --grep but the pattern is an ECMAScript regex
     bool             noPrefilter = false;                  // --no-prefilter: (debug) skip the regex→trigram prefilter, full-scan every file — the soundness oracle for --regex
     int              grepBefore = 0;                       // --grep-before=N (ripgrep -B): N source lines emitted before each --grep/--regex hit (0 = off, unchanged output)
@@ -1769,6 +1772,13 @@ struct ViewFlag
     const char*         example = nullptr;         // runnable, and inside that domain — Refuse rows only
     bool Config::*      isSetFlag     = nullptr;   // companion bool the =VALUE form also sets (--owners= ⇒ owners)
     bool Config::*      isSetFlagAlso = nullptr;   // a SECOND companion (--quality-ack= ⇒ qualityAck + qualityDelta)
+    // G1/F1: a GENERIC "already given" guard, distinct from isSetFlag's verb-selection meaning — two rows
+    // (--grep= and --regex=) point at the SAME member (Config::grep) and a second occurrence of EITHER used
+    // to silently overwrite the first. When set, a row REFUSES (dupMessage, exit-1-with-example, the house
+    // refusal shape) instead of assigning, the moment `c.*dupGuardFlag` is already true; on a clean first
+    // assignment it flips the flag true so a genuine second occurrence — of either spelling — is caught.
+    bool Config::*      dupGuardFlag  = nullptr;
+    const char*         dupMessage    = nullptr;   // printed verbatim (with the "ripwire: " lead-in) when dupGuardFlag fires
 };
 
 inline constexpr BoolFlag kBoolFlags[] =
@@ -1885,6 +1895,13 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--with-graph",         &Config::withGraph          },
 };
 
+// G1/F1 — shared by both kViewFlags rows that write Config::grep (--grep= and --regex=): a second
+// occurrence of either used to silently overwrite the pattern from the first (measured: `--grep=foo
+// --grep=bar` exits 0 with pattern="bar", `foo` discarded, nothing on stderr). The natural spelling an
+// agent reaches for when it means "AND" is a second --grep=, so the refusal names that spelling directly
+// rather than a generic "flag given twice".
+inline constexpr const char* kGrepDupMessage = "--grep given twice; did you mean --grep='A' --and='B'?";
+
 inline constexpr ViewFlag kViewFlags[] =
 {
     // server + self-eval inputs
@@ -1910,7 +1927,8 @@ inline constexpr ViewFlag kViewFlags[] =
 
     // search and the --for lens
     { "--query=",       &Config::query           , EmptyValue::Refuse, "search terms",                           "--query=\"teleport pagerank\"" },
-    { "--grep=",        &Config::grep            , EmptyValue::Refuse, "a literal string to search for",         "--grep=parseArgs" },
+    { "--grep=",        &Config::grep            , EmptyValue::Refuse, "a literal string to search for",         "--grep=parseArgs",
+      nullptr, nullptr, &Config::grepGiven, kGrepDupMessage },
     { "--match=",       &Config::match           , EmptyValue::Refuse, "a tree-sitter s-expression pattern",     "--match='(call_expression)'" },
     { "--lint-rules=",  &Config::lintRulesDir    , EmptyValue::Refuse, "a rules directory path",                 "--lint-rules=lintrules/" },
     { "--lint-select=", &Config::lintSelect      , EmptyValue::Refuse, "a comma-separated PREFIX list, or '*'",  "--lint-select=cache-,goto" },
@@ -1965,7 +1983,7 @@ inline constexpr ViewFlag kViewFlags[] =
     // --regex= sets the pattern AND the regex-mode bool; it already called refuseEmptyValue directly and the
     // table prints the SAME sentence, so this row is byte-identical to the arm it replaces.
     { "--regex=",          &Config::grep            , EmptyValue::Refuse, "a regular expression",                             "--regex='parse[A-Z]'",
-      &Config::grepRegex },
+      &Config::grepRegex, nullptr, &Config::grepGiven, kGrepDupMessage },
 
     // the bare-or-filter forms: "" is a REAL value here - `--situ=` means exactly `--situ`, and the value is
     // an OPTIONAL narrowing filter. Recorded rather than silently accepted (that distinction is the column).
@@ -2160,6 +2178,14 @@ inline ViewFlagMatch applyViewFlag( std::string_view arg, Config& c )
         if( value.empty() && vf.onEmpty == EmptyValue::Refuse )
         { refuseEmptyValue( vf.prefix, vf.needs, vf.example );  return ViewFlagMatch::Refused; }
 
+        // G1/F1: a repeat of a flag that silently overwrote its own prior value — checked BEFORE the
+        // assignment so the first value is never clobbered on the way to refusing.
+        if( vf.dupGuardFlag != nullptr && c.*vf.dupGuardFlag )
+        {
+            std::fprintf( stderr, "ripwire: %s\n", vf.dupMessage );
+            return ViewFlagMatch::Refused;
+        }
+
         c.*vf.member = value;
         // §B5: the companion bools the migrated arms used to set by hand — `--owners=SYM` selects the verb
         // AND narrows it, and a table that could only assign the value would have had to leave those 23 arms
@@ -2171,6 +2197,10 @@ inline ViewFlagMatch applyViewFlag( std::string_view arg, Config& c )
         if( vf.isSetFlagAlso != nullptr )
         {
             c.*vf.isSetFlagAlso = true;
+        }
+        if( vf.dupGuardFlag != nullptr )
+        {
+            c.*vf.dupGuardFlag = true;
         }
         return ViewFlagMatch::Assigned;
     }
