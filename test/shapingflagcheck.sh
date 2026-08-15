@@ -52,12 +52,17 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/
 # whether to speak; every other hit is a verb actually shaping with the value. The counts are pinned so a new
 # read site cannot appear without a reader deciding which column of kShapingVerbs it belongs in — the same
 # tripwire discipline as kTotalFlagArms. Re-derive with the commands printed below.
+# V1 (2026-08-15): the exact-name --expand default (mapTopK=0 when a bare --expand=SYM resolves to exactly
+# one match) added ONE new read site each — a single predicate line reading both cfg.topKExplicit and
+# cfg.maxTokens to decide whether the auto-default applies. --expand already honours both flags in
+# kShapingVerbs (the pre-existing M6 bundle-vs-whole-file logic already read them), so this is a re-pin, not
+# a column change: 16->17 / 12->13.
 MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
-[ "$MAXSITES" = 16 ] && ok "(A) --max-tokens has 16 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/mcpserver.h)" \
-                     || no "(A) --max-tokens read sites moved 16 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
-[ "$TOPSITES" = 12 ] && ok "(A) --top-k has 12 read sites outside cli.h" \
-                     || no "(A) --top-k read sites moved 12 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
+[ "$MAXSITES" = 17 ] && ok "(A) --max-tokens has 17 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/mcpserver.h)" \
+                     || no "(A) --max-tokens read sites moved 17 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
+[ "$TOPSITES" = 13 ] && ok "(A) --top-k has 13 read sites outside cli.h" \
+                     || no "(A) --top-k read sites moved 13 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
 # no OTHER file may read them: a third file would be a verb family this table has never heard of
 OTHER="$( grep -l 'cfg\.maxTokens\|cfg\.topK' src/*.h src/*.cpp 2>/dev/null | grep -vE 'src/(cli\.h|main\.cpp|mcpserver\.h)$' )"
 [ -z "$OTHER" ] && ok "(A) only main.cpp and mcpserver.h read the two fields" \

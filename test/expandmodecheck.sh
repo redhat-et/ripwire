@@ -73,13 +73,22 @@ else
 fi
 
 # ── (2) large-file symbol: the bundle stays the cheapest complete answer ──────────────────────────────
+# V1 (2026-08-15, ugrep RN2): bigProbe007 is an EXACT-NAME, unambiguous --expand (one token, one match), so
+# it now ALSO defaults its own map to top-k=0 — the ranked map that used to ride inside "bundle" mode is
+# gone, and the root discloses the default with topk_default="0" (test/expandtopk0check.sh is the dedicated
+# gate for that mechanism; this arm just keeps M6's bundle-vs-whole-file byte comparison honest under it).
 "$BIN" fix --expand=bigProbe007 --no-cache >"$TMP/big.xml" 2>/dev/null
 grep -q 'mode="bundle"' "$TMP/big.xml" \
     && ok "(2) large-file --expand keeps mode=\"bundle\"" \
     || no "(2) large-file --expand lost the bundle mode"
-grep -q '<r ' "$TMP/big.xml" \
-    && ok "(2) the ranked map is present in bundle mode" \
-    || no "(2) bundle mode lost the ranked map"
+grep -q 'topk_default="0"' "$TMP/big.xml" \
+    && ok "(2) bundle mode discloses the V1 exact-name top-k=0 default" \
+    || no "(2) bundle mode lost the topk_default=\"0\" disclosure"
+if grep -q '<r ' "$TMP/big.xml"; then
+    no "(2) the ranked map still rides along in bundle mode (V1 regression: exact-name --expand must default to top-k=0)"
+else
+    ok "(2) no ranked map in bundle mode (V1: exact-name default)"
+fi
 grep -q '<bodies' "$TMP/big.xml" \
     && ok "(2) the <bodies> payload is present in bundle mode" \
     || no "(2) bundle mode lost the <bodies> payload"
