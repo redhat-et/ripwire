@@ -2412,7 +2412,7 @@ $ ./build/ripwire . --notes
 
 **Answers:** the budget-shared task bundle: ONE call assembling, under ONE deterministic budget (default 6K tokens;
 
---token-budget overrides), the whole orientation dance in FIXED order — (1) routed+anchored ranking, (2) top-K full bodies, (3) their 1-hop caller signatures, (4) their field notes, (5) tests_to_run for the top files. Allocation order is ranking>bodies>callers>notes>tests; each section truncates rank-adaptively and the header reports EVERY truncation (no silent caps). A tiny budget degrades to ranking-only WITH the truncation note. Refuses loudly without a task string.
+--token-budget overrides), the whole orientation dance in FIXED order — (1) routed+anchored ranking, (2) top-K full bodies, (3) their 1-hop caller signatures, (4) their field notes, (5) tests_to_run for the top files, emitted in FIXED order ranking>bodies>callers>notes>tests. Each section holds a FIXED, up-front proportional quota of the budget (rank40/body30/caller15/note5/test10, percent); an under-spent section's leftover quota ROLLS FORWARD to the next section, so a small budget still zeroes a section eventually but never past its own fair share. Each section truncates rank-adaptively and the header reports EVERY truncation (no silent caps). A tiny budget degrades to ranking-only WITH the truncation note. Refuses loudly without a task string.
 
 **Try it**
 
@@ -2441,9 +2441,9 @@ $ ./build/ripwire . --pack-task="add a new output format flag to the CLI"
 
 **Caveats (stated by the binary):**
 
-- each section truncates rank-adaptively and the header reports EVERY truncation (no silent caps).
+- an under-spent section's leftover quota ROLLS FORWARD to the next section, so a small budget still zeroes a section eventually but never past its own fair share.
+- Each section truncates rank-adaptively and the header reports EVERY truncation (no silent caps).
 - A tiny budget degrades to ranking-only WITH the truncation note.
-- Refuses loudly without a task string.
 
 ### `--partition=N`
 
