@@ -127,9 +127,25 @@ inline constexpr const char* kCallHierarchyLegendOpen =
     "lists the symbols that CALL of=; the callees form lists the symbols of= itself calls. of= is the selector "
     "you passed, defs= how many DEFINITIONS that name resolved to (the rows UNION every def's neighbours), and "
     "count= the number of DISTINCT neighbour symbols (a floor, per counts_floor=), which the rows window with limit= and offset=. "
-    "When emitted by callees, bodyless_defs= (when present) counts how many of the defs= are declarations with no body (header-only or forward-declared); "
-    "zero callees may mean no body to read callees from rather than truly no dependencies. "
     "A neighbour that is an indexed function-like #define is a macro row (t=\"macro\", role=\"macro\" on the XML row): "
     "the edge crosses a macro expansion, not a plain call — rows carry no role= otherwise. ";
+
+// V1 fix (verifier finding 3, 2026-08-15): bodyless_defs= is a CALLEES-only attribute — main.cpp's emitter
+// gates it behind `!wantCallers`, so a --callers document can never carry it. It used to sit inside
+// kCallHierarchyLegendOpen above, which both forms print, so every --callers call paid ~235 B for a clause
+// it could never need. Appended only on the callees form (see the call site in main.cpp), so the clause
+// still appears verbatim wherever the attribute CAN appear — legendcoveragecheck's callees-side coverage is
+// unaffected; only the callers-side dead weight is gone.
+inline constexpr const char* kCallHierarchyLegendCalleesOnly =
+    "When emitted by callees, bodyless_defs= (when present) counts how many of the defs= are declarations with no body (header-only or forward-declared); "
+    "zero callees may mean no body to read callees from rather than truly no dependencies. ";
+
+// The composed opener, one call for the caller — keeps the wantCallers/callees branch out of
+// runCallHierarchy (already this file's largest dispatcher) rather than adding a ternary at the call site.
+inline std::string callHierarchyLegendOpen( bool wantCallers )
+{
+    return wantCallers ? std::string( kCallHierarchyLegendOpen )
+                        : std::string( kCallHierarchyLegendOpen ) + kCallHierarchyLegendCalleesOnly;
+}
 
 } // namespace rw
