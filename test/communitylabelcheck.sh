@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # communitylabelcheck.sh — A5 semantic-label and bridge-display precision gate.
+#
+# V6 (2026-08-15): extended with the rank-mass ordering key (--communities/--zoom used to sort modules by
+# raw members.size() alone, letting a large peripheral leaf cluster outrank a small load-bearing hub) and
+# the deterministic verb-histogram label suffix (grepai transfer: naminglens::splitIdentifier + a small
+# constexpr verb dictionary in src/verbtable.h, tallied top-3 by frequency with a first-seen-NodeId
+# tie-break). test/massfix is the dedicated fixture for both: hub.cpp (2 members, 12 external bridges) vs
+# leaf.cpp (6 members, 1 external bridge) for the ordering arm, verbs.cpp for the 3-distinct-verb suffix
+# arm — see each fixture file's own header comment for the exact numbers this gate pins.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/zoomfix"
+CORPUS_MASS="$ROOT/test/massfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -18,8 +27,22 @@ run_pair()
     diff -q "$TMP/${verb#--}.a" "$TMP/${verb#--}.b" >/dev/null
 }
 
+# run_pair_mass: the same byte-stability-under-two-runs check as run_pair, but against test/massfix — the
+# corpus engineered so mass and size DISAGREE (see the file header above). A diff here would mean either
+# the new rank-mass ordering key or the new verb-histogram tally (both computed once per run, from the same
+# deterministic PageRank vector and the same ascending-NodeId member order) is not reproducible.
+run_pair_mass()
+{
+    local verb="$1" out="$2"
+    "$BIN" "$CORPUS_MASS" "$verb" --no-cache >"$TMP/${out}.a" 2>/dev/null
+    "$BIN" "$CORPUS_MASS" "$verb" --no-cache >"$TMP/${out}.b" 2>/dev/null
+    diff -q "$TMP/${out}.a" "$TMP/${out}.b" >/dev/null
+}
+
 run_pair --communities || { echo "FAIL communities output is not deterministic"; exit 1; }
 run_pair --report || { echo "FAIL report output is not deterministic"; exit 1; }
+run_pair_mass --communities massfix_communities || { echo "FAIL massfix --communities output (rank-mass order + verb suffix) is not deterministic"; exit 1; }
+run_pair_mass --zoom massfix_zoom || { echo "FAIL massfix --zoom output (rank-mass order) is not deterministic"; exit 1; }
 
 python3 - "$TMP/communities.a" "$TMP/report.a" <<'PY'
 import re
@@ -110,4 +133,55 @@ for pattern, cap, expected_total in fixed_caps:
         raise SystemExit("FAIL report fixed-cap shown/total values are dishonest")
 
 print(f"PASS semantic unique labels={len(labels)} report_labels={len(module_labels)}")
+PY
+
+# V6 arm (b): the ordering key. test/massfix/hub.cpp is a 2-member community with 12 cross-cluster bridges
+# (high rank mass); test/massfix/leaf.cpp is a 6-member community with exactly one external bridge (low
+# rank mass despite 3x hub's member count). Pre-fix (raw members.size() as the sole key) hub sorted dead
+# last among massfix's communities (2 is the smallest size present); post-fix it must sort strictly before
+# leaf — this is the direct, corpus-level assertion that "sum(rank[member])" replaced "members.size()" as
+# --communities' primary ordering key, not merely that SOME reordering happened.
+#
+# V6 arm (c): the verb-histogram label suffix, exact value. hub's label must end " [check,validate]" (both
+# verbs occur exactly once each — a tie broken by first-seen NodeId order, checkHelper declared first).
+# test/massfix/verbs.cpp's community must end " [parse,render,emit]" (parse dominates at 3 occurrences;
+# render/emit tie at 1 and are ordered by first-seen NodeId, exercising the top-3-of-more-than-3-distinct
+# cutoff that hub's 2-verb case cannot).
+python3 - "$TMP/massfix_communities.a" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+communities = root.findall(".//community")
+
+def find(anchor_substr):
+    for i, node in enumerate(communities):
+        if anchor_substr in node.get("label", ""):
+            return i, node
+    raise SystemExit(f"FAIL massfix fixture community anchored on {anchor_substr!r} not found")
+
+hub_i, hub = find("validateCore@")
+leaf_i, leaf = find("leafMember1@")
+verbs_i, verbs = find("parseOne@")
+
+if int(hub.get("size")) != 2:
+    raise SystemExit(f"FAIL massfix/hub.cpp fixture drifted: size={hub.get('size')}, expected 2")
+if int(leaf.get("size")) != 6:
+    raise SystemExit(f"FAIL massfix/leaf.cpp fixture drifted: size={leaf.get('size')}, expected 6")
+
+if not (hub_i < leaf_i):
+    raise SystemExit(
+        f"FAIL V6 mass ordering: hub (2 members, 12 bridges) sorted at index {hub_i}, "
+        f"leaf (6 members, 1 bridge) at index {leaf_i} — rank mass did not override raw member count"
+    )
+
+hub_label = hub.get("label", "")
+if not hub_label.endswith(" [check,validate]"):
+    raise SystemExit(f"FAIL V6 verb suffix: hub label={hub_label!r}, expected suffix ' [check,validate]'")
+
+verbs_label = verbs.get("label", "")
+if not verbs_label.endswith(" [parse,render,emit]"):
+    raise SystemExit(f"FAIL V6 verb suffix: verbs label={verbs_label!r}, expected suffix ' [parse,render,emit]'")
+
+print(f"PASS V6 mass-ordering hub_idx={hub_i} leaf_idx={leaf_i}; verb-suffix hub+verbs both exact")
 PY
