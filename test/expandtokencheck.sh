@@ -11,6 +11,15 @@
 # reported est_tokens is within ~15% of a build-dep-free byte/calibration estimate of the FULL output, and
 # an --expand of a large fn reports MORE than the map-alone number. tiktoken (if present) is informational.
 #
+# V1 (2026-08-15, ugrep RN2): buildGraph is an EXACT-NAME, unambiguous --expand, so a BARE --expand=buildGraph
+# now defaults its OWN map to top-k=0 (no est_tokens=/no <r> header at all — see test/expandtopk0check.sh).
+# This gate's whole point is "does the header's est_tokens correctly ADD the body to a PRESENT map's own
+# count", so every probe below that needs a header to inspect pins the map back on with an explicit
+# --top-k=200 — the SAME 200-row default this gate has always exercised (an ordinary override, test/
+# expandmodecheck.sh arm 3, not a workaround) — kept at 200 rather than a smaller override because the
+# #3 byte/2.85 calibration below was measured on THIS map:body ratio; a leaner map shifts the blend toward
+# the body's own (leaner) per-token rate and would need its own re-calibration, which is out of scope here.
+#
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/expandtokencheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
@@ -37,7 +46,7 @@ MAP_EST="$( est src )"
     || no "map-alone est_tokens missing / non-positive (got '$MAP_EST')"
 
 # ── #2: --expand=buildGraph (a large fn) reports MORE than the map alone — the body is now counted ─────
-EXP_EST="$( est src --expand=buildGraph )"
+EXP_EST="$( est src --expand=buildGraph --top-k=200 )"
 { [ -n "$EXP_EST" ] && [ "$EXP_EST" -gt "$MAP_EST" ] 2>/dev/null; } \
     && ok "--expand=buildGraph est_tokens ($EXP_EST) > map-alone ($MAP_EST) — the body is counted (bug fixed)" \
     || no "--expand=buildGraph est_tokens ($EXP_EST) not > map-alone ($MAP_EST) — body still uncounted (BUG)"
@@ -48,9 +57,9 @@ EXP_EST="$( est src --expand=buildGraph )"
 #    whitespace/braces merge) than the map's signature markup (~2.5), so the whole-output blends to ~2.85
 #    B/tok (MEASURED: 59.5KB → 19.3K real tokens = 3.08; 2.85 is a conservative floor). |est - truth| must
 #    be <= 15% of truth. Integer math on the byte path. ─────────────────────────────────────────────────
-FULL_BYTES="$( "$BIN" src --expand=buildGraph --no-cache 2>/dev/null | wc -c | tr -d ' ' )"
+FULL_BYTES="$( "$BIN" src --expand=buildGraph --top-k=200 --no-cache 2>/dev/null | wc -c | tr -d ' ' )"
 if python3 -c 'import tiktoken' >/dev/null 2>&1; then
-    "$BIN" src --expand=buildGraph --no-cache 2>/dev/null >"$TMP/exp3.xml"
+    "$BIN" src --expand=buildGraph --top-k=200 --no-cache 2>/dev/null >"$TMP/exp3.xml"
     TRUTH="$( python3 -c 'import sys,tiktoken; print(len(tiktoken.get_encoding("o200k_base").encode(open(sys.argv[1],encoding="utf-8",errors="replace").read())))' "$TMP/exp3.xml" )"
     LABEL="real o200k"
 else
@@ -70,14 +79,14 @@ LIM=$(( TRUTH * 15 / 100 ))
     || no "map-alone ($MAP_EST) not materially short of full truth ($TRUTH) — the bug may not be exercised by this corpus"
 
 # ── #5: determinism — the reported est_tokens is byte-identical run-to-run ─────────────────────────────
-D1="$( est src --expand=buildGraph )"; D2="$( est src --expand=buildGraph )"
+D1="$( est src --expand=buildGraph --top-k=200 )"; D2="$( est src --expand=buildGraph --top-k=200 )"
 { [ -n "$D1" ] && [ "$D1" = "$D2" ]; } \
     && ok "--expand est_tokens deterministic across re-runs ($D1)" \
     || no "--expand est_tokens NON-deterministic ($D1 vs $D2)"
 
 # ── #6: full --expand output is well-formed XML ────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    "$BIN" src --expand=buildGraph --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null \
+    "$BIN" src --expand=buildGraph --top-k=200 --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null \
         && ok "xml well-formed under --expand" || no "xml malformed under --expand"
 else
     printf '  SKIP  xml well-formed (no xmllint)\n'
@@ -87,7 +96,7 @@ fi
 #    A budget just under the expand est but ABOVE the map-alone est must FAIL (exit 3) — the whole point of
 #    the fix: pre-fix this budget passed while the real payload blew past it. ─────────────────────────────
 MID=$(( (MAP_EST + EXP_EST) / 2 ))
-"$BIN" src --expand=buildGraph --token-budget=$MID --no-cache >/dev/null 2>"$TMP/tb.err"
+"$BIN" src --expand=buildGraph --top-k=200 --token-budget=$MID --no-cache >/dev/null 2>"$TMP/tb.err"
 rc=$?
 { [ "$rc" -eq 3 ] && grep -qE "est_tokens=$EXP_EST > budget=$MID\$" "$TMP/tb.err"; } \
     && ok "--token-budget=$MID (between map-alone and full) on --expand: exit 3, gate uses the full est ($EXP_EST)" \
@@ -101,7 +110,7 @@ BARE1="$( est src )"; BARE2="$( est src )"
 
 # ── #9: (optional) tiktoken accuracy report — informational, never gates (tiktoken isn't a build dep) ───
 if python3 -c 'import tiktoken' >/dev/null 2>&1; then
-    "$BIN" src --expand=buildGraph --no-cache 2>/dev/null >"$TMP/exp.xml"
+    "$BIN" src --expand=buildGraph --top-k=200 --no-cache 2>/dev/null >"$TMP/exp.xml"
     python3 - "$TMP/exp.xml" "$EXP_EST" <<'PY'
 import sys, re, tiktoken
 out=open(sys.argv[1],encoding='utf-8',errors='replace').read()
