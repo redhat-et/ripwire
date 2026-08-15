@@ -35,3 +35,9 @@ reach, so the gate proves TRUE POSITIVES and TRUE NEGATIVES from the same run.
 $ ripwire . --doc-drift
   → pointing at code.h:999 (`ghostSymbol`) — an illustration, not an anchor
 ```
+
+## file:line RANGES, and the weak-file-line disclosure (F5)
+
+- WEAK (weak-file-line, resolves-to) — the return statement sits at code.h:19.
+- STRADDLES (range-straddle) — the doc claims code.h:18-23 is one function, but line 18 sits in stableHelper's body and line 23 has moved into someone else's.
+- HOLDS (healthy range) — `movedHelper` spans code.h:22-24.

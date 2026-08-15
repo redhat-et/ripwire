@@ -157,9 +157,9 @@ inline const char* anchorKindTag( AnchorKind k ) noexcept { return kAnchorKindTa
 // `Deleted` is a STRONGER claim than `Undefined`, not a rename of it: undefined says only "no definition
 // here", deleted says "this repo HAD it and commit X removed it". Only the history oracle can say the second,
 // so a run without --with-history never emits it.
-enum class Drift : std::uint8_t { Holds = 0, MissingFile, PastEof, LineMoved, Undefined, Deleted, ConstValue, ArrayExtent };
+enum class Drift : std::uint8_t { Holds = 0, MissingFile, PastEof, LineMoved, Undefined, Deleted, ConstValue, ArrayExtent, RangeStraddles };
 
-inline constexpr const char* kDriftTag[] = { "holds", "missing-file", "past-eof", "line-moved", "undefined", "deleted", "const-value", "array-extent" };
+inline constexpr const char* kDriftTag[] = { "holds", "missing-file", "past-eof", "line-moved", "undefined", "deleted", "const-value", "array-extent", "range-straddles" };
 
 inline const char* driftTag( Drift d ) noexcept { return kDriftTag[ std::size_t( d ) ]; }
 
@@ -219,6 +219,7 @@ struct Anchor
     std::string   name;                         // the symbol / constant / array name it turns on ("" ⇒ none named)
     std::string   scope;                        // the qualifier a mention was written with (`A` in `A::b`); "" if bare
     std::uint64_t want    = 0;                  // file-line: the claimed line. const/array: the claimed number.
+    std::uint64_t wantHi  = 0;                  // file-line RANGE only: `path:A-B`'s B. 0 ⇒ a single-line anchor.
     Drift         why     = Drift::Holds;
     bool          isChecked = false;            // false ⇒ `skip` says which check the verb declined to make
     bool          isProse   = false;            // a `= N` / `[N]` shape whose NAME is absent from the code —
@@ -230,6 +231,10 @@ struct Anchor
                                                 //   tgt=, NOT at=: at= is the document-level "<sha>[+dirty]" provenance
                                                 //   stamp on the root element, and one attribute name may not mean two
                                                 //   things in one document (r27 P2 item 7).
+    std::string   resolvesTo;                   // weak-file-line ONLY: the symbol flipimpact-style innermost-at-line
+                                                //   resolution names as spanning `want` — a disclosed FACT, not a
+                                                //   verdict (the verb still declines to judge symbol identity here).
+                                                //   Empty when the line sits in no indexed symbol (file scope).
 };
 
 inline bool anchorLess( const Anchor& a, const Anchor& b )
@@ -249,14 +254,29 @@ struct DocRow
 {
     std::string         path;                   // root-relative
     std::vector<Anchor> drifted;                // ONLY the anchors that no longer hold, in (line, col) order
+    std::vector<Anchor> weakLine;                // weak-file-line anchors that DID resolve (resolvesTo non-empty) —
+                                                //   a disclosure list, never a verdict; a doc can carry these while
+                                                //   staying "clean" (drift=0), which is why it is kept off DocRow's
+                                                //   own print gate and mirrored into DriftResult::weakGroups instead.
     std::uint32_t       anchorCount  = 0;
     std::uint32_t       checkedCount = 0;
     std::uint32_t       datedCount   = 0;       // …of `drifted`, how many the author dated (the rest are live rot)
 };
 
+// One doc's weak-file-line disclosures, grouped so the path is written once rather than once per row (the
+// F6 finding's own lesson: a repeated path prefix is the single biggest avoidable payload cost this verb has).
+struct WeakDocGroup
+{
+    std::string         path;                   // root-relative
+    std::vector<Anchor> rows;                    // resolved weak-file-line anchors, (line, col) order
+};
+
 struct DriftResult
 {
-    std::vector<DocRow> docs;                   // only docs WITH drift; LIVE-drift desc, path asc (§P11.10)
+    std::vector<DocRow>      docs;               // only docs WITH drift; LIVE-drift desc, path asc (§P11.10)
+    std::vector<WeakDocGroup> weakGroups;         // EVERY doc with >=1 resolved weak-file-line row, clean or not —
+                                                  //   path ascending. Independent of docs/cleanDocs: disclosure,
+                                                  //   not a verdict, so it must not move the clean= count.
     std::uint32_t       docsScanned = 0;
     std::uint32_t       cleanDocs   = 0;
     std::uint32_t       anchors     = 0;
@@ -653,6 +673,29 @@ inline bool matchFileLine( std::string_view line, std::size_t i, std::size_t& en
     return true;
 }
 
+// The optional `-HI` half of a `path:A-B` range (a doc citing a symbol's whole span, e.g.
+// `skip_list.hpp:699-772`), read starting exactly where a successful matchFileLine left `end`. A SEPARATE
+// function rather than a widened matchFileLine signature on purpose — matchFileLine is a preexisting
+// contract the range lane has no need to touch, and every caller that has not heard of ranges keeps working
+// unmodified. Returns 0 (and leaves `end` untouched) unless the suffix parses as a second integer strictly
+// greater than A and inside the same hostile-input bound; a trailing `-` into prose, `A-A`, or `A-` with no
+// digit all degrade to the single-line anchor matchFileLine already found rather than being dropped outright.
+inline std::uint64_t matchLineRangeHi( std::string_view line, std::size_t& end, std::uint64_t lineNo )
+{
+    if( end >= line.size() || line[end] != '-' || end + 1 >= line.size() || !std::isdigit( (unsigned char)line[ end + 1 ] ) )
+    {
+        return 0;
+    }
+    std::size_t   k  = end + 1;
+    std::uint64_t hi = 0;
+    if( parseIntLiteral( line, k, hi ) && hi > lineNo && hi <= kMaxClaimedLine )
+    {
+        end = k;
+        return hi;
+    }
+    return 0;
+}
+
 // A doc's `NAME[16]` extent claim, starting just past the name. A backtick may sit between the name and the
 // bracket (`kFoo`[16]); whitespace may not, because `foo [16]` is prose next to a markdown reference.
 inline bool matchArrayClaim( std::string_view line, std::size_t afterName, std::size_t& closeIndex, std::uint64_t& extent )
@@ -868,13 +911,15 @@ inline void scanFileLineLane( const DocLineScan& scan, std::vector<Anchor>& out 
         std::string_view path;
         std::uint64_t    at   = 0;
         if( !matchFileLine( line, i, end, path, at ) ) { ++i; continue; }
+        const std::uint64_t hi = matchLineRangeHi( line, end, at );   // 0 ⇒ a single-line anchor; also grows `end`
 
         Anchor a;
         a.kind = AnchorKind::FileLine;
         a.line = scan.lineNo;
         a.col  = std::uint32_t( i + 1 );
         a.ref.assign( line.substr( i, end - i ) );
-        a.want = at;
+        a.want   = at;
+        a.wantHi = hi;
         a.name = nearestDefinedName( scan.named, i, end );
         out.push_back( std::move( a ) );
         i = end;
@@ -1740,6 +1785,40 @@ inline bool isCorroborated( const ResolveContext& ctx, std::uint32_t at )
     return it != ctx.resolving.end() && *it <= at + kCorroborateWin;
 }
 
+// A `path:A-B` RANGE — the structural fact that costs nothing extra: does the INNERMOST symbol at A reach
+// all the way to B, or does B land in a different symbol (or in none)? Neither half needs a NAMED symbol on
+// the doc line, and it never depends on one — the same innermost-at-line resolution resolveFileLine already
+// runs for LineMoved's got=, applied at both ends of the claimed span instead of one. A stale span is
+// exactly the shape F5 catches: `skip_list.hpp:699-772` once matched one function and now straddles two
+// because a line moved between them. Sets the drift verdict on `a` and returns true when it fires; the
+// caller returns immediately, exactly like every other early-return verdict in this file.
+inline bool flagRangeStraddle( const ResolveContext& ctx, Anchor& a, std::uint32_t fileId )
+{
+    const NodeId encLo = traceEnclosingSymbol( ctx.ing, fileId, std::uint32_t( a.want ) );
+    const NodeId encHi = traceEnclosingSymbol( ctx.ing, fileId, std::uint32_t( a.wantHi ) );
+    if( encLo == encHi )
+    {
+        return false;
+    }
+    a.why = Drift::RangeStraddles;  a.isChecked = true;
+    a.got = encHi == kNoNode ? std::string( "(file scope)" ) : ctx.ing.symbols[ encHi ].name;
+    a.tgt = std::string( relForHash( ctx.ing.files[ fileId ], ctx.root ) ) + ":" + std::to_string( a.wantHi );
+    return true;
+}
+
+// weak-file-line: the verb still declines to judge symbol identity, but the innermost-at-line resolution is
+// a free, zero-inference fact — disclose it as resolves-to= (never as got=/why=, which are reserved for an
+// actual VERDICT) so a reader gets the fact without the verb pretending to have checked what the doc claims.
+// Leaves `a.resolvesTo` empty when `want` sits in no indexed symbol (file scope).
+inline void discloseWeakResolution( const ResolveContext& ctx, Anchor& a, std::uint32_t fileId )
+{
+    const NodeId enc = traceEnclosingSymbol( ctx.ing, fileId, std::uint32_t( a.want ) );
+    if( enc != kNoNode )
+    {
+        a.resolvesTo = ctx.ing.symbols[ enc ].name;
+    }
+}
+
 inline void resolveFileLine( const ResolveContext& ctx, Anchor& a )
 {
     // The memo is prefilled with every file-line anchor's path token, so this is a hit in practice; the
@@ -1769,7 +1848,10 @@ inline void resolveFileLine( const ResolveContext& ctx, Anchor& a )
         a.tgt.assign( relForHash( ctx.ing.files[ fileId ], ctx.root ) );
         return;
     }
-    if( a.name.empty() ) { a.skip = Unchecked::WeakFileLine; return; }
+
+    if( a.wantHi > a.want && flagRangeStraddle( ctx, a, fileId ) ) { return; }
+
+    if( a.name.empty() ) { discloseWeakResolution( ctx, a, fileId );  a.skip = Unchecked::WeakFileLine;  return; }
 
     // The named symbol must be defined IN THE ANCHORED FILE. Docs constantly write "the call at
     // main.cpp:554 to `redactInPlace`" — the symbol names the CALLEE, not what lives at that line, and
@@ -2156,6 +2238,45 @@ inline void sortDocsByLiveDrift( std::vector<DocRow>& docs )
     } );
 }
 
+// Disclosure, not rot — path ascending is the whole ordering rule, same as every other purely-additive list
+// this verb emits (unlike sortDocsByLiveDrift, no severity to rank by).
+inline void sortWeakGroupsByPath( std::vector<WeakDocGroup>& groups )
+{
+    std::sort( groups.begin(), groups.end(), []( const WeakDocGroup& a, const WeakDocGroup& b ) { return a.path < b.path; } );
+}
+
+// An unchecked anchor worth keeping on the weak-file-line disclosure list: it declined for exactly that
+// reason, AND the free innermost-at-line resolution actually named something (a file-scope line has nothing
+// to disclose, so it stays in the tally only — see discloseWeakResolution).
+inline bool isDisclosableWeak( const Anchor& a )
+{
+    return a.skip == Unchecked::WeakFileLine && !a.resolvesTo.empty();
+}
+
+// computeDocDrift's UNCHECKED bucket, in one place: the tally increment every unchecked anchor gets, plus
+// the weak-file-line disclosure a resolved one ALSO gets. Its own function so the disclosure check does not
+// add a branch four levels deep inside computeDocDrift's own per-anchor classify loop.
+inline void recordUnchecked( const Anchor& a, DocRow& row, DriftResult& res )
+{
+    ++res.uncheckedBy[std::size_t( a.skip )];
+    if( isDisclosableWeak( a ) )
+    {
+        row.weakLine.push_back( a );
+    }
+}
+
+// The disclosure lane is independent of "clean": a doc with zero drift can still carry resolved weak-file-
+// line facts (the F5 finding's own motivating case — a doc that reports drift="0" while silently sitting on
+// anchors this walk could have named a symbol for). Called BEFORE the clean early-continue in the loop
+// below, so it is never gated behind "this doc also happens to have real rot".
+inline void recordWeakDisclosures( const DocRow& row, DriftResult& res )
+{
+    if( !row.weakLine.empty() )
+    {
+        res.weakGroups.push_back( WeakDocGroup{ row.path, row.weakLine } );
+    }
+}
+
 // `history` is the caller's --with-history index, or nullptr when the flag was not given. It is threaded in
 // rather than probed here so the ONE git walk is shared with every other consumer in the process (and so
 // this function stays a pure function of the tree plus that index, which is what keeps it det-gate clean).
@@ -2262,7 +2383,9 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
 
         for( const Anchor& a : anchors )
         {
-            // Exactly one of three buckets, so `checked + unchecked == anchors` holds by construction.
+            // Exactly one of three buckets, so `checked + unchecked == anchors` holds by construction. A
+            // resolved weak-file-line anchor STAYS in the unchecked bucket and its tally count — the
+            // disclosure list below is an ADDITIVE view onto the same anchor, never a fourth bucket.
             if( a.isProse )
             {
                 ++prose;
@@ -2277,7 +2400,7 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
             }
             else
             {
-                ++res.uncheckedBy[std::size_t( a.skip )];
+                recordUnchecked( a, row, res );
             }
         }
 
@@ -2288,6 +2411,8 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
 
         res.anchors += row.anchorCount;
         res.checked += row.checkedCount + std::uint32_t( drifted.size() );
+
+        recordWeakDisclosures( row, res );
 
         if( drifted.empty() ) { ++res.cleanDocs; continue; }
 
@@ -2309,6 +2434,7 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
     }
 
     sortDocsByLiveDrift( res.docs );        // §P11.10: worst rot first — see that function
+    sortWeakGroupsByPath( res.weakGroups );
     return res;
 }
 
@@ -2360,6 +2486,16 @@ inline void writeAnchor( std::FILE* out, const Anchor& a, const XmlEscaper& ex )
         std::fprintf( out, " tgt=\"%s\"", ex( a.tgt ).c_str() );
     }
     std::fprintf( out, "/>" );
+}
+
+// A weak-file-line DISCLOSURE row — never a verdict, so it carries none of writeAnchor's why=/k= vocabulary.
+// resolves-to= is the one new fact: the symbol flipimpact-style innermost-at-line resolution says spans
+// `want`, given away for free because the corpus pass to compute it already ran. The verb still does not
+// know whether that is the symbol the DOC meant — it only stopped hiding the one thing it does know.
+inline void writeWeakAnchor( std::FILE* out, const Anchor& a, const XmlEscaper& ex )
+{
+    std::fprintf( out, "<w l=\"%u\" c=\"%u\" ref=\"%s\" resolves-to=\"%s\"/>",
+                  a.line, a.col, ex( a.ref ).c_str(), ex( a.resolvesTo ).c_str() );
 }
 
 // --doc-drift --gateability: turn "CI stays non-gating forever" into a finishable to-do list. Every doc
@@ -2448,6 +2584,14 @@ inline constexpr const char* kDocDriftLegend =
     "spelling is a PageRank score instead. Docs are ordered by LIVE drift descending (path breaks ties), "
     "so the worst rot leads and a fully dated doc, which is drift zero by construction, sinks on the "
     "same key. Prose claims, Status lines and dates are NOT checked. "
+    "A `path:A-B` RANGE gets one more structural check: why=\"range-straddles\" fires when A's innermost "
+    "symbol does not reach B (got= then names whatever occupies B instead, tgt= that site), regardless of "
+    "whether the doc names a symbol. weak-file-line, the one unchecked reason that names no symbol, gets a "
+    "FREE disclosure instead of a verdict: <weak-file-line p= n=> groups, one per doc, list every such anchor "
+    "whose line DOES sit inside an indexed symbol, and each <w> row's resolves-to= names it — the verb still "
+    "does not know if that is the symbol the doc meant. This section sits beside, not inside, the <doc> rows: "
+    "a doc can appear in it while still counting toward clean=, and every row it lists still counts once in "
+    "the unchecked r=\"weak-file-line\" tally below. "
     // §B9.1: this legend enumerates its vocabulary explicitly, which is what made the four counters
     // it did NOT define read as an oversight rather than a convention — and one of them, corpus=,
     // openly disagrees with the map's own files= with no note. Same shape §A10.11 used for the --deps
@@ -2480,6 +2624,31 @@ inline constexpr const char* kDocDriftLegend =
     "wrong. corpus=\"0\" means the corpus scan never ran at all, which happens only when the docs raised "
     "no anchor SHAPE whatsoever — prose ones included — so anchors=\"0\" beside a non-zero prose= still "
     "scanned, and still reports the corpus it scanned. -->";
+
+// weak-file-line DISCLOSURE, grouped by doc — independent of the <doc> loop in writeDocDriftPage, so a doc
+// that is otherwise "clean" (drift="0") can still carry this section (the F5 finding's own repro: a doc
+// reads drift="0" while sitting on anchors this walk could have named a symbol for and did not). Each row is
+// still counted once in the unchecked r="weak-file-line" tally; this is an additive VIEW onto the same
+// anchors, so checked + unchecked == anchors is untouched. Its own function, not inlined into
+// writeDocDriftPage, because it is a genuinely separate concern (a different loop over a different
+// container) rather than a shortcut around the complexity floor.
+inline void writeWeakDisclosures( std::FILE* out, const DriftResult& res, std::size_t maxPerDoc, const XmlEscaper& ex )
+{
+    for( const WeakDocGroup& g : res.weakGroups )
+    {
+        std::fprintf( out, "<weak-file-line p=\"%s\" n=\"%zu\">", ex( g.path ).c_str(), g.rows.size() );
+        const std::size_t shownCount = std::min( g.rows.size(), maxPerDoc );
+        for( std::size_t rowIndex = 0; rowIndex < shownCount; ++rowIndex )
+        {
+            writeWeakAnchor( out, g.rows[ rowIndex ], ex );
+        }
+        if( g.rows.size() > shownCount )
+        {
+            std::fprintf( out, "<more weak=\"%zu\"/>", g.rows.size() - shownCount );
+        }
+        std::fprintf( out, "</weak-file-line>" );
+    }
+}
 
 // §P8: --limit/--offset used to be accepted and IGNORED here — every run emitted the same full <doc> list,
 // so a paging loop over --doc-drift never advanced. `pageLimit`/`pageOffset` (0 = un-paginated, the pre-§P8
@@ -2553,6 +2722,8 @@ inline void writeDocDriftPage( std::FILE* out, const DriftResult& res, std::size
         }
         std::fprintf( out, "</doc>" );
     }
+
+    writeWeakDisclosures( out, res, maxPerDoc, ex );
 
     // The two tallies print the same shape from two tables, so one emitter serves both — the reader can see
     // WHICH reason or WHICH dating mark carried each count rather than taking the header number on trust.

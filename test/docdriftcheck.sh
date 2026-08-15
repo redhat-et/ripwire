@@ -58,6 +58,9 @@ rows(){ printf '%s' "$F" | tr '<' '\n' | grep '^a k='; }
 attr(){ printf '%s' "$F" | sed -n "s/.*<doc-drift[^>]* $1=\"\([^\"]*\)\".*/\1/p"; }
 # the rows of ONE doc element, so a per-doc assertion cannot be satisfied by another doc's row
 docrows(){ printf '%s' "$F" | tr '<' '\n' | sed -n "/^doc p=\"$1\"/,/^\/doc/p" | grep '^a k='; }
+# the <w .../> disclosure rows of ONE weak-file-line group — a SIBLING section to <doc>, not nested in it
+# (F5: a doc can carry these while staying clean, so they must never live inside the drift-gated <doc> loop)
+weakrows(){ printf '%s' "$F" | tr '<' '\n' | sed -n "/^weak-file-line p=\"$1\"/,/^\/weak-file-line/p" | grep '^w l='; }
 
 # ── 1) file:line — the three failure modes, each named separately ─────────────────────────────────────
 rows | grep -q 'k="file-line" .*why="line-moved" ref="code.h:23" sym="stableHelper" got="movedHelper"' \
@@ -73,6 +76,27 @@ rows | grep -q 'why="missing-file" ref="deletedFile.h:12"' \
 # The holding anchor is INSIDE stableHelper — reporting it would be the cry-wolf failure.
 rows | grep -q 'ref="code.h:18"' && no "code.h:18 reported, but that line IS inside stableHelper" \
                                  || ok "code.h:18 (inside stableHelper) is silent — true negative"
+
+# ── 1b) F5: weak-file-line resolves-to= disclosure, and the path:A-B range-straddle check ───────────────
+# resolves-to= is a FACT (which symbol the free innermost-at-line resolution names), never a verdict — the
+# verb still declines to check whether it is the symbol the doc meant, so this lives OUTSIDE <doc> (§1c below).
+weakrows 'NOTES.md' | grep -q 'l="41" c="71" ref="code.h:19" resolves-to="stableHelper"' \
+    && ok "weak-file-line resolves-to=: code.h:19 (no symbol named) resolves to stableHelper" \
+    || { no "weak-file-line resolves-to= row missing/wrong"; weakrows 'NOTES.md'; }
+
+rows | grep -q 'k="file-line" .*why="range-straddles" ref="code.h:18-23" got="movedHelper" tgt="code.h:23"' \
+    && ok "range-straddles: code.h:18-23 starts in stableHelper and ends in movedHelper" \
+    || { no "range-straddles row missing/wrong"; rows | grep 'range-straddles'; }
+
+rows | grep -q 'code.h:22-24' && no "code.h:22-24 flagged, but the whole range sits inside movedHelper" \
+                              || ok "code.h:22-24 (healthy in-range span) is silent — true negative"
+
+# ── 1c) the weak-file-line disclosure is a SIBLING of <doc>, independent of clean= ───────────────────────
+printf '%s' "$F" | grep -q '<weak-file-line p="NOTES.md" n="1">' \
+    && ok "<weak-file-line p= n=> groups by doc, one row here (n=\"1\")" || no "the weak-file-line group for NOTES.md is missing"
+printf '%s' "$F" | grep -qE '<doc p="NOTES\.md"[^>]*drift="[0-9]+"' \
+    && ok "NOTES.md's <doc> row is untouched by the disclosure section (same element, same attributes)" \
+    || no "NOTES.md's <doc> row changed shape"
 
 # ── 2) symbol mentions ────────────────────────────────────────────────────────────────────────────────
 rows | grep -q 'k="symbol" .*why="undefined" ref="deletedHelper"' \
@@ -112,14 +136,15 @@ T="$( attr dated )"
 [ -n "$A" ] && [ "$(( C + U ))" = "$A" ] \
     && ok "checked($C) + unchecked($U) == anchors($A) — nothing dropped silently" \
     || no "the honesty invariant broke: checked=$C unchecked=$U anchors=$A"
-[ "$D" = "10" ] && ok "drift=10 — the seven labelled true positives plus the three undated record-lane rows" \
-                || no "drift=$D, expected 10"
+[ "$D" = "11" ] && ok "drift=11 — the seven labelled true positives, the range-straddle row, plus the three undated record-lane rows" \
+                || no "drift=$D, expected 11"
 [ "$P" = "1" ] && ok "prose=1 — 'absent_from_all_code = 42' counted as prose, not claimed as an anchor" \
                || no "prose=$P, expected 1"
 
 # NOTES.md carries no date anywhere, so the record lane must leave every one of its rows alone. This is the
-# assertion that pins the SPLIT as behaviour-preserving for an undated doc: same seven rows, none re-bucketed.
-[ "$( docrows 'NOTES.md' | grep -c . )" = "7" ] && ok "NOTES.md still reports exactly its seven rows" \
+# assertion that pins the SPLIT as behaviour-preserving for an undated doc: eight rows (the original seven
+# plus the range-straddle row F5 added), none re-bucketed.
+[ "$( docrows 'NOTES.md' | grep -c . )" = "8" ] && ok "NOTES.md still reports exactly its eight rows" \
                                                 || no "NOTES.md row count changed: $( docrows 'NOTES.md' | grep -c . )"
 docrows 'NOTES.md' | grep -q 'dated-record' && no "an undated doc's rows were filed as dated records" \
                                             || ok "NOTES.md is undated, so all seven rows stay LIVE in drift="
