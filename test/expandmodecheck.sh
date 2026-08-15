@@ -47,6 +47,13 @@ cd "$TMP"
 fileBytes="$( wc -c <"$TMP/fix/small.c" | tr -d ' ' )"
 
 # ── (1) small-file symbol: the whole file is the cheapest complete answer ─────────────────────────────
+# V1 fix (verifier finding 1, 2026-08-15): smallProbe is an EXACT-NAME match, so its own default bundle
+# is now the LEAN (topk_default="0") body — not map+body — per the same V1 default arm (2) already
+# accounts for on bigProbe007. That makes small.c's fixture genuinely byte-minimal a REQUIREMENT, not
+# cosmetic: with the estimator's phantom-map bug fixed, a lean body beats any file bytes it does not
+# have to pay a descriptive header comment for, so small.c carries NO leading comment (unlike big.c,
+# whose bulk swamps a header either way) — a comment here was previously masking the correct comparison
+# by inflating the file side just enough to keep mode="whole-file" for the wrong reason.
 "$BIN" fix --expand=smallProbe --no-cache >"$TMP/small.xml" 2>/dev/null
 grep -q 'mode="whole-file"' "$TMP/small.xml" \
     && ok "(1) small-file --expand serves mode=\"whole-file\"" \
