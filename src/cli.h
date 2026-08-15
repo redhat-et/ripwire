@@ -92,11 +92,19 @@ struct Config
     bool             packSignatures  = false;              // --pack-signatures: body-elided decl skeletons (~59-68% fewer bytes at top-10/50/100, 68% at the default top-50; root-neutralised, since the repeated path prefix is charged in both forms and is not what this elides)
     std::string_view query;                                // --query=TERMS: pure lexical (BM25) retrieval
     std::string_view grep;                                 // --grep=STR: parallel literal scan + enclosing symbol + the matched line
+    bool             grepGiven = false;                    // G1/F1: --grep=/--regex= was already given once this run — a SECOND occurrence
+                                                             // used to silently overwrite the first (the pattern a caller reaches for when they
+                                                             // MEAN "and"); refused instead, naming the real AND spelling. See kViewFlags' dupGuardFlag.
     bool             grepRegex = false;                    // --regex=PAT: like --grep but the pattern is an ECMAScript regex
     bool             noPrefilter = false;                  // --no-prefilter: (debug) skip the regex→trigram prefilter, full-scan every file — the soundness oracle for --regex
     int              grepBefore = 0;                       // --grep-before=N (ripgrep -B): N source lines emitted before each --grep/--regex hit (0 = off, unchanged output)
     int              grepAfter  = 0;                       // --grep-after=N  (ripgrep -A): N source lines emitted after each hit
                                                              // --grep-context=N (ripgrep -C): shorthand that sets BOTH grepBefore and grepAfter to N
+    // G3 (2026-08-15 harvest): boolean AND/NOT over --grep's already-collected hits — a flat term list,
+    // no CNF, no parens (OR stays --regex='A|B'). Literal-only: refused together with --regex (validateConfig).
+    std::vector<std::string_view> grepAnd;                 // --and=TERM (repeatable): every term must ALSO be present
+    std::vector<std::string_view> grepNot;                 // --not=TERM (repeatable): the term must be ABSENT
+    std::string_view              grepScope;               // --grep-scope=line|file (default line; validated in validateConfig)
     std::string_view match;                                // --match=QUERY: tree-sitter structural query (shape search)
     bool             lint = false;                         // --lint: built-in AST checks (rides the same query pass)
     std::string_view lintRulesDir;                         // --lint-rules=DIR: load user YAML lint rules (ast-grep style) — runs alongside/instead of --lint
@@ -890,6 +898,11 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --grep=STR | --regex=PAT   literal / regex search + enclosing symbol + the matched line; exhaustive literal scan.\n"
         "                               For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).\n"
         "      --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit\n"
+        "      --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex)\n"
+        "      --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)\n"
+        "      --grep-scope=line|file   modifies --and=/--not=: line (default) requires the SAME matched line; file requires\n"
+        "                               anywhere in the same file. Second occurrence of --grep=/--regex= itself REFUSES\n"
+        "                               (naming --and= as the AND spelling) rather than silently overwriting the pattern.\n"
         "    --match=QUERY              tree-sitter structural (shape) query\n"
         "    --query=TERMS              raw BM25 ranking (debug); use --for\n\n"
         "  zoom the detail ladder\n"
@@ -1791,6 +1804,13 @@ struct ViewFlag
     const char*         example = nullptr;         // runnable, and inside that domain — Refuse rows only
     bool Config::*      isSetFlag     = nullptr;   // companion bool the =VALUE form also sets (--owners= ⇒ owners)
     bool Config::*      isSetFlagAlso = nullptr;   // a SECOND companion (--quality-ack= ⇒ qualityAck + qualityDelta)
+    // G1/F1: a GENERIC "already given" guard, distinct from isSetFlag's verb-selection meaning — two rows
+    // (--grep= and --regex=) point at the SAME member (Config::grep) and a second occurrence of EITHER used
+    // to silently overwrite the first. When set, a row REFUSES (dupMessage, exit-1-with-example, the house
+    // refusal shape) instead of assigning, the moment `c.*dupGuardFlag` is already true; on a clean first
+    // assignment it flips the flag true so a genuine second occurrence — of either spelling — is caught.
+    bool Config::*      dupGuardFlag  = nullptr;
+    const char*         dupMessage    = nullptr;   // printed verbatim (with the "ripwire: " lead-in) when dupGuardFlag fires
 };
 
 inline constexpr BoolFlag kBoolFlags[] =
@@ -1907,6 +1927,13 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--with-graph",         &Config::withGraph          },
 };
 
+// G1/F1 — shared by both kViewFlags rows that write Config::grep (--grep= and --regex=): a second
+// occurrence of either used to silently overwrite the pattern from the first (measured: `--grep=foo
+// --grep=bar` exits 0 with pattern="bar", `foo` discarded, nothing on stderr). The natural spelling an
+// agent reaches for when it means "AND" is a second --grep=, so the refusal names that spelling directly
+// rather than a generic "flag given twice".
+inline constexpr const char* kGrepDupMessage = "--grep given twice; did you mean --grep='A' --and='B'?";
+
 inline constexpr ViewFlag kViewFlags[] =
 {
     // server + self-eval inputs
@@ -1932,7 +1959,8 @@ inline constexpr ViewFlag kViewFlags[] =
 
     // search and the --for lens
     { "--query=",       &Config::query           , EmptyValue::Refuse, "search terms",                           "--query=\"teleport pagerank\"" },
-    { "--grep=",        &Config::grep            , EmptyValue::Refuse, "a literal string to search for",         "--grep=parseArgs" },
+    { "--grep=",        &Config::grep            , EmptyValue::Refuse, "a literal string to search for",         "--grep=parseArgs",
+      nullptr, nullptr, &Config::grepGiven, kGrepDupMessage },
     { "--match=",       &Config::match           , EmptyValue::Refuse, "a tree-sitter s-expression pattern",     "--match='(call_expression)'" },
     { "--lint-rules=",  &Config::lintRulesDir    , EmptyValue::Refuse, "a rules directory path",                 "--lint-rules=lintrules/" },
     { "--lint-select=", &Config::lintSelect      , EmptyValue::Refuse, "a comma-separated PREFIX list, or '*'",  "--lint-select=cache-,goto" },
@@ -1987,7 +2015,7 @@ inline constexpr ViewFlag kViewFlags[] =
     // --regex= sets the pattern AND the regex-mode bool; it already called refuseEmptyValue directly and the
     // table prints the SAME sentence, so this row is byte-identical to the arm it replaces.
     { "--regex=",          &Config::grep            , EmptyValue::Refuse, "a regular expression",                             "--regex='parse[A-Z]'",
-      &Config::grepRegex },
+      &Config::grepRegex, nullptr, &Config::grepGiven, kGrepDupMessage },
 
     // the bare-or-filter forms: "" is a REAL value here - `--situ=` means exactly `--situ`, and the value is
     // an OPTIONAL narrowing filter. Recorded rather than silently accepted (that distinction is the column).
@@ -2154,8 +2182,8 @@ inline constexpr IntFlag kIntFlags[] =
 //   • a WARNING on accept      --most-important-last / --stable / --no-auto-order (deprecated aliases that
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
-inline constexpr std::size_t kHandWrittenFlagArms = 18;   // +1: --color-by= (enum-value arm)
-inline constexpr std::size_t kTotalFlagArms = 178;  // +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags)
+inline constexpr std::size_t kHandWrittenFlagArms = 21;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=)
+inline constexpr std::size_t kTotalFlagArms = 181;  // +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2182,6 +2210,14 @@ inline ViewFlagMatch applyViewFlag( std::string_view arg, Config& c )
         if( value.empty() && vf.onEmpty == EmptyValue::Refuse )
         { refuseEmptyValue( vf.prefix, vf.needs, vf.example );  return ViewFlagMatch::Refused; }
 
+        // G1/F1: a repeat of a flag that silently overwrote its own prior value — checked BEFORE the
+        // assignment so the first value is never clobbered on the way to refusing.
+        if( vf.dupGuardFlag != nullptr && c.*vf.dupGuardFlag )
+        {
+            std::fprintf( stderr, "ripwire: %s\n", vf.dupMessage );
+            return ViewFlagMatch::Refused;
+        }
+
         c.*vf.member = value;
         // §B5: the companion bools the migrated arms used to set by hand — `--owners=SYM` selects the verb
         // AND narrows it, and a table that could only assign the value would have had to leave those 23 arms
@@ -2193,6 +2229,10 @@ inline ViewFlagMatch applyViewFlag( std::string_view arg, Config& c )
         if( vf.isSetFlagAlso != nullptr )
         {
             c.*vf.isSetFlagAlso = true;
+        }
+        if( vf.dupGuardFlag != nullptr )
+        {
+            c.*vf.dupGuardFlag = true;
         }
         return ViewFlagMatch::Assigned;
     }
@@ -2845,6 +2885,22 @@ inline void validateModifierGuards( Config& c ) noexcept
         c.ok = false;
     }
 
+    // G3: --and=/--not=/--grep-scope= modify --grep=STR only — literal, not --regex=PAT (a flat substring
+    // term list has no meaning against a regex's own alternation/anchoring, and ugrep's own CNF stays
+    // regex-string-only for the same reason). Alone (no --grep) they would silently no-op like the
+    // modifiers above; combined with --regex they would silently ignore the extra terms. Both refuse loudly.
+    if( ( !c.grepAnd.empty() || !c.grepNot.empty() || !c.grepScope.empty() ) && c.grep.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --and=/--not=/--grep-scope= modify --grep=STR — pass it too (e.g. ripwire <dir> --grep=stale --and=mcp)\n" );
+        c.ok = false;
+    }
+    if( ( !c.grepAnd.empty() || !c.grepNot.empty() ) && c.grepRegex )
+    {
+        std::fprintf( stderr, "ripwire: --and=/--not= are literal-only and do not apply to --regex=PAT — "
+                              "use --grep=STR --and=... instead, or fold the term into the regex itself (e.g. --regex='A.*B')\n" );
+        c.ok = false;
+    }
+
     // --with-graph splices a mermaid block into ONE bundle's closing </ctx> — only --for and --pack-task ever
     // call packGraphBlock (main.cpp); --partition already warns-and-continues (N+1 bundles, no single graph to
     // splice into) rather than silently dropping it, so it is excluded here on purpose. Alone (no --for/
@@ -3260,6 +3316,32 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 // exact-match chain to the generic "unknown flag" arm, which told the agent the flag itself does not
                 // exist — a fabrication the agent then believes. `--order=`/`--export=` already name the value and
                 // list the supported set; these two now do the same.
+            }
+            // G3: repeatable, so a kViewFlags row (one member per flag) cannot hold it — same shape as
+            // --exclude= above. An empty value is refused here rather than silently pushing "" (a term that
+            // is a substring of everything would make --and= vacuous and --not= reject every hit).
+            else if( startsWith( a, "--and=" ) )
+            {
+                if( a.size() == 6 )
+                { refuseEmptyValue( "--and=", "a literal string that must ALSO be present", "--and='mcp'" );  c.ok = false; return c; }
+                c.grepAnd.push_back( a.substr( 6 ) );
+            }
+            else if( startsWith( a, "--not=" ) )
+            {
+                if( a.size() == 6 )
+                { refuseEmptyValue( "--not=", "a literal string that must be ABSENT", "--not='deprecated'" );  c.ok = false; return c; }
+                c.grepNot.push_back( a.substr( 6 ) );
+            }
+            else if( startsWith( a, "--grep-scope=" ) )
+            {
+                const std::string_view v = a.substr( 13 );
+                if( v != "line" && v != "file" )
+                {
+                    std::fprintf( stderr, "ripwire: --grep-scope=%.*s — unknown value (supported: line|file), e.g. --grep-scope=file\n",
+                                  int( v.size() ), v.data() );
+                    c.ok = false; return c;
+                }
+                c.grepScope = v;
             }
             else if( startsWith( a, "--rank-by=" ) )
             {

@@ -24,6 +24,7 @@
 #include "docdrift.h"      // the shared doc-anchor verifier (doc_drift)
 #include "exemplar.h"      // §B6 M2: selectExemplar + kExemplarSelectionRule — the ONE selector/wording both surfaces use
 #include "mcprefusal.h"    // §B6 M7/M8/M9: the shared verb+field refusal table both MCP arms speak
+#include "sarif.h"         // G1 (2026-08-15): rw::sarif::rootRelativeUri/rootPrefixOf — grepHitsJson's root-relative `file` (CLI ≡ MCP, no re-derivation)
 
 #include <filesystem>      // §B6 M3: the shared root-path existence/directory check (mcpRootRefusal below)
 #include <span>            // std::span — connectemit::rebuildFromLegs reads the caller's retained-leg mask
@@ -640,13 +641,31 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     const bool scanExhaustive = collected.cleanScan();
     const bool windowWhole    = grepPage.begin == 0 && grepPage.end == collected.raw.size();
 
+    // G1 (2026-08-15 harvest, report-memgraph §F6): `file` is root-relative when this is a single-root
+    // index (ing.realPaths empty — the same condition the CLI emitter gates on), reusing sarif.h's strip
+    // rather than re-deriving it (grepCollect's own rule: shared logic so the two surfaces cannot diverge).
+    // Multi-root already carries the compact `<label>/<relpath>` identity untouched.
+    const bool        singleRootJ = ing.realPaths.empty();
+    const std::string rootPrefixJ = singleRootJ ? sarif::rootPrefixOf( root ) : std::string();
+    const auto         pathForJ   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return singleRootJ ? sarif::rootRelativeUri( ing.files[ fileId ], rootPrefixJ ) : std::string_view( ing.files[ fileId ] );
+    };
+
     std::string out = "{\"pattern\":\"" + mcpdetail::jsonEscape( pattern )
-                    + "\",\"files\":" + std::to_string( filesMatched )
+                    // G1: mirrors the CLI <grep root="…"> — same condition (singleRootJ), same fact, right
+                    // after pattern like the CLI's attribute order (mcpclidiffcheck.sh's LENS2 fact-parity).
+                    + ( singleRootJ ? ( "\",\"root\":\"" + mcpdetail::jsonEscape( root ) + "\"" ) : "\"" )
+                    + ",\"files\":" + std::to_string( filesMatched )
                     + ( isPaging ? std::string{} : ( ",\"total\":" + std::to_string( collected.raw.size() ) ) )
                     + pageDisclosure( pagebuf, sizeof( pagebuf ), rowCount, collected.raw.size(), grepPage.end,
                                       page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax )
                     + ",\"hits_capped\":" + ( collected.isBudgetReached ? "true" : "false" )
                     + ( scanExhaustive && windowWhole ? ",\"complete\":true" : "" )
+                    // G4 (2026-08-15 harvest, report-ugrep §F6): the CLI's corpus_excluded=/corpus_oversize=
+                    // twins — present only when non-zero, same condition as the CLI emitter.
+                    + ( ing.crawlSkips.excludedFiles > 0 ? ( ",\"corpus_excluded\":" + std::to_string( ing.crawlSkips.excludedFiles ) ) : std::string() )
+                    + ( !ing.skippedOversize.empty() ? ( ",\"corpus_oversize\":" + std::to_string( ing.skippedOversize.size() ) ) : std::string() )
                     + ",\"order\":\"SOURCE files before test/bench files before docs, then path and line\""
                     + ",\"hits\":[";
     bool first = true;
@@ -657,8 +676,14 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
             out += ",";
         }
         first = false;
-        out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[ h.fileId ] ) + "\",\"line\":" + std::to_string( h.line )
-             + ",\"in\":\"" + mcpdetail::jsonEscape( h.enclosing ) + "\"}";
+        // in= honesty (G1): omit the key entirely rather than emit "in":"" when no symbol encloses the hit
+        // — an absent key reads as "not attributed", never "file scope" (the CLI's matching `in=` omission).
+        out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( pathForJ( h.fileId ) ) ) + "\",\"line\":" + std::to_string( h.line );
+        if( !h.enclosing.empty() )
+        {
+            out += ",\"in\":\"" + mcpdetail::jsonEscape( h.enclosing ) + "\"";
+        }
+        out += "}";
     }
     out += "]";
     // R1 (the 2026-08-12 usage mine): the CLI <enc>/<suggest> twins, appended AFTER "hits" so the

@@ -10275,7 +10275,20 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // grepBefore/grepAfter default to 0 (--grep-context/-before/-after unset) ⇒ GrepHit::before/after
     // stay empty and the <hit> emission below takes the ORIGINAL self-closing path byte-for-byte —
     // this is the byte-identical-when-unset contract.
-    const GrepCollection       found    = grepCollect( ing, pat, cfg.grepRegex, cfg.noPrefilter );
+    GrepCollection             found    = grepCollect( ing, pat, cfg.grepRegex, cfg.noPrefilter );
+    // G3 (2026-08-15 harvest, report-ugrep §F2): boolean AND/NOT as a post-filter over the collected raw
+    // hits — literal-only, already refused together with --regex in validateConfig. Built here (not in
+    // Config) so the CLI value strings (string_views into argv) become owned std::strings exactly once.
+    std::vector<GrepTerm> grepTerms;
+    grepTerms.reserve( cfg.grepAnd.size() + cfg.grepNot.size() );
+    for( const std::string_view t : cfg.grepAnd ) { grepTerms.push_back( GrepTerm{ std::string( t ), false } ); }
+    for( const std::string_view t : cfg.grepNot ) { grepTerms.push_back( GrepTerm{ std::string( t ), true } ); }
+    const GrepScope    grepScopeVal    = ( cfg.grepScope == "file" ) ? GrepScope::File : GrepScope::Line;
+    std::uint32_t      termsSuppressed = 0;
+    if( !grepTerms.empty() )
+    {
+        found = grepApplyBooleanTerms( ing, std::move( found ), std::span<const GrepTerm>( grepTerms ), grepScopeVal, termsSuppressed );
+    }
     const std::size_t          hitCount = found.raw.size();
     // files= counts the whole COLLECTED set, never the printed page — it is a property of the search, so it
     // must read the same on every page of a walk (it used to be counted over the window's rows).
@@ -10335,16 +10348,59 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     const bool windowWhole    = grepPage.begin == 0 && grepPage.end == hitCount;
     const char* const completeAttr = ( scanExhaustive && windowWhole ) ? " complete=\"1\"" : "";
     char              grab[ 192 ];
+    // G1 (2026-08-15 harvest, report-memgraph §F6): a single-root run's `ing.files` carry the crawl root's
+    // OWN spelling (a leading "./" for a relative root, the full absolute path for an absolute one — see
+    // sarif.h's rootRelativeUri, which this reuses rather than re-deriving the same strip). Multi-root
+    // workspaces already carry the compact `<label>/<relpath>` identity (model.h) and are left untouched —
+    // scoped out here, not silently degraded: `root=` is simply absent and `p=` reads as it always did.
+    const bool        singleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string rootPrefix = singleRoot ? rw::sarif::rootPrefixOf( std::string( cfg.roots[0] ) ) : std::string();
+    const auto         pathFor   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return singleRoot ? rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix ) : std::string_view( ing.files[ fileId ] );
+    };
+    std::string rootAttr;
+    if( singleRoot )
+    {
+        rootAttr = " root=\"" + ex( cfg.roots[0] ) + "\"";
+    }
+    // Collapse (byte-identical match text within one file folding into one <hit> + <at> sites, search.h's
+    // grepGroupByFile) is safe only on the UNPAGINATED default view: paging math runs upstream in RAW-hit
+    // space (the §A0/§A1 seam contract, test/grepseamcheck.sh) and a paged window's <hit> COUNT must stay
+    // the window size shown= already promises. Context lines are per-site too — folding would drop them.
+    const bool collapseOn = cfg.pageLimit == 0 && cfg.pageOffset == 0 && cfg.grepBefore == 0 && cfg.grepAfter == 0;
     // §P8 collision, documented not renamed: both `in=` meanings are load-bearing (10 and 13+ consumers,
     // two byte-exact goldens, five SKILL.md files), so the legend names the other one instead.
     // §A10.3: the ORDER is stated, because the rows are silently reordered otherwise — whereis's legend
     // states its ordering in full and grep's said nothing.
     // §B12.4 in-band (W3FIX): same shared clause as --impact, so limit="0" is DEFINED on the first screen of
     // the two verbs an agent walks most, not only in --help and pageview.h.
-    std::printf( "<!-- ripwire grep: parallel literal/regex scan; each hit carries its matched line (m) and enclosing symbol (in=, "
-                 "a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
-                 "ORDER: SOURCE files before test/bench files before docs, then path and line. "
-                 "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (collection budget reached). "
+    std::printf( "<!-- ripwire grep: parallel literal/regex scan; hits GROUP by file under <f p=\"…\">, each <hit> carrying its LINE "
+                 "(l=), matched text (m) and enclosing symbol (in=, a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar; "
+                 "ABSENT (never an empty in= value) when no symbol encloses the hit, which is NOT the same claim as file scope). "
+                 "root= on the root element is the crawl root every <f p=…> is now RELATIVE to (single-root runs only; absent ⇒ p= is the "
+                 "path ingest itself used, unchanged). ORDER: SOURCE files before test/bench files before docs, then path and line. "
+                 "shown=/capped= = rows printed vs found (a count of underlying HITS, the same unit hits= uses, not of printed <hit> "
+                 "elements); hits_capped=\"1\" ⇒ hits= is a FLOOR (collection budget reached). "
+                 // G3 (2026-08-15 harvest): terms=/scope=/terms_suppressed= appear ONLY when the run passed
+                 // and/not — deliberately no literal "--and"/"--not" substring (illegal "--" digraph inside
+                 // an XML comment; spelled without the leading dashes, matching this legend's own convention).
+                 "terms= (present only with and/not) restates the whole boolean query as it was EVALUATED: the base pattern, then "
+                 "each and term prefixed +, each not term prefixed -. scope=line (default) requires every term on the SAME matched "
+                 "line as the base pattern; scope=file requires every term ANYWHERE in the file, independent of which line matched. "
+                 "terms_suppressed= counts the raw hits the boolean filter REJECTED — a different axis from hits_capped= (a collection-"
+                 "budget ceiling): hits=/shown=/etc. already read the FILTERED count, so terms_suppressed= exists only so a reader can "
+                 "recover how many the un-filtered scan would have shown. "
+                 // G1 (2026-08-15 harvest): byte-identical match text within one file's hits on the UNPAGINATED default view folds into
+                 // ONE <hit> row plus <at l=… in=…/> children for the extra sites — n= on the <hit> (present only when >1) is 1+the <at>
+                 // count, so summing n= across a page's <hit> rows recovers shown=. Paging or --grep-context/-before/-after disables the
+                 // fold (a paged window's row count must stay honest; context lines are per-site and would be lost by folding).
+                 // Deliberately no literal "<at " substring above (space after the tag name): row-counting
+                 // gates that scan this legend's OWN comment for "<hit "/"<at " row markers (test/pagingsweepcheck.sh's
+                 // disclose()) would double-count the illustrated example as a real row otherwise.
+                 "A byte-identical match at OTHER sites in the SAME file folds into the first <hit>'s n= (default 1, unset) and an at-tagged "
+                 "sibling element (l=/in=, self-closing) per extra site — never on a paged or grep-context/-before/-after answer (dashes "
+                 "omitted, illegal in an XML comment), where every site keeps its own <hit>. "
                  // R1 (the 2026-08-12 usage mine): the two follow-up answers, defined in-band — the legend is the only prose a mid-task agent
                  // reads, so it carries the honesty duties: <suggest> is labeled SUGGESTIONS (a zero stays "none found"), callers= carries the FLOOR caveat.
                  // Deliberately NO attribute=value literal in the added sentences ("a zero-hit answer", never a quoted hits value): several gates
@@ -10363,12 +10419,52 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "prefilter is a performance switch that may not change the answer, so neither mode claims), a capped or paged listing, "
                  "or a scan that could not read a file; its ABSENCE claims nothing. The enc rows' caller counts stay FLOORS regardless "
                  "— complete= speaks for the hit rows alone. "
+                 // G4 (2026-08-15 harvest): corpus_excluded=/corpus_oversize= — present only when non-zero,
+                 // same absent-means-none convention as skippedOversize itself (model.h). Deliberately no
+                 // literal 'hits="0"' example below (a quoted numeric example — the quality-delta legend's
+                 // own rule, restated here after it bit a naive ` hits="N"` extraction downstream twice).
+                 "corpus_excluded= counts files an exclude filter (or built-in crawl policy) kept OUT of the index entirely; "
+                 "corpus_oversize= counts files the crawl SAW but dropped for exceeding the size ceiling. Both answer what an "
+                 "otherwise-empty answer alone cannot: not in this repo, or in a file that was never scanned — the skipped "
+                 "verb itemizes the rows behind either count. "
                  "%s -->", rw::kPageRaiseCapClause );
-    std::printf( "<grep pattern=\"%s\" files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s>",
-                 ex( pat ).c_str(), filesMatched, hitCount,
+    // G3: terms=/scope=/suppressed= — only when AND/NOT was actually given, so a plain --grep answer
+    // stays byte-identical to before G3 landed (the "purely additive" rule every ripwire flag follows).
+    std::string termsAttr;
+    if( !grepTerms.empty() )
+    {
+        std::string termsList = ex( pat );
+        for( const GrepTerm& t : grepTerms )
+        {
+            termsList += t.negated ? " -" : " +";
+            termsList += ex( t.term );
+        }
+        termsAttr = " terms=\"" + termsList + "\" scope=\"" + ( grepScopeVal == GrepScope::File ? "file" : "line" ) + "\""
+                  + " terms_suppressed=\"" + std::to_string( termsSuppressed ) + "\"";
+    }
+    // G4 (2026-08-15 harvest, report-ugrep §F6): corpus_excluded=/corpus_oversize= — so hits="0" can
+    // distinguish "not in this repo" from "in a file the crawl never scanned" (an --exclude= match, or a
+    // file past --max-file-size). Absent when zero, matching skippedOversize's own "absent means nothing
+    // was skipped" convention (model.h) — never a re-run hint (--skipped already itemizes the rows).
+    std::string corpusAttr;
+    if( ing.crawlSkips.excludedFiles > 0 )
+    {
+        corpusAttr += " corpus_excluded=\"" + std::to_string( ing.crawlSkips.excludedFiles ) + "\"";
+    }
+    if( !ing.skippedOversize.empty() )
+    {
+        corpusAttr += " corpus_oversize=\"" + std::to_string( ing.skippedOversize.size() ) + "\"";
+    }
+    std::printf( "<grep pattern=\"%s\"%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s>",
+                 ex( pat ).c_str(), rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
                                  cfg.pageLimit, cfg.pageOffset, true ),
-                 hitsCapped, completeAttr );
+                 hitsCapped, completeAttr, corpusAttr.c_str() );
+    // G1 (2026-08-15 harvest): hits GROUP by file under <f p="…">, root-relative when this is a single-root
+    // run (report-memgraph §F6: the absolute root prefix alone was 42.5% of a real --grep payload; the
+    // repeated-per-hit path was report-octocode §F1's 31.4%). Byte-identical text within one file's group
+    // folds via grepGroupByFile (search.h) when collapseOn — n= on the row (present only >1) plus <at l=…
+    // in=…/> children carry the folded sites (report-graphrag Finding 2, 18.7% on a real corpus).
     // <m> = the Matched line itself, in the same one-letter CDATA shape as <b>efore and <a>fter (P5:
     // a hit used to say WHERE the pattern is but never WHAT it matched — with the context flags it
     // printed the lines around the hit and skipped the hit's own line, and without them it printed no
@@ -10376,26 +10472,49 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // for). Always emitted, in before → matched → after reading order, so a <hit> is never
     // self-closing now. appendCdataSafe (serialize.h) rather than the local cdataSafe lambda: the
     // matched line is arbitrary file bytes, so invalid UTF-8 must be scrubbed too, not just C0.
-    for( std::size_t hitIndex = 0; hitIndex < hits.size(); ++hitIndex )   // `hits` IS the window — grepEnrich only built these rows
+    for( const GrepFileGroup& group : grepGroupByFile( std::span<const GrepHit>( hits ), collapseOn ) )
     {
-        const GrepHit& h = hits[ hitIndex ];
-        std::printf( "<hit p=\"%s:%u\" in=\"%s\">", ex( ing.files[ h.fileId ] ).c_str(), h.line, ex( h.enclosing ).c_str() );
-        if( !h.before.empty() )
+        std::printf( "<f p=\"%s\">", ex( pathFor( group.fileId ) ).c_str() );
+        for( const GrepCollapsedHit& c : group.hits )
         {
-            const std::string safe = cdataSafe( h.before );
-            std::printf( "<b><![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]></b>" );
+            const GrepHit& h = c.hit;
+            std::printf( "<hit l=\"%u\"", h.line );
+            if( !h.enclosing.empty() )                // in= honesty: ABSENT means no enclosing symbol, never in=""
+            {
+                std::printf( " in=\"%s\"", ex( h.enclosing ).c_str() );
+            }
+            if( !c.more.empty() )
+            {
+                std::printf( " n=\"%zu\"", c.more.size() + 1 );   // 1 (this row) + the folded sites — sums to shown=
+            }
+            std::printf( ">" );
+            if( !h.before.empty() )
+            {
+                const std::string safe = cdataSafe( h.before );
+                std::printf( "<b><![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]></b>" );
+            }
+            {
+                std::string safe;
+                appendCdataSafe( h.text, safe );
+                std::printf( "<m><![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]></m>" );
+            }
+            if( !h.after.empty() )
+            {
+                const std::string safe = cdataSafe( h.after );
+                std::printf( "<a><![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]></a>" );
+            }
+            for( const GrepHitSite& site : c.more )
+            {
+                std::printf( "<at l=\"%u\"", site.line );
+                if( !site.enclosing.empty() )
+                {
+                    std::printf( " in=\"%s\"", ex( site.enclosing ).c_str() );
+                }
+                std::printf( "/>" );
+            }
+            std::printf( "</hit>" );
         }
-        {
-            std::string safe;
-            appendCdataSafe( h.text, safe );
-            std::printf( "<m><![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]></m>" );
-        }
-        if( !h.after.empty() )
-        {
-            const std::string safe = cdataSafe( h.after );
-            std::printf( "<a><![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]></a>" );
-        }
-        std::printf( "</hit>" );
+        std::printf( "</f>" );
     }
 
     // ── R1b: the <enc> block — the map's context on the answer, no second call (helper above) ──────

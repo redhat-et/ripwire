@@ -1618,6 +1618,185 @@ inline std::vector<GrepHit> grepHits( const IngestResult& ing, const std::string
     return grepEnrich( ing, std::span<const GrepRawHit>( collected.raw ).first( rowCount ), ctxBefore, ctxAfter );
 }
 
+// ─── G1 (2026-08-15 harvest — report-memgraph §F6 / report-octocode §F1 / report-graphrag Finding 2) ──
+//
+// Two of the three measured `--grep` emission facts (report-ugrep's headline): every hit re-printing its
+// full path (42.5% of payload on a repeated-path corpus), and byte-identical match lines never folded
+// (18.7%-38% depending on corpus). Both are pure SERIALIZATION facts derivable from an already-enriched,
+// already-windowed hit list — no new analysis, and (the grepseamcheck rule) shared here so the CLI <f>
+// emitter and the MCP `grep` verb's file grouping cannot diverge.
+//
+// A site folded into an existing row by identical text — same file, byte-identical GrepHit::text — but a
+// DIFFERENT (line, enclosing symbol). Text lives on the PRIMARY hit only; a site never repeats it.
+struct GrepHitSite
+{
+    std::uint32_t line;
+    std::string   enclosing;
+    NodeId        enclosingId = kNoNode;
+};
+
+// One printed row: the primary occurrence (its `text`/`before`/`after` are what prints) plus zero or more
+// additional SITES sharing byte-identical text within the same file. `more` is empty on the common case
+// (no fold), so a row with one occurrence costs nothing extra to represent.
+struct GrepCollapsedHit
+{
+    GrepHit                   hit;
+    std::vector<GrepHitSite>  more;
+};
+
+struct GrepFileGroup
+{
+    std::uint32_t                  fileId;
+    std::vector<GrepCollapsedHit>  hits;
+};
+
+// Groups an already-windowed, already-ordered hit list (grepEnrich's output — tier-then-path, so hits of
+// one file are CONTIGUOUS) into one GrepFileGroup per file. `collapseIdentical` folds every hit whose
+// `text` byte-matches an EARLIER hit already collapsed into this file's group (not adjacency-only: two
+// occurrences of one guard line 40 rows apart in the same file still fold together) into that row's
+// `more` list, in encounter order.
+//
+// CALLER'S OBLIGATION (this is a serialization convenience, not a policy — the policy lives at the call
+// site): collapsing folds rows COUNT-VISIBLE to the caller, so it must never run under a page window the
+// caller cannot also disclose honestly. main.cpp's emitGrepReport only passes collapseIdentical=true on
+// the UNPAGINATED default view (cfg.pageLimit==0 && cfg.pageOffset==0) — paging math (grepCollect/pageWindow,
+// the §A0/§A1 seam contract test/grepseamcheck.sh pins) runs entirely in RAW-hit space upstream of this
+// call, so a paged window's row COUNT must stay the window size the caller already promised via shown=;
+// folding it after the fact would make shown= a lie. The emitter's own `n=` on a folded row (1+more.size())
+// is what lets a reader recover the un-collapsed count without re-deriving it.
+inline std::vector<GrepFileGroup> grepGroupByFile( std::span<const GrepHit> hits, bool collapseIdentical )
+{
+    std::vector<GrepFileGroup> groups;
+    for( const GrepHit& h : hits )
+    {
+        if( groups.empty() || groups.back().fileId != h.fileId )
+        {
+            groups.push_back( GrepFileGroup{ h.fileId, {} } );
+        }
+        GrepFileGroup& group = groups.back();
+        if( collapseIdentical )
+        {
+            bool folded = false;
+            for( GrepCollapsedHit& c : group.hits )
+            {
+                if( c.hit.text == h.text )
+                {
+                    c.more.push_back( GrepHitSite{ h.line, h.enclosing, h.enclosingId } );
+                    folded = true;
+                    break;
+                }
+            }
+            if( folded )
+            {
+                continue;
+            }
+        }
+        group.hits.push_back( GrepCollapsedHit{ h, {} } );
+    }
+    return groups;
+}
+
+// ─── G3 (2026-08-15 harvest — report-ugrep §F2): boolean AND/NOT over an already-collected hit set ────
+//
+// --and=B (repeatable) / --not=C (repeatable): a FLAT term list, no CNF, no parens — OR stays spelled
+// --regex='A|B' (the CNF normalizer ugrep needs to feed one regex string does not apply here). Applied as
+// a POST-FILTER over grepCollect()'s output, never inside the scan hot loop: --grep=PATTERN's primary
+// pattern IS the first required (non-negated) term by construction, so a line/file satisfying the WHOLE
+// conjunction necessarily contains a primary-pattern occurrence, which the unfiltered scan already
+// visited. Scanning on the primary term and rejecting sites that fail the EXTRA terms is therefore
+// complete — which is what makes "AND result == post-filter of the un-AND-ed scan" an identity by
+// construction (test/grepscancheck.sh's oracle re-derives it independently rather than trusting this
+// comment).
+struct GrepTerm
+{
+    std::string term;
+    bool        negated = false;
+};
+
+enum class GrepScope : std::uint8_t { Line, File };
+
+// A line/file SATISFIES the term list iff every non-negated term is present and every negated term is
+// absent — substring search, literal only (regex AND/NOT is out of scope, same as the CLI refusal).
+inline bool grepTextSatisfiesTerms( std::string_view text, std::span<const GrepTerm> terms )
+{
+    for( const GrepTerm& t : terms )
+    {
+        const bool present = text.find( t.term ) != std::string_view::npos;
+        if( present == t.negated )   // required-but-absent, or forbidden-but-present
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Filters `collected.raw` order-preserving (already tier-then-path sorted — filtering never reorders).
+// LINE scope re-reads each candidate hit's own line (grepMatchedLine, the same helper grepEnrich uses);
+// FILE scope reads each candidate file ONCE and keeps/drops its whole hit run against the WHOLE file
+// text. `suppressedOut` receives the count of raw hits the filter removed — disclosed as suppressed= on
+// the root, a DIFFERENT honesty axis from hits_capped= (a budget ceiling, not a term rejection).
+inline GrepCollection grepApplyBooleanTerms( const IngestResult& ing, GrepCollection collected,
+                                             std::span<const GrepTerm> terms, GrepScope scope,
+                                             std::uint32_t& suppressedOut )
+{
+    suppressedOut = 0;
+    if( terms.empty() || collected.raw.empty() )
+    {
+        return collected;
+    }
+    std::vector<GrepRawHit> kept;
+    kept.reserve( collected.raw.size() );
+
+    std::uint32_t             loadedFileId = UINT32_MAX;
+    std::string               fileText;
+    std::vector<std::size_t>  lineStarts;
+    bool                       fileOk = true;   // FILE scope verdict for the currently loaded file
+    const auto ensureFileLoaded = [ & ]( std::uint32_t f )
+    {
+        if( f == loadedFileId )
+        {
+            return;
+        }
+        loadedFileId = f;
+        fileText.clear();
+        if( !docparse::detail::readWholeFile( diskPath( ing, f ), fileText ) )
+        {
+            fileText.clear();   // degrade: an unreadable file satisfies nothing rather than crashing
+        }
+        lineStarts.clear();
+        lineStarts.push_back( 0 );
+        for( std::size_t i = 0; i < fileText.size(); ++i )
+        {
+            if( fileText[i] == '\n' )
+            {
+                lineStarts.push_back( i + 1 );
+            }
+        }
+        if( scope == GrepScope::File )
+        {
+            fileOk = grepTextSatisfiesTerms( fileText, terms );
+        }
+    };
+
+    for( const GrepRawHit& r : collected.raw )
+    {
+        ensureFileLoaded( r.fileId );
+        const bool keep = ( scope == GrepScope::File )
+                         ? fileOk
+                         : grepTextSatisfiesTerms( grepMatchedLine( fileText, lineStarts, r.line ), terms );
+        if( keep )
+        {
+            kept.push_back( r );
+        }
+        else
+        {
+            ++suppressedOut;
+        }
+    }
+    collected.raw = std::move( kept );
+    return collected;
+}
+
 // ─── R1b: the enclosing-symbol context rows (the 2026-08-12 usage mine) ───────────────────────────
 //
 // ONE row per DISTINCT enclosing symbol NAME on the served page, first-appearance order — shared by the
