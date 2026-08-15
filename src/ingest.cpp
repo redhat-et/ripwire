@@ -16,6 +16,8 @@
 #include "infra/namesplit.h"   // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
 #include "infra/fixedStr.h"    // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
 #include "lexindex.h"          // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
+#include "didyoumean.h"        // octocode F3: boundedEditDistance/nearestNameByEditDistance — the ONE near-miss
+                                // primitive, reused for a --match query's node-kind tokens (see nearestNodeKindHint)
 
 #include "infra/Diagnostics.h"
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
@@ -11722,6 +11724,168 @@ GrammarQueries compileGrammarQueries( const TSLanguage* g, const std::vector<Ast
     return gqs;
 }
 
+// octocode F3: the "compiled for no grammar" refusal (below) used to hand back the query verbatim and
+// nothing else, so `(call_expresion)` — one deleted 's' away from the real `call_expression` — got no
+// nearer a fix than staring at the S-expression. This is the hint: pull every token that LOOKS like a
+// node-kind reference out of the failed query text, edit-distance each against the UNION of every linked
+// grammar's own node-kind vocabulary (ts_language_symbol_count/name — the grammar's own runtime-exposed
+// truth, never a hand-maintained list this tree would have to keep in sync), and report the closest.
+//
+// Candidate extraction is a plain text scan, not a second ts_query_new attempt: the query already failed to
+// compile against EVERY linked grammar, so there is no successful parse to introspect. A node-kind token is
+// an identifier immediately after `(` — `(call_expression ...)`, `(binary_expression left: (identifier))` —
+// outside a quoted anonymous-token literal (`"+"`) and outside a `;` line comment; the bare wildcard `_`
+// ("any node") is excluded, and predicates (`#eq?`) / field negation (`!decorator`) never start with an
+// identifier char so they are excluded by construction, not by a special case. A FIELD name (`left:`) is
+// never captured either — it precedes a `:`, never a `(`.
+//
+// Vocabulary: TSSymbolTypeRegular and TSSymbolTypeSupertype only — the two symbol kinds a query ever names
+// bare. TSSymbolTypeAnonymous is a literal token (written as a quoted string, never a bare identifier) and
+// TSSymbolTypeAuxiliary is grammar-internal machinery; suggesting either as "the kind you meant" would be
+// a hint the reader could not type back into a query. Several extensions share one grammar object
+// (.cpp/.cc/.cxx -> tree_sitter_cpp); each distinct TSLanguage* is walked once. When more than one grammar
+// defines the same kind name, kLangTable's fixed row order decides which grammar the hint names — a pure
+// function of the table, independent of HashMap iteration order.
+//
+// Deterministic across candidate tokens too: smaller edit distance wins, a tie breaks on the lexicographically
+// smaller resulting KIND NAME — never on which candidate token or which grammar was tried first. Bandwidth
+// cutoff matches didyoumean.h's own kMaxEditDistance (3): beyond that a "hint" is noise, not help, and the
+// hint stays empty (the same honest "no plausible near-miss" contract as didYouMean()).
+struct NodeKindHint { std::string kind; std::string grammar; };   // both empty ⇒ no candidate was close enough
+
+static std::vector<std::string> extractCandidateNodeKinds( std::string_view query )
+{
+    std::vector<std::string> out;
+    bool inString = false;
+    for( std::size_t i = 0; i < query.size(); ++i )
+    {
+        const char c = query[i];
+        if( inString )
+        {
+            if( c == '\\' ) { ++i; continue; }   // escape: skip the escaped byte, same rule astQueryShape uses
+            if( c == '"' ) { inString = false; }
+            continue;
+        }
+        if( c == '"' ) { inString = true; continue; }
+        if( c == ';' )   // line comment: everything to end-of-line is inert
+        {
+            while( i + 1 < query.size() && query[i + 1] != '\n' ) { ++i; }
+            continue;
+        }
+        if( c != '(' )
+        {
+            continue;
+        }
+        std::size_t j = i + 1;
+        while( j < query.size() && std::isspace( static_cast<unsigned char>( query[j] ) ) )
+        {
+            ++j;
+        }
+        if( j >= query.size() || !( std::isalpha( static_cast<unsigned char>( query[j] ) ) || query[j] == '_' ) )
+        {
+            continue;   // "(#eq?" / "(!decorator" / "(\"literal\"" — none of these is a node-kind token
+        }
+        const std::size_t start = j;
+        while( j < query.size() && ( std::isalnum( static_cast<unsigned char>( query[j] ) ) || query[j] == '_' ) )
+        {
+            ++j;
+        }
+        std::string tok( query.substr( start, j - start ) );
+        if( tok != "_" && std::find( out.begin(), out.end(), tok ) == out.end() )
+        {
+            out.push_back( std::move( tok ) );
+        }
+    }
+    return out;
+}
+
+static NodeKindHint nearestNodeKindHint( std::string_view query )
+{
+    NodeKindHint hint;
+    const std::vector<std::string> candidates = extractCandidateNodeKinds( query );
+    if( candidates.empty() )
+    {
+        return hint;   // nothing that even looks like a node-kind token (e.g. a bare syntax error)
+    }
+
+    // The union of every linked grammar's own vocabulary, first-grammar-in-table-order wins per name.
+    HashMap<std::string_view, std::string_view> kindGrammar;   // node-kind name -> owning grammar's display name
+    kindGrammar.reserve( 8192 );
+    std::vector<const TSLanguage*> tried;
+    for( const LangEntry& le : kLangTable )
+    {
+        if( le.grammar == nullptr || le.querySub.empty() )
+        {
+            continue;   // no grammar (markdown) or nothing to attribute a --match hit against
+        }
+        const TSLanguage* g = le.grammar();
+        if( std::find( tried.begin(), tried.end(), g ) != tried.end() )
+        {
+            continue;   // several extensions share one grammar object
+        }
+        tried.push_back( g );
+        const std::uint32_t symCount = ts_language_symbol_count( g );
+        for( std::uint32_t s = 0; s < symCount; ++s )
+        {
+            const TSSymbolType ty = ts_language_symbol_type( g, static_cast<TSSymbol>( s ) );
+            if( ty != TSSymbolTypeRegular && ty != TSSymbolTypeSupertype )
+            {
+                continue;
+            }
+            const char* nm = ts_language_symbol_name( g, static_cast<TSSymbol>( s ) );
+            if( nm == nullptr || *nm == '\0' )
+            {
+                continue;
+            }
+            kindGrammar.try_emplace( std::string_view( nm ), le.querySub );   // first grammar in table order wins
+        }
+    }
+    if( kindGrammar.empty() )
+    {
+        return hint;
+    }
+
+    constexpr int kMaxEditDistance = 3;   // same bandwidth as didYouMean()'s symbol-name cutoff
+    int           bestDist = kMaxEditDistance + 1;
+    for( const std::string& cand : candidates )
+    {
+        const std::string_view nearest = rw::nearestNameByEditDistance( kindGrammar.begin(), kindGrammar.end(), cand, kMaxEditDistance,
+                                                                         []( const auto& kv ) -> std::string_view { return kv.first; } );
+        if( nearest.empty() )
+        {
+            continue;
+        }
+        const int  dist   = rw::boundedEditDistance( nearest, cand, kMaxEditDistance );
+        const bool better = hint.kind.empty() || dist < bestDist || ( dist == bestDist && std::string( nearest ) < hint.kind );
+        if( better )
+        {
+            bestDist    = dist;
+            hint.kind    = std::string( nearest );
+            hint.grammar = std::string( kindGrammar.at( nearest ) );
+        }
+    }
+    return hint;
+}
+
+// octocode F3: the refusal loop's own trailer, extracted so that loop's own branch count doesn't grow — a
+// caller that asked for neither field pays one pointer-compare and returns, same as before this existed.
+static void recordNodeKindHint( const AstQueryGroup& group, const std::string& query )
+{
+    if( group.nearestKindOut == nullptr && group.nearestGrammarOut == nullptr )
+    {
+        return;
+    }
+    const NodeKindHint hint = nearestNodeKindHint( query );
+    if( group.nearestKindOut != nullptr )
+    {
+        group.nearestKindOut->push_back( hint.kind );
+    }
+    if( group.nearestGrammarOut != nullptr )
+    {
+        group.nearestGrammarOut->push_back( hint.grammar );
+    }
+}
+
 // Defined further down this file, next to the rest of the unreachable-code check's helpers, and
 // forward-declared here so the shared file walk can drive it — the same split as
 // ingest()/astQueryGrouped() already use above.
@@ -11990,6 +12154,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                     {
                         groups[groupIndex].uncompiledOut->push_back( spec.query );
                     }
+                    recordNodeKindHint( groups[groupIndex], spec.query );   // octocode F3: opt-in, see above
                 }
         }
     }

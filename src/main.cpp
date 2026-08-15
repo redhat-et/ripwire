@@ -10616,28 +10616,61 @@ void emitRunLintSarif( const MainDispatch& d,
     rw::sarif::emitLintSarif( stdout, sarifRules, sarifFindings, props, d.root );
 }
 
-// §L3: runs a --match query, returning its hits plus the grammar-applicability disclosure — grammarsAttrOut
-// pre-joined (see AstQueryGroup::grammarsOut/eligibleFilesOut in ingest.h and mcprefusal.h's joinClauses) —
-// so a query that compiles for SOME grammars but none are present in the corpus can say so instead of
-// reporting a bare hits="0" indistinguishable from "this pattern does not occur" (§P0.1's gap, one level up
-// the stack). Standalone so runLint's own dispatcher body, already one of the largest in this file, doesn't
-// grow by the plumbing.
-static std::vector<rw::AstMatch> runMatchQuery( const rw::IngestResult& ing, const std::string& matchQuery, std::size_t maxHits,
-                                                std::vector<std::string>& uncompiledOut, std::string& grammarsAttrOut,
-                                                std::size_t& eligibleFilesOut )
+// §L3 / octocode F3: everything one --match run answers with, as ONE structured-binding-friendly return
+// (CONTRIBUTING.md §3 Interfaces) instead of a growing out-param list — matches/uncompiled/grammarsAttr/
+// eligibleFiles/nearestKind/nearestGrammar are all facts about the SAME query, so a caller reading five
+// separate by-ref writes was already the wrong shape before this fix added a sixth.
+struct MatchQueryOutcome
+{
+    std::vector<rw::AstMatch> matches;
+    std::vector<std::string>  uncompiled;      // non-empty ⇒ the query compiled for NO grammar, refuse
+    std::string                grammarsAttr;    // §L3: pre-joined, see AstQueryGroup::grammarsOut
+    std::size_t                eligibleFiles = 0;
+    std::string                nearestKind;     // octocode F3: "" when no candidate was close enough
+    std::string                nearestGrammar;  // "" alongside a "" nearestKind
+};
+
+// Runs a --match query and reports the grammar-applicability disclosure (see AstQueryGroup::grammarsOut/
+// eligibleFilesOut in ingest.h and mcprefusal.h's joinClauses), so a query that compiles for SOME grammars
+// but none are present in the corpus can say so instead of reporting a bare hits="0" indistinguishable from
+// "this pattern does not occur" (§P0.1's gap, one level up the stack). Standalone so runLint's own
+// dispatcher body, already one of the largest in this file, doesn't grow by the plumbing.
+static MatchQueryOutcome runMatchQuery( const rw::IngestResult& ing, const std::string& matchQuery, std::size_t maxHits )
 {
     const std::vector<rw::AstQuerySpec> specs{ { matchQuery, std::string() } };
-    std::vector<std::string>            grammarsOut;
+    MatchQueryOutcome                   out;
+    std::vector<std::string>            grammarsOut, nearestKinds, nearestGrammars;
     rw::AstQueryGroup                   grp;
-    grp.specs            = &specs;
-    grp.maxMatches       = maxHits;
-    grp.uncompiledOut    = &uncompiledOut;
-    grp.grammarsOut      = &grammarsOut;
-    grp.eligibleFilesOut = &eligibleFilesOut;
-    std::vector<rw::AstMatch>           ms( rw::astQueryGrouped( ing, { grp } )[0] );
-    const std::vector<std::string_view> views( grammarsOut.begin(), grammarsOut.end() );
-    grammarsAttrOut = rw::mcprefuse::joinClauses( views, "," );
-    return ms;
+    grp.specs             = &specs;
+    grp.maxMatches        = maxHits;
+    grp.uncompiledOut     = &out.uncompiled;
+    grp.grammarsOut       = &grammarsOut;
+    grp.eligibleFilesOut  = &out.eligibleFiles;
+    grp.nearestKindOut    = &nearestKinds;      // octocode F3: parallel to uncompiledOut — a one-spec caller
+    grp.nearestGrammarOut = &nearestGrammars;   // ever gets at most one entry in either
+    out.matches = std::move( rw::astQueryGrouped( ing, { grp } )[0] );
+    out.grammarsAttr = rw::mcprefuse::joinClauses( std::vector<std::string_view>( grammarsOut.begin(), grammarsOut.end() ), "," );
+    if( !nearestKinds.empty() )    { out.nearestKind    = std::move( nearestKinds[0] ); }
+    if( !nearestGrammars.empty() ) { out.nearestGrammar = std::move( nearestGrammars[0] ); }
+    return out;
+}
+
+// octocode F3: the "compiled for no grammar" refusal's optional trailer — "" when nearestKind is empty (no
+// candidate node-kind token in the query landed within the edit-distance cutoff of any linked grammar's
+// vocabulary), which reads exactly as the refusal did before this fix (an honest "no plausible near-miss",
+// never a guess). Extracted so the refusal call site stays a single fprintf, not a nested if beside it.
+static std::string matchNearestKindClause( const std::string& kind, const std::string& grammar )
+{
+    if( kind.empty() )
+    {
+        return std::string();
+    }
+    std::string clause = " — nearest_kind=\"" + kind + "\"";
+    if( !grammar.empty() )
+    {
+        clause += " grammar=\"" + grammar + "\"";
+    }
+    return clause;
 }
 
 std::optional<int> runLint( const MainDispatch& d )
@@ -10739,18 +10772,18 @@ std::optional<int> runLint( const MainDispatch& d )
                     autoCaptured = true;
                 }
             }
-            constexpr std::size_t       kMatchMaxHits = 5000;   // astQuery's per-spec budget, named not implied
-            std::vector<std::string>    uncompiled;
-            std::string                 grammarsAttr;    // §L3: which grammars the query compiled against (runMatchQuery)
-            std::size_t                 eligibleFiles = 0;
-            const std::vector<AstMatch> ms = runMatchQuery( ing, matchQuery, kMatchMaxHits, uncompiled, grammarsAttr, eligibleFiles );
+            constexpr std::size_t        kMatchMaxHits = 5000;   // astQuery's per-spec budget, named not implied
+            const MatchQueryOutcome      mq = runMatchQuery( ing, matchQuery, kMatchMaxHits );
+            const std::vector<AstMatch>& ms            = mq.matches;
+            const std::string&           grammarsAttr  = mq.grammarsAttr;   // §L3: which grammars the query compiled against
+            const std::size_t&           eligibleFiles = mq.eligibleFiles;
             // §P0.4's rule, applied to --match's own engine: a query no grammar compiled measured NOTHING,
             // so a hits="0" here would be a failure wearing a result. Refuse, exactly like an invalid --regex.
-            if( !uncompiled.empty() )
+            if( !mq.uncompiled.empty() )
             {
                 std::fprintf( stderr, "ripwire: --match: the query compiled for no grammar — refusing rather than reporting a zero it did not measure "
-                                      "(query as received: %s)\n",
-                              std::string( cfg.match ).c_str() );
+                                      "(query as received: %s)%s\n",
+                              std::string( cfg.match ).c_str(), matchNearestKindClause( mq.nearestKind, mq.nearestGrammar ).c_str() );
                 return 1;
             }
             // §P8 G3: --match was missed when its sibling --grep got paging — `--limit=5` still emitted the
