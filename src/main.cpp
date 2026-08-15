@@ -77,6 +77,7 @@
 #include "atoms.h"                 // --lint: the atoms-of-confusion pack (Gopstein FSE 2017), C-family only
 #include "cachelint.h"             // --lint: the cache-friendliness pack (access-pattern half; layout half is --field-affinity)
 #include "naminglens.h"            // identifier-naming lens v1: the naming-* built-in --lint rules (deterministic, dictionary-free)
+#include "verbtable.h"             // V6: known-verb dictionary for the community/zoom label verb-histogram suffix
 #include "sarif.h"                 // --sarif: SARIF 2.1.0 re-serialization of --lint's findings (github code-scanning UI)
 #include "prcontext.h"
 #include "ccjson.h"
@@ -95,6 +96,7 @@
 #include <ctime>
 #include <filesystem>
 #include <functional>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <string>
@@ -379,6 +381,102 @@ struct CommunityPresentation
 // the validation corpus, rebuilt by each of the four verbs below.
 using CommunityMembers = std::vector<rw::SmallVec<rw::NodeId, 2>>;
 
+// V6 (graphrag-transfer): the ordering key for --communities/--zoom module rows. The pre-fix ordering was
+// raw member count alone, which lets a large PERIPHERAL leaf cluster (many members, each individually
+// low-ranked) outrank a small LOAD-BEARING hub cluster (few members, each highly ranked) — confirmed live
+// on ripwire's own tree, where the 572-member `min@infra/fastmath.h` cluster (mostly unrelated call-site
+// name collisions) sorts first by size alone. Mass sums the already-computed PageRank vector over a
+// community's members instead of merely counting them; member count remains the deterministic SECONDARY
+// tie-break (mirroring the pre-fix primary), then community id — see every call site below.
+float communityRankMass( const rw::SmallVec<rw::NodeId, 2>& communityMembers, const std::vector<float>& rank ) noexcept
+{
+    return std::accumulate( communityMembers.begin(), communityMembers.end(), 0.0f,
+                            [ & ]( float acc, rw::NodeId nodeId ) { return acc + rank[nodeId]; } );
+}
+
+// V6: the shared (rank-mass desc, size desc, id asc) tie-break every module-ordering sort below uses —
+// --communities' flat `order`/`ord` and --zoom's per-level `topOrder`/`kids` are all the same three-key
+// comparator over a different (mass, members) slice, so it is one function rather than four inline copies.
+bool massSizeIdLess( std::uint32_t a, std::uint32_t b, const std::vector<float>& mass, const CommunityMembers& members ) noexcept
+{
+    if( mass[a] != mass[b] )                     { return mass[a] > mass[b]; }
+    if( members[a].size() != members[b].size() ) { return members[a].size() > members[b].size(); }
+    return a < b;
+}
+
+// V6: --zoom's per-LEVEL counterpart to communityRankMass — one mass vector per level of the multi-level
+// hierarchy, precomputed once so every sort at every level (top-level order + every level's child order)
+// is an O(1) lookup rather than re-summing a group's members on each comparator call.
+std::vector<std::vector<float>> perLevelRankMass( const std::vector<CommunityMembers>& members, const std::vector<float>& rank )
+{
+    std::vector<std::vector<float>> mass( members.size() );
+    for( std::size_t l = 0; l < members.size(); ++l )
+    {
+        mass[l].resize( members[l].size() );
+        for( std::size_t gid = 0; gid < members[l].size(); ++gid )
+        {
+            mass[l][gid] = communityRankMass( members[l][gid], rank );
+        }
+    }
+    return mass;
+}
+
+// V6 (grepai-transfer): a deterministic verb-histogram SUFFIX for a community's label. grepai's RPG
+// hierarchy (rpg/extractor_local.go's LocalExtractor + rpg/hierarchy.go's EnrichLabels) tags every symbol
+// with its first-word verb (a fixed dictionary lookup) and aggregates the per-cluster frequency into the
+// label; ripwire's community label was a single lead-symbol anchor only, so two clusters that happen to
+// share an anchor NAME (two different `process` clusters, say) were indistinguishable. This reuses two
+// primitives that already exist — naminglens::splitIdentifier for the tokenizer, verbtable::kKnownVerbs
+// for the dictionary check (via std::binary_search — see that header for why there is no wrapper
+// function here) — and is purely additive: the anchor (§P6.2) stays the primary disambiguator.
+//
+// Determinism: communityMembers arrives in ascending NodeId order (both call sites below build it with a
+// single ascending push loop), so "first-seen" IS a stable, reproducible tie-break; stable_sort by count
+// alone over an already-deterministic input cannot introduce nondeterminism, and ties never depend on
+// container iteration order because the sort operates on `verbOrder`, a plain vector, not the map.
+std::string communityVerbSuffix( const rw::IngestResult& ing, const rw::SmallVec<rw::NodeId, 2>& communityMembers )
+{
+    std::vector<std::string>                verbOrder;   // first-seen order == the eventual tie-break
+    rw::HashMap<std::string, std::uint32_t>  verbCount;
+    std::vector<std::string>                 splitScratch;
+
+    for( rw::NodeId nodeId : communityMembers )
+    {
+        rw::naminglens::splitIdentifier( ing.symbols[nodeId].name, splitScratch );
+        if( splitScratch.empty() )
+        {
+            continue;
+        }
+        const std::string first = rw::naminglens::toLowerAscii( splitScratch.front() );
+        if( !std::binary_search( rw::verbtable::kKnownVerbs.begin(), rw::verbtable::kKnownVerbs.end(), std::string_view( first ) ) )
+        {
+            continue;
+        }
+        const auto [ it, inserted ] = verbCount.try_emplace( first, 0u );
+        if( inserted )
+        {
+            verbOrder.push_back( first );
+        }
+        ++it->second;
+    }
+    std::stable_sort( verbOrder.begin(), verbOrder.end(),
+                      [ & ]( const std::string& a, const std::string& b ) { return verbCount[a] > verbCount[b]; } );
+
+    const std::size_t topVerbs = std::min<std::size_t>( 3, verbOrder.size() );
+    if( topVerbs == 0 )
+    {
+        return {};
+    }
+    std::string suffix = " [";
+    for( std::size_t i = 0; i < topVerbs; ++i )
+    {
+        if( i ) { suffix += ","; }
+        suffix += verbOrder[i];
+    }
+    suffix += "]";
+    return suffix;
+}
+
 CommunityPresentation communityPresentation( const rw::IngestResult& ing, const rw::Graph& g,
                                              const CommunityMembers& members,
                                              const std::vector<float>& rank )
@@ -431,7 +529,8 @@ CommunityPresentation communityPresentation( const rw::IngestResult& ing, const 
         }
         out.label[ communityIndex ] = out.directory[ communityIndex ] + "::" + symbol.name + "@"
                                     + std::string( anchorPath ) + ":" + std::to_string( symbol.line ) + ":"
-                                    + std::to_string( symbol.sigStartByte );
+                                    + std::to_string( symbol.sigStartByte )
+                                    + communityVerbSuffix( ing, communityMembers );
     }
     return out;
 }
@@ -9063,22 +9162,29 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
         }
     }
 
+    // V6: rank mass (sum of PageRank over a community's members) is the primary ordering key — see
+    // communityRankMass's comment for why raw size alone under-ranks small load-bearing hubs.
+    std::vector<float> mass( K );
+    for( std::uint32_t c = 0; c < K; ++c )
+    {
+        mass[c] = communityRankMass( members[c], rank );
+    }
     std::vector<std::uint32_t> order( K );
     for( std::uint32_t c = 0; c < K; ++c )
     {
         order[c] = c;
     }
-    std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
-               { return members[a].size() != members[b].size() ? members[a].size() > members[b].size() : a < b; } );
+    std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return massSizeIdLess( a, b, mass, members ); } );
 
     const std::uint32_t modules  = nonIsolatedModuleCount( members );
     const IsolateStats  isolates = isolateStats( ing, g, members );
 
     // §P8: --limit/--offset were accepted and ignored — the listing always emitted the same 30 largest
     // modules. The row list is `order` filtered to real modules (size>=2), already deterministic
-    // (size desc, then community id), so materialize it once and window it. --limit raises or lowers the
-    // historic 30 cap; the bridge listing keeps its own 12 cap (it is a second, independent report, not
-    // a continuation of the module rows), which is why shown_bridges= keeps its own count.
+    // (V6: rank-mass desc, then size desc, then community id), so materialize it once and window it.
+    // --limit raises or lowers the historic 30 cap; the bridge listing keeps its own 12 cap (it is a
+    // second, independent report, not a continuation of the module rows), which is why shown_bridges=
+    // keeps its own count.
     std::vector<std::uint32_t> moduleOrder;
     moduleOrder.reserve( modules );
     for( std::uint32_t c : order )
@@ -9310,7 +9416,7 @@ std::optional<int> runZoom( const MainDispatch& d )
     // is labelled by its dominant directory + symbol count. Cross-module BRIDGES at the top level are always
     // shown, ranked by traffic. `--zoom --mermaid` emits the same hierarchy as a nested-subgraph diagram.
     // Deterministic: multiLevelCommunities is byte-stable (id-order local-moving at every level); the renderer
-    // visits children/symbols in a fixed (size desc, id asc / rank desc, id asc) order.
+    // visits children/symbols in a fixed (V6: rank-mass desc, size desc, id asc / rank desc, id asc) order.
     if( cfg.zoom )
     {
         const std::uint32_t N = std::uint32_t( ing.symbols.size() );
@@ -9331,6 +9437,10 @@ std::optional<int> runZoom( const MainDispatch& d )
                 members[l][h.levels[l][i]].push_back( i );
             }
         }
+
+        // V6: per-level rank mass — see communityRankMass's comment (--communities uses the identical key)
+        // and perLevelRankMass's comment (why this is precomputed once rather than per comparator call).
+        const std::vector<std::vector<float>> mass = perLevelRankMass( members, rank );
 
         // children[l][gid] = the level-(l-1) groups whose parent is gid (l≥1). Inverts h.parentOf[l-1].
         std::vector<std::vector<std::vector<std::uint32_t>>> children( L );
@@ -9366,8 +9476,8 @@ std::optional<int> runZoom( const MainDispatch& d )
             return d;
         };
 
-        // top-level modules (groups with ≥2 symbols), largest first, id-tiebroken — the same "a lone symbol is
-        // not a module" rule as --communities.
+        // top-level modules (groups with ≥2 symbols), highest rank-mass first, size- then id-tiebroken — the
+        // same "a lone symbol is not a module" rule as --communities, and (V6) the same ordering key.
         const std::size_t        topL = L - 1;
         std::vector<std::uint32_t> topOrder;
         for( std::uint32_t gid = 0; gid < h.counts[topL]; ++gid )
@@ -9377,8 +9487,8 @@ std::optional<int> runZoom( const MainDispatch& d )
                 topOrder.push_back( gid );
             }
         }
-        std::sort( topOrder.begin(), topOrder.end(), [ & ]( std::uint32_t a, std::uint32_t b )
-                   { return members[topL][a].size() != members[topL][b].size() ? members[topL][a].size() > members[topL][b].size() : a < b; } );
+        std::sort( topOrder.begin(), topOrder.end(),
+                  [ & ]( std::uint32_t a, std::uint32_t b ) { return massSizeIdLess( a, b, mass[topL], members[topL] ); } );
 
         // top-level cross-module bridges (between the FINEST communities, summed onto top-module pairs), ranked.
         // We count finest-community→finest-community call edges, then lift each endpoint to its top-level module.
@@ -9414,8 +9524,8 @@ std::optional<int> runZoom( const MainDispatch& d )
                 if( topL >= 1 )
                 {
                     std::vector<std::uint32_t> kids = children[topL][t];
-                    std::sort( kids.begin(), kids.end(), [ & ]( std::uint32_t a, std::uint32_t b )
-                               { return members[topL - 1][a].size() != members[topL - 1][b].size() ? members[topL - 1][a].size() > members[topL - 1][b].size() : a < b; } );
+                    std::sort( kids.begin(), kids.end(),
+                              [ & ]( std::uint32_t a, std::uint32_t b ) { return massSizeIdLess( a, b, mass[topL - 1], members[topL - 1] ); } );
                     const std::size_t maxKids = std::min<std::size_t>( 8, kids.size() );
                     for( std::size_t ki = 0; ki < maxKids; ++ki )
                     {
@@ -9514,11 +9624,11 @@ std::optional<int> runZoom( const MainDispatch& d )
                     std::printf( "<member t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line );
                 }
             }
-            else           // recurse into child modules (next-finer level), largest first
+            else           // recurse into child modules (next-finer level), highest rank-mass first (V6)
             {
                 std::vector<std::uint32_t> kids = children[l][gid];
-                std::sort( kids.begin(), kids.end(), [ & ]( std::uint32_t a, std::uint32_t b )
-                           { return members[l - 1][a].size() != members[l - 1][b].size() ? members[l - 1][a].size() > members[l - 1][b].size() : a < b; } );
+                std::sort( kids.begin(), kids.end(),
+                          [ & ]( std::uint32_t a, std::uint32_t b ) { return massSizeIdLess( a, b, mass[l - 1], members[l - 1] ); } );
                 for( std::uint32_t cg : kids )
                 {
                     emit( l - 1, cg );
