@@ -401,8 +401,12 @@ struct Config
                                                              // --token-budget overrides), the 5-call orientation dance in FIXED order:
                                                              // (1) routed+anchored ranking, (2) top-K full bodies, (3) their 1-hop
                                                              // caller signatures, (4) their field notes, (5) tests_to_run for the top
-                                                             // files. Allocation order ranking>bodies>callers>notes>tests; each section
-                                                             // truncates rank-adaptively and the header reports EVERY truncation.
+                                                             // files, in FIXED order ranking>bodies>callers>notes>tests. Each section
+                                                             // holds a FIXED, up-front proportional quota of the budget (rank40/
+                                                             // body30/caller15/note5/test10, pct); an under-spent section's leftover
+                                                             // quota rolls forward, so a small budget still zeroes a section
+                                                             // eventually but never past its own fair share. Each section truncates
+                                                             // rank-adaptively and the header reports EVERY truncation.
     int              partitionCount  = 0;                   // --partition=N (with --pack-task): fan-out form of the
                                                              // bundle — ONE shared common core plus N minimally-overlapping per-agent
                                                              // slices carved along the call graph's own Louvain communities, each
@@ -1507,10 +1511,13 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --pack-task=\"TASK\"          the budget-shared task bundle: ONE call assembling, under ONE deterministic budget\n"
         "                               (default 6K tokens; --token-budget overrides), the whole orientation dance in FIXED order —\n"
         "                               (1) routed+anchored ranking, (2) top-K full bodies, (3) their 1-hop caller signatures,\n"
-        "                               (4) their field notes, (5) tests_to_run for the top files. Allocation order is\n"
-        "                               ranking>bodies>callers>notes>tests; each section truncates rank-adaptively and the header\n"
-        "                               reports EVERY truncation (no silent caps). A tiny budget degrades to ranking-only WITH the\n"
-        "                               truncation note. Refuses loudly without a task string.\n"
+        "                               (4) their field notes, (5) tests_to_run for the top files, emitted in FIXED order\n"
+        "                               ranking>bodies>callers>notes>tests. Each section holds a FIXED, up-front proportional quota\n"
+        "                               of the budget (rank40/body30/caller15/note5/test10, percent); an under-spent section's\n"
+        "                               leftover quota ROLLS FORWARD to the next section, so a small budget still zeroes a section\n"
+        "                               eventually but never past its own fair share. Each section truncates rank-adaptively and\n"
+        "                               the header reports EVERY truncation (no silent caps). A tiny budget degrades to\n"
+        "                               ranking-only WITH the truncation note. Refuses loudly without a task string.\n"
         "      --partition=N            (with --pack-task, N=2..16) FAN-OUT form: instead of one bundle, emit ONE shared common core\n"
         "                               plus N per-agent slices, so N parallel agents stop re-deriving the same orientation. The\n"
         "                               task's ranked surface is carved along the call graph's own Louvain communities — a partition\n"
