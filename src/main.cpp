@@ -12220,7 +12220,14 @@ int runDefaultMap( const MainDispatch& d )
         // + the pre-rendered <bodies> + "</ctx>". Rendering-and-measuring beats arithmetic here: the map's
         // est_tokens digits depend on the payload charge, and a probe that prices a shape it then fails to
         // build is the exact climbCeilingLadder failure mode this file already documents.
-        const std::size_t bundleBytes = ( sizeof( "<ctx>" ) - 1 ) + measureEmittedMapBytes( mapTopK, payloadTokens )
+        // V1 fix (verifier finding 1, 2026-08-15): mapTopK==0 means UNLIMITED inside serialize(), not "no
+        // map" — an unguarded call here priced the whole-repo map (~1MB on this tree) that the emission
+        // path below never prints (mapTopK==0 skips straight to the topK>0 branch's `else`, see the two
+        // guarded siblings at the ceiling verdict and the topK>0 emission gate). Same guard here: a map
+        // that will not be emitted must not be charged, exactly like every other measureEmittedMapBytes
+        // call site in this function.
+        const std::size_t bundleBytes = ( sizeof( "<ctx>" ) - 1 )
+                                      + ( mapTopK > 0 ? measureEmittedMapBytes( mapTopK, payloadTokens ) : 0 )
                                       + bodiesSection.xml.size() + ( sizeof( "</ctx>" ) - 1 );
         wholeFile = rw::renderWholeFiles( ing, expandNodes, redactPtr, d.notesPtr, cfg.compress );   // D2: shaped candidate
         ExpandServeChoice choice = chooseExpandServe( bundleBytes, wholeFile, cfg.packBudgetBytes );
