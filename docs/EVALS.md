@@ -836,8 +836,30 @@ C++ corpus — *historical, private, not publicly reproducible*. Every figure be
   31.6× / 42.0×). Same algorithm on both sides — tree-sitter parse then PageRank — so the gap is
   compiled versus interpreted. Aider's tag cache was cleared each run; minimum of N runs.
 - **Whole repository (1,560 files): ~1 s cold, 0.18 s warm**, against Aider's 40 s cold map.
-- **`--grep` is +19.7% / −11.2%** — published deliberately as the anti-headline. `--grep` is not a
-  token reducer, and saying so is cheaper than being caught.
+- **`--grep` re-derived 2026-08-15** (post emission-overhaul; supersedes the 2026-06-20 +19.7% /
+  −11.2% row — kept below as the historical record). Same instrument arm as `bench/bench_proof.py`
+  (tiktoken `cl100k_base`, `--no-cache`, same two terms), on the same private corpus advanced from
+  366 to 405 files. Four disclosed facts, not one number:
+  1. **The wave's causal cut, binary-to-binary** (identical corpus, queries, cap state):
+     `--grep frantic` 6,568 → 4,552 tok (**−30.7%**), `--grep FirePolicy` 6,531 → 4,556 (**−30.2%**)
+     at the capped default view; −22.2% / −21.5% uncapped (`--limit=1000`). Independent corroboration:
+     `test/grepbytescheck.sh` re-derives a **−40.3% median** payload cut on this repository's five
+     frozen queries every run.
+  2. **Default view vs a clean raw-grep dump**: **+1.2% / +7.6%** (was +19.7% / −11.2% in 2026-06).
+     Not same-answer: ripwire shows 100 of 172/190 occurrence-hits (capped, disclosed in-band) with
+     enclosing symbols; grep's 90/86-line dump is complete. "Clean" = `--exclude-dir=.claude` — the
+     corpus now carries agent-worktree duplicates ripwire's crawler skips; without that exclusion the
+     grep arm balloons 4.7× and ripwire reads −80%, a litter artifact this row refuses to quote.
+  3. **Same-answer uncapped parity — the anti-headline stands**: showing every hit, `--grep` remains
+     token-negative vs clean grep, **+153% / +217%** (down from +225% / +304% pre-wave on the same
+     measurement). `--grep` buys enclosing-symbol structure and in-band honesty, not fewer tokens,
+     on exhaustive dumps.
+  4. **Boolean AND is the flip**: `--grep=frantic --and=state` answers the narrowed question complete
+     (uncapped) at **−78.4%** vs the single-term capped view; on this repository's frozen pairs the
+     G3 gate holds 6/6 gold lines. When the agent knows a second term, `--grep` is now firmly
+     token-positive.
+- *(historical, 2026-06-20)* **`--grep` was +19.7% / −11.2%** — published deliberately as the
+  anti-headline. `--grep` is not a token reducer, and saying so is cheaper than being caught.
 
 The benchmark states its own scope limit, and it is worth repeating verbatim in spirit: the token
 baseline is *a model of a naive agent read* — a documented, auditable proxy, not a live agent trace —
