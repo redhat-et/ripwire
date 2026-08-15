@@ -177,9 +177,11 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # this arm was written for. Bumping it is correct; changing it to a >= would retire the arm.
 # 7 -> 9 2026-08-08: docTextViaBridgeCache (ingest.cpp) reads the doc bytes for its content-hash key and
 # reads the cached blob back through the same canonical helper — both sites re-read before this re-pin.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 9 ] \
-    && ok "repo: --uses=readWholeFile count=9 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 9"
+# 9 -> 10 2026-08-15 (G3, report-ugrep §F2): grepApplyBooleanTerms' own ensureFileLoaded (search.h) re-reads
+# a candidate file's bytes to test --and=/--not= terms — a THIRD search.h call site alongside grepEnrich's.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 10 ] \
+    && ok "repo: --uses=readWholeFile count=10 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 10"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"

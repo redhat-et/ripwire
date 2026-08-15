@@ -71,8 +71,19 @@ done
 # ── (O) independent grep oracle: ripwire's matched-FILE set must be a SUPERSET of grep -lE's ──
 # (BRE-safe subset of the battery; uses grep -E so the pattern syntax matches.)
 for p in 'compute' 'Widget' 'open|close' '[A-Z][a-z]+' 'Foo.*Bar' 'zylophoneXyzzy' '(open|close)'; do
-    cx="$( "$BIN" "$CORPUS" --regex="$p" --no-cache 2>/dev/null | grep -o 'p="[^"]*"' | sed 's/p="//;s/:.*//' | sort -u )"
-    gp="$( grep -rlE -- "$p" "$CORPUS" 2>/dev/null | sort -u )"
+    # G1 (2026-08-15): a matched file's path now lives ONLY on the wrapping <f p="…"> (no ":LINE" suffix —
+    # that moved to the nested <hit l="…">), so the old "strip at the first colon" sed left a trailing
+    # unstripped quote on every path (no colon to truncate at) and every comparison below false-missed.
+    # Extract <f p="…"> distinctly, past the legend comment (whose own prose illustrates that exact shape).
+    cx="$( "$BIN" "$CORPUS" --regex="$p" --no-cache 2>/dev/null | python3 -c '
+import re, sys
+xml = sys.stdin.read().split( "-->", 1 )[ -1 ]
+for m in re.finditer( r"<f p=\"([^\"]*)\"", xml ):
+    print( m.group( 1 ) )
+' | sort -u )"
+    # G1: $CORPUS is an absolute single-root, so ripwire's p= is now root-relative to it — strip the same
+    # prefix from the independent grep oracle's paths so both sides compare the same spelling.
+    gp="$( grep -rlE -- "$p" "$CORPUS" 2>/dev/null | sed "s|^$CORPUS/||" | sort -u )"
     miss=0
     while IFS= read -r f; do
         [ -z "$f" ] && continue

@@ -268,7 +268,15 @@ while True:
     if not j.get("has_more"): break
     off = j["next_offset"]
 cli  = subprocess.run([BIN, ROOT, "--grep=pageDisclosure", "--limit=100000"], capture_output=True, text=True).stdout
-rows = [ (f, int(l)) for f, l in re.findall(r'<hit p="([^"]+):(\d+)"', cli) ]
+# G1 (2026-08-15): a <hit> no longer carries its own path — it lives on the wrapping <f p="…"> (root-relative,
+# same spelling the MCP arm's "file" now uses too). Pair each <hit> with its enclosing <f>, past the legend
+# comment (whose own prose illustrates the <f p=…>/<hit …> shape and would otherwise false-match).
+cli = cli.split("-->", 1)[-1]
+rows = []
+for fm in re.finditer(r'<f p="([^"]*)">(.*?)</f>', cli, re.S):
+    path = fm.group(1)
+    for hm in re.finditer(r'<hit l="(\d+)"', fm.group(2)):
+        rows.append((path, int(hm.group(1))))
 if not rows:        problems.append("the CLI probe produced no <hit> rows (probe broken, not the tool)")
 elif walk != rows:  problems.append("the MCP page-walk (%d rows) != the CLI listing (%d rows)" % (len(walk), len(rows)))
 if full["total"] != len(rows): problems.append("total=%s but the CLI lists %d hits" % (full["total"], len(rows)))

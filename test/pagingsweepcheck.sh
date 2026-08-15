@@ -356,7 +356,11 @@ disclose(){   # $1=label $2=root-element $3=row-pattern $4..=verb args
 disclose "hotspots" "hotspots" '<f p='   --hotspots
 disclose "cochange" "cochange" '<pair '  --cochange
 disclose "whereis"  "whereis"  '<hit '   --whereis=rankGraph
-disclose "grep"     "grep"     '<hit '   --grep=NodeId
+# G1 (2026-08-15): on the UNPAGINATED default view a byte-identical match at another site in the same
+# file folds into its <hit>'s n= plus an <at l=… in=…/> child instead of its own <hit> row (search.h's
+# grepGroupByFile) — shown= counts underlying HITS (sites), not printed <hit> elements, so the row pattern
+# widens to count both; disclose()'s own math (rows == shown=) is otherwise untouched.
+disclose "grep"     "grep"     '<hit |<at ' --grep=NodeId
 # (d) --clones: the root said groups="36" type3="108" and printed 76 <group> rows. shown= must be 76.
 disclose "clones"   "clones"   '<group ' --clones
 # --deps capped at --pack-top-n (default 40) of 179 including files and said nothing (G1, this round).
