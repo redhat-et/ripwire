@@ -45,6 +45,16 @@ grep -qi 'did you mean' "$TMP/err" && ok "refusal carries a did-you-mean suggest
     || no "unknown name() nested in an expression: exit $rc2 (expected 1)"
 grep -q 'parseArgsTypo' "$TMP/err2" && ok "nested refusal names the literal" || no "nested refusal does not name the literal"
 
+# ── 2b. C3: the SAME typo, with the pushdown-eligible predicate(all,…) arm FIRST and the typo'd name() arm
+#    SECOND — the order check #2 doesn't exercise. and()'s predicate pushdown must not short-circuit the
+#    other arm just because a predicate-on-`all` arm parses first; if it did, this typo would silently vanish
+#    (exit 0) instead of refusing.
+"$BIN" "$ROOT" --graph-query='and(kind(all,fn),callers(name("parseArgsTypo"),2))' >"$TMP/out2b" 2>"$TMP/err2b"; rc2b=$?
+[ "$rc2b" -eq 1 ] && ok "unknown name() nested behind a pushdown-eligible predicate(all,…) arm: exit 1" \
+    || no "unknown name() behind predicate(all,…): exit $rc2b (expected 1) — pushdown short-circuited the other arm"
+grep -q 'parseArgsTypo' "$TMP/err2b" && ok "reordered nested refusal still names the literal" \
+    || no "reordered nested refusal does not name the literal"
+
 # ── 3. a RESOLVING name inside a query that legitimately selects nothing is a MEASUREMENT
 "$BIN" "$ROOT" --graph-query='cx(name("main"),999999)' >"$TMP/zero" 2>/dev/null; rc3=$?
 [ "$rc3" -eq 0 ] && grep -q '<query [^>]*count="0"' "$TMP/zero" \
