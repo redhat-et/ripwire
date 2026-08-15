@@ -762,7 +762,14 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 13;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 64;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 65;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 65 = 2026-08-15 C++ nested out-of-line defs: queries/cpp/tags.scm
+                                                          // gains a second out-of-line definition pattern, so a C++ def
+                                                          // written with two or more qualifier segments
+                                                          // (`void nsD::OuterD::InnerD::deep3(){}`) is indexed instead of
+                                                          // silently dropped — the extracted SET grows on any C++ tree
+                                                          // using that spelling, so a v64 blob must be rejected. See
+                                                          // test/cppqualcheck.sh §11.
                                                           // 64 = 2026-08-14 in-file test scope: every def carries a new
                                                           // syntactic testScope bit (Rust #[cfg(test)] mod / #[test] fn,
                                                           // Python class Test* / module-level def test_*, JS/TS
