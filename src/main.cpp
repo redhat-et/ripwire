@@ -5849,12 +5849,17 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
 
         // §H4 §3.4: the FIRST legend these two verbs have ever shipped (0 bytes before — which is why every
         // one of their root attributes sits in test/legendcoverage_baseline.txt), and the floor marker that
-        // is the round's honest half. ONE string for both forms, printed BEFORE the format branches so the
+        // is the round's honest half. ONE opener for both forms, printed BEFORE the format branches so the
         // columnar and default shapes carry the identical disclosure. JSON has no comment-node analogue, so
         // there the marker travels as the counts_floor key on the root object instead.
+        // V1 fix (verifier finding 3): bodyless_defs= is callees-only (main.cpp gates the attribute itself
+        // behind !wantCallers a few lines up), so its defining sentence rides along only on the callees
+        // form — a --callers call no longer pays for vocabulary it can never emit. The wantCallers branch
+        // lives in rw::callHierarchyLegendOpen (graphlegend.h), not here, so it does not add to this
+        // already-large dispatcher's own complexity.
         if( !cfg.json )
         {
-            std::printf( "%s%s-->", rw::kCallHierarchyLegendOpen, rw::graphCountDisclosure().c_str() );
+            std::printf( "%s%s-->", rw::callHierarchyLegendOpen( wantCallers ).c_str(), rw::graphCountDisclosure().c_str() );
         }
 
         // --format=columnar (RESEARCH lever 1): the same page window, re-encoded as a path-table + parallel
