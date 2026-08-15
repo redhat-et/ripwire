@@ -707,14 +707,25 @@ inline constexpr std::size_t kMcpGitOnlyCount = std::size( kMcpGitOnlyVerbs );
 // sites in the tools/list assembly are plain concatenations. That is not decoration: the alternative is one
 // conditional per site inside dispatchMcpLine, a function already carrying enough branches that a
 // --quality-delta run gates on it. The predicate is decided once; these say what it means.
-inline std::string gitOnlyOmissionNote( bool omitted )
+// `isGitDir` disambiguates WHICH of the two git-only causes this is (finding #7, the adversarial verifier's
+// 2026-08-15 harvest): "no .git at all" and ".git present but no HEAD commit" both make pinnedRootHasGit
+// false, but only the first is actually "not a git repository" — a `git init` with zero commits IS one, it
+// just has no HEAD to read history from. Saying "is not a git repository" about the second case is a FALSE
+// CAUSE of exactly the kind mcpverbs.h:224 warns against, and it is avoidable: every git-only verb's own
+// per-request refusal already carries the qualifier ("not a git repository (or no HEAD commit)" — see
+// mcp.h:1261/1268), so this disclosure now renders the same two-cause sentence instead of asserting the
+// narrower one unconditionally.
+inline std::string gitOnlyOmissionNote( bool omitted, bool isGitDir )
 {
     if( !omitted )
     {
         return {};
     }
-    std::string note = " NOTE: this server's workspace is not a git repository, so its git-backed verbs are"
-                       " OMITTED from tools/list —";
+    std::string note = isGitDir
+                      ? std::string( " NOTE: this server's workspace is a git repository with no HEAD commit"
+                                      " (nothing committed yet), so its git-backed verbs are OMITTED from tools/list —" )
+                      : std::string( " NOTE: this server's workspace is not a git repository (or has no HEAD commit),"
+                                      " so its git-backed verbs are OMITTED from tools/list —" );
     for( std::size_t i = 0; i < kMcpGitOnlyCount; ++i )
     {
         note += ( i == 0 ? " " : ", " );

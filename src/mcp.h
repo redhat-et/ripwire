@@ -153,6 +153,48 @@ constexpr std::size_t mcpBatchExcludedCount( bool gitVerbsOmitted ) noexcept
     return gitVerbsOmitted ? kBatchExcludedCount - mcpGitOnlyNotBatchServed() : kBatchExcludedCount;
 }
 
+// finding #8: is `verb` one of the git-only omission set (mcprefusal.h's kMcpGitOnlyVerbs)? Shared by the
+// served-list builder below, so "which verbs are git-only" has one answer rather than a second inline loop.
+constexpr bool mcpIsGitOnlyVerb( std::string_view verb ) noexcept
+{
+    for( const mcprefuse::McpGitOnlyVerb& row : mcprefuse::kMcpGitOnlyVerbs )
+    {
+        if( verb == std::string_view( row.verb ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// finding #8: the SERVED half of batch's tools/list description — the "each verb is one of for/grep/…/
+// owners/cochange/…" slash-list — used to be a hand-copied literal that named `owners` unconditionally, even
+// on a non-git pinned root where `owners` is itself OMITTED from tools/list (it is git-only AND
+// batch-served — the one row mcpGitOnlyNotBatchServed's comment already calls out). Advertising, inside
+// batch's own prose, a verb that tools/list does not otherwise advertise sends a caller looking for a tool
+// this server does not offer here — the same class of dishonesty §B6 M14 fixed for the EXCLUDED half of
+// this sentence, now applied to the served half. Built from kBatchServedVerbs (mcpverbs.h) rather than
+// duplicated as a second literal, so the two cannot drift the way the hand-copied one did.
+inline std::string mcpBatchServedVerbsList( bool gitVerbsOmitted )
+{
+    std::string out;
+    bool        first = true;
+    for( const std::string_view v : kBatchServedVerbs )
+    {
+        if( gitVerbsOmitted && mcpIsGitOnlyVerb( v ) )
+        {
+            continue;
+        }
+        if( !first )
+        {
+            out += "/";
+        }
+        out += v;
+        first = false;
+    }
+    return out;
+}
+
 // ─── Protocol versions ───────────────────────────────────────────────────────────────────────
 inline constexpr std::string_view kMcpLatestProtocolVersion = "2025-11-25";
 inline constexpr std::string_view kMcpHttpFallbackProtocolVersion = "2025-03-26";
@@ -213,6 +255,15 @@ inline bool isMcpProtocolVersionSupported( std::string_view version ) noexcept
 //     false ⇒ those verbs are OMITTED from tools/list and the omission is announced in `instructions`.
 //     Defaults TRUE so every stdio path (which never pins) advertises the full catalog untouched — see
 //     the omitGitVerbs comment in the tools/list branch for why omission is pinned-only.
+//   - pinnedRootIsGitDir (finding #7) — meaningful ONLY when pinnedRootHasGit is false: does the workspace
+//     sit INSIDE a git repo at all (`.git` present, `rev-parse --show-toplevel` succeeds) that simply has
+//     no HEAD commit yet, versus not being a git repo in the first place? The two causes were collapsed
+//     into one sentence ("this server's workspace is not a git repository") that is FALSE for the first
+//     case — a `git init` with no commit IS a git repository, it has no HEAD, exactly the qualifier every
+//     git-only verb's OWN refusal already carries ("not a git repository (or no HEAD commit)"). Resolved
+//     ONCE at listener startup alongside pinnedRootHasGit (one more `git rev-parse` fork, only when the
+//     first probe already failed — never on the common git-with-history path). Meaningless (left false)
+//     when pinnedRootHasGit is true, since the disclosure it feeds is never rendered in that case.
 struct McpDispatchPolicy
 {
     std::string pinnedRoot;         // "" = stdio (no pinning); non-empty = the remote transport's fixed workspace key/root
@@ -220,6 +271,7 @@ struct McpDispatchPolicy
     std::string defaultRoot;        // "" = no stdio startup root given; else the canonicalized `ripwire <root> --mcp` root
     std::string assumedRoot;        // "" = no guessable root; else the canonicalized launch cwd (stdio, no startup root) — see above
     bool        pinnedRootHasGit = true;   // see above — only read when pinnedRoot is non-empty
+    bool        pinnedRootIsGitDir = false;   // see above — only read when pinnedRootHasGit is false
 };
 
 // canonicalize a root path for the workspace-pin comparison: realpath when it resolves, else the string
@@ -562,7 +614,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                        ",\"result\":{\"protocolVersion\":\"" + std::string( negotiatedVersion ) +
                        "\",\"serverInfo\":{\"name\":\"ripwire\",\"version\":\"1.0\"},\"capabilities\":{\"tools\":{}},"
                        "\"instructions\":\"" + mcpdetail::jsonEscape( std::string( kMcpServerInstructions )   // V3/F4: the
-                                                    + mcprefuse::gitOnlyOmissionNote( omitGitVerbs ) ) + "\"}}";  // omission announces itself
+                                                    + mcprefuse::gitOnlyOmissionNote( omitGitVerbs, policy.pinnedRootIsGitDir ) ) + "\"}}";  // omission announces itself, finding #7: qualified by which cause it is
             }
         }
         else if( method == "tools/list" )
@@ -684,7 +736,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    "{\"name\":\"doc_drift\",\"description\":\"WHICH OF THIS REPO'S DOC CLAIMS ARE NOW FALSE. Verifies the CHECKABLE anchors in every markdown file against the live index and returns ONLY the ones that no longer hold: file:line refs (missing-file / past-eof / line-moved, the last with got= naming the symbol that now occupies the line), backticked symbol mentions (undefined), `= N` constants and `[N]` array extents. Read this BEFORE trusting a design doc, plan or audit you did not just write — it is the cheap alternative to re-verifying its claims by hand. Every lane deliberately under-reports: a name counts as stale only when it occurs nowhere in the code as an identifier token, and a number only when the corpus binds it uniquely in a declaration; checked + unchecked = anchors, and each declined check is named in an unchecked row. A failed anchor the AUTHOR DATED — an as-of-DATE hedge on the line, a dated heading, an ISO date in the filename or H1, or a labelled front-matter self-date — is reported as kind=\\\"dated-record\\\" with rec= naming which, and counted in dated= rather than drift=, so drift= is the LIVE rot and drift + dated is every anchor that failed. A doc that never writes its own date machine-readably reports live: the lane reads dating marks, it does not guess genre. Prose, Status lines and dates are NOT checked. kind = optional doc-path substring filter.\","
                    + mcprefuse::toolMetadataFor( "doc_drift", pathIsRequired ) + "},"
                    // A4-R3 batch — one-turn context sweep: N read sub-queries in ONE round-trip, merged + deduped.
-                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array of {verb, ...args} over the SAME path; each verb is one of for/grep/find_symbol/find_referencing_symbols/impact/uses/mentions/analyze/lego/owners/cochange/path_between/exemplar/fetch_body (plus the two ALIASES callers=find_referencing_symbols and callees=find_symbol) with that verb's own args (task/pattern/symbol/type/from/to/handle, and limit/offset on the verbs that page). The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs and quality_baseline (side effects), quality_delta (a heavy both-trees pass, out of place in a fast sweep), batch itself (it does not nest), and the whole-repo / cross-branch set (situational_awareness, memory_recall, connect, explore — and its alias pack_task — from_trace, edit_check, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift). Result is one <batch> of <q i verb ok> elements IN ORDER, each sub-answer verbatim in CDATA; a failing sub-query becomes an inline ok=0 err= entry (never fails the batch); identical payloads dedup to <dup-of q=\\\"i\\\"/>; over 16 → capped honestly (capped=\\\"1\\\", n<requested). Use to gather a task's whole context in one round-trip instead of many.\","
+                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array of {verb, ...args} over the SAME path; each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the two ALIASES callers=find_referencing_symbols and callees=find_symbol) with that verb's own args (task/pattern/symbol/type/from/to/handle, and limit/offset on the verbs that page). The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs and quality_baseline (side effects), quality_delta (a heavy both-trees pass, out of place in a fast sweep), batch itself (it does not nest), and the whole-repo / cross-branch set (situational_awareness, memory_recall, connect, explore — and its alias pack_task — from_trace, edit_check, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift). Result is one <batch> of <q i verb ok> elements IN ORDER, each sub-answer verbatim in CDATA; a failing sub-query becomes an inline ok=0 err= entry (never fails the batch); identical payloads dedup to <dup-of q=\\\"i\\\"/>; over 16 → capped honestly (capped=\\\"1\\\", n<requested). Use to gather a task's whole context in one round-trip instead of many.\","
                    + mcprefuse::toolMetadataFor( "batch", pathIsRequired ) + "}"
                    "]}}";
             }
