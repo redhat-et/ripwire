@@ -1696,6 +1696,107 @@ inline std::vector<GrepFileGroup> grepGroupByFile( std::span<const GrepHit> hits
     return groups;
 }
 
+// ─── G3 (2026-08-15 harvest — report-ugrep §F2): boolean AND/NOT over an already-collected hit set ────
+//
+// --and=B (repeatable) / --not=C (repeatable): a FLAT term list, no CNF, no parens — OR stays spelled
+// --regex='A|B' (the CNF normalizer ugrep needs to feed one regex string does not apply here). Applied as
+// a POST-FILTER over grepCollect()'s output, never inside the scan hot loop: --grep=PATTERN's primary
+// pattern IS the first required (non-negated) term by construction, so a line/file satisfying the WHOLE
+// conjunction necessarily contains a primary-pattern occurrence, which the unfiltered scan already
+// visited. Scanning on the primary term and rejecting sites that fail the EXTRA terms is therefore
+// complete — which is what makes "AND result == post-filter of the un-AND-ed scan" an identity by
+// construction (test/grepscancheck.sh's oracle re-derives it independently rather than trusting this
+// comment).
+struct GrepTerm
+{
+    std::string term;
+    bool        negated = false;
+};
+
+enum class GrepScope : std::uint8_t { Line, File };
+
+// A line/file SATISFIES the term list iff every non-negated term is present and every negated term is
+// absent — substring search, literal only (regex AND/NOT is out of scope, same as the CLI refusal).
+inline bool grepTextSatisfiesTerms( std::string_view text, std::span<const GrepTerm> terms )
+{
+    for( const GrepTerm& t : terms )
+    {
+        const bool present = text.find( t.term ) != std::string_view::npos;
+        if( present == t.negated )   // required-but-absent, or forbidden-but-present
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Filters `collected.raw` order-preserving (already tier-then-path sorted — filtering never reorders).
+// LINE scope re-reads each candidate hit's own line (grepMatchedLine, the same helper grepEnrich uses);
+// FILE scope reads each candidate file ONCE and keeps/drops its whole hit run against the WHOLE file
+// text. `suppressedOut` receives the count of raw hits the filter removed — disclosed as suppressed= on
+// the root, a DIFFERENT honesty axis from hits_capped= (a budget ceiling, not a term rejection).
+inline GrepCollection grepApplyBooleanTerms( const IngestResult& ing, GrepCollection collected,
+                                             std::span<const GrepTerm> terms, GrepScope scope,
+                                             std::uint32_t& suppressedOut )
+{
+    suppressedOut = 0;
+    if( terms.empty() || collected.raw.empty() )
+    {
+        return collected;
+    }
+    std::vector<GrepRawHit> kept;
+    kept.reserve( collected.raw.size() );
+
+    std::uint32_t             loadedFileId = UINT32_MAX;
+    std::string               fileText;
+    std::vector<std::size_t>  lineStarts;
+    bool                       fileOk = true;   // FILE scope verdict for the currently loaded file
+    const auto ensureFileLoaded = [ & ]( std::uint32_t f )
+    {
+        if( f == loadedFileId )
+        {
+            return;
+        }
+        loadedFileId = f;
+        fileText.clear();
+        if( !docparse::detail::readWholeFile( diskPath( ing, f ), fileText ) )
+        {
+            fileText.clear();   // degrade: an unreadable file satisfies nothing rather than crashing
+        }
+        lineStarts.clear();
+        lineStarts.push_back( 0 );
+        for( std::size_t i = 0; i < fileText.size(); ++i )
+        {
+            if( fileText[i] == '\n' )
+            {
+                lineStarts.push_back( i + 1 );
+            }
+        }
+        if( scope == GrepScope::File )
+        {
+            fileOk = grepTextSatisfiesTerms( fileText, terms );
+        }
+    };
+
+    for( const GrepRawHit& r : collected.raw )
+    {
+        ensureFileLoaded( r.fileId );
+        const bool keep = ( scope == GrepScope::File )
+                         ? fileOk
+                         : grepTextSatisfiesTerms( grepMatchedLine( fileText, lineStarts, r.line ), terms );
+        if( keep )
+        {
+            kept.push_back( r );
+        }
+        else
+        {
+            ++suppressedOut;
+        }
+    }
+    collected.raw = std::move( kept );
+    return collected;
+}
+
 // ─── R1b: the enclosing-symbol context rows (the 2026-08-12 usage mine) ───────────────────────────
 //
 // ONE row per DISTINCT enclosing symbol NAME on the served page, first-appearance order — shared by the

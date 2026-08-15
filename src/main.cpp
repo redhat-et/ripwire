@@ -10142,7 +10142,20 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // grepBefore/grepAfter default to 0 (--grep-context/-before/-after unset) ⇒ GrepHit::before/after
     // stay empty and the <hit> emission below takes the ORIGINAL self-closing path byte-for-byte —
     // this is the byte-identical-when-unset contract.
-    const GrepCollection       found    = grepCollect( ing, pat, cfg.grepRegex, cfg.noPrefilter );
+    GrepCollection             found    = grepCollect( ing, pat, cfg.grepRegex, cfg.noPrefilter );
+    // G3 (2026-08-15 harvest, report-ugrep §F2): boolean AND/NOT as a post-filter over the collected raw
+    // hits — literal-only, already refused together with --regex in validateConfig. Built here (not in
+    // Config) so the CLI value strings (string_views into argv) become owned std::strings exactly once.
+    std::vector<GrepTerm> grepTerms;
+    grepTerms.reserve( cfg.grepAnd.size() + cfg.grepNot.size() );
+    for( const std::string_view t : cfg.grepAnd ) { grepTerms.push_back( GrepTerm{ std::string( t ), false } ); }
+    for( const std::string_view t : cfg.grepNot ) { grepTerms.push_back( GrepTerm{ std::string( t ), true } ); }
+    const GrepScope    grepScopeVal    = ( cfg.grepScope == "file" ) ? GrepScope::File : GrepScope::Line;
+    std::uint32_t      termsSuppressed = 0;
+    if( !grepTerms.empty() )
+    {
+        found = grepApplyBooleanTerms( ing, std::move( found ), std::span<const GrepTerm>( grepTerms ), grepScopeVal, termsSuppressed );
+    }
     const std::size_t          hitCount = found.raw.size();
     // files= counts the whole COLLECTED set, never the printed page — it is a property of the search, so it
     // must read the same on every page of a walk (it used to be counted over the window's rows).
@@ -10236,6 +10249,15 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "path ingest itself used, unchanged). ORDER: SOURCE files before test/bench files before docs, then path and line. "
                  "shown=/capped= = rows printed vs found (a count of underlying HITS, the same unit hits= uses, not of printed <hit> "
                  "elements); hits_capped=\"1\" ⇒ hits= is a FLOOR (collection budget reached). "
+                 // G3 (2026-08-15 harvest): terms=/scope=/terms_suppressed= appear ONLY when the run passed
+                 // and/not — deliberately no literal "--and"/"--not" substring (illegal "--" digraph inside
+                 // an XML comment; spelled without the leading dashes, matching this legend's own convention).
+                 "terms= (present only with and/not) restates the whole boolean query as it was EVALUATED: the base pattern, then "
+                 "each and term prefixed +, each not term prefixed -. scope=line (default) requires every term on the SAME matched "
+                 "line as the base pattern; scope=file requires every term ANYWHERE in the file, independent of which line matched. "
+                 "terms_suppressed= counts the raw hits the boolean filter REJECTED — a different axis from hits_capped= (a collection-"
+                 "budget ceiling): hits=/shown=/etc. already read the FILTERED count, so terms_suppressed= exists only so a reader can "
+                 "recover how many the un-filtered scan would have shown. "
                  // G1 (2026-08-15 harvest): byte-identical match text within one file's hits on the UNPAGINATED default view folds into
                  // ONE <hit> row plus <at l=… in=…/> children for the extra sites — n= on the <hit> (present only when >1) is 1+the <at>
                  // count, so summing n= across a page's <hit> rows recovers shown=. Paging or --grep-context/-before/-after disables the
@@ -10265,8 +10287,22 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "or a scan that could not read a file; its ABSENCE claims nothing. The enc rows' caller counts stay FLOORS regardless "
                  "— complete= speaks for the hit rows alone. "
                  "%s -->", rw::kPageRaiseCapClause );
-    std::printf( "<grep pattern=\"%s\"%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s>",
-                 ex( pat ).c_str(), rootAttr.c_str(), filesMatched, hitCount,
+    // G3: terms=/scope=/suppressed= — only when AND/NOT was actually given, so a plain --grep answer
+    // stays byte-identical to before G3 landed (the "purely additive" rule every ripwire flag follows).
+    std::string termsAttr;
+    if( !grepTerms.empty() )
+    {
+        std::string termsList = ex( pat );
+        for( const GrepTerm& t : grepTerms )
+        {
+            termsList += t.negated ? " -" : " +";
+            termsList += ex( t.term );
+        }
+        termsAttr = " terms=\"" + termsList + "\" scope=\"" + ( grepScopeVal == GrepScope::File ? "file" : "line" ) + "\""
+                  + " terms_suppressed=\"" + std::to_string( termsSuppressed ) + "\"";
+    }
+    std::printf( "<grep pattern=\"%s\"%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s>",
+                 ex( pat ).c_str(), rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
                                  cfg.pageLimit, cfg.pageOffset, true ),
                  hitsCapped, completeAttr );
