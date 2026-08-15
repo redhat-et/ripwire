@@ -52,6 +52,20 @@ itemized with its reason. A confident-looking map that lies by omission is the f
 tool refuses.
 [What it misses, and what to run next →](#what-it-misses-and-what-to-run-next)
 
+**New (2026-08-15), each measured, gated, and re-derived on every CI run:**
+- **`--expand` answers "show me this function" in one call, −57.6% tokens** — an exact-name ask now
+  skips the ranked-map preamble by default and the body arrives with its file's sibling symbols and
+  imports inline (`sibs=`/`inc=`), so the follow-up "what else is in this file?" call never happens.
+- **`--grep` groups, deduplicates, and speaks boolean** — per-file grouping, identical-line collapse
+  ("this exact guard appears at 6 call sites" is the finding), and `--and=`/`--not=`/`--grep-scope=`:
+  a two-term ask returns the *complete* answer at **−78%** of the single-term dump. Default view now
+  runs at ~clean-grep cost while naming the enclosing symbol for every hit.
+- **C++ maps got materially truer**: out-of-line definitions past one qualifier
+  (`Outer::Inner::method(){}` — the house style of large C++ codebases) were silently invisible;
+  on one 6,600-file production tree that was ~15% of qualified definitions. Now indexed at any depth.
+- **Compound `--graph-query` filters run ~25× faster** via predicate pushdown — an exact algebraic
+  identity, byte-identical output, gate-enforced.
+
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
 
 Ten everyday moments, re-measured on this repository, 2026-08-08. Figures are ~tokens (≈ bytes/4);
@@ -1010,11 +1024,15 @@ And the third row's caveat is not small: it was measured 2026-06-20 on a large p
 is not publicly reproducible from this tree, and it proves *cheaper and faster*, not *better
 outcomes*.
 
-**The losses ship next to the wins.** `--grep` costs more tokens than it saves (**+19.7%** on one
-measure, −11.2% on the other) — it is not a token reducer. `--pack-signatures` inverts on a short
-symbol: 303 bytes of signature-plus-doc-comment against a 158-byte body. The headline is a property of
-large result sets, and [the full counterexample list](#in-the-numbers) is part of the contract, not an
-appendix.
+**The losses ship next to the wins.** `--grep`'s 2026-06 anti-headline (+19.7% / −11.2% vs raw grep)
+was re-derived 2026-08-15 after the emission overhaul: the default view now lands at **+1.2% / +7.6%**
+of a clean grep dump while carrying enclosing symbols and in-band honesty grep cannot give — but an
+*exhaustive* uncapped dump remains token-negative (**+153% / +217%**), and this project still says so.
+When the agent knows a second term, `--grep=A --and=B` flips hard positive (**−78.4%** measured,
+complete both sides). `--pack-signatures` inverts on a short symbol: 303 bytes of
+signature-plus-doc-comment against a 158-byte body. The headline is a property of large result sets,
+and [the full counterexample list](#in-the-numbers) is part of the contract, not an appendix — the
+four-fact grep re-derivation lives in [`docs/EVALS.md` §5](docs/EVALS.md).
 
 </details>
 
