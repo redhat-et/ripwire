@@ -59,6 +59,11 @@ QUERY="frobnicate widget cache"
 # byte-identity is kept deliberately as the strongest available statement of that property.
 # CORRECTED at 2026-07-30 by the w1fix2 verifier (finding G1) after the first re-pin comment got the byte
 # count, the new value, both rates and the causal story wrong — see the trap ledger entries 17-19.
+# RE-PIN 2026-08-15 (harvest wave, V5 item 3): est_tokens="725"-era note above still applies; this re-pin
+# moves 1088 -> 1095 (+17 B, document 2915 -> 2932 B). CAUSE: the --for legend's phantom-flag fix — the clause
+# "the signatures-only flag opts out" now reads "the signatures-only flag (no-bodies mode) opts out" (V5 lane,
+# merged at 6bd6c00); no such flag existed and the wording was corrected rather than a flag added. Every ranking
+# and body byte is identical; the ONLY moving bytes are that clause and est_tokens re-measuring itself.
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route >"$TMP/plain_full.xml" 2>/dev/null
 diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \
     && ok "golden-neutral: plain --for --no-route byte-identical to the pre---anchor golden" \
