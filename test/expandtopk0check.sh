@@ -112,9 +112,56 @@ else
     ok "(E) bundle mode ships no ranked map either"
 fi
 
+# ── (G) V1 fix regression guard (verifier finding 1, 2026-08-15) — the shape (B) and (E) both
+#        structurally could not exercise. (B) forces bundle mode via --pack-budget-bytes=10, so the
+#        estimator's own value never gets compared against a real whole-file candidate. (E)'s
+#        bigProbe007 fixture is tiny and hand-built, so even a wildly wrong bundle estimate happens not
+#        to flip the mode there. Neither arm runs at the DEFAULT budget on a REAL, non-trivial repo — the
+#        one place the defect actually manifested: measureEmittedMapBytes(mapTopK, …) was called
+#        UNGUARDED for the bundle-size estimate, and mapTopK==0 means UNLIMITED inside serialize() (not
+#        "no map"), so the estimator priced a ~1 MB whole-repo map that the emitter never intended to
+#        print. chooseExpandServe then compared that phantom bundle against the real whole-file candidate
+#        and picked mode="whole-file" — serving the ENTIRE 48 KB src/darkflags.h in place of the ~1 KB
+#        body the exact-name default promises. RED on the pre-fix binary
+#        (reason="file 48222B &lt; bundle 1054283B", mode="whole-file"); GREEN once the estimator is
+#        guarded exactly like its two siblings at the ceiling verdict and the topK>0 emission gate
+#        (`mapTopK > 0 ? measureEmittedMapBytes(...) : 0`).
+"$BIN" "$ROOT" --expand=endsWithView --no-cache >"$TMP/real_default.xml" 2>"$TMP/real_default.err"
+"$BIN" "$ROOT" --expand=endsWithView --no-cache --top-k=0 >"$TMP/real_tk0.xml" 2>/dev/null
+realTk0Bytes=$( wc -c < "$TMP/real_tk0.xml" | tr -d ' ' )
+
+if grep -q 'mode="whole-file"' "$TMP/real_default.xml"; then
+    no "(G) default --expand=endsWithView on the real repo wrongly served whole-file: $( grep -oE '<ctx[^>]*>' "$TMP/real_default.xml" )"
+else
+    ok "(G) default --expand=endsWithView on the real repo correctly stays in bundle mode"
+fi
+
+# (G-a) the SERVED BODY (everything but the <ctx ...> opening tag's own mode=/reason= decoration, which
+#       composing with M6 is the documented, (E)-gated contract) must be byte-identical to explicit
+#       --top-k=0's — proving the estimator and the emitter now agree on what mapTopK==0 means.
+sed 's/<ctx[^>]*>//' "$TMP/real_default.xml" > "$TMP/real_default_body.xml"
+sed 's/<ctx[^>]*>//' "$TMP/real_tk0.xml"      > "$TMP/real_tk0_body.xml"
+diff -q "$TMP/real_default_body.xml" "$TMP/real_tk0_body.xml" >/dev/null \
+    && ok "(G-a) default's served body is byte-identical to explicit --top-k=0's" \
+    || no "(G-a) default's served body diverges from explicit --top-k=0's — the estimator or the emitter disagree on what mapTopK==0 means"
+
+# (G-b) when topk_default="0" is in effect and a reason= fires, the bundle byte count it PRICES must be
+#       the REAL served size (== the --top-k=0 byte count), never a phantom map-inclusive estimate. This
+#       is the precise, load-bearing number the V1 defect corrupted.
+pricedBundle=$( grep -oE 'reason="bundle [0-9]+B' "$TMP/real_default.xml" | grep -oE '[0-9]+' )
+if [ -n "$pricedBundle" ]; then
+    if [ "$pricedBundle" = "$realTk0Bytes" ]; then
+        ok "(G-b) reason= prices the bundle at exactly the --top-k=0 byte count (${pricedBundle}B) — no phantom map"
+    else
+        no "(G-b) reason= priced the bundle at ${pricedBundle}B but --top-k=0 actually serves ${realTk0Bytes}B — the reason= string still prices a map that mapTopK==0 will never emit"
+    fi
+else
+    no "(G-b) no reason=\"bundle NNNB ...\" clause found on the real-repo default root — unexpected mode, see (G) above: $( grep -oE '<ctx[^>]*>' "$TMP/real_default.xml" )"
+fi
+
 # ── (F) well-formedness + determinism ─────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    for f in uniq dup5 dup tk5 tk0 big; do
+    for f in uniq dup5 dup tk5 tk0 big real_default real_tk0; do
         xmllint --noout "$TMP/$f.xml" 2>/dev/null && ok "(F) $f.xml well-formed" || no "(F) $f.xml fails xmllint"
     done
 else
