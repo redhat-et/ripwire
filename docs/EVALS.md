@@ -847,7 +847,7 @@ C++ corpus — *historical, private, not publicly reproducible*. Every figure be
      uncapped (`--limit=1000`). Independent corroboration:
      `test/grepbytescheck.sh` re-derives a **−40.2% median** payload cut on this repository's five
      frozen *capped* queries every run — and, on twelve frozen *uncapped* small-hit queries, a
-     **+65.1% median** payload *increase*, larger than plain grep on **12 of 12**. Both medians are
+     **+61.5% median** payload *increase*, larger than plain grep on **12 of 12**. Both medians are
      re-derived on every run and banded to ±1.5 points against this paragraph, so neither can drift
      from the binary silently. *(Re-measured 2026-08-15 by the fix-grep lane, which corrected three
      instrument defects in that gate: the two arms were reading different corpora (ripwire the whole
@@ -855,7 +855,7 @@ C++ corpus — *historical, private, not publicly reproducible*. Every figure be
      row-capped — so the statistic tracked grep's verbosity rather than ripwire's encoding, and the
      regime where ripwire is LARGER was structurally invisible. The same lane made the boolean-terms
      legend clause conditional on `--and`/`--not` actually being passed, which is what moved the capped
-     median from −38.6% to −40.2% and the uncapped one from +78.0% to +65.1%. One residual is disclosed
+     median from −38.6% to −40.2% and the uncapped one from +78.0% to +61.5% (re-derived at the final wave head bc19040 — the expand-estimator and legend-scoping merges moved bytes after the fix-grep measurement). One residual is disclosed
      in the gate's own header rather than acted on: both arms are handed an ABSOLUTE corpus path, so
      grep repeats a ~60-byte prefix on every output line while ripwire prints a root-relative path once
      per file; re-running the capped set with a relative path for both arms reads **≈ −14%**, not
