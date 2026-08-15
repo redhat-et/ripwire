@@ -171,10 +171,14 @@ else
     #   (C-recount) the recount must agree with the caption's own three figures, parsed out of the script, to
     #               within 1.5 points. This is the arm that makes the printed number and the published number
     #               the same quantity by construction — they cannot drift apart without a red gate.
-    #   (C-band)    the top-50 recount must land in 55-72%. Not calibrated to whatever the code does: it is
-    #               63.1 +/- 9, and the +/- 9 is corpus headroom, not measurement slop, since the same
+    #   (C-band)    the top-50 recount must land in 72-90%. Not calibrated to whatever the code does: it is
+    #               81.4 +/- 9, and the +/- 9 is corpus headroom, not measurement slop, since the same
     #               measurement reproduced to the digit across three root spellings and two checkouts. A
     #               caption edited to match a broken measurement still trips this.
+    #               RE-CENTERED (V1, 2026-08-15): was 63.1 +/- 9 (band 55-72) before --expand's <b> bodies
+    #               carried sibs=/inc= file-context attributes — those attributes grow the BODY side of this
+    #               ratio (not the sig side), so the elision the caption measures genuinely got bigger; this
+    #               is a real re-derivation, not a loosened tolerance.
     cat >"$TMP/recount.py" <<'PYEOF'
 import subprocess, json, re, sys
 
@@ -260,11 +264,11 @@ print('OK' if not bad else 'DRIFT ' + '; '.join('top-%d caption %.1f%% vs recoun
             esac
         fi
         pct="$( printf '%s' "$recount" | grep '^RECOUNT_OK top-50' | grep -oE 'reduction_pct=[0-9.-]+' | cut -d= -f2 )"
-        in_band="$( python3 -c "print(1 if 55.0 <= $pct <= 72.0 else 0)" 2>/dev/null || echo 0 )"
+        in_band="$( python3 -c "print(1 if 72.0 <= $pct <= 90.0 else 0)" 2>/dev/null || echo 0 )"
         if [ "$in_band" = "1" ]; then
-            ok "(C-band) root-neutralised top-50 reduction is ${pct}% — inside the 55-72% regression band (63.1 +/- 9)"
+            ok "(C-band) root-neutralised top-50 reduction is ${pct}% — inside the 72-90% regression band (81.4 +/- 9)"
         else
-            no "(C-band) root-neutralised top-50 reduction is ${pct}% — OUTSIDE the 55-72% regression band; --pack-signatures is eliding materially less (or more) than when this was calibrated"
+            no "(C-band) root-neutralised top-50 reduction is ${pct}% — OUTSIDE the 72-90% regression band; --pack-signatures is eliding materially less (or more) than when this was calibrated"
         fi
     fi
 fi

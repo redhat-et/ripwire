@@ -11810,6 +11810,23 @@ int runDefaultMap( const MainDispatch& d )
         }
     }
 
+    // V1 (routing note ugrep RN2, 2026-08-15): an EXACT-NAME --expand — one token that resolved to exactly
+    // one symbol — needs no orientation map: the caller already named the exact target, so the top-200
+    // ranked map is pure overhead in front of the one body it exists to summarize (MEASURED on this repo:
+    // 12,944 est_tokens of map ahead of a ~1.4 KB body). Default top-k to 0 for this shape. An explicit
+    // --top-k=N (0 included) always overrides — see the explicit-top-k guard just below. A MULTI-match name
+    // (matches.size() > 1) or a multi-token --expand keep the caller's ordinary default: there IS something
+    // to disambiguate/orient there, the exact reason expandAutoServeScope's lean-does-not-auto-compete
+    // rationale still holds. Composed verbs already claim the map for their own purpose, so they are
+    // excluded here exactly like expandAutoServeScope excludes them below.
+    const bool exactNameExpandDefault = cfg.expand.size() == 1 && expandNodes.size() == 1 && !cfg.topKExplicit
+        && cfg.outline.empty() && !cfg.packSignatures && cfg.packTopN == 0 && cfg.query.empty()
+        && !cfg.adaptive && cfg.maxTokens == 0 && !cfg.json;
+    if( exactNameExpandDefault )
+    {
+        mapTopK = 0;
+    }
+
     // --outline=NAME,...: same resolution, same refusal contract. A miss used to emit the map and exit 0,
     // so a typo'd outline was indistinguishable from a successful one.
     std::vector<NodeId> outlineNodes;
@@ -11890,7 +11907,8 @@ int runDefaultMap( const MainDispatch& d )
     {
         bodiesSection = rw::chargeSection( [ & ]( std::FILE* f )
             { packBodies( f, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
-                          expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr ); },
+                          expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
+                          /*truncateOversizedFirst=*/true, /*withFileContext=*/true ); },   // V1: octocode F2 sibs=/inc=
             rw::kBytesPerTokenBody );
     }
     if( !outlineNodes.empty() )
@@ -11929,7 +11947,11 @@ int runDefaultMap( const MainDispatch& d )
     // Gate: test/expandmodecheck.sh.
     bool                serveWholeFile = false;
     rw::WholeFileRender wholeFile;
-    std::string         ctxOpenStr = "<ctx>";
+    // V1: the exact-name default's root disclosure — "assert absence + a root attribute" (ugrep RN2). Set as
+    // the INITIAL value so it survives even when expandAutoServeScope below does not run (a range slice, or
+    // a pre-render degrade) — every path exactNameExpandDefault can reach ends up with SOME <ctx ...> to
+    // decorate, since hasExtension is provably true whenever --expand is non-empty.
+    std::string         ctxOpenStr = exactNameExpandDefault ? "<ctx topk_default=\"0\">" : "<ctx>";
     if( expandAutoServeScope( cfg, !expandRanges.empty(), bodiesSection.isRendered ) )
     {
         // Bundle total = "<ctx>" + the map as it would actually be emitted (payload token digits included)
@@ -11942,6 +11964,14 @@ int runDefaultMap( const MainDispatch& d )
         ExpandServeChoice choice = chooseExpandServe( bundleBytes, wholeFile, cfg.packBudgetBytes );
         serveWholeFile = choice.serveWholeFile;
         ctxOpenStr     = std::move( choice.ctxOpen );
+        if( exactNameExpandDefault )
+        {
+            // chooseExpandServe's four formatted opens all start "<ctx mode=\"...\" reason=\"...\">" — insert
+            // right after "<ctx" so the self-describing default rides alongside whichever mode/reason M6
+            // independently picked (bundle-without-a-map still beats a huge whole-file, so this composes).
+            VERIFY( ctxOpenStr.rfind( "<ctx", 0 ) == 0 );
+            ctxOpenStr.insert( 4, " topk_default=\"0\"" );
+        }
     }
 
     // r27-emitters T2: the ride-along map. A bare `--expand=SYM` costs ~24 KB for a ~1.4 KB body because the
@@ -11950,8 +11980,10 @@ int runDefaultMap( const MainDispatch& d )
     // complete answer, the map still rides and the caller is still TOLD, once, on stderr (stdout stays
     // byte-identical), with --top-k=0 as the documented off switch. Fires only when the user did not choose
     // a top-k themselves, and never in whole-file mode (there is no map riding along to warn about).
+    // V1: also never fires when mapTopK==0 via exactNameExpandDefault — there is no map riding along to warn
+    // about there either, and printing "top-0 map rides along" would be both false and confusing.
     if( !cfg.topKExplicit && ( !cfg.expand.empty() || !cfg.outline.empty() ) && !cfg.json
-        && !serveWholeFile )
+        && !serveWholeFile && mapTopK > 0 )
     {
         std::fprintf( stderr, "ripwire: note — the ranked top-%d map rides along with your requested bodies; add --top-k=0 for the bodies alone (or --top-k=1 for a minimal map)\n", mapTopK );
     }
@@ -12065,7 +12097,8 @@ int runDefaultMap( const MainDispatch& d )
     if( !expandNodes.empty() && !serveWholeFile )   // M6: whole-file mode already served the file itself
     {
         emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
-                                                       expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr ); } );   // L3: --expand bodies surface notes
+                                                       expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
+                                                       /*truncateOversizedFirst=*/true, /*withFileContext=*/true ); } );   // L3: --expand bodies surface notes; V1: sibs=/inc=
     }
     if( !outlineNodes.empty() )
     { // resolved (and refused on a miss) above, before the first stdout byte

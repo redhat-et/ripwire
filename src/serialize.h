@@ -3424,6 +3424,118 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
 // test), turning the fit test into "everything fits". The guard happens to mask it today, so the floored form
 // is a latent trap defused, not an output change.
 //
+// ── V1 (octocode F2, 2026-08-15): per-file context for a --expand body ─────────────────────────────────
+// The gap: --expand's body bundle carried no import list or sibling-symbol summary, so an agent reading
+// one body had to spend a SECOND call (--outline on the same file, or a re-run with a bigger --top-k) just
+// to learn what else lives there. ripwire already indexes both facts (ing.symbols grouped by fileId,
+// ing.includes filtered by fileId) — this is a lookup, not a new extraction pass.
+// A NEW per-file table, not a corpus-wide persistent index (the owner's multiple-views latitude for this
+// round): an --expand call only ever touches the handful of files its requested symbols live in, so
+// building a table for EVERY file in the corpus up front would price a scan `--expand` never needs. Built
+// ONCE per packBodies call — one pass over ing.symbols, one over ing.includes, both filtered to just the
+// files in `fileOrder` — not once per body, so a two-body file and a two-hundred-body file pay the same.
+// Deterministic (source/definition order, the same order ing.symbols/ing.includes already hold); G2:
+// HashMap<>, never std::map, reserved to fileOrder.size().
+struct FileExpandContext
+{
+    // (id, name) pairs for EVERY symbol in the file, in ing.symbols order, self NOT pre-excluded (which
+    // entry is "self" differs per body when a file contributes more than one requested symbol, so exclusion
+    // happens at emission time, per body, against a table built once).
+    std::vector<std::pair<NodeId, std::string_view>> siblings;
+    std::vector<std::string_view>                     includes;   // this file's #include/import targets, source order
+};
+
+inline constexpr std::size_t kMaxExpandSibs     = 40;   // sibs= cap — a giant file's sibling list must not dwarf the body
+inline constexpr std::size_t kMaxExpandIncludes = 24;   // inc= cap
+
+inline HashMap<std::uint32_t, FileExpandContext> buildFileExpandContexts(
+    const IngestResult& ing, const std::vector<std::uint32_t>& fileOrder )
+{
+    HashMap<std::uint32_t, FileExpandContext> table;
+    table.reserve( fileOrder.size() );
+    for( std::uint32_t f : fileOrder )
+    {
+        table[f];   // ensure an entry exists even for a file with zero includes (still worth an inc-total="0" fact)
+    }
+    for( const Symbol& s : ing.symbols )
+    {
+        if( const auto it = table.find( s.fileId ); it != table.end() )
+        {
+            it->second.siblings.emplace_back( s.id, std::string_view( s.name ) );
+        }
+    }
+    for( const Include& inc : ing.includes )
+    {
+        if( const auto it = table.find( inc.fileId ); it != table.end() )
+        {
+            it->second.includes.emplace_back( inc.target );
+        }
+    }
+    return table;
+}
+
+// sibs=/inc= for ONE body — extracted out of packBodies for the SAME reason emitCalleeCallsBlock was
+// (its own comment above): the disclosure logic must not inflate packBodies' own complexity/LOC. Appends
+// directly to `children` (the same accumulator packBodies streams the rest of the tag through), mirroring
+// emitCalleeCallsBlock's own append-to-caller-buffer shape rather than returning a string to splice.
+inline void appendFileExpandContextAttrs( std::string& children, const FileExpandContext& fc, NodeId id, std::vector<char>& esc )
+{
+    // sibs="..." — every OTHER symbol defined in this file (this body's own id excluded), source order,
+    // capped at kMaxExpandSibs; sibs_total= is the count EXCLUDING self (never affected by the cap) so a
+    // truncated list still says how much was left out — the same disclosure spirit as
+    // <calls total=/shown=/capped=> above, flattened onto attributes since sibs/inc describe the FILE, not
+    // a child listing of their own.
+    std::string sibsList;
+    std::size_t sibsShown = 0, sibsTotal = 0;
+    for( const auto& [ sibId, sibName ] : fc.siblings )
+    {
+        if( sibId == id )
+        {
+            continue; // this body's own definition is not its own sibling
+        }
+        ++sibsTotal;
+        if( sibsShown < kMaxExpandSibs )
+        {
+            if( !sibsList.empty() )
+            {
+                sibsList += ",";
+            }
+            sibsList += escapeXml( sibName, esc );
+            ++sibsShown;
+        }
+    }
+    if( sibsTotal > 0 )
+    {
+        children += " sibs=\"" + sibsList + "\" sibs_total=\"" + std::to_string( sibsTotal ) + "\"";
+        if( sibsShown < sibsTotal )
+        {
+            children += " sibs_capped=\"1\"";
+        }
+    }
+
+    // inc="..." — this file's own #include/import targets, source order, capped at kMaxExpandIncludes;
+    // inc_total= is the TRUE count. Absent when the file has none (a documented zero, not a degrade — see
+    // buildFileExpandContexts).
+    if( !fc.includes.empty() )
+    {
+        std::string incList;
+        const std::size_t incShown = std::min( fc.includes.size(), kMaxExpandIncludes );
+        for( std::size_t k = 0; k < incShown; ++k )
+        {
+            if( k > 0 )
+            {
+                incList += ",";
+            }
+            incList += escapeXml( fc.includes[k], esc );
+        }
+        children += " inc=\"" + incList + "\" inc_total=\"" + std::to_string( fc.includes.size() ) + "\"";
+        if( incShown < fc.includes.size() )
+        {
+            children += " inc_capped=\"1\"";
+        }
+    }
+}
+
 // --expand (L4 middle ground): emit the FULL definition source [sigStartByte, endByte) for each
 // requested symbol — "give me this def's body, not the whole file" (Agentless rung-3 / Serena
 // include_body). Grouped under <bodies>, CDATA-safe, budget-capped, self-describing (truncation
@@ -3432,6 +3544,11 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
 // ranges: optional NodeId→LineRange map (octocode partial-fetch). A node absent from `ranges`, or
 // present with hasRange=false, takes the ORIGINAL whole-body path byte-for-byte — no ranges map at
 // all (nullptr, the default) is the pre-existing call signature, unchanged.
+// withFileContext (V1, default false — every existing caller stays byte-identical): adds sibs=/inc= to
+// each <b> — see FileExpandContext above. Opt-in because most packBodies callers (--for auto-body,
+// --pack-task, --detail, --around, MCP `exemplar`) already answer a DIFFERENT question ("show me this
+// symbol") where a file-context summary is not what was asked; --expand's contract IS "orient me on this
+// symbol", so it turns this on (main.cpp's two --expand call sites).
 inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& nodes,
                         std::size_t budgetBytes,
                         const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
@@ -3441,12 +3558,14 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                                                                         //   <b> body (canonical-id target). nullptr ⇒ INERT (byte-identical).
                         EmittedBodies* outEmitted = nullptr,            // §H5: what this call actually emitted — see EmittedBodies.
                                                                         //   nullptr ⇒ not recorded (every XML-only caller).
-                        bool truncateOversizedFirst = true )            // T3: false ⇒ whole-body-or-not-at-all — a first body larger
+                        bool truncateOversizedFirst = true,            // T3: false ⇒ whole-body-or-not-at-all — a first body larger
                                                                         //   than the WHOLE budget takes the omission-marker path instead
                                                                         //   of the head-truncation below. The auto --for bundle passes
                                                                         //   false (its contract is "the FULL body if it fits, else
                                                                         //   dropped and disclosed"); every pre-existing caller keeps the
                                                                         //   default and is byte-identical.
+                        bool withFileContext = false )                 // V1: sibs=/inc= on each <b> — see FileExpandContext above.
+                                                                        //   false (every caller but --expand) ⇒ byte-identical.
 {
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F2): the MCP `exemplar` verb has no byte budget, and 0 must never
     // mean "cap at zero bytes" (the cap fired before the first body and emitted a bare <bodies></bodies>).
@@ -3508,6 +3627,12 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     {
         outEmitted->requested = requestedCount;
     }
+
+    // V1: built ONCE here (not per body) — see FileExpandContext's own comment for why this is a per-call
+    // table over fileOrder rather than a corpus-wide index. Empty map, zero extra passes, when the caller
+    // did not ask (the common case for every packBodies caller except --expand).
+    const HashMap<std::uint32_t, FileExpandContext> fileCtx =
+        withFileContext ? buildFileExpandContexts( ing, fileOrder ) : HashMap<std::uint32_t, FileExpandContext>{};
 
     std::string children;         // see THE <bodies> DISCLOSURE in the header for why this is buffered, not streamed
     std::size_t shownCount = 0;   // counted at the emission, never by substring-matching `children`
@@ -3643,6 +3768,18 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
             if( bodyScrubbed )
             {
                 children += " scrubbed=\"1\""; // absent = the CDATA is byte-equal to the JSON twin
+            }
+            // V1 (octocode F2): sibs=/inc= — the file-context lookup an --expand caller used to need a
+            // second --outline call for. `fileCtx` is empty when withFileContext is false, so this is a
+            // single failed HashMap::find per body (no-op) on every other packBodies caller. The actual
+            // attribute-building lives in appendFileExpandContextAttrs above, out of this function's own
+            // complexity count — same rationale as emitCalleeCallsBlock's own extraction.
+            if( withFileContext )
+            {
+                if( const auto fcIt = fileCtx.find( f ); fcIt != fileCtx.end() )
+                {
+                    appendFileExpandContextAttrs( children, fcIt->second, id, esc );
+                }
             }
             children += "><![CDATA[";
             children += safe;
