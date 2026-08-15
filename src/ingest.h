@@ -327,6 +327,20 @@ struct AstQueryGroup
                                                                      // to one of those grammars (same extension-
                                                                      // based convention the grammar-presence scan
                                                                      // above already uses — not content-sniffed)
+
+    // octocode F3: a spec that lands in uncompiledOut (compiled for NO grammar — a malformed/misspelled
+    // query) used to refuse with the query echoed back and nothing more, so a typo'd node-kind token (e.g.
+    // `call_expresion` for `call_expression`) got no nearer a fix than re-reading the S-expression by eye.
+    // Both fields are opt-in (default nullptr ⇒ zero cost for every caller that doesn't ask) and, when the
+    // caller supplies them, are appended to PARALLEL to uncompiledOut — one push per uncompiled spec, same
+    // order, so nearestKindOut[i]/nearestGrammarOut[i] describe uncompiledOut[i]. An entry is an empty
+    // string when no candidate node-kind token was within the edit-distance cutoff of any linked grammar's
+    // vocabulary (an honest "no plausible near-miss", the same contract as didyoumean.h's didYouMean()).
+    std::vector<std::string>*        nearestKindOut    = nullptr;   // optional: nearest valid node-kind name
+                                                                     // per uncompiled spec, or "" if none close
+    std::vector<std::string>*        nearestGrammarOut = nullptr;   // optional: the grammar (kLangTable's
+                                                                     // querySub name) that nearestKindOut's
+                                                                     // entry belongs to, "" alongside a "" kind
 };
 
 // keptBytesOut (optional): the walk is where the corpus gets READ, so a pass that runs after it and needs
