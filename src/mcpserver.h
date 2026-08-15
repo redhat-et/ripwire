@@ -500,6 +500,13 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
     // can neither advertise a verb this tree makes refuse nor omit one it would have answered.
     policy.pinnedRootHasGit = ( cfg.roots.size() < 2 ) && quality::gitRepoHasHistory( pinnedRoot );
 
+    // finding #7: WHICH git-only cause is it, when pinnedRootHasGit came back false? A second probe, only
+    // forked when the first one already failed (the common git-with-history path pays nothing extra) —
+    // gitRepoToplevel succeeds on a `.git init`-only tree with zero commits (rev-parse --show-toplevel
+    // needs no HEAD), so a non-empty toplevel here means "git repo, no HEAD" rather than "no git at all".
+    policy.pinnedRootIsGitDir = !policy.pinnedRootHasGit && ( cfg.roots.size() < 2 )
+                              && !gitRepoToplevel( pinnedRoot ).empty();
+
     // ── 4) open the listening socket ───────────────────────────────────────────────────────────────────
     const int listenFd = ::socket( AF_INET, SOCK_STREAM, 0 );
     if( listenFd < 0 ) { std::fprintf( stderr, "ripwire: --listen: socket() failed: %s\n", std::strerror( errno ) ); return 1; }

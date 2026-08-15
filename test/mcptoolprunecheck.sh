@@ -68,15 +68,50 @@ echo "mcptoolprunecheck: BIN=$BIN"
 GIT_ONLY="owners whereis stray_content"
 GIT_LESS="cochange situational_awareness quality_delta edit_check"
 
-# ── two workspaces off ONE corpus: identical trees, one with git history and one without ────────────────
+# finding #12: the exact retained-verb IDENTITY, not just a count — a drop-one/add-one mutation that kept
+# the total at 27 (or 30) would slip past a bare wc -w. Spelled once here; every arm below that checks a
+# tools/list listing diffs against ALL_VERBS or ALL_VERBS-minus-GIT_ONLY (EXPECTED_NONGIT) rather than
+# re-deriving it. names_identical prints OK or the missing/extra sets, so a failure names exactly what moved.
+ALL_VERBS="analyze batch cochange connect doc_drift edit_check exemplar explore fetch_body find_referencing_symbols find_symbol flags for from_trace grep impact insert_after_symbol insert_before_symbol lego memory_recall mentions owners path_between quality_baseline quality_delta replace_symbol_body situational_awareness stray_content uses whereis"
+# NOT built via `$( … case … esac … )` — bash 3.2 (macOS's stock /bin/bash) misparses a case pattern's
+# bare `)` inside a `$( )` command substitution as closing the substitution early ("syntax error near
+# unexpected token `;;'"), so the filter has to run as a plain loop instead.
+EXPECTED_NONGIT=""
+for v in $ALL_VERBS; do
+    case " $GIT_ONLY " in
+        *" $v "*) ;;
+        *) EXPECTED_NONGIT="$EXPECTED_NONGIT $v";;
+    esac
+done
+names_identical() { # $1 = got (space-separated), $2 = want (space-separated)
+    python3 -c '
+import sys
+got, want = sorted(sys.argv[1].split()), sorted(sys.argv[2].split())
+if got == want:
+    print("OK")
+else:
+    missing = [x for x in want if x not in got]
+    extra = [x for x in got if x not in want]
+    print("missing:%s extra:%s" % (",".join(missing) or "-", ",".join(extra) or "-"))
+' "$1" "$2"
+}
+
+# ── three workspaces off ONE corpus: identical trees — full git history, `.git init` with NO commit (finding
+# #7's repro), and no git at all ─────────────────────────────────────────────────────────────────────────
 NOGIT="$TMP/nogit";  cp -R "$ROOT/test/zoomfix" "$NOGIT"
 GITWS="$TMP/gitws";  cp -R "$ROOT/test/zoomfix" "$GITWS"
+EMPTYGIT="$TMP/emptygit"; cp -R "$ROOT/test/zoomfix" "$EMPTYGIT"
 ( cd "$GITWS" && git init -q . && git add -A \
   && git -c user.email=gate@example.invalid -c user.name=gate commit -qm "fixture" ) >/dev/null 2>&1
 git -C "$GITWS" rev-parse --verify --quiet HEAD >/dev/null 2>&1 \
     || { echo "could not create the git workspace — arm G cannot run"; exit 2; }
 git -C "$NOGIT" rev-parse --show-toplevel >/dev/null 2>&1 \
     && { echo "the non-git workspace resolved INTO a repo ($TMP is inside a checkout?) — arms A-E are void"; exit 2; }
+( cd "$EMPTYGIT" && git init -q . ) >/dev/null 2>&1
+git -C "$EMPTYGIT" rev-parse --verify --quiet HEAD >/dev/null 2>&1 \
+    && { echo "the empty git workspace already has a HEAD commit — arm H is void"; exit 2; }
+git -C "$EMPTYGIT" rev-parse --show-toplevel >/dev/null 2>&1 \
+    || { echo "the empty git workspace is not even inside a repo (git init failed?) — arm H is void"; exit 2; }
 
 PORT=$(( 21000 + ( $$ % 4000 ) ))
 ACCEPT='application/json, text/event-stream'
@@ -130,6 +165,12 @@ NOGIT_COUNT="$( printf '%s' "$NOGIT_NAMES" | wc -w | tr -d ' ' )"
 [ "$NOGIT_COUNT" = "27" ] && ok "(A) tools/list advertises 27 verbs (30 minus the 3 git-only)" \
                           || no "(A) tools/list advertises $NOGIT_COUNT verbs, expected 27"
 
+# finding #12: count + absence alone would not catch a drop-one/add-one mutation (omit a 28th verb instead
+# of / in addition to one of the three, while some OTHER verb slips in) — pin the exact retained SET.
+NOGIT_IDENTITY="$( names_identical "$NOGIT_NAMES" "$EXPECTED_NONGIT" )"
+[ "$NOGIT_IDENTITY" = "OK" ] && ok "(A) the retained 27 are EXACTLY ALL_VERBS minus the 3 git-only (identity, not just count)" \
+                             || no "(A) retained-set identity mismatch: $NOGIT_IDENTITY"
+
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 echo
 echo "=== (B) [red] the omission is self-describing in initialize's instructions ==="
@@ -173,7 +214,11 @@ if not m:
     problems.append("batch states no exclusion count")
 elif int(m.group(1)) != truth:
     problems.append("batch says %s excluded, the pruned listing's arithmetic says %d" % (m.group(1), truth))
-for gone in ("whereis", "stray_content"):
+# finding #8: ALL THREE git-only verbs, not just the two that sit in the EXCLUDED half of the sentence.
+# `owners` is batch-SERVED (kBatchServedVerbs), so on a pruned catalog it must vanish from the SERVED half
+# ("each verb is one of for/grep/.../owners/...") instead — a check that only ever looked at the excluded
+# half's two names would miss exactly that bug (mcp.h:687 conditioned one half and not the other).
+for gone in ("owners", "whereis", "stray_content"):
     if gone not in d and gone in b:
         problems.append("batch's prose still names '%s', which this server does not advertise" % gone)
 print("OK" if not problems else "; ".join(problems))
@@ -239,6 +284,9 @@ STDIO_NAMES="$( python3 -c "$names_py" "$TMP/stdio.list" )"
 STDIO_COUNT="$( printf '%s' "$STDIO_NAMES" | wc -w | tr -d ' ' )"
 [ "$STDIO_COUNT" = "30" ] && ok "(F) stdio startup-root server still advertises all 30" \
                           || no "(F) stdio advertises $STDIO_COUNT verbs — a stdio read verb may name ANY path, so nothing is provably unreachable"
+STDIO_IDENTITY="$( names_identical "$STDIO_NAMES" "$ALL_VERBS" )"
+[ "$STDIO_IDENTITY" = "OK" ] && ok "(F) stdio's 30 are EXACTLY ALL_VERBS (identity, not just count)" \
+                             || no "(F) stdio retained-set identity mismatch: $STDIO_IDENTITY"
 stdio_call "$NOGIT" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' >/dev/null
 INIT_STDIO="$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | "$BIN" "$NOGIT" --mcp 2>/dev/null | tail -1 )"
 printf '%s' "$INIT_STDIO" | python3 -c '
@@ -265,6 +313,9 @@ for v in $GIT_ONLY; do
     case " $GIT_NAMES " in *" $v "*) ;; *) gone="$gone $v";; esac
 done
 [ -z "$gone" ] && ok "(G) every git verb present on a real repo" || no "(G) pruned on a REAL git repo:$gone"
+GIT_IDENTITY="$( names_identical "$GIT_NAMES" "$ALL_VERBS" )"
+[ "$GIT_IDENTITY" = "OK" ] && ok "(G) the git root's 30 are EXACTLY ALL_VERBS (identity, not just count)" \
+                           || no "(G) git-root retained-set identity mismatch: $GIT_IDENTITY"
 python3 -c '
 import sys, json
 ins = json.load(open(sys.argv[1])).get("result", {}).get("instructions", "")
@@ -272,6 +323,45 @@ print("QUIET" if "omit" not in ins.lower() else "FALSE_DISCLOSURE")
 ' "$TMP/git.init" > "$TMP/gdisc"
 grep -q QUIET "$TMP/gdisc" && ok "(G) no omission sentence on a git root" || no "(G) instructions claim an omission on a real git repo"
 stop_pinned
+
+# ════════════════════════════════════════════════════════════════════════════════════════════════════
+echo
+echo "=== (H) [red] finding #7: an EMPTY git repo (git init, no commit) gets the QUALIFIED wording ==="
+# ════════════════════════════════════════════════════════════════════════════════════════════════════
+# THE BUG: gitOnlyOmissionNote used to say, unconditionally, "this server's workspace is not a git
+# repository" — FALSE for this workspace, which IS a git repository, it just has no HEAD commit yet. Every
+# git-only verb's OWN per-request refusal already carries the honest qualifier ("not a git repository (or
+# no HEAD commit)"); the disclosure sentence must say the same thing, not a narrower false one.
+start_pinned "$EMPTYGIT" || { echo "listener on the empty-git workspace failed to start: $( head -3 "$TMP/srv.err" )"; exit 1; }
+http_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' > "$TMP/empty.init"
+http_call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' > "$TMP/empty.list"
+stop_pinned
+
+EMPTY_NAMES="$( python3 -c "$names_py" "$TMP/empty.list" )"
+EMPTY_IDENTITY="$( names_identical "$EMPTY_NAMES" "$EXPECTED_NONGIT" )"
+[ "$EMPTY_IDENTITY" = "OK" ] && ok "(H) the empty-git root also prunes to EXACTLY ALL_VERBS minus the 3 git-only" \
+                             || no "(H) empty-git retained-set identity mismatch: $EMPTY_IDENTITY"
+
+python3 - "$TMP/empty.init" <<'PY' > "$TMP/empty.res" 2>&1
+import sys, json
+r = json.load(open(sys.argv[1]))
+ins = r.get("result", {}).get("instructions", "")
+low = ins.lower()
+problems = []
+# the FALSE claim the bug made: "is not a git repository" with no qualifier reaching the SAME sentence.
+# A workspace that has .git but no HEAD IS a git repository, so that exact unqualified claim must be gone.
+if "is not a git repository" in low and "or has no head commit" not in low and "or no head commit" not in low:
+    problems.append("still asserts the unqualified false cause 'is not a git repository'")
+# the honest content the fix must add: SOME wording naming "no HEAD" / "no commit" as the actual cause.
+if "no head commit" not in low and "no head" not in low:
+    problems.append("does not name the real cause (no HEAD commit) anywhere in the disclosure")
+if "omit" not in low:
+    problems.append("instructions never say anything was omitted")
+print("OK" if not problems else "; ".join(problems))
+PY
+[ "$( cat "$TMP/empty.res" )" = "OK" ] \
+    && ok "(H) the disclosure names the real cause (no HEAD commit), not the false 'not a git repository' claim" \
+    || no "(H) $( cat "$TMP/empty.res" )"
 
 # the byte measurement the recon asked for, reported (not asserted — a byte budget is a ledger, not a gate).
 NB="$( wc -c < "$TMP/nogit.list" | tr -d ' ' )"; GB="$( wc -c < "$TMP/git.list" | tr -d ' ' )"
