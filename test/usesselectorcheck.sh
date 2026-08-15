@@ -107,10 +107,16 @@ grep -q 'srcmut_sigchange' "$TMP/err" && no "the constant nonsense suggestion (s
 # ── (d) plain name and canonical-id forms stay byte-identical to pre-fix (only file:name changed) ───────
 #    NoteIndex::empty's canonical id ("path::scope::name") — a scoped method, so it actually carries "::"
 #    (a scope-less free function's canonical id degrades to its bare name and can't test this branch).
-#    The id is looked up live via --expand (it embeds the corpus path exactly as invoked — "." vs an
-#    absolute ROOT produce different id= strings — so it must never be hardcoded).
-CANON_ID="$( "$BIN" "$ROOT" --expand='src/notes.h:empty' --no-cache 2>/dev/null | grep -o 'id="[^"]*NoteIndex::empty"' | head -1 | sed 's/^id="//;s/"$//' )"
-[ -n "$CANON_ID" ] || { no "could not look up NoteIndex::empty's canonical id via --expand"; CANON_ID="./src/notes.h::NoteIndex::empty"; }
+#    The id is looked up live via --outline, not --expand (it embeds the corpus path exactly as invoked —
+#    "." vs an absolute ROOT produce different id= strings — so it must never be hardcoded). V1 fix
+#    (verifier finding 1, 2026-08-15): --expand's own exact-name default now correctly picks whichever of
+#    lean-bundle/whole-file is genuinely cheaper (the bug this fix closed made whole-file win here for the
+#    WRONG reason — a phantom map size — which is what let a bare --expand double as an id= lookup before).
+#    Bundle mode's <b> body tag carries no id= at all, so --expand is no longer a mode-independent way to
+#    fetch a canonical id; --outline always rides the classic 200-row map (no V1 lean default applies to
+#    it) and its <s> rows carry id= unconditionally, so it is the stable lookup path here.
+CANON_ID="$( "$BIN" "$ROOT" --outline='src/notes.h:empty' --no-cache 2>/dev/null | grep -o 'id="[^"]*NoteIndex::empty"' | head -1 | sed 's/^id="//;s/"$//' )"
+[ -n "$CANON_ID" ] || { no "could not look up NoteIndex::empty's canonical id via --outline"; CANON_ID="./src/notes.h::NoteIndex::empty"; }
 BARE_A="$( uses_elem 'buildGraph' )"
 BARE_B="$( uses_elem 'buildGraph' )"
 [ "$BARE_A" = "$BARE_B" ] && ok "bare-name form is stable/reproducible: $BARE_A" || no "bare-name form not reproducible"

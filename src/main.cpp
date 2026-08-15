@@ -5849,12 +5849,17 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
 
         // §H4 §3.4: the FIRST legend these two verbs have ever shipped (0 bytes before — which is why every
         // one of their root attributes sits in test/legendcoverage_baseline.txt), and the floor marker that
-        // is the round's honest half. ONE string for both forms, printed BEFORE the format branches so the
+        // is the round's honest half. ONE opener for both forms, printed BEFORE the format branches so the
         // columnar and default shapes carry the identical disclosure. JSON has no comment-node analogue, so
         // there the marker travels as the counts_floor key on the root object instead.
+        // V1 fix (verifier finding 3): bodyless_defs= is callees-only (main.cpp gates the attribute itself
+        // behind !wantCallers a few lines up), so its defining sentence rides along only on the callees
+        // form — a --callers call no longer pays for vocabulary it can never emit. The wantCallers branch
+        // lives in rw::callHierarchyLegendOpen (graphlegend.h), not here, so it does not add to this
+        // already-large dispatcher's own complexity.
         if( !cfg.json )
         {
-            std::printf( "%s%s-->", rw::kCallHierarchyLegendOpen, rw::graphCountDisclosure().c_str() );
+            std::printf( "%s%s-->", rw::callHierarchyLegendOpen( wantCallers ).c_str(), rw::graphCountDisclosure().c_str() );
         }
 
         // --format=columnar (RESEARCH lever 1): the same page window, re-encoded as a path-table + parallel
@@ -12220,7 +12225,14 @@ int runDefaultMap( const MainDispatch& d )
         // + the pre-rendered <bodies> + "</ctx>". Rendering-and-measuring beats arithmetic here: the map's
         // est_tokens digits depend on the payload charge, and a probe that prices a shape it then fails to
         // build is the exact climbCeilingLadder failure mode this file already documents.
-        const std::size_t bundleBytes = ( sizeof( "<ctx>" ) - 1 ) + measureEmittedMapBytes( mapTopK, payloadTokens )
+        // V1 fix (verifier finding 1, 2026-08-15): mapTopK==0 means UNLIMITED inside serialize(), not "no
+        // map" — an unguarded call here priced the whole-repo map (~1MB on this tree) that the emission
+        // path below never prints (mapTopK==0 skips straight to the topK>0 branch's `else`, see the two
+        // guarded siblings at the ceiling verdict and the topK>0 emission gate). Same guard here: a map
+        // that will not be emitted must not be charged, exactly like every other measureEmittedMapBytes
+        // call site in this function.
+        const std::size_t bundleBytes = ( sizeof( "<ctx>" ) - 1 )
+                                      + ( mapTopK > 0 ? measureEmittedMapBytes( mapTopK, payloadTokens ) : 0 )
                                       + bodiesSection.xml.size() + ( sizeof( "</ctx>" ) - 1 );
         wholeFile = rw::renderWholeFiles( ing, expandNodes, redactPtr, d.notesPtr, cfg.compress );   // D2: shaped candidate
         ExpandServeChoice choice = chooseExpandServe( bundleBytes, wholeFile, cfg.packBudgetBytes );
