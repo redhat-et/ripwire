@@ -119,6 +119,40 @@ static_assert( kBatchExcludedCount == 16,
                "the batch tools/list stanza spells kBatchExcludedCount in prose — a verb joined or left "
                "kMcpVerbTable / kBatchServedVerbs; update the stanza's number and this assert together" );
 
+// V3/F4: how far kBatchExcludedCount moves when the git-backed verbs are omitted from tools/list. The
+// subtraction is over the git-only verbs batch does NOT serve, because those are the ones sitting in the
+// EXCLUDED half of the count; `owners` is git-only AND batch-served, so dropping it removes one from each
+// side of the subtraction and leaves the difference alone. Derived from the two tables rather than written
+// as "2" for the same reason M14's own count is derived: a hand-counted intersection is only ever wrong.
+constexpr std::size_t mcpGitOnlyNotBatchServed() noexcept
+{
+    std::size_t notServed = 0;
+    for( const mcprefuse::McpGitOnlyVerb& row : mcprefuse::kMcpGitOnlyVerbs )
+    {
+        bool served = false;
+        for( const std::string_view batchVerb : kBatchServedVerbs )
+        {
+            if( std::string_view( row.verb ) == batchVerb ) { served = true; break; }
+        }
+        if( !served )
+        {
+            ++notServed;
+        }
+    }
+
+    return notServed;
+}
+static_assert( mcpGitOnlyNotBatchServed() < kBatchExcludedCount,
+               "every advertised verb would be batch-excluded once the git verbs are omitted — the two "
+               "tables have drifted into overlap and the pruned batch count would be nonsense" );
+
+// The number `batch`'s tools/list prose states, for a catalog that may or may not be pruned. Lives here,
+// beside the arithmetic it depends on, so the tools/list assembly reads it rather than deciding it.
+constexpr std::size_t mcpBatchExcludedCount( bool gitVerbsOmitted ) noexcept
+{
+    return gitVerbsOmitted ? kBatchExcludedCount - mcpGitOnlyNotBatchServed() : kBatchExcludedCount;
+}
+
 // ─── Protocol versions ───────────────────────────────────────────────────────────────────────
 inline constexpr std::string_view kMcpLatestProtocolVersion = "2025-11-25";
 inline constexpr std::string_view kMcpHttpFallbackProtocolVersion = "2025-03-26";
@@ -173,12 +207,19 @@ inline bool isMcpProtocolVersionSupported( std::string_view version ) noexcept
 //     AND no defaultRoot/pinnedRoot exists, and always DISCLOSED in the response envelope
 //     (`_assumed_root`) — one-step-smart-defaults: the cheapest complete answer, said out loud.
 //     Empty ⇒ the pre-R2a "every request names its own path" refusal, unchanged.
+//   • pinnedRootHasGit (V3/F4) — meaningful ONLY beside a non-empty pinnedRoot: can the git-backed verbs
+//     (mcprefusal.h's kMcpGitOnlyVerbs) answer about that workspace at all? Resolved ONCE at listener
+//     startup (mcpserver.h) because the workspace is fixed for the listener's life and the probe forks git.
+//     false ⇒ those verbs are OMITTED from tools/list and the omission is announced in `instructions`.
+//     Defaults TRUE so every stdio path (which never pins) advertises the full catalog untouched — see
+//     the omitGitVerbs comment in the tools/list branch for why omission is pinned-only.
 struct McpDispatchPolicy
 {
     std::string pinnedRoot;         // "" = stdio (no pinning); non-empty = the remote transport's fixed workspace key/root
     bool        editsAllowed = true;   // false = refuse the 3 edit verbs (remote default)
     std::string defaultRoot;        // "" = no stdio startup root given; else the canonicalized `ripwire <root> --mcp` root
     std::string assumedRoot;        // "" = no guessable root; else the canonicalized launch cwd (stdio, no startup root) — see above
+    bool        pinnedRootHasGit = true;   // see above — only read when pinnedRoot is non-empty
 };
 
 // canonicalize a root path for the workspace-pin comparison: realpath when it resolves, else the string
@@ -373,6 +414,22 @@ static_assert( mcpEditVerbCount() >= 3,
                "and a write verb that loses it loses the remote-edit refusal, the workspace check AND the §H2 "
                "payload-presence check at once. A FOURTH edit verb raises this floor; nothing lowers it." );
 
+// V3/F4: is this server's catalog PRUNED of the git-backed verbs (mcprefusal.h's kMcpGitOnlyVerbs)? Both
+// methods that touch the catalog read this ONE predicate — `initialize` announces the omission and
+// `tools/list` performs it — because a catalog that omits without announcing, or announces without
+// omitting, is worse than either.
+//
+// PINNED-ONLY, and the scope is the whole argument. A pinned listener serves ONE workspace and REFUSES a
+// `path` naming a different tree, so "this workspace has no git" and "these verbs cannot answer for any
+// request this server will accept" are the same statement. Every stdio server — bare, or with a
+// `ripwire <root> --mcp` startup root — still answers read verbs about ANY path the caller names, so its
+// git verbs CAN succeed and omitting them would advertise LESS than the truth, which is the same class of
+// dishonesty as advertising more. Contract gate: test/mcptoolprunecheck.sh, arms (A)/(F)/(G).
+inline bool mcpOmitsGitVerbs( const McpDispatchPolicy& policy ) noexcept
+{
+    return !policy.pinnedRoot.empty() && !policy.pinnedRootHasGit;
+}
+
 // the result of handling one JSON-RPC request line — shared by both transports.
 struct McpDispatchResult
 {
@@ -439,6 +496,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
         const std::string id = rid.token;
         std::string       resp;
 
+        const bool omitGitVerbs = mcpOmitsGitVerbs( policy );   // V3/F4 — read once; both methods must agree
+
         // the envelope's own two shape/presence faults, checked once for all three methods.
         const McpObjectArg paramsArg = mcpObjectArg( line, "params" );
         if( methodRaw.isPresent && !methodRaw.isQuoted )
@@ -502,7 +561,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
                        ",\"result\":{\"protocolVersion\":\"" + std::string( negotiatedVersion ) +
                        "\",\"serverInfo\":{\"name\":\"ripwire\",\"version\":\"1.0\"},\"capabilities\":{\"tools\":{}},"
-                       "\"instructions\":\"" + mcpdetail::jsonEscape( std::string( kMcpServerInstructions ) ) + "\"}}";
+                       "\"instructions\":\"" + mcpdetail::jsonEscape( std::string( kMcpServerInstructions )   // V3/F4: the
+                                                    + mcprefuse::gitOnlyOmissionNote( omitGitVerbs ) ) + "\"}}";  // omission announces itself
             }
         }
         else if( method == "tools/list" )
@@ -533,6 +593,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // shipped install's schema stops demanding a field the dispatch no longer needs. The guarded
             // cases (cwd = "/" or $HOME ⇒ assumedRoot stays empty) keep declaring it required, truthfully.
             const bool pathIsRequired = policy.defaultRoot.empty() && policy.pinnedRoot.empty() && policy.assumedRoot.empty();
+            const std::size_t batchExcluded = mcpBatchExcludedCount( omitGitVerbs );   // V3/F4
             // A4-R7: descriptions trimmed to decision-relevant content (when to use / what it answers /
             // the one non-obvious caveat) — cut repeated boilerplate ("Reach for this...", restated XML
             // shape agents don't need to CHOOSE the verb) that every connected agent paid for at session
@@ -570,8 +631,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    + mcprefuse::toolMetadataFor( "for", pathIsRequired ) + "},"
                    "{\"name\":\"lego\",\"description\":\"Interface-to-impls view for ONE named interface/base: its method contract plus EVERY implementor (own-language only), each with file path. Use when implementing against a KNOWN interface (contrast 'for', which sprays top interfaces for a task). type = interface/base name, or file:name to disambiguate.\","
                    + mcprefuse::toolMetadataFor( "lego", pathIsRequired ) + "},"
-                   "{\"name\":\"owners\",\"description\":\"Bus-factor: recency-weighted (6-month half-life) author ownership per file. bf=1 means one person holds >80% of weighted commits. symbol optional — restricts to the file that defines it.\","
-                   + mcprefuse::toolMetadataFor( "owners", pathIsRequired ) + "},"
+                   + mcprefuse::gitOnlyStanza( omitGitVerbs, "{\"name\":\"owners\",\"description\":\"Bus-factor: recency-weighted (6-month half-life) author ownership per file. bf=1 means one person holds >80% of weighted commits. symbol optional — restricts to the file that defines it.\","
+                   + mcprefuse::toolMetadataFor( "owners", pathIsRequired ) + "}," ) +
                    // EDIT verbs — symbol-addressed writes. The safety contract IS the feature: any refusal leaves the file byte-identical.
                    "{\"name\":\"replace_symbol_body\",\"description\":\"Replace a symbol's ENTIRE definition (signature through closing brace) with new_body — splices over the full def span, preserving every byte outside it verbatim; new_body must be a complete, well-formed definition. Refuses (file unchanged) if not found (lists nearest names), ambiguous (lists file:line candidates — retry with 'file'; in a multi-root workspace pass the root-labeled path form, e.g. file:'svc/'), the index is stale (call any read verb first), or the file is a SYMLINK (resolve to the real file first — editing through a link would replace the link entry, not the target). Concurrent ripwire edits serialize; a concurrent external write is detected and refused, never silently overwritten. path = repo dir, or paths = multiple workspace roots (writes land in the correct root's real file); symbol = def name; file = optional disambiguating path substring; new_body = replacement text.\","
                    + mcprefuse::toolMetadataFor( "replace_symbol_body", pathIsRequired ) + "},"
@@ -614,16 +675,16 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    + mcprefuse::toolMetadataFor( "edit_check", pathIsRequired ) + "},"
                    // The cross-branch + dark-content verbs. Read-only git plumbing, no index
                    // coupling for the first two (they read OTHER refs' blobs, which the index never ingested).
-                   "{\"name\":\"whereis\",\"description\":\"WHERE DOES THIS CONTENT LIVE? Which branch's tree defines or mentions a symbol, HEAD first, with on-head=0 naming the case this verb exists for: content that lives only on a branch (a finished fix stranded on 1 of 30 refs). Each distinct blob is read once (content-addressed), so N branches cost about one tree. kind=def on a REF row is a LEXICAL heuristic (ref blobs are raw text, never ingested) — for HEAD's parsed answer use find_symbol/fetch_body. symbol = the name; kind = optional ref-name substring filter; the listing shows the first 60 hits unless you raise it with limit=N (offset=M pages the rest, and has_more/next_offset tell a paging loop when to stop). Single-root; read-only.\","
-                   + mcprefuse::toolMetadataFor( "whereis", pathIsRequired ) + "},"
-                   "{\"name\":\"stray_content\",\"description\":\"Per branch: the lines its own divergent work AUTHORED (vs its merge-base with HEAD) that the live line does NOT have. v=unmerged means genuinely absent; v=SUPERSEDED means the live line removed the same base code this branch removed, i.e. it re-implemented the work — the case `git cherry` structurally cannot see, since that commit stays unmerged forever. Merged branches are omitted (counted in merged=). Every file row carries its raw del/redone/sim evidence, so a verdict is auditable. Line-granular, not semantic. kind = optional ref-name substring filter. Single-root; read-only.\","
-                   + mcprefuse::toolMetadataFor( "stray_content", pathIsRequired ) + "},"
+                   + mcprefuse::gitOnlyStanza( omitGitVerbs, "{\"name\":\"whereis\",\"description\":\"WHERE DOES THIS CONTENT LIVE? Which branch's tree defines or mentions a symbol, HEAD first, with on-head=0 naming the case this verb exists for: content that lives only on a branch (a finished fix stranded on 1 of 30 refs). Each distinct blob is read once (content-addressed), so N branches cost about one tree. kind=def on a REF row is a LEXICAL heuristic (ref blobs are raw text, never ingested) — for HEAD's parsed answer use find_symbol/fetch_body. symbol = the name; kind = optional ref-name substring filter; the listing shows the first 60 hits unless you raise it with limit=N (offset=M pages the rest, and has_more/next_offset tell a paging loop when to stop). Single-root; read-only.\","
+                   + mcprefuse::toolMetadataFor( "whereis", pathIsRequired ) + "}," ) +
+                   mcprefuse::gitOnlyStanza( omitGitVerbs, "{\"name\":\"stray_content\",\"description\":\"Per branch: the lines its own divergent work AUTHORED (vs its merge-base with HEAD) that the live line does NOT have. v=unmerged means genuinely absent; v=SUPERSEDED means the live line removed the same base code this branch removed, i.e. it re-implemented the work — the case `git cherry` structurally cannot see, since that commit stays unmerged forever. Merged branches are omitted (counted in merged=). Every file row carries its raw del/redone/sim evidence, so a verdict is auditable. Line-granular, not semantic. kind = optional ref-name substring filter. Single-root; read-only.\","
+                   + mcprefuse::toolMetadataFor( "stray_content", pathIsRequired ) + "}," ) +
                    "{\"name\":\"flags\",\"description\":\"WHAT IS BUILT BUT DARK here — the answer to 'why don't I see feature X?'. Harvests all three gate patterns (ifndef/define header gates, CMake option(), getenv reads) with each gate's kind, DEFAULT, the size of the code it guards (regions + LOC), and its read sites. When a name is both a header gate and a CMake option the CMake default wins (that is what the build passes) and the header shows as an also row. Lexical, not preprocessed: reports the in-repo default, never the value your build used. kind = optional gate-name substring filter. symbol = optional GATE NAME, which switches the verb from the list to the FLIP lens for that one gate: what code becomes live, which symbols hold it, what those transitively call, who depends on them, and which tests cover them (untested names the hosts no test reaches). The flip lens follows BOTH the #if regions and the C++ branch sites of a value-style gate (constexpr bool k = F != 0, then if constexpr) — the family the list honestly sizes at regions=0 — and it walks alias chains both ways: flipping a master rolls up every child that #defines to it, flipping a child lights only that child and names its parent. An unknown gate name is refused with near-misses, never answered empty.\","
                    + mcprefuse::toolMetadataFor( "flags", pathIsRequired ) + "},"
                    "{\"name\":\"doc_drift\",\"description\":\"WHICH OF THIS REPO'S DOC CLAIMS ARE NOW FALSE. Verifies the CHECKABLE anchors in every markdown file against the live index and returns ONLY the ones that no longer hold: file:line refs (missing-file / past-eof / line-moved, the last with got= naming the symbol that now occupies the line), backticked symbol mentions (undefined), `= N` constants and `[N]` array extents. Read this BEFORE trusting a design doc, plan or audit you did not just write — it is the cheap alternative to re-verifying its claims by hand. Every lane deliberately under-reports: a name counts as stale only when it occurs nowhere in the code as an identifier token, and a number only when the corpus binds it uniquely in a declaration; checked + unchecked = anchors, and each declined check is named in an unchecked row. A failed anchor the AUTHOR DATED — an as-of-DATE hedge on the line, a dated heading, an ISO date in the filename or H1, or a labelled front-matter self-date — is reported as kind=\\\"dated-record\\\" with rec= naming which, and counted in dated= rather than drift=, so drift= is the LIVE rot and drift + dated is every anchor that failed. A doc that never writes its own date machine-readably reports live: the lane reads dating marks, it does not guess genre. Prose, Status lines and dates are NOT checked. kind = optional doc-path substring filter.\","
                    + mcprefuse::toolMetadataFor( "doc_drift", pathIsRequired ) + "},"
                    // A4-R3 batch — one-turn context sweep: N read sub-queries in ONE round-trip, merged + deduped.
-                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array of {verb, ...args} over the SAME path; each verb is one of for/grep/find_symbol/find_referencing_symbols/impact/uses/mentions/analyze/lego/owners/cochange/path_between/exemplar/fetch_body (plus the two ALIASES callers=find_referencing_symbols and callees=find_symbol) with that verb's own args (task/pattern/symbol/type/from/to/handle, and limit/offset on the verbs that page). The other " + std::to_string( kBatchExcludedCount ) + " advertised verbs are NOT batchable: the 3 edit verbs and quality_baseline (side effects), quality_delta (a heavy both-trees pass, out of place in a fast sweep), batch itself (it does not nest), and the whole-repo / cross-branch set (situational_awareness, memory_recall, connect, explore — and its alias pack_task — from_trace, edit_check, whereis, stray_content, flags, doc_drift). Result is one <batch> of <q i verb ok> elements IN ORDER, each sub-answer verbatim in CDATA; a failing sub-query becomes an inline ok=0 err= entry (never fails the batch); identical payloads dedup to <dup-of q=\\\"i\\\"/>; over 16 → capped honestly (capped=\\\"1\\\", n<requested). Use to gather a task's whole context in one round-trip instead of many.\","
+                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array of {verb, ...args} over the SAME path; each verb is one of for/grep/find_symbol/find_referencing_symbols/impact/uses/mentions/analyze/lego/owners/cochange/path_between/exemplar/fetch_body (plus the two ALIASES callers=find_referencing_symbols and callees=find_symbol) with that verb's own args (task/pattern/symbol/type/from/to/handle, and limit/offset on the verbs that page). The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs and quality_baseline (side effects), quality_delta (a heavy both-trees pass, out of place in a fast sweep), batch itself (it does not nest), and the whole-repo / cross-branch set (situational_awareness, memory_recall, connect, explore — and its alias pack_task — from_trace, edit_check, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift). Result is one <batch> of <q i verb ok> elements IN ORDER, each sub-answer verbatim in CDATA; a failing sub-query becomes an inline ok=0 err= entry (never fails the batch); identical payloads dedup to <dup-of q=\\\"i\\\"/>; over 16 → capped honestly (capped=\\\"1\\\", n<requested). Use to gather a task's whole context in one round-trip instead of many.\","
                    + mcprefuse::toolMetadataFor( "batch", pathIsRequired ) + "}"
                    "]}}";
             }
@@ -853,6 +914,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     if( path.empty() ) { resp = errResultMsg( -32602, wsErr );  pathsUsageError = true; }
                 }
             }
+
+            // V3/RN1: did the CALLER name the tree? Read before the pinned / startup-root / assumed-cwd
+            // tiers rebind an empty `path` — afterwards nothing tells "you asked" from "we picked one".
+            const bool rootFromCaller = !path.empty();
 
             // ── Remote-transport policy gates — no-op over stdio ────────────────────────────────────────
             // These fire ONLY when policy.pinnedRoot is set (the HTTP transport). Both are checked BEFORE
@@ -1403,7 +1468,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     const long long s        = hasStart ? startLine : 1;
                     const long long e        = hasEnd   ? endLine   : ( hasStart ? (long long)0x7fffffff : 0 );
                     const FetchOutcome fo = fetchBody( path, handle, s, e, hasRange, redactPtr );
-                    resp = fo.ok ? textResult( fo.resultJson ) : errResultMsg( fo.errCode, fo.message );
+                    // V3/RN1: withHandleRootProvenance owns the omitted-`path`-vs-rename fork.
+                    resp = fo.ok ? textResult( fo.resultJson )
+                                 : errResultMsg( fo.errCode, mcprefuse::withHandleRootProvenance(
+                                       fo.message, fo.unresolvedHandle && !rootFromCaller, path ) );
                 }
                 // A4-R3 batch verb: N read sub-queries over `path` in one round-trip. A malformed/empty
                 // `queries` array is a whole-request error; a bad SUB-query (unknown verb, missing arg, not

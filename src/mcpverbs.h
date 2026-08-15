@@ -2632,6 +2632,12 @@ struct FetchOutcome
     int         errCode = -32602;
     std::string message;      // on refusal
     std::string resultJson;   // on success: {handle, name, kind, file, line, bytes, body [, start_line, end_line, total_lines, partial]}
+    // V3/RN1: true for exactly ONE refusal — a well-formed handle that resolved against no symbol in this
+    // tree. It is the only fault whose cause can be an omitted `path` rather than a rename, so the dispatch
+    // arm (which is the only place that knows where the root came from) needs to recognize it. Reported as
+    // a discriminator rather than by matching the message text, because a refusal identified by substring
+    // is one that silently stops being identified the next time someone improves the wording.
+    bool        unresolvedHandle = false;
 };
 
 // fetchBody with optional body-relative line range. `hasRange` selects partial mode; when false the whole
@@ -2745,6 +2751,7 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
     if( f == kNoNode || f >= ing.symbols.size() )
     {
         oc.ok = false; oc.errCode = -32602;
+        oc.unresolvedHandle = true;   // V3/RN1: the dispatch arm may add the omitted-`path` cause to this one
         oc.message = "handle '" + handle + "' does not resolve to any current symbol (it may have been renamed or removed); call a read verb to refresh";
         return oc;
     }

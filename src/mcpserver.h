@@ -492,6 +492,14 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
     policy.pinnedRoot   = pinnedRoot;
     policy.editsAllowed = cfg.allowRemoteEdits;   // remote edits refused by default
 
+    // V3/F4: can the git-backed verbs answer about THIS workspace at all? Resolved ONCE, here — the answer
+    // is fixed for the listener's life (the workspace is pinned at startup) and the probe forks `git`, so
+    // per-tools/list would be a fork per client handshake. A MULTI-root workspace answers no without
+    // asking (all three are kMcpSingleRootVerbs rows and refuse a `paths` workspace by rule); otherwise it
+    // is exactly gitRepoHasHistory — the same predicate their own refusals are built on, so the catalog
+    // can neither advertise a verb this tree makes refuse nor omit one it would have answered.
+    policy.pinnedRootHasGit = ( cfg.roots.size() < 2 ) && quality::gitRepoHasHistory( pinnedRoot );
+
     // ── 4) open the listening socket ───────────────────────────────────────────────────────────────────
     const int listenFd = ::socket( AF_INET, SOCK_STREAM, 0 );
     if( listenFd < 0 ) { std::fprintf( stderr, "ripwire: --listen: socket() failed: %s\n", std::strerror( errno ) ); return 1; }

@@ -626,11 +626,17 @@ inline std::string singleRootRefusal( std::string_view verb, std::string_view be
 // its sub-queries against the MERGED index like every other read verb, and demonstrably answers correctly,
 // so refusing it here would delete working behaviour to match a CLI restriction that looks like the
 // questionable side of that divergence.
-struct McpSingleRootVerb
+// The shape EVERY "this verb cannot answer here, and here is why" rule table shares: the verb, and the
+// clause its refusal (or its omission note) renders as the reason. Named once because the tables below are
+// not two kinds of thing — they are two answers to the same question about different conditions — and so
+// one build-time floor (mcpRuleVerbsAreKnown) can guard all of them instead of one hand-copied floor each.
+struct McpVerbRule
 {
     const char* verb;
-    const char* because;   // the reason clause singleRootRefusal renders after "<verb> is single-root: "
+    const char* because;
 };
+using McpSingleRootVerb = McpVerbRule;   // §B6 M1's rows: the reason clause after "<verb> is single-root: "
+using McpGitOnlyVerb    = McpVerbRule;   // V3/F4's rows: the reason clause inside the omission note
 
 inline constexpr McpSingleRootVerb kMcpSingleRootVerbs[] = {
     { "quality_baseline",      "it pins ONE tree's floor into ONE .ripwire_quality_baseline sidecar, and a "
@@ -663,6 +669,106 @@ inline std::string_view singleRootReason( std::string_view verb )
         }
     }
     return {};
+}
+
+// ─── V3/F4: WHICH verbs cannot answer at all without git — the tools/list omission set ────────────────────
+//
+// The octocode recon's F4: their server calls remove_route for every capability it does not have, so
+// tools/list only ever contains tools that can succeed; ripwire's PINNED listener advertised all 30
+// regardless, and a non-git workspace paid ~9.1K est-tokens of schema per turn for verbs that could only
+// refuse. This table is the "can it succeed here" half of that fix; mcp.h owns the omission itself.
+//
+// THE MEMBERSHIP RULE, and why it is only three. A verb belongs here iff a non-git root makes it refuse
+// UNCONDITIONALLY — no argument, no sidecar, no fallback reaches an answer. The recon named five; probing
+// each against a non-git pinned root (test/mcptoolprunecheck.sh arm (E) is that probe, kept as a gate)
+// found only these three. The other four git-TOUCHING verbs answer, and are deliberately absent:
+//   cochange              answers with commits:0 / at:null — the disclosure IS the git-less answer
+//   situational_awareness answers when `files` names the changed files instead of a git diff
+//   quality_delta         answers against a quality_baseline SIDECAR (head_sha "(none — not a git repo)")
+//   edit_check            answers (every symbol reads as new-symbol against an absent HEAD)
+// Omitting one of those would advertise LESS than the server can do, which is the same class of dishonesty
+// as advertising more — so the rule is "provably cannot", never "probably will not".
+//
+// `because` is the clause the disclosure sentence renders, so the omission explains itself in the verb's
+// own terms rather than as one generic line for all three.
+inline constexpr McpGitOnlyVerb kMcpGitOnlyVerbs[] = {
+    { "owners",        "its author weights are mined from git log" },
+    { "whereis",       "it enumerates the repo's refs" },
+    { "stray_content", "it compares refs against their merge-base" },
+};
+inline constexpr std::size_t kMcpGitOnlyCount = std::size( kMcpGitOnlyVerbs );
+
+// The disclosure sentence appended to the server's `instructions` when the omission is in force. An
+// omission a client cannot see is indistinguishable from a build that never had those verbs, so the
+// absence has to describe itself: what was dropped, and the one condition that would bring it back.
+// Derived from the table — the names are never restated, which is how the two would drift apart.
+//
+// The three renderers below all take the SAME `omitted` flag and answer "" when it is false, so their call
+// sites in the tools/list assembly are plain concatenations. That is not decoration: the alternative is one
+// conditional per site inside dispatchMcpLine, a function already carrying enough branches that a
+// --quality-delta run gates on it. The predicate is decided once; these say what it means.
+inline std::string gitOnlyOmissionNote( bool omitted )
+{
+    if( !omitted )
+    {
+        return {};
+    }
+    std::string note = " NOTE: this server's workspace is not a git repository, so its git-backed verbs are"
+                       " OMITTED from tools/list —";
+    for( std::size_t i = 0; i < kMcpGitOnlyCount; ++i )
+    {
+        note += ( i == 0 ? " " : ", " );
+        note += kMcpGitOnlyVerbs[i].verb;
+        note += " (";
+        note += kMcpGitOnlyVerbs[i].because;
+        note += ")";
+    }
+    note += ". They are absent because they could only refuse here, not because this build lacks them;"
+            " point a server at a git checkout to get them back.";
+    return note;
+}
+
+// The stanza, or nothing at all — the omission itself, as a filter over the one place tools/list writes
+// its verbs rather than as a second, prunable copy of the catalog (octocode's remove_route posture).
+inline std::string gitOnlyStanza( bool omitted, std::string stanza )
+{
+    return omitted ? std::string{} : std::move( stanza );
+}
+
+// The two git-only names inside `batch`'s cross-branch exclusion prose. Batch says, in words, which
+// ADVERTISED verbs it will not serve; when two of them are not advertised at all, listing them sends a
+// caller looking for tools this server does not offer. Spelled here beside the table those names come
+// from, so the prose and the omission cannot drift apart in the way §B6 M14's hand-written count did.
+inline std::string batchGitOnlyExcludedNames( bool omitted )
+{
+    return omitted ? std::string{} : std::string( "whereis, stray_content, " );
+}
+
+// ─── V3/RN1: the omitted-`path` clause on an unresolvable fetch_body handle ───────────────────────────────
+//
+// A handle is PATH-QUALIFIED for an unscoped definition (a free function's stable id is only unique within
+// its file), so a handle minted by a read verb on tree A does not resolve in tree B. When the request
+// omitted `path`, the tree that answered is the one the SERVER supplied — the pinned/startup root, or the
+// R2a launch cwd — and blaming a rename for that miss sends the caller to re-read a symbol that is fine.
+// The lightrag recon (RN1) measured the cost at two dead-end round trips.
+//
+// So the sentence forks on PROVENANCE, not on a guess about the handle: named the tree yourself and an
+// unresolvable handle really does mean renamed/removed; did not, and the recoverable cause is the argument
+// you left out. We cannot invert the hash to say WHICH tree would have worked — so this names the argument
+// and the root that actually answered, and says nothing it cannot support.
+//
+// Takes the base message and returns it UNCHANGED unless the clause applies, for the same reason the three
+// omission renderers above answer "": the fork belongs beside the sentence it decides, not as one more
+// branch in the dispatch chain.
+inline std::string withHandleRootProvenance( std::string message, bool clauseApplies, std::string_view rootThatAnswered )
+{
+    if( !clauseApplies )
+    {
+        return message;
+    }
+    return message + " — but this request did not name a tree, so it was answered against '" + std::string( rootThatAnswered )
+         + "', the root this server supplied for the omitted `path`. A handle is only valid in the tree the read"
+           " verb that minted it answered about: pass that tree as `path` before concluding the symbol is gone.";
 }
 
 // ─── M8: the not-found refusal ───────────────────────────────────────────────────────────────────────────
@@ -919,18 +1025,22 @@ inline constexpr std::string_view kBatchSubQueryFields[] = {
     "handle", "kind", "start_line", "end_line", "limit", "offset",
 };
 
-// §B6 M1's build-time floor: every row of kMcpSingleRootVerbs must name a verb kMcpVerbFields knows, so a
-// renamed or deleted verb cannot leave a single-root rule pointing at nothing — the failure mode where the
-// gate silently stops firing and the false-cause refusals come back. Placed here rather than beside the table
-// because kMcpVerbFields is declared between the two.
-consteval bool mcpSingleRootVerbsAreKnown()
+// The build-time floor EVERY McpVerbRule table stands on: each row must name a verb kMcpVerbFields knows,
+// so a renamed or deleted verb cannot leave a rule pointing at nothing. Placed here rather than beside the
+// tables because kMcpVerbFields is declared between them.
+//
+// ONE function over a (rows, count) pair rather than one per table. §B6 M1's floor was written first, and
+// V3/F4's arrived as a byte-for-byte copy of it with one identifier changed — which is the shape of thing
+// this whole header exists to stop being written twice, and a --quality-delta pass named it as a 73-token
+// clone the same afternoon. The tables share a row type (McpVerbRule) precisely so this can be one.
+consteval bool mcpRuleVerbsAreKnown( const McpVerbRule* rows, std::size_t rowCount )
 {
-    for( const McpSingleRootVerb& row : kMcpSingleRootVerbs )
+    for( std::size_t i = 0; i < rowCount; ++i )
     {
         bool found = false;
         for( const McpVerbFields& known : kMcpVerbFields )
         {
-            if( std::string_view( row.verb ) == std::string_view( known.verb ) ) { found = true; break; }
+            if( std::string_view( rows[i].verb ) == std::string_view( known.verb ) ) { found = true; break; }
         }
         if( !found )
         {
@@ -939,9 +1049,16 @@ consteval bool mcpSingleRootVerbsAreKnown()
     }
     return true;
 }
-static_assert( mcpSingleRootVerbsAreKnown(),
+// §B6 M1: a dangling row here would stop the single-root gate firing, and the false-cause refusals it was
+// built to kill ("not a git repository" about two real git repos) would come back.
+static_assert( mcpRuleVerbsAreKnown( kMcpSingleRootVerbs, std::size( kMcpSingleRootVerbs ) ),
                "a kMcpSingleRootVerbs row names a verb that is not in kMcpVerbFields — the single-root gate "
                "would never fire for it, and its multi-root refusal would go back to naming a false cause" );
+// V3/F4 fails in a nastier direction: a dangling row here OMITS nothing while the disclosure sentence goes
+// on promising the omission — a lie in the one place this feature exists to tell the truth.
+static_assert( mcpRuleVerbsAreKnown( kMcpGitOnlyVerbs, kMcpGitOnlyCount ),
+               "a kMcpGitOnlyVerbs row names a verb that is not in kMcpVerbFields — tools/list would omit "
+               "nothing while the instructions still announced the omission" );
 
 // ─── §B6 M2 / M4 / M12: tools/list's inputSchema, RENDERED from the tables that already decide it ────────
 //
