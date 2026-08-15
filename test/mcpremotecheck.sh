@@ -36,6 +36,7 @@ cleanup(){ [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; rm -rf "$TMP"; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for JSON assertions"; exit 2; }
 command -v curl    >/dev/null 2>&1 || { echo "curl required (present on macOS/Linux)"; exit 2; }
+command -v git     >/dev/null 2>&1 || { echo "git required (the workspace needs history — see the WS setup below)"; exit 2; }
 
 echo "mcpremotecheck: BIN=$BIN  FIX=$FIX"
 
@@ -64,6 +65,19 @@ start_server() { # $@ = extra flags; server pinned to a fresh copy of the fixtur
 stop_server() { [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null; SRV_PID=""; }
 
 WS="$( mktemp -d "$TMP/ws.XXXXXX" )"; cp -R "$FIX/"* "$WS/"
+
+# The workspace carries git history, and the protocol-equivalence arm below is the reason. V3/F4 made
+# tools/list OMIT the git-backed verbs when a PINNED workspace is not a git repository — pinning is what
+# makes the omission provable (the listener refuses a `path` naming another tree), so the pinned HTTP
+# server prunes where the stdio server, which still answers about any path a caller names, does not. On a
+# non-git fixture the two catalogs then differ BY DESIGN, and this arm would report a designed policy
+# difference as a transport bug. Same lesson the arm's own comment records from 2026-07-30, one policy
+# later: hold configuration constant and vary only the transport. The non-git catalog is not going
+# unchecked — test/mcptoolprunecheck.sh owns it, on both transports.
+( cd "$WS" && git init -q . && git add -A \
+  && git -c user.email=gate@example.invalid -c user.name=gate commit -qm "fixture baseline" ) >/dev/null 2>&1
+git -C "$WS" rev-parse --verify --quiet HEAD >/dev/null 2>&1 \
+    || { echo "could not give the workspace git history — the equivalence arm would compare two policies"; exit 2; }
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
