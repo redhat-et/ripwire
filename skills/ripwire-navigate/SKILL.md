@@ -73,6 +73,11 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   `ripwire <dir> --match='(<tree-sitter query>)'` (e.g. `(call_expression function: (identifier) @c)`)
   — add `--grep-context=N` (or `--grep-before=N`/`--grep-after=N`) for ripgrep-style N lines of source
   around each hit, so you see the call site's shape without a follow-up `--expand`.
+  When one grep answers a two-term question ("cache staleness check for the MCP index"), narrow it in the
+  SAME call instead of grepping again and eyeballing the intersection: `--and=B` (repeatable) keeps only
+  hits where B is ALSO present, `--not=C` (repeatable) drops hits where C IS present — literal-only, so
+  they pair with `--grep=`, not `--regex=`. `--grep-scope=line` (default) requires the extra term on the
+  SAME matched line; `--grep-scope=file` widens that to anywhere in the same file.
 
 `--callers`/`--callees` answer from the call graph directly — no separate index step. Edges are name-based:
 a high-rank symbol with no callees may be a dispatch hub (virtual/callback/macro), not a leaf — read it.

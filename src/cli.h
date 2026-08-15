@@ -100,6 +100,11 @@ struct Config
     int              grepBefore = 0;                       // --grep-before=N (ripgrep -B): N source lines emitted before each --grep/--regex hit (0 = off, unchanged output)
     int              grepAfter  = 0;                       // --grep-after=N  (ripgrep -A): N source lines emitted after each hit
                                                              // --grep-context=N (ripgrep -C): shorthand that sets BOTH grepBefore and grepAfter to N
+    // G3 (2026-08-15 harvest): boolean AND/NOT over --grep's already-collected hits — a flat term list,
+    // no CNF, no parens (OR stays --regex='A|B'). Literal-only: refused together with --regex (validateConfig).
+    std::vector<std::string_view> grepAnd;                 // --and=TERM (repeatable): every term must ALSO be present
+    std::vector<std::string_view> grepNot;                 // --not=TERM (repeatable): the term must be ABSENT
+    std::string_view              grepScope;               // --grep-scope=line|file (default line; validated in validateConfig)
     std::string_view match;                                // --match=QUERY: tree-sitter structural query (shape search)
     bool             lint = false;                         // --lint: built-in AST checks (rides the same query pass)
     std::string_view lintRulesDir;                         // --lint-rules=DIR: load user YAML lint rules (ast-grep style) — runs alongside/instead of --lint
@@ -887,6 +892,11 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               so it pastes straight into a shell. NO run= means NOT DERIVABLE -- never a guessed suite command\n"
         "    --grep=STR | --regex=PAT   literal / regex search + enclosing symbol + the matched line\n"
         "      --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit\n"
+        "      --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex)\n"
+        "      --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)\n"
+        "      --grep-scope=line|file   modifies --and=/--not=: line (default) requires the SAME matched line; file requires\n"
+        "                               anywhere in the same file. Second occurrence of --grep=/--regex= itself REFUSES\n"
+        "                               (naming --and= as the AND spelling) rather than silently overwriting the pattern.\n"
         "    --match=QUERY              tree-sitter structural (shape) query\n"
         "    --query=TERMS              raw BM25 ranking (debug); use --for\n\n"
         "  zoom the detail ladder\n"
@@ -2150,8 +2160,8 @@ inline constexpr IntFlag kIntFlags[] =
 //   • a WARNING on accept      --most-important-last / --stable / --no-auto-order (deprecated aliases that
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
-inline constexpr std::size_t kHandWrittenFlagArms = 18;   // +1: --color-by= (enum-value arm)
-inline constexpr std::size_t kTotalFlagArms = 178;  // +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags)
+inline constexpr std::size_t kHandWrittenFlagArms = 21;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=)
+inline constexpr std::size_t kTotalFlagArms = 181;  // +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2853,6 +2863,22 @@ inline void validateModifierGuards( Config& c ) noexcept
         c.ok = false;
     }
 
+    // G3: --and=/--not=/--grep-scope= modify --grep=STR only — literal, not --regex=PAT (a flat substring
+    // term list has no meaning against a regex's own alternation/anchoring, and ugrep's own CNF stays
+    // regex-string-only for the same reason). Alone (no --grep) they would silently no-op like the
+    // modifiers above; combined with --regex they would silently ignore the extra terms. Both refuse loudly.
+    if( ( !c.grepAnd.empty() || !c.grepNot.empty() || !c.grepScope.empty() ) && c.grep.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --and=/--not=/--grep-scope= modify --grep=STR — pass it too (e.g. ripwire <dir> --grep=stale --and=mcp)\n" );
+        c.ok = false;
+    }
+    if( ( !c.grepAnd.empty() || !c.grepNot.empty() ) && c.grepRegex )
+    {
+        std::fprintf( stderr, "ripwire: --and=/--not= are literal-only and do not apply to --regex=PAT — "
+                              "use --grep=STR --and=... instead, or fold the term into the regex itself (e.g. --regex='A.*B')\n" );
+        c.ok = false;
+    }
+
     // --with-graph splices a mermaid block into ONE bundle's closing </ctx> — only --for and --pack-task ever
     // call packGraphBlock (main.cpp); --partition already warns-and-continues (N+1 bundles, no single graph to
     // splice into) rather than silently dropping it, so it is excluded here on purpose. Alone (no --for/
@@ -3268,6 +3294,32 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                 // exact-match chain to the generic "unknown flag" arm, which told the agent the flag itself does not
                 // exist — a fabrication the agent then believes. `--order=`/`--export=` already name the value and
                 // list the supported set; these two now do the same.
+            }
+            // G3: repeatable, so a kViewFlags row (one member per flag) cannot hold it — same shape as
+            // --exclude= above. An empty value is refused here rather than silently pushing "" (a term that
+            // is a substring of everything would make --and= vacuous and --not= reject every hit).
+            else if( startsWith( a, "--and=" ) )
+            {
+                if( a.size() == 6 )
+                { refuseEmptyValue( "--and=", "a literal string that must ALSO be present", "--and='mcp'" );  c.ok = false; return c; }
+                c.grepAnd.push_back( a.substr( 6 ) );
+            }
+            else if( startsWith( a, "--not=" ) )
+            {
+                if( a.size() == 6 )
+                { refuseEmptyValue( "--not=", "a literal string that must be ABSENT", "--not='deprecated'" );  c.ok = false; return c; }
+                c.grepNot.push_back( a.substr( 6 ) );
+            }
+            else if( startsWith( a, "--grep-scope=" ) )
+            {
+                const std::string_view v = a.substr( 13 );
+                if( v != "line" && v != "file" )
+                {
+                    std::fprintf( stderr, "ripwire: --grep-scope=%.*s — unknown value (supported: line|file), e.g. --grep-scope=file\n",
+                                  int( v.size() ), v.data() );
+                    c.ok = false; return c;
+                }
+                c.grepScope = v;
             }
             else if( startsWith( a, "--rank-by=" ) )
             {
