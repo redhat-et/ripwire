@@ -56,6 +56,37 @@ is 'and(callers(name("d4"),3),file(all,"chain"))' 3 && ok "join and: callers(d4,
 is 'or(name("d4"),name("hot"))' 2 && ok "join or: d4 ∪ hot = 2" || no "or join wrong"
 is 'not(callers(name("d4"),3),name("d2"))' 2 && ok "join not: callers(d4,3) − d2 = 2 (d1,d3)" || no "not join wrong"
 
+# ── C3: and()'s predicate-pushdown, EXACT equivalence — X ∩ {n∈all:P(n)} ≡ {n∈X:P(n)}, same sorted-unique
+#    vector either way. Byte-compare (query-header `expr=` attr stripped — it just echoes the literal query
+#    text, which differs on purpose between these spellings) a pushdown-eligible query against BOTH and()-arg
+#    orders and an "unpushed" control spelling: wrapping the source in `or(all,all)` (== all, but syntactically
+#    NOT the bare literal `all` the pushdown shape-check looks for) forces the plain eager path even in a
+#    binary that HAS the pushdown, giving a true byte-for-byte ground truth instead of just re-asserting a count.
+norm(){ sed -E 's/expr="[^"]*"//'; }
+PD1="$( q 'and(callers(name("d4"),3),file(all,"chain"))'          | norm )"   # node-set, then predicate(all,…)
+PD2="$( q 'and(file(all,"chain"),callers(name("d4"),3))'          | norm )"   # predicate(all,…), then node-set
+REF1="$( q 'and(callers(name("d4"),3),file(or(all,all),"chain"))' | norm )"   # unpushed control, order A
+REF2="$( q 'and(file(or(all,all),"chain"),callers(name("d4"),3))' | norm )"   # unpushed control, order B
+{ [ -n "$PD1" ] && [ "$PD1" = "$PD2" ] && [ "$PD1" = "$REF1" ] && [ "$PD1" = "$REF2" ]; } \
+    && ok "pushdown equivalence: file(all,…) mixed with a node-set, both and()-arg orders, byte-identical to an unpushed control" \
+    || no "pushdown equivalence broke: PD1/PD2/REF1/REF2 differ (file())"
+PD3="$( q 'and(kind(all,fn),callers(name("d4"),3))'          | norm )"        # predicate(all,…) as the FIRST arg
+REF3="$( q 'and(kind(or(all,all),fn),callers(name("d4"),3))' | norm )"
+[ "$PD3" = "$REF3" ] && ok "pushdown equivalence: kind(all,…) as and()'s first arg matches its unpushed control" \
+    || no "kind(all,…) pushdown differs from its unpushed control"
+
+# ── C3: the and(∅,X) trap — one arm legitimately empty must NOT short-circuit evaluation of the OTHER arm.
+#    cx(all,999999) is pushdown-eligible AND empty (no fixture function has cx that high) — a naive
+#    implementation that skips the other and()-arm once either side looks empty would never call sourceName()
+#    on the buried typo, so its did-you-mean refusal would silently vanish (exit 0, not exit 1). Both arg
+#    orders, so the trap is caught whether the empty side parses first or second. ─────────────────────────
+[ "$( ec 'and(cx(all,999999),name("notARealSymbolXYZ"))' )" = 1 ] \
+    && ok "and(empty pushdown predicate, name()-typo): typo still refused — right arm still evaluated" \
+    || no "and(empty pushdown side, typo side) did not refuse (exit != 1) — right arm was short-circuited away"
+[ "$( ec 'and(name("notARealSymbolXYZ"),cx(all,999999))' )" = 1 ] \
+    && ok "and(name()-typo, empty pushdown predicate): typo still refused — left arm still evaluated" \
+    || no "and(typo side, empty pushdown side) did not refuse (exit != 1) — left arm was short-circuited away"
+
 # ── ranking + --top-k cap: a broad node-set is ranked by importance and capped (no token bomb); count = the
 #    TRUE total, shown = what was emitted. (8 fns in the fixture, capped to 3.) ──────────────────────────
 capout="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$FIX" --graph-query='kind(all,fn)' --top-k=3 --no-cache 2>/dev/null )"
