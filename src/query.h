@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <regex>
 #include <string>
 #include <string_view>
@@ -89,6 +90,31 @@ inline bool isKnownLayerWord( std::string_view w ) noexcept
     }
     return false;
 }
+
+struct Eval;   // forward — the C3 pushdown helpers below take Eval& only, so the incomplete type is enough here
+
+// C3 — predicate pushdown for and()'s node-predicate-on-`all` arm, kept as FREE functions taking `Eval&`
+// rather than members: Eval's own body length is a tracked verbosity floor (--quality-delta), and this
+// pushdown logic is a self-contained addition that belongs beside Eval, not padding it. EXACT algebraic
+// identity, not a heuristic: X ∩ { n∈all : P(n) } ≡ { n∈X : P(n) } — same sorted-unique vector either way,
+// because filterKind/Cx/Fanin/File erase from a sorted-unique input without reordering it. A kind|cx|fanin|
+// file filter applied to the literal `all` source sweeps every indexed node (file()'s regex sweep is the
+// expensive one) before and()'s intersection narrows it back down — pointless when the OTHER arm is small.
+// Peeks the shape "OP(all,ARG)" at the current parse position; on a match, CONSUMES it (leaves `e.pos` just
+// past the filter's closing ')') and fills `apply` with a closure that runs the same filter against an
+// arbitrary set instead of against sourceAll(). On any mismatch or inner parse failure it fully restores
+// `e.pos`/`e.ok`/`e.err` and returns false, so the caller can fall back to ordinary `e.expr()`.
+bool tryParsePredicateOnAll( Eval& e, std::function<std::vector<NodeId>( std::vector<NodeId> )>& apply );
+
+// and()'s body: try the pushdown shape on the first arg, else parse it as an ordinary set and try the
+// pushdown shape on the second arg, else fall back to evaluate-both-then-intersect. NEVER extend this shape
+// to or()/not(): those need the OTHER arm evaluated in FULL even when THIS arm is empty — a
+// not(name("typo"), X) or or(name("typo"), X) must still walk X so a buried name() literal there records
+// into unresolvedNames (§P0.5b) for the CLI's did-you-mean report. and()'s own such case — one arm
+// legitimately empty, the OTHER arm hiding an unresolved name() — is exactly why every branch below calls
+// e.expr() on the non-pushdown arm unconditionally instead of checking either side's cardinality first (see
+// querycheck.sh's and(∅,X) arms, which a "skip the other side" optimization here would silently defeat).
+std::vector<NodeId> evalAnd( Eval& e );
 
 // One-pass recursive-descent parse-and-evaluate. The operator set is small and each node-set is
 // materialized eagerly — the graphs ripwire handles fit comfortably in memory.
@@ -445,7 +471,11 @@ struct Eval
                 }
             }
         }
-        else if( op == "and" || op == "or" || op == "not" )
+        else if( op == "and" )
+        {
+            result = evalAnd( *this );   // C3 — kept OUTSIDE Eval; see the free-function block above the class
+        }
+        else if( op == "or" || op == "not" )
         {
             std::vector<NodeId> a = expr();
             expect( ',' );
@@ -473,6 +503,68 @@ struct Eval
         return ok ? r : std::vector<NodeId>{};
     }
 };
+
+// C3 — definitions for the two forward-declared pushdown helpers (see the doc comments above `struct Eval`).
+inline bool tryParsePredicateOnAll( Eval& e, std::function<std::vector<NodeId>( std::vector<NodeId> )>& apply )
+{
+    const std::size_t save      = e.pos;
+    const bool         wasOk    = e.ok;
+    const std::string  savedErr = e.err;
+    auto giveUp = [ & ]() { e.pos = save; e.ok = wasOk; e.err = savedErr; return false; };
+
+    const std::string opName = e.ident();
+    const bool isFilterOp = opName == "kind" || opName == "cx" || opName == "fanin" || opName == "file";
+    if( !isFilterOp || !e.accept( '(' ) || e.ident() != "all" || !e.accept( ',' ) )
+    {
+        return giveUp();
+    }
+
+    if( opName == "kind" )
+    {
+        SymKind k = SymKind::Other;
+        if( !kindOfWord( e.ident(), k ) ) { return giveUp(); }
+        apply = [ &e, k ]( std::vector<NodeId> s ) { return e.filterKind( std::move( s ), k ); };
+    }
+    else if( opName == "cx" )
+    {
+        const long n = e.integer();
+        if( !e.ok ) { return giveUp(); }
+        apply = [ &e, n ]( std::vector<NodeId> s ) { return e.filterCx( std::move( s ), n ); };
+    }
+    else if( opName == "fanin" )
+    {
+        const long n = e.integer();
+        if( !e.ok ) { return giveUp(); }
+        apply = [ &e, n ]( std::vector<NodeId> s ) { return e.filterFanin( std::move( s ), n ); };
+    }
+    else // "file"
+    {
+        const std::string re = e.quoted();
+        if( !e.ok ) { return giveUp(); }
+        apply = [ &e, re ]( std::vector<NodeId> s ) { return e.filterFile( std::move( s ), re ); };
+    }
+    if( !e.accept( ')' ) ) { return giveUp(); }
+    return true;
+}
+
+inline std::vector<NodeId> evalAnd( Eval& e )
+{
+    std::function<std::vector<NodeId>( std::vector<NodeId> )> pushdown;
+    if( tryParsePredicateOnAll( e, pushdown ) )
+    {
+        e.expect( ',' );
+        std::vector<NodeId> other = e.expr();
+        return e.ok ? pushdown( std::move( other ) ) : std::vector<NodeId>{};
+    }
+    std::vector<NodeId> a = e.expr();
+    e.expect( ',' );
+    if( tryParsePredicateOnAll( e, pushdown ) )
+    {
+        return e.ok ? pushdown( std::move( a ) ) : std::vector<NodeId>{};
+    }
+    std::vector<NodeId> b = e.expr();
+    return e.join( "and", std::move( a ), std::move( b ) );
+}
 
 }   // namespace query
 }   // namespace rw
