@@ -24,8 +24,11 @@ questions, count the tokens of ripwire's answer vs. the naive thing an agent doe
 
 **→ ~96% fewer tokens (24.9× less) across these agent questions.**
 
-**Honest parity note (shown, not hidden):** `--grep` is *not* a token reducer — it adds enclosing-symbol
-structure at ~grep cost: `--grep frantic` +19.7%, `--grep FirePolicy` −11.2% vs raw grep. The reduction
+**Honest parity note (shown, not hidden):** `--grep` is *not* a token reducer on exhaustive dumps — it adds
+enclosing-symbol structure: `--grep frantic` +19.7%, `--grep FirePolicy` −11.2% vs raw grep (2026-06-20).
+**Superseded 2026-08-15** by the emission-overhaul re-derivation in `docs/EVALS.md` §5: default view now
++1.2% / +7.6% vs a clean grep dump, −30% binary-to-binary, and `--and=` flips known-second-term queries to
+−78%; the uncapped same-answer dump stays token-negative (+153% / +217%). The headline reduction still
 comes from **structured answers** (`--callers`) and **orientation** (`--for`), not from grep-like modes.
 
 ## 2. Wall-clock — ripwire (C++23) vs aider repo-map (Python + NetworkX)
