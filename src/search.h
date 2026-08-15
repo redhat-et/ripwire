@@ -1618,6 +1618,84 @@ inline std::vector<GrepHit> grepHits( const IngestResult& ing, const std::string
     return grepEnrich( ing, std::span<const GrepRawHit>( collected.raw ).first( rowCount ), ctxBefore, ctxAfter );
 }
 
+// ─── G1 (2026-08-15 harvest — report-memgraph §F6 / report-octocode §F1 / report-graphrag Finding 2) ──
+//
+// Two of the three measured `--grep` emission facts (report-ugrep's headline): every hit re-printing its
+// full path (42.5% of payload on a repeated-path corpus), and byte-identical match lines never folded
+// (18.7%-38% depending on corpus). Both are pure SERIALIZATION facts derivable from an already-enriched,
+// already-windowed hit list — no new analysis, and (the grepseamcheck rule) shared here so the CLI <f>
+// emitter and the MCP `grep` verb's file grouping cannot diverge.
+//
+// A site folded into an existing row by identical text — same file, byte-identical GrepHit::text — but a
+// DIFFERENT (line, enclosing symbol). Text lives on the PRIMARY hit only; a site never repeats it.
+struct GrepHitSite
+{
+    std::uint32_t line;
+    std::string   enclosing;
+    NodeId        enclosingId = kNoNode;
+};
+
+// One printed row: the primary occurrence (its `text`/`before`/`after` are what prints) plus zero or more
+// additional SITES sharing byte-identical text within the same file. `more` is empty on the common case
+// (no fold), so a row with one occurrence costs nothing extra to represent.
+struct GrepCollapsedHit
+{
+    GrepHit                   hit;
+    std::vector<GrepHitSite>  more;
+};
+
+struct GrepFileGroup
+{
+    std::uint32_t                  fileId;
+    std::vector<GrepCollapsedHit>  hits;
+};
+
+// Groups an already-windowed, already-ordered hit list (grepEnrich's output — tier-then-path, so hits of
+// one file are CONTIGUOUS) into one GrepFileGroup per file. `collapseIdentical` folds every hit whose
+// `text` byte-matches an EARLIER hit already collapsed into this file's group (not adjacency-only: two
+// occurrences of one guard line 40 rows apart in the same file still fold together) into that row's
+// `more` list, in encounter order.
+//
+// CALLER'S OBLIGATION (this is a serialization convenience, not a policy — the policy lives at the call
+// site): collapsing folds rows COUNT-VISIBLE to the caller, so it must never run under a page window the
+// caller cannot also disclose honestly. main.cpp's emitGrepReport only passes collapseIdentical=true on
+// the UNPAGINATED default view (cfg.pageLimit==0 && cfg.pageOffset==0) — paging math (grepCollect/pageWindow,
+// the §A0/§A1 seam contract test/grepseamcheck.sh pins) runs entirely in RAW-hit space upstream of this
+// call, so a paged window's row COUNT must stay the window size the caller already promised via shown=;
+// folding it after the fact would make shown= a lie. The emitter's own `n=` on a folded row (1+more.size())
+// is what lets a reader recover the un-collapsed count without re-deriving it.
+inline std::vector<GrepFileGroup> grepGroupByFile( std::span<const GrepHit> hits, bool collapseIdentical )
+{
+    std::vector<GrepFileGroup> groups;
+    for( const GrepHit& h : hits )
+    {
+        if( groups.empty() || groups.back().fileId != h.fileId )
+        {
+            groups.push_back( GrepFileGroup{ h.fileId, {} } );
+        }
+        GrepFileGroup& group = groups.back();
+        if( collapseIdentical )
+        {
+            bool folded = false;
+            for( GrepCollapsedHit& c : group.hits )
+            {
+                if( c.hit.text == h.text )
+                {
+                    c.more.push_back( GrepHitSite{ h.line, h.enclosing, h.enclosingId } );
+                    folded = true;
+                    break;
+                }
+            }
+            if( folded )
+            {
+                continue;
+            }
+        }
+        group.hits.push_back( GrepCollapsedHit{ h, {} } );
+    }
+    return groups;
+}
+
 // ─── R1b: the enclosing-symbol context rows (the 2026-08-12 usage mine) ───────────────────────────
 //
 // ONE row per DISTINCT enclosing symbol NAME on the served page, first-appearance order — shared by the

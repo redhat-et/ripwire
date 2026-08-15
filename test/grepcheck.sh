@@ -26,6 +26,25 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
+# G1 (2026-08-15): hits GROUP by file under <f p="…">, so a <hit> no longer carries its own path — it
+# carries only l="LINE". Reconstructs the pre-G1 "PATH:LINE" per-row shape (document order) so the
+# tier/paging assertions below, which never cared about the wrapper, keep reading one path-per-row.
+hitpaths(){
+    python3 -c '
+import re, sys
+xml = sys.stdin.read().split( "-->", 1 )[ -1 ]   # drop the leading legend comment — its own prose SPELLS
+                                                  # <f p=.../<hit l=... as illustration and would false-match
+cur = None
+for tag in re.findall( r"<[^>]+>", xml ):
+    m = re.match( r"<f p=\"([^\"]*)\"", tag )
+    if m:
+        cur = m.group( 1 ); continue
+    m = re.match( r"<hit l=\"([0-9]+)\"", tag )
+    if m and cur is not None:
+        print( f"{cur}:{m.group(1)}" )
+'
+}
+
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 
 echo "grepcheck: BIN=$BIN  CORPUS=$CORPUS"
@@ -39,32 +58,35 @@ grep -q '<grep pattern="perimeter"' "$TMP/perimeter" \
     && ok "--grep=perimeter output has correct header" \
     || no "--grep=perimeter missing or wrong header"
 
-# (1b) At least one hit points into geometry.cpp
-grep -q 'p="[^"]*geometry\.cpp' "$TMP/perimeter" \
+# (1b) At least one hit points into geometry.cpp — G1: the path now lives on the WRAPPING <f p=…>, not
+#      on the <hit> itself (grouped-by-file, see test/grepbytescheck.sh for why).
+grep -q '<f p="[^"]*geometry\.cpp"' "$TMP/perimeter" \
     && ok "at least one hit in geometry.cpp" \
     || no "no hits found in geometry.cpp"
 
 # (1c) Enclosing symbols: the real output has (P5, 2026-07-27 — a <hit> is no longer self-closing: it
-#      always carries <m><![CDATA[the matched line]]></m>, see test/grepscancheck.sh):
-#      <hit p=".../geometry.cpp:11" in="perimeter"><m><![CDATA[double perimeter( … )]]></m></hit>
-#      <hit p=".../geometry.cpp:16" in="perimeter">…
-#      <hit p=".../geometry.h:13"   in="perimeter">…
-#      We assert these exact values (checked by inspection above)
-grep -q '<hit p="[^"]*geometry\.cpp:11" in="perimeter">' "$TMP/perimeter" \
+#      always carries <m><![CDATA[the matched line]]></m>, see test/grepscancheck.sh; G1, 2026-08-15 —
+#      hits GROUP by file under <f p=…>, and the <hit> itself carries only l="LINE" + in=):
+#      <f p=".../geometry.cpp"><hit l="11" in="perimeter"><m><![CDATA[double perimeter( … )]]></m></hit>
+#                               <hit l="16" in="perimeter">…</f>
+#      <f p=".../geometry.h"><hit l="13"   in="perimeter">…</f>
+#      geometry.cpp's two hits sort ascending (11 before 16), so each assertion below pins the hit as the
+#      FIRST (or, for line 16, immediately following the first) row inside its file's <f> group.
+grep -q '<f p="[^"]*geometry\.cpp"><hit l="11" in="perimeter">' "$TMP/perimeter" \
     && ok "geometry.cpp:11 enclosing symbol is 'perimeter'" \
     || { no "geometry.cpp:11 missing or wrong enclosing symbol"; head -20 "$TMP/perimeter"; }
 
-grep -q '<hit p="[^"]*geometry\.cpp:16" in="perimeter">' "$TMP/perimeter" \
+grep -q '<hit l="16" in="perimeter">' "$TMP/perimeter" \
     && ok "geometry.cpp:16 enclosing symbol is 'perimeter'" \
     || no "geometry.cpp:16 missing or wrong enclosing symbol"
 
-grep -q '<hit p="[^"]*geometry\.h:13" in="perimeter">' "$TMP/perimeter" \
+grep -q '<hit l="13" in="perimeter">' "$TMP/perimeter" \
     && ok "geometry.h:13 enclosing symbol is 'perimeter'" \
     || no "geometry.h:13 missing or wrong enclosing symbol"
 
 # (1c2) …and the matched line itself is emitted with the hit (the P5 fix: a hit that shows WHERE but not
 #       WHAT cost the agent a follow-up file read)
-grep -q '<hit p="[^"]*geometry\.cpp:11" in="perimeter"><m><!\[CDATA\[double perimeter(' "$TMP/perimeter" \
+grep -q '<f p="[^"]*geometry\.cpp"><hit l="11" in="perimeter"><m><!\[CDATA\[double perimeter(' "$TMP/perimeter" \
     && ok "geometry.cpp:11 hit carries its matched line in <m>" \
     || { no "geometry.cpp:11 hit has no/incorrect <m> matched line"; head -20 "$TMP/perimeter"; }
 
@@ -157,37 +179,40 @@ printf 'void zetaEntry()\n{\n    TIERMARKERTOKEN();\n}\n'                       
 printf 'void testAlphaEntry()\n{\n    TIERMARKERTOKEN();\n}\n'                   >"$SB/test/aaa_test.cpp"
 
 "$BIN" "$SB" --no-cache --grep=TIERMARKERTOKEN >"$TMP/tier.xml" 2>/dev/null
-tr '<' '\n' <"$TMP/tier.xml" | sed -n 's/^hit p="\([^"]*\)".*/\1/p' >"$TMP/tier.paths"
+hitpaths <"$TMP/tier.xml" >"$TMP/tier.paths"
 
 # (4a) nothing was dropped — an ordering change that loses a row must never read as a pass
 [ "$( wc -l <"$TMP/tier.paths" | tr -d ' ' )" = "4" ] \
     && ok "tier order: all 4 sandbox hits emitted (ordering drops nothing)" \
     || { no "tier order: expected 4 hits, got $( wc -l <"$TMP/tier.paths" | tr -d ' ' )"; cat "$TMP/tier.paths"; }
 
+# G1: paths are now root-relative (single-root run — see rw::sarif::rootRelativeUri), so a sandbox row
+# reads as a BARE "src/aaa.cpp:3" with no path segment before it; the case patterns below accept either
+# that bare form or an unstripped one (multi-root / a root string rootRelativeUri could not match).
 tierRow(){ sed -n "$1p" "$TMP/tier.paths"; }
-case "$( tierRow 1 )" in */src/aaa.cpp:*)       ok "tier order row 1 = src/aaa.cpp (source tier leads)" ;;
-                        *)                      no "tier order row 1 = '$( tierRow 1 )', expected src/aaa.cpp" ;; esac
-case "$( tierRow 2 )" in */src/zzz.cpp:*)       ok "tier order row 2 = src/zzz.cpp (alphabetical WITHIN a tier preserved)" ;;
-                        *)                      no "tier order row 2 = '$( tierRow 2 )', expected src/zzz.cpp" ;; esac
-case "$( tierRow 3 )" in */test/aaa_test.cpp:*) ok "tier order row 3 = test/aaa_test.cpp (test tier after source)" ;;
-                        *)                      no "tier order row 3 = '$( tierRow 3 )', expected test/aaa_test.cpp" ;; esac
-case "$( tierRow 4 )" in */AAA_notes.md:*)      ok "tier order row 4 = AAA_notes.md (doc tier LAST, though alphabetically first)" ;;
-                        *)                      no "tier order row 4 = '$( tierRow 4 )', expected AAA_notes.md" ;; esac
+case "$( tierRow 1 )" in src/aaa.cpp:*|*/src/aaa.cpp:*)       ok "tier order row 1 = src/aaa.cpp (source tier leads)" ;;
+                        *)                                    no "tier order row 1 = '$( tierRow 1 )', expected src/aaa.cpp" ;; esac
+case "$( tierRow 2 )" in src/zzz.cpp:*|*/src/zzz.cpp:*)       ok "tier order row 2 = src/zzz.cpp (alphabetical WITHIN a tier preserved)" ;;
+                        *)                                    no "tier order row 2 = '$( tierRow 2 )', expected src/zzz.cpp" ;; esac
+case "$( tierRow 3 )" in test/aaa_test.cpp:*|*/test/aaa_test.cpp:*) ok "tier order row 3 = test/aaa_test.cpp (test tier after source)" ;;
+                        *)                                          no "tier order row 3 = '$( tierRow 3 )', expected test/aaa_test.cpp" ;; esac
+case "$( tierRow 4 )" in AAA_notes.md:*|*/AAA_notes.md:*)     ok "tier order row 4 = AAA_notes.md (doc tier LAST, though alphabetically first)" ;;
+                        *)                                    no "tier order row 4 = '$( tierRow 4 )', expected AAA_notes.md" ;; esac
 
 # (4b) --limit/--offset page down the TIERED order, not the alphabetical one
 "$BIN" "$SB" --no-cache --grep=TIERMARKERTOKEN --limit=1 >"$TMP/tier_l1.xml" 2>/dev/null
-grep -q '<hit p="[^"]*/src/aaa\.cpp:' "$TMP/tier_l1.xml" && ! grep -q 'AAA_notes\.md:' "$TMP/tier_l1.xml" \
+grep -qE '<f p="([^"]*/)?src/aaa\.cpp"' "$TMP/tier_l1.xml" && ! grep -q 'AAA_notes\.md"' "$TMP/tier_l1.xml" \
     && ok "--limit=1 returns the SOURCE row (paging walks the tiered order)" \
     || { no "--limit=1 did not return the source row"; cat "$TMP/tier_l1.xml"; }
 
 "$BIN" "$SB" --no-cache --grep=TIERMARKERTOKEN --limit=1 --offset=3 >"$TMP/tier_o3.xml" 2>/dev/null
-grep -q '<hit p="[^"]*AAA_notes\.md:' "$TMP/tier_o3.xml" \
+grep -q '<f p="[^"]*AAA_notes\.md"' "$TMP/tier_o3.xml" \
     && ok "--offset=3 --limit=1 returns the DOC row (last in the tiered order)" \
     || { no "--offset=3 --limit=1 did not return the doc row"; cat "$TMP/tier_o3.xml"; }
 
 # (4c) the finding's own repro, on this repo's real corpus: the capped first screen is all code
 "$BIN" "$ROOT" --grep=DEGRADED_PATH_ALERT >"$TMP/repro.xml" 2>/dev/null
-tr '<' '\n' <"$TMP/repro.xml" | sed -n 's/^hit p="\([^"]*\)".*/\1/p' >"$TMP/repro.paths"
+hitpaths <"$TMP/repro.xml" >"$TMP/repro.paths"
 
 [ "$( wc -l <"$TMP/repro.paths" | tr -d ' ' )" -gt 0 ] \
     && ok "repro query returned $( wc -l <"$TMP/repro.paths" | tr -d ' ' ) rows" \
@@ -204,17 +229,17 @@ tr '<' '\n' <"$TMP/repro.xml" | sed -n 's/^hit p="\([^"]*\)".*/\1/p' >"$TMP/repr
 # (which the doc-swamp finding was never about) and the first remaining row must still be src/.
 grep -vE '\.(ya?ml|json|toml):' "$TMP/repro.paths" >"$TMP/repro.code.paths"
 case "$( sed -n 1p "$TMP/repro.code.paths" )" in
-    */src/*) ok "first CODE row of the repro query is a src/ path (data-config rows aside)" ;;
-    *)       no "first CODE row of the repro query is '$( sed -n 1p "$TMP/repro.code.paths" )', not a src/ path" ;;
+    src/*|*/src/*) ok "first CODE row of the repro query is a src/ path (data-config rows aside)" ;;
+    *)             no "first CODE row of the repro query is '$( sed -n 1p "$TMP/repro.code.paths" )', not a src/ path" ;;
 esac
 # …and config rows must never displace the definition site off the capped first screen entirely
-grep -q '/src/verify\.h:' "$TMP/repro.paths" || grep -q '/src/' "$TMP/repro.paths" \
+grep -qE '(^|/)src/verify\.h:' "$TMP/repro.paths" || grep -qE '(^|/)src/' "$TMP/repro.paths" \
     && ok "capped first screen still reaches src/ rows alongside the config rows" \
     || no "capped first screen lost every src/ row to config rows"
 
 # (4d) with the cap lifted, EVERY doc row still sorts after EVERY code row
 "$BIN" "$ROOT" --grep=DEGRADED_PATH_ALERT --limit=1000 >"$TMP/repro_all.xml" 2>/dev/null
-tr '<' '\n' <"$TMP/repro_all.xml" | sed -n 's/^hit p="\([^"]*\)".*/\1/p' >"$TMP/repro_all.paths"
+hitpaths <"$TMP/repro_all.xml" >"$TMP/repro_all.paths"
 firstDocRow="$( grep -n '\.md:'  "$TMP/repro_all.paths" | head -1 | cut -d: -f1 )"
 lastCodeRow="$( grep -vn '\.md:' "$TMP/repro_all.paths" | tail -1 | cut -d: -f1 )"
 if [ -n "$firstDocRow" ] && [ -n "$lastCodeRow" ] && [ "$firstDocRow" -gt "$lastCodeRow" ]; then

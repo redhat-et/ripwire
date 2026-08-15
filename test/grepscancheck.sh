@@ -52,11 +52,20 @@ FIX="$ROOT/test/fixture"
 # ── (1)+(2) every hit has an <m>, and its text is exactly the line on disk ────────────────────────────
 "$BIN" "$FIX" --no-cache --grep=perimeter >"$TMP/lit" 2>/dev/null
 
-python3 - "$TMP/lit" "$ROOT" >"$TMP/verify1" 2>&1 <<'PY'
+# G1 (2026-08-15): hits GROUP by file under <f p="…">; a <hit> now carries only l="LINE" (+ in=, + n= when
+# a byte-identical match at another site in this file folded into it). Walk <f>…</f> blocks to pair each
+# <hit> with its file, same as the pre-G1 combined p="FILE:LINE" gave for free.
+# G1: p= is root-relative to the CRAWL root ($FIX, what was passed to $BIN), not to $ROOT (the repo root)
+# — pass $FIX so the verifier resolves each hit's path against the same root ripwire used.
+python3 - "$TMP/lit" "$FIX" >"$TMP/verify1" 2>&1 <<'PY'
 import re, sys
-xml  = open( sys.argv[1], encoding = 'utf-8', errors = 'replace' ).read()
+xml  = open( sys.argv[1], encoding = 'utf-8', errors = 'replace' ).read().split( '-->', 1 )[ -1 ]
 root = sys.argv[2]
-hits = re.findall( r'<hit p="([^"]*):(\d+)" in="[^"]*">(.*?)</hit>', xml, re.S )
+hits = []   # (path, line, body) — one per <hit> (a folded row's own text still applies to its own l=)
+for fm in re.finditer( r'<f p="([^"]*)">(.*?)</f>', xml, re.S ):
+    path = fm.group( 1 )
+    for hm in re.finditer( r'<hit l="(\d+)"[^>]*>(.*?)</hit>', fm.group( 2 ), re.S ):
+        hits.append( ( path, hm.group( 1 ), hm.group( 2 ) ) )
 selfclosing = re.findall( r'<hit [^>]*/>', xml )
 print( "HITS:%d" % len( hits ) )
 print( "SELFCLOSING:%d" % len( selfclosing ) )
@@ -124,7 +133,20 @@ kill $LOADPIDS 2>/dev/null; wait 2>/dev/null
 mkdir -p "$TMP/solo"
 cp "$FIX/geometry.cpp" "$TMP/solo/geometry.cpp"
 "$BIN" "$TMP/solo" --no-cache --grep=perimeter >"$TMP/solo.xml" 2>/dev/null
-rows(){ sed 's/></>\n</g' "$1" | grep -oE '<hit p="[^"]*:[0-9]+" in="[^"]*"' | sed 's|.*/||'; }
+# G1: a <hit> no longer carries its own path (it lives on the wrapping <f p="…">) — pair each <hit> with
+# its file the same way test/grepcheck.sh's hitpaths() does. Self-comparison only (solo.rows vs par.rows,
+# both produced by this SAME function), so the exact row spelling need not match any external format.
+rows(){
+    python3 -c '
+import re, sys
+xml = open( sys.argv[1] ).read().split( "-->", 1 )[ -1 ]
+for fm in re.finditer( r"<f p=\"([^\"]*)\">(.*?)</f>", xml, re.S ):
+    path = fm.group( 1 )
+    for hm in re.finditer( r"<hit l=\"(\d+)\"(?: in=\"([^\"]*)\")?", fm.group( 2 ) ):
+        inattr = hm.group( 2 ) or ""
+        print( path + ":" + hm.group( 1 ) + " in=\"" + inattr + "\"" )
+' "$1"
+}
 mrows(){ sed 's/></>\n</g' "$1" | grep -oE '<m><!\[CDATA\[.*'; }
 rows     "$TMP/solo.xml" >"$TMP/solo.rows"
 rows     "$TMP/lit"      | grep 'geometry.cpp' >"$TMP/par.rows"
@@ -133,10 +155,20 @@ rows     "$TMP/lit"      | grep 'geometry.cpp' >"$TMP/par.rows"
     || { no "(6) serial and parallel scans disagree"; diff "$TMP/solo.rows" "$TMP/par.rows" | head -6; }
 
 # ── (7) EXTERNAL ORACLE: ripwire's (file,line) set == `grep -n -F`'s, on the same literal ─────────────
+# G1: $FIX is passed as the crawl ROOT, so p= is now root-relative TO $FIX (rw::sarif::rootRelativeUri) —
+# a bare "geometry.cpp", not "test/fixture/geometry.cpp". `grep -F` below is run from inside $FIX for the
+# same reason, so both sides compare the SAME root-relative spelling.
 PAT='perimeter'
-"$BIN" "$FIX" --no-cache --grep="$PAT" 2>/dev/null | sed 's/></>\n</g' \
-    | grep -oE 'p="[^"]*"' | sed 's/p="//;s/"$//' | sed "s|^$ROOT/||" | sort >"$TMP/cx.loc"
-( cd "$FIX" && grep -rn -F "$PAT" . 2>/dev/null | sed 's|^\./||' | awk -F: '{print "test/fixture/"$1":"$2}' ) | sort -u >"$TMP/gr.loc"
+"$BIN" "$FIX" --no-cache --grep="$PAT" 2>/dev/null >"$TMP/cx.xml"
+python3 -c '
+import re, sys
+xml = open( sys.argv[1] ).read().split( "-->", 1 )[ -1 ]
+for fm in re.finditer( r"<f p=\"([^\"]*)\">(.*?)</f>", xml, re.S ):
+    path = fm.group( 1 )
+    for hm in re.finditer( r"<hit l=\"(\d+)\"", fm.group( 2 ) ):
+        print( path + ":" + hm.group( 1 ) )
+' "$TMP/cx.xml" | sort >"$TMP/cx.loc"
+( cd "$FIX" && grep -rn -F "$PAT" . 2>/dev/null | sed 's|^\./||' | awk -F: '{print $1":"$2}' ) | sort -u >"$TMP/gr.loc"
 if diff -q "$TMP/cx.loc" "$TMP/gr.loc" >/dev/null; then
     ok "(7) external oracle: ripwire's hit locations == grep -n -F's ($( wc -l <"$TMP/cx.loc" | tr -d ' ' ) lines)"
 else

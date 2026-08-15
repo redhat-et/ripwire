@@ -61,7 +61,9 @@ e=$?
     && ok "(1) zero-hit grep still exits 0" \
     || no "(1) zero-hit grep exits $e, expected 0"
 
-grep -q '<grep pattern="perimeterr" files="0" hits="0"' "$TMP/typo.xml" \
+# G1: a single-root run now carries root="…" between pattern= and files= (rw::sarif::rootRelativeUri) —
+# tolerate its presence rather than pin exact adjacency.
+grep -qE '<grep pattern="perimeterr"( root="[^"]*")? files="0" hits="0"' "$TMP/typo.xml" \
     && ok "(1a) hits=\"0\" stays an honest none-found (presence guard)" \
     || no "(1a) zero-hit header missing or reshaped"
 
@@ -165,9 +167,12 @@ grep -q 'callers=.*FLOOR' "$TMP/dist.xml" \
     && ok "(10b) [red] legend states callers= is a FLOOR (call-graph honesty)" \
     || no "(10b) [red] legend does not state the callers= floor"
 
-# (11) existing <hit> rows are byte-untouched by the enrichment (the grepcheck exact-shape contract)
-grep -q '<hit p="[^"]*geometry\.cpp:11" in="perimeter"><m><!\[CDATA\[' "$TMP/peri.xml" \
-    && ok "(11) <hit> rows keep their exact pre-change shape (enrichment is additive-after)" \
+# (11) existing <hit> rows are byte-untouched by the enrichment (the grepcheck exact-shape contract).
+#      G1 (2026-08-15) moved the path onto the wrapping <f p=…> and the hit itself now carries l="LINE" —
+#      that shape change is pinned in test/grepcheck.sh; this check's OWN concern (R1's enrichment must
+#      not touch the hit row at all) still holds on the l=/in=/<m> shape.
+grep -q '<f p="[^"]*geometry\.cpp"><hit l="11" in="perimeter"><m><!\[CDATA\[' "$TMP/peri.xml" \
+    && ok "(11) <hit> rows keep their exact pre-G1 (l=/in=/<m>) shape (enrichment is additive-after)" \
     || no "(11) <hit> row shape changed — enrichment must not touch hit rows"
 
 # (12) --metrics co-run: lens attrs may appear, nothing crashes, still well-formed; plain grep never
