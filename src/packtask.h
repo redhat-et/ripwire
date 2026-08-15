@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -69,6 +70,29 @@ inline constexpr std::size_t kPackTaskHeaderReserve  = 1024;   // the <ctx><!-- 
 inline constexpr std::size_t kPackTaskWrapReserve     = 80;    // <notes>/<tests>/<far>: open tag + close tag
 inline constexpr std::size_t kPackTaskWrapReserveWide = 112;   // <callers>: the same plus its of_top= attribute
 
+// F1 (graphrag harvest 2026-08-15): FIXED proportional quotas over the post-header remaining budget, computed
+// UP FRONT — one per section, sum to 1.0 — instead of the old `min( remaining, bundleBudget * frac )` per
+// section. That old form let an early section (ranking) swallow the WHOLE remaining budget whenever remaining
+// was already smaller than its own frac share (the common case at small --token-budget values), leaving every
+// later section a hard zero: `--pack-task=... --token-budget=900` on the ripwire tree reported
+// "bodies: omitted | callers: omitted | notes: none | tests: none" — disclosed, but with no floor. Each
+// section below now gets its OWN fixed share of the post-header remaining budget; a section that finishes
+// under its share rolls the leftover FORWARD into the next section's quota (see the `carry` chain in
+// packTaskBundleText), so an early section that needs little still leaves real room for the sections after it.
+// tests_to_run — the last section — still absorbs whatever is left of `remaining` after the other four (the
+// pre-existing cascade-to-the-end behavior, unchanged): its implicit share is kQuotaTests plus every carry.
+// integer percent, not double fractions — five decimal literals summing to 1.0 in floating point is not
+// guaranteed bit-exact, and a static_assert is the whole point of naming the split (catch a typo'd share at
+// compile time, not by re-deriving the finding at runtime).
+inline constexpr int kPackTaskQuotaRankingPct = 40;
+inline constexpr int kPackTaskQuotaBodiesPct  = 30;
+inline constexpr int kPackTaskQuotaCallersPct = 15;
+inline constexpr int kPackTaskQuotaNotesPct   = 5;
+inline constexpr int kPackTaskQuotaTestsPct   = 10;   // the cascaded remainder shares this name only in spirit —
+                                                        // tests never CAPS at this share, it only starts there.
+static_assert( kPackTaskQuotaRankingPct + kPackTaskQuotaBodiesPct + kPackTaskQuotaCallersPct
+             + kPackTaskQuotaNotesPct + kPackTaskQuotaTestsPct == 100, "pack-task section quotas must sum to 100%" );
+
 struct PackTaskSection { std::string xml; std::size_t kept = 0; };
 
 // W3FIX H2/M1 — the pieces the header comment is made of, so the header can be REBUILT in three shapes (as
@@ -103,6 +127,14 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
     h.append( p.boostNote );
     h.append( p.docMentionNote );
     h += ": one-call orientation under ONE budget — sections in FIXED order ranking > bodies > callers > notes > tests, "
+         // F1 (graphrag harvest 2026-08-15): each section holds a FIXED, up-front proportional quota of the
+         // budget rather than competing for whatever a strict cascade left it — the old shape let ranking
+         // (the first section) swallow the WHOLE remaining budget at small --token-budget values, zeroing
+         // bodies/callers/notes/tests even though they were "just" capped, never actually reserved anything.
+         // Stated tersely, matching trap #8's own precedent (a fixed-size addition, priced once, absorbed by
+         // estchargecheck A11's self-tuning ladder): the split and the roll-forward rule, nothing more.
+         "quotas per section are FIXED (rank40/body30/caller15/note5/test10, percent of budget), unused quota "
+         "ROLLS FORWARD to the next section — a small budget still zeroes a section, but never past its own share. "
          // §B8.3, the half wave 2 did NOT close. packTaskListSection was fixed to EMIT shown=/total=/capped=
          // (see its own comment below), and <bodies>/<calls> carry the same trio — but the vocabulary was
          // defined only in src/pageview.h, which no reader of this bundle holds. Live before this line: a
@@ -687,8 +719,11 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
                                   + in.trailingSectionBytes;
     std::size_t       remaining   = bundleBudget > headerFloor ? bundleBudget - headerFloor : 1;
 
-    const auto cap = [ & ]( double frac ) -> std::size_t { return std::max<std::size_t>( 1, std::min( remaining, std::size_t( double( bundleBudget ) * frac ) ) ); };
-    constexpr double kShareRanking = 0.45, kShareBodies = 0.30, kShareCallers = 0.12, kShareNotes = 0.05;   // tests = the cascaded remainder
+    // F1 — the kPackTaskQuota*Pct shares above, applied to `quotaBase` (see their own comment for why). `carry`
+    // (threaded through sections 1-4 below) is an under-filled section's unspent quota, rolled FORWARD.
+    const std::size_t quotaBase = remaining;
+    const auto quotaOf = [ & ]( int pct ) -> std::size_t { return std::max<std::size_t>( 1, std::min( remaining, quotaBase * std::size_t( pct ) / 100 ) ); };
+    const auto sectionBudget = [ & ]( int pct, std::size_t carryIn ) -> std::size_t { return std::min( remaining, quotaOf( pct ) + carryIn ); };
 
     const auto countSub = []( const std::string& hay, std::string_view needle ) -> std::size_t
     {
@@ -703,7 +738,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     //    window keep full signature+doc detail; d2plus is a bare name-only <far> sub-block spliced just
     //    inside </sigs> (still section 1, never a 6th top-level section) — see renderRankingWithFar above.
     const std::vector<float>  maskedRank = buildMaskedRank( ing, rank, eligibleIds );
-    const std::size_t         sigsBudget = cap( kShareRanking );
+    const std::size_t         sigsBudget = sectionBudget( kPackTaskQuotaRankingPct, /*carryIn=*/0 );
     const RankingSectionInputs rankIn{ &eligibleIds, &d2plusIds, &topRanked, &maskedRank, sigsBudget, &in, &forClone };
     const RankingSection       rankOut   = renderRankingWithFar( ing, rankIn, ex );
 
@@ -712,27 +747,29 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     const std::size_t   farTotal   = rankOut.farTotal;
     const std::size_t   farKept    = rankOut.farKept;
     remaining = remaining > sigsStr.size() ? remaining - sigsStr.size() : 0;
+    std::size_t carry = sigsBudget > sigsStr.size() ? sigsBudget - sigsStr.size() : 0;   // ranking's unspent share (an overshoot never goes negative)
 
     // ── section 2 — full bodies of the top-K ranked symbols (K adapts: packBodies self-trims to `remaining`) ─
     // §H5: `emittedBodies` is packBodies' own report of what it emitted. It is the ONE answer to "which
     // bodies?" — the XML is those bytes, the JSON tail below re-serializes the same record, and bodiesKept
     // counts it. The previous `countSub( bodiesStr, "<b " )` was both a second answer and a fragile one: body
     // text rides in CDATA verbatim, so a corpus body containing that literal inflated the count.
+    const std::size_t  bodiesBudget = sectionBudget( kPackTaskQuotaBodiesPct, carry );
     std::string        bodiesStr;
     rw::EmittedBodies emittedBodies;
     const std::size_t  bodiesTotal = bodyIds.size();
     std::size_t        bodiesKept  = 0;
-    if( !bodyIds.empty() && cap( kShareBodies ) >= kPackTaskSectionFloor )
+    if( !bodyIds.empty() && bodiesBudget >= kPackTaskSectionFloor )
     {
-        const std::size_t bodiesBudget = cap( kShareBodies );
         bodiesStr  = packTaskRenderToString( [ & ]( std::FILE* m )
         {
             packBodies( m, ing, bodyIds, bodiesBudget, g.outOff, g.outTargets, in.compress, in.redact,
                         /*ranges=*/nullptr, /*noteIndex=*/nullptr, &emittedBodies );
         } );
         bodiesKept = emittedBodies.kept.size();
-        remaining  = remaining > bodiesStr.size() ? remaining - bodiesStr.size() : 0;
     }
+    remaining = remaining > bodiesStr.size() ? remaining - bodiesStr.size() : 0;
+    carry     = bodiesBudget > bodiesStr.size() ? bodiesBudget - bodiesStr.size() : 0;   // rolls forward again — nothing spent here reaches section 3 otherwise
 
     // ── section 3 — d1: the anchors' 1-hop callers+callees (computed above), each shown with its OWN one-line
     //    SIGNATURE (R2: d1's detail tier) + its declaration site — never a full body (that stays d0-only).
@@ -740,10 +777,12 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     const std::vector<std::string>& callerRows = d1Rendered.xml;
     const std::vector<std::string>& d1SigRaw   = d1Rendered.rawSig;   // unescaped — the L2 --json tail reuses these verbatim
     char callersAttr[ 32 ];  std::snprintf( callersAttr, sizeof( callersAttr ), " of_top=\"%zu\"", bodiesTotal );
-    const PackTaskSection callers = packTaskListSection( "callers", callersAttr, callerRows, cap( kShareCallers ), kPackTaskWrapReserveWide );
+    const std::size_t     callersBudget = sectionBudget( kPackTaskQuotaCallersPct, carry );
+    const PackTaskSection callers = packTaskListSection( "callers", callersAttr, callerRows, callersBudget, kPackTaskWrapReserveWide );
     const std::string&    callersStr   = callers.xml;
     const std::size_t     callersTotal = callerRows.size();
     const std::size_t     callersKept  = callers.kept;
+    carry = callersBudget > callersStr.size() ? callersBudget - callersStr.size() : 0;   // rolls into notes next
     remaining = remaining > callersStr.size() ? remaining - callersStr.size() : 0;
 
     // ── section 4 — field notes on the top-K symbols + their files (L3; inert when in.notes is null) ────────
@@ -805,11 +844,12 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             }
         }
     }
-    const PackTaskSection notes        = packTaskListSection( "notes", "", noteEntries, cap( kShareNotes ), kPackTaskWrapReserve );
+    const std::size_t     notesBudget  = sectionBudget( kPackTaskQuotaNotesPct, carry );
+    const PackTaskSection notes        = packTaskListSection( "notes", "", noteEntries, notesBudget, kPackTaskWrapReserve );
     const std::string&    notesStr     = notes.xml;
     const std::size_t     notesTotal   = noteEntries.size();
     const std::size_t     notesKept    = notes.kept;
-    remaining = remaining > notesStr.size() ? remaining - notesStr.size() : 0;
+    remaining = remaining > notesStr.size() ? remaining - notesStr.size() : 0;   // tests (last) takes whatever `remaining` still holds — no explicit carry needed past here
 
     // ── section 5 — tests_to_run for the top files (the --affected mining: tests that transitively reach) ───
     std::vector<std::string>   testRows;
