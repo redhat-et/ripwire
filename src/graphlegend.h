@@ -145,7 +145,7 @@ inline constexpr const char* kCallHierarchyLegendCalleesOnly =
 inline std::string callHierarchyLegendOpen( bool wantCallers )
 {
     return wantCallers ? std::string( kCallHierarchyLegendOpen )
-                        : std::string( kCallHierarchyLegendOpen ) + kCallHierarchyLegendCalleesOnly;
+                       : std::string( kCallHierarchyLegendOpen ) + kCallHierarchyLegendCalleesOnly;
 }
 
 } // namespace rw
