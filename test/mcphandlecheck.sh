@@ -10,6 +10,9 @@
 #      run-stable → warm==cold, process-independent).
 #   5. a STALE handle (its file changed since issue) is REFUSED with no body returned.
 #   6. a garbage / hand-mutated (non-existent-id) handle is REFUSED (no mis-resolve, no body).
+#   6b. R2c: a bare symbol NAME is accepted where a handle is expected, disclosed via resolved_from_name.
+#   6c. V3/RN1: a handle that missed only because the request omitted `path` names `path` as the cause and
+#       says which root answered — instead of blaming a rename nobody made.
 #   7. determinism: two find_symbol calls are byte-identical.
 #   8. every response line is valid JSON.
 #
@@ -273,6 +276,99 @@ done
 diff -q "$TMP/det_n1" "$TMP/det_n2" >/dev/null \
     && ok "(6b-5) by-name fetch byte-identical across processes" \
     || no "(6b-5) by-name fetch differs across processes"
+
+echo
+echo "=== 6c. RN1: a handle that failed only because the request omitted \`path\` says SO ==="
+# THE FINDING (lightrag recon RN1, 2026-08-15): a handle minted by find_symbol{path:A} and then handed to
+# fetch_body WITHOUT `path` resolves against whatever root the SERVER supplied for the omitted field (the
+# R2a launch cwd, or a startup/pinned root) — a DIFFERENT index, in which the handle's stable id does not
+# exist. The refusal blamed STALENESS: "may have been renamed or removed; call a read verb to refresh".
+# That sends the caller to re-read a symbol that is fine, and it cost two dead-end round trips before the
+# real cause — an omitted argument — was even a hypothesis.
+#
+# Handles stay path-qualified: an UNSCOPED free function's stable id is only unique within its file, so
+# the path is load-bearing and the handle FORMAT does not change (steps 4/5/6 are the contracts a format
+# change would break). What changes is the SENTENCE. When the root was not the caller's, the refusal names
+# `path` as the recoverable cause and says which root actually answered, instead of asserting a rename
+# nobody made. When the caller DID name the tree, the rename/removal sentence is still the true one —
+# 6c-2 is that guard, because a clause pasted onto every refusal explains nothing.
+ELSEWHERE="$( cd "$TMP" && mkdir -p elsewhere && cd elsewhere && pwd -P )"
+printf 'int unrelatedLeaf( void ) { return 0; }\n' > "$ELSEWHERE/unrelated.c"
+
+# The REALPATH of the corpus, because that is what the server assumes for an omitted `path` (the launch
+# cwd, canonicalized). On macOS $TMPDIR is a /var -> /private/var symlink, so minting the handle against
+# the un-canonicalized spelling and fetching it against the canonical one is a THIRD spelling of this same
+# bug (two names for one directory index to two different file paths, so the path-qualified handle misses).
+# 6c-3's job is the no-false-refusal guard, so it holds the spelling constant and varies only the argument.
+CORPUS_REAL="$( cd "$CORPUS" && pwd -P )"
+
+# A FRESH handle: step 5 mutated the source file and 6b-4 planted twins, so H (minted at step 2) is now
+# STALE against the corpus — and a stale handle refuses for a different, already-correct reason. Minting
+# here keeps 6c about the missing-argument cause and nothing else.
+H3="$( mcp_call \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_symbol","arguments":{"path":"'"$CORPUS_REAL"'","symbol":"'"$SYM"'"}}}' \
+    | handle_of_symbol )"
+if ! printf '%s' "$H3" | grep -Eq '^sym#[0-9a-f]{16}@[0-9a-f]{16}$'; then
+    no "(6c) could not mint a fresh handle (got: '$H3') — skipping the omitted-path arms"
+else
+
+# (6c-1) [red] handle + NO path, from a server whose assumed root is a DIFFERENT tree
+printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fetch_body","arguments":{"handle":"'"$H3"'"}}}' \
+    | ( cd "$ELSEWHERE" && "$BIN" --mcp 2>/dev/null ) | tail -1 > "$TMP/nopath"
+python3 -c '
+import sys, json
+r = json.load(open(sys.argv[1]))
+if "result" in r: print("SERVED_ANYWAY"); sys.exit(0)
+m   = r.get("error", {}).get("message", "")
+low = m.lower()
+problems = []
+if r.get("error", {}).get("code") != -32602: problems.append("wrong error code")
+if "path" not in low:                        problems.append("the refusal never names the `path` argument")
+if sys.argv[2] not in m:                     problems.append("the refusal never says which root answered")
+print("NOPATH_OK" if not problems else "NOPATH_BAD:" + "; ".join(problems) + " || " + m[:220])
+' "$TMP/nopath" "$ELSEWHERE" > "$TMP/nopathchk"
+grep -q NOPATH_OK "$TMP/nopathchk" \
+    && ok "(6c-1) [red] omitted-path handle failure names \`path\` and the root that answered" \
+    || no "(6c-1) [red] $(cat "$TMP/nopathchk")"
+
+# (6c-2) guard: when the CALLER named the tree, a genuinely unresolvable handle keeps the rename/removal
+#        sentence — the missing-argument clause must not be pasted onto a refusal it does not explain.
+printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fetch_body","arguments":{"path":"'"$ELSEWHERE"'","handle":"'"$H3"'"}}}' \
+    | ( cd "$ELSEWHERE" && "$BIN" --mcp 2>/dev/null ) | tail -1 > "$TMP/withpath"
+python3 -c '
+import sys, json
+r = json.load(open(sys.argv[1]))
+if "result" in r: print("SERVED_ANYWAY"); sys.exit(0)
+m = r.get("error", {}).get("message", "")
+okRename = "renamed or removed" in m
+okNoNag  = "did not name a tree" not in m.lower()
+print("WITHPATH_OK" if (okRename and okNoNag) else "WITHPATH_BAD:" + m[:220])
+' "$TMP/withpath" > "$TMP/withpathchk"
+grep -q WITHPATH_OK "$TMP/withpathchk" \
+    && ok "(6c-2) an explicit path keeps the rename/removal sentence (no false missing-argument clause)" \
+    || no "(6c-2) $(cat "$TMP/withpathchk")"
+
+# (6c-3) guard: an omitted path whose assumed root DOES contain the symbol still serves the body — the
+#        clause is a refusal refinement, never a new refusal.
+printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fetch_body","arguments":{"handle":"'"$H3"'"}}}' \
+    | ( cd "$CORPUS_REAL" && "$BIN" --mcp 2>/dev/null ) | tail -1 > "$TMP/nopath_ok"
+python3 -c '
+import sys, json
+r = json.load(open(sys.argv[1]))
+print("SERVE_OK" if "result" in r else "SERVE_BAD:" + r.get("error",{}).get("message","")[:160])
+' "$TMP/nopath_ok" > "$TMP/nopathokchk"
+grep -q SERVE_OK "$TMP/nopathokchk" \
+    && ok "(6c-3) an omitted path that DOES resolve still serves the body" \
+    || no "(6c-3) $(cat "$TMP/nopathokchk")"
+
+fi
 
 echo
 echo "=== 7. determinism: two find_symbol calls byte-identical ==="
