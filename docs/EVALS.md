@@ -846,10 +846,15 @@ C++ corpus — *historical, private, not publicly reproducible*. Every figure be
      (**−30.2%** → **−32.3%**) at the capped default view; −22.2% / −21.5% → **−23.1% / −22.3%**
      uncapped (`--limit=1000`). Independent corroboration:
      `test/grepbytescheck.sh` re-derives a **−40.2% median** payload cut on this repository's five
-     frozen *capped* queries every run — and, on twelve frozen *uncapped* small-hit queries, a
-     **+61.5% median** payload *increase*, larger than plain grep on **12 of 12**. Both medians are
-     re-derived on every run and banded to ±1.5 points against this paragraph, so neither can drift
-     from the binary silently. *(Re-measured 2026-08-15 by the fix-grep lane, which corrected three
+     frozen *capped* queries — and, on twelve frozen *uncapped* small-hit queries, a
+     **+61.5% median** payload *increase*, larger than plain grep on **12 of 12**. Those two medians
+     are DEV-MACHINE values: ripwire's grep enrichment carries git-context-dependent bytes
+     (churn/amp/hotspot attrs vary with the clone), and the same commit re-derived the capped median
+     as −41.4% (dev worktree), −55.8% (fresh single-branch clone), and −31.5%/−31.9% (the two CI
+     platforms). What is environment-STABLE, and what the gate asserts on every run everywhere: the
+     ≥30% kill-condition bar held in all four environments, and both directions held (capped always a
+     cut, uncapped always an increase). The gate also pins this paragraph's form and signs, so the
+     claim cannot silently rot; magnitudes here are labelled by machine, not gated. *(Re-measured 2026-08-15 by the fix-grep lane, which corrected three
      instrument defects in that gate: the two arms were reading different corpora (ripwire the whole
      repo, grep only `src/`), `grep` was invoked by bare name, and all five frozen queries were
      row-capped — so the statistic tracked grep's verbosity rather than ripwire's encoding, and the
