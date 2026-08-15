@@ -73,6 +73,24 @@ for n in a b c;               do mkfile "$SB/test/t_$n.cpp" 50 'void seamTest%03
 run(){ "$BIN" "$SB" --no-cache --grep=SEAMTOKENPAGING "$@" 2>/dev/null; }
 hdr(){ grep -o '<grep [^>]*>' | head -1; }
 attr(){ sed -n "s/.* $1=\"\([^\"]*\)\".*/\1/p" | head -1; }
+# G1 (2026-08-15): hits GROUP by file under <f p="…">; a <hit> now carries only l="LINE" + in=. Reads
+# stdin, emits one 'p="…" in="…"' row per <hit> in document order — the same shape the pre-G1
+# `sed -n 's/^hit \(p="…" in="…"\).*/\1/p'` gave for free, so the reference/walk dedup logic below (which
+# only cares that the SAME hit produces the SAME row every time) is otherwise untouched.
+rowid(){
+    python3 -c '
+import re, sys
+xml = sys.stdin.read().split( "-->", 1 )[ -1 ]
+cur = None
+for tag in re.findall( r"<[^>]+>", xml ):
+    m = re.match( r"<f p=\"([^\"]*)\"", tag )
+    if m:
+        cur = m.group( 1 ); continue
+    m = re.match( r"<hit l=\"([0-9]+)\"(?: in=\"([^\"]*)\")?", tag )
+    if m and cur is not None:
+        print( "p=\"" + cur + ":" + m.group( 1 ) + "\" in=\"" + ( m.group( 2 ) or "" ) + "\"" )
+'
+}
 
 # ── (1) §A0 — the overflow boundary ──────────────────────────────────────────────────────────────────
 H_LO="$( run --limit=536870911 | hdr | attr hits )"
@@ -98,7 +116,7 @@ H_BIG="$(   run --limit=1000000 | hdr | attr hits )"
     || no "(2b) sandbox collected only ${H_PLAIN:-0} hits; a corpus under 400 cannot exercise the seam bug"
 
 # ── (3)+(4) §A1 — a full page walk reproduces the unpaged row set, with a stable total= ───────────────
-run --limit=1000000 | tr '<' '\n' | sed -n 's/^hit \(p="[^"]*" in="[^"]*"\).*/\1/p' >"$TMP/reference.rows"
+run --limit=1000000 | rowid >"$TMP/reference.rows"
 
 : >"$TMP/walk.rows"
 : >"$TMP/walk.totals"
@@ -108,7 +126,7 @@ while [ "$page" -lt 200 ]; do
     run --limit=100 --offset="$off" >"$TMP/page.xml"
     H="$( hdr <"$TMP/page.xml" )"
     printf '%s|%s|%s\n' "$( printf '%s' "$H" | attr total )" "$( printf '%s' "$H" | attr hits )" "$( printf '%s' "$H" | attr files )" >>"$TMP/walk.totals"
-    tr '<' '\n' <"$TMP/page.xml" | sed -n 's/^hit \(p="[^"]*" in="[^"]*"\).*/\1/p' >>"$TMP/walk.rows"
+    rowid <"$TMP/page.xml" >>"$TMP/walk.rows"
     [ "$( printf '%s' "$H" | attr has_more )" = "1" ] || break
     off="$( printf '%s' "$H" | attr next_offset )"
     page=$(( page + 1 ))
