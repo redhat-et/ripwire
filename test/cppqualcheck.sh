@@ -9,9 +9,14 @@
 # completeness gauges — could not move: the reader had no signal whatsoever. --uses/--callers/--edit-check
 # silently under-reported on ripwire's own CLI<->MCP seam.
 #
-# TWO CORPORA. test/cppqualfix/ proves each SPELLING extracts and resolves; every name in it has exactly one
-# definition, so those arms cannot prove the re-split chose the RIGHT def. test/cppqualdecoyfix/ (§8) gives
-# each name a same-final-name DECOY in another scope, so a wrong qualifier binds provably wrong.
+# §11 (added 2026-08-15) carries the DEFINITION half of the same grammar recursion: an out-of-line
+# definition written with two or more qualifier segments was dropped by the mirror-image defect in the
+# definition pattern, just as silently. Read its own section header for that round's evidence.
+#
+# THREE CORPORA. test/cppqualfix/ proves each CALL SPELLING extracts and resolves; every name in it has
+# exactly one definition, so those arms cannot prove the re-split chose the RIGHT def. test/cppqualdecoyfix/
+# (§8) gives each name a same-final-name DECOY in another scope, so a wrong qualifier binds provably wrong.
+# test/cppqualdeffix/ (§11) is the definition-side corpus, with its own same-final-name decoy.
 #
 # EVERY expected count below is a LITERAL, read by hand off the fixtures (plan §7 trap 1: a gate that derives
 # its expected number the way the code does cannot catch the derivation). Each fixture's header comment maps
@@ -27,7 +32,7 @@
 #     operator> / operator>> / operator>= bound the OUTER decoys at :65/:66/:67 instead of :76/:77/:78.
 #   vs asan/ripwire_prefixup: §9's --from-trace arm exits 134 (sanitizer abort). The PLAIN build is silent
 #     on that wrap, so §9 only carries evidence when RIPWIRE_BIN points at a G1 binary.
-#   All 49 PASS against the fixed binary, plain AND asan.
+#   All 49 PASS against the fixed binary, plain AND asan (65 with §11's definition arm, added later).
 #   (The four cast arms and the two most-vexing-parse arms pass on every binary by construction — they are
 #   regression guards for a future round, not evidence of this one.)
 #
@@ -391,6 +396,91 @@ esac
 [ "$TRC" = 0 ] \
     && ok "--from-trace on an operator> frame exits 0 (rc=134 before the fix, under the G1 sanitizer stack)" \
     || no "--from-trace on an operator> frame exited $TRC — the reverse-scan wrap is back (134 = sanitizer abort)"
+
+# ── §11 the DEFINITION half of the same recursion (C1 — memgraph F1) ────────────────────────────────────
+# Everything above is about qualified CALLS. A C++ out-of-line DEFINITION written with TWO OR MORE
+# qualifier segments — `void nsD::OuterD::InnerD::deep3(){}`, the house style of whole codebases — was
+# dropped by the mirror-image defect in the DEFINITION pattern, and dropped SILENTLY: no --skipped row, no
+# floor, no `unresolved=`. The symbol did not exist, so every caller of it read as a leaf.
+#
+# THIRD CORPUS: test/cppqualdeffix/. §3 pins a hand-read `files=1 symbols=23` header for cppqualfix/, so a
+# second .cpp there would invalidate that literal for reasons unrelated to what it proves. See the
+# fixture's own header for the shape->sink table every literal below is read off.
+#
+# Each definition body calls its OWN uniquely named sink, so `--callers=<sink>` is one literal that proves
+# BOTH halves of the claim at once: the definition is indexed, AND it carries its body's call edges (a def
+# indexed without a body would report the same count="0" as a def that was never indexed at all).
+#
+# RED-FIRST (recorded 2026-08-15 against build/ripwire_c1base, the pre-fix binary built at 4b9386c):
+# 12 of the 14 checks below FAIL. The fixture header reads `symbols=24 edges=1` (now 30 / 7); six of the
+# seven sink arms report count=0 — sinkOneSeg, the 1-qualifier control, is the only definition that was
+# ever indexed; and neither deep3 row carries overloads="2", because both rows are the in-class
+# DECLARATIONS alone. The two that pass pre-fix are the control and the negative `nsD::deep3` arm (a
+# spelling neither binary produces — it is the guard against the outermost-scope key, not evidence of this
+# round). All 14 pass against the fixed binary.
+DEFFIX="$ROOT/test/cppqualdeffix"
+[ -d "$DEFFIX" ] || { echo "no test/cppqualdeffix dir — the definition fixture is missing"; exit 2; }
+DEFMAP="$( run "$DEFFIX" --no-cache )"
+
+# (a) POSITIVE CONTROL first (L-6 vacuity guard): the 1-qualifier definition was ALWAYS indexed, so an arm
+#     that reports 0 for it means the corpus/run is broken, not that the fix regressed.
+[ "$( cnt "$( run "$DEFFIX" --callers=sinkOneSeg --no-cache )" )" = 1 ] \
+    && ok "def §11 control: --callers=sinkOneSeg count=1 (OuterB::oneSeg — 1 qualifier, indexed before the fix too)" \
+    || no "def §11 control: --callers=sinkOneSeg expected 1 — the fixture or the run is broken, every arm below is vacuous"
+
+# (b) one literal per newly indexed SHAPE.
+defcallers(){   # $1 sink  $2 prose
+    local got; got="$( cnt "$( run "$DEFFIX" --callers="$1" --no-cache )" )"
+    [ "${got:-REFUSED}" = 1 ] && ok "def §11: --callers=$1 count=1 — $2" \
+        || no "def §11: --callers=$1 expected 1, got '${got:-REFUSED}' — $2"
+}
+defcallers sinkTwo     "OuterB::InnerB::deep2 — 2 qualifiers, class in class"
+defcallers sinkNsCls   "nsC::ClsC::nsQualMeth — 2 qualifiers, namespace + class"
+defcallers sinkThree   "nsD::OuterD::InnerD::deep3 — 3 qualifiers"
+defcallers sinkTmplDef "OuterT<T>::InnerT::tdeep — 2 qualifiers, TEMPLATED outer scope"
+defcallers sinkOpDef   "VecV::InnerV::operator== — 2 qualifiers, OPERATOR name"
+defcallers sinkDecoy   "nsD::OuterD::deep3 — the decoy definition is itself 2 qualifiers"
+
+# (c) --callees on such a definition is non-empty and names the right sink (the downstream symptom the
+#     finding was reported on: `--callees=<a Storage::Accessor:: method>` returned count=0 because the only
+#     def it could see was the bodyless header declaration).
+DEFCALLEES="$( run "$DEFFIX" --callees=deep2 --no-cache )"
+{ [ "$( cnt "$DEFCALLEES" )" = 1 ] && printf '%s' "$DEFCALLEES" | grep -q 'n="sinkTwo"'; } \
+    && ok "def §11: --callees=deep2 count=1 and names sinkTwo — the def has a BODY to read callees from" \
+    || no "def §11: --callees=deep2 expected count=1 naming sinkTwo, got: $DEFCALLEES"
+
+# (d) PRECISION: the scope is the IMMEDIATE one, not the outermost. The captured node is an INNER
+#     qualified_identifier, so the naive read — qualifierOf() on the capture's own parent — yields the
+#     OUTERMOST scope (`nsD` for a 3-segment name). `nsD::OuterD` declares its own `deep3()` precisely so
+#     that a mis-key is observable: an outermost-scope def would merge into that decoy row and hand
+#     sinkThree to the wrong method, silently and plausibly.
+#
+#     WHY NOT ASSERT THE id= ROWS ALONE: both `InnerD::deep3` and `OuterD::deep3` rows exist even on the
+#     PRE-FIX binary, minted by the in-class DECLARATIONS — so an id-presence arm passes while the two
+#     definitions are missing entirely. The discriminating fact is which row the def MERGED INTO, read off
+#     `overloads=` (decl+def collapsed = 2) and off the caller line each sink names.
+printf '%s' "$DEFMAP" | grep -qE '<s t="method" n="deep3" id="[^"]*nesteddef\.cpp::InnerD::deep3" overloads="2"' \
+    && ok "def §11 precision: the 3-segment def merged into the InnerD::deep3 row (overloads=2) — IMMEDIATE scope" \
+    || no "def §11 precision: InnerD::deep3 is not overloads=2 — the def took the wrong scope or is absent"
+printf '%s' "$DEFMAP" | grep -qE '<s t="method" n="deep3" id="[^"]*nesteddef\.cpp::OuterD::deep3" overloads="2"' \
+    && ok "def §11 precision: the decoy OuterD::deep3 kept exactly its own def (overloads=2, not 3)" \
+    || no "def §11 precision: OuterD::deep3 is not overloads=2 — the two deep3 definitions merged"
+printf '%s' "$DEFMAP" | grep -qE 'id="[^"]*nesteddef\.cpp::nsD::deep3"' \
+    && no "def §11 precision: a nsD::deep3 row exists — the def keyed on the OUTERMOST namespace" \
+    || ok "def §11 precision: no nsD::deep3 row (the outermost-scope mis-key is closed)"
+# and the two sinks name DIFFERENT definition lines — the same fact from the edge side, where a merge
+# would be invisible to any row attribute. Literals read by hand off the fixture.
+printf '%s' "$( run "$DEFFIX" --callers=sinkThree --no-cache )" | grep -qE 'p="[^"]*nesteddef\.cpp:107"' \
+    && ok "def §11 precision: sinkThree's caller is the def at nesteddef.cpp:107 (nsD::OuterD::InnerD::deep3)" \
+    || no "def §11 precision: sinkThree's caller is not the :107 definition"
+printf '%s' "$( run "$DEFFIX" --callers=sinkDecoy --no-cache )" | grep -qE 'p="[^"]*nesteddef\.cpp:102"' \
+    && ok "def §11 precision: sinkDecoy's caller is the def at nesteddef.cpp:102 (nsD::OuterD::deep3)" \
+    || no "def §11 precision: sinkDecoy's caller is not the :102 definition"
+
+# (e) the fixture header, hand-read: 7 definitions x 1 sink call each = 7 edges, all canonical.
+printf '%s' "$DEFMAP" | grep -qE 'files=1 symbols=30 edges=7 shown=30 est_tokens=[0-9]+ ambiguous=0 unresolved=0' \
+    && ok "def §11 header: symbols=30 edges=7 ambiguous=0 unresolved=0 (was symbols=24 edges=1)" \
+    || no "def §11 header wrong: $( printf '%s' "$DEFMAP" | grep -oE 'files=1 [^-]*' | head -1 )"
 
 # ── §10 determinism + well-formed XML ───────────────────────────────────────────────────────────────────
 [ "$( run "$FIX" --no-cache )" = "$( run "$FIX" --no-cache )" ] \
