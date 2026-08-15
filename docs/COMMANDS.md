@@ -199,7 +199,7 @@ $ ./build/ripwire . --for="rankGraphTeleport"
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--token-budget`, `--signatures-only`, `--no-route`, `--adaptive`, `--no-mention-boost`, `--no-doc-mention`, `--query`
+**Shaped by:** `--top-k`, `--token-budget`, `--signatures-only`, `--no-route`, `--adaptive`, `--no-mention-boost`, `--no-doc-mention`, `--grep`
 
 **Caveats (stated by the binary):**
 
@@ -630,7 +630,7 @@ $ ./build/ripwire . --uses=rankGraphTeleport
 
 **Answers:** composable node-set query over the call graph: sources name("X")/all;
 
-filters kind|cx|fanin|file|layer; bounded closure callers|callees(SET[,depth]); joins and|or|not.  e.g. and(callers(name("foo"),2),kind(all,fn)) layer(SET,NAME) keeps the architecture layer NAME (game|infra|render|math|audio|ai|test) — the SAME built-in directory-name taxonomy the map prints as layer= on a file node, so the two cannot disagree. It does NOT read a --arch=FILE rules file: --arch is a verb and outranks --graph-query, so the two never run together. An unknown layer word, or ANY layer() against a tree where no path names a layer, is REFUSED (exit 1) rather than answered count="0" — 0 there would read as "no such code". a name("X") literal matching NO indexed symbol refuses with a did-you-mean (a typo is not a count=0); a query whose names all resolve but that selects nothing still reports count="0" — that IS a measurement (including a VALID layer with no members in a tree that does have layers). Ranked result set is capped at --top-k (default 200); --limit overrides that cap (raise or lower it), --offset pages past it — see --limit=N --offset=M above
+filters kind|cx|fanin|file|layer; bounded closure callers|callees(SET[,depth]); joins and|or|not.  e.g. and(callers(name("foo"),2),kind(all,fn)); file() regex example: file("src/.*\\.cpp") (or in bash, use single quotes: file('src/.*\.cpp')) layer(SET,NAME) keeps the architecture layer NAME (game|infra|render|math|audio|ai|test) — the SAME built-in directory-name taxonomy the map prints as layer= on a file node, so the two cannot disagree. It does NOT read a --arch=FILE rules file: --arch is a verb and outranks --graph-query, so the two never run together. An unknown layer word, or ANY layer() against a tree where no path names a layer, is REFUSED (exit 1) rather than answered count="0" — 0 there would read as "no such code". a name("X") literal matching NO indexed symbol refuses with a did-you-mean (a typo is not a count=0); a query whose names all resolve but that selects nothing still reports count="0" — that IS a measurement (including a VALID layer with no members in a tree that does have layers). Ranked result set is capped at --top-k (default 200); --limit overrides that cap (raise or lower it), --offset pages past it — see --limit=N --offset=M above
 
 **Try it**
 
@@ -659,7 +659,7 @@ $ ./build/ripwire . --graph-query='and(callers(name("rankGraphTeleport"),2),kind
 
 **Caveats (stated by the binary):**
 
-- and(callers(name("foo"),2),kind(all,fn)) layer(SET,NAME) keeps the architecture layer NAME (game|infra|render|math|audio|ai|test) — the SAME built-in directory-name taxonomy the map prints as layer= on a file node, so the two cannot disagree.
+- file() regex example: file("src/.*\\.cpp") (or in bash, use single quotes: file('src/.*\.cpp')) layer(SET,NAME) keeps the architecture layer NAME (game|infra|render|math|audio|ai|test) — the SAME built-in directory-name taxonomy the map prints as layer= on a file node, so the two cannot disagree.
 - It does NOT read a --arch=FILE rules file: --arch is a verb and outranks --graph-query, so the two never run together.
 - An unknown layer word, or ANY layer() against a tree where no path names a layer, is REFUSED (exit 1) rather than answered count="0" — 0 there would read as "no such code".
 
@@ -940,7 +940,9 @@ $ ./build/ripwire . --test-gate
 
 ### `--grep=STR | --regex=PAT`
 
-**Answers:** literal / regex search + enclosing symbol + the matched line --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex) --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)
+**Answers:** literal / regex search + enclosing symbol + the matched line;
+
+exhaustive literal scan. For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance). --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex) --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)
 
 **Try it**
 

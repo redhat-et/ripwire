@@ -71,6 +71,9 @@ CONCEPT="how does resolution work"
 # the ranking it pins did not change.
 # CORRECTED at 2026-07-30 by the w1fix2 verifier (finding G1) — the first re-pin comment claimed this moved UP
 # while anchorcheck moved DOWN, and called that the signature of re-measurement. Both moved up. See traps 17-19.
+# RE-PIN 2026-08-15 (harvest wave, V5 item 3): same cause as anchorcheck's re-pin of the same date — the
+# --for legend clause "the signatures-only flag opts out" became "the signatures-only flag (no-bodies mode)
+# opts out" (V5 lane, 6bd6c00). +17 B legend text + est_tokens self-measurement; ranking bytes identical.
 "$BIN" routefix --no-cache --for="$CONCEPT" --no-route >"$TMP/concept_noroute.xml" 2>/dev/null
 diff -q "$TMP/concept_noroute.xml" "$ROOT/test/routefix/golden_for.xml" >/dev/null \
     && ok "safe fallback: conceptual --for --no-route byte-identical to the pre-routing golden" \
