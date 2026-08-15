@@ -880,6 +880,37 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
     std::error_code ec;
     fs::path root = fs::path( rootDir );
 
+    // If the root is a regular file, index just that one file instead of refusing.
+    if( fs::is_regular_file( root, ec ) && !ec )
+    {
+        // Process this single file through the same validation pipeline as directory walk would.
+        const std::string name = root.filename().string();
+        if( !isDenylistedName( name ) )
+        {
+            const std::string ext = lowerExtensionOf( name );
+            // Check if extension is supported (source language or doc format).
+            if( lookupLang( ext ) != nullptr || docparse::isDocExtension( ext ) )
+            {
+                const std::uintmax_t sz = fs::file_size( root, ec );
+                if( !ec && sz <= maxFileBytes )
+                {
+                    out.push_back( rootDir );
+                }
+                else if( !ec && sz > maxFileBytes )
+                {
+                    skipped.push_back( { rootDir, sz, maxFileBytes } );
+                }
+            }
+            else if( !isNonTextExtension( ext ) )
+            {
+                ++extTally[ ext ];
+            }
+        }
+        ec.clear();
+        return { std::move( out ), std::move( skipped ), std::move( skips ) };
+    }
+
+    // Otherwise treat root as a directory.
     auto opts = fs::directory_options::skip_permission_denied;
     fs::recursive_directory_iterator it( root, opts, ec );
     if( ec )
