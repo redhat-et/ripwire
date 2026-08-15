@@ -97,6 +97,26 @@ e2=$?
     && ok "--grep='a\"b' output is valid XML" \
     || ok "--grep='a\"b' output is empty or invalid XML (acceptable)"
 
+# ── (2b) G1/F1 — a second --grep=/--regex= refuses, naming the AND spelling ────────────────────────
+# Measured against the pre-fix binary: `--grep=foo --grep=bar` exited 0 with pattern="bar", `foo` silently
+# discarded, nothing on stderr — indistinguishable from a caller who only ever meant "bar".
+
+DUPOUT="$( "$BIN" "$CORPUS" --no-cache --grep=foo --grep=bar 2>&1 >/dev/null )"; DUPEC=$?
+[ "$DUPEC" = 1 ] \
+    && ok "--grep=foo --grep=bar refuses at exit 1 (was exit 0, pattern=\"bar\")" \
+    || no "--grep=foo --grep=bar exited $DUPEC, expected 1: $DUPOUT"
+printf '%s' "$DUPOUT" | grep -q -- "--grep given twice" \
+    && ok "the refusal names the flag" \
+    || no "the refusal does not name --grep: $DUPOUT"
+printf '%s' "$DUPOUT" | grep -qE -- "--and=" \
+    && ok "the refusal shows the AND spelling (--and=)" \
+    || no "the refusal gives no --and= example: $DUPOUT"
+
+DUPOUT2="$( "$BIN" "$CORPUS" --no-cache --grep=foo --regex=bar 2>&1 >/dev/null )"; DUPEC2=$?
+[ "$DUPEC2" = 1 ] \
+    && ok "--grep=foo --regex=bar (same member, two spellings) also refuses" \
+    || no "--grep=foo --regex=bar exited $DUPEC2, expected 1: $DUPOUT2"
+
 # ── (3) Determinism: byte-identical runs ────────────────────────────────────────────────────────
 
 "$BIN" "$CORPUS" --no-cache --grep=perimeter >"$TMP/det1" 2>/dev/null
