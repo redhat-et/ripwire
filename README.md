@@ -53,9 +53,12 @@ tool refuses.
 [What it misses, and what to run next →](#what-it-misses-and-what-to-run-next)
 
 **New (2026-08-15), each measured, gated, and re-derived on every CI run:**
-- **`--expand` answers "show me this function" in one call, −57.6% tokens** — an exact-name ask now
+- **`--expand` answers "show me this function" in one call, −47.3% tokens** — an exact-name ask now
   skips the ranked-map preamble by default and the body arrives with its file's sibling symbols and
   imports inline (`sibs=`/`inc=`), so the follow-up "what else is in this file?" call never happens.
+  (Re-derived 2026-08-15 fix-expand round: `--expand=emitGrepReport` — 47,252 B classic 200-row-map
+  bundle vs 24,911 B today's exact-name default, on this repo; the figure moves as the corpus grows
+  and is not itself CI-gated, so re-measure before citing it in a future round.)
 - **`--grep` groups, deduplicates, and speaks boolean** — per-file grouping, identical-line collapse
   ("this exact guard appears at 6 call sites" is the finding), and `--and=`/`--not=`/`--grep-scope=`:
   a two-term ask returns the *complete* answer at **−78%** of the single-term dump. Default view now
@@ -801,8 +804,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="./src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="./src/graph.h:2057"/>
 <s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2393"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:11489"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:11604"/>
+<s t="fn" n="churnRankedGraph" p="./src/main.cpp:11527"/>
+<s t="fn" n="runDefaultMap" p="./src/main.cpp:11642"/>
 <s t="fn" n="getIndex" p="./src/mcpindex.h:946"/>
 </callers>
 ```
