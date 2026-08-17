@@ -5985,7 +5985,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         std::printf( "<!-- ripwire graph-query: a fixed-operator node-set query over the call graph (sources "
                      "name/all; filters kind/cx/fanin/file/layer; bounded closure callers/callees; joins and/or/not), "
                      "ranked by importance + capped at the top-k limit (default 200); narrow the query or raise top-k for more. NOT Datalog. "
-                     "%s%s-->", rw::graphCountDisclosure().c_str(), rw::prConvergeLegend( prD ).c_str() );
+                     "%s%s-->", rw::graphCountDisclosure().c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY): count= is the true total and
         // shown= the --top-k slice, but capped= was missing — so a caller reading a 200-row answer had to
         // know the default top-k to tell a complete result from a truncated one. Rule 3: the bit is always
@@ -5994,7 +5994,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         std::printf( "<query expr=\"%s\" count=\"%zu\"%s%s%s>",
                      ex( cfg.graphQuery ).c_str(), total,
                      pageDisclosure( gqAb, sizeof( gqAb ), keep, total, gqPw.end, cfg.pageLimit, cfg.pageOffset, true ),
-                     rw::kGraphCountFloorAttrXml, rw::prConvergeAttrXml( prD ).c_str() );
+                     rw::kGraphCountFloorAttrXml, rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ).c_str() );
         for( std::size_t ri = gqPw.begin; ri < gqPw.end; ++ri )
         {
             const NodeId  c = result[ ri ];
@@ -6902,7 +6902,7 @@ std::optional<int> runImpact( const MainDispatch& d )
             // §H4 §3.4: opener + the shared floor/counting-unit tail, both from src/graphlegend.h so the MCP
             // twin cannot drift from this wording (the §B4 echo-site class).
             std::printf( "%s%s. %s%s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
-                         rw::graphCountDisclosure().c_str(), rw::prConvergeLegend( prD ).c_str() );
+                         rw::graphCountDisclosure().c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         }
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
         // above runImpact. reaches= stays the un-windowed reach-set size — the blast radius the INDEXED graph
@@ -6925,7 +6925,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                                    + pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                                      cfg.pageLimit, cfg.pageOffset, true )
                                    + rw::kGraphCountFloorAttrXml            // §H4 §3.4
-                                   + rw::prConvergeAttrXml( prD );          // W2-F
+                                   + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs );          // W2-F
             emitColumnarSymbolRows( stdout, ing, "impact", attr.c_str(), page );
             return 0;
         }
@@ -6942,7 +6942,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                          pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                          cfg.pageLimit, cfg.pageOffset, true, kJsonPageSyntax ),
                          rw::kGraphCountFloorAttrJson,             // §H4 §3.4
-                         rw::prConvergeAttrJson( prD ).c_str() );  // W2-F: the dialects keep ONE keyset
+                         rw::renderDisclosure( prD, rw::DiscloseAs::JsonKeys ).c_str() );  // W2-F: the dialects keep ONE keyset
             printJsonSymbolRows( ing, show, ipw.begin, ipw.end );
             std::printf( "]}" );
             return 0;
@@ -6952,7 +6952,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                      ex( cfg.impactSym ).c_str(), seeds.size(), reach.size(),
                      pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
-                     rw::kGraphCountFloorAttrXml, rw::prConvergeAttrXml( prD ).c_str() );
+                     rw::kGraphCountFloorAttrXml, rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ).c_str() );
         for( std::size_t i = ipw.begin; i < ipw.end; ++i ) { const Symbol& s = ing.symbols[ show[i] ]; std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
         std::printf( "</impact>" );
         return 0;
@@ -7204,12 +7204,12 @@ std::optional<int> runExercises( const MainDispatch& d )
     std::printf( "<!-- ripwire exercises: the NON-TEST symbols this test transitively calls into — what it covers (the inverse of the affected verb). "
                  "<t> = the seed test files the pattern matched; <s> = the covered symbols, PageRank desc. "
                  "harness=script|mixed says the seed set contains shell gates, whose subprocess coverage this walk cannot see. "
-                 "%s-->", rw::prConvergeLegend( prD ).c_str() );
+                 "%s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
     std::printf( "<exercises of=\"%s\" seed_files=\"%zu\" shown_seed_files=\"%zu\" seed_files_capped=\"%u\" test_symbols=\"%zu\" reaches=\"%zu\"%s%s>",
                  ex( cfg.exercisesFile ).c_str(), sel.testFiles.size(), shownSeed,
                  unsigned( shownSeed < sel.testFiles.size() ), sel.seeds.size(), show.size(), harnessAttr.c_str(),
                  ( pageDisclosure( epab, sizeof( epab ), shownRows, show.size(), epw.end, cfg.pageLimit, cfg.pageOffset, true )
-                   + rw::prConvergeAttrXml( prD ) ).c_str() );
+                   + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
     const rw::TestRunnerIndex runners( ing );      // §P11.4: the seed rows are the tests you are about to re-run
     for( std::size_t i = 0; i < shownSeed; ++i )
     {
@@ -9236,7 +9236,7 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
                  "shown=/capped= describe the member list printed here: this listing is fixed at the 5 top-ranked members and is NOT "
                  "widened by limit=/offset= (those page the MODULE rows). capped=1 means members were dropped; drill= names the verb "
                  "that pages the full member list of one module. raise the default cap with limit=N (offset=M pages). "
-                 "%s-->", rw::prConvergeLegend( prD ).c_str() );
+                 "%s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
     // §P11.6 drill=: the id= values below were the only identifiers this tool emitted that no verb took
     // back. The follow-up verb is named ON THE ROOT ELEMENT rather than in the doc comment, because an XML
     // comment may not contain a double hyphen (G4) and its entity escapes are NOT expanded — a caller would
@@ -9246,7 +9246,7 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
                  bridge.size(), shownBridges, isBridgesCapped, isolates.total, isolates.declaration,
                  isolates.header, isolates.source, isolates.document, isolates.connectedSingletons, N,
                  ( pagingDisclosure( cmab, sizeof( cmab ), moduleOrder.size(), cmpw.end, cfg.pageLimit, cfg.pageOffset )
-                   + rw::prConvergeAttrXml( prD ) ).c_str() );
+                   + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     for( std::size_t moduleIndex = cmpw.begin; moduleIndex < cmpw.end; ++moduleIndex )
@@ -9386,12 +9386,12 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
                  "other modules. size= is the module's TRUE member count; shown=/capped= are this page. partition= is the FULL label "
                  "space (every id 0..partition-1, incl. isolated singletons) — the range the id= argument ranges over; modules= counts "
                  "the NON-isolated communities (size>=2), the SAME predicate the communities-listing verb's modules= uses, so parent "
-                 "and child agree. %s-->", rw::prConvergeLegend( prD ).c_str() );
+                 "and child agree. %s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
     std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" partition=\"%u\" modules=\"%u\"%s>",
                  want, std::size_t( mem.size() ), ex( presentation.directory[ want ] ).c_str(), ex( presentation.label[ want ] ).c_str(),
                  peers.size(), shownBridges, unsigned( shownBridges < peers.size() ), K, modulesNonIsolated,
                  ( pageDisclosure( mpab, sizeof( mpab ), shownMembers, mem.size(), mpw.end, cfg.pageLimit, cfg.pageOffset, true )
-                   + rw::prConvergeAttrXml( prD ) ).c_str() );
+                   + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
     for( std::size_t i = mpw.begin; i < mpw.end; ++i )
     {
         const Symbol& s = ing.symbols[ mem[i] ];
@@ -9533,7 +9533,7 @@ std::optional<int> runZoom( const MainDispatch& d )
             // nodes inside; bridge edges connect top modules. Deterministic node ids = "L<level>_<gid>".
             // W2-F: mermaid has no attribute grammar — the note is emitted ONLY on the truncating exit, as a
             // mermaid COMMENT so the diagram still renders with the warning attached.
-            std::printf( "%s", rw::prConvergeTextWarning( prD, "%% " ).c_str() );
+            std::printf( "%s", rw::renderDisclosure( prD, rw::DiscloseAs::MermaidNote ).c_str() );
             std::printf( "%%%% ripwire --zoom --mermaid: nested module hierarchy (multi-level Louvain). subgraph = top module, inner node = sub-module (dir, symbol count); edge = cross-module call count. Render at mermaid.live.\n" );
             std::printf( "flowchart TB\n" );
             std::vector<char> esc;
@@ -9608,7 +9608,7 @@ std::optional<int> runZoom( const MainDispatch& d )
                      "symbols= equals isolated= plus the sum of the TOP-LEVEL size= values, every one of them, including any this page did not print. "
                      "On a level-0 module size= is its true member count and shown=/capped= describe the member list printed here, which is fixed at the 5 top-ranked members and is not widened by limit=/offset= (those page the TOP-LEVEL modules); "
                      "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. %s-->",
-                     rw::prConvergeLegend( prD ).c_str() );
+                     rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // §P15/§P16: top_modules= is a real, deterministically-ordered row list (size desc, id asc — the same
         // rule --communities' module listing uses) that used to print EVERY top module unconditionally, so a
         // repo with hundreds of top modules had no way to page it. --limit/--offset now window it like --uses
@@ -9620,7 +9620,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         std::printf( "<zoom levels=\"%zu\" top_modules=\"%zu\" symbols=\"%u\" isolated=\"%u\"%s>", L, topOrder.size(), N, isolatedCount,
                      ( pageDisclosure( zoomAb, sizeof( zoomAb ), zoomPw.end - zoomPw.begin, topOrder.size(), zoomPw.end,
                                        cfg.pageLimit, cfg.pageOffset, false )
-                       + rw::prConvergeAttrXml( prD ) ).c_str() );
+                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
 
         // a stack-free recursion via an explicit lambda (std::function — not hot). Emits <module> elements
         // nested by level; the finest level emits <member> leaves.
@@ -9785,7 +9785,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // situ.h's kTestGateLegend and flipimpact.h's writeFlipHeader). Each legend was locally honest,
         // which is precisely why a reader comparing two of the numbers is misled.
         std::printf( "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages). %s-->",
-                     rw::prConvergeLegend( prD ).c_str() );
+                     rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // P2.1: two nested caps, neither previously marked — at most 20 seam PAIRS, and at most 5 example
         // EDGES inside each. Each <seam> gains shown= alongside its true untested= count.
         //
@@ -9808,7 +9808,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
                      dirName.size(), bridges, untested, testFileCount, pairs.size(),
                      ( pageDisclosure( seamsAb, sizeof( seamsAb ), shownPairs, pairs.size(), seamsPw.end,
                                        cfg.pageLimit, cfg.pageOffset, true )
-                       + rw::prConvergeAttrXml( prD ) ).c_str() );
+                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
         for( std::size_t pi = seamsPw.begin; pi < seamsPw.end; ++pi )
         {
             const std::uint32_t    cu    = std::uint32_t( pairs[pi].first >> 32 ), cv = std::uint32_t( pairs[pi].first & 0xffffffffu );
@@ -10000,7 +10000,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // which is what makes this an enforceable guarantee rather than an incidental one (contrast --recall).
         std::printf( "<!-- ripwire markdown: no run of 4-or-more backticks in this output — safe to embed inside a wider fence -->\n\n" );
         // W2-F: markdown has no attribute grammar — the note is emitted ONLY on the truncating exit.
-        std::printf( "%s", rw::prConvergeTextWarning( prD ).c_str() );
+        std::printf( "%s", rw::renderDisclosure( prD, rw::DiscloseAs::MarkdownNote ).c_str() );
         std::printf( "# ripwire architecture report\n\n%u files · %u symbols · %u edges · %u modules (%u call-graph isolated)\n\n",
                      F, N, std::uint32_t( g.outTargets.size() ), modules, isolates.total );
         std::printf( "Call-graph isolate provenance: %u declaration, %u header, %u source, %u document; %u connected Louvain singletons\n\n",
@@ -10153,7 +10153,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
                      "— files equals files_unlisted plus the LISTABLE file set, which is what the rows below "
                      "enumerate before any paging window is applied; under explicit paging (limit=/offset=) that "
                      "listable count is emitted as total= and shown= says how many of it these rows are. "
-                     "%s-->", rw::prConvergeLegend( prD ).c_str() );
+                     "%s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // T2 + §P8 G1: --limit/--offset paginate over the (sorted) non-empty file set. files= stays the TRUE
         // total of INDEXED files (all of them, matching pre-T2) — deliberately NOT the paging total, because
         // the emitted rows are the non-empty subset `ford`, and total= must be the count a next_offset walks
@@ -10165,7 +10165,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         std::printf( "<tree files=\"%u\" files_unlisted=\"%u\"%s>", F, filesUnlisted,
                      ( pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, ford.size(), pw.end,
                                        cfg.pageLimit, cfg.pageOffset, false )
-                       + rw::prConvergeAttrXml( prD ) ).c_str() );
+                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
         std::vector<char> trEsc;
         for( std::size_t fi = pw.begin; fi < pw.end; ++fi )
         {

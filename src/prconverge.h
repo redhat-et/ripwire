@@ -3,18 +3,8 @@
 // prconverge.h — the ONE spelling of the PageRank convergence disclosure, shared by every ranked document
 // on every surface (the map's XML and JSON dialects, the standalone ranked verb roots, and their MCP twins).
 //
-// WHY THIS EXISTS. PageRank here is a power iteration with a stopping rule: iterate until the L1 residual
-// falls below `tolerance`, or until `maxIterationCount` iterations have run — whichever comes first. Those
-// two exits produce documents that look identical and mean different things. The first is the fixed point
-// the ranking claims to be. The second is a TRUNCATION of the computation: a rank vector caught mid-descent,
-// emitted with the same k= attributes, the same ordering, the same confidence.
-//
-// Until this header the difference reached nobody. `pageRankDouble` fired DEGRADED_PATH_ALERT on the
-// truncating exit and returned its iteration count, and `rankGraphTeleport` discarded the return; the alert
-// itself is `#ifndef NDEBUG`, so on every shipped Release binary it is not code at all. A release build
-// therefore emitted a non-converged ranking with no alert, no attribute, exit 0 — the whole document
-// indistinguishable from a converged one. Constraint #3 (honesty in output) names that class exactly: every
-// truncation is disclosed in the header.
+// Why the disclosure exists (the truncating exit was invisible on Release builds): the full story is
+// docs/ARCHITECTURE.md, "The convergence disclosure contract". This header is only the spelling.
 //
 // THE ATTRIBUTES.
 //   pr_iters="N"       how many power iterations produced this document's ordering. Present on EVERY
@@ -26,19 +16,26 @@
 //                      `skipped_oversize=`, `changed=` and `over_ceiling="1"` already use in the map header,
 //                      and for the same reason: the converged path is the overwhelming majority and must
 //                      cost zero bytes. There is deliberately no pr_converged="1"; a run that converged says
-//                      so by not saying anything, and the legend below is what makes that readable rather
-//                      than a thing you have to know.
+//                      so by not saying anything, and the legend is what makes that readable rather than a
+//                      thing you have to know.
 //
 // It is NOT spelled with `_floor` or `_capped`. Those markers (src/graphlegend.h, src/pageview.h) mean "the
 // count you are reading is short of the truth" and "a cap stopped the scan"; this one means "the numeric
 // method behind the ordering did not reach its own stopping criterion". Three different facts, three names.
 //
-// CAN IT EVER FIRE? Not at the shipped configuration. The iteration is an alpha-contraction in L1, so
-// residual_k <= 2 * alpha^k and 2 * 0.85^k < 1e-6 at k = 90, comfortably inside maxIterationCount = 100 for
-// ANY graph (src/pagerank.cpp carries the derivation; E2 measured 28-52 iterations across four real
-// corpora). The disclosure is therefore a contract for the configuration, not a live alarm: lower the
-// tolerance, raise alpha toward 1, or hand the ranker a graph shape the contraction argument stops covering,
-// and the attribute is what tells the reader before the ranking does.
+// At the shipped configuration the truncating exit is provably unreachable — src/pagerank.cpp carries the
+// contraction derivation. The disclosure is a contract for the configuration, not a live alarm.
+//
+// ONE RENDERER, NOT SIX ENTRY POINTS, and the second reason is measured. The first reason is design: the
+// forms below differ only in the syntax their host document accepts, never in what they say, so five public
+// names for one fact is exactly the drift this file exists to prevent — the header's own title is "the ONE
+// spelling". The second is that a cluster of tiny keyword-dense symbols is a RETRIEVAL hazard in this repo,
+// not a neutral style choice: at six symbols this header took four of the top seven hits for the query
+// "power iteration rank convergence damping factor" and five of the top eight for "pagerank power iteration",
+// pushing `pageRankDouble` — the numeric kernel, and the labelled answer to both — from rank 1 to 6 and from
+// 2 to 9 (bench/recalleval, ranking lane). BM25 length-normalization prefers a short symbol whose whole text
+// is the query's vocabulary, and a spelling header is nothing but the vocabulary. Consolidating restored it.
+// Keep this file at one renderer; if a form is added, add a `DiscloseAs` case, never a sibling function.
 //
 // Gate: test/prconvergecheck.sh.
 
@@ -50,7 +47,7 @@ namespace rw
 
 // What a ranked document discloses about the power iteration that ordered it. `isPageRank == false` is the
 // honest default: a document whose order came from somewhere else discloses nothing here rather than
-// borrowing a PageRank run's numbers, which is how one attribute comes to describe two rankings.
+// borrowing another run's numbers, which is how one attribute comes to describe two rankings.
 struct RankDisclosure
 {
     std::uint32_t iterationCount = 0;
@@ -58,131 +55,92 @@ struct RankDisclosure
     bool          isPageRank     = false;
 };
 
-// ── THE TWO LEGEND CLAUSES, and why the split is not a cost dodge ────────────────────────────────────────
-// test/legendcoveragecheck.sh's arm (A) fails ANY root attribute a first screen does not define, so
-// `pr_iters=` cannot be emitted without a definition where the reader meets it — the always-on clause below
-// is obligatory, not optional. What IS a choice is its LENGTH. This attribute rides the DEFAULT map, the
-// single most-emitted document the tool has, and G4 is maximum token density; a 700-byte paragraph about a
-// condition that provably cannot fire at the shipped configuration (see the header comment) would be paid on
-// every invocation forever. So the always-on clause is written in the map legend's own compact
-// `name=value(qualifier)` dialect — the same shape as `est_tokens=hdr-copy(none-if-stable)` beside it — and
-// it is fully DEFINITIONAL for both names, which is arm (B)'s stricter predicate, at ~130 bytes.
-//
-// The prose lands where it is load-bearing: kPrConvergeLegendTruncated is appended ONLY on the map whose
-// iteration actually stopped short, i.e. exactly when a reader needs to be told what to do about it. This is
-// the same rule kChurnRankLegend / kMaxTokensFitLegend already follow — a clause is charged to the document
-// that carries the fact, never to the document that does not.
-//
-// G4: NO "--" digraph anywhere in either string (both are spliced into an XML comment, where "--" is a
-// well-formedness error), which is why verbs are named bare rather than with their flags, and no "<" either.
-inline constexpr const char* kPrConvergeLegendDense =
-    "pr_iters=pagerank-power-iterations(stop:L1-residual-below-tol,else-ceiling) "
-    "pr_converged=0-only-when-ceiling-hit-first(absent=converged;no-such-attr=not-pagerank-ordered) ";
+// Which spelling the caller's host document accepts. Picking the wrong one is picking the wrong DOCUMENT,
+// which is a decision worth naming at the call site rather than hiding in a function name.
+enum class DiscloseAs
+{
+    XmlAttrs,       // ` pr_iters="N"` [+ ` pr_converged="0"`] — appended to a root element's attributes
+    JsonKeys,       // `,"pr_iters":N` [+ `,"pr_converged":false`] — appended to a JSON header's keys
+    LegendClause,   // the definition, spliced INSIDE an XML comment the caller has already opened
+    LegendComment,  // the same definition as its own `<!-- -->` block
+    MarkdownNote,   // truncating exit only: one line, for a document with no attribute grammar at all
+    MermaidNote,    // truncating exit only: the same line as a diagram comment
+};
 
-// The truncating exit, in prose, on the document that took it.
-inline constexpr const char* kPrConvergeLegendTruncated =
-    "pr_converged=\"0\" on this map means the ranking below is a rank vector that STOPPED SHORT of tolerance "
-    "rather than the fixed point it approximates: the power iteration hit its iteration ceiling with the L1 "
-    "residual between successive vectors still above the convergence threshold. The k= scores, and therefore "
-    "the order, are a snapshot of an unfinished computation. Treat the ordering as indicative and the scores "
-    "as not comparable with any converged map. ";
-
-// The clause a caller splices into its legend, composed from the disclosure so no emitter has to restate the
-// rule about which half goes where. Empty for a document that ran no power iteration ⇒ zero bytes, and the
-// legend it would have joined stays byte-identical.
-inline std::string prConvergeLegend( const RankDisclosure& d )
+// Render one form of the disclosure. Empty string whenever there is nothing to say — no power iteration
+// ordered this document, or (for the two note forms) it converged — so a caller that appends unconditionally
+// keeps its exact pre-feature bytes and pays nothing on the overwhelmingly common path.
+inline std::string renderDisclosure( const RankDisclosure& d, DiscloseAs as )
 {
     if( !d.isPageRank )
     {
         return {};
     }
-    std::string s = kPrConvergeLegendDense;
+    const std::string iterations = std::to_string( d.iterationCount );
+
+    // ── the two attribute dialects ───────────────────────────────────────────────────────────────────────
+    // §B1.2 / §B2.1: the dialects must carry the SAME KEYSET for the same run — a keyset that differs by
+    // dialect is how one number comes to mean two things — so the two arms differ only in punctuation, and
+    // JSON says `false` rather than 0 because it has a boolean and XML does not.
+    if( as == DiscloseAs::XmlAttrs )
+    {
+        return " pr_iters=\"" + iterations + "\"" + ( d.hasConverged ? "" : " pr_converged=\"0\"" );
+    }
+    if( as == DiscloseAs::JsonKeys )
+    {
+        return ",\"pr_iters\":" + iterations + ( d.hasConverged ? "" : ",\"pr_converged\":false" );
+    }
+
+    // ── the two note forms: documents with no attribute grammar ──────────────────────────────────────────
+    // The markdown architecture report and the mermaid module diagram have no root element to hang an
+    // attribute on. What they must NOT do is go quiet on the case that matters — "the clause landed at 3 of
+    // its 5 echo sites" is this repo's own named failure family, and a disclosure present only where the
+    // syntax was convenient is that failure with a rationale attached. So: nothing at all on the converged
+    // path (zero bytes, byte-identical output), one line on the truncating one, carrying the host language's
+    // own comment marker, because a note that breaks the document it warns about is worse than silence.
+    if( as == DiscloseAs::MarkdownNote || as == DiscloseAs::MermaidNote )
+    {
+        if( d.hasConverged )
+        {
+            return {};
+        }
+        return std::string( as == DiscloseAs::MermaidNote ? "%% " : "> " )
+             + "NOTE: this ranking did NOT converge. The PageRank power iteration ran its full ceiling of "
+             + iterations
+             + " iterations with the L1 residual still above tolerance, so the order below is a snapshot of an "
+               "unfinished computation rather than the fixed point it approximates.\n\n";
+    }
+
+    // ── the legend ───────────────────────────────────────────────────────────────────────────────────────
+    // test/legendcoveragecheck.sh arm (A) fails ANY root attribute a first screen does not define, so the
+    // always-on clause is obligatory, not optional. Its LENGTH is the choice: this attribute rides the
+    // DEFAULT map, the most-emitted document the tool has, and G4 is maximum token density — a paragraph
+    // about a condition that provably cannot fire would be paid on every invocation forever. So it is
+    // written in the map legend's own compact `name=value(qualifier)` dialect (the same shape as
+    // `est_tokens=hdr-copy(none-if-stable)` beside it), fully DEFINITIONAL for both names, at ~130 bytes.
+    //
+    // The prose is charged only to the document that took the truncating exit, i.e. exactly where a reader
+    // needs telling what to do about it — the rule kChurnRankLegend / kMaxTokensFitLegend already follow.
+    //
+    // G4: no "--" digraph and no "<" anywhere in either string; both are spliced into an XML comment where
+    // "--" is a well-formedness error, which is why verbs are named bare rather than with their flags.
+    std::string clause =
+        "pr_iters=pagerank-power-iterations(stop:L1-residual-below-tol,else-ceiling) "
+        "pr_converged=0-only-when-ceiling-hit-first(absent=converged;no-such-attr=not-pagerank-ordered) ";
     if( !d.hasConverged )
     {
-        s += kPrConvergeLegendTruncated;
+        clause +=
+            "pr_converged=\"0\" on this map means the ranking below is a rank vector that STOPPED SHORT of tolerance "
+            "rather than the fixed point it approximates: the power iteration hit its iteration ceiling with the L1 "
+            "residual between successive vectors still above the convergence threshold. The k= scores, and therefore "
+            "the order, are a snapshot of an unfinished computation. Treat the ordering as indicative and the scores "
+            "as not comparable with any converged map. ";
     }
-    return s;
-}
-
-// The root-element attributes, one spelling per dialect. Appended in the same slot on every surface. A
-// disclosure with `isPageRank == false` renders as the empty string, so a caller that has no power iteration
-// to describe pays zero bytes and its document stays byte-identical to the pre-feature one.
-inline std::string prConvergeAttrXml( const RankDisclosure& d )
-{
-    if( !d.isPageRank )
-    {
-        return {};
-    }
-    std::string a = " pr_iters=\"";
-    a += std::to_string( d.iterationCount );
-    a += '"';
-    if( !d.hasConverged )
-    {
-        a += " pr_converged=\"0\"";
-    }
-    return a;
-}
-
-// The JSON twin. The two dialects' headers must carry the SAME KEYSET for the same run (§B1.2 / §B2.1: a
-// keyset that differs by dialect is how one number comes to mean two things), so this mirrors the XML rule
-// exactly — pr_iters always, pr_converged only on the truncating exit, and `false` rather than 0 because
-// JSON has a boolean and the XML "0" is only there because XML does not.
-inline std::string prConvergeAttrJson( const RankDisclosure& d )
-{
-    if( !d.isPageRank )
-    {
-        return {};
-    }
-    std::string a = ",\"pr_iters\":";
-    a += std::to_string( d.iterationCount );
-    if( !d.hasConverged )
-    {
-        a += ",\"pr_converged\":false";
-    }
-    return a;
-}
-
-// The map's legend is a CHAIN OF SELF-CONTAINED COMMENT BLOCKS (kChurnRankLegend and friends each open and
-// close their own `<!-- -->`), while every other ranked verb splices its clauses INSIDE one comment it opens
-// itself. Both spellings therefore exist, and the difference is not cosmetic: getting it wrong emits the
-// clause as document TEXT outside any comment, which is a G4 breach at exit 0. This is the wrapped form; use
-// it wherever the caller appends to a completed comment, and prConvergeLegend() wherever it appends inside
-// an open one.
-inline std::string prConvergeLegendComment( const RankDisclosure& d )
-{
-    if( !d.isPageRank )
-    {
-        return {};
-    }
-    return "<!-- " + prConvergeLegend( d ) + "-->";
-}
-
-// ── the surfaces with NO attribute grammar ───────────────────────────────────────────────────────────────
-// Two ranked outputs are not XML and not JSON: the markdown architecture report, and the mermaid rendering of
-// the nested module hierarchy. Neither has a root element to hang pr_iters= on, and neither should carry a
-// paragraph on every run — a markdown report gains nothing from a line saying a number converged, which is
-// the state it is always in at the shipped configuration.
-//
-// What they must NOT do is go quiet on the case that matters. "The clause landed at 3 of its 5 echo sites"
-// is this repo's own named failure family, and a disclosure that exists only where the syntax was convenient
-// is that failure with a rationale attached. So these two emit NOTHING on the converged path (zero bytes,
-// byte-identical output) and a single plain line on the truncating one — the disclosure is structural where
-// a structure exists and textual where none does, and it is never absent where it is load-bearing.
-// `linePrefix` is the host language's own comment/callout marker, because a note that breaks the document
-// it warns about is worse than the silence — "> " is a markdown blockquote, and "%% " is a mermaid comment,
-// which is what keeps the diagram pasteable into a renderer with the note still attached to it.
-inline std::string prConvergeTextWarning( const RankDisclosure& d, const char* linePrefix = "> " )
-{
-    if( !d.isPageRank || d.hasConverged )
-    {
-        return {};
-    }
-    std::string s = linePrefix;
-    s += "NOTE: this ranking did NOT converge. The PageRank power iteration ran its full ceiling of ";
-    s += std::to_string( d.iterationCount );
-    s += " iterations with the L1 residual still above tolerance, so the order below is a snapshot of an "
-         "unfinished computation rather than the fixed point it approximates.\n\n";
-    return s;
+    // The map's legend is a CHAIN of self-contained comment blocks (kChurnRankLegend and friends each open
+    // and close their own), while every other ranked verb splices clauses inside one comment it opened
+    // itself. Getting this wrong emits the clause as document TEXT outside any comment — a G4 breach at
+    // exit 0 — which is why the distinction is a named form and not a bool the caller has to remember.
+    return ( as == DiscloseAs::LegendComment ) ? "<!-- " + clause + "-->" : clause;
 }
 
 } // namespace rw

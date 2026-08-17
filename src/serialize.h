@@ -1463,7 +1463,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     }
     // W2-F: the pr_iters= / pr_converged= definition, charged to the maps that carry the attributes — empty
     // for a lexical or HITS ordering, and the prose half only on the map whose iteration stopped short.
-    legend += prConvergeLegendComment( ann.prDisclosure );
+    legend += renderDisclosure( ann.prDisclosure, DiscloseAs::LegendComment );
     // header honesty gauges: ambiguous=resolver guessed among >1 in-repo def (read source); unresolved=the callee
     // name IS defined in-repo but EVERY def was language-filtered — a plausibly-internal, cross-language-filtered
     // edge (NOT counted for genuine externals like stdlib/third-party, whose name has no in-repo def at all).
@@ -1603,7 +1603,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         // suppressed under --stable: the iteration count is a property of the CORPUS and the ranker, not of
         // the run's size, so it does not move between two runs over the same tree, and a byte-stable prefix
         // that hides "this ranking is unfinished" would be a cache optimisation buying silence.
-        h += prConvergeAttrXml( ann.prDisclosure );
+        h += renderDisclosure( ann.prDisclosure, DiscloseAs::XmlAttrs );
         h += ">";
         return h;
     };
@@ -5274,7 +5274,7 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     // headers carry the SAME KEYSET for the same run, so this is not an XML-side courtesy — a JSON consumer
     // (every MCP client) reading a truncated ranking with no key to tell it so is the exact defect the XML
     // side just closed. Same slot, same absent-means-converged rule.
-    w.write( prConvergeAttrJson( h.ann->prDisclosure ) );
+    w.write( renderDisclosure( h.ann->prDisclosure, DiscloseAs::JsonKeys ) );
 
     // §A4b: the multi-root prologue (A13) — `roots_count` joins the header gauges and a
     // `roots` table maps each label to its root path, ONLY when N≥2 (single-root output byte-unchanged).
