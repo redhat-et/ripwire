@@ -317,7 +317,9 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
         }
 
         std::vector<char> seedMask( F, 0 );  seedMask[ seed ] = 1;    // ripwire: PageRank teleported on the seed
-        const std::vector<float> r = rankGraphTeleport( g, diffTeleport( ing, seedMask ) );
+        // .rank only: a scoring harness, not an emitter — it produces a measurement, not a ranked document
+        // with a root to disclose on.
+        const std::vector<float> r = rankGraphTeleport( g, diffTeleport( ing, seedMask ) ).rank;
         std::vector<float>       ctxScore( F, 0.f );
         for( const Symbol& s : ing.symbols )
         {

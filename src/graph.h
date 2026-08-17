@@ -11,6 +11,7 @@
 #include "infra/sparseCsr.h"     // first-party infra math (src/infra/)
 #include "infra/csrverify.h"     // structural gate, VERIFY'd after every production CSR build
 #include "pagerank.h"            // double-precision PageRank kernel over float CSR storage
+#include "prconverge.h"          // W2-F: RankDisclosure — the power iteration's own account, carried with its result
 #include "smallvec.h"            // rw::SmallVec — THE ONE ALIAS (src/smallvec.h picks the implementation)
 #include "resolve.h"             // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
 #include "scipoverlay.h"         // SCIP precision overlay (data struct only; parser lives in scip.h)
@@ -2022,15 +2023,29 @@ inline std::vector<float> biasPrior( const Graph& g, const std::vector<float>& p
     return pw;
 }
 
+// What a rank call hands back: the vector, and the power iteration's own account of itself. Structured-binding
+// return (CONTRIBUTING §3) rather than an out-param — `auto [ rank, prIters, prConverged ] = rankGraph( g );`
+// — so a caller cannot take the ranking while leaving the disclosure on the floor without writing the
+// discard out. That is what this used to be: rankGraphTeleport called pageRankDouble, threw away its return,
+// and every ranked document in the tool inherited the silence. src/prconverge.h turns the pair into the
+// pr_iters= / pr_converged= root attributes.
+struct RankedGraph
+{
+    std::vector<float> rank;
+    std::uint32_t      iterationCount = 0;
+    bool               hasConverged   = true;
+};
+
 // PageRank with an explicit teleport / personalization vector p (Σp = 1). The prior is name-quality-biased
 // through biasPrior() so all rank modes share one weighting seam; the transition matrix (edges) is untouched.
-inline std::vector<float> rankGraphTeleport( const Graph& g, const std::vector<float>& p, float alpha = 0.85f )
+inline RankedGraph rankGraphTeleport( const Graph& g, const std::vector<float>& p, float alpha = 0.85f )
 {
     PROFILE_SCOPE_DESCRIBE( "rankGraph: PageRank (power iteration)" );
     const std::vector<float> pw = biasPrior( g, p );
     const std::size_t N = pw.size();
     std::vector<double> teleport( pw.begin(), pw.end() );
     std::vector<double> rankDouble( N, 0.0 );
+    PageRankRun         run{};   // an N == 0 graph never enters the kernel: { 0, converged } — see PageRankRun
     if( N )
     {
         double teleportMass = 0.0;
@@ -2046,15 +2061,25 @@ inline std::vector<float> rankGraphTeleport( const Graph& g, const std::vector<f
                 value *= inverseMass;
             }
         }
-        pageRankDouble( g.inEdges, g.wOutDeg, teleport, rankDouble, PageRankConfig{ .alpha = double( alpha ) } );
+        run = pageRankDouble( g.inEdges, g.wOutDeg, teleport, rankDouble, PageRankConfig{ .alpha = double( alpha ) } );
     }
     std::vector<float> r( N, 0.f );
     std::transform( rankDouble.begin(), rankDouble.end(), r.begin(), []( double value ) { return float( value ); } );
-    return r;
+    return { std::move( r ), run.iterationCount, run.hasConverged };
+}
+
+// Take the vector and leave the disclosure behind, for a caller that keeps the two in separate variables
+// (the default-map dispatcher, whose ranking arrives from one of four mutually exclusive arms). Named rather
+// than open-coded per arm so an arm added later cannot take the ranking and forget the disclosure —
+// `rank = takeRank( rankGraphTeleport( … ), d )` is the only spelling, and it fills both or neither.
+inline std::vector<float> takeRank( RankedGraph ranked, RankDisclosure& disclosureOut )
+{
+    disclosureOut = RankDisclosure{ ranked.iterationCount, ranked.hasConverged, true };
+    return std::move( ranked.rank );
 }
 
 // uniform-teleport PageRank (the default).
-inline std::vector<float> rankGraph( const Graph& g, float alpha = 0.85f )
+inline RankedGraph rankGraph( const Graph& g, float alpha = 0.85f )
 {
     const std::size_t N = g.wOutDeg.size();
     return rankGraphTeleport( g, std::vector<float>( N, N ? 1.0f / float( N ) : 0.f ), alpha );
@@ -2429,8 +2454,12 @@ inline std::vector<float> anchoredLexicalRank( const Graph& g, const std::vector
         p[a] = float( lex[a] / confSum );
     }
 
-    // bounded graph expansion from the anchors (existing PPR core), then the score-space blend
-    const std::vector<float> ppr = rankGraphTeleport( g, p );
+    // bounded graph expansion from the anchors (existing PPR core), then the score-space blend.
+    // The disclosure is DELIBERATELY dropped here and nowhere else in the tree it could be kept: what leaves
+    // this function is a BLEND of a lexical score and a PPR vector, so no document ordered by it was ordered
+    // by a power iteration, and stamping pr_iters= on the lens would name a run that shaped only part of the
+    // order (prconverge.h: absence of pr_iters= means exactly this, and is why it means it).
+    const std::vector<float> ppr = rankGraphTeleport( g, p ).rank;
     return blendMaxNorm( lex, ppr, anchorcfg::kGraphBlend );
 }
 
