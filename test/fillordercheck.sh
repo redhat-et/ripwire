@@ -47,7 +47,14 @@ echo "fillordercheck: BIN=$BIN"
 order_of(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'order="?[a-zA-Z_:().-]+"?' | head -1 | sed -E 's/order="?//; s/"?$//'; }
 est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | grep -oE '[0-9]+'; }
 
-# ── #1: GOLDEN NEUTRAL — test/fixture (est_tokens=691) stays important-first, no auto-flip ─────────────
+# ── #1: GOLDEN NEUTRAL — test/fixture (est_tokens=745) stays important-first, no auto-flip ─────────────
+# RE-PINNED 768 → 745 (R-E, 2026-08-17 harvest: root-relative paths for ALL verbs): the default map's
+# per-row p= dropped the crawl root's OWN prefix repeated six times ("test/fixture/" on every <f p=…>,
+# same F6 pattern G1 fixed for --grep) in favor of ONE root="test/fixture" attribute on <r> — fewer
+# emitted bytes despite the map growing no new row/symbol/edge (still 6/14/5). -58 emitted bytes
+# (1919 → 1861 = wc -c test/golden.xml, re-pinned in the same commit) at the same language-weighted
+# rate: 1861/745 = 2.4980 B/tok, inside the calibrated 2.36-2.59 band. No row moved and no rank VALUE
+# moved; `important-first` unchanged. The prior re-pins' reasoning below still stands verbatim.
 # RE-PINNED 647 → 691 (markdown section tier, mdsectioncheck): the fixture's two .md files gained
 # section hierarchy — "Why it exists"/"Symbols" now carry id= (path::Geometry Fixture::…) and the
 # notes.md [[related]] wikilink edge moved from the file node to its enclosing section — +114 emitted
@@ -80,7 +87,7 @@ est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | 
 # expectation is unchanged. The threshold (16000) is >25x this number either way.
 EFIX="$( est_of test/fixture )"
 OFIX="$( order_of test/fixture )"
-{ [ "$EFIX" = "768" ] && [ "$OFIX" = "important-first" ]; } \
+{ [ "$EFIX" = "745" ] && [ "$OFIX" = "important-first" ]; } \
     && ok "test/fixture (est_tokens=$EFIX) does NOT auto-flip — order=$OFIX (golden neutral)" \
     || no "test/fixture unexpectedly changed order or est_tokens (est=$EFIX order=$OFIX)"
 
