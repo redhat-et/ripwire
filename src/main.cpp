@@ -6224,6 +6224,9 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         gqSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  gqRootPrefix = gqSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
 
     // --graph-query=EXPR (ABS-5): composable node-set operators over the call graph — a FIXED, closed set
     // (sources name()/all; filters kind/cx/fanin/file/layer; bounded transitive-closure callers()/callees(); set
@@ -6282,16 +6285,18 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         // know the default top-k to tell a complete result from a truncated one. Rule 3: the bit is always
         // emitted alongside shown=, so "no capped attribute" is never something a parser must interpret.
         char gqAb[ kPageDisclosureCap ];
-        std::printf( "<query expr=\"%s\" count=\"%zu\"%s%s>",
+        const std::string gqRootAttr = gqSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
+        std::printf( "<query expr=\"%s\" count=\"%zu\"%s%s%s>",
                      ex( cfg.graphQuery ).c_str(), total,
                      pageDisclosure( gqAb, sizeof( gqAb ), keep, total, gqPw.end, cfg.pageLimit, cfg.pageOffset, true ),
-                     rw::kGraphCountFloorAttrXml );
+                     rw::kGraphCountFloorAttrXml, gqRootAttr.c_str() );
         for( std::size_t ri = gqPw.begin; ri < gqPw.end; ++ri )
         {
-            const NodeId  c = result[ ri ];
-            const Symbol& s = ing.symbols[c];
+            const NodeId            c  = result[ ri ];
+            const Symbol&           s  = ing.symbols[c];
+            const std::string_view  rp = gqSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], gqRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
             std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>",
-                         symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line );
+                         symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
         }
         std::printf( "</query>" );
         return 0;
@@ -9209,7 +9214,10 @@ int runAbiCheck( const MainDispatch& d )
     // --detail=N is this verb's ONE "show me everything" lever: it lifts the per-ref display cap AND prints
     // the kinds the default triage counts but does not list (rename/spelling/stub/head-moved).
     const bool listAll = d.cfg.detail != 0;
-    abicheck::writeAbiCheck( stdout, result, listAll ? SIZE_MAX : abicheck::kMaxStructsPerRef, listAll );
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — --abi
+    // is single-root by construction (cli.h already refuses the multi-root shape upstream).
+    const std::string_view abiRootArg = d.ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
+    abicheck::writeAbiCheck( stdout, result, listAll ? SIZE_MAX : abicheck::kMaxStructsPerRef, listAll, abiRootArg );
     return abicheck::abiContractBroken( result ) ? 2 : 0;   // exit 2 = a real byte-contract drift on some branch
 }
 
