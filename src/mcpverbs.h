@@ -600,6 +600,47 @@ inline std::string grepSuggestJson( const IngestResult& ing, const std::string& 
     return out;
 }
 
+// §R-J: the CLI <unindexed> twin (see main.cpp's emitGrepUnindexed) — the JSON "unindexed" array, present
+// only when non-empty (the same "absent means none" convention corpus_excluded/corpus_oversize already use),
+// lifted out for the same reason grepEnclosingJson/grepSuggestJson above were: pure serialization of an
+// already-collected list (search.h's grepCollectAux), so grepHitsJson's own body does not carry the loop.
+// §R-J: the CLI unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= twins as one
+// JSON key fragment — mirrors main.cpp's grepUnindexedAttrs (same three conditions: scanned= unconditional,
+// the other two only when non-zero/true), lifted out for the same reason grepAuxJson below is.
+inline std::string grepUnindexedKeys( const GrepAuxCollection& aux )
+{
+    const std::uint32_t skipped = aux.filesSkippedOversize + aux.filesSkippedBinary + aux.filesUnreadable;
+    std::string          keys    = ",\"unindexed_files_scanned\":" + std::to_string( aux.filesScanned );
+    if( skipped > 0 )
+    {
+        keys += ",\"unindexed_files_skipped\":" + std::to_string( skipped );
+    }
+    if( aux.candidatesCapped )
+    {
+        keys += ",\"unindexed_candidates_capped\":true";
+    }
+    return keys;
+}
+
+inline std::string grepAuxJson( const std::vector<GrepAuxHit>& hits, bool singleRoot, const std::string& rootPrefix )
+{
+    if( hits.empty() )
+    {
+        return {};
+    }
+    std::string out   = ",\"unindexed\":[";
+    bool        first = true;
+    for( const GrepAuxHit& h : hits )
+    {
+        if( !first ) { out += ","; }
+        first = false;
+        out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( singleRoot ? sarif::rootRelativeUri( h.path, rootPrefix ) : std::string_view( h.path ) ) )
+             + "\",\"line\":" + std::to_string( h.line ) + "}";
+    }
+    out += "]";
+    return out;
+}
+
 inline std::string grepHitsJson( const std::string& root, const std::string& pattern, McpPageArgs page = {} )
 {
     const McpIndex&            ix        = getIndex( root );
@@ -609,6 +650,11 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     const PageWindow           grepPage  = pageWindow( collected.raw.size(), effectiveRowCap( page.limit, kRowCap ), page.offset );
     const std::size_t          rowCount  = grepPage.end - grepPage.begin;
     const std::vector<GrepHit> hits      = grepEnrich( ing, std::span<const GrepRawHit>( collected.raw ).subspan( grepPage.begin, rowCount ), 0, 0 );
+
+    // §R-J: the CLI's unindexed_files_scanned=/unindexed block twin (search.h grepCollectAux) — literal-only,
+    // matching this verb. No --max-file-size equivalent on the MCP surface, so this uses the same
+    // kDefaultMaxFileBytes ceiling the CLI falls back to when --max-file-size was never passed.
+    const GrepAuxCollection aux = grepCollectAux( ing.crawlSkips, pattern, /*regex=*/false, kDefaultMaxFileBytes );
 
     // §B6 M12: the two disclosures the CLI legend carries and this payload did not. `files` is the
     // DENOMINATOR (how many distinct files the hits come from — hits sorted by file, so one pass counts
@@ -666,6 +712,9 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
                     // twins — present only when non-zero, same condition as the CLI emitter.
                     + ( ing.crawlSkips.excludedFiles > 0 ? ( ",\"corpus_excluded\":" + std::to_string( ing.crawlSkips.excludedFiles ) ) : std::string() )
                     + ( !ing.skippedOversize.empty() ? ( ",\"corpus_oversize\":" + std::to_string( ing.skippedOversize.size() ) ) : std::string() )
+                    // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped=
+                    // (helper above) — mcpclidiffcheck's LENS2 fact-parity arm requires scanned= at minimum.
+                    + grepUnindexedKeys( aux )
                     + ",\"order\":\"SOURCE files before test/bench files before docs, then path and line\""
                     + ",\"hits\":[";
     bool first = true;
@@ -686,6 +735,9 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
         out += "}";
     }
     out += "]";
+    // §R-J: the CLI <unindexed> twin (helper above) — appended AFTER "hits" for the same reason the R1
+    // block below is: existing key-order-sensitive gates read up through "hits" first.
+    out += grepAuxJson( aux.hits, singleRootJ, rootPrefixJ );
     // R1 (the 2026-08-12 usage mine): the CLI <enc>/<suggest> twins, appended AFTER "hits" so the
     // historic key order three other gates read (files,total,shown,capped) is byte-untouched.
     out += grepEnclosingJson( ing, ix.g, std::span<const GrepHit>( hits ) );

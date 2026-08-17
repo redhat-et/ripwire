@@ -272,6 +272,12 @@ cli  = subprocess.run([BIN, ROOT, "--grep=pageDisclosure", "--limit=100000"], ca
 # same spelling the MCP arm's "file" now uses too). Pair each <hit> with its enclosing <f>, past the legend
 # comment (whose own prose illustrates the <f p=…>/<hit …> shape and would otherwise false-match).
 cli = cli.split("-->", 1)[-1]
+# §R-J: queries/*.scm-class hits print in a trailing <unindexed> block — additive, never paginated, never
+# part of the hits=/total= this page-walk reconstructs (the MCP arm's own "unindexed" array is the twin, a
+# SEPARATE fact from "hits"). Cut it before the <f p=…> walk below, the same boundary grepcheck.sh's
+# hitpaths() cuts at, or a pattern that also happens to live in a query/config file inflates this count by
+# rows the MCP page-walk was never asked to cover.
+cli = cli.split("<unindexed", 1)[0]
 rows = []
 for fm in re.finditer(r'<f p="([^"]*)">(.*?)</f>', cli, re.S):
     path = fm.group(1)

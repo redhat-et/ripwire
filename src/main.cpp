@@ -10443,6 +10443,61 @@ void emitGrepSuggest( const rw::IngestResult& ing, const std::string& pat, bool 
     std::printf( "/>" );
 }
 
+// §R-J: the three root attributes unindexed_files_scanned=/unindexed_files_skipped=/
+// unindexed_candidates_capped= as one string fragment — a pure function of the aux collection, lifted out
+// so emitGrepReport's own body states only "compute aux, then ask what it discloses" rather than the
+// three-attribute assembly itself. unindexed_files_scanned= is unconditional (0 is informative: it means
+// no unsupported-ext candidate existed, or none survived the size/binary guard — never "this build lacks
+// the feature"); the other two follow corpus_excluded='s convention above: absent means zero/false.
+std::string grepUnindexedAttrs( const rw::GrepAuxCollection& aux )
+{
+    const std::uint32_t skipped = aux.filesSkippedOversize + aux.filesSkippedBinary + aux.filesUnreadable;
+    std::string          attr    = " unindexed_files_scanned=\"" + std::to_string( aux.filesScanned ) + "\"";
+    if( skipped > 0 )
+    {
+        attr += " unindexed_files_skipped=\"" + std::to_string( skipped ) + "\"";
+    }
+    if( aux.candidatesCapped )
+    {
+        attr += " unindexed_candidates_capped=\"1\"";
+    }
+    return attr;
+}
+
+// §R-J <unindexed> emission, lifted out of emitGrepReport for the same reason emitGrepEncRows/
+// emitGrepSuggest above were: pure serialization of an already-collected list (search.h's grepCollectAux),
+// so the "collapse by contiguous path" grouping loop is a helper's job, not emitGrepReport's. Omitted
+// entirely (prints nothing) when there is nothing to say — the same "absent means none" convention
+// corpus_excluded=/corpus_oversize= use, so a caller never needs an empty-check before calling this.
+void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, bool singleRoot, const std::string& rootPrefix, std::vector<char>& esc )
+{
+    using namespace rw;
+    if( hits.empty() )
+    {
+        return;
+    }
+    const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+    std::printf( "<unindexed>" );
+    for( std::size_t i = 0; i < hits.size(); )
+    {
+        std::size_t j = i;
+        std::printf( "<f p=\"%s\">", ex( singleRoot ? rw::sarif::rootRelativeUri( hits[i].path, rootPrefix )
+                                                     : std::string_view( hits[i].path ) ).c_str() );
+        for( ; j < hits.size() && hits[j].path == hits[i].path; ++j )
+        {
+            const GrepAuxHit& h = hits[j];
+            std::string        safe;
+            appendCdataSafe( h.text, safe );
+            std::printf( "<hit l=\"%u\"><m><![CDATA[", h.line );
+            std::fwrite( safe.data(), 1, safe.size(), stdout );
+            std::printf( "]]></m></hit>" );
+        }
+        std::printf( "</f>" );
+        i = j;
+    }
+    std::printf( "</unindexed>" );
+}
+
 // R1 (the 2026-08-12 usage mine) widened the signature beyond (cfg, ing): `g` feeds the <enc> rows'
 // callers= (in-edge CSR — data the graph already holds, zero new analysis), and amp/tested ride along
 // ONLY when a co-run (--metrics) already computed them — grep itself never triggers the qmetrics pass
@@ -10492,6 +10547,14 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     {
         found = grepApplyBooleanTerms( ing, std::move( found ), std::span<const GrepTerm>( grepTerms ), grepScopeVal, termsSuppressed );
     }
+    // §R-J: additive scan over CrawlSkips::unsupported — the "unsupported-ext, text-looking" population the
+    // crawl already computed at ingest time (queries/*/tags.scm and its siblings). Reuses the SAME per-file
+    // ceiling the crawl applies to indexed files, so a huge unsupported-ext file is excluded exactly like an
+    // oversized indexed one would be. See search.h's grepCollectAux for the honesty fields and why this is a
+    // separate hit type rather than a widened GrepRawHit::fileId domain (the lane report has the option write-up).
+    const std::size_t       maxAuxFileBytes = cfg.maxFileBytes == 0 ? kDefaultMaxFileBytes : cfg.maxFileBytes;
+    const GrepAuxCollection aux             = grepCollectAux( ing.crawlSkips, pat, cfg.grepRegex, maxAuxFileBytes );
+
     const std::size_t          hitCount = found.raw.size();
     // files= counts the whole COLLECTED set, never the printed page — it is a property of the search, so it
     // must read the same on every page of a walk (it used to be counted over the window's rows).
@@ -10628,11 +10691,26 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "COMPLETENESS: complete= on the root (value 1) means this listing is EXHAUSTIVE and a consumer need not re-derive it: "
                  "a LITERAL scan read every indexed file end to end, hit no collection ceiling, and printed every hit it found — so on "
                  "this answer a zero really is zero and a hit absent above is absent from every indexed file. The claim is "
-                 "complete-within-the-index ONLY: files the ingest skipped were never scanned (the skipped verb lists exactly which, "
-                 "with reasons), and files outside the indexed roots are outside the claim. It never appears on a regex answer (the "
+                 "complete-within-the-index ONLY: most files the ingest skipped were never scanned (the skipped verb lists exactly "
+                 "which, with reasons; the ONE exception is the unindexed_files_scanned= class right below, itself never covered by "
+                 "complete=), and files outside the indexed roots are outside the claim. It never appears on a regex answer (the "
                  "prefilter is a performance switch that may not change the answer, so neither mode claims), a capped or paged listing, "
                  "or a scan that could not read a file; its ABSENCE claims nothing. The enc rows' caller counts stay FLOORS regardless "
                  "— complete= speaks for the hit rows alone. "
+                 // §R-J (Wave-2 harvest item R-J): queries/*/tags.scm (and any other unsupported-ext file that
+                 // still reads as text) used to be invisible to EVERY verb — including the H-severity bug hunt
+                 // whose root cause lived at that exact path. This is the fix: additively scan the crawl's own
+                 // unsupported-ext/text-looking population and print its hits in a trailing block, never
+                 // folded into the indexed count above and never claimed by complete=.
+                 "unindexed_files_scanned= counts files outside the index (unsupported-ext, but text-looking — the skipped verb's "
+                 "own unsupported-ext class) that THIS answer additionally scanned for the same pattern; their hits print inside a "
+                 "trailing unindexed element (present only when it found something), holding its own <f> rows in the same shape as "
+                 "above, and never carry in= — there is no symbol table to check for such a file, which is not the same claim as file "
+                 "scope. unindexed_files_skipped= (present only when nonzero) counts "
+                 "candidates this scan saw but did not read: over the max-file-size ceiling, sniffed binary, or unreadable. "
+                 "unindexed_candidates_capped=\"1\" (present only when true) means the CANDIDATE list itself (the skipped verb's own "
+                 "500-row-per-class cap) was already a floor, so files past it were never considered here either — see the skipped verb "
+                 "for every row. "
                  // G4 (2026-08-15 harvest): corpus_excluded=/corpus_oversize= — present only when non-zero,
                  // same absent-means-none convention as skippedOversize itself (model.h). Deliberately no
                  // literal 'hits="0"' example below (a quoted numeric example — the quality-delta legend's
@@ -10669,11 +10747,13 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     {
         corpusAttr += " corpus_oversize=\"" + std::to_string( ing.skippedOversize.size() ) + "\"";
     }
-    std::printf( "<grep pattern=\"%s\"%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s>",
+    // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= (helper above).
+    const std::string auxAttr = grepUnindexedAttrs( aux );
+    std::printf( "<grep pattern=\"%s\"%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s%s>",
                  ex( pat ).c_str(), rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
                                  cfg.pageLimit, cfg.pageOffset, true ),
-                 hitsCapped, completeAttr, corpusAttr.c_str() );
+                 hitsCapped, completeAttr, corpusAttr.c_str(), auxAttr.c_str() );
     // G1 (2026-08-15 harvest): hits GROUP by file under <f p="…">, root-relative when this is a single-root
     // run (report-memgraph §F6: the absolute root prefix alone was 42.5% of a real --grep payload; the
     // repeated-per-hit path was report-octocode §F1's 31.4%). Byte-identical text within one file's group
@@ -10731,11 +10811,26 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
         std::printf( "</f>" );
     }
 
+    // ── §R-J: the aux block — files OUTSIDE the index (see unindexed_files_scanned= above), wrapped in its
+    // OWN <unindexed> element (helper above) rather than left as bare <f> rows appended to the indexed
+    // list. That boundary is load-bearing, not decoration: without it a reader (or a naive tag-walker)
+    // cannot tell an indexed hit from a query/config file the crawl never parsed, which is exactly the
+    // ambiguity complete= and in='s honesty rules exist to prevent elsewhere in this answer. Printed
+    // strictly AFTER the indexed block (indexed source always outranks a query/config file for a reader's
+    // attention) — and deliberately never folded/collapsed like grepGroupByFile does above: the candidate
+    // population is already crawl-bounded (kMaxSkipRowsPerClass), so the folding machinery would add
+    // complexity for a set too small to need it. No in= — see GrepAuxHit's own comment in search.h for why
+    // that is a missing FIELD, not an omitted attribute.
+    emitGrepUnindexed( aux.hits, singleRoot, rootPrefix, esc );
+
     // ── R1b: the <enc> block — the map's context on the answer, no second call (helper above) ──────
     emitGrepEncRows( ing, g, std::span<const GrepHit>( hits ), amp, tested, esc );
 
     // ── R1a: the zero-hit follow-up — suggestions, labeled as such, never matches (helper above) ───
-    if( hitCount == 0 )
+    // §R-J: also suppressed when the AUX block found the pattern — a real hit in queries/cpp/tags.scm is not
+    // a zero-hit answer just because it sits outside the index, and printing SUGGESTIONS beside real matches
+    // would misdescribe an answer that already found what it was looking for.
+    if( hitCount == 0 && aux.hits.empty() )
     {
         emitGrepSuggest( ing, pat, cfg.grepRegex, esc );
     }
