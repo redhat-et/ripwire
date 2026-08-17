@@ -237,7 +237,7 @@ def main():
             print("   or: python3 legenddriftcheck.py --legend-file=FILE --help-file=FILE", file=sys.stderr)
             sys.exit(1)
 
-        corpus_path = corpus_path or "/Users/qgames/AppDevelopLocal/project2/ripwire"
+        corpus_path = corpus_path or os.getcwd()
 
         if not os.path.exists(binary_path):
             print(f"Error: Binary not found: {binary_path}", file=sys.stderr)
