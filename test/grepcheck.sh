@@ -34,6 +34,10 @@ hitpaths(){
 import re, sys
 xml = sys.stdin.read().split( "-->", 1 )[ -1 ]   # drop the leading legend comment — its own prose SPELLS
                                                   # <f p=.../<hit l=... as illustration and would false-match
+xml = xml.split( "<unindexed", 1 )[ 0 ]          # §R-J: unindexed (queries/*.scm-class) rows sort strictly
+                                                  # AFTER the whole indexed list by construction (own element,
+                                                  # never folded into the tier order) — the tier/paging
+                                                  # assertions below are about the INDEX, so cut before them.
 cur = None
 for tag in re.findall( r"<[^>]+>", xml ):
     m = re.match( r"<f p=\"([^\"]*)\"", tag )

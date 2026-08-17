@@ -161,7 +161,7 @@ namespace
 // The per-file byte ceiling is now a RUNTIME value (default kDefaultMaxFileBytes = 4 MB, ingest.h),
 // threaded through collectSources so --max-file-size can override it. Kept here as the last-resort
 // fallback for any caller that somehow crawls with a zero ceiling.
-constexpr std::size_t kBinarySniffCap = 4096;       // NUL-byte sniff window
+// (kBinarySniffCap moved to ingest.h — see rw::looksBinary there, now shared with grep's aux-file scan.)
 
 // saveCache's balanced lexical-index merge carries odd runs with memcpy. Keep the
 // payload's byte-copy contract explicit while preserving the former pair ordering.
@@ -520,12 +520,7 @@ bool isDenylistedName( std::string_view name ) noexcept
     return false;
 }
 
-// True if the first kBinarySniffCap bytes contain a NUL (binary heuristic).
-bool looksBinary( std::string_view bytes ) noexcept
-{
-    const std::size_t n = bytes.size() < kBinarySniffCap ? bytes.size() : kBinarySniffCap;
-    return std::memchr( bytes.data(), '\0', n ) != nullptr;
-}
+// (looksBinary moved to ingest.h as rw::looksBinary — unqualified lookup below still finds it, same namespace.)
 
 // §L1 — PARSE HEALTH, measured on the tree the ingest ALREADY built (no second parse, no second read).
 //
