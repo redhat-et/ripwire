@@ -1613,6 +1613,101 @@ inline std::string materializeCommitTree( const std::string& root, const std::st
     return tmpRoot;
 }
 
+// ─── ONE ref-spec parse, shared by every verb that compares two TREES ───────────────────────────────────
+//
+// `--dmm=VALUE` and `--quality-delta=VALUE` accept exactly the same three spellings, and they share ONE
+// implementation for the reason the R3 selectBaseline story above records: two arms each carrying their own
+// copy of a git-resolution rule is precisely how the two --quality-delta floors drifted apart and reported
+// 31 phantom regressions against zero. The spellings:
+//   ""        the working tree against HEAD   (each verb's bare default)
+//   "REV"     REV against its FIRST PARENT    (the per-commit form)
+//   "A..B"    B against A                     (an explicit range; an EMPTY side means HEAD)
+// `A...B` (symmetric difference) is REFUSED rather than quietly read as `A..B`: for a TREE comparison the two
+// spellings mean different things, and guessing which was meant is the substitution this tool does not ship.
+// Every token resolves through gitResolveCommitSha — which requires a bare object NAME — before it reaches
+// git a second time, so the P0.1 shape materializeCommitTree guards against cannot be smuggled in here either.
+enum class RefSpecStatus : std::uint8_t
+{
+    Ok,             // baseSha, plus either targetSha or targetIsWorkingTree, are usable
+    NoGit,          // environment: not a repo, or no commit on HEAD — `reason` says which
+    BadRange,       // USER error: the three-dot form — `badToken` is the spec verbatim
+    BadRev,         // USER error: `badToken` does not resolve to a commit
+    NoParent,       // environment: the REV form landed on a root commit — `reason` says so
+};
+
+struct RefSpec
+{
+    RefSpecStatus status              = RefSpecStatus::Ok;
+    std::string   baseSha;                     // the EARLIER tree
+    std::string   targetSha;                   // the LATER tree — empty iff targetIsWorkingTree
+    bool          targetIsWorkingTree = false;
+    std::string   badToken;                    // BadRev/BadRange only: the offending token, verbatim
+    std::string   reason;                      // NoGit/NoParent only: the environment sentence
+};
+
+inline RefSpec resolveRefSpec( const std::string& root, std::string_view spec )
+{
+    RefSpec r;
+
+    if( !gitRepoHasHistory( root ) )
+    {
+        r.status = RefSpecStatus::NoGit;
+        r.reason = "not a git repository, or no commit on HEAD — there is no earlier tree to compare against";
+        return r;
+    }
+
+    if( spec.empty() )
+    {
+        r.targetIsWorkingTree = true;
+        r.baseSha             = gitResolveCommitSha( root, "HEAD" );
+        if( r.baseSha.empty() )
+        {
+            r.status = RefSpecStatus::NoGit;
+            r.reason = "HEAD does not resolve to a commit — there is no earlier tree to compare against";
+        }
+        return r;
+    }
+
+    if( spec.find( "..." ) != std::string_view::npos )
+    {
+        r.status   = RefSpecStatus::BadRange;
+        r.badToken = std::string( spec );
+        return r;
+    }
+
+    if( const std::size_t sep = spec.find( ".." ); sep != std::string_view::npos )
+    {
+        const std::string baseRef   = sep == 0 ? std::string( "HEAD" ) : std::string( spec.substr( 0, sep ) );
+        const std::string targetRef = sep + 2 >= spec.size() ? std::string( "HEAD" ) : std::string( spec.substr( sep + 2 ) );
+        r.baseSha   = gitResolveCommitSha( root, baseRef );
+        r.targetSha = gitResolveCommitSha( root, targetRef );
+        if( r.baseSha.empty() || r.targetSha.empty() )
+        {
+            r.status   = RefSpecStatus::BadRev;
+            r.badToken = r.baseSha.empty() ? baseRef : targetRef;
+        }
+        return r;
+    }
+
+    const std::string targetRef = std::string( spec );
+    r.targetSha                 = gitResolveCommitSha( root, targetRef );
+    if( r.targetSha.empty() )
+    {
+        r.status   = RefSpecStatus::BadRev;
+        r.badToken = targetRef;
+        return r;
+    }
+    // The per-commit form: the commit against its FIRST parent. A root commit has none — an environment fact,
+    // not a typo, so it degrades with a stated reason rather than refusing.
+    r.baseSha = gitResolveCommitSha( root, r.targetSha + "^" );
+    if( r.baseSha.empty() )
+    {
+        r.status = RefSpecStatus::NoParent;
+        r.reason = "that commit has no parent — a root commit has no earlier tree to be a delta against";
+    }
+    return r;
+}
+
 // T0.1 — build a quality Snapshot from the HEAD version of the tree, so `--quality-delta` (and the MCP
 // quality_delta verb) works at "before I push" with ZERO start-of-task ritual when no explicit
 // `.ripwire_quality_baseline` sidecar exists. Mechanism: `git archive HEAD` streams a tar of the committed
@@ -1736,6 +1831,75 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
         evictOldQSnapCaches( cacheDirLadder(), repoHex, qExclHex, qsnapPath, 2 );
     }
     return { std::move( snap ), true };
+}
+
+// ─── R-I: one materialized commit tree, ingested AND graphed, with an EXPLICIT lifetime ─────────────────
+//
+// `--quality-delta=A..B` needs BOTH trees live at the same moment: computeSnapshot builds the floor from A
+// while computeDelta reads B's IngestResult, and both read file bytes through the materialized tree. So the
+// temp dir must OUTLIVE the call. dmm.h's ingestCommitTree deliberately lets its TmpTreeGuard fire at return
+// (its profileOf touches only symbol metrics); that is NOT safe here, so the guard belongs to the CALLER and
+// this function only fills it — the lifetime is stated in the signature instead of being a comment someone
+// has to find.
+//
+// `out.root` is the materialized temp root, and it is the ONLY spelling that side's root-relative keys and
+// its displayed symbols may be taken against. Two reasons, and both are load-bearing: keys spelled against
+// the repo root would not match the other tree's (S2 key-for-key comparison), and the temp root carries a PID
+// suffix — letting it reach stdout would make the output differ run to run, which is a determinism bug even
+// when the findings are right.
+//
+// Cache policy mirrors dmm::ingestCommitTree exactly rather than inventing a second one: the HEAD sha reuses
+// --quality-delta's own (repo, excludes, sha) ingest-cache family, so a pair with a HEAD endpoint is a warm
+// blob read; any OTHER revision parses COLD on purpose, because that family is capped at two files per
+// (repo, excludes) and letting arbitrary ref pairs sweep it would trade the primary verb's warm path for
+// this one's on every run. Degrade (never throws): a failed archive/extract/ingest returns false, having
+// already alerted, and the caller reports the environment failure rather than a half-built comparison.
+struct RefTree
+{
+    std::string  root;      // the materialized temp root — empty until this call succeeds
+    IngestResult ing;
+    Graph        g;
+};
+
+// `tag` MUST differ between the two sides of a pair. materializeCommitTree spells its temp root
+// `<cache>/ripwire-<tag>-<pid>` and REMOVES that path before extracting into it, so two calls sharing a tag
+// within one process land on the same directory and the second silently deletes the first. That is not a
+// hypothetical: the first cut of this function passed one tag for both sides, and the base tree's clone
+// detection — which re-reads file BYTES rather than trusting the in-memory index — then scored tree B's
+// bodies against tree B, inflating the duplication kind from 5 findings to 66. The two sides are named
+// separately here so the collision cannot be reintroduced by a caller that forgets.
+inline bool loadRefTree( const std::string& repoRoot, const std::string& sha, const std::vector<std::string>& excludes,
+                         std::size_t maxFileBytes, const char* tag, TmpTreeGuard& guard, RefTree& out )
+{
+    VERIFY( tag != nullptr && *tag != '\0' );
+    const std::string tmpRoot = materializeCommitTree( repoRoot, sha, tag );
+    if( tmpRoot.empty() )
+    {
+        return false;                     // materializeCommitTree already alerted
+    }
+    guard.p = tmpRoot;                    // teardown is the CALLER's from here, success or not
+
+    std::string cachePath;
+    if( sha == gitHeadSha( repoRoot ) )
+    {
+        cachePath = headSnapCachePath( headSnapRepoHex( repoRoot ), headSnapExclHex( excludes, maxFileBytes ), sha );
+    }
+
+    {
+        // ingest() writes single-writer process-global query caches — serialize on the SAME mutex every other
+        // materialized-tree reader in this file uses, rather than introducing a second lock order.
+        std::lock_guard<std::mutex> ingestLk( headSnapshotIngestMutex() );
+        out.ing = ingest( tmpRoot.c_str(), excludes,
+                          cachePath.empty() ? std::string_view {} : std::string_view( cachePath ), maxFileBytes );
+    }
+    if( out.ing.symbols.empty() && out.ing.files.empty() )
+    {
+        DEGRADED_PATH_ALERT( "quality: a materialized commit tree ingested empty" );
+        return false;
+    }
+    out.g    = buildGraph( out.ing, nullptr );
+    out.root = tmpRoot;
+    return true;
 }
 
 // Signal-to-noise round — the committed-thrash evidence for short-horizon-churn: the per-canonId RAW-body
