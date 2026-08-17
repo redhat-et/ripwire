@@ -4557,8 +4557,18 @@ inline std::vector<std::vector<NodeId>> legoImplementorsOnSurface( const IngestR
 // interface, if any survives), and an implementor row in a trimmed file leaves its list. Returns true when
 // anything narrowed — the caller re-renders the lego block, a byte-SUBSET of what the sigs budget already
 // accounted for, so the bundle can only shrink.
+// R-E (2026-08-17 harvest) fix: `rootPrefix` MUST match what packSignatures() rendered `sigsRendered`'s own
+// <f p=…> rows with (empty ⇒ ing.files[] unchanged, same convention every other pathRel uses) — this scan
+// compares its OWN escaped ing.files[f] spelling against what it scraped out of sigsRendered's TEXT, and
+// those two must be the SAME relativization or every comparison silently fails: before this parameter
+// existed, sigsRendered's rows were already root-relative (packSignatures' own pathRel fix) while this
+// function's `escaped` was still the raw absolute ing.files[f] — nothing ever matched, isRenderedFile()
+// returned false for every file including ones that WERE rendered, and legoScoped narrowed to nothing on
+// every --for run whose rendered sigs happened to hit this path at all. Caught by legobundlecheck.sh going
+// red for the wrong reason (an empty lego, not a mis-narrowed one) rather than by a dedicated assertion —
+// worth a gate of its own if this class recurs.
 inline bool narrowLegoToRenderedSigs( const IngestResult& ing, std::vector<std::vector<NodeId>>& legoScoped,
-                                      std::string_view sigsRendered )
+                                      std::string_view sigsRendered, std::string_view rootPrefix = {} )
 {
     HashMap<std::string, char> renderedFilePaths;
     for( std::size_t at = sigsRendered.find( "<f p=\"" ); at != std::string_view::npos; at = sigsRendered.find( "<f p=\"", at + 6 ) )
@@ -4584,7 +4594,8 @@ inline bool narrowLegoToRenderedSigs( const IngestResult& ing, std::vector<std::
         }
         if( fileVerdict[f] < 0 )
         {
-            const std::string_view escaped = escapeXml( ing.files[f], esc );
+            const std::string_view rel     = rootPrefix.empty() ? std::string_view( ing.files[f] ) : rw::sarif::rootRelativeUri( ing.files[f], rootPrefix );
+            const std::string_view escaped = escapeXml( rel, esc );
             fileVerdict[f] = renderedFilePaths.find( std::string( escaped ) ) != renderedFilePaths.end() ? 1 : 0;
         }
         return fileVerdict[f] == 1;
