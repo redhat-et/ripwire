@@ -6158,7 +6158,8 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         // to --top-k (default 200). A node-set query like kind(all,fn) can match the whole graph; emitting all
         // of it is a token bomb, so we never dump more than --top-k and report the true total. Order is
         // (rank desc, id asc) — the id tie-break makes the top-K deterministic, exactly as the default map.
-        const std::vector<float> rank  = rankGraph( g );
+        const auto [ rank, prIters, prConverged ] = rankGraph( g );
+        const rw::RankDisclosure prD{ prIters, prConverged, true };   // W2-F: this listing IS PageRank-ordered
         const std::size_t        total = result.size();
         std::sort( result.begin(), result.end(), [ & ]( NodeId a, NodeId b )
                    {
@@ -6182,16 +6183,16 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         std::printf( "<!-- ripwire graph-query: a fixed-operator node-set query over the call graph (sources "
                      "name/all; filters kind/cx/fanin/file/layer; bounded closure callers/callees; joins and/or/not), "
                      "ranked by importance + capped at the top-k limit (default 200); narrow the query or raise top-k for more. NOT Datalog. "
-                     "%s-->", rw::graphCountDisclosure().c_str() );
+                     "%s%s-->", rw::graphCountDisclosure().c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY): count= is the true total and
         // shown= the --top-k slice, but capped= was missing — so a caller reading a 200-row answer had to
         // know the default top-k to tell a complete result from a truncated one. Rule 3: the bit is always
         // emitted alongside shown=, so "no capped attribute" is never something a parser must interpret.
         char gqAb[ kPageDisclosureCap ];
-        std::printf( "<query expr=\"%s\" count=\"%zu\"%s%s>",
+        std::printf( "<query expr=\"%s\" count=\"%zu\"%s%s%s>",
                      ex( cfg.graphQuery ).c_str(), total,
                      pageDisclosure( gqAb, sizeof( gqAb ), keep, total, gqPw.end, cfg.pageLimit, cfg.pageOffset, true ),
-                     rw::kGraphCountFloorAttrXml );
+                     rw::kGraphCountFloorAttrXml, rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ).c_str() );
         for( std::size_t ri = gqPw.begin; ri < gqPw.end; ++ri )
         {
             const NodeId  c = result[ ri ];
@@ -7086,7 +7087,8 @@ std::optional<int> runImpact( const MainDispatch& d )
             return 1;
         }
         const std::vector<NodeId> reach = rw::transitiveCallers( g, seeds );
-        const std::vector<float>  rank  = rankGraph( g );
+        const auto [ rank, prIters, prConverged ] = rankGraph( g );
+        const rw::RankDisclosure  prD{ prIters, prConverged, true };   // W2-F: the listing is PageRank-ordered
         std::vector<NodeId>       show  = reach;
         std::sort( show.begin(), show.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
         std::vector<char> esc;
@@ -7097,8 +7099,8 @@ std::optional<int> runImpact( const MainDispatch& d )
             // carries the limit="0" definition too — rule 7 existed only in --help and that header before.
             // §H4 §3.4: opener + the shared floor/counting-unit tail, both from src/graphlegend.h so the MCP
             // twin cannot drift from this wording (the §B4 echo-site class).
-            std::printf( "%s%s. %s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
-                         rw::graphCountDisclosure().c_str() );
+            std::printf( "%s%s. %s%s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
+                         rw::graphCountDisclosure().c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         }
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
         // above runImpact. reaches= stays the un-windowed reach-set size — the blast radius the INDEXED graph
@@ -7120,7 +7122,8 @@ std::optional<int> runImpact( const MainDispatch& d )
                                    + "\" reaches=\"" + std::to_string( reach.size() ) + "\""
                                    + pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                                      cfg.pageLimit, cfg.pageOffset, true )
-                                   + rw::kGraphCountFloorAttrXml;   // §H4 §3.4
+                                   + rw::kGraphCountFloorAttrXml            // §H4 §3.4
+                                   + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs );          // W2-F
             emitColumnarSymbolRows( stdout, ing, "impact", attr.c_str(), page );
             return 0;
         }
@@ -7132,21 +7135,22 @@ std::optional<int> runImpact( const MainDispatch& d )
         // have a 40-row display cap of its own).
         if( cfg.json )
         {
-            std::printf( "{\"of\":\"%s\",\"defs\":%zu,\"reaches\":%zu%s%s,\"impact\":[",
+            std::printf( "{\"of\":\"%s\",\"defs\":%zu,\"reaches\":%zu%s%s%s,\"impact\":[",
                          jsonStr( cfg.impactSym ).c_str(), seeds.size(), reach.size(),
                          pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                          cfg.pageLimit, cfg.pageOffset, true, kJsonPageSyntax ),
-                         rw::kGraphCountFloorAttrJson );   // §H4 §3.4
+                         rw::kGraphCountFloorAttrJson,             // §H4 §3.4
+                         rw::renderDisclosure( prD, rw::DiscloseAs::JsonKeys ).c_str() );  // W2-F: the dialects keep ONE keyset
             printJsonSymbolRows( ing, show, ipw.begin, ipw.end );
             std::printf( "]}" );
             return 0;
         }
 
-        std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s>",
+        std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s>",
                      ex( cfg.impactSym ).c_str(), seeds.size(), reach.size(),
                      pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
-                     rw::kGraphCountFloorAttrXml );
+                     rw::kGraphCountFloorAttrXml, rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ).c_str() );
         for( std::size_t i = ipw.begin; i < ipw.end; ++i ) { const Symbol& s = ing.symbols[ show[i] ]; std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
         std::printf( "</impact>" );
         return 0;
@@ -7374,8 +7378,9 @@ std::optional<int> runExercises( const MainDispatch& d )
         return 1;
     }
 
-    std::vector<NodeId>      show = exercisedSymbols( ing, g, sel.seeds );
-    const std::vector<float> rank = rankGraph( g );
+    std::vector<NodeId> show = exercisedSymbols( ing, g, sel.seeds );
+    const auto [ rank, prIters, prConverged ] = rankGraph( g );
+    const rw::RankDisclosure prD{ prIters, prConverged, true };   // W2-F: the legend says "PageRank desc" — so disclose the run
     std::sort( show.begin(), show.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
 
     // §P8 / src/pageview.h, THE TRUNCATION VOCABULARY: the symbol listing is the PRIMARY (--limit-windowed)
@@ -7396,11 +7401,13 @@ std::optional<int> runExercises( const MainDispatch& d )
 
     std::printf( "<!-- ripwire exercises: the NON-TEST symbols this test transitively calls into — what it covers (the inverse of the affected verb). "
                  "<t> = the seed test files the pattern matched; <s> = the covered symbols, PageRank desc. "
-                 "harness=script|mixed says the seed set contains shell gates, whose subprocess coverage this walk cannot see -->" );
+                 "harness=script|mixed says the seed set contains shell gates, whose subprocess coverage this walk cannot see. "
+                 "%s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
     std::printf( "<exercises of=\"%s\" seed_files=\"%zu\" shown_seed_files=\"%zu\" seed_files_capped=\"%u\" test_symbols=\"%zu\" reaches=\"%zu\"%s%s>",
                  ex( cfg.exercisesFile ).c_str(), sel.testFiles.size(), shownSeed,
                  unsigned( shownSeed < sel.testFiles.size() ), sel.seeds.size(), show.size(), harnessAttr.c_str(),
-                 pageDisclosure( epab, sizeof( epab ), shownRows, show.size(), epw.end, cfg.pageLimit, cfg.pageOffset, true ) );
+                 ( pageDisclosure( epab, sizeof( epab ), shownRows, show.size(), epw.end, cfg.pageLimit, cfg.pageOffset, true )
+                   + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
     const rw::TestRunnerIndex runners( ing );      // §P11.4: the seed rows are the tests you are about to re-run
     for( std::size_t i = 0; i < shownSeed; ++i )
     {
@@ -9339,7 +9346,8 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
 {
     using namespace rw;
     const rw::Communities   cm   = rw::communities( g );
-    const std::vector<float> rank = rankGraph( g );
+    const auto [ rank, prIters, prConverged ] = rankGraph( g );
+    const rw::RankDisclosure prD{ prIters, prConverged, true };   // W2-F: this document is PageRank-ordered
     const std::uint32_t      K    = cm.count;
     const std::uint32_t      N    = std::uint32_t( ing.symbols.size() );
 
@@ -9425,7 +9433,8 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
                  "drill= names the verb that takes an id= from a row below. On each module row size= is its TRUE member count while "
                  "shown=/capped= describe the member list printed here: this listing is fixed at the 5 top-ranked members and is NOT "
                  "widened by limit=/offset= (those page the MODULE rows). capped=1 means members were dropped; drill= names the verb "
-                 "that pages the full member list of one module. raise the default cap with limit=N (offset=M pages). -->" );
+                 "that pages the full member list of one module. raise the default cap with limit=N (offset=M pages). "
+                 "%s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
     // §P11.6 drill=: the id= values below were the only identifiers this tool emitted that no verb took
     // back. The follow-up verb is named ON THE ROOT ELEMENT rather than in the doc comment, because an XML
     // comment may not contain a double hyphen (G4) and its entity escapes are NOT expanded — a caller would
@@ -9434,7 +9443,8 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
                  modules, shownModules, isModulesCapped,
                  bridge.size(), shownBridges, isBridgesCapped, isolates.total, isolates.declaration,
                  isolates.header, isolates.source, isolates.document, isolates.connectedSingletons, N,
-                 pagingDisclosure( cmab, sizeof( cmab ), moduleOrder.size(), cmpw.end, cfg.pageLimit, cfg.pageOffset ) );
+                 ( pagingDisclosure( cmab, sizeof( cmab ), moduleOrder.size(), cmpw.end, cfg.pageLimit, cfg.pageOffset )
+                   + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     for( std::size_t moduleIndex = cmpw.begin; moduleIndex < cmpw.end; ++moduleIndex )
@@ -9527,7 +9537,8 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
 
     // dir=/label= come from the SAME communityPresentation the parent uses, so the two rows for one id
     // cannot drift into two derivations of "what is this module called".
-    const std::vector<float>    rank         = rankGraph( g );
+    const auto [ rank, prIters, prConverged ] = rankGraph( g );
+    const rw::RankDisclosure prD{ prIters, prConverged, true };   // W2-F: this document is PageRank-ordered
     const CommunityPresentation presentation = communityPresentation( ing, g, members, rank );
 
     rw::SmallVec<NodeId, 2>& mem = members[ want ];
@@ -9573,11 +9584,12 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
                  "other modules. size= is the module's TRUE member count; shown=/capped= are this page. partition= is the FULL label "
                  "space (every id 0..partition-1, incl. isolated singletons) — the range the id= argument ranges over; modules= counts "
                  "the NON-isolated communities (size>=2), the SAME predicate the communities-listing verb's modules= uses, so parent "
-                 "and child agree. -->" );
+                 "and child agree. %s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
     std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" partition=\"%u\" modules=\"%u\"%s>",
                  want, std::size_t( mem.size() ), ex( presentation.directory[ want ] ).c_str(), ex( presentation.label[ want ] ).c_str(),
                  peers.size(), shownBridges, unsigned( shownBridges < peers.size() ), K, modulesNonIsolated,
-                 pageDisclosure( mpab, sizeof( mpab ), shownMembers, mem.size(), mpw.end, cfg.pageLimit, cfg.pageOffset, true ) );
+                 ( pageDisclosure( mpab, sizeof( mpab ), shownMembers, mem.size(), mpw.end, cfg.pageLimit, cfg.pageOffset, true )
+                   + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
     for( std::size_t i = mpw.begin; i < mpw.end; ++i )
     {
         const Symbol& s = ing.symbols[ mem[i] ];
@@ -9627,7 +9639,9 @@ std::optional<int> runZoom( const MainDispatch& d )
         const std::uint32_t maxLevels = cfg.zoomDepth > 0 ? std::uint32_t( cfg.zoomDepth ) : 8u;
         const std::uint32_t maxTop    = cfg.zoomDepth > 0 ? 1u : 10u;   // explicit depth ⇒ contract as far as the cap allows
         const rw::ZoomHierarchy h    = rw::multiLevelCommunities( g, maxTop, maxLevels );
-        const std::vector<float> rank = rankGraph( g );
+        const auto [ rank, prIters, prConverged ] = rankGraph( g );
+        const rw::RankDisclosure prD{ prIters, prConverged, true };   // W2-F: this document is PageRank-ordered
+
         const std::size_t        L    = h.levels.size();                // ≥1 always (level 0 present)
 
         // per-level, per-group: member symbol ids (for size, dominant dir, and leaf top-symbols). members[l][gid].
@@ -9715,6 +9729,9 @@ std::optional<int> runZoom( const MainDispatch& d )
         {
             // nested-subgraph diagram: one subgraph per top module; its child modules (next-finer level) are
             // nodes inside; bridge edges connect top modules. Deterministic node ids = "L<level>_<gid>".
+            // W2-F: mermaid has no attribute grammar — the note is emitted ONLY on the truncating exit, as a
+            // mermaid COMMENT so the diagram still renders with the warning attached.
+            std::printf( "%s", rw::renderDisclosure( prD, rw::DiscloseAs::MermaidNote ).c_str() );
             std::printf( "%%%% ripwire --zoom --mermaid: nested module hierarchy (multi-level Louvain). subgraph = top module, inner node = sub-module (dir, symbol count); edge = cross-module call count. Render at mermaid.live.\n" );
             std::printf( "flowchart TB\n" );
             std::vector<char> esc;
@@ -9788,7 +9805,8 @@ std::optional<int> runZoom( const MainDispatch& d )
                      "symbols= is the whole corpus; isolated= is the symbols in NO top-level module (a group of one — the same rule that makes top_modules= count only groups of 2 or more), and they reconcile exactly: "
                      "symbols= equals isolated= plus the sum of the TOP-LEVEL size= values, every one of them, including any this page did not print. "
                      "On a level-0 module size= is its true member count and shown=/capped= describe the member list printed here, which is fixed at the 5 top-ranked members and is not widened by limit=/offset= (those page the TOP-LEVEL modules); "
-                     "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. -->" );
+                     "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. %s-->",
+                     rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // §P15/§P16: top_modules= is a real, deterministically-ordered row list (size desc, id asc — the same
         // rule --communities' module listing uses) that used to print EVERY top module unconditionally, so a
         // repo with hundreds of top modules had no way to page it. --limit/--offset now window it like --uses
@@ -9798,8 +9816,9 @@ std::optional<int> runZoom( const MainDispatch& d )
         const PageWindow  zoomPw = pageWindow( topOrder.size(), cfg.pageLimit, cfg.pageOffset );
         char              zoomAb[ kPageDisclosureCap ];
         std::printf( "<zoom levels=\"%zu\" top_modules=\"%zu\" symbols=\"%u\" isolated=\"%u\"%s>", L, topOrder.size(), N, isolatedCount,
-                     pageDisclosure( zoomAb, sizeof( zoomAb ), zoomPw.end - zoomPw.begin, topOrder.size(), zoomPw.end,
-                                     cfg.pageLimit, cfg.pageOffset, false ) );
+                     ( pageDisclosure( zoomAb, sizeof( zoomAb ), zoomPw.end - zoomPw.begin, topOrder.size(), zoomPw.end,
+                                       cfg.pageLimit, cfg.pageOffset, false )
+                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
 
         // a stack-free recursion via an explicit lambda (std::function — not hot). Emits <module> elements
         // nested by level; the finest level emits <member> leaves.
@@ -9895,7 +9914,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
     // between two modules. A FACT (these edges are never exercised from a test), never a mandate to test them.
     if( cfg.seams )
     {
-        const std::vector<float> rank = rankGraph( g );
+        const auto [ rank, prIters, prConverged ] = rankGraph( g );
+        const rw::RankDisclosure prD{ prIters, prConverged, true };   // W2-F: this document is PageRank-ordered
         const std::uint32_t      N    = std::uint32_t( ing.symbols.size() );
 
         // module = immediate parent DIRECTORY (the real subsystem) — NOT a Louvain community (one-level
@@ -9962,7 +9982,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // §B12.5 — the UNIT clause is the same sentence on all three verbs that spell `untested=` (see
         // situ.h's kTestGateLegend and flipimpact.h's writeFlipHeader). Each legend was locally honest,
         // which is precisely why a reader comparing two of the numbers is misled.
-        std::printf( "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages) -->" );
+        std::printf( "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages). %s-->",
+                     rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // P2.1: two nested caps, neither previously marked — at most 20 seam PAIRS, and at most 5 example
         // EDGES inside each. Each <seam> gains shown= alongside its true untested= count.
         //
@@ -9983,8 +10004,9 @@ std::optional<int> runStructureText( const MainDispatch& d )
         char              seamsAb[ kPageDisclosureCap ];
         std::printf( "<seams modules=\"%zu\" bridges=\"%u\" untested=\"%u\" test_files=\"%u\" seam_pairs=\"%zu\"%s>",
                      dirName.size(), bridges, untested, testFileCount, pairs.size(),
-                     pageDisclosure( seamsAb, sizeof( seamsAb ), shownPairs, pairs.size(), seamsPw.end,
-                                     cfg.pageLimit, cfg.pageOffset, true ) );
+                     ( pageDisclosure( seamsAb, sizeof( seamsAb ), shownPairs, pairs.size(), seamsPw.end,
+                                       cfg.pageLimit, cfg.pageOffset, true )
+                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
         for( std::size_t pi = seamsPw.begin; pi < seamsPw.end; ++pi )
         {
             const std::uint32_t    cu    = std::uint32_t( pairs[pi].first >> 32 ), cv = std::uint32_t( pairs[pi].first & 0xffffffffu );
@@ -10131,7 +10153,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
         const std::uint32_t      N    = std::uint32_t( ing.symbols.size() );
         const std::uint32_t      F    = std::uint32_t( ing.files.size() );
         const rw::Communities   cm   = rw::communities( g );
-        const std::vector<float> rank = rankGraph( g );
+        const auto [ rank, prIters, prConverged ] = rankGraph( g );
+        const rw::RankDisclosure prD{ prIters, prConverged, true };   // W2-F: this document is PageRank-ordered
 
         CommunityMembers members( cm.count );
         for( NodeId i = 0; i < N; ++i )
@@ -10174,6 +10197,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // is SYNTHESIZED (counts, sorted names, fixed section labels) — no verbatim file content is embedded,
         // which is what makes this an enforceable guarantee rather than an incidental one (contrast --recall).
         std::printf( "<!-- ripwire markdown: no run of 4-or-more backticks in this output — safe to embed inside a wider fence -->\n\n" );
+        // W2-F: markdown has no attribute grammar — the note is emitted ONLY on the truncating exit.
+        std::printf( "%s", rw::renderDisclosure( prD, rw::DiscloseAs::MarkdownNote ).c_str() );
         std::printf( "# ripwire architecture report\n\n%u files · %u symbols · %u edges · %u modules (%u call-graph isolated)\n\n",
                      F, N, std::uint32_t( g.outTargets.size() ), modules, isolates.total );
         std::printf( "Call-graph isolate provenance: %u declaration, %u header, %u source, %u document; %u connected Louvain singletons\n\n",
@@ -10295,7 +10320,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
     // symbol rank, path breaking ties; symbols within a file by rank, id breaking ties).
     if( cfg.tree )
     {
-        const std::vector<float> rank = rankGraph( g );
+        const auto [ rank, prIters, prConverged ] = rankGraph( g );
+        const rw::RankDisclosure prD{ prIters, prConverged, true };   // W2-F: this document is PageRank-ordered
         const std::uint32_t      F    = std::uint32_t( ing.files.size() );
         SymbolsByFile              byFile = symbolsByFileInIdOrder( ing, []( const Symbol& ) { return true; } );
         std::vector<std::uint32_t> ford;  ford.reserve( F );   // ONLY non-empty files (the emitted set)
@@ -10324,7 +10350,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
                      // pre-paging set, and introduces total= as the number the identity is actually about.
                      "— files equals files_unlisted plus the LISTABLE file set, which is what the rows below "
                      "enumerate before any paging window is applied; under explicit paging (limit=/offset=) that "
-                     "listable count is emitted as total= and shown= says how many of it these rows are -->" );
+                     "listable count is emitted as total= and shown= says how many of it these rows are. "
+                     "%s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // T2 + §P8 G1: --limit/--offset paginate over the (sorted) non-empty file set. files= stays the TRUE
         // total of INDEXED files (all of them, matching pre-T2) — deliberately NOT the paging total, because
         // the emitted rows are the non-empty subset `ford`, and total= must be the count a next_offset walks
@@ -10334,8 +10361,9 @@ std::optional<int> runStructureText( const MainDispatch& d )
         const PageWindow  pw = pageWindow( ford.size(), cfg.pageLimit, cfg.pageOffset );
         char              pab[ kPageDisclosureCap ];
         std::printf( "<tree files=\"%u\" files_unlisted=\"%u\"%s>", F, filesUnlisted,
-                     pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, ford.size(), pw.end,
-                                     cfg.pageLimit, cfg.pageOffset, false ) );
+                     ( pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, ford.size(), pw.end,
+                                       cfg.pageLimit, cfg.pageOffset, false )
+                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
         std::vector<char> trEsc;
         for( std::size_t fi = pw.begin; fi < pw.end; ++fi )
         {
@@ -11813,7 +11841,9 @@ inline std::optional<int> finishTokenBudgetGate( TokenBudgetBuffer& tb, std::FIL
 // git-unavailable degrade uses ("using uniform ranking") — one place owns "which window was mined, what to
 // call it, and saying so when it was empty". Multi-root emits no stamp at all (mapAnn is single-root), which
 // makes stderr its ONLY disclosure — another reason for the note to live on this side of the return.
-struct ChurnRanking { std::vector<float> rank; std::string window; };
+// W2-F: `pr` rides along because churn ranking IS a PageRank run — a teleport variant, not a separate
+// method — so the map it produces owes the same pr_iters= / pr_converged= disclosure a uniform one does.
+struct ChurnRanking { std::vector<float> rank; std::string window; rw::RankDisclosure pr; };
 
 // P0-4: the DEFAULT window label of each churn ranker, which is also the difference between them that a
 // reader has to see. Plain churn mines a bounded 18-month wall-clock window; churn-decay mines the whole
@@ -11852,27 +11882,27 @@ inline ChurnRanking churnRankedGraph( const MainDispatch& d )
         {
             rootDirs.push_back( r.arg );
         }
-        std::vector<float> rank   = isDecay ? rankGraphTeleport( d.g, churnDecayTeleportWorkspace( rootDirs, d.ing, &hasChurnEvidence ) )
+        rw::RankedGraph    ranked = isDecay ? rankGraphTeleport( d.g, churnDecayTeleportWorkspace( rootDirs, d.ing, &hasChurnEvidence ) )
                                             : rankGraphTeleport( d.g, churnTeleportWorkspace( rootDirs, d.ing, "18 months ago", &hasChurnEvidence ) );
         std::string        window = churnWindowStamp( isDecay ? churnDecayWindowLabel( "all-history" ) : std::string( "18mo" ), hasChurnEvidence );
         discloseEmptyChurn( window );
-        return { std::move( rank ), std::move( window ) };
+        return { std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
     }
 
     const SinceScope sinceScope = resolveSinceScope( d.root, d.cfg.since );
     const bool       isScoped   = !d.cfg.since.empty() && sinceScope.active;   // the §P9 N7 rule, one verb over
     if( isDecay )
     {
-        std::vector<float> rank   = rankGraphTeleport( d.g, churnDecayTeleport( d.root, d.ing, d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
+        rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnDecayTeleport( d.root, d.ing, d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
         std::string        window = churnWindowStamp( churnDecayWindowLabel( isScoped ? std::string_view( d.cfg.since ) : std::string_view( "all-history" ) ),
                                                       hasChurnEvidence );
         discloseEmptyChurn( window );
-        return { std::move( rank ), std::move( window ) };
+        return { std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
     }
-    std::vector<float> rank   = rankGraphTeleport( d.g, churnTeleport( d.root, d.ing, "18 months ago", d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
+    rw::RankedGraph    ranked = rankGraphTeleport( d.g, churnTeleport( d.root, d.ing, "18 months ago", d.cfg.since.empty() ? nullptr : &sinceScope, &hasChurnEvidence ) );
     std::string        window = churnWindowStamp( isScoped ? std::string_view( d.cfg.since ) : std::string_view( "18mo" ), hasChurnEvidence );
     discloseEmptyChurn( window );
-    return { std::move( rank ), std::move( window ) };
+    return { std::move( ranked.rank ), std::move( window ), { ranked.iterationCount, ranked.hasConverged, true } };
 }
 
 // ── M6 (density audit 2026-08-08): --expand cheapest-complete-answer serving, the two decisions ──────
@@ -11962,6 +11992,10 @@ int runDefaultMap( const MainDispatch& d )
     RedactCounts&                     redactCounts = d.redactCounts;
 
     std::vector<float> rank;
+    // W2-F: the map header's pr_iters= / pr_converged= (src/prconverge.h). Default-constructed is
+    // isPageRank=false — CORRECT for the arms below that run no power iteration (a lexical query score, the
+    // HITS vectors that overwrite `rank`); the PageRank arms fill it via rw::takeRank (graph.h), never apart.
+    rw::RankDisclosure rankDisclosure;
     std::string        queryRouteNote;   // leading routed comment for --query (empty under --no-route)
     std::size_t        mapDiffChanged = 0;      // D6: teleport-seed file count, only meaningful when mapDiffActive
     bool               mapDiffActive  = false;  // true only under --map-diff — gates the header's changed= attribute
@@ -12031,23 +12065,24 @@ int runDefaultMap( const MainDispatch& d )
         }
         if( gitOk )
         {
-            rank = rankGraphTeleport( g, diffTeleport( ing, changed ) );
+            rank = rw::takeRank( rankGraphTeleport( g, diffTeleport( ing, changed ) ), rankDisclosure );
         }
         else
         {
             std::fprintf( stderr, "ripwire: --map-diff requires git in PATH; using uniform ranking\n" );
-            rank = rankGraph( g );
+            rank = rw::takeRank( rankGraph( g ), rankDisclosure );
         }
     }
     else if( cfg.rankBy == RankBy::Churn || cfg.rankBy == RankBy::ChurnDecay )
     {
         ChurnRanking cr = churnRankedGraph( d );        // §A9.6: the ranking and the window label it must disclose
         rank             = std::move( cr.rank );
+        rankDisclosure   = cr.pr;                    // W2-F: churn is a PageRank TELEPORT variant — it runs the power iteration too
         churnWindowLabel = std::move( cr.window );   // §B2.2: already carries "(no churn evidence)" when the window mined nothing
     }
     else
     {
-        rank = rankGraph( g );
+        rank = rw::takeRank( rankGraph( g ), rankDisclosure );
     }
 
     // HITS: surface hubs (entrypoints/orchestrators) or authorities (core APIs) instead of the default
@@ -12061,7 +12096,10 @@ int runDefaultMap( const MainDispatch& d )
         }
         else
         {
-            rank = ( cfg.rankBy == RankBy::Hub ) ? std::move( hub ) : std::move( authority );
+            // W2-F: hub and authority REPLACE the PageRank vector, so its disclosure must not survive either
+            // (rrf above KEEPS it — pagerank is one of the three vectors it fuses, so that run shaped the order).
+            rankDisclosure = rw::RankDisclosure{};
+            rank           = ( cfg.rankBy == RankBy::Hub ) ? std::move( hub ) : std::move( authority );
         }
     }
 
@@ -12128,7 +12166,8 @@ int runDefaultMap( const MainDispatch& d )
                                       isChurnRanked ? &churnWindowLabel : nullptr,
                                       cfg.rankBy == RankBy::ChurnDecay ? "churn-decay" : "churn",   // P0-4
                                       cfg.maxTokens > 0 ? &maxTokensFit : nullptr,   // §B13.4
-                                      rankByLabel };                                 // §B2.1
+                                      rankByLabel,                                   // §B2.1
+                                      rankDisclosure };                              // W2-F: pr_iters= / pr_converged=
     // T3's auto-flip changes the order= spelling ("important-last(auto:fill)" is 11 bytes longer than
     // "important-first"), so it is a BYTE fact, not only an ordering one — the comment that used to sit here
     // claimed the search was "unaffected by emit order", and at N=20000 on src/ the flip fires. One value,

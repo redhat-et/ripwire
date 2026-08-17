@@ -215,10 +215,50 @@ being a probability vector, and the top-K biases toward the dense call core whil
 central leaf interfaces collapse toward zero. This is the single thing naive PageRank implementations
 get wrong.
 
-Convergence is a residual stop: iterate until `‖r_new − r‖₁ < τ`, else stop at `maxIter` with a
-degrade alert and use the last iterate. Teleport makes the operator strictly positive, hence
-primitive, so Perron–Frobenius guarantees a unique positive dominant eigenvector with `λ₁ = 1` — the
-iteration is well-posed, not merely empirical.
+Convergence is a residual stop: iterate until `‖r_new − r‖₁ < τ`, else stop at `maxIter` and use
+the last iterate. Teleport makes the operator strictly positive, hence primitive, so
+Perron–Frobenius guarantees a unique positive dominant eigenvector with `λ₁ = 1` — the iteration is
+well-posed, not merely empirical.
+
+#### The convergence disclosure contract
+
+Those two exits produce documents that look identical and do not mean the same thing. The first is
+the fixed point the ranking claims to be. The second is a **truncation of the computation** — a rank
+vector caught mid-descent, carrying the same `k=` scores, the same ordering, the same confidence.
+
+So the iteration reports itself, and every ranked document carries what it said:
+
+| attribute | meaning |
+| --- | --- |
+| `pr_iters="N"` | how many power iterations produced this document's ordering |
+| `pr_converged="0"` | that iteration stopped at `maxIter` with the residual still above `τ` |
+
+The absence rules are load-bearing and are the same absence rules the rest of the header uses.
+**No `pr_converged` means it converged** — there is no `pr_converged="1"`, because the converged
+path is the overwhelming majority and must cost zero bytes. **No `pr_iters` at all** means the
+document was not ordered by a power iteration: a lexical `--query`/`--for` score, or a HITS
+hub/authority vector, both of which replace the PageRank vector outright. `--rank-by=rrf` does carry
+it, because PageRank is one of the three vectors it fuses. The map legend defines both names where
+the reader meets them; the prose explaining what to do about a truncated ranking is charged only to
+the map that actually took that exit. `src/prconverge.h` owns every spelling — XML, JSON, and the
+plain line the markdown report and the mermaid diagram emit instead, since neither has an attribute
+grammar to hang one on.
+
+Why bother, when the truncating exit cannot fire at the shipped configuration? Because the reason it
+cannot fire is arithmetic about *these constants*, not a property of the method. The iteration is an
+α-contraction in L1 — the operator is column-stochastic and dangling mass is redistributed through
+the teleport prior — so `residual_k ≤ 2·α^k`, and `2·0.85^k < 1e-6` at `k = 90`, inside `maxIter =
+100` for any graph whatsoever. (E2 measured 28–52 iterations across four real corpora.) Lower `τ`,
+raise `α` toward 1, or hand the ranker a shape the contraction argument stops covering, and the
+attribute is what tells a reader before the ranking does.
+
+The mechanism matters as much as the attribute. `DEGRADED_PATH_ALERT` still fires on the truncating
+exit and is still the only thing that names *which site* degraded — but it is `#ifndef NDEBUG`, so
+on every shipped Release binary it is not code at all. Before this contract, `rankGraphTeleport`
+discarded the kernel's return value, which meant a Release build emitted a ranking from an
+unfinished iteration with no alert, no attribute, and exit 0. **A disclosure that lives only in an
+assertion is a disclosure that does not ship.** Gate: `test/prconvergecheck.sh`, whose hard arm
+asserts the attribute appears in an NDEBUG build specifically.
 
 The same CSR and the same product kernel serve the other graph lenses: HITS hubs and authorities
 (authorities are core APIs and base classes; hubs are entrypoints and orchestrators — a two-axis
@@ -307,6 +347,25 @@ Four rules hold it up:
    so add order is stable. The rest of the binary keeps the fast-math baseline.
 
 Plus the ingest rule: sort candidate paths before assigning IDs.
+
+**Rule 1 means a compile-time constant, and a future maintainer will be tempted to make it a runtime
+one. Do not.** The block size is `kReductionBlockSize = 1024`, a `constexpr` in `src/pagerank.cpp`.
+The obvious "improvement" is to derive it from the machine — `hardware_concurrency()`, a core count,
+a cache-size probe — so the partition matches the hardware it runs on. That change is invisible in
+review, passes every test on the machine that makes it, and silently destroys the contract this
+section is about.
+
+Floating-point addition is not associative. A partition that varies by machine changes the summation
+tree, which changes the low bits of the dangling-mass and residual reductions, which changes ranks in
+the last digits, which reorders ties in a sort that has no tolerance band. Every symptom points away
+from the cause: each run is self-consistent, each run reproduces on its own host, the ranking always
+*looks* right, and only a byte-diff taken across two different machines shows anything at all — which
+is precisely the diff nobody runs, because the local determinism gate is green.
+
+This is not hypothetical. A graph-database PageRank implementation surveyed in 2026-08 uses the same
+fixed-canonical-merge-order reduction strategy this one does — independent agreement that the
+strategy is right — and then partitions it by `hardware_concurrency()`, inheriting exactly this
+class. The strategy is only half the property; the partition has to be a property of the source.
 
 The gate is `./build/ripwire DIR > a; ./build/ripwire DIR > b; diff -q a b`, run three times.
 Anything that makes output depend on timing is a bug even when the ranking still looks right.
