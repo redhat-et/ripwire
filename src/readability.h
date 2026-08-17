@@ -240,8 +240,10 @@ inline constexpr const char* kReadabilityLegend =
     "which also prints total= has_more= next_offset= offset= limit= "
     "unreadable_files=indexed files this pass could not read; their functions are absent, so functions= is a FLOOR -->";
 
-// Emit the report. Returns the process exit code — always 0: this is a lens, not a gate.
-inline int writeReadabilityReport( const IngestResult& ing, int pageLimit, int pageOffset )
+// Emit the report. Returns the process exit code — always 0: this is a lens, not a gate. `rootPrefix`/
+// `rootAttr` — R-E (2026-08-17 harvest), same convention writeContextRatioReport takes (see contextratio.h).
+inline int writeReadabilityReport( const IngestResult& ing, int pageLimit, int pageOffset,
+                                   std::string_view rootPrefix = {}, const std::string& rootAttr = std::string() )
 {
     const ReadabilityScan scan  = computeReadability( ing );
     const std::size_t     total = scan.rows.size();
@@ -257,7 +259,7 @@ inline int writeReadabilityReport( const IngestResult& ing, int pageLimit, int p
     {
         std::printf( " unreadable_files=\"%u\"", scan.unreadableFileCount );
     }
-    std::printf( ">" );
+    std::printf( "%s>", rootAttr.c_str() );
 
     // TWO scratch buffers, not one reused twice in the same call: escapeXml returns a VIEW into its `out`,
     // so a second call with the same buffer invalidates the first view — and argument evaluation order is
@@ -266,9 +268,10 @@ inline int writeReadabilityReport( const IngestResult& ing, int pageLimit, int p
     std::vector<char> escName;
     for( std::size_t rowIndex = page.begin; rowIndex < page.end; ++rowIndex )
     {
-        const ReadabilityRow& row  = scan.rows[rowIndex];
-        const Symbol&         s    = ing.symbols[row.id];
-        const std::string     path( escapeXml( ing.files[s.fileId], escPath ) );
+        const ReadabilityRow&  row  = scan.rows[rowIndex];
+        const Symbol&          s    = ing.symbols[row.id];
+        const std::string_view rel  = rootPrefix.empty() ? std::string_view( ing.files[s.fileId] ) : rw::sarif::rootRelativeUri( ing.files[s.fileId], rootPrefix );
+        const std::string      path( escapeXml( rel, escPath ) );
         const std::string     name( escapeXml( s.name, escName ) );
         std::printf( "<fn p=\"%s:%u\" n=\"%s\" lines=\"%u\" toks=\"%u\" ops=\"%u\" vocab=\"%u\" vol=\"%.1f\" ent=\"%.2f\" posnett=\"%.3f\"/>",
                      path.c_str(), s.line, name.c_str(),

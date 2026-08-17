@@ -111,6 +111,17 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     const std::uint32_t F = std::uint32_t( ing.files.size() );
     const std::uint32_t N = std::uint32_t( ing.symbols.size() );
 
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — this is
+    // plain text, not XML/JSON, so there is no attribute to carry root= on; the disclosure is instead the
+    // leading line printed just below, the ONE place the absolute root is spelled (honesty rule: recoverable
+    // from the document, same as every structured verb's root= attribute).
+    const bool         situSingleRoot = ing.realPaths.empty();
+    const std::string  situRootPrefix = situSingleRoot ? rw::sarif::rootPrefixOf( root ) : std::string();
+    const auto          situPathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return situSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ fileId ], situRootPrefix ) : std::string_view( ing.files[ fileId ] );
+    };
+
     std::uint32_t       nChanged = 0;
     for( std::uint32_t f = 0; f < F; ++f )
     {
@@ -129,6 +140,10 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     }
 
     std::fprintf( out, "ripwire situational-awareness — %u changed file(s), %zu symbols in them\n", nChanged, changedSyms.size() );
+    if( situSingleRoot )
+    {
+        std::fprintf( out, "root: %s\n", root.c_str() );
+    }
     if( changedSyms.empty() )
     { std::fprintf( out, "  (no indexed symbols in the changed files — nothing to analyze)\n" ); return; }
 
@@ -171,7 +186,8 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
                   reach.size(), affected.size(), blastNote.c_str() );
     for( std::size_t i = 0; i < affected.size() && i < kSituBlastFilesShown; ++i )
     {
-        std::fprintf( out, "        %s  (%u dependent symbols)\n", ing.files[ affected[i] ].c_str(), fileReachers[ affected[i] ] );
+        const std::string_view rp = situPathRel( affected[i] );
+        std::fprintf( out, "        %.*s  (%u dependent symbols)\n", int( rp.size() ), rp.data(), fileReachers[ affected[i] ] );
     }
 
     // (2) tests to run — the test files among the dependents (the --affected set)
@@ -192,7 +208,8 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     const TestRunnerIndex situRunners( ing );
     for( std::size_t i = 0; i < tests.size() && i < kSituTestRowsShown; ++i )
     {
-        std::fprintf( out, "        %s%s\n", ing.files[ tests[i] ].c_str(), runSuffixText( situRunners, tests[i] ).c_str() );
+        const std::string_view rp = situPathRel( tests[i] );
+        std::fprintf( out, "        %.*s%s\n", int( rp.size() ), rp.data(), runSuffixText( situRunners, tests[i] ).c_str() );
     }
     // §B7.3: this section inherits --affected's blind spot without --affected's disclosure — a shell harness
     // runs the compiled BINARY as a subprocess, which is not a call edge, so no test/*.sh gate can EVER be
@@ -242,7 +259,8 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     }
     for( std::size_t i = 0; i < partners.size() && i < kSituPartnerRowsShown; ++i )
     {
-        std::fprintf( out, "        %s  (co-edited in %.0f%% of commits)\n", ing.files[ partners[i].first ].c_str(), partners[i].second * 100.0 );
+        const std::string_view rp = situPathRel( partners[i].first );
+        std::fprintf( out, "        %.*s  (co-edited in %.0f%% of commits)\n", int( rp.size() ), rp.data(), partners[i].second * 100.0 );
     }
 }
 

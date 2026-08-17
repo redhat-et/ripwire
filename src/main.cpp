@@ -201,7 +201,11 @@ bool gitChangedFiles( const std::string& root, const rw::IngestResult& ing, std:
 // module = a symbol's immediate parent DIRECTORY (the real subsystem: canyon/, steer/, …). Fills
 // symDir[symbolId] = module id and dirName[id] = directory path. Shared by --seams and --mermaid —
 // one-level Louvain is too fine to be a "module"; the directory is the meaningful boundary.
-void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>& symDir, std::vector<std::string>& dirName )
+// R-E (2026-08-17 harvest): rootPrefix empty ⇒ dirName[] keeps the ing.files[] directory spelling unchanged
+// (multi-root, or no single root to strip) — relativizing at the point the directory string is FIRST
+// derived, same reasoning as communityPresentation() above, so both --seams and --mermaid inherit the fix.
+void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>& symDir, std::vector<std::string>& dirName,
+                        std::string_view rootPrefix = {} )
 {
     rw::HashMap<std::string, std::uint32_t> dirId;
     const auto idOf = [ & ]( std::string_view d ) -> std::uint32_t
@@ -218,7 +222,8 @@ void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>&
     symDir.assign( ing.symbols.size(), 0 );
     for( std::size_t i = 0; i < ing.symbols.size(); ++i )
     {
-        std::string_view  p  = ing.files[ ing.symbols[i].fileId ];
+        std::string_view  rawP = ing.files[ ing.symbols[i].fileId ];
+        std::string_view  p    = rootPrefix.empty() ? rawP : rw::sarif::rootRelativeUri( rawP, rootPrefix );
         const std::size_t sl = p.rfind( '/' );
         symDir[i] = idOf( sl == std::string_view::npos ? std::string_view( "." ) : p.substr( 0, sl ) );
     }
@@ -307,13 +312,18 @@ using rw::effectiveRowCap;
 // --json branches (identical shape, different surrounding header fields — see each call site). Avoids
 // carrying two copies of the same per-row loop (--quality-delta flagged the pre-extraction duplicate).
 // File-scope (not inside `using namespace rw;`, unlike its callers) — every rw:: type/fn spelled out.
-inline void printJsonSymbolRows( const rw::IngestResult& ing, const std::vector<rw::NodeId>& ids, std::size_t begin, std::size_t end )
+// R-E (2026-08-17 harvest): rootPrefix empty ⇒ p= stays the ing.files[] spelling unchanged (multi-root, or
+// a caller with no single root to strip) — same convention as serialize()'s pathRel.
+inline void printJsonSymbolRows( const rw::IngestResult& ing, const std::vector<rw::NodeId>& ids, std::size_t begin, std::size_t end,
+                                 std::string_view rootPrefix = {} )
 {
     for( std::size_t i = begin; i < end; ++i )
     {
-        const rw::Symbol& s = ing.symbols[ ids[i] ];
+        const rw::Symbol&      s = ing.symbols[ ids[i] ];
+        const std::string_view p = rootPrefix.empty() ? std::string_view( ing.files[ s.fileId ] )
+                                                       : rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix );
         std::printf( "%s{\"t\":\"%s\",\"n\":\"%s\",\"p\":\"%s:%u\"}", i == begin ? "" : ",",
-                     rw::symTag( s.kind ), rw::jsonStr( s.name ).c_str(), rw::jsonStr( ing.files[ s.fileId ] ).c_str(), s.line );
+                     rw::symTag( s.kind ), rw::jsonStr( s.name ).c_str(), rw::jsonStr( p ).c_str(), s.line );
     }
 }
 
@@ -477,9 +487,14 @@ std::string communityVerbSuffix( const rw::IngestResult& ing, const rw::SmallVec
     return suffix;
 }
 
+// R-E (2026-08-17 harvest): rootPrefix empty ⇒ dir=/label= keep the ing.files[] directory spelling unchanged
+// (multi-root, or no single root to strip) — the SAME convention every other lens's pathRel uses, applied
+// here at the point the directory string is first derived so every downstream reader of dir=/label= (both
+// emitters below, and the zoom view) inherits the fix instead of needing its own patch.
 CommunityPresentation communityPresentation( const rw::IngestResult& ing, const rw::Graph& g,
                                              const CommunityMembers& members,
-                                             const std::vector<float>& rank )
+                                             const std::vector<float>& rank,
+                                             std::string_view rootPrefix = {} )
 {
     CommunityPresentation out;
     out.directory.resize( members.size() );
@@ -502,7 +517,8 @@ CommunityPresentation communityPresentation( const rw::IngestResult& ing, const 
         AnchorKey   leadKey = keyOf( lead );
         for( rw::NodeId nodeId : communityMembers )
         {
-            std::string_view  path = ing.files[ ing.symbols[nodeId].fileId ];
+            std::string_view  rawPath = ing.files[ ing.symbols[nodeId].fileId ];
+            std::string_view  path    = rootPrefix.empty() ? rawPath : rw::sarif::rootRelativeUri( rawPath, rootPrefix );
             const std::size_t slash = path.rfind( '/' );
             ++directoryCount[ std::string( slash == std::string_view::npos ? path : path.substr( 0, slash ) ) ];
 
@@ -3957,6 +3973,12 @@ std::string cloneUnpagedTotalAttr( bool clonePaging, std::size_t cloneTotal )
 int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
 {
     using namespace rw;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         clnSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  clnRootPrefix = clnSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  clnRootEsc;
+    const std::string  clnRootAttr   = clnSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], clnRootEsc ) ) + "\"" ) : std::string();
+
     const std::vector<CloneGroup> cg  = findClones( ing, 40 );
     const std::vector<CloneGroup> cg3 = findClonesType3( ing, 40 );   // gapped near-misses (excludes exact = Type-1/2)
     const int                     cap = cfg.packTopN > 0 ? cfg.packTopN : 40;
@@ -4037,14 +4059,15 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     const CloneGrouping grouping = groupClones( ing, cg, cg3 );
 
     std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\": the Type-3 pair list is capped upstream, so a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. raise the default cap with limit=N (offset=M pages). -->" );
-    std::printf( "<clones groups=\"%zu\" type3=\"%zu\"%s exempt_groups=\"%zu\" clone_groups=\"%u\" dup_loc=\"%llu\" total_loc=\"%llu\" dup_pct=\"%.1f\" counts_floor=\"1\"%s>",
+    std::printf( "<clones groups=\"%zu\" type3=\"%zu\"%s exempt_groups=\"%zu\" clone_groups=\"%u\" dup_loc=\"%llu\" total_loc=\"%llu\" dup_pct=\"%.1f\" counts_floor=\"1\"%s%s>",
                  cg.size(), cg3.size(),
                  cloneUnpagedTotalAttr( clonePaging, cloneTotal ).c_str(), exemptGroupCount,
                  grouping.componentCount,
                  static_cast<unsigned long long>( grouping.duplicatedLoc ), static_cast<unsigned long long>( grouping.totalLoc ),
                  cloneDuplicationPercent( grouping ),
                  pageDisclosure( cpab, sizeof( cpab ), clonePage.end - clonePage.begin, cloneTotal, clonePage.end,
-                                 cfg.pageLimit, cfg.pageOffset, true ) );
+                                 cfg.pageLimit, cfg.pageOffset, true ),
+                 clnRootAttr.c_str() );
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     for( std::size_t rowIndex = clonePage.begin; rowIndex < clonePage.end; ++rowIndex )
@@ -4069,8 +4092,9 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
         }
         for( NodeId id : gp.members )
         {
-            const Symbol& s = ing.symbols[id];
-            std::printf( "<f n=\"%s\" p=\"%s:%u\"/>", ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line );
+            const Symbol&           s  = ing.symbols[id];
+            const std::string_view  rp = clnSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], clnRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+            std::printf( "<f n=\"%s\" p=\"%s:%u\"/>", ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
         }
         std::printf( "</group>" );
     }
@@ -4210,6 +4234,10 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
 {
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( rw::escapeXml( s, esc ) ); };
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         coSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  coRootPrefix = coSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    const std::string  coRootAttr   = coSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
 
     // §P8: this is the verb the audit caught red-handed — pairs="363" with 30 rows, and --limit=3 still
     // emitted all 30, so a paging loop re-read page 0 forever. The window is honest now, and shown= /
@@ -4217,10 +4245,11 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
     const rw::PageWindow prpw = rw::pageWindow( prs.size(), rw::effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
     char                 prab[ 192 ];
     std::printf( "%s%s", kCochangeRepoLegend, rw::kAtStampLegend );   // sweep: ditto
-    std::printf( "<cochange pairs=\"%zu\" window=\"%s\" sub_windows=\"%u\"%s%s%s>", prs.size(), windowLabel.c_str(), subWindows, minRecAttr,
+    std::printf( "<cochange pairs=\"%zu\" window=\"%s\" sub_windows=\"%u\"%s%s%s%s>", prs.size(), windowLabel.c_str(), subWindows, minRecAttr,
                  rw::pageDisclosure( prab, sizeof( prab ), prpw.end - prpw.begin, prs.size(), prpw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
-                 rw::gitstamp::atAttr( root ).c_str() );   // §P8: same anchor as the per-file path above
+                 rw::gitstamp::atAttr( root ).c_str(),   // §P8: same anchor as the per-file path above
+                 coRootAttr.c_str() );
     for( std::size_t pairIndex = prpw.begin; pairIndex < prpw.end; ++pairIndex )
     {
         const CoPairRow& pr = prs[ pairIndex ];
@@ -4229,8 +4258,10 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
         const char* driverAttr = ( pr.confAb > pr.confBa ) ? " driver=\"a\""
                                : ( pr.confBa > pr.confAb ) ? " driver=\"b\""
                                                            : "";
+        const std::string_view ra = coSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ pr.a ], coRootPrefix ) : std::string_view( ing.files[ pr.a ] );
+        const std::string_view rb = coSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ pr.b ], coRootPrefix ) : std::string_view( ing.files[ pr.b ] );
         std::printf( "<pair a=\"%s\" b=\"%s\" together=\"%u\" deg=\"%.2f\" conf_ab=\"%.2f\" conf_ba=\"%.2f\"%s recur=\"%u\"%s/>",
-                     ex( ing.files[ pr.a ] ).c_str(), ex( ing.files[ pr.b ] ).c_str(),
+                     ex( ra ).c_str(), ex( rb ).c_str(),
                      pr.n, pr.deg, pr.confAb, pr.confBa, driverAttr, pr.recur,
                      rw::coPairAttr( pr.depCapable, pr.surprising ) );
     }
@@ -4249,6 +4280,10 @@ inline void emitCochangeGroups( const rw::IngestResult& ing, const rw::Config& c
 {
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( rw::escapeXml( s, esc ) ); };
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         cgSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  cgRootPrefix = cgSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    const std::string  cgRootAttr   = cgSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
 
     const rw::PageWindow gpw = rw::pageWindow( groups.size(), rw::effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
     char                 gab[ 192 ];
@@ -4258,24 +4293,27 @@ inline void emitCochangeGroups( const rw::IngestResult& ing, const rw::Config& c
         coveredTotal += g.members.size();
     }
     std::printf( "%s%s", kCochangeGroupLegend, rw::kAtStampLegend );
-    std::printf( "<cochange groups=\"%zu\" pairs_covered=\"%zu\" cover=\"greedy\" window=\"%s\" sub_windows=\"%u\"%s%s%s>",
+    std::printf( "<cochange groups=\"%zu\" pairs_covered=\"%zu\" cover=\"greedy\" window=\"%s\" sub_windows=\"%u\"%s%s%s%s>",
                  groups.size(), coveredTotal, windowLabel.c_str(), subWindows, minRecAttr,
                  rw::pageDisclosure( gab, sizeof( gab ), gpw.end - gpw.begin, groups.size(), gpw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
-                 rw::gitstamp::atAttr( root ).c_str() );
+                 rw::gitstamp::atAttr( root ).c_str(),
+                 cgRootAttr.c_str() );
     for( std::size_t gi = gpw.begin; gi < gpw.end; ++gi )
     {
-        const rw::CoGroup& g = groups[ gi ];
-        std::printf( "<group core=\"%s\" partners=\"%zu\">", ex( ing.files[ g.core ] ).c_str(), g.members.size() );
+        const rw::CoGroup&     g  = groups[ gi ];
+        const std::string_view rc = cgSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ g.core ], cgRootPrefix ) : std::string_view( ing.files[ g.core ] );
+        std::printf( "<group core=\"%s\" partners=\"%zu\">", ex( rc ).c_str(), g.members.size() );
         for( std::size_t vi : g.members )
         {
             const rw::CoViolation& v       = viol[ vi ];
             const std::uint32_t    partner = ( v.a == g.core ) ? v.b : v.a;
             // conf_core= is always conf(core => partner): the group's subject IS the core, so the direction is
             // fixed by the row rather than left for the reader to infer from an a/b ordering this form never prints.
-            const double           confCore = ( v.a == g.core ) ? v.confA : v.confB;
+            const double            confCore = ( v.a == g.core ) ? v.confA : v.confB;
+            const std::string_view  rp       = cgSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ partner ], cgRootPrefix ) : std::string_view( ing.files[ partner ] );
             std::printf( "<f p=\"%s\" together=\"%u\" recur=\"%u\" conf_core=\"%.2f\"/>",
-                         ex( ing.files[ partner ] ).c_str(), v.together, v.recur, confCore );
+                         ex( rp ).c_str(), v.together, v.recur, confCore );
         }
         std::printf( "</group>" );
     }
@@ -4290,6 +4328,13 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
     const std::string&                root         = d.root;
     const bool                        multiRoot    = d.multiRoot;
     const std::vector<WorkspaceRoot>& ws           = d.ws;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — shared
+    // across every lens dispatched from this one function (hotspots/cochange/context-ratio/comment-coherence/
+    // nonlocal-state/naming-consistency/dead-code all read cfg/ing without their own copy).
+    const bool         mvSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  mvRootPrefix = mvSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  mvRootEsc;
+    const std::string  mvRootAttr   = mvSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], mvRootEsc ) ) + "\"" ) : std::string();
 
     // --ensemble: the FAMILY JOIN (src/ensemble.h owns the join AND its emission, the way --readability owns
     // its lens). It calls four existing measurements and reports which of the four EVIDENCE FAMILIES fire on
@@ -4317,7 +4362,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
     // read/write sites when ingest ran RICH, which is why cfg.contextRatio joins needsValueUses below.
     if( cfg.contextRatio )
     {
-        return rw::contextratio::writeContextRatioReport( ing, cfg.pageLimit, cfg.pageOffset );
+        return rw::contextratio::writeContextRatioReport( ing, cfg.pageLimit, cfg.pageOffset, mvRootPrefix, mvRootAttr );
     }
 
     // --hotspots: the maintenance-pain map = per-file (Σ cognitive complexity) × (recent git churn).
@@ -4449,11 +4494,12 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         // r26-stamp Task A: anchor churn×complexity scores to the commit (+dirty state) they were mined
         // against — multi-root anchors to the PRIMARY root (d.root); the merged ranking has no per-root
         // sub-scoping to hang a second stamp on, unlike --pr-context's per-root sections.
-        std::printf( "<hotspots window=\"%s\" files=\"%zu\" ranked=\"%zu\" unranked_no_churn=\"%zu\" unranked_no_complexity=\"%zu\"%s%s>",
+        std::printf( "<hotspots window=\"%s\" files=\"%zu\" ranked=\"%zu\" unranked_no_churn=\"%zu\" unranked_no_complexity=\"%zu\"%s%s%s>",
                      windowLabel.c_str(), ing.files.size(), order.size(), unrankedNoChurn, unrankedNoComplexity,
                      pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, order.size(), pw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
-                     gitstamp::atAttr( root ).c_str() );
+                     gitstamp::atAttr( root ).c_str(),
+                     mvRootAttr.c_str() );
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
         for( std::size_t i = pw.begin; i < pw.end; ++i )
@@ -4464,9 +4510,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // agent trying to --expand it landed on a bogus line. Split into top= (bare name), top_ccx=
             // (the complexity score, same digits that used to trail the colon) and top_l= (the function's
             // real 1-based source line) so the --expand hop is buildable straight from this row.
-            const HotspotWorstFn   worst = hotspotWorstFnOf( ing, worstSym[f] );
+            const HotspotWorstFn    worst = hotspotWorstFnOf( ing, worstSym[f] );
+            const std::string_view  rp    = mvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[f], mvRootPrefix ) : std::string_view( ing.files[f] );
             std::printf( "<f p=\"%s\" churn=\"%u\" ccx=\"%llu\" score=\"%llu\" top=\"%s\" top_ccx=\"%u\" top_l=\"%u\"/>",
-                         ex( ing.files[f] ).c_str(), churn[f], (unsigned long long)ccxSum[f],
+                         ex( rp ).c_str(), churn[f], (unsigned long long)ccxSum[f],
                          (unsigned long long)score( f ), ex( worst.name ).c_str(), worstCcx[f], worst.line );
         }
         std::printf( "</hotspots>" );
@@ -4534,15 +4581,19 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // it is mined from `git log`), and it was one of the last two verbs of that kind emitting numbers
             // with no anchor to the HEAD that produced them. Same gitstamp::atAttr every other repo-reading
             // verb already calls, placed LAST on the element to match --hotspots' existing attribute order.
-            std::printf( "<cochange of=\"%s\" commits=\"%u\" window=\"%s\" sub_windows=\"%u\"%s partners=\"%zu\"%s%s>",
-                         ex( ing.files[fid] ).c_str(), commits, coWindowLabel.c_str(), subWindows, pminrec, ps.size(),
+            std::printf( "<cochange of=\"%s\" commits=\"%u\" window=\"%s\" sub_windows=\"%u\"%s partners=\"%zu\"%s%s%s>",
+                         ex( mvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[fid], mvRootPrefix ) : std::string_view( ing.files[fid] ) ).c_str(),
+                         commits, coWindowLabel.c_str(), subWindows, pminrec, ps.size(),
                          pageDisclosure( pab, sizeof( pab ), ppw.end - ppw.begin, ps.size(), ppw.end,
                                          cfg.pageLimit, cfg.pageOffset, true ),
-                         gitstamp::atAttr( root ).c_str() );
+                         gitstamp::atAttr( root ).c_str(),
+                         mvRootAttr.c_str() );
             for( std::size_t partnerIndex = ppw.begin; partnerIndex < ppw.end; ++partnerIndex )
             {
+                const std::string_view rp = mvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ ps[ partnerIndex ].fileId ], mvRootPrefix )
+                                                          : std::string_view( ing.files[ ps[ partnerIndex ].fileId ] );
                 std::printf( "<f p=\"%s\" together=\"%u\" deg=\"%.2f\" conf_rev=\"%.2f\" recur=\"%u\"%s/>",
-                             ex( ing.files[ ps[ partnerIndex ].fileId ] ).c_str(), ps[ partnerIndex ].together,
+                             ex( rp ).c_str(), ps[ partnerIndex ].together,
                              ps[ partnerIndex ].deg, ps[ partnerIndex ].degRev, ps[ partnerIndex ].recur,
                              coPairAttr( ps[ partnerIndex ] ) );
             }
@@ -5573,6 +5624,12 @@ std::optional<int> runQualityViews( const MainDispatch& d )
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — shared
+    // across every lens dispatched from this function.
+    const bool         qvSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  qvRootPrefix = qvSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  qvRootEsc;
+    const std::string  qvRootAttr   = qvSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], qvRootEsc ) ) + "\"" ) : std::string();
 
     // --readability: the Posnett/Hindle/Devanbu (MSR 2011) closed-form lens, per function, LEAST readable
     // first (readability.h owns the measurement AND its emission, the way --handoff owns its packet). It
@@ -5580,7 +5637,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
     // a LENS: exit 0 always, no verdict, no threshold.
     if( cfg.readability )
     {
-        return writeReadabilityReport( ing, cfg.pageLimit, cfg.pageOffset );
+        return writeReadabilityReport( ing, cfg.pageLimit, cfg.pageOffset, qvRootPrefix, qvRootAttr );
     }
 
     // --comment-coherence: two published content measures per documented function/method (Steidl c_coeff
@@ -5588,7 +5645,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
     // --readability. Symbol table + files on disk only; no graph, no git; a LENS: exit 0 always.
     if( cfg.commentCoherence )
     {
-        return writeCommentCoherenceReport( ing, cfg.pageLimit, cfg.pageOffset );
+        return writeCommentCoherenceReport( ing, cfg.pageLimit, cfg.pageOffset, qvRootPrefix, qvRootAttr );
     }
 
     // --nonlocal-state: per function, the non-local MUTABLE state it or its transitive callees reach, reads
@@ -5597,7 +5654,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
     // git — and it is a LENS: exit 0 always, no verdict, no threshold, every count a disclosed floor.
     if( cfg.nonlocalState )
     {
-        return nonlocal::writeNonLocalStateReport( ing, g, cfg.pageLimit, cfg.pageOffset );
+        return nonlocal::writeNonLocalStateReport( ing, g, cfg.pageLimit, cfg.pageOffset, qvRootPrefix, qvRootAttr );
     }
 
     if( cfg.qualityPanel )
@@ -5619,7 +5676,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
     // always — a lens, not a gate.
     if( cfg.namingConsistency )
     {
-        return namingconsistency::writeNamingConsistencyReport( ing, cfg.pageLimit, cfg.pageOffset );
+        return namingconsistency::writeNamingConsistencyReport( ing, cfg.pageLimit, cfg.pageOffset, qvRootPrefix, qvRootAttr );
     }
 
     // --dead-code[=DIR]: HIGH-CONFIDENCE candidates only. Zero callers is incomplete whole-program evidence,
@@ -5793,10 +5850,11 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             std::vector<char> dcFiltEsc;
             dcFilterAttr = " filter=\"" + std::string( escapeXml( cfg.deadCodeDir, dcFiltEsc ) ) + "\"";
         }
-        std::printf( "<dead-code count=\"%zu\" confidence=\"high\" evidence=\"internal-linkage+zero-callers\"%s%s>", candidates.size(),
+        std::printf( "<dead-code count=\"%zu\" confidence=\"high\" evidence=\"internal-linkage+zero-callers\"%s%s%s>", candidates.size(),
                      dcFilterAttr.c_str(),
                      pageDisclosure( dcAb, sizeof( dcAb ), dcPw.end - dcPw.begin, candidates.size(), dcPw.end,
-                                     cfg.pageLimit, cfg.pageOffset, false ) );
+                                     cfg.pageLimit, cfg.pageOffset, false ),
+                     qvRootAttr.c_str() );
         std::vector<char> dcEsc;
         for( std::size_t candidateIndex = dcPw.begin; candidateIndex < dcPw.end; ++candidateIndex )
         {
@@ -5805,7 +5863,8 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             // name and path may contain & < > " — escape both so output is valid XML.
             const auto en = rw::escapeXml( s.name, dcEsc );
             std::printf( "<d n=\"%.*s\" t=\"%s\"", int( en.size() ), en.data(), symTag( s.kind ) );
-            const auto ep = rw::escapeXml( ing.files[ s.fileId ], dcEsc );
+            const std::string_view rp = qvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], qvRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+            const auto ep = rw::escapeXml( rp, dcEsc );
             std::printf( " p=\"%.*s\" l=\"%u\"/>", int( ep.size() ), ep.data(), s.line );
         }
         std::printf( "</dead-code>" );
@@ -5971,6 +6030,11 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         chSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  chRootPrefix = chSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  chEsc;
+    const std::string  chRootAttr   = chSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], chEsc ) ) + "\"" ) : std::string();
 
     // --callers=SYM / --callees=SYM: sharp 1-hop call hierarchy from the graph (in-edges = callers,
     // out-edges = callees). LSP's incomingCalls/outgoingCalls — crisper than the --around neighbourhood.
@@ -6075,10 +6139,11 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             const std::string attr = "of=\"" + ex( sym ) + "\" defs=\"" + std::to_string( matches.size() )
                                    + "\" count=\"" + std::to_string( result.size() ) + "\""
                                    + ( !wantCallers && bodylessDefsCount > 0 ? " bodyless_defs=\"" + std::to_string( bodylessDefsCount ) + "\"" : "" )
+                                   + chRootAttr   // R-E: same root= the XML/JSON branches carry
                                    + pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                                      cfg.pageLimit, cfg.pageOffset, false )
                                    + rw::kGraphCountFloorAttrXml;   // §H4 §3.4 — every dialect carries the marker
-            emitColumnarSymbolRows( stdout, ing, tag, attr, page );
+            emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix );
             return 0;
         }
 
@@ -6093,18 +6158,20 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             {
                 std::printf( ",\"bodyless_defs\":%zu", bodylessDefsCount );
             }
+            // R-E: the JSON twin of the XML root= below — right after the leading identifying fields.
+            if( chSingleRoot ) { std::printf( ",\"root\":\"%s\"", jsonStr( cfg.roots[0] ).c_str() ); }
             std::printf( "%s%s", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                         cfg.pageLimit, cfg.pageOffset, false, kJsonPageSyntax ),
                          rw::kGraphCountFloorAttrJson );   // §H4 §3.4 — the JSON dialect's spelling of the same marker
             std::printf( ",\"%s\":[", tag );
-            printJsonSymbolRows( ing, result, pw.begin, pw.end );
+            printJsonSymbolRows( ing, result, pw.begin, pw.end, chRootPrefix );
             std::printf( "]}" );
             return 0;
         }
 
         // §P10.6: defs= = resolved definitions this name matched (matches.size()) — the rows below UNION the
         // neighbors of every def, which --uses/--impact already disclose and these two verbs silently hid.
-        std::printf( "<%s of=\"%s\" defs=\"%zu\" count=\"%zu\"", tag, ex( sym ).c_str(), matches.size(), result.size() );
+        std::printf( "<%s of=\"%s\" defs=\"%zu\" count=\"%zu\"%s", tag, ex( sym ).c_str(), matches.size(), result.size(), chRootAttr.c_str() );
         if( !wantCallers && bodylessDefsCount > 0 )
         {
             std::printf( " bodyless_defs=\"%zu\"", bodylessDefsCount );
@@ -6114,8 +6181,9 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                      rw::kGraphCountFloorAttrXml );
         for( std::size_t i = pw.begin; i < pw.end; ++i )
         {
-            const Symbol& s = ing.symbols[ result[i] ];
-            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"%s/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line,
+            const Symbol&           s  = ing.symbols[ result[i] ];
+            const std::string_view  rp = chSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], chRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"%s/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
                          macroRoleAttr( s.kind ) );
         }
         std::printf( "</%s>", tag );
@@ -6348,6 +6416,11 @@ std::optional<int> runUses( const MainDispatch& d )
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         usSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  usRootPrefix = usSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  usEsc;
+    const std::string  usRootAttr   = usSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], usEsc ) ) + "\"" ) : std::string();
 
     // --uses=SYM (ABS-3): the use-site index for SYM — the resolvable places its name is referenced, with a
     // §H4 note: NOT "complete". The index is a FLOOR (counts_floor=, src/graphlegend.h), and the word this
@@ -6442,18 +6515,19 @@ std::optional<int> runUses( const MainDispatch& d )
             // a markdown SECTION heading reaches routinely. Same shape as runImpact / the callers arm.
             const std::string attr = "of=\"" + ex( sym ) + "\" defs=\"" + std::to_string( defs.size() )
                                    + "\" external=\"" + ( external ? "1" : "0" ) + "\" count=\"" + std::to_string( sites.size() ) + "\""
-                                   + selectorAttrs + upage + rw::kGraphCountFloorAttrXml;   // §H4 §3.4
-            emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins );
+                                   + selectorAttrs + usRootAttr + upage + rw::kGraphCountFloorAttrXml;   // §H4 §3.4
+            emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins, usRootPrefix );
             return 0;
         }
 
-        std::printf( "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s%s%s>",
-                     ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), selectorAttrs.c_str(), upage,
+        std::printf( "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s%s%s%s>",
+                     ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), selectorAttrs.c_str(), usRootAttr.c_str(), upage,
                      rw::kGraphCountFloorAttrXml );
         for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
         {
-            const UseSite& u = sites[ siteIndex ];
-            std::printf( "<u role=\"%s\" p=\"%s:%u\"", refRoleTag( u.role ), ex( ing.files[ u.fileId ] ).c_str(), u.line );
+            const UseSite&          u  = sites[ siteIndex ];
+            const std::string_view  rp = usSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ u.fileId ], usRootPrefix ) : std::string_view( ing.files[ u.fileId ] );
+            std::printf( "<u role=\"%s\" p=\"%s:%u\"", refRoleTag( u.role ), ex( rp ).c_str(), u.line );
             // §P8 collision: `in=` means three things tool-wide — enclosing NAME (--grep/--match/--lint),
             // fan-in COUNT (--for/--pack-task/--exemplar), and here the enclosing symbol's canonical ID. The
             // first two are load-bearing and stay; this one had ZERO consumers, so it is the one that moves.
@@ -7073,6 +7147,11 @@ std::optional<int> runImpact( const MainDispatch& d )
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         imSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  imRootPrefix = imSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  imEsc;
+    const std::string  imRootAttr   = imSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], imEsc ) ) + "\"" ) : std::string();
 
     // --impact=SYM: transitive blast radius — every symbol that (transitively) reaches SYM via calls
     if( !cfg.impactSym.empty() )
@@ -7118,10 +7197,11 @@ std::optional<int> runImpact( const MainDispatch& d )
             std::vector<NodeId> page( show.begin() + ipw.begin, show.begin() + ipw.end );
             const std::string attr = "of=\"" + ex( cfg.impactSym ) + "\" defs=\"" + std::to_string( seeds.size() )
                                    + "\" reaches=\"" + std::to_string( reach.size() ) + "\""
+                                   + imRootAttr
                                    + pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                                      cfg.pageLimit, cfg.pageOffset, true )
                                    + rw::kGraphCountFloorAttrXml;   // §H4 §3.4
-            emitColumnarSymbolRows( stdout, ing, "impact", attr.c_str(), page );
+            emitColumnarSymbolRows( stdout, ing, "impact", attr.c_str(), page, imRootPrefix );
             return 0;
         }
 
@@ -7132,22 +7212,29 @@ std::optional<int> runImpact( const MainDispatch& d )
         // have a 40-row display cap of its own).
         if( cfg.json )
         {
-            std::printf( "{\"of\":\"%s\",\"defs\":%zu,\"reaches\":%zu%s%s,\"impact\":[",
-                         jsonStr( cfg.impactSym ).c_str(), seeds.size(), reach.size(),
+            std::printf( "{\"of\":\"%s\",\"defs\":%zu,\"reaches\":%zu",
+                         jsonStr( cfg.impactSym ).c_str(), seeds.size(), reach.size() );
+            if( imSingleRoot ) { std::printf( ",\"root\":\"%s\"", jsonStr( cfg.roots[0] ).c_str() ); }   // R-E
+            std::printf( "%s%s,\"impact\":[",
                          pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                          cfg.pageLimit, cfg.pageOffset, true, kJsonPageSyntax ),
                          rw::kGraphCountFloorAttrJson );   // §H4 §3.4
-            printJsonSymbolRows( ing, show, ipw.begin, ipw.end );
+            printJsonSymbolRows( ing, show, ipw.begin, ipw.end, imRootPrefix );
             std::printf( "]}" );
             return 0;
         }
 
-        std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s>",
-                     ex( cfg.impactSym ).c_str(), seeds.size(), reach.size(),
+        std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s>",
+                     ex( cfg.impactSym ).c_str(), seeds.size(), reach.size(), imRootAttr.c_str(),
                      pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
                      rw::kGraphCountFloorAttrXml );
-        for( std::size_t i = ipw.begin; i < ipw.end; ++i ) { const Symbol& s = ing.symbols[ show[i] ]; std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
+        for( std::size_t i = ipw.begin; i < ipw.end; ++i )
+        {
+            const Symbol&           s  = ing.symbols[ show[i] ];
+            const std::string_view  rp = imSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], imRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
+        }
         std::printf( "</impact>" );
         return 0;
     }
@@ -7163,6 +7250,9 @@ std::optional<int> runMentions( const MainDispatch& d )
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         mnSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  mnRootPrefix = mnSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
 
     // --mentions=SYM: which DOCS (markdown plans/designs) name this code symbol in a `backtick` — the doc↔code
     // link (the reverse of "what code a doc touches"). From g.mentions, built OUT of the call graph so a doc
@@ -7208,14 +7298,17 @@ std::optional<int> runMentions( const MainDispatch& d )
         // un-paginated tag stays byte-identical.
         const PageWindow  mentionsPw = pageWindow( fileRows.size(), cfg.pageLimit, cfg.pageOffset );
         char              mentionsAb[ kPageDisclosureCap ];
-        std::printf( "<mentions of=\"%s\" defs=\"%zu\" docs=\"%zu\" sections=\"%zu\"%s>", ex( cfg.mentionsSym ).c_str(), defs.size(),
+        const std::string mnRootAttr = mnSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
+        std::printf( "<mentions of=\"%s\" defs=\"%zu\" docs=\"%zu\" sections=\"%zu\"%s%s>", ex( cfg.mentionsSym ).c_str(), defs.size(),
                      fileRows.size(), sectionCount,
                      pageDisclosure( mentionsAb, sizeof( mentionsAb ), mentionsPw.end - mentionsPw.begin, fileRows.size(), mentionsPw.end,
-                                     cfg.pageLimit, cfg.pageOffset, false ) );
+                                     cfg.pageLimit, cfg.pageOffset, false ),
+                     mnRootAttr.c_str() );
         for( std::size_t rowIndex = mentionsPw.begin; rowIndex < mentionsPw.end; ++rowIndex )
         {
-            const MentionFileRow& row = fileRows[ rowIndex ];
-            std::printf( "<doc p=\"%s\" mentions=\"%zu\"/>", ex( ing.files[ row.fileId ] ).c_str(), row.mentions );
+            const MentionFileRow&  row = fileRows[ rowIndex ];
+            const std::string_view rp  = mnSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ row.fileId ], mnRootPrefix ) : std::string_view( ing.files[ row.fileId ] );
+            std::printf( "<doc p=\"%s\" mentions=\"%zu\"/>", ex( rp ).c_str(), row.mentions );
         }
         std::printf( "</mentions>" );
         return 0;
@@ -8498,12 +8591,18 @@ SkipHealthReport classifySkipHealth( const rw::IngestResult& ing )
 
 // §L1 — the <f why="oversize"> rows (§P0.5d's original population), each carrying the ceiling that dropped
 // it so `bytes > limit` is self-evident per row.
-void writeOversizeRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vector<rw::SkippedOversize>& rows )
+// R-E (2026-08-17 harvest): rootPrefix empty ⇒ p= keeps sk.path unchanged (multi-root, or no single root to
+// strip) — sk.path/sf.path/hr's ing.files[] lookup below are already-materialized copies of the crawl's own
+// spelling (see emitGrepReport's note), so this relativizes them at PRINT time, same convention every other
+// lens's pathRel uses.
+void writeOversizeRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vector<rw::SkippedOversize>& rows,
+                        std::string_view rootPrefix = {} )
 {
     for( const rw::SkippedOversize& sk : rows )
     {
         char row[ 96 ];
-        w.write( "<f p=\"" );  w.write( rw::escapeXml( sk.path, esc ) );
+        const std::string_view rp = rootPrefix.empty() ? std::string_view( sk.path ) : rw::sarif::rootRelativeUri( sk.path, rootPrefix );
+        w.write( "<f p=\"" );  w.write( rw::escapeXml( rp, esc ) );
         std::snprintf( row, sizeof( row ), "\" why=\"oversize\" bytes=\"%llu\" limit=\"%llu\"/>",
                        ( unsigned long long ) sk.sizeBytes, ( unsigned long long ) sk.limitBytes );
         w.write( row );
@@ -8512,12 +8611,14 @@ void writeOversizeRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vec
 
 // §L1 — the <f> rows for the two non-size drop classes. `why` is a caller-supplied literal from a CLOSED
 // vocabulary (excluded / unsupported-ext), never data — see test/fixedbufsweep.sh's row for this buffer.
-void writeDropRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vector<rw::SkippedFile>& rows, const char* why )
+void writeDropRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vector<rw::SkippedFile>& rows, const char* why,
+                    std::string_view rootPrefix = {} )
 {
     for( const rw::SkippedFile& sf : rows )
     {
         char row[ 96 ];
-        w.write( "<f p=\"" );  w.write( rw::escapeXml( sf.path, esc ) );
+        const std::string_view rp = rootPrefix.empty() ? std::string_view( sf.path ) : rw::sarif::rootRelativeUri( sf.path, rootPrefix );
+        w.write( "<f p=\"" );  w.write( rw::escapeXml( rp, esc ) );
         std::snprintf( row, sizeof( row ), "\" why=\"%s\" bytes=\"%llu\" ext=\"", why, ( unsigned long long ) sf.sizeBytes );
         w.write( row );
         w.write( rw::escapeXml( sf.ext, esc ) );
@@ -8543,7 +8644,7 @@ void writeUnindexedExtRows( rw::XmlWriter& w, std::vector<char>& esc, const std:
 // threshold without re-running anything. err_ratio is over the FILE's bytes; ws_freq is over the leading
 // sample, which is its own denominator — hence two ratios and not one.
 void writeHealthRows( rw::XmlWriter& w, std::vector<char>& esc, const rw::IngestResult& ing,
-                      const std::vector<SkipHealthFinding>& findings )
+                      const std::vector<SkipHealthFinding>& findings, std::string_view rootPrefix = {} )
 {
     for( const SkipHealthFinding& hr : findings )
     {
@@ -8552,7 +8653,8 @@ void writeHealthRows( rw::XmlWriter& w, std::vector<char>& esc, const rw::Ingest
         const double         errFrac = double( h.errBytes ) / double( h.fileBytes );
         const double         wsFrac  = sample == 0 ? 1.0 : double( h.wsBytes ) / double( sample );
         char row[ 192 ];
-        w.write( "<h p=\"" );  w.write( rw::escapeXml( ing.files[ hr.fileIndex ], esc ) );
+        const std::string_view rp = rootPrefix.empty() ? std::string_view( ing.files[ hr.fileIndex ] ) : rw::sarif::rootRelativeUri( ing.files[ hr.fileIndex ], rootPrefix );
+        w.write( "<h p=\"" );  w.write( rw::escapeXml( rp, esc ) );
         std::snprintf( row, sizeof( row ), "\" why=\"%s%s%s\" err=\"%u\" err_ratio=\"%.3f\" ws_freq=\"%.3f\" bytes=\"%u\"/>",
                        hr.degraded ? "degraded-parse" : "",
                        ( hr.degraded && hr.minified ) ? "," : "",
@@ -8593,6 +8695,11 @@ std::optional<int> runSkipped( const MainDispatch& d )
     {
         return std::nullopt;
     }
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         skSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  skRootPrefix = skSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  skRootEsc;
+    const std::string  skRootAttr   = skSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], skRootEsc ) ) + "\"" ) : std::string();
 
     {
         XmlWriter         w( stdout );
@@ -8610,7 +8717,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
                        "<skipped indexed=\"%zu\" oversize=\"%zu\" excluded=\"%llu\" unsupported_ext=\"%llu\" excluded_dirs=\"%llu\""
                        " pruned_dirs=\"%llu\""
                        " degraded_parse=\"%zu\" minified_suspect=\"%zu\" unmeasured=\"%zu\" max_file_size=\"%zu\" json_ceiling=\"%zu\""
-                       " yaml_ceiling=\"%zu\"%s>",
+                       " yaml_ceiling=\"%zu\"%s",
                        ing.files.size(), ing.skippedOversize.size(),
                        ( unsigned long long ) cs.excludedFiles, ( unsigned long long ) cs.unsupportedFiles,
                        ( unsigned long long ) cs.excludedDirs, ( unsigned long long ) cs.prunedDirs,
@@ -8618,12 +8725,17 @@ std::optional<int> runSkipped( const MainDispatch& d )
                        effectiveMax, kMaxJsonConfigBytes, kMaxYamlConfigBytes,
                        rowsCapped ? " rows_capped=\"1\"" : "" );
         w.write( hdr );
+        // R-E: root= is unbounded (a deep absolute path), so it is NOT folded into the fixed `hdr` buffer
+        // above (the V1-1 truncation class main.cpp's own history warns about) — written separately as the
+        // std::string it already is, then the tag is closed.
+        w.write( skRootAttr );
+        w.write( ">" );
 
-        writeOversizeRows( w, esc, ing.skippedOversize );
-        writeDropRows( w, esc, cs.excluded,    "excluded" );
-        writeDropRows( w, esc, cs.unsupported, "unsupported-ext" );
+        writeOversizeRows( w, esc, ing.skippedOversize, skRootPrefix );
+        writeDropRows( w, esc, cs.excluded,    "excluded", skRootPrefix );
+        writeDropRows( w, esc, cs.unsupported, "unsupported-ext", skRootPrefix );
         writeUnindexedExtRows( w, esc, cs.unindexedExts );
-        writeHealthRows( w, esc, ing, health.findings );
+        writeHealthRows( w, esc, ing, health.findings, skRootPrefix );
         w.write( "</skipped></ctx>" );
     }
     std::fputc( '\n', stdout );
@@ -9300,6 +9412,14 @@ std::optional<int> runFieldAffinity( const MainDispatch& d )
     const fieldaffinity::AffResult res =
         fieldaffinity::computeFieldAffinity( d.ing, d.fanIn, cfg.fieldAffinityStruct );
 
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — always
+    // true here (the multi-root refusal above already returned), but ing.realPaths.empty() is still the
+    // canonical guard so this cannot silently diverge if that invariant ever changes.
+    const bool         faSingleRoot = d.ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  faRootPrefix = faSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  faRootEsc;
+    const std::string  faRootAttr   = faSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], faRootEsc ) ) + "\"" ) : std::string();
+
     // A filter that matched no modelable aggregate is a REFUSAL, not an empty report: an empty
     // <fieldaffinity/> reads as "this struct has no co-access", which is a different and much stronger
     // claim than "this name never resolved to a C-family aggregate body this verb can model".
@@ -9312,7 +9432,7 @@ std::optional<int> runFieldAffinity( const MainDispatch& d )
         return 1;
     }
 
-    fieldaffinity::writeFieldAffinity( stdout, res );
+    fieldaffinity::writeFieldAffinity( stdout, res, faRootPrefix, faRootAttr );
     return 0;
 }
 
@@ -9338,6 +9458,12 @@ std::uint32_t nonIsolatedModuleCount( const CommunityMembers& members )
 int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g )
 {
     using namespace rw;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         cmSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  cmRootPrefix = cmSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  cmRootEsc;
+    const std::string  cmRootAttr   = cmSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], cmRootEsc ) ) + "\"" ) : std::string();
+
     const rw::Communities   cm   = rw::communities( g );
     const std::vector<float> rank = rankGraph( g );
     const std::uint32_t      K    = cm.count;
@@ -9348,7 +9474,7 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
     {
         members[cm.comm[i]].push_back( i );
     }
-    const CommunityPresentation presentation = communityPresentation( ing, g, members, rank );
+    const CommunityPresentation presentation = communityPresentation( ing, g, members, rank, cmRootPrefix );
 
     HashMap<std::uint64_t, std::uint32_t> bridge;   // (min,max) community pair → inter-module edge count
     for( NodeId u = 0; u < N; ++u )
@@ -9430,11 +9556,12 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
     // back. The follow-up verb is named ON THE ROOT ELEMENT rather than in the doc comment, because an XML
     // comment may not contain a double hyphen (G4) and its entity escapes are NOT expanded — a caller would
     // read a literal "&#45;&#45;". As an attribute value the flag is exact, parseable and pasteable.
-    std::printf( "<communities drill=\"--community=ID\" modules=\"%u\" shown_modules=\"%u\" modules_capped=\"%u\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" isolated=\"%u\" isolated_decl=\"%u\" isolated_header=\"%u\" isolated_source=\"%u\" isolated_doc=\"%u\" connected_singletons=\"%u\" symbols=\"%u\"%s>",
+    std::printf( "<communities drill=\"--community=ID\" modules=\"%u\" shown_modules=\"%u\" modules_capped=\"%u\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" isolated=\"%u\" isolated_decl=\"%u\" isolated_header=\"%u\" isolated_source=\"%u\" isolated_doc=\"%u\" connected_singletons=\"%u\" symbols=\"%u\"%s%s>",
                  modules, shownModules, isModulesCapped,
                  bridge.size(), shownBridges, isBridgesCapped, isolates.total, isolates.declaration,
                  isolates.header, isolates.source, isolates.document, isolates.connectedSingletons, N,
-                 pagingDisclosure( cmab, sizeof( cmab ), moduleOrder.size(), cmpw.end, cfg.pageLimit, cfg.pageOffset ) );
+                 pagingDisclosure( cmab, sizeof( cmab ), moduleOrder.size(), cmpw.end, cfg.pageLimit, cfg.pageOffset ),
+                 cmRootAttr.c_str() );
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     for( std::size_t moduleIndex = cmpw.begin; moduleIndex < cmpw.end; ++moduleIndex )
@@ -9448,8 +9575,9 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
                      topN, unsigned( topN < mem.size() ) );   // §B8.1: rules 2+3 — size= is the total, this pair is the cut
         for( std::size_t i = 0; i < topN; ++i )
         {
-            const Symbol& s = ing.symbols[ mem[i] ];
-            std::printf( "<member t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line );
+            const Symbol&           s  = ing.symbols[ mem[i] ];
+            const std::string_view  rp = cmSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], cmRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+            std::printf( "<member t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
         }
         std::printf( "</community>" );
     }
@@ -9487,6 +9615,12 @@ std::optional<int> runCommunities( const MainDispatch& d )
 int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g )
 {
     using namespace rw;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         cdSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  cdRootPrefix = cdSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  cdRootEsc;
+    const std::string  cdRootAttr   = cdSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], cdRootEsc ) ) + "\"" ) : std::string();
+
     const Communities   cm = communities( g );
     const std::uint32_t K  = cm.count;
     const std::uint32_t N  = std::uint32_t( ing.symbols.size() );
@@ -9528,7 +9662,7 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
     // dir=/label= come from the SAME communityPresentation the parent uses, so the two rows for one id
     // cannot drift into two derivations of "what is this module called".
     const std::vector<float>    rank         = rankGraph( g );
-    const CommunityPresentation presentation = communityPresentation( ing, g, members, rank );
+    const CommunityPresentation presentation = communityPresentation( ing, g, members, rank, cdRootPrefix );
 
     rw::SmallVec<NodeId, 2>& mem = members[ want ];
     std::sort( mem.begin(), mem.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
@@ -9574,14 +9708,16 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
                  "space (every id 0..partition-1, incl. isolated singletons) — the range the id= argument ranges over; modules= counts "
                  "the NON-isolated communities (size>=2), the SAME predicate the communities-listing verb's modules= uses, so parent "
                  "and child agree. -->" );
-    std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" partition=\"%u\" modules=\"%u\"%s>",
+    std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" partition=\"%u\" modules=\"%u\"%s%s>",
                  want, std::size_t( mem.size() ), ex( presentation.directory[ want ] ).c_str(), ex( presentation.label[ want ] ).c_str(),
                  peers.size(), shownBridges, unsigned( shownBridges < peers.size() ), K, modulesNonIsolated,
-                 pageDisclosure( mpab, sizeof( mpab ), shownMembers, mem.size(), mpw.end, cfg.pageLimit, cfg.pageOffset, true ) );
+                 pageDisclosure( mpab, sizeof( mpab ), shownMembers, mem.size(), mpw.end, cfg.pageLimit, cfg.pageOffset, true ),
+                 cdRootAttr.c_str() );
     for( std::size_t i = mpw.begin; i < mpw.end; ++i )
     {
-        const Symbol& s = ing.symbols[ mem[i] ];
-        std::printf( "<member t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line );
+        const Symbol&           s  = ing.symbols[ mem[i] ];
+        const std::string_view  rp = cdSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], cdRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+        std::printf( "<member t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
     }
     for( std::size_t i = 0; i < shownBridges; ++i )
     {
@@ -9889,6 +10025,11 @@ std::optional<int> runStructureText( const MainDispatch& d )
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
     const std::string&                root         = d.root;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         stSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  stRootPrefix = stSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  stRootEsc;
+    const std::string  stRootAttr   = stSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], stRootEsc ) ) + "\"" ) : std::string();
 
     // --seams: cross-module call seams (community bridges) that NO test transitively reaches — the untested
     // inter-module connections. The graph-leveraged slice of testing: an integration test guards a seam
@@ -9902,7 +10043,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // Louvain is too fine; bridges land within one dir). A seam = a call edge crossing a dir boundary.
         std::vector<std::uint32_t> symDir;
         std::vector<std::string>   dirName;
-        computeDirModules( ing, symDir, dirName );
+        computeDirModules( ing, symDir, dirName, stRootPrefix );
 
         // testReach = everything transitively called from test files → a seam u→v is exercised if testReach[u]
         std::vector<NodeId> testSeeds;
@@ -9981,10 +10122,11 @@ std::optional<int> runStructureText( const MainDispatch& d )
         const PageWindow  seamsPw     = pageWindow( pairs.size(), effectiveRowCap( cfg.pageLimit, 20 ), cfg.pageOffset );
         const std::size_t shownPairs  = seamsPw.end - seamsPw.begin;
         char              seamsAb[ kPageDisclosureCap ];
-        std::printf( "<seams modules=\"%zu\" bridges=\"%u\" untested=\"%u\" test_files=\"%u\" seam_pairs=\"%zu\"%s>",
+        std::printf( "<seams modules=\"%zu\" bridges=\"%u\" untested=\"%u\" test_files=\"%u\" seam_pairs=\"%zu\"%s%s>",
                      dirName.size(), bridges, untested, testFileCount, pairs.size(),
                      pageDisclosure( seamsAb, sizeof( seamsAb ), shownPairs, pairs.size(), seamsPw.end,
-                                     cfg.pageLimit, cfg.pageOffset, true ) );
+                                     cfg.pageLimit, cfg.pageOffset, true ),
+                     stRootAttr.c_str() );
         for( std::size_t pi = seamsPw.begin; pi < seamsPw.end; ++pi )
         {
             const std::uint32_t    cu    = std::uint32_t( pairs[pi].first >> 32 ), cv = std::uint32_t( pairs[pi].first & 0xffffffffu );
@@ -9996,11 +10138,13 @@ std::optional<int> runStructureText( const MainDispatch& d )
                          ex( dirName[cu] ).c_str(), ex( dirName[cv] ).c_str(), edges.size(), topE, topE < edges.size() ? 1 : 0 );
             for( std::size_t i = 0; i < topE; ++i )
             {
-                const Symbol& su = ing.symbols[ edges[i].u ];
-                const Symbol& sv = ing.symbols[ edges[i].v ];
+                const Symbol&           su  = ing.symbols[ edges[i].u ];
+                const Symbol&           sv  = ing.symbols[ edges[i].v ];
+                const std::string_view  rpu = stSingleRoot ? rw::sarif::rootRelativeUri( ing.files[su.fileId], stRootPrefix ) : std::string_view( ing.files[su.fileId] );
+                const std::string_view  rpv = stSingleRoot ? rw::sarif::rootRelativeUri( ing.files[sv.fileId], stRootPrefix ) : std::string_view( ing.files[sv.fileId] );
                 std::printf( "<edge caller=\"%s\" p=\"%s:%u\" callee=\"%s\" cp=\"%s:%u\"/>",
-                             ex( su.name ).c_str(), ex( ing.files[su.fileId] ).c_str(), su.line,
-                             ex( sv.name ).c_str(), ex( ing.files[sv.fileId] ).c_str(), sv.line );
+                             ex( su.name ).c_str(), ex( rpu ).c_str(), su.line,
+                             ex( sv.name ).c_str(), ex( rpv ).c_str(), sv.line );
             }
             std::printf( "</seam>" );
         }
@@ -10016,7 +10160,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         const std::uint32_t N = std::uint32_t( ing.symbols.size() );
         std::vector<std::uint32_t> symDir;
         std::vector<std::string>   dirName;
-        computeDirModules( ing, symDir, dirName );
+        computeDirModules( ing, symDir, dirName, stRootPrefix );
         const std::uint32_t M = std::uint32_t( dirName.size() );
 
         std::vector<std::uint32_t> sz( M, 0 );
@@ -10138,7 +10282,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         {
             members[cm.comm[i]].push_back( i );
         }
-        const CommunityPresentation presentation = communityPresentation( ing, g, members, rank );
+        const CommunityPresentation presentation = communityPresentation( ing, g, members, rank, stRootPrefix );
         for( auto& m : members )
         {
             std::sort( m.begin(), m.end(), [ & ]( NodeId a, NodeId b )
@@ -10176,6 +10320,13 @@ std::optional<int> runStructureText( const MainDispatch& d )
         std::printf( "<!-- ripwire markdown: no run of 4-or-more backticks in this output — safe to embed inside a wider fence -->\n\n" );
         std::printf( "# ripwire architecture report\n\n%u files · %u symbols · %u edges · %u modules (%u call-graph isolated)\n\n",
                      F, N, std::uint32_t( g.outTargets.size() ), modules, isolates.total );
+        // R-E (2026-08-17 harvest): paths below are root-relative on a single-root run (same convention every
+        // other verb's root= attribute states); this line is the markdown twin — the ONLY place the absolute
+        // root is spelled, so it stays recoverable from the document per the honesty rule every other verb follows.
+        if( stSingleRoot )
+        {
+            std::printf( "Root: `%.*s`\n\n", int( cfg.roots[0].size() ), cfg.roots[0].data() );
+        }
         std::printf( "Call-graph isolate provenance: %u declaration, %u header, %u source, %u document; %u connected Louvain singletons\n\n",
                      isolates.declaration, isolates.header, isolates.source, isolates.document, isolates.connectedSingletons );
 
@@ -10221,7 +10372,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
                 break;
             }
             anyGod = true;
-            std::printf( "- `%s` — %u dependents\n", ing.files[ford[i]].c_str(), afferent[ford[i]] );
+            const std::string_view rp = stSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ford[i]], stRootPrefix ) : std::string_view( ing.files[ford[i]] );
+            std::printf( "- `%.*s` — %u dependents\n", int( rp.size() ), rp.data(), afferent[ford[i]] );
         }
         if( !anyGod )
         {
@@ -10241,7 +10393,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
                 std::printf( "- " );
                 for( std::size_t j = 0; j < cycles[i].size(); ++j )
                 {
-                    std::printf( "%s`%s`", j ? " ↔ " : "", ing.files[cycles[i][j]].c_str() );
+                    const std::string_view rp = stSingleRoot ? rw::sarif::rootRelativeUri( ing.files[cycles[i][j]], stRootPrefix ) : std::string_view( ing.files[cycles[i][j]] );
+                    std::printf( "%s`%.*s`", j ? " ↔ " : "", int( rp.size() ), rp.data() );
                 }
                 std::printf( "\n" );
             }
@@ -10255,7 +10408,12 @@ std::optional<int> runStructureText( const MainDispatch& d )
         std::sort( ts.begin(), ts.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
         const std::uint32_t reportTopSymbols = std::min<std::uint32_t>( N, 10 );
         std::printf( "\n## Top symbols (PageRank; showing %u of %u)\n", reportTopSymbols, N );
-        for( std::uint32_t i = 0; i < N && i < 10; ++i ) { const Symbol& s = ing.symbols[ ts[i] ]; std::printf( "- `%s` (%s:%u)\n", s.name.c_str(), ing.files[ s.fileId ].c_str(), s.line ); }
+        for( std::uint32_t i = 0; i < N && i < 10; ++i )
+        {
+            const Symbol&           s  = ing.symbols[ ts[i] ];
+            const std::string_view  rp = stSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], stRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+            std::printf( "- `%s` (%.*s:%u)\n", s.name.c_str(), int( rp.size() ), rp.data(), s.line );
+        }
 
         HashMap<std::uint64_t, std::uint32_t> bridge;
         for( NodeId u = 0; u < N; ++u )
@@ -10987,6 +11145,13 @@ std::optional<int> runLint( const MainDispatch& d )
     using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — --lint's
+    // OWN --sarif re-serialization (writeSarifResult) already applies it; this brings the native --match/
+    // --lint XML forms into parity rather than leaving them the only two still absolute per row.
+    const bool         lintSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  lintRootPrefix = lintSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  lintRootEsc;
+    const std::string  lintRootAttr   = lintSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], lintRootEsc ) ) + "\"" ) : std::string();
 
     // --lint-catalog: the built-in rule registry, standalone — needs no corpus at all (lintcatalog.h's
     // table is static), so it is handled before the match/lint/lint-rules setup below even starts.
@@ -11110,7 +11275,7 @@ std::optional<int> runLint( const MainDispatch& d )
                          "auto_captured=\"1\" ⇒ the query bound no @capture and ripwire appended `@m` to its single top-level pattern. "
                          "grammars= names every grammar the query compiled against; eligible_files=/of_files= are corpus files in that "
                          "language set vs total indexed files. raise the default cap with limit=N (offset=M pages) -->" );
-            std::printf( "<match hits=\"%zu\"%s hits_capped=\"%d\"%s grammars=\"%s\" eligible_files=\"%zu\" of_files=\"%zu\">",
+            std::printf( "<match hits=\"%zu\"%s hits_capped=\"%d\"%s grammars=\"%s\" eligible_files=\"%zu\" of_files=\"%zu\"%s>",
                          ms.size(),
                          pageDisclosure( mpab, sizeof( mpab ), matchShown, ms.size(), matchPage.end,
                                          cfg.pageLimit, cfg.pageOffset, true ),
@@ -11118,12 +11283,14 @@ std::optional<int> runLint( const MainDispatch& d )
                          autoCaptured ? " auto_captured=\"1\"" : "",
                          ex( grammarsAttr ).c_str(),
                          eligibleFiles,
-                         ing.files.size() );
+                         ing.files.size(),
+                         lintRootAttr.c_str() );
             for( std::size_t hitIndex = matchPage.begin; hitIndex < matchPage.end; ++hitIndex )
             {
-                const AstMatch& m = ms[ hitIndex ];
-                const Symbol*   e = enclosing( m.fileId, m.startByte );
-                std::printf( "<m p=\"%s:%u\" in=\"%s\">", ex( ing.files[ m.fileId ] ).c_str(), m.line, e ? ex( e->name ).c_str() : "" );
+                const AstMatch&         m  = ms[ hitIndex ];
+                const Symbol*           e  = enclosing( m.fileId, m.startByte );
+                const std::string_view  rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
+                std::printf( "<m p=\"%s:%u\" in=\"%s\">", ex( rp ).c_str(), m.line, e ? ex( e->name ).c_str() : "" );
                 emitEscaped( m.text );
                 std::printf( "</m>" );
             }
@@ -11569,15 +11736,15 @@ std::optional<int> runLint( const MainDispatch& d )
             // exact position (immediately after shown=) so the two are attribute-for-attribute identical.
             // Distinct from findings_capped= below, which is rule 4's FLOOR marker on the total itself.
             const unsigned isLintCapped = unsigned( shownCount < outs.size() );
-            std::printf( "<lint findings=\"%zu\" shown=\"%zu\" capped=\"%u\" total=\"%zu\" has_more=\"%u\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"%s%s%s>",
+            std::printf( "<lint findings=\"%zu\" shown=\"%zu\" capped=\"%u\" total=\"%zu\" has_more=\"%u\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"%s%s%s%s>",
                          outs.size(), shownCount, isLintCapped, outs.size(), hasMore ? 1u : 0u, nextOffset,
                          cfg.pageOffset > 0 ? cfg.pageOffset : 0, cfg.pageLimit > 0 ? cfg.pageLimit : 0,
-                         anyRuleCapped ? " findings_capped=\"1\"" : "", heatJoinedAttr.c_str(), lintRootExtra.c_str() );
+                         anyRuleCapped ? " findings_capped=\"1\"" : "", heatJoinedAttr.c_str(), lintRootExtra.c_str(), lintRootAttr.c_str() );
         }
         else
         {
-            std::printf( "<lint findings=\"%zu\"%s%s%s>", outs.size(), anyRuleCapped ? " findings_capped=\"1\"" : "",
-                         heatJoinedAttr.c_str(), lintRootExtra.c_str() );
+            std::printf( "<lint findings=\"%zu\"%s%s%s%s>", outs.size(), anyRuleCapped ? " findings_capped=\"1\"" : "",
+                         heatJoinedAttr.c_str(), lintRootExtra.c_str(), lintRootAttr.c_str() );
         }
         if( cfg.lint )
         { // built-in per-rule tally (order → deterministic)
@@ -11620,16 +11787,17 @@ std::optional<int> runLint( const MainDispatch& d )
         }
         for( std::size_t findingIndex = lintPage.begin; findingIndex < lintPage.end; ++findingIndex )
         {
-            const LintOut& m = outs[ findingIndex ];
-            const Symbol* e = enclosing( m.fileId, m.startByte );
+            const LintOut&          m  = outs[ findingIndex ];
+            const Symbol*           e  = enclosing( m.fileId, m.startByte );
+            const std::string_view  rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
             if( m.sev.empty() )
             { // built-in finding — unchanged shape (no sev=)
-                std::printf( "<f rule=\"%s\" p=\"%s:%u\" in=\"%s\"%s>", ex( m.rule ).c_str(), ex( ing.files[ m.fileId ] ).c_str(), m.line, e ? ex( e->name ).c_str() : "",
+                std::printf( "<f rule=\"%s\" p=\"%s:%u\" in=\"%s\"%s>", ex( m.rule ).c_str(), ex( rp ).c_str(), m.line, e ? ex( e->name ).c_str() : "",
                              heatByFinding.empty() ? "" : heatByFinding[ findingIndex ].c_str() );
             }
             else
             { // user finding — carries sev=
-                std::printf( "<f rule=\"%s\" sev=\"%s\" p=\"%s:%u\" in=\"%s\"%s>", ex( m.rule ).c_str(), ex( m.sev ).c_str(), ex( ing.files[ m.fileId ] ).c_str(), m.line, e ? ex( e->name ).c_str() : "",
+                std::printf( "<f rule=\"%s\" sev=\"%s\" p=\"%s:%u\" in=\"%s\"%s>", ex( m.rule ).c_str(), ex( m.sev ).c_str(), ex( rp ).c_str(), m.line, e ? ex( e->name ).c_str() : "",
                              heatByFinding.empty() ? "" : heatByFinding[ findingIndex ].c_str() );
             }
             emitEscaped( m.text );
@@ -11652,6 +11820,9 @@ std::optional<int> runAround( const MainDispatch& d )
     const std::vector<std::uint8_t>*  testedPtr    = d.testedPtr;
     const std::vector<std::uint32_t>* lcom4Ptr     = d.lcom4Ptr;
     const std::vector<std::uint32_t>* ampPtr       = d.ampPtr;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses.
+    const bool             aroundSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string_view aroundRootArg    = aroundSingleRoot ? cfg.roots[0] : std::string_view();
 
     // --around=SYMBOL: emit a focused ego-graph pack (bounded k-hop neighbourhood) instead of the
     // whole-repo map — "give me the context centered on THIS symbol".
@@ -11703,7 +11874,7 @@ std::optional<int> runAround( const MainDispatch& d )
             std::fputs( "<ctx>", stdout );
         }
 
-        serialize( stdout, ing, rank, g.outOff, g.outTargets, int( eg.nodes.size() ), cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, false, g.outProv.empty() ? nullptr : &g.outProv, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, /*autoOrder=*/false, /*outEstTokens=*/nullptr, aroundCompose.tokens + aroundRoutes.tokens + wrap.tokens );
+        serialize( stdout, ing, rank, g.outOff, g.outTargets, int( eg.nodes.size() ), cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, false, g.outProv.empty() ? nullptr : &g.outProv, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, /*autoOrder=*/false, /*outEstTokens=*/nullptr, aroundCompose.tokens + aroundRoutes.tokens + wrap.tokens, /*ann=*/{}, /*statsFirstScreen=*/false, aroundRootArg );
 
         if( !g.composeEdges.empty() )
         {
@@ -11960,6 +12131,11 @@ int runDefaultMap( const MainDispatch& d )
     const std::vector<char>*          impurePtr    = d.impurePtr;
     RedactCounts*                     redactPtr    = d.redactPtr;
     RedactCounts&                     redactCounts = d.redactCounts;
+    // R-E (2026-08-17 harvest): the SAME single-root condition emitGrepReport uses, so the default map's
+    // root="…" and --grep's cannot diverge on when it appears. Multi-root already carries its own
+    // roots=/<root label=…> disclosure inside serialize() and is untouched (rootArg stays empty there).
+    const bool             mapSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string_view mapRootArg    = mapSingleRoot ? cfg.roots[0] : std::string_view();
 
     std::vector<float> rank;
     std::string        queryRouteNote;   // leading routed comment for --query (empty under --no-route)
@@ -12155,7 +12331,7 @@ int runDefaultMap( const MainDispatch& d )
             DEGRADED_PATH_ALERT( "runDefaultMap: open_memstream failed for the --max-tokens fit probe — the map is emitted unshaped and its ceiling unverified" );
             return 0;
         }
-        serialize( m, ing, rank, g.outOff, g.outTargets, k, cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, cfg.stable, mapProvPtr, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, /*outEstTokens=*/nullptr, extraPayloadTokens, mapAnn );
+        serialize( m, ing, rank, g.outOff, g.outTargets, k, cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, cfg.stable, mapProvPtr, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, /*outEstTokens=*/nullptr, extraPayloadTokens, mapAnn, /*statsFirstScreen=*/false, mapRootArg );
         std::fflush( m );  std::fclose( m );  std::free( buf );
         return sz;
     };
@@ -12194,7 +12370,7 @@ int runDefaultMap( const MainDispatch& d )
         }
         serializeJson( m, ing, rank, g.outOff, g.outTargets, k, cfg.mostImportantLast, cfg.metrics,
                        fanInPtr, &g.ambOut, cfg.stable, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut,
-                       g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, /*outEstTokens=*/nullptr, mapProvPtr, mapAnn );
+                       g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, /*outEstTokens=*/nullptr, mapProvPtr, mapAnn, mapRootArg );
         std::fflush( m );
         std::fclose( m );
         std::free( buf );
@@ -12631,11 +12807,11 @@ int runDefaultMap( const MainDispatch& d )
         {
             serializeJson( out, ing, rank, g.outOff, g.outTargets, mapTopK, cfg.mostImportantLast, cfg.metrics,
                            fanInPtr, &g.ambOut, cfg.stable, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut,
-                           g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, &mapEstTokens, mapProvPtr, mapAnn );
+                           g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, &mapEstTokens, mapProvPtr, mapAnn, mapRootArg );
         }
         else
         {
-            serialize( out, ing, rank, g.outOff, g.outTargets, mapTopK, cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, cfg.stable, mapProvPtr, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, &mapEstTokens, payloadTokens, mapAnn );
+            serialize( out, ing, rank, g.outOff, g.outTargets, mapTopK, cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, cfg.stable, mapProvPtr, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, mapAutoOrder, &mapEstTokens, payloadTokens, mapAnn, /*statsFirstScreen=*/false, mapRootArg );
         }
     }
     else

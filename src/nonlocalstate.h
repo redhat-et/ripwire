@@ -904,7 +904,10 @@ inline constexpr const char* kNonLocalStateLegend =
     "for that local, which it does for typed and constructed locals only. Read a zero as none found, never "
     "as none exists, and read a row as a place to look rather than a verdict. -->";
 
-inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, int pageLimit, int pageOffset )
+// `rootPrefix`/`rootAttr` — R-E (2026-08-17 harvest), same convention writeContextRatioReport takes
+// (see contextratio.h).
+inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, int pageLimit, int pageOffset,
+                                     std::string_view rootPrefix = {}, const std::string& rootAttr = std::string() )
 {
     const Scan        scan  = computeNonLocalState( ing, g );
     const std::size_t total = scan.rows.size();
@@ -913,6 +916,11 @@ inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, in
 
     char disclosure[kPageDisclosureCap];
     pageDisclosure( disclosure, sizeof disclosure, shown, total, page.end, pageLimit, pageOffset, true );
+
+    const auto pathRel = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootPrefix.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
 
     std::fputs( kNonLocalStateLegend, stdout );
     std::printf( "<nonlocal_state cells=\"%zu\" functions=\"%zu\"%s%s", scan.cells.size(), total, disclosure,
@@ -933,7 +941,7 @@ inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, in
     {
         std::printf( " decls_capped=\"1\"" );
     }
-    std::printf( ">" );
+    std::printf( "%s>", rootAttr.c_str() );
 
     // Separate scratch buffers per concurrently-live view: escapeXml returns a VIEW into its `out`, so
     // reusing one buffer for two live strings invalidates the first (see readability.h's note).
@@ -942,7 +950,7 @@ inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, in
     {
         const Row&    row  = scan.rows[rowIndex];
         const Symbol& s    = ing.symbols[row.fn];
-        const std::string path( escapeXml( ing.files[s.fileId], escA ) );
+        const std::string path( escapeXml( pathRel( s.fileId ), escA ) );
         const std::string name( escapeXml( s.name, escB ) );
         const std::size_t cellsShown = std::min( row.cells.size(), kCellsPerRowCap );
 
@@ -960,13 +968,13 @@ inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, in
             const RowCell& rc   = row.cells[k];
             const Cell&    cell = scan.cells[rc.cell];
             const std::string cellName( escapeXml( cell.name, escC ) );
-            const std::string cellPath( escapeXml( ing.files[cell.fileId], escD ) );
+            const std::string cellPath( escapeXml( pathRel( cell.fileId ), escD ) );
             const char*       dir = rc.read && rc.write ? "rw" : ( rc.write ? "w" : "r" );
             std::printf( "<cell n=\"%s\" p=\"%s:%u\" dir=\"%s\"", cellName.c_str(), cellPath.c_str(), cell.line, dir );
             if( rc.direct )
             {
                 std::vector<char>  escSite;
-                const std::string  sitePath( escapeXml( ing.files[rc.siteFile], escSite ) );
+                const std::string  sitePath( escapeXml( pathRel( rc.siteFile ), escSite ) );
                 const char*        atDir = rc.directRead && rc.directWrite ? "rw" : ( rc.directWrite ? "w" : "r" );
                 std::printf( " at=\"%s:%u\" at_dir=\"%s\"", sitePath.c_str(), rc.siteLine, atDir );
             }

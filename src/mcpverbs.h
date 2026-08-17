@@ -847,8 +847,17 @@ inline std::string situationDiffJson( const std::string& root, const std::string
 
     const SituationFacts facts = computeSituationFacts( root, ing, ix.g, changed );
 
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= carries (sarif.h) — the
+    // CLI text twin (situ.h::writeSituation) states the SAME fact on its own leading "root: …" line.
+    const bool         situJSingleRoot = ing.realPaths.empty();
+    const std::string  situJRootPrefix = situJSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
+    const auto          situJPathRel   = [ & ]( std::uint32_t f ) -> std::string_view
+    {
+        return situJSingleRoot ? sarif::rootRelativeUri( ing.files[f], situJRootPrefix ) : std::string_view( ing.files[f] );
+    };
+
     const auto fileObj = [ & ]( std::uint32_t f ) -> std::string
-    { return std::string( "{\"file\":\"" ) + mcpdetail::jsonEscape( ing.files[f] ) + "\"}"; };
+    { return std::string( "{\"file\":\"" ) + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\"}"; };
 
     // §B6 M11: the run= hint index, from the SAME source --affected/--situ/--test-gate/--pr-context read
     // (testmap.h). runFieldJson is that header's JSON call shape, so "absent means NOT DERIVABLE" — the
@@ -856,7 +865,12 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     const TestRunnerIndex runners( ing );
     const auto            jsonEsc = []( std::string_view sv ) { return mcpdetail::jsonEscape( std::string( sv ) ); };
 
-    std::string out = "{\"changed_files\":[";
+    std::string out = "{";
+    if( situJSingleRoot )
+    {
+        out += "\"root\":\"" + mcpdetail::jsonEscape( root ) + "\",";
+    }
+    out += "\"changed_files\":[";
     {
         bool first = true;
         for( std::uint32_t f : facts.changed )
@@ -884,7 +898,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
                 out += ",";
             }
             first = false;
-            out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[ facts.blastRadius[i] ] )
+            out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( facts.blastRadius[i] ) ) )
                  + "\",\"dependent_symbols\":" + std::to_string( facts.blastDependents[i] ) + "}";
         }
     }
@@ -903,7 +917,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
                 out += ",";
             }
             first = false;
-            out += "{\"test\":\"" + mcpdetail::jsonEscape( ing.files[f] ) + "\"" + runFieldJson( runners, f, jsonEsc ) + "}";
+            out += "{\"test\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\"" + runFieldJson( runners, f, jsonEsc ) + "}";
         }
     }
 
@@ -918,7 +932,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
             }
             first = false;
             char d[ 16 ];  std::snprintf( d, sizeof( d ), "%.2f", deg );
-            out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[f] ) + "\",\"cochange_degree\":" + d + "}";
+            out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\",\"cochange_degree\":" + d + "}";
         }
     }
 
@@ -932,7 +946,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
                 out += ",";
             }
             first = false;
-            out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[f] ) + "\",\"score\":" + std::to_string( score ) + "}";
+            out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\",\"score\":" + std::to_string( score ) + "}";
         }
     }
 
