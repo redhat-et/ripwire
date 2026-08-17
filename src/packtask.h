@@ -595,6 +595,204 @@ inline RankingSection renderRankingWithFar( const IngestResult& ing, const Ranki
     return out;
 }
 
+// ── W2-K: budget-cliff smoothing ────────────────────────────────────────────────────────────────────────
+// E4's sweep found bodies_shown NON-monotonic in --token-budget (5 bodies at 4000, 2 at 4500, on ripwire-src,
+// reproduced on both a pre- and post-harvest binary). The orchestrator's kill clause required a SHARED
+// mechanism, not a corpus artifact, before funding a fix — measured here (RW_W2K_DEBUG instrumentation,
+// discarded): at budgetTokens=3500..5000 on this exact task, ranking is "full" (never capped: <sigs> never
+// truncates) and its unspent share (`carry`, rolled into bodies) is STRICTLY INCREASING the whole way
+// (244 -> 669 -> 1093 -> 1518), so bodiesBudget itself is ALSO strictly increasing (2112 -> 2856 -> 3598 ->
+// 4342) — the cross-section "ranking eats its own share" theory in exp-e4.md does not hold for this cliff.
+// The real cause is the one packBodies' own §H5 comment already names and defends as NOT a defect: bodies
+// fill top-rank-first via a STREAMING SKIP-AND-CONTINUE walk (admit a candidate if it fits the budget
+// remaining so far, else skip and try the next), and that walk is providably not monotone in its own total
+// budget — a bigger budget can newly admit ONE large, high-rank candidate that then starves several smaller,
+// lower-rank ones the smaller budget had room for. Worked counter-example (rank order, fixed costs):
+// costs=[10,3,3,3,3,3], budget=9 -> skip the 10, admit three 3's, count=3; budget=10 -> admit the 10 (just
+// fits), remaining=0, count=1. Bigger budget, fewer bodies, with NOTHING about ranking involved.
+// §H5's own conclusion — "rank priority is the retrieval contract, count is not a quality measure" — is still
+// right for a SINGLE evaluation, and this fix does not relitigate it: the top-ranked candidate is still
+// preferred whenever a choice exists. What changes is WHICH admission strategy earns that preference. A
+// streaming walk is one strategy; it happens to not be monotone. Below is a DIFFERENT strategy — maximize the
+// COUNT of candidates admitted within the budget, tie-broken toward the higher-ranked ones — that keeps the
+// same "prefer top rank" spirit but IS monotone by construction: the set of budgets for which a given subset
+// fits only grows as the budget grows, so the best COUNT achievable over that growing set cannot fall.
+// Bounded by kPackTaskBodyCandidates (today 6), so brute-force 2^N subset enumeration is exact and cheap —
+// no heuristic, no new tuned constant. Scoped entirely to --pack-task's OWN pre-selection of which of its
+// already-ranked candidates to hand packBodies: packBodies' general per-call streaming contract — the one
+// EVERY OTHER caller (--expand, MCP `exemplar`, --detail, --around) relies on — is untouched and
+// byte-identical; only the LIST this one caller passes it changes.
+struct MonotoneRoll { std::size_t charge = 0, carry = 0; };
+
+// A section's unspent SHARE only rolls FORWARD to the next section when the section was not itself
+// budget-constrained (kept every one of its — always budget-INDEPENDENT — candidates): only then is its
+// actual consumed size a fixed constant as the budget grows, so `granted - consumed` is provably
+// non-decreasing. When the section WAS constrained, its actual consumed bytes can wobble with the granted
+// share's own coarse admission/trim granularity (the same class of effect the bodies fix above targets, just
+// smaller stakes for the strict-prefix callers/notes/tests sections) — so a constrained section is charged
+// its WHOLE granted share and donates NOTHING forward: conservative, never negative, never shrinking.
+inline MonotoneRoll monotoneRoll( bool sectionCapped, std::size_t granted, std::size_t consumed )
+{
+    if( sectionCapped )
+    {
+        return { granted, 0 };
+    }
+    return { consumed, granted > consumed ? granted - consumed : 0 };
+}
+
+// the exact bytes packBodies would emit for ONE node alone, minus the fixed <bodies ...></bodies> wrapper
+// (`wrapperLen`, measured once by the caller) — i.e. this node's own share of `children`. Called under the
+// caller's RedactTallyFreeze, so a probe never bills the redaction tally a second time (§B10.2's rule).
+inline std::size_t probeBodyCost( const IngestResult& ing, const Graph& g, NodeId id, bool compress,
+                                  RedactCounts* redact, std::size_t wrapperLen )
+{
+    EmittedBodies     dummy;
+    const std::string one = packTaskRenderToString( [ & ]( std::FILE* m )
+    {
+        packBodies( m, ing, { id }, SIZE_MAX, g.outOff, g.outTargets, compress, redact, nullptr, nullptr, &dummy );
+    } );
+    return one.size() > wrapperLen ? one.size() - wrapperLen : 0;
+}
+
+// a mask's "keep the higher ranks" tie-break score: bit i (rank i, 0 = top) contributes a MORE significant
+// bit the LOWER i is, so among equal-count masks the one preserving more of the front of the rank order
+// always compares higher — a total order, so the tie-break is deterministic.
+inline std::uint32_t bodyMaskRankScore( std::uint32_t mask, std::size_t n )
+{
+    std::uint32_t score = 0;
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        if( mask & ( 1u << i ) )
+        {
+            score |= ( 1u << ( n - 1 - i ) );
+        }
+    }
+    return score;
+}
+
+// packBodies only ever sees the pre-selected subset (selectMonotoneBodySubset, below), so its own <bodies
+// shown=/total=/capped=> wrapper and its per-item "<!-- body omitted (over budget) -->" markers describe
+// THAT smaller request, not the true candidate set (bodyIds) — total= undercounts and capped="0" is a lie
+// whenever the pre-selection itself dropped a candidate packBodies never even saw. Restated here from the
+// TRUE candidate list against `emitted.kept` (what actually got shown, not the intended selection — robust
+// to any probe/render mismatch), so §H5's per-item disclosure ("the XML names each over-budget skip in a
+// comment; the JSON lists bodies_omitted") still holds for candidates OUR pre-selection dropped, not only
+// ones packBodies itself would have dropped. A no-op (bodiesXml returned unchanged) when every candidate
+// was shown — the common case once the budget clears the whole set.
+template<class EscFn>
+inline std::string restatePackTaskBodiesWrapper( const IngestResult& ing, const std::string& bodiesXml,
+                                                  const std::vector<NodeId>& bodyIds, EmittedBodies& emitted, EscFn&& ex )
+{
+    if( bodiesXml.empty() || emitted.kept.size() >= bodyIds.size() )
+    {
+        return bodiesXml;
+    }
+    std::vector<char> keptMark( ing.symbols.size(), 0 );
+    for( const EmittedBody& b : emitted.kept )
+    {
+        if( b.id < keptMark.size() )
+        {
+            keptMark[b.id] = 1;
+        }
+    }
+    std::string markers;
+    for( NodeId id : bodyIds )
+    {
+        if( id < keptMark.size() && !keptMark[id] )
+        {
+            markers += "<!-- body omitted (over budget): ";
+            markers += ex( xmlCommentText( ing.symbols[id].name ) );
+            markers += " -->";
+            emitted.omitted.push_back( id );
+        }
+    }
+    const std::size_t openEnd = bodiesXml.find( '>' );
+    const bool         closesRight = bodiesXml.size() >= 9 && bodiesXml.compare( bodiesXml.size() - 9, 9, "</bodies>" ) == 0;
+    if( openEnd == std::string::npos || !closesRight )
+    {
+        DEGRADED_PATH_ALERT( "pack-task: <bodies> did not have the expected open/close shape — restated omissions dropped" );
+        return bodiesXml;
+    }
+    char open[ 96 ];
+    std::snprintf( open, sizeof( open ), "<bodies shown=\"%zu\" total=\"%zu\" capped=\"1\">", emitted.kept.size(), bodyIds.size() );
+    std::string out = open;
+    out += bodiesXml.substr( openEnd + 1, bodiesXml.size() - 9 - ( openEnd + 1 ) );
+    out += markers;
+    out += "</bodies>";
+    return out;
+}
+
+// THE FIX: the admissible subset of `bodyIds` (rank order, already <= kPackTaskBodyCandidates) that
+// maximizes COUNT within `bodiesBudget`, tie-broken toward keeping the higher-ranked members and then toward
+// the smaller total cost (more carry left for callers). See the section comment above for why this — not
+// packBodies' own streaming admission — is what makes bodies_shown monotone in budgetTokens.
+inline std::vector<NodeId> selectMonotoneBodySubset( const IngestResult& ing, const Graph& g,
+                                                      const std::vector<NodeId>& bodyIds, std::size_t bodiesBudget,
+                                                      bool compress, RedactCounts* redact )
+{
+    if( bodyIds.empty() )
+    {
+        return {};
+    }
+    const std::size_t        n = bodyIds.size();   // kPackTaskBodyCandidates today — small by construction
+    std::vector<std::size_t> cost( n, 0 );
+    std::size_t               wrapperLen = 0;
+    {
+        const RedactTallyFreeze freeze( redact );   // every probe below is off the books
+        EmittedBodies            dummy;
+        wrapperLen = packTaskRenderToString( [ & ]( std::FILE* m )
+        {
+            packBodies( m, ing, {}, SIZE_MAX, g.outOff, g.outTargets, compress, redact, nullptr, nullptr, &dummy );
+        } ).size();
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            cost[i] = probeBodyCost( ing, g, bodyIds[i], compress, redact, wrapperLen );
+        }
+    }
+    // reserve the measured wrapper cost PLUS kPackTaskWrapReserve's existing generous margin (digit-width
+    // slop, escaping slop) — the same named constant packTaskListSection already reserves for its own
+    // shown=/total=/capped= wrapper, reused here rather than inventing a new one.
+    const std::size_t pool = bodiesBudget > wrapperLen + kPackTaskWrapReserve ? bodiesBudget - wrapperLen - kPackTaskWrapReserve : 0;
+
+    std::uint32_t bestMask = 0, bestScore = 0;
+    std::size_t   bestCount = 0, bestCost = SIZE_MAX;
+    for( std::uint32_t mask = 0; mask < ( 1u << n ); ++mask )
+    {
+        std::size_t count = 0, total = 0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            if( mask & ( 1u << i ) )
+            {
+                ++count;
+                total += cost[i];
+            }
+        }
+        if( total > pool )
+        {
+            continue;
+        }
+        const std::uint32_t score  = bodyMaskRankScore( mask, n );
+        const bool           better = count > bestCount
+                                    || ( count == bestCount && score > bestScore )
+                                    || ( count == bestCount && score == bestScore && total < bestCost );
+        if( better )
+        {
+            bestMask = mask;  bestScore = score;  bestCount = count;  bestCost = total;
+        }
+    }
+
+    std::vector<NodeId> chosen;
+    chosen.reserve( bestCount );
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        if( bestMask & ( 1u << i ) )
+        {
+            chosen.push_back( bodyIds[i] );
+        }
+    }
+    return chosen;
+}
+
 // THE bundle assembler: builds the fixed 5-section budget-shared bundle (ranking > bodies > callers > notes >
 // tests) for `task`, given an already-computed LensRanking, and returns the whole <ctx>…</ctx> XML document
 // as a string — never touches stdout (the caller owns the sink: the CLI fwrites it, MCP wraps it as a
@@ -746,8 +944,12 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     const bool          sigsCapped = rankOut.capped;
     const std::size_t   farTotal   = rankOut.farTotal;
     const std::size_t   farKept    = rankOut.farKept;
-    remaining = remaining > sigsStr.size() ? remaining - sigsStr.size() : 0;
-    std::size_t carry = sigsBudget > sigsStr.size() ? sigsBudget - sigsStr.size() : 0;   // ranking's unspent share (an overshoot never goes negative)
+    // §W2-K: monotoneRoll (see its own comment) — eligibleIds never depends on budgetTokens, so when ranking
+    // is NOT capped its consumed bytes are a fixed constant and its unspent share safely rolls forward; when
+    // capped, the whole granted share is charged and nothing rolls forward.
+    const MonotoneRoll sigsRoll = monotoneRoll( sigsCapped, sigsBudget, sigsStr.size() );
+    remaining = remaining > sigsRoll.charge ? remaining - sigsRoll.charge : 0;
+    std::size_t carry = sigsRoll.carry;
 
     // ── section 2 — full bodies of the top-K ranked symbols (K adapts: packBodies self-trims to `remaining`) ─
     // §H5: `emittedBodies` is packBodies' own report of what it emitted. It is the ONE answer to "which
@@ -761,15 +963,36 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     std::size_t        bodiesKept  = 0;
     if( !bodyIds.empty() && bodiesBudget >= kPackTaskSectionFloor )
     {
+        // §W2-K: pre-select the max-count admissible subset (selectMonotoneBodySubset, above) instead of
+        // handing packBodies the full candidate list — this is what makes bodies_shown monotone. An empty
+        // selection (nothing whole fits, even the cheapest) does NOT fall back to the full candidate list —
+        // that would hand the decision back to packBodies' own streaming walk over MULTIPLE candidates,
+        // reintroducing the exact non-monotonicity this fix removes (measured: it did, on memgraph, at the
+        // 900/1200/1600 floor). Instead it renders the single top-ranked candidate ALONE, so packBodies'
+        // truncate-the-first-oversized-one floor still applies (never literally nothing when a partial view
+        // is possible) — and, rendered alone, that floor is itself flat-then-jumps (always exactly 1 shown
+        // for any bodiesBudget >= kPackTaskSectionFloor), never a source of a second cliff.
+        std::vector<NodeId> chosenBodyIds = selectMonotoneBodySubset( ing, g, bodyIds, bodiesBudget, in.compress, in.redact );
+        if( chosenBodyIds.empty() )
+        {
+            chosenBodyIds.push_back( bodyIds[0] );
+        }
+        const std::vector<NodeId>& renderIds = chosenBodyIds;
         bodiesStr  = packTaskRenderToString( [ & ]( std::FILE* m )
         {
-            packBodies( m, ing, bodyIds, bodiesBudget, g.outOff, g.outTargets, in.compress, in.redact,
+            packBodies( m, ing, renderIds, bodiesBudget, g.outOff, g.outTargets, in.compress, in.redact,
                         /*ranges=*/nullptr, /*noteIndex=*/nullptr, &emittedBodies );
         } );
         bodiesKept = emittedBodies.kept.size();
+        // §W2-K: restate total=/capped= and splice in omission markers for whatever OUR pre-selection
+        // dropped that packBodies itself never saw — see restatePackTaskBodiesWrapper's own comment.
+        bodiesStr  = restatePackTaskBodiesWrapper( ing, bodiesStr, bodyIds, emittedBodies, ex );
     }
-    remaining = remaining > bodiesStr.size() ? remaining - bodiesStr.size() : 0;
-    carry     = bodiesBudget > bodiesStr.size() ? bodiesBudget - bodiesStr.size() : 0;   // rolls forward again — nothing spent here reaches section 3 otherwise
+    // §W2-K: bodyIds (the candidate SET) never depends on budgetTokens either, so the same monotoneRoll
+    // treatment applies at this handoff too.
+    const MonotoneRoll bodiesRoll = monotoneRoll( bodiesKept < bodiesTotal, bodiesBudget, bodiesStr.size() );
+    remaining = remaining > bodiesRoll.charge ? remaining - bodiesRoll.charge : 0;
+    carry     = bodiesRoll.carry;   // rolls forward again — nothing spent here reaches section 3 otherwise
 
     // ── section 3 — d1: the anchors' 1-hop callers+callees (computed above), each shown with its OWN one-line
     //    SIGNATURE (R2: d1's detail tier) + its declaration site — never a full body (that stays d0-only).
@@ -782,8 +1005,10 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     const std::string&    callersStr   = callers.xml;
     const std::size_t     callersTotal = callerRows.size();
     const std::size_t     callersKept  = callers.kept;
-    carry = callersBudget > callersStr.size() ? callersBudget - callersStr.size() : 0;   // rolls into notes next
-    remaining = remaining > callersStr.size() ? remaining - callersStr.size() : 0;
+    // §W2-K: callerRows is fixed by the graph (d1), not by budgetTokens — same monotoneRoll treatment.
+    const MonotoneRoll callersRoll = monotoneRoll( callersKept < callersTotal, callersBudget, callersStr.size() );
+    carry     = callersRoll.carry;   // rolls into notes next
+    remaining = remaining > callersRoll.charge ? remaining - callersRoll.charge : 0;
 
     // ── section 4 — field notes on the top-K symbols + their files (L3; inert when in.notes is null) ────────
     std::vector<std::string> noteEntries;
@@ -849,7 +1074,10 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     const std::string&    notesStr     = notes.xml;
     const std::size_t     notesTotal   = noteEntries.size();
     const std::size_t     notesKept    = notes.kept;
-    remaining = remaining > notesStr.size() ? remaining - notesStr.size() : 0;   // tests (last) takes whatever `remaining` still holds — no explicit carry needed past here
+    // §W2-K: noteEntries is fixed by bodyIds+in.notes, not by budgetTokens — same monotoneRoll treatment,
+    // so `remaining` (which tests takes directly, no explicit carry var) stays monotone into section 5 too.
+    const MonotoneRoll notesRoll = monotoneRoll( notesKept < notesTotal, notesBudget, notesStr.size() );
+    remaining = remaining > notesRoll.charge ? remaining - notesRoll.charge : 0;   // tests (last) takes whatever `remaining` still holds
 
     // ── section 5 — tests_to_run for the top files (the --affected mining: tests that transitively reach) ───
     std::vector<std::string>   testRows;
