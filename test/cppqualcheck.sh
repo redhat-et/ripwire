@@ -179,9 +179,11 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # reads the cached blob back through the same canonical helper — both sites re-read before this re-pin.
 # 9 -> 10 2026-08-15 (G3, report-ugrep §F2): grepApplyBooleanTerms' own ensureFileLoaded (search.h) re-reads
 # a candidate file's bytes to test --and=/--not= terms — a THIRD search.h call site alongside grepEnrich's.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 10 ] \
-    && ok "repo: --uses=readWholeFile count=10 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 10"
+# 10 -> 11 2026-08-17 (§R-J, Wave-2 harvest): grepCollectAux (search.h) reads each unsupported-ext/
+# text-looking candidate's bytes to scan it for the pattern — a FOURTH search.h call site.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 11 ] \
+    && ok "repo: --uses=readWholeFile count=11 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 11"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"
