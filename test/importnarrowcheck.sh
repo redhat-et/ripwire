@@ -75,10 +75,12 @@ grep -q 'n="callBoth" amb="1"' "$TMP/map" \
     || { no "callBoth() is not amb=1 (negative control 2 failed — Rule 3 wrongly narrowed a tie)"; grep -o 'n="callBoth"[^>]*' "$TMP/map" | head; }
 
 # ── 6) under-link guard: the controls RESOLVE to BOTH distinct helper defs (a.h + b.h) — not dropped, not
-#       cross-linked. Each stays split across exactly the two real defs. ──────────────────────────────────────
+#       cross-linked. Each stays split across exactly the two real defs. R-E (2026-08-17 harvest:
+#       root-relative paths for ALL verbs) — p= is relative to $FIX itself, so "importnarrowfix/" never
+#       appears; match the bare "[ab].h:N" shape directly. ──────────────────────────────────────
 for c in callNeither callBoth; do
     cc="$( "$BIN" "$FIX" --callees=$c --no-cache 2>/dev/null )"
-    nt="$( printf '%s' "$cc" | grep -o 'n="helper"[^>]*importnarrowfix/[ab].h:[0-9]*' | sort -u | wc -l | tr -d ' ' )"
+    nt="$( printf '%s' "$cc" | grep -o 'n="helper"[^>]*[ab]\.h:[0-9]*' | sort -u | wc -l | tr -d ' ' )"
     [ "$nt" = "2" ] && ok "control $c() keeps BOTH helper edges to distinct defs ($nt targets)" \
                     || { no "control $c() has $nt distinct helper targets (want 2: a.h + b.h)"; printf '%s\n' "$cc" | tr '>' '\n' | grep helper; }
 done

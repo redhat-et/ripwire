@@ -30,9 +30,14 @@
 #      Square keeps <iface n="Shape">, and its two same-named Circle impls are distinguishable by p=.
 #      (Positive case is repo-real: the filter must pass a hit through a 700-file corpus, not just a
 #      fixture-sized one.)
-#   5) the STANDALONE verb is untouched: --lego=Shape on test/legofix is byte-identical to the
-#      pre-change binary's output. This one embedded golden is deliberate — the standalone form is the
-#      REFERENCE the bundle is now required to match, so a change to it is exactly what must be noticed.
+#   5) the STANDALONE verb's p= identity is untouched by the §P3 bundle-scoping fix: --lego=Shape on
+#      test/legofix carries the same iface/impl/method identity as before, just root-relative p= (RE-
+#      PINNED "test/legofix/shapes.h" → "shapes.h" ×3, R-E 2026-08-17 harvest: root-relative paths for
+#      ALL verbs — --lego threads the same rootPrefix as every other verb this lane touched, and a
+#      single-root run root-relativizes regardless of whether the root arg was relative or absolute).
+#      This one embedded golden is deliberate — the standalone form is the REFERENCE the bundle is now
+#      required to match, so a change to it beyond the expected root-relative reshaping is exactly what
+#      must be noticed.
 #   6) determinism (twice → byte-identical) + well-formed XML.
 #   7) mutation-check: an assertion known to be false must FAIL (the gate discriminates).
 #
@@ -139,11 +144,11 @@ else
     ok "only $NCIRCLEROWS Circle row in this bundle (nothing to disambiguate)"
 fi
 
-# ── 5) the STANDALONE verb is byte-identical to the pre-change binary ────────────────────────────────
+# ── 5) the STANDALONE verb is byte-identical to the pre-change (post-root-relative) reference ──────────
 "$BIN" test/legofix --no-cache --lego=Shape >"$TMP/standalone" 2>/dev/null
-printf '%s' '<ctx><lego><iface n="Shape" p="test/legofix/shapes.h" implementors="2"><m pure="1">virtual double area() const = 0</m><m pure="1">virtual void draw() const = 0</m><impl n="Circle" p="test/legofix/shapes.h"/><impl n="Square" p="test/legofix/shapes.h"/></iface></lego></ctx>' >"$TMP/standalone.golden"
+printf '%s' '<ctx><lego><iface n="Shape" p="shapes.h" implementors="2"><m pure="1">virtual double area() const = 0</m><m pure="1">virtual void draw() const = 0</m><impl n="Circle" p="shapes.h"/><impl n="Square" p="shapes.h"/></iface></lego></ctx>' >"$TMP/standalone.golden"
 cmp -s "$TMP/standalone" "$TMP/standalone.golden" \
-    && ok "--lego=Shape standalone byte-identical to the pre-change output (bundle-only change)" \
+    && ok "--lego=Shape standalone byte-identical to the reference output (bundle-only change)" \
     || no "--lego=Shape standalone CHANGED — the §P3 fix must touch the bundle embedding only: $( cat "$TMP/standalone" )"
 
 # ── 6) determinism + well-formed XML ─────────────────────────────────────────────────────────────────
