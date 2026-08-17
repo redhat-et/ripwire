@@ -1439,7 +1439,7 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     // one. It was NOT before: this copy carried an abridged paging clause with no limit="0" definition —
     // exactly the §B4 echo-site divergence the shared-constant rule exists to stop.
     std::fprintf( mem, "%s%s. %s%s-->", kImpactLegendOpen, kPageRaiseCapClause, graphCountDisclosure().c_str(),
-                  prConvergeLegend( prD ).c_str() );
+                  renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
     // "is it safe to change X?" reads as the WHOLE blast radius when it can be 3% of it. Same attributes,
     // same meaning as the CLI --impact — the two surfaces must not diverge on an honesty marker.
@@ -1451,7 +1451,7 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     std::fprintf( mem, "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s>",
                   ex( symbol ).c_str(), seeds.size(), reach.size(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
-                  kGraphCountFloorAttrXml, prConvergeAttrXml( prD ).c_str() );
+                  kGraphCountFloorAttrXml, renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str() );
     for( std::size_t i = ipw.begin; i < ipw.end; ++i )
     { const Symbol& s = ing.symbols[ show[i] ]; std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
     std::fprintf( mem, "</impact>" );
