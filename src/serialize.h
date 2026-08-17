@@ -12,6 +12,8 @@
 #include "infra/jsonesc.h"     // F9: jsonesc::utf8SeqLen — the canonical UTF-8-sequence-length core (was duplicated here)
 #include "notes.h"       // L3: field-notes NoteIndex — the retrieval-time surfacing lookup (INERT when null)
 #include "pageview.h"    // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract (packDeps)
+#include "sarif.h"       // R-E (2026-08-17): rootRelativeUri/rootPrefixOf — the same root= single-root-only
+                          // strip --grep's emitGrepReport uses, reused here so the two verbs cannot diverge
 
 #include <algorithm>
 #include <cstdint>
@@ -1339,12 +1341,26 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                        // no denominator and no order marker until the last line. The stanza is emitted ONCE either
                        // way (never both places), so no count is stated twice. Only the MCP analyze front door
                        // passes true; every CLI caller keeps the default and stays byte-identical.
-                       bool statsFirstScreen = false )
+                       bool statsFirstScreen = false,
+                       // R-E (2026-08-17 harvest, report-memgraph §F6 seconded): the run's OWN root argument,
+                       // single-root callers only (empty ⇒ multi-root — already carries the roots=/<root
+                       // label=…> disclosure above and stays untouched — or a caller that never passes one, e.g.
+                       // a pure sizing pass, where a root= attribute would add bytes nothing reads). Same fact
+                       // --grep's root= states, same helper (sarif.h's rootPrefixOf/rootRelativeUri) — the two
+                       // verbs must not diverge on what "root-relative" means.
+                       std::string_view rootArg = {} )
 {
     const std::size_t* changedCount = ann.changedCount;
     const std::string* mapAtStamp   = ann.atStamp;
     const std::string* churnWindow  = ann.churnWindow;
     const std::size_t S = ing.symbols.size();
+    // R-E: normalize once, reuse at every <f p=…> row below — rootPrefixOf just strips a trailing '/', so
+    // this is O(1) work the loop below would otherwise repeat per row.
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
 
     // rank order: (rank desc, id asc) — the id tie-break makes the top-K deterministic.
     std::vector<NodeId> order( S );
@@ -1576,6 +1592,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         // FIRST — the `<r at="<sha>` byte sequence gitstampcheck.sh pins is unchanged.
         h += "<r";
         if( mapAtStamp != nullptr && !mapAtStamp->empty() ) { h += " at=\"";  h += *mapAtStamp;  h += "\""; }
+        // R-E: after at= (so gitstampcheck's `<r at="<sha>` byte sequence is unmoved), same slot --grep uses
+        // right after its own identifying attributes — the crawl root every <f p=…> below is now RELATIVE to.
+        if( !rootArg.empty() ) { h += " root=\"";  h += escapeXml( rootArg, esc );  h += "\""; }
         // §A9.6: after at= (so gitstampcheck's `<r at="<sha>` byte sequence is unmoved) — see MapAnnotations.
         if( churnWindow != nullptr ) { h += " rank_by=\"";  h += ann.churnRankLabel;  h += "\" window=\"";  h += escapeXml( *churnWindow, esc );  h += "\""; }
         // §B2.1: the windowless rankers stamp the same attribute in the same slot. `else if` states the
@@ -1632,7 +1651,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     }
     for( std::uint32_t f : fileOrder )
     {
-        w.write( "<f p=\"" );  w.write( escapeXml( ing.files[f], esc ) );  w.write( "\"" );
+        w.write( "<f p=\"" );  w.write( escapeXml( pathRel( f ), esc ) );  w.write( "\"" );
         if( const char* fl = builtinLayer( ing.files[f] ); *fl ) { w.write( " layer=\"" );  w.write( fl );  w.write( "\"" ); }   // P3
         w.write( ">" );
 
@@ -5099,6 +5118,9 @@ struct JsonMapHeader
     const std::vector<std::uint8_t>* outProv;      // nullptr ⇒ no precise= (nothing was measured)
     const MapAnnotations*            ann;          // §B1.2: how THIS map was produced — the same at/rank_by/window
                                                    // stamp the XML `<r>` element carries. nullptr ⇒ no stamp emitted.
+    std::string_view                 rootArg;      // R-E: the JSON twin of the XML `<r root="…">` — empty for
+                                                    // multi-root (its own roots_count/roots table below already
+                                                    // names every root) or a caller that never passes one.
 };
 
 // §B1.2: the PROVENANCE stamp — the JSON half of the XML `<r at= rank_by= window=>` attributes. Without it
@@ -5251,6 +5273,15 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     w.write( "\"order\":" );
     writeJsonStr( w, h.orderAttr, esc );
 
+    // R-E (2026-08-17 harvest): the JSON twin of the XML `<r root="…">` — same condition (single-root only,
+    // multi-root's own roots_count/roots table below already names every root), right after order= like the
+    // XML sibling places root= right after its own leading attributes.
+    if( !h.rootArg.empty() )
+    {
+        w.write( ",\"root\":" );
+        writeJsonStr( w, h.rootArg, esc );
+    }
+
     writeJsonMapStamp( w, esc, h.ann );   // §B1.2 — see its header
 
     // §A4b: the multi-root prologue (A13) — `roots_count` joins the header gauges and a
@@ -5312,10 +5343,17 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                            const std::vector<std::string>* bind,
                            bool autoOrder, std::size_t* outEstTokens,
                            const std::vector<std::uint8_t>* outProv = nullptr,
-                           const MapAnnotations& ann = {} )     // §B1.2: same value the XML serialize() takes;
+                           const MapAnnotations& ann = {},      // §B1.2: same value the XML serialize() takes;
                                                                 // defaulted ⇒ every field null ⇒ no stamp keys.
+                           std::string_view rootArg = {} )      // R-E: same single-root-only root argument the
+                                                                 // XML serialize() takes (see its own comment)
 {
     const std::size_t S = ing.symbols.size();
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
 
     std::vector<NodeId> order( S );
     for( NodeId i = 0; i < S; ++i )
@@ -5404,7 +5442,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     {
         JsonWriter hw( dst );
         writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, S, outTargets.size(), keep, estTokens, ambTotal,
-                                                    unresolvedTotal, orderAttr, outProv, &ann } );
+                                                    unresolvedTotal, orderAttr, outProv, &ann, rootArg } );
         hw.write( ",\"r\":[" );
     };
 
@@ -5424,7 +5462,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
             w.write( "," );
         }
         firstFile = false;
-        w.write( "{\"p\":" );  writeJsonStr( w, ing.files[f], esc );
+        w.write( "{\"p\":" );  writeJsonStr( w, pathRel( f ), esc );
         if( const char* fl = builtinLayer( ing.files[f] ); *fl ) { w.write( ",\"layer\":" );  writeJsonStr( w, fl, esc ); }
         w.write( ",\"s\":[" );
 

@@ -708,7 +708,18 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
 
     // multi-root §7: ` root="<label>"` on the header, or "" for a single-root run (⇒ byte-identical header).
-    const std::string rootAttr = rootLabel.empty() ? std::string() : ( std::string( " root=\"" ) + ex( rootLabel ) + "\"" );
+    // R-E (2026-08-17 harvest): a single-root run now carries its OWN root= — the crawl root every <file p=…>/
+    // <f p=…>/<caller p=…>/<partner p=…> below is RELATIVE to, same attribute name/shape --grep uses — instead
+    // of the ` root="<label>"` multi-root spells, which is a DIFFERENT fact (a workspace label, not a path).
+    const bool         prSingleRoot = ing.realPaths.empty();
+    const std::string  prRootPrefix = prSingleRoot ? rw::sarif::rootPrefixOf( root ) : std::string();
+    const std::string  rootAttr     = !rootLabel.empty() ? ( std::string( " root=\"" ) + ex( rootLabel ) + "\"" )
+                                     : prSingleRoot        ? ( std::string( " root=\"" ) + ex( root ) + "\"" )
+                                                            : std::string();
+    const auto         prPathRel    = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return prSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ fileId ], prRootPrefix ) : std::string_view( ing.files[ fileId ] );
+    };
     // r26-stamp Task A: anchor these callers/blast-radius/tests numbers to the commit (+dirty state) they were
     // computed against — "" (omitted) on a non-git root, never a placeholder.
     const std::string atAttrStr = gitstamp::atAttr( root );
@@ -794,7 +805,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
             // this file's defined symbols, in id order (== file/line order by the ingest sort).
             const FileSymbols& fileSyms = symsByFile[f];
 
-            std::fprintf( o, "<file p=\"%s\" symbols=\"%zu\">", ex( ing.files[f] ).c_str(), std::size_t( fileSyms.size() ) );
+            std::fprintf( o, "<file p=\"%s\" symbols=\"%zu\">", ex( prPathRel( f ) ).c_str(), std::size_t( fileSyms.size() ) );
 
             // (1) blast radius: transitive dependents of ALL this file's symbols. Reuse transitiveCallers.
             const std::vector<NodeId>  reach = transitiveCallers( g, fileSyms );
@@ -856,7 +867,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                              reach.size(), totalReachFiles, radiusFiles.size(), fSc.shown, fSc.capped );
                 for( std::size_t i = 0; i < fSc.shown; ++i )
                 {
-                    std::fprintf( o, "<f p=\"%s\" deps=\"%u\"/>", ex( ing.files[ radiusFiles[i] ] ).c_str(), fileReachers[ radiusFiles[i] ] );
+                    std::fprintf( o, "<f p=\"%s\" deps=\"%u\"/>", ex( prPathRel( radiusFiles[i] ) ).c_str(), fileReachers[ radiusFiles[i] ] );
                 }
                 std::fprintf( o, "</impact>" );
             }
@@ -873,7 +884,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                 std::fprintf( o, "<tests count=\"%zu\" shown=\"%zu\" capped=\"%u\">", testFiles.size(), tSc.shown, tSc.capped );
                 for( std::size_t i = 0; i < tSc.shown; ++i )
                 {
-                    std::fprintf( o, "<test p=\"%s\"%s/>", ex( ing.files[ testFiles[i] ] ).c_str(), runAttr( prRunners, testFiles[i], ex ).c_str() );   // §A9.5
+                    std::fprintf( o, "<test p=\"%s\"%s/>", ex( prPathRel( testFiles[i] ) ).c_str(), runAttr( prRunners, testFiles[i], ex ).c_str() );   // §A9.5
                 }
                 std::fprintf( o, "</tests>" );
             }
@@ -917,18 +928,18 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                     if( trim.callerCap > 0 )
                     {
                         std::fprintf( o, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\" callers=\"%zu\" shown=\"%zu\" capped=\"%u\">",
-                                     symTag( sy.kind ), ex( sy.name ).c_str(), ex( ing.files[ sy.fileId ] ).c_str(), sy.line, callers.size(), cSc.shown, cSc.capped );
+                                     symTag( sy.kind ), ex( sy.name ).c_str(), ex( prPathRel( sy.fileId ) ).c_str(), sy.line, callers.size(), cSc.shown, cSc.capped );
                         for( std::size_t i = 0; i < cSc.shown; ++i )
                         {
                             const Symbol& cs = ing.symbols[ callers[i] ];
-                            std::fprintf( o, "<caller t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( cs.kind ), ex( cs.name ).c_str(), ex( ing.files[ cs.fileId ] ).c_str(), cs.line );
+                            std::fprintf( o, "<caller t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( cs.kind ), ex( cs.name ).c_str(), ex( prPathRel( cs.fileId ) ).c_str(), cs.line );
                         }
                         std::fprintf( o, "</s>" );
                     }
                     else
                     { // keep the row + its callers COUNT (the cheap structural fact), drop the caller list
                         std::fprintf( o, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\" callers=\"%zu\" shown=\"%zu\" capped=\"%u\"/>",
-                                     symTag( sy.kind ), ex( sy.name ).c_str(), ex( ing.files[ sy.fileId ] ).c_str(), sy.line, callers.size(), cSc.shown, cSc.capped );
+                                     symTag( sy.kind ), ex( sy.name ).c_str(), ex( prPathRel( sy.fileId ) ).c_str(), sy.line, callers.size(), cSc.shown, cSc.capped );
                     }
                 }
                 std::fprintf( o, "</changed-symbols>" );
@@ -958,7 +969,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                 std::fprintf( o, "<cochange commits=\"%u\" partners=\"%zu\" shown=\"%zu\" capped=\"%u\">", commits, outside.size(), pSc.shown, pSc.capped );
                 for( std::size_t i = 0; i < pSc.shown; ++i )
                 {
-                    std::fprintf( o, "<partner p=\"%s\" deg=\"%.2f\"%s/>", ex( ing.files[ outside[i]->fileId ] ).c_str(),
+                    std::fprintf( o, "<partner p=\"%s\" deg=\"%.2f\"%s/>", ex( prPathRel( outside[i]->fileId ) ).c_str(),
                                  outside[i]->deg, coPairAttr( *outside[i] ) );   // §A9.3: surprising= or dep_capable="0"
                 }
                 std::fprintf( o, "</cochange>" );

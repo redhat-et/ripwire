@@ -988,10 +988,17 @@ inline AffResult computeFieldAffinity( const IngestResult& ing, const std::vecto
 
 // ── XML emission (G4: minified, xmllint-clean; no newline outside CDATA, no double hyphen in a comment) ──
 
-inline void writeFieldAffinity( std::FILE* out, const AffResult& res )
+// `rootPrefix`/`rootAttr` — R-E (2026-08-17 harvest), same convention writeContextRatioReport takes (see
+// contextratio.h). AffStruct::path/AffFn::path are already-materialized copies of ing.files[fileId] made
+// while `res` was built, so this relativizes them at PRINT time exactly like every other lens's pathRel.
+inline void writeFieldAffinity( std::FILE* out, const AffResult& res, std::string_view rootPrefix = {}, const std::string& rootAttr = std::string() )
 {
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); };
+    const auto         pathRel = [ & ]( const std::string& p ) -> std::string_view
+    {
+        return rootPrefix.empty() ? std::string_view( p ) : rw::sarif::rootRelativeUri( p, rootPrefix );
+    };
 
     // G4: an XML comment may not contain a double hyphen, so flags are named WITHOUT their leading
     // dashes. Keep it that way when editing.
@@ -1066,13 +1073,13 @@ inline void writeFieldAffinity( std::FILE* out, const AffResult& res )
     {
         std::fprintf( out, " as_uncompiled=\"%zu\"", res.asUncompiledQueries.size() );
     }
-    std::fprintf( out, ">" );
+    std::fprintf( out, "%s>", rootAttr.c_str() );
 
     for( const AffStruct& s : res.rows )
     {
         std::fprintf( out, "<s n=\"%s\" p=\"%s\" l=\"%u\" agg=\"%s\" modeled=\"%d\" fields=\"%zu\" touched=\"%zu\""
                            " fns=\"%u\" pairs=\"%zu\" sepcost=\"%.2f\" findings=\"%zu\"",
-                      ex( s.name ).c_str(), ex( s.path ).c_str(), s.line, s.aggregate, s.modeled ? 1 : 0,
+                      ex( s.name ).c_str(), ex( pathRel( s.path ) ).c_str(), s.line, s.aggregate, s.modeled ? 1 : 0,
                       s.declared, s.fieldsTotal, s.touchedFns, s.pairsTotal, s.sepCost, s.findings.size() );
         if( s.modeled )
         {
@@ -1143,7 +1150,7 @@ inline void writeFieldAffinity( std::FILE* out, const AffResult& res )
         for( const AffFn& fn : s.fns )
         {
             std::fprintf( out, "<fn n=\"%s\" p=\"%s\" l=\"%u\" fanin=\"%u\" touched=\"%u\" f=\"%s\"",
-                          ex( fn.name ).c_str(), ex( fn.path ).c_str(), fn.line, fn.fanIn, fn.touched,
+                          ex( fn.name ).c_str(), ex( pathRel( fn.path ) ).c_str(), fn.line, fn.fanIn, fn.touched,
                           ex( fn.fields ).c_str() );
             if( !fn.profileScope.empty() )
             {
