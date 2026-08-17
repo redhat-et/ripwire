@@ -16,6 +16,7 @@
 #include "model.h"
 
 #include <cctype>
+#include <cstring>
 #include <string_view>
 
 namespace rw
@@ -180,6 +181,20 @@ inline bool isNonTextExtension( std::string_view ext ) noexcept
     };
     return ext.empty() || ext == "."
         || std::binary_search( std::begin( kNonTextExts ), std::end( kNonTextExts ), ext, extLess );
+}
+
+// The NUL-byte binary heuristic, made public (§R-J): grep's aux-file scan (search.h grepCollectAux) needs
+// the SAME sniff ingest.cpp's parse pool already runs on every file it reads, but that copy used to live in
+// ingest.cpp's anonymous namespace (TU-local) — and grep already has the candidate's bytes in hand from its
+// own read, so a second file-opening sniff (rw::binstale::looksBinary, which re-reads from disk) would cost
+// a redundant read per candidate. This is now the ONE definition; ingest.cpp's own scan sites use it too via
+// plain unqualified lookup (same namespace), so there is no third NUL-scan loop anywhere in the tree.
+inline constexpr std::size_t kBinarySniffCap = 4096;   // NUL-byte sniff window
+
+inline bool looksBinary( std::string_view bytes ) noexcept
+{
+    const std::size_t n = bytes.size() < kBinarySniffCap ? bytes.size() : kBinarySniffCap;
+    return std::memchr( bytes.data(), '\0', n ) != nullptr;
 }
 
 // The crawl's default directory denylist (a .gitignore-lite): noise/vendor/build subtrees pruned entirely.

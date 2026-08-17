@@ -23,6 +23,7 @@
 #include "didyoumean.h"         // R1a: the ONE near-miss suggester — the zero-hit follow-up reuses it, never a second one
 #include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
 #include "filter.h"             // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
+#include "ingest.h"             // §R-J: rw::looksBinary / rw::kBinarySniffCap — the shared NUL-sniff, reused by grepCollectAux
 #include "model.h"
 
 #include <algorithm>
@@ -1529,6 +1530,118 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     const bool isBudgetReached = raw.size() >= budgetCount;
     return { std::move( raw ), isBudgetReached, unreadableCount.load( std::memory_order_relaxed ),
              workerDegraded.load( std::memory_order_relaxed ) };
+}
+
+// ─── §R-J (Wave-2 harvest item R-J) — query-file / unsupported-ext TEXT visibility ─────────────────────
+//
+// The 2026-08-15 harvest's root cause for an H-severity extraction bug was queries/cpp/tags.scm line 14 —
+// and ripwire itself could not locate it: grepCollect() above iterates ONLY `ing.files` (the crawl's
+// indexed population), so a file whose extension carries no grammar (`why="unsupported-ext"` on the
+// `--skipped` report) is invisible to every `--grep` call, no matter how literal or specific the pattern.
+//
+// This is a SEPARATE hit type over a SEPARATE population, not a widened GrepRawHit::fileId domain. The
+// alternative — giving these files real fileIds inside `ing.files` — was rejected (see the lane report):
+// eight call sites across search.h/main.cpp/mcpverbs.h treat `fileId` as an index into `ing.files` with an
+// implicit `< ing.files.size()` bound (grepEnrich's symbol filter, grepApplyBooleanTerms, the `--verify`
+// `contains()` check, both emitters' path lookups), and none of them has any USE for a query file — it has
+// no symbols, so `grepEnrich`'s enclosing-symbol lookup would only ever return nullptr for it anyway. Kept
+// separate, this list requires zero changes to any of those eight sites.
+//
+// One consequence taken deliberately: a GrepAuxHit carries NO enclosing-symbol field at all — not an empty
+// one. `in=` on an indexed hit can be legitimately absent (top-level code with no enclosing def); adding an
+// always-empty field here would let a reader mistake "this file has no symbol table" for "this hit sits at
+// file scope", which the grep legend already promises are NOT the same claim. No field means no such misread
+// is possible.
+
+// One match inside a file the crawl never indexed — no fileId (none was ever assigned), and by construction
+// no enclosing-symbol field (see above). `path` is copied verbatim from CrawlSkips::unsupported, which is
+// already the on-disk-readable, root-relative spelling `recordCrawlDrop` captured at crawl time.
+struct GrepAuxHit
+{
+    std::string   path;
+    std::uint32_t line;
+    std::string   text;   // matched line, same kGrepMatchedLineMaxBytes cap as an indexed hit
+};
+
+// What grepCollectAux scanned, and exactly why any candidate was excluded — every one of these is a COUNT
+// disclosed on the emitted root element, never a silent drop. `candidatesCapped` is a distinct claim from
+// any per-file skip: it says the CANDIDATE SET itself (CrawlSkips::unsupported, capped at
+// kMaxSkipRowsPerClass by the crawl, independent of grep) is a floor, so a repo with >500 unsupported-ext
+// text files will not see all of them considered here — the same honesty the `--skipped` report already
+// gives that list, inherited rather than re-decided.
+struct GrepAuxCollection
+{
+    std::vector<GrepAuxHit> hits;                    // path-then-line order (CrawlSkips::unsupported is already path-sorted)
+    std::uint32_t           filesScanned         = 0;   // opened, read, pattern-tested
+    std::uint32_t           filesSkippedBinary   = 0;   // opened, NUL-sniffed, excluded from scanning
+    std::uint32_t           filesSkippedOversize = 0;   // NOT opened — the row's own recorded size exceeded maxAuxFileBytes
+    std::uint32_t           filesUnreadable      = 0;   // open/read failed after the crawl saw it (deleted/permission mid-run)
+    bool                    candidatesCapped     = false;
+    bool                    degraded             = false;   // regex failed to COMPILE — nothing was scanned, mirrors GrepCollection's construction-failure case
+};
+
+// Scans the crawl's own "unsupported-ext, text-looking" population — CrawlSkips::unsupported, already
+// computed once at ingest time by recordPreSizeDrop/recordCrawlDrop, no second crawl — for `pat`,
+// additively to grepCollect()'s indexed-file scan. `maxAuxFileBytes` reuses the SAME per-file ceiling the
+// crawl applies to indexed files (cfg.maxFileBytes / kDefaultMaxFileBytes): a query file this large would
+// already have been an --max-file-size casualty had it carried a supported extension, so scanning past that
+// ceiling here would silently reintroduce the hazard the crawl exists to cap. Sequential by design — the
+// candidate population is capped at kMaxSkipRowsPerClass (500), far below where grepCollect's worker-pool
+// fan-out would pay for itself.
+inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::string& pat, bool regex, std::size_t maxAuxFileBytes )
+{
+    GrepAuxCollection out;
+    out.candidatesCapped = skips.unsupported.size() < skips.unsupportedFiles;
+
+    std::regex re;
+    if( regex )
+    {
+        try { re = std::regex( pat, std::regex::ECMAScript | std::regex::optimize ); }
+        catch( ... ) { out.degraded = true; return out; }   // T1: nothing scanned — a caller may not read this empty set as a complete zero
+    }
+
+    std::string               text;
+    std::vector<GrepMatchSite> sites;
+    std::vector<std::size_t>  lineStarts;
+    for( const SkippedFile& row : skips.unsupported )
+    {
+        if( row.sizeBytes > maxAuxFileBytes )
+        {
+            ++out.filesSkippedOversize;
+            continue;
+        }
+        text.clear();
+        if( !docparse::detail::readWholeFile( row.path, text ) )
+        {
+            ++out.filesUnreadable;
+            continue;
+        }
+        if( looksBinary( text ) )
+        {
+            ++out.filesSkippedBinary;
+            continue;
+        }
+        ++out.filesScanned;
+
+        sites.clear();
+        grepScanText( text, pat, regex ? &re : nullptr, kGrepCollectionBudget, sites );
+        if( sites.empty() )
+        {
+            continue;
+        }
+
+        lineStarts.clear();
+        lineStarts.push_back( 0 );
+        for( std::size_t i = 0; i < text.size(); ++i )
+        {
+            if( text[i] == '\n' ) { lineStarts.push_back( i + 1 ); }
+        }
+        for( const GrepMatchSite& s : sites )
+        {
+            out.hits.push_back( GrepAuxHit{ row.path, s.line, grepMatchedLine( text, lineStarts, s.line ) } );
+        }
+    }
+    return out;
 }
 
 // Turn a WINDOW of already-collected, already-ordered raw hits into printable rows: enclosing-symbol chain,
