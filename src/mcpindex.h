@@ -503,6 +503,10 @@ struct McpIndex
     IngestResult                      ing;
     Graph                             g;
     std::vector<float>                rank;
+    RankDisclosure                    prDisclosure;   // W2-F: what the power iteration behind `rank` did →
+                                                      //   pr_iters= / pr_converged= on every ranked MCP payload.
+                                                      //   Held beside the vector it describes so a verb cannot
+                                                      //   serve one without the other (src/prconverge.h).
     std::vector<long long>            fileMtime;   // parallel to ing.files
     std::vector<long long>            fileSize;    // parallel to ing.files: st_size at index build (staleness fast-path discriminator,
                                                    //   free from the same stat() as mtime — a size change is caught without a read).
@@ -1034,7 +1038,9 @@ inline const McpIndex& getIndex( const std::string& root )
         }
     }
     ix.workingSetHash = workingSetHashOf( changed );
-    ix.rank = rankGraphTeleport( ix.g, diffTeleport( ix.ing, changed ) );
+    const auto [ wsRank, wsIters, wsConverged ] = rankGraphTeleport( ix.g, diffTeleport( ix.ing, changed ) );
+    ix.rank         = wsRank;
+    ix.prDisclosure = RankDisclosure{ wsIters, wsConverged, true };   // W2-F: a teleport variant is still a power iteration
 
     ix.fileMtime.assign( ix.ing.files.size(), 0 );
     ix.fileSize.assign( ix.ing.files.size(), -1 );      // st_size parallel to files — the staleness fast-path discriminator (S1)

@@ -380,7 +380,12 @@ inline std::string analyzeToString( const std::string& root, int topK, bool stab
                                     /*lcom4=*/nullptr, /*amp=*/nullptr, &ix.g.unresolvedOut,
                                     ix.g.bindLabel.empty() ? nullptr : &ix.g.bindLabel,
                                     /*autoOrder=*/false, /*outEstTokens=*/nullptr,
-                                    /*extraBodyTokens=*/0, /*ann=*/{}, /*statsFirstScreen=*/true ); } );
+                                    /*extraBodyTokens=*/0,
+                                    // W2-F: the map's convergence disclosure. The CLI map carries pr_iters= and
+                                    // this one must too — "the clause landed at 3 of its 5 echo sites" is the
+                                    // §B4 family, and mcpclidiffcheck is the gate that keeps the two surfaces one.
+                                    /*ann=*/rw::MapAnnotations{ .prDisclosure = ix.prDisclosure },
+                                    /*statsFirstScreen=*/true ); } );
 }
 
 // ─── the cross-branch + dark-content MCP twins (`whereis`, `stray_content`, `flags`) ───
@@ -1466,7 +1471,8 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     }
 
     const std::vector<NodeId> reach = transitiveCallers( g, seeds );
-    const std::vector<float>  rank  = rankGraph( g );
+    const auto [ rank, prIters, prConverged ] = rankGraph( g );
+    const RankDisclosure      prD{ prIters, prConverged, true };   // W2-F: CLI --impact discloses this; so does its twin
     std::vector<NodeId>       show  = reach;
     std::sort( show.begin(), show.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
 
@@ -1484,7 +1490,8 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     // constants (src/graphlegend.h + src/pageview.h), so this legend is byte-identical to the CLI --impact
     // one. It was NOT before: this copy carried an abridged paging clause with no limit="0" definition —
     // exactly the §B4 echo-site divergence the shared-constant rule exists to stop.
-    std::fprintf( mem, "%s%s. %s-->", kImpactLegendOpen, kPageRaiseCapClause, graphCountDisclosure().c_str() );
+    std::fprintf( mem, "%s%s. %s%s-->", kImpactLegendOpen, kPageRaiseCapClause, graphCountDisclosure().c_str(),
+                  renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
     // "is it safe to change X?" reads as the WHOLE blast radius when it can be 3% of it. Same attributes,
     // same meaning as the CLI --impact — the two surfaces must not diverge on an honesty marker.
@@ -1493,10 +1500,10 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     const PageWindow  ipw       = pageWindow( show.size(), effectiveRowCap( page.limit, 40 ), page.offset );
     const std::size_t shownRows = ipw.end - ipw.begin;
     char              ipab[ kPageDisclosureCap ];
-    std::fprintf( mem, "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s>",
+    std::fprintf( mem, "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s>",
                   ex( symbol ).c_str(), seeds.size(), reach.size(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
-                  kGraphCountFloorAttrXml );
+                  kGraphCountFloorAttrXml, renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str() );
     for( std::size_t i = ipw.begin; i < ipw.end; ++i )
     { const Symbol& s = ing.symbols[ show[i] ]; std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
     std::fprintf( mem, "</impact>" );

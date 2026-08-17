@@ -12,6 +12,7 @@
 #include "infra/jsonesc.h"     // F9: jsonesc::utf8SeqLen — the canonical UTF-8-sequence-length core (was duplicated here)
 #include "notes.h"       // L3: field-notes NoteIndex — the retrieval-time surfacing lookup (INERT when null)
 #include "pageview.h"    // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract (packDeps)
+#include "prconverge.h" // W2-F: RankDisclosure + the pr_iters= / pr_converged= spellings (CLI and MCP share them)
 
 #include <algorithm>
 #include <cstdint>
@@ -1075,6 +1076,14 @@ struct MapAnnotations
     // annotation is the bare ranker LABEL and `churnWindow` stays the churn-only path. Static storage
     // (kRankByLabel below) ⇒ safe to hold as a bare pointer, same rule as `marker`.
     const char* rankByLabel = nullptr;
+
+    // W2-F: what the PageRank power iteration behind this map DID → ` pr_iters="N"` and, only on the
+    // truncating exit, ` pr_converged="0"` (src/prconverge.h owns both dialect spellings and the legend).
+    // Held BY VALUE, unlike every pointer above, because it is a POD with a meaningful default:
+    // `isPageRank == false` renders as the empty string, so a caller that ran no power iteration (a lexical
+    // query score, a HITS hub/authority map) keeps a byte-identical header by doing nothing. A pointer would
+    // make "no PageRank ran" and "the caller forgot to pass it" the same null — the silence this removes.
+    RankDisclosure prDisclosure{};
 };
 
 // §B2.1 — the ranker-specific legend clause, one per non-default ranker, emitted ONLY on that ranker's map
@@ -1453,6 +1462,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += kMaxTokensFitLegend; // §B13.4, --max-tokens-only (ditto)
     }
+    // W2-F: the pr_iters= / pr_converged= definition, charged to the maps that carry the attributes — empty
+    // for a lexical or HITS ordering, and the prose half only on the map whose iteration stopped short.
+    legend += renderDisclosure( ann.prDisclosure, DiscloseAs::LegendComment );
     // header honesty gauges: ambiguous=resolver guessed among >1 in-repo def (read source); unresolved=the callee
     // name IS defined in-repo but EVERY def was language-filtered — a plausibly-internal, cross-language-filtered
     // edge (NOT counted for genuine externals like stdlib/third-party, whose name has no in-repo def at all).
@@ -1587,6 +1599,12 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         // (one estimator). --stable omits it on the precedent of the k= rank attribute below: --stable buys a
         // byte-stable PREFIX, the root element is that prefix, and est_tokens is globally volatile.
         if( !stable ) { char estAttr[ 40 ];  std::snprintf( estAttr, sizeof( estAttr ), " est_tokens=\"%zu\"", estTokens );  h += estAttr; }
+        // W2-F: LAST on the root, after est_tokens — the same placement rule counts_floor= follows, so no
+        // existing attribute-ADJACENCY assertion in test/ can break on it. Unlike est_tokens this is NOT
+        // suppressed under --stable: the iteration count is a property of the CORPUS and the ranker, not of
+        // the run's size, so it does not move between two runs over the same tree, and a byte-stable prefix
+        // that hides "this ranking is unfinished" would be a cache optimisation buying silence.
+        h += renderDisclosure( ann.prDisclosure, DiscloseAs::XmlAttrs );
         h += ">";
         return h;
     };
@@ -5252,6 +5270,12 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     writeJsonStr( w, h.orderAttr, esc );
 
     writeJsonMapStamp( w, esc, h.ann );   // §B1.2 — see its header
+
+    // W2-F: the convergence disclosure, in the dialect's own spelling. §B1.2's rule is that the two dialects'
+    // headers carry the SAME KEYSET for the same run, so this is not an XML-side courtesy — a JSON consumer
+    // (every MCP client) reading a truncated ranking with no key to tell it so is the exact defect the XML
+    // side just closed. Same slot, same absent-means-converged rule.
+    w.write( renderDisclosure( h.ann->prDisclosure, DiscloseAs::JsonKeys ) );
 
     // §A4b: the multi-root prologue (A13) — `roots_count` joins the header gauges and a
     // `roots` table maps each label to its root path, ONLY when N≥2 (single-root output byte-unchanged).
