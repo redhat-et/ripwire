@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# queryfilescancheck.sh — gate for §R-J (Wave-2 harvest item, PLAN_EXTREPO_HARVEST_2026-08-15.md): the
+# queryfilescancheck.sh — gate for §R-J (Wave-2 harvest item, 2026-08-15 round): the
 # queries/*/tags.scm visibility fix.
 #
 # THE FINDING THIS CLOSES. In the 2026-08-15 harvest, an H-severity extraction bug's root cause lived at
