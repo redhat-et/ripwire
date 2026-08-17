@@ -537,7 +537,12 @@ CommunityPresentation communityPresentation( const rw::IngestResult& ing, const 
         }
 
         const rw::Symbol& symbol = ing.symbols[ lead ];
-        std::string_view   anchorPath = ing.files[ symbol.fileId ];
+        // R-E (2026-08-17 harvest) fix: this MUST read the same relativized spelling out.directory[] above
+        // was just built from (rawPath/path further up in this loop), never the raw ing.files[] value — the
+        // prefix-strip below matches directoryPrefix (relative) against anchorPath at position 0, and an
+        // absolute anchorPath against a relative prefix never matches at 0, so the strip silently no-oped
+        // and the full absolute path rode into the label instead of just failing loudly.
+        std::string_view   anchorPath = rootPrefix.empty() ? ing.files[ symbol.fileId ] : rw::sarif::rootRelativeUri( ing.files[ symbol.fileId ], rootPrefix );
         const std::string  directoryPrefix = out.directory[ communityIndex ] + "/";
         if( anchorPath.rfind( directoryPrefix, 0 ) == 0 )
         {
