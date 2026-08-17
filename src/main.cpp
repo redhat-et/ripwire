@@ -2507,6 +2507,9 @@ struct ForLensHeaderParts
     std::string_view adaptiveNote, mentionNote, boostNote, docMentionNote;
     bool             anchor     = false;   // --anchor's EXPERIMENTAL caveat paragraph
     bool             autoBundle = false;   // T3: auto mode is on (cfg.detail==0, no --signatures-only) — appends the bundle=auto legend
+    std::string_view rootArg;              // R-E (2026-08-17): the single-root run's own root= — the ladder's
+                                            // route-dropped rebuild below calls ctxRootOpen a second time and
+                                            // must carry the SAME root as the pre-built rootOpenStr did.
 };
 
 // T3 — the legend sentence for the terminal-by-default bundle, a named constant so the sigs-budget
@@ -2531,7 +2534,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     std::string h;
     h.reserve( 640 + kForAutoBundleLegend.size() + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
                + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + extraNotes.size() );
-    h += withRouteAttr ? std::string( p.rootOpenStr ) : rw::ctxRootOpen( p.task, {} );
+    h += withRouteAttr ? std::string( p.rootOpenStr ) : rw::ctxRootOpen( p.task, {}, p.rootArg );
     h += "<!-- ripwire lens for ";
     if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
     else
@@ -2781,6 +2784,9 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
                                         std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr )
 {
     ForAutoBodiesResult out;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool             fabSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string_view fabRootArg    = fabSingleRoot ? cfg.roots[0] : std::string_view();
 
     // candidates: the positive-score head of the ranked surface — the same "top heads with a positive
     // score" rule packTaskBundleText applies, on the same (score desc, id asc) order sigs selected with
@@ -2819,7 +2825,8 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     rw::EmittedBodies autoEmitted;
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
         { rw::packBodies( f, ing, autoBodyIds, autoBodyBudget, g.outOff, g.outTargets, cfg.compress, redactPtr,
-                           /*ranges=*/nullptr, /*noteIndex=*/nullptr, &autoEmitted, /*truncateOversizedFirst=*/false ); },
+                           /*ranges=*/nullptr, /*noteIndex=*/nullptr, &autoEmitted, /*truncateOversizedFirst=*/false,
+                           /*withFileContext=*/false, fabRootArg ); },
         rw::kBytesPerTokenBody );
 
     if( !out.section.isRendered )
@@ -2856,6 +2863,9 @@ std::optional<int> runForLens( const MainDispatch& d )
     RedactCounts&                     redactCounts = d.redactCounts;
     RedactCounts*                     redactPtr    = d.redactPtr;
     const rw::notes::NoteIndex*      notesPtr     = d.notesPtr;   // L3: surfaces <note> children on the emitted symbols/files
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool             flSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string_view flRootArg    = flSingleRoot ? cfg.roots[0] : std::string_view();
 
     // --for=TASK: the task lens — a ranked, signatures-only inventory of the building blocks relevant
     // to the task (with descriptive cx/in metrics), framed for reuse. The evidence-optimal bundle
@@ -2969,7 +2979,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // </ctx>): when nothing trims, the output is byte-identical to the pre-H1 path. W3FIX H2: the header goes
         // through forLensHeaderText (above) rather than being appended once, because the ceiling ladder below has
         // to PRICE a header without the comment's task echo or without route= and then emit that exact shape.
-        const std::string        rootOpenStr = ctxRootOpen( cfg.forTask, routeNoteRaw );
+        const std::string        rootOpenStr = ctxRootOpen( cfg.forTask, routeNoteRaw, flRootArg );
         // T3 (pre-registered: docs/EVALS.md §4, T3 round): terminal-by-default — the auto <bodies> mode is on
         // unless the caller took an explicit body posture (--detail=N) or opted out (--signatures-only). The
         // --json and --format=candidates dialects never reach the auto machinery (candidates returned above;
@@ -2979,7 +2989,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // (autoBundle=false) and rebuild the header without the legend — the ladder's later rebuilds read
         // this struct through buildForHeader and must honor that decision.
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
-                                        mentionNote, boostNote, docMentionNote, cfg.anchor, autoBundleMode };
+                                        mentionNote, boostNote, docMentionNote, cfg.anchor, autoBundleMode, flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -3111,7 +3121,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             std::size_t lsz  = 0;
             if( std::FILE* lm = rw::openChargeBuffer( &lbuf, &lsz ) )
             {
-                packLego( lm, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true );
+                packLego( lm, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true, flRootArg );
                 std::fflush( lm );  std::fclose( lm );
                 if( lbuf ) { legoStr.assign( lbuf, lsz );  std::free( lbuf ); }
                 legoPreRendered = true;
@@ -3217,7 +3227,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 &forChurn, &forClone, testedPtr, ampPtr,     // Q3: churn/clone/tested/amp folded onto the <d> blocks
                                 /*rankAdaptivePayload=*/true,                // B0.3: tail entries excerpt-trimmed by global rank (serialize.h kForDoc*)
                                 sigsBudget,                                  // H1: global payload budget (trim ladder; payload="capped" marker)
-                                notesPtr );                                  // L3: field-notes surfacing (inert when null)
+                                notesPtr,                                    // L3: field-notes surfacing (inert when null)
+                                flRootArg );                                 // R-E: root-relative p=
                 std::fflush( sm );  std::fclose( sm );
                 if( sbuf ) { sigsStr.assign( sbuf, ssz );  std::free( sbuf ); }
                 sigsPreRendered = true;
@@ -3233,7 +3244,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // for, so the bundle only shrinks; before est_tokens so the header reports the delivered size).
         if( sigsPreRendered && legoPreRendered && !legoStr.empty() && narrowLegoToRenderedSigs( ing, legoScoped, sigsStr ) )
         {
-            legoStr = captureXml( [ & ]( std::FILE* f ) { packLego( f, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true ); } );
+            legoStr = captureXml( [ & ]( std::FILE* f ) { packLego( f, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true, flRootArg ); } );
         }
 
         // ── §F1 (CA4 wave-1 verifier): the lens's LAST TWO payload sections, rendered and CHARGED here ──────
@@ -3297,7 +3308,8 @@ std::optional<int> runForLens( const MainDispatch& d )
             }
             detailSection = rw::chargeSection( [ & ]( std::FILE* f )
                 { packBodies( f, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets, cfg.compress, redactPtr,
-                              /*ranges=*/nullptr, notesPtr ); },   // L3: --detail bodies surface notes too (part of the --for bundle)
+                              /*ranges=*/nullptr, notesPtr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
+                              /*withFileContext=*/false, flRootArg ); },   // L3: --detail bodies surface notes too (part of the --for bundle)
                 rw::kBytesPerTokenBody );
         }
 
@@ -3430,7 +3442,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         else
         {
             packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
-                            &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr );
+                            &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg );
         }
         if( legoPreRendered )
         {
@@ -3438,7 +3450,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         }
         else
         {
-            packLego( stdout, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true ); // same scope+identity on the degrade path (§P3; un-narrowed — sigs bytes unknown here)
+            packLego( stdout, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true, flRootArg ); // same scope+identity on the degrade path (§P3; un-narrowed — sigs bytes unknown here)
         }
         if( composePreRendered )
         {
@@ -3465,7 +3477,9 @@ std::optional<int> runForLens( const MainDispatch& d )
         if( cfg.detail > 0 )
         {
             rw::emitChargedSection( stdout, detailSection, [ & ]{ packBodies( stdout, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets,
-                                                                              cfg.compress, redactPtr, /*ranges=*/nullptr, notesPtr ); } );
+                                                                              cfg.compress, redactPtr, /*ranges=*/nullptr, notesPtr,
+                                                                              /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
+                                                                              /*withFileContext=*/false, flRootArg ); } );
         }
         else if( autoSection.isRendered && !autoSection.xml.empty() )
         {
@@ -3500,6 +3514,11 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
     const QMetrics&                   qmetrics     = d.qmetrics;
     RedactCounts&                     redactCounts = d.redactCounts;
     RedactCounts*                     redactPtr    = d.redactPtr;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — shared
+    // by --lego and --exemplar, both dispatched from this function.
+    const bool             tvSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string_view tvRootArg    = tvSingleRoot ? cfg.roots[0] : std::string_view();
+    const std::string      tvRootPrefix = tvSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
 
     // --lego=TYPE: the TARGETED Lego view — resolve ONE named interface/base and emit its signature, full
     // method contract (where sound), and EVERY implementor (own-language only, via the langCompatible guard
@@ -3519,7 +3538,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         const std::vector<char> legoImpure = computeImpure( ing, g );
         const std::vector<float> flat( ing.symbols.size(), 0.f );   // single iface → rank is irrelevant (id tie-break)
         std::printf( "<ctx>" );
-        packLego( stdout, ing, g.implementors, flat, 1, d.redactPtr, &legoImpure, focus, /*withPaths=*/true );
+        packLego( stdout, ing, g.implementors, flat, 1, d.redactPtr, &legoImpure, focus, /*withPaths=*/true, tvRootArg );
         std::printf( "</ctx>" );
         reportRedactions( stderr, d.redactCounts );      // W3-N1: a contract <m> sig is a redacting seam — disclose the tally
         return 0;
@@ -3586,11 +3605,13 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
                      ex( reqNote ).c_str(), kindNote.c_str(), symTag( pick.targetKind ), rw::kExemplarSelectionRule );
         std::printf( "<exemplar kind=\"%s\" candidates=\"%zu\" n=\"%s\" p=\"%s:%u\" in=\"%u\" ccx=\"%u\"%s%s%s>",
                      symTag( pick.targetKind ), pick.candidateCount, ex( wsym.name ).c_str(),
-                     ex( ing.files[ wsym.fileId ] ).c_str(), wsym.line,
+                     ex( tvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ wsym.fileId ], tvRootPrefix ) : std::string_view( ing.files[ wsym.fileId ] ) ).c_str(), wsym.line,
                      fin( pick.winner ), wsym.ccx, ts( pick.winner ) ? " tested=\"1\"" : "",
                      pick.lowConfidence ? " low_confidence=\"1\"" : "",
                      pick.overCcxBar    ? " over_ccx_bar=\"1\"" : "" );
-        packBodies( stdout, ing, { pick.winner }, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr );
+        packBodies( stdout, ing, { pick.winner }, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
+                   /*ranges=*/nullptr, /*noteIndex=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
+                   /*withFileContext=*/false, tvRootArg );
         std::printf( "</exemplar>" );
         reportRedactions( stderr, redactCounts );
         return 0;
@@ -3624,6 +3645,9 @@ std::optional<int> runArchViews( const MainDispatch& d )
     using namespace rw;
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool             avSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string_view avRootArg    = avSingleRoot ? cfg.roots[0] : std::string_view();
 
     // --deps: the file→file physical dependency view (#include / import counts + targets), heaviest
     // first — the "why pull in 100 headers for something simple" detector.
@@ -3646,7 +3670,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
                 }
             }
         }
-        packDeps( stdout, ing, cfg.packTopN > 0 ? cfg.packTopN : 40, cycles, h.transitive, afferent, adj, rh.ccd, rh.acd, rh.nccd, cfg.pageLimit, cfg.pageOffset );
+        packDeps( stdout, ing, cfg.packTopN > 0 ? cfg.packTopN : 40, cycles, h.transitive, afferent, adj, rh.ccd, rh.acd, rh.nccd, cfg.pageLimit, cfg.pageOffset, avRootArg );
         return 0;
     }
 
@@ -7003,6 +7027,11 @@ std::optional<int> runPath( const MainDispatch& d )
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         pthSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  pthRootPrefix = pthSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    std::vector<char>  pthRootEsc;
+    const std::string  pthRootAttr   = pthSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], pthRootEsc ) ) + "\"" ) : std::string();
 
     // --path=SRC,DST: shortest directed call-path (how does SRC reach DST through calls?)
     if( !cfg.pathSpec.empty() )
@@ -7043,14 +7072,16 @@ std::optional<int> runPath( const MainDispatch& d )
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
         const auto        loc = [ & ]( NodeId n ) -> std::string
-        { const Symbol& s = ing.symbols[n]; return ex( ing.files[ s.fileId ] ) + ":" + std::to_string( s.line ); };
+        { const Symbol& s = ing.symbols[n];
+          const std::string_view rp = pthSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], pthRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+          return ex( rp ) + ":" + std::to_string( s.line ); };
 
         // from_p/to_p = the def this run actually bound the name to; from_defs/to_defs = how many it could have
         // bound it to (>1 ⇒ qualify with file:name if this is not the one you meant).
-        std::printf( "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"",
+        std::printf( "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"%s",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                      srcDefs.size(), dstDefs.size(),
-                     path.empty() ? 0 : 1, path.empty() ? std::size_t( 0 ) : path.size() - 1 );
+                     path.empty() ? 0 : 1, path.empty() ? std::size_t( 0 ) : path.size() - 1, pthRootAttr.c_str() );
         // P2.10: a dead end is exactly the moment to name the next verb. --path is DIRECTED; --connect searches
         // undirected and finds the shared-caller join a directed walk can never see.
         if( path.empty() )
@@ -7062,8 +7093,9 @@ std::optional<int> runPath( const MainDispatch& d )
         std::printf( ">" );
         for( NodeId n : path )
         {
-            const Symbol& s = ing.symbols[n];
-            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line );
+            const Symbol&           s  = ing.symbols[n];
+            const std::string_view  rp = pthSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], pthRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
         }
         std::printf( "</path>" );
         return 0;
@@ -7077,6 +7109,9 @@ std::optional<int> runConnect( const MainDispatch& d )
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool             cnSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string_view cnRootArg    = cnSingleRoot ? cfg.roots[0] : std::string_view();
 
     // --connect=A,B,C: the minimal connecting subgraph over 2..16 task symbols — how do they RELATE, and
     // which intermediaries join them? Search is UNDIRECTED (finds the shared-caller join a directed --path
@@ -7130,7 +7165,7 @@ std::optional<int> runConnect( const MainDispatch& d )
         static_assert( rw::kConnectRadiusMax == int( rw::connectcfg::kMaxRadius ),
                        "--connect-radius' refusal band drifted from the core's clamp band — the refusal would name a range the core does not honor" );
         const rw::ConnectResult res = rw::connectSubgraph( g, terminals, std::uint32_t( cfg.connectRadius ) );
-        rw::packConnect( stdout, ing, res, d.redactPtr, cfg.maxTokens );
+        rw::packConnect( stdout, ing, res, d.redactPtr, cfg.maxTokens, cnRootArg );
         return 0;
     }
     return std::nullopt;
@@ -8800,6 +8835,8 @@ std::optional<int> runPackTask( const MainDispatch& d )
     in.amp                  = d.ampPtr;
     in.redact               = d.redactPtr;
     in.notes                = d.notesPtr;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    in.rootArg = ( ing.realPaths.empty() && cfg.roots.size() == 1 ) ? cfg.roots[0] : std::string_view();
 
     // --partition=N: the FAN-OUT form. Same lens ranking, same PackTaskInputs, same
     // assembler; partition.h only decides WHICH slice each of the N+1 bundles is masked to and how the
@@ -12641,7 +12678,8 @@ int runDefaultMap( const MainDispatch& d )
     if( cfg.packSignatures )
     {
         sigsSection = rw::chargeSection( [ & ]( std::FILE* f )
-            { packSignatures( f, ing, rank, cfg.packTopN > 0 ? cfg.packTopN : 50, cfg.packBudgetBytes, false, nullptr, impurePtr, redactPtr ); },
+            { packSignatures( f, ing, rank, cfg.packTopN > 0 ? cfg.packTopN : 50, cfg.packBudgetBytes, false, nullptr, impurePtr, redactPtr,
+                              nullptr, nullptr, nullptr, nullptr, false, 0, nullptr, mapRootArg ); },
             rw::kBytesPerTokenDefault );
     }
     else if( cfg.packTopN > 0 )
@@ -12655,13 +12693,13 @@ int runDefaultMap( const MainDispatch& d )
         bodiesSection = rw::chargeSection( [ & ]( std::FILE* f )
             { packBodies( f, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
                           expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
-                          /*truncateOversizedFirst=*/true, /*withFileContext=*/true ); },   // V1: octocode F2 sibs=/inc=
+                          /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg ); },   // V1: octocode F2 sibs=/inc=
             rw::kBytesPerTokenBody );
     }
     if( !outlineNodes.empty() )
     {
         outlineSection = rw::chargeSection( [ & ]( std::FILE* f )
-            { packOutline( f, ing, outlineNodes, cfg.packBudgetBytes, cfg.compress, redactPtr ); },
+            { packOutline( f, ing, outlineNodes, cfg.packBudgetBytes, cfg.compress, redactPtr, mapRootArg ); },
             rw::kBytesPerTokenBody );
     }
 
@@ -12842,7 +12880,8 @@ int runDefaultMap( const MainDispatch& d )
     { rw::emitChargedSection( out, sec, renderDirect ); };
     if( cfg.packSignatures )
     {
-        emitSection( sigsSection, [ & ]{ packSignatures( out, ing, rank, cfg.packTopN > 0 ? cfg.packTopN : 50, cfg.packBudgetBytes, false, nullptr, impurePtr, redactPtr ); } );
+        emitSection( sigsSection, [ & ]{ packSignatures( out, ing, rank, cfg.packTopN > 0 ? cfg.packTopN : 50, cfg.packBudgetBytes, false, nullptr, impurePtr, redactPtr,
+                                                         nullptr, nullptr, nullptr, nullptr, false, 0, nullptr, mapRootArg ); } );
     }
     else if( cfg.packTopN > 0 )
     {
@@ -12852,11 +12891,11 @@ int runDefaultMap( const MainDispatch& d )
     {
         emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
                                                        expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
-                                                       /*truncateOversizedFirst=*/true, /*withFileContext=*/true ); } );   // L3: --expand bodies surface notes; V1: sibs=/inc=
+                                                       /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg ); } );   // L3: --expand bodies surface notes; V1: sibs=/inc=
     }
     if( !outlineNodes.empty() )
     { // resolved (and refused on a miss) above, before the first stdout byte
-        emitSection( outlineSection, [ & ]{ packOutline( out, ing, outlineNodes, cfg.packBudgetBytes, cfg.compress, redactPtr ); } );
+        emitSection( outlineSection, [ & ]{ packOutline( out, ing, outlineNodes, cfg.packBudgetBytes, cfg.compress, redactPtr, mapRootArg ); } );
     }
 
     if( hasExtension && !serveWholeFile )   // M6: the whole-file branch closed its own root

@@ -253,12 +253,15 @@ inline std::string xmlCommentText( std::string_view raw )
 // even as a character reference — there is no encoding of them for this format to choose. The --json dialect,
 // which has no such rule, stays byte-verbatim for all of them. XML scrubs one class of byte; it no longer
 // silently rewrites the whitespace a user actually typed.
-inline std::string ctxRootOpen( std::string_view task, std::string_view routeNote )
+inline std::string ctxRootOpen( std::string_view task, std::string_view routeNote, std::string_view rootArg = {} )
 {
     std::vector<char> esc;
     std::string       out = "<ctx";
     if( !task.empty() )      { out += " task=\"";   out += escapeXml( task, esc );       out += "\""; }
     if( !routeNote.empty() ) { out += " route=\"";  out += escapeXml( routeNote, esc );  out += "\""; }
+    // R-E (2026-08-17 harvest): the same root= every other verb's document root carries — single-root runs
+    // only. Shared by --for/--pack-task/--from-trace (every ctxRootOpen caller), so the three cannot diverge.
+    if( !rootArg.empty() )   { out += " root=\"";   out += escapeXml( rootArg, esc );    out += "\""; }
     // §B12.7's TELL. Emitted ONLY when the scrub actually lost bytes, so it is absent on every ordinary
     // document (same silence-means-nothing-happened convention route=/over_ceiling use) and the goldens do
     // not move. Present, it says: this attribute is NOT the verbatim copy its contract promises, and the
@@ -2624,13 +2627,15 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                             std::size_t payloadBudgetBytes = 0,  // H1 (B0 r2): GLOBAL byte budget for this <sigs> block — 0 = no global
                                                                  //   budget (the pre-H1 path, byte-identical); only the --for lens and the
                                                                  //   MCP `for` verb pass one (kForPayloadBudgetBytes minus the sibling blocks)
-                            const notes::NoteIndex* noteIndex = nullptr )   // L3: field notes — surfaces <note> children on each <f>
+                            const notes::NoteIndex* noteIndex = nullptr,   // L3: field notes — surfaces <note> children on each <f>
                                                                             //   (path target) and <d> (canonical-id target). nullptr ⇒ INERT
                                                                             //   (byte-identical). W3-N2: note bytes are CHARGED to the budget
                                                                             //   (as the JSON sibling charges them) but the ladder never TRIMS a
                                                                             //   note — user-attached memory always survives; the payload around
                                                                             //   it shrinks to make room. Charging nothing put a note-heavy tree
                                                                             //   56% over a tight --token-budget the JSON mode honored.
+                            std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                                                              // argument serialize() takes — see its comment.
 {
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F1): the MCP `for` verb has no byte budget, and 0 must never mean
     // "cap at zero bytes" (the cap fired before the first signature and emitted a bare <sigs></sigs>).
@@ -2641,6 +2646,14 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
     }
 
     const std::size_t S = ing.symbols.size();
+    // R-E: same convention serialize()'s pathRel uses — fileNoteTarget() below is UNAFFECTED (D5: it takes
+    // the raw ing.files[] spelling and relativizes it against the NoteIndex's OWN root for the LOOKUP key,
+    // never the displayed p=), so only the two `<f p=…>` sites and their byte-length estimate use this.
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
 
     // top-N symbols by (rank desc, id asc)
     std::vector<NodeId> order( S );
@@ -2738,7 +2751,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             sf.entryBegin = entries.size();
             {
                 // exact wrapper bytes: <f p="…"> [+ layer="…"] + </f>
-                sf.wrapBytes = 6 + escapeXml( ing.files[f], esc ).size() + 1 + 1 + 4;
+                sf.wrapBytes = 6 + escapeXml( pathRel( f ), esc ).size() + 1 + 1 + 4;
                 if( const char* fl = builtinLayer( ing.files[f] ); *fl )
                 {
                     sf.wrapBytes += 8 + std::strlen( fl ) + 1;
@@ -2892,7 +2905,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             {
                 continue; // every entry dropped → wrapper too
             }
-            w.write( "<f p=\"" );  w.write( escapeXml( ing.files[ sf.fileId ], esc ) );  w.write( "\"" );
+            w.write( "<f p=\"" );  w.write( escapeXml( pathRel( sf.fileId ), esc ) );  w.write( "\"" );
             if( const char* fl = builtinLayer( ing.files[ sf.fileId ] ); *fl ) { w.write( " layer=\"" );  w.write( fl );  w.write( "\"" ); }
             w.write( ">" );
             w.write( sf.notes );                                               // L3/D5: file notes on this <f> (rendered in phase 1)
@@ -2943,7 +2956,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         std::sort( syms.begin(), syms.end(), [ & ]( NodeId a, NodeId b )
         { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
 
-        w.write( "<f p=\"" );  w.write( escapeXml( ing.files[f], esc ) );  w.write( "\"" );
+        w.write( "<f p=\"" );  w.write( escapeXml( pathRel( f ), esc ) );  w.write( "\"" );
         if( const char* fl = builtinLayer( ing.files[f] ); *fl ) { w.write( " layer=\"" );  w.write( fl );  w.write( "\"" ); }   // P3
         w.write( ">" );
         {
@@ -3584,8 +3597,10 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
                                                                         //   false (its contract is "the FULL body if it fits, else
                                                                         //   dropped and disclosed"); every pre-existing caller keeps the
                                                                         //   default and is byte-identical.
-                        bool withFileContext = false )                 // V1: sibs=/inc= on each <b> — see FileExpandContext above.
+                        bool withFileContext = false,                  // V1: sibs=/inc= on each <b> — see FileExpandContext above.
                                                                         //   false (every caller but --expand) ⇒ byte-identical.
+                        std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                                                          // argument serialize() takes — see its comment.
 {
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F2): the MCP `exemplar` verb has no byte budget, and 0 must never
     // mean "cap at zero bytes" (the cap fired before the first body and emitted a bare <bodies></bodies>).
@@ -3598,6 +3613,11 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     XmlWriter         w( out );
     std::vector<char> esc;
     std::size_t       used = 0;
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
 
     // file content cache: each file read once, reused for both the bodies and their callees' signatures.
     HashMap<std::uint32_t, std::string> contents;
@@ -3782,7 +3802,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
             const bool bodyScrubbed = ( safe.size() != body.size() ) || xmlScrubIsLossy( body );
 
             char hdr[ 64 ];  std::snprintf( hdr, sizeof( hdr ), "<b t=\"%s\" l=\"%u\" p=\"", symTag( s.kind ), s.line );
-            children += hdr;  children += escapeXml( ing.files[f], esc );
+            children += hdr;  children += escapeXml( pathRel( f ), esc );
             children += "\" n=\"";  children += escapeXml( s.name, esc );  children += "\"";
             children += partAttr;                                 // octocode partial-fetch: lines="lo-hi/total" (empty on the whole-body path)
             if( bodyScrubbed )
@@ -4117,11 +4137,18 @@ inline std::size_t estimateExpandBodyTokens( const IngestResult& ing, const std:
 // compress=true → strip comments and collapse blank runs (P2-B) before CDATA encoding.
 // §B10.1: `redact` is REQUIRED — no default (see packSource). `compress` loses its default with it, because
 // C++ defaults must be trailing; both call sites already spell both.
-inline void packOutline( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& nodes, std::size_t budgetBytes, bool compress, RedactCounts* redact )
+inline void packOutline( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& nodes, std::size_t budgetBytes, bool compress, RedactCounts* redact,
+                         std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                                                           // argument serialize() takes — see its comment.
 {
     XmlWriter         w( out );
     std::vector<char> esc;
     std::size_t       used = 0;
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
 
     HashMap<std::uint32_t, std::vector<NodeId>> byFile;
     std::vector<std::uint32_t>                  fileOrder;
@@ -4233,7 +4260,7 @@ inline void packOutline( std::FILE* out, const IngestResult& ing, const std::vec
             std::string safe;  safe.reserve( sk.size() );              // split ]]>; scrub C0 controls (G4) + invalid UTF-8 (A4-F20)
             appendCdataSafe( sk, safe );
             char hdr[ 64 ];  std::snprintf( hdr, sizeof( hdr ), "<o t=\"%s\" l=\"%u\" p=\"", symTag( s.kind ), s.line );
-            w.write( hdr );  w.write( escapeXml( ing.files[f], esc ) );
+            w.write( hdr );  w.write( escapeXml( pathRel( f ), esc ) );
             w.write( "\" n=\"" );  w.write( escapeXml( s.name, esc ) );  w.write( "\"><![CDATA[" );
             w.write( safe );  w.write( "]]></o>" );
             used += safe.size();
@@ -4591,8 +4618,15 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                       const std::vector<float>& rank, int topN,
                       RedactCounts* redact,                       // §B0/W3-N1: REQUIRED — the <m> contract sigs are emitted text
                       const std::vector<char>* impure = nullptr,
-                      NodeId focusId = kNoNode, bool withPaths = false )
+                      NodeId focusId = kNoNode, bool withPaths = false,
+                      std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                                                        // argument serialize() takes — see its comment.
 {
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
     std::vector<NodeId> ifaces;
     if( focusId != kNoNode )
     {
@@ -4649,7 +4683,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
         const char* caveatAttr          = legoContractCaveat( isContractExtracted, focusId != kNoNode );   // §A9.4
         char hdr[ 48 ];  std::snprintf( hdr, sizeof( hdr ), "\" implementors=\"%zu\">", implementors[id].size() );
         w.write( "<iface n=\"" );  w.write( escapeXml( isym.name, esc ) );
-        if( withPaths ) { w.write( "\" p=\"" );  w.write( escapeXml( ing.files[ isym.fileId ], esc ) ); }
+        if( withPaths ) { w.write( "\" p=\"" );  w.write( escapeXml( pathRel( isym.fileId ), esc ) ); }
         w.write( caveatAttr );
         w.write( hdr );
 
@@ -4715,7 +4749,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
         {
             const Symbol& im = ing.symbols[ impls[j] ];
             w.write( "<impl n=\"" );  w.write( escapeXml( im.name, esc ) );
-            if( withPaths ) { w.write( "\" p=\"" );  w.write( escapeXml( ing.files[ im.fileId ], esc ) ); }
+            if( withPaths ) { w.write( "\" p=\"" );  w.write( escapeXml( pathRel( im.fileId ), esc ) ); }
             w.write( "\"/>" );
         }
         if( impls.size() > cap )
@@ -4740,9 +4774,16 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                       // unbounded (the historic topN cap still applies); >0 overrides topN. offset skips the first
                       // M files of the sorted order. The health/godfiles/stabledeps/cycles PREAMBLE is unpaginated
                       // (it's a small fixed summary). Default args keep every existing caller byte-identical.
-                      int pageLimit = 0, int pageOffset = 0 )
+                      int pageLimit = 0, int pageOffset = 0,
+                      std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                                                        // argument serialize() takes — see its comment.
 {
     const std::size_t F = ing.files.size();
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
     // §P9.4: dep_files= denominator (see graph.h::restrictDependencyHealth) — derived from `ing`, already a param.
     const auto        depCapableMask = dependencyCapableMask( ing );
     const std::size_t depFiles       = std::size_t( std::count( depCapableMask.begin(), depCapableMask.end(), char( 1 ) ) );
@@ -4791,9 +4832,13 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // paging half still appears only when --limit/--offset is active.
     {
         char db[ 64 + rw::kPageDisclosureCap ], pd[ rw::kPageDisclosureCap ];
-        std::snprintf( db, sizeof( db ), "<deps files=\"%zu\"%s>", order.size(),
+        std::snprintf( db, sizeof( db ), "<deps files=\"%zu\"%s", order.size(),
                        rw::pageDisclosure( pd, sizeof( pd ), end - begin, order.size(), end, pageLimit, pageOffset, true ) );
         w.write( db );
+        // R-E: root= is unbounded (a deep absolute path), so it is NOT folded into the fixed `db` buffer above
+        // (the V1-1 truncation class main.cpp's own history warns about) — written separately.
+        if( !rootArg.empty() ) { w.write( " root=\"" );  w.write( escapeXml( rootArg, esc ) );  w.write( "\"" ); }
+        w.write( ">" );
     }
 
     // whole-codebase dependency health (Lakos): NCCD<1 horizontal/flat/good, >1 vertical, >2 tangled.
@@ -4830,7 +4875,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
             for( std::size_t i = 0; i < capG; ++i )
             {
                 char gb[ 48 ];  std::snprintf( gb, sizeof( gb ), "\" afferent=\"%u\"/>", afferent[ byAff[i] ] );
-                w.write( "<f p=\"" );  w.write( escapeXml( ing.files[ byAff[i] ], esc ) );  w.write( gb );
+                w.write( "<f p=\"" );  w.write( escapeXml( pathRel( byAff[i] ), esc ) );  w.write( gb );
             }
             w.write( "</godfiles>" );
         }
@@ -4869,8 +4914,8 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
             for( std::size_t i = 0; i < capS; ++i )
             {
                 char vb[ 32 ];  std::snprintf( vb, sizeof( vb ), "\" gap=\"%.2f\"/>", sv[i].gap );
-                w.write( "<v from=\"" );  w.write( escapeXml( ing.files[ sv[i].from ], esc ) );
-                w.write( "\" to=\"" );    w.write( escapeXml( ing.files[ sv[i].to ], esc ) );  w.write( vb );
+                w.write( "<v from=\"" );  w.write( escapeXml( pathRel( sv[i].from ), esc ) );
+                w.write( "\" to=\"" );    w.write( escapeXml( pathRel( sv[i].to ), esc ) );  w.write( vb );
             }
             w.write( "</stabledeps>" );
         }
@@ -4924,8 +4969,8 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                 }
                 if( haveCut )   // degrade path: an SCC always has >=1 internal edge, but never assert it — just skip the attr
                 {
-                    w.write( " cut=\"" );  w.write( escapeXml( ing.files[bestSrc], esc ) );
-                    w.write( " -&gt; " );  w.write( escapeXml( ing.files[bestDst], esc ) );
+                    w.write( " cut=\"" );  w.write( escapeXml( pathRel( bestSrc ), esc ) );
+                    w.write( " -&gt; " );  w.write( escapeXml( pathRel( bestDst ), esc ) );
                     // §B14 — was `char rb[24]`, correct by EXACTLY one byte (`" cutrefs=""` is 12 literal bytes
                     // + 10 digits at UINT32_MAX = 22, +NUL = 23 ≤ 24). A one-byte margin on a buffer nobody
                     // re-derives is the class's own precondition, so it is composed instead.
@@ -4936,7 +4981,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
 
             const std::size_t capN = cycles[c].size() < 12 ? cycles[c].size() : 12;
             for( std::size_t j = 0; j < capN; ++j )
-            { w.write( "<f p=\"" );  w.write( escapeXml( ing.files[ cycles[c][j] ], esc ) );  w.write( "\"/>" ); }
+            { w.write( "<f p=\"" );  w.write( escapeXml( pathRel( cycles[c][j] ), esc ) );  w.write( "\"/>" ); }
             w.write( "</cycle>" );
         }
         w.write( "</cycles>" );
@@ -4956,7 +5001,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         const double inst = ( ce_ + ca_ ) > 0.0 ? ce_ / ( ce_ + ca_ ) : 0.0;   // instability I = Ce/(Ca+Ce), project-only
         char hdr[ 112 ];  std::snprintf( hdr, sizeof( hdr ), "\" includes=\"%zu\" afferent=\"%u\" instab=\"%.2f\" transitive=\"%u\">",
                                         byFile[f].size(), f < afferent.size() ? afferent[f] : 0u, inst, trans( f ) );
-        w.write( "<f p=\"" );  w.write( escapeXml( ing.files[f], esc ) );  w.write( hdr );
+        w.write( "<f p=\"" );  w.write( escapeXml( pathRel( f ), esc ) );  w.write( hdr );
         const std::size_t cap = byFile[f].size() < 40 ? byFile[f].size() : 40;
         for( std::size_t j = 0; j < cap; ++j )
         { w.write( "<inc t=\"" );  w.write( escapeXml( ing.includes[ byFile[f][j] ].target, esc ) );  w.write( "\"/>" ); }
@@ -5793,8 +5838,15 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
                                    std::vector<std::vector<NodeId>>& buckets,
                                    const std::vector<std::uint32_t>& globalRankOf,
                                    const JsonSigLens& lens, RedactCounts* redact, std::size_t budgetBytes,
-                                   std::vector<JsonSigFile>& outFiles, std::vector<JsonSigEntry>& outEntries )
+                                   std::vector<JsonSigFile>& outFiles, std::vector<JsonSigEntry>& outEntries,
+                                   std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only
+                                                                     // root argument serialize() takes.
 {
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
     std::size_t used = 0;
     for( std::uint32_t f : fileOrder )
     {
@@ -5825,7 +5877,7 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
         sf.fileId     = f;
         sf.entryBegin = outEntries.size();
         // exact wrapper bytes: `,` + `{"p":"…"` [+ `,"layer":"…"`] + `,"symbols":[` + `]}`
-        sf.wrapBytes  = 1 + 6 + jsonStr( ing.files[f] ).size() + 1 + 12 + 2;
+        sf.wrapBytes  = 1 + 6 + jsonStr( pathRel( f ) ).size() + 1 + 12 + 2;
         if( const char* fl = builtinLayer( ing.files[f] ); *fl )
         {
             sf.wrapBytes += 10 + std::strlen( fl ) + 1;
@@ -5914,7 +5966,9 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
                                 std::size_t budgetBytes        = 0,        // per-entry streaming budget (cfg.packBudgetBytes); 0 = unlimited
                                 std::size_t payloadBudgetBytes = 0,        // H1 global payload budget for this array; 0 = no ladder
                                 bool*       outCapped          = nullptr,  // set true iff the ladder trimmed something
-                                JsonSigNoteCounts* outNotes    = nullptr ) // §B1.3: matched vs emitted note counts
+                                JsonSigNoteCounts* outNotes    = nullptr,  // §B1.3: matched vs emitted note counts
+                                std::string_view rootArg       = {} )      // R-E (2026-08-17): same single-root-only
+                                                                           // root argument serialize() takes.
 {
     const bool rankAdaptivePayload = lens.rankAdaptivePayload;
     if( outCapped )
@@ -5962,7 +6016,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     // collected, then the ladder. Phase 2 splices a file wrapper only when that file still has a live entry.
     std::vector<JsonSigFile>  sigFiles;
     std::vector<JsonSigEntry> entries;
-    collectJsonSigEntries( ing, fileOrder, buckets, globalRankOf, lens, redact, budgetBytes, sigFiles, entries );
+    collectJsonSigEntries( ing, fileOrder, buckets, globalRankOf, lens, redact, budgetBytes, sigFiles, entries, rootArg );
 
     std::size_t total = 2;                                                       // "[" + "]"
     for( const JsonSigFile& sf : sigFiles )
@@ -5992,6 +6046,11 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     // phase 2 — emit (identical write shapes to the pre-§A4a streaming path)
     JsonWriter  w( out );
     std::string esc;
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
     w.write( "[" );
     bool firstFile = true;
     for( const JsonSigFile& sf : sigFiles )
@@ -6008,7 +6067,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
             w.write( "," );
         }
         firstFile = false;
-        w.write( "{\"p\":" );  writeJsonStr( w, ing.files[ sf.fileId ], esc );
+        w.write( "{\"p\":" );  writeJsonStr( w, pathRel( sf.fileId ), esc );
         if( const char* fl = builtinLayer( ing.files[ sf.fileId ] ); *fl ) { w.write( ",\"layer\":" );  writeJsonStr( w, fl, esc ); }
         w.write( sf.notes );               // §B1.3: file-level notes, where the XML puts them on <f>
         w.write( ",\"symbols\":[" );  w.write( fileSyms );  w.write( "]}" );
