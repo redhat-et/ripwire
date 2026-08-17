@@ -87,12 +87,32 @@ root_disc  = 0
 other      = 0
 for m in re.finditer(re.escape(abspath), text):
     ctx = text[max(0, m.start() - 40):m.start()]
-    am = ( re.search(r'([A-Za-z_][A-Za-z0-9_]*)=\"$', ctx)
-        or re.search(r'"([A-Za-z_][A-Za-z0-9_]*)":\"$', ctx)
+    # WIDE context for the JSON case: a value can carry TEXT before the path (e.g. `"run":"bash /abs/…"`
+    # — a shell command whose value is not JUST the path), so the tight 40-char immediately-after-the-
+    # opening-quote lookback misses it. Search a wider window for the last `"key":"` and confirm no
+    # UNESCAPED closing quote sits between it and our match (which would mean a different string).
+    wide = text[max(0, m.start() - 200):m.start()]
+    am = ( re.search(r'(?P<n>[A-Za-z_][A-Za-z0-9_]*)=\"$', ctx)
+        or re.search(r'"(?P<n>[A-Za-z_][A-Za-z0-9_]*)":\"$', ctx)
         # the plain-text dialects (--situ, --report) spell the SAME disclosure as a leading
         # "root: <path>" / "Root: `<path>`" line, not an XML/JSON attribute — recognize it too.
-        or re.search(r'(?:^|\n)(root|Root):\s*`?$', ctx, re.I) )
-    attr = am.group(1).lower() if am else "?"
+        or re.search(r'(?:^|\n)(?P<n>root|Root):\s*`?$', ctx, re.I)
+        # --situ's plain-text run hint: "   (run: bash /abs/…)" — no quotes at all, same deliberately-
+        # absolute run= command as every other dialect, just spelled without the attribute syntax.
+        or re.search(r'\((?P<n>run):\s*(?:bash|python3?|sh)?\s*$', ctx) )
+    if am is None:
+        # same widening, both dialects: a value can carry TEXT before the path (run="bash /abs/…",
+        # "run":"bash /abs/…") — search a wider window for the last key open and confirm no UNESCAPED
+        # closing quote sits between it and our match (which would mean we left that string already).
+        for km in re.finditer(r'(?:(?P<n1>[A-Za-z_][A-Za-z0-9_]*)="|"(?P<n2>[A-Za-z_][A-Za-z0-9_]*)":")', wide):
+            tail = wide[km.end():]
+            if '"' not in tail.replace('\\"', ''):
+                am = km
+    if am is None:
+        attr = "?"
+    else:
+        gd = am.groupdict()
+        attr = ( gd.get("n") or gd.get("n1") or gd.get("n2") or "?" ).lower()
     if attr in root_attrs:
         root_disc += 1
     elif attr in excluded:

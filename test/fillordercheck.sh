@@ -54,6 +54,14 @@ est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | 
 # bytes (1612 → 1726 = wc -c test/golden.xml, re-pinned in the same commit) at the same
 # language-weighted rate. Same file/symbol/edge counts (6/14/5); ranks redistribute but
 # `important-first` is unchanged. The prior re-pins' reasoning below still stands verbatim.
+# RE-PINNED 691 → 768 (W2-F, PageRank convergence disclosure): the map gained the pr_iters= root attribute
+# and the ~130-byte legend clause that DEFINES it (src/prconverge.h), +187 emitted bytes on this fixture
+# (1732 → 1919 = wc -c test/golden.xml, re-pinned in the same commit) at the same language-weighted rate:
+# 1919/768 = 2.4987 B/tok, inside the calibrated 2.36-2.59 band, and the rate is unmoved (1732/691 = 2.5065),
+# which is the check that the growth is DOCUMENT bytes and not an estimator drift. No row moved and no rank
+# VALUE moved — the change is plumbing and disclosure, proved by stripping the two new attributes and the new
+# legend comment from the map and diffing against the pre-change binary (empty). `important-first` unchanged;
+# the auto-flip threshold (16000) is >20x this number either way. The prior re-pins' reasoning stands verbatim.
 # RE-PINNED 619 → 647 (macro-edges round): the v1 legend comment grew its t= vocabulary
 # (|macro(#define;...)), +71 emitted bytes (1541 → 1612 = wc -c test/golden.xml, re-pinned in the same
 # commit) at the same language-weighted rate; the fixture itself contains no macro, so no row moved and
@@ -72,7 +80,7 @@ est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | 
 # expectation is unchanged. The threshold (16000) is >25x this number either way.
 EFIX="$( est_of test/fixture )"
 OFIX="$( order_of test/fixture )"
-{ [ "$EFIX" = "691" ] && [ "$OFIX" = "important-first" ]; } \
+{ [ "$EFIX" = "768" ] && [ "$OFIX" = "important-first" ]; } \
     && ok "test/fixture (est_tokens=$EFIX) does NOT auto-flip — order=$OFIX (golden neutral)" \
     || no "test/fixture unexpectedly changed order or est_tokens (est=$EFIX order=$OFIX)"
 
