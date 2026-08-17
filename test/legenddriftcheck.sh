@@ -22,7 +22,7 @@
 #   bash test/legenddriftcheck.sh
 #   RIPWIRE_BIN=asan/ripwire bash test/legenddriftcheck.sh
 #
-# References: PLAN_WAVE2_2026-08-17.md line 30 (E3 correction note)
+# References: the Wave-2 round record (2026-08-17), E3 correction note.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -71,7 +71,7 @@ fi
 
 # ── Arm B: Synthetic known-positive (E3 correction: must catch a phantom) ──────────────────────
 #
-# Per the orchestrator correction in PLAN_WAVE2_2026-08-17.md, the known-positive arm must
+# Per the round's E3 correction (2026-08-17), the known-positive arm must
 # use a SYNTHETIC FIXTURE rather than historical data. We inject:
 #   - A legend text containing prose like "the signatures-only flag …"
 #   - A help table that LACKS --signatures-only (or any non-existent flag)
