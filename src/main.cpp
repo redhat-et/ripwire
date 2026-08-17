@@ -4831,6 +4831,191 @@ std::string noBaselineFatalMessage( const std::string& baselineFile, const rw::q
                                      : "it has been removed: re-run `ripwire <dir> --quality-baseline` BEFORE the change you want to measure\n" );
 }
 
+// ── R-I: --quality-delta=A..B, the WAVE-level form ───────────────────────────────────────────────────────
+//
+// The state two COMMITTED trees need, with the temp-dir teardown bound to the caller's scope. Both trees stay
+// alive together on purpose: computeSnapshot reads A while computeDelta reads B, and both read file bytes
+// through their materialized tree, so neither guard may fire early (quality::loadRefTree's header states the
+// same contract from the other side).
+//
+// `sameRef` is the A==B case. It is a legal question with an empty answer, and it is answered by materializing
+// ONE tree and comparing it with itself rather than by a special-cased early return: the empty delta then
+// falls out of the ordinary machinery instead of being asserted by a branch nobody re-tests.
+struct RefPairDelta
+{
+    rw::quality::TmpTreeGuard baseGuard;             // declared BEFORE the trees so teardown outlives their use
+    rw::quality::TmpTreeGuard targetGuard;
+    rw::quality::RefTree      baseTree;
+    rw::quality::RefTree      targetTree;
+    bool                  sameRef = false;
+    std::string           attrs;                     // XML:  ` base_ref="…" target_ref="…" churn="unavailable"`
+    std::string           jsonAttrs;                 // JSON: the SAME three facts — built beside attrs so the
+                                                     // two emitters cannot disclose different things
+
+    const rw::quality::RefTree& target() const noexcept { return sameRef ? baseTree : targetTree; }
+};
+
+// Resolve the spec and materialize both sides. Returns an EXIT CODE on any refusal or environment failure
+// (already reported on stderr), or nullopt when `out` is ready to compare. Splitting user error from
+// environment failure is the same line --dmm's handler draws: a revision that does not resolve is a typo the
+// caller can fix, everything else is the machine.
+std::optional<int> loadRefPairDelta( const std::string& root, std::string_view spec, const rw::Config& cfg, RefPairDelta& out )
+{
+    using namespace rw;
+
+    const quality::RefSpec ref = quality::resolveRefSpec( root, spec );
+    switch( ref.status )
+    {
+        case quality::RefSpecStatus::BadRev:
+            // The did-you-mean here cannot be a spelling neighbourhood — git already owns the ref namespace and
+            // has no cheap enumeration of it — so the adjacent help names the PROBE and the three causes that
+            // actually produce this on an agent's machine, which is more use than a guessed nearest ref.
+            std::fprintf( stderr, "ripwire: --quality-delta: '%s' does not resolve to a commit in %s\n"
+                                  "  check it with `git -C %s rev-parse --verify %s^{commit}`; the usual causes are a typo, a ref that\n"
+                                  "  lives only on a remote you have not fetched, or a shallow clone whose history stops before it\n",
+                          ref.badToken.c_str(), root.c_str(), root.c_str(), ref.badToken.c_str() );
+            return 1;
+        case quality::RefSpecStatus::BadRange:
+            std::fprintf( stderr, "ripwire: --quality-delta: '%s' uses the three-dot form; this compares two TREES, so spell it A..B "
+                                  "(or --quality-delta=$(git merge-base A B)..B if the merge base is what you meant)\n", ref.badToken.c_str() );
+            return 1;
+        case quality::RefSpecStatus::NoGit:
+        case quality::RefSpecStatus::NoParent:
+            // Environment, not a typo — and unlike --dmm (a measurement that reports UNAVAILABLE and exits 0)
+            // this verb has nothing to report at all, so it takes the same exit 1 the bare form's
+            // "nothing to compare against" path takes.
+            std::fprintf( stderr, "ripwire: --quality-delta=%.*s: %s\n", int( spec.size() ), spec.data(), ref.reason.c_str() );
+            return 1;
+        case quality::RefSpecStatus::Ok:
+            break;
+    }
+    // resolveRefSpec only reports Ok for the working-tree form on an EMPTY spec, which the flag table refuses
+    // before it reaches here; the guard is belt-and-braces so a future grammar change cannot silently compare
+    // a materialized tree against a working tree whose keys are spelled against a different root.
+    if( ref.targetIsWorkingTree || ref.baseSha.empty() || ref.targetSha.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --quality-delta needs TWO commits (A..B); use the bare --quality-delta for the working tree\n" );
+        return 1;
+    }
+
+    // DISTINCT tags — see quality::loadRefTree's header. Sharing one would make the target's extraction
+    // delete the base tree out from under the clone detector, which reads file bytes off disk.
+    out.sameRef = ( ref.baseSha == ref.targetSha );
+    if( !quality::loadRefTree( root, ref.baseSha, cfg.excludes, cfg.maxFileBytes, "qdpair-base", out.baseGuard, out.baseTree ) )
+    {
+        std::fprintf( stderr, "ripwire: --quality-delta: could not materialize or parse the tree at %s\n", ref.baseSha.c_str() );
+        return 1;
+    }
+    if( !out.sameRef && !quality::loadRefTree( root, ref.targetSha, cfg.excludes, cfg.maxFileBytes, "qdpair-target", out.targetGuard, out.targetTree ) )
+    {
+        std::fprintf( stderr, "ripwire: --quality-delta: could not materialize or parse the tree at %s\n", ref.targetSha.c_str() );
+        return 1;
+    }
+
+    // Both values are bare 40-char object names straight out of `rev-parse --verify` (resolveRefSpec accepts
+    // nothing else), so they carry no XML-significant byte and are spliced rather than escaped — the same
+    // reasoning gitstamp::atAttr states for its own hex value.
+    out.attrs     = " base_ref=\"" + ref.baseSha + "\" target_ref=\"" + ref.targetSha + "\" churn=\"unavailable\"";
+    out.jsonAttrs = ",\"base_ref\":\"" + ref.baseSha + "\",\"target_ref\":\"" + ref.targetSha + "\",\"churn\":\"unavailable\"";
+    return std::nullopt;
+}
+
+// WHAT this delta is measured AGAINST, and on WHICH tree — the one place --quality-delta decides that.
+// Extracted from runQualityDelta when the ref-pair form landed: floor selection was previously a single
+// straight-line arm inside that body, and adding a second, differently-shaped floor turned it into the kind
+// of branch pile the verb itself measures (runQualityDelta's own complexity crossed the bar on this lane's
+// --quality-delta before this extraction). Everything downstream — acks, counters, both emitters, the exit
+// code — reads these three fields and does not care which floor produced them.
+//
+// `deltaRoot` is WHICH SIDE was judged, and every root-relative key and displayed symbol downstream is
+// spelled against it rather than against the repo root. In the ref-pair form the judged tree is a
+// materialized temp dir: its keys must match the floor tree's key-for-key (S2), and its PID-suffixed path
+// must never reach stdout — a temp path in the output would make two runs of the same comparison differ
+// byte for byte, which is a determinism bug even when every finding is correct.
+struct DeltaBasis
+{
+    rw::quality::BaselineSelection       baseSel;
+    std::vector<rw::quality::Regression> regs;
+    std::string                          deltaRoot;   // see above — NOT interchangeable with the repo root
+};
+
+// Returns an EXIT CODE when there is nothing to compare against (already reported), nullopt when `out` holds
+// a usable comparison. `refs` is the CALLER's because it owns the materialized trees' teardown, and those
+// trees must outlive every read of `out.regs`.
+std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& baselineFile,
+                                      RefPairDelta& refs, DeltaBasis& out )
+{
+    using namespace rw;
+    const Config&       cfg  = d.cfg;
+    const std::string&  root = d.root;
+
+    // ── the REF-PAIR floor: two COMMITTED trees, neither of them the working tree ─────────────────────────
+    if( !cfg.qualityDeltaRange.empty() )
+    {
+        if( const std::optional<int> refused = loadRefPairDelta( root, cfg.qualityDeltaRange, cfg, refs ) )
+        {
+            return refused;
+        }
+        // No sidecar is read, written or DELETED by this form. Deliberate, and disclosed in --help: the
+        // sidecar's whole contract is "pinned at the current HEAD", which says nothing about a pair of
+        // arbitrary commits — and the bare form's self-heal deleting a user's pinned floor as a side effect
+        // of a wave-level measurement would be a side effect nobody asked for.
+        out.baseSel.snapshot = quality::computeSnapshot( refs.baseTree.ing, refs.baseTree.g, refs.baseTree.root );
+        out.baseSel.marker   = "ref-pair";
+        out.deltaRoot        = refs.target().root;
+        out.regs             = quality::computeDelta( refs.target().ing, refs.target().g, out.baseSel.snapshot,
+                                                      out.deltaRoot, cfg.excludes, cfg.maxFileBytes );
+        return std::nullopt;
+    }
+
+    // ── the WORKING-TREE floors, unchanged ───────────────────────────────────────────────────────────────
+    // Precedence: (1) an explicit `.ripwire_quality_baseline` sidecar (from --quality-baseline) wins whenever
+    // it is pinned at the CURRENT HEAD — the mid-task convergence loop (baseline once, edit, re-check) is
+    // unchanged; (2) else — no sidecar, or a STALE one (see R3 below) — if the root is a git repo with a HEAD
+    // tree, auto-baseline against HEAD so the "before I push" loop works with no start-of-task ritual (T0.1);
+    // (3) else degrade to the exit-1 "run --quality-baseline first" guidance (non-git / unborn /
+    // detached-no-tree — unchanged).
+    //
+    // STALENESS + the self-heal live in ONE place, quality::selectBaseline — R3 owner ruling (2026-07-29): a
+    // sidecar whose pinned sha != the CURRENT HEAD sha is STALE, full stop. The B10.1b "reachable ancestor is
+    // a deliberately-pinned floor" carve-out this arm used to apply (gitIsAncestor) is REVOKED: a parallel
+    // session's sidecar pinned at a commit that merely happened to be an ancestor of this session's HEAD made
+    // THIS arm report 31 phantom regressions while the MCP quality_delta verb — same binary, same repo, same
+    // second — correctly reported zero. That divergence was only possible because each arm carried its own
+    // copy of the test; there is now exactly one, in quality.h.
+    //
+    // What remains this arm's own POLICY is the `removeStaleFile=true` argument: the stale sidecar is silently
+    // UNLINKED (best-effort) so the NEXT run sees no file at all rather than rediscovering the same dead pin,
+    // and the ONLY record is the `baseline=` XML attribute ("git-HEAD (stale sidecar removed)") — no stderr
+    // spam, which is the B10.1b noise fix that survives the ruling intact. The read-only MCP arm passes false
+    // and reports "…ignored" instead. When the unlink FAILS (read-only parent dir) this arm degrades to the
+    // read-only story — marker "…ignored", one DEGRADED_PATH_ALERT from the seam — because the pin is still
+    // on disk; `isStaleFileOnDisk()` is the fact, and the fatal message words itself from it, not the intent.
+    out.deltaRoot = std::string( cfg.rootPath );
+    out.baseSel   = quality::selectBaseline( root, baselineFile, /*removeStaleFile=*/true );
+    if( !out.baseSel.isSidecarHonored() )
+    {
+        auto [ headSnap, ok ] = computeHeadSnapshot( root, nullptr, cfg.maxFileBytes, cfg.excludes );
+        if( !ok )
+        {
+            // w1 MED: this used to say "no <file>" in BOTH cases — factually false when the file is a STALE
+            // sidecar that was just dropped, and doubly so when the self-heal unlink FAILED and the thing is
+            // still sitting on disk. The stale-aware wording (and the MCP twin it mirrors) lives in
+            // noBaselineFatalMessage above. Exit code is unchanged (1) in every branch.
+            std::fputs( noBaselineFatalMessage( baselineFile, out.baseSel ).c_str(), stderr );
+            return 1;
+        }
+        out.baseSel.snapshot = std::move( headSnap );
+        if( !out.baseSel.isSidecarStale() )
+        { // the stale/healed case is silent by design — only the true "never baselined" case is informative
+            std::fprintf( stderr, "ripwire: no %s — auto-comparing the working tree vs git HEAD (commit the baseline with --quality-baseline to pin it)\n",
+                          baselineFile.c_str() );
+        }
+    }
+    out.regs = quality::computeDelta( d.ing, d.g, out.baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes );
+    return std::nullopt;
+}
+
 // runQualityViews was NOT a dispatch chain — it held two
 // branches, one of which was 298 lines. That one body is now runQualityDelta below; the residual
 // runQualityViews keeps only --dead-code. ONE extraction, verbatim: the 298-line body is unsplit, because
@@ -4887,27 +5072,19 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // parent dir) this arm degrades to the read-only story — marker "…ignored", one DEGRADED_PATH_ALERT
         // from the seam — because the pin is still on disk; `baseSel.isStaleFileOnDisk()` is the fact, and the
         // fatal message below words itself from it rather than from the intent.
-        quality::BaselineSelection baseSel = quality::selectBaseline( root, baselineFile, /*removeStaleFile=*/true );
-        if( !baseSel.isSidecarHonored() )
+        // `refs` is declared HERE because it owns both materialized trees' teardown and they must outlive
+        // every read of `regs` (DeltaBasis's header states that rule, and why the emitters below spell every
+        // path and symbol against basis.deltaRoot rather than against `root`).
+        const bool   refPair = !cfg.qualityDeltaRange.empty();
+        RefPairDelta refs;
+        DeltaBasis   basis;
+        if( const std::optional<int> refused = resolveDeltaBasis( d, baselineFile, refs, basis ) )
         {
-            auto [ headSnap, ok ] = computeHeadSnapshot( root, nullptr, cfg.maxFileBytes, cfg.excludes );
-            if( !ok )
-            {
-                // w1 MED: this used to say "no <file>" in BOTH cases — factually false when the file is a STALE
-                // sidecar that was just dropped, and doubly so when the self-heal unlink FAILED and the thing is
-                // still sitting on disk. The stale-aware wording (and the MCP twin it mirrors) lives in
-                // noBaselineFatalMessage above. Exit code is unchanged (1) in every branch.
-                std::fputs( noBaselineFatalMessage( baselineFile, baseSel ).c_str(), stderr );
-                return 1;
-            }
-            baseSel.snapshot = std::move( headSnap );
-            if( !baseSel.isSidecarStale() )
-            { // the stale/healed case is silent by design — only the true "never baselined" case is informative
-                std::fprintf( stderr, "ripwire: no %s — auto-comparing the working tree vs git HEAD (commit the baseline with --quality-baseline to pin it)\n",
-                              baselineFile.c_str() );
-            }
+            return *refused;
         }
-        std::vector<quality::Regression> regs = quality::computeDelta( ing, g, baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes );
+        const quality::BaselineSelection& baseSel   = basis.baseSel;
+        const std::string&                deltaRoot = basis.deltaRoot;
+        std::vector<quality::Regression>&  regs     = basis.regs;
 
         // Signal-to-noise round — the per-finding ACK RATCHET. Suppress findings already accepted (with a
         // reason) in .ripwire_quality_acks, honestly (acked="N"); a finding that WORSENED past its acked
@@ -4991,8 +5168,13 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // L2 — stale-ack disclosure (rationale: quality.h's computeStaleAcks). Checked against the CURRENT
         // tree, not the baseline above, so it costs one more computeSnapshot; skipped when the ledger is
         // empty. Reported, never gated — the exit code below reads `regs` alone.
+        // R-I: "the CURRENT tree" is the JUDGED tree, which in the ref-pair form is tree B — checking the
+        // ledger against the working tree there would report acks as stale because of edits that have nothing
+        // to do with the comparison being made.
         const std::vector<quality::StaleAck> staleAcks = acks.empty() ? std::vector<quality::StaleAck>{}
-                                                         : quality::computeStaleAcks( acks, quality::computeSnapshot( ing, g, cfg.rootPath ) );
+                                                         : quality::computeStaleAcks( acks, refPair
+                                                             ? quality::computeSnapshot( refs.target().ing, refs.target().g, refs.target().root )
+                                                             : quality::computeSnapshot( ing, g, cfg.rootPath ) );
 
         // r26 ORIGIN SPLIT — three counts over the VISIBLE (post-ack) findings, one pass:
         //   minorCount      — the materiality tier (unchanged axis).
@@ -5049,13 +5231,17 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         if( cfg.json )
         {
             const char* baseMarkerJ = baseSel.marker;   // R3: the one spelling table lives in quality::selectBaseline — the XML/JSON twins cannot drift apart
-            // The JSON sibling of the XML at= anchor — "at":null (never a fake sha) on a non-git root.
-            const std::string atValJ  = gitstamp::stampAt( root );
+            // The JSON sibling of the XML at= anchor — "at":null (never a fake sha) on a non-git root, and
+            // null in the ref-pair form too: the list was not computed "at" any working-tree state, and the
+            // two refs below ARE its anchor.
+            const std::string atValJ  = refPair ? std::string{} : gitstamp::stampAt( root );
             const std::string atJsonJ = atValJ.empty() ? std::string( "null" ) : ( "\"" + atValJ + "\"" );
+            // R-I: the same two shas + the same unmeasurable-kind disclosure the XML root carries, spelled in
+            // JSON. Empty for the bare form, so that object stays byte-identical to before.
             std::printf( "{\"baseline\":\"%s\",\"regressions\":%zu,\"minor\":%zu,\"acked\":%zu,\"stale\":%zu,"
-                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"at\":%s,\"r\":[",
+                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"at\":%s%s,\"r\":[",
                          jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount, staleAcks.size(),
-                         preexistingCount, newSymbolCount, gatingCount, atJsonJ.c_str() );
+                         preexistingCount, newSymbolCount, gatingCount, atJsonJ.c_str(), refs.jsonAttrs.c_str() );
             bool firstR = true;
             for( const quality::Regression& r : regs )
             {
@@ -5067,11 +5253,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 std::printf( "{\"kind\":\"%s\"", jsonStr( r.kind ).c_str() );
                 if( r.kind == "duplication" )
                 {
-                    std::printf( ",\"members\":\"%s\",\"tokens\":%u", jsonStr( quality::displaySym( r.sym, root ) ).c_str(), r.now );
+                    std::printf( ",\"members\":\"%s\",\"tokens\":%u", jsonStr( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.now );
                 }
                 else
                 {
-                    std::printf( ",\"sym\":\"%s\"", jsonStr( quality::displaySym( r.sym, root ) ).c_str() );
+                    std::printf( ",\"sym\":\"%s\"", jsonStr( quality::displaySym( r.sym, deltaRoot ) ).c_str() );
                     if( !( r.kind == "dead-code" ) && !( r.kind == "api-surface" && r.was == r.now ) )
                     {
                         std::printf( ",\"was\":%u,\"now\":%u", r.was, r.now );
@@ -5131,7 +5317,15 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                      "HEAD (re-pin with quality-baseline); git-HEAD (stale sidecar ignored) = same staleness "
                      "verdict, but the file was left on disk (the read-only MCP arm, or an unlink that "
                      "failed). Only the first is a floor YOU chose; the other three compare against HEAD, so "
-                     "anything already committed cannot appear. at= is the git commit (plus a dirty marker "
+                     "anything already committed cannot appear. A FIFTH marker, ref-pair, means none of those: "
+                     "the verb was given a RANGE, so it compared two COMMITTED trees and no sidecar was read, "
+                     "written or deleted. Those reports carry base_ref= and target_ref= (the two RESOLVED "
+                     "shas, at full length, because a wave number gets quoted into handoffs) and OMIT at=, "
+                     "since the pair is the anchor. They also carry churn set to unavailable, which is the "
+                     "honest statement that one of the ten kinds, short-horizon-churn, cannot be measured "
+                     "there at all: it needs git history at the tree being judged, and both trees are "
+                     "materialized OUT of the repo into temp dirs. Its silence in such a report is therefore "
+                     "not evidence that nothing churned. at= is the git commit (plus a dirty marker "
                      "when the working tree differs) this list was computed at. Findings: "
                      "complexity over the ccx bar, verbosity (LOC)/nesting/params regressions, new duplication, "
                      "newly-dead, new public api-surface (contract drift), error-masking, short-horizon churn, "
@@ -5173,9 +5367,13 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                      "first.) -->" );
         const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
         // at= anchors this regression list to the commit (+dirty state) it was computed against.
-        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\"%s>",
+        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\"%s%s>",
                      baseMarker, regs.size(), minorCount, ackedCount, staleAcks.size(), preexistingCount, newSymbolCount, gatingCount,
-                     gitstamp::atAttr( root ).c_str() );
+                     // R-I: at= is OMITTED for the ref-pair form rather than stamped with the working tree's
+                     // sha, which would anchor the list to a commit it was not computed from. base_ref= and
+                     // target_ref= are the anchor there, and they carry FULL shas because a wave measurement
+                     // gets quoted into handoffs where a 9-char prefix is one collision from unverifiable.
+                     refPair ? "" : gitstamp::atAttr( root ).c_str(), refs.attrs.c_str() );
         for( const quality::Regression& r : regs )
         {
             // duplication carries a member LIST (members=) + token count; the per-symbol was/now kinds
@@ -5216,11 +5414,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             const char* gatingAttr = ( !r.isNewSymbol && !r.isMinor ) ? " gating=\"1\"" : "";
             if( r.kind == "duplication" )
             {
-                std::printf( "<r kind=\"duplication\" members=\"%s\" tokens=\"%u\"%s%s%s%s%s/>", ex( quality::displaySym( r.sym, root ) ).c_str(), r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+                std::printf( "<r kind=\"duplication\" members=\"%s\" tokens=\"%u\"%s%s%s%s%s/>", ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
             }
             else if( r.kind == "dead-code" )
             {
-                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, root ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
             // B10.2e: api-surface now carries two shapes — a brand-new/newly-public symbol (was=now=0, no
             // param comparison to show) and a param-count contract-change (was/now = the real counts). Print
             // was/now whenever they differ from each other so the contract-change case's was=/now= is visible
@@ -5228,11 +5426,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             else if( r.kind == "api-surface" && r.was == r.now )
             {
-                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, root ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
             }
             else
             {
-                std::printf( "<r kind=\"%s\" sym=\"%s\" was=\"%u\" now=\"%u\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, root ) ).c_str(), r.was, r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+                std::printf( "<r kind=\"%s\" sym=\"%s\" was=\"%u\" now=\"%u\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.was, r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
             }
         }
         std::fputs( quality::staleAcksXml( staleAcks ).c_str(), stdout );   // L2 — one <sa> row per stale ack (quality::staleAcksXml)

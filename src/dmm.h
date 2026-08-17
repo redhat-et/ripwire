@@ -271,77 +271,42 @@ inline bool ingestCommitTree( const std::string& root, const std::string& sha, c
     return true;
 }
 
-// Split `--dmm=VALUE`. Three accepted spellings, and every one of them resolves through
-// `gitResolveCommitSha` before a token reaches git a second time:
-//   ""        the working tree against HEAD                (the default, and what `--quality-delta` compares)
-//   "REV"     REV against its FIRST PARENT                 (the per-commit scalar the paper defines)
-//   "A..B"    B against A                                  (an explicit range; an empty side means HEAD)
-// `A...B` (symmetric difference) is refused rather than silently read as `A..B`: for a TREE comparison the
-// two spellings mean different things and guessing which one was meant is exactly the kind of quiet
-// substitution this codebase does not ship.
+// Split `--dmm=VALUE`. The three accepted spellings — "" (working tree vs HEAD), "REV" (vs its first
+// parent), "A..B" (B against A) — and their refusals are NOT parsed here: `quality::resolveRefSpec` owns
+// them, because `--quality-delta=VALUE` accepts the identical grammar and a second copy of a git-resolution
+// rule is how the two --quality-delta floors once drifted into disagreeing by 31 findings. This function
+// keeps only the mapping from that shared verdict onto this verb's own Status vocabulary, so the wording of
+// every message and the exit behaviour are byte-identical to before the extraction.
 inline Result computeDmm( const std::string& root, std::string_view spec, const IngestResult& workingIng,
                           const std::vector<std::string>& excludes, std::size_t maxFileBytes )
 {
     Result r;
 
-    if( !quality::gitRepoHasHistory( root ) )
+    const quality::RefSpec ref = quality::resolveRefSpec( root, spec );
+    switch( ref.status )
     {
-        r.status = Status::NoGit;
-        r.reason = "not a git repository, or no commit on HEAD — there is no earlier tree to compare against";
-        return r;
-    }
-
-    // Resolve both endpoints to bare shas BEFORE anything else touches git — one place, three spellings.
-    if( spec.empty() )
-    {
-        r.targetIsWorkingTree = true;
-        r.baseSha             = quality::gitResolveCommitSha( root, "HEAD" );
-        if( r.baseSha.empty() )
-        {
+        case quality::RefSpecStatus::NoGit:
             r.status = Status::NoGit;
-            r.reason = "HEAD does not resolve to a commit — there is no earlier tree to compare against";
+            r.reason = ref.reason;
             return r;
-        }
-    }
-    else if( spec.find( "..." ) != std::string_view::npos )
-    {
-        r.status   = Status::BadRange;
-        r.badToken = std::string( spec );
-        return r;
-    }
-    else if( const std::size_t sep = spec.find( ".." ); sep != std::string_view::npos )
-    {
-        const std::string baseRef   = sep == 0 ? std::string( "HEAD" ) : std::string( spec.substr( 0, sep ) );
-        const std::string targetRef = sep + 2 >= spec.size() ? std::string( "HEAD" ) : std::string( spec.substr( sep + 2 ) );
-        r.baseSha   = quality::gitResolveCommitSha( root, baseRef );
-        r.targetSha = quality::gitResolveCommitSha( root, targetRef );
-        if( r.baseSha.empty() || r.targetSha.empty() )
-        {
+        case quality::RefSpecStatus::BadRange:
+            r.status   = Status::BadRange;
+            r.badToken = ref.badToken;
+            return r;
+        case quality::RefSpecStatus::BadRev:
             r.status   = Status::BadRev;
-            r.badToken = r.baseSha.empty() ? baseRef : targetRef;
+            r.badToken = ref.badToken;
             return r;
-        }
-    }
-    else
-    {
-        const std::string targetRef = std::string( spec );
-        r.targetSha                 = quality::gitResolveCommitSha( root, targetRef );
-        if( r.targetSha.empty() )
-        {
-            r.status   = Status::BadRev;
-            r.badToken = targetRef;
-            return r;
-        }
-        // The per-commit form: the commit against its FIRST parent. A root commit has none — an environment
-        // fact, not a typo, so it degrades to UNAVAILABLE with a stated reason rather than refusing.
-        r.baseSha = quality::gitResolveCommitSha( root, r.targetSha + "^" );
-        if( r.baseSha.empty() )
-        {
+        case quality::RefSpecStatus::NoParent:
             r.status = Status::NoParent;
-            r.reason = "that commit has no parent — a root commit has no earlier tree to be a delta against";
+            r.reason = ref.reason;
             return r;
-        }
+        case quality::RefSpecStatus::Ok:
+            break;
     }
+    r.baseSha             = ref.baseSha;
+    r.targetSha           = ref.targetSha;
+    r.targetIsWorkingTree = ref.targetIsWorkingTree;
 
     IngestResult baseIng;
     if( !ingestCommitTree( root, r.baseSha, excludes, maxFileBytes, baseIng ) )
