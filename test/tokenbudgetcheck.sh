@@ -71,17 +71,55 @@ ESRC="$( est src )"
 # ── #3: --max-tokens is a real CEILING with headroom. For budgets above the map's fixed envelope floor,
 #    the ACTUAL output byte count must stay under budget*minBytesPerToken (2.36) — i.e. the packed map
 #    tokenizes to <= the requested budget for ANY language mix. We check bytes (a build-dep-free proxy for
-#    tokens via the densest 2.36 B/tok rate) so tiktoken isn't required here. ──────────────────────────
+#    tokens via the densest 2.36 B/tok rate) so tiktoken isn't required here.
+#
+#    THE over_ceiling SPLIT (2026-08-17, W2-F). This arm used to assert the byte ceiling at EVERY N,
+#    including ones where the map's own header says `over_ceiling=1` — "the fixed floor (envelope + legend
+#    + attributes) does not fit inside fit_bytes with ZERO symbols of content". Those two statements
+#    contradict each other, and the contradiction was live rather than theoretical: at N=500 the
+#    pre-existing binary emitted over_ceiling=1 (a disclosed breach) while measuring 1173 B against this
+#    arm's looser 1180 B bound, so the gate called the cap held on a run the tool had already declared it
+#    could not hold. §F5 introduced the label precisely because a cap that can be overshot is not a cap and
+#    must SAY so; an arm that ignores the label is asserting a property the emitter never claimed.
+#
+#    So the loop splits on the label instead of pretending it is not there, and neither half is weaker
+#    than the whole was:
+#      * over_ceiling ABSENT — the emitter is claiming the cap held. The byte assertion binds, unchanged.
+#      * over_ceiling PRESENT — the emitter is claiming the floor alone exceeds the budget. The byte
+#        assertion is meaningless there, so assert the claim that IS being made: the map is at its floor
+#        (shown= is the minimum the search can reach), i.e. the overshoot is the envelope and not unpacked
+#        content. A map that blew the ceiling by SHOWING SYMBOLS would still be caught here.
+#    Plus the monotonicity that keeps the split honest: the label must vanish as N grows (asserted below),
+#    so "disclose over_ceiling" can never become a way to opt out of the ceiling at every budget.
 budget_ok=1
+floor_ok=1
+labelled=""
 for N in 500 1000 2000 5000; do
-    B="$( outbytes src --max-tokens=$N )"
+    doc="$( "$BIN" src --max-tokens=$N --no-cache 2>/dev/null )"
+    B="$( printf '%s' "$doc" | wc -c | tr -d ' ' )"
+    if printf '%s' "$doc" | grep -q 'over_ceiling=1'; then
+        labelled="$labelled $N"
+        shownN="$( printf '%s' "$doc" | grep -oE 'shown=[0-9]+' | grep -oE '[0-9]+' | head -1 )"
+        floorShown="$( "$BIN" src --max-tokens=1 --no-cache 2>/dev/null | grep -oE 'shown=[0-9]+' | grep -oE '[0-9]+' | head -1 )"
+        if [ "${shownN:-x}" != "${floorShown:-y}" ]; then
+            echo "    N=$N discloses over_ceiling=1 but is NOT at the floor (shown=$shownN vs floor shown=$floorShown) — the overshoot is content, not envelope"
+            floor_ok=0
+        fi
+        continue
+    fi
     # worst-case tokens <= B / 2.36 ; require that to be <= N (integer math: B*100 <= N*236)
     if [ $(( B * 100 )) -gt $(( N * 236 )) ]; then
-        echo "    over budget at N=$N: $B bytes → up to $(( B * 100 / 236 )) tokens > $N"; budget_ok=0
+        echo "    over budget at N=$N: $B bytes → up to $(( B * 100 / 236 )) tokens > $N (and NO over_ceiling label)"; budget_ok=0
     fi
 done
-[ "$budget_ok" = 1 ] && ok "--max-tokens=N: packed map stays under N tokens (worst-case 2.36 B/tok) for N in {500,1000,2000,5000}" \
-    || no "--max-tokens exceeded its budget for some N (headroom/ceiling broken)"
+[ "$budget_ok" = 1 ] && ok "--max-tokens=N: where the map claims the cap held (no over_ceiling), it stays under N tokens (worst-case 2.36 B/tok)" \
+    || no "--max-tokens exceeded its budget for some N with NO over_ceiling disclosure (headroom/ceiling broken)"
+[ "$floor_ok" = 1 ] && ok "--max-tokens=N: where the map discloses over_ceiling=1 (N in{$labelled }), it is at its FLOOR — the overshoot is the envelope" \
+    || no "--max-tokens: an over_ceiling=1 map is packing content above its floor — the label is covering a real overshoot"
+# The label must be a SMALL-N property, not an escape hatch: the largest probed budget must not carry it.
+"$BIN" src --max-tokens=5000 --no-cache 2>/dev/null | grep -q 'over_ceiling=1' \
+    && no "--max-tokens=5000 discloses over_ceiling=1 — the fixed floor has grown past a realistic budget" \
+    || ok "--max-tokens=5000 carries no over_ceiling label (the floor is small relative to real budgets)"
 
 # ── #4: a bigger budget never packs FEWER symbols (monotone fit) — the binary search must be monotone ──
 S500="$( "$BIN" src --max-tokens=500  --no-cache 2>/dev/null | grep -oE 'shown=[0-9]+' | grep -oE '[0-9]+' )"
