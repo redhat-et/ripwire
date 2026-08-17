@@ -106,6 +106,9 @@ struct PackTaskHeaderParts
     std::string_view taskNote;         // the comment's scrubbed echo of `task` (xmlCommentText)
     std::string_view mentionNote, boostNote, docMentionNote;   // L1: no routeNote — route= is the one copy
     std::string_view report;           // the per-section truncation ledger
+    std::string_view rootArg;          // R-E (2026-08-17): the single-root run's own root= — the ladder's
+                                        // route-dropped rebuild below calls ctxRootOpen a second time and
+                                        // must carry the SAME root as the pre-built rootOpenStr did.
 };
 
 // One spelling of --pack-task's header, three shapes of it. `withTaskEcho=false` replaces the comment's echo
@@ -114,7 +117,7 @@ struct PackTaskHeaderParts
 inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRouteAttr, bool withTaskEcho,
                                        std::string_view extraNotes )
 {
-    std::string h = withRouteAttr ? std::string( p.rootOpenStr ) : ctxRootOpen( p.task, {} );
+    std::string h = withRouteAttr ? std::string( p.rootOpenStr ) : ctxRootOpen( p.task, {}, p.rootArg );
     h += "<!-- ripwire task bundle for ";
     if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
     else
@@ -281,6 +284,13 @@ struct PackTaskInputs
     // here, at the two places the budget is spent: the section shares trim to leave room for it, and the ladder
     // prices it, so the label fires when the trim cannot get there. 0 ⇒ every other caller, byte-identical.
     std::size_t                        trailingSectionBytes = 0;
+
+    // R-E (2026-08-17 harvest): the single-root run's OWN root argument — same convention serialize()'s
+    // rootArg takes (empty ⇒ multi-root, or a caller that never resolved one, e.g. an MCP call against a
+    // workspace this struct's caller has not single-rooted). Threaded through every `<f p=…>`/`<test p=…>`
+    // row this bundle renders (packSignatures/packBodies/the D1 caller rows/the far-tier name-only rows) so
+    // CLI (runPackTask) and MCP (mcpverbs.h's packTaskText) cannot diverge — one assembler, one root.
+    std::string_view                   rootArg;
 };
 
 // R2: the anchors' 1-hop neighbors, EITHER direction (g.inEdges = symbols that CALL an anchor; g.outOff/
@@ -427,12 +437,18 @@ inline std::string resolveD1Signature( const IngestResult& ing, const Symbol& s,
     return sig;
 }
 
+// R-E (2026-08-17 harvest): rootPrefix empty ⇒ p= keeps the ing.files[] spelling unchanged (multi-root, or
+// no single root to strip) — same convention every other lens's pathRel uses. This is the SHARED CLI/MCP
+// assembler (packTaskBundleText, called by both runPackTask and mcpverbs.h's packTaskText), so fixing it
+// here fixes both dialects in one place — they cannot drift.
 template<class EscFn>
 inline D1Row buildD1Row( const IngestResult& ing, NodeId id, bool isCaller,
-                         HashMap<std::uint32_t, std::string>& srcCache, EscFn&& ex, RedactCounts* redact )
+                         HashMap<std::uint32_t, std::string>& srcCache, EscFn&& ex, RedactCounts* redact,
+                         std::string_view rootPrefix = {} )
 {
     const Symbol& s   = ing.symbols[id];
     std::string   sig = resolveD1Signature( ing, s, srcCache, redact );
+    const std::string_view rp = rootPrefix.empty() ? std::string_view( ing.files[ s.fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix );
 
     // §B14 — composed on std::string. `ex()` escapes BEFORE this point, so an snprintf into a fixed buffer
     // would truncate the ESCAPED form and emit an unterminated `<s …` row at exit 0 (measured on base: at a
@@ -441,7 +457,7 @@ inline D1Row buildD1Row( const IngestResult& ing, NodeId id, bool isCaller,
     D1Row row;
     row.xml  = "<s t=\"";   row.xml += symTag( s.kind );
     row.xml += "\" n=\"";   row.xml += ex( s.name );
-    row.xml += "\" p=\"";   row.xml += ex( ing.files[ s.fileId ] );
+    row.xml += "\" p=\"";   row.xml += ex( rp );
     row.xml += ":";         row.xml += std::to_string( s.line );
     row.xml += "\" rel=\""; row.xml += isCaller ? "caller" : "callee";
     row.xml += "\"";
@@ -460,14 +476,15 @@ inline D1Row buildD1Row( const IngestResult& ing, NodeId id, bool isCaller,
 }
 
 template<class EscFn>
-inline D1Rows renderD1CallerRows( const IngestResult& ing, const D1Neighbors& d1, EscFn&& ex, RedactCounts* redact )
+inline D1Rows renderD1CallerRows( const IngestResult& ing, const D1Neighbors& d1, EscFn&& ex, RedactCounts* redact,
+                                  std::string_view rootPrefix = {} )
 {
     D1Rows out;
     out.xml.reserve( d1.ids.size() );  out.rawSig.reserve( d1.ids.size() );
     HashMap<std::uint32_t, std::string> srcCache;
     for( std::size_t i = 0; i < d1.ids.size(); ++i )
     {
-        D1Row row = buildD1Row( ing, d1.ids[i], d1.isCaller[i] != 0, srcCache, ex, redact );
+        D1Row row = buildD1Row( ing, d1.ids[i], d1.isCaller[i] != 0, srcCache, ex, redact, rootPrefix );
         out.xml.emplace_back( std::move( row.xml ) );
         out.rawSig.emplace_back( std::move( row.rawSig ) );
     }
@@ -476,17 +493,19 @@ inline D1Rows renderD1CallerRows( const IngestResult& ing, const D1Neighbors& d1
 
 // R2: a bare NAME-ONLY `<s .../>` row per id (no signature, no doc) — the d2plus tier.
 template<class EscFn>
-inline std::vector<std::string> renderNameOnlyRows( const IngestResult& ing, const std::vector<NodeId>& ids, EscFn&& ex )
+inline std::vector<std::string> renderNameOnlyRows( const IngestResult& ing, const std::vector<NodeId>& ids, EscFn&& ex,
+                                                     std::string_view rootPrefix = {} )
 {
     std::vector<std::string> rows;
     rows.reserve( ids.size() );
     for( NodeId id : ids )
     {
         const Symbol& s = ing.symbols[id];
+        const std::string_view rp = rootPrefix.empty() ? std::string_view( ing.files[ s.fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix );
         std::string   row = "<s t=\"";                                   // §B14 — std::string, not char[512]
         row += symTag( s.kind );
         row += "\" n=\"";   row += ex( s.name );
-        row += "\" p=\"";   row += ex( ing.files[ s.fileId ] );
+        row += "\" p=\"";   row += ex( rp );
         row += ":";         row += std::to_string( s.line );
         row += "\"/>";
         rows.emplace_back( std::move( row ) );
@@ -568,7 +587,8 @@ inline RankingSection renderRankingWithFar( const IngestResult& ing, const Ranki
                         ri.in->fanIn, ri.in->impure, ri.in->redact,
                         ri.in->churn, ri.forClone, ri.in->tested, ri.in->amp,
                         /*rankAdaptivePayload=*/true, /*payloadBudgetBytes=*/ri.sigsBudget,
-                        /*noteIndex=*/nullptr );   // notes are a DEDICATED section (4), never inline here (avoids double-emit)
+                        /*noteIndex=*/nullptr,       // notes are a DEDICATED section (4), never inline here (avoids double-emit)
+                        ri.in->rootArg );
     } );
     // §P8 vocabulary: the ladder's marker is now `<sigs capped="1">` (src/pageview.h, THE TRUNCATION
     // VOCABULARY, rule 5) — it was payload="capped", and THIS was the string-match that made a string enum
@@ -576,7 +596,7 @@ inline RankingSection renderRankingWithFar( const IngestResult& ing, const Ranki
     // read as the ranking section's own verdict.
     out.capped = out.sigsStr.find( "<sigs capped=\"1\">" ) != std::string::npos;
 
-    const std::vector<std::string> farRows = renderNameOnlyRows( ing, *ri.d2plusIds, ex );
+    const std::vector<std::string> farRows = renderNameOnlyRows( ing, *ri.d2plusIds, ex, ri.in->rootArg );
     char farAttr[ 32 ];  std::snprintf( farAttr, sizeof( farAttr ), " of_top=\"%zu\"", ri.topRanked->size() );
     const std::size_t     sigsLeftover = ri.sigsBudget > out.sigsStr.size() ? ri.sigsBudget - out.sigsStr.size() : 0;
     const PackTaskSection far          = packTaskListSection( "far", farAttr, farRows, sigsLeftover, kPackTaskWrapReserve );
@@ -644,12 +664,13 @@ inline MonotoneRoll monotoneRoll( bool sectionCapped, std::size_t granted, std::
 // (`wrapperLen`, measured once by the caller) — i.e. this node's own share of `children`. Called under the
 // caller's RedactTallyFreeze, so a probe never bills the redaction tally a second time (§B10.2's rule).
 inline std::size_t probeBodyCost( const IngestResult& ing, const Graph& g, NodeId id, bool compress,
-                                  RedactCounts* redact, std::size_t wrapperLen )
+                                  RedactCounts* redact, std::size_t wrapperLen, std::string_view rootArg = {} )
 {
     EmittedBodies     dummy;
     const std::string one = packTaskRenderToString( [ & ]( std::FILE* m )
     {
-        packBodies( m, ing, { id }, SIZE_MAX, g.outOff, g.outTargets, compress, redact, nullptr, nullptr, &dummy );
+        packBodies( m, ing, { id }, SIZE_MAX, g.outOff, g.outTargets, compress, redact, nullptr, nullptr, &dummy,
+                   /*truncateOversizedFirst=*/true, /*withFileContext=*/false, rootArg );
     } );
     return one.size() > wrapperLen ? one.size() - wrapperLen : 0;
 }
@@ -728,7 +749,7 @@ inline std::string restatePackTaskBodiesWrapper( const IngestResult& ing, const 
 // packBodies' own streaming admission — is what makes bodies_shown monotone in budgetTokens.
 inline std::vector<NodeId> selectMonotoneBodySubset( const IngestResult& ing, const Graph& g,
                                                       const std::vector<NodeId>& bodyIds, std::size_t bodiesBudget,
-                                                      bool compress, RedactCounts* redact )
+                                                      bool compress, RedactCounts* redact, std::string_view rootArg = {} )
 {
     if( bodyIds.empty() )
     {
@@ -746,7 +767,7 @@ inline std::vector<NodeId> selectMonotoneBodySubset( const IngestResult& ing, co
         } ).size();
         for( std::size_t i = 0; i < n; ++i )
         {
-            cost[i] = probeBodyCost( ing, g, bodyIds[i], compress, redact, wrapperLen );
+            cost[i] = probeBodyCost( ing, g, bodyIds[i], compress, redact, wrapperLen, rootArg );
         }
     }
     // reserve the measured wrapper cost PLUS kPackTaskWrapReserve's existing generous margin (digit-width
@@ -908,7 +929,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // the comment's echo of the same text — free, so the ceiling still blew out ~3.4x on a long task. Charge
     // every user-length part EXACTLY (measured, not estimated); the reserve now covers only what it says it
     // covers, the fixed legend + report + "</ctx>". rootOpenStr is emitted verbatim at the assembly below.
-    const std::string rootOpenStr = ctxRootOpen( task, lr.routeNote );
+    const std::string rootOpenStr = ctxRootOpen( task, lr.routeNote, in.rootArg );
     // §F1: in.trailingSectionBytes is the caller's spliced-in tail (see PackTaskInputs) — a FIXED cost with no
     // trim knob of its own, so it belongs in the floor the section shares are divided under, exactly like the
     // header's own user-length parts. 0 for every caller that splices nothing.
@@ -972,7 +993,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // truncate-the-first-oversized-one floor still applies (never literally nothing when a partial view
         // is possible) — and, rendered alone, that floor is itself flat-then-jumps (always exactly 1 shown
         // for any bodiesBudget >= kPackTaskSectionFloor), never a source of a second cliff.
-        std::vector<NodeId> chosenBodyIds = selectMonotoneBodySubset( ing, g, bodyIds, bodiesBudget, in.compress, in.redact );
+        std::vector<NodeId> chosenBodyIds = selectMonotoneBodySubset( ing, g, bodyIds, bodiesBudget, in.compress, in.redact, in.rootArg );
         if( chosenBodyIds.empty() )
         {
             chosenBodyIds.push_back( bodyIds[0] );
@@ -981,7 +1002,8 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         bodiesStr  = packTaskRenderToString( [ & ]( std::FILE* m )
         {
             packBodies( m, ing, renderIds, bodiesBudget, g.outOff, g.outTargets, in.compress, in.redact,
-                        /*ranges=*/nullptr, /*noteIndex=*/nullptr, &emittedBodies );
+                        /*ranges=*/nullptr, /*noteIndex=*/nullptr, &emittedBodies, /*truncateOversizedFirst=*/true,
+                        /*withFileContext=*/false, in.rootArg );
         } );
         bodiesKept = emittedBodies.kept.size();
         // §W2-K: restate total=/capped= and splice in omission markers for whatever OUR pre-selection
@@ -996,7 +1018,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
 
     // ── section 3 — d1: the anchors' 1-hop callers+callees (computed above), each shown with its OWN one-line
     //    SIGNATURE (R2: d1's detail tier) + its declaration site — never a full body (that stays d0-only).
-    const D1Rows d1Rendered = renderD1CallerRows( ing, d1, ex, in.redact );
+    const D1Rows d1Rendered = renderD1CallerRows( ing, d1, ex, in.redact, in.rootArg );
     const std::vector<std::string>& callerRows = d1Rendered.xml;
     const std::vector<std::string>& d1SigRaw   = d1Rendered.rawSig;   // unescaped — the L2 --json tail reuses these verbatim
     char callersAttr[ 32 ];  std::snprintf( callersAttr, sizeof( callersAttr ), " of_top=\"%zu\"", bodiesTotal );
@@ -1111,8 +1133,9 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         {
             // §B14 — std::string, not char[512]. This row carried TWO unbounded interpolands (the test path
             // AND the runner command), so it was the widest of the six breaching sites.
+            const std::string_view rp = in.rootArg.empty() ? std::string_view( ing.files[f] ) : rw::sarif::rootRelativeUri( ing.files[f], rw::sarif::rootPrefixOf( in.rootArg ) );
             std::string row = "<test p=\"";
-            row += ex( ing.files[f] );
+            row += ex( rp );
             row += "\"";
             row += rw::runAttr( runners, f, ex );
             row += "/>";
@@ -1138,6 +1161,12 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     {
         const RedactTallyFreeze tallyFreeze( in.redact );
         std::string&            j = *jsonOut;
+        // R-E (2026-08-17 harvest): the JSON dialect's pathRel — same rootArg every XML row above already used.
+        const std::string       jRootPrefix = in.rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( in.rootArg );
+        const auto               jPathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+        {
+            return in.rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], jRootPrefix );
+        };
         j = "{\"task\":\"" + jsonStr( task ) + "\"";
         if( !lr.routeNote.empty() )
         {
@@ -1177,7 +1206,9 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             packSignaturesJson( m, ing, maskedRank, int( eligibleIds.size() ),
                                 JsonSigLens{ /*metrics=*/true, in.fanIn, in.impure, in.churn, &forClone,
                                              in.tested, in.amp, /*rankAdaptivePayload=*/true },
-                                in.redact );   // §B0: the same redaction the XML <sigs> above already applied
+                                in.redact,   // §B0: the same redaction the XML <sigs> above already applied
+                                /*budgetBytes=*/0, /*payloadBudgetBytes=*/0, /*outCapped=*/nullptr, /*outNotes=*/nullptr,
+                                in.rootArg );
         } );
 
         // R2: d2plus — the topRanked members NOT within 1 hop of an anchor, name-only (mirrors XML's <far>).
@@ -1189,7 +1220,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             const Symbol& s = ing.symbols[ d2plusIds[i] ];
             j += ( i == 0 ? "" : "," );
             j += "{\"t\":\"" + std::string( symTag( s.kind ) ) + "\",\"n\":\"" + jsonStr( s.name )
-               + "\",\"p\":\"" + jsonStr( ing.files[ s.fileId ] ) + ":" + std::to_string( s.line ) + "\"}";
+               + "\",\"p\":\"" + jsonStr( std::string( jPathRel( s.fileId ) ) ) + ":" + std::to_string( s.line ) + "\"}";
         }
         j += "]";
 
@@ -1211,7 +1242,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             const Symbol& s = ing.symbols[ d1.ids[i] ];
             j += ( i == 0 ? "" : "," );
             j += "{\"t\":\"" + std::string( symTag( s.kind ) ) + "\",\"n\":\"" + jsonStr( s.name )
-               + "\",\"p\":\"" + jsonStr( ing.files[ s.fileId ] ) + ":" + std::to_string( s.line )
+               + "\",\"p\":\"" + jsonStr( std::string( jPathRel( s.fileId ) ) ) + ":" + std::to_string( s.line )
                + "\",\"rel\":\"" + ( d1.isCaller[i] ? "caller" : "callee" ) + "\"";
             if( !d1SigRaw[i].empty() )
             {
@@ -1244,7 +1275,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         const auto                 jrun = [ & ]( std::string_view s ) { return jsonStr( s ); };
         for( std::size_t i = 0; i < testsShown; ++i )
         {
-            j += std::string( i == 0 ? "" : "," ) + "{\"p\":\"" + jsonStr( ing.files[ testFiles[i] ] ) + "\""
+            j += std::string( i == 0 ? "" : "," ) + "{\"p\":\"" + jsonStr( std::string( jPathRel( testFiles[i] ) ) ) + "\""
                + rw::runFieldJson( jsonRunners, testFiles[i], jrun ) + "}";
         }
         j += "]";
@@ -1281,7 +1312,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     report += " | far: "  + listStatus( farTotal,      rankOut.farXml, farKept );   // R2: d2plus name-only tier (nested in <sigs>)
 
     const PackTaskHeaderParts headerParts{ task, rootOpenStr, taskNote, mentionNote, boostNote,
-                                            docMentionNote, report };
+                                            docMentionNote, report, in.rootArg };
     const auto buildHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
     { return packTaskHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
     const std::string headerStr = buildHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );

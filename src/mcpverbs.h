@@ -1716,8 +1716,14 @@ inline std::string pathText( const std::string& root, const std::string& from, c
 
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the
+    // CLI twin (main.cpp runPath) computes the identical condition so the two dialects cannot diverge.
+    const bool         ptSingleRoot = ing.realPaths.empty();
+    const std::string  ptRootPrefix = ptSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const auto loc = [ & ]( NodeId n ) -> std::string
-    { const Symbol& s = ing.symbols[n]; return ex( ing.files[ s.fileId ] ) + ":" + std::to_string( s.line ); };
+    { const Symbol& s = ing.symbols[n];
+      const std::string_view rp = ptSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], ptRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+      return ex( rp ) + ":" + std::to_string( s.line ); };
 
     char*       buf = nullptr;
     std::size_t sz  = 0;
@@ -1726,10 +1732,11 @@ inline std::string pathText( const std::string& root, const std::string& from, c
     {
         return {};
     }
-    std::fprintf( mem, "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"",
+    const std::string ptRootAttr = ptSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
+    std::fprintf( mem, "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"%s",
                   ex( from ).c_str(), ex( to ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                   srcDefs.size(), dstDefs.size(),
-                  pth.empty() ? 0 : 1, pth.empty() ? std::size_t( 0 ) : pth.size() - 1 );
+                  pth.empty() ? 0 : 1, pth.empty() ? std::size_t( 0 ) : pth.size() - 1, ptRootAttr.c_str() );
     if( pth.empty() )
     {
         std::fprintf( mem, " hint=\"no directed call path — try the connect verb on %s,%s (undirected: finds a shared caller), or uses/impact for non-call references\"",
@@ -1737,7 +1744,9 @@ inline std::string pathText( const std::string& root, const std::string& from, c
     }
     std::fprintf( mem, ">" );
     for( NodeId n : pth )
-    { const Symbol& s = ing.symbols[n]; std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
+    { const Symbol&           s  = ing.symbols[n];
+      const std::string_view  rp = ptSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], ptRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+      std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line ); }
     std::fprintf( mem, "</path>" );
     std::fflush( mem );
     std::fclose( mem );
@@ -1932,10 +1941,18 @@ inline std::size_t connectEstTokens( std::size_t payloadBytes ) noexcept
 
 inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectResult& res,
                          RedactCounts* redact,                  // §B0/W3-N1: REQUIRED — the Steiner-node sig= attrs are emitted text
-                         int maxTokens = 0 )
+                         int maxTokens = 0,
+                         std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                                                           // argument serialize() takes — see its comment.
+                                                           // Shared by CLI --connect and the MCP connect verb.
 {
     std::vector<char> escBuf;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, escBuf ) ); };
+    const std::string rootPrefix = rootArg.empty() ? std::string() : sarif::rootPrefixOf( rootArg );
+    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
 
     // per-file content cache for the Steiner sig= attributes (each needed file read at most once).
     HashMap<std::uint32_t, std::string> contents;
@@ -1969,7 +1986,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
         const Symbol& s = ing.symbols[ id ];
         p.append( "<" ).append( tag ).append( " n=\"" ).append( ex( s.name ) )
          .append( "\" t=\"" ).append( symTag( s.kind ) )
-         .append( "\" p=\"" ).append( ex( ing.files[ s.fileId ] ) ).append( ":" ).append( std::to_string( s.line ) ).append( "\"" );
+         .append( "\" p=\"" ).append( ex( pathRel( s.fileId ) ) ).append( ":" ).append( std::to_string( s.line ) ).append( "\"" );
     };
 
     // §4 trim order: pass 1 full sigs; pass 2 name-only Steiner nodes; then drop legs longest-first
@@ -2089,9 +2106,10 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
     // verb apologises for an estimate being an estimate. Dropped.
     const std::size_t estTokens = connectEstTokens( payload.size() );
     std::fprintf( out, "%s", kConnectHeader );
-    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s>",
+    const std::string connectRootAttr = rootArg.empty() ? std::string() : ( " root=\"" + ex( rootArg ) + "\"" );
+    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s%s>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups, estTokens,
-                  truncated ? " truncated=\"paths\"" : "" );
+                  truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str() );
     std::fwrite( payload.data(), 1, payload.size(), out );
     std::fprintf( out, "</connect>" );
 }
@@ -2122,7 +2140,8 @@ inline std::string connectText( const std::string& root, const std::vector<std::
     std::size_t sz  = 0;
     std::FILE*  mem = open_memstream( &buf, &sz );
     if( !mem ) { err = "internal error"; return {}; }
-    packConnect( mem, ing, res, redact );
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    packConnect( mem, ing, res, redact, /*maxTokens=*/0, ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );
     std::fflush( mem );
     std::fclose( mem );
     std::string out = buf ? std::string( buf, sz ) : std::string{};
@@ -2500,6 +2519,9 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     in.impure       = &impure;
     in.redact       = redact;
     in.notes        = notesPtr;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the
+    // CLI twin (main.cpp runPackTask) sets the identical field so the two dialects cannot diverge.
+    in.rootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
     if( partitionCount >= packpartition::kMinPartitions && partitionCount <= packpartition::kMaxPartitions )
     {
         return packpartition::packTaskPartitionText( ing, g, task, lr, in, partitionCount );
