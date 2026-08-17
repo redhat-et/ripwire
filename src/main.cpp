@@ -4854,11 +4854,12 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         const std::string owSymAttr = cfg.ownersSym.empty()
                                     ? std::string{}
                                     : " of=\"" + std::string( escapeXml( cfg.ownersSym, owSymEsc ) ) + "\" defs=\"" + std::to_string( symDefCount ) + "\"";
-        std::printf( "<owners files=\"%zu\"%s%s%s>", ownerships.size(),
+        std::printf( "<owners files=\"%zu\"%s%s%s%s>", ownerships.size(),
                      pageDisclosure( owab, sizeof( owab ), owpw.end - owpw.begin, printRows.size(), owpw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),
                      owSymAttr.c_str(),
-                     gitstamp::atAttr( root ).c_str() );
+                     gitstamp::atAttr( root ).c_str(),
+                     mvRootAttr.c_str() );
         if( !detail && uniformCount > 0 )
         {
             std::printf( "<uniform authors=\"1\" bf=\"1\" share=\"1.00\" files=\"%zu\"/>", uniformCount );
@@ -4870,7 +4871,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             const FileOwnership& ow  = ownerships[i];
             const AuthorScore&   top = ow.authors[0];
             // path and email are externally-controlled strings — escape both to keep output valid XML.
-            const auto ep = rw::escapeXml( ing.files[ ow.fileId ], owEsc );
+            const std::string_view rp = mvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ ow.fileId ], mvRootPrefix ) : std::string_view( ing.files[ ow.fileId ] );
+            const auto ep = rw::escapeXml( rp, owEsc );
             std::printf( "<f p=\"%.*s\" authors=\"%u\" bf=\"%d\"",
                          int( ep.size() ), ep.data(), ow.uniqueAuthors, int( ow.busFactor ) );
             const auto em = rw::escapeXml( top.email, owEsc );
@@ -7471,6 +7473,9 @@ std::optional<int> runExercises( const MainDispatch& d )
     const Config&       cfg = d.cfg;
     const IngestResult& ing = d.ing;
     const Graph&        g   = d.g;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool         exSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  exRootPrefix = exSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
 
     if( !cfg.exercisesFlag )
     {
@@ -7525,17 +7530,24 @@ std::optional<int> runExercises( const MainDispatch& d )
     std::printf( "<!-- ripwire exercises: the NON-TEST symbols this test transitively calls into — what it covers (the inverse of the affected verb). "
                  "<t> = the seed test files the pattern matched; <s> = the covered symbols, PageRank desc. "
                  "harness=script|mixed says the seed set contains shell gates, whose subprocess coverage this walk cannot see -->" );
-    std::printf( "<exercises of=\"%s\" seed_files=\"%zu\" shown_seed_files=\"%zu\" seed_files_capped=\"%u\" test_symbols=\"%zu\" reaches=\"%zu\"%s%s>",
+    const std::string exRootAttr = exSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
+    std::printf( "<exercises of=\"%s\" seed_files=\"%zu\" shown_seed_files=\"%zu\" seed_files_capped=\"%u\" test_symbols=\"%zu\" reaches=\"%zu\"%s%s%s>",
                  ex( cfg.exercisesFile ).c_str(), sel.testFiles.size(), shownSeed,
                  unsigned( shownSeed < sel.testFiles.size() ), sel.seeds.size(), show.size(), harnessAttr.c_str(),
-                 pageDisclosure( epab, sizeof( epab ), shownRows, show.size(), epw.end, cfg.pageLimit, cfg.pageOffset, true ) );
+                 pageDisclosure( epab, sizeof( epab ), shownRows, show.size(), epw.end, cfg.pageLimit, cfg.pageOffset, true ),
+                 exRootAttr.c_str() );
     const rw::TestRunnerIndex runners( ing );      // §P11.4: the seed rows are the tests you are about to re-run
     for( std::size_t i = 0; i < shownSeed; ++i )
     {
-        std::printf( "<t p=\"%s\"%s/>", ex( ing.files[ sel.testFiles[i] ] ).c_str(), rw::runAttr( runners, sel.testFiles[i], ex ).c_str() );
+        const std::string_view rp = exSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ sel.testFiles[i] ], exRootPrefix ) : std::string_view( ing.files[ sel.testFiles[i] ] );
+        std::printf( "<t p=\"%s\"%s/>", ex( rp ).c_str(), rw::runAttr( runners, sel.testFiles[i], ex ).c_str() );
     }
     for( std::size_t i = epw.begin; i < epw.end; ++i )
-    { const Symbol& s = ing.symbols[ show[i] ]; std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
+    {
+        const Symbol&           s  = ing.symbols[ show[i] ];
+        const std::string_view  rp = exSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], exRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+        std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
+    }
     std::printf( "</exercises>" );
     return 0;
 }
@@ -9420,7 +9432,9 @@ std::optional<int> runLayout( const MainDispatch& d )
         }
         return 1;
     }
-    layout::writeLayout( stdout, result );
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const std::string_view layoutRootArg = ( d.ing.realPaths.empty() && cfg.roots.size() == 1 ) ? cfg.roots[0] : std::string_view();
+    layout::writeLayout( stdout, result, layoutRootArg );
     return layout::layoutContractBroken( result ) ? 2 : 0;   // exit 2 = mirror drift or a contradicted tripwire
 }
 

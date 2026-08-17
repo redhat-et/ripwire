@@ -447,6 +447,14 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
                                         std::size_t maxFileBytes, const std::vector<std::string>& excludes, NodeId focus )
 {
     const Symbol& fsym = ing.symbols[ focus ];
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the ONE
+    // shared assembler for CLI --edit-check and the MCP edit_check verb, so the two dialects cannot diverge.
+    const bool         ecSingleRoot = ing.realPaths.empty();
+    const std::string  ecRootPrefix = ecSingleRoot ? rw::sarif::rootPrefixOf( root ) : std::string();
+    const auto          ecPathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return ecSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ fileId ], ecRootPrefix ) : std::string_view( ing.files[ fileId ] );
+    };
 
     const std::vector<NodeId> overloadNodes = editCheckOverloadSet( ing, g, focus );
     const EditCheckContract   contract      = editCheckContractVsHead( ing, g, root, maxFileBytes, excludes, focus, overloadNodes );
@@ -522,7 +530,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // FIXED-BUFFER RULE for the escaper-side test that separates this shape from the safe one.
     out += "<edit-check sym=\"";  out += ex( fsym.name );
     out += "\" t=\"";             out += symTag( fsym.kind );
-    out += "\" p=\"";             out += ex( ing.files[ fsym.fileId ] );
+    out += "\" p=\"";             out += ex( ecPathRel( fsym.fileId ) );
     out += ":";                   out += std::to_string( fsym.line );
     out += "\" status=\"";        out += verdict.status;   // the JOINED verdict, never editCheckContractVsHead's metric half alone
     out += "\"";
@@ -561,6 +569,9 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // §H4 §3.4: LAST, after at= — same placement rule, same reason (no existing attribute-adjacency
     // assertion in test/ can break on an attribute appended past the end of every group).
     out += kGraphCountFloorAttrXml;
+    // R-E (2026-08-17 harvest): root= — same placement rule as kGraphCountFloorAttrXml above (truly last,
+    // after every pre-existing attribute, so no substring-adjacency assertion in test/ can break).
+    if( ecSingleRoot ) { out += " root=\"";  out += ex( root );  out += "\""; }
     out += ">";
     // §B11.3 — one row per FOLDED definition, so the set behind the scalar is nameable. Emitted only above
     // defs="1" (at 1 the row would restate the root's own p=/t=, and params_now already IS its parameter
@@ -572,7 +583,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
         for( NodeId ov : overloadNodes )
         {
             const Symbol& os = ing.symbols[ov];
-            out += "<def p=\"";  out += ex( ing.files[ os.fileId ] );          // §B14 — std::string, not char[512]
+            out += "<def p=\"";  out += ex( ecPathRel( os.fileId ) );          // §B14 — std::string, not char[512]
             out += ":";          out += std::to_string( os.line );
             out += "\" t=\"";    out += symTag( os.kind );
             out += "\" params=\""; out += std::to_string( std::uint32_t( os.params ) );
@@ -583,7 +594,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     {
         const Symbol& cs = ing.symbols[c];
         out += "<c n=\"";   out += ex( cs.name );                        // §B14 — std::string, not char[512]
-        out += "\" p=\"";   out += ex( ing.files[ cs.fileId ] );
+        out += "\" p=\"";   out += ex( ecPathRel( cs.fileId ) );
         out += ":";         out += std::to_string( cs.line );
         out += "\"";
         if( callerIncompatible[c] )
