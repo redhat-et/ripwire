@@ -3247,7 +3247,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         // §P3 × §P4: the budget trim above can drop files the lego scope still references — narrow the lego
         // block to the RENDERED sigs' files and re-render (a byte-subset of what the budget already charged
         // for, so the bundle only shrinks; before est_tokens so the header reports the delivered size).
-        if( sigsPreRendered && legoPreRendered && !legoStr.empty() && narrowLegoToRenderedSigs( ing, legoScoped, sigsStr ) )
+        if( sigsPreRendered && legoPreRendered && !legoStr.empty()
+            && narrowLegoToRenderedSigs( ing, legoScoped, sigsStr, flRootArg.empty() ? std::string_view() : rw::sarif::rootPrefixOf( flRootArg ) ) )
         {
             legoStr = captureXml( [ & ]( std::FILE* f ) { packLego( f, ing, legoScoped, lensRank, 12, redactPtr, impurePtr, kNoNode, /*withPaths=*/true, flRootArg ); } );
         }
