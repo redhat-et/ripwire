@@ -1,8 +1,8 @@
-# snapshot.lock — pins the recall lane's FROZEN doc corpus (see make_snapshot.py and the
-# 2026-08-07 FROZEN SNAPSHOT entry in test/recallevalcheck.sh). Regenerated ONLY by
-#   python3 bench/recalleval/make_snapshot.py --freeze [COMMIT]
-# in a deliberate recalibration commit that also re-measures the frozen baselines and resets
-# the gate's floors. Hand-editing this file or snapshot.mdpack reds gate check #0.
+# snapshot.lock — pins the recall lane's FROZEN corpus (see make_snapshot.py and the FROZEN
+# SNAPSHOT entries in test/recallevalcheck.sh). Regenerated ONLY by
+#   python3 bench/recalleval/make_snapshot.py --freeze [COMMIT] --corpus docs
+# in a deliberate recalibration commit that also re-measures that lane's frozen baselines and
+# resets the gate's floors. Hand-editing this file or snapshot.mdpack reds gate check #0.
 source_commit=7a7f7989203479a35e09b2418f10682ec10dc87e
 source_commit_date=2026-08-07T11:24:59-04:00
 files=113

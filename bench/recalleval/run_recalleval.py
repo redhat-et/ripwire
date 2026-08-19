@@ -34,14 +34,22 @@ Usage:
 Output: per-lane human table + machine-readable `AGG\t<lane>\t...` rows (greppable, diff-stable —
 the determinism gate runs the harness twice and diffs stdout byte-for-byte).
 
-CORPUS SPLIT (2026-08-07, the frozen-snapshot ruling — see make_snapshot.py and the gate header):
-the RECALL lane scores the FROZEN corpus in bench/recalleval/snapshot.mdpack (unpacked into a temp
-root per run), so its recall/MRR move only when the RANKER moves; a separate `recall_livepol` probe
-re-runs the same queries against the LIVE root and reports pollution@5 only — the live-corpus
-composition signal. The RANKING lane still scores the live root: its labels are code symbols and
-its floors carry wide margins. Only the ranking lane and the live probe are "a benchmark you re-run
-on a moving repo"; the frozen recall lane is a fixed instrument until a recalibration commit
-re-freezes it.
+BOTH LANES SCORE FROZEN CORPORA (recall 2026-08-07, ranking 2026-08-19 — see make_snapshot.py and the
+gate header's two FROZEN SNAPSHOT entries):
+  * RECALL scores bench/recalleval/snapshot.mdpack — every tracked *.md at the pinned commit.
+  * RANKING scores bench/recalleval/snapshot.srcpack — every tracked file the crawl can reach at the
+    pinned commit, i.e. the whole indexed tree, because --for's universe is the whole indexed tree.
+Each is unpacked into its own temp root per run, so a lane's recall/MRR can move only when the RANKER
+moves — a red floor is a ranker regression BY CONSTRUCTION, never this repository gaining a document
+or a symbol. The ranking lane's freeze exists because it hit the identical failure the recall lane
+did: three independent measurements (docs/EVALS.md §6 probe 4's three-cell control, the wave-2
+verifier's follow-up F, the subtoken round's 2×2) each showed a −3.1pp step with the ranker provably
+neutral and the corpus — this repo's own new symbols displacing its own gold — carrying all of it.
+
+The LIVE root is still measured, and only where live composition is the question: `recall_livepol`
+re-runs the recall queries against it and reports pollution@5 only. The ranking lens's live
+anti-pollution property is asserted directly by the gate's check #6 (--for at the live repo root),
+which is why this harness grows no second live probe.
 """
 
 import argparse
@@ -54,8 +62,6 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-PACK_PATH = os.path.join(HERE, "snapshot.mdpack")
-LOCK_PATH = os.path.join(HERE, "snapshot.lock")
 
 FIXTURE_COMPONENTS = {"test", "tests", "fixture", "fixtures", "testdata", "present"}
 GENERATED_PREFIX = "docs/captures/"
@@ -200,32 +206,38 @@ def pct(num, den):
     return 100.0 * num / den if den else 0.0
 
 
-def materialize_snapshot(tmp_root):
-    """Unpack snapshot.mdpack into tmp_root as real *.md files; return (commit, doc count).
+def materialize_snapshot(tmp_root, corpus_key):
+    """Unpack a frozen corpus into tmp_root as real files; return (commit, entry count).
 
-    Cheap structural sanity only (lock present, doc count matches): the byte-level corpus_sha256
-    verification is single-sourced in make_snapshot.py --verify, which gate check #0 runs first.
+    One function for both lanes (docs -> *.md, src -> the whole crawlable tree): the pack format,
+    the lock keys and the failure modes are identical, so a second copy of this would be a clone of
+    a helper the tree already reuses. Cheap structural sanity only (lock present, count matches);
+    the byte-level corpus_sha256 verification is single-sourced in make_snapshot.py --verify, which
+    gate check #0 runs first.
     """
-    if not os.path.isfile(LOCK_PATH) or not os.path.isfile(PACK_PATH):
-        raise RuntimeError("frozen corpus missing (%s / %s) — run make_snapshot.py --freeze in a recalibration commit" % (PACK_PATH, LOCK_PATH))
+    sys.path.insert(0, HERE)
+    from make_snapshot import CORPORA, read_pack
+    corpus = CORPORA[corpus_key]
+    if not os.path.isfile(corpus.lock_path) or not os.path.isfile(corpus.pack_path):
+        raise RuntimeError("frozen %s corpus missing (%s / %s) — run make_snapshot.py --freeze --corpus %s in a recalibration commit"
+                           % (corpus_key, corpus.pack_path, corpus.lock_path, corpus_key))
     lock = {}
-    with open(LOCK_PATH, "r", encoding="utf-8") as fh:
+    with open(corpus.lock_path, "r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 key, val = line.split("=", 1)
                 lock[key] = val
-    sys.path.insert(0, HERE)
-    from make_snapshot import read_pack
-    docs = read_pack()
-    for rel, content in docs:
+    entries = read_pack(corpus)
+    for rel, content in entries:
         dest = os.path.join(tmp_root, rel)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, "wb") as fh:
             fh.write(content)
-    if len(docs) != int(lock.get("files", "-1")):
-        raise RuntimeError("frozen corpus mismatch: %d docs in the pack vs files=%s in snapshot.lock" % (len(docs), lock.get("files")))
-    return lock["source_commit"], len(docs)
+    if len(entries) != int(lock.get("files", "-1")):
+        raise RuntimeError("frozen %s corpus mismatch: %d entries in the pack vs files=%s in %s"
+                           % (corpus_key, len(entries), lock.get("files"), os.path.basename(corpus.lock_path)))
+    return lock["source_commit"], len(entries)
 
 
 def run_live_pollution(labels, bin_path, root):
@@ -283,7 +295,9 @@ def run_lane(name, labels, bin_path, root, ranker, verbose):
 def main():
     ap = argparse.ArgumentParser(description="held-out recall/ranking eval over the built ripwire binary")
     ap.add_argument("--bin", default=os.environ.get("RIPWIRE_BIN", os.path.join(REPO, "build", "ripwire")))
-    ap.add_argument("--root", default=REPO)
+    ap.add_argument("--root", default=REPO,
+                    help="the LIVE root. Both scored lanes read their frozen packs and ignore this; it is "
+                         "the corpus the recall_livepol composition probe measures.")
     ap.add_argument("--lane", choices=("recall", "ranking", "both"), default="both")
     ap.add_argument("--top-k", type=int, default=10, help="candidate depth for the ranking lane")
     ap.add_argument("--verbose", action="store_true")
@@ -307,7 +321,7 @@ def main():
         if args.lane in ("recall", "both"):
             frozen_root = tempfile.mkdtemp(prefix="recalleval_frozen_")
             try:
-                commit, count = materialize_snapshot(frozen_root)
+                commit, count = materialize_snapshot(frozen_root, "docs")
                 print("snapshot OK: commit=%s files=%d (frozen corpus materialized)" % (commit, count))
                 run_lane("recall", recall_labels, bin_path, frozen_root,
                          lambda q: ranked_recall(bin_path, frozen_root, q), args.verbose)
@@ -315,8 +329,14 @@ def main():
                 shutil.rmtree(frozen_root, ignore_errors=True)
             run_live_pollution(recall_labels, bin_path, root)
         if args.lane in ("ranking", "both"):
-            run_lane("ranking", ranking_labels, bin_path, root,
-                     lambda q: ranked_for(bin_path, root, q, args.top_k), args.verbose)
+            frozen_src = tempfile.mkdtemp(prefix="recalleval_frozensrc_")
+            try:
+                commit, count = materialize_snapshot(frozen_src, "src")
+                print("snapshot OK (ranking): commit=%s files=%d (frozen source corpus materialized)" % (commit, count))
+                run_lane("ranking", ranking_labels, bin_path, frozen_src,
+                         lambda q: ranked_for(bin_path, frozen_src, q, args.top_k), args.verbose)
+            finally:
+                shutil.rmtree(frozen_src, ignore_errors=True)
     except (RuntimeError, subprocess.TimeoutExpired) as e:
         print("run_recalleval: FAILED: %s" % e, file=sys.stderr)
         return 1

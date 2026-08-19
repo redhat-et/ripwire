@@ -79,6 +79,15 @@ BINARY_EXTENSIONS = {
                # rendered from the committed present/ripwire-showcase.pdf. Added 2026-08-10, the round
                # this gate's header anticipated: it failed once naming the file, and this is the row
                # plus the reason. Regenerate it from the deck PDF; never draw or edit it by hand.
+    ".srcpack",  # bench/recalleval/snapshot.srcpack — the ranking lane's FROZEN source corpus, 1422
+               # files packed and gzip-compressed (~32 MB of text, 6.7 MB stored). Added 2026-08-19 by
+               # the ranking-lane freeze; it failed here once naming the file, and this is the row plus
+               # the reason. Binary because it is COMPRESSED, not because its contents are: every byte
+               # inside it is a copy of a tracked text file this sweep already scans at its own path, so
+               # allowlisting the container hides nothing (the same argument ripwirepubliccheck's
+               # SECRET_OK makes for snapshot.mdpack). Regenerate only via
+               # `make_snapshot.py --freeze --corpus src`; never hand-edit — recallevalcheck's check #0
+               # hashes the contents and would red first.
 }
 
 def scan(paths, label):

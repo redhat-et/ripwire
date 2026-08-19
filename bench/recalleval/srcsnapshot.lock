@@ -1,0 +1,9 @@
+# srcsnapshot.lock — pins the ranking lane's FROZEN corpus (see make_snapshot.py and the FROZEN
+# SNAPSHOT entries in test/recallevalcheck.sh). Regenerated ONLY by
+#   python3 bench/recalleval/make_snapshot.py --freeze [COMMIT] --corpus src
+# in a deliberate recalibration commit that also re-measures that lane's frozen baselines and
+# resets the gate's floors. Hand-editing this file or snapshot.srcpack reds gate check #0.
+source_commit=7a3194b51ac6fc08a4a7f36b3bfc79aa4a0c21c0
+source_commit_date=2026-08-19T13:39:48-04:00
+files=1422
+corpus_sha256=eb25c17569d5361e4510118daf8067ac5c7cab19e3bdea130636062ce2bcb043
