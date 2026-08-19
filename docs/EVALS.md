@@ -1135,6 +1135,108 @@ two moves `exemplarconfcheck` is unmeasured; splitting them is a variant this ro
 registered for, and shipping half of a registered rule would itself be an unregistered change. A
 follow-up round can register the halves separately and attribute the shift.
 
+### Length-aware desc+body mix — W3-LEN round, PRE-REGISTERED 2026-08-19 (before the change is measured)
+
+This is the ranker-side follow-up the S1b registration named: *"the remaining hypothesis for the
+desc-vs-body gap is ranker-side (a length-aware desc+body mix), which needs its own registration"*.
+Description CONTENT is closed — four agreeing measurements — so nothing under `skills/` and nothing
+in `test/skillevalfix/prompts.tsv` is touched this round. The lever is router-side code only.
+
+**The diagnosis that funds it.** At the subtoken-acronym merge the two BODY-scoring arms fell in
+lockstep (`for-routed` 91 → 90, `bm25-full` 93 → 91) while the description-only arm rose cleanly
+(`bm25-desc` 90 → 98). The retokenization makes body BM25 reward flag-literal / acronym density on
+generic-word overlap, and every regressed row lost by a margin under 4% inside the `subtoken+body`
+branch (`chooseForRanker` → `LexMode::SubtokenBody` → `lexicalScores`). Per-row evidence and the
+2×2 binaries are in the D1 report; the numbers below were re-derived here on the clean
+`adb0831` build before a line of this round's code existed.
+
+**Baselines at `adb0831` (measured before any edit, `--no-cache`, frozen `skills/` + `prompts.tsv`).**
+Judged-only hit@1: `overlap` 62/152, `name` 17/152, `bm25-desc` **98/152**, `bm25-full` **91/152**,
+`for-routed` **90/152**. Whole-corpus (n=198 positive / 68 negative): `for-routed` hit@1 64.6%,
+hit@2 76.8%, mrr 0.755, sep-auc **0.922**, oracle fire/abstain **65.0%**. split=test (130 pos / 53
+neg): `for-routed` hit@1 **66.2%**, sep-auc **0.942**; split=dev (68 pos / 15 neg): `for-routed`
+hit@1 61.8%, sep-auc **0.840**. `for-routed` misses 70 of 198 positive rows.
+
+**Feasibility, measured on the baseline before the band was written.** D1 recommended a
+margin-aware tie-break that blends toward the description-only score, and flagged one check as not
+done: whether the desc arm actually gets the regressed rows right. It does not. Of the three rows
+the subtoken merge cost `for-routed`, `bm25-desc` *also misses* row 135, and misses it to the
+identical wrong skill:
+
+| row | provenance / split | want | `for-routed` | `bm25-desc` | reachable by a desc-ward mix? |
+| --- | --- | --- | --- | --- | --- |
+| 89 | desc / test | quality-bar | miss → change-check | **hit** | yes |
+| 96 | judged / test | before-you-build | miss → efficient | **hit** | yes |
+| 135 | judged / test | security-scan | miss → **efficient** | miss → **efficient** | **no** |
+| 73 | desc / test | change-check | hit | hit | keeps |
+| 199 | judged / dev | fresh-eyes | hit | hit | keeps |
+
+Row 135 is *provably* out of reach of this whole lever family: `ripwire-efficient` scores at or
+above `ripwire-security-scan` in **both** components (subtoken+body 4.89274 vs 4.83958; and the desc
+arm ranks efficient top-1), so every non-negative-weight blend of the two keeps efficient ≥
+security-scan. The same holds for a margin-aware tie-break, which is that blend with margin-dependent
+weights. So the merge-dip set contributes at most **+1** judged row (96), and any band above that
+must be carried by the general desc-ward shift, whose asymptote is the desc arm's own **98/152**.
+
+**The change, registered verbatim.** One lever, one constant, in the `subtoken+body` scoring path
+only (`lexical.h::lexicalScoresTiered`; the name-exact ranker and every bag-of-words eval arm are
+untouched). Markdown `Section` symbols are currently down-weighted by a flat ×0.30 so prose cannot
+swamp code. A document's **lead section** — the FIRST symbol of its file when that symbol is a
+Section, i.e. the frontmatter / abstract that describes what the document is — is instead
+down-weighted by `kLexLeadSectionMul`. The constant is DERIVED, not swept:
+
+```
+kLexLeadSectionMul = kLexSectionMul * ( kLexWeightDoc / kLexWeightBody ) = 0.30 * ( 2 / 1 ) = 0.60
+```
+
+i.e. "a document's lead section is its doc-comment", priced at exactly the doc-vs-body ratio the
+ranker already commits to for code. It stays ≤ 1, so it is shrink-only and the MaxScore pruning
+bound stays provably safe. No index format changes, no `kParserVer` bump, no postings-parity
+surface: the multiplier is applied where the ×0.30 already is, in both scoring branches.
+
+**Metric and band (primary surface).** `for-routed` judged-only hit@1, n = 152, **exactly one
+measurement**. **ACCEPT iff the net change lands in [+4, +8] rows** (90 → 94…98; one row = 0.66pp).
+The lower edge is +4 for the reason the S1b round registered it on this same corpus and denominator:
+anything in [0, +4) is inside the range a ranker perturbation produces by displacement luck. The
+upper edge is the mechanism's own asymptote — a desc-ward mix cannot explain beating the
+description arm it is deferring to — so **> +8 is a REJECT pending audit**, per the S1/LB-3 leakage
+precedent. Band width 4 rows.
+
+**Simultaneous guards (all must hold; any breach is a REJECT regardless of the primary).**
+`bm25-desc` judged hit@1 stays **exactly 98/152** and `bm25-full` stays **exactly 91/152** — both
+arms are structurally independent of this lever, so any movement is a bug, not a result.
+split=test `for-routed` hit@1 **≥ 67.7%** (88/130 — the pre-subtoken value the dip is measured
+against; baseline 66.2%). Negative-split separation may not degrade: `for-routed` sep-auc ≥ **0.922**
+whole-corpus, ≥ **0.942** split=test, ≥ **0.840** split=dev, and oracle fire/abstain ≥ **65.0%**.
+Committed floors: `test/skillroutingjudgedcheck.sh` (`bm25-desc` and `for-routed` judged ≥ 50%, the
+cold-start row routes in both arms); `test/skillevalcheck.sh` (split=test ≥ 60.0% / sep-auc ≥ 0.89,
+split=dev ≥ 46.0% / ≥ 0.75, judged split ≥ 80 rows, both metric-can-fail arms).
+
+**KILL conditions (not a REJECT — an abort).** Any floor break anywhere in the suite, in particular
+the frozen ranking lane (`test/recallevalcheck.sh` every committed floor, `snapshot.srcpack`) and
+the recall MRR gate; any edit under `skills/` or to `test/skillevalfix/prompts.tsv`; any change to a
+scoring constant other than the one registered lever. **Retuning the constant after seeing the
+result is a KILL** — a second value is a new registration, labelled as such, maximum two shots, both
+reported. Whole-suite green (`python3 test/pargates.py . ./build/ripwire -j 6`), ASan/LSan clean,
+determinism byte-identical ×3, `xmllint` clean and `--quality-delta` with zero unacked regressions
+are standing requirements, not part of the band.
+
+**Expected direction on the other lenses, registered so it cannot be claimed after the fact.**
+`lexicalScoresTiered` is shared with `--recall` (the docs lens) and `--exemplar`. Boosting a
+document's lead section should help doc retrieval or leave it flat; the recall lane is floor-gated
+and no directional claim is banked. Code corpora are unaffected by construction — a non-markdown
+file's first symbol is not a `Section`.
+
+**Prior expectation, stated in advance.** REJECT is the more likely outcome. The targeted mechanism
+accounts for at most +1 of the +4 floor; the remaining +3 has to come from the general desc-ward
+shift across the other 67 `for-routed` misses, which is unmodelled. It is worth one shot because the
+direction is measured (the desc arm is 8 rows ahead of the body arm on the same corpus) and because
+this is the first lever aimed at that gap that is not a description edit.
+
+**Decision rule.** In band with every guard green → keep the code, append the verdict here. Out of
+band, or any guard breached → revert the code commit, keep this registration, and append the
+negative result. The registration and its outcome are the deliverable either way.
+
 ---
 
 ## 5. Token and output economy
