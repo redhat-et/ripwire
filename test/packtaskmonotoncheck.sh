@@ -78,6 +78,29 @@ prev_bodies=-1; prev_callers=-1; prev_notes=-1; prev_tests=-1
 prev_bodies_total=-1
 mono_ok=1
 declare -a ROWS=()
+# ── W2-K.2 arm (a), verifier FINDING K1 — RELEVANCE monotonicity, which the count arm above cannot see ──────
+#    The count can rise while the answer gets WORSE: measured against the pre-fix binary on THIS fixture,
+#    raising the budget 900 -> 1200 deleted the body of `cliffProbeTargetFunction` — the function the task
+#    literally names, and the top-ranked body candidate — and substituted two one-line helpers that scored a
+#    higher count; it stayed deleted through 4000. The property asserted here is a RATCHET, not a pinned
+#    budget (same reason as the header's note about cliff locations): once the bundle has shown that body at
+#    some budget, no LARGER budget may drop it. `tgt_seen` below is the ratchet, `tgt_final` the presence
+#    guard that stops the arm going vacuous if the fixture ever stops producing that body at all.
+TGTBODY="cliffProbeTargetFunction"
+tgt_seen=0; tgt_final=0; tgt_ok=1
+# ── W2-K.2 arm (b), verifier FINDING K2 — the budget a capped bundle leaves UNSPENT ──────────────────────────
+#    monotoneRoll charges a capped section its whole granted share and donates nothing forward. Correct, but
+#    with <bodies> (the one section whose items differ by two orders of magnitude) sitting SECOND in the
+#    cascade, the bytes it could not spend were buried in front of four sections that could have. Measured on
+#    the pre-fix binary on THIS fixture: fill 51.6% at budget 3500 and 45.2% at 4000 while <bodies> was capped
+#    at 5 of 6 — content dropped for want of room, with more than half the budget never spent. The property:
+#    if the bundle DROPPED anything (any section capped), then the budget must actually be full. Rungs where
+#    nothing is capped are exempt — a small bundle that fits everything it has is not stranding anything.
+#    KFILLFLOOR is deliberately far below the post-fix measurement (94.0% at 3500, 82.3% at 4000, >=105% at
+#    every smaller capped rung) so ordinary content drift cannot red it, and far above the pre-fix numbers it
+#    is built to catch. Byte-exact and content-stable: no wall-clock, no environment term.
+KFILLFLOOR=75
+fill_ok=1; fill_arm_armed=0
 for tb in $LADDER; do
     OUT="$TMP/b$tb.json"
     runw --pack-task="$TASK" --token-budget="$tb" --json > "$OUT"
@@ -120,10 +143,48 @@ PYEOF
 
     xmllint --noout "$( runw --pack-task="$TASK" --token-budget="$tb" > "$TMP/x$tb.xml"; echo "$TMP/x$tb.xml" )" 2>/dev/null \
         || { no "budget=$tb bundle is not well-formed"; mono_ok=0; }
+
+    # arm (a) — the ratchet. A `<b … n="NAME">` row is the BODY; the same name in <sigs> is only a signature,
+    # so the open tag is matched, never a bare name grep.
+    if grep -q "<b [^>]*n=\"$TGTBODY\"" "$TMP/x$tb.xml"; then
+        tgt_seen=1;  tgt_final=1
+    else
+        tgt_final=0
+        if [ "$tgt_seen" = "1" ]; then
+            no "budget=$tb DROPPED the task-named body $TGTBODY that a SMALLER budget had shown (relevance regression)"
+            tgt_ok=0
+        fi
+    fi
+
+    # arm (b) — capped ⇒ the budget must be spent. The working byte budget is the same expression the bundle
+    # header states: token target x kMinBytesPerToken(2.36) x kBudgetHeadroom(0.90).
+    BYTES="$( wc -c < "$TMP/x$tb.xml" | tr -d ' ' )"
+    CAPPED=0
+    [ "$bk" -lt "$bt" ] && CAPPED=1
+    [ "$ck" -lt "$ct" ] && CAPPED=1
+    [ "$nk" -lt "$nt" ] && CAPPED=1
+    [ "$tk" -lt "$tt" ] && CAPPED=1
+    if [ "$CAPPED" = "1" ]; then
+        fill_arm_armed=1
+        PCT="$( python3 -c "print( int( $BYTES * 100 / ( $tb * 2.36 * 0.90 ) ) )" )"
+        if [ "$PCT" -lt "$KFILLFLOOR" ]; then
+            no "budget=$tb dropped content (a section is capped) with only ${PCT}% of the byte budget spent (floor ${KFILLFLOOR}%) — budget stranded, not exhausted"
+            fill_ok=0
+        fi
+    fi
 done
 
 echo "  ladder: ${ROWS[*]}"
 [ "$mono_ok" = "1" ] && ok "bodies/callers/notes/tests kept counts are NON-DECREASING across the full budget ladder"
+
+# arm (a) verdict + its presence guard: if the top rung does not carry that body at all, the ratchet above
+# never had anything to ratchet and would have passed while inert.
+[ "$tgt_final" = "1" ] || { no "the top budget rung shows no <b> body for $TGTBODY — arm (a) never armed"; tgt_ok=0; }
+[ "$tgt_ok" = "1" ] && ok "the task-named top-ranked body ($TGTBODY) is never DROPPED by a larger budget (relevance ratchet)"
+
+# arm (b) verdict + its presence guard.
+[ "$fill_arm_armed" = "1" ] || { no "no rung on the ladder capped any section — arm (b) never armed (fixture no longer competes for room)"; fill_ok=0; }
+[ "$fill_ok" = "1" ] && ok "every rung that DROPPED content spent at least ${KFILLFLOOR}% of its byte budget (no stranded budget)"
 
 # sanity: the fixture actually exercised the mechanism — bodies_total must be > 1 (several real candidates
 # competing for room) somewhere on the ladder, else "monotonic" would be trivially true and this gate would

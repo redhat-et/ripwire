@@ -119,6 +119,8 @@
 #include "pageview.h"        // pageWindow + pagingDisclosure — THE TRUNCATION VOCABULARY
 #include "gitstamp.h"        // atAttr — one family is git-mined, so the row set is stamped like --hotspots
 #include "serialize.h"       // escapeXml
+#include "graphlegend.h"     // R-E follow-up (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
+#include "sarif.h"           // R-E follow-up (2026-08-19): rootRelativeUri/rootPrefixOf — the shared relativizer
 
 #include <algorithm>
 #include <array>
@@ -619,8 +621,18 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
     std::vector<char> escUnavail;
     std::vector<char> escFloor;
 
+    // ── verifier FINDING E2 (2026-08-19): all 40 of this report's p= rows were absolute, with no root= to
+    //    define them — the same gap --tree carried, on the verb the quality skills open with. Same shape as
+    //    every other verb: the single-root condition, the shared legend clause emitted exactly when the
+    //    attribute is, and root= placed BEFORE at= so the r26 stamp keeps its "last attribute" position.
+    const bool        qpSingleRoot = ing.realPaths.empty();
+    const std::string qpRootPrefix = qpSingleRoot ? rw::sarif::rootPrefixOf( root ) : std::string();
+    std::vector<char> escRoot;
+    const std::string qpRootAttr   = qpSingleRoot ? ( " root=\"" + std::string( escapeXml( root, escRoot ) ) + "\"" ) : std::string();
+
     std::fputs( kPanelLegend, stdout );
     std::fputs( rw::kAtStampLegend, stdout );
+    std::fputs( rw::rootRelPathsLegend( qpSingleRoot ), stdout );
     std::printf( "<quality_panel preset=\"%s\" families=\"%u\" enabled=\"%s\" enabled_n=\"%u\" cut=\"%u\" cut_reachable=\"%s\"",
                  sel.name, unsigned( kPanelFamilyCount ), familyList( sel.enabled ).c_str(),
                  unsigned( std::popcount( sel.enabled ) ), unsigned( sel.cut ),
@@ -653,7 +665,8 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
     {
         std::printf( " findings_capped=\"1\" floor_rules=\"%s\"", std::string( escapeXml( std::string_view( floorRules ), escFloor ) ).c_str() );
     }
-    std::printf( " shown=\"%zu\" capped=\"%s\"%s%s>", shown, shown < total ? "1" : "0", paging, gitstamp::atAttr( root ).c_str() );
+    std::printf( " shown=\"%zu\" capped=\"%s\"%s%s%s>", shown, shown < total ? "1" : "0", paging,
+                 qpRootAttr.c_str(), gitstamp::atAttr( root ).c_str() );
 
     // TWO scratch buffers, not one reused twice in the same call: escapeXml returns a VIEW into its `out`, so a
     // second call with the same buffer invalidates the first view (readability.h carries the same note).
@@ -664,7 +677,8 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
     {
         const PanelRow&   row = scan.rows[rowIndex];
         const Symbol&     s   = ing.symbols[row.id];
-        const std::string path( escapeXml( ing.files[s.fileId], escPath ) );
+        const std::string path( escapeXml( qpSingleRoot ? rw::sarif::rootRelativeUri( ing.files[s.fileId], qpRootPrefix )
+                                                        : std::string_view( ing.files[s.fileId] ), escPath ) );
         const std::string name( escapeXml( s.name, escName ) );
         // The annotation rides LAST on the row and is omitted when it does not hold — "absent = did not
         // hold", the same posture as every other optional attribute in this tool, never join="" or join="0".
