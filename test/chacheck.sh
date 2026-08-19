@@ -39,8 +39,10 @@ EMIT1_LINE="$(  grep -n 'void emit( int a ) {'   "$FIX/arity.cpp" | cut -d: -f1 
 EMIT3_LINE="$(  grep -n 'void emit( int a, int b, int c )' "$FIX/arity.cpp" | cut -d: -f1 )"   # arity 3
 EMITV_LINE="$(  grep -n 'void emit( const char\* fmt'      "$FIX/arity.cpp" | cut -d: -f1 )"   # variadic
 
-# distinct speak/emit target lines a caller resolves to (via --callees).
-targets(){ "$BIN" "$FIX" --callees="$1" --no-cache 2>/dev/null | tr '>' '\n' | grep -oE 'cha(fix)?/[a-z]+\.cpp:[0-9]+' | grep -oE '[0-9]+$' | sort -un; }
+# distinct speak/emit target lines a caller resolves to (via --callees). R-E (2026-08-17 harvest:
+# root-relative paths for ALL verbs) — p= is now relative to $FIX itself, so "chafix/" (or "cha/") never
+# appears in the path at all; match the bare "<name>.cpp:<line>" shape directly.
+targets(){ "$BIN" "$FIX" --callees="$1" --no-cache 2>/dev/null | tr '>' '\n' | grep -oE '[a-z]+\.cpp:[0-9]+' | grep -oE '[0-9]+$' | sort -un; }
 
 # ── 1) CHA positive: g() resolves d.speak() to EXACTLY the Animal (inherited) def — Robot::speak excluded. ──
 gT="$( targets g )"

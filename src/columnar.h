@@ -96,9 +96,13 @@ inline void buildPathTable( const std::vector<std::uint32_t>& rowFileIds,
     }
 }
 
-// emit the <paths> table (index=path, space-separated), XML-escaped.
+// emit the <paths> table (index=path, space-separated), XML-escaped. `rootPrefix` empty ⇒ paths stay the
+// ing.files[] spelling unchanged (multi-root, or a caller with no single root to strip) — R-E (2026-08-17
+// harvest): the table already de-duplicates each path to ONE entry, but that one entry was still absolute
+// on an absolute-root run, so the fix applies here too, same helper serialize()'s pathRel uses.
 inline void emitPathTable( std::FILE* out, const IngestResult& ing,
-                           const std::vector<std::uint32_t>& uniqueFiles, std::vector<char>& esc )
+                           const std::vector<std::uint32_t>& uniqueFiles, std::vector<char>& esc,
+                           std::string_view rootPrefix = {} )
 {
     std::fputs( "<paths>", out );
     for( std::size_t i = 0; i < uniqueFiles.size(); ++i )
@@ -108,7 +112,9 @@ inline void emitPathTable( std::FILE* out, const IngestResult& ing,
             std::fputc( ' ', out );
         }
         std::fprintf( out, "%zu=", i );
-        const std::string_view p = escapeXml( ing.files[ uniqueFiles[i] ], esc );
+        const std::string_view raw = ing.files[ uniqueFiles[i] ];
+        const std::string_view rel = rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, rootPrefix );
+        const std::string_view p   = escapeXml( rel, esc );
         std::fwrite( p.data(), 1, p.size(), out );
     }
     std::fputs( "</paths>", out );
@@ -121,7 +127,7 @@ inline void emitPathTable( std::FILE* out, const IngestResult& ing,
 //     <path>0,0,1,..</path><name>a,b,..</name><line>12,..</line><kind>fn,..</kind></cols></TAG>
 inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
                                     const char* wrapperTag, const std::string& wrapperAttrs,
-                                    const std::vector<NodeId>& rows )
+                                    const std::vector<NodeId>& rows, std::string_view rootPrefix = {} )
 {
     std::vector<char> esc;
 
@@ -135,7 +141,7 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
 
     std::fputs( kColumnarLegend, out );   // §B1.5: once per output, before the element it describes
     std::fprintf( out, "<%s %s format=\"columnar\">", wrapperTag, wrapperAttrs.c_str() );
-    emitPathTable( out, ing, uniqueFiles, esc );
+    emitPathTable( out, ing, uniqueFiles, esc, rootPrefix );
     std::fprintf( out, "<cols n=\"%zu\" fields=\"path,name,line,kind\">", rows.size() );
 
     // path index array
@@ -196,7 +202,8 @@ inline void emitColumnarUseSites( std::FILE* out, const IngestResult& ing,
                                   const std::vector<std::uint32_t>& fileIds,
                                   const std::vector<std::uint32_t>& lines,
                                   const std::vector<RefRole>&       roles,
-                                  const std::vector<std::string>&   inNames )
+                                  const std::vector<std::string>&   inNames,
+                                  std::string_view rootPrefix = {} )
 {
     std::vector<char> esc;
     std::vector<std::uint32_t> uniqueFiles, rowPathIdx;
@@ -205,7 +212,7 @@ inline void emitColumnarUseSites( std::FILE* out, const IngestResult& ing,
 
     std::fputs( kColumnarLegend, out );   // §B1.5: the same one legend the symbol-row emitter uses
     std::fprintf( out, "<uses %s format=\"columnar\">", wrapperAttrs.c_str() );
-    emitPathTable( out, ing, uniqueFiles, esc );
+    emitPathTable( out, ing, uniqueFiles, esc, rootPrefix );
     std::fprintf( out, "<cols n=\"%zu\" fields=\"path,line,role,in_id\">", nRows );
 
     std::fputs( "<path>", out );

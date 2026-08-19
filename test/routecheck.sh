@@ -71,6 +71,10 @@ CONCEPT="how does resolution work"
 # the ranking it pins did not change.
 # CORRECTED at 2026-07-30 by the w1fix2 verifier (finding G1) — the first re-pin comment claimed this moved UP
 # while anchorcheck moved DOWN, and called that the signature of re-measurement. Both moved up. See traps 17-19.
+# RE-PIN 2026-08-19 (R-E CORRECTION): same cause and same shape as anchorcheck's re-pin of the same date —
+# root-relative p= drops the repeated "routefix/" prefix in favour of one root="routefix" on the <ctx>.
+# Document 2879 -> 2850 B, est_tokens 1071 -> 1063. Route-neutrality, the property this golden exists for,
+# is untouched: no row moved and no rank value moved.
 # RE-PIN 2026-08-15 (harvest wave, V5 item 3): same cause as anchorcheck's re-pin of the same date — the
 # --for legend clause "the signatures-only flag opts out" became "the signatures-only flag (no-bodies mode)
 # opts out" (V5 lane, 6bd6c00). +17 B legend text + est_tokens self-measurement; ranking bytes identical.

@@ -103,7 +103,13 @@ grep -q 'p="svc/./include/svc_api.h"' "$TMP/m1.xml" && grep -q 'p="cli/./src/cli
 # the point of the spelling: strip the label and you have the single-root `./rel` spelling verbatim
 run "$WS/svc" >"$TMP/solosvc.xml" 2>/dev/null
 ( cd "$WS/svc" && TMPDIR="$CACHE" "$BIN" . ) >"$TMP/solosvc2.xml" 2>/dev/null
-solo_p="$( grep -o 'p="\./[^"]*svc_api\.h"' "$TMP/solosvc2.xml" | head -1 )"
+# RE-PINNED 2026-08-19 (R-E CORRECTION): a single-root run spells p= ROOT-RELATIVE now, so the "./" the
+# crawl root "." used to contribute is gone — this pattern selected nothing and the suffix arm below could
+# not run at all. The PROPERTY is unchanged and still machine-checked: the workspace id ends with the
+# single-root id at a "/" boundary. What DID change is the exactness of the old §P8 bullet-7 wording above:
+# the workspace spelling is no longer `<label>/` + the single-root spelling verbatim, it is that plus the
+# `/./` seam ("svc/./include/svc_api.h" vs "include/svc_api.h"). Relatable by suffix, not by concatenation.
+solo_p="$( grep -o 'p="[^"]*svc_api\.h"' "$TMP/solosvc2.xml" | head -1 )"
 ws_p="$(   grep -o 'p="svc/\./[^"]*svc_api\.h"' "$TMP/m1.xml"    | head -1 )"
 # machine-checked: strip the `p="` head off both, then the workspace path must END with the solo path.
 solo_tail="${solo_p#p=\"}"; ws_tail="${ws_p#p=\"}"
@@ -329,9 +335,13 @@ run "$PRW/svc" --pr-context >"$TMP/prc_solo_new.xml" 2>/dev/null
 grep -q 'pr-context-workspace' "$TMP/prc_solo_new.xml" \
   && no "G-pr N=1: single-root emitted a workspace wrapper (leak)" \
   || ok "G-pr N=1: single-root emits a bare <pr-context> (no wrapper)"
-grep -q 'root="' "$TMP/prc_solo_new.xml" \
-  && no "G-pr N=1: single-root leaked a root= attribute" \
-  || ok "G-pr N=1: single-root header carries no root= attribute"
+# RE-PINNED 2026-08-19 (R-E CORRECTION): root= on a SINGLE-root header is the intended contract now — it
+# names the root the header's own root-relative p= are measured against, and every other verb carries it.
+# What this arm is actually quarantining is the MULTI-root disclosure vocabulary (the <root label=…> table
+# and its roots= count), so that is what it asserts. Asserting "no root= at all" would now forbid the fix.
+grep -qE '<root label=|roots="' "$TMP/prc_solo_new.xml" \
+  && no "G-pr N=1: single-root leaked the MULTI-root disclosure (a <root label=…> table or roots=)" \
+  || ok "G-pr N=1: single-root carries no multi-root root-table/roots= disclosure"
 REF="$ROOT/build/ripwire"
 if [ -x "$REF" ] && [ "$REF" != "$BIN" ]; then
   TMPDIR="$CACHE" "$REF" "$PRW/svc" --pr-context >"$TMP/prc_solo_ref.xml" 2>/dev/null

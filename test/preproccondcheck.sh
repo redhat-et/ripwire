@@ -136,7 +136,8 @@ count(){ # count <file> <expected> <label>
     # --deps echoes the corpus path as GIVEN (absolute here), so match on the trailing path segment and
     # require the row to carry includes= — the `<godfiles>` block repeats bare `<f p=…>` rows without it.
     local got
-    got="$( tr '>' '\n' <"$TMP/deps" | grep -E "<f p=\"[^\"]*/$1\" .*includes=" | grep -oE 'includes="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"
+    # RE-PINNED 2026-08-19 (R-E CORRECTION): p= is root-relative — see nestedimportcheck.sh's twin comment.
+    got="$( tr '>' '\n' <"$TMP/deps" | grep -E "<f p=\"([^\"]*/)?$1\" .*includes=" | grep -oE 'includes="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"
     if [ "${got:-}" = "$2" ]; then ok "count: $3 (includes=$2)"; else no "count: $3 — expected includes=$2, got includes=${got:-<no row>}"; fi
 }
 count guarded.cpp 9 'guarded.cpp captures every arm exactly once'

@@ -63,6 +63,7 @@
 
 #include "model.h"
 #include "graph.h"       // langCompatible — the SAME language gate the resolver uses; never a second one
+#include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "serialize.h"   // escapeXml, tokensForEmittedBytes, kBytesPerTokenBody — the one body-token rate
 #include "pageview.h"    // pageWindow + effectiveRowCap + pagingDisclosure — THE TRUNCATION VOCABULARY
 #include "smallvec.h"          // rw::SmallVec — the small-vector the byName id-lists use in graph.h too
@@ -474,8 +475,13 @@ inline constexpr const char* kContextRatioLegend =
     "printed files_capped=1 when file rows were dropped; the symbol listing is the one limit=N and offset=M "
     "window, which also prints total= has_more= next_offset= offset= limit= -->";
 
-// Emit the report. Returns the process exit code — always 0: this is a lens, not a gate.
-inline int writeContextRatioReport( const IngestResult& ing, int pageLimit, int pageOffset )
+// Emit the report. Returns the process exit code — always 0: this is a lens, not a gate. `rootPrefix` empty
+// ⇒ every p= stays the ing.files[] spelling unchanged (multi-root, or no single root to strip) — R-E
+// (2026-08-17 harvest): same convention serialize()'s pathRel uses; `rootAttr` is the ready-made root="…"
+// clause (empty when rootPrefix is), computed once by the caller since every --* lens in runMaintenanceViews
+// shares it.
+inline int writeContextRatioReport( const IngestResult& ing, int pageLimit, int pageOffset,
+                                    std::string_view rootPrefix = {}, const std::string& rootAttr = std::string() )
 {
     const Scan        scan  = computeContextRatio( ing );
     const std::size_t total = scan.symbols.size();
@@ -487,21 +493,27 @@ inline int writeContextRatioReport( const IngestResult& ing, int pageLimit, int 
     pagingDisclosure( paging, sizeof paging, total, page.end, pageLimit, pageOffset );
 
     std::fputs( kContextRatioLegend, stdout );
+    // R-E fix (2026-08-19): the shared root-relative clause, emitted exactly when root= is (graphlegend.h).
+    std::fputs( rw::rootRelPathsLegend( !rootAttr.empty() ), stdout );
     std::printf( "<contextratio units=\"%zu\" file_units=\"%zu\" defs_per_name_cap=\"%u\" body_bytes_per_token=\"%.2f\""
-                 " shown_syms=\"%zu\" syms_capped=\"%s\" shown_files=\"%zu\" files_capped=\"%s\"%s>",
+                 " shown_syms=\"%zu\" syms_capped=\"%s\" shown_files=\"%zu\" files_capped=\"%s\"%s%s>",
                  total, scan.files.size(), unsigned( kDefsPerNameCap ), kBytesPerTokenBody,
                  shown, shown < total ? "1" : "0",
-                 fileShown, fileShown < scan.files.size() ? "1" : "0", paging );
+                 fileShown, fileShown < scan.files.size() ? "1" : "0", paging, rootAttr.c_str() );
 
     // TWO scratch buffers, not one reused twice in the same call: escapeXml returns a VIEW into its `out`,
     // so a second call with the same buffer invalidates the first view (readability.h carries the same note).
     std::vector<char> escPath;
     std::vector<char> escName;
+    const auto         pathRel = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootPrefix.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
     for( std::size_t rowIndex = page.begin; rowIndex < page.end; ++rowIndex )
     {
         const Row&        row = scan.symbols[rowIndex];
         const Symbol&     s   = ing.symbols[row.unitId];
-        const std::string path( escapeXml( ing.files[s.fileId], escPath ) );
+        const std::string path( escapeXml( pathRel( s.fileId ), escPath ) );
         const std::string name( escapeXml( s.name, escName ) );
         std::printf( "<s p=\"%s:%u\" n=\"%s\" t=\"%s\" sites=\"%u\" ents=\"%u\" ents_out=\"%u\" ent_ratio=\"%.3f\""
                      " files=\"%u\" files_out=\"%u\" rtok=\"%llu\" rtok_out=\"%llu\" read_ratio=\"%.3f\" ext=\"%u\" amb=\"%u\"/>",
@@ -514,7 +526,7 @@ inline int writeContextRatioReport( const IngestResult& ing, int pageLimit, int 
     for( std::size_t fileIndex = 0; fileIndex < fileShown; ++fileIndex )
     {
         const Row&        row = scan.files[fileIndex];
-        const std::string path( escapeXml( ing.files[row.unitId], escPath ) );
+        const std::string path( escapeXml( pathRel( row.unitId ), escPath ) );
         std::printf( "<f p=\"%s\" sites=\"%u\" ents=\"%u\" ents_out=\"%u\" ent_ratio=\"%.3f\""
                      " files=\"%u\" files_out=\"%u\" rtok=\"%llu\" rtok_out=\"%llu\" read_ratio=\"%.3f\" ext=\"%u\" amb=\"%u\"/>",
                      path.c_str(), row.sites, row.ents, row.entsOut, ratioOf( row.entsOut, row.ents ),

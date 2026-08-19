@@ -62,6 +62,13 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
 {
     using namespace handoff_detail;
     std::vector<char> esc;   // escapeXml scratch, reused across every attribute
+    // R-E (2026-08-17 harvest): single-root only by construction (the caller already refused multi-root),
+    // so this always strips — same convention every other lens's pathRel uses (sarif.h).
+    const std::string  hoRootPrefix = rw::sarif::rootPrefixOf( root );
+    const auto          hoPathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rw::sarif::rootRelativeUri( ing.files[ fileId ], hoRootPrefix );
+    };
 
     const std::string branch  = gitOneLine( root, "rev-parse --abbrev-ref HEAD" );
     const std::string subject = gitOneLine( root, "log -1 --format=%s" );
@@ -81,7 +88,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     for( const std::uint32_t f : facts.changed )
     {
         v += "<f p=\"";
-        v += escapeXml( ing.files[f], esc );
+        v += escapeXml( hoPathRel( f ), esc );
         v += "\">";
         std::size_t shown = 0;
         for( std::size_t i = 0; i < ing.symbols.size() && shown < kHandoffSymbolsPerFile; ++i )
@@ -100,7 +107,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     for( const std::uint32_t f : facts.tests )
     {
         v += "<t p=\"";
-        v += escapeXml( ing.files[f], esc );
+        v += escapeXml( hoPathRel( f ), esc );
         v += "\"/>";
     }
     v += "</tests></verified>";
@@ -118,7 +125,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
         char degBuf[32];
         std::snprintf( degBuf, sizeof degBuf, "%.2f", deg );
         std::string r = "<cochange p=\"";
-        r += escapeXml( ing.files[f], esc );
+        r += escapeXml( hoPathRel( f ), esc );
         r += "\" deg=\"";
         r += degBuf;
         r += "\"/>";
@@ -175,7 +182,7 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
             char sBuf[32];
             std::snprintf( sBuf, sizeof sBuf, "%.3f", double( best[i].first ) );
             std::string r = "<doc p=\"";
-            r += escapeXml( ing.files[ best[i].second ], esc );
+            r += escapeXml( hoPathRel( best[i].second ), esc );
             r += "\" s=\"";
             r += sBuf;
             r += "\"/>";
@@ -194,6 +201,8 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
                           "never dropped. gitok=0 means the git diff probe failed and changed counts are floors. -->";
         doc += "<handoff";
         doc += at;
+        // R-E (2026-08-17 harvest): single-root by construction — the crawl root every p= above is relative to.
+        doc += " root=\"";  doc += escapeXml( root, esc );  doc += "\"";
         doc += " branch=\"";
         doc += escapeXml( branch, esc );
         doc += "\" head=\"";

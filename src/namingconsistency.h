@@ -42,6 +42,7 @@
 
 #include "model.h"
 #include "ingest.h"
+#include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "naminglens.h"
 #include "pageview.h"
 #include "serialize.h"   // escapeXml
@@ -351,8 +352,10 @@ inline constexpr const char* kNamingConsistencyLegend =
     "inconsistent case) propose=the mechanically recombined form in the group's dominant style. "
     "Pages limit=N (offset=M); default 40 rows, shown= capped= disclose the cut. -->";
 
-// Emit the report. Returns the process exit code — always 0: this is a lens, not a gate.
-inline int writeNamingConsistencyReport( const IngestResult& ing, int pageLimit, int pageOffset )
+// Emit the report. Returns the process exit code — always 0: this is a lens, not a gate. `rootPrefix`/
+// `rootAttr` — R-E (2026-08-17 harvest), same convention writeContextRatioReport takes (see contextratio.h).
+inline int writeNamingConsistencyReport( const IngestResult& ing, int pageLimit, int pageOffset,
+                                         std::string_view rootPrefix = {}, const std::string& rootAttr = std::string() )
 {
     const ConventionScan scan = scanNamingConsistency( ing );
 
@@ -382,8 +385,10 @@ inline int writeNamingConsistencyReport( const IngestResult& ing, int pageLimit,
     pageDisclosure( disclosure, sizeof disclosure, shown, total, page.end, pageLimit, pageOffset, true );
 
     std::fputs( kNamingConsistencyLegend, stdout );
-    std::printf( "<naming-consistency groups=\"%zu\" candidates=\"%zu\" decided=\"%zu\" flagged=\"%zu\"%s>",
-                 scan.groups.size(), scan.symbols.size(), decidedCount, total, disclosure );
+    // R-E fix (2026-08-19): the shared root-relative clause, emitted exactly when root= is (graphlegend.h).
+    std::fputs( rw::rootRelPathsLegend( !rootAttr.empty() ), stdout );
+    std::printf( "<naming-consistency groups=\"%zu\" candidates=\"%zu\" decided=\"%zu\" flagged=\"%zu\"%s%s>",
+                 scan.groups.size(), scan.symbols.size(), decidedCount, total, disclosure, rootAttr.c_str() );
 
     for( const ConventionGroup& g : scan.groups )
     {
@@ -408,7 +413,8 @@ inline int writeNamingConsistencyReport( const IngestResult& ing, int pageLimit,
         const StyledSymbol& sym   = *flagged[rowIndex];
         const Symbol&        s    = ing.symbols[ sym.id ];
         const ConventionGroup* group = groupFor( scan, sym.lang, sym.kind );
-        const std::string     path( escapeXml( ing.files[s.fileId], escPath ) );
+        const std::string_view rel  = rootPrefix.empty() ? std::string_view( ing.files[s.fileId] ) : rw::sarif::rootRelativeUri( ing.files[s.fileId], rootPrefix );
+        const std::string     path( escapeXml( rel, escPath ) );
         const std::string     name( escapeXml( s.name, escName ) );
         const std::string     propose( escapeXml( recombineToStyle( sym.toks, group->dominant ), escProp ) );
         std::printf( "<f p=\"%s:%u\" n=\"%s\" lang=\"%s\" kind=\"%s\" style=\"%s\" propose=\"%s\"/>",

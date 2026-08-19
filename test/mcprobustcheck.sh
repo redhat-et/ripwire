@@ -511,8 +511,12 @@ case "$( c_inner_text "$TMP/d4d_out" )" in
 ( cd "$FIX" && printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_symbol","arguments":{"symbol":"perimeter"}}}' \
     | "$BIN" --mcp 2>/dev/null ) >"$TMP/d5_out"
+# RE-PINNED 2026-08-19 (R-E CORRECTION): find_symbol's JSON gained a leading "root" key (its "file" values
+# are root-relative now, exactly like the CLI's p=), so the answer no longer STARTS with "symbol". The fact
+# this arm asserts — the launch cwd was assumed and the symbol was found there — is unchanged, so the
+# pattern moves from a prefix to a containment match rather than the assertion being softened.
 case "$( c_inner_text "$TMP/d5_out" )" in
-    '{"symbol":{"name":"perimeter"'*) d5=ok;; *) d5=no;; esac
+    *'"symbol":{"name":"perimeter"'*) d5=ok;; *) d5=no;; esac
 [ "$d5" = ok ] \
     && ok "(D-5) bare '--mcp' with omitted 'path' answers about the launch cwd (the dominant failure is a success)" \
     || no "(D-5) unexpected: $( c_inner_text "$TMP/d5_out" )"

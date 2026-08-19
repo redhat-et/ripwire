@@ -320,7 +320,9 @@ inline constexpr const char* kCommentCoherenceLegend =
     "shown=rows printed capped=1 when rows were dropped; raise the default cap with limit=N (offset=M pages), "
     "which also prints total= has_more= next_offset= offset= limit= -->";
 
-inline int writeCommentCoherenceReport( const IngestResult& ing, int pageLimit, int pageOffset )
+// R-E (2026-08-17 harvest): rootPrefix/rootAttr — same convention writeContextRatioReport takes (see there).
+inline int writeCommentCoherenceReport( const IngestResult& ing, int pageLimit, int pageOffset,
+                                        std::string_view rootPrefix = {}, const std::string& rootAttr = std::string() )
 {
     const CommentCoherenceScan scan  = computeCommentCoherence( ing );
     const std::size_t          total = scan.rows.size();
@@ -336,7 +338,7 @@ inline int writeCommentCoherenceReport( const IngestResult& ing, int pageLimit, 
     {
         std::printf( " unreadable_files=\"%u\"", scan.unreadableFileCount );
     }
-    std::printf( ">" );
+    std::printf( "%s>", rootAttr.c_str() );
 
     std::vector<char> escPath;
     std::vector<char> escName;
@@ -344,7 +346,8 @@ inline int writeCommentCoherenceReport( const IngestResult& ing, int pageLimit, 
     {
         const CommentCoherenceRow& row  = scan.rows[rowIndex];
         const Symbol&               s    = ing.symbols[row.id];
-        const std::string           path( escapeXml( ing.files[s.fileId], escPath ) );
+        const std::string_view      rel  = rootPrefix.empty() ? std::string_view( ing.files[s.fileId] ) : rw::sarif::rootRelativeUri( ing.files[s.fileId], rootPrefix );
+        const std::string           path( escapeXml( rel, escPath ) );
         const std::string           name( escapeXml( s.name, escName ) );
         std::printf( "<fn p=\"%s:%u\" n=\"%s\" c_coeff=\"%.3f\" words=\"%u\" restate=\"%u\" "
                      "cic=\"%.3f\" c_terms=\"%u\" i_terms=\"%u\" shared=\"%u\"/>",

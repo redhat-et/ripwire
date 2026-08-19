@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# R-E (2026-08-17 harvest, root-relative paths for ALL verbs): --deps' cut=/p= is now relative to $FIX
+# itself — the fixture directory's own name never appears in a path — so every literal expectation below
+# was re-pinned from "$FIX/name" to bare "name".
 # cyclecutcheck.sh — WEAKEST-LINK CUT SUGGESTION gate for `--deps` cycle output (packDeps in
 # src/serialize.h). Each <cycle> now carries cut="src -> dst" cutrefs="N": the cheapest edge to
 # remove to break the cycle, picked by MIN occurrence-count within the cycle's own edges (adj is
@@ -49,15 +52,15 @@ unesc(){ printf '%s' "$1" | sed 's/&gt;/>/g; s/&lt;/</g; s/&quot;/"/g; s/&apos;/
 D="$( run )"
 
 # ── 1) the 3-cycle: thin edge (weight 1) wins over the thick a->b (weight 3) ──────────────────────
-C3="$( cycle_containing "$D" 'cyclecutfix/a.h' )"
+C3="$( cycle_containing "$D" 'p="a.h"' )"
 CUT3="$( unesc "$( attr_of "$C3" cut )" )"
 REF3="$( attr_of "$C3" cutrefs )"
-{ [ "$CUT3" = "$FIX/b.h -> $FIX/c.h" ] && [ "$REF3" = 1 ]; } \
+{ [ "$CUT3" = "b.h -> c.h" ] && [ "$REF3" = 1 ]; } \
     && ok "3-cycle: cut=b.h -> c.h (weight 1, beats thick a->b weight 3), cutrefs=1" \
-    || no "3-cycle cut wrong: cut='$CUT3' cutrefs='$REF3' (want '$FIX/b.h -> $FIX/c.h' / 1)"
+    || no "3-cycle cut wrong: cut='$CUT3' cutrefs='$REF3' (want 'b.h -> c.h' / 1)"
 
 # ── 2) the cut edge is genuinely a member of the 3-cycle (src AND dst both in the cycle's file list) ──
-{ printf '%s' "$C3" | grep -qF "<f p=\"$FIX/b.h\"/>" && printf '%s' "$C3" | grep -qF "<f p=\"$FIX/c.h\"/>"; } \
+{ printf '%s' "$C3" | grep -qF "<f p=\"b.h\"/>" && printf '%s' "$C3" | grep -qF "<f p=\"c.h\"/>"; } \
     && ok "3-cycle: cut endpoints (b.h,c.h) are both real members of the cycle" \
     || no "3-cycle: cut names a file NOT in the cycle's member list — $C3"
 
@@ -67,12 +70,12 @@ REF3="$( attr_of "$C3" cutrefs )"
     || no "3-cycle size/cost wrong: size=$( attr_of "$C3" size ) cost=$( attr_of "$C3" cost )"
 
 # ── 4) the 2-cycle: equal weights (1,1) → lexicographic tie-break picks x.h -> y.h ────────────────
-C2="$( cycle_containing "$D" 'cyclecutfix/two/x.h' )"
+C2="$( cycle_containing "$D" 'p="two/x.h"' )"
 CUT2="$( unesc "$( attr_of "$C2" cut )" )"
 REF2="$( attr_of "$C2" cutrefs )"
-{ [ "$CUT2" = "$FIX/two/x.h -> $FIX/two/y.h" ] && [ "$REF2" = 1 ]; } \
+{ [ "$CUT2" = "two/x.h -> two/y.h" ] && [ "$REF2" = 1 ]; } \
     && ok "2-cycle: equal-weight tie broken lexicographically → cut=x.h -> y.h, cutrefs=1" \
-    || no "2-cycle cut wrong: cut='$CUT2' cutrefs='$REF2' (want '$FIX/two/x.h -> $FIX/two/y.h' / 1)"
+    || no "2-cycle cut wrong: cut='$CUT2' cutrefs='$REF2' (want 'two/x.h -> two/y.h' / 1)"
 
 # ── 5) determinism: cut/cutrefs (and the whole cycles block) identical across repeated runs ───────
 D2="$( run )"

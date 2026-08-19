@@ -800,13 +800,13 @@ spot:
 
 ```
 $ ripwire . --callers=rankGraphTeleport
-<callers of="rankGraphTeleport" defs="1" count="6" counts_floor="1">
-<s t="fn" n="runEval" p="./src/eval.h:168"/>
-<s t="fn" n="rankGraph" p="./src/graph.h:2082"/>
-<s t="fn" n="anchoredLexicalRank" p="./src/graph.h:2418"/>
-<s t="fn" n="churnRankedGraph" p="./src/main.cpp:11861"/>
-<s t="fn" n="runDefaultMap" p="./src/main.cpp:11976"/>
-<s t="fn" n="getIndex" p="./src/mcpindex.h:950"/>
+<callers of="rankGraphTeleport" defs="1" count="6" root="." counts_floor="1">
+<s t="fn" n="runEval" p="src/eval.h:168"/>
+<s t="fn" n="rankGraph" p="src/graph.h:2082"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:2418"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:12112"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:12227"/>
+<s t="fn" n="getIndex" p="src/mcpindex.h:950"/>
 </callers>
 ```
 

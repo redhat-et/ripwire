@@ -51,11 +51,11 @@ CNT="$( grep -o 'rule="unreachable-code"' "$OUT" | wc -l | tr -d ' ' )"
 [ "$CNT" = "5" ] && ok "fires on exactly 5 dead statements (got $CNT)" || no "expected 5 findings, got $CNT"
 
 # 3. enclosing symbol + line correct for each MUST-flag case
-grep -q 'p="test/unreachablefix/dead.cpp:8" in="afterReturn"'  "$OUT" && ok "flags stmt after return (afterReturn, dead.cpp:8)"      || no "afterReturn dead stmt NOT flagged at line 8"
-grep -q 'p="test/unreachablefix/dead.cpp:25" in="afterThrow"'  "$OUT" && ok "flags stmt after throw (afterThrow, dead.cpp:25)"        || no "afterThrow dead stmt NOT flagged at line 25"
-grep -q 'p="test/unreachablefix/dead.cpp:34" in="afterBreak"'  "$OUT" && ok "flags stmt after break (afterBreak, dead.cpp:34)"        || no "afterBreak dead stmt NOT flagged at line 34"
-grep -q 'p="test/unreachablefix/dead.py:7" in="after_return"'  "$OUT" && ok "flags stmt after return (Python after_return, dead.py:7)" || no "Python after_return dead stmt NOT flagged at line 7"
-grep -q 'p="test/unreachablefix/dead.py:13" in="after_raise"'  "$OUT" && ok "flags stmt after raise (Python after_raise, dead.py:13)"  || no "Python after_raise dead stmt NOT flagged at line 13"
+grep -q 'p="dead.cpp:8" in="afterReturn"'  "$OUT" && ok "flags stmt after return (afterReturn, dead.cpp:8)"      || no "afterReturn dead stmt NOT flagged at line 8"
+grep -q 'p="dead.cpp:25" in="afterThrow"'  "$OUT" && ok "flags stmt after throw (afterThrow, dead.cpp:25)"        || no "afterThrow dead stmt NOT flagged at line 25"
+grep -q 'p="dead.cpp:34" in="afterBreak"'  "$OUT" && ok "flags stmt after break (afterBreak, dead.cpp:34)"        || no "afterBreak dead stmt NOT flagged at line 34"
+grep -q 'p="dead.py:7" in="after_return"'  "$OUT" && ok "flags stmt after return (Python after_return, dead.py:7)" || no "Python after_return dead stmt NOT flagged at line 7"
+grep -q 'p="dead.py:13" in="after_raise"'  "$OUT" && ok "flags stmt after raise (Python after_raise, dead.py:13)"  || no "Python after_raise dead stmt NOT flagged at line 13"
 
 # 4. FALSE-POSITIVE GUARDS — these must NEVER appear as unreachable-code findings.
 # grab only the unreachable-code finding lines, then assert the trap symbols are absent.
