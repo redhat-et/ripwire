@@ -30,26 +30,39 @@ namespace rw
 
 // split an identifier into lowercase subtokens on camelCase / digit / non-alnum boundaries.
 // "updateCollisionPositionVelocity" → [update, collision, position, velocity]; "_max_speed" → [max, speed].
+//
+// An UPPERCASE RUN IS ONE TOKEN (the ACRONYMWord rule, 2026-08-19). "MCP" → [mcp], "HTTPServer" →
+// [http, server], "IOError" → [io, error], "XMLHttpRequest" → [xml, http, request]: only the LAST
+// uppercase of a run of ≥2 starts a new token, and only when a lowercase letter follows it. Until
+// 2026-08-19 the camel test compared against `cur.back()` — the ALREADY-LOWERCASED accumulator, whose
+// last byte can never be uppercase — so the "previous byte was uppercase" guard was dead code and every
+// acronym came apart into 1-byte fragments that the `size() >= 2` rule then dropped. `subtokens("MCP")`
+// returned NOTHING, which is why a SKILL.md description about MCP indexed zero `mcp` tokens. The
+// previous byte's case now lives in its own flag, where lowercasing cannot erase it.
+// Registered + measured: docs/EVALS.md §4 "Subtoken acronym shredding"; gate: test/subtokencheck.sh.
+// The rule is naminglens.h::splitIdentifier's, so the repo's two identifier splitters agree.
+//
+// This DELEGATES to lexindex.h's forEachLexSubtoken rather than restating the state machine. It used to
+// restate it, and the acronym bug is what that cost: three hand-kept copies of one rule, one of which
+// (this one) compared against a lowercased accumulator and so lost the case information the rule needs.
+// Appends to `out` (does not clear) — every caller either passes a fresh vector or clears it first.
 inline void subtokens( std::string_view id, std::vector<std::string>& out )
 {
-    std::string cur;
-    const auto flush = [ & ] { if( cur.size() >= 2 ) { out.push_back( cur ); } cur.clear(); };
-    // EXPLICIT narrowing: `char` is signed on x86-64/macOS, so an IMPLICIT `unsigned char c : id` trips G1's
-    // implicit-integer-sign-change on any byte ≥ 0x80 (a UTF-8 identifier). hashutil.h owns the full note.
-    for( const char ch : id )
+    forEachLexSubtoken( id, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
     {
-        const unsigned char c     = static_cast<unsigned char>( ch );
-        const bool          upper = c >= 'A' && c <= 'Z';
-        const bool lower = c >= 'a' && c <= 'z';
-        const bool digit = c >= '0' && c <= '9';
-        if( !upper && !lower && !digit ) { flush(); continue; }                       // separator
-        if( upper && !cur.empty() && !( cur.back() >= 'A' && cur.back() <= 'Z' ) )
+        const std::size_t tokLen = tokEndByte - tokStartByte;
+        if( tokLen < 2 )
         {
-            flush(); // camel boundary
+            return;                                       // the ≥2-byte drop, applied by every consumer
         }
-        cur.push_back( char( upper ? c - 'A' + 'a' : c ) );
-    }
-    flush();
+        std::string tok;
+        tok.reserve( tokLen );
+        for( std::size_t k = tokStartByte; k < tokEndByte; ++k )
+        {
+            tok.push_back( char( lexLowerByte( static_cast<unsigned char>( id[k] ) ) ) );
+        }
+        out.push_back( std::move( tok ) );
+    } );
 }
 
 // docCommentStart moved to lexindex.h (B0.2): the index-time stats builder must scan the EXACT spans this
@@ -257,10 +270,13 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     constexpr int kwName = 3, kwCallee = 1, kwDoc = kLexWeightDoc, kwBody = kLexWeightBody;
 
     // stream one field through the ONE shared state machine (lexindex.h forEachLexSubtoken — the same
-    // tokenizer subtokens() mirrors and the B0.2 index-time builder uses): a token is a maximal [optional
-    // uppercase][lowercase/digit]* run between separators, so only a token's FIRST byte can be uppercase,
-    // which the matcher exploits. Tokens shorter than 2 bytes are dropped, exactly like subtokens().
-    // No strings, no maps — just in-place span-vs-query compares.
+    // tokenizer subtokens() mirrors and the B0.2 index-time builder uses): a token is a maximal
+    // alphanumeric run between separators, cut at a lower/digit → Upper transition and at the ACRONYMWord
+    // seam. Tokens shorter than 2 bytes are dropped, exactly like subtokens().
+    // No strings, no maps — just in-place span-vs-query compares. Since 2026-08-19 an all-caps run survives
+    // as ONE token, so a span's INTERIOR bytes can be uppercase and memcmp alone would miss it; the memcmp
+    // stays as the fast path (it resolves every ordinary identifier token) and only a span already agreeing
+    // on length AND head falls through to lexTokenEqualsLowered — the rare acronym case, arm D's seam.
     const auto scanTextInto = [ & ]( int* tfRow, int& wtAccum, std::string_view text, int w )
     {
         int fieldTokenWt = 0;
@@ -277,7 +293,8 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             for( std::size_t m = 0; m < matchCount; ++m )
             {
                 const std::string& q = matchToks[m].tok;
-                if( q.size() == tokLen && q[0] == head && std::memcmp( q.data() + 1, tok + 1, tokLen - 1 ) == 0 )
+                if( q.size() == tokLen && q[0] == head
+                    && ( std::memcmp( q.data() + 1, tok + 1, tokLen - 1 ) == 0 || lexTokenEqualsLowered( tok, tokLen, q.data() ) ) )
                 {
                     tfRow[m] += w;                    // exact tokens own rows 0..uniqueCount (m == u there)
                     break;                            // table strings are distinct → at most one can match

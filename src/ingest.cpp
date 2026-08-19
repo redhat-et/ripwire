@@ -1482,7 +1482,23 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 65;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 66;           // bump on any grammar/.scm/extraction change
+                                                      // 66 (2026-08-19 subtoken acronym shredding, subtokencheck.sh):
+                                                      //    the shared subtoken state machine (lexindex.h
+                                                      //    forEachLexSubtoken/forEachLexSubtokenHashed) stopped
+                                                      //    cutting a token at EVERY interior uppercase byte, which
+                                                      //    had reduced an all-caps run to 1-byte fragments that the
+                                                      //    ≥2-byte rule then dropped — an acronym was indexed as
+                                                      //    nothing at all. A run is now one token, split only at the
+                                                      //    last upper before a lowercase ("HTTPServer" → http|server).
+                                                      //    lexSubtokenHash also lowercases EVERY byte now, not just
+                                                      //    the first. Both feed the PERSISTED rich-cache record —
+                                                      //    RawDefLex's dlWeighted/tokenHashes/tokenTfs and the
+                                                      //    per-file 512-bit H3 signature derived from them — so v65
+                                                      //    blobs hold token statistics this binary would never
+                                                      //    produce and must be rejected. quality.h
+                                                      //    kIngestParserVerMirror bumped in the SAME commit.
+                                                      //    Registered + measured: docs/EVALS.md §4.
                                                       // 65 (2026-08-15 C++ nested out-of-line defs, cppqualcheck.sh §11):
                                                       //    queries/cpp/tags.scm gains a second out-of-line
                                                       //    definition pattern (`qualified_identifier name:

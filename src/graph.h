@@ -141,9 +141,16 @@ namespace priorwt
     inline constexpr std::size_t kSpecificMinLen   = 8;         // ≥8 chars …  (aider's)
     inline constexpr std::size_t kSpecificMinWords = 2;         // … AND ≥2 words (camelCase/snake split) (aider's)
 
-    // number of word segments in an identifier by the SAME boundary rules as lexical.h subtokens():
-    // split on camelCase transitions, digit/non-alnum separators, and snake_case '_'. Allocation-free,
-    // constexpr-friendly (pure scan of the bytes). A run of ≥1 alnum char between boundaries is one word.
+    // number of word segments in an identifier: split on camelCase transitions, digit/non-alnum
+    // separators, and snake_case '_'. Allocation-free, constexpr-friendly (pure scan of the bytes).
+    // A run of ≥1 alnum char between boundaries is one word.
+    //
+    // NOT identical to lexical.h subtokens(), and deliberately left that way: an all-caps run counts as
+    // ONE word here whether or not a lowercase follows it, so "HTTPServer" is 1 word to this prior and 2
+    // tokens (http|server) to the retrieval tokenizer. This is a PageRank name weight (the ≥2-word
+    // specificity prior), not a retrieval index — the 2026-08-19 acronym round scoped its one registered
+    // change to the retrieval tokenizer rather than move the default map's ranking as a side effect.
+    // See docs/EVALS.md §4 "Subtoken acronym shredding".
     inline constexpr std::size_t wordCount( std::string_view id ) noexcept
     {
         std::size_t words = 0;
