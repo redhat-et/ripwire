@@ -1373,7 +1373,8 @@ help table with that flag removed, the checker returns `DIRTY`. But three of its
 patterns look for a literal `--flag` spelling, which **cannot appear in a well-formed XML comment**,
 so only the prose pattern can ever reach real output. Recorded as narrow coverage, not a false green.
 
-**Probe 3 — W2-K. Two findings; the fix is real and its price was never measured.** The
+**Probe 3 — the pack-task budget lane. Two findings; the fix is real and its price was never
+measured.** The
 non-monotonicity is genuinely gone on the live corpus: the base binary shows `callers_kept` 20 → 13
 going from `--token-budget=6000` to `8000`; the head binary is non-decreasing across the same ladder.
 Both findings are about what that cost.
@@ -1390,7 +1391,7 @@ the task `"cliffprobe target function"`:
 
 Raising the budget from 900 to 1200 **deletes the body of the function the task literally names** and
 substitutes one-line helpers, and it stays deleted through 4000. The base binary keeps it at every
-budget from 1200 up. "Bigger budget, worse answer" is the exact defect W2-K set out to remove; the
+budget from 1200 up. "Bigger budget, worse answer" is the exact defect the lane set out to remove; the
 `count > rank-score > cost` tie-break relocated it from the counter to the content. The disclosure is
 truthful throughout — the drop is named (`<!-- body omitted (over budget): cliffProbeTargetFunction -->`),
 `total="6"` is restated from the true candidate set and `capped="1"` is honest — so this is a
@@ -1414,7 +1415,8 @@ leaving ~44% of the budget unspent — and nothing in the output says the trunca
 choice rather than a budget wall. Roughly a third of the byte reduction is the legitimate
 root-relative path saving; the caller-count column is the part that is not.
 
-**Probe 4 — W2-F residual. Verified, and its CAUSE is now pinned: corpus, not ranker.** The residual
+**Probe 4 — the convergence-disclosure lane's residual. Verified, and its CAUSE is now pinned:
+corpus, not ranker.** The residual
 reproduces exactly, and a three-cell control isolates it:
 
 | binary | tree | ranking-lane lenient recall@5 | MRR |
@@ -1436,11 +1438,12 @@ the ranker. The honest correction is to give the ranking lane a frozen corpus th
 already has one (`snapshot.mdpack`/`snapshot.lock`), or to re-derive the gold at the new head. Both
 are deliberate recalibration commits and neither belongs in this wave.
 
-**Probe 5 — silent-semantics sweep. No undisclosed behavior change; four coverage gaps in W2-E's
-claim.** Twenty verb forms were captured from both binaries on this repository, normalized for the
-absolute-root prefix, and structurally diffed. Every residual difference traces to a disclosed
-deliverable: `root="."` plus its shared legend clause (W2-E), `pr_iters=` plus its legend clause
-(W2-F), the `<unindexed>` element and `unindexed_files_scanned=` (W2-J), `est_tokens=` shrinking
+**Probe 5 — silent-semantics sweep. No undisclosed behavior change; four coverage gaps in the
+root-relative-paths lane's claim.** Twenty verb forms were captured from both binaries on this
+repository, normalized for the absolute-root prefix, and structurally diffed. Every residual
+difference traces to a disclosed deliverable: `root="."` plus its shared legend clause
+(root-relative-paths lane), `pr_iters=` plus its legend clause (convergence-disclosure lane), the
+`<unindexed>` element and `unindexed_files_scanned=` (grep-visibility lane), `est_tokens=` shrinking
 because paths got shorter, and one extra `--for` signature admitted for the same reason. Nothing
 unexplained.
 The gaps are in the *scope* of "root-relative `p=` on ALL verbs + CLI/MCP parity". Four surfaces
@@ -1460,8 +1463,9 @@ question with relative paths and the MCP twin of that question with absolute one
 
 **Probe 6 — degrade paths. CLEAN.** No `VERIFY( false )` is added anywhere in the wave. Two new
 `DEGRADED_PATH_ALERT` call sites (`restatePackTaskBodiesWrapper`'s unexpected `<bodies>` shape,
-`loadRefTree`'s empty materialized tree), both with a real fallback behind them. W2-F's disclosure is
-explicitly *not* an assert: `pageRankDouble` returns `PageRankRun{ iterationCount, hasConverged }`
+`loadRefTree`'s empty materialized tree), both with a real fallback behind them. The
+convergence-disclosure lane's own signal is explicitly *not* an assert: `pageRankDouble` returns
+`PageRankRun{ iterationCount, hasConverged }`
 because `DEGRADED_PATH_ALERT` compiles out under `NDEBUG` and a shipped binary would otherwise have no
 signal that a ranking stopped short — non-negotiable #4 honored by construction, not by convention.
 The three added `VERIFY`s are true invariants with no behavior behind them. The
@@ -1513,17 +1517,19 @@ only wall-clock cost. See §4.
 **PageRank is a bad co-change ranker** (3.8% at recall@5 against 40.3% lexical), and fusing it into
 the lexical ranker made things worse. See §6.
 
-**`--pack-task`'s budget monotonicity is monotone in the COUNT of bodies, not in their relevance.**
-W2-K (2026-08-17) removed a real defect — a bigger `--token-budget` could show strictly fewer bodies —
-by replacing `packBodies`' streaming admission with a max-count subset pre-selection, tie-broken
-`count > rank-score > cost`. On the gate's own fixture the counter is now non-decreasing and the
-answer is not: at `--token-budget=900` the bundle carries the body of the function the task names, and
-at 1200 it carries two one-line helpers instead, holding that substitution through 4000. The
-pre-selection is disclosed honestly (the dropped candidate is named, `total=` is restated from the true
-candidate set, `capped="1"`), and `test/packtaskmonotoncheck.sh` cannot see the inversion because it
-asserts on counts. The related `monotoneRoll` conservatism — a capped section is charged its whole
-granted share and donates nothing forward — leaves up to ~44% of the requested budget unspent on this
-repository, costing seven caller signatures at the default 6,000-token budget. Both are measured in §6.
+**A budget-monotonicity fix was monotone in the COUNT of bodies and not in their relevance** — kept
+here because the failure mode is the interesting part, not the patch. The pack-task budget lane
+(2026-08-17) removed a real defect — a bigger `--token-budget` could show strictly fewer bodies — by
+replacing `packBodies`' streaming admission with a max-count subset pre-selection, tie-broken
+`count > rank-score > cost`. Measured at `aa97c9e` on the gate's own fixture, the counter was
+non-decreasing and the answer was not: at `--token-budget=900` the bundle carried the body of the
+function the task names, and at 1200 it carried two one-line helpers instead, holding that
+substitution through 4000. The pre-selection disclosed itself honestly throughout (the dropped
+candidate named, `total=` restated from the true candidate set, `capped="1"`), and
+`test/packtaskmonotoncheck.sh` could not see the inversion because it asserted on counts. The related
+`monotoneRoll` conservatism — a capped section charged its whole granted share, donating nothing
+forward — left up to ~44% of the requested budget unspent on this repository, costing seven caller
+signatures at the default 6,000-token budget. Both are measured in §6.
 
 > Update 2026-08-19: both were fixed after this verdict was written, so its "current behavior" is now
 > history. The top-ranked candidate is admitted rather than entered into the count contest — its body
