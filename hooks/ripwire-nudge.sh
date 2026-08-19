@@ -64,11 +64,33 @@ set -u
 # rule table. One log means one contamination risk, so the §FIXTURE guard in meter_init() is part of
 # the design and not a test detail: a gate run must never be able to reach that file.
 #
-# OBSERVE FIRST; THE A/B IS BUILT BUT DORMANT. Default behavior is always-on observation WITH nudges
-# enabled — i.e. exactly what this hook did before, plus counting. The `arm` field and the
-# RIPWIRE_METER_ARM / meter.conf toggle exist so that turning on a real control-vs-treatment
-# alternation later costs one env var and no code; nothing here alternates on its own, and the arm is
-# recorded on every row so the future analysis can trust the assignment it reads.
+# A REAL RANDOMIZATION MECHANISM NOW EXISTS: `meter_auto_arm`, ACTIVATED BY `arm=auto` (2026-08-19
+# fix). From 2026-08-11 through 2026-08-19 the only way to reach the control arm at all was to name it
+# explicitly — an operator setting RIPWIRE_METER_ARM=control (or `arm=control` in meter.conf) for an
+# ENTIRE machine, session by session, by hand; there was no code path that could ever produce a MIXED
+# population, only all-control or all-treatment. Nobody ever set it, across 4,209 logged rows and 21
+# sessions: 100% treatment, 0% control, and the meter could not answer its own north-star question
+# (does the nudge change behavior vs. no nudge) because there was nothing to compare against. This was
+# a silent, unannounced gap: the `arm` field was always present and always "treatment", so the log
+# LOOKED complete.
+#
+# `meter_auto_arm` hashes the session id to a stable ~50/50 split — a pure function of an immutable
+# input, so "decided once at SessionStart, persisted for the session" comes for free: every PreToolUse
+# invocation in a session recomputes the same hash of the same session id and lands on the same arm,
+# with no marker file and no shared state to go stale, including across the internal SessionStart
+# resets a long session can produce (see the post_nudge/post_sweep reset behavior above). It is reached
+# only when the arm config names the new literal `auto` (RIPWIRE_METER_ARM=auto, or `arm=auto` in
+# meter.conf) — UNSET still means treatment, exactly as before this fix, so a machine nobody has
+# touched keeps behaving exactly as it always has; going live with a real A/B population is a
+# deployment-time config write (`arm=auto`), not a change to what the script defaults to.
+#
+# THIS FIX DOES NOT CHANGE TREATMENT SEMANTICS. A session that lands on the treatment arm behaves
+# bit-for-bit as before: same nudges, same dedup, same sweep. What changes is only that a control arm
+# now actually gets populated, and — see the nudge-decision block further down — a control-arm call
+# runs through the IDENTICAL eligibility bookkeeping a treatment call does (the same per-category
+# marker, the same per-class sweep counter), so the row records "control" when this call would have
+# been the one to fire/escalate and "suppressed-control" when it would have been deduped — eligibility
+# is measurable in both arms, not just inferred from silence.
 #
 # THE NUDGE-CAUSES-THE-CALL CONFOUND. A nudge that says "use --grep" is itself a cause of the next
 # ripwire call, so a naive rate would partly measure the hook talking to itself. Three fields keep
@@ -159,6 +181,8 @@ meter_repo=""
 meter_tag=""
 sweep_on=1
 sweep_n=3
+dedup_cooldown=20
+dedup_cap=3
 # ---- meter_dest — WHERE the log goes. Sets `_mhome` (the config directory) and `meter_file`, and
 #      applies the §FIXTURE guard. `_mexplicit` is the guard's whole input: it records whether the
 #      caller NAMED a destination (RIPWIRE_METER_LOG / RIPWIRE_HOME) or the path was merely INFERRED
@@ -183,6 +207,26 @@ meter_dest()
     fi
 }
 
+# ---- meter_auto_arm SESSION — the ~50/50 split used when the arm config names the literal `auto`
+#      (see the design note above §METER). `cksum` (POSIX, present on every platform this hook ships
+#      on) hashes the session id to a number; the low two decimal digits split the range in half. Any
+#      failure of the hash (no `cksum`, or output this script does not recognize as a plain integer)
+#      degrades to "treatment" — the same safe default the rest of this file uses whenever a signal is
+#      unavailable, never a crash and never a silently invented third arm. ----
+meter_auto_arm()
+{
+    _aa_h="$( printf '%s' "$1" | cksum 2>/dev/null | cut -d' ' -f1 )"
+    case "$_aa_h" in
+        ''|*[!0-9]*) printf 'treatment'; return 0 ;;
+    esac
+    if [ "$(( _aa_h % 100 ))" -lt 50 ]
+    then
+        printf 'control'
+    else
+        printf 'treatment'
+    fi
+}
+
 meter_init()
 {
     meter_dest
@@ -190,15 +234,19 @@ meter_init()
     _conf_arm=""
     _conf_sweep=""
     _conf_sweepn=""
+    _conf_cooldown=""
+    _conf_cap=""
     if [ -n "$_mhome" ] && [ -f "$_mhome/meter.conf" ]
     then
         while IFS='=' read -r _ck _cv
         do
             case "$_ck" in
-                enabled) _conf_enabled="$_cv" ;;
-                arm)     _conf_arm="$_cv" ;;
-                sweep)   _conf_sweep="$_cv" ;;
-                sweep_n) _conf_sweepn="$_cv" ;;
+                enabled)        _conf_enabled="$_cv" ;;
+                arm)            _conf_arm="$_cv" ;;
+                sweep)          _conf_sweep="$_cv" ;;
+                sweep_n)        _conf_sweepn="$_cv" ;;
+                dedup_cooldown) _conf_cooldown="$_cv" ;;
+                dedup_cap)      _conf_cap="$_cv" ;;
             esac
         done < "$_mhome/meter.conf"
     fi
@@ -216,6 +264,20 @@ meter_init()
         0)           sweep_n=3 ;;
         *)           sweep_n="${RIPWIRE_SWEEP_N:-$_conf_sweepn}" ;;
     esac
+    # DEDUP/COOLDOWN POLICY (2026-08-19 retune — see the §DEDUP block below for the full rationale and
+    # the policy it replaces). Same "not a plain positive integer reads as the default" guard as
+    # sweep_n, for the same reason: a malformed override must degrade to the shipped policy, never to
+    # 0 (which would mean "re-arm instantly", i.e. no cooldown at all) or to disabling delivery.
+    case "${RIPWIRE_DEDUP_COOLDOWN:-$_conf_cooldown}" in
+        ''|*[!0-9]*) dedup_cooldown=20 ;;
+        0)           dedup_cooldown=20 ;;
+        *)           dedup_cooldown="${RIPWIRE_DEDUP_COOLDOWN:-$_conf_cooldown}" ;;
+    esac
+    case "${RIPWIRE_DEDUP_CAP:-$_conf_cap}" in
+        ''|*[!0-9]*) dedup_cap=3 ;;
+        0)           dedup_cap=3 ;;
+        *)           dedup_cap="${RIPWIRE_DEDUP_CAP:-$_conf_cap}" ;;
+    esac
 
     # THE ARM IS RESOLVED BEFORE THE LOG IS, and that ordering is the fix for a bug this file shipped
     # with (2026-08-12, found by the E1 lane driving the arm for real). The arm is not a property of
@@ -226,11 +288,19 @@ meter_init()
     # advice where the contract promises none. A control arm that silently does not control is worse
     # than no control arm, because the resulting data looks valid.
     #
-    # Only the literal `control` selects the control arm. An unrecognized value must not silently
-    # invent a third arm — it reads as the default, which is what the row then honestly records.
+    # The literal `control`/`treatment` still force an arm (an operator override, or a test harness
+    # pinning one side) — that contract, and its "any unrecognized value reads as treatment" safety
+    # net, is UNCHANGED, on purpose: this file's own default stays `treatment` so a machine that never
+    # touches meter.conf keeps behaving exactly as it always has. What is NEW is a third literal value,
+    # `auto`, which activates the session-id hash split in `meter_auto_arm` — this is the fix's actual
+    # deliverable, but it is opt-in at the CONFIG layer (deployment writes `arm=auto` to
+    # ~/.ripwire/meter.conf) rather than a change to what an unconfigured hook does. That split keeps
+    # "does this commit change treatment semantics" answerable with "no" — nothing about this hook's
+    # behavior moves unless something now names `auto` where nothing was named before.
     case "${RIPWIRE_METER_ARM:-$_conf_arm}" in
-        control) meter_arm="control" ;;
-        *)       meter_arm="treatment" ;;
+        control)    meter_arm="control" ;;
+        auto)       meter_arm="$( meter_auto_arm "$session" )" ;;
+        *)          meter_arm="treatment" ;;
     esac
 
     [ -n "$meter_file" ] || return 0          # no HOME and no explicit log path — nothing to write to
@@ -964,8 +1034,57 @@ meter_init
 #      `post_nudge` means "this call happened in an already-nudged session", not "this call nudged". --
 [ -e "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anynudge" ] && meter_post=1
 
-# ---- the nudge decision, recorded as both a boolean and a REASON. Dedup is per session per category
-#      (or per-PPID if the payload carries no session_id); a deduped call is silent but still counted.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §DEDUP — RE-ARMING COOLDOWN, NOT FIRE-ONCE-EVER (2026-08-19 retune)
+#
+# OLD POLICY (2026-08-11 through 2026-08-19): a plain marker file. First eligible call of a category
+# this session fires; the marker's mere EXISTENCE silences every later call of that category for the
+# rest of the session, no matter how long the session runs or how many more times the trigger
+# condition recurs. Combined with §SWEEP's own one-shot `.esc` marker (one escalation, ever, per
+# class, which also retired the base marker on firing), the net effect measured in the field
+# (readout 2026-08-19, 4,209-row snapshot): the trigger condition was met 1,546 times but delivered
+# only 17 times (1.1%) — a nudge or two near session start, then silence for the rest of a session that
+# can run thousands of rows. `grep`-class native calls, the largest and cleanest substitution target
+# (931 occurrences, dominant pattern a single literal `grep -n SYM file`), went unaddressed 95.9% of
+# the time — not because the trigger stopped firing, but because the delivery mechanism could not.
+#
+# NEW POLICY: RE-ARM AFTER A COOLDOWN, CAPPED. Each category tracks three counts — eligible
+# OBSERVATIONS so far this session (`.obs`, every matching call, delivered or not), DELIVERIES so far
+# (`.deliv`), and the observation count AT the last delivery (`.last`). A call delivers when either (a)
+# no delivery has happened yet this session for this category — same "fires on first sight" as the old
+# policy — or (b) at least `dedup_cooldown` MORE eligible observations of this category have occurred
+# since the last delivery AND fewer than `dedup_cap` deliveries have happened so far. Defaults:
+# cooldown 20 (a session has to show the SAME native habit 20 more times before hearing about it again
+# — enough to skip incidental one-offs, short enough to reach mid-session on a 900+ row grep habit),
+# cap 3 (this hook does not want to become the thing it is telling the agent to stop doing — a nudge
+# that fires every 20 calls forever is its own kind of noise). Both are overridable
+# (RIPWIRE_DEDUP_COOLDOWN / RIPWIRE_DEDUP_CAP, or `dedup_cooldown` / `dedup_cap` in meter.conf) with
+# the same "not a plain positive integer reads as the shipped default" guard sweep_n already uses.
+#
+# THIS TIER'S CAP AND §SWEEP'S CAP ARE COUNTED SEPARATELY, ON PURPOSE. A class with both a base tip
+# and an escalated sweep tip (grep/read/glob/git-*) can therefore receive up to `dedup_cap` GENERIC
+# tips plus `dedup_cap` ESCALATED tips across a session — with the shipped default, up to 6 total, not
+# unbounded and not exactly-one-shared-3. A single counter shared across both tiers was tried and
+# rejected: the base tier's own cooldown clock (`_dobs`, gated to only nudge-eligible occurrences) and
+# §SWEEP's (`sweep_count`, every occurrence of the class) advance at different rates, and whichever
+# tier reached its threshold FIRST would silently consume the other's only delivery slot — turning
+# "escalate at exactly the Nth occurrence" into "escalate at the Nth occurrence, unless the generic
+# tip got there first, in which case wait for a whole cooldown period instead." Two independent,
+# small, bounded caps are simpler to reason about and to test than one shared counter with an
+# order-dependent race.
+#
+# THE OBSERVATION WINDOW RESTARTS WITH THIS COMMIT. Every row logged before this change used the old
+# fire-once policy; every row after uses this one. `nudge":"dedup"` in an old row and `nudge":"dedup"`
+# in a new one are NOT the same measurement — the new one only means "within cooldown of the last
+# delivery," not "will never fire again this session." Any before/after comparison across this commit
+# must treat it as a regime change, not noise.
+#
+# CONTROL-ARM ELIGIBILITY RIDES THE SAME MECHANISM (unchanged from the 2026-08-19 arm-assignment fix):
+# a control-arm call runs through the identical `.obs`/`.deliv`/`.last` bookkeeping, so `nudge` records
+# "control" (this call is a counterfactual delivery) or "suppressed-control" (a treatment session would
+# be within cooldown here too) under the SAME re-arming policy treatment now gets — the two commits
+# compose without control-arm rows silently reverting to the old one-shot semantics.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
 nudged=0
 nudge="none"
 if [ -z "$category" ]
@@ -974,19 +1093,58 @@ then
 elif [ "$nudge_ok" != "1" ]
 then
     nudge="gated"                                       # not a git repo, or no ripwire on PATH
-elif [ "$meter_arm" = "control" ]
-then
-    nudge="control"                                     # A/B control arm: counted, never nudged
 else
-    marker="${TMPDIR:-/tmp}/ripwire-nudge.${session}.${category}"
-    if [ -e "$marker" ]
+    # Keyed by `mclass`, not `category`: they agree everywhere except a Bash recursive grep, where
+    # `category` is the finer "bash-grep" (so the base TIP text can say something Bash-specific) but
+    # `mclass` already resolves to the same "grep" the §SWEEP block below tracks against. Using
+    # `mclass` here means a recursive Bash grep and a Grep-tool call share ONE cooldown clock instead
+    # of two, which is the one piece of state this tier intentionally does share with the tool-name
+    # split — it does NOT share its `.deliv` cap file with §SWEEP's, see that block's comment for why.
+    _dobs="${TMPDIR:-/tmp}/ripwire-nudge.${session}.${mclass}.obs"
+    _ddeliv="${TMPDIR:-/tmp}/ripwire-nudge.${session}.${mclass}.deliv"
+    _dlast="${TMPDIR:-/tmp}/ripwire-nudge.${session}.${mclass}.base-last"
+
+    { printf '.' >>"$_dobs"; } 2>/dev/null || true
+    _dobsdots=""
+    { _dobsdots="$(<"$_dobs")"; } 2>/dev/null || _dobsdots=""
+    _dobsn="${#_dobsdots}"
+
+    _ddots=""
+    [ -e "$_ddeliv" ] && { _ddots="$(<"$_ddeliv")"; } 2>/dev/null
+    _ddelivn="${#_ddots}"
+
+    _dlastn=0
+    [ -e "$_dlast" ] && { _dlastn="$(<"$_dlast")"; } 2>/dev/null
+    case "$_dlastn" in ''|*[!0-9]*) _dlastn=0 ;; esac
+
+    _darm=0
+    if [ "$_ddelivn" -eq 0 ]
     then
-        nudge="dedup"
-    else
-        { : > "$marker"; } 2>/dev/null || true
+        _darm=1                                          # first sighting this session: always fires
+    elif [ "$_ddelivn" -lt "$dedup_cap" ] && [ $(( _dobsn - _dlastn )) -ge "$dedup_cooldown" ]
+    then
+        _darm=1                                          # re-armed: cooldown elapsed, cap not yet spent
+    fi
+
+    if [ "$_darm" = "1" ]
+    then
+        { printf '.' >>"$_ddeliv"; } 2>/dev/null || true
+        { printf '%s' "$_dobsn" >"$_dlast"; } 2>/dev/null || true
         { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anynudge"; } 2>/dev/null || true
-        nudged=1
-        nudge="fired"
+        if [ "$meter_arm" = "control" ]
+        then
+            nudge="control"                             # counterfactual fire: treatment would have spoken
+        else
+            nudged=1
+            nudge="fired"
+        fi
+    else
+        if [ "$meter_arm" = "control" ]
+        then
+            nudge="suppressed-control"                  # counterfactual dedup: treatment would be silent too
+        else
+            nudge="dedup"
+        fi
     fi
 fi
 
@@ -996,10 +1154,16 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 [ -e "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anysweep" ] && meter_postsweep=1
 
+# 2026-08-19: the outer gate no longer excludes the control arm. Counting still has to happen there —
+# same reasoning as the base-tier marker above — so that `sweep_count`/the `.esc` marker reach the
+# same state a treatment session's would, and a control-arm row can say "control" (this call is the
+# counterfactual escalation) instead of just "this session was in the control arm, who knows if
+# anything would have fired here." Only the pattern capture (`.pat`, used solely to BUILD delivered
+# text) is skipped for control — nothing ever reads it there, so writing it would be pure waste.
 sweep_hit=0
 sweep_count=0
 sweep_q=""
-if [ "$sweep_on" = "1" ] && [ "$nudge_ok" = "1" ] && [ "$meter_arm" != "control" ]
+if [ "$sweep_on" = "1" ] && [ "$nudge_ok" = "1" ]
 then
     case "$mclass" in
         grep|read|glob|git-diff|git-log|git-show-stat)
@@ -1018,8 +1182,10 @@ then
 
             # The grep escalation is the one that can quote the agent's own query back at it, so the
             # patterns are remembered as they go past. Sanitized HERE, not at emit time: whatever
-            # lands in this file is already safe to interpolate into a double-quoted --for=.
-            if [ "$mclass" = "grep" ]
+            # lands in this file is already safe to interpolate into a double-quoted --for=. Skipped
+            # in the control arm: this capture only ever feeds delivered text, and control never
+            # delivers text.
+            if [ "$mclass" = "grep" ] && [ "$meter_arm" != "control" ]
             then
                 _swpat="$mdetail"
                 [ "$tool_name" = "Bash" ] && _swpat="$meter_arg1"
@@ -1033,18 +1199,54 @@ then
                 [ -n "$_swpat" ] && { printf '%s\n' "$_swpat" >>"${_swf}.pat"; } 2>/dev/null
             fi
 
-            if [ "$sweep_count" -ge "$sweep_n" ] && [ ! -e "${_swf}.esc" ]
+            # 2026-08-19 retune: the escalation used to be a ONE-SHOT `.esc` marker, exactly the
+            # fire-once-forever shape §DEDUP above replaces for the base tier, and for the same
+            # measured reason — a 900+ call grep habit gets exactly one escalated tip, ever, then
+            # nothing for the rest of the session. It now shares the SAME cooldown/cap POLICY
+            # (`dedup_cooldown`/`dedup_cap`) as the base tier, counted against `sweep_count` (this
+            # class's own observation count), via its own `.deliv`/`.last` pair next to the existing
+            # `.pat` file — a SEPARATE counter from the base tier's, deliberately: the two tiers watch
+            # different observation streams (this one is every occurrence of the class; the base
+            # tier's `_dobs` only counts nudge-eligible ones) and merging them into one shared counter
+            # made the classic "escalate at exactly the Nth occurrence" contract depend on whether the
+            # base tier had already spent a shared slot first, which is a foot-gun disguised as
+            # economy. The practical ceiling on a class that has both tiers is therefore up to
+            # `dedup_cap` GENERIC tips plus `dedup_cap` ESCALATED tips across the session — bounded,
+            # simple, and independently verifiable per tier, rather than 2x` dedup_cap` of one message
+            # kind unpredictably borrowed from the other.
+            _swdelivdots=""
+            [ -e "${_swf}.deliv" ] && { _swdelivdots="$(<"${_swf}.deliv")"; } 2>/dev/null
+            _swdelivn="${#_swdelivdots}"
+            _swlastn=0
+            [ -e "${_swf}.last" ] && { _swlastn="$(<"${_swf}.last")"; } 2>/dev/null
+            case "$_swlastn" in ''|*[!0-9]*) _swlastn=0 ;; esac
+
+            _swarm=0
+            if [ "$sweep_count" -ge "$sweep_n" ]
             then
-                { : > "${_swf}.esc"; } 2>/dev/null || true
+                if [ "$_swdelivn" -eq 0 ]
+                then
+                    _swarm=1                              # first time this class crosses the threshold
+                elif [ "$_swdelivn" -lt "$dedup_cap" ] && [ $(( sweep_count - _swlastn )) -ge "$dedup_cooldown" ]
+                then
+                    _swarm=1                              # re-armed: cooldown elapsed, cap not yet spent
+                fi
+            fi
+
+            if [ "$_swarm" = "1" ]
+            then
+                { printf '.' >>"${_swf}.deliv"; } 2>/dev/null || true
+                { printf '%s' "$sweep_count" >"${_swf}.last"; } 2>/dev/null || true
                 { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anysweep"; } 2>/dev/null || true
                 { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anynudge"; } 2>/dev/null || true
-                # An escalation retires the weaker one-time tip for the same category: having said
-                # the specific thing, saying the generic thing later would only teach the agent that
-                # this hook repeats itself.
-                [ -n "$category" ] && { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.${category}"; } 2>/dev/null
                 sweep_hit=1
-                nudged=1
-                nudge="sweep${sweep_n}"
+                if [ "$meter_arm" = "control" ]
+                then
+                    nudge="control"                     # counterfactual escalation: treatment would fire here
+                else
+                    nudged=1
+                    nudge="sweep${sweep_n}"
+                fi
             fi
             ;;
     esac
@@ -1088,19 +1290,19 @@ EOF3
     case "$mclass" in
         grep)
             _swfor="${sweep_q:-<the task, in words>}"
-            msg="ripwire tip (SWEEP, ${sweep_count} search calls this session): a same-class sweep is trial-and-error retrieval — N round-trips and N outputs for one question. ONE call replaces it, paste-ready: \`ripwire ${sweep_dir} --for=\"${_swfor}\"\` — ranked over the WHOLE corpus (it matches doc-comments and bodies, not just the literal string) with signatures attached, so there is no read-the-file-for-context step after it. Want everything in one budgeted bundle instead — ranking + top bodies + callers + tests_to_run? \`ripwire ${sweep_dir} --pack-task=\"${_swfor}\"\`. Still after a literal string? \`ripwire ${sweep_dir} --grep='STR'\` returns each match with its enclosing function. (Escalated once per class per session; advisory only — your command runs either way.)"
+            msg="ripwire tip (SWEEP, ${sweep_count} search calls this session): a same-class sweep is trial-and-error retrieval — N round-trips and N outputs for one question. ONE call replaces it, paste-ready: \`ripwire ${sweep_dir} --for=\"${_swfor}\"\` — ranked over the WHOLE corpus (it matches doc-comments and bodies, not just the literal string) with signatures attached, so there is no read-the-file-for-context step after it. Want everything in one budgeted bundle instead — ranking + top bodies + callers + tests_to_run? \`ripwire ${sweep_dir} --pack-task=\"${_swfor}\"\`. Still after a literal string? \`ripwire ${sweep_dir} --grep='STR'\` returns each match with its enclosing function. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down.)"
             ;;
         read)
-            msg="ripwire tip (SWEEP, ${sweep_count} whole-file reads this session): reading files one after another is the largest token sink in an agent loop, and less context measures MORE accurate, not just cheaper (code-repair accuracy fell 29%->3% as context grew 32K->256K, LongCodeBench). ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --pack-task=\"<what you are trying to do>\"\` — ranking + top bodies + caller signatures + notes + tests_to_run in one bundle under one token budget. Already know the symbol? \`ripwire ${sweep_dir} --expand=SYM\` returns its body plus its callees' signatures instead of the file around it. (Escalated once per class per session; advisory only — your command runs either way.)"
+            msg="ripwire tip (SWEEP, ${sweep_count} whole-file reads this session): reading files one after another is the largest token sink in an agent loop, and less context measures MORE accurate, not just cheaper (code-repair accuracy fell 29%->3% as context grew 32K->256K, LongCodeBench). ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --pack-task=\"<what you are trying to do>\"\` — ranking + top bodies + caller signatures + notes + tests_to_run in one bundle under one token budget. Already know the symbol? \`ripwire ${sweep_dir} --expand=SYM\` returns its body plus its callees' signatures instead of the file around it. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down.)"
             ;;
         glob)
-            msg="ripwire tip (SWEEP, ${sweep_count} filename globs this session): a glob finds files by NAME, which is exactly why it takes several tries. ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --for=\"<the task, in words>\"\` ranks files by what the code actually DOES (doc-comments and bodies, not paths) and hands back signatures instead of a path list you still have to open. Just want the lay of the land? \`ripwire ${sweep_dir}\` with no flags is the whole map. (Escalated once per class per session; advisory only — your command runs either way.)"
+            msg="ripwire tip (SWEEP, ${sweep_count} filename globs this session): a glob finds files by NAME, which is exactly why it takes several tries. ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --for=\"<the task, in words>\"\` ranks files by what the code actually DOES (doc-comments and bodies, not paths) and hands back signatures instead of a path list you still have to open. Just want the lay of the land? \`ripwire ${sweep_dir}\` with no flags is the whole map. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down.)"
             ;;
         git-diff|git-log|git-show-stat)
-            msg="ripwire tip (SWEEP, ${sweep_count} raw git-history calls this session): ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --situ\` — the mid-task bundle: the blast radius of what you have changed, tests_to_run, the co-change partners you have forgotten, and a hotspot alert, in one pass. Reviewing someone else's branch instead? \`ripwire ${sweep_dir} --pr-context\`. Want what changed STRUCTURALLY rather than line counts? \`ripwire ${sweep_dir} --map-diff\`. (Escalated once per class per session; advisory only — your command runs either way.)"
+            msg="ripwire tip (SWEEP, ${sweep_count} raw git-history calls this session): ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --situ\` — the mid-task bundle: the blast radius of what you have changed, tests_to_run, the co-change partners you have forgotten, and a hotspot alert, in one pass. Reviewing someone else's branch instead? \`ripwire ${sweep_dir} --pr-context\`. Want what changed STRUCTURALLY rather than line counts? \`ripwire ${sweep_dir} --map-diff\`. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down.)"
             ;;
         *)
-            msg="ripwire tip (SWEEP, ${sweep_count} calls this session): \`ripwire ${sweep_dir} --for=\"<the task, in words>\"\` answers the whole sweep in one ranked call. (Escalated once per class per session; advisory only — your command runs either way.)"
+            msg="ripwire tip (SWEEP, ${sweep_count} calls this session): \`ripwire ${sweep_dir} --for=\"<the task, in words>\"\` answers the whole sweep in one ranked call. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down.)"
             ;;
     esac
 
@@ -1122,25 +1324,25 @@ case "$category" in
         pattern=$( field pattern )
         [ -n "$pattern" ] || pattern="PATTERN"
         pattern=$( printf '%s' "$pattern" | cut -c1-60 )
-        msg="ripwire tip: for text search across this repo, \`ripwire . --grep='${pattern}'\` returns each match WITH its enclosing function/class — often replacing the read-the-file-for-context step. Conceptual/multi-word task instead of a literal string? \`ripwire . --for=\"...\"\`. Symbol usage/call sites? \`ripwire . --callers=SYM\` / \`--uses=SYM\`. (One-time tip this session; \`ripwire --help\` lists everything.)"
+        msg="ripwire tip: for text search across this repo, \`ripwire . --grep='${pattern}'\` returns each match WITH its enclosing function/class — often replacing the read-the-file-for-context step. Conceptual/multi-word task instead of a literal string? \`ripwire . --for=\"...\"\`. Symbol usage/call sites? \`ripwire . --callers=SYM\` / \`--uses=SYM\`. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
         ;;
     git-diff)
-        msg="ripwire tip: for a diff, \`ripwire . --situ\` maps the mid-task blast radius, tests-to-run, and forgotten co-change partners in one pass (swap in \`--pr-context\` when reviewing a PR). (One-time tip this session; \`ripwire --help\` lists everything.)"
+        msg="ripwire tip: for a diff, \`ripwire . --situ\` maps the mid-task blast radius, tests-to-run, and forgotten co-change partners in one pass (swap in \`--pr-context\` when reviewing a PR). (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
         ;;
     git-log)
-        msg="ripwire tip: for git log, \`ripwire . --rank-by=churn\` ranks who's actually churning that code (swap in \`--map-diff\` for what changed structurally). (One-time tip this session; \`ripwire --help\` lists everything.)"
+        msg="ripwire tip: for git log, \`ripwire . --rank-by=churn\` ranks who's actually churning that code (swap in \`--map-diff\` for what changed structurally). (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
         ;;
     git-show-stat)
-        msg="ripwire tip: for a commit's --stat summary, \`ripwire . --map-diff\` shows what changed structurally, not just line counts. (One-time tip this session; \`ripwire --help\` lists everything.)"
+        msg="ripwire tip: for a commit's --stat summary, \`ripwire . --map-diff\` shows what changed structurally, not just line counts. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
         ;;
     read)
-        msg="ripwire tip: reading whole files is the biggest token sink in an agent loop, and less context measures MORE accurate, not just cheaper (code-repair accuracy fell 29%->3% as context grew 32K->256K, LongCodeBench). To understand ONE symbol, \`ripwire . --expand=SYM\` returns its body plus its callees' signatures instead of the file around it. Don't yet know which file to open? \`ripwire . --for=\"<task in words>\"\` ranks them, or \`ripwire . --pack-task=\"<task>\"\` returns ranking + bodies + callers + tests in ONE budgeted call. (One-time tip this session; \`ripwire --help\` lists everything.)"
+        msg="ripwire tip: reading whole files is the biggest token sink in an agent loop, and less context measures MORE accurate, not just cheaper (code-repair accuracy fell 29%->3% as context grew 32K->256K, LongCodeBench). To understand ONE symbol, \`ripwire . --expand=SYM\` returns its body plus its callees' signatures instead of the file around it. Don't yet know which file to open? \`ripwire . --for=\"<task in words>\"\` ranks them, or \`ripwire . --pack-task=\"<task>\"\` returns ranking + bodies + callers + tests in ONE budgeted call. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
         ;;
     glob)
-        msg="ripwire tip: a filename glob finds files by NAME; \`ripwire . --for=\"<task in words>\"\` ranks them by what the code actually does (matching doc-comments and bodies, not just paths) and hands back signatures rather than a path list you still have to open. (One-time tip this session; \`ripwire --help\` lists everything.)"
+        msg="ripwire tip: a filename glob finds files by NAME; \`ripwire . --for=\"<task in words>\"\` ranks them by what the code actually does (matching doc-comments and bodies, not just paths) and hands back signatures rather than a path list you still have to open. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
         ;;
     *)
-        msg="ripwire tip: this looks like a recursive grep/rg over the tree. \`ripwire . --grep='PATTERN'\` (literal) or \`ripwire . --for=\"task in words\"\` (conceptual) often answers the same question with the enclosing symbol attached, in far fewer tokens than raw grep + file reads. (One-time tip this session; \`ripwire --help\` lists everything.)"
+        msg="ripwire tip: this looks like a recursive grep/rg over the tree. \`ripwire . --grep='PATTERN'\` (literal) or \`ripwire . --for=\"task in words\"\` (conceptual) often answers the same question with the enclosing symbol attached, in far fewer tokens than raw grep + file reads. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
         ;;
 esac
 
