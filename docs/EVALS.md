@@ -1525,6 +1525,16 @@ asserts on counts. The related `monotoneRoll` conservatism — a capped section 
 granted share and donates nothing forward — leaves up to ~44% of the requested budget unspent on this
 repository, costing seven caller signatures at the default 6,000-token budget. Both are measured in §6.
 
+> Update 2026-08-19: both were fixed after this verdict was written, so its "current behavior" is now
+> history. The top-ranked candidate is admitted rather than entered into the count contest — its body
+> survives every budget increase, truncated by the existing oversized-first floor when the pool cannot
+> hold it whole — and the bodies section, the one whose items differ by two orders of magnitude, is
+> allocated last, so the share it cannot spend no longer sits in front of the four sections that can.
+> Measured on this repository, `--pack-task="rank the call graph"`: caller signatures at the default
+> 6,000-token budget 13/20 → 20/20 and fill 52.5% → 59.8%; at 8,000 tokens fill 43.5% → 90.6%. Both
+> properties are now asserted by `test/packtaskmonotoncheck.sh` (a relevance ratchet, and capped ⇒ the
+> budget was spent), each shown red against the binary this verdict describes.
+
 **Strict multi-file localization is hard and stays hard.** Held-out LocBench: single-file gold 73.4%,
 multi-file **18.2%**. Multi-SWE-bench C++: single-file 86.3%, multi-file **32.9%**. SFML C++:
 single-file 43.1%, multi-file **7.0%** (at `d411f3de4`, split by `primary_files` in

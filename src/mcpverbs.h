@@ -371,6 +371,12 @@ inline std::string captureXml( const std::function<void( std::FILE* )>& render )
 inline std::string analyzeToString( const std::string& root, int topK, bool stable = false )
 {
     const McpIndex& ix = getIndex( root );                  // parse once, reuse across calls
+    // ── verifier FINDING E3 (2026-08-19): this verb is the default map's own MCP twin and serialize() has
+    //    taken a rootArg since the root-relative round — this call site simply never passed it, so the same
+    //    corpus answered the CLI question with `src/main.cpp` and the MCP twin of that question with the
+    //    absolute path (85 rows on ripwire's own tree). Same single-root condition every other MCP verb
+    //    uses; serialize() emits root= and the shared legend clause from there, so nothing else moves.
+    const std::string_view anRootArg = ix.ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
     return captureXml( [ & ]( std::FILE* f )
                        { serialize( f, ix.ing, ix.rank, ix.g.outOff, ix.g.outTargets, topK,
                                     /*mostImportantLast=*/false, /*metrics=*/false, /*fanIn=*/nullptr,
@@ -385,7 +391,7 @@ inline std::string analyzeToString( const std::string& root, int topK, bool stab
                                     // this one must too — "the clause landed at 3 of its 5 echo sites" is the
                                     // §B4 family, and mcpclidiffcheck is the gate that keeps the two surfaces one.
                                     /*ann=*/rw::MapAnnotations{ .prDisclosure = ix.prDisclosure },
-                                    /*statsFirstScreen=*/true ); } );
+                                    /*statsFirstScreen=*/true, anRootArg ); } );
 }
 
 // ─── the cross-branch + dark-content MCP twins (`whereis`, `stray_content`, `flags`) ───
@@ -1194,9 +1200,18 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // (serialize.h kForPayloadBudgetBytes). Lego + compose are rendered into memory FIRST so the <sigs>
     // budget is the exact remainder; emission ORDER is unchanged (header, sigs, lego, compose, </ctx>),
     // and when nothing trims the bytes are identical to the pre-H1 path.
-    std::string headerStr = ctxRootOpen( task, " [routed: " + rc.reason + "]" )   // §B1.7: same root attrs as the CLI twin
+    // ── verifier FINDING E4 (2026-08-19): the CLI --for answered with `src/main.cpp` and disclosed root=;
+    //    its MCP twin answered the same question with the absolute path and disclosed nothing. Same
+    //    single-root condition, the same rootArg threaded into the same three emitters the CLI passes it to
+    //    (ctxRootOpen / packSignatures / packLego), and the same shared legend clause on the tail of the
+    //    header comment — so the two dialects stay byte-consistent on what they say and what they explain.
+    const std::string_view flRootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
+    std::string headerStr = ctxRootOpen( task, " [routed: " + rc.reason + "]", flRootArg )   // §B1.7: same root attrs as the CLI twin
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote
                           + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing -->";
+    // No rootRelPathsLegend clause here on purpose — the CLI --for twin does not carry one either, and the
+    // measured reason it cannot yet is recorded at forLensHeaderText (main.cpp). Byte-consistency between
+    // the two dialects is the contract; closing the gap is a change both make together.
     const auto renderToString = [ ]( auto&& emitFn ) -> std::string
     {
         char*       buf2 = nullptr;
@@ -1226,7 +1241,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // §P3: same scope + identity the CLI --for embeds — the MCP bundle must not carry wider scope (interfaces
     // this task never reached) or less identity (p= on every row) than its CLI twin.
     std::vector<std::vector<NodeId>> legoScoped = legoImplementorsOnSurface( ing, ix.g.implementors, lensSurfaceIds );
-    std::string legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true ); } );
+    std::string legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true, flRootArg ); } );
     std::string composeStr, routeStr;
     if( !ix.g.composeEdges.empty() )
     {
@@ -1251,7 +1266,8 @@ inline std::string forTaskText( const std::string& root, const std::string& task
                     nullptr, nullptr, nullptr, nullptr,   // Q3 lens vectors — the MCP verb has no git/clone pass (as before)
                     /*rankAdaptivePayload=*/true,         // B0.3: same rank-adaptive payload rule as the CLI --for lens
                     sigsBudget,                           // H1: global payload budget (trim ladder; payload="capped" marker)
-                    notesPtr );                           // L3: field-notes surfacing (inert when null)
+                    notesPtr,                             // L3: field-notes surfacing (inert when null)
+                    flRootArg );                          // R-E: root-relative p=, same argument the CLI twin passes
     // §P3 × §P4 (parity with the CLI --for): after a flush the memstream buffer holds header+sigs — narrow
     // the lego block to the files the budget-trimmed sigs actually kept and re-render (a byte-subset of what
     // the budget charged for). The header prefix is skipped so only rendered sigs rows are consulted.
