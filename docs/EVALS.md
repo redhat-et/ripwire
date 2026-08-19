@@ -777,6 +777,101 @@ layer validation — the router can no longer recommend a claim the verb would r
 `test/taskroutecheck.sh` holds both directions: emitted claims execute through the real parser
 byte-identically, and the parser-refused form never routes to `--verify`.
 
+### Skill-routing surface forms — S1b round, PRE-REGISTERED 2026-08-19 (before any skill edit)
+
+**Why this round exists, and why it is close to one already rejected.** The S1 round above ran a
+"more of the skill's own rare words" mechanism (tf ≥ 3 own body, df ≤ 4/17, ≤ 12 added words per
+skill, all 17 skills) against the grown corpus and **rejected** it at net 0 flipped rows. That
+verdict stands and is not being relitigated. This round is registered as a deliberate NEAR
+REPLICATION with three named differences, so that a null result adds a fourth independent
+rejection to the same hypothesis family rather than a first, and a positive result is attributable
+to the differences rather than to a re-roll:
+
+1. **Rarity threshold tightened** — df ≤ 1 across the other 16 descriptions (S1: ≤ 4/17), i.e. a
+   term at most one sibling description already spends.
+2. **Scoped to the measured failure, not to every skill** — only skills that appear in the
+   baseline desc-vs-body disagreement list (rows `bm25-full` routes correctly and `bm25-desc` does
+   not), minus the two descriptions longer than 1.4× the mean description length
+   (`ripwire-quality-bar` 302 tokens, `ripwire-fresh-eyes` 232; mean 158). BM25's `b = 0.75`
+   length penalty is why the twice-measured SWAP trap lives on the long descriptions; ADD edits
+   there pay the same tax, so they are excluded by rule and not by taste.
+3. **A term class S1's filter could not surface: surface forms the tokenizer cannot produce from
+   the description's current spelling.** `subtokens()` (`src/lexical.h`) flushes at a camel
+   boundary tested against the *already-lowercased* accumulator, so an ALL-CAPS acronym is shredded
+   into one-character fragments, every one of which is dropped by the `size() >= 2` rule: `MCP`,
+   `API`, `CI`, `PR` tokenize to **nothing at all**. `ripwire-mcp`'s description is entirely about
+   MCP and contributes **zero** `mcp` tokens to the bm25-desc index, while the only description
+   holding that token is `ripwire-security-scan` (from a literal `.mcp.json`) and the
+   `ripwire-mcp` *body* holds it at tf 17. The same defect has a non-acronym form: with no
+   stemming, `layers`/`layering` do not produce `layer`, which no description holds at all. These
+   are representation gaps, not vocabulary-taste gaps, and S1's tf×idf ranking could not
+   distinguish them from ordinary rare words.
+
+**Instrument (unchanged):** `ripwire skills --eval-skills=test/skillevalfix/prompts.tsv`
+(`src/skilleval.h`), gated by `test/skillevalcheck.sh` and `test/skillroutingjudgedcheck.sh`.
+Corpus frozen at 266 rows / 152 judged; **no fixture row is added, edited, or relabelled this
+round**.
+
+**Baseline (measured at `ab59ca8`, this corpus, before any edit):**
+
+| arm | hit@1 | hit@2 | mrr | sep-auc |
+| --- | --- | --- | --- | --- |
+| bm25-desc (all 266) | 66.7% | 81.3% | 0.776 | 0.943 |
+| bm25-full (all 266) | 64.6% | 75.3% | 0.746 | 0.878 |
+| bm25-desc (split=test, N=183) | 66.9% | 83.1% | 0.786 | 0.957 |
+| bm25-full (split=test, N=183) | 67.7% | 77.7% | 0.769 | 0.893 |
+| bm25-desc (split=dev, N=83) | 66.2% | 77.9% | 0.757 | 0.897 |
+
+Judged-only hit@1 (n = 152): bm25-desc **90**, bm25-full **93**, for-routed 91. The desc-vs-body
+gap is therefore **+3 rows** to the body — the same gap S1 measured and failed to close.
+
+**Derivation rule (fixed before measurement).** Per skill, tf over its own SKILL.md body and df
+over the 17 candidate *descriptions* (`ripwire-router` is excluded from the candidate corpus by
+`skilleval.h`, so it is excluded here). A term is a candidate iff tf ≥ 3 in its own body, absent
+from its own description, and df ≤ 1 across the others. Selection among candidates keeps only
+domain words — the moment, the artifact in hand, or a named metric the body actually reports —
+and drops CLI mechanics (flag spellings, output column names, file extensions), function words and
+numerals. Every kept term is written into the description as prose in that description's existing
+voice, **ADD only**: no existing sentence is swapped, shortened or deleted, and frontmatter
+stop-rule markers are untouched. **Derivation reads the 18 SKILL.md files and nothing else** — the
+eval prompts, their labels and the per-row miss lists are never read as text; the only thing taken
+from the instrument is the *set of skill names* in the disagreement list. Deriving terms from the
+scoring set would be fitting, not measuring.
+
+**Metric and band (primary).** bm25-desc judged-only hit@1, n = 152, exactly one measurement.
+**ACCEPT iff the net change lands in [+4, +12] rows** (90 → 94…102; one row = 0.66pp). The lower
+edge is +4 because that is the smallest net change that also carries independent meaning: it puts
+the description arm past bm25-full's 93 and closes the +3 desc-vs-body gap this round exists to
+close. Anything in [0, +4) is inside the range that a dozen arbitrary term additions can produce
+by displacement luck and is a **REJECT**. The upper edge follows the S1/LB-3 precedent: a result
+better than the mechanism can explain is a leakage suspect, so **> +12 is also a REJECT** pending
+audit.
+
+**Simultaneous floors, all must hold, any breach is a REJECT regardless of the primary:**
+split=test bm25-desc hit@1 ≥ 66.1% (baseline 66.9%; at most one positive row of give-back at
+n = 130) and sep-auc ≥ 0.940 (baseline 0.957); split=dev hit@1 ≥ 46.0% and sep-auc ≥ 0.75
+(committed floors); judged hit@1 ≥ 50% and for-routed judged ≥ 45% (committed floors);
+`test/skillevalcheck.sh`, `test/skillroutingjudgedcheck.sh`, `test/agentloopcodexcheck.sh` and
+`test/skilltruthcheck.sh` all green. sep-auc explicitly may not fall: added trigger vocabulary that
+makes negatives fire is the known failure mode of ADD edits.
+
+**Reported but not decisive** (registered so it cannot be promoted after the fact): net flipped
+rows on the n = 85 held-out judged subset (split=test ∩ provenance=judged), the exact statistic S1
+decided on, recorded for comparability with that round's net 0.
+
+**Decision rule.** In band with every floor green → keep and commit with before/after numbers.
+Otherwise → revert the description edits in full, keep this registration, and record the negative
+result here. One attempt; a retry is a new round with a fresh registration.
+
+**Prior expectation, stated in advance.** Given S1's net 0 and the two LB-3 rejections, the
+expected outcome of this round is REJECT. It is worth running anyway only because of difference
+(3): the acronym-shredding defect is a mechanism S1 could not have tested, and its cost is
+measurable rather than a matter of taste. If this round also rejects, the remaining hypothesis for
+the desc-vs-body gap is ranker-side (a length-aware desc+body mix), which needs its own
+registration and is out of scope for any description-content round.
+
+**RESULT — recorded after the single measurement, below.**
+
 ---
 
 ## 5. Token and output economy
