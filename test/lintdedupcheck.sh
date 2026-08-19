@@ -36,7 +36,9 @@ echo "lintdedupcheck: BIN=$BIN  FIXTURE=$FIXTURE"
 FIX_RC=$?
 [ "$FIX_RC" -eq 0 ] && ok "--lint exits 0 on fixture" || no "--lint exited $FIX_RC on fixture"
 
-DUP33_COUNT=$( grep -o '<f rule="magic-number" p="\./dup\.cpp:8" in="scramble">33</f>' "$TMP/fixture_out" | wc -l | tr -d ' ' )
+# RE-PINNED 2026-08-19 (R-E CORRECTION): with the crawl root spelled ".", p= used to read "./dup.cpp";
+# root-relative p= drops that prefix, so the row is p="dup.cpp:8". Nothing about the dedup moved.
+DUP33_COUNT=$( grep -o '<f rule="magic-number" p="dup\.cpp:8" in="scramble">33</f>' "$TMP/fixture_out" | wc -l | tr -d ' ' )
 [ "$DUP33_COUNT" = "1" ] \
     && ok "the shardOf-class duplicate (two same-value literals, one line) collapses to exactly 1 row (got $DUP33_COUNT)" \
     || no "expected exactly 1 collapsed row for dup.cpp:8 magic-number 33, got $DUP33_COUNT"
@@ -76,7 +78,7 @@ REPO_DUPES=$( grep -oE '<f [^>]*>[^<]*</f>' "$TMP/repo_out" | sort | uniq -d | w
     && ok "whole-repo --lint output has zero byte-identical <f> rows" \
     || { no "whole-repo --lint output has $REPO_DUPES byte-identical <f> row group(s)"; grep -oE '<f [^>]*>[^<]*</f>' "$TMP/repo_out" | sort | uniq -d | head -5; }
 
-REPORTED_COUNT=$( grep -o '<f rule="magic-number" p="\./bench/bench_convergence\.cpp:47" in="shardOf">33</f>' "$TMP/repo_out" | wc -l | tr -d ' ' )
+REPORTED_COUNT=$( grep -o '<f rule="magic-number" p="bench/bench_convergence\.cpp:47" in="shardOf">33</f>' "$TMP/repo_out" | wc -l | tr -d ' ' )
 [ "$REPORTED_COUNT" = "1" ] \
     && ok "the originally-reported bench_convergence.cpp:47 shardOf/33 row now appears exactly once (got $REPORTED_COUNT)" \
     || no "expected exactly 1 occurrence of the reported row, got $REPORTED_COUNT"

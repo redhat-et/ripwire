@@ -122,10 +122,17 @@ else
     no "xmllint is required for the G4 arms (install libxml2) — the gate does not skip"
 fi
 
-# ── §B1.7 arm 5: verbs that echo no task keep a BARE root (no empty attributes) ────────────────────
-case "$( "$BIN" "$CORPUS" --lego=ceilingArithmetic 2>/dev/null | head -c 5 )" in
-    "<ctx>") ok "a task-less verb still opens with a bare <ctx> (no empty task=/route=)";;
-    *)       no "a task-less verb's root gained an attribute it has no value for";;
+# ── §B1.7 arm 5: verbs that echo no task keep a root free of EMPTY attributes ──────────────────────
+# RE-PINNED 2026-08-19 (R-E CORRECTION): this arm read `head -c 5 == "<ctx>"`, which was a proxy for what
+# §B1.7 actually forbids — an attribute the verb has NO VALUE for (task="" / route=""). --lego now opens
+# `<ctx root="…">` because its p= are root-relative and the root has to be nameable; root= carries a real
+# value, so it is not the shape this arm exists to catch. Asserted directly now: no empty task=/route=,
+# and the opener is still a <ctx> root. Weakening it to "any attributes allowed" would make it inert.
+ctxOpen="$( "$BIN" "$CORPUS" --lego=ceilingArithmetic 2>/dev/null | grep -oE '^<ctx[^>]*>' )"
+case "$ctxOpen" in
+    *'task=""'*|*'route=""'*) no "a task-less verb's root gained an attribute it has no value for: $ctxOpen";;
+    "<ctx>"|"<ctx "*)         ok "a task-less verb's root carries no empty task=/route= ($ctxOpen)";;
+    *)                        no "a task-less verb no longer opens with a <ctx> root: $ctxOpen";;
 esac
 
 # ── §B1.6 arm 1: the JSON tail carries the CEILING the XML header states ───────────────────────────

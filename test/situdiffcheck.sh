@@ -66,8 +66,10 @@ printf '%s' "$INNER" | python3 -c '
 import sys,json
 d=json.load(sys.stdin)
 br=[x["file"] for x in d["blast_radius"]]
-has_sched=any(f.endswith("/core/scheduler.cpp") for f in br)
-has_app  =any(f.endswith("/app.cpp") for f in br)
+# RE-PINNED 2026-08-19 (R-E CORRECTION): the MCP situ JSON spells its file values ROOT-RELATIVE now
+# (the CLI --situ twin already did), so a file at the crawl root has no leading "/" to end with.
+has_sched=any(f=="core/scheduler.cpp" or f.endswith("/core/scheduler.cpp") for f in br)
+has_app  =any(f=="app.cpp" or f.endswith("/app.cpp") for f in br)
 print("OK" if (has_sched and has_app) else "BAD:"+";".join(br))
 ' >"$TMP/br"
 [ "$( cat "$TMP/br" )" = "OK" ] && ok "blast_radius reaches scheduler.cpp + app.cpp (transitive dependents)" || no "blast_radius wrong: $( cat "$TMP/br" )"
@@ -77,7 +79,7 @@ printf '%s' "$INNER" | python3 -c '
 import sys,json
 d=json.load(sys.stdin)
 chg=[x["file"] for x in d["changed_files"]]
-ok_chg=any(f.endswith("/core/engine.cpp") for f in chg)
+ok_chg=any(f=="core/engine.cpp" or f.endswith("/core/engine.cpp") for f in chg)
 ok_mod="core" in d["modules_touched"]
 print("OK" if (ok_chg and ok_mod) else "BAD changed=%r modules=%r"%(chg,d["modules_touched"]))
 ' >"$TMP/mod"
@@ -184,7 +186,7 @@ try:
     d=json.loads(r["result"]["content"][0]["text"])
     chg=[x["file"] for x in d.get("changed_files",[])]
     note=d.get("note","")
-    if len(chg)==1 and chg[0].endswith("/util.h") and "clean" not in note: print("OK")
+    if len(chg)==1 and ( chg[0]=="util.h" or chg[0].endswith("/util.h") ) and "clean" not in note: print("OK")
     else: print("BAD changed=%r note=%r"%(chg,note))
 except Exception as e:
     print("BAD:"+str(e))

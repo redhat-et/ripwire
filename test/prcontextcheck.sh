@@ -240,12 +240,12 @@ grep -q 'files="2"' "$TMP/docpr" \
 # (a) the SOURCE file leads, though the doc sorts first alphabetically
 firstFile="$( tr '<' '\n' <"$TMP/docpr" | sed -n 's/^file p="\([^"]*\)".*/\1/p' | head -1 )"
 case "$firstFile" in
-    */src/engine.cpp) ok "§P11.7: src/engine.cpp emits FIRST (impact order, not alphabetical)" ;;
+    src/engine.cpp|*/src/engine.cpp) ok "§P11.7: src/engine.cpp emits FIRST (impact order, not alphabetical)" ;;
     *)                no "§P11.7: first <file> is '$firstFile', want src/engine.cpp" ;;
 esac
 lastFile="$( tr '<' '\n' <"$TMP/docpr" | sed -n 's/^file p="\([^"]*\)".*/\1/p' | tail -1 )"
 case "$lastFile" in
-    */AAA_changelog.md) ok "§P11.7: the zero-dependent doc file sorts LAST" ;;
+    AAA_changelog.md|*/AAA_changelog.md) ok "§P11.7: the zero-dependent doc file sorts LAST" ;;
     *)                  no "§P11.7: last <file> is '$lastFile', want AAA_changelog.md" ;;
 esac
 

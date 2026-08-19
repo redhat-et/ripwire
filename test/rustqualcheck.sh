@@ -59,6 +59,9 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"      # BOTH seams: positional ar
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # absolute BEFORE we cd away
 # RELATIVE corpus paths (we cd to $ROOT below): every `p="…"` the gate matches is echoed back as the
 # caller spelled the root, so an absolute root would make every path assertion below unwritable.
+# RE-PINNED 2026-08-19 (R-E CORRECTION): p= is now relative to the CRAWL ROOT, which is $FIX itself, so the
+# rows spell "src/lib.rs" and the fixture prefix is stated once as root="test/rustqualfix". The p= literals
+# below dropped that prefix; nothing about the resolver's answers moved.
 FIX="test/rustqualfix"
 LEGO="test/legofix"
 fail=0
@@ -123,10 +126,10 @@ XD="$( run "$FIX" --callees=crossdir_caller --no-cache )"
 [ "$( cnt "$XD" )" = 2 ] \
     && ok "--callees=crossdir_caller count=2 (both cross-directory Type::new() calls survive)" \
     || no "--callees=crossdir_caller expected 2, got '$( cnt "$XD" )': $XD"
-printf '%s' "$XD" | grep -q 'n="new" p="test/rustqualfix/src/lib.rs' \
+printf '%s' "$XD" | grep -q 'n="new" p="src/lib.rs' \
     && ok "crossdir_caller → Widget::new in src/lib.rs (ACROSS a directory boundary, precise)" \
     || no "crossdir_caller did not bind lib.rs's Widget::new: $XD"
-printf '%s' "$XD" | grep -q 'n="new" p="test/rustqualfix/src/gadget/mod.rs' \
+printf '%s' "$XD" | grep -q 'n="new" p="src/gadget/mod.rs' \
     && ok "crossdir_caller → Gadget::new in src/gadget/mod.rs (its own impl, precise)" \
     || no "crossdir_caller did not bind gadget/mod.rs's Gadget::new: $XD"
 # and neither call is ambiguous — canonical keying, not a lucky tier win. (V3 L-8: match the attribute
@@ -160,10 +163,10 @@ printf '%s' "$MAP" | grep -qE 'n="crossdir_amb"[^>]*amb="1"' \
 #   bare `detached()`  → count=3 and bump carries amb="1"   (Rule 3 narrows to the FILE, i.e. to both defs)
 #   `Self::detached()` → count=2 and bump carries NO amb=   (canonical `Widget::detached`)
 BUMP="$( run "$FIX" --callees=bump --no-cache )"
-printf '%s' "$BUMP" | grep -q 'n="helper" p="test/rustqualfix/src/lib.rs' \
+printf '%s' "$BUMP" | grep -q 'n="helper" p="src/lib.rs' \
     && ok "Self::helper() inside Widget::bump → lib.rs's Widget::helper (Self resolved to Widget)" \
     || no "Widget::bump did not bind lib.rs's helper: $BUMP"
-printf '%s' "$BUMP" | grep -q 'n="detached" p="test/rustqualfix/src/gadget/mod.rs' \
+printf '%s' "$BUMP" | grep -q 'n="detached" p="src/gadget/mod.rs' \
     && ok "Self::detached() reaches the CROSS-DIRECTORY impl Widget block" \
     || no "Widget::bump did not bind gadget/mod.rs's Widget::detached: $BUMP"
 [ "$( cnt "$BUMP" )" = 2 ] \
@@ -173,7 +176,7 @@ printf '%s' "$MAP" | grep -qE 'n="bump"[^>]*amb=' \
     && no "bump carries amb= — Self:: did NOT pin the target (a bare call scores amb=\"1\" here)" \
     || ok "PRECISE: bump carries no amb= — the discriminating Self:: arm (bare would be amb=\"1\")"
 SPIN="$( run "$FIX" --callees=spin --no-cache )"
-printf '%s' "$SPIN" | grep -q 'n="helper" p="test/rustqualfix/src/gadget/mod.rs' \
+printf '%s' "$SPIN" | grep -q 'n="helper" p="src/gadget/mod.rs' \
     && ok "Self::helper() inside Gadget::spin → gadget/mod.rs's Gadget::helper (per-directory Self)" \
     || no "Gadget::spin did not bind gadget/mod.rs's helper: $SPIN"
 [ "$( cnt "$SPIN" )" = 1 ] \
@@ -250,7 +253,7 @@ printf '%s' "$EXP" | grep -q 'pub fn new()' \
 # `if( !ir.isInherit ) continue;`. A CALL ref now also carries a qualifier, so prove the two cannot leak
 # into one another: the inherit-derived --lego output must be byte-identical to the pre-lane binary's.
 LEGO_NEW="$( run "$FIX" --lego=Shape --no-cache | grep -o '<lego.*</lego>' )"
-[ "$LEGO_NEW" = '<lego><iface n="Shape" p="test/rustqualfix/src/lib.rs" methods="0" caveat="not-extracted-for-lang" implementors="1"><impl n="Widget" p="test/rustqualfix/src/lib.rs"/></iface></lego>' ] \
+[ "$LEGO_NEW" = '<lego><iface n="Shape" p="src/lib.rs" methods="0" caveat="not-extracted-for-lang" implementors="1"><impl n="Widget" p="src/lib.rs"/></iface></lego>' ] \
     && ok "impl Shape for Widget still yields exactly its inherit edge (call qualifiers did not leak in)" \
     || no "inherit edges CHANGED: $LEGO_NEW"
 if [ -d "$ROOT/$LEGO" ]; then

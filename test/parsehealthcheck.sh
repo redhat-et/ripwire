@@ -142,7 +142,7 @@ PY
 
 # ── (1) degraded-parse across three languages ────────────────────────────────────────────────────────
 for f in brokencpp.cpp brokenpy.py brokenjs.js; do
-  row="$( hrow "corpus/$f" )"
+  row="$( hrow "$f" )"   # R-E CORRECTION 2026-08-19: root-relative p= — root="corpus" carries the prefix
   if [ -z "$row" ]; then
     no "(1) no parse-health row for corpus/$f"
     continue
@@ -158,13 +158,13 @@ done
 
 # ── (2) the valid counterparts report nothing ────────────────────────────────────────────────────────
 for f in goodcpp.cpp goodpy.py goodjs.js; do
-  row="$( hrow "corpus/$f" )"
+  row="$( hrow "$f" )"   # R-E CORRECTION 2026-08-19: root-relative p= — root="corpus" carries the prefix
   [ -z "$row" ] && ok "(2) corpus/$f reports no parse-health finding" \
                 || no "(2) corpus/$f reported a finding it should not: $row"
 done
 
 # ── (3) minified-suspect ─────────────────────────────────────────────────────────────────────────────
-row="$( hrow 'corpus/bundle.js' )"
+row="$( hrow 'bundle.js' )"
 if [ -z "$row" ]; then
   no '(3) no parse-health row for corpus/bundle.js'
 else
@@ -180,7 +180,7 @@ fi
 
 # ── (4) still indexed — this lane discloses, it never drops ──────────────────────────────────────────
 "$BIN" corpus --no-cache > "$TMP/map.xml" 2>/dev/null
-grep -q 'p="corpus/brokencpp.cpp"' "$TMP/map.xml" && ok '(4) the degraded file is still in the map' \
+grep -q 'p="brokencpp.cpp"' "$TMP/map.xml" && ok '(4) the degraded file is still in the map' \
                                                   || no '(4) the degraded file VANISHED from the map — this lane must not drop'
 grep -q 'minifiedEntry' "$TMP/map.xml" && ok '(4) the minified bundle still contributes symbols' \
                                        || no '(4) the minified bundle contributes no symbols — this lane must not drop'
