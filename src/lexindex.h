@@ -75,16 +75,63 @@ inline std::size_t docCommentStart( const std::string& src, std::size_t defStart
     return ls;
 }
 
+// ASCII lowercase for one already-classified token byte. The tokenizer's consumers all need it and none
+// of them may spell it differently: since 2026-08-19 a token can carry INTERIOR uppercase (an all-caps
+// run is one token), so "lowercase the head, trust the rest" is no longer a legal shortcut anywhere.
+// EXPLICIT unsigned narrowing — `char` is signed here, and G1's implicit-integer-sign-change fires on any
+// byte ≥ 0x80 (hashutil.h owns the full note).
+inline constexpr unsigned char lexLowerByte( unsigned char c ) noexcept
+{
+    return ( c >= 'A' && c <= 'Z' ) ? static_cast<unsigned char>( c - 'A' + 'a' ) : c;
+}
+
+// Does the token span [tok, tok+tokLen) equal the ALL-LOWERCASE string `lowerQuery` of the same length,
+// once the span is lowercased? The BM25 scan compares query subtokens (lowercased by subtokens()) against
+// raw corpus spans, and an acronym span like "MCP" is the case a plain memcmp gets wrong.
+inline bool lexTokenEqualsLowered( const char* tok, std::size_t tokLen, const char* lowerQuery ) noexcept
+{
+    for( std::size_t k = 0; k < tokLen; ++k )
+    {
+        if( lowerQuery[k] != char( lexLowerByte( static_cast<unsigned char>( tok[k] ) ) ) )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The registered boundary rule, in ONE place because both walkers below need it and a second copy is
+// exactly how the acronym bug survived: an UPPERCASE byte at `k` opens a new token when the byte before it
+// was not uppercase (the plain camel seam, "fooBar"), or when it is the last upper of an all-caps run that
+// a LOWERCASE letter follows (the ACRONYMWord seam, "HTTPServer" -> HTTP|Server). A run followed by end,
+// digit or separator stays whole: "MCP" is one token, "MCP2Server" is mcp2|server. The lookahead is one
+// byte and the split lands BEFORE the byte that triggers it, so the fused walker's rolling hash never has
+// to give a byte back. docs/EVALS.md §4 "Subtoken acronym shredding"; gate: test/subtokencheck.sh.
+inline bool lexUpperOpensToken( std::string_view text, std::size_t k, bool prevUpper ) noexcept
+{
+    const unsigned char next = ( k + 1 < text.size() ) ? static_cast<unsigned char>( text[k + 1] ) : 0u;
+    return !prevUpper || ( next >= 'a' && next <= 'z' );
+}
+
 // The ONE subtoken state machine (extracted verbatim from lexical.h scanField so index-time and query-time
-// tokenization are the same function): a token is a maximal [optional uppercase][lowercase/digit]* run
-// between separators — an interior uppercase char always starts a NEW token, so only a token's FIRST byte
-// can be uppercase. Emits RAW [tokStartByte, tokEndByte) spans; callers apply the ≥2-byte drop themselves
-// (mirroring subtokens()/scanField exactly).
+// tokenization are the same function): a token is a maximal alphanumeric run between separators, cut at a
+// lower/digit → Upper transition and at the LAST uppercase of an all-caps run of ≥2 that a lowercase
+// letter follows (the ACRONYMWord rule — "HTTPServer" → HTTP|Server). Emits RAW [tokStartByte, tokEndByte)
+// spans; callers apply the ≥2-byte drop themselves (mirroring subtokens()/scanField exactly).
+//
+// 2026-08-19: before this date the rule read "an interior uppercase char always starts a NEW token", which
+// made every all-caps run a string of 1-byte tokens that the ≥2-byte drop then discarded — an acronym was
+// indexed as nothing at all. A token's non-first bytes can now be UPPERCASE, so anything downstream that
+// used to exploit "only the FIRST byte can be uppercase" must normalize the whole token: lexSubtokenHash
+// and the fused walker below do, and so does lexical.h's scanTextInto matcher. Registered + measured in
+// docs/EVALS.md §4 "Subtoken acronym shredding"; gate: test/subtokencheck.sh (arms B and C pin exactly
+// this mirror against subtokens() and against lexSubtokenHash()).
 template<class EmitFn>
 inline void forEachLexSubtoken( std::string_view text, EmitFn&& emit )
 {
     constexpr std::size_t kNoTokenByte = ~std::size_t( 0 );
     std::size_t           tokStartByte = kNoTokenByte;
+    bool                  prevUpper    = false;
     for( std::size_t k = 0; k < text.size(); ++k )
     {
         const unsigned char c     = static_cast<unsigned char>( text[k] );
@@ -94,13 +141,19 @@ inline void forEachLexSubtoken( std::string_view text, EmitFn&& emit )
         if( !upper && !lower && !digit )                                                                       // separator
         {
             if( tokStartByte != kNoTokenByte ) { emit( tokStartByte, k ); tokStartByte = kNoTokenByte; }
+            prevUpper = false;
             continue;
         }
-        if( upper && tokStartByte != kNoTokenByte ) { emit( tokStartByte, k ); tokStartByte = k; continue; }   // camel boundary
+        if( upper && tokStartByte != kNoTokenByte && lexUpperOpensToken( text, k, prevUpper ) )                // camel / ACRONYMWord boundary
+        {
+            emit( tokStartByte, k );
+            tokStartByte = k;
+        }
         if( tokStartByte == kNoTokenByte )
         {
             tokStartByte = k;
         }
+        prevUpper = upper;
     }
     if( tokStartByte != kNoTokenByte )
     {
@@ -108,18 +161,20 @@ inline void forEachLexSubtoken( std::string_view text, EmitFn&& emit )
     }
 }
 
-// FNV-1a 64 over the token's NORMALIZED bytes (first byte lowercased; the state machine guarantees every
-// later byte is already lowercase/digit) — so hashing a corpus token equals hashing the all-lowercase
-// query subtoken it would string-match. 64-bit keys make a cross-token collision (the only way the
-// postings path could diverge from the scan path) astronomically unlikely; the postingscheck equivalence
-// gate verifies byte-identity on the real corpora.
+// FNV-1a 64 over the token's NORMALIZED bytes (EVERY byte lowercased) — so hashing a corpus token equals
+// hashing the all-lowercase query subtoken it would string-match. Lowercasing only the first byte was
+// enough until 2026-08-19, when the state machine stopped shredding all-caps runs: a token may now be
+// "MCP", and hashing that as "mCP" would make the postings path miss the query token "mcp" that the scan
+// path matches. 64-bit keys make a cross-token collision (the only other way the postings path could
+// diverge from the scan path) astronomically unlikely; the postingscheck equivalence gate verifies
+// byte-identity on the real corpora, and test/subtokencheck.sh arm C pins this against the fused walker.
 inline std::uint64_t lexSubtokenHash( const char* tok, std::size_t tokLen ) noexcept
 {
-    std::uint64_t       h    = 1469598103934665603ull;
-    const unsigned char head = static_cast<unsigned char>( tok[0] );
-    h ^= ( head >= 'A' && head <= 'Z' ) ? static_cast<unsigned char>( head - 'A' + 'a' ) : head;
-    h  = hashutil::fnv1aMultiply( h );
-    for( std::size_t k = 1; k < tokLen; ++k ) { h ^= static_cast<unsigned char>( tok[k] ); h = hashutil::fnv1aMultiply( h ); }
+    std::uint64_t h = 1469598103934665603ull;
+    for( std::size_t k = 0; k < tokLen; ++k )
+    {
+        h = hashutil::fnv1aAbsorb( h, char( lexLowerByte( static_cast<unsigned char>( tok[k] ) ) ) );
+    }
     return h;
 }
 
@@ -136,9 +191,12 @@ struct RawDefLex
 // state machine, so the index-time stats builder touches each byte ONCE (the split shape walked every
 // token's bytes twice: once to find the span, once to hash it — this seam is the rich-parse tail the
 // index/cold budgets pay). Emits ( tokStartByte, tokEndByte, normalizedHash ); the hash is EXACTLY
-// lexSubtokenHash( text + tokStartByte, len ): the first byte is lowercased before mixing, and every
-// later byte is already lowercase/digit by the state machine's camel rule, so no other normalization
-// exists to drift. Query-time scanField keeps the hash-free walker above (it string-compares instead).
+// lexSubtokenHash( text + tokStartByte, len ): EVERY byte is lowercased before mixing, so no other
+// normalization exists to drift. (Lowercasing only the first byte was equivalent until 2026-08-19, when
+// an all-caps run stopped being shredded and interior uppercase became reachable — see lexSubtokenHash.)
+// The boundary rule is the walker's above, one char of lookahead and no retroactive un-mixing: a split
+// happens BEFORE the byte that triggers it, so the running hash never has to give a byte back.
+// Query-time scanField keeps the hash-free walker above (it string-compares instead).
 template<class EmitFn>
 inline void forEachLexSubtokenHashed( std::string_view text, EmitFn&& emit )
 {
@@ -146,12 +204,13 @@ inline void forEachLexSubtokenHashed( std::string_view text, EmitFn&& emit )
     constexpr std::uint64_t kFnvBasis  = 1469598103934665603ull;
     std::size_t           tokStartByte = kNoTokenByte;
     std::uint64_t         h            = kFnvBasis;
+    bool                  prevUpper    = false;
+    const auto mix = [ & ]( unsigned char c ) noexcept { h = hashutil::fnv1aAbsorb( h, char( lexLowerByte( c ) ) ); };
     const auto beginToken = [ & ]( unsigned char c, std::size_t k ) noexcept
     {
         tokStartByte = k;
-        h  = kFnvBasis;
-        h ^= ( c >= 'A' && c <= 'Z' ) ? static_cast<unsigned char>( c - 'A' + 'a' ) : c;
-        h  = hashutil::fnv1aMultiply( h );
+        h            = kFnvBasis;
+        mix( c );
     };
     for( std::size_t k = 0; k < text.size(); ++k )
     {
@@ -162,12 +221,19 @@ inline void forEachLexSubtokenHashed( std::string_view text, EmitFn&& emit )
         if( !upper && !lower && !digit )                                                                       // separator
         {
             if( tokStartByte != kNoTokenByte ) { emit( tokStartByte, k, h ); tokStartByte = kNoTokenByte; }
+            prevUpper = false;
             continue;
         }
-        if( upper && tokStartByte != kNoTokenByte ) { emit( tokStartByte, k, h ); beginToken( c, k ); continue; }   // camel boundary
-        if( tokStartByte == kNoTokenByte ) { beginToken( c, k ); continue; }
-        h ^= c;                                                                                                // interior byte: already lowercase/digit
-        h  = hashutil::fnv1aMultiply( h );
+        if( upper && tokStartByte != kNoTokenByte && lexUpperOpensToken( text, k, prevUpper ) )                // camel / ACRONYMWord boundary
+        {
+            emit( tokStartByte, k, h );
+            beginToken( c, k );
+            prevUpper = true;
+            continue;
+        }
+        if( tokStartByte == kNoTokenByte ) { beginToken( c, k ); prevUpper = upper; continue; }
+        mix( c );                                                                                              // interior byte (lowercased: a run's tail is uppercase)
+        prevUpper = upper;
     }
     if( tokStartByte != kNoTokenByte )
     {
