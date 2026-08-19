@@ -3543,7 +3543,10 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         }
         const std::vector<char> legoImpure = computeImpure( ing, g );
         const std::vector<float> flat( ing.symbols.size(), 0.f );   // single iface → rank is irrelevant (id tie-break)
-        std::printf( "<ctx>" );
+        // R-E fix (2026-08-19): the document root DISCLOSES the root its p= are now relative to. The first
+        // R-E landing made packLego's p= root-relative and left the root undisclosed, so a --lego bundle
+        // carried relative paths against a root the reader could not name — the honesty rule this tool sells.
+        std::printf( "%s", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str() );
         packLego( stdout, ing, g.implementors, flat, 1, d.redactPtr, &legoImpure, focus, /*withPaths=*/true, tvRootArg );
         std::printf( "</ctx>" );
         reportRedactions( stderr, d.redactCounts );      // W3-N1: a contract <m> sig is a redacting seam — disclose the tally
@@ -3609,10 +3612,13 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
                      "many are printed, capped=1 when the two differ (calls omits shown= and capped= when its "
                      "list is complete). Copy its shape, not its text. -->",
                      ex( reqNote ).c_str(), kindNote.c_str(), symTag( pick.targetKind ), rw::kExemplarSelectionRule );
-        std::printf( "<exemplar kind=\"%s\" candidates=\"%zu\" n=\"%s\" p=\"%s:%u\" in=\"%u\" ccx=\"%u\"%s%s%s>",
+        // R-E fix (2026-08-19): root= — same reason as --lego above. p= went root-relative in the first R-E
+        // landing with no attribute naming the root, on the one verb whose whole job is "open this file".
+        const std::string exemplarRootAttr = tvSingleRoot ? ( " root=\"" + ex( tvRootArg ) + "\"" ) : std::string();
+        std::printf( "<exemplar kind=\"%s\" candidates=\"%zu\" n=\"%s\" p=\"%s:%u\" in=\"%u\" ccx=\"%u\"%s%s%s%s>",
                      symTag( pick.targetKind ), pick.candidateCount, ex( wsym.name ).c_str(),
                      ex( tvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ wsym.fileId ], tvRootPrefix ) : std::string_view( ing.files[ wsym.fileId ] ) ).c_str(), wsym.line,
-                     fin( pick.winner ), wsym.ccx, ts( pick.winner ) ? " tested=\"1\"" : "",
+                     fin( pick.winner ), wsym.ccx, exemplarRootAttr.c_str(), ts( pick.winner ) ? " tested=\"1\"" : "",
                      pick.lowConfidence ? " low_confidence=\"1\"" : "",
                      pick.overCcxBar    ? " over_ccx_bar=\"1\"" : "" );
         packBodies( stdout, ing, { pick.winner }, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
@@ -4088,7 +4094,7 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     // a paging artefact, not a measurement.
     const CloneGrouping grouping = groupClones( ing, cg, cg3 );
 
-    std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\": the Type-3 pair list is capped upstream, so a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. raise the default cap with limit=N (offset=M pages). -->" );
+    std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\": the Type-3 pair list is capped upstream, so a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. raise the default cap with limit=N (offset=M pages). -->%s", rw::rootRelPathsLegend( clnSingleRoot ) );
     std::printf( "<clones groups=\"%zu\" type3=\"%zu\"%s exempt_groups=\"%zu\" clone_groups=\"%u\" dup_loc=\"%llu\" total_loc=\"%llu\" dup_pct=\"%.1f\" counts_floor=\"1\"%s%s>",
                  cg.size(), cg3.size(),
                  cloneUnpagedTotalAttr( clonePaging, cloneTotal ).c_str(), exemptGroupCount,
@@ -4274,12 +4280,17 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
     // capped= reconcile pairs= against the rows that follow even with no --limit at all.
     const rw::PageWindow prpw = rw::pageWindow( prs.size(), rw::effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
     char                 prab[ 192 ];
-    std::printf( "%s%s", kCochangeRepoLegend, rw::kAtStampLegend );   // sweep: ditto
+    std::printf( "%s%s%s", kCochangeRepoLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( coSingleRoot ) );   // sweep: ditto
     std::printf( "<cochange pairs=\"%zu\" window=\"%s\" sub_windows=\"%u\"%s%s%s%s>", prs.size(), windowLabel.c_str(), subWindows, minRecAttr,
                  rw::pageDisclosure( prab, sizeof( prab ), prpw.end - prpw.begin, prs.size(), prpw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
-                 rw::gitstamp::atAttr( root ).c_str(),   // §P8: same anchor as the per-file path above
-                 coRootAttr.c_str() );
+                 // R-E fix (2026-08-19): root= sits BEFORE at=, never after. at= stays the LAST attribute on
+                 // every git-mined report root — the r26-stamp placement rule --owners' own emitter comment
+                 // states and ownerscheck.sh's "at= is still the last attribute" arm is the record of. root=
+                 // is a path-interpretation attribute and belongs with the identifying ones, which is also the
+                 // slot --grep already puts it in. The first R-E landing appended it and displaced the stamp.
+                 coRootAttr.c_str(),
+                 rw::gitstamp::atAttr( root ).c_str() );   // §P8: same anchor as the per-file path above
     for( std::size_t pairIndex = prpw.begin; pairIndex < prpw.end; ++pairIndex )
     {
         const CoPairRow& pr = prs[ pairIndex ];
@@ -4322,13 +4333,13 @@ inline void emitCochangeGroups( const rw::IngestResult& ing, const rw::Config& c
     {
         coveredTotal += g.members.size();
     }
-    std::printf( "%s%s", kCochangeGroupLegend, rw::kAtStampLegend );
+    std::printf( "%s%s%s", kCochangeGroupLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( cgSingleRoot ) );
     std::printf( "<cochange groups=\"%zu\" pairs_covered=\"%zu\" cover=\"greedy\" window=\"%s\" sub_windows=\"%u\"%s%s%s%s>",
                  groups.size(), coveredTotal, windowLabel.c_str(), subWindows, minRecAttr,
                  rw::pageDisclosure( gab, sizeof( gab ), gpw.end - gpw.begin, groups.size(), gpw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
-                 rw::gitstamp::atAttr( root ).c_str(),
-                 cgRootAttr.c_str() );
+                 cgRootAttr.c_str(),                        // R-E fix: root= before at= — at= stays LAST (r26)
+                 rw::gitstamp::atAttr( root ).c_str() );
     for( std::size_t gi = gpw.begin; gi < gpw.end; ++gi )
     {
         const rw::CoGroup&     g  = groups[ gi ];
@@ -4508,8 +4519,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "and one whose path the git-to-index join never bound (a rename, an exclusion, or a spelling the "
                      "join could not match), which scores zero for a reason that is not about the file. Treat it as an "
                      "upper bound on quietness, not a measure of it. "
-                     "raise the default cap with limit=N (offset=M pages) -->%s",
-                     windowLabelInComment.c_str(), rw::kAtStampLegend );   // sweep: at= was undefined on this screen
+                     "raise the default cap with limit=N (offset=M pages) -->%s%s",
+                     windowLabelInComment.c_str(), rw::kAtStampLegend, rw::rootRelPathsLegend( mvSingleRoot ) );   // sweep: at= was undefined on this screen
         if( multiRoot )
         { // §5 comparability caveat: churn scales (commit-count conventions) differ per repo
             std::printf( "<!-- multi-root workspace: churn is mined PER root — hotspot scores are comparable within a root, not across roots -->" );
@@ -4528,8 +4539,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      windowLabel.c_str(), ing.files.size(), order.size(), unrankedNoChurn, unrankedNoComplexity,
                      pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, order.size(), pw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
-                     gitstamp::atAttr( root ).c_str(),
-                     mvRootAttr.c_str() );
+                     mvRootAttr.c_str(),                    // R-E fix: root= before at= — at= stays LAST (r26)
+                     gitstamp::atAttr( root ).c_str() );
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
         for( std::size_t i = pw.begin; i < pw.end; ++i )
@@ -4606,7 +4617,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             char              pab[ 192 ];
             char              pminrec[ 40 ];
             coMinRecurAttr( pminrec, sizeof( pminrec ), cfg.cochangeRecur );
-            std::printf( "%s%s", kCochangeFileLegend, rw::kAtStampLegend );   // sweep: at= was undefined on this screen
+            std::printf( "%s%s%s", kCochangeFileLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( mvSingleRoot ) );   // sweep: at= was undefined on this screen
             // §P8 vocabulary: at="<sha>[+dirty]" — cochange is a PURE git-history product (every number in
             // it is mined from `git log`), and it was one of the last two verbs of that kind emitting numbers
             // with no anchor to the HEAD that produced them. Same gitstamp::atAttr every other repo-reading
@@ -4616,8 +4627,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                          commits, coWindowLabel.c_str(), subWindows, pminrec, ps.size(),
                          pageDisclosure( pab, sizeof( pab ), ppw.end - ppw.begin, ps.size(), ppw.end,
                                          cfg.pageLimit, cfg.pageOffset, true ),
-                         gitstamp::atAttr( root ).c_str(),
-                         mvRootAttr.c_str() );
+                         mvRootAttr.c_str(),                // R-E fix: root= before at= — at= stays LAST (r26)
+                         gitstamp::atAttr( root ).c_str() );
             for( std::size_t partnerIndex = ppw.begin; partnerIndex < ppw.end; ++partnerIndex )
             {
                 const std::string_view rp = mvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ ps[ partnerIndex ].fileId ], mvRootPrefix )
@@ -4842,8 +4853,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "many files were ANALYSED; on the <uniform/> fold it is how many of them collapsed into that one row. "
                      "With a SYM, of= echoes it and defs= is how many DEFINITIONS that name has: this report covers the file "
                      "holding the FIRST of them (lowest node id, the same pick around and lego make), so defs= above 1 means "
-                     "the other definitions' files were NOT analysed. Qualify with file:name to choose one -->%s",
-                     rw::kAtStampLegend );   // sweep: ditto
+                     "the other definitions' files were NOT analysed. Qualify with file:name to choose one -->%s%s",
+                     rw::kAtStampLegend, rw::rootRelPathsLegend( mvSingleRoot ) );   // sweep: ditto
         // §P8: --limit/--offset used to be accepted and ignored here (757 rows whatever you asked for). They
         // window `printRows`, which is already deterministic (files sorted by path). files= keeps meaning the
         // number of files ANALYSED — a different quantity from the <f/> row count, which is why the paging
@@ -4864,8 +4875,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      pageDisclosure( owab, sizeof( owab ), owpw.end - owpw.begin, printRows.size(), owpw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),
                      owSymAttr.c_str(),
-                     gitstamp::atAttr( root ).c_str(),
-                     mvRootAttr.c_str() );
+                     mvRootAttr.c_str(),                    // R-E fix: root= before at= — at= stays LAST (r26)
+                     gitstamp::atAttr( root ).c_str() );
         if( !detail && uniformCount > 0 )
         {
             std::printf( "<uniform authors=\"1\" bf=\"1\" share=\"1.00\" files=\"%zu\"/>", uniformCount );
@@ -6153,7 +6164,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // already-large dispatcher's own complexity.
         if( !cfg.json )
         {
-            std::printf( "%s%s-->", rw::callHierarchyLegendOpen( wantCallers ).c_str(), rw::graphCountDisclosure().c_str() );
+            std::printf( "%s%s-->%s", rw::callHierarchyLegendOpen( wantCallers ).c_str(), rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( chSingleRoot ) );
         }
 
         // --format=columnar (RESEARCH lever 1): the same page window, re-encoded as a path-table + parallel
@@ -6531,7 +6542,7 @@ std::optional<int> runUses( const MainDispatch& d )
                      "chosen def (the callers verb's own narrowing, read the other way, so the two agree); read/write/import/extends carry no "
                      "resolution and stay name-matched across every def sharing the name. narrowed_roles= names what narrowed, and "
                      "defs_of_name=/call_sites_of_name= (file: qualifier only) are the un-narrowed totals. "
-                     "%s-->", rw::kUsesLegendOpen, rw::graphCountDisclosure().c_str() );
+                     "%s-->%s", rw::kUsesLegendOpen, rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( usSingleRoot ) );
         // §P8 G1: the page window over the sorted sites; count= stays the un-windowed total (note above
         // runUses) — of the sites the extractor RESOLVED, which counts_floor= is there to say (V3 L-4).
         const PageWindow  upw      = pageWindow( sites.size(), cfg.pageLimit, cfg.pageOffset );
@@ -7092,6 +7103,10 @@ std::optional<int> runPath( const MainDispatch& d )
 
         // from_p/to_p = the def this run actually bound the name to; from_defs/to_defs = how many it could have
         // bound it to (>1 ⇒ qualify with file:name if this is not the one you meant).
+        // R-E fix (2026-08-19): --path ships no legend of its own, so the shared root-relative clause IS its
+        // whole first-screen legend here — root= would otherwise be the one attribute on this document with
+        // nothing anywhere saying what it means. Same text, same helper, as every other verb's.
+        std::printf( "%s", rw::rootRelPathsLegend( pthSingleRoot ) );
         std::printf( "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"%s",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                      srcDefs.size(), dstDefs.size(),
@@ -7344,7 +7359,7 @@ std::optional<int> runMentions( const MainDispatch& d )
         std::printf( "<!-- ripwire mentions: markdown FILES that name this symbol in a `backtick` (doc<->code; NOT a call edge). "
                      "docs= is the row count (distinct files); sections= counts the underlying markdown-section mentions "
                      "before file-collapse (docs <= sections). Each row's mentions= is its own section-mention count. "
-                     "No line locator: the doc edge is stored at file granularity — a fabricated always-1 l= was removed; absent beats fake -->" );
+                     "No line locator: the doc edge is stored at file granularity — a fabricated always-1 l= was removed; absent beats fake -->%s", rw::rootRelPathsLegend( mnSingleRoot ) );
         // §P15/§P16: fileRows is deterministic (file path order) and printed unconditionally, no historic
         // display cap — pageWindow directly on cfg.pageLimit/cfg.pageOffset, discloseCap=false so the
         // un-paginated tag stays byte-identical.
@@ -7546,7 +7561,7 @@ std::optional<int> runExercises( const MainDispatch& d )
     std::printf( "<!-- ripwire exercises: the NON-TEST symbols this test transitively calls into — what it covers (the inverse of the affected verb). "
                  "<t> = the seed test files the pattern matched; <s> = the covered symbols, PageRank desc. "
                  "harness=script|mixed says the seed set contains shell gates, whose subprocess coverage this walk cannot see. "
-                 "%s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+                 "%s-->%s", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( exSingleRoot ) );
     const std::string exRootAttr = exSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
     std::printf( "<exercises of=\"%s\" seed_files=\"%zu\" shown_seed_files=\"%zu\" seed_files_capped=\"%u\" test_symbols=\"%zu\" reaches=\"%zu\"%s%s%s>",
                  ex( cfg.exercisesFile ).c_str(), sel.testFiles.size(), shownSeed,
@@ -9625,7 +9640,7 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
                  "shown=/capped= describe the member list printed here: this listing is fixed at the 5 top-ranked members and is NOT "
                  "widened by limit=/offset= (those page the MODULE rows). capped=1 means members were dropped; drill= names the verb "
                  "that pages the full member list of one module. raise the default cap with limit=N (offset=M pages). "
-                 "%s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+                 "%s-->%s", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cmSingleRoot ) );
     // §P11.6 drill=: the id= values below were the only identifiers this tool emitted that no verb took
     // back. The follow-up verb is named ON THE ROOT ELEMENT rather than in the doc comment, because an XML
     // comment may not contain a double hyphen (G4) and its entity escapes are NOT expanded — a caller would
@@ -9783,7 +9798,7 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
                  "other modules. size= is the module's TRUE member count; shown=/capped= are this page. partition= is the FULL label "
                  "space (every id 0..partition-1, incl. isolated singletons) — the range the id= argument ranges over; modules= counts "
                  "the NON-isolated communities (size>=2), the SAME predicate the communities-listing verb's modules= uses, so parent "
-                 "and child agree. %s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+                 "and child agree. %s-->%s", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cdSingleRoot ) );
     std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" partition=\"%u\" modules=\"%u\"%s%s>",
                  want, std::size_t( mem.size() ), ex( presentation.directory[ want ] ).c_str(), ex( presentation.label[ want ] ).c_str(),
                  peers.size(), shownBridges, unsigned( shownBridges < peers.size() ), K, modulesNonIsolated,
@@ -10188,8 +10203,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // §B12.5 — the UNIT clause is the same sentence on all three verbs that spell `untested=` (see
         // situ.h's kTestGateLegend and flipimpact.h's writeFlipHeader). Each legend was locally honest,
         // which is precisely why a reader comparing two of the numbers is misled.
-        std::printf( "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages). %s-->",
-                     rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+        std::printf( "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages). %s-->%s",
+                     rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( stSingleRoot ) );
         // P2.1: two nested caps, neither previously marked — at most 20 seam PAIRS, and at most 5 example
         // EDGES inside each. Each <seam> gains shown= alongside its true untested= count.
         //
@@ -12804,6 +12819,19 @@ int runDefaultMap( const MainDispatch& d )
     // a pre-render degrade) — every path exactNameExpandDefault can reach ends up with SOME <ctx ...> to
     // decorate, since hasExtension is provably true whenever --expand is non-empty.
     std::string         ctxOpenStr = exactNameExpandDefault ? "<ctx topk_default=\"0\">" : "<ctx>";
+    // R-E fix (2026-08-19): the payload document root DISCLOSES the root its p= are relative to, on the two
+    // shapes where the ride-along map's <r root=…> is NOT there to do it — no map at all (mapTopK==0, which
+    // the exact-name --expand default always picks) and whole-file mode. The first R-E landing made
+    // packBodies/packOutline emit root-relative p= and left both of those serving relative paths against an
+    // unnamed root. Gated on the map's absence rather than emitted unconditionally because rootrelcheck.sh's
+    // own contract is that a document discloses its root ONCE — a <ctx root=> beside an <r root=> is two.
+    // Computed HERE, ahead of the bundle price below, because those bytes are part of the document that
+    // price describes (expandtopk0check §G-b compares the priced number to the real --top-k=0 byte count).
+    std::vector<char>  ctxRootEsc;
+    const std::string  ctxRootAttr = ( mapRootArg.empty() || cfg.json )
+                                   ? std::string()
+                                   : ( " root=\"" + std::string( rw::escapeXml( mapRootArg, ctxRootEsc ) ) + "\"" );
+    const std::size_t  ctxRootBytesWhenNoMap = ( mapTopK == 0 ) ? ctxRootAttr.size() : 0;
     if( expandAutoServeScope( cfg, !expandRanges.empty(), bodiesSection.isRendered ) )
     {
         // Bundle total = "<ctx>" + the map as it would actually be emitted (payload token digits included)
@@ -12816,7 +12844,7 @@ int runDefaultMap( const MainDispatch& d )
         // guarded siblings at the ceiling verdict and the topK>0 emission gate). Same guard here: a map
         // that will not be emitted must not be charged, exactly like every other measureEmittedMapBytes
         // call site in this function.
-        const std::size_t bundleBytes = ( sizeof( "<ctx>" ) - 1 )
+        const std::size_t bundleBytes = ( sizeof( "<ctx>" ) - 1 ) + ctxRootBytesWhenNoMap
                                       + ( mapTopK > 0 ? measureEmittedMapBytes( mapTopK, payloadTokens ) : 0 )
                                       + bodiesSection.xml.size() + ( sizeof( "</ctx>" ) - 1 );
         wholeFile = rw::renderWholeFiles( ing, expandNodes, redactPtr, d.notesPtr, cfg.compress );   // D2: shaped candidate
@@ -12831,6 +12859,14 @@ int runDefaultMap( const MainDispatch& d )
             VERIFY( ctxOpenStr.rfind( "<ctx", 0 ) == 0 );
             ctxOpenStr.insert( 4, " topk_default=\"0\"" );
         }
+    }
+    // …and the insert itself, same technique topk_default= uses right above (the four chooseExpandServe
+    // openers all start with that literal). Fires only where no map will carry the disclosure — see the
+    // ctxRootAttr comment above the bundle price.
+    if( !ctxRootAttr.empty() && ( serveWholeFile || mapTopK == 0 ) )
+    {
+        VERIFY( ctxOpenStr.rfind( "<ctx", 0 ) == 0 );
+        ctxOpenStr.insert( 4, ctxRootAttr );
     }
 
     // r27-emitters T2: the ride-along map. A bare `--expand=SYM` costs ~24 KB for a ~1.4 KB body because the

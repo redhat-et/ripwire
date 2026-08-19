@@ -13,6 +13,7 @@
 
 #include "model.h"
 #include "graph.h"
+#include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "serialize.h"     // packSignatures / packBodies / escapeXml / kMinBytesPerToken / kBudgetHeadroom
 #include "redact.h"
 #include "notes.h"
@@ -173,6 +174,9 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
     h.append( p.report );
     h.append( extraNotes );
     h += " -->";
+    // R-E fix (2026-08-19): root= landed on this bundle's <ctx> with nothing defining it (legendcoverage
+    // arm (A), "pack-task | ctx@root"). The shared clause, emitted exactly when the attribute is.
+    h += rootRelPathsLegend( !p.rootArg.empty() );
     return h;
 }
 

@@ -35,6 +35,7 @@
 
 #include "model.h"
 #include "clones.h"             // scanCodeTokens — THE ONE code scanner (this lens is its keep-identity projection,
+#include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
                                 //                  --clones is its erase-identity one) + usesHashLineComments
 #include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
 #include "pageview.h"           // pageWindow + pageDisclosure — THE TRUNCATION VOCABULARY
@@ -254,6 +255,8 @@ inline int writeReadabilityReport( const IngestResult& ing, int pageLimit, int p
     pageDisclosure( disclosure, sizeof disclosure, shown, total, page.end, pageLimit, pageOffset, true );
 
     std::fputs( kReadabilityLegend, stdout );
+    // R-E fix (2026-08-19): the shared root-relative clause, emitted exactly when root= is (graphlegend.h).
+    std::fputs( rw::rootRelPathsLegend( !rootAttr.empty() ), stdout );
     std::printf( "<readability functions=\"%zu\"%s", total, disclosure );
     if( scan.unreadableFileCount != 0 )
     {
