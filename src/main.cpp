@@ -2569,6 +2569,16 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     }
     h.append( extraNotes );
     h += " -->";
+    // DELIBERATELY NOT the shared rootRelPathsLegend clause here, and this is a measurement, not an
+    // oversight (2026-08-19). The --for lens carries root= on its <ctx> with nothing defining it — the same
+    // "an attribute the document never explains" gap the root-relative round closed on eighteen other
+    // legends, missed here because this header is built in main.cpp rather than through a shared emitter.
+    // Appending the clause was tried and reverted: it is 130 B, and this bundle's header floor is already
+    // most of a small budget, so at --token-budget=800 it took est_tokens from inside the ceiling to 811
+    // (+1.4%) and red test/fornotesbudgetcheck.sh — the "a disclosure has BYTES" trap, on a contract that
+    // says est_tokens <= the stated budget in BOTH dialects. Closing it needs a smaller spelling or a
+    // header-floor recalibration, not a paste. The MCP `for` twin therefore does not carry it either, so the
+    // two dialects stay byte-consistent on what they say and what they explain.
     return h;
 }
 
@@ -10579,6 +10589,16 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // symbol-less files files= includes but no <file> row can ever list (fine — a file with no symbols
         // has nothing to preview — but silent until now).
         const std::uint32_t filesUnlisted = F - std::uint32_t( ford.size() );
+        // ── verifier FINDING E1 (2026-08-19): --tree was the single largest absolute-path emitter left in the
+        //    tool — 1,212 rows on ripwire's own corpus, more than every verb rootrelcheck already covered put
+        //    together — and it is the session-start orientation map the skills route to FIRST. Same shape as
+        //    every other verb's root=: the single-root condition from sarif.h, the shared legend clause from
+        //    graphlegend.h emitted exactly when the attribute is, and root= appended AFTER the paging and
+        //    PageRank disclosures so nothing already on this element moves.
+        const bool         trSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+        const std::string  trRootPrefix = trSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+        std::vector<char>  trRootEsc;
+        const std::string  trRootAttr   = trSingleRoot ? ( " root=\"" + std::string( rw::escapeXml( cfg.roots[0], trRootEsc ) ) + "\"" ) : std::string();
         std::printf( "<!-- ripwire tree: each file + its top symbols by rank, files ordered by their best "
                      "symbol's rank (path breaks ties) — a session-start orientation map. files= is the indexed "
                      "corpus; rows list files WITH symbols; files_unlisted= holds the symbol-less remainder "
@@ -10589,7 +10609,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
                      "— files equals files_unlisted plus the LISTABLE file set, which is what the rows below "
                      "enumerate before any paging window is applied; under explicit paging (limit=/offset=) that "
                      "listable count is emitted as total= and shown= says how many of it these rows are. "
-                     "%s-->", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+                     "%s-->%s", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(),
+                     rw::rootRelPathsLegend( trSingleRoot ) );
         // T2 + §P8 G1: --limit/--offset paginate over the (sorted) non-empty file set. files= stays the TRUE
         // total of INDEXED files (all of them, matching pre-T2) — deliberately NOT the paging total, because
         // the emitted rows are the non-empty subset `ford`, and total= must be the count a next_offset walks
@@ -10598,10 +10619,11 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // so the un-paginated tag is byte-identical. See src/pageview.h, THE TRUNCATION VOCABULARY.
         const PageWindow  pw = pageWindow( ford.size(), cfg.pageLimit, cfg.pageOffset );
         char              pab[ kPageDisclosureCap ];
-        std::printf( "<tree files=\"%u\" files_unlisted=\"%u\"%s>", F, filesUnlisted,
+        std::printf( "<tree files=\"%u\" files_unlisted=\"%u\"%s%s>", F, filesUnlisted,
                      ( pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, ford.size(), pw.end,
                                        cfg.pageLimit, cfg.pageOffset, false )
-                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
+                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
+                     trRootAttr.c_str() );
         std::vector<char> trEsc;
         for( std::size_t fi = pw.begin; fi < pw.end; ++fi )
         {
@@ -10609,7 +10631,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
             FileSymbols&        syms = byFile[f];
             std::sort( syms.begin(), syms.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
             // path and symbol names may contain & < > " — escape them to keep XML well-formed.
-            const auto ep = rw::escapeXml( ing.files[f], trEsc );
+            const auto ep = rw::escapeXml( trSingleRoot ? rw::sarif::rootRelativeUri( ing.files[f], trRootPrefix )
+                                                        : std::string_view( ing.files[f] ), trEsc );
             std::printf( "<file p=\"%.*s\" symbols=\"%zu\">", int( ep.size() ), ep.data(), std::size_t( syms.size() ) );
             const std::size_t topN = std::min<std::size_t>( 3, syms.size() );
             for( std::size_t i = 0; i < topN; ++i )

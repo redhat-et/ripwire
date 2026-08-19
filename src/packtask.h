@@ -1291,6 +1291,15 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         {
             j += ",\"doc_mention\":\"" + jsonStr( lr.docMentionNote ) + "\"";
         }
+        // R-E follow-up (2026-08-19): the JSON dialect's OWN root disclosure. Every `p` in this tail was
+        // already root-relative (the XML twin's root= is suppressed for --json), so a consumer holding only
+        // the JSON had relative paths and nothing saying what they were relative to — the mirror of the
+        // "root= with no legend" gap the round closed on the XML side. Same value, same single-root-only
+        // condition, spelled as this dialect spells things. Absent on a multi-root run, exactly as root= is.
+        if( !in.rootArg.empty() )
+        {
+            j += ",\"root\":\"" + jsonStr( in.rootArg ) + "\"";
+        }
         // §B1.6: all THREE budget facts the XML header states ("budget=N bytes (T-token target, ceiling C)").
         // budget_ceiling_bytes was the one number with no JSON key — the hard byte ceiling the token target
         // implies, which is what a consumer checks the bundle against; budget_bytes is the WORKING budget
@@ -1331,7 +1340,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // ceiling). Both halves are gone by construction: there is one selection, and this is its record.
         { char b[ 96 ];  std::snprintf( b, sizeof( b ), ",\"bodies_total\":%zu,\"bodies_kept\":%zu,\"bodies\":",
                                         bodiesTotal, emittedBodies.kept.size() );  j += b; }
-        j += packTaskRenderToString( [ & ]( std::FILE* m ) { packBodiesJson( m, ing, emittedBodies ); } );
+        j += packTaskRenderToString( [ & ]( std::FILE* m ) { packBodiesJson( m, ing, emittedBodies, in.rootArg ); } );
         j += packTaskOmittedBodiesJson( ing, emittedBodies );   // §H5 — see its header
 
         const std::size_t callersShown = std::min( callersKept, d1.ids.size() );

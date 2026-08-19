@@ -6138,7 +6138,8 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
 //
 // §B0 note: there is no `redact` parameter and that is not an opt-out — `record` holds text packBodies ALREADY
 // redacted, at the one seam packBodies already defines. Adding a second redaction pass here is what created the over-count.
-inline void packBodiesJson( std::FILE* out, const IngestResult& ing, const EmittedBodies& record )
+inline void packBodiesJson( std::FILE* out, const IngestResult& ing, const EmittedBodies& record,
+                            std::string_view rootArg = {} )
 {
     JsonWriter  w( out );
     std::string esc;
@@ -6163,7 +6164,11 @@ inline void packBodiesJson( std::FILE* out, const IngestResult& ing, const Emitt
         w.write( "{\"t\":" );  writeJsonStr( w, symTag( s.kind ), esc );
         std::snprintf( num, sizeof( num ), ",\"l\":%u,", s.line );
         w.write( num );
-        w.write( "\"p\":" );  writeJsonStr( w, ing.files[ s.fileId ], esc );
+        // R-E follow-up (2026-08-19): the LAST `p` in the pack-task bundle that was still absolute. Every
+        // other row of both dialects had been relativized; this one was invisible because the gate row that
+        // would have caught it was passing on an empty document (see test/rootrelcheck.sh's VERBS header).
+        w.write( "\"p\":" );  writeJsonStr( w, rootArg.empty() ? std::string_view( ing.files[ s.fileId ] )
+                                                                : sarif::rootRelativeUri( ing.files[ s.fileId ], sarif::rootPrefixOf( rootArg ) ), esc );
         w.write( ",\"n\":" );  writeJsonStr( w, s.name, esc );
         // the octocode partial-fetch marker, where the XML writes lines="lo-hi/total" — absent on a whole body,
         // exactly as the attribute is.
