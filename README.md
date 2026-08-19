@@ -124,11 +124,6 @@ this project publishes against itself.
 
 </details>
 
-These savings are on the *code-reading* half of an agent's token bill; output-filter proxies (e.g.
-rtk) compress the other half — what git, npm and cargo print back — at the shell layer, so the two
-stack rather than overlap. Where they meet, prefer the graph: `--situ` and `--map-diff` answer "what
-changed and what does it mean" more densely than any filtered `git diff` can.
-
 ### Saves Tokens: It answers for a fraction of the context
 
 On mid-task questions it had never seen, ripwire answers at **7.3%** of what a grep-and-read pass
