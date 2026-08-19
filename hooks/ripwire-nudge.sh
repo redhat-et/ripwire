@@ -181,6 +181,8 @@ meter_repo=""
 meter_tag=""
 sweep_on=1
 sweep_n=3
+dedup_cooldown=20
+dedup_cap=3
 # ---- meter_dest — WHERE the log goes. Sets `_mhome` (the config directory) and `meter_file`, and
 #      applies the §FIXTURE guard. `_mexplicit` is the guard's whole input: it records whether the
 #      caller NAMED a destination (RIPWIRE_METER_LOG / RIPWIRE_HOME) or the path was merely INFERRED
@@ -232,15 +234,19 @@ meter_init()
     _conf_arm=""
     _conf_sweep=""
     _conf_sweepn=""
+    _conf_cooldown=""
+    _conf_cap=""
     if [ -n "$_mhome" ] && [ -f "$_mhome/meter.conf" ]
     then
         while IFS='=' read -r _ck _cv
         do
             case "$_ck" in
-                enabled) _conf_enabled="$_cv" ;;
-                arm)     _conf_arm="$_cv" ;;
-                sweep)   _conf_sweep="$_cv" ;;
-                sweep_n) _conf_sweepn="$_cv" ;;
+                enabled)        _conf_enabled="$_cv" ;;
+                arm)            _conf_arm="$_cv" ;;
+                sweep)          _conf_sweep="$_cv" ;;
+                sweep_n)        _conf_sweepn="$_cv" ;;
+                dedup_cooldown) _conf_cooldown="$_cv" ;;
+                dedup_cap)      _conf_cap="$_cv" ;;
             esac
         done < "$_mhome/meter.conf"
     fi
@@ -257,6 +263,20 @@ meter_init()
         ''|*[!0-9]*) sweep_n=3 ;;
         0)           sweep_n=3 ;;
         *)           sweep_n="${RIPWIRE_SWEEP_N:-$_conf_sweepn}" ;;
+    esac
+    # DEDUP/COOLDOWN POLICY (2026-08-19 retune — see the §DEDUP block below for the full rationale and
+    # the policy it replaces). Same "not a plain positive integer reads as the default" guard as
+    # sweep_n, for the same reason: a malformed override must degrade to the shipped policy, never to
+    # 0 (which would mean "re-arm instantly", i.e. no cooldown at all) or to disabling delivery.
+    case "${RIPWIRE_DEDUP_COOLDOWN:-$_conf_cooldown}" in
+        ''|*[!0-9]*) dedup_cooldown=20 ;;
+        0)           dedup_cooldown=20 ;;
+        *)           dedup_cooldown="${RIPWIRE_DEDUP_COOLDOWN:-$_conf_cooldown}" ;;
+    esac
+    case "${RIPWIRE_DEDUP_CAP:-$_conf_cap}" in
+        ''|*[!0-9]*) dedup_cap=3 ;;
+        0)           dedup_cap=3 ;;
+        *)           dedup_cap="${RIPWIRE_DEDUP_CAP:-$_conf_cap}" ;;
     esac
 
     # THE ARM IS RESOLVED BEFORE THE LOG IS, and that ordering is the fix for a bug this file shipped
@@ -1014,17 +1034,57 @@ meter_init
 #      `post_nudge` means "this call happened in an already-nudged session", not "this call nudged". --
 [ -e "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anynudge" ] && meter_post=1
 
-# ---- the nudge decision, recorded as both a boolean and a REASON. Dedup is per session per category
-#      (or per-PPID if the payload carries no session_id); a deduped call is silent but still counted.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §DEDUP — RE-ARMING COOLDOWN, NOT FIRE-ONCE-EVER (2026-08-19 retune)
 #
-# 2026-08-19: the control arm now runs through the SAME marker as treatment instead of a shortcut that
-# always said "control" — that shortcut is why every control-arm row looked identical whether or not
-# the trigger condition had already been satisfied earlier in the session, which threw away exactly
-# the eligibility signal a control arm exists to carry. `nudge` now distinguishes the two control-arm
-# cases the same way treatment's `fired`/`dedup` already do: "control" is this call's counterfactual
-# — the marker was unset, so a treatment session WOULD have spoken here — and "suppressed-control" is
-# the counterfactual dedup — the marker was already set, so treatment would have stayed silent too.
-# `nudged` stays 0 in both control cases; only the arm decides whether text is ever built or emitted.
+# OLD POLICY (2026-08-11 through 2026-08-19): a plain marker file. First eligible call of a category
+# this session fires; the marker's mere EXISTENCE silences every later call of that category for the
+# rest of the session, no matter how long the session runs or how many more times the trigger
+# condition recurs. Combined with §SWEEP's own one-shot `.esc` marker (one escalation, ever, per
+# class, which also retired the base marker on firing), the net effect measured in the field
+# (readout 2026-08-19, 4,209-row snapshot): the trigger condition was met 1,546 times but delivered
+# only 17 times (1.1%) — a nudge or two near session start, then silence for the rest of a session that
+# can run thousands of rows. `grep`-class native calls, the largest and cleanest substitution target
+# (931 occurrences, dominant pattern a single literal `grep -n SYM file`), went unaddressed 95.9% of
+# the time — not because the trigger stopped firing, but because the delivery mechanism could not.
+#
+# NEW POLICY: RE-ARM AFTER A COOLDOWN, CAPPED. Each category tracks three counts — eligible
+# OBSERVATIONS so far this session (`.obs`, every matching call, delivered or not), DELIVERIES so far
+# (`.deliv`), and the observation count AT the last delivery (`.last`). A call delivers when either (a)
+# no delivery has happened yet this session for this category — same "fires on first sight" as the old
+# policy — or (b) at least `dedup_cooldown` MORE eligible observations of this category have occurred
+# since the last delivery AND fewer than `dedup_cap` deliveries have happened so far. Defaults:
+# cooldown 20 (a session has to show the SAME native habit 20 more times before hearing about it again
+# — enough to skip incidental one-offs, short enough to reach mid-session on a 900+ row grep habit),
+# cap 3 (this hook does not want to become the thing it is telling the agent to stop doing — a nudge
+# that fires every 20 calls forever is its own kind of noise). Both are overridable
+# (RIPWIRE_DEDUP_COOLDOWN / RIPWIRE_DEDUP_CAP, or `dedup_cooldown` / `dedup_cap` in meter.conf) with
+# the same "not a plain positive integer reads as the shipped default" guard sweep_n already uses.
+#
+# THIS TIER'S CAP AND §SWEEP'S CAP ARE COUNTED SEPARATELY, ON PURPOSE. A class with both a base tip
+# and an escalated sweep tip (grep/read/glob/git-*) can therefore receive up to `dedup_cap` GENERIC
+# tips plus `dedup_cap` ESCALATED tips across a session — with the shipped default, up to 6 total, not
+# unbounded and not exactly-one-shared-3. A single counter shared across both tiers was tried and
+# rejected: the base tier's own cooldown clock (`_dobs`, gated to only nudge-eligible occurrences) and
+# §SWEEP's (`sweep_count`, every occurrence of the class) advance at different rates, and whichever
+# tier reached its threshold FIRST would silently consume the other's only delivery slot — turning
+# "escalate at exactly the Nth occurrence" into "escalate at the Nth occurrence, unless the generic
+# tip got there first, in which case wait for a whole cooldown period instead." Two independent,
+# small, bounded caps are simpler to reason about and to test than one shared counter with an
+# order-dependent race.
+#
+# THE OBSERVATION WINDOW RESTARTS WITH THIS COMMIT. Every row logged before this change used the old
+# fire-once policy; every row after uses this one. `nudge":"dedup"` in an old row and `nudge":"dedup"`
+# in a new one are NOT the same measurement — the new one only means "within cooldown of the last
+# delivery," not "will never fire again this session." Any before/after comparison across this commit
+# must treat it as a regime change, not noise.
+#
+# CONTROL-ARM ELIGIBILITY RIDES THE SAME MECHANISM (unchanged from the 2026-08-19 arm-assignment fix):
+# a control-arm call runs through the identical `.obs`/`.deliv`/`.last` bookkeeping, so `nudge` records
+# "control" (this call is a counterfactual delivery) or "suppressed-control" (a treatment session would
+# be within cooldown here too) under the SAME re-arming policy treatment now gets — the two commits
+# compose without control-arm rows silently reverting to the old one-shot semantics.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
 nudged=0
 nudge="none"
 if [ -z "$category" ]
@@ -1034,17 +1094,42 @@ elif [ "$nudge_ok" != "1" ]
 then
     nudge="gated"                                       # not a git repo, or no ripwire on PATH
 else
-    marker="${TMPDIR:-/tmp}/ripwire-nudge.${session}.${category}"
-    if [ -e "$marker" ]
+    # Keyed by `mclass`, not `category`: they agree everywhere except a Bash recursive grep, where
+    # `category` is the finer "bash-grep" (so the base TIP text can say something Bash-specific) but
+    # `mclass` already resolves to the same "grep" the §SWEEP block below tracks against. Using
+    # `mclass` here means a recursive Bash grep and a Grep-tool call share ONE cooldown clock instead
+    # of two, which is the one piece of state this tier intentionally does share with the tool-name
+    # split — it does NOT share its `.deliv` cap file with §SWEEP's, see that block's comment for why.
+    _dobs="${TMPDIR:-/tmp}/ripwire-nudge.${session}.${mclass}.obs"
+    _ddeliv="${TMPDIR:-/tmp}/ripwire-nudge.${session}.${mclass}.deliv"
+    _dlast="${TMPDIR:-/tmp}/ripwire-nudge.${session}.${mclass}.base-last"
+
+    { printf '.' >>"$_dobs"; } 2>/dev/null || true
+    _dobsdots=""
+    { _dobsdots="$(<"$_dobs")"; } 2>/dev/null || _dobsdots=""
+    _dobsn="${#_dobsdots}"
+
+    _ddots=""
+    [ -e "$_ddeliv" ] && { _ddots="$(<"$_ddeliv")"; } 2>/dev/null
+    _ddelivn="${#_ddots}"
+
+    _dlastn=0
+    [ -e "$_dlast" ] && { _dlastn="$(<"$_dlast")"; } 2>/dev/null
+    case "$_dlastn" in ''|*[!0-9]*) _dlastn=0 ;; esac
+
+    _darm=0
+    if [ "$_ddelivn" -eq 0 ]
     then
-        if [ "$meter_arm" = "control" ]
-        then
-            nudge="suppressed-control"                  # counterfactual dedup: treatment would be silent too
-        else
-            nudge="dedup"
-        fi
-    else
-        { : > "$marker"; } 2>/dev/null || true
+        _darm=1                                          # first sighting this session: always fires
+    elif [ "$_ddelivn" -lt "$dedup_cap" ] && [ $(( _dobsn - _dlastn )) -ge "$dedup_cooldown" ]
+    then
+        _darm=1                                          # re-armed: cooldown elapsed, cap not yet spent
+    fi
+
+    if [ "$_darm" = "1" ]
+    then
+        { printf '.' >>"$_ddeliv"; } 2>/dev/null || true
+        { printf '%s' "$_dobsn" >"$_dlast"; } 2>/dev/null || true
         { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anynudge"; } 2>/dev/null || true
         if [ "$meter_arm" = "control" ]
         then
@@ -1052,6 +1137,13 @@ else
         else
             nudged=1
             nudge="fired"
+        fi
+    else
+        if [ "$meter_arm" = "control" ]
+        then
+            nudge="suppressed-control"                  # counterfactual dedup: treatment would be silent too
+        else
+            nudge="dedup"
         fi
     fi
 fi
@@ -1107,16 +1199,46 @@ then
                 [ -n "$_swpat" ] && { printf '%s\n' "$_swpat" >>"${_swf}.pat"; } 2>/dev/null
             fi
 
-            if [ "$sweep_count" -ge "$sweep_n" ] && [ ! -e "${_swf}.esc" ]
+            # 2026-08-19 retune: the escalation used to be a ONE-SHOT `.esc` marker, exactly the
+            # fire-once-forever shape §DEDUP above replaces for the base tier, and for the same
+            # measured reason — a 900+ call grep habit gets exactly one escalated tip, ever, then
+            # nothing for the rest of the session. It now shares the SAME cooldown/cap POLICY
+            # (`dedup_cooldown`/`dedup_cap`) as the base tier, counted against `sweep_count` (this
+            # class's own observation count), via its own `.deliv`/`.last` pair next to the existing
+            # `.pat` file — a SEPARATE counter from the base tier's, deliberately: the two tiers watch
+            # different observation streams (this one is every occurrence of the class; the base
+            # tier's `_dobs` only counts nudge-eligible ones) and merging them into one shared counter
+            # made the classic "escalate at exactly the Nth occurrence" contract depend on whether the
+            # base tier had already spent a shared slot first, which is a foot-gun disguised as
+            # economy. The practical ceiling on a class that has both tiers is therefore up to
+            # `dedup_cap` GENERIC tips plus `dedup_cap` ESCALATED tips across the session — bounded,
+            # simple, and independently verifiable per tier, rather than 2x` dedup_cap` of one message
+            # kind unpredictably borrowed from the other.
+            _swdelivdots=""
+            [ -e "${_swf}.deliv" ] && { _swdelivdots="$(<"${_swf}.deliv")"; } 2>/dev/null
+            _swdelivn="${#_swdelivdots}"
+            _swlastn=0
+            [ -e "${_swf}.last" ] && { _swlastn="$(<"${_swf}.last")"; } 2>/dev/null
+            case "$_swlastn" in ''|*[!0-9]*) _swlastn=0 ;; esac
+
+            _swarm=0
+            if [ "$sweep_count" -ge "$sweep_n" ]
             then
-                { : > "${_swf}.esc"; } 2>/dev/null || true
+                if [ "$_swdelivn" -eq 0 ]
+                then
+                    _swarm=1                              # first time this class crosses the threshold
+                elif [ "$_swdelivn" -lt "$dedup_cap" ] && [ $(( sweep_count - _swlastn )) -ge "$dedup_cooldown" ]
+                then
+                    _swarm=1                              # re-armed: cooldown elapsed, cap not yet spent
+                fi
+            fi
+
+            if [ "$_swarm" = "1" ]
+            then
+                { printf '.' >>"${_swf}.deliv"; } 2>/dev/null || true
+                { printf '%s' "$sweep_count" >"${_swf}.last"; } 2>/dev/null || true
                 { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anysweep"; } 2>/dev/null || true
                 { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anynudge"; } 2>/dev/null || true
-                # An escalation retires the weaker one-time tip for the same category: having said
-                # the specific thing, saying the generic thing later would only teach the agent that
-                # this hook repeats itself. Retiring it in the control arm too keeps the counterfactual
-                # consistent with what a treatment session in this same state would do next.
-                [ -n "$category" ] && { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.${category}"; } 2>/dev/null
                 sweep_hit=1
                 if [ "$meter_arm" = "control" ]
                 then

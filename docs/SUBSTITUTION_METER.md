@@ -37,11 +37,13 @@ One **global** file, all repos:
 | Default path | `~/.ripwire/substitution.jsonl` |
 | Override the directory | `RIPWIRE_HOME=/some/dir` → `/some/dir/substitution.jsonl` |
 | Override the file | `RIPWIRE_METER_LOG=/some/file.jsonl` |
-| Optional config | `~/.ripwire/meter.conf` — `enabled=0` / `arm=control\|treatment\|auto` / `sweep=0` / `sweep_n=N`, one `key=value` per line |
+| Optional config | `~/.ripwire/meter.conf` — `enabled=0` / `arm=control\|treatment\|auto` / `sweep=0` / `sweep_n=N` / `dedup_cooldown=N` / `dedup_cap=N`, one `key=value` per line |
 | Turn counting off | `RIPWIRE_METER=0` (the nudge keeps working) |
 | Declare a test harness | `RIPWIRE_METER_FIXTURE=1` — see [Fixture isolation](#fixture-isolation) |
 | Turn the sweep escalation off | `RIPWIRE_SWEEP=0` (counting and the one-time nudges keep working) |
 | Change the sweep threshold | `RIPWIRE_SWEEP_N=4` (default 3) |
+| Change the dedup re-arm cooldown | `RIPWIRE_DEDUP_COOLDOWN=N` (default 20 — eligible observations of the same class since the last delivery before it can fire again) |
+| Change the per-class delivery cap | `RIPWIRE_DEDUP_CAP=N` (default 3 — per tier; see [Dedup/cooldown policy](#dedup-cooldown-policy)) |
 
 The hook is registered once per user but runs in whatever repository the session is in, so every row
 carries `repo` (absolute path) and `tag` (its basename). One file plus a repo field is what makes
@@ -181,9 +183,8 @@ Read those groups apart. Averaging them produces a number that means nothing.
 
 ## The sweep escalation
 
-The one-time nudges above fire once per class per session and say the verb. The **sweep escalation**
-fires once per class per session at the **Nth** call of that class (default N=3) and says the whole
-command, built from what was observed:
+The base nudges say the verb; the **sweep escalation** fires at the **Nth** call of a class (default
+N=3) and says the whole command, built from what was observed:
 
 | Sweep class | What the escalation names |
 | --- | --- |
@@ -192,11 +193,54 @@ command, built from what was observed:
 | `git-diff` `git-log` `git-show-stat` | `--situ`, plus `--pr-context` and `--map-diff` |
 | `glob` | `--for`, plus the flagless map |
 
-The row it fires on carries `nudged":1` and `nudge":"sweep3"`; every later row in that session
-carries `post_sweep":1`. It obeys every posture the base nudges obey — advisory only, never a
-`deny`, once per class per session, silent when the target is not a git repo or `ripwire` is off
-`PATH`, silent in the `control` arm. An escalation also retires the weaker one-time tip for the same
-category, so an agent never hears the specific advice and then the generic advice.
+A firing row carries `nudged":1` and `nudge":"sweep<N>"`; every later row in that session carries
+`post_sweep":1`. It obeys every posture the base nudges obey — advisory only, never a `deny`, silent
+when the target is not a git repo or `ripwire` is off `PATH`, silent in the `control` arm (see
+[Dedup/cooldown policy](#dedup-cooldown-policy) for what "silent" now means there). It no longer
+retires the base tier's marker on firing — see that section for why the two tiers now dedup
+independently rather than sharing one counter.
+
+## Dedup/cooldown policy {#dedup-cooldown-policy}
+
+**Old policy (2026-08-11 – 2026-08-19): fire once per class per session, ever.** The base tip fired on
+the first eligible call of a category and a plain marker file silenced every later one, for the rest
+of the session, regardless of how many more times the trigger condition recurred. The sweep escalation
+had the same shape — one delivery, ever, per class, and firing it also retired the base tier's marker.
+Measured against the 2026-08-19 readout (4,209-row snapshot): the trigger condition was met 1,546
+times but delivered only 17 times (1.1%) — a nudge or two near session start, then silence for a
+session that can run thousands of rows. `grep`-class native calls, the largest and cleanest
+substitution target (931 occurrences, dominant pattern a literal `grep -n SYM file`), went
+unaddressed 95.9% of the time.
+
+**New policy: a re-arming cooldown, capped.** Each tier — the base one-time tip and the sweep
+escalation — tracks its own eligible-observation count, delivery count, and the observation count at
+its last delivery. A call delivers when either no delivery has happened yet this tier this session
+(same "fires on first sight" as before), or at least `dedup_cooldown` MORE eligible observations of
+the class have occurred since the last delivery **and** fewer than `dedup_cap` deliveries have
+happened so far for that tier. Defaults: cooldown 20, cap 3 per tier (so a class with both tiers —
+grep/read/glob/git-*  — can receive up to 3 generic tips and 3 escalated tips across a session, not an
+unbounded stream and not a single shared 3). Both are overridable
+(`RIPWIRE_DEDUP_COOLDOWN`/`RIPWIRE_DEDUP_CAP`, or `dedup_cooldown`/`dedup_cap` in `meter.conf`).
+
+The two tiers dedup **independently** rather than sharing one counter — tried and reverted: the base
+tier's observation stream (only nudge-eligible calls) and the sweep tier's (every occurrence of the
+class) advance at different rates, and whichever tier reached its own threshold first would silently
+spend a shared delivery slot, turning "escalate at exactly the Nth occurrence" into "escalate at the
+Nth occurrence, unless the generic tip got there first." Two small independent caps are simpler to
+reason about than one shared counter with an order-dependent race.
+
+**The control arm rides the same policy.** A control-arm call runs through the identical
+`.obs`/`.deliv`/`.last` bookkeeping a treatment call does, so `nudge":"control"` means this call is the
+counterfactual delivery under the CURRENT (re-arming) policy, and `nudge":"suppressed-control"` means
+a treatment session would be within cooldown here too — not the old policy's flat "control" for every
+eligible call.
+
+**The observation window restarts with this policy.** Every row logged before this change used the
+old fire-once-forever policy; every row from this change onward uses the re-arming one.
+`nudge":"dedup"` (or `"suppressed-control"`) in an old row and the same value in a new one are not the
+same measurement — the new one means "within cooldown of the last delivery," not "will never fire
+again this session." Any before/after comparison spanning this change is comparing two different
+instruments, not measuring drift in one.
 
 The patterns quoted back at the agent are sanitized where they are captured, not where they are
 emitted: anything outside `[A-Za-z0-9_.:-]` becomes a space, runs of spaces collapse, each pattern is
