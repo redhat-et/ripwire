@@ -8,7 +8,8 @@
 # forms), --hotspots, --communities/--community=/--seams/--report, --skipped, --map-diff, --pr-context,
 # --situ (CLI text + MCP JSON), --mentions, --owners, --handoff, --layout, --edit-check, --exercises,
 # --graph-query, --abi, --connect, --path, and the quality-lens family (context-ratio/comment-coherence/
-# nonlocal-state/naming-consistency/readability/dead-code/field-affinity).
+# nonlocal-state/naming-consistency/readability/dead-code/field-affinity) — plus, since 2026-08-19,
+# --tree and --quality-panel, and the MCP twins of the two biggest surfaces (`analyze`, `for`).
 #
 # THE DEFECT (F6): a single-root run invoked with an ABSOLUTE root argument used to repeat that whole
 # absolute path once per row in every one of the verbs above — the root spelled N times instead of once.
@@ -70,7 +71,8 @@ echo "rootrelcheck: BIN=$BIN  CORPUS(absolute)=$CORPUS"
 # walks every occurrence of the absolute prefix and classifies it by the attribute NAME it is the value
 # of (looking backward for `name="` or `"name":"`), then reports two counts: `path_leaks` (occurrences in
 # a p=/file/"p"/"file"-shaped attribute — the DEFECT this gate exists to catch, must be 0) and `root_disc`
-# (occurrences in root=/"root" — must be 0 or 1, never more).
+# (occurrences in root=/"root" — must be EXACTLY 1 on every row of this sweep; see the loop for why the
+# bound was tightened from "at most 1" on 2026-08-19).
 oracle() {
 python3 - "$1" "$CORPUS" <<'PYEOF'
 import re, sys
@@ -127,29 +129,37 @@ print(f"{path_leaks} {root_disc}")
 PYEOF
 }
 
-# label | CLI args (relative to CORPUS)
+# label | CLI args (relative to CORPUS). Arguments are TAB-separated and split on TAB ALONE — never on
+# spaces. Found 2026-08-19 while widening this gate: three rows carried a multi-WORD query
+# (`--for=serialize map`, `--pack-task=serialize the ranked map`, and its --json twin) and the old
+# space-splitting `$args` expansion tore each into an option plus stray bare words. A bare word after the
+# root is another ROOT, so the binary printed `root path does not exist: map` to stderr, wrote NOTHING to
+# stdout, and the oracle dutifully scored an empty file at zero leaks. Those three rows had asserted
+# nothing since the gate landed — CONTRIBUTING §2's "a gate that cannot observe what it asserts", in this
+# gate's own verb list. TAB separation fixes the splitting; the `-s` presence guard in the loop below is
+# the general fix, so a row that emits nothing can never again read as a row that emits nothing WRONG.
 declare -a VERBS=(
     "default-map|--top-k=30"
-    "json-map|--json --top-k=10"
+    "json-map|--json"$'\t'"--top-k=10"
     "for|--for=serialize map"
     "pack-task|--pack-task=serialize the ranked map"
-    "pack-task-json|--pack-task=serialize the ranked map --json"
+    "pack-task-json|--pack-task=serialize the ranked map"$'\t'"--json"
     "expand|--expand=main"
     "outline|--outline=main"
     "callers|--callers=runDefaultMap"
     "callees|--callees=main"
-    "callees-json|--callees=main --json"
-    "callees-columnar|--callees=main --format=columnar"
+    "callees-json|--callees=main"$'\t'"--json"
+    "callees-columnar|--callees=main"$'\t'"--format=columnar"
     "uses|--uses=main"
     "impact|--impact=main"
-    "impact-json|--impact=main --json"
+    "impact-json|--impact=main"$'\t'"--json"
     "lint|--lint"
     "match|--match=(function_definition)"
     "clones|--clones"
     "hotspots|--hotspots"
     "cochange|--cochange"
     "cochange-file|--cochange=src/main.cpp"
-    "cochange-groups|--cochange --cochange-groups"
+    "cochange-groups|--cochange"$'\t'"--cochange-groups"
     "communities|--communities"
     "community|--community=0"
     "seams|--seams"
@@ -176,14 +186,28 @@ declare -a VERBS=(
     "dead-code|--dead-code"
     "field-affinity|--field-affinity"
     "deps|--deps"
+    # ── verifier FINDINGS E1/E2 (2026-08-19): two surfaces this list did not name, and therefore did not
+    #    cover. --tree is the single highest-volume path emitter in the tool (1,212 absolute rows on this
+    #    corpus before the fix — more than every other verb in this list put together) and is the
+    #    session-start orientation map the skills route to first; --quality-panel leaked all 40 of its p=
+    #    rows. Neither was a REGRESSION — the pre-lane binary behaves identically — but "all verbs" was the
+    #    claim and these two sat outside it. RED at the wave's verified head: tree 1212, quality-panel 40.
+    "tree|--tree"
+    "quality-panel|--quality-panel"
 )
 
 for entry in "${VERBS[@]}"; do
     label="${entry%%|*}"
     args="${entry#*|}"
     out="$TMP/$label.out"
-    # shellcheck disable=SC2086
-    "$BIN" "$CORPUS" $args >"$out" 2>"$TMP/$label.err"
+    IFS=$'\t' read -r -a argv <<< "$args"          # TAB only — see the VERBS header for the row this saved
+    "$BIN" "$CORPUS" "${argv[@]}" >"$out" 2>"$TMP/$label.err"
+    # PRESENCE GUARD (CONTRIBUTING §2): the oracle scores an empty document at zero leaks, so a verb that
+    # failed to run at all would read as a verb that ran clean. Assert the row produced something first.
+    if [ ! -s "$out" ]; then
+        no "$label: produced NO output — this row asserts nothing (stderr: $( head -c 140 "$TMP/$label.err" | tr '\n' ' ' ))"
+        continue
+    fi
     read -r leaks rootn < <( oracle "$out" )
     if [ "$leaks" = "0" ]; then
         ok "$label: 0 path-attribute leaks of the absolute root (root_disc=$rootn)"
@@ -191,8 +215,13 @@ for entry in "${VERBS[@]}"; do
         no "$label: $leaks absolute-root leak(s) in p=/file attributes (root_disc=$rootn)"
         grep -o ".\{15\}$CORPUS.\{15\}" "$out" 2>/dev/null | LC_ALL=C sort -u | head -5
     fi
-    if [ "$rootn" -gt 1 ] 2>/dev/null; then
-        no "$label: root= disclosed $rootn times (expected 0 or 1)"
+    # EXACTLY once, not "at most once" (tightened 2026-08-19). Every row of this sweep is a single-root run
+    # with an ABSOLUTE root argument, so every row OWES the disclosure: relative p= with nothing naming what
+    # they are relative to is the same class of dishonesty as the absolute p= this gate started with, just
+    # quieter. The bound was <=1 and the pack-task --json dialect was sitting at 0 — it emitted a whole
+    # bundle of root-relative `p` values and no "root" key at all.
+    if [ "$rootn" != "1" ]; then
+        no "$label: root disclosed $rootn time(s), expected exactly 1 (an absolute-root single-root run owes it)"
     fi
 done
 
@@ -237,6 +266,36 @@ if [ "$situ_cli_root" = "1" ] && [ "$sml" = "0" ] && [ "$smr" = "1" ]; then
     ok "situ CLI/MCP parity: CLI text 'root: …' line present once, MCP JSON clean + root= once"
 else
     no "situ CLI/MCP parity: cli_root_lines=$situ_cli_root mcp(leaks=$sml root=$smr)"
+fi
+
+# ── verifier FINDINGS E3/E4 (2026-08-19): the parity arm covered grep + situ only, so the two MCP verbs
+#    that are the direct twins of the two BIGGEST CLI surfaces went unchecked — and both leaked. MCP
+#    `analyze` is the default map's own twin (85 absolute rows) and MCP `for` is --for's (3). The defect
+#    this closes is not a leak in isolation: it is that the same corpus answered a CLI question with
+#    `src/main.cpp` and the MCP twin of that same question with the absolute path. Both dialects must be
+#    equally clean AND both must disclose root= exactly once. RED at the wave's verified head.
+analyze_cli="$TMP/analyze_cli.out"; "$BIN" "$CORPUS" >"$analyze_cli" 2>/dev/null   # the plain default map
+analyze_args="{\"path\":\"$CORPUS\"}"
+analyze_mcp="$TMP/analyze_mcp.out"; mcp_text "$( call analyze "$analyze_args" )" >"$analyze_mcp"
+read -r acl acr < <( oracle "$analyze_cli" )
+read -r aml amr < <( oracle "$analyze_mcp" )
+if [ "$acl" = "0" ] && [ "$aml" = "0" ] && [ "$acr" = "1" ] && [ "$amr" = "1" ]; then
+    ok "analyze CLI/MCP parity: both clean, both disclose root= exactly once"
+else
+    no "analyze CLI/MCP parity: cli(leaks=$acl root=$acr) mcp(leaks=$aml root=$amr)"
+    grep -o ".\{15\}$CORPUS.\{15\}" "$analyze_mcp" 2>/dev/null | LC_ALL=C sort -u | head -3
+fi
+
+for_cli="$TMP/for.out"                      # produced by the verb sweep above (--for=serialize map)
+for_args="{\"path\":\"$CORPUS\",\"task\":\"serialize map\"}"
+for_mcp="$TMP/for_mcp.out";  mcp_text "$( call for "$for_args" )" >"$for_mcp"
+read -r fcl fcr < <( oracle "$for_cli" )
+read -r fml fmr < <( oracle "$for_mcp" )
+if [ "$fcl" = "0" ] && [ "$fml" = "0" ] && [ "$fcr" = "1" ] && [ "$fmr" = "1" ]; then
+    ok "for CLI/MCP parity: both clean, both disclose root= exactly once"
+else
+    no "for CLI/MCP parity: cli(leaks=$fcl root=$fcr) mcp(leaks=$fml root=$fmr)"
+    grep -o ".\{15\}$CORPUS.\{15\}" "$for_mcp" 2>/dev/null | LC_ALL=C sort -u | head -3
 fi
 
 # ── well-formedness + determinism, the two structural gates every changed emitter owes (G4) ──────────────

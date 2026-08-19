@@ -135,7 +135,10 @@ REPO_TREE="$( perl -e 'alarm 120; exec @ARGV' "$BIN" "$ROOT" --tree 2>/dev/null 
 if [ -n "$REPO_TREE" ]; then
     REPO_FILES="$( printf '%s' "$REPO_TREE" | tr '<' '\n' | sed -n 's/^file p="\([^"]*\)".*/\1/p' )"
     case "$( printf '%s\n' "$REPO_FILES" | head -1 )" in
-        */src/*) ok "--tree(repo): the first file is a src/ path (was ADOPTION_AUDIT_fable2026.md)" ;;
+        # `src/…` OR `*/src/…`: since 2026-08-19 --tree emits p= ROOT-RELATIVE with a root= disclosure
+        # (test/rootrelcheck.sh), so an absolute root argument no longer puts a leading slash on the row.
+        # Both spellings are accepted here because this arm is about WHICH FILE leads, not how it is spelled.
+        src/*|*/src/*) ok "--tree(repo): the first file is a src/ path (was ADOPTION_AUDIT_fable2026.md)" ;;
         *)       no "--tree(repo): first file is '$( printf '%s\n' "$REPO_FILES" | head -1 )', expected a src/ path" ;;
     esac
 
