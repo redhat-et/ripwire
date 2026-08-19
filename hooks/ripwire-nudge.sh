@@ -64,11 +64,33 @@ set -u
 # rule table. One log means one contamination risk, so the §FIXTURE guard in meter_init() is part of
 # the design and not a test detail: a gate run must never be able to reach that file.
 #
-# OBSERVE FIRST; THE A/B IS BUILT BUT DORMANT. Default behavior is always-on observation WITH nudges
-# enabled — i.e. exactly what this hook did before, plus counting. The `arm` field and the
-# RIPWIRE_METER_ARM / meter.conf toggle exist so that turning on a real control-vs-treatment
-# alternation later costs one env var and no code; nothing here alternates on its own, and the arm is
-# recorded on every row so the future analysis can trust the assignment it reads.
+# A REAL RANDOMIZATION MECHANISM NOW EXISTS: `meter_auto_arm`, ACTIVATED BY `arm=auto` (2026-08-19
+# fix). From 2026-08-11 through 2026-08-19 the only way to reach the control arm at all was to name it
+# explicitly — an operator setting RIPWIRE_METER_ARM=control (or `arm=control` in meter.conf) for an
+# ENTIRE machine, session by session, by hand; there was no code path that could ever produce a MIXED
+# population, only all-control or all-treatment. Nobody ever set it, across 4,209 logged rows and 21
+# sessions: 100% treatment, 0% control, and the meter could not answer its own north-star question
+# (does the nudge change behavior vs. no nudge) because there was nothing to compare against. This was
+# a silent, unannounced gap: the `arm` field was always present and always "treatment", so the log
+# LOOKED complete.
+#
+# `meter_auto_arm` hashes the session id to a stable ~50/50 split — a pure function of an immutable
+# input, so "decided once at SessionStart, persisted for the session" comes for free: every PreToolUse
+# invocation in a session recomputes the same hash of the same session id and lands on the same arm,
+# with no marker file and no shared state to go stale, including across the internal SessionStart
+# resets a long session can produce (see the post_nudge/post_sweep reset behavior above). It is reached
+# only when the arm config names the new literal `auto` (RIPWIRE_METER_ARM=auto, or `arm=auto` in
+# meter.conf) — UNSET still means treatment, exactly as before this fix, so a machine nobody has
+# touched keeps behaving exactly as it always has; going live with a real A/B population is a
+# deployment-time config write (`arm=auto`), not a change to what the script defaults to.
+#
+# THIS FIX DOES NOT CHANGE TREATMENT SEMANTICS. A session that lands on the treatment arm behaves
+# bit-for-bit as before: same nudges, same dedup, same sweep. What changes is only that a control arm
+# now actually gets populated, and — see the nudge-decision block further down — a control-arm call
+# runs through the IDENTICAL eligibility bookkeeping a treatment call does (the same per-category
+# marker, the same per-class sweep counter), so the row records "control" when this call would have
+# been the one to fire/escalate and "suppressed-control" when it would have been deduped — eligibility
+# is measurable in both arms, not just inferred from silence.
 #
 # THE NUDGE-CAUSES-THE-CALL CONFOUND. A nudge that says "use --grep" is itself a cause of the next
 # ripwire call, so a naive rate would partly measure the hook talking to itself. Three fields keep
@@ -183,6 +205,26 @@ meter_dest()
     fi
 }
 
+# ---- meter_auto_arm SESSION — the ~50/50 split used when the arm config names the literal `auto`
+#      (see the design note above §METER). `cksum` (POSIX, present on every platform this hook ships
+#      on) hashes the session id to a number; the low two decimal digits split the range in half. Any
+#      failure of the hash (no `cksum`, or output this script does not recognize as a plain integer)
+#      degrades to "treatment" — the same safe default the rest of this file uses whenever a signal is
+#      unavailable, never a crash and never a silently invented third arm. ----
+meter_auto_arm()
+{
+    _aa_h="$( printf '%s' "$1" | cksum 2>/dev/null | cut -d' ' -f1 )"
+    case "$_aa_h" in
+        ''|*[!0-9]*) printf 'treatment'; return 0 ;;
+    esac
+    if [ "$(( _aa_h % 100 ))" -lt 50 ]
+    then
+        printf 'control'
+    else
+        printf 'treatment'
+    fi
+}
+
 meter_init()
 {
     meter_dest
@@ -226,11 +268,19 @@ meter_init()
     # advice where the contract promises none. A control arm that silently does not control is worse
     # than no control arm, because the resulting data looks valid.
     #
-    # Only the literal `control` selects the control arm. An unrecognized value must not silently
-    # invent a third arm — it reads as the default, which is what the row then honestly records.
+    # The literal `control`/`treatment` still force an arm (an operator override, or a test harness
+    # pinning one side) — that contract, and its "any unrecognized value reads as treatment" safety
+    # net, is UNCHANGED, on purpose: this file's own default stays `treatment` so a machine that never
+    # touches meter.conf keeps behaving exactly as it always has. What is NEW is a third literal value,
+    # `auto`, which activates the session-id hash split in `meter_auto_arm` — this is the fix's actual
+    # deliverable, but it is opt-in at the CONFIG layer (deployment writes `arm=auto` to
+    # ~/.ripwire/meter.conf) rather than a change to what an unconfigured hook does. That split keeps
+    # "does this commit change treatment semantics" answerable with "no" — nothing about this hook's
+    # behavior moves unless something now names `auto` where nothing was named before.
     case "${RIPWIRE_METER_ARM:-$_conf_arm}" in
-        control) meter_arm="control" ;;
-        *)       meter_arm="treatment" ;;
+        control)    meter_arm="control" ;;
+        auto)       meter_arm="$( meter_auto_arm "$session" )" ;;
+        *)          meter_arm="treatment" ;;
     esac
 
     [ -n "$meter_file" ] || return 0          # no HOME and no explicit log path — nothing to write to
@@ -966,6 +1016,15 @@ meter_init
 
 # ---- the nudge decision, recorded as both a boolean and a REASON. Dedup is per session per category
 #      (or per-PPID if the payload carries no session_id); a deduped call is silent but still counted.
+#
+# 2026-08-19: the control arm now runs through the SAME marker as treatment instead of a shortcut that
+# always said "control" — that shortcut is why every control-arm row looked identical whether or not
+# the trigger condition had already been satisfied earlier in the session, which threw away exactly
+# the eligibility signal a control arm exists to carry. `nudge` now distinguishes the two control-arm
+# cases the same way treatment's `fired`/`dedup` already do: "control" is this call's counterfactual
+# — the marker was unset, so a treatment session WOULD have spoken here — and "suppressed-control" is
+# the counterfactual dedup — the marker was already set, so treatment would have stayed silent too.
+# `nudged` stays 0 in both control cases; only the arm decides whether text is ever built or emitted.
 nudged=0
 nudge="none"
 if [ -z "$category" ]
@@ -974,19 +1033,26 @@ then
 elif [ "$nudge_ok" != "1" ]
 then
     nudge="gated"                                       # not a git repo, or no ripwire on PATH
-elif [ "$meter_arm" = "control" ]
-then
-    nudge="control"                                     # A/B control arm: counted, never nudged
 else
     marker="${TMPDIR:-/tmp}/ripwire-nudge.${session}.${category}"
     if [ -e "$marker" ]
     then
-        nudge="dedup"
+        if [ "$meter_arm" = "control" ]
+        then
+            nudge="suppressed-control"                  # counterfactual dedup: treatment would be silent too
+        else
+            nudge="dedup"
+        fi
     else
         { : > "$marker"; } 2>/dev/null || true
         { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anynudge"; } 2>/dev/null || true
-        nudged=1
-        nudge="fired"
+        if [ "$meter_arm" = "control" ]
+        then
+            nudge="control"                             # counterfactual fire: treatment would have spoken
+        else
+            nudged=1
+            nudge="fired"
+        fi
     fi
 fi
 
@@ -996,10 +1062,16 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 [ -e "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anysweep" ] && meter_postsweep=1
 
+# 2026-08-19: the outer gate no longer excludes the control arm. Counting still has to happen there —
+# same reasoning as the base-tier marker above — so that `sweep_count`/the `.esc` marker reach the
+# same state a treatment session's would, and a control-arm row can say "control" (this call is the
+# counterfactual escalation) instead of just "this session was in the control arm, who knows if
+# anything would have fired here." Only the pattern capture (`.pat`, used solely to BUILD delivered
+# text) is skipped for control — nothing ever reads it there, so writing it would be pure waste.
 sweep_hit=0
 sweep_count=0
 sweep_q=""
-if [ "$sweep_on" = "1" ] && [ "$nudge_ok" = "1" ] && [ "$meter_arm" != "control" ]
+if [ "$sweep_on" = "1" ] && [ "$nudge_ok" = "1" ]
 then
     case "$mclass" in
         grep|read|glob|git-diff|git-log|git-show-stat)
@@ -1018,8 +1090,10 @@ then
 
             # The grep escalation is the one that can quote the agent's own query back at it, so the
             # patterns are remembered as they go past. Sanitized HERE, not at emit time: whatever
-            # lands in this file is already safe to interpolate into a double-quoted --for=.
-            if [ "$mclass" = "grep" ]
+            # lands in this file is already safe to interpolate into a double-quoted --for=. Skipped
+            # in the control arm: this capture only ever feeds delivered text, and control never
+            # delivers text.
+            if [ "$mclass" = "grep" ] && [ "$meter_arm" != "control" ]
             then
                 _swpat="$mdetail"
                 [ "$tool_name" = "Bash" ] && _swpat="$meter_arg1"
@@ -1040,11 +1114,17 @@ then
                 { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anynudge"; } 2>/dev/null || true
                 # An escalation retires the weaker one-time tip for the same category: having said
                 # the specific thing, saying the generic thing later would only teach the agent that
-                # this hook repeats itself.
+                # this hook repeats itself. Retiring it in the control arm too keeps the counterfactual
+                # consistent with what a treatment session in this same state would do next.
                 [ -n "$category" ] && { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.${category}"; } 2>/dev/null
                 sweep_hit=1
-                nudged=1
-                nudge="sweep${sweep_n}"
+                if [ "$meter_arm" = "control" ]
+                then
+                    nudge="control"                     # counterfactual escalation: treatment would fire here
+                else
+                    nudged=1
+                    nudge="sweep${sweep_n}"
+                fi
             fi
             ;;
     esac

@@ -37,7 +37,7 @@ One **global** file, all repos:
 | Default path | `~/.ripwire/substitution.jsonl` |
 | Override the directory | `RIPWIRE_HOME=/some/dir` → `/some/dir/substitution.jsonl` |
 | Override the file | `RIPWIRE_METER_LOG=/some/file.jsonl` |
-| Optional config | `~/.ripwire/meter.conf` — `enabled=0` / `arm=control` / `sweep=0` / `sweep_n=N`, one `key=value` per line |
+| Optional config | `~/.ripwire/meter.conf` — `enabled=0` / `arm=control\|treatment\|auto` / `sweep=0` / `sweep_n=N`, one `key=value` per line |
 | Turn counting off | `RIPWIRE_METER=0` (the nudge keeps working) |
 | Declare a test harness | `RIPWIRE_METER_FIXTURE=1` — see [Fixture isolation](#fixture-isolation) |
 | Turn the sweep escalation off | `RIPWIRE_SWEEP=0` (counting and the one-time nudges keep working) |
@@ -142,11 +142,11 @@ guess.
 | `tool` | string | Raw tool name: `Bash`, `Read`, `Grep`, `Glob`, `mcp__ripwire__…`, `SessionStart`. |
 | `class` | string | Fine classification — the table below. |
 | `family` | string | `ripwire` · `native` · `git` · `other` · `meta`. |
-| `nudged` | 0/1 | A nudge fired **on this call**. |
-| `nudge` | string | Why it did or did not: `fired` · `sweep<N>` · `dedup` · `gated` · `control` · `none`. |
-| `post_nudge` | 0/1 | A nudge had **already** fired earlier in this session, before this call. |
-| `post_sweep` | 0/1 | A **sweep escalation** had already fired earlier in this session. |
-| `arm` | string | `treatment` (default) or `control`. |
+| `nudged` | 0/1 | A nudge was actually **delivered** (text emitted) on this call. Always 0 in the `control` arm. |
+| `nudge` | string | Why it did or did not: `fired` · `sweep<N>` · `dedup` · `gated` · `control` · `suppressed-control` · `none`. `control`/`suppressed-control` are the control arm's **counterfactual** — see below. |
+| `post_nudge` | 0/1 | A nudge had **already** fired (or, in the control arm, would-have-fired) earlier in this session, before this call. |
+| `post_sweep` | 0/1 | A **sweep escalation** had already fired (or would-have-fired) earlier in this session. |
+| `arm` | string | `treatment` (default) or `control`. See [The A/B toggle](#the-ab-toggle) for how a session lands on one or the other. |
 | `detail` | string | The command line, file path, or pattern — control characters stripped, 200 chars. |
 
 Example:
@@ -420,23 +420,43 @@ an unstated one makes it untrustworthy:
 The meter does not estimate around any of this. An unobserved call is absent, and absent is not zero
 — the same rule the rest of the tool's output follows.
 
-## The A/B toggle: built now, dormant now
+## The A/B toggle {#the-ab-toggle}
 
-Default behaviour is **always-on observation with nudges enabled** — exactly what the hook did before
-the meter, plus counting. The toggle exists so that switching on a real control-vs-treatment
-comparison later costs one environment variable and no code:
+Default behaviour (nothing named in the environment or `meter.conf`) is still **always-on observation
+with nudges enabled**, unchanged from before the meter existed. Three literal `arm` values select
+something other than that default:
 
 | Arm | Nudge | SessionStart primer | Counted | Row says |
 | --- | --- | --- | --- | --- |
-| `treatment` (default) | yes | yes | yes | `arm":"treatment"` |
-| `control` (`RIPWIRE_METER_ARM=control`, or `arm=control` in `meter.conf`) | **no** | **no** | yes | `arm":"control"`, `nudge":"control"` |
+| unset (default) / `treatment` | yes | yes | yes | `arm":"treatment"`, `nudge` one of `fired`/`sweep<N>`/`dedup`/`gated`/`none` |
+| `control` | **no** | **no** | yes | `arm":"control"`, `nudge":"control"` (would have fired) or `"suppressed-control"` (would have deduped) |
+| `auto` | *depends — see below* | *depends* | yes | `arm` is `treatment` or `control`, decided by a hash of the session id |
 
-Only the literal `control` selects the control arm; any other value reads as the default, and the row
-records what was actually used rather than what was asked for.
+`auto` is what makes the arm a real per-session coin flip instead of an all-or-nothing switch: it
+resolves to `treatment` or `control` via a stable hash of the session id (`meter_auto_arm` in the
+hook), landing roughly half of sessions on each side, with the SAME split recomputed identically on
+every PreToolUse call in that session — no marker file needed, because a pure function of an
+unchanging input is already "decided once, stable for the session." Set it once, at the config layer
+(`arm=auto` in `~/.ripwire/meter.conf`, or `RIPWIRE_METER_ARM=auto`), to turn on a real A/B
+population; leave it unset to keep the pre-2026-08-19 always-treatment behavior. Any value other than
+`control`/`auto` reads as `treatment` — a typo in `meter.conf` fails toward "still nudges," not toward
+"silently starts a coin flip nobody asked for."
 
-**What "no nudge" covers, and two ways it did not (fixed 2026-08-12).** The toggle shipped inert and,
-being inert, shipped broken in exactly the configuration that will first use it. Both faults are now
-gated by `test/hookcheck.sh` arms A1–A4:
+**Control-arm rows carry the counterfactual, not just a flat "control" flag (2026-08-19).** A
+control-arm call runs through the exact same per-category and per-class bookkeeping a treatment call
+does — the same dedup marker, the same sweep counter — so the row can say which of the two things a
+treatment session would have done: `nudge":"control"` means the trigger condition was met AND this is
+the call that would have fired or escalated; `nudge":"suppressed-control"` means the trigger condition
+was met but a treatment session would have been silent too (already delivered for this
+category/class, within its cooldown). Before this fix every eligible control-arm call recorded a flat
+`"control"`, which threw away exactly the eligibility signal a control arm exists to carry — with it,
+"how often would the nudge have had something to say" is measurable on the control side too, not just
+inferred from what treatment shows.
+
+**What "no nudge" covers, and two ways it did not (fixed 2026-08-12, before `auto` existed).** The
+toggle shipped inert and, being inert, shipped broken in exactly the configuration that will first use
+it. Both faults are gated by `test/hookcheck.sh` arms A1–A4, and both still hold under `auto`, since
+`auto` resolves to a literal `control`/`treatment` before anything downstream runs:
 
 - **The arm is resolved before the log is.** `meter_init` used to parse `RIPWIRE_METER_ARM` *after*
   the "no log destination, nothing to write" early return, so a control-arm run with no named
@@ -452,14 +472,17 @@ gated by `test/hookcheck.sh` arms A1–A4:
 A control arm that silently does not control is worse than no control arm, because the data it
 produces looks valid.
 
-**As of 2026-08-12 the arm has been 100% `treatment` on every row ever logged.** No control session
-has been run. That is worth stating plainly wherever the log is quoted: this file measures a
-**level**, not a **difference**, and no reading taken from it is a causal claim about the nudge.
+**From 2026-08-11 through 2026-08-19 the arm was 100% `treatment` on every row ever logged (4,209
+rows, 21 sessions) — not because of either bug above, but because no code path could ever produce a
+MIXED population.** The only way to reach `control` at all was an operator setting it globally, for
+the whole machine, by hand; nobody did. `arm=auto` (this fix) is the first mechanism that can actually
+populate both arms from ordinary use. A log or a readout written before a deployment turned `auto` on
+is describing a **level**, not a **difference** — a single arm's data supports no causal claim about
+the nudge, however the log gets sliced.
 
-**Nothing alternates on its own.** Assignment is per session, by whoever sets the variable. Phase 2 —
-a pre-registered alternation with a stated band — is a separate decision, and the point of shipping
-the mechanism inert is that the decision is then cheap and the data before it is not contaminated by
-a half-built one.
+**Nothing alternates on its own unless `auto` is named.** Assignment under `auto` is per session, by
+the hash of its id — deterministic, not re-rolled, and not something a config change mid-session can
+retroactively flip for calls already logged.
 
 ## Reading the log
 
