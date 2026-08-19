@@ -145,8 +145,12 @@ else
 fi
 
 # ── 5) the STANDALONE verb is byte-identical to the pre-change (post-root-relative) reference ──────────
+# RE-PINNED 2026-08-19 (R-E CORRECTION): the reference gained root="test/legofix" on <ctx>. The 2026-08-17
+# landing made packLego's p= root-relative and disclosed the root NOWHERE, so this document served relative
+# paths against a root it never named — the one thing --lego's p= exists to let you do (open the file) is
+# undoable without it. Every other byte of the reference is unchanged, which is what this arm is for.
 "$BIN" test/legofix --no-cache --lego=Shape >"$TMP/standalone" 2>/dev/null
-printf '%s' '<ctx><lego><iface n="Shape" p="shapes.h" implementors="2"><m pure="1">virtual double area() const = 0</m><m pure="1">virtual void draw() const = 0</m><impl n="Circle" p="shapes.h"/><impl n="Square" p="shapes.h"/></iface></lego></ctx>' >"$TMP/standalone.golden"
+printf '%s' '<ctx root="test/legofix"><lego><iface n="Shape" p="shapes.h" implementors="2"><m pure="1">virtual double area() const = 0</m><m pure="1">virtual void draw() const = 0</m><impl n="Circle" p="shapes.h"/><impl n="Square" p="shapes.h"/></iface></lego></ctx>' >"$TMP/standalone.golden"
 cmp -s "$TMP/standalone" "$TMP/standalone.golden" \
     && ok "--lego=Shape standalone byte-identical to the reference output (bundle-only change)" \
     || no "--lego=Shape standalone CHANGED — the §P3 fix must touch the bundle embedding only: $( cat "$TMP/standalone" )"

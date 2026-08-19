@@ -59,6 +59,11 @@ QUERY="frobnicate widget cache"
 # byte-identity is kept deliberately as the strongest available statement of that property.
 # CORRECTED at 2026-07-30 by the w1fix2 verifier (finding G1) after the first re-pin comment got the byte
 # count, the new value, both rates and the causal story wrong — see the trap ledger entries 17-19.
+# RE-PIN 2026-08-19 (R-E CORRECTION): 1095 -> 1082, document 2932 -> 2889 B. CAUSE: root-relative p=. The
+# gate crawls the RELATIVE arg `anchorfix` from $TMP, so every <f p=> used to repeat "anchorfix/"; the bundle
+# now states it once as root="anchorfix" on the <ctx> and spells the rows "frob.cpp". FEWER bytes, same rows,
+# same ranking, same bodies — the only moving bytes are the path prefixes, the new root= and est_tokens
+# re-measuring itself. 2889/1082 = 2.6700 B/tok (this document is signatures+bodies, not the map's rate band).
 # RE-PIN 2026-08-15 (harvest wave, V5 item 3): est_tokens="725"-era note above still applies; this re-pin
 # moves 1088 -> 1095 (+17 B, document 2915 -> 2932 B). CAUSE: the --for legend's phantom-flag fix — the clause
 # "the signatures-only flag opts out" now reads "the signatures-only flag (no-bodies mode) opts out" (V5 lane,

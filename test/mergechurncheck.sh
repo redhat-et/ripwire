@@ -63,7 +63,14 @@ mkfn(){ printf 'int %s( int x )\n{\n    if( x > 1 ) return x + 1;\n    return x 
 D(){ export GIT_AUTHOR_DATE="$1" GIT_COMMITTER_DATE="$1"; }
 C(){ git -C "$R1" add -A >/dev/null; git -C "$R1" commit -qm "$1"; }
 # attr_of FILE PATHSUFFIX ATTR — the ATTR value of the row whose p= ends with PATHSUFFIX ("" if no such row)
-attr_of(){ tr '>' '\n' < "$1" | grep -F "$2\"" | grep -oE "$3=\"[^\"]*\"" | head -1 | sed 's/^[^"]*"//; s/"$//'; }
+# RE-PINNED 2026-08-19 (R-E CORRECTION): the selector was a LEADING-SLASH substring, correct while p= carried
+# the absolute crawl path and silently empty since p= went root-relative (2026-08-17) — a file AT the crawl
+# root, which is every file in this fixture, spells p="mergeonly.cpp" with no slash. The merge-churn numbers
+# themselves never moved. psel keeps the boundary-suffix semantics the callers were written for and accepts
+# both spellings, so callers still pass the leading-slash form.
+psel(){ awk -v s="${1#/}" '{ if( match( $0, /p="[^"]*"/ ) ) { v = substr( $0, RSTART + 3, RLENGTH - 4 );
+        if( v == s || ( length(v) > length(s) && substr( v, length(v) - length(s) ) == "/" s ) ) print } }'; }
+attr_of(){ tr '>' '\n' < "$1" | psel "$2" | grep -oE "$3=\"[^\"]*\"" | head -1 | sed 's/^[^"]*"//; s/"$//'; }
 
 # ── the fixture: ONE evil merge over an ordinary merged branch ───────────────────────────────────────
 # History, read commit by commit (these readings ARE the literals asserted below — never computed from the

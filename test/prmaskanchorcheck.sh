@@ -73,29 +73,33 @@ GIT_AUTHOR_DATE="2026-06-01T13:00:00" GIT_COMMITTER_DATE="2026-06-01T13:00:00" \
 OUT="$TMP/out.xml"
 "$BIN" "$REPO" --pr-context=HEAD~1 >"$OUT" 2>/dev/null
 
-grep -q '<file p="[^"]*deps/src/util\.py"' "$OUT" && no "the vendored twin deps/src/util.py must NOT be a section (phantom)" \
+# RE-PINNED 2026-08-19 (R-E CORRECTION): p= is ROOT-RELATIVE now, so "src/util.py" carries no leading
+# component at all and "./"/"repo/" prefixes are gone. Both the POSITIVE and the NEGATIVE selectors are
+# re-pinned together — a negative arm whose pattern can no longer match anything passes vacuously, which is
+# the green-while-inert shape CONTRIBUTING §2 names, and three of these arms were exactly that.
+grep -q '<file p="deps/src/util\.py"' "$OUT" && no "the vendored twin deps/src/util.py must NOT be a section (phantom)" \
                                                   || ok "the vendored twin is not a section (phantom removed)"
-grep -q '<file p="[^"]*[^s]/src/util\.py"' "$OUT" && ok "the genuinely changed src/util.py IS a section" \
+grep -q '<file p="src/util\.py"' "$OUT" && ok "the genuinely changed src/util.py IS a section" \
                                                   || no "the genuinely changed src/util.py must still be a section"
 [ "$( hdrfiles "$OUT" )" = "1" ] && ok 'files="1" (only the real change counted)' \
                                  || no "expected files=1; got: $( hdrfiles "$OUT" )"
 
 # ── the anchoring is string-based: a relative root spelling behaves identically ────────────────────────
 ( cd "$REPO" && "$BIN" . --pr-context=HEAD~1 >"$TMP/dot.xml" 2>/dev/null )
-grep -q '<file p="\./deps/src/util\.py"' "$TMP/dot.xml" && no 'root "." : the vendored twin must NOT be a section' \
+grep -q '<file p="deps/src/util\.py"' "$TMP/dot.xml" && no 'root "." : the vendored twin must NOT be a section' \
                                                         || ok 'root "." : the vendored twin is not a section'
-grep -q '<file p="\./src/util\.py"' "$TMP/dot.xml" && ok 'root "." : the real change is a section' \
+grep -q '<file p="src/util\.py"' "$TMP/dot.xml" && ok 'root "." : the real change is a section' \
                                                    || no 'root "." : the real change must be a section'
 
 ( cd "$TMP" && "$BIN" repo --pr-context=HEAD~1 >"$TMP/rel.xml" 2>/dev/null )
-grep -q '<file p="repo/deps/src/util\.py"' "$TMP/rel.xml" && no 'root "repo": the vendored twin must NOT be a section' \
+grep -q '<file p="deps/src/util\.py"' "$TMP/rel.xml" && no 'root "repo": the vendored twin must NOT be a section' \
                                                           || ok 'root "repo": the vendored twin is not a section'
-grep -q '<file p="repo/src/util\.py"' "$TMP/rel.xml" && ok 'root "repo": the real change is a section' \
+grep -q '<file p="src/util\.py"' "$TMP/rel.xml" && ok 'root "repo": the real change is a section' \
                                                      || no 'root "repo": the real change must be a section'
 
 # ── a root that is a SUBDIR of the repo still resolves ────────────────────────────────────────────────
 ( cd "$TMP" && "$BIN" repo/src --pr-context=HEAD~1 >"$TMP/sub.xml" 2>/dev/null )
-grep -q '<file p="repo/src/util\.py"' "$TMP/sub.xml" && ok "subdir root 'repo/src' finds its changed file" \
+grep -q '<file p="util\.py"' "$TMP/sub.xml" && ok "subdir root 'repo/src' finds its changed file" \
                                                      || no "subdir root 'repo/src' must find its changed file"
 
 # ── §H6b — the SAME subdir, spelled "." from inside it. This is the spelling the old private join lost.
@@ -110,7 +114,7 @@ grep -q '<file p="repo/src/util\.py"' "$TMP/sub.xml" && ok "subdir root 'repo/sr
 DOTSUBFILES="$( hdrfiles "$TMP/dotsub.xml" )"
 [ "${DOTSUBFILES:-0}" = "1" ] && ok "subdir root '.' finds its changed file: files=\"$DOTSUBFILES\" (§H6b false zero closed)" \
                               || no "subdir root '.' reports files=\"${DOTSUBFILES:-<none>}\", expected 1 (§H6b false zero)"
-grep -q '<file p="\./util\.py"' "$TMP/dotsub.xml" && ok "subdir root '.' lists it at its own indexed spelling ./util.py" \
+grep -q '<file p="util\.py"' "$TMP/dotsub.xml" && ok "subdir root '.' lists it at its own indexed spelling util.py" \
                                                   || no "subdir root '.' must list ./util.py"
 grep -q 'no changed files in the index' "$TMP/dotsub.xml" \
     && no "subdir root '.' still prints 'no changed files in the index' for a tree whose indexed file changed" \

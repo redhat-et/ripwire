@@ -116,10 +116,13 @@ done
 # RE-PIN (H4 W3-DISC): the five graph verbs gained the
 # `counts_floor="1"` disclosure attribute (emitted between limit= and format= on the columnar
 # header). The pinned string moves ONCE, deliberately, to carry it; everything else is unchanged.
+# RE-PINNED 2026-08-19 (R-E CORRECTION): the header gained root= between count= and shown=, because p= on
+# the rows below is root-relative now. Its VALUE is $SBX, a mktemp path, so it cannot be pinned — the
+# literal is split around it. Every other byte of the header is still asserted exactly.
 short="$( "$BIN" "$SBX" --callers=beta --format=columnar --limit=1 --offset=0 2>/dev/null )"
 case "$short" in
-    *'<callers of="beta" defs="1" count="1" shown="1" capped="0" total="1" has_more="0" next_offset="1" offset="0" limit="1" counts_floor="1" format="columnar">'*)
-        ok "short-name columnar header byte-identical to the pre-fix shape (+ the H4 counts_floor attribute)" ;;
+    *'<callers of="beta" defs="1" count="1" root="'*'" shown="1" capped="0" total="1" has_more="0" next_offset="1" offset="0" limit="1" counts_floor="1" format="columnar">'*)
+        ok "short-name columnar header byte-identical to the pre-fix shape (+ counts_floor and root)" ;;
     *)  no "short-name columnar header CHANGED shape: $( printf '%s' "$short" | head -c 200 )" ;;
 esac
 

@@ -516,7 +516,13 @@ else
     # (i) the fixture must actually be the big multi-file diff this script built — if the repo failed to
     #     construct, every assertion below would pass or fail for reasons that have nothing to do with the
     #     budget. Checked FIRST, and loudly: a broken fixture is a broken gate, not a green one.
-    if [ "$FIXFILES" = 'files="14"' ] && [ "$FIXFULL" -gt 20000 ]; then
+    # RE-PINNED 20000 -> 15000 (2026-08-19, R-E CORRECTION): the un-budgeted fixture bundle SHRANK, from
+    # ~21 KB to 18187 B, when p= went root-relative (2026-08-17) — this fixture's crawl root is a mktemp
+    # path, repeated on every one of the 14 <file p=> sections and their nested rows, and it is now stated
+    # once as root=. The floor is a PRESENCE GUARD ("big enough that a 600-token budget must trim it"),
+    # not a measurement: 18187 B against a 600-token (~1.5 KB) budget still binds by an order of magnitude,
+    # and arm (ii) below proves the trim actually happened rather than assuming it.
+    if [ "$FIXFILES" = 'files="14"' ] && [ "$FIXFULL" -gt 15000 ]; then
         ok "(8f) fixture repo built: 14 changed files, ${FIXFULL} B un-budgeted — a document a 600-token budget MUST trim"
     else
         no "(8f) fixture repo did NOT build as specified (${FIXFILES:-<no root>}, ${FIXFULL} B) — the shrink assertion below would prove nothing"

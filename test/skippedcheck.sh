@@ -61,19 +61,22 @@ jsonBytes="$(  wc -c < "$TMP/corpus/data.json" | tr -d ' ' )"
 [ "$bigBytes" -gt 1024 ]     && ok "(0) big.cpp exceeds the 1K ceiling ($bigBytes B)"        || no "(0) big.cpp does NOT exceed 1024 B ($bigBytes B) — fixture broken"
 [ "$jsonBytes" -gt 262144 ]  && ok "(0) data.json exceeds the 256KB json ceiling ($jsonBytes B)" || no "(0) data.json does NOT exceed 262144 B ($jsonBytes B) — fixture broken"
 
-cd "$TMP"   # crawl arg `corpus` → rows spell p="corpus/..." machine-independently
+cd "$TMP"   # crawl arg `corpus` → root="corpus" + rows spell the bare relative path, machine-independently
+# RE-PINNED 2026-08-19 (R-E CORRECTION): with the crawl arg `corpus`, p= used to repeat that prefix on
+# every row; root-relative p= states it ONCE as root="corpus" and rows spell the bare relative path.
+# Still machine-independent — that is why this script cds into $TMP and crawls a relative arg.
 
 # ── (1) generic ceiling: both oversize files listed with limit="1024", exact bytes= ──────────────────────
 "$BIN" corpus --skipped --max-file-size=1K --no-cache > "$TMP/one.xml" 2>/dev/null
 rc=$?
 [ "$rc" -eq 0 ] && ok "(1) --skipped exits 0 (a report, not a gate)" || no "(1) --skipped exited $rc, expected 0"
-grep -q "<f p=\"corpus/big.cpp\" why=\"oversize\" bytes=\"$bigBytes\" limit=\"1024\"/>" "$TMP/one.xml" \
+grep -q "<f p=\"big.cpp\" why=\"oversize\" bytes=\"$bigBytes\" limit=\"1024\"/>" "$TMP/one.xml" \
     && ok "(1) big.cpp row carries its exact bytes= and the generic limit=\"1024\"" \
     || { no "(1) big.cpp row missing or wrong (want bytes=\"$bigBytes\" limit=\"1024\")"; head -c 400 "$TMP/one.xml"; echo; }
-grep -q "<f p=\"corpus/data.json\" why=\"oversize\" bytes=\"$jsonBytes\" limit=\"1024\"/>" "$TMP/one.xml" \
+grep -q "<f p=\"data.json\" why=\"oversize\" bytes=\"$jsonBytes\" limit=\"1024\"/>" "$TMP/one.xml" \
     && ok "(1) data.json over BOTH ceilings is counted once, at the generic ceiling tested first" \
     || no "(1) data.json row missing or wrong (want bytes=\"$jsonBytes\" limit=\"1024\" — generic ceiling wins)"
-grep -q 'p="corpus/small.cpp"' "$TMP/one.xml" \
+grep -q 'p="small.cpp"' "$TMP/one.xml" \
     && no "(1) small.cpp is listed but was never dropped" \
     || ok "(1) the under-ceiling file is not listed"
 grep -q 'oversize="2"' "$TMP/one.xml" && grep -q 'max_file_size="1024"' "$TMP/one.xml" && grep -q 'json_ceiling="262144"' "$TMP/one.xml" \
@@ -82,10 +85,10 @@ grep -q 'oversize="2"' "$TMP/one.xml" && grep -q 'max_file_size="1024"' "$TMP/on
 
 # ── (2) json lane: default ceiling → only data.json, at the fixed json ceiling ───────────────────────────
 "$BIN" corpus --skipped --no-cache > "$TMP/two.xml" 2>/dev/null
-grep -q "<f p=\"corpus/data.json\" why=\"oversize\" bytes=\"$jsonBytes\" limit=\"262144\"/>" "$TMP/two.xml" \
+grep -q "<f p=\"data.json\" why=\"oversize\" bytes=\"$jsonBytes\" limit=\"262144\"/>" "$TMP/two.xml" \
     && ok "(2) >256KB .json is dropped by the json lane and says so (limit=\"262144\")" \
     || { no "(2) data.json row missing or wrong under the default ceiling"; head -c 400 "$TMP/two.xml"; echo; }
-grep -q 'p="corpus/big.cpp"' "$TMP/two.xml" \
+grep -q 'p="big.cpp"' "$TMP/two.xml" \
     && no "(2) big.cpp listed under the default 4MB ceiling it does not exceed" \
     || ok "(2) big.cpp is not listed under the default ceiling"
 grep -q 'oversize="1"' "$TMP/two.xml" && ok "(2) root reports oversize=\"1\"" || no "(2) root does not report oversize=\"1\""

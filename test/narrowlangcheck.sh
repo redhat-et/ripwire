@@ -91,12 +91,14 @@ echo "=== --deps: does the file-adjacency resolver (Rule 3's dependency) resolve
 # depends on it) exactly like a.h shows afferent=2 in the C++ fixture. This isolates the bug to the shared
 # resolveIncludeAdj/fileIncludes basename-matcher, independent of Rule 3's own logic.
 CPP_DEPS="$( "$BIN" "$CPPFIX" --deps --no-cache 2>/dev/null )"
-printf '%s' "$CPP_DEPS" | grep -q 'p="test/importnarrowfix/a.h"[^/]*afferent="[1-9]' \
+# RE-PINNED 2026-08-19 (R-E CORRECTION): p= is root-relative to the crawl root ($CPPFIX), so the row
+# spells p="a.h", not the fixture-prefixed path this probe was written against.
+printf '%s' "$CPP_DEPS" | grep -q 'p="a.h"[^/]*afferent="[1-9]' \
     && ok "C++ control: a.h shows afferent>=1 in --deps (adjacency resolver works on C++)" \
     || no "C++ control: a.h afferent count regressed to 0 — the resolver itself may be broken (unrelated to this gate's finding)"
 
 PY_DEPS="$( "$BIN" "$PYFIX" --deps --no-cache 2>/dev/null )"
-printf '%s' "$PY_DEPS" | grep -q 'p="test/narrowlangfix/py/caller.py"[^/]*<inc t="a"/>' \
+printf '%s' "$PY_DEPS" | grep -q 'p="caller.py"[^/]*<inc t="a"/>' \
     && ok "Python: --deps correctly captures the raw include text (t=\"a\") for caller.py" \
     || no "Python: --deps did not even capture the raw include text — investigate before the narrowing checks below"
 if printf '%s' "$PY_DEPS" | grep -q 'p="test/narrowlangfix/py/a.py"[^/]*afferent="[1-9]'; then

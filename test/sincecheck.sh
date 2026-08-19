@@ -30,15 +30,18 @@ for i in 1 2 3; do printf 'int a(int x){ if(x>%d){return 1;} else {return 2;} }\
 for i in 1 2 3; do printf 'int b(int x){ if(x>%d){return 1;} else {return 2;} }\n' "$i" > B.cpp; git add B.cpp; git commit -qm "B$i"; done
 
 allhx="$("$BIN" "$REPO" --hotspots --no-cache 2>/dev/null)"
-echo "$allhx" | grep -q '/A.cpp"' && echo "$allhx" | grep -q '/B.cpp"' \
+# RE-PINNED 2026-08-19 (R-E CORRECTION): p= is root-relative, so a file at the crawl root spells
+# p="A.cpp" with no leading slash. Anchored on p=" instead, which is a STRICTER selector than the old
+# substring, not a looser one.
+echo "$allhx" | grep -q 'p="A.cpp"' && echo "$allhx" | grep -q 'p="B.cpp"' \
   && ok "all-history --hotspots: both A and B present" \
   || no "all-history --hotspots should list both A and B"
 
 win="$("$BIN" "$REPO" --hotspots --since=HEAD~3 --no-cache 2>/dev/null)"
-if echo "$win" | grep -q '/B.cpp"' && ! echo "$win" | grep -q '/A.cpp"'; then
+if echo "$win" | grep -q 'p="B.cpp"' && ! echo "$win" | grep -q 'p="A.cpp"'; then
   ok "--since=HEAD~3 scopes churn to the window (B only, A dropped)"
 else
-  no "--since=HEAD~3 should keep only B (A's commits predate the window)"; echo "     got: $(echo "$win" | grep -oE '/[AB].cpp" churn="[0-9]"' | tr '\n' ' ')"
+  no "--since=HEAD~3 should keep only B (A's commits predate the window)"; echo "     got: $(echo "$win" | grep -oE 'p="[AB].cpp" churn="[0-9]"' | tr '\n' ' ')"
 fi
 
 baderr="$(mktemp)"
