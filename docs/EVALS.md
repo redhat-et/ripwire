@@ -1135,7 +1135,7 @@ two moves `exemplarconfcheck` is unmeasured; splitting them is a variant this ro
 registered for, and shipping half of a registered rule would itself be an unregistered change. A
 follow-up round can register the halves separately and attribute the shift.
 
-### Length-aware desc+body mix — W3-LEN round, PRE-REGISTERED 2026-08-19 (before the change is measured)
+### Length-aware desc+body mix — lead-section round, PRE-REGISTERED 2026-08-19 (before the change is measured)
 
 This is the ranker-side follow-up the S1b registration named: *"the remaining hypothesis for the
 desc-vs-body gap is ranker-side (a length-aware desc+body mix), which needs its own registration"*.
