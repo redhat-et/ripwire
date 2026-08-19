@@ -870,7 +870,57 @@ measurable rather than a matter of taste. If this round also rejects, the remain
 the desc-vs-body gap is ranker-side (a length-aware desc+body mix), which needs its own
 registration and is out of scope for any description-content round.
 
-**RESULT — recorded after the single measurement, below.**
+**RESULT (2026-08-19, the single measurement): REJECT.** Nine descriptions gained 353 subtokens of
+derived prose (`ripwire-reuse-first` was in the target list but got **no** edit — every one of its
+12 candidates was CLI mechanics or a function word, and the selection rule dropped them all).
+bm25-desc judged hit@1 moved **90 → 92 / 152 = +2 rows**, below the registered [+4, +12] band.
+Reverted per the decision rule; registration, derivation script and candidate table stay.
+
+Every other number rose, and none of them was the registered metric:
+
+| statistic | baseline | after | registered role |
+| --- | --- | --- | --- |
+| bm25-desc judged hit@1 (n=152) | 90 | **92 (+2)** | **PRIMARY — band [+4, +12]** |
+| bm25-desc hit@1 (all 266) | 66.7% | 67.7% | not registered |
+| bm25-desc hit@1 (split=test) | 66.9% | 69.2% | floor ≥ 66.1% — held |
+| bm25-desc sep-auc (split=test) | 0.957 | 0.954 | floor ≥ 0.940 — held |
+| bm25-desc hit@1 / sep-auc (split=dev) | 66.2% / 0.897 | 64.7% / 0.882 | floors 46.0 / 0.75 — held |
+| bm25-full judged hit@1 (n=152) | 93 | 94 | context |
+| net flipped rows, judged split=test (n=85) | — | +3 (5 correct, 2 wrong) | reported, barred from deciding |
+
+**This is the honest reading, and it is not "so close".** Every floor held, the headline arm rose
+on both the whole corpus and the frozen test split, and the round's own mechanism-specific
+prediction landed — the `ripwire-mcp` row that the acronym defect explains flipped to correct, as
+did a `ripwire-layers` row. But the primary is +2 in a band whose lower edge was set at +4 *before
+the measurement*, and set there for a stated reason that the result does not retire: **+4 was the
+smallest change that would also put the description arm past `bm25-full`.** It did not. `bm25-full`
+moved 93 → 94 in the same run (the full arm indexes description *and* body, so it banks every
+addition too), leaving the desc-vs-body gap at **+2 rows to the body** — narrowed by one row, not
+closed. A +2 that leaves the gap open is exactly the displacement-luck outcome the band was drawn
+to exclude, and accepting it because the other columns look good is the post-hoc metric swap the
+registration barred in advance.
+
+**What the round bought, at the price of 353 tokens.** Seven positive rows became correct and five
+became wrong. The five losses concentrate in a way that names the cost: `ripwire-handoff`, whose
+description grew the most in relative terms (96 → 145 tokens, +51%), took top-1 on two rows that
+are not its own — this is the ADD edit's known failure mode arriving on schedule. Prose additions
+cannot be all-signal: of the 353 tokens, only about half were the derived low-df terms; the rest
+was the connective glue that makes them a sentence, and BM25's `b = 0.75` charges the whole
+sentence to every query the skill will ever be scored against. S1 capped additions at 12 words per
+skill and measured net 0; this round removed the cap, added ~39 tokens per skill, and measured +2.
+Neither is the gap. That the two failures bracket the cap from both sides is the useful part.
+
+**Where this leaves the desc-vs-body gap.** Four measurements now agree that description *content*
+is not the lever: the two LB-3 rounds on `--for`, S1's rare-word round at net 0, and this one at
++2-with-the-gap-still-open. The one thing S1 could not have tested did pay off in isolation — the
+tokenizer's acronym shredding is real, `subtokens()` turns `MCP`/`API`/`CI`/`PR` into nothing, and
+`ripwire-mcp`'s description still indexes zero `mcp` tokens today — but recovering one row per
+defect does not carry a description-content round on its own. Two follow-ups are worth their own
+registrations, and both are ranker-side rather than prose-side: (a) a length-aware desc+body mix,
+already S1's surviving hypothesis; (b) making `subtokens()` keep an all-caps run as one token, so
+`MCP` indexes as `mcp` on *both* the document and the query side. (b) is a change to a shared
+tokenizer that every lexical surface in the tool depends on, so it is a ranking round with a full
+recall-lane re-measure, not a skills edit.
 
 ---
 
