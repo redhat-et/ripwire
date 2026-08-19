@@ -1337,6 +1337,142 @@ Two injected bugs, two arms, scored by whether the release test build exits 0 in
 **N = 2, directional, not significant**, and states the honest reading: the tool did not change
 *whether* the fix happened, it changed *how cheaply*.
 
+### Wave-2 adversarial verification (2026-08-19) — six probes against `aa97c9e`
+
+An independent adversarial pass over `integration/wave2-2026-08-17` (34 commits ahead of `ab59ca8`),
+directed *not* to re-run the green suite but to break the wave's claims: gates passing for the wrong
+reason, silently changed semantics, degrade paths that lie. Instruments: a from-scratch build of the
+base (`ab59ca8`) and of the head (`aa97c9e`) in throwaway worktrees, never sharing objects — the
+mixed-binary discipline in `CLAUDE.md`, applied to the verification and not only to the work.
+
+**Mixed-binary cross-check, first.** The wave worktree's incrementally built `build/ripwire` is
+byte-for-byte output-identical to a clean `--clean-first`-equivalent scratch build of the same commit
+across 13 verbs (default map, `--lint`, `--hotspots`, `--clones`, `--grep`, `--for`, `--pack-task`,
+`--tree`, `--communities`, `--seams`, `--quality-panel`, `--skipped`, `--report`). Every number below
+is therefore about the wave, not about a stale object file.
+
+**Probe 1 — unequal cache states. CLEAN.** The zero-cache-format-change claim is verified *in source*,
+not asserted: `kParserVer` stays 65 and `kCacheVersion` stays 13 across the whole wave (the only
+`ingest.cpp` change moves `looksBinary` to `ingest.h`). The four-cell asymmetry matrix, run with
+isolated `TMPDIR` cache ladders on a scratch corpus, is byte-identical in every cell: new cold ==
+new warm; new-on-a-cache-written-by-the-old-binary == new cold; old-on-a-cache-written-by-the-new-binary
+== old cold. Root-relativization survives a stale cache because it happens at render time, not at
+ingest time: `test/rootrelcheck.sh` run with the **new** binary against a cache the **old** binary
+wrote is ALL PASS, and nine path-heavy verbs (including `--tree`, `--lint`, `--grep`, `--expand`) are
+byte-identical cold vs. stale-cache.
+
+**Probe 2 — vacuous-green hunt. Five of six gates proved decisive; one coverage caveat.** Each new or
+re-pinned gate was re-executed against the pre-wave binary. `rootrelcheck` 41 FAIL, `churnjoincheck`
+532 FAIL, `prconvergecheck` 15 FAIL, `qdrefpaircheck` 13 FAIL, `queryfilescancheck` 7 FAIL,
+`packtaskmonotoncheck` 1 FAIL on exactly its load-bearing assertion (`NON-MONOTONIC bodies_kept: 2 ->
+1 at budget=3500`). None of these can pass for the wrong reason.
+`legenddriftcheck` is the caveat. Arm B (the synthetic known-positive) fires correctly. Arm A (live)
+extracts **1 flag reference from 114 legends** on this corpus — the live arm's whole discriminating
+power is one token (`--signatures-only`). It is not vacuous: fed the real live legend text against a
+help table with that flag removed, the checker returns `DIRTY`. But three of its four extraction
+patterns look for a literal `--flag` spelling, which **cannot appear in a well-formed XML comment**,
+so only the prose pattern can ever reach real output. Recorded as narrow coverage, not a false green.
+
+**Probe 3 — W2-K. Two findings; the fix is real and its price was never measured.** The
+non-monotonicity is genuinely gone on the live corpus: the base binary shows `callers_kept` 20 → 13
+going from `--token-budget=6000` to `8000`; the head binary is non-decreasing across the same ladder.
+Both findings are about what that cost.
+
+*K1 — monotone in COUNT, non-monotone in RELEVANCE.* On `packtaskmonotoncheck`'s own fixture, with
+the task `"cliffprobe target function"`:
+
+| `--token-budget` | base (`ab59ca8`) bodies | head (`aa97c9e`) bodies |
+| ---: | --- | --- |
+| 900 | *(none)* | **cliffProbeTargetFunction** |
+| 1200 | **cliffProbeTargetFunction** | SmallOne, SmallTwo |
+| 2000–4000 | **cliffProbeTargetFunction** (+SmallOne at 3000) | SmallOne…SmallFive |
+| 4500+ | all six | all six |
+
+Raising the budget from 900 to 1200 **deletes the body of the function the task literally names** and
+substitutes one-line helpers, and it stays deleted through 4000. The base binary keeps it at every
+budget from 1200 up. "Bigger budget, worse answer" is the exact defect W2-K set out to remove; the
+`count > rank-score > cost` tie-break relocated it from the counter to the content. The disclosure is
+truthful throughout — the drop is named (`<!-- body omitted (over budget): cliffProbeTargetFunction -->`),
+`total="6"` is restated from the true candidate set and `capped="1"` is honest — so this is a
+retrieval-semantics finding, not a dishonesty finding. `packtaskmonotoncheck` cannot see it: it
+asserts on counts only.
+
+*K2 — `monotoneRoll` under-fills the budget, undisclosed.* A section that was itself capped is
+charged its *whole* granted share and donates nothing forward. That is conservative and correct for
+monotonicity, and the source says so; the cost was never quantified anywhere in the round record. On
+this repository, task `"rank the call graph"`:
+
+| `--token-budget` | base bytes (fill) | head bytes (fill) | base `callers_kept` | head `callers_kept` |
+| ---: | ---: | ---: | ---: | ---: |
+| 4000 | 7,708 (90.7%) | 6,548 (77.1%) | 11/20 | 8/20 |
+| 6000 | 9,848 (77.3%) | 7,121 (55.9%) | **20/20** | **13/20** |
+| 8000 | 16,113 (94.8%) | 7,812 (**46.0%**) | 13/20 | 18/20 |
+
+(fill = emitted bytes against `budgetTokens × kMinBytesPerToken × kBudgetHeadroom`.) At the default
+6,000-token budget the flagship one-call bundle now carries **seven fewer caller signatures** while
+leaving ~44% of the budget unspent — and nothing in the output says the truncation was a policy
+choice rather than a budget wall. Roughly a third of the byte reduction is the legitimate
+root-relative path saving; the caller-count column is the part that is not.
+
+**Probe 4 — W2-F residual. Verified, and its CAUSE is now pinned: corpus, not ranker.** The residual
+reproduces exactly, and a three-cell control isolates it:
+
+| binary | tree | ranking-lane lenient recall@5 | MRR |
+| --- | --- | ---: | ---: |
+| `ab59ca8` | `ab59ca8` | **75.0%** | 0.694 |
+| `ab59ca8` | `aa97c9e` | **71.9%** | 0.660 |
+| `aa97c9e` | `aa97c9e` | **71.9%** | 0.660 |
+
+The base binary scores 71.9% on the wave tree — identical to the head binary. The −3.1pp is entirely
+**corpus composition**: the ranking lane scores the live source tree, so the lane's own new symbols
+displace its gold. Confirmed by inspection of `--for="pagerank power iteration"`: on the clean tree
+gold `pageRankDouble` sits at rank 2; on the wave tree ranks 2–5 and 9 are `RankDisclosure`,
+`renderDisclosure` (`src/prconverge.h`), `RankedGraph`, `rankGraphTeleport` (`src/graph.h`) and
+`PageRankRun` (`src/pagerank.h`). The ship rationale named `RankedGraph`/`PageRankRun`; the true
+displacer set is broader and includes the two `prconverge.h` disclosure types.
+**Recalibration verdict: recommend — but not by moving the floor.** A metric that any wave can erode
+merely by adding load-bearing symbols to this repository measures the tool's own source growth, not
+the ranker. The honest correction is to give the ranking lane a frozen corpus the way the recall lane
+already has one (`snapshot.mdpack`/`snapshot.lock`), or to re-derive the gold at the new head. Both
+are deliberate recalibration commits and neither belongs in this wave.
+
+**Probe 5 — silent-semantics sweep. No undisclosed behavior change; four coverage gaps in W2-E's
+claim.** Twenty verb forms were captured from both binaries on this repository, normalized for the
+absolute-root prefix, and structurally diffed. Every residual difference traces to a disclosed
+deliverable: `root="."` plus its shared legend clause (W2-E), `pr_iters=` plus its legend clause
+(W2-F), the `<unindexed>` element and `unindexed_files_scanned=` (W2-J), `est_tokens=` shrinking
+because paths got shorter, and one extra `--for` signature admitted for the same reason. Nothing
+unexplained.
+The gaps are in the *scope* of "root-relative `p=` on ALL verbs + CLI/MCP parity". Four surfaces
+still repeat the absolute root once per row and carry no `root=`:
+
+| surface | absolute `p=` rows | `root=` |
+| --- | ---: | --- |
+| `--tree` (223 KB, the session-start orientation map) | **1,212** | absent |
+| `--quality-panel` (output byte-identical to the base binary) | **40** | absent |
+| MCP `analyze` (the default map's own twin; the CLI form is relative) | **85** | absent |
+| MCP `for` (the CLI form is relative and discloses `root="."`) | 3 | absent |
+
+None is a regression — the base behaves identically — but the claim is broader than the landing, and
+`rootrelcheck`'s 47-verb list omits `--tree` and `--quality-panel` while its CLI/MCP parity arm covers
+only `grep` and `situ`. The new state is *internally inconsistent*: the same corpus answers a CLI
+question with relative paths and the MCP twin of that question with absolute ones.
+
+**Probe 6 — degrade paths. CLEAN.** No `VERIFY( false )` is added anywhere in the wave. Two new
+`DEGRADED_PATH_ALERT` call sites (`restatePackTaskBodiesWrapper`'s unexpected `<bodies>` shape,
+`loadRefTree`'s empty materialized tree), both with a real fallback behind them. W2-F's disclosure is
+explicitly *not* an assert: `pageRankDouble` returns `PageRankRun{ iterationCount, hasConverged }`
+because `DEGRADED_PATH_ALERT` compiles out under `NDEBUG` and a shipped binary would otherwise have no
+signal that a ranking stopped short — non-negotiable #4 honored by construction, not by convention.
+The three added `VERIFY`s are true invariants with no behavior behind them. The
+`RIPWIRE_TEST_PR_MAXITERS` arming hook is honored in every build flavour by design, and its effect is
+disclosed in the document it perturbs (`pr_converged="0"`), so it cannot degrade a run silently.
+
+**Reproduce.** Build both commits in separate throwaway worktrees (never reuse objects across a
+checkout), then: `RIPWIRE_BIN=<base-binary> bash test/<gate>.sh` for each red arm;
+`TMPDIR=<fresh> <binary> <corpus>` for each cache-matrix cell; `bash test/recallevalcheck.sh` run from
+each tree for the probe-4 control.
+
 ---
 
 ## 7. Honest counterexamples
@@ -1376,6 +1512,18 @@ only wall-clock cost. See §4.
 
 **PageRank is a bad co-change ranker** (3.8% at recall@5 against 40.3% lexical), and fusing it into
 the lexical ranker made things worse. See §6.
+
+**`--pack-task`'s budget monotonicity is monotone in the COUNT of bodies, not in their relevance.**
+W2-K (2026-08-17) removed a real defect — a bigger `--token-budget` could show strictly fewer bodies —
+by replacing `packBodies`' streaming admission with a max-count subset pre-selection, tie-broken
+`count > rank-score > cost`. On the gate's own fixture the counter is now non-decreasing and the
+answer is not: at `--token-budget=900` the bundle carries the body of the function the task names, and
+at 1200 it carries two one-line helpers instead, holding that substitution through 4000. The
+pre-selection is disclosed honestly (the dropped candidate is named, `total=` is restated from the true
+candidate set, `capped="1"`), and `test/packtaskmonotoncheck.sh` cannot see the inversion because it
+asserts on counts. The related `monotoneRoll` conservatism — a capped section is charged its whole
+granted share and donates nothing forward — leaves up to ~44% of the requested budget unspent on this
+repository, costing seven caller signatures at the default 6,000-token budget. Both are measured in §6.
 
 **Strict multi-file localization is hard and stays hard.** Held-out LocBench: single-file gold 73.4%,
 multi-file **18.2%**. Multi-SWE-bench C++: single-file 86.3%, multi-file **32.9%**. SFML C++:
