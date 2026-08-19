@@ -11760,10 +11760,51 @@ std::optional<int> runLint( const MainDispatch& d )
         // can share the same rule/file:line/enclosing-symbol/text because the row carries no column).
         outs = dedupeLintFindings( ing, std::move( outs ) );
 
+        // W3-S (2026-08-19): E6 found --lint emitting an UNCAPPED payload on a large corpus — 2,037,645 B /
+        // 6,169 findings (~330 B/finding, driven by long single-line minified text=) with no --help promise
+        // ("trims to fit") kept and no way for a caller to see it coming; every other verb in the catalog has
+        // a display default (--hotspots 40, --grep 100, …), --lint alone had none. Measured HERE before
+        // choosing the cap: this repo prints 367,924 B / 3,213 findings (~114 B/finding); a second, larger
+        // polyglot fixture (ctxpack, 1,033 tracked files) prints 254,445 B / 2,312 findings (~110 B/finding).
+        // kLintDefaultPayloadBytes=100,000 lands an order of magnitude under E6's pathological case while
+        // staying multiples of every other capped verb's default payload on this repo (--hotspots ~5.5 KB,
+        // --clones ~17 KB, --grep(100 hits) ~57 KB) — --lint's own facts are individually smaller so it earns
+        // a bigger budget. An explicit --limit=N always beats it (effectiveRowCap's existing rule), so a
+        // caller who already knew to page past a cap sees no change.
+        static constexpr std::size_t kLintDefaultPayloadBytes = 100000;
         const bool paging = cfg.pageLimit > 0 || cfg.pageOffset > 0;
+        std::size_t lintDefaultShown = outs.size();
+        if( !paging )
+        {
+            // Byte-budget the default (unpaged) run. Rows are already in final sorted order, so this keeps
+            // the same sorted PREFIX pageWindow() would keep by row count; the stopping rule is bytes here
+            // because a corpus with long text= rows (E6's vendored-bundle case) needs far FEWER rows to reach
+            // the same budget than a corpus of short rows does. text= dominates real row size and is summed
+            // exactly; the flat +80 covers the <f> tag markup, path, rule name and enclosing symbol name,
+            // which are all short in practice — an estimate, not a second full render (that would mean
+            // rendering the very tail this exists to avoid paying for), and one that can only ever be
+            // conservative in the wrong direction (undercounting an unusually long path/rule name by a few
+            // dozen bytes), never by the orders of magnitude that would silently readmit the 2 MB case.
+            std::size_t bytesUsed = 0;
+            lintDefaultShown = 0;
+            for( std::size_t i = 0; i < outs.size(); ++i )
+            {
+                const LintOut& m = outs[i];
+                const Symbol*  e = enclosing( m.fileId, m.startByte );
+                const std::size_t rowBytes = m.text.size() + m.rule.size() + m.sev.size()
+                                            + ing.files[ m.fileId ].size()
+                                            + ( e ? e->name.size() : 0 ) + 80;
+                if( lintDefaultShown > 0 && bytesUsed + rowBytes > kLintDefaultPayloadBytes )
+                {
+                    break;   // the sorted prefix already kept at least one row — stop BEFORE the overflow row
+                }
+                bytesUsed += rowBytes;
+                ++lintDefaultShown;
+            }
+        }
         const PageWindow lintPage = paging
                                   ? pageWindow( outs.size(), cfg.pageLimit, cfg.pageOffset )
-                                  : PageWindow{ 0, outs.size() };
+                                  : PageWindow{ 0, lintDefaultShown };
         const std::size_t shownCount = lintPage.end - lintPage.begin;
 
         // §P0.2 disclosure: which rules (if any) spent their whole per-rule budget, so their count= is a floor.
@@ -11856,26 +11897,23 @@ std::optional<int> runLint( const MainDispatch& d )
                          "profiled run armed; an ABSENT heat column was not measured, never zero. heat_joined= on the root counts annotated "
                          "findings; 0 is honest (no finding sits inside a profiled scope), never an error. -->" );
         }
-        if( paging )
         {
-            const bool        hasMore    = lintPage.end < outs.size();
-            const std::size_t nextOffset = hasMore ? lintPage.end : outs.size();
-            // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 3): --lint ESTABLISHED
-            // the six-attribute paging block that pageDisclosure() now serves to every other paging verb —
-            // but its own hand-rolled copy never grew the capped= bit pageDisclosure emits, so the verb
-            // that defined the shape was the one verb that did not spell it. Emitted in pageDisclosure's
-            // exact position (immediately after shown=) so the two are attribute-for-attribute identical.
+            // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 3): --lint ESTABLISHED the
+            // six-attribute paging block that pageDisclosure() now serves to every other paging verb, but its
+            // own hand-rolled copy never grew the capped= bit pageDisclosure emits, so the verb that defined
+            // the shape was the one verb that did not spell it — fixed here by calling the shared helper
+            // instead of hand-rolling a second copy (W3-S: this is also what lets the new default byte cap
+            // above disclose shown=/capped= on the UNPAGED path, which the old hand-rolled `else` branch could
+            // not do at all). discloseCap=true unconditionally, same as every other default-capped verb
+            // (--impact, --hotspots, …): pageDisclosure only adds the paging half (total=/has_more=/
+            // next_offset=/offset=/limit=) when --limit/--offset was actually given, so an un-paged, un-capped
+            // run (a small corpus under kLintDefaultPayloadBytes) is byte-identical to before this change.
             // Distinct from findings_capped= below, which is rule 4's FLOOR marker on the total itself.
-            const unsigned isLintCapped = unsigned( shownCount < outs.size() );
-            std::printf( "<lint findings=\"%zu\" shown=\"%zu\" capped=\"%u\" total=\"%zu\" has_more=\"%u\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"%s%s%s%s>",
-                         outs.size(), shownCount, isLintCapped, outs.size(), hasMore ? 1u : 0u, nextOffset,
-                         cfg.pageOffset > 0 ? cfg.pageOffset : 0, cfg.pageLimit > 0 ? cfg.pageLimit : 0,
+            char lintPageBuf[ kPageDisclosureCap ];
+            std::printf( "<lint findings=\"%zu\"%s%s%s%s%s>", outs.size(),
+                         pageDisclosure( lintPageBuf, sizeof( lintPageBuf ), shownCount, outs.size(), lintPage.end,
+                                        cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true ),
                          anyRuleCapped ? " findings_capped=\"1\"" : "", heatJoinedAttr.c_str(), lintRootExtra.c_str(), lintRootAttr.c_str() );
-        }
-        else
-        {
-            std::printf( "<lint findings=\"%zu\"%s%s%s%s>", outs.size(), anyRuleCapped ? " findings_capped=\"1\"" : "",
-                         heatJoinedAttr.c_str(), lintRootExtra.c_str(), lintRootAttr.c_str() );
         }
         if( cfg.lint )
         { // built-in per-rule tally (order → deterministic)
