@@ -914,8 +914,8 @@ numbers shifted by the `graph.h` comment) and are re-pinned in their own commit.
 default map and on the new fixture, determinism byte-identical over three runs, `xmllint` clean,
 `--quality-delta` exit 0.
 
-**The regression the bands did not cover: `test/exemplarconfcheck.sh`.** Its §P5 arm asserts that a
-strong task must NOT raise `--exemplar`'s `low_confidence` advisory. Post-fix, the query "read
+**The regression the bands did not cover: `test/exemplarconfcheck.sh`.** Its confidence arm asserts
+that a strong task must NOT raise `--exemplar`'s `low_confidence` advisory. Post-fix, the query "read
 command line options" raises it. This was reproduced as a clean 2×2 — same corpora, only the binary
 differs — so it is the tokenizer change, not corpus drift and not that gate's known
 corpus-fragility:
@@ -931,7 +931,7 @@ so scores shift corpus-wide and one symbol enters that ten-slot window — a str
 10-sample proportion flips on a single displacement. The *answer* is unchanged: the exemplar
 returned the identical symbol (`min`, `src/infra/fastmath.h:51`) with the identical donated kind
 (`fn`) before and after; only the advisory attribute differs. It is nonetheless a false positive on
-an honesty signal, which is the exact failure direction §P5 exists to prevent.
+an honesty signal, which is the exact failure direction that arm exists to prevent.
 
 **Verdict: ACCEPT on the registered bands; landing needs an owner call on `exemplarconfcheck`.**
 The registered decision rule is satisfied — in band on the primary surface, every named floor
