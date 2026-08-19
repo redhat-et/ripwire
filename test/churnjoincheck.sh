@@ -62,8 +62,23 @@ trap 'rm -rf "$TMP" "$R1" "$R2" "$R3" $TMPDIRS' EXIT
 # a C++ file with one function of non-zero cognitive complexity (so --hotspots ranks it at all)
 mkfn(){ printf 'int %s( int x )\n{\n    if( x > 1 ) return x + 1;\n    return x - 1;\n}\n' "$1"; }
 D(){ export GIT_AUTHOR_DATE="$1" GIT_COMMITTER_DATE="$1"; }
+# RE-PINNED 2026-08-19 (R-E CORRECTION). Every path selector in this file was a LEADING-SLASH substring
+# ("/deep/util.cpp\"") — correct while p= carried the absolute crawl path, and silently WRONG since p= went
+# root-relative (2026-08-17): a file AT the crawl root now spells p="util.cpp" with no slash at all, so the
+# selector matched nothing and several arms went green-while-inert (the live-repo audit below re-derived
+# "all 0 ranked rows", passing on an empty set). The JOIN itself was never broken — root util.cpp still
+# reports churn=2/rootdev and deep/util.cpp churn=5/deepdev, verified before this re-pin — so the fix is the
+# selector, and it is written to be spelling-independent rather than re-pinned to the new spelling: psel
+# keeps the "boundary suffix" semantics the callers were written for (equal to, or ending in "/" + it) and
+# now accepts the root-relative form too. Callers still pass the leading-slash spelling; psel strips it.
+psel(){ awk -v s="${1#/}" '{ if( match( $0, /p="[^"]*"/ ) ) { v = substr( $0, RSTART + 3, RLENGTH - 4 );
+        if( v == s || ( length(v) > length(s) && substr( v, length(v) - length(s) ) == "/" s ) ) print } }'; }
+# psel's complement: pass every line through EXCEPT the ones psel would select.
+pdrop(){ awk -v s="${1#/}" '{ if( match( $0, /p="[^"]*"/ ) ) { v = substr( $0, RSTART + 3, RLENGTH - 4 );
+        if( v == s || ( length(v) > length(s) && substr( v, length(v) - length(s) ) == "/" s ) ) next } print }'; }
+prow(){ tr '>' '\n' < "$1" | psel "$2"; }
 # churn_of REPO PATHSUFFIX — the churn= attribute of the <f> row whose p= ends with PATHSUFFIX ("" if absent)
-churn_of(){ tr '>' '\n' < "$1" | grep -F "$2\"" | grep -oE 'churn="[0-9]+"' | head -1 | tr -cd '0-9'; }
+churn_of(){ prow "$1" "$2" | grep -oE 'churn="[0-9]+"' | head -1 | tr -cd '0-9'; }
 
 # ── 1. SAME BASENAME AT TWO DEPTHS, divergent commit counts (the §H6 headline shape) ────────────────
 # util.cpp at the root (2 commits) and deep/util.cpp (5 commits). The root file's commit is the NEWEST, so
@@ -90,7 +105,7 @@ unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
 "$BIN" "$R1" --hotspots --limit=50 > "$TMP/h1.out" 2>"$TMP/h1.err"
 C_DEEP="$( churn_of "$TMP/h1.out" /deep/util.cpp )"     # the deep row matches on its own longer suffix;
 # "…/deep/util.cpp" also ends with /util.cpp, so the ROOT row is the one that ends with /util.cpp and NOT with /deep/util.cpp
-C_ROOT="$( tr '>' '\n' < "$TMP/h1.out" | grep -F '/util.cpp"' | grep -vF '/deep/util.cpp"' | grep -oE 'churn="[0-9]+"' | tr -cd '0-9' )"
+C_ROOT="$( prow "$TMP/h1.out" /util.cpp | pdrop /deep/util.cpp | grep -oE 'churn="[0-9]+"' | tr -cd '0-9' )"
 [ "$C_ROOT" = 2 ] && ok "--hotspots: root util.cpp keeps its OWN churn (2)" \
     || no "--hotspots: root util.cpp churn=\"$C_ROOT\", want 2"
 [ "$C_DEEP" = 5 ] && ok "--hotspots: deep/util.cpp keeps its OWN churn (5) — not the root file's 2 (§H6)" \
@@ -104,18 +119,18 @@ FCH="$( tr '>' '\n' < "$TMP/f1.out" | grep -F 'n="deepFn"' | grep -oE 'churn="[0
 
 # ownership uses the OTHER direction of the same join (one git path -> many indexed files)
 "$BIN" "$R1" --owners --detail=1 --limit=50 > "$TMP/o1.out" 2>/dev/null
-OROOT="$( tr '>' '\n' < "$TMP/o1.out" | grep -F '/util.cpp"' | grep -vF '/deep/util.cpp"' | grep -oE 'top="[^"]*"' | head -1 )"
-ODEEP="$( tr '>' '\n' < "$TMP/o1.out" | grep -F '/deep/util.cpp"' | grep -oE 'top="[^"]*"' | head -1 )"
+OROOT="$( prow "$TMP/o1.out" /util.cpp | pdrop /deep/util.cpp | grep -oE 'top="[^"]*"' | head -1 )"
+ODEEP="$( prow "$TMP/o1.out" /deep/util.cpp | grep -oE 'top="[^"]*"' | head -1 )"
 [ "$OROOT" = 'top="rootdev@x.com"' ] && ok "--owners: root util.cpp is owned by rootdev (it has an ownership row at all)" \
     || no "--owners: root util.cpp top author is '$OROOT', want rootdev@x.com (its history was donated to the deep file — §H6)"
 [ "$ODEEP" = 'top="deepdev@x.com"' ] && ok "--owners: deep/util.cpp is owned by deepdev" \
     || no "--owners: deep/util.cpp top author is '$ODEEP', want deepdev@x.com"
-tr '>' '\n' < "$TMP/o1.out" | grep -F '/deep/util.cpp"' | grep -q 'authors="1"' \
+prow "$TMP/o1.out" /deep/util.cpp | grep -q 'authors="1"' \
     && ok "--owners: deep/util.cpp has ONE author (the root file's author is not folded in)" \
-    || no "--owners: deep/util.cpp author count is not 1: $( tr '>' '\n' < "$TMP/o1.out" | grep -F '/deep/util.cpp"' | head -c 200 )"
-tr '>' '\n' < "$TMP/o1.out" | grep -F '/util.cpp"' | grep -vF '/deep/util.cpp"' | grep -q 'authors="1"' \
+    || no "--owners: deep/util.cpp author count is not 1: $( prow "$TMP/o1.out" /deep/util.cpp | head -c 200 )"
+prow "$TMP/o1.out" /util.cpp | pdrop /deep/util.cpp | grep -q 'authors="1"' \
     && ok "--owners: root util.cpp has ONE author (its own)" \
-    || no "--owners: root util.cpp author count is not 1: $( tr '>' '\n' < "$TMP/o1.out" | grep -F '/util.cpp"' | grep -vF '/deep/util.cpp"' | head -c 200 )"
+    || no "--owners: root util.cpp author count is not 1: $( prow "$TMP/o1.out" /util.cpp | pdrop /deep/util.cpp | head -c 200 )"
 
 # determinism: the tie-break must not depend on hash/bucket order
 "$BIN" "$R1" --hotspots --limit=50 > "$TMP/h1b.out" 2>/dev/null
@@ -163,12 +178,12 @@ CB="$( churn_of "$TMP/h2.out" /b/src/x.cpp )"
 "$BIN" "$R2" --owners --detail=1 --limit=50 > "$TMP/o2.out" 2>"$TMP/o2.err"
 # ghost@x.com legitimately owns other.cpp; what must never happen is ghost appearing on a SURVIVOR of the
 # ambiguous join (the deleted src/x.cpp's history has no honest home).
-tr '>' '\n' < "$TMP/o2.out" | grep -E '/[ab]/src/x.cpp"' | grep -q 'ghost@x.com' \
-    && no "--owners: the deleted file's author (ghost@x.com) was attributed to a surviving same-name file: $( tr '>' '\n' < "$TMP/o2.out" | grep -E '/[ab]/src/x.cpp"' | head -c 300 )" \
+{ prow "$TMP/o2.out" /a/src/x.cpp; prow "$TMP/o2.out" /b/src/x.cpp; } | grep -q 'ghost@x.com' \
+    && no "--owners: the deleted file's author (ghost@x.com) was attributed to a surviving same-name file: $( { prow "$TMP/o2.out" /a/src/x.cpp; prow "$TMP/o2.out" /b/src/x.cpp; } | head -c 300 )" \
     || ok "--owners: the deleted file's author is attributed to NEITHER survivor (ambiguous join refused)"
-tr '>' '\n' < "$TMP/o2.out" | grep -F '/a/src/x.cpp"' | grep -q 'authors="1"' \
+prow "$TMP/o2.out" /a/src/x.cpp | grep -q 'authors="1"' \
     && ok "--owners: a/src/x.cpp has exactly ONE author (its own)" \
-    || no "--owners: a/src/x.cpp author count is not 1: $( tr '>' '\n' < "$TMP/o2.out" | grep -F '/a/src/x.cpp"' | head -c 200 )"
+    || no "--owners: a/src/x.cpp author count is not 1: $( prow "$TMP/o2.out" /a/src/x.cpp | head -c 200 )"
 
 "$BIN" "$R2" --cochange=other.cpp > "$TMP/cc2.out" 2>"$TMP/cc2.err"
 grep -q 'partners="0"' "$TMP/cc2.out" \
@@ -265,8 +280,10 @@ if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
         local label="$1" gitWindow="$2"; shift 2
         "$BIN" "$ROOT" --hotspots --limit=1000 "$@" > "$TMP/live.hot" 2>/dev/null
         git -C "$ROOT" log -c --since="$gitWindow" --name-only --format= | sort | uniq -c | awk '{ print $1" "$2 }' > "$TMP/live.counts"
-        tr '>' '\n' < "$TMP/live.hot" | grep -oE "p=\"$ROOT/[^\"]+\" churn=\"[0-9]+\"" \
-            | sed "s|p=\"$ROOT/||; s|\" churn=\"| |; s|\"$||" > "$TMP/live.rows"
+        # RE-PINNED 2026-08-19 (R-E CORRECTION): p= is ROOT-RELATIVE now, so the old "$ROOT/"-anchored
+        # pattern selected nothing and this audit reported "all 0 ranked rows" — green, and inert.
+        tr '>' '\n' < "$TMP/live.hot" | grep -oE 'p="[^"]+" churn="[0-9]+"' \
+            | sed 's|p="||; s|" churn="| |; s|"$||' > "$TMP/live.rows"
         local rows=0 bad=0
         while read -r rel got; do
             rows=$(( rows + 1 ))
@@ -331,7 +348,7 @@ WANT4="$( git -C "$R4" log -c --since="12 months ago" --name-only --format= | gr
 FCH4="$( "$BIN" "$R4" --for="zetaSurvivor" 2>/dev/null | tr '<' '\n' | grep -F 'n="zetaSurvivor"' | grep -oE 'churn="[0-9]+"' | tr -cd '0-9' )"
 [ "${FCH4:-0}" = 0 ] && ok "F4/deleted: --for churn= for the survivor is 0, not the dead path's 6" \
     || no "F4/deleted: --for reports churn=\"$FCH4\" for a file with $WANT4 in-window commits"
-"$BIN" "$R4" --owners --detail=1 --limit=50 2>/dev/null | tr '>' '\n' | grep -F '/a/zeta.cpp"' | grep -q 'ghost@x.com' \
+"$BIN" "$R4" --owners --detail=1 --limit=50 2>/dev/null | tr '>' '\n' | psel /a/zeta.cpp | grep -q 'ghost@x.com' \
     && no "F4/deleted: the deleted file's author was attributed to the survivor" \
     || ok "F4/deleted: --owners does not give the survivor the deleted file's author"
 
@@ -358,7 +375,7 @@ unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
 grep -qF '"'"$R5"'/src/zeta.cpp"' "$TMP/m5.out" \
     && no "F4/excluded: the sandbox is wrong — the excluded ghost is still indexed" \
     || ok "F4/excluded: src/zeta.cpp is out of the index (the premise holds)"
-grep -qF '/keep/src/zeta.cpp"' "$TMP/m5.out" \
+tr '>' '\n' < "$TMP/m5.out" | psel /keep/src/zeta.cpp | grep -q . \
     && ok "F4/excluded: the survivor keep/src/zeta.cpp IS indexed (so the next arm is not vacuous)" \
     || no "F4/excluded: --exclude took the survivor too — this arm proves nothing"
 C5="$( churn_of "$TMP/h5.out" /keep/src/zeta.cpp )"
@@ -699,7 +716,7 @@ PYEOF
     [ "${F9:-0}" = "$W9" ] && ok "F6/gitLogNameOnlyRaw: --for churn=\"$F9\" equals src/x.cpp's own $W9 commit(s) — the split tail bound to nothing" \
         || no "F6/gitLogNameOnlyRaw: --for churn=\"$F9\" but src/x.cpp's own path appears in $W9 in-window commit(s) (a 4096-byte split tail bound to it)"
 
-    A9="$( "$BIN" "$R9" --owners --detail=1 --limit=50 2>/dev/null | tr '>' '\n' | grep -F '/src/x.cpp"' | grep -oE 'authors="[0-9]+"' | tr -cd '0-9' )"
+    A9="$( "$BIN" "$R9" --owners --detail=1 --limit=50 2>/dev/null | tr '>' '\n' | psel /src/x.cpp | grep -oE 'authors="[0-9]+"' | tr -cd '0-9' )"
     [ "${A9:-0}" = 1 ] && ok "F6/gitFileAuthors: src/x.cpp has ONE author — the long path's Ghost is not folded in" \
         || no "F6/gitFileAuthors: src/x.cpp authors=\"$A9\", want 1 (the split tail donated the long path's author)"
 

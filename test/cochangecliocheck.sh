@@ -292,7 +292,9 @@ if m:
     print(m.group(0).split('>',1)[0]+'>')
     for f in re.findall(r'<f p="([^"]*)"',m.group(1)): print(f)
 PY
-    members="$( tail -n +2 "$TMP/coremembers" | sed -E 's#.*/src/##' | sort | tr '\n' ' ' )"
+    # RE-PINNED 2026-08-19 (R-E CORRECTION): p= is root-relative, so the members read "src/g1.cpp" and
+    # the old 's#.*/src/##' (which needs a slash BEFORE src/) stripped nothing. Anchored to the start.
+    members="$( tail -n +2 "$TMP/coremembers" | sed -E 's#^(.*/)?src/##' | sort | tr '\n' ' ' )"
     if [ "$members" = "g1.cpp g2.cpp g3.cpp " ]; then
         ok "(3c) the core group names exactly {g1,g2,g3} — one actionable row instead of three pair rows"
     else

@@ -476,6 +476,11 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
         return {};
     }
 
+    // R-E fix (2026-08-19): root-relative "file" values + a "root" key. This verb has no CLI twin to diverge
+    // from, but an agent that reads `file` here and `p=` from callers/callees in the same task must not be
+    // handed two path dialects for one tree — that is the whole point of the root-relative round.
+    const bool         sqSingleRoot = ing.realPaths.empty();
+    const std::string  sqRootPrefix = sqSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const auto symObj = [ & ]( NodeId id ) -> std::string
     {
         const Symbol& s = ing.symbols[id];
@@ -483,12 +488,18 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
         // the body. Names/signatures by default (this verb); bodies by handle on request.
         return std::string( "{\"name\":\"" ) + mcpdetail::jsonEscape( s.name )
              + "\",\"kind\":\"" + symTag( s.kind )
-             + "\",\"file\":\"" + mcpdetail::jsonEscape( ing.files[ s.fileId ] )
+             + "\",\"file\":\"" + mcpdetail::jsonEscape( std::string( sqSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], sqRootPrefix )
+                                                                                   : std::string_view( ing.files[ s.fileId ] ) ) )
              + "\",\"line\":" + std::to_string( s.line )
              + ",\"handle\":\"" + mcpdetail::jsonEscape( handleFor( ix, id ) ) + "\"}";
     };
 
-    std::string out = "{\"symbol\":" + symObj( f ) + ",\"calledBy\":[";
+    std::string out = "{";
+    if( sqSingleRoot )
+    {
+        out += "\"root\":\"" + mcpdetail::jsonEscape( root ) + "\",";
+    }
+    out += "\"symbol\":" + symObj( f ) + ",\"calledBy\":[";
     {
         const auto* ro = g.inEdges.rowOffsets();
         const auto* ci = g.inEdges.colIndices();
@@ -771,8 +782,20 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
     // and same null-on-a-non-git-root convention main.cpp's --quality-delta --json already established.
     const std::string atVal  = gitstamp::stampAt( root );
     const std::string atJson = atVal.empty() ? std::string( "null" ) : ( "\"" + atVal + "\"" );
-    std::string out = "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[fid] ) + "\",\"commits\":" + std::to_string( commits )
-                    + ",\"at\":" + atJson + ",\"partners\":[";
+    // R-E fix (2026-08-19): root-relative file paths + the "root" key, the JSON siblings of the root= the CLI
+    // --cochange now carries. The first R-E landing converted the CLI arm alone, so the two dialects of one
+    // answer spelled their paths differently — the same divergence the at= note above exists to prevent.
+    const bool         ccSingleRoot = ing.realPaths.empty();
+    const std::string  ccRootPrefix = ccSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
+    const auto         ccRel        = [ & ]( std::uint32_t f ) -> std::string
+    { return std::string( ccSingleRoot ? sarif::rootRelativeUri( ing.files[f], ccRootPrefix ) : std::string_view( ing.files[f] ) ); };
+    std::string out = "{";
+    if( ccSingleRoot )
+    {
+        out += "\"root\":\"" + mcpdetail::jsonEscape( root ) + "\",";
+    }
+    out += "\"file\":\"" + mcpdetail::jsonEscape( ccRel( fid ) ) + "\",\"commits\":" + std::to_string( commits )
+         + ",\"at\":" + atJson + ",\"partners\":[";
     bool first = true;
     for( const CoPartner& p : ps )
     {
@@ -784,7 +807,7 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
         char deg[ 16 ];  std::snprintf( deg, sizeof( deg ), "%.2f", p.deg );
         // §A9.3: the JSON sibling of the XML dep_capable= tell — surprising is false for a pair that could
         // never have carried a static dependency, and dep_capable says WHY it is false.
-        out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[ p.fileId ] ) + "\",\"together\":" + std::to_string( p.together )
+        out += "{\"file\":\"" + mcpdetail::jsonEscape( ccRel( p.fileId ) ) + "\",\"together\":" + std::to_string( p.together )
              + ",\"deg\":" + deg + ",\"surprising\":" + ( p.surprising ? "true" : "false" )
              + ",\"dep_capable\":" + ( p.depCapable ? "true" : "false" ) + "}";
     }
@@ -852,8 +875,17 @@ inline std::string situationDiffJson( const std::string& root, const std::string
 
     const SituationFacts facts = computeSituationFacts( root, ing, ix.g, changed );
 
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= carries (sarif.h) — the
+    // CLI text twin (situ.h::writeSituation) states the SAME fact on its own leading "root: …" line.
+    const bool         situJSingleRoot = ing.realPaths.empty();
+    const std::string  situJRootPrefix = situJSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
+    const auto          situJPathRel   = [ & ]( std::uint32_t f ) -> std::string_view
+    {
+        return situJSingleRoot ? sarif::rootRelativeUri( ing.files[f], situJRootPrefix ) : std::string_view( ing.files[f] );
+    };
+
     const auto fileObj = [ & ]( std::uint32_t f ) -> std::string
-    { return std::string( "{\"file\":\"" ) + mcpdetail::jsonEscape( ing.files[f] ) + "\"}"; };
+    { return std::string( "{\"file\":\"" ) + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\"}"; };
 
     // §B6 M11: the run= hint index, from the SAME source --affected/--situ/--test-gate/--pr-context read
     // (testmap.h). runFieldJson is that header's JSON call shape, so "absent means NOT DERIVABLE" — the
@@ -861,7 +893,12 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     const TestRunnerIndex runners( ing );
     const auto            jsonEsc = []( std::string_view sv ) { return mcpdetail::jsonEscape( std::string( sv ) ); };
 
-    std::string out = "{\"changed_files\":[";
+    std::string out = "{";
+    if( situJSingleRoot )
+    {
+        out += "\"root\":\"" + mcpdetail::jsonEscape( root ) + "\",";
+    }
+    out += "\"changed_files\":[";
     {
         bool first = true;
         for( std::uint32_t f : facts.changed )
@@ -889,7 +926,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
                 out += ",";
             }
             first = false;
-            out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[ facts.blastRadius[i] ] )
+            out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( facts.blastRadius[i] ) ) )
                  + "\",\"dependent_symbols\":" + std::to_string( facts.blastDependents[i] ) + "}";
         }
     }
@@ -908,7 +945,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
                 out += ",";
             }
             first = false;
-            out += "{\"test\":\"" + mcpdetail::jsonEscape( ing.files[f] ) + "\"" + runFieldJson( runners, f, jsonEsc ) + "}";
+            out += "{\"test\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\"" + runFieldJson( runners, f, jsonEsc ) + "}";
         }
     }
 
@@ -923,7 +960,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
             }
             first = false;
             char d[ 16 ];  std::snprintf( d, sizeof( d ), "%.2f", deg );
-            out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[f] ) + "\",\"cochange_degree\":" + d + "}";
+            out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\",\"cochange_degree\":" + d + "}";
         }
     }
 
@@ -937,7 +974,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
                 out += ",";
             }
             first = false;
-            out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[f] ) + "\",\"score\":" + std::to_string( score ) + "}";
+            out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\",\"score\":" + std::to_string( score ) + "}";
         }
     }
 
@@ -1004,9 +1041,18 @@ inline std::string mentionsJson( const std::string& root, const std::string& sym
     // emitted one entry per markdown SECTION, duplicating "file" values up to 3x. docs=/sections= mirror
     // the XML root's disclosures; mentions= and l= mirror the XML row attrs.
     const std::vector<MentionFileRow> fileRows = collapseMentionsToFileRows( ing, docs );
-    std::string out = "{\"symbol\":\"" + mcpdetail::jsonEscape( symbol )
-                    + "\",\"docs\":" + std::to_string( fileRows.size() )
-                    + ",\"sections\":" + std::to_string( docs.size() ) + ",\"files\":[";
+    // R-E fix (2026-08-19): root-relative "file" values + the "root" key — the JSON siblings of the root=
+    // the CLI --mentions now carries. Converted with the CLI arm this time, not one release behind it.
+    const bool         mnSingleRoot = ing.realPaths.empty();
+    const std::string  mnRootPrefix = mnSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
+    std::string out = "{";
+    if( mnSingleRoot )
+    {
+        out += "\"root\":\"" + mcpdetail::jsonEscape( root ) + "\",";
+    }
+    out += "\"symbol\":\"" + mcpdetail::jsonEscape( symbol )
+         + "\",\"docs\":" + std::to_string( fileRows.size() )
+         + ",\"sections\":" + std::to_string( docs.size() ) + ",\"files\":[";
     bool first = true;
     for( const MentionFileRow& row : fileRows )
     {
@@ -1015,7 +1061,9 @@ inline std::string mentionsJson( const std::string& root, const std::string& sym
             out += ",";
         }
         first = false;
-        out += "{\"file\":\"" + mcpdetail::jsonEscape( ing.files[ row.fileId ] ) + "\",\"mentions\":" + std::to_string( row.mentions ) + "}";
+        out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( mnSingleRoot ? sarif::rootRelativeUri( ing.files[ row.fileId ], mnRootPrefix )
+                                                                                : std::string_view( ing.files[ row.fileId ] ) ) )
+             + "\",\"mentions\":" + std::to_string( row.mentions ) + "}";
     }
     out += "]}";
     return out;
@@ -1334,7 +1382,14 @@ inline std::string ownersText( const std::string& root, const std::string& symbo
     const std::string  owSymAttr = symbolName.empty()
                                  ? std::string{}
                                  : " of=\"" + std::string( escapeXml( symbolName, owSymEsc ) ) + "\" defs=\"" + std::to_string( symDefCount ) + "\"";
-    std::fprintf( mem, "<owners files=\"%zu\"%s%s>", ownerships.size(), owSymAttr.c_str(), gitstamp::atAttr( root ).c_str() );
+    // R-E fix (2026-08-19): the same root-relative p= + root= the CLI --owners now emits, in the same slot
+    // (root= before at=, so at= stays LAST — the r26 placement rule). The first R-E landing converted the CLI
+    // arm alone and left this one spelling absolute paths, which is the divergence the §P8 note above forbids.
+    const bool         owSingleRoot = ing.realPaths.empty();
+    const std::string  owRootPrefix = owSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
+    std::vector<char>  owRootEsc;
+    const std::string  owRootAttr   = owSingleRoot ? ( " root=\"" + std::string( rw::escapeXml( root, owRootEsc ) ) + "\"" ) : std::string();
+    std::fprintf( mem, "<owners files=\"%zu\"%s%s%s>", ownerships.size(), owSymAttr.c_str(), owRootAttr.c_str(), gitstamp::atAttr( root ).c_str() );
     if( uniformCount > 0 )
     {
         std::fprintf( mem, "<uniform authors=\"1\" bf=\"1\" share=\"1.00\" files=\"%zu\"/>", uniformCount );
@@ -1343,7 +1398,8 @@ inline std::string ownersText( const std::string& root, const std::string& symbo
     {
         const FileOwnership& ow  = ownerships[i];
         const AuthorScore&   top = ow.authors[0];
-        const auto ep = rw::escapeXml( ing.files[ ow.fileId ], owEsc );
+        const auto ep = rw::escapeXml( owSingleRoot ? sarif::rootRelativeUri( ing.files[ ow.fileId ], owRootPrefix )
+                                                    : std::string_view( ing.files[ ow.fileId ] ), owEsc );
         std::fprintf( mem, "<f p=\"%.*s\" authors=\"%u\" bf=\"%d\"",
                       int( ep.size() ), ep.data(), ow.uniqueAuthors, int( ow.busFactor ) );
         const auto em = rw::escapeXml( top.email, owEsc );
@@ -1434,13 +1490,22 @@ inline std::string exemplarText( const std::string& root, const std::string& kin
     std::fprintf( mem, "<!-- ripwire exemplar for \"%s\"%s: the repo's best-in-class %s to imitate — %s. "
                        "Copy its shape, not its text. -->",
                   ex( reqNote ).c_str(), kindNote.c_str(), symTag( pick.targetKind ), kExemplarSelectionRule );
-    std::fprintf( mem, "<exemplar kind=\"%s\" candidates=\"%zu\" n=\"%s\" p=\"%s:%u\" in=\"%u\" ccx=\"%u\"%s%s%s>",
+    // R-E fix (2026-08-19): the CLI twin went root-relative and this one did not, so ONE exemplar came back
+    // p="src/infra/fastmath.h:51" on the CLI and the same file spelled as a full absolute path over MCP — the
+    // one-answer-two-surfaces contract mcptranchecheck.sh exists to hold. Same single-root condition, same
+    // helper, and the same root= disclosure the CLI twin now carries.
+    const bool         exSingleRoot = ing.realPaths.empty();
+    const std::string  exRootPrefix = exSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
+    const std::string  exRootAttr   = exSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
+    std::fprintf( mem, "<exemplar kind=\"%s\" candidates=\"%zu\" n=\"%s\" p=\"%s:%u\" in=\"%u\" ccx=\"%u\"%s%s%s%s>",
                   symTag( pick.targetKind ), pick.candidateCount, ex( wsym.name ).c_str(),
-                  ex( ing.files[ wsym.fileId ] ).c_str(), wsym.line,
-                  fin( pick.winner ), wsym.ccx, ts( pick.winner ) ? " tested=\"1\"" : "",
+                  ex( exSingleRoot ? sarif::rootRelativeUri( ing.files[ wsym.fileId ], exRootPrefix ) : std::string_view( ing.files[ wsym.fileId ] ) ).c_str(), wsym.line,
+                  fin( pick.winner ), wsym.ccx, exRootAttr.c_str(), ts( pick.winner ) ? " tested=\"1\"" : "",
                   pick.lowConfidence ? " low_confidence=\"1\"" : "",
                   pick.overCcxBar    ? " over_ccx_bar=\"1\"" : "" );
-    packBodies( mem, ing, { pick.winner }, 0 /* no byte budget in MCP (0 = unlimited) */, g.outOff, g.outTargets, false, redact );
+    packBodies( mem, ing, { pick.winner }, 0 /* no byte budget in MCP (0 = unlimited) */, g.outOff, g.outTargets, false, redact,
+                /*ranges=*/nullptr, /*noteIndex=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
+                /*withFileContext=*/false, exSingleRoot ? std::string_view( root ) : std::string_view() );
     std::fprintf( mem, "</exemplar></ctx>" );
     std::fflush( mem );
     std::fclose( mem );
@@ -1500,12 +1565,21 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     const PageWindow  ipw       = pageWindow( show.size(), effectiveRowCap( page.limit, 40 ), page.offset );
     const std::size_t shownRows = ipw.end - ipw.begin;
     char              ipab[ kPageDisclosureCap ];
-    std::fprintf( mem, "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s>",
+    // R-E fix (2026-08-19): root-relative p= + root=, exactly as the CLI --impact now emits them. The first
+    // R-E landing converted the CLI arm alone, so mcpclidiffcheck's attribute-set lens went red (CLI has
+    // root=, MCP does not) and every row answered the same question in a different path dialect.
+    const bool         imSingleRoot = ing.realPaths.empty();
+    const std::string  imRootPrefix = imSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
+    const std::string  imRootAttr   = imSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
+    std::fprintf( mem, "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s%s>",
                   ex( symbol ).c_str(), seeds.size(), reach.size(),
+                  imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   kGraphCountFloorAttrXml, renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str() );
     for( std::size_t i = ipw.begin; i < ipw.end; ++i )
-    { const Symbol& s = ing.symbols[ show[i] ]; std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
+    { const Symbol& s = ing.symbols[ show[i] ];
+      const std::string_view rp = imSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], imRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+      std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line ); }
     std::fprintf( mem, "</impact>" );
     std::fflush( mem );
     std::fclose( mem );
@@ -1663,12 +1737,21 @@ inline std::string usesText( const std::string& root, const std::string& symbol 
                        "Reference-name-based (same heuristic level as call edges) — verify in source if a name is overloaded. "
                        "external=\"1\" means SYM has no definition in the indexed tree under ANY spelling (stdlib/third-party); "
                        "a qualified file:name spelling whose bare name IS defined refuses instead (the CLI uses verb narrows it). "
-                       "%s-->", kUsesLegendOpen, graphCountDisclosure().c_str() );
-    std::fprintf( mem, "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s>",
-                  ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), kGraphCountFloorAttrXml );
+                       "%s-->%s", kUsesLegendOpen, graphCountDisclosure().c_str(),
+                  rootRelPathsLegend( ing.realPaths.empty() ) );   // R-E fix: the CLI --uses legend carries the
+                                                                   // identical clause — floormarkcheck (4) pins
+                                                                   // the two disclosure tails byte-identical.
+    // R-E fix (2026-08-19): root-relative p= + root=, exactly as the CLI --uses now emits them (same finding
+    // as impactText above — the first R-E landing converted only the CLI arm).
+    const bool         usSingleRoot = ing.realPaths.empty();
+    const std::string  usRootPrefix = usSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
+    const std::string  usRootAttr   = usSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
+    std::fprintf( mem, "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s%s>",
+                  ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), usRootAttr.c_str(), kGraphCountFloorAttrXml );
     for( const UseSite& u : sites )
     {
-        std::fprintf( mem, "<u role=\"%s\" p=\"%s:%u\"", refRoleTag( u.role ), ex( ing.files[ u.fileId ] ).c_str(), u.line );
+        const std::string_view up = usSingleRoot ? sarif::rootRelativeUri( ing.files[ u.fileId ], usRootPrefix ) : std::string_view( ing.files[ u.fileId ] );
+        std::fprintf( mem, "<u role=\"%s\" p=\"%s:%u\"", refRoleTag( u.role ), ex( up ).c_str(), u.line );
         if( !u.in.empty() )
         {
             std::fprintf( mem, " in_id=\"%s\"", ex( u.in ).c_str() ); // §P8: MCP twin of the CLI --uses rename
@@ -1709,8 +1792,14 @@ inline std::string pathText( const std::string& root, const std::string& from, c
 
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the
+    // CLI twin (main.cpp runPath) computes the identical condition so the two dialects cannot diverge.
+    const bool         ptSingleRoot = ing.realPaths.empty();
+    const std::string  ptRootPrefix = ptSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const auto loc = [ & ]( NodeId n ) -> std::string
-    { const Symbol& s = ing.symbols[n]; return ex( ing.files[ s.fileId ] ) + ":" + std::to_string( s.line ); };
+    { const Symbol& s = ing.symbols[n];
+      const std::string_view rp = ptSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], ptRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+      return ex( rp ) + ":" + std::to_string( s.line ); };
 
     char*       buf = nullptr;
     std::size_t sz  = 0;
@@ -1719,10 +1808,14 @@ inline std::string pathText( const std::string& root, const std::string& from, c
     {
         return {};
     }
-    std::fprintf( mem, "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"",
+    const std::string ptRootAttr = ptSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
+    // R-E fix (2026-08-19): the same shared root-relative clause the CLI --path twin now leads with — this
+    // verb has no legend of its own either, and the two dialects must not differ on what they explain.
+    std::fprintf( mem, "%s", rootRelPathsLegend( ptSingleRoot ) );
+    std::fprintf( mem, "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"%s",
                   ex( from ).c_str(), ex( to ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                   srcDefs.size(), dstDefs.size(),
-                  pth.empty() ? 0 : 1, pth.empty() ? std::size_t( 0 ) : pth.size() - 1 );
+                  pth.empty() ? 0 : 1, pth.empty() ? std::size_t( 0 ) : pth.size() - 1, ptRootAttr.c_str() );
     if( pth.empty() )
     {
         std::fprintf( mem, " hint=\"no directed call path — try the connect verb on %s,%s (undirected: finds a shared caller), or uses/impact for non-call references\"",
@@ -1730,7 +1823,9 @@ inline std::string pathText( const std::string& root, const std::string& from, c
     }
     std::fprintf( mem, ">" );
     for( NodeId n : pth )
-    { const Symbol& s = ing.symbols[n]; std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line ); }
+    { const Symbol&           s  = ing.symbols[n];
+      const std::string_view  rp = ptSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], ptRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+      std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line ); }
     std::fprintf( mem, "</path>" );
     std::fflush( mem );
     std::fclose( mem );
@@ -1917,18 +2012,38 @@ inline constexpr std::size_t kConnectRootBytes = 112;
 // The ONE estimator both the trim-loop fit check and the printed est_tokens go through. Never inline the
 // arithmetic at a call site again: two copies of this formula is exactly how the payload-only scope bug
 // survived (the printed number and the budget decision must be the same number, by construction).
-inline std::size_t connectEstTokens( std::size_t payloadBytes ) noexcept
+// `extraBytes` — R-E fix (2026-08-19): the bytes this document carries that the two constants above do not
+// bound, i.e. the root= attribute's own length (an absolute crawl root is easily 50+ bytes, and kConnectRootBytes
+// is a start-tag bound from before root= existed) plus the shared root-relative legend comment when it is
+// emitted. The first R-E landing added root= to the start tag and left the estimator alone, which is exactly
+// the UNDER-report kConnectRootBytes' own comment says must never happen. Passed, never re-derived, so the
+// trim-loop's fit check and the printed est_tokens still cannot disagree.
+inline std::size_t connectEstTokens( std::size_t payloadBytes, std::size_t extraBytes = 0 ) noexcept
 {
-    const double wholeDocumentBytes = double( payloadBytes ) + double( sizeof( kConnectHeader ) - 1 ) + double( kConnectRootBytes );
+    const double wholeDocumentBytes = double( payloadBytes ) + double( sizeof( kConnectHeader ) - 1 )
+                                    + double( kConnectRootBytes ) + double( extraBytes );
     return std::size_t( wholeDocumentBytes / kBytesPerTokenDefault + 0.5 );
 }
 
 inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectResult& res,
                          RedactCounts* redact,                  // §B0/W3-N1: REQUIRED — the Steiner-node sig= attrs are emitted text
-                         int maxTokens = 0 )
+                         int maxTokens = 0,
+                         std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                                                           // argument serialize() takes — see its comment.
+                                                           // Shared by CLI --connect and the MCP connect verb.
 {
     std::vector<char> escBuf;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, escBuf ) ); };
+    const std::string rootPrefix = rootArg.empty() ? std::string() : sarif::rootPrefixOf( rootArg );
+    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
+    // R-E fix (2026-08-19): the root= attribute and the shared root-relative legend are part of the document
+    // this verb budgets, so they are charged to BOTH the trim-loop fit check and the printed est_tokens. Built
+    // once here because connectEstTokens must be called with the same value in both places.
+    const std::string  connectRootAttr = rootArg.empty() ? std::string() : ( " root=\"" + ex( rootArg ) + "\"" );
+    const std::size_t  connectExtraBytes = connectRootAttr.size() + std::strlen( rootRelPathsLegend( !rootArg.empty() ) );
 
     // per-file content cache for the Steiner sig= attributes (each needed file read at most once).
     HashMap<std::uint32_t, std::string> contents;
@@ -1962,7 +2077,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
         const Symbol& s = ing.symbols[ id ];
         p.append( "<" ).append( tag ).append( " n=\"" ).append( ex( s.name ) )
          .append( "\" t=\"" ).append( symTag( s.kind ) )
-         .append( "\" p=\"" ).append( ex( ing.files[ s.fileId ] ) ).append( ":" ).append( std::to_string( s.line ) ).append( "\"" );
+         .append( "\" p=\"" ).append( ex( pathRel( s.fileId ) ) ).append( ":" ).append( std::to_string( s.line ) ).append( "\"" );
     };
 
     // §4 trim order: pass 1 full sigs; pass 2 name-only Steiner nodes; then drop legs longest-first
@@ -2066,7 +2181,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
         // fit check against --max-tokens (0 = no budget) — over the WHOLE document (§P9.3, see kConnectHeader
         // above): the same estimator that produces the printed est_tokens, so the budget the caller sets and
         // the number the caller reads can never disagree.
-        const std::size_t est = connectEstTokens( payload.size() );
+        const std::size_t est = connectEstTokens( payload.size(), connectExtraBytes );
         if( maxTokens <= 0 || est <= std::size_t( maxTokens ) )
         {
             break;
@@ -2080,11 +2195,11 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
     // §P8 vocabulary: `est_tokens="~191"` was the tool's only NON-NUMERIC token estimate — the `~` made
     // `int(...)` throw in the one field whose whole purpose is arithmetic against a budget, and no other
     // verb apologises for an estimate being an estimate. Dropped.
-    const std::size_t estTokens = connectEstTokens( payload.size() );
-    std::fprintf( out, "%s", kConnectHeader );
-    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s>",
+    const std::size_t estTokens = connectEstTokens( payload.size(), connectExtraBytes );
+    std::fprintf( out, "%s%s", kConnectHeader, rootRelPathsLegend( !rootArg.empty() ) );
+    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s%s>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups, estTokens,
-                  truncated ? " truncated=\"paths\"" : "" );
+                  truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str() );
     std::fwrite( payload.data(), 1, payload.size(), out );
     std::fprintf( out, "</connect>" );
 }
@@ -2115,7 +2230,8 @@ inline std::string connectText( const std::string& root, const std::vector<std::
     std::size_t sz  = 0;
     std::FILE*  mem = open_memstream( &buf, &sz );
     if( !mem ) { err = "internal error"; return {}; }
-    packConnect( mem, ing, res, redact );
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    packConnect( mem, ing, res, redact, /*maxTokens=*/0, ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );
     std::fflush( mem );
     std::fclose( mem );
     std::string out = buf ? std::string( buf, sz ) : std::string{};
@@ -2493,6 +2609,9 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     in.impure       = &impure;
     in.redact       = redact;
     in.notes        = notesPtr;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the
+    // CLI twin (main.cpp runPackTask) sets the identical field so the two dialects cannot diverge.
+    in.rootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
     if( partitionCount >= packpartition::kMinPartitions && partitionCount <= packpartition::kMaxPartitions )
     {
         return packpartition::packTaskPartitionText( ing, g, task, lr, in, partitionCount );

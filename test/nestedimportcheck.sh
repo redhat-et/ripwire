@@ -165,7 +165,9 @@ noinc must_not_appear_require 'TS `require( … )` is a call expression, not an 
 # 1f. NO SPRAY — exact per-file counts (hand-read; see the header).
 count(){ # count <file> <expected> <label>
     local got
-    got="$( tr '>' '\n' <"$TMP/deps" | grep -E "<f p=\"[^\"]*/$1\" .*includes=" | grep -oE 'includes="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"
+    # RE-PINNED 2026-08-19 (R-E CORRECTION): p= is root-relative, so a fixture file at the crawl root
+    # spells p="guarded.py" and the mandatory "/" before $1 matched nothing (every count read <no row>).
+    got="$( tr '>' '\n' <"$TMP/deps" | grep -E "<f p=\"([^\"]*/)?$1\" .*includes=" | grep -oE 'includes="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"
     if [ "${got:-}" = "$2" ]; then ok "count: $3 (includes=$2)"; else no "count: $3 — expected includes=$2, got includes=${got:-<no row>}"; fi
 }
 count guarded.py       19 'guarded.py: 18 import + 1 from-import, each captured exactly once'

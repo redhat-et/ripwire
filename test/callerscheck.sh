@@ -36,18 +36,20 @@ c(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$FIX" --callers="$1" --no-cache 2>/d
 ec(){ perl -e 'alarm 8; exec @ARGV' "$BIN" "$FIX" --callers="$1" --no-cache >/dev/null 2>&1; echo $?; }
 cnt(){ printf '%s' "$1" | grep -oE 'count="[0-9]+"' | grep -oE '[0-9]+'; }
 
-# ── #1: --callers=hot lists exactly the 2 known callers, with correct p="....file:line" (BIN may be
-#    invoked with an absolute or relative FIX path — match on the path SUFFIX, not full string) ─────────
+# ── #1: --callers=hot lists exactly the 2 known callers, with correct p="....file:line" (R-E, 2026-08-17
+#    harvest: --callers is now root-relative, so a single-root run's p= never carries the crawl root's OWN
+#    directory name at all — "queryfix/src/..." became bare "src/..." — match the root-relative spelling
+#    directly rather than a "queryfix/" suffix that used to tolerate an absolute-or-./-relative FIX path) ──
 OUT_HOT="$( c hot )"
 { [ "$( cnt "$OUT_HOT" )" = 2 ] \
-    && printf '%s' "$OUT_HOT" | grep -qE '<s t="fn" n="caller_a" p="[^"]*queryfix/src/util\.cpp:3"/>' \
-    && printf '%s' "$OUT_HOT" | grep -qE '<s t="fn" n="caller_b" p="[^"]*queryfix/src/util\.cpp:4"/>'; } \
+    && printf '%s' "$OUT_HOT" | grep -qE '<s t="fn" n="caller_a" p="src/util\.cpp:3"/>' \
+    && printf '%s' "$OUT_HOT" | grep -qE '<s t="fn" n="caller_b" p="src/util\.cpp:4"/>'; } \
     && ok "--callers=hot: exactly caller_a (util.cpp:3) + caller_b (util.cpp:4), count=2" \
     || no "--callers=hot: wrong callers/lines — got: $OUT_HOT"
 
 # ── #2: --callers=d3 lists exactly its one known caller (d2), correct file:line ─────────────────────────
 OUT_D3="$( c d3 )"
-{ [ "$( cnt "$OUT_D3" )" = 1 ] && printf '%s' "$OUT_D3" | grep -qE '<s t="fn" n="d2" p="[^"]*queryfix/src/chain\.cpp:3"/>'; } \
+{ [ "$( cnt "$OUT_D3" )" = 1 ] && printf '%s' "$OUT_D3" | grep -qE '<s t="fn" n="d2" p="src/chain\.cpp:3"/>'; } \
     && ok "--callers=d3: exactly d2 (chain.cpp:3), count=1" \
     || no "--callers=d3: wrong caller/line — got: $OUT_D3"
 

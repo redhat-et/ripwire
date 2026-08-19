@@ -154,12 +154,18 @@ g stash pop -q
 # grow one attribute in the vocabulary pass — `est_tokens=`, computed from bytes already in hand, no git, no
 # cost — so the old `*'<r>'*` literal reported "not found at all" for a root that is exactly as unstamped as
 # before. Pinned to the ABSENCE of at= (the actual invariant) plus the PRESENCE of the free est_tokens=.
+# RE-PINNED 2026-08-19 (R-E CORRECTION): the `<r est_tokens="` literal was POSITIONAL — it assumed
+# est_tokens= is the first attribute on <r>, which stopped being true when root= landed in front of it
+# (2026-08-17). The INVARIANT this arm protects is unchanged and is asserted directly now: no at= (the
+# actual "never pays for a git subprocess" property) and a present, git-free est_tokens=, wherever the two
+# sit in the attribute order. Same lesson as the §P8 re-pin above: pin the property, not the byte offset.
 out="$( "$BIN" "$R" --no-cache 2>/dev/null )"
-case "$out" in
-    *'<r at='*)          no "default map: <r> grew an at= — this must never cost a git subprocess on the hot path" ;;
-    *'<r est_tokens="'*) ok "default map: <r> carries only the git-free est_tokens=, never at=" ;;
-    *'<r>'*)             no "default map: <r> lost its est_tokens= — the map's own size is comment-only again" ;;
-    *)                   no "default map: <r> not found at all" ;;
+rroot="$( printf '%s' "$out" | grep -oE '<r[ >][^>]*' | head -1 )"
+case "$rroot" in
+    *' at='*)          no "default map: <r> grew an at= — this must never cost a git subprocess on the hot path" ;;
+    *'est_tokens="'*)  ok "default map: <r> carries the git-free est_tokens= and no at= ($rroot)" ;;
+    '<r>'|'<r '*)      no "default map: <r> lost its est_tokens= — the map's own size is comment-only again" ;;
+    *)                 no "default map: <r> not found at all" ;;
 esac
 
 # --map-diff DOES stamp <r>: it already shells out to git for the diff itself

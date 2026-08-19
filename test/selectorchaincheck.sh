@@ -89,7 +89,9 @@ fi
 # ── (b2) an OVERLOADED name: `empty` has 3 defs; the selector must pick exactly one ───────────────────
 E_ALL="$( run --top-k=0 --expand=empty              2>/dev/null )"
 E_ONE="$( run --top-k=0 --expand=src/notes.h:empty  2>/dev/null )"
-{ [ "$( bcnt "$E_ALL" )" -ge 3 ] && [ "$( bcnt "$E_ONE" )" = 1 ] && printf '%s' "$E_ONE" | grep -q 'p="./src/notes.h"'; } \
+# RE-PINNED 2026-08-19 (R-E CORRECTION): p= is root-relative, so the "./" the crawl root used to carry
+# is gone from the row spelling. The selector passed on the command line is unchanged.
+{ [ "$( bcnt "$E_ALL" )" -ge 3 ] && [ "$( bcnt "$E_ONE" )" = 1 ] && printf '%s' "$E_ONE" | grep -q 'p="src/notes.h"'; } \
   && ok "(b2) overloaded 'empty': bare=$( bcnt "$E_ALL" ) defs, src/notes.h:empty = exactly 1 (notes.h)" \
   || no "(b2) overload disambiguation wrong (bare=$( bcnt "$E_ALL" ) qualified=$( bcnt "$E_ONE" ))"
 
@@ -105,7 +107,7 @@ printf '%s' "$S_P" | grep -q 'lines="1-1' \
 
 # ── (c) --outline takes the same selector, and its refusal names --outline (§P10 X7) ─────────────────
 O_ONE="$( run --top-k=0 --outline=src/notes.h:empty 2>/dev/null )"
-{ [ "$( ocnt "$O_ONE" )" = 1 ] && printf '%s' "$O_ONE" | grep -q 'p="./src/notes.h"'; } \
+{ [ "$( ocnt "$O_ONE" )" = 1 ] && printf '%s' "$O_ONE" | grep -q 'p="src/notes.h"'; } \
   && ok "(c) --outline=src/notes.h:empty → exactly the notes.h def" \
   || no "(c) --outline selector wrong (outlines=$( ocnt "$O_ONE" ))"
 OERR="$( run --top-k=0 --outline=nosuch.h:zzznotasymbol 2>&1 >/dev/null )"

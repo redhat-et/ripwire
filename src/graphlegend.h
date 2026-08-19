@@ -96,6 +96,24 @@ inline std::string graphCountDisclosure()
 inline constexpr const char* kGraphCountFloorAttrXml = " counts_floor=\"1\"";
 inline constexpr const char* kGraphCountFloorAttrJson = ",\"counts_floor\":true";
 
+// ---- the root-relative path disclosure, ONE sentence for every verb that emits root= --------------------
+// R-E fix (2026-08-19): the root-relative round gave 30 first screens a root= attribute and defined it in
+// none of them. test/legendcoveragecheck.sh caught it, and its baseline file may only be edited DOWNWARD —
+// so the fix is the TEXT, not a baseline line. Hoisted here rather than pasted into eighteen legends: it is
+// one claim, --grep already shipped it, and a second wording would be exactly the §B4 echo-site drift this
+// header exists to stop. Each emitter concatenates it into its own legend (a trailing "%s" before the -->).
+// It is emitted as its OWN comment, immediately after the verb's legend and before the root element, rather
+// than spliced into eighteen string literals: legendcoveragecheck's legendOf() reads the whole LEADING RUN
+// of comments, so an adjacent comment IS the legend, and one shared literal cannot drift from itself the way
+// eighteen hand-edited tails can. Emit it through rootRelPathsLegend( bool ) so the text appears exactly when
+// root= does — a legend that defines an attribute the document did not emit is the mirror-image false claim.
+inline constexpr const char* kRootRelPathsLegend =
+    "<!-- root= on this element is the crawl root every p= below is RELATIVE to (single-root runs only; "
+    "absent => p= is the path ingest itself used, unchanged). -->";
+
+// `on` is the emitter's own root=-present condition, never a re-derivation of it.
+inline const char* rootRelPathsLegend( bool on ) noexcept { return on ? kRootRelPathsLegend : ""; }
+
 // ---- the per-verb legend OPENERS that more than one emitter prints -------------------------------------
 // Each of these had TWO byte-identical copies (a CLI one in main.cpp, an MCP one in mcpverbs.h) before this
 // header. They are hoisted verbatim-minus-the-fix so the pair cannot drift; the REST of each verb's legend

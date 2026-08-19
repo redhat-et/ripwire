@@ -65,7 +65,10 @@ for i in 1 2 3; do printf 'let ocamlFn%d x = x + %d\n' "$i" "$i" > "$TMP/corpus/
 printf 'val ocamlSig : int -> int\n' > "$TMP/corpus/mod1.mli"
 printf '\211PNG\r\n\032\n binary-ish payload\n' > "$TMP/corpus/logo.png"
 
-cd "$TMP"   # crawl arg `corpus` → rows spell p="corpus/..." machine-independently
+cd "$TMP"   # crawl arg `corpus` → root="corpus" + rows spell the bare relative path, machine-independently
+# RE-PINNED 2026-08-19 (R-E CORRECTION): with the crawl arg `corpus`, p= used to repeat that prefix on
+# every row; root-relative p= states it ONCE as root="corpus" and rows spell the bare relative path.
+# Still machine-independent — that is why this script cds into $TMP and crawls a relative arg.
 
 # ── (0) presence guards ──────────────────────────────────────────────────────────────────────────────
 bigBytes="$( wc -c < "$TMP/corpus/big.cpp" | tr -d ' ' )"
@@ -90,10 +93,10 @@ for m in re.finditer(r'<f\b[^>]*/>', x):
 sys.exit(1)
 PY
 }
-hasrow 'corpus/big.cpp'      oversize        && ok '(1) big.cpp     row carries why="oversize"'        || no '(1) NO why="oversize" row for corpus/big.cpp'
-hasrow 'corpus/vendorgen.cpp' excluded       && ok '(1) vendorgen.cpp row carries why="excluded"'      || no '(1) NO why="excluded" row for corpus/vendorgen.cpp'
-hasrow 'corpus/mod1.ml'      unsupported-ext && ok '(1) mod1.ml     row carries why="unsupported-ext"' || no '(1) NO why="unsupported-ext" row for corpus/mod1.ml'
-grep -q 'p="corpus/keep.cpp"' "$TMP/sk.xml" && no '(1) keep.cpp is INDEXED — it must not appear as a skip row' \
+hasrow 'big.cpp'       oversize        && ok '(1) big.cpp     row carries why="oversize"'        || no '(1) NO why="oversize" row for corpus/big.cpp'
+hasrow 'vendorgen.cpp' excluded       && ok '(1) vendorgen.cpp row carries why="excluded"'      || no '(1) NO why="excluded" row for corpus/vendorgen.cpp'
+hasrow 'mod1.ml'       unsupported-ext && ok '(1) mod1.ml     row carries why="unsupported-ext"' || no '(1) NO why="unsupported-ext" row for corpus/mod1.ml'
+grep -q 'p="keep.cpp"' "$TMP/sk.xml" && no '(1) keep.cpp is INDEXED — it must not appear as a skip row' \
                                             || ok '(1) the indexed file (keep.cpp) has no skip row'
 
 # ── (2) reconciliation ───────────────────────────────────────────────────────────────────────────────

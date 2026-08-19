@@ -782,14 +782,18 @@ inline void writeAbiCaveats( std::FILE* out, const char* tag, const std::vector<
     }
 }
 
-inline void writeAbiStruct( std::FILE* out, const StructRow& s, const XmlEscaper& ex )
+// `rootPrefix` empty ⇒ p= keeps s.path unchanged (multi-root, or no single root to strip) — R-E
+// (2026-08-17 harvest): s.path is an already-materialized copy of ing.files[fileId], relativized here at
+// print time exactly like layout.h's writeLayoutDef.
+inline void writeAbiStruct( std::FILE* out, const StructRow& s, const XmlEscaper& ex, std::string_view rootPrefix = {} )
 {
+    const std::string_view rp = rootPrefix.empty() ? std::string_view( s.path ) : rw::sarif::rootRelativeUri( s.path, rootPrefix );
     // ref_size/size_differs are meaningful only when the ref side was actually SIZED: "absent" has no bytes
     // at all, and "unknown" refused to place a number (finalizeLayout leaves size at 0, which would print
     // as ref_size="0" and read as "an empty struct" — a plausible-looking wrong number of exactly the kind
     // the honesty contract exists to prevent). Omitted rather than printed as a misleading 0.
     std::fprintf( out, "<struct n=\"%s\" p=\"%s\" l=\"%u\" kind=\"%s\" head_size=\"%u\"",
-                  ex( s.name ).c_str(), ex( s.path ).c_str(), s.headLine, s.kind, s.headSize );
+                  ex( s.name ).c_str(), ex( rp ).c_str(), s.headLine, s.kind, s.headSize );
     if( s.refSized )
     {
         std::fprintf( out, " ref_size=\"%u\" size_differs=\"%d\" size_delta=\"%u\"",
@@ -833,7 +837,8 @@ inline std::size_t eligibleRows( const RefRow& r, bool listAll ) noexcept
     return n;
 }
 
-inline void writeAbiRef( std::FILE* out, const RefRow& r, const XmlEscaper& ex, std::size_t maxStructs, bool listAll )
+inline void writeAbiRef( std::FILE* out, const RefRow& r, const XmlEscaper& ex, std::size_t maxStructs, bool listAll,
+                         std::string_view rootPrefix = {} )
 {
     const std::size_t eligible   = eligibleRows( r, listAll );
     const std::size_t shownCount = std::min( eligible, maxStructs );
@@ -859,7 +864,7 @@ inline void writeAbiRef( std::FILE* out, const RefRow& r, const XmlEscaper& ex, 
         {
             break;
         }
-        writeAbiStruct( out, s, ex );
+        writeAbiStruct( out, s, ex, rootPrefix );
     }
     if( eligible > shownCount )
     {
@@ -868,10 +873,13 @@ inline void writeAbiRef( std::FILE* out, const RefRow& r, const XmlEscaper& ex, 
     std::fprintf( out, "</ref>" );
 }
 
-inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t maxStructs, bool listAll )
+// `rootArg` — R-E (2026-08-17 harvest), same single-root-only root argument serialize() takes; --abi is
+// single-root by construction (per its own doc comment above), so every caller has one to pass.
+inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t maxStructs, bool listAll, std::string_view rootArg = {} )
 {
     std::vector<char> esc;
     const XmlEscaper  ex = [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); };
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
 
     // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 3): `droppedRows` is a COUNT and
     // used to be printed as capped= — the one place in the tool where that attribute held a number instead
@@ -928,12 +936,13 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
                   res.distinctBlobs, res.counts.total(), shownRows, unsigned( droppedRows > 0 ), droppedRows, res.counts.excluded(),
                   res.headOnly, res.unmodelable, res.unrelated, brokenRefs, res.quietRefs, excludedRefs );
     writeKindAttrs( out, res.counts );
+    if( !rootArg.empty() ) { std::fprintf( out, " root=\"%s\"", ex( rootArg ).c_str() ); }
     std::fprintf( out, ">" );
     for( const RefRow& r : res.refs )
     {
         if( eligibleRows( r, listAll ) > 0 )
         { // rows but none this view lists -> counted in excluded_refs=
-            writeAbiRef( out, r, ex, maxStructs, listAll );
+            writeAbiRef( out, r, ex, maxStructs, listAll, rootPrefix );
         }
     }
     std::fprintf( out, "</abi>" );

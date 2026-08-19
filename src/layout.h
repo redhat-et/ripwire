@@ -51,6 +51,7 @@
 
 #include "model.h"
 #include "graph.h"              // splitQualifiedSpec — the ONE `file:name` disambiguation rule --around/--lego use
+#include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "arch.h"               // fnv1a64
 #include "infra/hashutil.h"     // fnv1aMultiply — the sanitizer-safe wrapping multiply (G1 runs -fsanitize=integer)
 #include "serialize.h"          // escapeXml
@@ -2450,10 +2451,14 @@ inline LayoutResult computeLayout( const IngestResult& ing, std::string_view spe
 
 using XmlEscaper = std::function<std::string( std::string_view )>;
 
-inline void writeLayoutDef( std::FILE* out, const LayoutDef& def, const XmlEscaper& ex )
+// `rootPrefix` empty ⇒ p= keeps def.path unchanged (multi-root, or no single root to strip) — R-E
+// (2026-08-17 harvest): def.path is an already-materialized copy of ing.files[fileId], relativized here at
+// print time exactly like every other lens's pathRel.
+inline void writeLayoutDef( std::FILE* out, const LayoutDef& def, const XmlEscaper& ex, std::string_view rootPrefix = {} )
 {
+    const std::string_view rp = rootPrefix.empty() ? std::string_view( def.path ) : rw::sarif::rootRelativeUri( def.path, rootPrefix );
     std::fprintf( out, "<def p=\"%s\" l=\"%u\" agg=\"%s\" modeled=\"%d\" fields=\"%zu\"",
-                  ex( def.path ).c_str(), def.line, def.aggregate, def.modeled ? 1 : 0, def.fields.size() );
+                  ex( rp ).c_str(), def.line, def.aggregate, def.modeled ? 1 : 0, def.fields.size() );
     if( def.modeled )
     {
         std::fprintf( out, " size=\"%u\" align=\"%u\" tail_pad=\"%u\"", def.size, def.align, def.tailPad );
@@ -2513,10 +2518,23 @@ inline void writeLayoutDef( std::FILE* out, const LayoutDef& def, const XmlEscap
     std::fprintf( out, "</def>" );
 }
 
-inline void writeLayout( std::FILE* out, const LayoutResult& res )
+// `rootArg` — R-E (2026-08-17 harvest), same single-root-only root argument serialize() takes.
+inline void writeLayout( std::FILE* out, const LayoutResult& res, std::string_view rootArg = {} )
 {
     std::vector<char> esc;
     const XmlEscaper  ex = [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); };
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    // MirrorDiff::a/b are pre-formatted "path:line" strings (built where the two mirror sides are joined) —
+    // relativize the path portion only, splitting at the LAST ':' so a Windows-drive-letter-free path with
+    // no colon of its own (every indexed path here) is unambiguous.
+    const auto relPathLine = [ & ]( const std::string& pathLine ) -> std::string
+    {
+        if( rootPrefix.empty() ) { return pathLine; }
+        const std::size_t colon = pathLine.rfind( ':' );
+        if( colon == std::string::npos ) { return pathLine; }
+        return std::string( rw::sarif::rootRelativeUri( std::string_view( pathLine ).substr( 0, colon ), rootPrefix ) )
+             + std::string( std::string_view( pathLine ).substr( colon ) );
+    };
 
     bool drift = false, stub = false, spelling = false;
     for( const MirrorDiff& m : res.mirrors )
@@ -2551,14 +2569,16 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res )
                        "exits non-zero); kind=\"stub\" is an empty placeholder aggregate and kind=\"spelling\" is the two "
                        "arms of one ifdef block naming the same bytes differently (simd::float4 vs float4) — both reported, "
                        "neither a break. agree=\"0\" on an assert row means a sizeof tripwire contradicts the computed size. "
-                       "Definitions and asserts come from the INDEXED files. -->" );
-    std::fprintf( out, "<layout sym=\"%s\" found=\"%d\" defs=\"%zu\" mirror=\"%s\" asserts=\"%zu\" conflicts=\"%u\" scanned=\"%zu\">",
+                       "Definitions and asserts come from the INDEXED files. -->%s",
+                 rw::rootRelPathsLegend( !rootArg.empty() ) );   // R-E fix (2026-08-19): defines root= (graphlegend.h)
+    const std::string layoutRootAttr = rootArg.empty() ? std::string() : ( " root=\"" + ex( rootArg ) + "\"" );
+    std::fprintf( out, "<layout sym=\"%s\" found=\"%d\" defs=\"%zu\" mirror=\"%s\" asserts=\"%zu\" conflicts=\"%u\" scanned=\"%zu\"%s>",
                   ex( res.sym ).c_str(), res.found ? 1 : 0, res.defsFound, mirror, res.asserts.size(),
-                  res.assertConflicts, res.filesScanned );
+                  res.assertConflicts, res.filesScanned, layoutRootAttr.c_str() );
 
     for( const LayoutDef& d : res.defs )
     {
-        writeLayoutDef( out, d, ex );
+        writeLayoutDef( out, d, ex, rootPrefix );
     }
     if( res.defsFound > res.defs.size() )
     {
@@ -2568,7 +2588,7 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res )
     for( const MirrorDiff& m : res.mirrors )
     {
         std::fprintf( out, "<mismatch kind=\"%s\" a=\"%s\" b=\"%s\" size_a=\"%u\" size_b=\"%u\" size_differs=\"%d\" diffs=\"%zu\">",
-                      m.kind, ex( m.a ).c_str(), ex( m.b ).c_str(),
+                      m.kind, ex( relPathLine( m.a ) ).c_str(), ex( relPathLine( m.b ) ).c_str(),
                       m.sizeA, m.sizeB, m.sizeDiffers ? 1 : 0, m.fields.size() );
         for( const FieldDiff& f : m.fields )
         {
@@ -2579,7 +2599,8 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res )
 
     for( const AssertRow& a : res.asserts )
     {
-        std::fprintf( out, "<assert p=\"%s\" l=\"%u\" kind=\"%s\"", ex( a.path ).c_str(), a.line, a.kind );
+        const std::string_view arp = rootPrefix.empty() ? std::string_view( a.path ) : rw::sarif::rootRelativeUri( a.path, rootPrefix );
+        std::fprintf( out, "<assert p=\"%s\" l=\"%u\" kind=\"%s\"", ex( arp ).c_str(), a.line, a.kind );
         if( a.hasWant )
         {
             std::fprintf( out, " want=\"%u\"", a.want );
