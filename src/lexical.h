@@ -85,19 +85,6 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
 // has real, non-incidental lexical grounding somewhere in the corpus.
 inline constexpr float kWeakLexicalScoreThreshold = 1.0f;
 
-// ── prose down-weight, and the lead-section exception docs/EVALS.md §4, the lead-section round ──────────────────────
-// Markdown headings compete on name-match with code, so a Section scores ×kLexSectionMul — prose stays
-// FINDABLE but code wins when both match (review finding #4, the doc-heavy-repo swamping fix).
-//
-// That flat factor prices a document's ABSTRACT the same as its interior. A file's LEAD section — the
-// first symbol of the file when that symbol is a Section, i.e. the frontmatter or title block that says
-// what the document IS — is the document's doc-comment, and this ranker already commits to a price for
-// a doc-comment against a body: kLexWeightDoc : kLexWeightBody. kLexLeadSectionMul pays the lead section
-// exactly that ratio rather than a swept number, so there is no tuning surface here to fit an eval with.
-// Both factors stay ≤ 1 — shrink-only, so the MaxScore impact bound below stays provably safe.
-inline constexpr double kLexSectionMul     = 0.30;
-inline constexpr double kLexLeadSectionMul = kLexSectionMul * ( double( kLexWeightDoc ) / double( kLexWeightBody ) );
-
 // BM25 score of `query` against each symbol's doc (name subtokens + callees' names + DOC-COMMENT & BODY
 // text). Returns a per-symbol score vector (size = symbols.size()). Cold path: one query.
 //
@@ -710,19 +697,6 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     constexpr double   k1 = 1.5, b = 0.75;
     std::vector<float> score( S, 0.f );
 
-    // which symbols are their file's LEAD section (kLexLeadSectionMul above). Symbol ids are
-    // file-contiguous — assigned in (fileId, line, name) order — so the file's first symbol is the one
-    // whose predecessor carries a different fileId, and a single ascending pass identifies every one.
-    // A non-markdown file's first symbol is not a Section, so code corpora are untouched by construction.
-    std::vector<char> leadSection( S, 0 );
-    for( std::size_t i = 0; i < S; ++i )
-    {
-        if( ing.symbols[i].kind == SymKind::Section && ( i == 0 || ing.symbols[i].fileId != ing.symbols[i - 1].fileId ) )
-        {
-            leadSection[i] = 1;
-        }
-    }
-
     // ── H2 (B0 round 2): MaxScore-style safe pruning — only when the caller opted in AND the env
     //    escape hatch is off. The exhaustive branch below is the pre-H2 code, byte-for-byte.
     const bool pruneActive = pruneTopK > 0 && std::getenv( "RIPWIRE_NO_PRUNE" ) == nullptr;
@@ -764,8 +738,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         // In IEEE doubles each side is computed with ≤ 7 rounded ops (relative error ≤ 7·2⁻⁵³ ≈ 8e-16),
         // so the ×(1+1e-9) slack — six orders of magnitude above the worst accumulated rounding, and
         // likewise above the U·2⁻⁵³ summation error of the per-doc bound sum below — makes the COMPUTED
-        // cap strictly ≥ the COMPUTED contribution. The Section down-weight (kLexSectionMul, or
-        // kLexLeadSectionMul for a file's lead section — both ≤ 1) and the §P4 tier
+        // cap strictly ≥ the COMPUTED contribution. The Section ×0.30 down-weight and the §P4 tier
         // multiplier (both (0,1], shrink-only) only shrink a real score, never the bound.
         // Hence: bound < θ ⇒ computed score < θ, unconditionally.
         // capOcc folds in the query-occurrence multiplicity (BM25 adds one contribution PER occurrence).
@@ -832,7 +805,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             }
             if( ing.symbols[i].kind == SymKind::Section )
             {
-                sc *= leadSection[i] ? kLexLeadSectionMul : kLexSectionMul;
+                sc *= 0.30;
             }
             if( symbolScoreMul && i < symbolScoreMul->size() )
             {
@@ -889,10 +862,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         }
         // Markdown headings (sec) compete on name-match with code; down-weight so a doc stays FINDABLE but
         // code wins when both match — fixes prose swamping retrieval in doc-heavy repos (review finding #4).
-        // A file's LEAD section is its abstract and pays the doc-vs-body ratio instead (kLexLeadSectionMul).
         if( ing.symbols[i].kind == SymKind::Section )
         {
-            sc *= leadSection[i] ? kLexLeadSectionMul : kLexSectionMul;
+            sc *= 0.30;
         }
         if( symbolScoreMul && i < symbolScoreMul->size() )
         {
@@ -1059,8 +1031,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
         }
         if( ing.symbols[i].kind == SymKind::Section )
         {
-            sc *= kLexSectionMul; // the flat prose down-weight; the lead-section exception is scoped to
-                                  // the subtoken+body ranker alone (the lead-section round's registered surface)
+            sc *= 0.30; // same prose down-weight as lexicalScores
         }
         if( symbolScoreMul && i < symbolScoreMul->size() )
         {
