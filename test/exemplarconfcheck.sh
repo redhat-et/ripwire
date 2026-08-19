@@ -51,11 +51,38 @@ printf '%s' "$WHDR" | grep -q 'low_confidence="1"' \
 # cluster) but no longer matches its own gate's quotation. The v0.3.6 installer tests added enough argv/config
 # vocabulary to make the intermediate wording donate kind=var; this phrasing still targets the same parser
 # cluster and donates kind=fn, which keeps Arm 3's differential premise honest.
-STRONG1="$( "$BIN" "$ROOT" --no-cache --exemplar="read command line options" 2>/dev/null )"
+#
+# QUERY REPLACED 2026-08-19 (subtoken acronym round, kParserVer 66) — and this time the reason is not a
+# corpus artifact but a MEASURED ranker improvement, so the replacement is chosen for ROBUSTNESS, not just
+# for meaning. The argv wording sat at share=0.50 — exactly ONE symbol above the strict `> 0.4` cut on a
+# 10-sample proportion. That one symbol was `AmbientOptions`, a TypeScript test fixture
+# (test/tsshapefix/limits.d.ts, `export interface AmbientOptions { width?: number }`) which "corroborated"
+# only because its NAME carries the subtoken `options`. Once acronyms stopped being shredded, its
+# doc-comment's shouted words (KNOWN LIMIT / CONTAINER / CONTENTS) began counting toward its BM25 document
+# length instead of being silently dropped, it lost the phantom length discount that had inflated it
+# (11.1936 -> 10.6999, -4.41%, 12.8x the -0.04 ambient drift), and it left the window — taking the arm's
+# only spare corroborator with it. Instrumented dumps, same corpus, both binaries:
+#
+#   query                          pre-fix        post-fix
+#   read command line options      0.50 trust=1   0.40 trust=0   <- one spurious symbol above the cut
+#   compute pagerank               0.80 trust=1   0.80 trust=1   <- robust, kept as STRONG2 below
+#   format byte sizes for humans   0.30 trust=0   0.20 trust=0   <- the WEAK arm got MORE clearly weak
+#   compute the churn of a file    0.60 trust=1   0.60 trust=1   <- the replacement: 2 samples of margin
+#
+# The weak/strong separation WIDENED (0.30/0.80 -> 0.20/0.80), so the confidence signal did not degrade —
+# a knife-edge instance of "strong" stopped qualifying. Candidates measured and rejected, recorded so the
+# choice is auditable rather than a hunt for green: "expand a symbol body" (0.60 but donates cls, breaks
+# Arm 3), "parse a source file into symbols" (donates cls pre / var post — kind not even stable),
+# "rank the graph with pagerank" (0.90 but donates var), "find the callers of a symbol" (0.30, not
+# trustworthy on EITHER binary), "resolve a reference to its definition" (0.40, on the cut),
+# "rank symbols by lexical score" (0.40, on the cut), "detect clone groups in the corpus" (0.60 -> 0.50,
+# drifts). The churn wording is stable at 0.60 on both binaries, donates kind=fn, and is quoted nowhere in
+# src/ — so it cannot repeat the self-referential trap the 2026-08-12 note above describes.
+STRONG1="$( "$BIN" "$ROOT" --no-cache --exemplar="compute the churn of a file" 2>/dev/null )"
 SHDR1="$( exemhdr "$STRONG1" )"
 printf '%s' "$SHDR1" | grep -q 'low_confidence' \
-    && no "strong query (argv parsing) wrongly fired low_confidence: $SHDR1" \
-    || ok "strong query (argv parsing) does not fire low_confidence: $SHDR1"
+    && no "strong query (file churn) wrongly fired low_confidence: $SHDR1" \
+    || ok "strong query (file churn) does not fire low_confidence: $SHDR1"
 
 # a second independent strong query (a dense literal "compute" cluster in this repo).
 STRONG2="$( "$BIN" "$ROOT" --no-cache --exemplar="compute pagerank" 2>/dev/null )"
