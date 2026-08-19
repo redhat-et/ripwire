@@ -777,6 +777,110 @@ layer validation — the router can no longer recommend a claim the verb would r
 `test/taskroutecheck.sh` holds both directions: emitted claims execute through the real parser
 byte-identically, and the parser-refused form never routes to `--verify`.
 
+### Subtoken acronym shredding — PRE-REGISTERED 2026-08-19 (before the fix is measured)
+
+**The defect.** The shared subtoken tokenizer shreds an all-caps run into single characters, which
+the ≥2-byte rule then drops, so an acronym is indexed as *nothing at all*. Three mirrors carry the
+same bug: `lexical.h::subtokens()` tests its camel boundary against the ALREADY-LOWERCASED
+accumulator (`cur.back()` can never be uppercase, so the "previous char was uppercase" guard is
+dead code), and `lexindex.h::forEachLexSubtoken()` / `forEachLexSubtokenHashed()` state it
+outright — "an interior uppercase char always starts a NEW token". Reproduced against the shipped
+`subtokens()` at `ab59ca8`:
+
+| input | tokens at `ab59ca8` |
+| --- | --- |
+| `MCP` / `PR` / `CI` | *(none — every fragment is 1 byte and dropped)* |
+| `MCP end to end` | `end`, `to`, `end` |
+| `MCPServer` | `server` |
+| `HTTPServer` | `server` |
+| `IOError` | `error` |
+| `XMLHttpRequest` | `http`, `request` |
+
+Concrete cost: `ripwire-mcp`'s SKILL.md description is about MCP end to end yet contributes **zero**
+`mcp` tokens to the routing index (its body carries tf 17); the only description that indexes `mcp`
+at all does so through the literal `.mcp.json`. 17 of the 152 judged routing prompts carry an
+all-caps run of ≥2 (`MCP`×3, `CI`×3, `UI`×2, `PR`×2, `YAML`, `LICM`, `API`, `CSV`, `CLI`, `JSON`,
+`SKILL`), and all 18 skill descriptions carry at least one.
+
+**Consumers of the tokenizer (the full list, so the blast radius is on the record).** Query-side
+`subtokens()`: `lexical.h` `lexicalScoresTiered` query tokenization (`--for`, `--query`, `--recall`,
+`--pack-task`, `--exemplar` kind donation, every eval), `lexical.h` LB-2 route-carrier counts,
+`eval.h` `bm25Seeded` doc construction (both the dS and dB arms), `exemplar.h` name and task
+tokens, `skilleval.h` doc bags + prompt tokens (the `overlap`, `bm25-desc` and `bm25-full` arms).
+Corpus-side `forEachLexSubtoken()`: `lexical.h` `scanField` over the name / callee / path / doc /
+body fields. Index-side `forEachLexSubtokenHashed()`: `lexindex.h::buildDefLexStats`, i.e. the
+persisted per-definition lexical statistics and the per-file 512-bit subtoken pre-filter signature.
+`naminglens.h` is *not* a consumer — it has its own case-preserving `splitIdentifier` — but it does
+share `lexSubtokenHash`, always on pre-lowercased input.
+
+**Cache persistence — yes, so the version bumps.** `RawDefLex` (`dlWeighted`, `tokenHashes`,
+`tokenTfs`) is written into the rich per-file cache record (`ingest.cpp` v10 rich `withLex` extra),
+and the per-file H3 signature is derived from `tokenHashes`. The fix therefore changes a *persisted*
+representation: `kParserVer` 65→66 and `quality.h::kIngestParserVerMirror` 65→66 in the same commit.
+
+**The change, registered verbatim before measurement.** In all three mirrors, a token is a maximal
+`[A-Za-z0-9]` run between separators, split additionally at:
+
+1. a **lower/digit → Upper** transition — `fooBar` → `foo`,`bar` (unchanged behavior); and
+2. the **last uppercase of an uppercase run of length ≥2 that is immediately followed by a
+   lowercase letter** (the ACRONYMWord rule) — `HTTPServer` → `http`,`server`; `MCPServer` →
+   `mcp`,`server`; `IOError` → `io`,`error`; `XMLHttpRequest` → `xml`,`http`,`request`.
+
+An uppercase run **not** followed by a lowercase stays one token: `MCP` → `mcp`, `PR` → `pr`,
+`CI` → `ci`, `MCP2Server` → `mcp2`,`server`. Digits stay token-interior and never open a boundary
+(unchanged): `utf8Encode` → `utf8`,`encode`, `sha256sum` → `sha256sum`. Tokens under 2 bytes are
+still dropped (unchanged): `aB` → ∅. `subtokens()` still lowercases on emit; `lexSubtokenHash` and
+the fused rolling hash now lowercase **every** byte rather than only the first, because a token may
+now carry interior uppercase — without that the postings path would stop matching the scan path.
+Registering `HTTPServer` → `http`+`server` rather than `httpserver` is not a free choice: it is
+exactly the rule `naminglens.h::splitIdentifier` already implements ("the LAST upper of an ≥2-upper
+run starts the next word: `HTTPServer` → [HTTP, Server]"), so the repo's two splitters converge
+instead of acquiring a second disagreement.
+
+**Explicitly out of scope this round.** `graph.h::wordCount` (the PageRank specificity prior) is a
+fourth, independent boundary implementation; it already keeps an all-caps run as ONE word and is
+left untouched. The length-aware desc+body mix hypothesis from the S1 round is likewise out of
+scope. One registered change only.
+
+**Baselines at `ab59ca8` (measured before any edit).** Skill routing
+(`ripwire skills --eval-skills=test/skillevalfix/prompts.tsv`): judged-only hit@1 `bm25-desc`
+**90/152**, `bm25-full` **93/152**, `for-routed` **91/152**, `overlap` 57/152, `name` 15/152;
+split=test `bm25-desc` hit@1 **66.9%**, hit@2 83.1%, mrr 0.786, sep-auc **0.957**; split=dev
+`bm25-desc` 66.2% / 0.897. Recall lane (`test/recallevalcheck.sh`, frozen corpus
+`commit=7a7f79892034 files=113 sha=cfeb23c71cd2`): recall lane lenient recall@5 **88.1%**, lenient
+MRR **0.624**, LIVE pollution@5 **4.8%**; ranking lane lenient recall@5 **75.0%**, lenient MRR
+**0.694**, pollution@5 **0.0%**, adversarial-class pollution@5 **0.0%**.
+
+**Metric and band (primary surface — skill routing).** Judged-only hit@1, `bm25-desc` arm, n=152,
+exactly one measurement. One row = 0.66pp, so a band narrower than 2 rows would be reading noise.
+**ACCEPT iff net flipped rows (newly-correct − newly-wrong) land in [−2, +12]** (−1.3pp … +7.9pp;
+14 rows wide). The lower edge is deliberately non-inferiority-shaped rather than zero: this is a
+*correctness* repair — an index that cannot represent the word "MCP" is wrong whatever the proxy
+says — and up to 2 rows of proxy cost is what that correctness argument buys. Past −2 the ranking
+cost is real and the fix does not land. The upper edge is the LB-3/S1 leakage guard: only 17 judged
+rows carry an acronym at all, so a net gain past +12 is a result the registered mechanism cannot
+account for — audit it, do not bank it.
+
+**Simultaneous floors (all must hold; a win on one surface bought past a floor on another is a
+REJECT).** `test/skillevalcheck.sh`: split=test `bm25-desc` hit@1 ≥ 60.0% and sep-auc ≥ 0.89,
+split=dev ≥ 46.0% / ≥ 0.75, the judged split ≥ 80 rows, and both metric-can-fail arms (wrong labels
+halve hit@1; swapped labels invert sep-auc to within 0.02 of 1−auc and below 0.5).
+`test/skillroutingjudgedcheck.sh`: `bm25-desc` and `for-routed` judged hit@1 both ≥ 50%, and the
+cold-start row routes in both arms. **Recall lane:** `test/recallevalcheck.sh` must stay green on
+every committed floor — recall lane lenient recall@5 ≥ 71%, lenient MRR ≥ 0.57, LIVE pollution@5
+≤ 16%, ranking lane lenient recall@5 ≥ 70%, lenient MRR ≥ 0.55, pollution@5 ≤ 5%, adversarial-class
+pollution@5 ≤ 8%. The ranking-lane recall@5 floor has the least headroom (75.0% against 70%) and is
+the one to watch. **Expected direction on the recall lane: neutral.** The frozen recall corpus is
+markdown-prose-led, where acronyms are common on both sides, so the fix should add signal
+symmetrically; no directional claim is registered, only the floors. Whole-suite green
+(`python3 test/pargates.py . ./build/ripwire -j 6` rc=0), ASan clean, determinism byte-identical,
+and `--quality-delta` with zero unacked regressions are standing requirements, not part of the band.
+
+**Decision rule.** In band with every floor green → keep the code. Out of band, or any floor
+breached → revert the tokenizer change, keep this registration and the negative result, and keep
+the new gate only if it still describes shipped behavior (it does not, so it reverts with the code).
+One attempt; a retry is a new round with a fresh registration.
+
 ---
 
 ## 5. Token and output economy
