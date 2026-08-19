@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 415 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 416 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -881,6 +881,74 @@ breached → revert the tokenizer change, keep this registration and the negativ
 the new gate only if it still describes shipped behavior (it does not, so it reverts with the code).
 One attempt; a retry is a new round with a fresh registration.
 
+**RESULT (2026-08-19, the single measurement): IN BAND on both registered surfaces — but the suite
+found one regression the bands do not cover, and it is not papered over. See the verdict below.**
+
+*Primary surface — skill routing.* Judged-only hit@1, `bm25-desc`, n=152: **90 → 98**, net flipped
+**+8** rows (+5.3pp), inside the registered [−2, +12]. Every simultaneous floor held with room:
+split=test hit@1 66.9% → **73.1%** (floor 60.0), sep-auc 0.957 → **0.957** (floor 0.89); split=dev
+66.2% → **69.1%** (floor 46.0), sep-auc 0.897 → **0.887** (floor 0.75); judged `bm25-desc` 64.5%
+and `for-routed` 59.2% (floors 50%/50%); both metric-can-fail arms and the cold-start row still
+pass. Secondary arms, reported not banded: `overlap` 57 → **62**, `name` 15 → **17**, `bm25-full`
+93 → **91**, `for-routed` 91 → **90**. The `bm25-full` and `for-routed` dips are inside the one-row
+noise scale and neither approaches a floor; the desc-vs-body gap that three prior rounds failed to
+close by adding vocabulary (+3 rows, stable across a 2.6× corpus growth) **inverts** here — with
+acronyms indexed, the description now beats the body it was written to represent by 7 rows. That is
+the first mechanism to move that gap, and it moved it by repairing an index defect rather than by
+writing more words.
+
+*Recall lane.* Every committed floor green. Frozen instrument (the one designed to isolate ranker
+movement): lenient recall@5 **88.1% → 88.1%**, lenient MRR **0.624 → 0.643**, LIVE pollution@5
+**4.8% → 2.4%**. Ranking lane at MATCHED corpus (post-fix binary re-run against the `ab59ca8` tree,
+because that lane scores the LIVE root and this round edited it): lenient recall@5 **75.0% →
+75.0%** unchanged, lenient MRR 0.694 → **0.673**, pollution@5 and adversarial-class pollution@5
+both **0.0%**. Read on the live root the lane reports 71.9% — one label of 32 — which is corpus
+composition, not ranker movement; the matched-corpus re-run is the number that answers the
+registered question.
+
+*Whole suite.* 424 gates: 420 pass, 2 skip, 2 fail. `editcheckcheck.sh` is a timing gate and failed
+once under `-j 6` at load average 28.7 (another lane building); it passes twice solo — the known
+flake, not a finding. `qschemetripcheck.sh` and `readmeexamplecheck.sh` failed as pure golden drift
+(the `kParserVer` 65→66 hash re-pin the gate itself prescribes, and two README `--callers` line
+numbers shifted by the `graph.h` comment) and are re-pinned in their own commit. ASan clean on the
+default map and on the new fixture, determinism byte-identical over three runs, `xmllint` clean,
+`--quality-delta` exit 0.
+
+**The regression the bands did not cover: `test/exemplarconfcheck.sh`.** Its §P5 arm asserts that a
+strong task must NOT raise `--exemplar`'s `low_confidence` advisory. Post-fix, the query "read
+command line options" raises it. This was reproduced as a clean 2×2 — same corpora, only the binary
+differs — so it is the tokenizer change, not corpus drift and not that gate's known
+corpus-fragility:
+
+| binary ↓ / corpus → | `ab59ca8` tree | this working tree |
+| --- | --- | --- |
+| pre-fix (`ab59ca8`) | no flag | no flag |
+| post-fix (this branch) | **`low_confidence="1"`** | **`low_confidence="1"`** |
+
+Mechanism: `low_confidence` fires when at most `kExemplarConfMinShare`=0.4 of the top-10 lexical
+hits carry a task subtoken in their NAME. Acronyms now count toward every document's BM25 length,
+so scores shift corpus-wide and one symbol enters that ten-slot window — a strict `>0.4` on a
+10-sample proportion flips on a single displacement. The *answer* is unchanged: the exemplar
+returned the identical symbol (`min`, `src/infra/fastmath.h:51`) with the identical donated kind
+(`fn`) before and after; only the advisory attribute differs. It is nonetheless a false positive on
+an honesty signal, which is the exact failure direction §P5 exists to prevent.
+
+**Verdict: ACCEPT on the registered bands; landing needs an owner call on `exemplarconfcheck`.**
+The registered decision rule is satisfied — in band on the primary surface, every named floor
+green — and the change repairs an index that could not represent the word "MCP" at all. What this
+round will NOT do is reword the failing arm's query to make its own change green. That arm's header
+records two previous rewordings for this class of cause, but both were CORPUS-side (module
+constants at `kParserVer` 62, installer vocabulary at v0.3.6); this one is RANKER-side, and
+recalibrating a behavioral gate to accommodate the change under measurement is the same move as
+widening a band after seeing the number. The gate is left red, the evidence is above, and the
+choice is the owner's: recalibrate the arm in a separate disclosed commit, or reject.
+
+**Named follow-up (not run this round).** The registered rule bundles two seams — an all-caps run
+kept whole (`MCP` → `mcp`) and the ACRONYMWord split (`HTTPServer` → `http`+`server`). Which of the
+two moves `exemplarconfcheck` is unmeasured; splitting them is a variant this round was not
+registered for, and shipping half of a registered rule would itself be an unregistered change. A
+follow-up round can register the halves separately and attribute the shift.
+
 ---
 
 ## 5. Token and output economy
@@ -1205,7 +1273,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **415 gate scripts**, all of which exist on disk.
+naming **416 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -1839,7 +1907,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 415. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 416. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
