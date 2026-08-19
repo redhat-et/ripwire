@@ -51,6 +51,7 @@
 
 #include "model.h"
 #include "graph.h"              // splitQualifiedSpec — the ONE `file:name` disambiguation rule --around/--lego use
+#include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "arch.h"               // fnv1a64
 #include "infra/hashutil.h"     // fnv1aMultiply — the sanitizer-safe wrapping multiply (G1 runs -fsanitize=integer)
 #include "serialize.h"          // escapeXml
@@ -2568,7 +2569,8 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res, std::string_vi
                        "exits non-zero); kind=\"stub\" is an empty placeholder aggregate and kind=\"spelling\" is the two "
                        "arms of one ifdef block naming the same bytes differently (simd::float4 vs float4) — both reported, "
                        "neither a break. agree=\"0\" on an assert row means a sizeof tripwire contradicts the computed size. "
-                       "Definitions and asserts come from the INDEXED files. -->" );
+                       "Definitions and asserts come from the INDEXED files. -->%s",
+                 rw::rootRelPathsLegend( !rootArg.empty() ) );   // R-E fix (2026-08-19): defines root= (graphlegend.h)
     const std::string layoutRootAttr = rootArg.empty() ? std::string() : ( " root=\"" + ex( rootArg ) + "\"" );
     std::fprintf( out, "<layout sym=\"%s\" found=\"%d\" defs=\"%zu\" mirror=\"%s\" asserts=\"%zu\" conflicts=\"%u\" scanned=\"%zu\"%s>",
                   ex( res.sym ).c_str(), res.found ? 1 : 0, res.defsFound, mirror, res.asserts.size(),

@@ -42,6 +42,7 @@
 
 #include "model.h"
 #include "ingest.h"
+#include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "naminglens.h"
 #include "pageview.h"
 #include "serialize.h"   // escapeXml
@@ -384,6 +385,8 @@ inline int writeNamingConsistencyReport( const IngestResult& ing, int pageLimit,
     pageDisclosure( disclosure, sizeof disclosure, shown, total, page.end, pageLimit, pageOffset, true );
 
     std::fputs( kNamingConsistencyLegend, stdout );
+    // R-E fix (2026-08-19): the shared root-relative clause, emitted exactly when root= is (graphlegend.h).
+    std::fputs( rw::rootRelPathsLegend( !rootAttr.empty() ), stdout );
     std::printf( "<naming-consistency groups=\"%zu\" candidates=\"%zu\" decided=\"%zu\" flagged=\"%zu\"%s%s>",
                  scan.groups.size(), scan.symbols.size(), decidedCount, total, disclosure, rootAttr.c_str() );
 

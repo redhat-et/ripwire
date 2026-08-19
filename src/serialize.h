@@ -5,6 +5,7 @@
 
 #include "model.h"
 #include "arch.h"        // P3: builtinLayer() — the file-node layer= tag
+#include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "lintrules.h"   // §P9.4: langOfPath / dependencyCapable — packDeps' dep_files= denominator
 #include "resolve.h"     // S6-C: canonicalId() — the `id=` canonical symbol string (shared with the resolver)
 #include "redact.h"      // deterministic secret redaction of emitted body content (opt-out --no-redact)
@@ -1455,6 +1456,16 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     std::string legend = outProv
         ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=scip(precise;else name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->"
         : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) r:est_tokens=hdr-copy(none-if-stable) -->";
+    // R-E fix (2026-08-19): root= was added to <r> with nothing defining it — legendcoveragecheck's arm (A)
+    // named it on nine roster verbs at once (the default map, --around, and every map-* variant share this
+    // legend). Spelled in THIS legend's own key=meaning dialect rather than as the prose sentence
+    // graphlegend.h's kRootRelPathsLegend carries: the map legend is the one first screen every run pays for,
+    // and its whole style is one compact token per attribute. Conditional, so a multi-root map — which emits
+    // no root= — stays byte-identical and no golden moves for a document the clause would not describe.
+    if( !rootArg.empty() )
+    {
+        legend += "<!-- r:root=crawl-root-every-p=-is-relative-to(single-root-only;absent=>p=is-the-raw-ingest-path) -->";
+    }
     if( churnWindow != nullptr )
     {
         legend += churnRankLegendFor( ann.churnRankLabel ); // §A9.6 / P0-4, churn-only (see the constants)

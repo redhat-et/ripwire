@@ -63,6 +63,7 @@
 
 #include "model.h"
 #include "graph.h"       // langCompatible — the SAME language gate the resolver uses; never a second one
+#include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "serialize.h"   // escapeXml, tokensForEmittedBytes, kBytesPerTokenBody — the one body-token rate
 #include "pageview.h"    // pageWindow + effectiveRowCap + pagingDisclosure — THE TRUNCATION VOCABULARY
 #include "smallvec.h"          // rw::SmallVec — the small-vector the byName id-lists use in graph.h too
@@ -492,6 +493,8 @@ inline int writeContextRatioReport( const IngestResult& ing, int pageLimit, int 
     pagingDisclosure( paging, sizeof paging, total, page.end, pageLimit, pageOffset );
 
     std::fputs( kContextRatioLegend, stdout );
+    // R-E fix (2026-08-19): the shared root-relative clause, emitted exactly when root= is (graphlegend.h).
+    std::fputs( rw::rootRelPathsLegend( !rootAttr.empty() ), stdout );
     std::printf( "<contextratio units=\"%zu\" file_units=\"%zu\" defs_per_name_cap=\"%u\" body_bytes_per_token=\"%.2f\""
                  " shown_syms=\"%zu\" syms_capped=\"%s\" shown_files=\"%zu\" files_capped=\"%s\"%s%s>",
                  total, scan.files.size(), unsigned( kDefsPerNameCap ), kBytesPerTokenBody,
