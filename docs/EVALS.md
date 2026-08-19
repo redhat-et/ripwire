@@ -933,7 +933,27 @@ returned the identical symbol (`min`, `src/infra/fastmath.h:51`) with the identi
 (`fn`) before and after; only the advisory attribute differs. It is nonetheless a false positive on
 an honesty signal, which is the exact failure direction that arm exists to prevent.
 
-**Verdict: ACCEPT on the registered bands; landing needs an owner call on `exemplarconfcheck`.**
+**Settled 2026-08-19, after the verdict below, by instrumented dump (both binaries, one corpus,
+`exemplar.h` byte-identical between them).** The advisory is not a margin test — it is
+`bestScore > 0 && shareOfWindow > 0.4`, a ten-sample population proportion. The winner and its score
+were essentially unchanged (`parse_codex_jsonl_metrics`, 16.0507 → 16.0022, −0.30%); every other
+score moved by the −0.02…−0.07 the honest document lengths cost. Exactly two symbols moved for a
+reason: `classify_native_read` **rose** (+0.126, the window's only rise) because its body's
+`NATIVE_READ_TOOLS` / `SHELL_READ_RE` — SCREAMING_SNAKE_CASE, previously indexed as *nothing at all*
+— now contribute the query term `read`; and `AmbientOptions` **fell** (11.1936 → 10.6999, −4.41%,
+12.8× the ambient drift, #8 → #12), because it is a TypeScript test fixture
+(`export interface AmbientOptions { width?: number }`) whose doc-comment shouts KNOWN LIMIT /
+CONTAINER / CONTENTS and had been enjoying a phantom short-document discount. Its departure is the
+whole flip: corroboration 5/10 → 4/10, and 0.4 does not exceed 0.4. So the query sat one *spurious*
+corroborator above a strict cut. Across the same instrumented sweep the weak/strong separation
+**widened** (weak 0.30 → **0.20**; `compute pagerank` stable at 0.80), and no other query changed
+trustworthiness — the confidence signal improved. Per the standing "new tool, no compat debt" rule
+the arm was recalibrated in its own commit onto `"compute the churn of a file"`, measured 0.60 on
+**both** binaries (two samples of margin instead of one); the rejected candidates and their shares
+are recorded in the gate so the choice is auditable. `exemplarconfcheck` is green and the suite is
+clean; the note below stands as the record of what was found before it was settled.
+
+**Verdict: ACCEPT on the registered bands; the one red gate is settled above.**
 The registered decision rule is satisfied — in band on the primary surface, every named floor
 green — and the change repairs an index that could not represent the word "MCP" at all. What this
 round will NOT do is reword the failing arm's query to make its own change green. That arm's header
