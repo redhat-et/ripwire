@@ -1345,6 +1345,16 @@ reason, silently changed semantics, degrade paths that lie. Instruments: a from-
 base (`ab59ca8`) and of the head (`aa97c9e`) in throwaway worktrees, never sharing objects — the
 mixed-binary discipline in `CLAUDE.md`, applied to the verification and not only to the work.
 
+> Update 2026-08-19: every finding below that named a defect — the two pack-task findings (K1, K2) and
+> the four path-coverage gaps (E1–E4, plus a fifth the fix surfaced: the pack-task JSON dialect) — was
+> remediated in a follow-up lane and re-verified here by re-executing these same probes at the final
+> head, from clean `--clean-first` rebuilds of both flavours. The task-named body now survives all 43
+> rungs of a step-100 budget sweep (it was dropped on 31 of them), no section's kept-count decreases
+> anywhere on that sweep, and all five path surfaces answer relatively with `root=` disclosed once.
+> Suite at the final head: `gates=429 pass=427 skip=2 fail=0`, ASan+LSan clean, byte-deterministic,
+> `xmllint` clean, `--quality-delta` gating 0 both against HEAD and across the whole wave as a ref-pair.
+> The probe text below is left as written, describing the commit it was measured at.
+
 **Mixed-binary cross-check, first.** The wave worktree's incrementally built `build/ripwire` is
 byte-for-byte output-identical to a clean `--clean-first`-equivalent scratch build of the same commit
 across 13 verbs (default map, `--lint`, `--hotspots`, `--clones`, `--grep`, `--for`, `--pack-task`,
