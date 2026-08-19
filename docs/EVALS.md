@@ -312,6 +312,8 @@ The fix is a corpus split, not another floor edit:
   only (`recall_livepol`, ceiling 16% unchanged) — pollution@5 was stable through all five ratchet
   entries and remains the honest live-composition signal.
 - **Ranking lane unchanged**, live: its labels are code symbols and its floors carry wide margins.
+  *(Superseded 2026-08-19 — see the next section. This bullet did not survive contact: the ranking
+  lane had the identical defect one level down, and is now frozen too.)*
 
 Frozen-corpus bars (baselines measured twice, byte-identical; floors sit two queries under baseline —
 the gate's standing philosophy of floors loose enough to survive intentional improvement):
@@ -328,10 +330,29 @@ retained and recalibrated (its live margin, 0.613 vs 0.60, was the next casualty
 mechanism); 0.57 against a frozen corpus is a tighter real bar than 0.60 against a drifting one.
 
 **Update policy.** The snapshot is refreshed only in a deliberate recalibration commit that states why,
-re-freezes (`make_snapshot.py --freeze`), re-measures the frozen baselines, and resets the floors — all
-in one commit. Valid reasons: a label re-authoring that names a document the snapshot lacks (the
-zero-skip guard forces this), or an owner-ruled representativeness refresh after a docs restructure.
+re-freezes (`make_snapshot.py --freeze --corpus docs`), re-measures the frozen baselines, and resets the
+floors — all in one commit. Valid reasons: a label re-authoring that names a document the snapshot lacks
+(the zero-skip guard forces this), or an owner-ruled representativeness refresh after a docs restructure.
 **A red floor is never a reason to refresh.**
+
+### The ranking lane scores a frozen corpus too (2026-08-19)
+
+**Source:** `bench/recalleval/snapshot.srcpack` + `srcsnapshot.lock` (1422 files @ `7a3194b` — the whole
+crawlable tree, since `--for`'s universe is every indexed file: BM25 statistics, the PageRank call graph
+and the fixture path tiers are all properties of the corpus as a whole), same freeze/verify module, same
+gate check #0. The gate header's `2026-08-19 FROZEN RANKING CORPUS` entry is the full record.
+
+The ranking lane was measuring this repository's own source growth: three independent measurements, each
+with the ranker provably neutral — §6 probe 4's three-cell control (base binary scores the wave tree's
+71.9%, so all of the −3.1pp is corpus), the wave-2 verifier's follow-up F, and the subtoken round's 2×2
+(parser-65 and parser-66 binaries score identically on each tree; the one flipped label is the round's
+own gold, whose body it consolidated). A fourth floor-lowering was available and was refused.
+**Floors and labels are unchanged** — r@5 70%, MRR 0.55, pollution 5%, adversarial 8%, now measured
+against a fixed corpus. The freeze itself moved nothing, measured rather than argued: at `7a3194b` the
+frozen root reproduces the live root exactly (lenient r@5 71.9%, MRR 0.660, strict 53.1/65.6,
+pollution@5 0.0%, all four class rows), and all 32 per-query rank vectors are byte-identical between the
+two roots — no tolerance band claimed because none is needed. **A red floor is never a reason to
+refresh** (`make_snapshot.py --freeze --corpus src`, `--corpus` deliberately has no default).
 
 ### Query-mention anchoring
 

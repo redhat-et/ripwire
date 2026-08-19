@@ -65,13 +65,14 @@ echo "recallevalcheck: BIN=$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 OUT="$TMP/run1.txt"; OUT2="$TMP/run2.txt"
 
-# ── #0: the FROZEN CORPUS is intact — snapshot.lock's corpus_sha256 matches the bytes on disk. This is
-#    the integrity anchor of the whole lane (see the 2026-08-07 FROZEN SNAPSHOT entry below): a frozen
-#    doc edited in place, or a refresh that forgot to re-record the lock, must fail HERE, loudly,
-#    before any floor below is allowed to measure the wrong corpus. Hard exit: every recall number
-#    after this point is meaningless against a corrupt snapshot. ────────────────────────────────────────
+# ── #0: BOTH FROZEN CORPORA are intact — each lock's corpus_sha256 matches the bytes on disk. This is
+#    the integrity anchor of the whole file (the two FROZEN SNAPSHOT entries below: docs/recall
+#    2026-08-07, src/ranking 2026-08-19): a frozen file edited in place, or a refresh that forgot to
+#    re-record its lock, must fail HERE, loudly, before any floor below is allowed to measure the wrong
+#    corpus. Hard exit: every number after this point is meaningless against a corrupt snapshot.
+#    `--verify` with no --corpus checks BOTH, so neither lane can be silently left unanchored. ──────────
 if python3 "$ROOT/bench/recalleval/make_snapshot.py" --verify >"$TMP/snap.txt" 2>&1; then
-    ok "frozen corpus intact ($( tail -1 "$TMP/snap.txt" ))"
+    ok "frozen corpora intact ($( sed 's/^snapshot verified: //' "$TMP/snap.txt" | paste -sd'|' - ))"
 else
     no "frozen corpus BROKEN: $( tail -2 "$TMP/snap.txt" | tr '\n' ' ' )"
     echo 'FAILURES ABOVE'; exit 1
@@ -96,12 +97,18 @@ RNK="$( grep -E $'^AGG\tranking\t' "$OUT" )"
 LIV="$( grep -E $'^AGG\trecall_livepol\t' "$OUT" )"
 field(){ printf '%s' "$1" | tr '\t' '\n' | sed -n "s/^$2=//p"; }
 { [ -n "$REC" ] && [ -n "$RNK" ]; } && ok "both AGG rows present" || no "missing an AGG row"
-# The recall AGG row must announce the corpus it was scored on, and it must be the pinned one — a
-# harness silently falling back to the live root would re-open the ratchet this file retired.
+# Each scored lane must announce the corpus it was scored on, and it must be that lane's pinned one — a
+# harness silently falling back to the live root would re-open the ratchet this file retired. Asserted
+# per lane against its OWN lock, because the two corpora are pinned at different commits by design
+# (a docs refresh and a source refresh are independent recalibration commits).
 LOCKC="$( sed -n 's/^source_commit=//p' "$ROOT/bench/recalleval/snapshot.lock" )"
 grep -q "^snapshot OK: commit=${LOCKC:-MISSING-LOCK}" "$OUT" \
-    && ok "recall lane scored the frozen corpus (commit ${LOCKC:0:12})" \
+    && ok "recall lane scored the frozen doc corpus (commit ${LOCKC:0:12})" \
     || no "recall lane did not announce the pinned snapshot commit — frozen lane not in effect"
+SLOCKC="$( sed -n 's/^source_commit=//p' "$ROOT/bench/recalleval/srcsnapshot.lock" )"
+grep -q "^snapshot OK (ranking): commit=${SLOCKC:-MISSING-LOCK}" "$OUT" \
+    && ok "ranking lane scored the frozen source corpus (commit ${SLOCKC:0:12})" \
+    || no "ranking lane did not announce the pinned source-snapshot commit — frozen lane not in effect"
 [ -n "$LIV" ] && ok "live pollution probe row present (recall_livepol)" \
     || no "missing the recall_livepol row — live-corpus composition is unreported"
 RN="$( field "$REC" n )"; KN="$( field "$RNK" n )"
@@ -256,22 +263,96 @@ KL5="$( field "$RNK" lenient_r5 )"; KMRR="$( field "$RNK" mrr_lenient )"; KPOL="
 #   the old 0.60 priced a different, live corpus). The frozen lane's own pollution@5 is reported but
 #   NOT gated: fixture-share of a frozen corpus is a constant of the snapshot, and the ranking
 #   lane's ceilings already gate ranker-side pollution.
-#   UPDATE POLICY (read before touching snapshot/ or its lock): the snapshot is refreshed ONLY in a
-#   deliberate recalibration commit that (a) states why, (b) regenerates via
-#   `python3 bench/recalleval/make_snapshot.py --freeze [COMMIT]`, (c) re-measures the frozen
-#   baselines (two runs, byte-identical), and (d) resets the floors here — all FOUR in ONE commit.
-#   Valid reasons: a label re-authoring that names a document the snapshot lacks (check #2's
+#   UPDATE POLICY (read before touching snapshot.mdpack or its lock): the snapshot is refreshed ONLY in
+#   a deliberate recalibration commit that (a) states why, (b) regenerates via
+#   `python3 bench/recalleval/make_snapshot.py --freeze [COMMIT] --corpus docs`, (c) re-measures the
+#   frozen baselines (two runs, byte-identical), and (d) resets the floors here — all FOUR in ONE
+#   commit. Valid reasons: a label re-authoring that names a document the snapshot lacks (check #2's
 #   zero-skip guard forces the refresh), or an owner-ruled representativeness refresh after a docs
 #   restructure. A red floor is NEVER a reason to refresh: on a frozen corpus a red floor is a
 #   ranker regression, full stop. Check #0's corpus_sha256 makes a quiet in-place edit or an
 #   unrecorded refresh fail loudly before any floor is consulted.
+#
+# 2026-08-19 FROZEN RANKING CORPUS — the ranking lane joins the recall lane. Its half of the
+# 2026-08-07 entry ("Ranking lane unchanged, live: its labels are code symbols and its floors carry
+# wide margins") did not survive contact: the ranking lane has the IDENTICAL defect, one level down.
+# It scored the live SOURCE tree, so every wave that adds load-bearing symbols to this repository
+# displaces this lane's own gold — the ratchet the recall lane retired, re-expressed in code instead
+# of prose. THREE INDEPENDENT MEASUREMENTS said so before this commit, none of them a floor argument:
+#   1. The convergence-disclosure lane's residual (docs/EVALS.md §6 probe 4). A three-cell control:
+#      base binary on the base tree 75.0% / MRR 0.694; base binary on the wave tree 71.9% / 0.660;
+#      wave binary on the wave tree 71.9% / 0.660. The BASE binary scores the wave number — every
+#      point of the −3.1pp is corpus. The displacers were named by inspection: on "pagerank power
+#      iteration", ranks 2-5 and 9 of the wave tree are RankDisclosure/renderDisclosure
+#      (src/prconverge.h), RankedGraph/rankGraphTeleport (src/graph.h) and PageRankRun — the wave's
+#      own new symbols, doing exactly what they should.
+#   2. The wave-2 adversarial verifier's follow-up F, arrived at independently and repeated in its
+#      2026-08-19 addendum: "recalibrate the ranking lane by freezing its corpus (mechanism already
+#      exists for the recall lane), not by lowering the floor a fourth time."
+#   3. The subtoken merge window's 2×2 (2026-08-19). Ranking lenient r@5, one query = 3.125pp, n=32:
+#      parser-65 and parser-66 binaries score 71.9% on the parent tree and 68.8% on the merged tree —
+#      the TOKENIZER CONTRIBUTES EXACTLY ZERO, and the whole −3.1pp is one label flipping because the
+#      round consolidated the body of its own gold (rw::subtokens, src/lexical.h, rank 3 → 9: the old
+#      body carried the query's literal vocabulary inline, the new one delegates to forEachLexSubtoken).
+#      A lane that reports "you refactored the symbol this query is about" as a ranking regression is
+#      measuring the diff, not the ranker.
+#   THE FOURTH FLOOR-LOWERING WAS AVAILABLE AND IS REFUSED. 70 has room for exactly one more flip;
+#   spending the ratchet again would buy one round and re-price a bar that was never the problem.
+#   WHAT IS FROZEN: bench/recalleval/snapshot.srcpack + srcsnapshot.lock — 1422 files @ 7a3194b, the
+#   whole crawlable tree, not just src/. It has to be the whole tree because --for's universe is: BM25
+#   corpus statistics, the call graph PageRank runs over, and the fixture/present path tiers are all
+#   properties of every indexed file. Stored gzip-compressed (~32 MB of text, 6.7 MB packed) behind the
+#   crawler-inert .srcpack extension, unpacked into its own temp root per run, exactly as the doc pack
+#   is; the two corpora are pinned at their own commits by independent recalibration commits.
+#   THE FREEZE MOVED NOTHING — this is the claim that makes the commit honest, and it is measured, not
+#   argued. At 7a3194b the frozen root reproduces the live root EXACTLY: lenient r@5 71.9% (23/32),
+#   lenient MRR 0.660, strict r@1/r@5 53.1/65.6, mrr_strict 0.598, pollution@5 0.0%, adversarial-class
+#   pollution 0.0%, and all four CLASS rows (name 100.0 / concept 66.7 / task 42.9 / adversarial 80.0).
+#   Stronger than the aggregates: all 32 PER-QUERY rank vectors are byte-identical between the live and
+#   frozen roots (`--verbose | grep ^Q`, diff clean). No tolerance band is claimed because none is
+#   needed. What the pack drops relative to the live root — third_party/ and docs/captures/ — the crawl
+#   already prunes by name at BOTH roots (ingest.h kCrawlSkipDirs), which is why the delta is zero.
+#   FLOORS AND LABELS ARE UNCHANGED BY THIS COMMIT. r@5 70, MRR 0.55, pollution 5%, adversarial 8% are
+#   the same values as before the freeze, now measured against a fixed corpus, where they finally mean
+#   what they say. labels_ranking.tsv is untouched — option 2 of the merge window's §7 (recalibrate the
+#   label) was NOT taken, so nothing about the lane's gold has been re-decided.
+#   ON THE MARGIN, STATED RATHER THAN LEFT FOR A READER TO NOTICE: r@5 70 against a 71.9% baseline is
+#   0.6 of a query (one query = 3.125pp at n=32) — exactly the "floor within one query" shape the five
+#   ratchet entries above condemn. It is condemned there and correct here, and the difference is the
+#   corpus, not the number: against a LIVE corpus a 0.6-query margin makes the gate a tripwire for
+#   documenting and for writing code, which is what those entries measured; against a FROZEN one the
+#   only thing that can spend it is the ranker, so tripping on the first lost query is the gate doing
+#   its job. Widening it was deliberately NOT done — a wider floor here would be a floor-lowering with
+#   better manners, and this commit's whole claim is that it lowers nothing.
+#   AND IT IS NOT TUNED TO ADMIT ANYTHING. The corpus is pinned at 7a3194b, which PREDATES the subtoken
+#   change: the frozen rw::subtokens is its PRE-consolidation body, the one whose lexical evidence the
+#   query was labelled against. That is what makes the lane an instrument for the pending merge rather
+#   than a verdict on it — and it cuts both ways, since a genuine ranker regression in that merge now
+#   has nowhere to hide behind corpus drift.
+#   WHY THIS LANE STILL GATES ITS FROZEN pollution@5 WHILE THE RECALL LANE DOES NOT: on a frozen corpus
+#   pollution@5 is a pure RANKER signal (fixture share can only move if the ranker moves it), and it is
+#   §P4's own published number — the thing the tier down-weight exists to hold. The recall lane un-gated
+#   its frozen pollution because it has no ranker-side fixture defense at all and its live probe is the
+#   honest reporter. The ranking lens's LIVE anti-pollution property keeps its own tripwire: check #6a
+#   asserts, at the live repo root, that the real implementation outranks every test//present/ row —
+#   which is why no second live probe was added here.
+#   UPDATE POLICY — identical discipline, own lock: refresh ONLY in a deliberate recalibration commit
+#   that (a) states why, (b) regenerates via
+#   `python3 bench/recalleval/make_snapshot.py --freeze [COMMIT] --corpus src`, (c) re-measures this
+#   lane's frozen baselines (two runs, byte-identical), and (d) resets its floors here — all FOUR in
+#   ONE commit. --corpus has no default for --freeze on purpose: a refresh must move only the corpus
+#   whose floors the same commit re-measures. Valid reasons: a label re-authoring naming a symbol the
+#   snapshot lacks (check #2's zero-skip guard forces it), or an owner-ruled representativeness refresh
+#   after the source tree has moved far enough that the frozen corpus no longer resembles what the tool
+#   ships. A RED FLOOR IS NEVER A REASON TO REFRESH — on a frozen corpus a red floor is a ranker
+#   regression, full stop, and "the corpus moved" is no longer available as an explanation.
 floor "$RL5" 71   && ok "recall lane lenient recall@5 ($RL5%) >= floor 71% (frozen-corpus baseline 76.2%)"  || no "recall lane lenient recall@5 ($RL5%) under floor 71% — ranker regression on the FROZEN corpus"
 floor "$RMRR" 0.57 && ok "recall lane lenient MRR ($RMRR) >= floor 0.57 (frozen-corpus baseline 0.619)" || no "recall lane lenient MRR ($RMRR) under floor 0.57 — ranker regression on the FROZEN corpus"
 LPOL="$( field "$LIV" pollution5 )"
 ceil  "${LPOL:-999}" 16 && ok "LIVE-corpus pollution@5 ($LPOL%) <= ceiling 16% (the corpus-composition reporter; exported-tree baseline 10.0%)" || no "LIVE-corpus pollution@5 (${LPOL:-missing}%) over ceiling 16% — generated/fixture docs are retaking --recall on the live tree"
-floor "$KL5" 70   && ok "ranking lane lenient recall@5 ($KL5%) >= floor 70% (post-§P4 84.4%)"  || no "ranking lane lenient recall@5 ($KL5%) under floor 70%"
-floor "$KMRR" 0.55 && ok "ranking lane lenient MRR ($KMRR) >= floor 0.55 (post-§P4 0.726)"    || no "ranking lane lenient MRR ($KMRR) under floor 0.55"
-ceil  "$KPOL" 5    && ok "ranking lane pollution@5 ($KPOL%) <= ceiling 5% (post-§P4 0.0%)"    || no "ranking lane pollution@5 ($KPOL%) over ceiling 5% — fixtures/present are retaking --for"
+floor "$KL5" 70   && ok "ranking lane lenient recall@5 ($KL5%) >= floor 70% (frozen-corpus baseline 71.9%)"  || no "ranking lane lenient recall@5 ($KL5%) under floor 70% — ranker regression on the FROZEN corpus"
+floor "$KMRR" 0.55 && ok "ranking lane lenient MRR ($KMRR) >= floor 0.55 (frozen-corpus baseline 0.660)"    || no "ranking lane lenient MRR ($KMRR) under floor 0.55 — ranker regression on the FROZEN corpus"
+ceil  "$KPOL" 5    && ok "ranking lane pollution@5 ($KPOL%) <= ceiling 5% (frozen-corpus baseline 0.0%; post-§P4 0.0%)"    || no "ranking lane pollution@5 ($KPOL%) over ceiling 5% — fixtures/present are retaking --for"
 
 # ── #5b: §P4's own number — the adversarial class (queries built to let fixtures/decks win) must stay
 #    de-polluted. Ceiling 8% = one polluted top-5 slot across the class (5 queries × 5 slots → 1/25 = 4%);
