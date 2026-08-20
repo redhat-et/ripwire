@@ -27,6 +27,56 @@ jsonOut="$( "$BIN" "$ROOT/test/jsonfix" --grep=dependencies --no-cache 2>/dev/nu
 { grep -q 'package.json' <<<"$jsonOut" && grep -q 'dependencies' <<<"$jsonOut"; } \
     && ok "JSON config keys are retrievable with --grep" \
     || no "--grep failed to retrieve the JSON fixture"
+
+# ── the MIXED fixture (wave-3 verifier P2-5) ──────────────────────────────────────────────────────────
+# The arm above runs against test/jsonfix, a JSON MONOCULTURE. Under span tiers a monoculture is exactly
+# the corpus in which the claim cannot fail: with no code tier anywhere, the ladder falls through and the
+# JSON row is served no matter what the policy is. The gate whose job is to pin "JSON config keys are
+# retrievable" was therefore structurally incapable of observing the regression it exists to catch, which
+# is why the config-language consequence shipped unnoticed. test/jsonmixfix is the same claim on a corpus
+# that CAN say no: one package.json plus one C file, and two tokens that exercise the two sub-cases.
+MIXFIX="$ROOT/test/jsonmixfix"
+# Liveness: if the fixture ever stops carrying both files, every arm below would pass by finding nothing.
+{ [ -f "$MIXFIX/package.json" ] && [ -f "$MIXFIX/loader.c" ]; } \
+    && ok "mixed fixture present (a JSON config AND a code file — the monoculture blind spot is closed)" \
+    || no "test/jsonmixfix is missing a member — the arms below cannot observe the config-language class"
+
+# (a) EMPTY CODE TIER: `dependencies` is a JSON key (string) and a C COMMENT mention, and nothing else.
+#     The collapsed ladder must serve BOTH. Before the wave-3 ladder fix, comment outranked string and
+#     package.json vanished from its own retrieval claim — this arm is red on that binary.
+mixDep="$( "$BIN" "$MIXFIX" --grep=dependencies --no-cache 2>/dev/null )"
+if grep -q 'package.json' <<<"$mixDep" && grep -q 'loader.c' <<<"$mixDep"; then
+    ok "mixed corpus: a JSON key survives a code file's COMMENT mention of the same token (collapsed tier)"
+else
+    no "mixed corpus: --grep=dependencies lost one of the two files — the comment>string inversion is back"
+    printf '%s\n' "$mixDep" | grep -o '<grep [^>]*>'
+fi
+
+# (b) NON-EMPTY CODE TIER: `retryBudget` is a JSON key AND a C function name. The code tier wins, so the
+#     config row IS held back. That is the OPEN half of the finding (P4-C, wave-4 board item 15: in a data
+#     language the string tier IS the content). This arm does not pretend otherwise — it pins the current
+#     answer AND the honesty around it, so the class is observable instead of silent: the row must be
+#     disclosed via suppressed_string=, and the answer must NOT claim complete=.
+#     WHEN BOARD ITEM 15 LANDS this arm goes red on purpose: flip it to the (a) shape in that commit.
+mixCode="$( "$BIN" "$MIXFIX" --grep=retryBudget --no-cache 2>/dev/null )"
+if grep -q 'loader.c' <<<"$mixCode" && ! grep -q 'package.json' <<<"$mixCode" \
+   && grep -q 'suppressed_string="1"' <<<"$mixCode" && ! grep -q 'complete="1"' <<<"$mixCode"; then
+    ok "mixed corpus: a code-tier hit still hides the config row — DISCLOSED (suppressed_string=), no completeness claim (P4-C, board 15)"
+else
+    no "mixed corpus: the config-suppression case changed shape — if this is board item 15 landing, re-pin this arm deliberately"
+    printf '%s\n' "$mixCode" | grep -o '<grep [^>]*>'
+fi
+
+# (c) …and the hatch the security skill now tells auditors to use actually recovers it.
+mixAny="$( "$BIN" "$MIXFIX" --grep=retryBudget --grep-in=any --no-cache 2>/dev/null )"
+{ grep -q 'package.json' <<<"$mixAny" && grep -q 'loader.c' <<<"$mixAny"; } \
+    && ok "mixed corpus: --grep-in=any recovers the config row the default holds back" \
+    || no "mixed corpus: --grep-in=any did NOT recover the config row — the documented escape hatch is broken"
+
+# The security skill must actually TELL the auditor that, since its own MCP-config recipe depends on it.
+grep -q -- '--grep-in=any' "$SEC" \
+    && ok "security skill routes its config recipe through --grep-in=any" \
+    || no "security skill's MCP-config recipe does not use --grep-in=any — as written it reviews zero config stanzas"
 if grep -qiE "doesn.t index JSON|--grep.? can.t find" "$SEC"; then
     no "security skill still claims JSON is not indexed/retrievable"
 else
