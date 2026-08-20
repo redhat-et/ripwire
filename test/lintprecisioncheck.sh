@@ -67,10 +67,33 @@ def rows(root):
 
 if rows(page1) + rows(page2) != rows(full)[:6]:
     raise SystemExit("FAIL lint page seam dropped, duplicated, or reordered findings")
-if any(default.get(name) is not None for name in required):
-    raise SystemExit("FAIL default lint leaked pagination attrs; legacy schema must stay byte-neutral")
-if len(rows(default)) != int(default.get("findings", "-1")) or rows(default) != rows(full):
-    raise SystemExit("FAIL default lint hides a row cap instead of emitting the advertised full result")
+
+# W3-S item 1 (2026-08-19): the DEFAULT (unpaged) run now carries a byte-budget default cap
+# (kLintDefaultPayloadBytes, src/main.cpp runLint) — the fix for E6's uncapped ~2MB --lint payload. This
+# changes the two assertions the pre-fix gate made here, deliberately:
+#   - it used to require NO pagination-vocabulary attr on the default run at all; it now REQUIRES shown=/
+#     capped= (pageview.h THE TRUNCATION VOCABULARY rule 3: shown= always rides with capped=) while still
+#     requiring the explicit-paging-only half (total=/has_more=/next_offset=/offset=/limit=) stays ABSENT —
+#     an un-paged run is capped by DEFAULT, not by --limit/--offset, so it never claims to BE a page.
+#   - it used to require default == full byte-for-byte; it now requires default to be the sorted PREFIX of
+#     full, truthfully short of it (shown < findings) on a corpus this large, and requires findings= to
+#     still agree across default/full (both see the SAME true total, they just show different amounts).
+paging_only = ("total", "has_more", "next_offset", "offset", "limit")
+if default.get("shown") is None or default.get("capped") is None:
+    raise SystemExit("FAIL default lint is missing shown=/capped= (the W3-S default-cap disclosure)")
+if any(default.get(name) is not None for name in paging_only):
+    raise SystemExit("FAIL default lint carries a paging-only attr with no --limit/--offset given")
+if len(rows(default)) != int(default.get("shown", "-1")):
+    raise SystemExit("FAIL default lint shown= does not equal its emitted finding count")
+if default.get("findings") != full.get("findings"):
+    raise SystemExit("FAIL default lint and --limit=1000000 disagree on the true findings= total")
+if rows(default) != rows(full)[: len(rows(default))]:
+    raise SystemExit("FAIL default lint rows are not the sorted PREFIX of the full result")
+if int(default.get("shown")) >= int(default.get("findings")):
+    raise SystemExit("FAIL default lint on src/ did not actually engage its default cap (shown >= findings) — "
+                      "re-anchor this arm, it no longer exercises the capped case it exists to check")
+if default.get("capped") != "1":
+    raise SystemExit("FAIL default lint capped its rows but did not say capped=\"1\"")
 
 print(f"PASS magic=1 shown={page1.get('shown')} total={page1.get('total')}")
 PY
