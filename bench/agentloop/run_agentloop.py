@@ -312,10 +312,18 @@ def arm_suffix( arm, ripwire_bin, rules_blurb="" ):
     # (ripwire_skills adds the skills tree), so any prompt-level difference between them would
     # confound exactly the comparison the third arm exists to make.
     if arm in RIPWIRE_ARMS:
+        # B3 fix (2026-08-20 outcome-harness-fixes lane): --max-tokens is not read by --for — verified
+        # against the pinned binary, it warns on stderr and emits the full UNBUDGETED result (a
+        # harness that discards stderr, as this one does, never sees the warning). Every ripwire-arm
+        # run before this fix received an unbounded bundle, which is a prompt-length confound sitting
+        # directly inside the treatment arm. --token-budget is the flag --for actually reads and
+        # reports fit against in its own header (`est_tokens`): --for=... --token-budget=2000 ->
+        # est_tokens="1638" on the pinned binary. See test/agentloopclaudecheck.sh's flag-probe check,
+        # which shells out to the pinned binary's --help so this cannot silently drift again.
         suffix = ( "\n\nRETRIEVAL ARM — RIPWIRE CLI: Do not use a ripwire MCP server. Before "
                    "grep/find or opening implementation files, use the shell to run this exact CLI "
                    "binary at least once:\n"
-                   f"  {ripwire_bin} . --for=\"<short issue description>\" --max-tokens=4000\n"
+                   f"  {ripwire_bin} . --for=\"<short issue description>\" --token-budget=4000\n"
                    "Use its ranked output and any additional ripwire CLI verbs that help, then "
                    "continue with ordinary editing and validation tools." )
         # The rules blurb is the SHIPPED wrap recipe's body, read straight out of `ripwire wrap`
