@@ -26,6 +26,19 @@ namespace rw
 namespace namesplit
 {
 
+// ---- the ONE ASCII identifier-character pair ----
+// Same reason as the scanner below: several leaf surfaces need "is this byte part of an identifier" and
+// each one that spells it itself is a clone --quality-delta correctly flags (mention.h's isIdentChar and
+// pattern.h's metavariable scanner were the two that collided). Deliberately ASCII-only: every caller is
+// scanning a NAME SPELLING it produced or a pattern the user typed, not arbitrary Unicode source.
+inline bool isIdentChar( char c ) noexcept
+{
+    return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_';
+}
+
+// ...and the same minus the digits: what may START an identifier.
+inline bool isIdentStart( char c ) noexcept { return isIdentChar( c ) && !( c >= '0' && c <= '9' ); }
+
 // the head of `f` before its trailing BALANCED `open…close` group, or `f` unchanged when there is no such
 // group or stripping it would eat the name itself. ONE scan for both delimiter pairs (call signatures and
 // template arguments), so the two strippers below can never drift apart. Guards, in order: nothing to strip

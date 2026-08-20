@@ -70,7 +70,16 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
 - **Find a literal / regex / structural shape** —
   `ripwire <dir> --grep=STR` (literal + enclosing symbol) ·
   `ripwire <dir> --regex=PAT` ·
-  `ripwire <dir> --match='(<tree-sitter query>)'` (e.g. `(call_expression function: (identifier) @c)`)
+  `ripwire <dir> --match='(<tree-sitter query>)'` (e.g. `(call_expression function: (identifier) @c)`) ·
+  **`ripwire <dir> --pattern='foo($X, ...)'`** — the same structural search written in CODE instead of in
+  node kinds, so you do not have to know whether this grammar calls it `call_expression`, `call`,
+  `method_invocation` or `invocation_expression`. `$NAME` binds one node (repeat it and both sites must
+  match), `$_` binds nothing, `...` (or `$$$`) is an ellipsis over siblings. ONE pattern searches every
+  served language at once — c, cpp, objc, java, csharp, javascript, typescript, python, go, rust, swift —
+  and `grammars=`/`shapes=` on the result name which ones it resolved for and what node kind it became in
+  each. Reach for `--pattern` when you can WRITE the shape and for `--match` when you need a constraint the
+  pattern language cannot express (a field name, a `#match?` predicate). Ruby, bash and the data tiers are
+  refused by name, never answered with a zero.
   — add `--grep-context=N` (or `--grep-before=N`/`--grep-after=N`) for ripgrep-style N lines of source
   around each hit, so you see the call site's shape without a follow-up `--expand`.
   When one grep answers a two-term question ("cache staleness check for the MCP index"), narrow it in the
