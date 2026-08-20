@@ -11477,8 +11477,11 @@ inline constexpr std::string_view kPatternLegend =
                          "matched by a single first-match-wins probe (never an exhaustive search) under the disclosed ellipsis_bound "
                          "sibling cap. Comments are transparent on both sides; everything else is kind- and text-exact. "
                          "unresolved_in= appears ONLY on a zero result and names the served grammars the pattern did not resolve for "
-                         "- the zero may be theirs, not the code's. shown=/capped= = rows printed vs found; hits_capped=\"1\" means "
-                         "hits= is a FLOOR (engine match limit reached). raise the default cap with limit=N (offset=M pages) -->";
+                         "- the zero may be theirs, not the code's. shown=/capped= = rows printed vs found. hits= is a "
+                         "FLOOR, not a total, when EITHER hits_capped=\"1\" (engine match limit reached) or ellipsis_capped=\"1\"; "
+                         "the latter means an ellipsis probe gave up on ellipsis_skipped= candidate nodes whose sibling run exceeded "
+                         "ellipsis_bound, so a node that would have matched can be missing (ellipsis_skipped= counts ABANDONS and is "
+                         "itself a floor on those nodes). raise the default cap with limit=N (offset=M pages) -->";
 
 // R2 — everything ONE pattern run answers with before a byte is emitted, as one structured return (the
 // same shape, and the same reason, as MatchQueryOutcome above). A non-empty `refusal` is the whole result:
@@ -11492,6 +11495,8 @@ struct PatternSearchOutcome
     std::string               ellipsisAttr;    // "" unless the pattern uses an ellipsis
     std::string               unresolvedAttr;  // "" unless some served grammar did not resolve
     std::size_t               eligibleFiles = 0;
+    bool                      ellipsisCapped = false;   // an ellipsis probe abandoned a node at the bound (V-2)
+    std::uint64_t             ellipsisSkipped = 0;      // how many times — a floor on the nodes left unevaluated
 };
 
 // Compile the pattern for every served grammar, decide refusal-or-proceed, run the walk, and assemble the
@@ -11512,11 +11517,17 @@ static PatternSearchOutcome runPatternSearch( const rw::IngestResult& ing, std::
     }
     const rw::pattern::PatternProgramSet& progs = compiled.set;
 
+    std::atomic<std::uint64_t> ellipsisCapped{ 0 };
+
     rw::AstQueryGroup grp;
-    grp.walk            = rw::AstWalk::Pattern;
-    grp.patternPrograms = &progs;
-    grp.maxMatches      = rw::pattern::kMaxHits;
-    out.matches         = std::move( rw::astQueryGrouped( ing, { grp } )[0] );
+    grp.walk              = rw::AstWalk::Pattern;
+    grp.patternPrograms   = &progs;
+    grp.maxMatches        = rw::pattern::kMaxHits;
+    grp.ellipsisCappedOut = &ellipsisCapped;
+    out.matches           = std::move( rw::astQueryGrouped( ing, { grp } )[0] );
+
+    out.ellipsisSkipped = ellipsisCapped.load( std::memory_order_relaxed );
+    out.ellipsisCapped  = out.ellipsisSkipped != 0;
 
     out.grammarsAttr  = joinOwned( rw::pattern::resolvedNames( progs ), "," );
     out.shapesAttr    = joinOwned( rw::pattern::resolvedShapes( progs ), "," );
@@ -11528,7 +11539,13 @@ static PatternSearchOutcome runPatternSearch( const rw::IngestResult& ing, std::
     // the caller withholds it unless the row list is empty.
     if( progs.usesEllipsis )
     {
-        out.ellipsisAttr = " ellipsis=\"first-match\" ellipsis_bound=\"" + std::to_string( rw::pattern::kEllipsisBound ) + "\"";
+        // ellipsis_capped=/ellipsis_skipped= ride the same condition as ellipsis_bound= — they are facts
+        // about an ellipsis run and decoration on anything else — but unlike the bound they are facts about
+        // THIS run. ellipsis_capped= is always spelled, 0 or 1, exactly like hits_capped=/capped=: a
+        // disclosure that only appears when it is bad teaches the reader to skim past it.
+        out.ellipsisAttr = " ellipsis=\"first-match\" ellipsis_bound=\"" + std::to_string( rw::pattern::kEllipsisBound ) + "\""
+                           + " ellipsis_capped=\"" + ( out.ellipsisCapped ? "1" : "0" ) + "\""
+                           + " ellipsis_skipped=\"" + std::to_string( out.ellipsisSkipped ) + "\"";
     }
     if( !progs.unresolved.empty() )
     {
