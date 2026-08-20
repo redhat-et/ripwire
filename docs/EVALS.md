@@ -3110,7 +3110,7 @@ red-first, with the data-language carve-out recorded as a wave-4 item and
 now pins both budget constants (`6e51beb`), closing the found hole where `128 → 12` left all
 arms green while the feature went ~90% inert.
 
-**W3-S — the six smalls: ACCEPT, with two gate-margin liabilities recorded.** All four new gates
+**The six-smalls disclosure round — ACCEPT, with two gate-margin liabilities recorded.** All four new gates
 are decisive against the clean `adb0831` binary (verifier reproduction: `lintpayloadcapcheck`
 5 FAIL/3 PASS, `bodiesshowncheck` 4/5, `langcensuscheck` 5/12, `forrootlegendcheck` 3/6; all
 green on the wave binary), and each carries a reachable-both-ways guard. `--lint`'s default
@@ -3130,7 +3130,7 @@ the config-language consequence shipped unnoticed — now has a mixed fixture wh
 fires (`61bb8b0`), and the MCP `grep` verb refuses unknown `in=` values the way the CLI does
 (`36f79e5`).
 
-**W3-LEN — length-aware desc+body mix: REJECT stands, verified on every axis.** Registration
+**The length-aware desc+body mix — REJECT stands, verified on every axis.** Registration
 (`2cc9924`) precedes the lever (`deda604`) precedes the revert (`d8862a6`) precedes the result
 (`7e2ad2c`), and the registration is result-free: `for-routed` judged hit@1, n=152, ACCEPT iff
 [+4, +8], plus guards (split=test ≥ 67.7%, sep-auc ≥ 0.922). Measured 90 → 92 = +2, below band,
@@ -3157,5 +3157,5 @@ substance is fixed rather than reworded: batch grep now carries the same `in` ha
 routing judged 98/152 bm25-desc / 90/152 for-routed, split=test 73.1%; frozen ranking lane
 71.9% ≥ 70 (`snapshot.srcpack`); recall MRR 0.643; kParserVer 66 (unmoved this wave, proven by
 cache-provenance matrix). The E6 demotion corpus stands at 16 CLEAN (strict 15) against the
-≥25 bar — the W2-C/W2-D/R-B ranking lanes remain deliberately unbuilt, and the pre-registered
+≥25 bar — the three queued ranking lanes remain deliberately unbuilt, and the pre-registered
 band remains banked, unregistered, and untuned.
