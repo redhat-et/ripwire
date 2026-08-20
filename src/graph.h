@@ -132,8 +132,13 @@ inline bool langCompatible( Lang a, Lang b ) noexcept
 // only assigns the role when scanMacroNames reports flags==1 over exactly the language set langCompatible
 // bridges, so every candidate that survives the language gate is already SymKind::Macro. The predicate is
 // applied there anyway, as the one-line seam a future round would change, and gated so that changing it
-// cannot be silent. Where it does bite is the all-roles resolution in contextratio.h, which is what keeps
-// the new RefRole::Type from spraying a type mention across same-named functions.
+// cannot be silent. Where it does bite is the all-roles resolution in contextratio.h — and the role that gets
+// there is RefRole::Extends, NOT RefRole::Type: contextratio's collectFacts `continue`s on Type 28 lines before
+// it ever calls resolveCandidates, so what keeps a type mention from spraying across same-named functions is
+// that `continue`, not this predicate. What this predicate keeps from spraying is a BASE CLAUSE — on
+// test/nsfilterfix, `class Derived : public Handler` binds to both `class Handler` and the free
+// `int Handler( int )` without it (ents 1 -> 2, amb 0 -> 1). Corrected 2026-08-20: the wrong role was named
+// here and in contextratio.h, and test/nsfiltercheck.sh arm 5 now pins the real effect on the real role.
 inline bool namespaceCompatible( RefRole role, SymKind kind ) noexcept
 {
     switch( role )
