@@ -286,6 +286,18 @@ inline Facts collectFacts( const IngestResult& ing, const NameDefs& byName,
         {
             continue;   // a doc→code mention is a reader's cross-reference, not a thing the code resolves
         }
+        if( r.role == RefRole::Type )
+        {
+            // DELIBERATELY OUT OF SCOPE, and this is a scoping decision rather than a judgement that a type
+            // mention is not context. Two reasons. (1) A member declaration `Shared m_a;` already contributes
+            // a site here through its HAS-A compose reference, which occupies the same bytes — admitting the
+            // type mention as well would count ONE thing a reader must read TWICE. (2) The coupling/cohesion
+            // thresholds this lens feeds were calibrated over the pre-Type reference stream (docs/EVALS.md
+            // §9); moving their input silently, from a lane registered to change the USE-SITE index, would
+            // invalidate a calibrated instrument as a side effect. Admitting type mentions here is a real
+            // improvement and a real re-calibration — it needs its own registered round, not a free ride.
+            continue;
+        }
         const bool          hasFile = r.fileId < fileCount;
         const bool          hasSym  = r.fromSymbol != kNoNode && r.fromSymbol < symbolCount
                                       && isMeasurableKind( ing.symbols[r.fromSymbol].kind );
