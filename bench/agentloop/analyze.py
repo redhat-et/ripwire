@@ -24,6 +24,9 @@
 #   python3 bench/agentloop/analyze.py --results results.json
 import argparse, json, math, pathlib, random, statistics, sys
 
+sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
+import select_tasks   # reuse frozen_partition() — see load_results()'s B1 re-derivation check below
+
 SCHEMA = "ripwire-agentloop-results-v3"   # v3: three arms, resolved_model + harness_version fields
 ARM_BASELINE, ARM_RIPWIRE = "baseline", "ripwire_cli"
 
@@ -33,6 +36,21 @@ def load_results( path ):
     data = json.loads( pathlib.Path( path ).read_text() )
     if data.get( "schema" ) != SCHEMA:
         raise SystemExit( f"{path}: unexpected schema {data.get('schema')!r} (expected {SCHEMA!r}); refusing" )
+    # B1 fix (2026-08-20 outcome-harness-fixes lane): the mirror of run_agentloop.py's load_tasks_lock()
+    # check, on the OTHER side of the seam. A results file was necessarily produced against SOME
+    # tasks.lock at run time, but a stale copy of that lock, a hand-edited results file, or results
+    # merged in from a run against an older lock could still carry a repo that the CURRENT split
+    # contract sends to LocBench train. Every record names its own repo, so this can be re-derived
+    # here with no dependency on which lock file produced it — fail closed on the contract before any
+    # statistic is computed from a possibly-contaminated instance.
+    contaminated = sorted( { r["repo"] for r in data.get( "records", () )
+                             if select_tasks.frozen_partition( r["repo"] ) != "heldout" } )
+    if contaminated:
+        raise SystemExit(
+            f"{path}: results contain instance(s) from repo(s) that re-derive to LocBench TRAIN under "
+            f"the current split rule, not heldout: {contaminated}. These results were produced against "
+            f"a lock that has since gone stale (or never honored the split contract) — refusing to "
+            f"analyze a possibly-contaminated instance set." )
     return data
 
 def pair_by_task_seed( records ):
@@ -131,7 +149,17 @@ def mean_substitution( recs ):
 def analyze( records, n_boot=10000, bootstrap_seed="ripwire-b4-agentloop-bootstrap-v1" ):
     paired, incomplete = pair_by_task_seed( records )
     repos = sorted( { repo for _, repo, *_ in paired } )
-    out = dict( n_pairs=len( paired ), n_repos=len( repos ), n_incomplete=len( incomplete ) )
+    # Contamination count (arm-isolation fix, 2026-08-20 outcome-harness-fixes lane): a baseline record
+    # with status="contaminated" (run_agentloop.py's baseline_contamination_note()) is already excluded
+    # from `paired` by pair_by_task_seed()'s status=="ok" requirement — this is the count IV.6 of the
+    # prereg asks be REPORTED, not the mechanism that excludes it. Must be 0 for a trustworthy round;
+    # any non-zero value means the isolation held at the environment level (the run still executed) but
+    # the agent disobeyed the prompt contract anyway, and analyze() must never silently absorb that into
+    # n_incomplete without a name.
+    n_contaminated_baseline = sum( 1 for r in records
+                                   if r.get( "arm" ) == ARM_BASELINE and r.get( "status" ) == "contaminated" )
+    out = dict( n_pairs=len( paired ), n_repos=len( repos ), n_incomplete=len( incomplete ),
+                n_contaminated_baseline=n_contaminated_baseline )
     if not paired:
         out["note"] = "zero complete paired (baseline,ripwire_cli) runs — nothing to analyze yet"
         return out
@@ -167,7 +195,12 @@ def print_report( out ):
     def pct( x ): return f"{100*x:+.2f}pp" if x is not None else "n/a"
     def rat( x ): return f"{100*x:+.1f}%" if x is not None else "n/a"
     print( f"paired agentloop analysis: n_pairs={out['n_pairs']} n_repos={out['n_repos']} "
-           f"n_incomplete={out['n_incomplete']}" )
+           f"n_incomplete={out['n_incomplete']} n_contaminated_baseline={out.get('n_contaminated_baseline', 0)}" )
+    contaminated = out.get( "n_contaminated_baseline", 0 )
+    if contaminated:
+        print( f"  ** {contaminated} baseline run(s) invoked ripwire despite the no-ripwire contract "
+               f"(status=\"contaminated\") — excluded from n_pairs, but a non-zero count here means the "
+               f"round is not clean; see run_agentloop.py's baseline_contamination_note() **" )
     if "note" in out:
         print( f"  {out['note']}" ); return
     print( f"  resolved-rate delta {pct(out['resolved_delta_mean'])}; "
@@ -225,6 +258,26 @@ def synthetic_fixture():
                           arm=ARM_RIPWIRE, seed=1, harness="fixture", model="fixture", status="ok",
                           resolved=True, localization_hit=True, tokens_in=1000, tokens_out=9000,
                           wall_seconds=100.0, cost_usd=0.4, error=None, started_unix=0, finished_unix=0 ) )
+    # one deliberately CONTAMINATED baseline (arm-isolation fix): its ripwire_cli counterpart for the
+    # same (instance_id, seed) completed status="ok", proving contamination excludes the pair even when
+    # the other side is otherwise complete — status != "ok" on either side is enough, per
+    # pair_by_task_seed(), and this must show up as n_contaminated_baseline=1, not silently as just
+    # another n_incomplete entry.
+    records.append( dict( instance_id="repoB-contam", repo="fake/repoB", base_commit="deadbeef",
+                          arm=ARM_BASELINE, seed=1, harness="fixture", model="fixture",
+                          status="contaminated",
+                          resolved=False, localization_hit=False, tokens_in=1000, tokens_out=9000,
+                          wall_seconds=100.0, cost_usd=0.4, command_calls=1, ripwire_calls=1,
+                          ripwire_commands=[ "ripwire . --for=oops" ], native_read_calls=0,
+                          events_path=None,
+                          error="CONTAMINATED: baseline arm invoked ripwire 1 time(s)",
+                          started_unix=0, finished_unix=0 ) )
+    records.append( dict( instance_id="repoB-contam", repo="fake/repoB", base_commit="deadbeef",
+                          arm=ARM_RIPWIRE, seed=1, harness="fixture", model="fixture", status="ok",
+                          resolved=True, localization_hit=True, tokens_in=1000, tokens_out=9800,
+                          wall_seconds=108.0, cost_usd=0.43, command_calls=1, ripwire_calls=3,
+                          ripwire_commands=[ "ripwire . --for=x" ], native_read_calls=1,
+                          events_path=None, error=None, started_unix=0, finished_unix=0 ) )
     return records
 
 def self_test():
@@ -233,8 +286,13 @@ def self_test():
     print_report( out )
     failures = []
     if out["n_pairs"] != 27: failures.append( f"expected 27 paired runs, got {out['n_pairs']}" )
-    if out["n_incomplete"] != 1: failures.append( f"expected 1 incomplete pair, got {out['n_incomplete']}" )
+    if out["n_incomplete"] != 2:
+        failures.append( f"expected 2 incomplete pairs (the orphan + the contaminated-baseline pair), "
+                          f"got {out['n_incomplete']}" )
     if out["n_repos"] != 3: failures.append( f"expected 3 repos, got {out['n_repos']}" )
+    if out.get( "n_contaminated_baseline" ) != 1:
+        failures.append( f"expected exactly 1 contaminated baseline run counted, "
+                          f"got {out.get('n_contaminated_baseline')}" )
     if not ( out["resolved_delta_mean"] > 0 ): failures.append( "expected a positive resolved-rate delta" )
     if not ( out["resolved_delta_bootstrap_95_lower"] > 0 ):
         failures.append( "expected a POSITIVE bootstrap 95% lower bound for a manufactured 1/3 -> 2/3 lift" )
