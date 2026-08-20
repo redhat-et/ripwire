@@ -24,6 +24,9 @@
 #   python3 bench/agentloop/analyze.py --results results.json
 import argparse, json, math, pathlib, random, statistics, sys
 
+sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
+import select_tasks   # frozen_partition(): the one repo-disjointness rule (verbatim from run_locbench.py)
+
 SCHEMA = "ripwire-agentloop-results-v3"   # v3: three arms, resolved_model + harness_version fields
 ARM_BASELINE, ARM_RIPWIRE = "baseline", "ripwire_cli"
 
@@ -33,6 +36,20 @@ def load_results( path ):
     data = json.loads( pathlib.Path( path ).read_text() )
     if data.get( "schema" ) != SCHEMA:
         raise SystemExit( f"{path}: unexpected schema {data.get('schema')!r} (expected {SCHEMA!r}); refusing" )
+    # HASH-OF-LIST IS NECESSARY BUT NOT SUFFICIENT (found 2026-08-20): run_agentloop.py verifies the
+    # lock's content_sha256, but a lock generated under a divergent partition rule hashes clean over a
+    # contract-violating task list — the 2026-08-05 pilot ran a LocBench-TRAIN instance
+    # (pydata__xarray-3364) that way. Re-derive the partition over every record's repo before any
+    # number is averaged; QUESTIONS-mode results (local scenario trees, not SWE-bench repos) are the
+    # one source the split contract does not apply to.
+    if not str( data.get( "tasks_lock_content_sha256", "" ) ).startswith( "questions:" ):
+        train_repos = sorted( { r["repo"] for r in data.get( "records", [] )
+                                if select_tasks.frozen_partition( r["repo"] ) != "heldout" } )
+        if train_repos:
+            raise SystemExit( f"{path}: records from LocBench-TRAIN repo(s) {train_repos}; the "
+                               f"repo-disjointness contract forbids scoring them — refusing "
+                               f"(fail-closed). These runs are train-contaminated; regenerate "
+                               f"tasks.lock with select_tasks.py and re-run." )
     return data
 
 def pair_by_task_seed( records ):
@@ -72,9 +89,10 @@ def clustered_bootstrap_lower( pairs, value_fn, n_boot, seed_str, alpha=0.025 ):
     ALSO WORTH KNOWING BEFORE TRUSTING A NUMBER FROM THIS: with equal paired-row counts per repo — the
     case for every configuration this harness runs — pooling then averaging is algebraically identical
     to resampling the G repo-level MEAN deltas themselves. The entire bootstrap distribution is a
-    resample of G numbers, and G is 6. That is the textbook few-clusters regime (reliable coverage
-    wants G >~ 20-40), and it is why adding instances inside the existing repos cannot buy power. See
-    power_sim.py."""
+    resample of G numbers, and G is the locked repo count — 8 at the current tasks.lock (6 before the
+    2026-08-20 partition fix; power_sim_results.json was computed at G=6, so its MDEs are slightly
+    pessimistic now). Still the textbook few-clusters regime (reliable coverage wants G >~ 20-40),
+    which is why adding instances inside the existing repos cannot buy power. See power_sim.py."""
     repos = sorted( { repo for _, repo, *_ in pairs } )
     if not repos: return 0.0, []
     by_repo = {}

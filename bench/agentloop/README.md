@@ -23,7 +23,9 @@ hardware limit — `colima stop amd64 && colima start amd64 --disk 250 --cpu 8 -
 SWE-bench's official `linux/amd64` images run emulated; budget wall-clock accordingly, or track
 upstream's experimental native-arm64 support. Until that runs, these arms measure
 localization / tokens / wall time — **not solve rate** — and localization is already at ceiling
-(6/6 on both arms in the pilot), so it has no discriminating power left. Two defects in the scoring
+(6/6 on both arms in the pilot), so it has no discriminating power left. (The pilot itself is also
+train-contaminated — it ran `pydata__xarray-3364`, a LocBench-TRAIN instance frozen by the pre-fix
+lock; see "Task selection" below.) Two defects in the scoring
 path were fixed on 2026-08-10 without being able to execute it: the report was being written to the
 *caller's* cwd, and an infrastructure failure (Docker down, disk full) was being recorded as
 `resolved=False` — indistinguishable from a patch that genuinely did not fix the bug, which would
@@ -79,6 +81,10 @@ available it is cross-checked against the shim, and the shim wins.
 ### READ THIS BEFORE FUNDING A RUN: the design is underpowered, and more instances will not fix it
 
 Computed 2026-08-10 (`power_sim.py`, `power_sim_results.json`), **before** spending anything.
+(Computed against the pre-2026-08-20 lock: 24 instances / 6 clusters. The corrected lock has 32
+instances / **8 clusters** — more clusters is the favorable direction, so read the tables below as
+slightly pessimistic bounds; they have not been re-run at G=8, and the conclusion — clusters are the
+lever, a null is uninformative — does not change at 8.)
 
 `analyze.py` bootstraps **clustered by repo**, and with equal paired-row counts per repo — always the
 case here — pooling then averaging is algebraically identical to resampling the **G repo-level mean
@@ -178,19 +184,32 @@ python3 bench/agentloop/select_tasks.py --from-file rows.json --work-dir /tmp/ag
 `rows.json` must be a real local dump of HF rows (list of `{repo, instance_id, base_commit, ...}`);
 the script refuses to run without either a network fetch or this file.
 
-**Honest result on this machine (2026-07-13):** SWE-bench-Lite's test split spans exactly **12
-repos**. The repo-disjoint split excludes 6 of them (`django/django`, `matplotlib/matplotlib`,
-`mwaskom/seaborn`, `pallets/flask`, `sphinx-doc/sphinx`, `sympy/sympy`), leaving 6 eligible
-(`astropy/astropy`, `psf/requests`, `pydata/xarray`, `pylint-dev/pylint`, `pytest-dev/pytest`,
-`scikit-learn/scikit-learn`). At the spec'd cap of 4 instances/repo, the maximum achievable is
-**24 instances**, not 40 — `tasks.lock` locks 24 (6 repos x 4), and that is reported here rather than
-silently raising the cap to hit a round number. Raise `--cap-per-repo` (e.g. to 6 or 7) if a larger N
-is wanted; that is a reviewed decision, not something this script decides for you.
+**Honest result on this machine (2026-08-20, correcting the 2026-07-13 paragraph):** SWE-bench-Lite's
+test split spans exactly **12 repos**. The repo-disjoint split excludes 4 of them
+(`matplotlib/matplotlib`, `mwaskom/seaborn`, `pallets/flask`, `pydata/xarray`), leaving 8 eligible
+(`astropy/astropy`, `django/django`, `psf/requests`, `pylint-dev/pylint`, `pytest-dev/pytest`,
+`scikit-learn/scikit-learn`, `sphinx-doc/sphinx`, `sympy/sympy`) and 265/300 eligible instances. At
+the spec'd cap of 4 instances/repo, the maximum achievable is **32 instances**, not 40 — `tasks.lock`
+locks 32 (8 repos x 4), and that is reported here rather than silently raising the cap to hit a round
+number. Raise `--cap-per-repo` (e.g. to 6 or 7) if a larger N is wanted; that is a reviewed decision,
+not something this script decides for you.
+
+The numbers this paragraph carried until 2026-08-20 (6 excluded / 6 eligible / 24 max) came from a
+committed lock that did not satisfy the partition rule it named: it froze `pydata/xarray` — a
+LocBench-TRAIN repo under `frozen_partition()` — as eligible, and the 2026-08-05 pilot ran one of its
+instances (`pydata__xarray-3364`), so the pilot's numbers are train-contaminated. Neither
+`select_tasks.py` implementation diverged (both agree with `run_locbench.py` on all 12 repos today);
+the committed artifact simply did not match them, and the content hash could not catch that.
 
 `tasks.lock` mirrors `bench/locbench/dataset.lock`'s fail-closed pattern: it carries a
 `content_sha256` over the canonicalized instance list, and both `run_agentloop.py` and `analyze.py`
 recompute and check it before trusting the file — a hand-edited or corrupted lock file is refused, not
-silently re-derived.
+silently re-derived. Since 2026-08-20 both also **re-derive the repo partition itself**:
+`run_agentloop.py` refuses a lock that freezes any LocBench-TRAIN repo, and `analyze.py` refuses a
+results file containing records from one (QUESTIONS-mode results excepted — those are local scenario
+trees, not SWE-bench repos). Hash-of-list proves the list wasn't edited, not that it was generated
+under the right rule; the partition check is what closes that gap
+(`test/agentlooplockcheck.sh` asserts both directions).
 
 ## Running the pipeline today (zero cost)
 
@@ -280,7 +299,7 @@ with one `--live-one` that OAuth survives a redirected `CLAUDE_CONFIG_DIR` befor
 ## Running the Codex CLI pilot
 
 Use the Codex harness for the requested comparison. `--limit` selects repositories round-robin, so the
-three-task pilot spans Astropy, Requests, and Xarray instead of taking three adjacent Astropy rows.
+three-task pilot spans three different repos instead of taking three adjacent Astropy rows.
 
 First, smoke-test with exactly ONE real run (`--live-one`) before ever touching the full matrix:
 
@@ -314,8 +333,8 @@ full run. Pass `--evaluator swebench` once Docker + `pip install swebench` are a
 
 ## SAFETY NOTE — read before ever passing `--live`
 
-**The full run (24 tasks x 2 arms x 3 seeds = 144 runs at the current `tasks.lock`) spends real
-money** against a real LLM API and real Docker compute — projected **$43-$216** at 24 locked
+**The full run (32 tasks x 2 arms x 3 seeds = 192 runs at the current `tasks.lock`) spends real
+money** against a real LLM API and real Docker compute — projected **$58-$288** at 32 locked
 instances (scale linearly if `--cap-per-repo` is raised toward the original 40-task target; R4's
 original 40-task estimate was ~$150-350). This is not a number `run_agentloop.py` will ever spend
 without:
