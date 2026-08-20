@@ -799,8 +799,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="src/graph.h:2089"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:2425"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:12376"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:12491"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:12377"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:12492"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:950"/>
 </callers>
 ```
@@ -1023,10 +1023,14 @@ is not publicly reproducible from this tree, and it proves *cheaper and faster*,
 outcomes*.
 
 **The losses ship next to the wins.** `--grep`'s 2026-06 anti-headline (+19.7% / −11.2% vs raw grep)
-was re-derived 2026-08-15 after the emission overhaul: the default view now lands at **−1.9% / +4.3%**
+was re-derived 2026-08-15 after the emission overhaul: the **un-tiered view** — `--grep-in=any`, which
+was the default when this was measured — lands at **−1.9% / +4.3%**
 of a clean grep dump while carrying enclosing symbols and in-band honesty grep cannot give — one term
-either side of parity, which is not a headline in either direction — but an *exhaustive* uncapped dump
-remains token-negative (**+150% / +214%**), and this project still says so. Nor is that the worst
+either side of parity, which is not a headline in either direction — but an uncapped dump of that same
+un-tiered view remains token-negative (**+150% / +214%**), and this project still says so. (Span tiers
+landed 2026-08-19 and made the *default* a filtered view of the same scan; every byte number on this
+page is the un-tiered one, deliberately — the instrument may not move under a display change — so none
+of them describes today's default. See `docs/EVALS.md` §grep.) Nor is that the worst
 regime: on *small-hit uncapped* answers the fixed per-answer legend is not amortized over anything, and
 a gated set of twelve such queries on this repository runs **+65.1% median, larger than plain grep on
 12 of 12**. When the agent knows a second term, `--grep=A --and=B` flips hard positive (**−77.7%**
