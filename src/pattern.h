@@ -58,6 +58,7 @@
 
 #include "model.h"
 #include "infra/Diagnostics.h"
+#include "infra/namesplit.h"   // isIdentChar / isIdentStart — the ONE ASCII identifier-character pair
 
 #include <tree_sitter/api.h>
 
@@ -148,21 +149,17 @@ struct PatternProgramSet
 
     const PatternProgram* forGrammar( const TSLanguage* g ) const noexcept
     {
-        for( const PatternProgram& p : programs )
-        {
-            if( p.grammar == g )
-            {
-                return &p;
-            }
-        }
-        return nullptr;
+        const auto it = std::find_if( programs.begin(), programs.end(), [ g ]( const PatternProgram& p ) noexcept { return p.grammar == g; } );
+        return it == programs.end() ? nullptr : &*it;
     }
 };
 
 // ── step 1: normalization ────────────────────────────────────────────────────────────────────────────
 
-inline bool isNameStart( char c ) noexcept { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || c == '_'; }
-inline bool isNameChar( char c ) noexcept  { return isNameStart( c ) || ( c >= '0' && c <= '9' ); }
+// Metavariable names are ASCII identifiers, which is exactly what infra/namesplit.h already decides for
+// mention.h — one predicate, two callers, no second opinion about what an identifier byte is.
+using rw::namesplit::isIdentChar;
+using rw::namesplit::isIdentStart;
 
 // What the normalizer produced, or why it could not.
 struct Normalized
@@ -262,7 +259,7 @@ inline Normalized normalizePattern( std::string_view raw, std::string_view marke
                 ++dollars;
             }
             std::size_t nameEnd = i + dollars;
-            while( nameEnd < raw.size() && isNameChar( raw[nameEnd] ) )
+            while( nameEnd < raw.size() && isIdentChar( raw[nameEnd] ) )
             {
                 ++nameEnd;
             }
@@ -275,7 +272,7 @@ inline Normalized normalizePattern( std::string_view raw, std::string_view marke
                 i = nameEnd - 1;
                 continue;
             }
-            if( name.empty() || !isNameStart( name[0] ) )
+            if( name.empty() || !isIdentStart( name[0] ) )
             {
                 out.src.push_back( c );      // a lone `$` that starts no metavariable is just a byte
                 ++otherBytes;
@@ -350,7 +347,7 @@ inline bool markerCollides( std::string_view raw, std::string_view marker )
                 i = j - 1;   // `$$$` — a legal ellipsis, not a collision
                 continue;
             }
-            if( j >= raw.size() || !isNameStart( raw[j] ) )
+            if( j >= raw.size() || !isIdentStart( raw[j] ) )
             {
                 return true;   // a bare `$` the rewrite would leave behind, next to ones it replaced
             }
@@ -400,14 +397,9 @@ inline constexpr std::string_view kUnsupportedGrammars = "ruby,bash,json,toml,ya
 
 inline const TemplateSet* templatesFor( std::string_view grammarName )
 {
-    for( const TemplateSet& ts : templateTable() )
-    {
-        if( ts.grammarName == grammarName )
-        {
-            return &ts;
-        }
-    }
-    return nullptr;
+    const std::vector<TemplateSet>& table = templateTable();
+    const auto it = std::find_if( table.begin(), table.end(), [ grammarName ]( const TemplateSet& ts ) { return ts.grammarName == grammarName; } );
+    return it == table.end() ? nullptr : &*it;
 }
 
 // ── steps 3-5: locate, guard, snapshot ───────────────────────────────────────────────────────────────
@@ -731,16 +723,27 @@ inline CompileOutcome compileAll( std::string_view raw, const std::vector<Gramma
     return out;
 }
 
+// Append `value` unless it is already there. Three of the disclosure lists below are "walk the programs,
+// keep one entry per grammar NAME, in table order", and three hand-written copies of that loop is both a
+// clone and three chances to get the order wrong. Order-preserving on purpose: table order is what makes
+// grammars=/shapes= deterministic without a sort.
+inline bool appendUnique( std::vector<std::string>& into, std::string value )
+{
+    if( std::find( into.begin(), into.end(), value ) != into.end() )
+    {
+        return false;
+    }
+    into.push_back( std::move( value ) );
+    return true;
+}
+
 // Every served grammar NAME, deduplicated, in table order — what a refusal quotes back as "served".
 inline std::vector<std::string> servedNames( const std::vector<GrammarRow>& rows )
 {
     std::vector<std::string> names;
     for( const GrammarRow& r : rows )
     {
-        if( std::find( names.begin(), names.end(), std::string( r.name ) ) == names.end() )
-        {
-            names.emplace_back( r.name );
-        }
+        appendUnique( names, std::string( r.name ) );
     }
     return names;
 }
@@ -751,10 +754,7 @@ inline std::vector<std::string> resolvedNames( const PatternProgramSet& set )
     std::vector<std::string> names;
     for( const PatternProgram& p : set.programs )
     {
-        if( std::find( names.begin(), names.end(), p.grammarName ) == names.end() )
-        {
-            names.push_back( p.grammarName );
-        }
+        appendUnique( names, p.grammarName );
     }
     return names;
 }
@@ -767,12 +767,10 @@ inline std::vector<std::string> resolvedShapes( const PatternProgramSet& set )
     std::vector<std::string> shapes, seen;
     for( const PatternProgram& p : set.programs )
     {
-        if( std::find( seen.begin(), seen.end(), p.grammarName ) != seen.end() )
+        if( appendUnique( seen, p.grammarName ) )
         {
-            continue;
+            shapes.push_back( p.grammarName + ":" + p.rootKind );
         }
-        seen.push_back( p.grammarName );
-        shapes.push_back( p.grammarName + ":" + p.rootKind );
     }
     return shapes;
 }
