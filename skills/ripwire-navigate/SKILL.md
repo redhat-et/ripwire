@@ -78,6 +78,11 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   hits where B is ALSO present, `--not=C` (repeatable) drops hits where C IS present — literal-only, so
   they pair with `--grep=`, not `--regex=`. `--grep-scope=line` (default) requires the extra term on the
   SAME matched line; `--grep-scope=file` widens that to anywhere in the same file.
+  Hits are SPAN-TIERED by default: a hit inside a comment or a string literal is a mention, not a use, so
+  the answer serves the tightest non-empty tier — code if there is any, else the comment rows (a pattern
+  that lives only in prose is still answered, never emptied) — and says what it held back via
+  `suppressed_comment=`/`suppressed_string=`. When those counters appear and the mention IS what you were
+  after (an error-message string, a design note), re-ask with `--grep-in=any` for every tier.
 
 `--callers`/`--callees` answer from the call graph directly — no separate index step. Edges are name-based:
 a high-rank symbol with no callees may be a dispatch hub (virtual/callback/macro), not a leaf — read it.
