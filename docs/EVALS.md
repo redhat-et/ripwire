@@ -1296,6 +1296,76 @@ for `bm25-desc`'s +8.
 
 ---
 
+### Type-mention use-sites + namespace-compatible candidates — PRE-REGISTERED 2026-08-20 (before any feature code)
+
+Two resolver-precision items from the stack-graphs recon lane, registered together because item #2 is
+the filter that is supposed to keep item #1 from *adding* ambiguity, and because they would share one
+`kParserVer` bump. Item #3 of that report (depth-2 receiver-chain resolution) is explicitly **not** in
+this round.
+
+**#1 — `RefRole::Type`.** `ingest.cpp::usesVisitNode` opens with `strcmp( t, "identifier" ) != 0 →
+return`, so a `type_identifier` / `user_type` node — a bare TYPE mention in a signature, a declaration
+or a template argument — is captured by nothing. `RefRole` today is
+`Call | Read | Write | Import | Extends | Macro`; only `Extends` (base clause) and `isCompose`
+(member-variable declared type) touch a type position, and both are *specific declaration forms*, not
+a general mention. The `--uses` legend currently states the absence as a promise. The change adds
+`RefRole::Type`, widens the accept set through a declarative kind table, and keeps the role OUT of the
+call-graph CSR exactly as `Read`/`Write`/`Import`/`Extends` already are (`graph.h` admits `Call` and
+`Macro` only).
+
+**#2 — `namespaceCompatible( RefRole, SymKind )`.** One predicate beside the existing `langCompatible`,
+generalizing the kind filters the graph already hard-codes in three places (the SCIP inherit overlay's
+`isClassLikeK`, the implementors builder's `isClassLike`, and the compose-edge builder's
+`k != SymKind::Class && k != SymKind::Struct`). **`RefRole::Call` stays UN-narrowed**: in C++ `Foo(x)`
+is legitimately a constructor call or a functional cast, and narrowing `Call` to `Function|Method`
+would drop real edges — `resolve.h`'s standing doctrine is that a *wrong* narrow is worse than no
+narrow.
+
+**Baseline, re-derived on this lane's own tree** (`integration/harvestexec-2026-08-20` @ `ba3a716`,
+`./build/ripwire .` on ripwire's own checkout, working tree clean of untracked plan docs):
+
+```
+files=1291 symbols=11240 edges=13755 ambiguous=5466 unresolved=3160 precise=3
+```
+
+`ambiguous/edges = 39.7%`. Use-site counts for five type-only symbols, same binary:
+`--uses=IngestResult` **0**, `--uses=Narrower` **0**, `--uses=ScipOverlay` **0**, `--uses=AffResult`
+**0**, `--uses=VarSpan` **1**. (The recon report measured `files=1163 … edges=12072 ambiguous=4885` on
+a different branch with a different untracked file set; the numbers above are this lane's own and are
+the ones the criteria below are read against.)
+
+**Success criteria, registered before the code.**
+
+* **#1a** On a purpose-built fixture where a type is named ONLY in type position (parameter type,
+  return type, member type, template argument) and never called or constructed, `--uses=<T>` goes from
+  `count="0"` to ≥ 4 rows carrying an honest role marker at the exact `file:line` of each mention.
+* **#1b** `edges=` and `ambiguous=` over that fixture are **unchanged, byte-for-byte on the whole
+  default map**, before and after — the proof that `Type` never entered the CSR.
+* **#1c** Negative control: a *local variable* whose name equals the type's name yields no type-role
+  row (it is a `Read`/`Write` site, not a type mention).
+* **#2a** `ambiguous=` on ripwire's own tree **decreases** against the 5466 baseline.
+* **#2b** Zero known-good edges lost on a pinned fixture set: the whole gate suite stays green, and an
+  ordinary constructor call `Handler h;` keeps its edge.
+* **#2c** The `Call`-role edge count is unchanged by the predicate alone.
+
+**Failure criteria that revert the item.**
+
+* #1 reverts if the default map over any corpus is not byte-identical (a `Type` ref reaching the CSR),
+  if determinism breaks, or if a type-role row is emitted at a *definition* site (a self-reference).
+* #2 reverts if `ambiguous=` fails to decrease (criterion #2a unmet — the predicate is then a no-op and
+  is not worth a behavioral surface), or if any known-good edge is dropped.
+
+**What moves if either lands.** #1 changes extraction ⇒ `kParserVer` 66 → 67 and
+`quality.h::kIngestParserVerMirror` 66 → 67 in the same commit, plus the `--uses` legend, the `--help`
+text, and every recorded capture in `docs/COMMANDS.md` (arm G is byte-parity). #2 moves `edges=` /
+`ambiguous=` on real corpora ⇒ the same re-capture obligation.
+
+**Red-first reference binary.** `/Users/qgames/AppDevelopLocal/project2/ripwire-wt-wave3/build/ripwire`
+@ `ba3a716` — the same commit this lane branches from. Every gate below is recorded FAILING against it
+before the feature code exists.
+
+---
+
 ## 5. Token and output economy
 
 ### `--pack-signatures`
