@@ -141,10 +141,14 @@ inline const char* forRootRelPathsLegendShort( bool on ) noexcept { return on ? 
 // widening round proved false and which no extractor can make true — the sentence promised exhaustiveness
 // over a name-based, statically-extracted reference index. Restated as what IS true.
 inline constexpr const char* kUsesLegendOpen =
-    "<!-- ripwire uses: the STATICALLY RESOLVABLE use-sites of SYM (role=call|macro|read|write|import|extends; "
-    "p=file:line) — a floor, see counts_floor below. That role list is the whole vocabulary: a bare TYPE mention — "
-    "SYM named as a type in a signature, a declaration or a template argument — is NOT a use-site and contributes "
-    "no row, so a caller that only names SYM as a type is absent from this count. role=\"macro\" is the call-shaped invocation of a name "
+    "<!-- ripwire uses: the STATICALLY RESOLVABLE use-sites of SYM (role=call|macro|read|write|import|extends|type; "
+    "p=file:line) — a floor, see counts_floor below. That role list is the whole vocabulary. role=\"type\" is a bare TYPE "
+    "mention — SYM named as a type in a signature, a declaration or a template argument — and it carries no call edge: "
+    "a type dependency is real, but it is not an invocation, so it never reaches the call graph, PageRank or the ranked "
+    "map. It is captured for C/C++/ObjC only, and only where the type is spelled as a plain leaf name, so a mention "
+    "written through a qualified or aliased spelling still contributes no row. A base clause is role=\"extends\" rather "
+    "than role=\"type\" (that relation is modelled separately), and a type\'s own DEFINITION is never a use of itself. "
+    "role=\"macro\" is the call-shaped invocation of a name "
     "that uniquely names an indexed function-like #define — never labelled role=\"call\", because an expansion "
     "is not a plain call; a name shared with a non-macro definition stays role=\"call\" for the resolver. ";
 

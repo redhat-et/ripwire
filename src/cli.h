@@ -62,7 +62,7 @@ struct Config
     std::string_view around;                               // --around=SYMBOL (or file:name): focused ego pack
     std::string_view callers;                              // --callers=SYMBOL (or file:name): who calls it (1-hop in-edges)
     std::string_view callees;                              // --callees=SYMBOL (or file:name): what it calls (1-hop out-edges)
-    std::string_view usesSym;                              // --uses=SYM (or file:name): the statically resolvable use-sites of SYM (call/read/write/import/extends) + external flag (ABS-3); file: narrows defs= + the call-role sites, other roles stay name-wide (§P10.2/§A6b)
+    std::string_view usesSym;                              // --uses=SYM (or file:name): the statically resolvable use-sites of SYM (call/read/write/import/extends/type) + external flag (ABS-3); file: narrows defs= + the call-role sites, other roles stay name-wide (§P10.2/§A6b)
     std::string_view graphQuery;                           // --graph-query=EXPR: composable node-set operators over the call graph (ABS-5)
     std::string_view verifyClaim;                          // --verify=CLAIM (G4): one structured claim in, a three-valued verdict + inline evidence out (src/verify.h owns the closed grammar)
     std::string_view helpTask;                             // --help-task=TASK: deterministic task -> one recommended Ripwire command (or honest abstention)
@@ -821,7 +821,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --around=SYM               ego graph around SYM   [--around-depth=N] [--around-fanout=K]\n"
         "    --callers=SYM              who calls SYM (1-hop in-edges). file:name disambiguates a same-named symbol across files (like --around/--lego)\n"
         "    --callees=SYM              what SYM calls (1-hop out-edges). file:name disambiguates like --callers\n"
-        "    --uses=SYM                 the statically resolvable use-sites of SYM (role=call|macro|read|write|import|extends, file:line); external=\"1\" if SYM has no in-corpus def.\n"
+        "    --uses=SYM                 the statically resolvable use-sites of SYM (role=call|macro|read|write|import|extends|type, file:line); external=\"1\" if SYM has no in-corpus def.\n"
         "                               file:name narrows defs= AND the role=\"call\" sites (kept only where the call RESOLVES to a chosen def —\n"
         "                               --callers' own narrowing); read/write/import/extends carry no resolution and stay name-matched.\n"
         "                               narrowed_roles=/defs_of_name=/call_sites_of_name= (file: qualifier only) disclose what narrowed and\n"

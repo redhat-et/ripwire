@@ -252,7 +252,12 @@ inline void resolveCandidates( const IngestResult& ing, const NameDefs& byName, 
         {
             break;
         }
-        if( langCompatible( ing.symbols[id].lang, r.lang ) )
+        // langCompatible AND namespaceCompatible — the same pair buildGraph's candidate set is gated by.
+        // This is the one place the namespace gate has a MEASURABLE effect: unlike the call-edge loop, this
+        // pass resolves EVERY role, so without it a bare RefRole::Type mention of `Handler` would count a
+        // same-named free function as a candidate and fold into this scan's ambiguity facts. A type mention
+        // can only ever mean a class, struct or interface, so the narrow is sound, not a guess.
+        if( langCompatible( ing.symbols[id].lang, r.lang ) && namespaceCompatible( r.role, ing.symbols[id].kind ) )
         {
             out.push_back( id );
         }
