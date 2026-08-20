@@ -11463,6 +11463,23 @@ static std::string joinOwned( const std::vector<std::string>& parts, const char*
     return rw::mcprefuse::joinClauses( std::vector<std::string_view>( parts.begin(), parts.end() ), sep );
 }
 
+// The pattern verb's schema legend, named and hoisted out of runLint: a fifteen-line string literal inside
+// an already-large dispatcher body is verbosity the reader pays for at every OTHER verb in that function,
+// and a legend nobody can grep for by name is one nobody audits. No literal flag spelling in it — a `-`
+// pair is illegal inside an XML comment.
+inline constexpr std::string_view kPatternLegend =
+    "<!-- ripwire pattern: structural search written in CODE, not in tree-sitter node kinds; each hit = a matching "
+                         "node + its enclosing symbol. q= is the pattern as received. grammars= names every served grammar the pattern "
+                         "resolved for and shapes= the node KIND it became in each, so what was actually searched for is auditable; "
+                         "unsupported= names the families this verb does not serve at all (a zero there would be a lie, so it never "
+                         "reports one). eligible_files=/of_files= are corpus files in that language set vs total indexed files. "
+                         "$NAME binds one node and the same $NAME twice must match structurally; $_ binds nothing; the ellipsis is "
+                         "matched by a single first-match-wins probe (never an exhaustive search) under the disclosed ellipsis_bound "
+                         "sibling cap. Comments are transparent on both sides; everything else is kind- and text-exact. "
+                         "unresolved_in= appears ONLY on a zero result and names the served grammars the pattern did not resolve for "
+                         "- the zero may be theirs, not the code's. shown=/capped= = rows printed vs found; hits_capped=\"1\" means "
+                         "hits= is a FLOOR (engine match limit reached). raise the default cap with limit=N (offset=M pages) -->";
+
 // R2 — everything ONE pattern run answers with before a byte is emitted, as one structured return (the
 // same shape, and the same reason, as MatchQueryOutcome above). A non-empty `refusal` is the whole result:
 // the caller prints it and exits 1, and no <pattern> element is ever opened.
@@ -11713,18 +11730,7 @@ std::optional<int> runLint( const MainDispatch& d )
             const PageWindow  patPage  = pageWindow( ps.matches.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
             const std::size_t patShown = patPage.end - patPage.begin;
             char              ppab[ kPageDisclosureCap ];
-            // No literal flag spelling in this legend: a `-` pair is illegal inside an XML comment.
-            std::printf( "<!-- ripwire pattern: structural search written in CODE, not in tree-sitter node kinds; each hit = a matching "
-                         "node + its enclosing symbol. q= is the pattern as received. grammars= names every served grammar the pattern "
-                         "resolved for and shapes= the node KIND it became in each, so what was actually searched for is auditable; "
-                         "unsupported= names the families this verb does not serve at all (a zero there would be a lie, so it never "
-                         "reports one). eligible_files=/of_files= are corpus files in that language set vs total indexed files. "
-                         "$NAME binds one node and the same $NAME twice must match structurally; $_ binds nothing; the ellipsis is "
-                         "matched by a single first-match-wins probe (never an exhaustive search) under the disclosed ellipsis_bound "
-                         "sibling cap. Comments are transparent on both sides; everything else is kind- and text-exact. "
-                         "unresolved_in= appears ONLY on a zero result and names the served grammars the pattern did not resolve for "
-                         "- the zero may be theirs, not the code's. shown=/capped= = rows printed vs found; hits_capped=\"1\" means "
-                         "hits= is a FLOOR (engine match limit reached). raise the default cap with limit=N (offset=M pages) -->" );
+            std::printf( "%.*s", int( kPatternLegend.size() ), kPatternLegend.data() );
             std::printf( "<pattern hits=\"%zu\"%s hits_capped=\"%d\" q=\"%s\" grammars=\"%s\" shapes=\"%s\" unsupported=\"%.*s\"%s%s eligible_files=\"%zu\" of_files=\"%zu\"%s>",
                          ps.matches.size(),
                          pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true ),

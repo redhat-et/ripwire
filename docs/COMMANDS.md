@@ -1024,12 +1024,11 @@ $ ./build/ripwire . --match='(if_statement)'
 
 **Answers:** structural search written in CODE, not in node kinds: --pattern='foo($X, ...)'.
 
-$NAME binds one node (the same $NAME twice must match structurally); $_ binds nothing; ... (or $$$) is an ellipsis over sibling nodes, matched by a single FIRST-MATCH-WINS probe under a hard cap -- both disclosed on the element. Comments are transparent; everything else is kind- and text-exact, so $A + $B does not match a - b. Served: c cpp objc java csharp javascript typescript python go rust swift. NOT served (named in unsupported= on every run, never a silent zero): ruby bash (bare tokens parse clean into the wrong node kind there) and the data tiers json toml yaml markdown. A pattern no served grammar resolves, or one that collapses to a bare token, is REFUSED -- never reported as hits=0.
+$NAME binds one node (repeat it and both sites must match structurally); $_ binds nothing; ... (or $$$) is an ellipsis over siblings, matched by ONE first-match-wins probe under a hard cap -- both facts on the element. Comments are transparent, everything else is kind- and text-exact ($A + $B does not match a - b). Served: c cpp objc java csharp javascript typescript python go rust swift; ruby, bash and the data tiers are named in unsupported= instead of answered. A pattern no served grammar resolves, or that collapses to a bare token, is REFUSED -- never reported as hits=0.
 
 **Caveats (stated by the binary):**
 
-- NOT served (named in unsupported= on every run, never a silent zero): ruby bash (bare tokens parse clean into the wrong node kind there) and the data tiers json toml yaml markdown.
-- A pattern no served grammar resolves, or one that collapses to a bare token, is REFUSED -- never reported as hits=0.
+- A pattern no served grammar resolves, or that collapses to a bare token, is REFUSED -- never reported as hits=0.
 
 ### `--query=TERMS`
 
