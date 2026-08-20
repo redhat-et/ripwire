@@ -1249,11 +1249,23 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 else if( name == "grep" && !path.empty() && !pattern.empty() )
                 {
                     // verifier N8: grep pages through the SAME window both other paged verbs use.
-                    // R-H: `in` is the CLI --grep-in twin — code (default) or any. An unknown value reads as
-                    // the default here rather than refusing, because the schema already declares the closed
-                    // set and this verb has no refusal channel per-argument; the CLI arm is the strict one.
-                    const rw::GrepIn grepInMode = ( strArg( "in" ) == "any" ) ? rw::GrepIn::Any : rw::GrepIn::Code;
-                    resp = pagedResult( [ & ]( McpPageArgs pg ) { return textResult( grepHitsJson( path, pattern, pg, grepInMode ) ); } );
+                    // R-H: `in` is the CLI --grep-in twin — code (default) or any. Wave-3 verifier P6-2:
+                    // an unknown value used to read as the default and silently return the TIERED answer
+                    // (`in:"Any"` measured 3 rows with suppressed_string="38", against 41 for `in:"any"`)
+                    // — a closed set that swallows a typo in the direction that hides rows. The old
+                    // rationale, "this verb has no refusal channel per-argument", was false: mcprefusal.h
+                    // registers the field and the batch surface already refuses loudly. Both dialects now
+                    // read the value through grepInModeFromArg, so they cannot disagree about the set.
+                    rw::GrepIn        grepInMode = rw::GrepIn::Code;
+                    const std::string inRefusal  = rw::grepInModeFromArg( strArg( "in" ), grepInMode );
+                    if( !inRefusal.empty() )
+                    {
+                        resp = errResultMsg( -32602, inRefusal );
+                    }
+                    else
+                    {
+                        resp = pagedResult( [ & ]( McpPageArgs pg ) { return textResult( grepHitsJson( path, pattern, pg, grepInMode ) ); } );
+                    }
                 }
                 else if( name == "cochange" && !path.empty() && !file.empty() )
                 {
