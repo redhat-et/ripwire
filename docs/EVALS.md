@@ -3074,3 +3074,88 @@ python3 test/pargates.py . ./build/ripwire -j 6     # the gate suite
 
 The retrieval evals are **benchmarks, not goldens**: on a live repository the numbers move as
 documents and commits land. The gate suite is the golden.
+
+---
+
+## Wave-3 round (2026-08-19) — adversarial verdicts, findings included
+
+Verifier probes ran against `35fccbf` (the merged wave head plus its quality-acks ledger) from
+clean from-scratch builds of both `adb0831` and the head in throwaway worktrees. Full report:
+the round's local record. The pre-push fix round (`lane/w3-verifier-fixes`, ten commits) landed
+every must-fix finding below before this verdict commit; SHAs cited inline.
+
+**R-H — span tiers on `--grep`/`--regex`: ACCEPT the mechanism, with the ladder correction
+required by the verifier LANDED (`8d935d1`) and the byte claim withheld.** The tier pass is a
+query-time filter over already-collected hits (`search.h::grepApplySpanTiers`), owned by one
+function that both the CLI and the MCP `grep` verb call, with `--grep-in=any` byte-identical to
+the pre-tier verb on every cell of a 4-way cache-provenance matrix across two corpora (default
+map identical in 6/6 cells, `kParserVer` 66 unmoved, `reparsed=0` when the new binary reads the
+old binary's blob — and additionally across 11 query shapes, `--json`, and the MCP verb). The
+disclosed budgets (`kGrepTierFileBudget=128`, 8 MB bytes) are pure functions of the corpus, and
+the deterministic-byte substitution for E5's parse-*time* budget is the right call:
+budget-tripped answers are byte-identical across three cold runs and warm≡cold, xmllint-clean,
+ASan/LSan-clean, with `tier_parsed=`/`tier_budget=`/`tier_unclassified=` disclosed and
+`complete=` correctly withheld. **The harvest's −38…−87% byte projection does not reproduce and
+must not publish** — measured whole-answer deltas run −20.4% to +12.3%, because suppressing
+comment rows frees room under the row cap and the page refills with code rows; the win is row
+quality at a fixed row budget. The verifier's structural finding — §F4's ladder ranked `comment`
+above `string`, so pasting an error message could serve a test-script comment while suppressing
+the emit site (10/138 measured misses), and config languages (whose content parses entirely to
+string nodes) vanished from the default view — is closed by collapsing the ladder to
+`code → everything-else` when the code tier is empty (`tier="comment+string"`), gate arms
+red-first, with the data-language carve-out recorded as a wave-4 item and
+`skills/ripwire-security-scan`'s recipe corrected to `--grep-in=any` (`a957607`) in the interim.
+`--help` no longer calls the default an "exhaustive literal scan" (`b6428c5`); the published
+`--grep` byte numbers are relabelled as `--grep-in=any` measurements (`74160b8`); `greptiercheck`
+now pins both budget constants (`6e51beb`), closing the found hole where `128 → 12` left all
+arms green while the feature went ~90% inert.
+
+**W3-S — the six smalls: ACCEPT, with two gate-margin liabilities recorded.** All four new gates
+are decisive against the clean `adb0831` binary (verifier reproduction: `lintpayloadcapcheck`
+5 FAIL/3 PASS, `bodiesshowncheck` 4/5, `langcensuscheck` 5/12, `forrootlegendcheck` 3/6; all
+green on the wave binary), and each carries a reachable-both-ways guard. `--lint`'s default
+payload falls 370,721 B → 67,908 B with `findings= shown= capped=` disclosed and the per-rule
+tally still truthful. Recorded liability 1: the cap keeps a sorted path prefix, so 14 of 31
+firing rules lose every locator row while their `count=` stays truthful — a one-attribute
+per-rule `shown=` closes it (wave-4). Recorded liability 2: the `root=` legend clause costs 51
+`est_tokens` at `--token-budget=800`, taking `fornotesbudgetcheck` from 747/800 to 798/800 —
+2 tokens of margin, now recorded in the gate's own header (`683e34c`) so the next red there
+reads as this wave's ratchet. `legenddriftcheck`'s widening is a genuine strengthening (live
+flag extraction 1 → 5 over 166 legends) and closes the wave-2 verifier's near-inert finding by
+naming the mechanism (`--` is illegal inside an XML comment). `packtaskcheck`'s path-stability
+hardening is verified green at both path depths and is the template for the remaining members
+of the byte-gate-over-live-tree class (`grepbytescheck`, `showcasecapturecheck`,
+`lintbudgetcheck` — wave-4 freezes). `skilltruthcheck`'s JSON-monoculture fixture — the reason
+the config-language consequence shipped unnoticed — now has a mixed fixture whose decisive arm
+fires (`61bb8b0`), and the MCP `grep` verb refuses unknown `in=` values the way the CLI does
+(`36f79e5`).
+
+**W3-LEN — length-aware desc+body mix: REJECT stands, verified on every axis.** Registration
+(`2cc9924`) precedes the lever (`deda604`) precedes the revert (`d8862a6`) precedes the result
+(`7e2ad2c`), and the registration is result-free: `for-routed` judged hit@1, n=152, ACCEPT iff
+[+4, +8], plus guards (split=test ≥ 67.7%, sep-auc ≥ 0.922). Measured 90 → 92 = +2, below band,
+split=test guard missed at 66.2%. Verifier re-measurement at the merged head returns 90/152 —
+the registered baseline — possible only with the lever fully out; the final diff is
+`docs/EVALS.md` only. What outlives the REJECT: the pre-build refutation of the margin-blend
+family (bm25-desc misses the same hard row to the same wrong skill, capping the recoverable dip
+at +1 against a +4 floor), which makes a third desc-vs-body round unfundable at this corpus
+power; the remaining lever class is query-side term weighting.
+
+**Wave-level quality-delta: `gating="0"` is honest, and the headline duplication ack survives
+refutation.** `--quality-delta=adb0831..HEAD` returns gating 0 with all preexisting-worse rows
+either reasoned-acked or unacked `sev="minor"` wiring deltas; nothing hides behind a minor
+classification. The load-bearing `{writeLangRows, writeUnindexedExtRows}` ack was attacked with
+the repo's own fold threshold and holds (the same emitter block deliberately leaves a *larger*
+clone pair unfolded for exactly the discriminator that applies — differing attribute sets — and
+every consolidation sketch is net-longer). The 16 stale rows are proven inherited (identical
+key-for-key in a baseline-vs-baseline run). The three ack-text defects the verifier found
+(a false "both callers updated" clause, a behaviour-changing cap filed as usage text, a
+non-member named in a group) are corrected in the ledger (`0e97e2f`), and the false clause's
+substance is fixed rather than reworded: batch grep now carries the same `in` hatch (`6e51beb`).
+
+**Instrument state at close (all floors green, re-confirmed live by the verifier):** skill
+routing judged 98/152 bm25-desc / 90/152 for-routed, split=test 73.1%; frozen ranking lane
+71.9% ≥ 70 (`snapshot.srcpack`); recall MRR 0.643; kParserVer 66 (unmoved this wave, proven by
+cache-provenance matrix). The E6 demotion corpus stands at 16 CLEAN (strict 15) against the
+≥25 bar — the W2-C/W2-D/R-B ranking lanes remain deliberately unbuilt, and the pre-registered
+band remains banked, unregistered, and untuned.
