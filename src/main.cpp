@@ -2569,16 +2569,31 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     }
     h.append( extraNotes );
     h += " -->";
-    // DELIBERATELY NOT the shared rootRelPathsLegend clause here, and this is a measurement, not an
-    // oversight (2026-08-19). The --for lens carries root= on its <ctx> with nothing defining it — the same
-    // "an attribute the document never explains" gap the root-relative round closed on eighteen other
-    // legends, missed here because this header is built in main.cpp rather than through a shared emitter.
-    // Appending the clause was tried and reverted: it is 130 B, and this bundle's header floor is already
-    // most of a small budget, so at --token-budget=800 it took est_tokens from inside the ceiling to 811
-    // (+1.4%) and red test/fornotesbudgetcheck.sh — the "a disclosure has BYTES" trap, on a contract that
-    // says est_tokens <= the stated budget in BOTH dialects. Closing it needs a smaller spelling or a
-    // header-floor recalibration, not a paste. The MCP `for` twin therefore does not carry it either, so the
-    // two dialects stay byte-consistent on what they say and what they explain.
+    // W3-S item 5 (2026-08-19): the --for lens carries root= on its <ctx> with nothing defining it — the
+    // same "an attribute the document never explains" gap the root-relative round closed on eighteen other
+    // legends via the shared rw::kRootRelPathsLegend clause (graphlegend.h), missed here because this
+    // header is built in main.cpp rather than through a shared emitter. Pasting THAT clause verbatim was
+    // tried and reverted: at 159 B it took a --token-budget=800 bundle's est_tokens from inside the ceiling
+    // to 811 (+1.4%) and red test/fornotesbudgetcheck.sh — a real "a disclosure has BYTES" trap, on a
+    // contract that says est_tokens <= the stated budget in both dialects.
+    //
+    // Trade-off chosen: a SHORTER spelling for this one call site, not a floor recalibration. Recalibrating
+    // the shared budget constants (kMinBytesPerToken / kBudgetHeadroom / kCeilingFirstEntryTolerance,
+    // serialize.h) would move every OTHER --for/--pack-task gate pinned against them
+    // (bundleidcheck.sh/partitioncheck.sh/estchargecheck.sh among others) for one verb's 21-byte gap — a
+    // blast radius wildly out of proportion to the fix. A second wording is normally exactly the kind of
+    // echo-site drift kRootRelPathsLegend's own header warns against (it was hoisted OUT of eighteen
+    // per-verb copies for that reason) — but --for is the one call site with a MEASURED, hard byte
+    // constraint the other eighteen do not carry, and the two dialects (CLI --for, MCP `for`) share this
+    // ONE short form, so there are still only two spellings in the whole tool, not nineteen.
+    // Measured: 159 B (kRootRelPathsLegend) -> 126 B (kForRootRelPathsLegendShort), saving 33 B. On the
+    // --token-budget=800 fixture fornotesbudgetcheck.sh builds: WITHOUT any root= clause, est_tokens=799
+    // (1 B of headroom under the 800 ceiling); WITH kRootRelPathsLegend appended, est_tokens=811 (RED, the
+    // regression this comment records); WITH the short form below, est_tokens=800 (fits exactly — the
+    // clause is now the FIRST byte of headroom this bundle had left, not eleven tokens past it).
+    // `on` is p.rootArg's OWN presence, the same convention rootRelPathsLegend(bool) itself uses elsewhere
+    // (never re-derived from withRouteAttr or anything else the ceiling ladder decided above).
+    h += rw::forRootRelPathsLegendShort( !p.rootArg.empty() );
     return h;
 }
 
@@ -2828,7 +2843,24 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     }
     if( autoBodyIds.empty() )
     {
-        out.attr = " bundle=\"auto\" bodies=\"0\" reason=\"no_candidates\"";
+        // R9 fix (W3-S, 2026-08-19): this used to return with `out.section` untouched (default-constructed,
+        // isRendered=false), so the caller's `autoSection.isRendered && !autoSection.xml.empty()` guard
+        // dropped the WHOLE <bodies> element — only the <ctx bundle="auto" bodies="0" reason="no_candidates">
+        // attribute below spoke to it. "A zero means none found, never none exists" (CONTRIBUTING #3)
+        // applies to elements too. packBodies handles an empty id list natively (requestedCount=0,
+        // shownCount=0), so this renders the same honest "<bodies shown="0" total="0" capped="0"></bodies>"
+        // shell the "budget" branch below already gets for free, rather than a second hand-rolled tag.
+        out.attr    = " bundle=\"auto\" bodies=\"0\" reason=\"no_candidates\"";
+        out.section = rw::chargeSection( [ & ]( std::FILE* f )
+            { rw::packBodies( f, ing, autoBodyIds, /*budgetBytes=*/1, g.outOff, g.outTargets, cfg.compress, redactPtr,
+                               /*ranges=*/nullptr, /*noteIndex=*/nullptr, nullptr, /*truncateOversizedFirst=*/false,
+                               /*withFileContext=*/false, fabRootArg ); },
+            rw::kBytesPerTokenBody );
+        if( !out.section.isRendered )
+        {
+            out.surfaceOff = true;                      // degrade: pre-T3 output exactly (alert already on stderr)
+            out.section    = rw::ChargedSection{};
+        }
         return out;
     }
 
@@ -2851,8 +2883,13 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     }
     else if( autoEmitted.kept.empty() )
     {
-        out.section = rw::ChargedSection{};  out.section.isRendered = true;   // drop the empty section whole
-        out.attr    = " bundle=\"auto\" bodies=\"0\" reason=\"budget\"";
+        // R9 fix (W3-S, 2026-08-19): `out.section` ALREADY holds packBodies' own honest
+        // "<bodies shown="0" total="N" capped="1"></bodies>" render from the chargeSection() call just
+        // above — this branch used to overwrite it with an empty section ("drop the empty section
+        // whole"), so the element vanished from the document even though the bytes to say so honestly
+        // had already been paid for and charged. Keep it; only the attr= reason below is new
+        // information (WHY zero: the budget, not the candidate set).
+        out.attr = " bundle=\"auto\" bodies=\"0\" reason=\"budget\"";
     }
     else
     {
@@ -8608,6 +8645,11 @@ constexpr const char* kSkippedLegend =
                  " ERROR spans) and is a PARSER-STATE fact, never a syntax verdict — a valid file in a dialect this grammar predates reads"
                  " degraded too; why=minified-suspect means whitespace frequency ws_freq= is under 0.070 across the leading 4096 bytes"
                  " (files under 256 bytes are never flagged — too little text to judge). Nothing here is dropped by these two flags."
+                 " <lang n= files= symbols=/> = corpus composition BY LANGUAGE: one row per language this build extracted at"
+                 " least one symbol OR one file for, sorted files DESC then name ASC, absent languages simply not rowed. files= is a"
+                 " FLOOR (derived from symbol-bearing files only — a file with zero extracted symbols is not attributed to any"
+                 " language); symbols= is exact, every run. unindexed= (below) is its mirror: languages this build could not read at"
+                 " all; this is what it DID read, broken down."
                  " HEADER: indexed= is files= on the map; the ACCOUNTING INVARIANT is indexed= + oversize= + excluded= = the candidate"
                  " population the crawl ENUMERATED, at every ceiling and exclude setting. unsupported_ext= counts source/text-looking files"
                  " outside that population (binary/asset extensions are deliberately not counted — an unindexed .png is a picture, not a"
@@ -8754,6 +8796,86 @@ void writeHealthRows( rw::XmlWriter& w, std::vector<char>& esc, const rw::Ingest
     }
 }
 
+// W3-S item 3 (2026-08-19) — corpus composition BY LANGUAGE. §L1 answers "what did the crawl DROP" in
+// full (unindexed=, the <e>/<f>/<h> rows above); nothing answers "what IS this corpus, by language" —
+// unindexed= names languages the build could not read at all, but a reader still cannot tell a
+// 90%-Python repo from a 90%-C++ one from anything the tool prints. One count per rw::Lang, sorted
+// deterministically (never hash-map iteration order — the same discipline unindexedExts' own
+// lessUnindexedExt follows).
+//
+// files= is derived from SYMBOLS, not a second file-extension table: every symbol already carries the
+// exact Lang ingest assigned it (Symbol::lang, ingest.cpp's real per-file grammar decision — the single
+// source of truth), so re-deriving language from a hand-mirrored extension list (the way lintrules.h's
+// langOfPath admittedly does, "kept in sync by hand", for its OWN narrower dependency-analysis purpose)
+// would risk a SECOND, drifting classification for the same fact. Trade-off, stated once rather than
+// buried in a caveat comment: a file that produced zero symbols (empty, or a language whose grammar
+// found nothing extractable) is not attributed to any language row here. This under-counts files= by
+// exactly that population — never inflates it, and never silently double-counts — so files= is a FLOOR
+// on any given language's true file count, same convention as skipped_oversize=/unindexed= use
+// elsewhere in this file (never a fabricated total). symbols= has no such gap: it is the exact,
+// already-computed Symbol::lang tally, a total on every run.
+struct LangCount { rw::Lang lang; std::uint64_t files = 0, symbols = 0; };
+
+// files DESC, name ASC tiebreak — the SAME mixed-direction swapped-std::tie shape lessUnindexedExt
+// (model.h) uses, so a reader who has already learned that ordering reads this one for free.
+bool lessLangCount( const LangCount& a, const LangCount& b ) noexcept
+{
+    const std::string_view an = rw::langTag( a.lang ), bn = rw::langTag( b.lang );
+    return std::tie( b.files, an ) < std::tie( a.files, bn );
+}
+
+std::vector<LangCount> computeLangCounts( const rw::IngestResult& ing )
+{
+    using namespace rw;
+    // fileLangOf[f] = the Lang every symbol in file f agrees on (ingest parses one file under one
+    // grammar, Metal/CUDA's C++/CUDA-as-a-language routing included, so there is nothing to disambiguate
+    // — the last write among a file's own symbols is the same value every earlier one already wrote).
+    std::vector<Lang> fileLangOf( ing.files.size(), Lang::Unknown );
+    std::array<std::uint64_t, std::size_t( Lang::Yaml ) + 1> symbolTally {};
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.fileId < fileLangOf.size() )
+        {
+            fileLangOf[ s.fileId ] = s.lang;
+        }
+        if( std::size_t( s.lang ) < symbolTally.size() )
+        {
+            ++symbolTally[ std::size_t( s.lang ) ];
+        }
+    }
+    std::array<std::uint64_t, std::size_t( Lang::Yaml ) + 1> fileTally {};
+    for( Lang l : fileLangOf )
+    {
+        if( l != Lang::Unknown && std::size_t( l ) < fileTally.size() )
+        {
+            ++fileTally[ std::size_t( l ) ];
+        }
+    }
+    std::vector<LangCount> out;
+    for( std::size_t i = 0; i < fileTally.size(); ++i )
+    {
+        if( fileTally[i] == 0 && symbolTally[i] == 0 )
+        {
+            continue;   // absent = this language contributed nothing, never a printed zero row
+        }
+        out.push_back( { Lang( i ), fileTally[i], symbolTally[i] } );
+    }
+    std::sort( out.begin(), out.end(), lessLangCount );
+    return out;
+}
+
+void writeLangRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vector<LangCount>& rows )
+{
+    for( const LangCount& lc : rows )
+    {
+        char row[ 64 ];
+        w.write( "<lang n=\"" );  w.write( rw::escapeXml( rw::langTag( lc.lang ), esc ) );
+        std::snprintf( row, sizeof( row ), "\" files=\"%llu\" symbols=\"%llu\"/>",
+                       ( unsigned long long ) lc.files, ( unsigned long long ) lc.symbols );
+        w.write( row );
+    }
+}
+
 // §P0.5d / §L1 — --skipped: WHY the index does not contain a file, and which files it DOES contain but
 // cannot vouch for. The disclosure doctrine ("every truncation is disclosed") applied to the corpus itself.
 //
@@ -8826,6 +8948,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeDropRows( w, esc, cs.unsupported, "unsupported-ext", skRootPrefix );
         writeUnindexedExtRows( w, esc, cs.unindexedExts );
         writeHealthRows( w, esc, ing, health.findings, skRootPrefix );
+        writeLangRows( w, esc, computeLangCounts( ing ) );   // W3-S item 3: corpus composition by language
         w.write( "</skipped></ctx>" );
     }
     std::fputc( '\n', stdout );
@@ -11837,10 +11960,51 @@ std::optional<int> runLint( const MainDispatch& d )
         // can share the same rule/file:line/enclosing-symbol/text because the row carries no column).
         outs = dedupeLintFindings( ing, std::move( outs ) );
 
+        // W3-S (2026-08-19): E6 found --lint emitting an UNCAPPED payload on a large corpus — 2,037,645 B /
+        // 6,169 findings (~330 B/finding, driven by long single-line minified text=) with no --help promise
+        // ("trims to fit") kept and no way for a caller to see it coming; every other verb in the catalog has
+        // a display default (--hotspots 40, --grep 100, …), --lint alone had none. Measured HERE before
+        // choosing the cap: this repo prints 367,924 B / 3,213 findings (~114 B/finding); a second, larger
+        // polyglot fixture (ctxpack, 1,033 tracked files) prints 254,445 B / 2,312 findings (~110 B/finding).
+        // kLintDefaultPayloadBytes=100,000 lands an order of magnitude under E6's pathological case while
+        // staying multiples of every other capped verb's default payload on this repo (--hotspots ~5.5 KB,
+        // --clones ~17 KB, --grep(100 hits) ~57 KB) — --lint's own facts are individually smaller so it earns
+        // a bigger budget. An explicit --limit=N always beats it (effectiveRowCap's existing rule), so a
+        // caller who already knew to page past a cap sees no change.
+        static constexpr std::size_t kLintDefaultPayloadBytes = 100000;
         const bool paging = cfg.pageLimit > 0 || cfg.pageOffset > 0;
+        std::size_t lintDefaultShown = outs.size();
+        if( !paging )
+        {
+            // Byte-budget the default (unpaged) run. Rows are already in final sorted order, so this keeps
+            // the same sorted PREFIX pageWindow() would keep by row count; the stopping rule is bytes here
+            // because a corpus with long text= rows (E6's vendored-bundle case) needs far FEWER rows to reach
+            // the same budget than a corpus of short rows does. text= dominates real row size and is summed
+            // exactly; the flat +80 covers the <f> tag markup, path, rule name and enclosing symbol name,
+            // which are all short in practice — an estimate, not a second full render (that would mean
+            // rendering the very tail this exists to avoid paying for), and one that can only ever be
+            // conservative in the wrong direction (undercounting an unusually long path/rule name by a few
+            // dozen bytes), never by the orders of magnitude that would silently readmit the 2 MB case.
+            std::size_t bytesUsed = 0;
+            lintDefaultShown = 0;
+            for( std::size_t i = 0; i < outs.size(); ++i )
+            {
+                const LintOut& m = outs[i];
+                const Symbol*  e = enclosing( m.fileId, m.startByte );
+                const std::size_t rowBytes = m.text.size() + m.rule.size() + m.sev.size()
+                                            + ing.files[ m.fileId ].size()
+                                            + ( e ? e->name.size() : 0 ) + 80;
+                if( lintDefaultShown > 0 && bytesUsed + rowBytes > kLintDefaultPayloadBytes )
+                {
+                    break;   // the sorted prefix already kept at least one row — stop BEFORE the overflow row
+                }
+                bytesUsed += rowBytes;
+                ++lintDefaultShown;
+            }
+        }
         const PageWindow lintPage = paging
                                   ? pageWindow( outs.size(), cfg.pageLimit, cfg.pageOffset )
-                                  : PageWindow{ 0, outs.size() };
+                                  : PageWindow{ 0, lintDefaultShown };
         const std::size_t shownCount = lintPage.end - lintPage.begin;
 
         // §P0.2 disclosure: which rules (if any) spent their whole per-rule budget, so their count= is a floor.
@@ -11922,6 +12086,9 @@ std::optional<int> runLint( const MainDispatch& d )
                      "A rule that spends its whole budget carries capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
                      "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one rule is a floor. "
                      "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). "
+                     "On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed "
+                     "them, absent an explicit limit=) — a different fact from the per-rule capped=\"1\" above, which is a MATCH-BUDGET "
+                     "floor on one rule's own count=; findings= is always the true total either way. "
                      "A rule row's applicable=\"0\" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this "
                      "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
                      "how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a "
@@ -11933,26 +12100,23 @@ std::optional<int> runLint( const MainDispatch& d )
                          "profiled run armed; an ABSENT heat column was not measured, never zero. heat_joined= on the root counts annotated "
                          "findings; 0 is honest (no finding sits inside a profiled scope), never an error. -->" );
         }
-        if( paging )
         {
-            const bool        hasMore    = lintPage.end < outs.size();
-            const std::size_t nextOffset = hasMore ? lintPage.end : outs.size();
-            // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 3): --lint ESTABLISHED
-            // the six-attribute paging block that pageDisclosure() now serves to every other paging verb —
-            // but its own hand-rolled copy never grew the capped= bit pageDisclosure emits, so the verb
-            // that defined the shape was the one verb that did not spell it. Emitted in pageDisclosure's
-            // exact position (immediately after shown=) so the two are attribute-for-attribute identical.
+            // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 3): --lint ESTABLISHED the
+            // six-attribute paging block that pageDisclosure() now serves to every other paging verb, but its
+            // own hand-rolled copy never grew the capped= bit pageDisclosure emits, so the verb that defined
+            // the shape was the one verb that did not spell it — fixed here by calling the shared helper
+            // instead of hand-rolling a second copy (W3-S: this is also what lets the new default byte cap
+            // above disclose shown=/capped= on the UNPAGED path, which the old hand-rolled `else` branch could
+            // not do at all). discloseCap=true unconditionally, same as every other default-capped verb
+            // (--impact, --hotspots, …): pageDisclosure only adds the paging half (total=/has_more=/
+            // next_offset=/offset=/limit=) when --limit/--offset was actually given, so an un-paged, un-capped
+            // run (a small corpus under kLintDefaultPayloadBytes) is byte-identical to before this change.
             // Distinct from findings_capped= below, which is rule 4's FLOOR marker on the total itself.
-            const unsigned isLintCapped = unsigned( shownCount < outs.size() );
-            std::printf( "<lint findings=\"%zu\" shown=\"%zu\" capped=\"%u\" total=\"%zu\" has_more=\"%u\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"%s%s%s%s>",
-                         outs.size(), shownCount, isLintCapped, outs.size(), hasMore ? 1u : 0u, nextOffset,
-                         cfg.pageOffset > 0 ? cfg.pageOffset : 0, cfg.pageLimit > 0 ? cfg.pageLimit : 0,
+            char lintPageBuf[ kPageDisclosureCap ];
+            std::printf( "<lint findings=\"%zu\"%s%s%s%s%s>", outs.size(),
+                         pageDisclosure( lintPageBuf, sizeof( lintPageBuf ), shownCount, outs.size(), lintPage.end,
+                                        cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true ),
                          anyRuleCapped ? " findings_capped=\"1\"" : "", heatJoinedAttr.c_str(), lintRootExtra.c_str(), lintRootAttr.c_str() );
-        }
-        else
-        {
-            std::printf( "<lint findings=\"%zu\"%s%s%s%s>", outs.size(), anyRuleCapped ? " findings_capped=\"1\"" : "",
-                         heatJoinedAttr.c_str(), lintRootExtra.c_str(), lintRootAttr.c_str() );
         }
         if( cfg.lint )
         { // built-in per-rule tally (order → deterministic)

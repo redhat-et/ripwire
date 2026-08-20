@@ -82,18 +82,23 @@ grep -q 'bundle="auto"' "$TMP/auto" && grep -qi 'bodies.*inline\|inline.*bod' "$
 grep -q '<sigs' "$TMP/tight" && ok "ultra-tight budget: the <sigs> block is intact" \
     || no "ultra-tight budget: the <sigs> block vanished (signatures must survive)"
 
-# ── #3b: candidates exist but none fits the body budget whole → dropped and DISCLOSED, never truncated ──
+# ── #3b: candidates exist but none fits the body budget whole → shown="0", DISCLOSED, never truncated ────
 #         (--pack-budget-bytes=64 forces the no-fit case corpus-robustly; the default budget is generous)
+# R9 fix (W3-S, 2026-08-19): this used to assert <bodies> was WHOLLY ABSENT here — packBodies had already
+# rendered the honest "<bodies shown="0" total="N" capped="1"></bodies>" shell (buildForAutoBodies called
+# it just to find out nothing fit), and the caller threw that render away ("drop the empty section whole").
+# "A zero means none found, never none exists" (CONTRIBUTING #3) applies to elements, not only counts, so
+# the fixed behaviour KEEPS the element — this arm now asserts presence-with-shown="0", not absence.
 "$BIN" src --for="$TASK" --pack-budget-bytes=64 --no-cache >"$TMP/nofit" 2>/dev/null
 grep -q 'bundle="auto" bodies="0" reason="budget"' "$TMP/nofit" \
     && ok "no body fits whole: disclosed (bodies=\"0\" reason=\"budget\")" \
     || no "no-fit case: missing bodies=\"0\" reason=\"budget\" disclosure"
-grep -q '<bodies [^>]*>' "$TMP/nofit" \
-    && no "no-fit case still emitted a <bodies> section (must drop whole, never truncate mid-def)" \
-    || ok "no-fit case: no <bodies> section (whole-body-or-nothing)"
+grep -qE '<bodies shown="0" total="[1-9][0-9]*" capped="1">' "$TMP/nofit" \
+    && ok "no-fit case: <bodies shown=\"0\" total=\"N\" capped=\"1\"> is PRESENT (not absent — R9)" \
+    || no "no-fit case: <bodies shown=\"0\"> missing or malformed (element must not vanish)"
 grep -q '<b [^>]*><!\[CDATA\[' "$TMP/nofit" \
     && no "no-fit case emitted a truncated body (never cut mid-def)" \
-    || ok "no-fit case: no body bytes at all (never a truncated one)"
+    || ok "no-fit case: no body bytes at all (never a truncated one — whole-body-or-nothing still holds)"
 
 # ── #4: --signatures-only opts out; guarded against misuse ──────────────────────────────────────────────
 "$BIN" src --for="$TASK" --signatures-only --no-cache >"$TMP/sigonly" 2>/dev/null; rc=$?
