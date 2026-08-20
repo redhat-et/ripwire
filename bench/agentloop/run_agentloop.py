@@ -114,6 +114,17 @@ def load_tasks_lock( path ):
         raise SystemExit( f"{path}: content hash mismatch (expected {expected}, computed {actual}); "
                            f"the lock file was hand-edited or corrupted — refusing (fail-closed, no "
                            f"silent re-derivation of the task list)" )
+    # HASH-OF-LIST IS NECESSARY BUT NOT SUFFICIENT (found 2026-08-20): a lock generated under a
+    # divergent partition rule carries a perfectly valid content_sha256 over a task list that violates
+    # the split contract — exactly how a LocBench-TRAIN repo (pydata/xarray) sat frozen in tasks.lock
+    # and one of its instances got run in the 2026-08-05 pilot. Re-derive the partition on every load.
+    train_locked = sorted( { i["repo"] for i in lock["instances"]
+                             if select_tasks.frozen_partition( i["repo"] ) != "heldout" } )
+    if train_locked:
+        raise SystemExit( f"{path}: locked instance(s) from LocBench-TRAIN repo(s) {train_locked}; the "
+                           f"repo-disjointness contract (sha256({select_tasks.SPLIT_SALT!r} + "
+                           f"repo.lower()), byte0<128 => train) forbids them — refusing (fail-closed). "
+                           f"Regenerate with select_tasks.py; do not hand-edit the lock." )
     return lock
 
 def make_record( task, arm, seed, harness, model, status="not_implemented", **overrides ):
