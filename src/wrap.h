@@ -388,7 +388,7 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
         {
             std::printf( "%s\n", line.c_str() );
         }
-        std::printf( "# (no-MCP one-shot orientation: ripwire . --for=\"<task>\" --max-tokens=2000)\n" );
+        std::printf( "# (no-MCP one-shot orientation: ripwire . --for=\"<task>\" --token-budget=2000)\n" );
     }
     else if( agent == "cursor" )
     {
@@ -426,7 +426,7 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
             "# RECOMMENDED — opencode has a `bash` tool, so call the CLI directly. It costs nothing\n"
             "# until you invoke it, and opencode reads AGENTS.md automatically (project root, plus\n"
             "# ~/.config/opencode/AGENTS.md globally), so the paste block below IS the whole wiring:\n"
-            "ripwire . --for=\"<your task>\" --max-tokens=2000\n"
+            "ripwire . --for=\"<your task>\" --token-budget=2000\n"
             "#\n"
             "# ALTERNATIVE — register the MCP server instead, for a warm index across calls. Add to\n"
             "# opencode.json (project) or ~/.config/opencode/opencode.json (global; the two are\n"
@@ -438,7 +438,7 @@ inline void wrapEmitAgent( const std::string_view agent, const std::vector<std::
     {
         std::printf(
             "# ripwire -> aider (no MCP; feed a ranked repo map as read-only context)\n"
-            "ripwire . --for=\"<your task>\" --max-tokens=2000 > .ripwire-map.txt\n"
+            "ripwire . --for=\"<your task>\" --token-budget=2000 > .ripwire-map.txt\n"
             "aider --read .ripwire-map.txt\n"
             "# re-run the first line when the tree changes; the warm cache makes it ~instant.\n" );
     }
