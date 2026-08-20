@@ -223,10 +223,15 @@ fb_files="$( attr tier_parsed "$FB_OUT" )"
 fb_hits="$( attr hits "$FB_OUT" )"
 fb_comment="$( attr suppressed_comment "$FB_OUT" )"
 fb_unc="$( attr tier_unclassified "$FB_OUT" )"
-if [ "$fb_budget" = "files" ] && [ -n "$fb_files" ] && [ "$fb_files" -lt 300 ]; then
-    ok "(5) the file budget trips, is disclosed, and names how many files were tiered ($fb_files/300)"
+# The EXACT constant, not `< 300` (wave-3 verifier P2-1): rebuilt with kGrepTierFileBudget 128 -> 12 the
+# gate stayed ALL GREEN while the feature went ~90% inert on the real tree (tier_parsed="12"
+# tier_unclassified="231" against 17 fully-tiered hit files at 128). A loose bound let the budget drop ~10x
+# — a typo, or a well-meaning "let us be cheaper" edit — without turning anything red. This corpus has 300
+# hit files, so the prefix is budget-limited and tier_parsed IS kGrepTierFileBudget, read back out.
+if [ "$fb_budget" = "files" ] && [ "$fb_files" = "128" ]; then
+    ok "(5) the file budget trips, is disclosed, and tier_parsed pins kGrepTierFileBudget exactly (128/300)"
 else
-    no "(5) expected tier_budget=files with tier_parsed<300, got budget=$fb_budget files=$fb_files"
+    no "(5) expected tier_budget=files with tier_parsed=128 (kGrepTierFileBudget), got budget=$fb_budget files=$fb_files — if the constant moved DELIBERATELY, re-pin this arm in the same commit"
     printf '%s\n' "$FB_OUT" | grep -o '<grep [^>]*>'
 fi
 # the tail's comment hits are still emitted — a budget may not silently delete rows it never looked at
@@ -263,10 +268,14 @@ bb_comment="$( attr suppressed_comment "$BB_OUT" )"
 [ -n "$bb_comment" ] && [ "$bb_comment" = "$bb_files" ] \
     && ok "(6b) exactly the tiered prefix's comment rows were suppressed under the byte budget" \
     || no "(6b) byte-budget arithmetic is off: suppressed_comment=$bb_comment tier_parsed=$bb_files"
-if [ "$bb_budget" = "bytes" ] && [ -n "$bb_files" ] && [ "$bb_files" -lt 16 ]; then
-    ok "(6) the byte budget trips before the file budget and is disclosed ($bb_files/16 files tiered)"
+# The exact parsed count, not `< 16` (P2-1, the byte-budget half): this corpus is a FROZEN generator — 16
+# files of identical construction — so how many fit under kGrepTierByteBudget is a pure function of the
+# constant. `< 16` let the budget fall ~7x (to ~1.1 MB) with every arm green. 7 is the measured admitted
+# prefix at 8 MB; if the constant moves deliberately, re-pin this number in the same commit.
+if [ "$bb_budget" = "bytes" ] && [ "$bb_files" = "7" ]; then
+    ok "(6) the byte budget trips before the file budget and is disclosed, tier_parsed pinned at 7/16"
 else
-    no "(6) expected tier_budget=bytes with tier_parsed<16, got budget=$bb_budget files=$bb_files"
+    no "(6) expected tier_budget=bytes with tier_parsed=7 (the prefix kGrepTierByteBudget admits), got budget=$bb_budget files=$bb_files"
     printf '%s\n' "$BB_OUT" | grep -o '<grep [^>]*>'
 fi
 
@@ -313,6 +322,37 @@ if [ -n "$mcpComment" ] && [ -n "$mcpString" ] && [ "$mcpTotal" = "$d_hits" ] &&
 else
     no "(9) MCP grep diverged from the CLI verb: total=$mcpTotal/$d_hits comment=$mcpComment/$d_comment string=$mcpString/$d_string"
     printf '%s\n' "$MCP_OUT" | tail -1 | cut -c1-400
+fi
+
+# ── (9b/9c) the BATCH sub-query's own hatch and its own refusal (wave-3 verifier P3-4/P6-1) ─────────────
+# R-H's stated reason for putting `in` on the live MCP verb — an MCP-only agent that reads
+# suppressed_comment= has no CLI to re-ask from — applies verbatim to `batch`, and was not applied there:
+# the batch arm took the DEFAULTED GrepIn::Code and read no `in` field at all, so the one surface with no
+# fallback was the one left closed. (The api-surface ack claimed both callers were updated; one was.)
+mcpcall(){ printf '%s\n%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    "$1" | "$BIN" "$SB" --mcp --no-cache 2>/dev/null | tail -1; }
+
+B_ANY="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"batch","arguments":{"path":"'"$SB"'","queries":[{"verb":"grep","pattern":"TIERTOKEN_frob","in":"any"}]}}}' )"
+B_DEF="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"batch","arguments":{"path":"'"$SB"'","queries":[{"verb":"grep","pattern":"TIERTOKEN_frob"}]}}}' )"
+b_any="$( jkey total "$B_ANY" )"
+b_def="$( jkey total "$B_DEF" )"
+# Both directions, so the arm cannot pass on a surface that ignores `in` (which would make the two equal)
+# NOR on one that always un-tiers (which would make both 5).
+if [ "$b_any" = "$a_hits" ] && [ "$b_def" = "$d_hits" ]; then
+    ok "(9b) the batch grep sub-query honours in=\"any\" ($b_any) and still tiers by default ($b_def)"
+else
+    no "(9b) batch grep in= is not wired: in=any gave total=$b_any (expected $a_hits), default gave total=$b_def (expected $d_hits)"
+    printf '%s\n' "$B_ANY" | cut -c1-400
+fi
+
+B_BAD="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"batch","arguments":{"path":"'"$SB"'","queries":[{"verb":"grep","pattern":"TIERTOKEN_frob","in":"Any"}]}}}' )"
+if printf '%s' "$B_BAD" | grep -q 'invalid value for field: in'; then
+    ok "(9c) the batch grep sub-query REFUSES an unknown in= value instead of silently tiering"
+else
+    no "(9c) batch grep swallowed in=\"Any\" — a closed value set that defaults on a typo hides the rows the caller asked for"
+    printf '%s\n' "$B_BAD" | cut -c1-400
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
