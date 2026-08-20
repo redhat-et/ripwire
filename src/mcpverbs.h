@@ -1208,10 +1208,13 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     const std::string_view flRootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
     std::string headerStr = ctxRootOpen( task, " [routed: " + rc.reason + "]", flRootArg )   // §B1.7: same root attrs as the CLI twin
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote
-                          + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing -->";
-    // No rootRelPathsLegend clause here on purpose — the CLI --for twin does not carry one either, and the
-    // measured reason it cannot yet is recorded at forLensHeaderText (main.cpp). Byte-consistency between
-    // the two dialects is the contract; closing the gap is a change both make together.
+                          + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing -->"
+                          + rw::forRootRelPathsLegendShort( !flRootArg.empty() );   // W3-S item 5: closes the gap this comment used to record
+    // W3-S item 5 (2026-08-19): both --for dialects now carry rw::kForRootRelPathsLegendShort (graphlegend.h)
+    // — the SAME short spelling, appended here exactly as the CLI twin (forLensHeaderText, main.cpp) does,
+    // so byte-consistency between the two dialects (this file's own standing contract) still holds. See that
+    // function's own comment for why a shorter wording, not the shared 18-verb kRootRelPathsLegend, closes
+    // this gap: this lens's ceiling is the one place the full 159 B clause measurably does not fit.
     const auto renderToString = [ ]( auto&& emitFn ) -> std::string
     {
         char*       buf2 = nullptr;

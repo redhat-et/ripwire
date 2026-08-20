@@ -69,6 +69,13 @@ QUERY="frobnicate widget cache"
 # "the signatures-only flag opts out" now reads "the signatures-only flag (no-bodies mode) opts out" (V5 lane,
 # merged at 6bd6c00); no such flag existed and the wording was corrected rather than a flag added. Every ranking
 # and body byte is identical; the ONLY moving bytes are that clause and est_tokens re-measuring itself.
+# RE-PIN 2026-08-19 (W3-S item 5): 2889 -> 3015 B (+126 B), est_tokens="1082" -> "1132" (+50 tok).
+# CAUSE: --for's header now carries the shared root= legend clause (rw::kForRootRelPathsLegendShort,
+# graphlegend.h) — "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent
+# => p= is ingest's own path, unchanged). -->", closing the "root= on this element is undocumented" gap
+# every OTHER root=-carrying verb's legend already closed (R-E, 2026-08-17). Every ranking and body byte
+# is identical; the only moving bytes are this new trailing comment and est_tokens re-measuring itself
+# (2.5 B/tok markup rate x 126 B extra = the +50 tok, consistent with every prior re-pin's arithmetic).
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route >"$TMP/plain_full.xml" 2>/dev/null
 diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \
     && ok "golden-neutral: plain --for --no-route byte-identical to the pre---anchor golden" \

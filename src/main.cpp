@@ -2569,16 +2569,31 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     }
     h.append( extraNotes );
     h += " -->";
-    // DELIBERATELY NOT the shared rootRelPathsLegend clause here, and this is a measurement, not an
-    // oversight (2026-08-19). The --for lens carries root= on its <ctx> with nothing defining it — the same
-    // "an attribute the document never explains" gap the root-relative round closed on eighteen other
-    // legends, missed here because this header is built in main.cpp rather than through a shared emitter.
-    // Appending the clause was tried and reverted: it is 130 B, and this bundle's header floor is already
-    // most of a small budget, so at --token-budget=800 it took est_tokens from inside the ceiling to 811
-    // (+1.4%) and red test/fornotesbudgetcheck.sh — the "a disclosure has BYTES" trap, on a contract that
-    // says est_tokens <= the stated budget in BOTH dialects. Closing it needs a smaller spelling or a
-    // header-floor recalibration, not a paste. The MCP `for` twin therefore does not carry it either, so the
-    // two dialects stay byte-consistent on what they say and what they explain.
+    // W3-S item 5 (2026-08-19): the --for lens carries root= on its <ctx> with nothing defining it — the
+    // same "an attribute the document never explains" gap the root-relative round closed on eighteen other
+    // legends via the shared rw::kRootRelPathsLegend clause (graphlegend.h), missed here because this
+    // header is built in main.cpp rather than through a shared emitter. Pasting THAT clause verbatim was
+    // tried and reverted: at 159 B it took a --token-budget=800 bundle's est_tokens from inside the ceiling
+    // to 811 (+1.4%) and red test/fornotesbudgetcheck.sh — a real "a disclosure has BYTES" trap, on a
+    // contract that says est_tokens <= the stated budget in both dialects.
+    //
+    // Trade-off chosen: a SHORTER spelling for this one call site, not a floor recalibration. Recalibrating
+    // the shared budget constants (kMinBytesPerToken / kBudgetHeadroom / kCeilingFirstEntryTolerance,
+    // serialize.h) would move every OTHER --for/--pack-task gate pinned against them
+    // (bundleidcheck.sh/partitioncheck.sh/estchargecheck.sh among others) for one verb's 21-byte gap — a
+    // blast radius wildly out of proportion to the fix. A second wording is normally exactly the kind of
+    // echo-site drift kRootRelPathsLegend's own header warns against (it was hoisted OUT of eighteen
+    // per-verb copies for that reason) — but --for is the one call site with a MEASURED, hard byte
+    // constraint the other eighteen do not carry, and the two dialects (CLI --for, MCP `for`) share this
+    // ONE short form, so there are still only two spellings in the whole tool, not nineteen.
+    // Measured: 159 B (kRootRelPathsLegend) -> 126 B (kForRootRelPathsLegendShort), saving 33 B. On the
+    // --token-budget=800 fixture fornotesbudgetcheck.sh builds: WITHOUT any root= clause, est_tokens=799
+    // (1 B of headroom under the 800 ceiling); WITH kRootRelPathsLegend appended, est_tokens=811 (RED, the
+    // regression this comment records); WITH the short form below, est_tokens=800 (fits exactly — the
+    // clause is now the FIRST byte of headroom this bundle had left, not eleven tokens past it).
+    // `on` is p.rootArg's OWN presence, the same convention rootRelPathsLegend(bool) itself uses elsewhere
+    // (never re-derived from withRouteAttr or anything else the ceiling ladder decided above).
+    h += rw::forRootRelPathsLegendShort( !p.rootArg.empty() );
     return h;
 }
 
@@ -11995,8 +12010,8 @@ std::optional<int> runLint( const MainDispatch& d )
                      "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one rule is a floor. "
                      "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). "
                      "On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed "
-                     "them, absent any --limit) — a different fact from the per-rule capped=\"1\" above, which is a MATCH-BUDGET floor "
-                     "on one rule's own count=; findings= is always the true total either way. "
+                     "them, absent an explicit limit=) — a different fact from the per-rule capped=\"1\" above, which is a MATCH-BUDGET "
+                     "floor on one rule's own count=; findings= is always the true total either way. "
                      "A rule row's applicable=\"0\" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this "
                      "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
                      "how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a "
