@@ -509,13 +509,19 @@ else
     no "#11 A9/A10 --for (auto bodies): mixed-rate identity broken — bytes/span/est/expected = ${mix_out:-unreadable} (the auto section is mischarged)"
 fi
 # the weak="1" path: a nonsense query trips the weak-score threshold, so the 9-byte attribute is present and
-# the same identity must still hold with it in the document.
+# the same identity must still hold with it in the document. R9 fix (W3-S, 2026-08-19): a query this weak
+# also has no positive-score body candidates, so buildForAutoBodies now ALWAYS emits the honest
+# "<bodies shown="0" total="0" capped="0"></bodies>" shell here (it used to be entirely absent) — a real,
+# if tiny, body-rate (3.80) span inside an otherwise markup-rate (2.50) document, so this arm uses
+# mixedconsistent (already proven above for the non-weak auto-bodies case) instead of the flat-rate
+# selfconsistent, which cannot see the mixed rate and would false-positive on a span the emitter prices
+# correctly.
 "$BIN" src --for="zzqqxx" --no-cache >"$TMP/f_weak.out" 2>/dev/null
 if grep -aq 'weak="1"' "$TMP/f_weak.out"; then
-    if out="$( selfconsistent "$TMP/f_weak.out" )"; then
-        ok "#11 A9 --for with weak=\"1\": est_tokens self-consistent — bytes/est/expected = $out (the 9 B attr is charged)"
+    if out="$( mixedconsistent "$TMP/f_weak.out" )"; then
+        ok "#11 A9 --for with weak=\"1\": est_tokens self-consistent — bytes/span/est/expected = $out (the 9 B attr + the empty <bodies> shell are both charged)"
     else
-        no "#11 A9 --for with weak=\"1\": est_tokens != round(bytes/2.50) — the weak attr is spliced in outside the sum"
+        no "#11 A9 --for with weak=\"1\": est_tokens != mixed-rate expected — the weak attr or the R9 <bodies> shell is spliced in outside the sum"
     fi
 else
     no "#11 A9 could not produce a weak=\"1\" bundle (threshold or query shape changed — re-anchor this arm)"

@@ -2828,7 +2828,24 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     }
     if( autoBodyIds.empty() )
     {
-        out.attr = " bundle=\"auto\" bodies=\"0\" reason=\"no_candidates\"";
+        // R9 fix (W3-S, 2026-08-19): this used to return with `out.section` untouched (default-constructed,
+        // isRendered=false), so the caller's `autoSection.isRendered && !autoSection.xml.empty()` guard
+        // dropped the WHOLE <bodies> element — only the <ctx bundle="auto" bodies="0" reason="no_candidates">
+        // attribute below spoke to it. "A zero means none found, never none exists" (CONTRIBUTING #3)
+        // applies to elements too. packBodies handles an empty id list natively (requestedCount=0,
+        // shownCount=0), so this renders the same honest "<bodies shown="0" total="0" capped="0"></bodies>"
+        // shell the "budget" branch below already gets for free, rather than a second hand-rolled tag.
+        out.attr    = " bundle=\"auto\" bodies=\"0\" reason=\"no_candidates\"";
+        out.section = rw::chargeSection( [ & ]( std::FILE* f )
+            { rw::packBodies( f, ing, autoBodyIds, /*budgetBytes=*/1, g.outOff, g.outTargets, cfg.compress, redactPtr,
+                               /*ranges=*/nullptr, /*noteIndex=*/nullptr, nullptr, /*truncateOversizedFirst=*/false,
+                               /*withFileContext=*/false, fabRootArg ); },
+            rw::kBytesPerTokenBody );
+        if( !out.section.isRendered )
+        {
+            out.surfaceOff = true;                      // degrade: pre-T3 output exactly (alert already on stderr)
+            out.section    = rw::ChargedSection{};
+        }
         return out;
     }
 
@@ -2851,8 +2868,13 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     }
     else if( autoEmitted.kept.empty() )
     {
-        out.section = rw::ChargedSection{};  out.section.isRendered = true;   // drop the empty section whole
-        out.attr    = " bundle=\"auto\" bodies=\"0\" reason=\"budget\"";
+        // R9 fix (W3-S, 2026-08-19): `out.section` ALREADY holds packBodies' own honest
+        // "<bodies shown="0" total="N" capped="1"></bodies>" render from the chargeSection() call just
+        // above — this branch used to overwrite it with an empty section ("drop the empty section
+        // whole"), so the element vanished from the document even though the bytes to say so honestly
+        // had already been paid for and charged. Keep it; only the attr= reason below is new
+        // information (WHY zero: the budget, not the candidate set).
+        out.attr = " bundle=\"auto\" bodies=\"0\" reason=\"budget\"";
     }
     else
     {
