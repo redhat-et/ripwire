@@ -1861,6 +1861,16 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 continue; // §3: a HAS-A type NAME never crosses roots
             }
+            // Lang guard (same as every call resolver above): a name resolves ACROSS files but only
+            // WITHIN a compatible language (or the C/ObjC↔C++ bridge). Compose CAPTURE is C++-only
+            // (ingest.cpp captureFields), but without this gate the RESOLUTION was language-blind: a
+            // C++ member `Foo m_foo;` bound its HAS-A edge to a Python/TS `class Foo` in the same
+            // repo — and the cross-language candidate's lower id even defeated the adjacency dedup
+            // below, emitting the same field twice. Gate: test/composelangcheck.sh.
+            if( !langCompatible( ing.symbols[ typeId ].lang, r.lang ) )
+            {
+                continue;
+            }
             ComposeEdge ce;
             ce.ownerSym  = r.fromSymbol;
             ce.typeSym   = typeId;
