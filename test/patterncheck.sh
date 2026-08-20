@@ -39,6 +39,10 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "patterncheck: BIN=$BIN  ROOT=$ROOT"
 
 attrOf(){ grep -oE " $2=\"[^\"]*\"" "$1" | head -1 | sed -E "s/^ $2=\"//; s/\"$//"; }
+# Element-scoped read. attrOf greps the WHOLE document, and the legend that precedes the element names
+# several attributes in prose (ellipsis_capped, hits_capped, ...) — a naive grep reads the legend's example
+# instead of the run's own value. Anything the legend spells must be read through this.
+patAttrOf(){ grep -oE '<pattern [^>]*>' "$1" | head -1 | grep -oE " $2=\"[^\"]*\"" | head -1 | sed -E "s/^ $2=\"//; s/\"$//"; }
 hitsOf(){ attrOf "$1" hits; }
 
 # ── the multi-language fixture, built in a temp dir ───────────────────────────────────────────────────
@@ -178,6 +182,36 @@ pe="$( attrOf "$TMP/soft" unresolved_in )"
 grep -oE '<pattern [^>]*>' "$TMP/all" | grep -q 'unresolved_in=' \
     && no "unresolved_in= leaked onto a run with hits>0 (it must fire only when the zero would mislead)" \
     || ok "unresolved_in= absent when the run found matches"
+
+# ── 4c. a modifier that cannot be honored is refused, not silently dropped ────────────────────────────
+# --sarif serializes --lint/--lint-rules findings. --pattern returns from runLint with its own element
+# before any finding exists, so a --sarif that looked accepted would never take effect — the same silent
+# no-op --match already refuses.
+"$BIN" "$FIX" --lint --pattern='foo($A, $B)' --sarif >"$TMP/sar.out" 2>"$TMP/sar.err"; rcsar=$?
+[ "$rcsar" -ne 0 ] && grep -q -- '--sarif' "$TMP/sar.err" && ok "--sarif with a pattern refuses instead of silently no-oping" \
+    || no "--sarif + pattern: want a non-zero exit naming --sarif, got exit $rcsar / $( head -c 160 "$TMP/sar.err" )"
+# control: the same run without --sarif is a normal, working pattern search
+"$BIN" "$FIX" --pattern='foo($A, $B)' >/dev/null 2>&1 && ok "control: the same pattern without --sarif still runs" \
+    || no "control arm broke — the refusal above may be firing for the wrong reason"
+
+# ── 4f. V-6: --pattern honors paging, so the disclosure list must name it ─────────────────────────────
+# honorsPaging() includes --pattern and --limit demonstrably windows it, but kPagingHonoringVerbs — spliced
+# into four refusal messages — omitted it, so `--pattern … --token-budget=200` told the user to narrow with
+# --limit while pointing at a set that excluded the verb they were on.
+mkdir -p "$TMP/pg" && printf 'void g(){ foo(1); foo(2); foo(3); }
+' > "$TMP/pg/a.c"
+"$BIN" "$TMP/pg" --pattern='foo($A)' --limit=1 >"$TMP/pg.out" 2>/dev/null
+[ "$( patAttrOf "$TMP/pg.out" hits )" = "3" ] && [ "$( patAttrOf "$TMP/pg.out" shown )" = "1" ] \
+    && ok "(4f) --pattern honors --limit (hits=3 shown=1) — the premise of the disclosure below" \
+    || no "(4f) --pattern did not window under --limit=1: $( grep -oE '<pattern [^>]*' "$TMP/pg.out" | head -c 200 )"
+"$BIN" "$TMP/pg" --pattern='foo($A)' --token-budget=200 >/dev/null 2>"$TMP/pg.err"
+if grep -q 'unknown flag' "$TMP/pg.err"; then
+    no "(4f) the binary has no --pattern flag — this arm cannot observe the disclosure"
+else
+    grep -q -- '--pattern' "$TMP/pg.err" \
+        && ok "(4f) the paging-honored list in the refusal message names --pattern" \
+        || no "(4f) the refusal message redirects to --limit through a list that omits --pattern: $( head -c 300 "$TMP/pg.err" )"
+fi
 
 # ── 4c. a modifier that cannot be honored is refused, not silently dropped ────────────────────────────
 # --sarif serializes --lint/--lint-rules findings. --pattern returns from runLint with its own element
