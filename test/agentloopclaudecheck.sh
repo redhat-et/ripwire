@@ -27,7 +27,7 @@ command -v python3 >/dev/null 2>&1 || { echo "agentloopclaudecheck: python3 requ
 [ -f "$ROOT/bench/agentloop/run_agentloop.py" ] || { echo "agentloopclaudecheck: harness missing"; exit 2; }
 
 python3 - "$ROOT" "$TMP" >"$TMP/out.txt" 2>&1 <<'PY'
-import inspect, pathlib, sys
+import hashlib, inspect, json, pathlib, sys
 
 root, tmp = sys.argv[1], sys.argv[2]
 sys.path.insert( 0, str( pathlib.Path( root ) / "bench" / "agentloop" ) )
@@ -221,6 +221,44 @@ if R.arm_suffix( "baseline", "/s/r" ) in R.build_prompt( { "problem_statement": 
     ok( "the SWE-bench prompt and the question prompt share one arm contract" )
 else:
     no( "the two prompt shapes carry different arm contracts and will drift" )
+
+# ── 9. B1 — a stale/hand-assembled lock fails CLOSED on the split CONTRACT, not just the hash ───
+# content_sha256 alone proves the file wasn't hand-edited; it does not prove the split rule still
+# yields that set. pydata/xarray is a known-train repo under the CURRENT frozen_partition() rule
+# (the exact contamination the committed tasks.lock as of 2026-08-20 carries); psf/requests is
+# known-heldout. Both derived from R.select_tasks.frozen_partition(), never hand-copied, so this
+# check cannot silently disagree with the rule it is testing.
+def _lock_from( instances ):
+    canon = [ dict( instance_id=i["instance_id"], repo=i["repo"], base_commit=i["base_commit"] )
+              for i in sorted( instances, key=lambda x: x["instance_id"] ) ]
+    blob = json.dumps( canon, sort_keys=True, separators=( ",", ":" ) ).encode( "utf-8" )
+    return dict( schema="ripwire-agentloop-tasks-lock-v1",
+                content_sha256=hashlib.sha256( blob ).hexdigest(), instances=instances )
+
+assert R.select_tasks.frozen_partition( "pydata/xarray" ) == "train", "fixture assumption broke: re-check the salt"
+assert R.select_tasks.frozen_partition( "psf/requests" ) == "heldout", "fixture assumption broke: re-check the salt"
+
+bad_instances = [ dict( instance_id="pydata__xarray-1", repo="pydata/xarray", base_commit="deadbeef" ),
+                  dict( instance_id="psf__requests-1", repo="psf/requests", base_commit="deadbeef" ) ]
+bad_path = pathlib.Path( tmp ) / "bad.lock"
+bad_path.write_text( json.dumps( _lock_from( bad_instances ) ) )
+try:
+    R.load_tasks_lock( str( bad_path ) )
+    no( "load_tasks_lock accepted a lock containing pydata/xarray, which re-derives to LocBench TRAIN" )
+except SystemExit as e:
+    if "pydata/xarray" in str( e ) and "TRAIN" in str( e ):
+        ok( "load_tasks_lock refuses (fail-closed) a lock whose repo re-derives to TRAIN, naming it" )
+    else:
+        no( "load_tasks_lock raised SystemExit but without naming the contaminated repo: %r" % ( str( e ), ) )
+
+good_instances = [ i for i in bad_instances if i["repo"] != "pydata/xarray" ]
+good_path = pathlib.Path( tmp ) / "good.lock"
+good_path.write_text( json.dumps( _lock_from( good_instances ) ) )
+try:
+    R.load_tasks_lock( str( good_path ) )
+    ok( "load_tasks_lock accepts a lock whose every repo re-derives to heldout" )
+except SystemExit as e:
+    no( "load_tasks_lock rejected an honest, all-heldout lock: %r" % ( str( e ), ) )
 PY
 
 while IFS= read -r line; do
