@@ -10925,8 +10925,9 @@ const char* grepTierLegend( const rw::GrepTierReport& tier )
         return "";
     }
     return "SPAN TIERS: each hit is classified by the tree-sitter span it sits in (code/comment/string) and this answer serves "
-           "the TIGHTEST NON-EMPTY tier — tier= names it when it is not code, so a pattern living only in prose is answered, "
-           "never emptied. suppressed_comment=/suppressed_string= are the classified hits held back: not in hits=, and the "
+           "the CODE tier, or — when no hit is code — comment and string TOGETHER; tier= names what was served when it is not "
+           "code, so a pattern living only in prose is answered, never emptied. "
+           "suppressed_comment=/suppressed_string= are the classified hits held back: not in hits=, and the "
            "reason complete= cannot appear. Pass grep-in=any (dashes omitted) for every tier. Hit files are parsed on demand "
            "under a fixed budget: tier_parsed= how many were classified, tier_budget= which ceiling stopped it (files or bytes, "
            "present only then), tier_unclassified= hits in files nothing classified — always EMITTED, never suppressed. ";

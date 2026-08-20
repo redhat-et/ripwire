@@ -290,6 +290,10 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     { "new_body",      "a STRING: the complete, well-formed replacement definition",                  "new_body=\"int f() { return 0; }\"" },
     { "text",          "a STRING: the text to insert",                                                "text=\"// note\\n\"" },
     { "verb",          "a STRING naming one read sub-verb",                                           "verb=\"grep\"" },
+    // R-H span tiers + wave-3 verifier P6-2: a CLOSED value set, so the sentence names the set. The CLI
+    // twin refuses an unknown --grep-in= value and says why (a typo would read as "code" and quietly
+    // suppress the very rows the caller asked to see); both MCP dialects now refuse through this row.
+    { "in",            "a STRING span tier: code (the default) or any",                               "in=\"any\"" },
     // ── the ENVELOPE, outside `params` (§B6 M6/M7) ──
     // These four were read through the bare findString/findObject path, which collapses "absent" onto
     // "present but not the shape I read" — so `"method":5` became `-32700 "parse error"` (a JSON that parsed
@@ -1037,6 +1041,10 @@ inline std::string unknownFieldRefusal( std::string_view verb, std::string_view 
 inline constexpr std::string_view kBatchSubQueryFields[] = {
     "verb", "symbol", "pattern", "task", "type", "file", "from", "to",
     "handle", "kind", "start_line", "end_line", "limit", "offset",
+    // Wave-3 verifier P3-4/P6-1: `in` on the batch grep sub-query. R-H's own reason for putting the hatch
+    // on the live MCP verb — an MCP-only agent that reads suppressed_comment= has no CLI to re-ask from —
+    // applies verbatim here, and this was the surface that had NO fallback at all.
+    "in",
 };
 
 // The build-time floor EVERY McpVerbRule table stands on: each row must name a verb kMcpVerbFields knows,

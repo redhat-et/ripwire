@@ -28,6 +28,27 @@
 #
 # The corpus is built here, in a temp dir this script creates and removes: it needs its own git repo
 # (notes are provenance-stamped) and its own .ripwire_notes, neither of which belongs in the tree.
+#
+# ── CEILING MARGIN, RECORDED 2026-08-19 (wave-3 verifier P5-4) — READ THIS BEFORE DEBUGGING A RED ──────
+# The `--token-budget=800` XML arm now runs at **est_tokens=798 of 800: TWO tokens of headroom.**
+#
+#   · baseline binary at adb0831 (wave-2 close): est_tokens=747, i.e. 53 tokens of headroom
+#   · wave-3 head:                               est_tokens=798, i.e.  2 tokens of headroom
+#
+# The 51-token move is ONE identified change — W3-S item 5's `root=` legend clause, +126 B on every --for,
+# charged at kMinBytesPerToken. It is not drift and it is not this gate rotting: the corpus is a generated
+# temp fixture, not the live tree, so the number does NOT move with repo growth. It is stable across
+# consecutive runs.
+#
+# CONSEQUENCE FOR THE NEXT LANE: **any** addition to --for's legend or header, of any size, turns this arm
+# red — and it will read as YOUR regression when it is this wave's ratchet. If you added a clause to --for
+# and this went red, that is the expected signal, not a bug in your change; the correct response is a
+# DELIBERATE re-anchor of the 800 ceiling in its own commit with the new number recorded here (the gate's
+# own philosophy elsewhere: a recalibration is a commit, never a mid-lane bar move). Do not widen the bar
+# quietly, and do not "fix" it by trimming the legend without deciding that the trim is what you want.
+#
+# The ceiling itself was NOT moved by this lane: the number is recorded, not re-anchored, because
+# re-anchoring on a lane that did not spend the margin would hide who spent it.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"

@@ -15,8 +15,13 @@
 #       CODE hit only, and discloses suppressed_comment=/suppressed_string= exactly.
 #   (2) ESCAPE HATCH: --grep-in=any shows all three and carries NO tier attributes at all (a plain
 #       untiered answer is byte-identical to the pre-lane shape — purely additive, no re-run hint).
-#   (3) F4 FALLBACK (globally tightest NON-EMPTY tier): a literal that exists ONLY in comments is still
+#   (3) F4 FALLBACK (code, else EVERYTHING ELSE): a literal that exists ONLY in comments is still
 #       answered — with tier="comment", never an honest-looking empty.
+#  (3c/3d) THE COLLAPSED LADDER (wave-3 verifier P4-B): below code there is no ranking — comment and
+#       string are served TOGETHER as tier="comment+string". The ranked ladder it replaces inverted the
+#       flagship answer: one `#` mention of an error message in a gate script outranked the string
+#       literal that emits it. (3c) is the synthetic; (3d) is the verifier's own live repro, guarded by a
+#       --grep-in=any liveness precondition so a moved anchor reds instead of passing vacuously.
 #   (4) AN ANSWER THAT HELD NOTHING BACK CLAIMS NOTHING: a doc-file-only hit prints with no tier
 #       vocabulary at all. (The unclassified population — hits the budget never reached — is arm (5c):
 #       they are COUNTED in tier_unclassified= and always emitted, never suppressed.)
@@ -138,6 +143,56 @@ fi
                     || no "(3b) expected hits=1 (code tier) for TIERTOKEN_onlycomment, got $c_hits (tier=$c_tier)"
 
 # ═══════════════════════════════════════════════════════════════════════════
+echo "=== (3c) the COLLAPSED ladder — below code, comment and string serve TOGETHER ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# Wave-3 verifier P4-B. The synthetic of arm (3d)'s live repro: an error message EMITTED as a string
+# literal, and MENTIONED once in a gate script's `#` comment. Under the pre-fix ranked ladder
+# (code > comment > string) that single comment outranked the emit site and buried it behind
+# suppressed_string= — "tightest span type" and "most likely to be the answer" come apart exactly here.
+cat >"$SB/src/ladder.c" <<'EOF'
+int ladderHost( void )
+{
+    return reportFailure( "TIERTOKEN_ladder went wrong" );
+}
+EOF
+cat >"$SB/src/laddercheck.sh" <<'EOF'
+# check 9: a TIERTOKEN_ladder line must REJECT the whole file loudly
+echo checking
+EOF
+L_OUT="$( "$BIN" "$SB" --no-cache --grep=TIERTOKEN_ladder 2>/dev/null )"
+l_hits="$( attr hits "$L_OUT" )"
+l_tier="$( attr tier "$L_OUT" )"
+l_sup_c="$( attr suppressed_comment "$L_OUT" )"
+l_sup_s="$( attr suppressed_string "$L_OUT" )"
+if [ "$l_hits" = "2" ] && [ "$l_tier" = "comment+string" ] && [ -z "$l_sup_c" ] && [ -z "$l_sup_s" ]; then
+    ok "(3c) an empty code tier serves comment AND string together, disclosed as tier=comment+string"
+else
+    no "(3c) expected hits=2 tier=comment+string with nothing suppressed, got hits=$l_hits tier=$l_tier suppressed_comment=$l_sup_c suppressed_string=$l_sup_s"
+    printf '%s\n' "$L_OUT" | grep -o '<grep [^>]*>'
+fi
+if printf '%s' "$L_OUT" | grep -q 'ladder\.c' && printf '%s' "$L_OUT" | grep -q 'laddercheck\.sh'; then
+    ok "(3c-b) BOTH the emit site and the gate-script mention are served"
+else
+    no "(3c-b) the collapsed tier dropped one of the two files — the P4-B inversion is back"
+fi
+
+# ── (3d) the verifier's OWN live repro, with a liveness precondition so it can never go vacuously green ──
+# --grep-in=any establishes that both anchors still exist before the default view is judged; if the live
+# text moves, this arm goes RED asking to be re-anchored rather than silently passing on an absent fixture.
+V_ANY="$( "$BIN" "$ROOT" --no-cache --grep="malformed rules line" --grep-in=any --limit=200 2>/dev/null )"
+if printf '%s' "$V_ANY" | grep -q 'src/arch\.h' && printf '%s' "$V_ANY" | grep -q 'test/archcheck\.sh'; then
+    V_DEF="$( "$BIN" "$ROOT" --no-cache --grep="malformed rules line" --limit=200 2>/dev/null )"
+    if printf '%s' "$V_DEF" | grep -q 'src/arch\.h' && printf '%s' "$V_DEF" | grep -q 'test/archcheck\.sh'; then
+        ok "(3d) live repro: a pasted error message serves its EMIT SITE (src/arch.h) as well as the gate-script comment"
+    else
+        no "(3d) live repro: the default answer still buries one of the two — the P4-B ladder inversion is back"
+        printf '%s\n' "$V_DEF" | grep -o '<grep [^>]*>'
+    fi
+else
+    no "(3d) the live anchor moved: --grep-in=any no longer finds \"malformed rules line\" in BOTH src/arch.h and test/archcheck.sh — re-anchor this arm"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
 echo "=== (4) a file with no grammar is never suppressed, and claims nothing ==="
 # ═══════════════════════════════════════════════════════════════════════════
 M_OUT="$( "$BIN" "$SB" --no-cache --grep=TIERTOKEN_md 2>/dev/null )"
@@ -168,10 +223,15 @@ fb_files="$( attr tier_parsed "$FB_OUT" )"
 fb_hits="$( attr hits "$FB_OUT" )"
 fb_comment="$( attr suppressed_comment "$FB_OUT" )"
 fb_unc="$( attr tier_unclassified "$FB_OUT" )"
-if [ "$fb_budget" = "files" ] && [ -n "$fb_files" ] && [ "$fb_files" -lt 300 ]; then
-    ok "(5) the file budget trips, is disclosed, and names how many files were tiered ($fb_files/300)"
+# The EXACT constant, not `< 300` (wave-3 verifier P2-1): rebuilt with kGrepTierFileBudget 128 -> 12 the
+# gate stayed ALL GREEN while the feature went ~90% inert on the real tree (tier_parsed="12"
+# tier_unclassified="231" against 17 fully-tiered hit files at 128). A loose bound let the budget drop ~10x
+# — a typo, or a well-meaning "let us be cheaper" edit — without turning anything red. This corpus has 300
+# hit files, so the prefix is budget-limited and tier_parsed IS kGrepTierFileBudget, read back out.
+if [ "$fb_budget" = "files" ] && [ "$fb_files" = "128" ]; then
+    ok "(5) the file budget trips, is disclosed, and tier_parsed pins kGrepTierFileBudget exactly (128/300)"
 else
-    no "(5) expected tier_budget=files with tier_parsed<300, got budget=$fb_budget files=$fb_files"
+    no "(5) expected tier_budget=files with tier_parsed=128 (kGrepTierFileBudget), got budget=$fb_budget files=$fb_files — if the constant moved DELIBERATELY, re-pin this arm in the same commit"
     printf '%s\n' "$FB_OUT" | grep -o '<grep [^>]*>'
 fi
 # the tail's comment hits are still emitted — a budget may not silently delete rows it never looked at
@@ -208,10 +268,14 @@ bb_comment="$( attr suppressed_comment "$BB_OUT" )"
 [ -n "$bb_comment" ] && [ "$bb_comment" = "$bb_files" ] \
     && ok "(6b) exactly the tiered prefix's comment rows were suppressed under the byte budget" \
     || no "(6b) byte-budget arithmetic is off: suppressed_comment=$bb_comment tier_parsed=$bb_files"
-if [ "$bb_budget" = "bytes" ] && [ -n "$bb_files" ] && [ "$bb_files" -lt 16 ]; then
-    ok "(6) the byte budget trips before the file budget and is disclosed ($bb_files/16 files tiered)"
+# The exact parsed count, not `< 16` (P2-1, the byte-budget half): this corpus is a FROZEN generator — 16
+# files of identical construction — so how many fit under kGrepTierByteBudget is a pure function of the
+# constant. `< 16` let the budget fall ~7x (to ~1.1 MB) with every arm green. 7 is the measured admitted
+# prefix at 8 MB; if the constant moves deliberately, re-pin this number in the same commit.
+if [ "$bb_budget" = "bytes" ] && [ "$bb_files" = "7" ]; then
+    ok "(6) the byte budget trips before the file budget and is disclosed, tier_parsed pinned at 7/16"
 else
-    no "(6) expected tier_budget=bytes with tier_parsed<16, got budget=$bb_budget files=$bb_files"
+    no "(6) expected tier_budget=bytes with tier_parsed=7 (the prefix kGrepTierByteBudget admits), got budget=$bb_budget files=$bb_files"
     printf '%s\n' "$BB_OUT" | grep -o '<grep [^>]*>'
 fi
 
@@ -259,6 +323,55 @@ else
     no "(9) MCP grep diverged from the CLI verb: total=$mcpTotal/$d_hits comment=$mcpComment/$d_comment string=$mcpString/$d_string"
     printf '%s\n' "$MCP_OUT" | tail -1 | cut -c1-400
 fi
+
+# ── (9b/9c) the BATCH sub-query's own hatch and its own refusal (wave-3 verifier P3-4/P6-1) ─────────────
+# R-H's stated reason for putting `in` on the live MCP verb — an MCP-only agent that reads
+# suppressed_comment= has no CLI to re-ask from — applies verbatim to `batch`, and was not applied there:
+# the batch arm took the DEFAULTED GrepIn::Code and read no `in` field at all, so the one surface with no
+# fallback was the one left closed. (The api-surface ack claimed both callers were updated; one was.)
+mcpcall(){ printf '%s\n%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    "$1" | "$BIN" "$SB" --mcp --no-cache 2>/dev/null | tail -1; }
+
+B_ANY="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"batch","arguments":{"path":"'"$SB"'","queries":[{"verb":"grep","pattern":"TIERTOKEN_frob","in":"any"}]}}}' )"
+B_DEF="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"batch","arguments":{"path":"'"$SB"'","queries":[{"verb":"grep","pattern":"TIERTOKEN_frob"}]}}}' )"
+b_any="$( jkey total "$B_ANY" )"
+b_def="$( jkey total "$B_DEF" )"
+# Both directions, so the arm cannot pass on a surface that ignores `in` (which would make the two equal)
+# NOR on one that always un-tiers (which would make both 5).
+if [ "$b_any" = "$a_hits" ] && [ "$b_def" = "$d_hits" ]; then
+    ok "(9b) the batch grep sub-query honours in=\"any\" ($b_any) and still tiers by default ($b_def)"
+else
+    no "(9b) batch grep in= is not wired: in=any gave total=$b_any (expected $a_hits), default gave total=$b_def (expected $d_hits)"
+    printf '%s\n' "$B_ANY" | cut -c1-400
+fi
+
+B_BAD="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"batch","arguments":{"path":"'"$SB"'","queries":[{"verb":"grep","pattern":"TIERTOKEN_frob","in":"Any"}]}}}' )"
+if printf '%s' "$B_BAD" | grep -q 'invalid value for field: in'; then
+    ok "(9c) the batch grep sub-query REFUSES an unknown in= value instead of silently tiering"
+else
+    no "(9c) batch grep swallowed in=\"Any\" — a closed value set that defaults on a typo hides the rows the caller asked for"
+    printf '%s\n' "$B_BAD" | cut -c1-400
+fi
+
+# ── (9d) the LIVE grep verb refuses the same typo, on the same words (wave-3 verifier P6-2) ─────────────
+# `in:"Any"` / `in:"all"` / `in:"comments"` used to read as the default and silently return the TIERED
+# answer. The CLI twin has always refused, and its own comment says why: a typo would read as "code" and
+# quietly suppress the very rows the user asked to see. Both MCP dialects now read the value through the
+# same reader, so this arm and (9c) assert the SAME sentence — two dialects cannot drift on a closed set.
+V_BAD="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"grep","arguments":{"path":"'"$SB"'","pattern":"TIERTOKEN_frob","in":"Any"}}}' )"
+V_OK="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"grep","arguments":{"path":"'"$SB"'","pattern":"TIERTOKEN_frob","in":"code"}}}' )"
+if printf '%s' "$V_BAD" | grep -q 'invalid value for field: in'; then
+    ok "(9d) the live MCP grep verb REFUSES an unknown in= value, as the CLI twin does"
+else
+    no "(9d) the live MCP grep verb swallowed in=\"Any\" and answered — the closed set is enforced on one dialect only"
+    printf '%s\n' "$V_BAD" | cut -c1-400
+fi
+# The refusal must not be over-broad: an EXPLICIT in="code" is a legal spelling of the default and answers.
+[ "$( jkey total "$V_OK" )" = "$d_hits" ] \
+    && ok "(9d-b) an explicit in=\"code\" still answers (the refusal is on unknown values, not on presence)" \
+    || no "(9d-b) in=\"code\" was refused or changed the answer — the value check is too broad"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== (10) determinism + well-formed XML on every tiered surface ==="

@@ -1360,11 +1360,24 @@ C++ corpus — *historical, private, not publicly reproducible*. Every figure be
   1. **The wave's causal cut, binary-to-binary** (identical corpus, queries, cap state):
      `--grep frantic` 6,568 → 4,552 → **4,415** tok (**−30.7%** at the wave, **−32.8%** after the
      fix-grep lane's conditional-legend fix), `--grep FirePolicy` 6,531 → 4,556 → **4,419**
-     (**−30.2%** → **−32.3%**) at the capped default view; −22.2% / −21.5% → **−23.1% / −22.3%**
+     (**−30.2%** → **−32.3%**) at the capped view; −22.2% / −21.5% → **−23.1% / −22.3%**
      uncapped (`--limit=1000`). Independent corroboration:
      `test/grepbytescheck.sh` re-derives a **−40.2% median** payload cut on this repository's five
      frozen *capped* queries — and, on twelve frozen *uncapped* small-hit queries, a
-     **+61.5% median** payload *increase*, larger than plain grep on **12 of 12**. Those two medians
+     **+61.5% median** payload *increase*, larger than plain grep on **12 of 12**.
+     **What "the view" means since 2026-08-19**: span tiers made `--grep`'s DEFAULT a filtered view of the
+     same exhaustive scan, and this gate's instrument was deliberately pinned to `--grep-in=any` — the
+     un-tiered emitter — in the same wave (`test/grepbytescheck.sh:114`, with the reason in its own header:
+     folding a second, independent row-cutting axis into the same median would silently re-band a published
+     number, and would empty the capped regime this set exists to measure, since three of its frozen queries
+     stop being capped once their comment rows are held back). So every byte figure in facts 1-3 is an
+     **`--grep-in=any`** figure, not a default-view figure — including the pre-tier measurements, whose
+     "default" was byte-identical to today's `--grep-in=any` (verified across eleven query shapes, both
+     dialects and the MCP surface by the wave-3 verifier). The tiered default's own byte effect is reported
+     un-banded by the gate and is not a headline in either direction: measured `buffer` **−20.4%** to
+     `DEGRADED_PATH_ALERT` **+12.3%**, because suppressing comment rows frees room under the row cap and the
+     page refills with code rows — the tiered default buys row QUALITY at a fixed row budget, not bytes.
+     Those two medians
      are DEV-MACHINE values: ripwire's grep enrichment carries git-context-dependent bytes
      (churn/amp/hotspot attrs vary with the clone), and the same commit re-derived the capped median
      as −41.4% (dev worktree), −55.8% (fresh single-branch clone), and −31.5%/−31.9% (the two CI
@@ -1383,16 +1396,21 @@ C++ corpus — *historical, private, not publicly reproducible*. Every figure be
      per file; re-running the capped set with a relative path for both arms reads **≈ −14%**, not
      −40.2%. Re-basing a published headline by ~25 points is an owner call, and it is recorded as the
      open item in `PLAN_HARVEST_REPORTS_2026-08-15/ROUTING_LEDGER.md`.)*
-  2. **Default view vs a clean raw-grep dump**: **−1.9% / +4.3%** *(re-measured 2026-08-15 after the
-     fix-grep lane; the wave itself read +1.2% / +7.6%, and 2026-06 read +19.7% / −11.2%)*. The
-     `frantic` arm crosses zero for the first time — the default view is now marginally *smaller* than
+  2. **Un-tiered view (`--grep-in=any`) vs a clean raw-grep dump**: **−1.9% / +4.3%** *(re-measured
+     2026-08-15 after the
+     fix-grep lane; the wave itself read +1.2% / +7.6%, and 2026-06 read +19.7% / −11.2%. Labelled
+     "default view" until 2026-08-19; span tiers moved the default and the label was corrected, not the
+     number — the measurement is unchanged and `--grep-in=any` is byte-identical to the pre-tier default)*.
+     The
+     `frantic` arm crosses zero for the first time — that view is now marginally *smaller* than
      a clean grep dump on that term, and still larger on `FirePolicy`; one term either side of parity
      is not a headline, which is why the row prints both. Not same-answer: ripwire shows 100 of 172/190
      occurrence-hits (capped, disclosed in-band) with enclosing symbols; grep's 90/86-line dump is
      complete. "Clean" = `--exclude-dir=.claude` — the corpus now carries agent-worktree duplicates
      ripwire's crawler skips; without that exclusion the grep arm balloons 4.7× and ripwire reads −80%,
      a litter artifact this row refuses to quote.
-  3. **Same-answer uncapped parity — the anti-headline stands**: showing every hit, `--grep` remains
+  3. **Same-answer uncapped parity — the anti-headline stands**: showing every hit,
+     `--grep --grep-in=any` remains
      token-negative vs clean grep, **+150% / +214%** *(re-measured 2026-08-15 after the fix-grep lane;
      +153% / +217% at the wave, down from +225% / +304% pre-wave on the same measurement)*. `--grep`
      buys enclosing-symbol structure and in-band honesty, not fewer tokens, on exhaustive dumps. The
