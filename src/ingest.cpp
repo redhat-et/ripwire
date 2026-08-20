@@ -12054,7 +12054,8 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
 // ur_walkTree is — the dispatcher stays a two-line switch over walk kinds, and each walk's own logic (and
 // its own reasons to grow) lives next to itself.
 inline void pat_walkTree( const pattern::PatternProgramSet* set, TSNode root, std::uint32_t fileId, std::string_view bytes,
-                          const std::vector<std::uint32_t>& nlOffsets, const TSLanguage* grammar, std::vector<AstMatch>& hits )
+                          const std::vector<std::uint32_t>& nlOffsets, const TSLanguage* grammar, std::vector<AstMatch>& hits,
+                          std::atomic<std::uint64_t>* ellipsisCappedOut )
 {
     if( set == nullptr )
     {
@@ -12066,7 +12067,14 @@ inline void pat_walkTree( const pattern::PatternProgramSet* set, TSNode root, st
         return;   // this file's grammar is one the pattern did not resolve for — unresolved_in= says so
     }
     std::vector<std::pair<std::uint32_t, std::uint32_t>> spans;
-    pattern::findMatches( *prog, root, bytes, spans, pattern::kMaxHits );
+    pattern::MatchStats                                  stats;
+    pattern::findMatches( *prog, root, bytes, spans, pattern::kMaxHits, stats );
+    if( ellipsisCappedOut != nullptr && stats.ellipsisCappedCount != 0 )
+    {
+        // Relaxed is right: nothing else is published alongside it and the only reader runs after the pool
+        // has joined. Addition is associative, so the total does not depend on which worker got here first.
+        ellipsisCappedOut->fetch_add( stats.ellipsisCappedCount, std::memory_order_relaxed );
+    }
     for( const auto& [a, b] : spans )
     {
         if( a < b && b <= bytes.size() )
@@ -12090,7 +12098,8 @@ inline void runWalkGroups( const std::vector<AstQueryGroup>& groups, TSNode root
         }
         else if( groups[groupIndex].walk == AstWalk::Pattern )
         {
-            pat_walkTree( groups[groupIndex].patternPrograms, root, fileId, bytes, nlOffsets, grammar, perGroupHits[groupIndex] );
+            pat_walkTree( groups[groupIndex].patternPrograms, root, fileId, bytes, nlOffsets, grammar, perGroupHits[groupIndex],
+                          groups[groupIndex].ellipsisCappedOut );
         }
     }
 }

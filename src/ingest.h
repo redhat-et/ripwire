@@ -15,6 +15,7 @@
 
 #include "model.h"
 
+#include <atomic>       // AstQueryGroup::ellipsisCappedOut — a summed counter across the parallel file walk
 #include <cctype>
 #include <cstring>
 #include <span>          // spanTiersOfFiles takes a VIEW of paths — the caller owns the storage
@@ -356,6 +357,14 @@ struct AstQueryGroup
     // AstWalk::Pattern only: the compiled pattern, keyed by grammar. Borrowed, and read-only for the
     // whole walk — it is a flat POD snapshot precisely so every worker can share it without a copy.
     const pattern::PatternProgramSet* patternPrograms = nullptr;
+
+    // AstWalk::Pattern only, optional (null ⇒ zero cost): how many times an ellipsis probe abandoned a
+    // candidate node because the sibling run exceeded the disclosed bound. Summed across the parallel file
+    // walk, and summation of integers is the only reduction, so the total is order-independent and the
+    // determinism contract is untouched. See pattern.h::MatchStats for what the number does and does not
+    // claim; the emitter turns a non-zero into ellipsis_capped="1" + ellipsis_skipped=N and labels hits= a
+    // floor, which is the disclosure V-2 found missing.
+    std::atomic<std::uint64_t>*       ellipsisCappedOut = nullptr;
 
     // §L3: a query that DID compile (for at least one grammar) still tells the caller nothing about WHICH
     // grammars accepted it, or how much of the corpus could even ask it the question. `(interface_declaration)

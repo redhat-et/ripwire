@@ -194,6 +194,44 @@ grep -oE '<pattern [^>]*>' "$TMP/all" | grep -q 'unresolved_in=' \
 "$BIN" "$FIX" --pattern='foo($A, $B)' >/dev/null 2>&1 && ok "control: the same pattern without --sarif still runs" \
     || no "control arm broke — the refusal above may be firing for the wrong reason"
 
+# ── 4d. V-2: the ellipsis sibling cap must SAY when it bit ────────────────────────────────────────────
+# Found 2026-08-20 by adversarial verification. `foo(0,…,399, zzz)` LITERALLY matches `foo(...)`, but the
+# first-match-wins probe abandons the node once the sibling run exceeds ellipsis_bound — and the run
+# reported hits="1" with hits_capped="0" capped="0", presenting a floor as a total. ellipsis_bound=
+# disclosed the limit statically; nothing said "it bit HERE". Non-negotiable 3: every truncation is
+# disclosed in the header.
+#
+# The bound counts SIBLINGS and an argument list interleaves separators (children = 2*args + 1), so the
+# real argument ceiling is ~128 — the fixture straddles it deliberately: 10 args under, 400 args over.
+mkdir -p "$TMP/elldir"
+printf 'void g(){ foo(%s, zzz); }\n' "$( seq -s, 0 9 )"   > "$TMP/elldir/small.c"
+printf 'void g(){ foo(%s, zzz); }\n' "$( seq -s, 0 399 )" > "$TMP/elldir/big.c"
+# presence guard: both files must really carry the call, or the arm proves nothing
+[ "$( grep -lF 'foo(' "$TMP/elldir"/*.c | wc -l | tr -d ' ' )" = "2" ] \
+    && ok "(4d) presence guard: both the under-cap and over-cap files carry the call" \
+    || no "(4d) presence guard: the ellipsis fixture did not write two files carrying foo("
+"$BIN" "$TMP/elldir" --pattern='foo(...)' >"$TMP/ell.out" 2>/dev/null
+he="$( patAttrOf "$TMP/ell.out" hits )"
+[ "${he:-x}" = "1" ] && ok "(4d) the over-cap call is NOT matched (hits=1, the under-cap one) — the cap is real" \
+    || no "(4d) ellipsis fixture hits=${he:-<none>}, expected 1 — the cap no longer bites and this arm is inert"
+ec="$( patAttrOf "$TMP/ell.out" ellipsis_capped )"
+es="$( patAttrOf "$TMP/ell.out" ellipsis_skipped )"
+[ "${ec:-x}" = "1" ] && ok "(4d) ellipsis_capped=\"1\" discloses that the bound bit on THIS run" \
+    || no "(4d) UNDISCLOSED TRUNCATION: a literal match was dropped at the ellipsis bound and ellipsis_capped=\"${ec:-<none>}\" — hits= is a floor presenting itself as a total"
+[ "${es:-0}" -ge 1 ] 2>/dev/null && ok "(4d) ellipsis_skipped=\"$es\" says how many nodes went unevaluated" \
+    || no "(4d) ellipsis_skipped=\"${es:-<none>}\" — the magnitude of the drop is not disclosed"
+# ...and the flag is HONEST in the other direction: a run the cap never touched must say 0, or the
+# disclosure is noise a reader learns to skim.
+mkdir -p "$TMP/ellok" && cp "$TMP/elldir/small.c" "$TMP/ellok/"
+"$BIN" "$TMP/ellok" --pattern='foo(...)' >"$TMP/ellok.out" 2>/dev/null
+[ "$( patAttrOf "$TMP/ellok.out" ellipsis_capped )" = "0" ] && [ "$( patAttrOf "$TMP/ellok.out" ellipsis_skipped )" = "0" ] \
+    && ok "(4d) a run under the bound reports ellipsis_capped=\"0\" ellipsis_skipped=\"0\"" \
+    || no "(4d) FALSE ALARM: an under-cap run claims the bound bit ($( grep -oE 'ellipsis_[a-z]+="[0-9]+"' "$TMP/ellok.out" | tr '\n' ' ' ))"
+# ...and it is absent entirely on a pattern with no ellipsis (a fact about nothing is decoration)
+"$BIN" "$FIX" --pattern='foo($A, $B)' 2>/dev/null | grep -oE '<pattern [^>]*>' | grep -q 'ellipsis_capped=' \
+    && no "(4d) ellipsis_capped= emitted on a pattern that has no ellipsis" \
+    || ok "(4d) ellipsis_capped= absent on a pattern with no ellipsis"
+
 # ── 4f. V-6: --pattern honors paging, so the disclosure list must name it ─────────────────────────────
 # honorsPaging() includes --pattern and --limit demonstrably windows it, but kPagingHonoringVerbs — spliced
 # into four refusal messages — omitted it, so `--pattern … --token-budget=200` told the user to narrow with

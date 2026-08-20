@@ -828,11 +828,27 @@ inline bool nodesMatchExactly( TSNode a, TSNode b, std::string_view src, unsigne
     return true;
 }
 
-bool matchAt( const PatternProgram& prog, std::uint32_t patIndex, TSNode cand, std::string_view src, MatchEnv& env, unsigned depth );
+// V-2 (adversarial verification 2026-08-20). The ellipsis probe ABANDONS a candidate node when the run of
+// siblings it would have to absorb exceeds kEllipsisBound — and before this struct existed, that abandon
+// was indistinguishable from "this node does not match". A 400-argument `foo(0,…,399, zzz)` that LITERALLY
+// matches `foo(...)` produced no row while hits= presented itself as a total (hits_capped="0", capped="0").
+// ellipsis_bound= disclosed the limit STATICALLY; nothing said "it bit here", so hits= was a floor that did
+// not say so — non-negotiable 3.
+//
+// One counter, threaded by reference (never copied the way MatchEnv is on a probe), incremented at both
+// abandon sites and at neither non-cap failure. It counts ABANDONS, not distinct nodes: one node reached
+// under two enclosing probes counts twice, so the number is a FLOOR on nodes left unevaluated and the
+// emitted attribute says so. Summation is the only reduction, so the parallel file walk stays deterministic.
+struct MatchStats
+{
+    std::uint64_t ellipsisCappedCount = 0;
+};
+
+bool matchAt( const PatternProgram& prog, std::uint32_t patIndex, TSNode cand, std::string_view src, MatchEnv& env, MatchStats& stats, unsigned depth );
 
 // The child-sequence walk, with the first-match-wins ellipsis probe. Split out of matchAt so neither
 // function grows a second concern: matchAt decides what ONE node is, this decides how a LIST lines up.
-inline bool matchChildren( const PatternProgram& prog, const PatNode& pat, TSNode cand, std::string_view src, MatchEnv& env, unsigned depth )
+inline bool matchChildren( const PatternProgram& prog, const PatNode& pat, TSNode cand, std::string_view src, MatchEnv& env, MatchStats& stats, unsigned depth )
 {
     std::vector<TSNode> kids;
     const std::uint32_t childCount = ts_node_child_count( cand );
@@ -854,7 +870,7 @@ inline bool matchChildren( const PatternProgram& prog, const PatNode& pat, TSNod
         const std::uint32_t patChild = prog.childIndex[ pat.childStart + pi ];
         if( prog.nodes[ patChild ].role != PatRole::Ellipsis )
         {
-            if( ci >= kids.size() || !matchAt( prog, patChild, kids[ci], src, env, depth + 1 ) )
+            if( ci >= kids.size() || !matchAt( prog, patChild, kids[ci], src, env, stats, depth + 1 ) )
             {
                 return false;
             }
@@ -871,7 +887,8 @@ inline bool matchChildren( const PatternProgram& prog, const PatNode& pat, TSNod
         {
             if( kids.size() - ci > kEllipsisBound )
             {
-                return false;   // the disclosed cap, not a silent truncation
+                ++stats.ellipsisCappedCount;   // ABANDON site 1: a trailing ellipsis over too long a sibling run
+                return false;                  // the cap — now disclosed per-run, not merely per-constant
             }
             ci = kids.size();
             break;
@@ -882,7 +899,7 @@ inline bool matchChildren( const PatternProgram& prog, const PatNode& pat, TSNod
         for( std::size_t k = ci; k < limit; ++k )
         {
             MatchEnv probe = env;   // a failed probe must leak nothing
-            if( matchAt( prog, goal, kids[k], src, probe, depth + 1 ) )
+            if( matchAt( prog, goal, kids[k], src, probe, stats, depth + 1 ) )
             {
                 env   = probe;
                 ci    = k + 1;
@@ -893,14 +910,19 @@ inline bool matchChildren( const PatternProgram& prog, const PatNode& pat, TSNod
         }
         if( !found )
         {
-            return false;
+            if( limit < kids.size() )
+            {
+                ++stats.ellipsisCappedCount;   // ABANDON site 2: the forward scan was CUT SHORT by the bound, so
+                                               // this "no match" is a fact about the cap, not about the code
+            }
+            return false;   // a scan that reached kids.size() is a complete answer and is NOT counted
         }
     }
     return ci == kids.size();
 }
 
 // Does the candidate node satisfy pattern node `patIndex`?
-inline bool matchAt( const PatternProgram& prog, std::uint32_t patIndex, TSNode cand, std::string_view src, MatchEnv& env, unsigned depth )
+inline bool matchAt( const PatternProgram& prog, std::uint32_t patIndex, TSNode cand, std::string_view src, MatchEnv& env, MatchStats& stats, unsigned depth )
 {
     if( depth > 128 )
     {
@@ -933,7 +955,7 @@ inline bool matchAt( const PatternProgram& prog, std::uint32_t patIndex, TSNode 
     {
         return nodeText( cand, src ) == prog.textOf( pat );
     }
-    return matchChildren( prog, pat, cand, src, env, depth );
+    return matchChildren( prog, pat, cand, src, env, stats, depth );
 }
 
 // Every node in one file's tree that the pattern matches, reported as [startByte,endByte) pairs in
@@ -941,7 +963,7 @@ inline bool matchAt( const PatternProgram& prog, std::uint32_t patIndex, TSNode 
 // (the YAML grammar's 254-level indent bug is the standing reminder) and a search pass may not be the
 // thing that overflows the stack. A matched node is still descended into, so `foo(foo(a))` reports both.
 inline void findMatches( const PatternProgram& prog, TSNode root, std::string_view src,
-                         std::vector<std::pair<std::uint32_t, std::uint32_t>>& out, std::size_t budget )
+                         std::vector<std::pair<std::uint32_t, std::uint32_t>>& out, std::size_t budget, MatchStats& stats )
 {
     if( !prog.ok() )
     {
@@ -957,7 +979,7 @@ inline void findMatches( const PatternProgram& prog, TSNode root, std::string_vi
         if( ts_node_symbol( n ) == rootKindId )
         {
             MatchEnv env;
-            if( matchAt( prog, 0, n, src, env, 0 ) )
+            if( matchAt( prog, 0, n, src, env, stats, 0 ) )
             {
                 out.emplace_back( ts_node_start_byte( n ), ts_node_end_byte( n ) );
             }
