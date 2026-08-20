@@ -49,6 +49,21 @@ def frozen_partition( repo ):
     digest = hashlib.sha256( ( SPLIT_SALT + repo.lower() ).encode( "utf-8" ) ).digest()
     return "train" if digest[0] < 128 else "heldout"
 
+# THE ONE RE-DERIVATION OF THE SPLIT CONTRACT (2026-08-20). Two independent fixes arrived in the same
+# wave — run_agentloop.load_tasks_lock() fail-closing on the LOCK, analyze.load_results() fail-closing
+# on the RESULTS — and each shipped its own inline set-comprehension over frozen_partition(). Two
+# copies of a contract check is how the contract drifts: the reason this whole class of bug existed is
+# that content_sha256 proved the BYTES and nothing re-derived the RULE. So the re-derivation lives
+# here, next to the rule it re-derives, and every caller imports it. Do not inline it again; do not
+# restate the salted hash anywhere outside frozen_partition() above. (test/agentlooplockcheck.sh
+# restates the rule by hand ON PURPOSE — that copy is the gate's independent control, not a caller.)
+#
+# What it proves and what it does not: a non-empty return means those repos are LocBench TRAIN under
+# the CURRENT rule, so scoring them is contamination. An empty return means none of the repos handed
+# in re-derive to train — it is not a claim about repos that were never in the list.
+def train_contaminated_repos( repos ):
+    return sorted( { r for r in repos if frozen_partition( r ) != "heldout" } )
+
 # ── dataset access (metadata only — repo/instance_id/base_commit; no clone, no patch fetch needed) ──
 def fetch_rows( n_max, cache_dir ):
     cache = cache_dir / f"rows_{DATASET.replace('/','__')}_{SPLIT}.json"
