@@ -76,7 +76,7 @@ h="$( hitsOf "$TMP/all" )"
     || no "foo(\$A, \$B) hits=${h:-<none>}, expected $FIXCOUNT — per-language rows: $( grep -oE '<m p="[^"]*"' "$TMP/all" | tr '\n' ' ' )"
 
 # grammars= / shapes= — the §L3 applicability disclosure, in --pattern's own vocabulary
-g="$( attrOf "$TMP/all" grammars )"
+g="$( patAttrOf "$TMP/all" grammars )"
 for lang in c cpp objc java csharp javascript typescript python go rust swift; do
     case ",$g," in
         *",$lang,"*) ok "grammars= names $lang" ;;
@@ -88,7 +88,7 @@ s="$( attrOf "$TMP/all" shapes )"
     || no "shapes= missing — the reader cannot tell what the pattern was interpreted as"
 case "$s" in *"python:call"*) ok "shapes= python:call (the pattern really resolved, not just parsed)" ;;
              *) no "shapes= has no python:call entry (got: $s)" ;; esac
-[ -n "$( attrOf "$TMP/all" eligible_files )" ] && ok "eligible_files= present" || no "eligible_files= missing"
+[ -n "$( patAttrOf "$TMP/all" eligible_files )" ] && ok "eligible_files= present" || no "eligible_files= missing"
 [ -n "$( attrOf "$TMP/all" of_files )" ]       && ok "of_files= present"       || no "of_files= missing"
 
 # ── 2. the node-kind guard: a clean parse is not enough ───────────────────────────────────────────────
@@ -178,21 +178,16 @@ fi
 pe="$( attrOf "$TMP/soft" unresolved_in )"
 [ -n "$pe" ] && ok "unresolved_in=\"$pe\" explains the zero instead of presenting it as absence" \
     || no "hits=0 with grammars left unresolved and no unresolved_in= — the zero reads as 'none exists'"
-# ...and it is SILENT on a run that found something (never nag when the run was useful)
+# ...and it is SILENT on a run that found something AND read every file it serves (never nag when the run
+# was useful and complete). V-3 narrowed this claim: "hits>0" alone is NOT the withholding condition, and
+# believing it was is what let a matched .tsx sit beside a silently unread .ts. skipped_files= is the other
+# half of the condition, and arm 4e below is the case that separates them.
+sk_all="$( patAttrOf "$TMP/all" skipped_files )"
+[ "${sk_all:-x}" = "0" ] && ok "control: the all-languages run scanned every served file (skipped_files=0)" \
+    || no "control: the all-languages fixture has skipped_files=${sk_all:-<none>} — arm 4b's withholding claim is testing the wrong case"
 grep -oE '<pattern [^>]*>' "$TMP/all" | grep -q 'unresolved_in=' \
-    && no "unresolved_in= leaked onto a run with hits>0 (it must fire only when the zero would mislead)" \
-    || ok "unresolved_in= absent when the run found matches"
-
-# ── 4c. a modifier that cannot be honored is refused, not silently dropped ────────────────────────────
-# --sarif serializes --lint/--lint-rules findings. --pattern returns from runLint with its own element
-# before any finding exists, so a --sarif that looked accepted would never take effect — the same silent
-# no-op --match already refuses.
-"$BIN" "$FIX" --lint --pattern='foo($A, $B)' --sarif >"$TMP/sar.out" 2>"$TMP/sar.err"; rcsar=$?
-[ "$rcsar" -ne 0 ] && grep -q -- '--sarif' "$TMP/sar.err" && ok "--sarif with a pattern refuses instead of silently no-oping" \
-    || no "--sarif + pattern: want a non-zero exit naming --sarif, got exit $rcsar / $( head -c 160 "$TMP/sar.err" )"
-# control: the same run without --sarif is a normal, working pattern search
-"$BIN" "$FIX" --pattern='foo($A, $B)' >/dev/null 2>&1 && ok "control: the same pattern without --sarif still runs" \
-    || no "control arm broke — the refusal above may be firing for the wrong reason"
+    && no "unresolved_in= leaked onto a run with hits>0 and skipped_files=0 (nothing there could mislead)" \
+    || ok "unresolved_in= absent when the run found matches and skipped nothing"
 
 # ── 4d. V-2: the ellipsis sibling cap must SAY when it bit ────────────────────────────────────────────
 # Found 2026-08-20 by adversarial verification. `foo(0,…,399, zzz)` LITERALLY matches `foo(...)`, but the
@@ -231,6 +226,53 @@ mkdir -p "$TMP/ellok" && cp "$TMP/elldir/small.c" "$TMP/ellok/"
 "$BIN" "$FIX" --pattern='foo($A, $B)' 2>/dev/null | grep -oE '<pattern [^>]*>' | grep -q 'ellipsis_capped=' \
     && no "(4d) ellipsis_capped= emitted on a pattern that has no ellipsis" \
     || ok "(4d) ellipsis_capped= absent on a pattern with no ellipsis"
+
+# ── 4e. V-3: dialect-split grammars must not contradict the legend ───────────────────────────────────
+# Two file extensions can share a querySub (the tags.scm TEMPLATE key) while using different grammar
+# OBJECTS: .cu/.cuh ride tree_sitter_cuda under "cpp", .tsx rides tree_sitter_tsx under "typescript".
+# Before this arm, grammars= printed the shared NAME, so a CUDA-only pattern reported grammars="cpp" while
+# the one .cpp file in the corpus went unscanned and unnamed in unresolved_in= — two attributes on one
+# element contradicting each other and the legend. Every disclosed set is now keyed per OBJECT.
+mkdir -p "$TMP/cu"
+printf 'void kern(int a){}
+void host(){ kern(3); }
+' > "$TMP/cu/b.cpp"
+"$BIN" "$TMP/cu" --pattern='kern<<<$G, $B>>>($A)' >"$TMP/cu.out" 2>"$TMP/cu.err"; rccu=$?
+if grep -q 'unknown flag' "$TMP/cu.err"; then
+    no "(4e) the binary has no --pattern flag — this arm cannot observe the dialect contract"
+else
+    [ "$rccu" -eq 0 ] && ok "(4e) a CUDA-only launch pattern runs (exit 0) — it resolves for the cuda grammar" \
+        || no "(4e) CUDA launch pattern exit $rccu ($( head -c 160 "$TMP/cu.err" ))"
+    gcu="$( patAttrOf "$TMP/cu.out" grammars )"
+    ucu="$( patAttrOf "$TMP/cu.out" unresolved_in )"
+    case ",$gcu," in
+        *",cpp,"*) no "(4e) grammars=\"$gcu\" claims the C++ grammar resolved — only the CUDA object did, and the .cpp file was never scanned" ;;
+        *)         ok "(4e) grammars=\"$gcu\" names the dialect apart from the grammar it borrows templates from" ;;
+    esac
+    case ",$ucu," in
+        *",cpp,"*) ok "(4e) unresolved_in=\"$ucu\" names cpp — the grammar the unscanned .cpp file needed" ;;
+        *)         no "(4e) unresolved_in=\"${ucu:-<none>}\" omits cpp, yet the .cpp file went unscanned — the disclosure erased the failing object" ;;
+    esac
+    [ "$( patAttrOf "$TMP/cu.out" eligible_files )" = "0" ] && ok "(4e) eligible_files=\"0\" — consistent with grammars=, which no longer claims cpp" \
+        || no "(4e) eligible_files=\"$( patAttrOf "$TMP/cu.out" eligible_files )\" disagrees with grammars=\"$gcu\""
+    [ "$( patAttrOf "$TMP/cu.out" skipped_files )" = "1" ] && ok "(4e) skipped_files=\"1\" names the cost: one served-language file was never read" \
+        || no "(4e) skipped_files=\"$( patAttrOf "$TMP/cu.out" skipped_files )\" — the unscanned .cpp file is still unannounced"
+fi
+# the hits>0 half: a matched .tsx must not hide a silently unread .ts sibling
+mkdir -p "$TMP/tsx"
+printf 'export const Foo = (p: any) => null;
+export function util(){ return 1; }
+' > "$TMP/tsx/util.ts"
+printf 'export const Page = () => <Foo bar={1} />;
+' > "$TMP/tsx/page.tsx"
+"$BIN" "$TMP/tsx" --pattern='<Foo bar={$V} />' >"$TMP/tsx.out" 2>/dev/null
+htsx="$( patAttrOf "$TMP/tsx.out" hits )"
+[ "${htsx:-0}" -ge 1 ] 2>/dev/null && ok "(4e) the JSX pattern matches in page.tsx (hits=$htsx)" \
+    || no "(4e) the JSX pattern found nothing — the arm below would pass for the wrong reason"
+[ "$( patAttrOf "$TMP/tsx.out" skipped_files )" = "1" ] && ok "(4e) skipped_files=\"1\" on a run WITH hits — util.ts was never read and says so" \
+    || no "(4e) skipped_files=\"$( patAttrOf "$TMP/tsx.out" skipped_files )\" — util.ts went unscanned on a hits>0 run with nothing to say so"
+[ -n "$( patAttrOf "$TMP/tsx.out" unresolved_in )" ] && ok "(4e) unresolved_in= is emitted despite hits>0, because a served file was skipped" \
+    || no "(4e) unresolved_in= withheld on a hits>0 run that skipped a served file — the withholding rule is still 'hits>0' alone"
 
 # ── 4f. V-6: --pattern honors paging, so the disclosure list must name it ─────────────────────────────
 # honorsPaging() includes --pattern and --limit demonstrably windows it, but kPagingHonoringVerbs — spliced

@@ -128,7 +128,8 @@ static_assert( sizeof( PatNode ) == 20, "PatNode layout changed — check the fi
 struct PatternProgram
 {
     const TSLanguage*          grammar = nullptr;
-    std::string                grammarName;   // kLangTable querySub — what grammars=/shapes= print
+    std::string                grammarName;   // kLangTable querySub — the TEMPLATE key (shared across dialects)
+    std::string                label;         // the DISCLOSURE name, unique per grammar OBJECT — what grammars=/shapes= print
     std::string                rootKind;      // the node kind the pattern became, for shapes=
     std::vector<PatNode>       nodes;         // nodes[0] is the root
     std::vector<std::uint32_t> childIndex;    // flattened child lists
@@ -143,7 +144,7 @@ struct PatternProgram
 struct PatternProgramSet
 {
     std::vector<PatternProgram> programs;        // resolved ones only — one per grammar OBJECT
-    std::vector<std::string>    unresolved;      // supported grammar NAMES that did not resolve
+    std::vector<std::string>    unresolved;      // served grammar LABELS that did not resolve (per OBJECT — see GrammarRow::label)
     bool                        usesEllipsis = false;
     std::uint8_t                metavarCount = 0;
 
@@ -526,11 +527,12 @@ inline std::uint32_t snapshotNode( PatternProgram& prog, TSNode n, std::string_v
 // Compile the pattern for ONE grammar. Walks the marker ladder × the template list and takes the first
 // combination that parses clean, spans the pattern exactly, and passes the guard. `fault` says which of
 // the two refusal classes applies when nothing does.
-inline PatternProgram compileFor( const TSLanguage* grammar, std::string_view grammarName, std::string_view raw )
+inline PatternProgram compileFor( const TSLanguage* grammar, std::string_view grammarName, std::string_view label, std::string_view raw )
 {
     PatternProgram prog;
     prog.grammar     = grammar;
     prog.grammarName = std::string( grammarName );
+    prog.label       = std::string( label );
     prog.fault       = Fault::NoParse;
 
     const TemplateSet* ts = templatesFor( grammarName );
@@ -614,6 +616,7 @@ inline PatternProgram compileFor( const TSLanguage* grammar, std::string_view gr
             PatternProgram candidate;
             candidate.grammar     = grammar;
             candidate.grammarName = std::string( grammarName );
+            candidate.label       = std::string( label );
             candidate.nodes.reserve( 64 );
             snapshotNode( candidate, node, src, marker, norm.metaNames, ellipsisTok, anonTok );
             const PatNode& rootNode = candidate.nodes[0];
@@ -644,7 +647,19 @@ inline PatternProgram compileFor( const TSLanguage* grammar, std::string_view gr
 struct GrammarRow
 {
     const TSLanguage* grammar = nullptr;
-    std::string_view  name;      // kLangTable querySub — "cpp", "python", …
+    std::string_view  name;      // kLangTable querySub — the TEMPLATE key: "cpp", "python", …
+    // V-3 (adversarial verification 2026-08-20). querySub is NOT unique per grammar OBJECT: `.cu`/`.cuh`
+    // ride tree_sitter_cuda under querySub "cpp", and `.tsx` rides tree_sitter_tsx under "typescript".
+    // The template key MUST stay shared (the cpp tags.scm is what compiles against the cuda grammar), but
+    // the DISCLOSURE name must not be, or `grammars="cpp"` claims the C++ grammar resolved when only the
+    // CUDA one did — while eligible_files=, which is keyed on the grammar OBJECT, correctly counts the
+    // .cpp file as unscanned. Two attributes on one element, contradicting each other, on a run where
+    // files went unscanned with no honest signal. label is unique per object, so every disclosed set is
+    // keyed the same way the scan itself is. Built in ingest.cpp::supportedPatternGrammars.
+    //
+    // OWNED, unlike `name`: a dialect label is SYNTHESISED ("cpp/cu"), so there is no constexpr storage for
+    // a view to point at, and a per-run vector of a dozen short strings is not a cost worth a lifetime bug.
+    std::string       label;
 };
 
 struct CompileOutcome
@@ -691,16 +706,16 @@ inline CompileOutcome compileAll( std::string_view raw, const std::vector<Gramma
     bool anyBareToken = false;
     for( const GrammarRow& row : rows )
     {
-        PatternProgram prog = compileFor( row.grammar, row.name, raw );
+        PatternProgram prog = compileFor( row.grammar, row.name, row.label, raw );
         if( prog.ok() )
         {
             out.set.programs.push_back( std::move( prog ) );
             continue;
         }
         anyBareToken = anyBareToken || ( prog.fault == Fault::BareToken );
-        if( std::find( out.set.unresolved.begin(), out.set.unresolved.end(), prog.grammarName ) == out.set.unresolved.end() )
+        if( std::find( out.set.unresolved.begin(), out.set.unresolved.end(), prog.label ) == out.set.unresolved.end() )
         {
-            out.set.unresolved.push_back( prog.grammarName );
+            out.set.unresolved.push_back( prog.label );
         }
     }
     if( out.set.programs.empty() )
@@ -713,11 +728,13 @@ inline CompileOutcome compileAll( std::string_view raw, const std::vector<Gramma
                                      "zero it did not measure" );
         return out;
     }
-    // A grammar that resolved must not also be listed as unresolved: two extensions can share a NAME
-    // (typescript/tsx, cpp/cuda) and only one of the two objects may have failed.
+    // Belt and braces: a grammar that resolved must not also be listed as unresolved. Keyed on `label`,
+    // which is unique per grammar OBJECT — the erase-by-NAME this replaced is exactly V-3's bug, because
+    // `typescript/tsx` and `cpp/cuda` share a NAME and only one of the two objects may have failed, so the
+    // failing object vanished from the disclosure while its files went unscanned.
     for( const PatternProgram& p : out.set.programs )
     {
-        out.set.unresolved.erase( std::remove( out.set.unresolved.begin(), out.set.unresolved.end(), p.grammarName ), out.set.unresolved.end() );
+        out.set.unresolved.erase( std::remove( out.set.unresolved.begin(), out.set.unresolved.end(), p.label ), out.set.unresolved.end() );
     }
     out.ok = true;
     return out;
@@ -743,7 +760,7 @@ inline std::vector<std::string> servedNames( const std::vector<GrammarRow>& rows
     std::vector<std::string> names;
     for( const GrammarRow& r : rows )
     {
-        appendUnique( names, std::string( r.name ) );
+        appendUnique( names, std::string( r.label ) );
     }
     return names;
 }
@@ -754,7 +771,7 @@ inline std::vector<std::string> resolvedNames( const PatternProgramSet& set )
     std::vector<std::string> names;
     for( const PatternProgram& p : set.programs )
     {
-        appendUnique( names, p.grammarName );
+        appendUnique( names, p.label );
     }
     return names;
 }
@@ -767,9 +784,9 @@ inline std::vector<std::string> resolvedShapes( const PatternProgramSet& set )
     std::vector<std::string> shapes, seen;
     for( const PatternProgram& p : set.programs )
     {
-        if( appendUnique( seen, p.grammarName ) )
+        if( appendUnique( seen, p.label ) )
         {
-            shapes.push_back( p.grammarName + ":" + p.rootKind );
+            shapes.push_back( p.label + ":" + p.rootKind );
         }
     }
     return shapes;
