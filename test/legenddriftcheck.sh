@@ -137,6 +137,63 @@ else
     fail=1
 fi
 
+# ── Arm C: synthetic known-positive for PATTERN 5 specifically (W3-S item 4, 2026-08-19) ──────────
+#
+# The wave-2 verifier found Arm A's live coverage was "green but nearly inert": 3 of 4 extraction
+# patterns require a literal "--flag" spelling, which can never appear inside a well-formed XML
+# comment ("--" is illegal there), so only pattern 4's prose form ("the X flag") ever fired against
+# real output — and only once across 114 legends. The fix widened run_verb_suite (15 -> ~50
+# invocations) AND added pattern 5: bareword "word=N" / "word=M" placeholder mentions, the shape
+# ripwire's own legends actually use to name a flag without the illegal "--" (e.g. "raise the default
+# cap with limit=N (offset=M pages)", copied near-verbatim into a dozen-plus legends per
+# src/pageview.h's own comment). Arm B above proves pattern 4 can still fire; this arm proves pattern
+# 5 can too — a DIFFERENT extraction path, so Arm B passing does not imply this one would.
+cat >"$TMPDIR/synthetic_legend_p5.txt" <<'LEGEND_P5_EOF'
+<!-- ripwire v1 t=fn|method p=path n=name k=rank c=call
+raise the default cap with detail=N (offset=M pages); on the root, detail="0" means no explicit
+detail was given and the verb's own default page size shaped the window.
+-->
+LEGEND_P5_EOF
+
+# A help table that has --offset (so pattern 5's OTHER token, --offset, is proven VALID in the same
+# run — the arm must not just detect a phantom, it must still correctly clear a real flag alongside
+# it) but is MISSING --detail — the phantom pattern 5 alone is responsible for catching, since
+# "detail=N" here is bareword prose with no "flag"/"lens"/"verb"/"option" nearby for pattern 4 to key
+# off of at all.
+cat >"$TMPDIR/synthetic_help_p5.txt" <<'HELP_P5_EOF'
+ripwire — parse, rank, stream
+
+usage: ripwire <dir> [flags]
+
+Common flags:
+  --help              show this help
+  --limit=N --offset=M   paginate a high-cardinality verb
+  --top-k=N           limit to top N results
+HELP_P5_EOF
+
+python3 "$LEGEND_CHECK" --legend-file="$TMPDIR/synthetic_legend_p5.txt" --help-file="$TMPDIR/synthetic_help_p5.txt" \
+    >"$TMPDIR/synthetic_p5_result.json" 2>"$TMPDIR/synthetic_p5_err.txt"
+rc_synthetic_p5=$?
+
+if [ $rc_synthetic_p5 -ne 0 ]; then
+    verdict_p5=$( python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('verdict', 'unknown'))" <"$TMPDIR/synthetic_p5_result.json" 2>/dev/null || echo "unknown" )
+    phantoms_p5=$( python3 -c "import json,sys; d=json.load(sys.stdin); print(','.join(d['findings']['phantom_flags']))" <"$TMPDIR/synthetic_p5_result.json" 2>/dev/null || echo "" )
+    valid_p5=$( python3 -c "import json,sys; d=json.load(sys.stdin); print(','.join(d['findings']['valid_references']))" <"$TMPDIR/synthetic_p5_result.json" 2>/dev/null || echo "" )
+
+    if [ "$verdict_p5" = "DIRTY" ] && [ "$phantoms_p5" = "--detail" ] && [ "$valid_p5" = "--offset" ]; then
+        ok "Arm C synthetic pattern-5 known-positive: --detail caught as phantom, --offset confirmed valid (bareword=N/M extraction fires independently of pattern 4)"
+    else
+        no "Arm C synthetic pattern-5: verdict=$verdict_p5 phantoms=[$phantoms_p5] valid=[$valid_p5] (expected DIRTY, phantoms=--detail, valid=--offset)"
+        cat "$TMPDIR/synthetic_p5_result.json" 2>/dev/null | head -20
+    fi
+else
+    no "Arm C synthetic pattern-5 known-positive: phantom NOT detected (pattern 5 failed to fire — MISSED catching power)"
+    echo "    Expected to find --detail as phantom via bareword \"detail=N\" (no nearby flag/lens/verb/option for pattern 4)."
+    echo "    The help table omits: --detail"
+    cat "$TMPDIR/synthetic_p5_result.json" 2>/dev/null | head -20
+    fail=1
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────────────────────────
 echo
 if [ "$fail" -eq 0 ]; then
