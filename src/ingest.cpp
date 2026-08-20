@@ -11935,6 +11935,32 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
 // Drive every BUILT-IN WALK group over one already-parsed file, each into its own bucket. Called from the
 // shared worker loop with the tree and newline index the query groups are about to use, which is the whole
 // point: a walk group exists so a non-query check can stop re-reading and re-parsing the corpus for itself.
+// R2: one file's worth of pattern matching, kept out of runWalkGroups' dispatch body for the same reason
+// ur_walkTree is — the dispatcher stays a two-line switch over walk kinds, and each walk's own logic (and
+// its own reasons to grow) lives next to itself.
+inline void pat_walkTree( const pattern::PatternProgramSet* set, TSNode root, std::uint32_t fileId, std::string_view bytes,
+                          const std::vector<std::uint32_t>& nlOffsets, const TSLanguage* grammar, std::vector<AstMatch>& hits )
+{
+    if( set == nullptr )
+    {
+        return;   // a Pattern group with no programs is a caller bug, but never a crash
+    }
+    const pattern::PatternProgram* prog = set->forGrammar( grammar );
+    if( prog == nullptr )
+    {
+        return;   // this file's grammar is one the pattern did not resolve for — unresolved_in= says so
+    }
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> spans;
+    pattern::findMatches( *prog, root, bytes, spans, pattern::kMaxHits );
+    for( const auto& [a, b] : spans )
+    {
+        if( a < b && b <= bytes.size() )
+        {
+            hits.push_back( makeAstMatch( fileId, bytes, nlOffsets, a, b, std::string() ) );
+        }
+    }
+}
+
 // `grammar` is the language THIS file was parsed with: the pattern walk needs it because one --pattern
 // string compiles to a different node shape per grammar, and the wrong program against the right tree
 // would silently match nothing. The unreachable-code walk ignores it (its rule is kind-name based).
@@ -11949,26 +11975,7 @@ inline void runWalkGroups( const std::vector<AstQueryGroup>& groups, TSNode root
         }
         else if( groups[groupIndex].walk == AstWalk::Pattern )
         {
-            const pattern::PatternProgramSet* set = groups[groupIndex].patternPrograms;
-            if( set == nullptr )
-            {
-                continue;   // a Pattern group with no programs is a caller bug, but never a crash
-            }
-            const pattern::PatternProgram* prog = set->forGrammar( grammar );
-            if( prog == nullptr )
-            {
-                continue;   // this file's grammar is one the pattern did not resolve for — unresolved_in= says so
-            }
-            std::vector<std::pair<std::uint32_t, std::uint32_t>> spans;
-            pattern::findMatches( *prog, root, bytes, spans, pattern::kMaxHits );
-            for( const auto& [a, b] : spans )
-            {
-                if( a >= b || b > bytes.size() )
-                {
-                    continue;
-                }
-                perGroupHits[groupIndex].push_back( makeAstMatch( fileId, bytes, nlOffsets, a, b, std::string() ) );
-            }
+            pat_walkTree( groups[groupIndex].patternPrograms, root, fileId, bytes, nlOffsets, grammar, perGroupHits[groupIndex] );
         }
     }
 }
