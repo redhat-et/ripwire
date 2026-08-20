@@ -74,7 +74,7 @@ only the files it surfaces.
 | recall what's already known | `ripwire <dir> --recall="<task>"` (docs/plans/memory, full bodies) |
 | who calls / what it calls | `--callers=SYM` · `--callees=SYM` |
 | the recorded uses of a name (read/write/import; a floor — see counts_floor=) | `--uses=SYM` |
-| a literal / regex / code-shape | `--grep=STR` · `--regex=PAT` · `--match='(<tree-sitter>)'` |
+| a literal / regex / code-shape | `--grep=STR` · `--regex=PAT` · `--pattern='foo($X, ...)'` (shape as CODE) · `--match='(<tree-sitter>)'` |
 | you HAVE a stack trace / sanitizer report / compiler error | `--from-trace=FILE` (`-`=stdin) — pipe the raw text in, don't hand-translate frames into a query |
 | a question the fixed verbs don't have | `--graph-query='and(callers(name("X"),2),kind(all,fn))'` |
 | ONE symbol in full | `--expand=SYM` (body + inline callee sigs) — not its whole file. Add `--compress` for ~20-35% off the body |
