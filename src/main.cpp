@@ -8630,6 +8630,11 @@ constexpr const char* kSkippedLegend =
                  " ERROR spans) and is a PARSER-STATE fact, never a syntax verdict — a valid file in a dialect this grammar predates reads"
                  " degraded too; why=minified-suspect means whitespace frequency ws_freq= is under 0.070 across the leading 4096 bytes"
                  " (files under 256 bytes are never flagged — too little text to judge). Nothing here is dropped by these two flags."
+                 " <lang n= files= symbols=/> = corpus composition BY LANGUAGE: one row per language this build extracted at"
+                 " least one symbol OR one file for, sorted files DESC then name ASC, absent languages simply not rowed. files= is a"
+                 " FLOOR (derived from symbol-bearing files only — a file with zero extracted symbols is not attributed to any"
+                 " language); symbols= is exact, every run. unindexed= (below) is its mirror: languages this build could not read at"
+                 " all; this is what it DID read, broken down."
                  " HEADER: indexed= is files= on the map; the ACCOUNTING INVARIANT is indexed= + oversize= + excluded= = the candidate"
                  " population the crawl ENUMERATED, at every ceiling and exclude setting. unsupported_ext= counts source/text-looking files"
                  " outside that population (binary/asset extensions are deliberately not counted — an unindexed .png is a picture, not a"
@@ -8776,6 +8781,86 @@ void writeHealthRows( rw::XmlWriter& w, std::vector<char>& esc, const rw::Ingest
     }
 }
 
+// W3-S item 3 (2026-08-19) — corpus composition BY LANGUAGE. §L1 answers "what did the crawl DROP" in
+// full (unindexed=, the <e>/<f>/<h> rows above); nothing answers "what IS this corpus, by language" —
+// unindexed= names languages the build could not read at all, but a reader still cannot tell a
+// 90%-Python repo from a 90%-C++ one from anything the tool prints. One count per rw::Lang, sorted
+// deterministically (never hash-map iteration order — the same discipline unindexedExts' own
+// lessUnindexedExt follows).
+//
+// files= is derived from SYMBOLS, not a second file-extension table: every symbol already carries the
+// exact Lang ingest assigned it (Symbol::lang, ingest.cpp's real per-file grammar decision — the single
+// source of truth), so re-deriving language from a hand-mirrored extension list (the way lintrules.h's
+// langOfPath admittedly does, "kept in sync by hand", for its OWN narrower dependency-analysis purpose)
+// would risk a SECOND, drifting classification for the same fact. Trade-off, stated once rather than
+// buried in a caveat comment: a file that produced zero symbols (empty, or a language whose grammar
+// found nothing extractable) is not attributed to any language row here. This under-counts files= by
+// exactly that population — never inflates it, and never silently double-counts — so files= is a FLOOR
+// on any given language's true file count, same convention as skipped_oversize=/unindexed= use
+// elsewhere in this file (never a fabricated total). symbols= has no such gap: it is the exact,
+// already-computed Symbol::lang tally, a total on every run.
+struct LangCount { rw::Lang lang; std::uint64_t files = 0, symbols = 0; };
+
+// files DESC, name ASC tiebreak — the SAME mixed-direction swapped-std::tie shape lessUnindexedExt
+// (model.h) uses, so a reader who has already learned that ordering reads this one for free.
+bool lessLangCount( const LangCount& a, const LangCount& b ) noexcept
+{
+    const std::string_view an = rw::langTag( a.lang ), bn = rw::langTag( b.lang );
+    return std::tie( b.files, an ) < std::tie( a.files, bn );
+}
+
+std::vector<LangCount> computeLangCounts( const rw::IngestResult& ing )
+{
+    using namespace rw;
+    // fileLangOf[f] = the Lang every symbol in file f agrees on (ingest parses one file under one
+    // grammar, Metal/CUDA's C++/CUDA-as-a-language routing included, so there is nothing to disambiguate
+    // — the last write among a file's own symbols is the same value every earlier one already wrote).
+    std::vector<Lang> fileLangOf( ing.files.size(), Lang::Unknown );
+    std::array<std::uint64_t, std::size_t( Lang::Yaml ) + 1> symbolTally {};
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.fileId < fileLangOf.size() )
+        {
+            fileLangOf[ s.fileId ] = s.lang;
+        }
+        if( std::size_t( s.lang ) < symbolTally.size() )
+        {
+            ++symbolTally[ std::size_t( s.lang ) ];
+        }
+    }
+    std::array<std::uint64_t, std::size_t( Lang::Yaml ) + 1> fileTally {};
+    for( Lang l : fileLangOf )
+    {
+        if( l != Lang::Unknown && std::size_t( l ) < fileTally.size() )
+        {
+            ++fileTally[ std::size_t( l ) ];
+        }
+    }
+    std::vector<LangCount> out;
+    for( std::size_t i = 0; i < fileTally.size(); ++i )
+    {
+        if( fileTally[i] == 0 && symbolTally[i] == 0 )
+        {
+            continue;   // absent = this language contributed nothing, never a printed zero row
+        }
+        out.push_back( { Lang( i ), fileTally[i], symbolTally[i] } );
+    }
+    std::sort( out.begin(), out.end(), lessLangCount );
+    return out;
+}
+
+void writeLangRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vector<LangCount>& rows )
+{
+    for( const LangCount& lc : rows )
+    {
+        char row[ 64 ];
+        w.write( "<lang n=\"" );  w.write( rw::escapeXml( rw::langTag( lc.lang ), esc ) );
+        std::snprintf( row, sizeof( row ), "\" files=\"%llu\" symbols=\"%llu\"/>",
+                       ( unsigned long long ) lc.files, ( unsigned long long ) lc.symbols );
+        w.write( row );
+    }
+}
+
 // §P0.5d / §L1 — --skipped: WHY the index does not contain a file, and which files it DOES contain but
 // cannot vouch for. The disclosure doctrine ("every truncation is disclosed") applied to the corpus itself.
 //
@@ -8848,6 +8933,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeDropRows( w, esc, cs.unsupported, "unsupported-ext", skRootPrefix );
         writeUnindexedExtRows( w, esc, cs.unindexedExts );
         writeHealthRows( w, esc, ing, health.findings, skRootPrefix );
+        writeLangRows( w, esc, computeLangCounts( ing ) );   // W3-S item 3: corpus composition by language
         w.write( "</skipped></ctx>" );
     }
     std::fputc( '\n', stdout );
