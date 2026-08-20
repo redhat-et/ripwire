@@ -286,6 +286,31 @@ else
     no "case c output is NOT deterministic"
 fi
 
+echo
+echo "=== 8. one-shot --for recipes budget with --token-budget, never --max-tokens ==="
+
+# --for does not read --max-tokens: it warns on stderr and emits the full, unbudgeted result.
+# --token-budget is the flag that actually shapes --for's output. The wrap recipes are the tool's
+# own advice, so they must not teach the inert pairing (found live 2026-08-20: wrap claude
+# recommended `--for="<task>" --max-tokens=2000`, which produced an unbudgeted map + a warning).
+for _agent in claude codex cursor windsurf gemini opencode aider; do
+    _out="$( "$BIN" wrap "$_agent" 2>/dev/null )"
+    if echo "$_out" | grep -- '--for=' | grep -q -- '--max-tokens'; then
+        no "wrap $_agent pairs --for with --max-tokens — inert advice, --for ignores that flag"
+    else
+        ok "wrap $_agent never pairs --for with --max-tokens"
+    fi
+done
+# the three recipes that ship a budgeted one-shot --for line must budget it with --token-budget=
+for _agent in claude opencode aider; do
+    _out="$( "$BIN" wrap "$_agent" 2>/dev/null )"
+    if echo "$_out" | grep -- '--for=' | grep -q -- '--token-budget='; then
+        ok "wrap $_agent one-shot --for recipe carries --token-budget="
+    else
+        no "wrap $_agent one-shot --for recipe lost its --token-budget= budget"
+    fi
+done
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo
 if [ "$fail" -eq 0 ]; then
