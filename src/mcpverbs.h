@@ -697,6 +697,29 @@ inline std::string grepAuxJson( const std::vector<GrepAuxHit>& hits, bool single
     return out;
 }
 
+// The ONE reader for the MCP `in` argument, shared by the live `grep` verb and the `batch` grep sub-query
+// (wave-3 verifier P6-1/P6-2/P3-4). Two things it fixes at once:
+//   · a CLOSED value set is now enforced on BOTH dialects. `in:"Any"`, `in:"all"`, `in:"comments"` used to
+//     read as the default and silently return the tiered answer — in the direction that HIDES rows, which
+//     is precisely why the CLI twin refuses. The "this verb has no refusal channel per-argument" rationale
+//     was false: mcprefusal.h already registers the field, and the batch surface refuses loudly.
+//   · `in` reaches the batch arm at all. It previously took the defaulted GrepIn::Code with no hatch.
+// Absent reads as the default, as an OPTIONAL field must; only a PRESENT unknown spelling refuses.
+inline std::string grepInModeFromArg( std::string_view typed, GrepIn& out )
+{
+    out = GrepIn::Code;
+    if( typed.empty() || typed == "code" )
+    {
+        return {};
+    }
+    if( typed == "any" )
+    {
+        out = GrepIn::Any;
+        return {};
+    }
+    return mcprefuse::badValueRefusal( "in", typed );
+}
+
 inline std::string grepHitsJson( const std::string& root, const std::string& pattern, McpPageArgs page = {}, GrepIn grepInMode = GrepIn::Code )
 {
     const McpIndex&            ix        = getIndex( root );
@@ -3320,6 +3343,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
     const std::string type    = strArg( "type" );
     const std::string handle  = strArg( "handle" );
     const std::string kind    = strArg( "kind" );
+    const std::string grepInTyped = strArg( "in" );   // P3-4: the grep sub-query's span-tier hatch
     const std::string from    = strArg( "from" );
     const std::string to      = strArg( "to" );
     const std::string file    = strArg( "file" );
@@ -3415,7 +3439,14 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( missingField( "grep" ) );
         }
-        r.payload = grepHitsJson( root, pattern, pageParse.page );   // N8: the batch arm pages grep too
+        // P3-4/P6-1: the span-tier hatch, through the SAME closed-value reader the live arm uses — so a
+        // typo refuses here as it does there, and the ack's "both callers updated" is finally true.
+        GrepIn batchGrepIn = GrepIn::Code;
+        if( const std::string inRefusal = grepInModeFromArg( grepInTyped, batchGrepIn ); !inRefusal.empty() )
+        {
+            return bad( inRefusal );
+        }
+        r.payload = grepHitsJson( root, pattern, pageParse.page, batchGrepIn );   // N8: the batch arm pages grep too
     }
     else if( r.verb == "find_symbol" || r.verb == "callees" )
     {
