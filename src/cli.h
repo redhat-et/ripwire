@@ -2827,6 +2827,15 @@ inline void validateSarifModifierGuards( Config& c ) noexcept
         std::fprintf( stderr, "ripwire: --sarif has no effect with --match — it serializes --lint/--lint-rules findings only\n" );
         c.ok = false;
     }
+    // R2: --pattern is --match's sibling in exactly the way that matters here — its own <pattern> element,
+    // no rule/severity shape, and an early return from runLint before any finding is assembled. The same
+    // silent no-op, so the same loud refusal; a pairing that looks honored and is not is the shape this
+    // arm exists to prevent, and adding the verb without adding the arm would have reintroduced it.
+    if( c.sarif && !c.pattern.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --sarif has no effect with --pattern — it serializes --lint/--lint-rules findings only\n" );
+        c.ok = false;
+    }
     // --with-profile's heat_* join has no SARIF field defined yet (the honesty rule: represent it or
     // refuse, never drop it silently) — refuse the pairing rather than silently omit the join.
     if( c.sarif && !c.withProfile.empty() )
