@@ -27,7 +27,7 @@ command -v python3 >/dev/null 2>&1 || { echo "agentloopclaudecheck: python3 requ
 [ -f "$ROOT/bench/agentloop/run_agentloop.py" ] || { echo "agentloopclaudecheck: harness missing"; exit 2; }
 
 python3 - "$ROOT" "$TMP" >"$TMP/out.txt" 2>&1 <<'PY'
-import inspect, pathlib, sys
+import hashlib, inspect, json, pathlib, sys
 
 root, tmp = sys.argv[1], sys.argv[2]
 sys.path.insert( 0, str( pathlib.Path( root ) / "bench" / "agentloop" ) )
@@ -221,6 +221,115 @@ if R.arm_suffix( "baseline", "/s/r" ) in R.build_prompt( { "problem_statement": 
     ok( "the SWE-bench prompt and the question prompt share one arm contract" )
 else:
     no( "the two prompt shapes carry different arm contracts and will drift" )
+
+# ── 9. B1 — a stale/hand-assembled lock fails CLOSED on the split CONTRACT, not just the hash ───
+# content_sha256 alone proves the file wasn't hand-edited; it does not prove the split rule still
+# yields that set. pydata/xarray is a known-train repo under the CURRENT frozen_partition() rule
+# (the exact contamination the committed tasks.lock as of 2026-08-20 carries); psf/requests is
+# known-heldout. Both derived from R.select_tasks.frozen_partition(), never hand-copied, so this
+# check cannot silently disagree with the rule it is testing.
+def _lock_from( instances ):
+    canon = [ dict( instance_id=i["instance_id"], repo=i["repo"], base_commit=i["base_commit"] )
+              for i in sorted( instances, key=lambda x: x["instance_id"] ) ]
+    blob = json.dumps( canon, sort_keys=True, separators=( ",", ":" ) ).encode( "utf-8" )
+    return dict( schema="ripwire-agentloop-tasks-lock-v1",
+                content_sha256=hashlib.sha256( blob ).hexdigest(), instances=instances )
+
+assert R.select_tasks.frozen_partition( "pydata/xarray" ) == "train", "fixture assumption broke: re-check the salt"
+assert R.select_tasks.frozen_partition( "psf/requests" ) == "heldout", "fixture assumption broke: re-check the salt"
+
+bad_instances = [ dict( instance_id="pydata__xarray-1", repo="pydata/xarray", base_commit="deadbeef" ),
+                  dict( instance_id="psf__requests-1", repo="psf/requests", base_commit="deadbeef" ) ]
+bad_path = pathlib.Path( tmp ) / "bad.lock"
+bad_path.write_text( json.dumps( _lock_from( bad_instances ) ) )
+try:
+    R.load_tasks_lock( str( bad_path ) )
+    no( "load_tasks_lock accepted a lock containing pydata/xarray, which re-derives to LocBench TRAIN" )
+except SystemExit as e:
+    if "pydata/xarray" in str( e ) and "TRAIN" in str( e ):
+        ok( "load_tasks_lock refuses (fail-closed) a lock whose repo re-derives to TRAIN, naming it" )
+    else:
+        no( "load_tasks_lock raised SystemExit but without naming the contaminated repo: %r" % ( str( e ), ) )
+
+good_instances = [ i for i in bad_instances if i["repo"] != "pydata/xarray" ]
+good_path = pathlib.Path( tmp ) / "good.lock"
+good_path.write_text( json.dumps( _lock_from( good_instances ) ) )
+try:
+    R.load_tasks_lock( str( good_path ) )
+    ok( "load_tasks_lock accepts a lock whose every repo re-derives to heldout" )
+except SystemExit as e:
+    no( "load_tasks_lock rejected an honest, all-heldout lock: %r" % ( str( e ), ) )
+
+# ── 10. B2 — the scorer's dataset name is a parameter with a swebench>=5-compatible default ─────
+if R.SWEBENCH_SCORE_DATASET_DEFAULT == "SWE-bench/SWE-bench_Lite":
+    ok( "SWEBENCH_SCORE_DATASET_DEFAULT is the swebench>=5-compatible dataset name" )
+else:
+    no( "SWEBENCH_SCORE_DATASET_DEFAULT is %r, expected SWE-bench/SWE-bench_Lite"
+        % R.SWEBENCH_SCORE_DATASET_DEFAULT )
+sig = inspect.signature( R.run_swebench_harness )
+if "dataset_name" in sig.parameters and sig.parameters["dataset_name"].default == "SWE-bench/SWE-bench_Lite":
+    ok( "run_swebench_harness's dataset_name is a parameter, not a hardcoded princeton-nlp literal" )
+else:
+    no( "run_swebench_harness has no configurable dataset_name parameter: %r" % ( sig, ) )
+if "swebench_dataset" in inspect.signature( R.evaluate_patch ).parameters:
+    ok( "evaluate_patch threads a configurable swebench_dataset through to the scorer" )
+else:
+    no( "evaluate_patch does not expose a configurable dataset name" )
+
+w_arm64 = R.swebench_arch_warning( machine="arm64" )
+w_x86   = R.swebench_arch_warning( machine="x86_64" )
+if w_arm64 and "--modal" in w_arm64:
+    ok( "swebench_arch_warning names --modal as the alternative backend on a non-x86_64 host" )
+else:
+    no( "swebench_arch_warning did not fire or did not name --modal on arm64: %r" % ( w_arm64, ) )
+if w_x86 is None:
+    ok( "swebench_arch_warning is silent on an x86_64 host" )
+else:
+    no( "swebench_arch_warning fired on x86_64: %r" % ( w_x86, ) )
+
+# ── 11. B3 — the ripwire arm's CLI invocation uses --token-budget, never --max-tokens ────────────
+# --max-tokens is not read by --for (verified against the pinned binary — see the live flag-probe
+# below, run outside this heredoc); every ripwire-arm run before this fix received an unbudgeted
+# bundle. --token-budget is the flag --for actually reads and reports fit against.
+suf = R.arm_suffix( "ripwire_cli", "/shim/ripwire" )
+if "--token-budget=4000" in suf:
+    ok( "ripwire arm's CLI invocation uses --token-budget=4000 (the flag --for actually reads)" )
+else:
+    no( "ripwire arm's CLI invocation is missing --token-budget=4000: %r" % ( suf, ) )
+if "--max-tokens" in suf:
+    no( "ripwire arm's CLI invocation still names --max-tokens, which --for silently ignores" )
+else:
+    ok( "ripwire arm's CLI invocation no longer names --max-tokens" )
+
+# ── 13. arm-isolation fix (item 4) — the contamination gate closes the shim's detection loop ────
+# The isolated environments (section 2 above) keep the baseline arm from being PRIMED to use
+# ripwire; they deliberately still put the logging shim on baseline's PATH too, so a DISOBEYED
+# instruction is evidence, not a silent success. This is the other half: converting that evidence
+# into a status the pairing logic (analyze.py's pair_by_task_seed, status=="ok" required on BOTH
+# arms) actually excludes.
+clean = R.baseline_contamination_note( "baseline", dict( ripwire_calls=0, ripwire_commands=[] ) )
+if clean is None:
+    ok( "baseline_contamination_note is None for a clean baseline run" )
+else:
+    no( "baseline_contamination_note fired on a clean baseline run: %r" % ( clean, ) )
+dirty = R.baseline_contamination_note(
+    "baseline", dict( ripwire_calls=2, ripwire_commands=[ "ripwire . --for=x" ] ) )
+if dirty and "2" in dirty:
+    ok( "baseline_contamination_note fires with evidence when the baseline arm invoked ripwire" )
+else:
+    no( "baseline_contamination_note did not fire on a contaminated baseline run: %r" % ( dirty, ) )
+treatment = R.baseline_contamination_note( "ripwire_cli", dict( ripwire_calls=5, ripwire_commands=[ "x" ] ) )
+if treatment is None:
+    ok( "baseline_contamination_note never fires for a RIPWIRE_ARMS run (that arm is working as intended)" )
+else:
+    no( "baseline_contamination_note incorrectly fired for the treatment arm: %r" % ( treatment, ) )
+rec = R.make_record( dict( instance_id="i", repo="r", base_commit="c" ), "baseline", 1, "claude-code-p", "m",
+                     status="contaminated", ripwire_calls=1, ripwire_commands=[ "x" ],
+                     error="CONTAMINATED: x" )
+if rec["status"] == "contaminated" and rec["error"]:
+    ok( "make_record accepts status=\"contaminated\" (record schema was extended, not narrowed)" )
+else:
+    no( "make_record mishandled a contaminated record: %r" % ( rec, ) )
 PY
 
 while IFS= read -r line; do
@@ -233,6 +342,31 @@ while IFS= read -r line; do
 done < "$TMP/out.txt"
 
 grep -q 'Traceback' "$TMP/out.txt" && no "python contract checks raised"
+
+# ── 12. B3 live flag-probe — the exact flags this file's prompts/wrap invocations use, shot at a
+# REAL ripwire binary, not just asserted in strings. Optional: a missing binary SKIPs rather than
+# FAILs, so this stays meaningful on a bench-only checkout with no C++ build and green once one
+# exists (this repo's own build, or RIPWIRE_BIN naming a pinned worktree binary explicitly).
+PROBE_BIN="${RIPWIRE_BIN:-}"
+if [ -z "$PROBE_BIN" ] && [ -x "$ROOT/build/ripwire" ]; then
+    PROBE_BIN="$ROOT/build/ripwire"
+fi
+if [ -n "$PROBE_BIN" ] && [ -x "$PROBE_BIN" ]; then
+    PROBE_DIR="$TMP/probecorpus"; mkdir -p "$PROBE_DIR"
+    printf 'int f(){return 1;}\n' > "$PROBE_DIR/a.c"
+    if "$PROBE_BIN" "$PROBE_DIR" --for="probe query" --token-budget=4000 >/dev/null 2>"$TMP/probe1.err"; then
+        ok "pinned binary ($PROBE_BIN) accepts --for=... --token-budget=4000 (exit 0)"
+    else
+        no "pinned binary rejected --for=... --token-budget=4000: $( cat "$TMP/probe1.err" )"
+    fi
+    if "$PROBE_BIN" wrap claude --force >/dev/null 2>"$TMP/probe2.err"; then
+        ok "pinned binary accepts wrap claude --force (exit 0)"
+    else
+        no "pinned binary rejected wrap claude --force: $( cat "$TMP/probe2.err" )"
+    fi
+else
+    skip "no ripwire binary resolvable (build $ROOT/build/ripwire, or set RIPWIRE_BIN=<path>) — B3 live flag-probe not run"
+fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

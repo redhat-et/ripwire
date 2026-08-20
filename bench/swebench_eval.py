@@ -35,8 +35,13 @@ def checkout(repo, base_commit):
 
 def ripwire_context(repo_path, problem, budget=2000):
     # the ripwire arm's extra context: a ranked, task-lensed signatures inventory for the bug report.
+    # B3 fix (2026-08-20 outcome-harness-fixes lane): --max-tokens is not read by --for at all (it
+    # shapes the default map / --recall / --connect / --pr-context / --from-trace / --for --detail=N,
+    # and --for warns and emits its full unbudgeted result on stderr, which this subprocess call never
+    # sees) — every call here was silently unbudgeted. --token-budget is the flag --for actually reads;
+    # verified against the pinned binary: --for=... --token-budget=2000 -> header est_tokens="1638".
     q = " ".join(problem.split())[:300]
-    r = sh([CTX, str(repo_path), "--for", q, "--max-tokens", str(budget)])
+    r = sh([CTX, str(repo_path), "--for", q, "--token-budget", str(budget)])
     return r.stdout if r.returncode == 0 else ""
 
 def ask(system, user):
