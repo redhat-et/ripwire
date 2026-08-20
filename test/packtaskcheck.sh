@@ -175,15 +175,21 @@ D2="$( runw --pack-task="parse budget planner decoy" )"
 D3="$( runw --pack-task="parse budget planner decoy" )"
 { [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; } && ok "bundle is deterministic (byte-identical ×3)" || no "bundle is non-deterministic"
 
-# ── 3) TINY budget → ranking-only WITH the truncation note ────────────────────────────────────────────────
+# ── 3) TINY budget → ranking-only, <bodies> present with shown="0" (R9 fix, W3-S 2026-08-19) ───────────────
+# Before the fix, a budget too tight for the bodies section left bodiesStr empty and the WHOLE <bodies>
+# element absent — "a zero means none found, never none exists" (CONTRIBUTING #3) says that is a lie by
+# omission when real candidates existed (total=6 here). packTaskListSection's <callers>/<tests> siblings
+# still degrade to fully absent (that is THEIR own, separately-scoped defect — not this item), so this arm
+# only tightens the <bodies> assertion, from "absent" to "present with shown=0/capped=1/the true total".
 TINY="$TMP/tiny.xml"
 "$BIN" "$ROOT/src" --no-cache --pack-task="serialize signatures budget" --token-budget=50 > "$TINY" 2>/dev/null
 if grep -qF '<sigs' "$TINY" \
-   && ! grep -qF '<bodies>' "$TINY" && ! grep -qF '<callers ' "$TINY" && ! grep -qF '<tests ' "$TINY" \
-   && grep -qE 'bodies: omitted \(budget\)' "$TINY"; then
-    ok "tiny budget degrades to ranking-only, header notes the dropped sections"
+   && grep -qE '<bodies shown="0" total="[1-9][0-9]*" capped="1"></bodies>' "$TINY" \
+   && ! grep -qF '<callers ' "$TINY" && ! grep -qF '<tests ' "$TINY" \
+   && grep -qE 'bodies: kept 0 of [1-9]' "$TINY"; then
+    ok "tiny budget: <sigs> survives, <bodies shown=\"0\"> is PRESENT (not absent), other sections omitted"
 else
-    no "tiny-budget degradation wrong (expected only <sigs> + an 'omitted (budget)' note)"
+    no "tiny-budget degradation wrong (expected <sigs> + <bodies shown=\"0\" total=\"N\" capped=\"1\">)"
     head -c 400 "$TINY"; echo
 fi
 xmllint --noout "$TINY" 2>/dev/null && ok "tiny-budget bundle is xmllint-clean" || no "tiny-budget bundle is not well-formed"

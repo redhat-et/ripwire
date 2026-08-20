@@ -1222,6 +1222,29 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // dropped that packBodies itself never saw — see restatePackTaskBodiesWrapper's own comment.
         bodiesStr  = restatePackTaskBodiesWrapper( ing, bodiesStr, bodyIds, emittedBodies, ex );
     }
+    else
+    {
+        // R9 fix (W3-S, 2026-08-19): bodiesStr used to stay empty here — no candidates at all, or a
+        // budget too tight even for the section wrapper — so the WHOLE <bodies> element was absent
+        // from the bundle; only <ctx bundle="auto" bodies="0" ...> (--for's twin of this branch) spoke
+        // to it, and pack-task's <ctx> carries no such attribute at all. "A zero means none found,
+        // never none exists" (CONTRIBUTING #3) applies to elements, not only counts.
+        //
+        // Deliberately NOT a packBodies() call: an earlier version of this fix routed through
+        // packBodies with truncateOversizedFirst=false so it could reuse the per-item "body omitted
+        // (over budget)" comment packBodies already writes — but that comment is UNBUDGETED (it does
+        // not check its own bytes against anything), so up to kPackTaskBodyCandidates (6) of them
+        // could add several hundred bytes nothing in monotoneRoll's carry-forward accounted for,
+        // which is exactly how packtaskcheck.sh's own ceiling arm caught it (--token-budget=2000 came
+        // back 5692 B against a 5428 B allowance). The bare wrapper tag is a FIXED, small cost — the
+        // same shape restatePackTaskBodiesWrapper hand-formats a few lines below for the same reason
+        // (it cannot call packBodies again either) — so it is safe to emit unconditionally here.
+        char tag[ 96 ];
+        std::snprintf( tag, sizeof( tag ), "<bodies shown=\"0\" total=\"%zu\" capped=\"%d\"></bodies>",
+                       bodyIds.size(), bodyIds.empty() ? 0 : 1 );
+        bodiesStr = tag;
+        // bodiesKept stays 0 (its declared default) — matches shown="0" exactly.
+    }
     // §W2-K: bodyIds (the candidate SET) never depends on budgetTokens either, so the same monotoneRoll
     // treatment applies at this handoff too.
     const MonotoneRoll bodiesRoll = monotoneRoll( bodiesKept < bodiesTotal, bodiesBudget, bodiesStr.size() );
