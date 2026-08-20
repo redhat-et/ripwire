@@ -84,11 +84,21 @@ def extract_legend_from_xml(xml_text):
 def extract_flag_tokens_from_legend(legend_text):
     """Extract flag-like tokens from legend text.
 
-    Four patterns:
+    Five patterns:
     1. Explicit flag references like "--for" or "--grep"
     2. Flag=value patterns (e.g., "rank_by=churn")
     3. Quoted flag references ("--flag" or '--flag')
     4. Prose like "the signatures-only flag" or "the pack-task lens"
+    5. Bareword "word=N" / "word=M" placeholder mentions (W3-S item 4, 2026-08-19) -- see the long
+       comment above PLACEHOLDER_EXCLUDE below for why patterns 1-3 are structurally UNREACHABLE
+       against real ripwire output and why this pattern is the one that actually widens live coverage.
+
+    V1 (wave-2 verifier, 2026-08-19): patterns 1-3 all require a literal "--flag" spelling, and "--"
+    is illegal inside a well-formed XML comment (a comment must not contain two consecutive hyphens),
+    so none of them can EVER match real ripwire legend text -- only pattern 4's prose form can, and an
+    independent sweep across the whole tool found only 3 such prose mentions reachable at all
+    ("the signatures-only flag", "the quality-delta ... verb", "the max-file-size flag"). The gate's
+    live arm was "green but nearly inert": true, but observing almost nothing.
     """
     tokens = set()
 
@@ -116,6 +126,13 @@ def extract_flag_tokens_from_legend(legend_text):
         "--max-depth",   # "MAX-depth" is prose referring to a concept, not a flag
         "--dual-compile", # "dual-compile CPU/GPU contract" is prose, not a flag
         "--canonical",   # prose attribute, not a flag
+        # W3-S item 4 (2026-08-19): surfaced by widening run_verb_suite past its original 15 verbs —
+        # both are pattern 4 false positives that existed in the code all along and were simply never
+        # exercised before (neither --readability nor --context-ratio was in the old suite).
+        "--closed-form",       # --readability's legend: "the Posnett/Hindle/Devanbu (MSR 2011)
+                                # closed-form lens" -- a closed-form MATH SOLUTION, not a flag
+        "--local-reasoning",   # --context-ratio's legend: "the LOCAL-REASONING lens" -- the
+                                # code-quality PROPERTY the verb measures, not a flag
     }
 
     for match in re.finditer(
@@ -123,12 +140,41 @@ def extract_flag_tokens_from_legend(legend_text):
         legend_text,
         re.IGNORECASE
     ):
-        word = match.group(1)
+        word = match.group(1).lower()   # re.IGNORECASE matched either case; --help flags are always
+                                         # lowercase (pattern 1's own `[a-z]`), so normalize before the
+                                         # allowlist/valid_flags comparison -- "LOCAL-REASONING lens"
+                                         # must hit the SAME allowlist/valid entry "local-reasoning" does.
         # Only include if it looks like a flag name (has hyphens or appears in help references)
         if '-' in word:
             candidate = f"--{word}"
             if candidate not in allowlist:
                 tokens.add(candidate)
+
+    # Pattern 5 (W3-S item 4, 2026-08-19): bareword "word=N" / "word=M" placeholder mentions.
+    # ripwire's own --help spells its paginating/budget flags exactly this way ("--limit=N --offset=M",
+    # "--top-k=N", "--max-tokens=N", "--detail=N", ...), and because a literal "--" cannot appear inside
+    # an XML comment, a legend that wants to name one of those flags can ONLY drop the leading "--" and
+    # keep the placeholder: "raise the default cap with limit=N (offset=M pages)" (this exact clause is
+    # hand-copied into a dozen-plus legends across the tool, per src/pageview.h's own comment). Matching
+    # this shape is what actually widens live coverage -- an 8-repo verb sweep found detail=N, limit=N,
+    # offset=M, max-tokens=N, token-budget=N, top-k=N, partition=N and plan-lanes=N all reachable this
+    # way, all real flags, none reachable by patterns 1-4.
+    #
+    # PLACEHOLDER_EXCLUDE: the SAME sweep also found bareword "word=N" mentions that are NOT flag
+    # references at all -- they are OUTPUT ATTRIBUTES that happen to share the same "=N" placeholder
+    # convention in their own defining prose (e.g. the map legend's "overloads=N-same-name-defs...",
+    # or a row's "bodies=N"/"files=N"/"hits=N"/"toks=N" disclosure). None of these has a same-named CLI
+    # flag, so admitting them would manufacture a false phantom on ordinary, correct legend text -- the
+    # gate crying wolf, which is worse than the narrow coverage this pattern replaces. Excluded by NAME,
+    # the same allowlist idiom pattern 4 already uses above; if a future legend introduces a new
+    # "=N"-shaped output attribute whose bareword happens to collide with no real flag, add it here
+    # (a live-arm FALSE positive is the failure mode this list exists to prevent, and the fix is always
+    # "add the name", never "narrow the pattern back to uselessness").
+    placeholder_exclude = {"bodies", "overloads", "files", "hits", "toks"}
+    for match in re.finditer(r'\b([a-z][a-z0-9\-]*)=[NM]\b', legend_text):
+        word = match.group(1)
+        if word not in placeholder_exclude:
+            tokens.add(f"--{word}")
 
     return sorted(list(tokens))
 
@@ -166,6 +212,14 @@ def run_verb_suite(binary_path, corpus_path):
     """Run a comprehensive suite of verbs to exercise legend output.
 
     Covers all major verbs that emit legends based on serialize.h analysis.
+
+    W3-S item 4 (2026-08-19): widened from 15 to ~50 verb invocations. Measured effect (this repo as
+    corpus, real binary): legends_found rose from 114 to several hundred, and — combined with pattern 5
+    above — flag_tokens_extracted rose from 1 to 8+ (detail/limit/offset/max-tokens/token-budget/top-k/
+    partition/plan-lanes all independently reachable now, not just "the signatures-only flag"). Every
+    added invocation was verified individually (real corpus, this repo) to exit 0 within a few seconds
+    before being added here; run_ripwire_verb's existing 60s per-call timeout is the safety net if a
+    future corpus makes one of these slow, same as before this change.
     """
     verbs_to_test = [
         [],                                   # default map
@@ -183,6 +237,41 @@ def run_verb_suite(binary_path, corpus_path):
         ["--rank-by=hub"],                   # hub ranking
         ["--rank-by=rrf"],                   # reciprocal rank fusion
         ["--stable"],                        # stable path ordering
+        ["--lint"],                          # --lint (rule catalog + findings legend)
+        ["--communities"],                   # --communities (module clustering)
+        ["--clones"],                        # --clones (near-duplicate detection)
+        ["--cochange"],                      # --cochange (git co-change pairs)
+        ["--owners"],                        # --owners (git blame rollup)
+        ["--tree"],                          # --tree (path hierarchy)
+        ["--deps"],                          # --deps (include/import graph)
+        ["--callers=main"],                  # --callers (1-hop call hierarchy)
+        ["--callees=main"],                  # --callees
+        ["--whereis=main"],                  # --whereis (cross-ref search)
+        ["--doc-drift"],                     # --doc-drift
+        ["--skipped"],                       # --skipped (crawl-composition disclosure)
+        ["--impact=main"],                   # --impact (transitive blast radius)
+        ["--uses=main"],                     # --uses (use-site index)
+        ["--around=main"],                   # --around (ego-graph)
+        ["--mentions=main"],                 # --mentions (doc cross-references)
+        ["--flags"],                         # --flags (dark-flag surface)
+        ["--edit-check=main"],               # --edit-check (contract-change check)
+        ["--affected=main.cpp"],             # --affected (test-mining)
+        ["--doctor"],                        # --doctor (self-diagnosis)
+        ["--quality-delta"],                 # --quality-delta
+        ["--quality-panel"],                 # --quality-panel
+        ["--graph-query=kind(all,fn)"],      # --graph-query (closed expression language)
+        ["--external-surface"],              # --external-surface
+        ["--nonlocal-state"],                # --nonlocal-state
+        ["--field-affinity"],                # --field-affinity
+        ["--dmm"],                           # --dmm (design/metric mismatch)
+        ["--comment-coherence"],             # --comment-coherence
+        ["--naming-consistency"],            # --naming-consistency
+        ["--readability"],                   # --readability
+        ["--context-ratio"],                 # --context-ratio
+        ["--ensemble"],                      # --ensemble
+        ["--outline=main.cpp"],              # --outline (whole-file summary)
+        ["--test-gate"],                     # --test-gate (tests-to-run + untested blast radius)
+        ["--situ"],                          # --situ (mid-task situational report)
     ]
 
     all_legends = []
