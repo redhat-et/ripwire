@@ -762,7 +762,14 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 13;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 66;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 67;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 67 = 2026-08-20 RefRole::Type use-sites: usesVisitNode's accept
+                                                          // set widens from bare `identifier` to `type_identifier` too, so a
+                                                          // bare TYPE mention becomes a recorded use-site. The extracted SET
+                                                          // of references grows on any C/C++/ObjC tree; the role stays OUT of
+                                                          // the CSR (buildGraph admits Call|Macro only) and the pass is
+                                                          // RICH-family only, so the default map is unchanged. A v66 rich
+                                                          // blob holds no type rows and must be rejected, not served.
                                                           // 65 = 2026-08-15 C++ nested out-of-line defs: queries/cpp/tags.scm
                                                           // gains a second out-of-line definition pattern, so a C++ def
                                                           // written with two or more qualifier segments
