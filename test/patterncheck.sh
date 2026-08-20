@@ -151,8 +151,17 @@ for badpat in '}{' 'if if if )( }' '@@@@'; do
     fi
 done
 # an empty value is the table's own EmptyValue::Refuse contract
+# The `unknown flag` guard is the same one the refusal loop above uses, and for the same reason: without
+# it a binary that has no --pattern flag at all satisfies this arm (exit 1 + non-empty stderr) and passes
+# for the wrong reason. Measured against the ba3a716 reference binary, 2026-08-20 (V-4).
 "$BIN" "$FIX" --pattern= >/dev/null 2>"$TMP/empty.err"; rcz=$?
-[ "$rcz" -ne 0 ] && [ -s "$TMP/empty.err" ] && ok "--pattern= (empty) refuses" || no "--pattern= (empty) did not refuse (exit $rcz)"
+if grep -q 'unknown flag' "$TMP/empty.err"; then
+    no "--pattern= (empty): the binary has no --pattern flag — this arm cannot observe the refusal contract"
+elif [ "$rcz" -ne 0 ] && [ -s "$TMP/empty.err" ]; then
+    ok "--pattern= (empty) refuses"
+else
+    no "--pattern= (empty) did not refuse (exit $rcz)"
+fi
 
 # ── 4b. the SOFT tier: a zero that a partly-unresolved pattern could explain must say so ──────────────
 # ast-grep's PatternHasError (recon §4): fires ONLY when hits=0 AND the pattern failed to resolve
