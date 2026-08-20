@@ -1364,6 +1364,82 @@ text, and every recorded capture in `docs/COMMANDS.md` (arm G is byte-parity). #
 branches from — kept in a separate worktree. Every gate below is recorded FAILING against it before the
 feature code exists.
 
+#### RESULT — #1 ACCEPT, #2 REJECT on its own registered criterion (2026-08-20)
+
+**Red-first, recorded.** Against the `ba3a716` binary, `test/typerefcheck.sh` failed 5 arms / passed 5
+and `test/nsfiltercheck.sh` failed 1 / passed 7 — each failing on exactly the arms the feature code is
+supposed to turn green, and on no others. Both are `ALL PASS` on the lane binary.
+
+**#1a MET.** `--uses` counts on this tree, pre-fix binary → lane binary, same working tree:
+
+| symbol | before | after | | symbol | before | after |
+| --- | --- | --- | --- | --- | --- | --- |
+| `IngestResult` | 0 | **416** | | `ScipOverlay` | 0 | **7** |
+| `Symbol` | 2 | **308** | | `AffResult` | 0 | **5** |
+| `RawRef` | 0 | **37** | | `VarSpan` | 1 | **4** |
+| `ComposeEdge` | 0 | **10** | | `UseCtx` | 0 | **3** |
+| `ShadowEvidence` | 0 | **2** | | `Narrower` | 0 | **1** |
+
+On the fixture, `--uses=Widget` returns 5 `role="type"` rows at the four pinned mention lines.
+
+`Narrower` reaching 1 rather than its 14 textual mentions is the disclosed limit doing its job, not a
+miss: the other 13 are the SCOPE segment of `Narrower::appendUint`, and a qualified name's segment has
+never been a use-site here — the same rule that already excludes a qualified VALUE read. The legend now
+states that limit rather than leaving it to be discovered.
+
+**#1b MET, in the strongest available form.** Not "`edges=`/`ambiguous=` are unchanged" but the whole
+default map is **byte-identical** between the pre-fix binary and the lane binary on the same tree
+(`files=1300 symbols=11264 edges=13761 ambiguous=5468 unresolved=3160 precise=3` either way). Two
+independent reasons, both load-bearing: `buildGraph` admits only `Call` and `Macro`, and the value-uses
+pass is RICH-family only, so the lean blob that backs the default map holds no type row at all.
+
+**#1c MET.** The local variable named `Widget` yields no type row, and the definition site is not a
+use-site.
+
+**#2a NOT MET ⇒ REJECT, and the criterion is unmeetable at the registered site.** `ambiguous=` is
+unchanged (5468 → 5468). This is not a weak effect, it is a proof: the call-edge resolve loop admits
+only `role=Call` — un-narrowed by the hard constraint — and `role=Macro`, whose name is uniquely a macro
+by construction (`retagMacroCallReferences` assigns the role only when `scanMacroNames` reports flags==1
+over exactly the language set `langCompatible` bridges, so every candidate surviving the language gate
+is already `SymKind::Macro`). A namespace filter there can therefore never remove a candidate. The
+registered failure criterion says this reverts the item, and it does: `namespaceCompatible` stays as the
+single statement of the rule and as the executable form of the Call-un-narrowed constraint, but it
+buys **no measured ambiguity reduction** and is not published as one.
+
+Three claims in the recon report that this re-derivation corrected, recorded so the next round does not
+re-pay for them:
+
+* *"Every `Extends` reference today sprays across every same-named definition regardless of kind."*
+  False — the implementors builder has been kind-filtered all along (`isClassLike`), and `Extends`
+  references never reach the call-edge loop at all.
+* *"Expected effect on `amb=`: real and unconditional."* False, per the proof above.
+* *"`--uses`, `--impact`, `--affected`, `--situ`, `--pr-context`, `--test-gate` all gain the type-only
+  dependents."* Only the RICH-family verbs can see the new references, and `--impact` / `--affected` /
+  `--situ` / `--pr-context` are LEAN and CSR-driven. What genuinely gains is `--uses` and the MCP
+  server's `uses` / `find_referencing_symbols` (the MCP index ingests RICH).
+
+**#2b MET.** No known-good edge lost: 434/437 gates pass, `Handler( 3 )` keeps both its `role="call"`
+site and its call edge, and the byte-identical default map is a stronger statement than the fixture set.
+
+**#2c MET, trivially** — byte-identical map ⇒ unchanged Call-role edge count.
+
+**Cost.** The RICH per-file cache blob grows 15.48 MB → 15.86 MB (+2.5%) on this tree; the LEAN blob is
+unchanged. Type mentions are dense, so this is the volume the recon report flagged, measured: it is
+real and it is small.
+
+**Deliberately out of scope, and disclosed rather than taken silently.** `contextratio` skips
+`role=type`: a member declaration already contributes a site through its HAS-A compose reference over
+the same bytes, and this lens feeds thresholds calibrated in §9 over the pre-`Type` reference stream.
+Admitting type mentions there is a real improvement AND a real re-calibration, so it needs its own
+registered round rather than a free ride on a use-site lane.
+
+**Battery at `bf67225`.** `gates=437 pass=434 skip=2 fail=1`; the one failure is
+`ripwirepubliccheck.sh` arm 3, verified RED at the clean integration baseline `ba3a716` in a detached
+worktree — pre-existing, on three wave-3 lines this lane never touched. ASan+LSan clean on the default
+map, `--uses`, `--metrics` and both fixtures; determinism byte-identical ×3 cold, warm==cold, and ×3 on
+the RICH `--uses` path; `xmllint` clean; golden unchanged; `--quality-delta` exit 0 with
+`regressions="0" gating="0"` (the 16 stale acks are identical at the baseline).
+
 ---
 
 ## 5. Token and output economy
