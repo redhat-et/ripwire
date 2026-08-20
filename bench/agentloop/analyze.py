@@ -25,7 +25,7 @@
 import argparse, json, math, pathlib, random, statistics, sys
 
 sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
-import select_tasks   # reuse frozen_partition() — see load_results()'s B1 re-derivation check below
+import select_tasks   # train_contaminated_repos(): the ONE re-derivation of the split contract
 
 SCHEMA = "ripwire-agentloop-results-v3"   # v3: three arms, resolved_model + harness_version fields
 ARM_BASELINE, ARM_RIPWIRE = "baseline", "ripwire_cli"
@@ -36,21 +36,24 @@ def load_results( path ):
     data = json.loads( pathlib.Path( path ).read_text() )
     if data.get( "schema" ) != SCHEMA:
         raise SystemExit( f"{path}: unexpected schema {data.get('schema')!r} (expected {SCHEMA!r}); refusing" )
-    # B1 fix (2026-08-20 outcome-harness-fixes lane): the mirror of run_agentloop.py's load_tasks_lock()
-    # check, on the OTHER side of the seam. A results file was necessarily produced against SOME
-    # tasks.lock at run time, but a stale copy of that lock, a hand-edited results file, or results
-    # merged in from a run against an older lock could still carry a repo that the CURRENT split
-    # contract sends to LocBench train. Every record names its own repo, so this can be re-derived
-    # here with no dependency on which lock file produced it — fail closed on the contract before any
-    # statistic is computed from a possibly-contaminated instance.
-    contaminated = sorted( { r["repo"] for r in data.get( "records", () )
-                             if select_tasks.frozen_partition( r["repo"] ) != "heldout" } )
-    if contaminated:
-        raise SystemExit(
-            f"{path}: results contain instance(s) from repo(s) that re-derive to LocBench TRAIN under "
-            f"the current split rule, not heldout: {contaminated}. These results were produced against "
-            f"a lock that has since gone stale (or never honored the split contract) — refusing to "
-            f"analyze a possibly-contaminated instance set." )
+    # The mirror of run_agentloop.load_tasks_lock()'s contract check, on the OTHER side of the seam,
+    # through the SAME imported re-derivation. A results file was necessarily produced against some
+    # tasks.lock at run time, but a stale copy of that lock, a hand-edited results file, or records
+    # merged in from an older run could still carry a repo that the CURRENT split contract sends to
+    # LocBench train — the 2026-08-05 pilot scored pydata__xarray-3364 exactly that way. Every record
+    # names its own repo, so this re-derives with no dependency on which lock produced it; fail closed
+    # before any statistic is averaged. QUESTIONS-mode results (local scenario trees, whose "repo"
+    # names are not SWE-bench repos at all) are the one source the split contract does not apply to —
+    # refusing them would break the E1 bank for no hygiene gain.
+    if not str( data.get( "tasks_lock_content_sha256", "" ) ).startswith( "questions:" ):
+        train_repos = select_tasks.train_contaminated_repos( r["repo"] for r in data.get( "records", () ) )
+        if train_repos:
+            raise SystemExit(
+                f"{path}: records from repo(s) that re-derive to LocBench TRAIN under the current "
+                f"split rule, not heldout: {train_repos}. The repo-disjointness contract forbids "
+                f"scoring them — refusing (fail-closed). These results were produced against a lock "
+                f"that has since gone stale (or never honored the split contract); regenerate "
+                f"tasks.lock with select_tasks.py and re-run." )
     return data
 
 def pair_by_task_seed( records ):
@@ -90,9 +93,10 @@ def clustered_bootstrap_lower( pairs, value_fn, n_boot, seed_str, alpha=0.025 ):
     ALSO WORTH KNOWING BEFORE TRUSTING A NUMBER FROM THIS: with equal paired-row counts per repo — the
     case for every configuration this harness runs — pooling then averaging is algebraically identical
     to resampling the G repo-level MEAN deltas themselves. The entire bootstrap distribution is a
-    resample of G numbers, and G is 6. That is the textbook few-clusters regime (reliable coverage
-    wants G >~ 20-40), and it is why adding instances inside the existing repos cannot buy power. See
-    power_sim.py."""
+    resample of G numbers, and G is the locked repo count — 8 at the current tasks.lock (6 before the
+    2026-08-20 partition fix; power_sim_results.json was computed at G=6, so its MDEs are slightly
+    pessimistic now). Still the textbook few-clusters regime (reliable coverage wants G >~ 20-40),
+    which is why adding instances inside the existing repos cannot buy power. See power_sim.py."""
     repos = sorted( { repo for _, repo, *_ in pairs } )
     if not repos: return 0.0, []
     by_repo = {}
