@@ -355,6 +355,24 @@ else
     printf '%s\n' "$B_BAD" | cut -c1-400
 fi
 
+# ── (9d) the LIVE grep verb refuses the same typo, on the same words (wave-3 verifier P6-2) ─────────────
+# `in:"Any"` / `in:"all"` / `in:"comments"` used to read as the default and silently return the TIERED
+# answer. The CLI twin has always refused, and its own comment says why: a typo would read as "code" and
+# quietly suppress the very rows the user asked to see. Both MCP dialects now read the value through the
+# same reader, so this arm and (9c) assert the SAME sentence — two dialects cannot drift on a closed set.
+V_BAD="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"grep","arguments":{"path":"'"$SB"'","pattern":"TIERTOKEN_frob","in":"Any"}}}' )"
+V_OK="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"grep","arguments":{"path":"'"$SB"'","pattern":"TIERTOKEN_frob","in":"code"}}}' )"
+if printf '%s' "$V_BAD" | grep -q 'invalid value for field: in'; then
+    ok "(9d) the live MCP grep verb REFUSES an unknown in= value, as the CLI twin does"
+else
+    no "(9d) the live MCP grep verb swallowed in=\"Any\" and answered — the closed set is enforced on one dialect only"
+    printf '%s\n' "$V_BAD" | cut -c1-400
+fi
+# The refusal must not be over-broad: an EXPLICIT in="code" is a legal spelling of the default and answers.
+[ "$( jkey total "$V_OK" )" = "$d_hits" ] \
+    && ok "(9d-b) an explicit in=\"code\" still answers (the refusal is on unknown values, not on presence)" \
+    || no "(9d-b) in=\"code\" was refused or changed the answer — the value check is too broad"
+
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== (10) determinism + well-formed XML on every tiered surface ==="
 # ═══════════════════════════════════════════════════════════════════════════
