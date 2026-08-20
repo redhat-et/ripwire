@@ -259,6 +259,33 @@ try:
     ok( "load_tasks_lock accepts a lock whose every repo re-derives to heldout" )
 except SystemExit as e:
     no( "load_tasks_lock rejected an honest, all-heldout lock: %r" % ( str( e ), ) )
+
+# ── 10. B2 — the scorer's dataset name is a parameter with a swebench>=5-compatible default ─────
+if R.SWEBENCH_SCORE_DATASET_DEFAULT == "SWE-bench/SWE-bench_Lite":
+    ok( "SWEBENCH_SCORE_DATASET_DEFAULT is the swebench>=5-compatible dataset name" )
+else:
+    no( "SWEBENCH_SCORE_DATASET_DEFAULT is %r, expected SWE-bench/SWE-bench_Lite"
+        % R.SWEBENCH_SCORE_DATASET_DEFAULT )
+sig = inspect.signature( R.run_swebench_harness )
+if "dataset_name" in sig.parameters and sig.parameters["dataset_name"].default == "SWE-bench/SWE-bench_Lite":
+    ok( "run_swebench_harness's dataset_name is a parameter, not a hardcoded princeton-nlp literal" )
+else:
+    no( "run_swebench_harness has no configurable dataset_name parameter: %r" % ( sig, ) )
+if "swebench_dataset" in inspect.signature( R.evaluate_patch ).parameters:
+    ok( "evaluate_patch threads a configurable swebench_dataset through to the scorer" )
+else:
+    no( "evaluate_patch does not expose a configurable dataset name" )
+
+w_arm64 = R.swebench_arch_warning( machine="arm64" )
+w_x86   = R.swebench_arch_warning( machine="x86_64" )
+if w_arm64 and "--modal" in w_arm64:
+    ok( "swebench_arch_warning names --modal as the alternative backend on a non-x86_64 host" )
+else:
+    no( "swebench_arch_warning did not fire or did not name --modal on arm64: %r" % ( w_arm64, ) )
+if w_x86 is None:
+    ok( "swebench_arch_warning is silent on an x86_64 host" )
+else:
+    no( "swebench_arch_warning fired on x86_64: %r" % ( w_x86, ) )
 PY
 
 while IFS= read -r line; do

@@ -56,7 +56,7 @@
 #   python3 bench/agentloop/run_agentloop.py --live-one --limit 1 --arms baseline --seeds 1 \
 #       --work-dir /tmp/agentloop --evaluator none      # ONE real claude -p call — cheapest live proof
 #   python3 bench/agentloop/run_agentloop.py --live --work-dir /tmp/agentloop --evaluator swebench ...
-import argparse, hashlib, json, os, pathlib, re, shlex, subprocess, sys, tempfile, time
+import argparse, hashlib, json, os, pathlib, platform, re, shlex, subprocess, sys, tempfile, time
 
 sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
 import select_tasks   # reuse fetch_rows()'s HF datasets-server fetch + cache — see load_gold_rows()
@@ -75,6 +75,15 @@ HARNESSES = ( "claude-code-p", "codex-exec", "opencode" )
 DEFAULT_SEEDS = ( 1, 2, 3 )
 COST_LOW_PER_INSTANCE, COST_HIGH_PER_INSTANCE = 0.30, 1.50   # arXiv 2412.21139, per R4
 DEFAULT_TIMEOUT_SECONDS = 900
+
+# B2 fix (2026-08-20 outcome-harness-fixes lane): select_tasks.py / load_gold_rows() need
+# princeton-nlp/SWE-bench_Lite — it has problem_statement/patch/test_patch/FAIL_TO_PASS, everything the
+# GOLD row and the prompt need, and swebench's own doc dataset for that purpose. The SCORER needs a
+# different, schema-incompatible dataset: swebench >=5.0 evaluates against SWE-bench/SWE-bench_Lite,
+# whose rows are a strict superset adding image/eval_script/log_parser/eval_type/difficulty that
+# harness/utils.py dereferences unconditionally (KeyError under the old name). The two names are pinned
+# SEPARATELY and explicitly here rather than one constant reused for both purposes.
+SWEBENCH_SCORE_DATASET_DEFAULT = "SWE-bench/SWE-bench_Lite"
 
 ALLOWED_TOOLS_BASELINE = "Bash,Read,Glob,Grep,Edit,Write"
 
@@ -717,27 +726,33 @@ def prepare_codex_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
     return env, run_home, shim
 
 # ── evaluation (--evaluator swebench|none) ─────────────────────────────────────────────────────────────
-def run_swebench_harness( task, patch, run_id_prefix="ripwire-agentloop" ):
+def run_swebench_harness( task, patch, run_id_prefix="ripwire-agentloop", dataset_name=SWEBENCH_SCORE_DATASET_DEFAULT ):
     """Score ONE candidate patch with the official SWE-bench evaluation harness (`swebench` PyPI
     package). Import-guarded: raises a clear, actionable SystemExit (not an ImportError traceback) if
     the package isn't installed, per --evaluator=swebench's contract. Requires Docker (the harness
     builds a per-instance image and runs FAIL_TO_PASS/PASS_TO_PASS inside it) — not checked here beyond
     letting the harness subprocess fail with its own error if Docker is unavailable.
 
-    TODO-verify: shells out to the documented CLI entrypoint `python -m swebench.harness.run_evaluation`
-    (https://github.com/princeton-nlp/SWE-bench#-usage) rather than importing internal functions, since
-    the internal module layout has changed across swebench releases and the CLI is the stable, documented
-    surface. NOT exercised in this change (no Docker / swebench install in this environment) — re-check
-    before the first real --evaluator=swebench run:
-      * the flag names below (--predictions_path/--run_id/--dataset_name/--instance_ids/--max_workers)
-        against the installed package's `python -m swebench.harness.run_evaluation --help`;
-      * the predictions file's expected schema (instance_id/model_patch/model_name_or_path) — this is
-        the documented SWE-bench predictions format as of the 2024-2025 harness releases, but field
-        names have shifted before (e.g. `model_patch` vs `patch`);
-      * the report output filename/location (`<run_id_prefix>.<run_id>.json` in CWD is the documented
-        convention; the glob fallback below is a hedge, not a substitute for checking) and the resolved-
-        instances key (`resolved_ids` — some harness versions nest this under a per-instance report
-        instead of a top-level list)."""
+    B2 fix (2026-08-20 outcome-harness-fixes lane): `dataset_name` used to be hardcoded to
+    `princeton-nlp/SWE-bench_Lite`, which crashes under swebench>=5 (see SWEBENCH_SCORE_DATASET_DEFAULT's
+    comment) — it is now a parameter, threaded from --swebench-dataset, defaulting to the working name.
+
+    VERIFIED against swebench 5.0.2 (2026-08-20, see PLAN_HARVEST_REPORTS_2026-08-20/outcome-prereg.md
+    I.2): the CLI entrypoint `python -m swebench.harness.run_evaluation` exists with exactly the flags
+    below (`--help` confirmed); the predictions schema is instance_id/model_patch/model_name_or_path;
+    the report filename is `<model_name_or_path>.<run_id>.json` under `--report_dir` (model_name_or_path
+    is set to run_id_prefix below, which contains no "/" and so never takes reporting.py's "/"->"__"
+    substitution); and the resolved-instances key is the top-level `resolved_ids`
+    (harness/reporting.py:154). The glob fallback below is a hedge for a future rename, not a substitute
+    for that verification.
+
+    KNOWN UNFIXED GAP (surfaced, not fixed, here — see the --swebench-dataset help text and the
+    startup warning main() prints when --evaluator=swebench is selected on a non-x86_64 host): the
+    published eval images are x86_64-only (`swebench/task/checks.py:68` hardcodes
+    `sweb.eval.x86_64.{instance_id}`). On an aarch64 Docker daemon (e.g. colima on Apple Silicon) this
+    harness will try to build local arm64 images instead of pulling the official ones, and a locally
+    rebuilt scientific-Python environment (different compiler/BLAS) is a known source of results that
+    are not comparable to published numbers. `--modal True` runs the official images remotely instead."""
     try:
         import swebench  # noqa: F401 — import-guard only; the CLI subprocess below does the real work
     except ImportError:
@@ -753,10 +768,15 @@ def run_swebench_harness( task, patch, run_id_prefix="ripwire-agentloop" ):
     predictions_path.write_text( json.dumps( [ dict(
         instance_id=task["instance_id"], model_patch=patch, model_name_or_path=run_id_prefix ) ] ) )
 
+    # sys.executable, not a bare "python"/"python3": run_swebench_harness() must be invoked from the
+    # same interpreter (venv) that has `swebench` installed, or the import-guard above already fired.
+    # This is documented as a runbook precondition (README.md / the prereg's Part V), not auto-detected
+    # here, because there is no reliable way to re-exec into "the venv with swebench" from inside a
+    # process that already imported the stdlib without it.
     cmd = [ sys.executable, "-m", "swebench.harness.run_evaluation",
             "--predictions_path", str( predictions_path ),
             "--run_id", run_id,
-            "--dataset_name", "princeton-nlp/SWE-bench_Lite",
+            "--dataset_name", dataset_name,
             "--instance_ids", task["instance_id"],
             "--report_dir", str( work ),      # else the report lands in the CALLER's cwd — 144 runs, 144 strays
             "--max_workers", "1" ]
@@ -794,7 +814,26 @@ def run_swebench_harness( task, patch, run_id_prefix="ripwire-agentloop" ):
     report = json.loads( report_path.read_text() )
     return task["instance_id"] in set( report.get( "resolved_ids", report.get( "resolved", [] ) ) )
 
-def evaluate_patch( task, gold_row, patch, evaluator ):
+def swebench_arch_warning( machine=None ):
+    """B2b (surfaced, not fixed): None on x86_64/amd64; else the startup warning naming --modal as the
+    alternative backend. A standalone, no-argument-default function so main() can print it once at
+    startup (before spending any time on checkouts) and a test can call it with a forced platform
+    string without needing to run on aarch64 hardware to exercise the aarch64 branch."""
+    machine = ( machine if machine is not None else platform.machine() ).lower()
+    if machine in ( "x86_64", "amd64" ):
+        return None
+    return (
+        f"# WARNING: this host's Docker daemon architecture is {machine!r}, not x86_64. The published "
+        f"SWE-bench eval images are x86_64-only (swebench/task/checks.py hardcodes "
+        f"sweb.eval.x86_64.{{instance_id}}); on this machine the harness will build LOCAL arm64 images "
+        f"instead of pulling the official ones, and a locally rebuilt scientific-Python environment "
+        f"(different compiler/BLAS) is a known source of results that are not comparable to published "
+        f"numbers. Pass `python -m swebench.harness.run_evaluation --modal True` (or use "
+        f"run_swebench_harness()'s --evaluator=swebench on an x86_64 host / cloud box) to score against "
+        f"the official images instead. Both arms of a paired comparison must be scored on the SAME "
+        f"backend, always." )
+
+def evaluate_patch( task, gold_row, patch, evaluator, swebench_dataset=SWEBENCH_SCORE_DATASET_DEFAULT ):
     """Return (resolved: bool|None, localization_hit: bool|None) for one candidate patch.
 
     evaluator='none'     -> resolved=None always (no Docker / swebench harness invoked, so runs can
@@ -817,7 +856,7 @@ def evaluate_patch( task, gold_row, patch, evaluator ):
     if evaluator == "swebench":
         if not patch.strip():
             return False, localization_hit
-        return run_swebench_harness( task, patch ), localization_hit
+        return run_swebench_harness( task, patch, dataset_name=swebench_dataset ), localization_hit
     raise SystemExit( f"unknown --evaluator {evaluator!r}; expected 'swebench' or 'none'" )
 
 # ── the one seam a real harness fills in ──────────────────────────────────────────────────────────
@@ -917,7 +956,7 @@ def _harness_metrics( harness, stdout, work_dir, task, arm, seed, ripwire_bin, s
 
 def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWIRE_BIN_DEFAULT,
              timeout_s=DEFAULT_TIMEOUT_SECONDS, evaluator="none", gold_rows=None, lane="",
-             local_corpus="" ):
+             local_corpus="", swebench_dataset=SWEBENCH_SCORE_DATASET_DEFAULT ):
     """Execute ONE (task, arm, seed) run through the selected harness and return a filled record.
 
     Steps: (a) checkout task["repo"]@task["base_commit"] into a cached, per-repo workspace, reset fresh
@@ -981,7 +1020,7 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
         proc = sh( cmd, cwd=repo_dir, timeout=timeout_s, env=child_env )
     except subprocess.TimeoutExpired as exc:
         diff = sh( [ "git", "diff" ], cwd=repo_dir ).stdout
-        resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator )
+        resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator, swebench_dataset )
         metrics = _harness_metrics( harness, exc.stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )
         return _fail( "timeout", f"{harness} exceeded {timeout_s}s", resolved=resolved,
                       localization_hit=localization_hit, wall_seconds=float( timeout_s ),
@@ -1007,7 +1046,7 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
                       f"check credentials; opencode routes to its own free model when auth is absent",
                       wall_seconds=wall, harness_version=agent_version( harness ), **metrics )
 
-    resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator )
+    resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator, swebench_dataset )
     return make_record( task, arm, seed, harness, model, status="ok",
                          resolved=resolved, localization_hit=localization_hit, wall_seconds=wall,
                          started_unix=started, finished_unix=time.time(),
@@ -1053,6 +1092,12 @@ def main():
                      help="'swebench' scores resolved= via the official swebench PyPI harness (Docker "
                           "required); 'none' (default) records resolved=None so the harness can run "
                           "before Docker/swebench are set up — see evaluate_patch()" )
+    ap.add_argument( "--swebench-dataset", default=SWEBENCH_SCORE_DATASET_DEFAULT,
+                     help="dataset name passed to `swebench.harness.run_evaluation`'s --dataset_name "
+                          f"(default: {SWEBENCH_SCORE_DATASET_DEFAULT!r}, required by swebench>=5's "
+                          "schema — image/eval_script/log_parser fields the harness dereferences "
+                          "unconditionally; the older princeton-nlp/SWE-bench_Lite name still works for "
+                          "gold rows via select_tasks.py/load_gold_rows() but raises KeyError here)" )
     ap.add_argument( "--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS,
                      help="per-run wall-clock timeout for the `claude -p` subprocess" )
     mode = ap.add_mutually_exclusive_group( required=True )
@@ -1067,6 +1112,15 @@ def main():
                        help="execute every (task, arm, seed) run in the matrix through --harness. Real "
                             "money / real API calls — read README.md's SAFETY NOTE first." )
     a = ap.parse_args()
+
+    # B2b (surfaced, not fixed — see swebench_arch_warning()'s docstring): a real scoring backend
+    # mismatch is expensive to discover after a live matrix has already run, so it prints once here,
+    # at parse time, before any checkout or agent call — not buried inside run_swebench_harness()
+    # where it would only fire per-instance after real work was already done.
+    if a.evaluator == "swebench":
+        warning = swebench_arch_warning()
+        if warning:
+            print( warning, file=sys.stderr )
 
     if a.questions:
         lock = dict( content_sha256=f"questions:{pathlib.Path( a.questions ).name}",
@@ -1131,7 +1185,7 @@ def main():
         gold_rows = {} if a.questions else load_gold_rows( a.work_dir )
         rec = run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir, ripwire_bin=a.ripwire_bin,
                         timeout_s=a.timeout_seconds, evaluator=a.evaluator, gold_rows=gold_rows,
-                        local_corpus=a.local_corpus )
+                        local_corpus=a.local_corpus, swebench_dataset=a.swebench_dataset )
         print( json.dumps( rec, indent=2 ) )
         return 0 if rec["status"] == "ok" else 1
 
@@ -1176,7 +1230,7 @@ def main():
         return run_one( t, arm, seed, a.harness, a.model, work_dir=a.work_dir,
                         ripwire_bin=a.ripwire_bin, timeout_s=a.timeout_seconds,
                         evaluator=a.evaluator, gold_rows=gold_rows, lane=lane,
-                        local_corpus=a.local_corpus )
+                        local_corpus=a.local_corpus, swebench_dataset=a.swebench_dataset )
 
     def _emit( run_index, cell, rec ):
         t, arm, _seed = cell
