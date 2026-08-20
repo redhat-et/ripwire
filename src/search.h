@@ -1993,7 +1993,7 @@ struct GrepTierReport
     std::uint32_t suppressedString  = 0;
     std::uint32_t tieredFileCount   = 0;   // hit files actually parsed (≤ the budgets)
     std::uint32_t unclassifiedHits  = 0;   // hits in files past the budget, or with no grammar — NEVER suppressed
-    const char*   emittedTier       = "code";        // "code" | "comment" | "string" — §F4's tightest non-empty tier
+    const char*   emittedTier       = "code";        // "code" | "comment" | "string" | "comment+string" — §F4's served tier
     const char*   budgetHit         = nullptr;       // nullptr | "files" | "bytes" — E5's disclosed bail-out
     bool          didRun            = false;         // false under --grep-in=any: no tier vocabulary may be emitted
 
@@ -2087,32 +2087,40 @@ inline GrepCollection grepApplySpanTiers( const IngestResult& ing, GrepCollectio
         ++tierHitCount[std::size_t( t )];
     }
 
-    // §F4: the tightest tier with anything in it wins. The choice is made over the CLASSIFIED hits only —
-    // an unclassified hit cannot vote for a tier nobody proved it belongs to, and it is emitted either way.
-    SpanTier serve = SpanTier::Code;
+    // §F4, corrected by the wave-3 verifier (P4-B): CODE still wins whenever it holds anything, but BELOW
+    // code the ladder COLLAPSES — comment and string are served TOGETHER, as one "everything else" tier.
+    // A ranked comment > string ordinal inverted the flagship answer: a single `#` mention of an error
+    // message in a gate script outranked the string literal that EMITS it (`--grep="malformed rules line"`
+    // served test/archcheck.sh and suppressed src/arch.h). "Tightest span type" and "most likely to be the
+    // answer" come apart exactly there, and no reading makes a test-script comment the tighter answer. The
+    // collapse costs nothing on the queries that already worked: a comment-only or string-only corpus still
+    // serves the one tier it has. The choice is made over the CLASSIFIED hits only — an unclassified hit
+    // cannot vote for a tier nobody proved it belongs to, and it is emitted either way.
+    std::uint8_t serveMask = 0;
     if( tierHitCount[std::size_t( SpanTier::Code )] > 0 )
     {
-        serve = SpanTier::Code;
+        serveMask          = std::uint8_t( 1u << std::size_t( SpanTier::Code ) );
+        report.emittedTier = "code";
     }
-    else if( tierHitCount[std::size_t( SpanTier::Comment )] > 0 )
+    else if( tierHitCount[std::size_t( SpanTier::Comment )] > 0 || tierHitCount[std::size_t( SpanTier::String )] > 0 )
     {
-        serve = SpanTier::Comment;
-    }
-    else if( tierHitCount[std::size_t( SpanTier::String )] > 0 )
-    {
-        serve = SpanTier::String;
+        serveMask = std::uint8_t( ( 1u << std::size_t( SpanTier::Comment ) ) | ( 1u << std::size_t( SpanTier::String ) ) );
+        // Name what was actually SERVED, not what the mask permits: a corpus holding only one of the two
+        // still reads as that single tier, so the disclosure never advertises a half nobody had.
+        report.emittedTier = ( tierHitCount[std::size_t( SpanTier::Comment )] == 0 )  ? "string"
+                             : ( tierHitCount[std::size_t( SpanTier::String )] == 0 ) ? "comment"
+                                                                                      : "comment+string";
     }
     else
     {
         return collected;   // nothing was classified at all — nothing to hold back, and nothing to disclose
     }
-    report.emittedTier = ( serve == SpanTier::Code ) ? "code" : ( serve == SpanTier::Comment ? "comment" : "string" );
 
     std::vector<GrepRawHit> kept;
     kept.reserve( collected.raw.size() );
     for( std::size_t h = 0; h < collected.raw.size(); ++h )
     {
-        if( hitTier[h] == kUnclassifiedTier || hitTier[h] == std::uint8_t( serve ) )
+        if( hitTier[h] == kUnclassifiedTier || ( serveMask & std::uint8_t( 1u << hitTier[h] ) ) != 0 )
         {
             kept.push_back( collected.raw[h] );
             continue;
