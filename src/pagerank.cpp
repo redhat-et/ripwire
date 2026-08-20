@@ -5,8 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <cstdlib>   // std::getenv — the test-only iteration ceiling below (see why it cannot be a fixture)
-#include <cstring>   // std::strlen — the strict decimal parse of that ceiling
+#include <cstdlib> // std::getenv — the test-only iteration ceiling below (see why it cannot be a fixture)
+#include <cstring> // std::strlen — the strict decimal parse of that ceiling
 #include <vector>
 
 namespace rw
@@ -58,18 +58,18 @@ std::uint32_t testIterationCeiling() noexcept
         const char* value = std::getenv( "RIPWIRE_TEST_PR_MAXITERS" );
         if( value == nullptr || *value == '\0' || std::strlen( value ) > 9 )
         {
-            return 0;   // unset, empty, or absurdly long ⇒ no override
+            return 0; // unset, empty, or absurdly long ⇒ no override
         }
         std::uint32_t parsed = 0;
         for( const char* c = value; *c != '\0'; ++c )
         {
             if( *c < '0' || *c > '9' )
             {
-                return 0;   // a strict decimal or nothing — never a prefix parse of "12x"
+                return 0; // a strict decimal or nothing — never a prefix parse of "12x"
             }
             parsed = parsed * 10 + std::uint32_t( *c - '0' );
         }
-        return parsed;   // 0 reads as "no override", which is what "=0" should mean anyway
+        return parsed; // 0 reads as "no override", which is what "=0" should mean anyway
     }();
     return ceiling;
 }
@@ -105,11 +105,11 @@ PageRankRun pageRankDouble( const sparseCsr<float>& inEdges, std::span<const dou
     VERIFY( config.maxIterationCount > 0 );
     // The test-only ceiling can only LOWER the configured one, so the shipped ceiling is still an upper
     // bound on every run and the VERIFY above still describes the loop that runs.
-    const std::uint32_t testCeiling      = testIterationCeiling();
+    const std::uint32_t testCeiling = testIterationCeiling();
     const std::uint32_t maxIterationCount = testCeiling > 0 ? std::min( config.maxIterationCount, testCeiling ) : config.maxIterationCount;
     if( nodeCount == 0 )
     {
-        return { 0, true };   // no residual to leave above tolerance — vacuously converged, see PageRankRun
+        return { 0, true }; // no residual to leave above tolerance — vacuously converged, see PageRankRun
     }
     VERIFY( rank.data() != teleport.data() );
 
@@ -128,7 +128,7 @@ PageRankRun pageRankDouble( const sparseCsr<float>& inEdges, std::span<const dou
     const std::uint32_t* rowOffsets = inEdges.rowOffsets();
     const std::uint32_t* columnIndices = inEdges.colIndices();
     const float* edgeValues = inEdges.values();
-    bool          hasConverged   = false;
+    bool hasConverged = false;
     std::uint32_t iterationCount = 0;
 
     for( ; iterationCount < maxIterationCount; ++iterationCount )

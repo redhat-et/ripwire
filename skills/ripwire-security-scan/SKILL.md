@@ -59,11 +59,20 @@ the security semantics of an MCP stanza. Retrieval is automated; the semantic de
 
 **Step 1 — locate and read the config** with ripwire or the shell + Read tool:
 ```
-ripwire <dir> --grep='"command"' --grep-context=6
+ripwire <dir> --grep-in=any --grep='"command"' --grep-context=6
 ls <dir>/.mcp.json ~/.claude/mcp.json ~/.cursor/mcp.json 2>/dev/null
 find <dir> -maxdepth 3 \( -name ".mcp.json" -o -name "mcp*.json" \) 2>/dev/null
 ```
 Read each file, then scan every `"command"` / `"args"` / `"env"` stanza.
+
+**`--grep-in=any` is not optional here — it is the whole recipe.** A JSON/TOML/YAML file parses entirely to
+string-tier nodes, so on any mixed repo a single code-tier hit for `"command"` anywhere (a C++ identifier, a
+gate script) suppresses **every config file** and serves you prose instead. Measured on ripwire's own tree:
+default → **2** files, all markdown prose, `.mcp.json` absent, `suppressed_string="38"`; `--grep-in=any` →
+**12** files including `.mcp.json`. The count is disclosed, not hidden — but an auditor who trusts the
+default reviews zero MCP stanzas and is told nothing is there. The empty-code-tier collapse (comment and
+string served together) does **not** rescue this: it only fires when the code tier is empty, and here it is
+not. Always pass `--grep-in=any` when the target is config.
 
 **Step 2 — checklist, one pass per server entry:**
 - **Command origin** — is `command` a known binary (`npx`, `node`, `python`, `uvx`)? An unknown path in a
@@ -93,6 +102,13 @@ available.
    class), `c-style-cast` (masks a `reinterpret_cast` as an implicit conversion — hides type-safety holes),
    `weak-crypto` (MD5/SHA1/DES-class primitives). A nonzero count on any of these in a file that touches
    untrusted input is the starting read list, ranked by rule severity not just count.
+   **Read `shown=` before you read the rows.** The default payload is capped at ~100 KB, and the header
+   discloses it: `<lint findings="N" shown="M" capped="1">` means the per-rule `count=` totals are complete
+   but only `M` locator rows printed — the cap keeps a sorted path *prefix*, so whole rules can report a
+   truthful nonzero `count=` with **zero** `<f>` rows of their own. On this repo, 14 of 31 firing rules lose
+   every locator that way. If the rule you care about shows a count with no rows, raise the cap with
+   `--limit=N` (or narrow the scan to the subsystem) before concluding the hits are elsewhere. `capped="0"`
+   means you are seeing everything.
 
 2. **Taint-reach (structural, not real taint)** — `ripwire <dir> --graph-query='callees(name("SYM"),6)'`
    where SYM is the parse/deserialize/handler entry point that receives untrusted input (the number bounds
@@ -112,14 +128,17 @@ available.
    that shows up as an untested seam is doubly worth attention: it's both attack-surface-adjacent and has
    no regression net if you (or an attacker-triggered path) breaks it.
 
-4. **Find the sinks and their call sites** — `ripwire <dir> --grep=STR` (literal, e.g. `system(`, `eval`,
-   `exec`, `pickle.loads`, `deserialize`) for a quick census, or `ripwire <dir> --uses=SYM` (e.g.
+4. **Find the sinks and their call sites** — `ripwire <dir> --grep-in=any --grep=STR` (literal, e.g.
+   `system(`, `eval`, `exec`, `pickle.loads`, `deserialize`) for a quick census, or `ripwire <dir> --uses=SYM` (e.g.
    `--uses=deserialize`) once you know the exact symbol name — gives the statically-resolvable call/read/write sites by role (a floor: dynamic dispatch/callbacks/macros are unmodelled — counts_floor=) and
    file:line, and flags `external="1"` when the sink is a stdlib/third-party name with no in-corpus
    definition (the common case for `system`/`eval`-class calls). Treat the site list as a floor, not
    proof of absence — and remember ripwire cannot show you the sink's own body.
+   `--grep-in=any` is deliberate on a SECURITY census: the default span tiering serves the code tier and
+   holds string/comment hits back, and a sink name inside a string literal (a shelled-out command line, an
+   `eval`'d payload, a config value) is exactly the hit a security review must not lose. Pay the extra rows.
 
-**Chain**: `--grep`/`--uses` to find the sink call sites → `--graph-query='callees(name("ENTRY"),6)'` on
+**Chain**: `--grep-in=any --grep=`/`--uses` to find the sink call sites → `--graph-query='callees(name("ENTRY"),6)'` on
 the untrusted-input entry point to see what's structurally downstream of it → `--lint` to flag unsafe
 constructs inside that reachable set → `--seams` to flag which of those paths have no test coverage. That
 ordering is the structural triage; the actual taint judgment (does the value truly reach the sink
@@ -131,7 +150,9 @@ unsanitized) still needs a human or a real dataflow tool reading the code ripwir
 finding (rule + line + text for a skill; the offending stanza for an MCP entry). Do not install/activate a
 CRITICAL. For WARN, quote the suspicious text and ask the user to confirm intent before proceeding.
 
-**Code scan** — a ranked list of concerns: sink call sites (from `--grep`/`--uses`), the entry point's
-forward reach (from the `callees(...)` graph-query), any unsafe-construct hits inside that reach (from
-`--lint`), and any untested seam among them (from `--seams`). Label the whole thing "structural triage,
+**Code scan** — a ranked list of concerns: sink call sites (from `--grep-in=any --grep=`/`--uses`), the entry
+point's forward reach (from the `callees(...)` graph-query), any unsafe-construct hits inside that reach (from
+`--lint`, and say whether it reported `capped="1"`), and any untested seam among them (from `--seams`).
+If any `--grep` in the report was run WITHOUT `--grep-in=any`, say so — a tiered answer is a filtered one,
+and a security finding list must state its own filter. Label the whole thing "structural triage,
 not a taint proof" — don't let the output read as a clean bill of health; it's a prioritized reading list.

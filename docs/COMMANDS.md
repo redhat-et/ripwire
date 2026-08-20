@@ -941,9 +941,9 @@ $ ./build/ripwire . --test-gate
 
 ### `--grep=STR | --regex=PAT`
 
-**Answers:** literal / regex search + enclosing symbol + the matched line;
+**Answers:** literal / regex search + enclosing symbol + the matched line.
 
-exhaustive literal scan. For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance). --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex) --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)
+SPAN-TIERED by default (see --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering. For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance). --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex) --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)
 
 **Try it**
 
@@ -984,11 +984,13 @@ file requires anywhere in the same file. Second occurrence of --grep=/--regex= i
 
 **Answers:** SPAN TIERS: which tree-sitter span a hit must sit in to print.
 
-code (default) serves the TIGHTEST NON-EMPTY tier -- code, else comment, else string -- and discloses what it held back (suppressed_comment=/suppressed_string=); a pattern living only in comments is still answered, never silently emptied. any turns tiering off entirely. Hit files are parsed on demand under a fixed budget; tier_budget= says so when it stops, and hits it never classified are emitted, never suppressed.
+code (default) serves the CODE tier when any hit is code, and otherwise comment AND string TOGETHER (tier= "comment+string"), disclosing what it held back (suppressed_comment=/suppressed_string=); a pattern living only in prose is still answered, never silently emptied. any turns tiering off entirely -- the exhaustive view. Hit files are parsed on demand under a fixed budget; tier_budget= says so when it stops, and hits it never classified are emitted, never suppressed.
+
+**Shaped by:** `--grep`
 
 **Caveats (stated by the binary):**
 
-- a pattern living only in comments is still answered, never silently emptied.
+- a pattern living only in prose is still answered, never silently emptied.
 - tier_budget= says so when it stops, and hits it never classified are emitted, never suppressed.
 
 ### `--match=QUERY`

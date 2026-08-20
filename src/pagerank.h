@@ -31,7 +31,7 @@ struct PageRankConfig
 struct PageRankRun
 {
     std::uint32_t iterationCount = 0;
-    bool          hasConverged   = true;
+    bool hasConverged = true;
 };
 
 // Float edge storage stays cache-compact; every iterative vector and reduction is double precision.
