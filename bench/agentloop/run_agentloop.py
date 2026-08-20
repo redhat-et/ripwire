@@ -22,7 +22,8 @@
 #
 # RECORD SCHEMA (one JSON object per (task, arm, seed) run — see `EMPTY_RESULT_SCHEMA` / `make_record`):
 #   instance_id, repo, base_commit, arm, seed, harness, model,
-#   status         — "not_implemented" | "ok" | "error" | "timeout"
+#   status         — "not_implemented" | "ok" | "error" | "timeout" | "contaminated" (baseline arm
+#                    invoked ripwire despite the no-ripwire contract — see baseline_contamination_note())
 #   resolved       — bool|null   (SWE-bench held-out test suite passed after the agent's patch)
 #   localization_hit — bool|null (agent touched >=1 gold file from the reference patch)
 #   tokens_in / tokens_out — int|null
@@ -436,6 +437,32 @@ def classify_native_read( tool_name=None, command=None ):
     if "ripwire" in text:
         return False
     return bool( SHELL_READ_RE.search( text ) )
+
+# ── contamination gate (2026-08-20 outcome-harness-fixes lane, arm-isolation fix) ─────────────────────
+# The isolated per-harness environments (prepare_claude_environment / prepare_codex_environment /
+# prepare_opencode_environment) keep the baseline arm from being PRIMED to use ripwire — no CLAUDE.md,
+# no skills, no settings.json hooks. They deliberately do NOT remove "ripwire" from PATH outright:
+# ephemeral_run_home() prepends the logging shim for every arm, including baseline, so that if the
+# agent disobeys the prompt's "Do not use ripwire or ctxpack" instruction anyway, the attempt is
+# evidence (a shim-log line / a transcript-parsed ripwire_calls count) instead of a silent, unrecorded
+# success. What was still missing is the other half: NOTHING converted that evidence into a verdict.
+# A baseline run that quietly used ripwire kept reporting status="ok" and paired normally in
+# analyze.py — a contaminated A/B, indistinguishable from a clean one, exactly the failure class
+# described in memory (opencode-round-recon's "~/.claude/CLAUDE.md baseline-contamination trap").
+def baseline_contamination_note( arm, metrics ):
+    """None if this run is clean; otherwise the evidence string. Only ever fires for the baseline arm —
+    a ripwire call from a RIPWIRE_ARMS run is the arm working as intended, not contamination.
+
+    Standalone and metrics-only (no subprocess, no filesystem) so it is unit-testable without running a
+    harness: see test/agentloopclaudecheck.sh's contamination-gate assertions."""
+    if arm != "baseline":
+        return None
+    calls = metrics.get( "ripwire_calls" )
+    if not calls:
+        return None
+    commands = metrics.get( "ripwire_commands" ) or []
+    return ( f"CONTAMINATED: baseline arm invoked ripwire {calls} time(s) despite the "
+             f"'Do not use ripwire or ctxpack' contract — evidence: {commands[:3]!r}" )
 
 def parse_codex_jsonl_metrics( stdout, ripwire_bin ):
     """Return token usage plus explicit command/ripwire-CLI evidence from retained Codex JSONL."""
@@ -1055,10 +1082,16 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
                       wall_seconds=wall, harness_version=agent_version( harness ), **metrics )
 
     resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator, swebench_dataset )
-    return make_record( task, arm, seed, harness, model, status="ok",
+    # The contamination gate: a baseline run that actually reached for ripwire is not a usable control
+    # datapoint. status != "ok" is enough on its own to keep it out of analyze.py's paired set
+    # (pair_by_task_seed() only pairs status=="ok" on both arms) — no analyze.py change needed for
+    # exclusion, only for counting it (see analyze.py's n_contaminated_baseline).
+    contamination = baseline_contamination_note( arm, metrics )
+    return make_record( task, arm, seed, harness, model,
+                         status="contaminated" if contamination else "ok",
                          resolved=resolved, localization_hit=localization_hit, wall_seconds=wall,
                          started_unix=started, finished_unix=time.time(),
-                         harness_version=agent_version( harness ), **metrics )
+                         harness_version=agent_version( harness ), error=contamination, **metrics )
 
 def main():
     ap = argparse.ArgumentParser( description="Phase B4 agent-in-the-loop eval runner (scaffolding)" )

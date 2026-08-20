@@ -300,6 +300,36 @@ if "--max-tokens" in suf:
     no( "ripwire arm's CLI invocation still names --max-tokens, which --for silently ignores" )
 else:
     ok( "ripwire arm's CLI invocation no longer names --max-tokens" )
+
+# ── 13. arm-isolation fix (item 4) — the contamination gate closes the shim's detection loop ────
+# The isolated environments (section 2 above) keep the baseline arm from being PRIMED to use
+# ripwire; they deliberately still put the logging shim on baseline's PATH too, so a DISOBEYED
+# instruction is evidence, not a silent success. This is the other half: converting that evidence
+# into a status the pairing logic (analyze.py's pair_by_task_seed, status=="ok" required on BOTH
+# arms) actually excludes.
+clean = R.baseline_contamination_note( "baseline", dict( ripwire_calls=0, ripwire_commands=[] ) )
+if clean is None:
+    ok( "baseline_contamination_note is None for a clean baseline run" )
+else:
+    no( "baseline_contamination_note fired on a clean baseline run: %r" % ( clean, ) )
+dirty = R.baseline_contamination_note(
+    "baseline", dict( ripwire_calls=2, ripwire_commands=[ "ripwire . --for=x" ] ) )
+if dirty and "2" in dirty:
+    ok( "baseline_contamination_note fires with evidence when the baseline arm invoked ripwire" )
+else:
+    no( "baseline_contamination_note did not fire on a contaminated baseline run: %r" % ( dirty, ) )
+treatment = R.baseline_contamination_note( "ripwire_cli", dict( ripwire_calls=5, ripwire_commands=[ "x" ] ) )
+if treatment is None:
+    ok( "baseline_contamination_note never fires for a RIPWIRE_ARMS run (that arm is working as intended)" )
+else:
+    no( "baseline_contamination_note incorrectly fired for the treatment arm: %r" % ( treatment, ) )
+rec = R.make_record( dict( instance_id="i", repo="r", base_commit="c" ), "baseline", 1, "claude-code-p", "m",
+                     status="contaminated", ripwire_calls=1, ripwire_commands=[ "x" ],
+                     error="CONTAMINATED: x" )
+if rec["status"] == "contaminated" and rec["error"]:
+    ok( "make_record accepts status=\"contaminated\" (record schema was extended, not narrowed)" )
+else:
+    no( "make_record mishandled a contaminated record: %r" % ( rec, ) )
 PY
 
 while IFS= read -r line; do
