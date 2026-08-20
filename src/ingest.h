@@ -315,7 +315,33 @@ enum class AstWalk : std::uint8_t
     // pattern can express. What it shares with the query groups is the read, the parse and the newline
     // index; the traversal stays its own.
     UnreachableCode,
+
+    // ---- R2 pattern surface (the pattern verb; src/pattern.h) ----
+    // A WALK for the same reason UnreachableCode is one: the traversal is "try the compiled pattern
+    // against every node of this file's tree", which no tree-sitter query can express (the pattern is
+    // code, and it becomes a different node shape in each grammar). What it shares with the query groups
+    // is the read, the parse and the newline index — the whole point of riding this walk instead of
+    // opening the corpus a second time. Its programs come from AstQueryGroup::patternPrograms.
+    Pattern,
 };
+
+// src/pattern.h owns the compiled form; ingest.h only ever holds a BORROWED pointer to it, so this
+// header stays free of tree-sitter. main.cpp includes pattern.h to build the set and read the
+// disclosures; ingest.cpp includes it to run the match. NOTE: no `struct TSLanguage;` forward
+// declaration here — inside namespace rw it would declare rw::TSLanguage and shadow the real global
+// one for every header included after this point, which is a whole-file cascade of "different return
+// type (const rw::TSLanguage* vs const TSLanguage*)" and not an obvious one to read backwards from.
+namespace pattern { struct PatternProgramSet; struct GrammarRow; }
+
+// Every grammar the pattern surface serves, one row per distinct grammar OBJECT, in kLangTable order.
+// Built in ingest.cpp rather than in pattern.h because the extension-to-grammar mapping is ingest's
+// fact, and a second copy of it is exactly the drift CONTRIBUTING's declarative-table rule prevents.
+std::vector<pattern::GrammarRow> supportedPatternGrammars();
+
+// §L3 applicability, in the pattern surface's own terms: corpus files whose extension maps to a grammar
+// the pattern actually RESOLVED for. The same extension-based (never content-sniffed) convention
+// computeGrammarDisclosure uses for --match, so eligible_files= means the same thing on both verbs.
+std::size_t eligiblePatternFiles( const IngestResult& ing, const pattern::PatternProgramSet& set );
 
 // The unreachable-code rule's own budget, named so every caller spends the same one.
 inline constexpr std::size_t kUnreachableMaxHits = 5000;
@@ -326,6 +352,10 @@ struct AstQueryGroup
     std::size_t                      maxMatches    = 5000;      // per-TAG budget, same semantics as astQuery's
     std::vector<std::string>*        uncompiledOut = nullptr;   // optional, same semantics as astQuery's
     AstWalk                          walk          = AstWalk::None;   // non-None ⇒ built-in walk, no specs
+
+    // AstWalk::Pattern only: the compiled pattern, keyed by grammar. Borrowed, and read-only for the
+    // whole walk — it is a flat POD snapshot precisely so every worker can share it without a copy.
+    const pattern::PatternProgramSet* patternPrograms = nullptr;
 
     // §L3: a query that DID compile (for at least one grammar) still tells the caller nothing about WHICH
     // grammars accepted it, or how much of the corpus could even ask it the question. `(interface_declaration)

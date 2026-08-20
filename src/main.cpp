@@ -42,6 +42,7 @@
 #include "arch.h"
 #include "search.h"
 #include "query.h"
+#include "pattern.h"               // R2: the pattern surface's compiler + disclosures (the matcher runs inside the ingest walk)
 #include "verify.h"                // G4 verify-a-claim: the --verify closed claim grammar + verdict/limit vocabularies (runVerify below)
 #include "taskroute.h"             // --help-task: deterministic task -> one safe CLI recommendation or abstention
 #include "quality.h"
@@ -11454,6 +11455,88 @@ static MatchQueryOutcome runMatchQuery( const rw::IngestResult& ing, const std::
     return out;
 }
 
+// Join owned strings through the ONE joiner the refusal surfaces already use, so a list this file prints
+// and a list an MCP refusal prints cannot drift in spelling. (joinClauses takes views; every caller here
+// holds owned strings, and hand-rolling the conversion at each call site is how they drift.)
+static std::string joinOwned( const std::vector<std::string>& parts, const char* sep )
+{
+    return rw::mcprefuse::joinClauses( std::vector<std::string_view>( parts.begin(), parts.end() ), sep );
+}
+
+// The pattern verb's schema legend, named and hoisted out of runLint: a fifteen-line string literal inside
+// an already-large dispatcher body is verbosity the reader pays for at every OTHER verb in that function,
+// and a legend nobody can grep for by name is one nobody audits. No literal flag spelling in it — a `-`
+// pair is illegal inside an XML comment.
+inline constexpr std::string_view kPatternLegend =
+    "<!-- ripwire pattern: structural search written in CODE, not in tree-sitter node kinds; each hit = a matching "
+                         "node + its enclosing symbol. q= is the pattern as received. grammars= names every served grammar the pattern "
+                         "resolved for and shapes= the node KIND it became in each, so what was actually searched for is auditable; "
+                         "unsupported= names the families this verb does not serve at all (a zero there would be a lie, so it never "
+                         "reports one). eligible_files=/of_files= are corpus files in that language set vs total indexed files. "
+                         "$NAME binds one node and the same $NAME twice must match structurally; $_ binds nothing; the ellipsis is "
+                         "matched by a single first-match-wins probe (never an exhaustive search) under the disclosed ellipsis_bound "
+                         "sibling cap. Comments are transparent on both sides; everything else is kind- and text-exact. "
+                         "unresolved_in= appears ONLY on a zero result and names the served grammars the pattern did not resolve for "
+                         "- the zero may be theirs, not the code's. shown=/capped= = rows printed vs found; hits_capped=\"1\" means "
+                         "hits= is a FLOOR (engine match limit reached). raise the default cap with limit=N (offset=M pages) -->";
+
+// R2 — everything ONE pattern run answers with before a byte is emitted, as one structured return (the
+// same shape, and the same reason, as MatchQueryOutcome above). A non-empty `refusal` is the whole result:
+// the caller prints it and exits 1, and no <pattern> element is ever opened.
+struct PatternSearchOutcome
+{
+    std::vector<rw::AstMatch> matches;
+    std::string               refusal;         // non-empty ⇒ refuse; already ends in a newline
+    std::string               grammarsAttr;    // resolved grammar names, joined
+    std::string               shapesAttr;      // "name:node_kind" per resolved grammar, joined
+    std::string               ellipsisAttr;    // "" unless the pattern uses an ellipsis
+    std::string               unresolvedAttr;  // "" unless some served grammar did not resolve
+    std::size_t               eligibleFiles = 0;
+};
+
+// Compile the pattern for every served grammar, decide refusal-or-proceed, run the walk, and assemble the
+// disclosures. The refusal path is the load-bearing half: §P0.1's rule one level out — a pattern nothing
+// could ask is not a zero, it is a refusal — and the served / not-served lists ride the message so the fix
+// arrives in the same breath as the fault.
+static PatternSearchOutcome runPatternSearch( const rw::IngestResult& ing, std::string_view rawPattern )
+{
+    PatternSearchOutcome                      out;
+    const std::vector<rw::pattern::GrammarRow> rows     = rw::supportedPatternGrammars();
+    const rw::pattern::CompileOutcome          compiled = rw::pattern::compileAll( rawPattern, rows );
+    if( !compiled.ok )
+    {
+        out.refusal = "ripwire: --pattern: " + compiled.err + " (pattern as received: " + std::string( rawPattern ) + ")"
+                      + " — served grammars: " + joinOwned( rw::pattern::servedNames( rows ), "," )
+                      + "; not served: " + std::string( rw::pattern::kUnsupportedGrammars ) + "\n";
+        return out;
+    }
+    const rw::pattern::PatternProgramSet& progs = compiled.set;
+
+    rw::AstQueryGroup grp;
+    grp.walk            = rw::AstWalk::Pattern;
+    grp.patternPrograms = &progs;
+    grp.maxMatches      = rw::pattern::kMaxHits;
+    out.matches         = std::move( rw::astQueryGrouped( ing, { grp } )[0] );
+
+    out.grammarsAttr  = joinOwned( rw::pattern::resolvedNames( progs ), "," );
+    out.shapesAttr    = joinOwned( rw::pattern::resolvedShapes( progs ), "," );
+    out.eligibleFiles = rw::eligiblePatternFiles( ing, progs );
+    // Both attributes below are emitted ONLY when they are facts about THIS pattern: an ellipsis fact on a
+    // pattern with no ellipsis, or a partial-resolution note on a run that found plenty, is decoration —
+    // and decoration is how a reader learns to stop reading attributes. unresolved_in= in particular is
+    // ast-grep's PatternHasError posture: a partial resolution only MISLEADS when the answer is zero, so
+    // the caller withholds it unless the row list is empty.
+    if( progs.usesEllipsis )
+    {
+        out.ellipsisAttr = " ellipsis=\"first-match\" ellipsis_bound=\"" + std::to_string( rw::pattern::kEllipsisBound ) + "\"";
+    }
+    if( !progs.unresolved.empty() )
+    {
+        out.unresolvedAttr = " unresolved_in=\"" + joinOwned( progs.unresolved, "," ) + "\"";
+    }
+    return out;
+}
+
 // octocode F3: the "compiled for no grammar" refusal's optional trailer — "" when nearestKind is empty (no
 // candidate node-kind token in the query landed within the edit-distance cutoff of any linked grammar's
 // vocabulary), which reads exactly as the refusal did before this fix (an honest "no plausible near-miss",
@@ -11494,7 +11577,7 @@ std::optional<int> runLint( const MainDispatch& d )
 
     // --match=QUERY (structural search) and --lint (built-in checks) both ride the shared AST-query pass and
     // annotate each hit with its enclosing symbol — so they share this setup.
-    if( !cfg.match.empty() || cfg.lint || !cfg.lintRulesDir.empty() )
+    if( !cfg.match.empty() || !cfg.pattern.empty() || cfg.lint || !cfg.lintRulesDir.empty() )
     {
         // model.h::symbolsByFile — same scan order, same comparator as the hand-written loop it replaces.
         const SymbolsByFile fileSyms = symbolsByFile( ing,
@@ -11627,6 +11710,50 @@ std::optional<int> runLint( const MainDispatch& d )
                 std::printf( "</m>" );
             }
             std::printf( "</match>" );
+            return 0;
+        }
+
+        // R2 — the PATTERN surface: structural search written in CODE instead of in node kinds.
+        // Sits here, beside --match, because it answers the same question through the same walk and must
+        // emit through the same conventions (enclosing symbol, page window, grammar applicability). The
+        // work BEFORE the walk — compile per grammar, refuse or proceed, assemble the disclosures — is
+        // runPatternSearch, extracted for exactly the reason runMatchQuery was: runLint's dispatcher body
+        // is already one of the largest in this file and must not grow a verb's worth of plumbing.
+        if( !cfg.pattern.empty() )
+        {
+            const PatternSearchOutcome ps = runPatternSearch( ing, cfg.pattern );
+            if( !ps.refusal.empty() )
+            {
+                std::fprintf( stderr, "%s", ps.refusal.c_str() );
+                return 1;
+            }
+            const PageWindow  patPage  = pageWindow( ps.matches.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
+            const std::size_t patShown = patPage.end - patPage.begin;
+            char              ppab[ kPageDisclosureCap ];
+            std::printf( "%.*s", int( kPatternLegend.size() ), kPatternLegend.data() );
+            std::printf( "<pattern hits=\"%zu\"%s hits_capped=\"%d\" q=\"%s\" grammars=\"%s\" shapes=\"%s\" unsupported=\"%.*s\"%s%s eligible_files=\"%zu\" of_files=\"%zu\"%s>",
+                         ps.matches.size(),
+                         pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true ),
+                         ps.matches.size() >= rw::pattern::kMaxHits ? 1 : 0,
+                         ex( cfg.pattern ).c_str(),
+                         ex( ps.grammarsAttr ).c_str(),
+                         ex( ps.shapesAttr ).c_str(),
+                         int( rw::pattern::kUnsupportedGrammars.size() ), rw::pattern::kUnsupportedGrammars.data(),
+                         ps.ellipsisAttr.c_str(),
+                         ps.matches.empty() ? ps.unresolvedAttr.c_str() : "",
+                         ps.eligibleFiles,
+                         ing.files.size(),
+                         lintRootAttr.c_str() );
+            for( std::size_t hitIndex = patPage.begin; hitIndex < patPage.end; ++hitIndex )
+            {
+                const rw::AstMatch&    m  = ps.matches[ hitIndex ];
+                const Symbol*          e  = enclosing( m.fileId, m.startByte );
+                const std::string_view rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
+                std::printf( "<m p=\"%s:%u\" in=\"%s\">", ex( rp ).c_str(), m.line, e ? ex( e->name ).c_str() : "" );
+                emitEscaped( m.text );
+                std::printf( "</m>" );
+            }
+            std::printf( "</pattern>" );
             return 0;
         }
 
@@ -13433,7 +13560,8 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
         { "--community",         c.communityFlag          }, { "--zoom",          c.zoom                  },
         { "--seams",             c.seams                  }, { "--report",        c.report                },
         { "--tree",              c.tree                   }, { "--grep",         !c.grep.empty()          },
-        { "--match",            !c.match.empty()          }, { "--lint",          c.lint                  },
+        { "--match",            !c.match.empty()          }, { "--pattern",      !c.pattern.empty()       },
+        { "--lint",              c.lint                   },
         { "--around",           !c.around.empty()         },
     };
 
@@ -13589,6 +13717,10 @@ const char* jsonUnsupportedVerb( const rw::Config& c )
     if( !c.match.empty() )
     {
         return "--match";
+    }
+    if( !c.pattern.empty() )
+    {
+        return "--pattern";
     }
     if( c.lint )
     {

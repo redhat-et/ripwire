@@ -110,6 +110,9 @@ struct Config
     // tier pass off entirely, which is both the escape hatch and the pre-tier answer byte for byte.
     std::string_view              grepIn;                  // --grep-in=code|any (default code; validated in validateConfig)
     std::string_view match;                                // --match=QUERY: tree-sitter structural query (shape search)
+    // R2 (2026-08-20): the pattern surface. --match makes you know each grammar's node-kind vocabulary
+    // before you can ask anything; --pattern takes the CODE SHAPE and compiles it per grammar (src/pattern.h).
+    std::string_view pattern;                              // --pattern=PAT: code-shaped structural search, e.g. 'foo($X, ...)'
     bool             lint = false;                         // --lint: built-in AST checks (rides the same query pass)
     std::string_view lintRulesDir;                         // --lint-rules=DIR: load user YAML lint rules (ast-grep style) — runs alongside/instead of --lint
     bool             sarif = false;                        // --sarif (with --lint / --lint-rules): SAME findings, SARIF 2.1.0 (src/sarif.h)
@@ -929,6 +932,13 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               demand under a fixed budget; tier_budget= says so when it stops, and hits it never\n"
         "                               classified are emitted, never suppressed.\n"
         "    --match=QUERY              tree-sitter structural (shape) query\n"
+        "    --pattern=PAT              structural search written in CODE, not in node kinds: --pattern='foo($X, ...)'. $NAME binds one\n"
+        "                               node (repeat it and both sites must match structurally); $_ binds nothing; ... (or $$$) is an\n"
+        "                               ellipsis over siblings, matched by ONE first-match-wins probe under a hard cap -- both facts on\n"
+        "                               the element. Comments are transparent, everything else is kind- and text-exact ($A + $B does not\n"
+        "                               match a - b). Served: c cpp objc java csharp javascript typescript python go rust swift; ruby,\n"
+        "                               bash and the data tiers are named in unsupported= instead of answered. A pattern no served\n"
+        "                               grammar resolves, or that collapses to a bare token, is REFUSED -- never reported as hits=0.\n"
         "    --query=TERMS              raw BM25 ranking (debug); use --for\n\n"
         "  zoom the detail ladder\n"
         "    --detail=N                 (with --for) importance-weighted detail: FULL bodies for the top-N ranked symbols +\n"
@@ -2002,6 +2012,7 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--grep=",        &Config::grep            , EmptyValue::Refuse, "a literal string to search for",         "--grep=parseArgs",
       nullptr, nullptr, &Config::grepGiven, kGrepDupMessage },
     { "--match=",       &Config::match           , EmptyValue::Refuse, "a tree-sitter s-expression pattern",     "--match='(call_expression)'" },
+    { "--pattern=",     &Config::pattern         , EmptyValue::Refuse, "a code-shaped pattern",                  "--pattern='foo($X, ...)'" },
     { "--lint-rules=",  &Config::lintRulesDir    , EmptyValue::Refuse, "a rules directory path",                 "--lint-rules=lintrules/" },
     { "--lint-select=", &Config::lintSelect      , EmptyValue::Refuse, "a comma-separated PREFIX list, or '*'",  "--lint-select=cache-,goto" },
     { "--lint-ignore=", &Config::lintIgnore      , EmptyValue::Refuse, "a comma-separated PREFIX list, or '*'",  "--lint-ignore=naming-" },
@@ -2230,7 +2241,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 183;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm)
+inline constexpr std::size_t kTotalFlagArms = 184;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2437,7 +2448,7 @@ inline bool honorsPaging( const Config& c ) noexcept
 {
     return c.lint || !c.lintRulesDir.empty() || c.hotspots || !c.callers.empty() || !c.callees.empty()
         || c.tree || c.deps || c.cochange || c.owners || c.clones || c.docDrift || c.communities
-        || c.whereisFlag || !c.grep.empty() || !c.match.empty() || !c.impactSym.empty() || !c.usesSym.empty()
+        || c.whereisFlag || !c.grep.empty() || !c.match.empty() || !c.pattern.empty() || !c.impactSym.empty() || !c.usesSym.empty()
         || c.exercisesFlag || c.communityFlag
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
         || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
@@ -2814,6 +2825,15 @@ inline void validateSarifModifierGuards( Config& c ) noexcept
     if( c.sarif && !c.match.empty() )
     {
         std::fprintf( stderr, "ripwire: --sarif has no effect with --match — it serializes --lint/--lint-rules findings only\n" );
+        c.ok = false;
+    }
+    // R2: --pattern is --match's sibling in exactly the way that matters here — its own <pattern> element,
+    // no rule/severity shape, and an early return from runLint before any finding is assembled. The same
+    // silent no-op, so the same loud refusal; a pairing that looks honored and is not is the shape this
+    // arm exists to prevent, and adding the verb without adding the arm would have reintroduced it.
+    if( c.sarif && !c.pattern.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --sarif has no effect with --pattern — it serializes --lint/--lint-rules findings only\n" );
         c.ok = false;
     }
     // --with-profile's heat_* join has no SARIF field defined yet (the honesty rule: represent it or

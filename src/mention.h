@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "model.h"
+#include "infra/namesplit.h"   // isIdentChar — the ONE ASCII identifier-character predicate
 #include "graph.h"   // R5: applyDocMentionBoost reads g.mentions (the doc->code backtick edges the
                       // --mentions=SYM verb already exposes) — same header gitmine.h already pulls in for
                       // an analogous "read one more Graph field" reason.
@@ -60,10 +61,9 @@ struct RawMention
     bool                     isPath = false;   // came with '/' (or an extension-bearing basename) → match as path
 };
 
-inline bool isIdentChar( char c ) noexcept
-{
-    return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_';
-}
+// Hoisted to infra/namesplit.h (a leaf header) when pattern.h needed the same predicate; the spelling
+// stays via a using-declaration so every call site below — and its gates — are byte-identical.
+using rw::namesplit::isIdentChar;
 
 // token characters: identifiers plus the joiners that make a path/module/symbol mention ('.', '/', '-')
 inline bool isTokenChar( char c ) noexcept { return isIdentChar( c ) || c == '.' || c == '/' || c == '-'; }
