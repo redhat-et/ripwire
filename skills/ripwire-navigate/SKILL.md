@@ -79,8 +79,10 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   they pair with `--grep=`, not `--regex=`. `--grep-scope=line` (default) requires the extra term on the
   SAME matched line; `--grep-scope=file` widens that to anywhere in the same file.
   Hits are SPAN-TIERED by default: a hit inside a comment or a string literal is a mention, not a use, so
-  the answer serves the tightest non-empty tier — code if there is any, else the comment rows (a pattern
-  that lives only in prose is still answered, never emptied) — and says what it held back via
+  the answer serves the CODE tier when any hit is code — and when none is, the ladder COLLAPSES and it
+  serves comment **and** string together as `tier="comment+string"` (so pasting an error message reaches
+  the string literal that emits it, not just some gate script's comment about it; a pattern that lives only
+  in prose is still answered, never emptied) — and says what it held back via
   `suppressed_comment=`/`suppressed_string=`. When those counters appear and the mention IS what you were
   after (an error-message string, a design note), re-ask with `--grep-in=any` for every tier.
 

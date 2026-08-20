@@ -15,8 +15,13 @@
 #       CODE hit only, and discloses suppressed_comment=/suppressed_string= exactly.
 #   (2) ESCAPE HATCH: --grep-in=any shows all three and carries NO tier attributes at all (a plain
 #       untiered answer is byte-identical to the pre-lane shape — purely additive, no re-run hint).
-#   (3) F4 FALLBACK (globally tightest NON-EMPTY tier): a literal that exists ONLY in comments is still
+#   (3) F4 FALLBACK (code, else EVERYTHING ELSE): a literal that exists ONLY in comments is still
 #       answered — with tier="comment", never an honest-looking empty.
+#  (3c/3d) THE COLLAPSED LADDER (wave-3 verifier P4-B): below code there is no ranking — comment and
+#       string are served TOGETHER as tier="comment+string". The ranked ladder it replaces inverted the
+#       flagship answer: one `#` mention of an error message in a gate script outranked the string
+#       literal that emits it. (3c) is the synthetic; (3d) is the verifier's own live repro, guarded by a
+#       --grep-in=any liveness precondition so a moved anchor reds instead of passing vacuously.
 #   (4) AN ANSWER THAT HELD NOTHING BACK CLAIMS NOTHING: a doc-file-only hit prints with no tier
 #       vocabulary at all. (The unclassified population — hits the budget never reached — is arm (5c):
 #       they are COUNTED in tier_unclassified= and always emitted, never suppressed.)
@@ -136,6 +141,56 @@ else
 fi
 [ "$c_hits" = "1" ] && ok "(3b) a token present in BOTH code and comments serves the code tier" \
                     || no "(3b) expected hits=1 (code tier) for TIERTOKEN_onlycomment, got $c_hits (tier=$c_tier)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo "=== (3c) the COLLAPSED ladder — below code, comment and string serve TOGETHER ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# Wave-3 verifier P4-B. The synthetic of arm (3d)'s live repro: an error message EMITTED as a string
+# literal, and MENTIONED once in a gate script's `#` comment. Under the pre-fix ranked ladder
+# (code > comment > string) that single comment outranked the emit site and buried it behind
+# suppressed_string= — "tightest span type" and "most likely to be the answer" come apart exactly here.
+cat >"$SB/src/ladder.c" <<'EOF'
+int ladderHost( void )
+{
+    return reportFailure( "TIERTOKEN_ladder went wrong" );
+}
+EOF
+cat >"$SB/src/laddercheck.sh" <<'EOF'
+# check 9: a TIERTOKEN_ladder line must REJECT the whole file loudly
+echo checking
+EOF
+L_OUT="$( "$BIN" "$SB" --no-cache --grep=TIERTOKEN_ladder 2>/dev/null )"
+l_hits="$( attr hits "$L_OUT" )"
+l_tier="$( attr tier "$L_OUT" )"
+l_sup_c="$( attr suppressed_comment "$L_OUT" )"
+l_sup_s="$( attr suppressed_string "$L_OUT" )"
+if [ "$l_hits" = "2" ] && [ "$l_tier" = "comment+string" ] && [ -z "$l_sup_c" ] && [ -z "$l_sup_s" ]; then
+    ok "(3c) an empty code tier serves comment AND string together, disclosed as tier=comment+string"
+else
+    no "(3c) expected hits=2 tier=comment+string with nothing suppressed, got hits=$l_hits tier=$l_tier suppressed_comment=$l_sup_c suppressed_string=$l_sup_s"
+    printf '%s\n' "$L_OUT" | grep -o '<grep [^>]*>'
+fi
+if printf '%s' "$L_OUT" | grep -q 'ladder\.c' && printf '%s' "$L_OUT" | grep -q 'laddercheck\.sh'; then
+    ok "(3c-b) BOTH the emit site and the gate-script mention are served"
+else
+    no "(3c-b) the collapsed tier dropped one of the two files — the P4-B inversion is back"
+fi
+
+# ── (3d) the verifier's OWN live repro, with a liveness precondition so it can never go vacuously green ──
+# --grep-in=any establishes that both anchors still exist before the default view is judged; if the live
+# text moves, this arm goes RED asking to be re-anchored rather than silently passing on an absent fixture.
+V_ANY="$( "$BIN" "$ROOT" --no-cache --grep="malformed rules line" --grep-in=any --limit=200 2>/dev/null )"
+if printf '%s' "$V_ANY" | grep -q 'src/arch\.h' && printf '%s' "$V_ANY" | grep -q 'test/archcheck\.sh'; then
+    V_DEF="$( "$BIN" "$ROOT" --no-cache --grep="malformed rules line" --limit=200 2>/dev/null )"
+    if printf '%s' "$V_DEF" | grep -q 'src/arch\.h' && printf '%s' "$V_DEF" | grep -q 'test/archcheck\.sh'; then
+        ok "(3d) live repro: a pasted error message serves its EMIT SITE (src/arch.h) as well as the gate-script comment"
+    else
+        no "(3d) live repro: the default answer still buries one of the two — the P4-B ladder inversion is back"
+        printf '%s\n' "$V_DEF" | grep -o '<grep [^>]*>'
+    fi
+else
+    no "(3d) the live anchor moved: --grep-in=any no longer finds \"malformed rules line\" in BOTH src/arch.h and test/archcheck.sh — re-anchor this arm"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== (4) a file with no grammar is never suppressed, and claims nothing ==="
