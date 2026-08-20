@@ -1433,6 +1433,21 @@ the same bytes, and this lens feeds thresholds calibrated in §9 over the pre-`T
 Admitting type mentions there is a real improvement AND a real re-calibration, so it needs its own
 registered round rather than a free ride on a use-site lane.
 
+**A second, narrower input change to the same lens — disclosed 2026-08-20 (V-5), verdicts unchanged.**
+The paragraph above covers the `role=type` *skip*; it did not cover the `namespaceCompatible` narrowing
+that `c604254` also added to `contextratio.h::resolveCandidates`. That narrowing does move the coupling
+lens's ambiguity facts — not for `Type`, which `collectFacts` `continue`s on 28 lines earlier and which
+therefore can never reach `resolveCandidates`, but for **`Extends`**: a base clause now binds only to
+class-like definitions, where before it also offered a same-named free function. Measured effect on this
+tree: **zero** — `--context-ratio` is byte-identical between the `ba3a716` and the merged binary over the
+1 304-file corpus (18 976 B), as are `--metrics` and `--quality-panel`, and it is zero on
+`test/typereffix` too. It is non-zero only on a corpus that carries a same-name class/function collision
+in a base-clause position, which `test/nsfilterfix` is built to be (`Derived`: `ents` 2→1, `amb` 1→0).
+The §9 calibration corpus is therefore only affected to the extent it holds such collisions, and this
+disclosure exists so a re-derivation of §9 knows to check rather than assume. `test/nsfiltercheck.sh`
+arm 5 pins the effect; the two source comments that attributed it to `RefRole::Type` were corrected in
+the same commit.
+
 **Battery at `bf67225`.** `gates=437 pass=434 skip=2 fail=1`; the one failure is
 `ripwirepubliccheck.sh` arm 3, verified RED at the clean integration baseline `ba3a716` in a detached
 worktree — pre-existing, on three wave-3 lines this lane never touched. ASan+LSan clean on the default

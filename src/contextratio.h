@@ -253,10 +253,20 @@ inline void resolveCandidates( const IngestResult& ing, const NameDefs& byName, 
             break;
         }
         // langCompatible AND namespaceCompatible — the same pair buildGraph's candidate set is gated by.
-        // This is the one place the namespace gate has a MEASURABLE effect: unlike the call-edge loop, this
-        // pass resolves EVERY role, so without it a bare RefRole::Type mention of `Handler` would count a
-        // same-named free function as a candidate and fold into this scan's ambiguity facts. A type mention
-        // can only ever mean a class, struct or interface, so the narrow is sound, not a guess.
+        // This is the one place the namespace gate has a MEASURABLE effect: unlike the call-edge loop, which
+        // admits only Call and Macro, this pass resolves every role it is HANDED.
+        //
+        // The role that reaches it is RefRole::Extends, NOT RefRole::Type — corrected 2026-08-20 after
+        // adversarial verification found both this comment and graph.h's naming the wrong one. There is
+        // exactly one caller, collectFacts below, and it `continue`s on Type 28 lines before it calls here
+        // (see the DELIBERATELY OUT OF SCOPE block), so a Type reference can never arrive. What keeps a type
+        // mention from spraying across same-named functions is that `continue`, not this predicate.
+        //
+        // What the predicate actually does here, measured on test/nsfilterfix: the base clause of
+        // `class Derived : public Handler` is an Extends reference, and without the narrow it binds to BOTH
+        // `class Handler` and the free `int Handler( int )` — ents 1 -> 2, amb 0 -> 1 on Derived's row. A base
+        // clause can only ever mean a class, struct or interface, so the narrow is sound, not a guess.
+        // Pinned by test/nsfiltercheck.sh arm 5, which is red under full removal of the narrowing.
         if( langCompatible( ing.symbols[id].lang, r.lang ) && namespaceCompatible( r.role, ing.symbols[id].kind ) )
         {
             out.push_back( id );
