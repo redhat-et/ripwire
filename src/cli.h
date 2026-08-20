@@ -1694,10 +1694,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               Deterministic: same 2-run byte-diff + stable key order contract as the XML.\n"
         "    --limit=N --offset=M       paginate a high-cardinality verb. HONORED by: --deps --callers --callees --tree\n"
         "                               --lint --hotspots --clones --cochange --owners --communities --community --doc-drift\n"
-        "                               --whereis --grep/--regex --match --impact --uses --exercises --seams --zoom\n"
-        "                               --external-surface --dead-code --mentions --graph-query --stray-content --test-gate\n"
-        "                               --readability --ensemble --quality-panel --context-ratio --nonlocal-state\n"
-        "                               --comment-coherence --naming-consistency.\n"
+        "                               --whereis --grep/--regex --match --pattern --impact --uses --exercises --seams\n"
+        "                               --zoom --external-surface --dead-code --mentions --graph-query --stray-content\n"
+        "                               --test-gate --readability --ensemble --quality-panel --context-ratio\n"
+        "                               --nonlocal-state --comment-coherence --naming-consistency.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
         "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio\n"
@@ -2439,7 +2439,7 @@ inline void validatePlanLanes( Config& c ) noexcept
 // above, so it belongs in the honoring set, not the refusing one.
 constexpr const char* kPagingHonoringVerbs =
     "--lint --hotspots --callers --callees --tree --deps --cochange --owners --clones --doc-drift "
-    "--communities --community --whereis --grep/--regex --match --impact --uses --exercises "
+    "--communities --community --whereis --grep/--regex --match --pattern --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
     "--readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence "
     "--naming-consistency";
