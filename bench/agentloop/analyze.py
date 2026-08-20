@@ -24,6 +24,9 @@
 #   python3 bench/agentloop/analyze.py --results results.json
 import argparse, json, math, pathlib, random, statistics, sys
 
+sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
+import select_tasks   # reuse frozen_partition() — see load_results()'s B1 re-derivation check below
+
 SCHEMA = "ripwire-agentloop-results-v3"   # v3: three arms, resolved_model + harness_version fields
 ARM_BASELINE, ARM_RIPWIRE = "baseline", "ripwire_cli"
 
@@ -33,6 +36,21 @@ def load_results( path ):
     data = json.loads( pathlib.Path( path ).read_text() )
     if data.get( "schema" ) != SCHEMA:
         raise SystemExit( f"{path}: unexpected schema {data.get('schema')!r} (expected {SCHEMA!r}); refusing" )
+    # B1 fix (2026-08-20 outcome-harness-fixes lane): the mirror of run_agentloop.py's load_tasks_lock()
+    # check, on the OTHER side of the seam. A results file was necessarily produced against SOME
+    # tasks.lock at run time, but a stale copy of that lock, a hand-edited results file, or results
+    # merged in from a run against an older lock could still carry a repo that the CURRENT split
+    # contract sends to LocBench train. Every record names its own repo, so this can be re-derived
+    # here with no dependency on which lock file produced it — fail closed on the contract before any
+    # statistic is computed from a possibly-contaminated instance.
+    contaminated = sorted( { r["repo"] for r in data.get( "records", () )
+                             if select_tasks.frozen_partition( r["repo"] ) != "heldout" } )
+    if contaminated:
+        raise SystemExit(
+            f"{path}: results contain instance(s) from repo(s) that re-derive to LocBench TRAIN under "
+            f"the current split rule, not heldout: {contaminated}. These results were produced against "
+            f"a lock that has since gone stale (or never honored the split contract) — refusing to "
+            f"analyze a possibly-contaminated instance set." )
     return data
 
 def pair_by_task_seed( records ):

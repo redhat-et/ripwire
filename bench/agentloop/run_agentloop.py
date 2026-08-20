@@ -114,6 +114,25 @@ def load_tasks_lock( path ):
         raise SystemExit( f"{path}: content hash mismatch (expected {expected}, computed {actual}); "
                            f"the lock file was hand-edited or corrupted — refusing (fail-closed, no "
                            f"silent re-derivation of the task list)" )
+    # B1 fix (2026-08-20 outcome-harness-fixes lane): content_sha256 only proves the file was not
+    # hand-edited AFTER selection — it says nothing about whether the SPLIT CONTRACT the lock claims to
+    # honor ("repo-disjoint from LocBench train") still holds. A lock generated against a stale copy of
+    # the rule (or hand-assembled to match an old README count) can pass the hash check above while
+    # locking a repo that the CURRENT frozen_partition() rule sends to "train". That happened: the
+    # committed tasks.lock as of 2026-08-20 locks 4 pydata/xarray instances even though
+    # frozen_partition("pydata/xarray") == "train" today. Re-derive the contract from the same rule
+    # select_tasks.py uses (not a copy of it — the imported module, so the two can never diverge) for
+    # EVERY locked instance, every time the lock is loaded, and fail closed on the CONTRACT rather than
+    # only on the bytes.
+    contaminated = sorted( { i["repo"] for i in lock["instances"]
+                             if select_tasks.frozen_partition( i["repo"] ) != "heldout" } )
+    if contaminated:
+        raise SystemExit(
+            f"{path}: {len(contaminated)} locked repo(s) re-derive to LocBench TRAIN under the current "
+            f"split rule, not heldout: {contaminated}. content_sha256 matching only proves the file was "
+            f"not hand-edited; it does NOT prove the split contract still yields this set. Regenerate "
+            f"the lock with select_tasks.py against the current frozen_partition() rule — refusing to "
+            f"run against a contaminated lock (fail-closed on the contract, not just the hash)." )
     return lock
 
 def make_record( task, arm, seed, harness, model, status="not_implemented", **overrides ):
