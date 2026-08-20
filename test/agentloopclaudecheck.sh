@@ -286,6 +286,20 @@ if w_x86 is None:
     ok( "swebench_arch_warning is silent on an x86_64 host" )
 else:
     no( "swebench_arch_warning fired on x86_64: %r" % ( w_x86, ) )
+
+# ── 11. B3 — the ripwire arm's CLI invocation uses --token-budget, never --max-tokens ────────────
+# --max-tokens is not read by --for (verified against the pinned binary — see the live flag-probe
+# below, run outside this heredoc); every ripwire-arm run before this fix received an unbudgeted
+# bundle. --token-budget is the flag --for actually reads and reports fit against.
+suf = R.arm_suffix( "ripwire_cli", "/shim/ripwire" )
+if "--token-budget=4000" in suf:
+    ok( "ripwire arm's CLI invocation uses --token-budget=4000 (the flag --for actually reads)" )
+else:
+    no( "ripwire arm's CLI invocation is missing --token-budget=4000: %r" % ( suf, ) )
+if "--max-tokens" in suf:
+    no( "ripwire arm's CLI invocation still names --max-tokens, which --for silently ignores" )
+else:
+    ok( "ripwire arm's CLI invocation no longer names --max-tokens" )
 PY
 
 while IFS= read -r line; do
@@ -298,6 +312,31 @@ while IFS= read -r line; do
 done < "$TMP/out.txt"
 
 grep -q 'Traceback' "$TMP/out.txt" && no "python contract checks raised"
+
+# ── 12. B3 live flag-probe — the exact flags this file's prompts/wrap invocations use, shot at a
+# REAL ripwire binary, not just asserted in strings. Optional: a missing binary SKIPs rather than
+# FAILs, so this stays meaningful on a bench-only checkout with no C++ build and green once one
+# exists (this repo's own build, or RIPWIRE_BIN naming a pinned worktree binary explicitly).
+PROBE_BIN="${RIPWIRE_BIN:-}"
+if [ -z "$PROBE_BIN" ] && [ -x "$ROOT/build/ripwire" ]; then
+    PROBE_BIN="$ROOT/build/ripwire"
+fi
+if [ -n "$PROBE_BIN" ] && [ -x "$PROBE_BIN" ]; then
+    PROBE_DIR="$TMP/probecorpus"; mkdir -p "$PROBE_DIR"
+    printf 'int f(){return 1;}\n' > "$PROBE_DIR/a.c"
+    if "$PROBE_BIN" "$PROBE_DIR" --for="probe query" --token-budget=4000 >/dev/null 2>"$TMP/probe1.err"; then
+        ok "pinned binary ($PROBE_BIN) accepts --for=... --token-budget=4000 (exit 0)"
+    else
+        no "pinned binary rejected --for=... --token-budget=4000: $( cat "$TMP/probe1.err" )"
+    fi
+    if "$PROBE_BIN" wrap claude --force >/dev/null 2>"$TMP/probe2.err"; then
+        ok "pinned binary accepts wrap claude --force (exit 0)"
+    else
+        no "pinned binary rejected wrap claude --force: $( cat "$TMP/probe2.err" )"
+    fi
+else
+    skip "no ripwire binary resolvable (build $ROOT/build/ripwire, or set RIPWIRE_BIN=<path>) — B3 live flag-probe not run"
+fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
