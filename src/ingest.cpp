@@ -1483,7 +1483,27 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 66;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 67;           // bump on any grammar/.scm/extraction change
+                                                      // 67 (2026-08-20 RefRole::Type use-sites, typerefcheck.sh):
+                                                      //    usesVisitNode's accept set was the single test
+                                                      //    `strcmp( t, "identifier" ) != 0 → return`, so a
+                                                      //    `type_identifier` node — a bare TYPE mention in a
+                                                      //    signature, a declaration or a template argument —
+                                                      //    was captured by NOTHING. It now emits a RawRef with
+                                                      //    the new RefRole::Type (model.h), which joins
+                                                      //    Read/Write/Import/Extends on the NEVER-in-the-CSR
+                                                      //    list, so the default ranked map, PageRank, edges=
+                                                      //    and ambiguous= are unchanged BY CONSTRUCTION — the
+                                                      //    value-uses pass is also RICH-family only, so the
+                                                      //    lean blob that backs the default map holds no such
+                                                      //    ref at all. What changes is the extracted SET of
+                                                      //    references, which the RICH per-file cache record
+                                                      //    persists (writeRef/readRef already carry `role`, so
+                                                      //    the wire FORMAT is unchanged — a v66 rich blob would
+                                                      //    simply be missing every type row and must be
+                                                      //    rejected rather than served). quality.h
+                                                      //    kIngestParserVerMirror bumped in the SAME commit.
+                                                      //    Registered + measured: docs/EVALS.md §4.
                                                       // 66 (2026-08-19 subtoken acronym shredding, subtokencheck.sh):
                                                       //    the shared subtoken state machine (lexindex.h
                                                       //    forEachLexSubtoken/forEachLexSubtokenHashed) stopped
@@ -8943,17 +8963,112 @@ struct UseCtx
     std::vector<RawRef>* refs = nullptr;
 };
 
+// A bare TYPE-MENTION node — the RefRole::Type accept set. DELIBERATELY NARROWER than isBaseTypeNode
+// above, which was written for base clauses and is a superset that would misfire here:
+//   * `identifier` is in that table for TS/Python base clauses; here it is already the VALUE path below,
+//     and accepting it twice would re-label every ordinary read as a type.
+//   * `qualified_identifier` / `scoped_type_identifier` / `generic_type` / `generic_name` /
+//     `qualified_name` are CONTAINERS whose own name segment is a `type_identifier` child. Accepting the
+//     container as well would emit two refs for one mention, and `qualified_name` in particular is C#'s
+//     dotted-value node — a value read wearing a type node's name.
+// So: the leaf node that actually spells a type, and nothing else. `std::vector<Widget>` yields exactly
+// one Type ref (`Widget`); `vector` is skipped by isNonValueContext's qualified-segment rule, the same
+// rule that already keeps a qualified VALUE read out of the index. The value-uses pass is armed for
+// C++/ObjC/Python only (see streamSideCaptures' arming), and Python spells its annotations with plain
+// `identifier`, so `user_type` (Swift) / `type_identifier` (Rust, Java, TS) are unreachable today and are
+// NOT listed — a kind in this table that no armed language can produce is a claim the gate cannot check.
+inline bool isTypeMentionNode( const char* nt ) noexcept
+{
+    static const char* const kTypeMentionKinds[] = {
+        "type_identifier",   // C/C++/ObjC — the leaf node that names a class, struct, enum or typedef
+    };
+    for( const char* k : kTypeMentionKinds )
+    {
+        if( std::strcmp( nt, k ) == 0 )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A type-name node that is NOT a mention of some other definition. Three shapes, and each would be a
+// distinct kind of lie in the use-site index:
+//   (a) the NAME of a type DEFINITION (`struct Widget {…}`, `enum class E : int`, `using A = B;`,
+//       `typedef struct X Y;`) — a definition is not a use of itself, and emitting one would give every
+//       indexed type a permanent self-reference and inflate every blast radius by exactly one row.
+//   (b) a BASE CLAUSE — that position already has its own role (RefRole::Extends, emitted by
+//       captureBases), so a second row would double-count the one relation the tool already models.
+//   (c) a TYPE PARAMETER's own name (`template< typename T >`) — T is being declared here, not named.
+inline bool isTypeDeclarationSite( TSNode id ) noexcept
+{
+    const TSNode parent = ts_node_parent( id );
+    if( ts_node_is_null( parent ) )
+    {
+        return false;
+    }
+    const char* pt = ts_node_type( parent );
+
+    // (b) base clause — RefRole::Extends owns this position.
+    if( std::strcmp( pt, "base_class_clause" ) == 0 )
+    {
+        return true;
+    }
+
+    // (c) a type parameter DECLARES its name.
+    if(    std::strcmp( pt, "type_parameter_declaration" ) == 0 || std::strcmp( pt, "variadic_type_parameter_declaration" ) == 0
+        || std::strcmp( pt, "optional_type_parameter_declaration" ) == 0 )
+    {
+        return true;
+    }
+
+    // (a) the `name` field of a type definition — probe the FIELD, not the node type, so a base name or a
+    // member type sitting under the same parent kind stays a genuine mention.
+    static const char* const kTypeDefParents[] = {
+        "struct_specifier", "class_specifier", "union_specifier", "enum_specifier", "alias_declaration", "concept_definition",
+    };
+    for( const char* k : kTypeDefParents )
+    {
+        if( std::strcmp( pt, k ) == 0 )
+        {
+            const TSNode nm = ts_node_child_by_field_name( parent, "name", 4 );
+            if( !ts_node_is_null( nm ) && sameSpan( nm, id ) )
+            {
+                return true;
+            }
+        }
+    }
+    // `typedef struct X Y;` — Y is the DECLARATOR field and is the new name; X keeps its mention.
+    if( std::strcmp( pt, "type_definition" ) == 0 )
+    {
+        const TSNode dc = ts_node_child_by_field_name( parent, "declarator", 10 );
+        if( !ts_node_is_null( dc ) && sameSpan( dc, id ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void usesVisitNode( UseCtx& cx, TSNode n, const char* t )
 {
     FUSEPROBE_BUMP( kUses );
-    // capture only bare value identifiers (C++ `identifier`, Python `identifier`). field_identifier reads
-    // (`obj.field` non-call) are intentionally out of scope — member-field use is a richer relation we keep
-    // for a later pass; the gate exercises plain locals/globals, which are `identifier` nodes.
-    if( std::strcmp( t, "identifier" ) != 0 )
+    // Two accept sets, one visitor. (1) bare value identifiers (C++ `identifier`, Python `identifier`) →
+    // role=Read/Write, unchanged. field_identifier reads (`obj.field` non-call) are still intentionally out
+    // of scope — member-field use is a richer relation we keep for a later pass. (2) bare TYPE mentions
+    // (`type_identifier`) → role=Type: a type named in a signature, a declaration or a template argument IS
+    // a dependency on that type, and it was captured by NOTHING before this. Both roles stay OUT of the call
+    // graph (buildGraph admits Call and Macro only), so the default ranked map is byte-identical either way.
+    const bool typeMention = isTypeMentionNode( t );
+    if( !typeMention && std::strcmp( t, "identifier" ) != 0 )
     {
         return;
     }
     if( isCallCallee( n ) || isNonValueContext( n ) )
+    {
+        return;
+    }
+    if( typeMention && isTypeDeclarationSite( n ) )
     {
         return;
     }
@@ -8966,7 +9081,7 @@ void usesVisitNode( UseCtx& cx, TSNode n, const char* t )
         r.startByte = a;
         r.line      = ts_node_start_point( n ).row + 1;
         r.lang      = cx.lang;
-        r.role      = isWriteTarget( n ) ? RefRole::Write : RefRole::Read;
+        r.role      = typeMention ? RefRole::Type : ( isWriteTarget( n ) ? RefRole::Write : RefRole::Read );
         r.name      = finalSegment( src.substr( a, b - a ) );   // bare identifier → already final segment
         cx.refs->push_back( std::move( r ) );
     }

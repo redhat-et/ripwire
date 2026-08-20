@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 429 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 431 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -1296,6 +1296,152 @@ for `bm25-desc`'s +8.
 
 ---
 
+### Type-mention use-sites + namespace-compatible candidates — PRE-REGISTERED 2026-08-20 (before any feature code)
+
+Two resolver-precision items from the stack-graphs recon lane, registered together because item #2 is
+the filter that is supposed to keep item #1 from *adding* ambiguity, and because they would share one
+`kParserVer` bump. Item #3 of that report (depth-2 receiver-chain resolution) is explicitly **not** in
+this round.
+
+**#1 — `RefRole::Type`.** `ingest.cpp::usesVisitNode` opens with `strcmp( t, "identifier" ) != 0 →
+return`, so a `type_identifier` / `user_type` node — a bare TYPE mention in a signature, a declaration
+or a template argument — is captured by nothing. `RefRole` today is
+`Call | Read | Write | Import | Extends | Macro`; only `Extends` (base clause) and `isCompose`
+(member-variable declared type) touch a type position, and both are *specific declaration forms*, not
+a general mention. The `--uses` legend currently states the absence as a promise. The change adds
+`RefRole::Type`, widens the accept set through a declarative kind table, and keeps the role OUT of the
+call-graph CSR exactly as `Read`/`Write`/`Import`/`Extends` already are (`graph.h` admits `Call` and
+`Macro` only).
+
+**#2 — `namespaceCompatible( RefRole, SymKind )`.** One predicate beside the existing `langCompatible`,
+generalizing the kind filters the graph already hard-codes in three places (the SCIP inherit overlay's
+`isClassLikeK`, the implementors builder's `isClassLike`, and the compose-edge builder's
+`k != SymKind::Class && k != SymKind::Struct`). **`RefRole::Call` stays UN-narrowed**: in C++ `Foo(x)`
+is legitimately a constructor call or a functional cast, and narrowing `Call` to `Function|Method`
+would drop real edges — `resolve.h`'s standing doctrine is that a *wrong* narrow is worse than no
+narrow.
+
+**Baseline, re-derived on this lane's own tree** (`integration/harvestexec-2026-08-20` @ `ba3a716`,
+`./build/ripwire .` on ripwire's own checkout, working tree clean of untracked plan docs):
+
+```
+files=1291 symbols=11240 edges=13755 ambiguous=5466 unresolved=3160 precise=3
+```
+
+`ambiguous/edges = 39.7%`. Use-site counts for five type-only symbols, same binary:
+`--uses=IngestResult` **0**, `--uses=Narrower` **0**, `--uses=ScipOverlay` **0**, `--uses=AffResult`
+**0**, `--uses=VarSpan` **1**. (The recon report measured `files=1163 … edges=12072 ambiguous=4885` on
+a different branch with a different untracked file set; the numbers above are this lane's own and are
+the ones the criteria below are read against.)
+
+**Success criteria, registered before the code.**
+
+* **#1a** On a purpose-built fixture where a type is named ONLY in type position (parameter type,
+  return type, member type, template argument) and never called or constructed, `--uses=<T>` goes from
+  `count="0"` to ≥ 4 rows carrying an honest role marker at the exact `file:line` of each mention.
+* **#1b** `edges=` and `ambiguous=` over that fixture are **unchanged, byte-for-byte on the whole
+  default map**, before and after — the proof that `Type` never entered the CSR.
+* **#1c** Negative control: a *local variable* whose name equals the type's name yields no type-role
+  row (it is a `Read`/`Write` site, not a type mention).
+* **#2a** `ambiguous=` on ripwire's own tree **decreases** against the 5466 baseline.
+* **#2b** Zero known-good edges lost on a pinned fixture set: the whole gate suite stays green, and an
+  ordinary constructor call `Handler h;` keeps its edge.
+* **#2c** The `Call`-role edge count is unchanged by the predicate alone.
+
+**Failure criteria that revert the item.**
+
+* #1 reverts if the default map over any corpus is not byte-identical (a `Type` ref reaching the CSR),
+  if determinism breaks, or if a type-role row is emitted at a *definition* site (a self-reference).
+* #2 reverts if `ambiguous=` fails to decrease (criterion #2a unmet — the predicate is then a no-op and
+  is not worth a behavioral surface), or if any known-good edge is dropped.
+
+**What moves if either lands.** #1 changes extraction ⇒ `kParserVer` 66 → 67 and
+`quality.h::kIngestParserVerMirror` 66 → 67 in the same commit, plus the `--uses` legend, the `--help`
+text, and every recorded capture in `docs/COMMANDS.md` (arm G is byte-parity). #2 moves `edges=` /
+`ambiguous=` on real corpora ⇒ the same re-capture obligation.
+
+**Red-first reference binary.** A `build/ripwire` built from `ba3a716` — the same commit this lane
+branches from — kept in a separate worktree. Every gate below is recorded FAILING against it before the
+feature code exists.
+
+#### RESULT — #1 ACCEPT, #2 REJECT on its own registered criterion (2026-08-20)
+
+**Red-first, recorded.** Against the `ba3a716` binary, `test/typerefcheck.sh` failed 5 arms / passed 5
+and `test/nsfiltercheck.sh` failed 1 / passed 7 — each failing on exactly the arms the feature code is
+supposed to turn green, and on no others. Both are `ALL PASS` on the lane binary.
+
+**#1a MET.** `--uses` counts on this tree, pre-fix binary → lane binary, same working tree:
+
+| symbol | before | after | | symbol | before | after |
+| --- | --- | --- | --- | --- | --- | --- |
+| `IngestResult` | 0 | **416** | | `ScipOverlay` | 0 | **7** |
+| `Symbol` | 2 | **308** | | `AffResult` | 0 | **5** |
+| `RawRef` | 0 | **37** | | `VarSpan` | 1 | **4** |
+| `ComposeEdge` | 0 | **10** | | `UseCtx` | 0 | **3** |
+| `ShadowEvidence` | 0 | **2** | | `Narrower` | 0 | **1** |
+
+On the fixture, `--uses=Widget` returns 5 `role="type"` rows at the four pinned mention lines.
+
+`Narrower` reaching 1 rather than its 14 textual mentions is the disclosed limit doing its job, not a
+miss: the other 13 are the SCOPE segment of `Narrower::appendUint`, and a qualified name's segment has
+never been a use-site here — the same rule that already excludes a qualified VALUE read. The legend now
+states that limit rather than leaving it to be discovered.
+
+**#1b MET, in the strongest available form.** Not "`edges=`/`ambiguous=` are unchanged" but the whole
+default map is **byte-identical** between the pre-fix binary and the lane binary on the same tree
+(`files=1300 symbols=11264 edges=13761 ambiguous=5468 unresolved=3160 precise=3` either way). Two
+independent reasons, both load-bearing: `buildGraph` admits only `Call` and `Macro`, and the value-uses
+pass is RICH-family only, so the lean blob that backs the default map holds no type row at all.
+
+**#1c MET.** The local variable named `Widget` yields no type row, and the definition site is not a
+use-site.
+
+**#2a NOT MET ⇒ REJECT, and the criterion is unmeetable at the registered site.** `ambiguous=` is
+unchanged (5468 → 5468). This is not a weak effect, it is a proof: the call-edge resolve loop admits
+only `role=Call` — un-narrowed by the hard constraint — and `role=Macro`, whose name is uniquely a macro
+by construction (`retagMacroCallReferences` assigns the role only when `scanMacroNames` reports flags==1
+over exactly the language set `langCompatible` bridges, so every candidate surviving the language gate
+is already `SymKind::Macro`). A namespace filter there can therefore never remove a candidate. The
+registered failure criterion says this reverts the item, and it does: `namespaceCompatible` stays as the
+single statement of the rule and as the executable form of the Call-un-narrowed constraint, but it
+buys **no measured ambiguity reduction** and is not published as one.
+
+Three claims in the recon report that this re-derivation corrected, recorded so the next round does not
+re-pay for them:
+
+* *"Every `Extends` reference today sprays across every same-named definition regardless of kind."*
+  False — the implementors builder has been kind-filtered all along (`isClassLike`), and `Extends`
+  references never reach the call-edge loop at all.
+* *"Expected effect on `amb=`: real and unconditional."* False, per the proof above.
+* *"`--uses`, `--impact`, `--affected`, `--situ`, `--pr-context`, `--test-gate` all gain the type-only
+  dependents."* Only the RICH-family verbs can see the new references, and `--impact` / `--affected` /
+  `--situ` / `--pr-context` are LEAN and CSR-driven. What genuinely gains is `--uses` and the MCP
+  server's `uses` / `find_referencing_symbols` (the MCP index ingests RICH).
+
+**#2b MET.** No known-good edge lost: 434/437 gates pass, `Handler( 3 )` keeps both its `role="call"`
+site and its call edge, and the byte-identical default map is a stronger statement than the fixture set.
+
+**#2c MET, trivially** — byte-identical map ⇒ unchanged Call-role edge count.
+
+**Cost.** The RICH per-file cache blob grows 15.48 MB → 15.86 MB (+2.5%) on this tree; the LEAN blob is
+unchanged. Type mentions are dense, so this is the volume the recon report flagged, measured: it is
+real and it is small.
+
+**Deliberately out of scope, and disclosed rather than taken silently.** `contextratio` skips
+`role=type`: a member declaration already contributes a site through its HAS-A compose reference over
+the same bytes, and this lens feeds thresholds calibrated in §9 over the pre-`Type` reference stream.
+Admitting type mentions there is a real improvement AND a real re-calibration, so it needs its own
+registered round rather than a free ride on a use-site lane.
+
+**Battery at `bf67225`.** `gates=437 pass=434 skip=2 fail=1`; the one failure is
+`ripwirepubliccheck.sh` arm 3, verified RED at the clean integration baseline `ba3a716` in a detached
+worktree — pre-existing, on three wave-3 lines this lane never touched. ASan+LSan clean on the default
+map, `--uses`, `--metrics` and both fixtures; determinism byte-identical ×3 cold, warm==cold, and ×3 on
+the RICH `--uses` path; `xmllint` clean; golden unchanged; `--quality-delta` exit 0 with
+`regressions="0" gating="0"` (the 16 stale acks are identical at the baseline).
+
+---
+
 ## 5. Token and output economy
 
 ### `--pack-signatures`
@@ -1636,7 +1782,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **429 gate scripts**, all of which exist on disk.
+naming **431 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -2444,7 +2590,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 429. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 431. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a

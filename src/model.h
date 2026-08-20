@@ -123,8 +123,8 @@ enum class RecvKind : std::uint8_t { None, ThisObj, NamedVar };
 // use-site index (`--uses=SYM`) can report the resolvable places a name is referenced, not just calls.
 // §H4: "complete" is what this comment used to claim, and it is not true of any static name-based
 // extractor — the index is a FLOOR, disclosed as counts_floor= (src/graphlegend.h).
-// Smallest int that fits (≤ 6 roles) → SoA-friendly. The role is ORTHOGONAL to the call graph: only
-// Call refs become PageRank edges; Read/Write/Import/Extends are recorded for the use-site index and
+// Smallest int that fits (≤ 7 roles) → SoA-friendly. The role is ORTHOGONAL to the call graph: only
+// Call refs become PageRank edges; Read/Write/Import/Extends/Type are recorded for the use-site index and
 // NEVER enter the CSR (so the default ranked map is unchanged — G5).
 //   Call    — the name is in function/callee position `f(...)` / `x.m(...)` (the existing call edges).
 //   Read    — the name is referenced as a VALUE / operand (`y = x + 1`, `return foo`, `f(bar)` arg).
@@ -139,7 +139,15 @@ enum class RecvKind : std::uint8_t { None, ThisObj, NamedVar };
 //             records the site as Call (a per-file parse cannot know another file's #defines); the retag to
 //             Macro is the corpus-wide post-pass retagMacroCallReferences below, run at every ingest exit —
 //             so a cached role=Call round-trips and is re-judged fresh each run.
-enum class RefRole : std::uint8_t { Call, Read, Write, Import, Extends, Macro };
+//   Type    — the name is a bare TYPE mention: SYM named as a type in a signature, a declaration or a template
+//             argument (`Widget makeOne( Widget in )`, `std::vector<Widget>`, `const Widget* p`). Joins the
+//             NEVER-in-the-CSR list above — a type mention is a dependency, not a call, so it must not touch
+//             PageRank or the default ranked map. Before this role existed a type-ONLY dependent was invisible
+//             to the whole use-site index: `--uses=IngestResult` reported 0 against 438 real mentions across
+//             68 files, so the most-depended-upon data structure in this repo read as a graph isolate.
+//             Distinct from Extends (a base clause) and from isCompose (a member variable's declared type) —
+//             those two are SPECIFIC declaration forms and are unchanged; this is the general mention.
+enum class RefRole : std::uint8_t { Call, Read, Write, Import, Extends, Macro, Type };
 static_assert( sizeof( RefRole ) == 1, "RefRole must be a single byte (SoA-friendly, smallest int that fits)" );
 
 // the terse `role=` attribute string for the use-site index (declarative table, not a switch chain).
@@ -153,6 +161,7 @@ inline const char* refRoleTag( RefRole r ) noexcept
         case RefRole::Import:  return "import";
         case RefRole::Extends: return "extends";
         case RefRole::Macro:   return "macro";
+        case RefRole::Type:    return "type";
         default:               return "read";
     }
 }
@@ -389,7 +398,7 @@ struct Reference
     bool          isInherit  = false;     // true ⇒ a base-class/implements edge (derived → base), not a call
     bool          isDocLink  = false;     // true ⇒ a doc→code mention (backtick `ident` in markdown), not a call
     bool          isCompose  = false;     // true ⇒ a HAS-A member-variable type edge (S5-E); NEVER enters call graph / PageRank
-    RefRole       role       = RefRole::Call;   // ABS-3 use-site role (call/read/write/import/extends); see RefRole.
+    RefRole       role       = RefRole::Call;   // ABS-3 use-site role (call/read/write/import/extends/type); see RefRole.
                                                 //   Only Call enters the call graph; the rest power --uses only.
     RecvKind      recv       = RecvKind::None;  // call-site receiver shape (P2-D narrowing); see RecvKind
     std::uint16_t argCount   = 0;         // B2.2: number of positional args at the call site when countable; 0 otherwise

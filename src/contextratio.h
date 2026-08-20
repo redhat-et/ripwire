@@ -252,7 +252,12 @@ inline void resolveCandidates( const IngestResult& ing, const NameDefs& byName, 
         {
             break;
         }
-        if( langCompatible( ing.symbols[id].lang, r.lang ) )
+        // langCompatible AND namespaceCompatible — the same pair buildGraph's candidate set is gated by.
+        // This is the one place the namespace gate has a MEASURABLE effect: unlike the call-edge loop, this
+        // pass resolves EVERY role, so without it a bare RefRole::Type mention of `Handler` would count a
+        // same-named free function as a candidate and fold into this scan's ambiguity facts. A type mention
+        // can only ever mean a class, struct or interface, so the narrow is sound, not a guess.
+        if( langCompatible( ing.symbols[id].lang, r.lang ) && namespaceCompatible( r.role, ing.symbols[id].kind ) )
         {
             out.push_back( id );
         }
@@ -280,6 +285,18 @@ inline Facts collectFacts( const IngestResult& ing, const NameDefs& byName,
         if( r.isDocLink || r.lang == Lang::Markdown )
         {
             continue;   // a doc→code mention is a reader's cross-reference, not a thing the code resolves
+        }
+        if( r.role == RefRole::Type )
+        {
+            // DELIBERATELY OUT OF SCOPE, and this is a scoping decision rather than a judgement that a type
+            // mention is not context. Two reasons. (1) A member declaration `Shared m_a;` already contributes
+            // a site here through its HAS-A compose reference, which occupies the same bytes — admitting the
+            // type mention as well would count ONE thing a reader must read TWICE. (2) The coupling/cohesion
+            // thresholds this lens feeds were calibrated over the pre-Type reference stream (docs/EVALS.md
+            // §9); moving their input silently, from a lane registered to change the USE-SITE index, would
+            // invalidate a calibrated instrument as a side effect. Admitting type mentions here is a real
+            // improvement and a real re-calibration — it needs its own registered round, not a free ride.
+            continue;
         }
         const bool          hasFile = r.fileId < fileCount;
         const bool          hasSym  = r.fromSymbol != kNoNode && r.fromSymbol < symbolCount
