@@ -105,6 +105,10 @@ struct Config
     std::vector<std::string_view> grepAnd;                 // --and=TERM (repeatable): every term must ALSO be present
     std::vector<std::string_view> grepNot;                 // --not=TERM (repeatable): the term must be ABSENT
     std::string_view              grepScope;               // --grep-scope=line|file (default line; validated in validateConfig)
+    // R-H (2026-08-15 harvest report-ugrep §F3/§F4, funded by E5): --grep-in=code|any — which SPAN TIER a
+    // hit must sit in to print. Empty ⇒ the default, code (the tightest non-empty tier); "any" turns the
+    // tier pass off entirely, which is both the escape hatch and the pre-tier answer byte for byte.
+    std::string_view              grepIn;                  // --grep-in=code|any (default code; validated in validateConfig)
     std::string_view match;                                // --match=QUERY: tree-sitter structural query (shape search)
     bool             lint = false;                         // --lint: built-in AST checks (rides the same query pass)
     std::string_view lintRulesDir;                         // --lint-rules=DIR: load user YAML lint rules (ast-grep style) — runs alongside/instead of --lint
@@ -915,6 +919,12 @@ inline void printUsage( std::FILE* out ) noexcept
         "      --grep-scope=line|file   modifies --and=/--not=: line (default) requires the SAME matched line; file requires\n"
         "                               anywhere in the same file. Second occurrence of --grep=/--regex= itself REFUSES\n"
         "                               (naming --and= as the AND spelling) rather than silently overwriting the pattern.\n"
+        "      --grep-in=code|any       SPAN TIERS: which tree-sitter span a hit must sit in to print. code (default) serves the\n"
+        "                               TIGHTEST NON-EMPTY tier -- code, else comment, else string -- and discloses what it held\n"
+        "                               back (suppressed_comment=/suppressed_string=); a pattern living only in comments is still\n"
+        "                               answered, never silently emptied. any turns tiering off entirely. Hit files are parsed on\n"
+        "                               demand under a fixed budget; tier_budget= says so when it stops, and hits it never\n"
+        "                               classified are emitted, never suppressed.\n"
         "    --match=QUERY              tree-sitter structural (shape) query\n"
         "    --query=TERMS              raw BM25 ranking (debug); use --for\n\n"
         "  zoom the detail ladder\n"
@@ -2212,8 +2222,8 @@ inline constexpr IntFlag kIntFlags[] =
 //   • a WARNING on accept      --most-important-last / --stable / --no-auto-order (deprecated aliases that
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
-inline constexpr std::size_t kHandWrittenFlagArms = 21;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=)
-inline constexpr std::size_t kTotalFlagArms = 182;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms)
+inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
+inline constexpr std::size_t kTotalFlagArms = 183;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2924,6 +2934,13 @@ inline void validateModifierGuards( Config& c ) noexcept
         std::fprintf( stderr, "ripwire: --and=/--not=/--grep-scope= modify --grep=STR — pass it too (e.g. ripwire <dir> --grep=stale --and=mcp)\n" );
         c.ok = false;
     }
+    // R-H: --grep-in= is the one grep modifier that ALSO applies to --regex (a regex hit lands in a span
+    // exactly like a literal one), so its refusal tests both spellings rather than --grep= alone.
+    if( !c.grepIn.empty() && c.grep.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --grep-in=code|any modifies --grep=STR / --regex=PAT — pass one too (e.g. ripwire <dir> --grep=stale --grep-in=any)\n" );
+        c.ok = false;
+    }
     if( ( !c.grepAnd.empty() || !c.grepNot.empty() ) && c.grepRegex )
     {
         std::fprintf( stderr, "ripwire: --and=/--not= are literal-only and do not apply to --regex=PAT — "
@@ -3372,6 +3389,20 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                     c.ok = false; return c;
                 }
                 c.grepScope = v;
+            }
+            else if( startsWith( a, "--grep-in=" ) )
+            {
+                // R-H span tiers. Same shape as --grep-scope= above (closed value set, refuse an unknown
+                // value rather than silently defaulting) — a typo here would otherwise read as "code" and
+                // quietly suppress the very rows the user asked to see.
+                const std::string_view v = a.substr( 10 );
+                if( v != "code" && v != "any" )
+                {
+                    std::fprintf( stderr, "ripwire: --grep-in=%.*s — unknown value (supported: code|any), e.g. --grep-in=any\n",
+                                  int( v.size() ), v.data() );
+                    c.ok = false; return c;
+                }
+                c.grepIn = v;
             }
             else if( startsWith( a, "--rank-by=" ) )
             {

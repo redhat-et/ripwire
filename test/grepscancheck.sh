@@ -158,8 +158,12 @@ rows     "$TMP/lit"      | grep 'geometry.cpp' >"$TMP/par.rows"
 # G1: $FIX is passed as the crawl ROOT, so p= is now root-relative TO $FIX (rw::sarif::rootRelativeUri) —
 # a bare "geometry.cpp", not "test/fixture/geometry.cpp". `grep -F` below is run from inside $FIX for the
 # same reason, so both sides compare the SAME root-relative spelling.
+# R-H span tiers (2026-08-19): the oracle compares the SCAN, and tiering is an EMISSION policy layered on
+# top of it — so the oracle arm reads the un-tiered listing (grep-in=any), which is what "every occurrence
+# this literal has in the corpus" now spells. The tiered default is then checked against that same oracle
+# as a strict SUBSET below: a policy may hold rows back, it may never invent one grep -F cannot see.
 PAT='perimeter'
-"$BIN" "$FIX" --no-cache --grep="$PAT" 2>/dev/null >"$TMP/cx.xml"
+"$BIN" "$FIX" --no-cache --grep="$PAT" --grep-in=any 2>/dev/null >"$TMP/cx.xml"
 python3 -c '
 import re, sys
 xml = open( sys.argv[1] ).read().split( "-->", 1 )[ -1 ]
@@ -173,6 +177,21 @@ if diff -q "$TMP/cx.loc" "$TMP/gr.loc" >/dev/null; then
     ok "(7) external oracle: ripwire's hit locations == grep -n -F's ($( wc -l <"$TMP/cx.loc" | tr -d ' ' ) lines)"
 else
     no "(7) ripwire's hit locations differ from grep -n -F's"; diff "$TMP/cx.loc" "$TMP/gr.loc" | head -6
+fi
+# (7b) the TIERED default is a strict subset of the oracle's set — nothing invented, only rows held back
+"$BIN" "$FIX" --no-cache --grep="$PAT" 2>/dev/null >"$TMP/cxtier.xml"
+python3 -c '
+import re, sys
+xml = open( sys.argv[1] ).read().split( "-->", 1 )[ -1 ]
+for fm in re.finditer( r"<f p=\"([^\"]*)\">(.*?)</f>", xml, re.S ):
+    path = fm.group( 1 )
+    for hm in re.finditer( r"<hit l=\"(\d+)\"", fm.group( 2 ) ):
+        print( path + ":" + hm.group( 1 ) )
+' "$TMP/cxtier.xml" | sort >"$TMP/cxtier.loc"
+if [ -z "$( comm -23 "$TMP/cxtier.loc" "$TMP/gr.loc" )" ]; then
+    ok "(7b) the span-tiered default listing is a strict subset of the external oracle's locations"
+else
+    no "(7b) the tiered default reports a location grep -n -F does not"; comm -23 "$TMP/cxtier.loc" "$TMP/gr.loc" | head -6
 fi
 
 # ── (8) long-line cap + UTF-8 safety on a generated hostile corpus ────────────────────────────────────

@@ -56,6 +56,12 @@ echo "grepcheck: BIN=$BIN  CORPUS=$CORPUS"
 # ── (1) Run --grep=perimeter ─────────────────────────────────────────────────────────────────────
 
 "$BIN" "$CORPUS" --no-cache --grep=perimeter >"$TMP/perimeter" 2>/dev/null
+# R-H span tiers (2026-08-19): the DEFAULT answer now serves the tightest non-empty tier, so geometry.cpp's
+# line-16 occurrence — which sits inside a trailing `// edge: perimeter -> distance` comment — is held back
+# and disclosed rather than printed. The un-tiered listing this file's line/enclosing assertions were
+# written against is exactly what --grep-in=any still serves, so the comment-hit arms below read it from
+# there; the default run keeps the code-hit arms, plus the two new arms asserting the suppression itself.
+"$BIN" "$CORPUS" --no-cache --grep=perimeter --grep-in=any >"$TMP/perimeter_any" 2>/dev/null
 
 # (1a) Output contains <grep pattern="perimeter" header
 grep -q '<grep pattern="perimeter"' "$TMP/perimeter" \
@@ -80,9 +86,18 @@ grep -q '<f p="[^"]*geometry\.cpp"><hit l="11" in="perimeter">' "$TMP/perimeter"
     && ok "geometry.cpp:11 enclosing symbol is 'perimeter'" \
     || { no "geometry.cpp:11 missing or wrong enclosing symbol"; head -20 "$TMP/perimeter"; }
 
-grep -q '<hit l="16" in="perimeter">' "$TMP/perimeter" \
-    && ok "geometry.cpp:16 enclosing symbol is 'perimeter'" \
+grep -q '<hit l="16" in="perimeter">' "$TMP/perimeter_any" \
+    && ok "geometry.cpp:16 (a comment mention) enclosing symbol is 'perimeter' under grep-in=any" \
     || no "geometry.cpp:16 missing or wrong enclosing symbol"
+
+# R-H: and the DEFAULT answer holds that same comment row back, saying so — the two facts together are
+# what makes the suppression a policy rather than a loss.
+grep -q '<hit l="16"' "$TMP/perimeter" \
+    && no "geometry.cpp:16 is a comment mention and should not print by default (span tiers)" \
+    || ok "geometry.cpp:16 (comment tier) is held back by default"
+grep -q 'suppressed_comment="' "$TMP/perimeter" \
+    && ok "the default answer discloses what the comment tier held back" \
+    || no "rows were held back with no suppressed_comment= disclosure"
 
 grep -q '<hit l="13" in="perimeter">' "$TMP/perimeter" \
     && ok "geometry.h:13 enclosing symbol is 'perimeter'" \
