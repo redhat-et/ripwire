@@ -42,6 +42,19 @@ echo "packtaskcheck: BIN=$BIN"
 KMINBPT=2.36
 TOL=1.15
 ceiling_bytes(){ awk "BEGIN{printf \"%d\", $1 * $KMINBPT * $TOL}"; }
+
+# W3-S item 6 (2026-08-19): ANY byte-ceiling assertion below must run the corpus by a root-relative "."
+# (from INSIDE $ROOT/src), never "$ROOT/src" from outside it. The bundle's id=/root= attributes embed the
+# corpus root verbatim, so an absolute root spends bytes proportional to $ROOT's own path DEPTH — a
+# worktree living under a long scratch path (e.g. .../claude-501/.../scratchpad/wt-...) measurably inflates
+# every ceiling comparison below over a short-path checkout of the IDENTICAL commit (measured: 5692 B vs
+# 5039 B on the same --pack-task at --token-budget=2000, the 5428 B ceiling arm breaching only in the deep
+# case). This is a GATE-ENVIRONMENT bug, not a product one — the fix is here, not in the binary. Structural
+# assertions elsewhere in this file (determinism, xmllint, exit codes, and F4's --token-budget=1-vs-2
+# RELATIVE comparison, where the same path-byte constant cancels on both sides) are unaffected and
+# deliberately left as "$BIN" "$ROOT/src" — only a comparison against ceiling_bytes()'s absolute allowance
+# needs this.
+runRel(){ ( cd "$ROOT/src" && "$BIN" . "$@" ); }
 byte_off(){ grep -boF -- "$2" "$1" 2>/dev/null | head -1 | cut -d: -f1; }   # first byte offset of a literal, or empty
 
 # ── 1) refuse loudly WITHOUT a task string ────────────────────────────────────────────────────────────────
@@ -195,9 +208,10 @@ fi
 xmllint --noout "$TINY" 2>/dev/null && ok "tiny-budget bundle is xmllint-clean" || no "tiny-budget bundle is not well-formed"
 
 # ── 4) budget ceiling respected across several --token-budget values (real src/ tree, exercises trimming) ──
+# runRel (not "$ROOT/src"): see the W3-S item-6 note by ceiling_bytes()'s definition above.
 for tb in 2000 4000 8000; do
     OUT="$TMP/b$tb.xml"
-    "$BIN" "$ROOT/src" --no-cache --pack-task="serialize signatures budget payload trim" --token-budget=$tb > "$OUT" 2>/dev/null
+    runRel --no-cache --pack-task="serialize signatures budget payload trim" --token-budget=$tb > "$OUT" 2>/dev/null
     bytes="$( wc -c < "$OUT" | tr -d ' ' )"
     ceil="$( ceiling_bytes "$tb" )"
     { [ "$bytes" -le "$ceil" ]; } \
@@ -206,9 +220,9 @@ for tb in 2000 4000 8000; do
     xmllint --noout "$OUT" 2>/dev/null || no "bundle at --token-budget=$tb is not well-formed"
 done
 
-# default (6K) budget is xmllint-clean + within its own ceiling
+# default (6K) budget is xmllint-clean + within its own ceiling — runRel, same item-6 reason as arm 4 above.
 DEF="$TMP/def.xml"
-"$BIN" "$ROOT/src" --no-cache --pack-task="serialize signatures budget payload trim" > "$DEF" 2>/dev/null
+runRel --no-cache --pack-task="serialize signatures budget payload trim" > "$DEF" 2>/dev/null
 defbytes="$( wc -c < "$DEF" | tr -d ' ' )"; defceil="$( ceiling_bytes 6000 )"
 { [ "$defbytes" -le "$defceil" ]; } && ok "default 6K-token budget within ceiling ($defbytes <= $defceil)" || no "default budget exceeded ceiling ($defbytes > $defceil)"
 xmllint --noout "$DEF" 2>/dev/null && ok "default bundle is xmllint-clean" || no "default bundle is not well-formed"
