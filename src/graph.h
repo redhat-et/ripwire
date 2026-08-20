@@ -113,6 +113,47 @@ inline bool langCompatible( Lang a, Lang b ) noexcept
     return aCish && bCish;
 }
 
+// langCompatible's sibling: which definition KINDS a reference of a given ROLE may bind to. One predicate
+// so the rule is stated ONCE — before it, the same idea lived hard-coded in the inherit overlay
+// (`isClassLikeK`) and the implementors builder (`isClassLike`), which is how two copies of one rule end up
+// disagreeing. Like langCompatible it can only ever REMOVE a candidate, never invent one, and it preserves
+// candidate order, so it is safe to `&&` into any admission site.
+//
+// RefRole::Call is UN-NARROWED, deliberately and permanently. In C++ the spelling `Foo( x )` is legitimately
+// a constructor call, a functional cast, OR a free function; narrowing Call to Function|Method would DROP
+// real edges, and resolve.h's standing doctrine is that a WRONG narrow is worse than no narrow. Read/Write
+// are un-narrowed for the same reason one step down — a value read can name a variable, a function used as
+// a value, or an enumerator — and Import names a FILE, not a kind. test/nsfiltercheck.sh arm 2 is the
+// executable form of this paragraph.
+//
+// MEASURED, and stated here so the next round does not re-derive it: inside buildGraph's call-edge loop
+// this predicate is a PROVABLE NO-OP. That loop admits only role=Call (un-narrowed above) and role=Macro,
+// and a role=Macro reference's name is uniquely a macro BY CONSTRUCTION — model.h's retagMacroCallReferences
+// only assigns the role when scanMacroNames reports flags==1 over exactly the language set langCompatible
+// bridges, so every candidate that survives the language gate is already SymKind::Macro. The predicate is
+// applied there anyway, as the one-line seam a future round would change, and gated so that changing it
+// cannot be silent. Where it does bite is the all-roles resolution in contextratio.h, which is what keeps
+// the new RefRole::Type from spraying a type mention across same-named functions.
+inline bool namespaceCompatible( RefRole role, SymKind kind ) noexcept
+{
+    switch( role )
+    {
+        case RefRole::Type:
+        case RefRole::Extends:
+        {
+            return kind == SymKind::Class || kind == SymKind::Struct || kind == SymKind::Interface;
+        }
+        case RefRole::Macro:
+        {
+            return kind == SymKind::Macro;
+        }
+        default:
+        {
+            return true;   // Call / Read / Write / Import — see the doctrine above
+        }
+    }
+}
+
 // ---- aider-style name-quality prior weights --------------------------------------------------------
 // Aider's battle-tuned repomap biases its PageRank *personalization* vector (never the transition matrix)
 // by cheap name-quality signals: a name defined all over the repo is generic and gets damped; a private-
@@ -1309,6 +1350,27 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
 
+        // ---- namespace gate: drop any candidate whose KIND the reference's ROLE cannot mean --------------
+        // Applied ONCE over the assembled candidate set rather than `&&`-ed into each of the six admission
+        // sites above: it is a stable in-place filter that preserves candidate order and can only remove, so
+        // one pass here is equivalent to six copies and leaves one seam to reason about. It is a PROVABLE
+        // NO-OP on this loop today — the loop admits only Call (un-narrowed by doctrine) and Macro (already
+        // uniquely a macro by construction); see namespaceCompatible's comment for the derivation and
+        // test/nsfiltercheck.sh for the gate that keeps it that way. It is here because it is the seam a
+        // future round would edit, and a silent edit is the failure mode the gate exists to catch.
+        if( !cand.empty() )
+        {
+            std::size_t keepCount = 0;
+            for( std::size_t ci = 0; ci < cand.size(); ++ci )
+            {
+                if( namespaceCompatible( r.role, ing.symbols[ cand[ci] ].kind ) )
+                {
+                    cand[ keepCount++ ] = cand[ci];
+                }
+            }
+            cand.resize( keepCount );
+        }
+
         // ---- H4 W3: RUST qualified-call scope guard — see keepRustQualifiedCandidates ------------------
         const bool alreadyPinned = scipPinned || canonical || narrowed;
         if( !keepRustQualifiedCandidates( ing, chaUp, r, alreadyPinned, cand ) && bindingTier.empty() )
@@ -1722,8 +1784,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // inheritance edges (Lego view): isInherit refs (derived → base name) → implementors[base] += derived.
     // Resolve the base name to class-like symbols (any-file, by name); dedup. The socket→bricks relation.
     g.implementors.assign( N, {} );
+    // the SAME rule namespaceCompatible states for a type-position reference — routed through it rather
+    // than restated, because a second copy of one rule is how the two copies end up disagreeing.
     const auto isClassLike = []( SymKind k ) noexcept
-    { return k == SymKind::Class || k == SymKind::Struct || k == SymKind::Interface; };
+    { return namespaceCompatible( RefRole::Extends, k ); };
     for( const Reference& r : ing.references )
     {
         if( !r.isInherit )
