@@ -18,9 +18,10 @@
 # call-edge resolve loop in graph.h admits ONLY role=Call and role=Macro, and a role=Macro reference's
 # name is uniquely a macro by construction (model.h::scanMacroNames flags==1 over exactly the language
 # set langCompatible bridges). With Call excluded by the constraint above, the predicate is therefore a
-# PROVABLE NO-OP inside that loop — the map header's `ambiguous=` cannot move. Arm 3 pins that: a
+# PROVABLE NO-OP inside that loop — the map header's `ambiguous=` cannot move. Arm 4 pins that: a
 # fixture built to be maximally ambiguous by kind still reports ambiguous=0, which is the honest
-# statement that this lever does not live here.
+# statement that this lever does not live here. (It was "arm 3" here until 2026-08-20; the no-op arm has
+# always been arm 4. Being invariant by construction, it can never fire — arm 5 is the one that can.)
 #
 #   test/nsfiltercheck.sh                       # uses build/ripwire on test/nsfilterfix
 #   RIPWIRE_BIN=asan/ripwire test/nsfiltercheck.sh
@@ -29,12 +30,31 @@
 # name, c.cpp `class Derived : public Handler`, d.cpp both `Handler( 3 )` (a call) and `Handler h;`
 # (a type mention) so the two namespaces meet on one name in one file.
 #
-# Four arms:
+# Five arms:
 #   1) RED PRE-FIX — `Handler h;` in d.cpp is a TYPE mention and yields a role="type" use-site.
 #   2) Call stays un-narrowed: `Handler( 3 )` still yields its role="call" use-site AND its call edge.
 #   3) The class-like relations survive the refactor: the base clause in c.cpp still binds Handler as
 #      role="extends", and `--lego=Handler` still lists Derived through the implementors relation.
 #   4) The no-op statement: edges=2 ambiguous=0 over the fixture, unchanged by the predicate.
+#   5) THE LIVE EFFECT — see below.
+#
+# WHY ARM 5 EXISTS (adversarial verification, 2026-08-20). Arms 1-4 are all invariant under FULL REMOVAL
+# of the predicate's narrowing (`case Type: case Extends: return true; case Macro: return true;`): the
+# mutated binary leaves this gate 8/8 PASS, exit 0. Arm 1 re-tests the RefRole::Type widening, which
+# typerefcheck.sh already owns; arm 4 asserts the no-op, which is by construction invariant. So the gate
+# named for the predicate could not observe the predicate at all.
+#
+# The narrowing's one LIVE effect is contextratio.h's all-roles resolution, and the role that reaches it
+# is Extends, NOT Type (collectFacts `continue`s on Type 28 lines before resolveCandidates is called).
+# The base clause `class Derived : public Handler` in c.cpp is that Extends reference, and without the
+# narrowing it binds to BOTH `class Handler` and the free `int Handler( int )`. Measured, same tree, only
+# the predicate differing:
+#
+#     shipped   s p="c.cpp:5" n="Derived" … ents="1" files="1" rtok="11" amb="0"
+#     stripped  s p="c.cpp:5" n="Derived" … ents="2" files="2" rtok="22" amb="1"
+#
+# Arm 5 pins amb="0" / ents="1" on that row, so full removal of the narrowing is now red here — on this
+# gate's OWN fixture, in the one place the predicate is measurable.
 #
 # Plus determinism and XML well-formedness. Exits non-zero on any failure.
 
@@ -110,12 +130,29 @@ else
     no "call graph MOVED: edges=$E ambiguous=$A (expected 2/0) — re-derive EVALS §4 before believing this"
 fi
 
-# ── 5) determinism ───────────────────────────────────────────────────────────────────────────────
+# ── 5) THE LIVE EFFECT: the Extends base clause resolves to ONE entity, not two ───────────────────
+# contextratio.h's resolveCandidates is the only caller-visible place the narrowing bites. Presence
+# guard first (a vanished row must not read as a pass), then the assertion.
+CR="$( "$BIN" "$FIX" --context-ratio --no-cache 2>/dev/null | tr '<' '\n' | grep -E '^s p="c\.cpp:'"$EXTLINE"'"' )"
+if [ -z "$CR" ]; then
+    no "presence guard: --context-ratio emits no row for Derived at c.cpp:$EXTLINE — arm 5 cannot observe anything"
+else
+    CENTS="$( printf '%s' "$CR" | grep -oE ' ents="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"; CENTS="${CENTS:-x}"
+    CAMB="$( printf '%s' "$CR" | grep -oE ' amb="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"; CAMB="${CAMB:-x}"
+    if [ "$CENTS" = "1" ] && [ "$CAMB" = "0" ]; then
+        ok "live effect: the Extends base clause at c.cpp:$EXTLINE resolves to ents=$CENTS amb=$CAMB — the free int Handler(int) is NOT a candidate"
+    else
+        no "NARROWING GONE: Derived at c.cpp:$EXTLINE reports ents=$CENTS amb=$CAMB (expected 1/0) — the base clause is binding the same-named FUNCTION too"
+        printf '    %s\n' "$CR"
+    fi
+fi
+
+# ── 6) determinism ───────────────────────────────────────────────────────────────────────────────
 "$BIN" "$FIX" --no-cache >"$TMP/r1" 2>/dev/null
 "$BIN" "$FIX" --no-cache >"$TMP/r2" 2>/dev/null
 if cmp -s "$TMP/r1" "$TMP/r2"; then ok "deterministic (two --no-cache runs byte-identical)"; else no "non-deterministic over the fixture"; fi
 
-# ── 6) well-formed XML ───────────────────────────────────────────────────────────────────────────
+# ── 7) well-formed XML ───────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
     if "$BIN" "$FIX" --uses=Handler --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null; then
         ok "xml well-formed (--uses over the fixture)"
