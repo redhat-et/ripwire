@@ -10787,6 +10787,63 @@ void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, bool singleRoot
     std::printf( "</unindexed>" );
 }
 
+// R-H span tiers: the legend clause and the root attributes, lifted out of emitGrepReport for exactly the
+// reason emitGrepUnindexed/grepUnindexedAttrs above were — pure serialization of an already-computed
+// report, gated on ONE predicate (GrepTierReport::hasDisclosure), so the emitter's own body says "print the
+// tier disclosure" rather than carrying six conditional appends. Both return empty when the run held
+// nothing back, which is the byte-identical-to-untiered contract.
+//
+// Kept DENSE on purpose (G4): this clause rides every answer that holds a row back, and on a small answer
+// legend prose IS the answer — an early draft cost ~1.2 KB and ate the row saving whole.
+const char* grepTierLegend( const rw::GrepTierReport& tier )
+{
+    if( !tier.hasDisclosure() )
+    {
+        return "";
+    }
+    return "SPAN TIERS: each hit is classified by the tree-sitter span it sits in (code/comment/string) and this answer serves "
+           "the TIGHTEST NON-EMPTY tier — tier= names it when it is not code, so a pattern living only in prose is answered, "
+           "never emptied. suppressed_comment=/suppressed_string= are the classified hits held back: not in hits=, and the "
+           "reason complete= cannot appear. Pass grep-in=any (dashes omitted) for every tier. Hit files are parsed on demand "
+           "under a fixed budget: tier_parsed= how many were classified, tier_budget= which ceiling stopped it (files or bytes, "
+           "present only then), tier_unclassified= hits in files nothing classified — always EMITTED, never suppressed. ";
+}
+
+// Present only when this answer actually held something back or stopped short — absent-means-nothing-was-
+// tiered, the same convention corpus_excluded= follows. tier= is narrowed further to the NON-DEFAULT case:
+// naming the code tier on every answer would be ~12 bytes restating the default on the overwhelming
+// majority that serve it.
+std::string grepTierAttrs( const rw::GrepTierReport& tier )
+{
+    if( !tier.hasDisclosure() )
+    {
+        return {};
+    }
+    std::string attrs;
+    if( tier.suppressedComment > 0 )
+    {
+        attrs += " suppressed_comment=\"" + std::to_string( tier.suppressedComment ) + "\"";
+    }
+    if( tier.suppressedString > 0 )
+    {
+        attrs += " suppressed_string=\"" + std::to_string( tier.suppressedString ) + "\"";
+    }
+    if( std::strcmp( tier.emittedTier, "code" ) != 0 )
+    {
+        attrs += std::string( " tier=\"" ) + tier.emittedTier + "\"";
+    }
+    attrs += " tier_parsed=\"" + std::to_string( tier.tieredFileCount ) + "\"";
+    if( tier.unclassifiedHits > 0 )
+    {
+        attrs += " tier_unclassified=\"" + std::to_string( tier.unclassifiedHits ) + "\"";
+    }
+    if( tier.budgetHit != nullptr )
+    {
+        attrs += std::string( " tier_budget=\"" ) + tier.budgetHit + "\"";
+    }
+    return attrs;
+}
+
 // R1 (the 2026-08-12 usage mine) widened the signature beyond (cfg, ing): `g` feeds the <enc> rows'
 // callers= (in-edge CSR — data the graph already holds, zero new analysis), and amp/tested ride along
 // ONLY when a co-run (--metrics) already computed them — grep itself never triggers the qmetrics pass
@@ -10836,6 +10893,13 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     {
         found = grepApplyBooleanTerms( ing, std::move( found ), std::span<const GrepTerm>( grepTerms ), grepScopeVal, termsSuppressed );
     }
+    // R-H (2026-08-15 harvest report-ugrep §F3/§F4, funded by wave-2 E5): SPAN TIERS — classify each
+    // surviving hit by the tree-sitter span it sits in and serve the tightest NON-EMPTY tier. Runs AFTER the
+    // boolean filter on purpose: tiering the survivors is both cheaper and the only reading that matches
+    // what this answer will print. The bounded on-demand parse and its disclosed bail-out live in
+    // search.h::grepApplySpanTiers (which owns the budget), never in astQuery — see its header.
+    GrepTierReport tierReport;
+    found = grepApplySpanTiers( ing, std::move( found ), ( cfg.grepIn == "any" ) ? GrepIn::Any : GrepIn::Code, tierReport );
     // §R-J: additive scan over CrawlSkips::unsupported — the "unsupported-ext, text-looking" population the
     // crawl already computed at ingest time (queries/*/tags.scm and its siblings). Reuses the SAME per-file
     // ceiling the crawl applies to indexed files, so a huge unsupported-ext file is excluded exactly like an
@@ -10899,9 +10963,15 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     //   window — the printed page starts at row 0 and reaches the last hit (shown == hits).
     // A FALSE claim here is the worst bug this tool can ship; when any condition fails, NOTHING is added
     // (the floor/truncation vocabulary already covers partial answers — no complete="0" noise).
+    //   tier   — R-H: a tier-filtered listing did NOT print every hit it found, so it may not wear the
+    //            claim either. This is the same rule the window arm applies to a page: complete= says "a hit
+    //            absent above is absent from every indexed file", and that is false the moment a comment or
+    //            string row was held back. --grep-in=any (no filtering) keeps the claim, which is what makes
+    //            the claim recoverable rather than lost.
     const bool scanExhaustive = found.cleanScan() && !cfg.grepRegex;
     const bool windowWhole    = grepPage.begin == 0 && grepPage.end == hitCount;
-    const char* const completeAttr = ( scanExhaustive && windowWhole ) ? " complete=\"1\"" : "";
+    const bool nothingHeldBack = tierReport.suppressedComment == 0 && tierReport.suppressedString == 0;
+    const char* const completeAttr = ( scanExhaustive && windowWhole && nothingHeldBack ) ? " complete=\"1\"" : "";
     char              grab[ 192 ];
     // G1 (2026-08-15 harvest, report-memgraph §F6): a single-root run's `ing.files` carry the crawl root's
     // OWN spelling (a leading "./" for a relative root, the full absolute path for an absolute one — see
@@ -10956,6 +11026,11 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                      "budget ceiling): hits=/shown=/etc. already read the FILTERED count, so terms_suppressed= exists only so a reader can "
                      "recover how many the un-filtered scan would have shown. " );
     }
+    // R-H span tiers: the prose is gated on exactly the condition its own attributes are (the terms= clause
+    // above set the precedent, and legendcoveragecheck's rule is "define what you EMIT"). An answer that
+    // held nothing back emits no tier attribute and pays no tier prose — byte-identical to the pre-tier
+    // verb, which is the "purely additive" contract. Helper above; empty string when there is nothing to say.
+    std::printf( "%s", grepTierLegend( tierReport ) );
     std::printf(
                  // G1 (2026-08-15 harvest): byte-identical match text within one file's hits on the UNPAGINATED default view folds into
                  // ONE <hit> row plus <at l=… in=…/> children for the extra sites — n= on the <hit> (present only when >1) is 1+the <at>
@@ -11036,13 +11111,15 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     {
         corpusAttr += " corpus_oversize=\"" + std::to_string( ing.skippedOversize.size() ) + "\"";
     }
+    // R-H: the tier disclosure (helper above) — empty when nothing was held back.
+    const std::string tierAttr = grepTierAttrs( tierReport );
     // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= (helper above).
     const std::string auxAttr = grepUnindexedAttrs( aux );
-    std::printf( "<grep pattern=\"%s\"%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s%s>",
+    std::printf( "<grep pattern=\"%s\"%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s%s%s>",
                  ex( pat ).c_str(), rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
                                  cfg.pageLimit, cfg.pageOffset, true ),
-                 hitsCapped, completeAttr, corpusAttr.c_str(), auxAttr.c_str() );
+                 hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str() );
     // G1 (2026-08-15 harvest): hits GROUP by file under <f p="…">, root-relative when this is a single-root
     // run (report-memgraph §F6: the absolute root prefix alone was 42.5% of a real --grep payload; the
     // repeated-per-hit path was report-octocode §F1's 31.4%). Byte-identical text within one file's group

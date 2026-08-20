@@ -644,6 +644,40 @@ inline std::string grepUnindexedKeys( const GrepAuxCollection& aux )
     return keys;
 }
 
+// R-H span tiers: the CLI grepTierAttrs() twin (main.cpp), same conditions and same key names so the two
+// surfaces cannot report the same run differently (mcpclidiffcheck's LENS2 fact parity). Lifted out for the
+// same reason grepUnindexedKeys above was: a payload key fragment is a helper's job, not the verb body's.
+inline std::string grepTierKeys( const GrepTierReport& tier )
+{
+    if( !tier.hasDisclosure() )
+    {
+        return {};
+    }
+    std::string keys;
+    if( tier.suppressedComment > 0 )
+    {
+        keys += ",\"suppressed_comment\":" + std::to_string( tier.suppressedComment );
+    }
+    if( tier.suppressedString > 0 )
+    {
+        keys += ",\"suppressed_string\":" + std::to_string( tier.suppressedString );
+    }
+    if( std::strcmp( tier.emittedTier, "code" ) != 0 )
+    {
+        keys += std::string( ",\"tier\":\"" ) + tier.emittedTier + "\"";
+    }
+    keys += ",\"tier_parsed\":" + std::to_string( tier.tieredFileCount );
+    if( tier.unclassifiedHits > 0 )
+    {
+        keys += ",\"tier_unclassified\":" + std::to_string( tier.unclassifiedHits );
+    }
+    if( tier.budgetHit != nullptr )
+    {
+        keys += std::string( ",\"tier_budget\":\"" ) + tier.budgetHit + "\"";
+    }
+    return keys;
+}
+
 inline std::string grepAuxJson( const std::vector<GrepAuxHit>& hits, bool singleRoot, const std::string& rootPrefix )
 {
     if( hits.empty() )
@@ -663,12 +697,19 @@ inline std::string grepAuxJson( const std::vector<GrepAuxHit>& hits, bool single
     return out;
 }
 
-inline std::string grepHitsJson( const std::string& root, const std::string& pattern, McpPageArgs page = {} )
+inline std::string grepHitsJson( const std::string& root, const std::string& pattern, McpPageArgs page = {}, GrepIn grepInMode = GrepIn::Code )
 {
     const McpIndex&            ix        = getIndex( root );
     const IngestResult&        ing       = ix.ing;
     constexpr int              kRowCap   = 100;
-    const GrepCollection       collected = grepCollect( ing, pattern, /*regex=*/false, /*noPrefilter=*/false );
+    // R-H span tiers: the SAME filter, in the SAME position (after collection), as the CLI verb applies —
+    // search.h owns the policy precisely so these two surfaces cannot answer differently. `grepInMode` is
+    // the MCP `in` argument (the CLI --grep-in twin): the escape hatch has to exist here too, because an
+    // MCP-only agent that reads suppressed_comment= has no CLI to re-ask from. Counters ride the payload
+    // below under the CLI's own key names.
+    GrepTierReport             tierReport;
+    const GrepCollection       collected = grepApplySpanTiers( ing, grepCollect( ing, pattern, /*regex=*/false, /*noPrefilter=*/false ),
+                                                               grepInMode, tierReport );
     const PageWindow           grepPage  = pageWindow( collected.raw.size(), effectiveRowCap( page.limit, kRowCap ), page.offset );
     const std::size_t          rowCount  = grepPage.end - grepPage.begin;
     const std::vector<GrepHit> hits      = grepEnrich( ing, std::span<const GrepRawHit>( collected.raw ).subspan( grepPage.begin, rowCount ), 0, 0 );
@@ -706,8 +747,14 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     // minus the regex arm — this verb is literal-only, so every scan is a full end-to-end read. Appended
     // after hits_capped so the historic key order other gates read is byte-untouched; absent when any
     // condition fails (the floor vocabulary already covers partial answers).
-    const bool scanExhaustive = collected.cleanScan();
-    const bool windowWhole    = grepPage.begin == 0 && grepPage.end == collected.raw.size();
+    // R-H adds the tier arm the CLI emitter also adds: a listing that held comment/string rows back did not
+    // print every hit it found, so it may not claim to be exhaustive.
+    const bool scanExhaustive  = collected.cleanScan();
+    const bool windowWhole     = grepPage.begin == 0 && grepPage.end == collected.raw.size();
+    const bool nothingHeldBack = tierReport.suppressedComment == 0 && tierReport.suppressedString == 0;
+
+    // R-H: the CLI tierAttr twin (helper above) — empty when nothing was held back.
+    const std::string tierKeys = grepTierKeys( tierReport );
 
     // G1 (2026-08-15 harvest, report-memgraph §F6): `file` is root-relative when this is a single-root
     // index (ing.realPaths empty — the same condition the CLI emitter gates on), reusing sarif.h's strip
@@ -729,7 +776,8 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
                     + pageDisclosure( pagebuf, sizeof( pagebuf ), rowCount, collected.raw.size(), grepPage.end,
                                       page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax )
                     + ",\"hits_capped\":" + ( collected.isBudgetReached ? "true" : "false" )
-                    + ( scanExhaustive && windowWhole ? ",\"complete\":true" : "" )
+                    + ( scanExhaustive && windowWhole && nothingHeldBack ? ",\"complete\":true" : "" )
+                    + tierKeys
                     // G4 (2026-08-15 harvest, report-ugrep §F6): the CLI's corpus_excluded=/corpus_oversize=
                     // twins — present only when non-zero, same condition as the CLI emitter.
                     + ( ing.crawlSkips.excludedFiles > 0 ? ( ",\"corpus_excluded\":" + std::to_string( ing.crawlSkips.excludedFiles ) ) : std::string() )

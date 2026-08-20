@@ -75,7 +75,10 @@ for p in 'compute' 'Widget' 'open|close' '[A-Z][a-z]+' 'Foo.*Bar' 'zylophoneXyzz
     # that moved to the nested <hit l="…">), so the old "strip at the first colon" sed left a trailing
     # unstripped quote on every path (no colon to truncate at) and every comparison below false-missed.
     # Extract <f p="…"> distinctly, past the legend comment (whose own prose illustrates that exact shape).
-    cx="$( "$BIN" "$CORPUS" --regex="$p" --no-cache 2>/dev/null | python3 -c '
+    # R-H span tiers (2026-08-19): grep-in=any — this arm's oracle is `grep -rlE`, i.e. every file the
+    # regex matches ANYWHERE, so it must be compared against the un-tiered listing. The tiered default is a
+    # deliberate SUBSET (comment/string rows held back and disclosed), which grepscancheck (7b) pins.
+    cx="$( "$BIN" "$CORPUS" --regex="$p" --grep-in=any --no-cache 2>/dev/null | python3 -c '
 import re, sys
 xml = sys.stdin.read().split( "-->", 1 )[ -1 ]
 for m in re.finditer( r"<f p=\"([^\"]*)\"", xml ):
