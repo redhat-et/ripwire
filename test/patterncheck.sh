@@ -170,6 +170,17 @@ grep -oE '<pattern [^>]*>' "$TMP/all" | grep -q 'unresolved_in=' \
     && no "unresolved_in= leaked onto a run with hits>0 (it must fire only when the zero would mislead)" \
     || ok "unresolved_in= absent when the run found matches"
 
+# ── 4c. a modifier that cannot be honored is refused, not silently dropped ────────────────────────────
+# --sarif serializes --lint/--lint-rules findings. --pattern returns from runLint with its own element
+# before any finding exists, so a --sarif that looked accepted would never take effect — the same silent
+# no-op --match already refuses.
+"$BIN" "$FIX" --lint --pattern='foo($A, $B)' --sarif >"$TMP/sar.out" 2>"$TMP/sar.err"; rcsar=$?
+[ "$rcsar" -ne 0 ] && grep -q -- '--sarif' "$TMP/sar.err" && ok "--sarif with a pattern refuses instead of silently no-oping" \
+    || no "--sarif + pattern: want a non-zero exit naming --sarif, got exit $rcsar / $( head -c 160 "$TMP/sar.err" )"
+# control: the same run without --sarif is a normal, working pattern search
+"$BIN" "$FIX" --pattern='foo($A, $B)' >/dev/null 2>&1 && ok "control: the same pattern without --sarif still runs" \
+    || no "control arm broke — the refusal above may be firing for the wrong reason"
+
 # ── 5. metavariable consistency ───────────────────────────────────────────────────────────────────────
 mkdir -p "$TMP/mv"
 printf 'function g(){ eq(a, a); eq(a, b); }\n' > "$TMP/mv/m.js"
