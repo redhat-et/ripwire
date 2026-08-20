@@ -111,7 +111,13 @@ measure_set(){
     local q rw_bytes grep_bytes reduction xml shown hits
     printf '%-26s %10s %10s %10s\n' "query" "ripwire_B" "grep_B" "reduction"
     for q in "$@"; do
-        xml="$( "$BIN" "$CORPUS" --no-cache --grep="$q" 2>/dev/null )"
+        # R-H span tiers (2026-08-19): the INSTRUMENT stays the un-tiered emitter. This gate's committed
+        # band was derived against `grep -rn -F`'s full row set, and span tiers cut rows on a SECOND,
+        # independent axis (comment/string mentions) — folding that into the same median would silently
+        # re-band a published number and would also empty the capped regime this set exists to measure
+        # (three of its frozen queries stop being capped once their comment rows are held back). The tiered
+        # default's own byte effect is REPORTED below, un-banded, rather than mixed into this median.
+        xml="$( "$BIN" "$CORPUS" --no-cache --grep="$q" --grep-in=any 2>/dev/null )"
         rw_bytes="$( printf '%s' "$xml" | wc -c | tr -d ' ' )"
         grep_bytes="$( "$GREP" -rn -F -- "$q" "$CORPUS" 2>/dev/null | wc -c | tr -d ' ' )"
 
@@ -166,6 +172,18 @@ echo
 echo "=== UNCAPPED small-hit set (instrument fix 3: the regime the capped set cannot see) ==="
 measure_set uncapped no "${QUERIES_UNCAPPED[@]}"
 MEDIAN_UNCAPPED="$( cat "$TMP/uncapped.median" )"
+
+echo
+echo "=== REPORTED (not banded): what SPAN TIERS take off the un-tiered answer, same frozen queries ==="
+printf '%-26s %12s %12s %10s\n' "query" "untiered_B" "tiered_B" "delta"
+for q in "${QUERIES_CAPPED[@]}"; do
+    anyB="$(  "$BIN" "$CORPUS" --no-cache --grep="$q" --grep-in=any 2>/dev/null | wc -c | tr -d ' ' )"
+    tierB="$( "$BIN" "$CORPUS" --no-cache --grep="$q"                2>/dev/null | wc -c | tr -d ' ' )"
+    if [ "${anyB:-0}" -gt 0 ]; then
+        printf '%-26s %12s %12s %9s%%\n' "$q" "$anyB" "$tierB" \
+            "$( python3 -c "print( round( 100.0 * ( 1.0 - $tierB / $anyB ), 1 ) )" )"
+    fi
+done
 echo
 
 [ -n "$MEDIAN_CAPPED" ] && [ -n "$MEDIAN_UNCAPPED" ] || { no "a median could not be computed — see the arm failures above"; echo; echo "SOME CHECKS FAILED"; exit 1; }

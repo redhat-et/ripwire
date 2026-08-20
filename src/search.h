@@ -31,6 +31,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>           // R-H: the span-tier byte budget prices a hit file BEFORE parsing it
 #include <iterator>
 #include <optional>
 #include <regex>
@@ -1938,6 +1939,191 @@ inline GrepCollection grepApplyBooleanTerms( const IngestResult& ing, GrepCollec
         else
         {
             ++suppressedOut;
+        }
+    }
+    collected.raw = std::move( kept );
+    return collected;
+}
+
+// ─── R-H SPAN TIERS (2026-08-15 harvest report-ugrep §F3+§F4, funded by wave-2 experiment E5) ─────
+//
+// THE MEASURED PROBLEM: 22-42% of a --grep answer's rows were the pattern's name appearing in a comment,
+// an #include, or prose — rows the verb could not enrich and an agent had to read anyway.
+// `--regex=mcp[A-Za-z]*Stale` paid 19 comment rows for the ONE definition it was looking for.
+//
+// THE POLICY (§F3 + §F4, and it is a policy, not a mechanism — tree-sitter already knows exactly where the
+// comments and the strings are): classify each hit by the SPAN it lands in, then emit only the TIGHTEST
+// NON-EMPTY tier and say what was held back. Code beats comment beats string. §F4's "globally self-
+// tightening" is the non-empty part: a pattern that exists ONLY in comments still gets its comment rows —
+// suppressing them would turn a real answer into an honest-looking zero, which is the failure this
+// codebase's whole floor/disclosure vocabulary exists to prevent.
+//
+// WHAT IS DELIBERATELY *NOT* A TIER: the harvest sketch also listed "code-nosym" (a code hit with no
+// enclosing symbol) between code and comment. It is not implemented as a tier here, on purpose. Enclosing-
+// symbol presence is a SYMBOL-TABLE axis, already carried per row by in=, and the rows it would demote are
+// #includes, macro definitions and file-scope statements — real code, in the files where the answer usually
+// lives. Folding two axes into one ordinal would suppress those for a reason the tier name does not state.
+//
+// THE COST MODEL (E5, PLAN_WAVE2_REPORTS_2026-08-17/exp-e5.md): tiering needs the hit files PARSED, and
+// astQuery/astQueryGrouped always parse the whole corpus — the wrong cost model for a verb that has already
+// narrowed to a handful of files. E5 measured the alternative (~42 ns/byte; 0.217 ms median per file on a
+// 2400-file tree) and funded ingest.h's narrow spanTiersOfFiles() entry, which this is the only caller of.
+//
+// THE BAIL-OUT (E5 design condition 3) IS A BYTE BUDGET, NOT A TIME BUDGET, and that substitution is the
+// one place this diverges from E5's wording. E5 asked for "a per-call parse-time budget"; a wall-clock
+// budget makes WHICH rows are suppressed depend on machine load, i.e. the same corpus and the same query
+// would answer differently on two runs. Determinism is a contract here, so the budget is expressed in the
+// quantity E5 itself proved parse cost is linear in — bytes — which is a pure function of the corpus. The
+// file count is capped alongside it so a pathological "10,000 tiny hit files" shape cannot pay 10,000
+// stat+read+parse setups under a byte budget it never reaches.
+inline constexpr std::uint32_t kGrepTierFileBudget = 128;              // hit files classified per call
+inline constexpr std::uint64_t kGrepTierByteBudget = 8u << 20;         // 8 MB ⇒ ~0.34 s serial at E5's 42 ns/B,
+                                                                       // ~0.05 s across this pool's workers
+
+// --grep-in=code (default) | any. `Any` skips the tier pass ENTIRELY — not "computes it and emits
+// everything": an answer that holds nothing back should pay nothing for the machinery, so --grep-in=any is
+// byte-identical to (and as fast as) the pre-tier verb, which also makes it the control arm for timing.
+enum class GrepIn : std::uint8_t { Code = 0, Any = 1 };
+
+// Everything the emitters must DISCLOSE about a tier pass, and nothing they can infer. Counts are per-run
+// facts of the corpus, not of thread timing.
+struct GrepTierReport
+{
+    std::uint32_t suppressedComment = 0;   // classified hits held back because a tighter tier was non-empty
+    std::uint32_t suppressedString  = 0;
+    std::uint32_t tieredFileCount   = 0;   // hit files actually parsed (≤ the budgets)
+    std::uint32_t unclassifiedHits  = 0;   // hits in files past the budget, or with no grammar — NEVER suppressed
+    const char*   emittedTier       = "code";        // "code" | "comment" | "string" — §F4's tightest non-empty tier
+    const char*   budgetHit         = nullptr;       // nullptr | "files" | "bytes" — E5's disclosed bail-out
+    bool          didRun            = false;         // false under --grep-in=any: no tier vocabulary may be emitted
+
+    // Is there anything a reader MUST be told? The emitters gate both the attributes and the legend prose on
+    // this one predicate, so a run that held nothing back stays byte-identical to an untiered answer (and
+    // legendcoveragecheck's "define what you emit" rule can never fire on prose for absent attributes).
+    bool hasDisclosure() const noexcept
+    {
+        return didRun && ( suppressedComment > 0 || suppressedString > 0 || budgetHit != nullptr
+                           || std::strcmp( emittedTier, "code" ) != 0 );
+    }
+};
+
+// Filters `collected.raw` order-preserving (already tier-then-path sorted — filtering never reorders), the
+// same post-filter shape as grepApplyBooleanTerms above, and runs AFTER it: tiering the survivors of a
+// boolean query is both cheaper and the only reading that matches what the answer will print.
+//
+// §A1 COMPLIANCE (the invariant that nothing a caller passes may change WHAT is collected): the budgets are
+// FIXED CONSTANTS, never derived from the row cap, the page offset or the limit. A "stop once the page is
+// full" budget would be cheaper and would reintroduce exactly the bug §A1 was written for — every page a
+// window into a differently-filtered list.
+inline GrepCollection grepApplySpanTiers( const IngestResult& ing, GrepCollection collected, GrepIn mode, GrepTierReport& report )
+{
+    report = GrepTierReport{};
+    if( mode == GrepIn::Any || collected.raw.empty() )
+    {
+        return collected;
+    }
+    report.didRun = true;
+
+    // ── the hit files, in the collection's own (tier-then-path) order — one file's hits are contiguous ──
+    std::vector<std::uint32_t> hitFileIds;
+    std::vector<std::string>   tierPaths;
+    for( const GrepRawHit& r : collected.raw )
+    {
+        if( hitFileIds.empty() || hitFileIds.back() != r.fileId )
+        {
+            hitFileIds.push_back( r.fileId );
+        }
+    }
+    // ── the bounded prefix: files are admitted in order until either budget would be exceeded ──────────
+    std::uint64_t plannedBytes = 0;
+    std::size_t   plannedFiles = 0;
+    for( const std::uint32_t fileId : hitFileIds )
+    {
+        if( plannedFiles >= kGrepTierFileBudget )
+        {
+            report.budgetHit = "files";
+            break;
+        }
+        std::error_code      ec;
+        const std::uintmax_t size = std::filesystem::file_size( diskPath( ing, fileId ), ec );
+        const std::uint64_t  bytes = ec ? std::uint64_t( 0 ) : std::uint64_t( size );
+        if( plannedBytes + bytes > kGrepTierByteBudget )
+        {
+            report.budgetHit = "bytes";
+            break;
+        }
+        plannedBytes += bytes;
+        ++plannedFiles;
+        tierPaths.push_back( diskPath( ing, fileId ) );
+    }
+
+    const SpanTierBatch batch = spanTiersOfFiles( std::span<const std::string>( tierPaths ) );
+    report.tieredFileCount    = std::uint32_t( tierPaths.size() );
+
+    // fileId → index into the parsed batch; UINT32_MAX ⇒ past the budget, i.e. UNCLASSIFIED
+    std::vector<std::uint32_t> batchIndexOf( ing.files.size(), UINT32_MAX );
+    for( std::size_t i = 0; i < tierPaths.size(); ++i )
+    {
+        batchIndexOf[hitFileIds[i]] = std::uint32_t( i );
+    }
+
+    // ── classify every hit once, then choose the tier to serve ────────────────────────────────────────
+    // One byte per hit, with UNCLASSIFIED as a fourth value rather than a second parallel array: the
+    // collection ceiling is 4M raw hits, so a second array is 4 MB spent to say what one spare value says.
+    constexpr std::uint8_t    kUnclassifiedTier = 3;
+    std::vector<std::uint8_t> hitTier( collected.raw.size(), kUnclassifiedTier );
+    std::uint32_t             tierHitCount[3] = { 0, 0, 0 };
+    for( std::size_t h = 0; h < collected.raw.size(); ++h )
+    {
+        const GrepRawHit&   r     = collected.raw[h];
+        const std::uint32_t index = batchIndexOf[r.fileId];
+        if( index == UINT32_MAX || !batch.perFile[index].isParsed )
+        {
+            ++report.unclassifiedHits;
+            continue;   // stays unclassified — and unclassified is never suppressible
+        }
+        const SpanTier t = spanTierAt( batch.perFile[index], r.byteOffset );
+        hitTier[h]       = std::uint8_t( t );
+        ++tierHitCount[std::size_t( t )];
+    }
+
+    // §F4: the tightest tier with anything in it wins. The choice is made over the CLASSIFIED hits only —
+    // an unclassified hit cannot vote for a tier nobody proved it belongs to, and it is emitted either way.
+    SpanTier serve = SpanTier::Code;
+    if( tierHitCount[std::size_t( SpanTier::Code )] > 0 )
+    {
+        serve = SpanTier::Code;
+    }
+    else if( tierHitCount[std::size_t( SpanTier::Comment )] > 0 )
+    {
+        serve = SpanTier::Comment;
+    }
+    else if( tierHitCount[std::size_t( SpanTier::String )] > 0 )
+    {
+        serve = SpanTier::String;
+    }
+    else
+    {
+        return collected;   // nothing was classified at all — nothing to hold back, and nothing to disclose
+    }
+    report.emittedTier = ( serve == SpanTier::Code ) ? "code" : ( serve == SpanTier::Comment ? "comment" : "string" );
+
+    std::vector<GrepRawHit> kept;
+    kept.reserve( collected.raw.size() );
+    for( std::size_t h = 0; h < collected.raw.size(); ++h )
+    {
+        if( hitTier[h] == kUnclassifiedTier || hitTier[h] == std::uint8_t( serve ) )
+        {
+            kept.push_back( collected.raw[h] );
+            continue;
+        }
+        if( hitTier[h] == std::uint8_t( SpanTier::Comment ) )
+        {
+            ++report.suppressedComment;
+        }
+        else if( hitTier[h] == std::uint8_t( SpanTier::String ) )
+        {
+            ++report.suppressedString;
         }
     }
     collected.raw = std::move( kept );

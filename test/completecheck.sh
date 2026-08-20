@@ -11,6 +11,10 @@
 # WHO MAY CLAIM (the probe's verdict, pinned by arms 10a/10b):
 #   --grep     literal scans (and regex with the prefilter disabled): a full end-to-end read of every
 #              indexed file, no collection ceiling reached, no unreadable file, every hit printed.
+#              R-H (2026-08-19) adds the FIFTH condition: nothing was SPAN-TIER suppressed. The default
+#              --grep serves the tightest non-empty tier, so an answer that held comment/string rows back
+#              did not print every hit it found and may not claim exhaustiveness; grep-in=any (the
+#              un-tiered listing) is where the claim lives now, and arm 4b is its mutation twin.
 #              A prefiltered regex answer NEVER claims (the claim would rest on the analyzer, not on
 #              a full read). The claim is complete-WITHIN-THE-INDEX: files the ingest skipped (the
 #              skipped verb) were never scanned, and the legend must say so wherever the claim appears.
@@ -45,7 +49,7 @@ CORPUS=test/fixture
 root_of(){ grep -o "<$1 [^>]*>" | head -1; }
 
 # ── 1) a small literal scan claims: every hit printed, no ceiling, no cap ──────────────────────────────
-"$BIN" "$CORPUS" --grep=distance >"$TMP/g1.xml" 2>/dev/null; rc=$?
+"$BIN" "$CORPUS" --grep=distance --grep-in=any >"$TMP/g1.xml" 2>/dev/null; rc=$?
 G1ROOT="$( root_of grep <"$TMP/g1.xml" )"
 { [ $rc -eq 0 ] && printf '%s' "$G1ROOT" | grep -q 'complete="1"'; } \
     && ok 'grep: small literal scan carries complete="1" on the root' \
@@ -90,8 +94,21 @@ G3ROOT="$( root_of grep <"$TMP/g3.xml" )"
     && ok 'grep MUTATION: a page that skips rows (offset=1) never claims' \
     || { no 'grep MUTATION: complete= survived offset=1'; printf '%s\n' "$G3ROOT"; }
 
+# ── 5b) MUTATION (R-H): a SPAN-TIER-FILTERED listing never claims ──────────────────────────────────────
+# The default --grep on this corpus holds `distance`'s comment mentions back (geometry.cpp's trailing
+# `// edge: perimeter -> distance`), so the printed set is not every hit found — exactly the shape
+# complete= must refuse. This is the fifth partiality condition, and its mutation arm.
+"$BIN" "$CORPUS" --grep=distance >"$TMP/g3b.xml" 2>/dev/null
+G3BROOT="$( root_of grep <"$TMP/g3b.xml" )"
+printf '%s' "$G3BROOT" | grep -q 'suppressed_comment="' \
+    && ok 'grep: the default answer on this corpus DOES suppress a comment row (the arm is live)' \
+    || { no 'grep: nothing was tier-suppressed, so the next assertion proves nothing'; printf '%s\n' "$G3BROOT"; }
+printf '%s' "$G3BROOT" | grep -q 'complete="1"' \
+    && { no 'grep MUTATION: complete= survived a tier-filtered listing'; printf '%s\n' "$G3BROOT"; } \
+    || ok 'grep MUTATION: a tier-filtered listing never claims'
+
 # ── 6) an explicit page that COVERS the whole listing still claims ─────────────────────────────────────
-"$BIN" "$CORPUS" --grep=distance --limit=100000 >"$TMP/g4.xml" 2>/dev/null
+"$BIN" "$CORPUS" --grep=distance --grep-in=any --limit=100000 >"$TMP/g4.xml" 2>/dev/null
 G4ROOT="$( root_of grep <"$TMP/g4.xml" )"
 printf '%s' "$G4ROOT" | grep -q 'complete="1"' \
     && ok 'grep: an explicit limit wide enough to show everything keeps the claim' \
@@ -162,7 +179,7 @@ C1ROOT="$( root_of callers <"$TMP/c1.xml" )"
     || { no 'callers: complete= appeared beside a floored count, or the floor marker is gone'; printf '%s\n' "$C1ROOT"; }
 
 # ── 11) determinism + well-formedness of a claiming document ───────────────────────────────────────────
-"$BIN" "$CORPUS" --grep=distance >"$TMP/g1b.xml" 2>/dev/null
+"$BIN" "$CORPUS" --grep=distance --grep-in=any >"$TMP/g1b.xml" 2>/dev/null
 diff -q "$TMP/g1.xml" "$TMP/g1b.xml" >/dev/null \
     && ok 'grep: a claiming answer is byte-deterministic across runs' \
     || no 'grep: claiming answer differs across two runs'
@@ -174,7 +191,7 @@ fi
 
 # ── 12) the MCP grep twin claims and un-claims with the CLI ────────────────────────────────────────────
 mcp_call(){ printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"grep","arguments":{"path":"%s","pattern":"distance"%s}}}\n' "$1" "$2"; }
-mcp_call "$CORPUS" ''            | "$BIN" --mcp >"$TMP/m1.json" 2>/dev/null
+mcp_call "$CORPUS" ',"in":"any"' | "$BIN" --mcp >"$TMP/m1.json" 2>/dev/null
 mcp_call "$CORPUS" ',"limit":1'  | "$BIN" --mcp >"$TMP/m2.json" 2>/dev/null
 # inside the JSON-RPC wrapper the payload's quotes are ESCAPED: \"complete\":true
 grep -q '\\"complete\\":true' "$TMP/m1.json" \

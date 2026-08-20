@@ -17,6 +17,7 @@
 
 #include <cctype>
 #include <cstring>
+#include <span>          // spanTiersOfFiles takes a VIEW of paths — the caller owns the storage
 #include <string_view>
 
 namespace rw
@@ -371,6 +372,79 @@ struct AstQueryGroup
 // whether that trade is worth it, which is why this is opt-in and not the default.
 std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, const std::vector<AstQueryGroup>& groups,
                                                     std::vector<std::string>* keptBytesOut = nullptr );
+
+// ---- R-H: SPAN TIERS — the NARROW single-file parse entry (2026-08-19, funded by wave-2 experiment E5) --
+//
+// astQueryGrouped() above always walks the WHOLE corpus: it sizes its work queue off ing.files.size(), and
+// there is no parameter for "just these files". That is the right cost model for --lint/--match (which ask
+// a question OF the corpus) and the wrong one for --grep (which has already narrowed the corpus to a
+// handful of hit files by scanning bytes). E5 measured what one file's on-demand parse actually costs
+// (~42 ns/byte for the C++ grammar; 0.217 ms median on a 2400-file tree, 3.99 ms p90 on ripwire's own
+// denser source) and funded THIS entry point rather than a widening of the general ingest path:
+// spanTiersOfFiles() parses exactly the files it is handed, nothing more, and returns one thing —
+// where the comments and strings are.
+//
+// What it is FOR: classifying a byte offset that some other pass already found. A --grep hit inside a
+// comment or a string literal is a mention, not a use, and 22-42% of a --grep answer's rows were such
+// mentions (2026-08-15 harvest, report-ugrep §F3). Nothing here is cached or serialized — these spans are
+// a property of the file's bytes at query time, so no cache version moves when this changes.
+enum class SpanTier : std::uint8_t { Code = 0, Comment = 1, String = 2 };
+
+// One file's comment/string spans. SoA, not an array of {start,end,tier} structs: the classify path binary-
+// searches `startByte` alone and touches the other two arrays at most once per lookup, so the search walks
+// a dense u32 array instead of striding over 12-byte records. Spans are sorted by startByte and never
+// overlap (the walk does not descend into a span it already classified), which is what makes the
+// upper-bound search below a complete classifier rather than a heuristic.
+struct SpanTierMap
+{
+    std::vector<std::uint32_t> startByte;   // inclusive
+    std::vector<std::uint32_t> endByte;     // exclusive
+    std::vector<std::uint8_t>  tier;        // SpanTier, one per span
+    bool                       isParsed = false;   // false ⇒ UNCLASSIFIABLE (no grammar, unreadable, binary,
+                                                    // or the tree-sitter parse failed) — see spanTierAt()
+};
+
+// Which tier a byte offset lands in. An UNPARSED map answers Code for every offset, and that default is
+// load-bearing honesty rather than a convenience: a caller that suppresses non-code rows must never
+// suppress a row it could not classify, so "we don't know" has to read as "keep it".
+inline SpanTier spanTierAt( const SpanTierMap& m, std::uint32_t byteOffset ) noexcept
+{
+    if( !m.isParsed || m.startByte.empty() )
+    {
+        return SpanTier::Code;
+    }
+    // last span whose start is <= byteOffset (std::upper_bound minus one); spans do not overlap, so at
+    // most this one can contain the offset.
+    const auto  it    = std::upper_bound( m.startByte.begin(), m.startByte.end(), byteOffset );
+    if( it == m.startByte.begin() )
+    {
+        return SpanTier::Code;
+    }
+    const std::size_t index = std::size_t( it - m.startByte.begin() ) - 1;
+    return ( byteOffset < m.endByte[index] ) ? SpanTier( m.tier[index] ) : SpanTier::Code;
+}
+
+// What one batched call parsed, so the caller can DISCLOSE it rather than imply completeness.
+// `parsedFileCount + unparsedFileCount == perFile.size()` always.
+struct SpanTierBatch
+{
+    std::vector<SpanTierMap> perFile;              // parallel to the paths handed in
+    std::uint32_t            parsedFileCount   = 0;
+    std::uint32_t            unparsedFileCount = 0;
+    std::uint64_t            bytesParsed       = 0;
+};
+
+// Parse each of `diskPaths` (on-disk paths, already resolved — this does not know about labeled multi-root
+// spellings) and return its comment/string spans, in the SAME order the paths arrived. Parallel over
+// hardware_concurrency() workers using the biggest-file-first work-stealing order astQueryGrouped's own
+// pool uses (E5 design condition 2), scoped to just these files: on the worst legal --grep shape E5 modelled
+// (100 hit files) that is what keeps a serial ~3.6 s ceiling at ~0.2 s. The CALLER owns the budget — this
+// function parses everything it is given, so bound the list before calling (search.h's grepApplySpanTiers
+// is the bounded caller, and discloses its own bail-out).
+//
+// DETERMINISM: which worker draws which file never reaches the result — every file writes only its own
+// slot, and each slot's spans are sorted on the file's own byte offsets.
+SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths );
 
 // ---- §P0.1: the shape of a user's tree-sitter query, so a capture-less one is never a silent zero ----
 // astQuery reports CAPTURES, so a query that binds none matches nothing it can report:

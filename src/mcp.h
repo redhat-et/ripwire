@@ -666,7 +666,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // verifier N8: limit/offset are DECLARED here because they are HONORED (mcpPageArgs →
                    // pageWindow, the same trio the CLI --grep applies). This was the only paged CLI verb whose
                    // MCP twin disclosed capped:true at 100 hits with no knob to raise or walk past it.
-                   "{\"name\":\"grep\",\"description\":\"Trigram literal search; each hit annotated with its enclosing symbol (which function/class it is in). Serves the first 100 hits unless you raise it with limit=N (offset=M pages the rest, and has_more/next_offset tell a paging loop when to stop); total/shown/capped in the payload disclose the cut, and hits_capped=true means total is itself a FLOOR (the collection budget was reached). complete:true means the OPPOSITE: this listing is exhaustive over the index (every indexed file read end to end, no ceiling, every hit served) — do not re-derive it, and a zero really is zero; the claim is complete-within-the-index only (files the ingest skipped were never scanned). Its absence claims nothing.\","
+                   "{\"name\":\"grep\",\"description\":\"Trigram literal search; each hit annotated with its enclosing symbol (which function/class it is in). Serves the first 100 hits unless you raise it with limit=N (offset=M pages the rest, and has_more/next_offset tell a paging loop when to stop); total/shown/capped in the payload disclose the cut, and hits_capped=true means total is itself a FLOOR (the collection budget was reached). Hits are SPAN-TIERED by default: a hit inside a comment or a string literal is a mention, not a use, so this serves the tightest NON-EMPTY tier (code if any code hit exists, else the comment rows — a pattern living only in prose is still answered) and discloses what it held back as suppressed_comment/suppressed_string; pass in=any for every tier. complete:true means the OPPOSITE: this listing is exhaustive over the index (every indexed file read end to end, no ceiling, every hit served, nothing tier-suppressed) — do not re-derive it, and a zero really is zero; the claim is complete-within-the-index only (files the ingest skipped were never scanned). Its absence claims nothing.\","
                    + mcprefuse::toolMetadataFor( "grep", pathIsRequired ) + "},"
                    "{\"name\":\"cochange\",\"description\":\"Files that historically change together with this file — the co-edit partners. surprising=true means no static #include dependency explains it; dep_capable=false means neither side could carry one (sh/md/json/binary), so surprising is undefined rather than informative.\","
                    + mcprefuse::toolMetadataFor( "cochange", pathIsRequired ) + "},"
@@ -1249,7 +1249,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 else if( name == "grep" && !path.empty() && !pattern.empty() )
                 {
                     // verifier N8: grep pages through the SAME window both other paged verbs use.
-                    resp = pagedResult( [ & ]( McpPageArgs pg ) { return textResult( grepHitsJson( path, pattern, pg ) ); } );
+                    // R-H: `in` is the CLI --grep-in twin — code (default) or any. An unknown value reads as
+                    // the default here rather than refusing, because the schema already declares the closed
+                    // set and this verb has no refusal channel per-argument; the CLI arm is the strict one.
+                    const rw::GrepIn grepInMode = ( strArg( "in" ) == "any" ) ? rw::GrepIn::Any : rw::GrepIn::Code;
+                    resp = pagedResult( [ & ]( McpPageArgs pg ) { return textResult( grepHitsJson( path, pattern, pg, grepInMode ) ); } );
                 }
                 else if( name == "cochange" && !path.empty() && !file.empty() )
                 {

@@ -76,6 +76,9 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
     { "find_referencing_symbols","symbol",    "a symbol name (the final name segment; add scope to disambiguate)", "symbol=\"parseArgs\"",
       FieldRule::Required, "pass the final name segment; add scope to disambiguate" },
     { "grep",                    "pattern",   "a literal string to search for",                                    "pattern=\"parseArgs\"" },
+    // R-H span tiers: the MCP spelling of the CLI's --grep-in. Optional, and the hatch has to exist on THIS
+    // surface too — an MCP-only agent that sees suppressed_comment= has no CLI to re-ask from.
+    { "grep",                    "in",        "which span tier to serve: code (default) or any",                    "in=\"any\"", FieldRule::Optional },
     { "cochange",                "file",      "a file path (a path SUFFIX is enough)",                              "file=\"src/main.cpp\"" },
     { "memory_recall",           "task",      "the task in plain words",                                           "task=\"how does the cache key work\"" },
     { "mentions",                "symbol",    "a code symbol name to find in doc backticks",                        "symbol=\"parseArgs\"",
@@ -892,7 +895,7 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "analyze",                  "path paths" },
     { "find_symbol",              "path paths symbol" },
     { "find_referencing_symbols", "path paths symbol" },
-    { "grep",                     "path paths pattern limit offset" },
+    { "grep",                     "path paths pattern in limit offset" },
     { "cochange",                 "path file" },
     { "memory_recall",            "path task top_k" },
     { "situational_awareness",    "path diff files" },

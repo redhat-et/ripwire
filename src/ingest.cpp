@@ -12505,6 +12505,249 @@ std::vector<AstMatch> astQuery( const IngestResult& ing, const std::vector<AstQu
     return std::move( got[0] );
 }
 
+// ---- R-H span tiers: the narrow single-file parse entry (declared in ingest.h — read its header first) --
+//
+// Node-type classification is a rule over the type NAME, not a per-grammar table, and that is deliberate:
+// twelve grammars spell the same two concepts a dozen ways (comment / line_comment / block_comment /
+// multiline_comment / documentation_comment / html_comment; string / string_literal / raw_string_literal /
+// interpreted_string_literal / verbatim_string_literal / template_string / string_content), and a hand-kept
+// per-grammar table is exactly the surface that goes stale the next time a grammar is vendored in. The two
+// substring rules below cover every one of those spellings by construction; the exact-match table carries
+// only the spellings that DON'T contain either word.
+//
+// Substring, not prefix/suffix: `raw_string_literal` and `documentation_comment` both need it. The exact
+// table must stay exact — a substring rule for "str" would classify `struct_specifier` as a string.
+inline constexpr std::string_view kSpanTierExactStringTypes[] = {
+    "char_literal",         // C/C++/Rust
+    "character_literal",    // Java/C#
+    "line_str_text",        // Swift — the TEXT inside a "…" literal
+    "raw_str_part",         // Swift raw strings
+    "heredoc_body",         // Bash/Ruby
+    "heredoc_content",      // Bash
+};
+
+// Code (the default) unless the node's own type says otherwise.
+inline SpanTier spanTierOfNodeType( const char* type ) noexcept
+{
+    if( type == nullptr )
+    {
+        return SpanTier::Code;
+    }
+    if( std::strstr( type, "comment" ) != nullptr )
+    {
+        return SpanTier::Comment;
+    }
+    if( std::strstr( type, "string" ) != nullptr )
+    {
+        return SpanTier::String;
+    }
+    for( const std::string_view exact : kSpanTierExactStringTypes )
+    {
+        if( exact.compare( type ) == 0 )
+        {
+            return SpanTier::String;
+        }
+    }
+    return SpanTier::Code;
+}
+
+// Collect one tree's OUTERMOST comment/string spans. Explicit stack, not recursion: a generated file can
+// nest thousands of nodes deep (the YAML grammar's own 254-level indent bug is the standing reminder), and
+// a query-time pass may not be the thing that overflows the stack. A classified node is recorded and NOT
+// descended into, so `string_content` inside `string_literal` cannot produce a second, overlapping span.
+static void collectSpanTiers( TSNode root, std::uint32_t byteCount, SpanTierMap& out )
+{
+    std::vector<TSNode> stack;
+    stack.push_back( root );
+    while( !stack.empty() )
+    {
+        const TSNode n = stack.back();
+        stack.pop_back();
+        const SpanTier    tier = spanTierOfNodeType( ts_node_type( n ) );
+        const std::uint32_t a  = ts_node_start_byte( n ), b = ts_node_end_byte( n );
+        if( tier != SpanTier::Code )
+        {
+            if( a < b && b <= byteCount )
+            {
+                out.startByte.push_back( a );
+                out.endByte.push_back( b );
+                out.tier.push_back( std::uint8_t( tier ) );
+            }
+            continue;   // do not descend: the span is already claimed, whole
+        }
+        // ALL children, not just the named ones — a comment is an `extra` in most grammars and several
+        // spell it as an anonymous node, so a named-only walk silently misses exactly the tier this
+        // function exists to find.
+        const std::uint32_t childCount = ts_node_child_count( n );
+        for( std::uint32_t c = childCount; c > 0; --c )
+        {
+            stack.push_back( ts_node_child( n, c - 1 ) );
+        }
+    }
+    // The stack walk emits in DFS pop order, which is not byte order once a subtree is skipped; the
+    // classify path binary-searches, so sort here once rather than making every lookup linear.
+    std::vector<std::uint32_t> order( out.startByte.size() );
+    std::iota( order.begin(), order.end(), std::uint32_t( 0 ) );
+    std::stable_sort( order.begin(), order.end(), [ & ]( std::uint32_t x, std::uint32_t y ) noexcept
+                      { return out.startByte[x] < out.startByte[y]; } );
+    SpanTierMap sorted;
+    sorted.startByte.reserve( order.size() );
+    sorted.endByte.reserve( order.size() );
+    sorted.tier.reserve( order.size() );
+    for( const std::uint32_t index : order )
+    {
+        sorted.startByte.push_back( out.startByte[index] );
+        sorted.endByte.push_back( out.endByte[index] );
+        sorted.tier.push_back( out.tier[index] );
+    }
+    out.startByte = std::move( sorted.startByte );
+    out.endByte   = std::move( sorted.endByte );
+    out.tier      = std::move( sorted.tier );
+}
+
+SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths )
+{
+    SpanTierBatch batch;
+    batch.perFile.resize( diskPaths.size() );
+    if( diskPaths.empty() )
+    {
+        return batch;
+    }
+
+    // BIGGEST FILE FIRST, the same longest-processing-time-first order (and the same reason) as
+    // astQueryGrouped's pool: hand the corpus's largest translation unit out first so it cannot strand an
+    // otherwise-idle pool at the tail. E5 design condition 2 — this is the pattern it named, scoped to the
+    // caller's file list instead of ing.files.
+    const std::size_t          fileCount = diskPaths.size();
+    std::vector<std::uint32_t> walkOrder( fileCount );
+    std::iota( walkOrder.begin(), walkOrder.end(), std::uint32_t( 0 ) );
+    {
+        std::vector<std::uintmax_t> fileByteSize( fileCount, 0 );
+        std::error_code             ec;
+        for( std::size_t fileIndex = 0; fileIndex < fileCount; ++fileIndex )
+        {
+            ec.clear();
+            fileByteSize[fileIndex] = fs::file_size( diskPaths[fileIndex], ec );
+            if( ec )
+            {
+                fileByteSize[fileIndex] = 0;
+            }
+        }
+        std::stable_sort( walkOrder.begin(), walkOrder.end(), [ & ]( std::uint32_t a, std::uint32_t b ) noexcept
+                          {
+                              if( fileByteSize[a] != fileByteSize[b] )
+                              {
+                                  return fileByteSize[a] > fileByteSize[b];
+                              }
+                              return a < b;
+                          } );
+    }
+
+    unsigned hw = std::thread::hardware_concurrency();
+    if( hw == 0 )
+    {
+        hw = 1;
+    }
+    const unsigned            threadCount = static_cast<unsigned>( std::min<std::size_t>( hw, fileCount ) );
+    std::atomic<std::size_t>  nextSlot{ 0 };
+    std::atomic<std::uint64_t> bytesParsed{ 0 };
+    const auto                worker = [ & ]()
+    {
+        ParserGuard pg;
+        if( pg.p == nullptr )
+        {
+            DEGRADED_PATH_ALERT( "span tiers: no tree-sitter parser — hits stay unclassified (never suppressed)" );
+            return;
+        }
+        std::string bytes;
+        try
+        {
+            for( ;; )
+            {
+                const std::size_t slot = nextSlot.fetch_add( 1, std::memory_order_relaxed );
+                if( slot >= fileCount )
+                {
+                    break;
+                }
+                const std::size_t  fileIndex = walkOrder[slot];
+                const std::string& path      = diskPaths[fileIndex];
+                const std::string  ext       = lowerExtensionOf( path );
+                const LangEntry*   le        = lookupLang( ext );
+                if( le == nullptr || le->grammar == nullptr )
+                {
+                    continue;   // markdown and every unsupported extension: unclassifiable, and it stays that way
+                }
+                bytes.clear();
+                if( !readFile( path, bytes ) || looksBinary( bytes ) )
+                {
+                    continue;
+                }
+                if( ext == ".h" && looksObjC( bytes ) )
+                {
+                    if( const LangEntry* objcLe = lookupLang( ".m" ) )
+                    {
+                        le = objcLe;   // the SAME reroute the crawl and the AST walk both apply
+                    }
+                }
+                const TSLanguage* g = le->grammar();
+                if( g == nullptr || !ts_parser_set_language( pg.p, g ) || !grammarAbiOk( g ) )
+                {
+                    continue;
+                }
+                TSTree* tree = nullptr;
+                {
+                    PROFILE_SCOPE_DESCRIBE( "spanTiers/worker: tree-sitter parse" );
+                    tree = ts_parser_parse_string( pg.p, nullptr, bytes.data(), static_cast<std::uint32_t>( bytes.size() ) );
+                }
+                if( tree == nullptr )
+                {
+                    continue;
+                }
+                collectSpanTiers( ts_tree_root_node( tree ), std::uint32_t( bytes.size() ), batch.perFile[fileIndex] );
+                batch.perFile[fileIndex].isParsed = true;   // slot owned by this worker alone
+                ts_tree_delete( tree );
+                bytesParsed.fetch_add( bytes.size(), std::memory_order_relaxed );
+            }
+        }
+        catch( ... )   // a throw escaping a worker thread is std::terminate — degrade to unclassified instead
+        {
+            DEGRADED_PATH_ALERT( "span tiers: parse worker degraded (exception swallowed) — files left unclassified" );
+        }
+    };
+    if( threadCount <= 1 )
+    {
+        worker();
+    }
+    else
+    {
+        // symmetric bare scope: the workers live exactly as long as the parse batch
+        std::vector<std::thread> pool;
+        pool.reserve( threadCount );
+        for( unsigned t = 0; t < threadCount; ++t )
+        {
+            pool.emplace_back( worker );
+        }
+        for( std::thread& w : pool )
+        {
+            w.join();
+        }
+    }
+
+    batch.bytesParsed = bytesParsed.load( std::memory_order_relaxed );
+    for( const SpanTierMap& m : batch.perFile )
+    {
+        if( m.isParsed )
+        {
+            ++batch.parsedFileCount;
+        }
+        else
+        {
+            ++batch.unparsedFileCount;
+        }
+    }
+    return batch;
+}
+
 // ---- unreachable-code detection (built-in --lint rule "unreachable-code") ----
 //
 // A GENUINE block node — a brace-delimited statement list whose direct children are the block's

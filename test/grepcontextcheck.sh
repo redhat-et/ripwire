@@ -185,12 +185,15 @@ e_sp=$?
 # in this codebase's comments) was emitted as a lone 0xE2 inside CDATA — `xmllint --noout` then died with
 # "Input is not proper UTF-8". The fixture cannot catch this (its multi-byte chars are mid-line); only
 # the real tree has comment lines that END on a codepoint, so this arm runs against $ROOT.
-"$BIN" "$ROOT" --no-cache --regex='fnv\w+' --grep-context=2 >"$TMP/utf8regex" 2>/dev/null
+# R-H span tiers (2026-08-19): grep-in=any here on purpose — this arm is about the UTF-8 back-off in the
+# CONTEXT serializer, and the line it pins ends an em-dash inside a COMMENT, which the tiered default now
+# holds back. Turning tiering off keeps the arm measuring the thing it was written for.
+"$BIN" "$ROOT" --no-cache --regex='fnv\w+' --grep-context=2 --grep-in=any >"$TMP/utf8regex" 2>/dev/null
 xmllint --noout "$TMP/utf8regex" 2>/dev/null \
     && ok "--regex='fnv\\w+' --grep-context=2 on the real corpus is well-formed (no split codepoint)" \
     || no "--regex='fnv\\w+' --grep-context=2 on the real corpus is malformed XML — context cut mid-UTF-8"
 
-"$BIN" "$ROOT" --no-cache --grep=MUST --grep-context=2 >"$TMP/utf8lit" 2>/dev/null
+"$BIN" "$ROOT" --no-cache --grep=MUST --grep-context=2 --grep-in=any >"$TMP/utf8lit" 2>/dev/null
 xmllint --noout "$TMP/utf8lit" 2>/dev/null \
     && ok "--grep=MUST --grep-context=2 on the real corpus is well-formed (no split codepoint)" \
     || no "--grep=MUST --grep-context=2 on the real corpus is malformed XML — context cut mid-UTF-8"
