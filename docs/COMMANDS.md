@@ -40,7 +40,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **understand a codebase cold** — [`--top-k`](#top-k-n) · [`--max-tokens`](#max-tokens-n) · [`--token-budget`](#token-budget-n-k-m-g) · [`--help-task`](#help-task-task) · [`--for`](#for-task) · [`--signatures-only`](#signatures-only) · [`--no-route`](#no-route) · [`--adaptive`](#adaptive) · [`--no-mention-boost`](#no-mention-boost) · [`--no-doc-mention`](#no-doc-mention) · [`--lego`](#lego-type) · [`--exemplar`](#exemplar-task-kind) · [`--recall`](#recall-task) · [`--tree`](#tree) · [`--html`](#html-file) · [`--color-by`](#color-by-mode) · [`--order`](#order-mode) · [`--no-stable`](#no-stable)
 
-**navigate / answer a question** — [`--around`](#around-sym) · [`--callers`](#callers-sym) · [`--callees`](#callees-sym) · [`--uses`](#uses-sym) · [`--graph-query`](#graph-query-expr) · [`--external-surface`](#external-surface) · [`--path`](#path-src-dst) · [`--connect`](#connect-a-b-c) · [`--impact`](#impact-sym) · [`--verify`](#verify-claim) · [`--mentions`](#mentions-sym) · [`--affected`](#affected-f1-f2-sym) · [`--exercises`](#exercises-testfile) · [`--situ`](#situ-f1-f2) · [`--handoff`](#handoff) · [`--test-gate`](#test-gate-f1-f2) · [`--grep`](#grep-str-regex-pat) · [`--grep-scope`](#grep-scope-line-file) · [`--grep-in`](#grep-in-code-any) · [`--match`](#match-query) · [`--query`](#query-terms)
+**navigate / answer a question** — [`--around`](#around-sym) · [`--callers`](#callers-sym) · [`--callees`](#callees-sym) · [`--uses`](#uses-sym) · [`--graph-query`](#graph-query-expr) · [`--external-surface`](#external-surface) · [`--path`](#path-src-dst) · [`--connect`](#connect-a-b-c) · [`--impact`](#impact-sym) · [`--verify`](#verify-claim) · [`--mentions`](#mentions-sym) · [`--affected`](#affected-f1-f2-sym) · [`--exercises`](#exercises-testfile) · [`--situ`](#situ-f1-f2) · [`--handoff`](#handoff) · [`--test-gate`](#test-gate-f1-f2) · [`--grep`](#grep-str-regex-pat) · [`--grep-scope`](#grep-scope-line-file) · [`--grep-in`](#grep-in-code-any) · [`--match`](#match-query) · [`--pattern`](#pattern-pat) · [`--query`](#query-terms)
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
@@ -1019,6 +1019,17 @@ $ ./build/ripwire . --match='(if_statement)'
 ```
 
 **Shaped by:** `--no-redact`, `--sarif`, `--json`
+
+### `--pattern=PAT`
+
+**Answers:** structural search written in CODE, not in node kinds: --pattern='foo($X, ...)'.
+
+$NAME binds one node (the same $NAME twice must match structurally); $_ binds nothing; ... (or $$$) is an ellipsis over sibling nodes, matched by a single FIRST-MATCH-WINS probe under a hard cap -- both disclosed on the element. Comments are transparent; everything else is kind- and text-exact, so $A + $B does not match a - b. Served: c cpp objc java csharp javascript typescript python go rust swift. NOT served (named in unsupported= on every run, never a silent zero): ruby bash (bare tokens parse clean into the wrong node kind there) and the data tiers json toml yaml markdown. A pattern no served grammar resolves, or one that collapses to a bare token, is REFUSED -- never reported as hits=0.
+
+**Caveats (stated by the binary):**
+
+- NOT served (named in unsupported= on every run, never a silent zero): ruby bash (bare tokens parse clean into the wrong node kind there) and the data tiers json toml yaml markdown.
+- A pattern no served grammar resolves, or one that collapses to a bare token, is REFUSED -- never reported as hits=0.
 
 ### `--query=TERMS`
 
