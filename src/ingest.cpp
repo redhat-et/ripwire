@@ -18,6 +18,7 @@
 #include "lexindex.h"          // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
 #include "didyoumean.h"        // octocode F3: boundedEditDistance/nearestNameByEditDistance — the ONE near-miss
                                 // primitive, reused for a --match query's node-kind tokens (see nearestNodeKindHint)
+#include "pattern.h"           // R2: the pattern surface's compiler + matcher — AstWalk::Pattern rides the shared file walk
 
 #include "infra/Diagnostics.h"
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
@@ -11652,6 +11653,35 @@ inline std::uint32_t lineAtByte( const std::vector<std::uint32_t>& nlOffsets, st
     return std::uint32_t( 1 + ( std::lower_bound( nlOffsets.begin(), nlOffsets.end(), bytePos ) - nlOffsets.begin() ) );
 }
 
+// One AstMatch row from one [startByte,endByte) span of one file. THE single place a match's snippet is
+// cut: the 120-byte cap, the UTF-8 continuation-byte back-off that stops the cut splitting a codepoint,
+// and the whitespace scrub that keeps the row on one line. Shared by the query walk's capture emitter and
+// by the pattern walk — two callers producing byte-different snippets for the same span would be a
+// difference no reader could explain, and a second copy of this is exactly the new-clone-of-reused-helper
+// shape --quality-delta flags.
+inline AstMatch makeAstMatch( std::uint32_t fileId, std::string_view bytes, const std::vector<std::uint32_t>& nlOffsets,
+                              std::uint32_t a, std::uint32_t b, std::string tag )
+{
+    PROFILE_SCOPE_DESCRIBE( "strings: capture text substr + whitespace scrub" );
+    std::size_t cutLen = std::min<std::size_t>( b - a, 120u );
+    if( cutLen < b - a )
+    {
+        while( cutLen > 0 && ( static_cast<unsigned char>( bytes[a + cutLen] ) & 0xC0 ) == 0x80 )
+        {
+            --cutLen;
+        }
+    }
+    std::string text( bytes.substr( a, cutLen ) );
+    for( char& ch : text )
+    {
+        if( ch == '\n' || ch == '\r' || ch == '\t' )
+        {
+            ch = ' ';
+        }
+    }
+    return AstMatch{ fileId, a, b, lineAtByte( nlOffsets, a ), std::move( tag ), std::move( text ) };
+}
+
 // ---- shared AST-query pass (--match / --lint) ----
 // One compiled query, plus the group it answers for. Grouping is a property of the QUERY, not of the walk:
 // a worker executes every query a file's grammar has and files the captures into that query's own bucket.
@@ -11905,14 +11935,40 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
 // Drive every BUILT-IN WALK group over one already-parsed file, each into its own bucket. Called from the
 // shared worker loop with the tree and newline index the query groups are about to use, which is the whole
 // point: a walk group exists so a non-query check can stop re-reading and re-parsing the corpus for itself.
+// `grammar` is the language THIS file was parsed with: the pattern walk needs it because one --pattern
+// string compiles to a different node shape per grammar, and the wrong program against the right tree
+// would silently match nothing. The unreachable-code walk ignores it (its rule is kind-name based).
 inline void runWalkGroups( const std::vector<AstQueryGroup>& groups, TSNode root, std::uint32_t fileId, std::string_view bytes,
-                           const std::vector<std::uint32_t>& nlOffsets, std::vector<std::vector<AstMatch>>& perGroupHits )
+                           const std::vector<std::uint32_t>& nlOffsets, const TSLanguage* grammar, std::vector<std::vector<AstMatch>>& perGroupHits )
 {
     for( std::size_t groupIndex = 0; groupIndex < groups.size(); ++groupIndex )
     {
         if( groups[groupIndex].walk == AstWalk::UnreachableCode )
         {
             ur_walkTree( root, fileId, bytes, nlOffsets, perGroupHits[groupIndex] );
+        }
+        else if( groups[groupIndex].walk == AstWalk::Pattern )
+        {
+            const pattern::PatternProgramSet* set = groups[groupIndex].patternPrograms;
+            if( set == nullptr )
+            {
+                continue;   // a Pattern group with no programs is a caller bug, but never a crash
+            }
+            const pattern::PatternProgram* prog = set->forGrammar( grammar );
+            if( prog == nullptr )
+            {
+                continue;   // this file's grammar is one the pattern did not resolve for — unresolved_in= says so
+            }
+            std::vector<std::pair<std::uint32_t, std::uint32_t>> spans;
+            pattern::findMatches( *prog, root, bytes, spans, pattern::kMaxHits );
+            for( const auto& [a, b] : spans )
+            {
+                if( a >= b || b > bytes.size() )
+                {
+                    continue;
+                }
+                perGroupHits[groupIndex].push_back( makeAstMatch( fileId, bytes, nlOffsets, a, b, std::string() ) );
+            }
         }
     }
 }
@@ -12308,7 +12364,7 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                     if( anyWalk )
                     {
                         PROFILE_SCOPE_DESCRIBE( "astQuery/worker: built-in tree walk" );
-                        runWalkGroups( groups, root, std::uint32_t( fileId ), bytes, nlOffsets, tHits[t] );
+                        runWalkGroups( groups, root, std::uint32_t( fileId ), bytes, nlOffsets, g, tHits[t] );
                     }
                     if( !hasQueries )
                     {
@@ -12329,25 +12385,9 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
                             {
                                 continue;
                             }
-                            const std::uint32_t line = lineAtByte( nlOffsets, a );
-                            std::size_t cutLen = std::min<std::size_t>( b - a, 120u );
-                            if( cutLen < b - a )
-                            { // truncated mid-text → back off UTF-8 continuation bytes so the cut never splits a codepoint (same pattern as serialize.h packSource)
-                                while( cutLen > 0 && ( static_cast<unsigned char>( bytes[a + cutLen] ) & 0xC0 ) == 0x80 )
-                                {
-                                    --cutLen;
-                                }
-                            }
-                            PROFILE_SCOPE_DESCRIBE( "strings: capture text substr + whitespace scrub" );
-                            std::string text = bytes.substr( a, cutLen );
-                            for( char& ch : text )
-                            {
-                                if( ch == '\n' || ch == '\r' || ch == '\t' )
-                                {
-                                    ch = ' ';
-                                }
-                            }
-                            tHits[t][owner.groupIndex].push_back( { std::uint32_t( fileId ), a, b, line, owner.tag, std::move( text ) } );
+                            // The snippet cut (120 bytes, UTF-8-safe, whitespace-scrubbed) lives in
+                            // makeAstMatch — the pattern walk emits rows through the same helper.
+                            tHits[t][owner.groupIndex].push_back( makeAstMatch( std::uint32_t( fileId ), bytes, nlOffsets, a, b, owner.tag ) );
                         }
                     };
 
@@ -12493,6 +12533,55 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
         out[groupIndex] = std::move( keep );
     }
     return out;
+}
+
+// R2: the grammars the pattern surface serves, derived from kLangTable so it can never disagree with the
+// crawler about which extension is which language. One row per distinct grammar OBJECT — .ts and .tsx are
+// two objects sharing the name "typescript", and .cu's CUDA grammar shares "cpp", and BOTH need their own
+// compiled program even though the disclosure prints one name. Membership is decided by pattern.h's
+// template table: a family with no wrap templates is a family this verb does not serve, stated in exactly
+// one place. kLangTable order makes the result deterministic without a sort.
+std::vector<pattern::GrammarRow> supportedPatternGrammars()
+{
+    std::vector<pattern::GrammarRow> rows;
+    rows.reserve( kLangTable.size() );
+    for( const LangEntry& le : kLangTable )
+    {
+        if( le.grammar == nullptr || le.querySub.empty() || pattern::templatesFor( le.querySub ) == nullptr )
+        {
+            continue;
+        }
+        const TSLanguage* g = le.grammar();
+        bool              seen = false;
+        for( const pattern::GrammarRow& r : rows )
+        {
+            seen = seen || ( r.grammar == g );
+        }
+        if( !seen )
+        {
+            rows.push_back( { g, le.querySub } );
+        }
+    }
+    return rows;
+}
+
+std::size_t eligiblePatternFiles( const IngestResult& ing, const pattern::PatternProgramSet& set )
+{
+    std::size_t eligible = 0;
+    for( std::size_t fileId = 0; fileId < ing.files.size(); ++fileId )
+    {
+        const std::string ext = lowerExtensionOf( diskPath( ing, std::uint32_t( fileId ) ) );
+        const LangEntry*  le  = lookupLang( ext );
+        if( le == nullptr || le->grammar == nullptr )
+        {
+            continue;
+        }
+        if( set.forGrammar( le->grammar() ) != nullptr )
+        {
+            ++eligible;
+        }
+    }
+    return eligible;
 }
 
 // The single-group spelling every standalone caller uses. One walk, one group — byte-identical to the

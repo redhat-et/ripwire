@@ -15,9 +15,9 @@
 #      bash's bare `try` both parse clean into the wrong node kind). A pattern that collapses to a single
 #      bare token is refused, loudly, and never scanned.
 #   3. The ELLIPSIS IS BOUNDED, and the bound is DISCLOSED. `...` may not mean "unbounded backtracking we
-#      never tell you about": the match is a single GREEDY left-to-right probe (ast-grep recon §3 —
-#      first-match-wins, no backtracking), under a hard per-ellipsis node cap. Both facts land on the
-#      element as ellipsis="greedy" and ellipsis_bound=N whenever the pattern uses one.
+#      never tell you about": the match is a single left-to-right FIRST-MATCH-WINS probe (ast-grep recon
+#      §3 — no backtracking), under a hard per-ellipsis node cap. Both facts land on the element as
+#      ellipsis="first-match" and ellipsis_bound=N whenever the pattern uses one.
 #   4. REFUSE, never a silent zero. An unparseable pattern, or one no supported grammar resolves, exits 1
 #      with a message — it must not print a confident hits="0" it did not measure.
 #   5. Metavariable CONSISTENCY: `$X` twice in one pattern means the same text twice.
@@ -111,8 +111,11 @@ done
 eb="$( attrOf "$TMP/ell" ellipsis_bound )"
 [ -n "$eb" ] && [ "$eb" -gt 0 ] 2>/dev/null && ok "ellipsis_bound=\"$eb\" disclosed on the element" \
     || no "ellipsis_bound= missing or non-numeric on an ellipsis pattern (got '$eb')"
-[ "$( attrOf "$TMP/ell" ellipsis )" = "greedy" ] && ok "ellipsis=\"greedy\" discloses first-match-wins, not exhaustive search" \
-    || no "ellipsis= does not say the probe is greedy (got '$( attrOf "$TMP/ell" ellipsis )')"
+# The recon suggested spelling this ellipsis="greedy"; the emitted value is "first-match" because that is
+# what the probe DOES — it takes the FIRST split that works, which is the lazy end of greedy, not the
+# longest. Naming it greedy would be a small fabrication in an attribute whose whole job is disclosure.
+[ "$( attrOf "$TMP/ell" ellipsis )" = "first-match" ] && ok "ellipsis=\"first-match\" discloses the probe is not an exhaustive search" \
+    || no "ellipsis= does not name the probe (got '$( attrOf "$TMP/ell" ellipsis )')"
 he="$( hitsOf "$TMP/ell" )"
 [ "${he:-0}" = "$FIXCOUNT" ] && ok "foo(\$A, ...) matched the same $FIXCOUNT call sites" \
     || no "foo(\$A, ...) hits=${he:-<none>}, expected $FIXCOUNT"
@@ -124,6 +127,17 @@ h3="$( "$BIN" "$FIX" --pattern='foo($A, $$$)' 2>/dev/null | grep -oE ' hits="[0-
 grep -oE '<pattern [^>]*>' "$TMP/all" | grep -q 'ellipsis_bound=' \
     && no "ellipsis_bound= emitted on a pattern that uses no ellipsis" \
     || ok "ellipsis_bound= absent when the pattern uses no ellipsis"
+
+# ── 3b. the ellipsis in a STATEMENT position, not only in an argument list ────────────────────────────
+# `if ($C) { ... }` is the shape users reach for, and in a semicolon language the substituted ellipsis is
+# a bare expression statement that does not parse without its `;`. The normalizer has to try both.
+mkdir -p "$TMP/stmt"
+printf 'void g(int c){ if (c) { h(); k(); } }\n'                 > "$TMP/stmt/s.c"
+printf 'class A { void g(boolean c){ if (c) { h(); k(); } } }\n' > "$TMP/stmt/S.java"
+printf 'function g(c){ if (c) { h(); k(); } }\n'                 > "$TMP/stmt/s.js"
+hst="$( "$BIN" "$TMP/stmt" --pattern='if ($C) { ... }' 2>/dev/null | grep -oE ' hits="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"
+[ "${hst:-0}" = "3" ] && ok "an ellipsis in a statement position resolves in c/java/js alike (hits=3)" \
+    || no "statement-position ellipsis: hits=${hst:-<none>}, expected 3"
 
 # ── 4. refuse, never a silent zero ────────────────────────────────────────────────────────────────────
 for badpat in '}{' 'if if if )( }' '@@@@'; do
