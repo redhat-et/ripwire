@@ -12672,6 +12672,30 @@ std::vector<std::vector<AstMatch>> astQueryGrouped( const IngestResult& ing, con
 // compiled program even though the disclosure prints one name. Membership is decided by pattern.h's
 // template table: a family with no wrap templates is a family this verb does not serve, stated in exactly
 // one place. kLangTable order makes the result deterministic without a sort.
+// The DISCLOSURE label for one grammar object, given the labels already handed out. querySub is the
+// TEMPLATE key and is deliberately shared by dialects — the C++ tags.scm and the C++ pattern templates are
+// what compile against tree_sitter_cuda, and tree_sitter_tsx borrows "typescript" the same way — but a
+// shared disclosure NAME is how V-3 happened: `grammars="cpp"` asserted the C++ grammar resolved on a run
+// where only the CUDA object had, while eligible_files=, keyed on the object, counted the .cpp file as
+// unscanned. The first object to claim a querySub keeps it verbatim (so every single-dialect language's
+// output is unchanged); a later object under the same key is qualified by the extension that introduced
+// it — "cpp/cu", "typescript/tsx". DERIVED, not enumerated, so a dialect grammar added tomorrow cannot
+// silently re-collide by being forgotten in a table.
+static std::string patternGrammarLabel( std::string_view querySub, std::string_view ext, const std::vector<pattern::GrammarRow>& taken )
+{
+    bool claimed = false;
+    for( const pattern::GrammarRow& r : taken )
+    {
+        claimed = claimed || ( r.label == querySub );
+    }
+    if( !claimed )
+    {
+        return std::string( querySub );
+    }
+    const std::string_view bare = ( !ext.empty() && ext.front() == '.' ) ? ext.substr( 1 ) : ext;
+    return std::string( querySub ) + "/" + std::string( bare );
+}
+
 std::vector<pattern::GrammarRow> supportedPatternGrammars()
 {
     std::vector<pattern::GrammarRow> rows;
@@ -12690,15 +12714,16 @@ std::vector<pattern::GrammarRow> supportedPatternGrammars()
         }
         if( !seen )
         {
-            rows.push_back( { g, le.querySub } );
+            rows.push_back( { g, le.querySub, patternGrammarLabel( le.querySub, le.ext, rows ) } );
         }
     }
     return rows;
 }
 
-std::size_t eligiblePatternFiles( const IngestResult& ing, const pattern::PatternProgramSet& set )
+PatternFileCensus eligiblePatternFiles( const IngestResult& ing, const pattern::PatternProgramSet& set )
 {
-    std::size_t eligible = 0;
+    const std::vector<pattern::GrammarRow> served = supportedPatternGrammars();
+    PatternFileCensus                      census;
     for( std::size_t fileId = 0; fileId < ing.files.size(); ++fileId )
     {
         const std::string ext = lowerExtensionOf( diskPath( ing, std::uint32_t( fileId ) ) );
@@ -12707,12 +12732,24 @@ std::size_t eligiblePatternFiles( const IngestResult& ing, const pattern::Patter
         {
             continue;
         }
-        if( set.forGrammar( le->grammar() ) != nullptr )
+        const TSLanguage* g = le->grammar();
+        if( set.forGrammar( g ) != nullptr )
         {
-            ++eligible;
+            ++census.eligibleCount;
+            continue;
+        }
+        // Not resolved for. It only counts as SKIPPED if this verb serves the grammar at all — a .rb or a
+        // .json file is not "skipped", it is out of scope, and unsupported= already says so.
+        for( const pattern::GrammarRow& r : served )
+        {
+            if( r.grammar == g )
+            {
+                ++census.skippedCount;
+                break;
+            }
         }
     }
-    return eligible;
+    return census;
 }
 
 // The single-group spelling every standalone caller uses. One walk, one group — byte-identical to the

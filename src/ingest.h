@@ -339,10 +339,21 @@ namespace pattern { struct PatternProgramSet; struct GrammarRow; }
 // fact, and a second copy of it is exactly the drift CONTRIBUTING's declarative-table rule prevents.
 std::vector<pattern::GrammarRow> supportedPatternGrammars();
 
-// §L3 applicability, in the pattern surface's own terms: corpus files whose extension maps to a grammar
-// the pattern actually RESOLVED for. The same extension-based (never content-sniffed) convention
-// computeGrammarDisclosure uses for --match, so eligible_files= means the same thing on both verbs.
-std::size_t eligiblePatternFiles( const IngestResult& ing, const pattern::PatternProgramSet& set );
+// §L3 applicability, in the pattern surface's own terms, counted per grammar OBJECT — the same
+// extension-based (never content-sniffed) convention computeGrammarDisclosure uses for --match, so
+// eligible_files= means the same thing on both verbs.
+//
+// V-3 (adversarial verification 2026-08-20): `skipped` is the other half, and the half whose absence was
+// the defect. A file whose extension maps to a grammar this verb SERVES, but whose grammar OBJECT the
+// pattern did not resolve for, is never scanned — and on a run with hits>0 the old emitter withheld
+// unresolved_in= entirely, so a `.ts` file sitting beside a matched `.tsx` one went unread with nothing on
+// the element to say so. Counting it here is what lets the emitter decide honestly.
+struct PatternFileCensus
+{
+    std::size_t eligibleCount = 0;   // files whose grammar object the pattern RESOLVED for — these were scanned
+    std::size_t skippedCount  = 0;   // files in a SERVED language whose grammar object it did not — never scanned
+};
+PatternFileCensus eligiblePatternFiles( const IngestResult& ing, const pattern::PatternProgramSet& set );
 
 // The unreachable-code rule's own budget, named so every caller spends the same one.
 inline constexpr std::size_t kUnreachableMaxHits = 5000;

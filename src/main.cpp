@@ -11472,12 +11472,16 @@ inline constexpr std::string_view kPatternLegend =
                          "node + its enclosing symbol. q= is the pattern as received. grammars= names every served grammar the pattern "
                          "resolved for and shapes= the node KIND it became in each, so what was actually searched for is auditable; "
                          "unsupported= names the families this verb does not serve at all (a zero there would be a lie, so it never "
-                         "reports one). eligible_files=/of_files= are corpus files in that language set vs total indexed files. "
-                         "$NAME binds one node and the same $NAME twice must match structurally; $_ binds nothing; the ellipsis is "
-                         "matched by a single first-match-wins probe (never an exhaustive search) under the disclosed ellipsis_bound "
-                         "sibling cap. Comments are transparent on both sides; everything else is kind- and text-exact. "
-                         "unresolved_in= appears ONLY on a zero result and names the served grammars the pattern did not resolve for "
-                         "- the zero may be theirs, not the code's. shown=/capped= = rows printed vs found. hits= is a "
+                         "reports one). Every grammar name here is per grammar OBJECT, so a dialect that borrows another's templates "
+                         "is spelled apart from it (cpp/cu = the CUDA grammar, typescript/tsx = the TSX one); a bare cpp NEVER stands "
+                         "for its dialects. eligible_files= = corpus files whose grammar the pattern resolved for, i.e. the files "
+                         "actually SCANNED; skipped_files= = files in a served language it did NOT resolve for, which were never read "
+                         "at all; of_files= = total indexed files. $NAME binds one node and the same $NAME twice must match "
+                         "structurally; $_ binds nothing; the ellipsis is matched by a single first-match-wins probe (never an "
+                         "exhaustive search) under the disclosed ellipsis_bound sibling cap. Comments are transparent on both sides; "
+                         "everything else is kind- and text-exact. unresolved_in= names the served grammars the pattern did not "
+                         "resolve for, and appears whenever that could mislead - on a zero result (the zero may be theirs, not the "
+                         "code's) or on any run with skipped_files above zero. shown=/capped= = rows printed vs found. hits= is a "
                          "FLOOR, not a total, when EITHER hits_capped=\"1\" (engine match limit reached) or ellipsis_capped=\"1\"; "
                          "the latter means an ellipsis probe gave up on ellipsis_skipped= candidate nodes whose sibling run exceeded "
                          "ellipsis_bound, so a node that would have matched can be missing (ellipsis_skipped= counts ABANDONS and is "
@@ -11495,6 +11499,7 @@ struct PatternSearchOutcome
     std::string               ellipsisAttr;    // "" unless the pattern uses an ellipsis
     std::string               unresolvedAttr;  // "" unless some served grammar did not resolve
     std::size_t               eligibleFiles = 0;
+    std::size_t               skippedFiles  = 0;   // served-language files this pattern never scanned (V-3)
     bool                      ellipsisCapped = false;   // an ellipsis probe abandoned a node at the bound (V-2)
     std::uint64_t             ellipsisSkipped = 0;      // how many times — a floor on the nodes left unevaluated
 };
@@ -11529,9 +11534,11 @@ static PatternSearchOutcome runPatternSearch( const rw::IngestResult& ing, std::
     out.ellipsisSkipped = ellipsisCapped.load( std::memory_order_relaxed );
     out.ellipsisCapped  = out.ellipsisSkipped != 0;
 
-    out.grammarsAttr  = joinOwned( rw::pattern::resolvedNames( progs ), "," );
-    out.shapesAttr    = joinOwned( rw::pattern::resolvedShapes( progs ), "," );
-    out.eligibleFiles = rw::eligiblePatternFiles( ing, progs );
+    out.grammarsAttr                 = joinOwned( rw::pattern::resolvedNames( progs ), "," );
+    out.shapesAttr                   = joinOwned( rw::pattern::resolvedShapes( progs ), "," );
+    const rw::PatternFileCensus cens = rw::eligiblePatternFiles( ing, progs );
+    out.eligibleFiles                = cens.eligibleCount;
+    out.skippedFiles                 = cens.skippedCount;
     // Both attributes below are emitted ONLY when they are facts about THIS pattern: an ellipsis fact on a
     // pattern with no ellipsis, or a partial-resolution note on a run that found plenty, is decoration —
     // and decoration is how a reader learns to stop reading attributes. unresolved_in= in particular is
@@ -11748,7 +11755,12 @@ std::optional<int> runLint( const MainDispatch& d )
             const std::size_t patShown = patPage.end - patPage.begin;
             char              ppab[ kPageDisclosureCap ];
             std::printf( "%.*s", int( kPatternLegend.size() ), kPatternLegend.data() );
-            std::printf( "<pattern hits=\"%zu\"%s hits_capped=\"%d\" q=\"%s\" grammars=\"%s\" shapes=\"%s\" unsupported=\"%.*s\"%s%s eligible_files=\"%zu\" of_files=\"%zu\"%s>",
+            // unresolved_in= is withheld only when it could not mislead: a run that found matches AND read
+            // every file it serves. The moment a served-language file went unscanned (skipped_files>0), the
+            // partial resolution is exactly what explains it, hits>0 or not — V-3's second case, where a
+            // matched .tsx sat beside a silently unread .ts.
+            const bool tellUnresolved = ps.matches.empty() || ps.skippedFiles > 0;
+            std::printf( "<pattern hits=\"%zu\"%s hits_capped=\"%d\" q=\"%s\" grammars=\"%s\" shapes=\"%s\" unsupported=\"%.*s\"%s%s eligible_files=\"%zu\" skipped_files=\"%zu\" of_files=\"%zu\"%s>",
                          ps.matches.size(),
                          pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true ),
                          ps.matches.size() >= rw::pattern::kMaxHits ? 1 : 0,
@@ -11757,8 +11769,9 @@ std::optional<int> runLint( const MainDispatch& d )
                          ex( ps.shapesAttr ).c_str(),
                          int( rw::pattern::kUnsupportedGrammars.size() ), rw::pattern::kUnsupportedGrammars.data(),
                          ps.ellipsisAttr.c_str(),
-                         ps.matches.empty() ? ps.unresolvedAttr.c_str() : "",
+                         tellUnresolved ? ps.unresolvedAttr.c_str() : "",
                          ps.eligibleFiles,
+                         ps.skippedFiles,
                          ing.files.size(),
                          lintRootAttr.c_str() );
             for( std::size_t hitIndex = patPage.begin; hitIndex < patPage.end; ++hitIndex )
