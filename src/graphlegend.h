@@ -114,6 +114,22 @@ inline constexpr const char* kRootRelPathsLegend =
 // `on` is the emitter's own root=-present condition, never a re-derivation of it.
 inline const char* rootRelPathsLegend( bool on ) noexcept { return on ? kRootRelPathsLegend : ""; }
 
+// W3-S item 5 (2026-08-19) — the ONE deliberate second wording of the clause above, for the ONE call site
+// (--for's two dialects: CLI main.cpp forLensHeaderText, MCP mcpverbs.h) that cannot afford the 159 B full
+// form: at --token-budget=800 pasting kRootRelPathsLegend verbatim pushed a real fixture from
+// est_tokens=799 to 811 (+1.4%), red test/fornotesbudgetcheck.sh. Recalibrating the shared ceiling
+// constants (serialize.h kMinBytesPerToken/kBudgetHeadroom/kCeilingFirstEntryTolerance) to absorb 33 B for
+// one verb would move every other budget-pinned gate in the tree — a blast radius wildly out of proportion
+// to a 21-byte gap after shortening, so a smaller spelling was the chosen trade-off, not a floor move.
+// Deliberately still only TWO spellings tool-wide (this one, and kRootRelPathsLegend for the other eighteen
+// legends) rather than a third-per-verb drift: both --for dialects share this exact string, the same way
+// they already share every other opener in this file.
+inline constexpr const char* kForRootRelPathsLegendShort =
+    "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's "
+    "own path, unchanged). -->";
+
+inline const char* forRootRelPathsLegendShort( bool on ) noexcept { return on ? kForRootRelPathsLegendShort : ""; }
+
 // ---- the per-verb legend OPENERS that more than one emitter prints -------------------------------------
 // Each of these had TWO byte-identical copies (a CLI one in main.cpp, an MCP one in mcpverbs.h) before this
 // header. They are hoisted verbatim-minus-the-fix so the pair cannot drift; the REST of each verb's legend

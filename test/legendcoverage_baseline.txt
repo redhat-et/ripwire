@@ -166,7 +166,6 @@ layout | layout@found
 layout | layout@mirror
 layout | layout@scanned
 layout | layout@sym
-lint | lint@findings
 lint | rule@name
 mentions | mentions@defs
 mentions | mentions@of

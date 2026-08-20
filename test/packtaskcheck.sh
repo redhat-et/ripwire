@@ -42,6 +42,19 @@ echo "packtaskcheck: BIN=$BIN"
 KMINBPT=2.36
 TOL=1.15
 ceiling_bytes(){ awk "BEGIN{printf \"%d\", $1 * $KMINBPT * $TOL}"; }
+
+# W3-S item 6 (2026-08-19): ANY byte-ceiling assertion below must run the corpus by a root-relative "."
+# (from INSIDE $ROOT/src), never "$ROOT/src" from outside it. The bundle's id=/root= attributes embed the
+# corpus root verbatim, so an absolute root spends bytes proportional to $ROOT's own path DEPTH — a
+# worktree living under a long scratch path (e.g. .../claude-501/.../scratchpad/wt-...) measurably inflates
+# every ceiling comparison below over a short-path checkout of the IDENTICAL commit (measured: 5692 B vs
+# 5039 B on the same --pack-task at --token-budget=2000, the 5428 B ceiling arm breaching only in the deep
+# case). This is a GATE-ENVIRONMENT bug, not a product one — the fix is here, not in the binary. Structural
+# assertions elsewhere in this file (determinism, xmllint, exit codes, and F4's --token-budget=1-vs-2
+# RELATIVE comparison, where the same path-byte constant cancels on both sides) are unaffected and
+# deliberately left as "$BIN" "$ROOT/src" — only a comparison against ceiling_bytes()'s absolute allowance
+# needs this.
+runRel(){ ( cd "$ROOT/src" && "$BIN" . "$@" ); }
 byte_off(){ grep -boF -- "$2" "$1" 2>/dev/null | head -1 | cut -d: -f1; }   # first byte offset of a literal, or empty
 
 # ── 1) refuse loudly WITHOUT a task string ────────────────────────────────────────────────────────────────
@@ -175,23 +188,30 @@ D2="$( runw --pack-task="parse budget planner decoy" )"
 D3="$( runw --pack-task="parse budget planner decoy" )"
 { [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; } && ok "bundle is deterministic (byte-identical ×3)" || no "bundle is non-deterministic"
 
-# ── 3) TINY budget → ranking-only WITH the truncation note ────────────────────────────────────────────────
+# ── 3) TINY budget → ranking-only, <bodies> present with shown="0" (R9 fix, W3-S 2026-08-19) ───────────────
+# Before the fix, a budget too tight for the bodies section left bodiesStr empty and the WHOLE <bodies>
+# element absent — "a zero means none found, never none exists" (CONTRIBUTING #3) says that is a lie by
+# omission when real candidates existed (total=6 here). packTaskListSection's <callers>/<tests> siblings
+# still degrade to fully absent (that is THEIR own, separately-scoped defect — not this item), so this arm
+# only tightens the <bodies> assertion, from "absent" to "present with shown=0/capped=1/the true total".
 TINY="$TMP/tiny.xml"
 "$BIN" "$ROOT/src" --no-cache --pack-task="serialize signatures budget" --token-budget=50 > "$TINY" 2>/dev/null
 if grep -qF '<sigs' "$TINY" \
-   && ! grep -qF '<bodies>' "$TINY" && ! grep -qF '<callers ' "$TINY" && ! grep -qF '<tests ' "$TINY" \
-   && grep -qE 'bodies: omitted \(budget\)' "$TINY"; then
-    ok "tiny budget degrades to ranking-only, header notes the dropped sections"
+   && grep -qE '<bodies shown="0" total="[1-9][0-9]*" capped="1"></bodies>' "$TINY" \
+   && ! grep -qF '<callers ' "$TINY" && ! grep -qF '<tests ' "$TINY" \
+   && grep -qE 'bodies: kept 0 of [1-9]' "$TINY"; then
+    ok "tiny budget: <sigs> survives, <bodies shown=\"0\"> is PRESENT (not absent), other sections omitted"
 else
-    no "tiny-budget degradation wrong (expected only <sigs> + an 'omitted (budget)' note)"
+    no "tiny-budget degradation wrong (expected <sigs> + <bodies shown=\"0\" total=\"N\" capped=\"1\">)"
     head -c 400 "$TINY"; echo
 fi
 xmllint --noout "$TINY" 2>/dev/null && ok "tiny-budget bundle is xmllint-clean" || no "tiny-budget bundle is not well-formed"
 
 # ── 4) budget ceiling respected across several --token-budget values (real src/ tree, exercises trimming) ──
+# runRel (not "$ROOT/src"): see the W3-S item-6 note by ceiling_bytes()'s definition above.
 for tb in 2000 4000 8000; do
     OUT="$TMP/b$tb.xml"
-    "$BIN" "$ROOT/src" --no-cache --pack-task="serialize signatures budget payload trim" --token-budget=$tb > "$OUT" 2>/dev/null
+    runRel --no-cache --pack-task="serialize signatures budget payload trim" --token-budget=$tb > "$OUT" 2>/dev/null
     bytes="$( wc -c < "$OUT" | tr -d ' ' )"
     ceil="$( ceiling_bytes "$tb" )"
     { [ "$bytes" -le "$ceil" ]; } \
@@ -200,9 +220,9 @@ for tb in 2000 4000 8000; do
     xmllint --noout "$OUT" 2>/dev/null || no "bundle at --token-budget=$tb is not well-formed"
 done
 
-# default (6K) budget is xmllint-clean + within its own ceiling
+# default (6K) budget is xmllint-clean + within its own ceiling — runRel, same item-6 reason as arm 4 above.
 DEF="$TMP/def.xml"
-"$BIN" "$ROOT/src" --no-cache --pack-task="serialize signatures budget payload trim" > "$DEF" 2>/dev/null
+runRel --no-cache --pack-task="serialize signatures budget payload trim" > "$DEF" 2>/dev/null
 defbytes="$( wc -c < "$DEF" | tr -d ' ' )"; defceil="$( ceiling_bytes 6000 )"
 { [ "$defbytes" -le "$defceil" ]; } && ok "default 6K-token budget within ceiling ($defbytes <= $defceil)" || no "default budget exceeded ceiling ($defbytes > $defceil)"
 xmllint --noout "$DEF" 2>/dev/null && ok "default bundle is xmllint-clean" || no "default bundle is not well-formed"

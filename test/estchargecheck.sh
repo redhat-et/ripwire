@@ -404,13 +404,21 @@ FOR_TASK="serialize the map"
 # grepping the whole document for your own marker reads your own source back at you.
 # The payload-element list is a denylist and therefore incomplete by construction — a bundle that emits some
 # OTHER element first (or none at all) falls back to `len(d)`, i.e. straight back into the trap. `-->` closes
-# the header comment the attribute is spliced into (main.cpp inserts it at the header's own rfind(" -->")),
-# so it is the boundary the emitter itself defines: always present, always AFTER the attribute, and never
-# after any payload. Kept alongside the element list so the cut is the earliest of the two.
+# the header comment the attribute is spliced into (main.cpp inserts it at the header's own rfind(" -->")).
+# W3-S item 5 (2026-08-19): --for's header can now legitimately hold TWO trailing comments — the main lens
+# comment, then a second, standalone "<!-- root= is the crawl root ... -->" clause (forRootRelPathsLegendShort,
+# main.cpp) appended after it closes, the same "second small comment after the first one closes" shape
+# kRootRelPathsLegend already uses at eighteen OTHER call sites (e.g. --cochange's kCochangeRepoLegend +
+# rootRelPathsLegend()). est_tokens is spliced into whichever comment is LAST (main.cpp's own
+# `headerStr.rfind(" -->")`, exactly as this comment already said), so this extractor must find the LAST
+# "-->" that precedes the payload boundary, not the FIRST — a plain `d.find(b'-->')` stopped scanning right
+# after the FIRST comment closed and missed est_tokens sitting inside the second one entirely.
 forest_of(){ python3 - "$1" <<'PYX'
 import sys, re
 d = open( sys.argv[1], 'rb' ).read()
-cut = min( ( i for i in ( d.find( b'-->' ), d.find( b'<sigs' ), d.find( b'<lego' ), d.find( b'<bodies' ) ) if i >= 0 ), default=len( d ) )
+payload = min( ( i for i in ( d.find( b'<sigs' ), d.find( b'<lego' ), d.find( b'<bodies' ) ) if i >= 0 ), default=len( d ) )
+close = d.rfind( b'-->', 0, payload )
+cut = close + 3 if close >= 0 else payload
 m = re.search( rb'est_tokens="(\d+)"', d[ :cut ] )
 print( m.group( 1 ).decode() if m else '' )
 PYX
@@ -509,13 +517,19 @@ else
     no "#11 A9/A10 --for (auto bodies): mixed-rate identity broken — bytes/span/est/expected = ${mix_out:-unreadable} (the auto section is mischarged)"
 fi
 # the weak="1" path: a nonsense query trips the weak-score threshold, so the 9-byte attribute is present and
-# the same identity must still hold with it in the document.
+# the same identity must still hold with it in the document. R9 fix (W3-S, 2026-08-19): a query this weak
+# also has no positive-score body candidates, so buildForAutoBodies now ALWAYS emits the honest
+# "<bodies shown="0" total="0" capped="0"></bodies>" shell here (it used to be entirely absent) — a real,
+# if tiny, body-rate (3.80) span inside an otherwise markup-rate (2.50) document, so this arm uses
+# mixedconsistent (already proven above for the non-weak auto-bodies case) instead of the flat-rate
+# selfconsistent, which cannot see the mixed rate and would false-positive on a span the emitter prices
+# correctly.
 "$BIN" src --for="zzqqxx" --no-cache >"$TMP/f_weak.out" 2>/dev/null
 if grep -aq 'weak="1"' "$TMP/f_weak.out"; then
-    if out="$( selfconsistent "$TMP/f_weak.out" )"; then
-        ok "#11 A9 --for with weak=\"1\": est_tokens self-consistent — bytes/est/expected = $out (the 9 B attr is charged)"
+    if out="$( mixedconsistent "$TMP/f_weak.out" )"; then
+        ok "#11 A9 --for with weak=\"1\": est_tokens self-consistent — bytes/span/est/expected = $out (the 9 B attr + the empty <bodies> shell are both charged)"
     else
-        no "#11 A9 --for with weak=\"1\": est_tokens != round(bytes/2.50) — the weak attr is spliced in outside the sum"
+        no "#11 A9 --for with weak=\"1\": est_tokens != mixed-rate expected — the weak attr or the R9 <bodies> shell is spliced in outside the sum"
     fi
 else
     no "#11 A9 could not produce a weak=\"1\" bundle (threshold or query shape changed — re-anchor this arm)"
