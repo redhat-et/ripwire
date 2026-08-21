@@ -1775,6 +1775,32 @@ void printLintRuleTallyRow( const std::string& name, const std::string* sev, std
                  shown < count ? 1u : 0u, capped ? " capped=\"1\"" : "", applicable ? "" : " applicable=\"0\"" );
 }
 
+// wave-4 item 12: the (count, shown-inside-`lintPage`) pair for ONE rule's rows in the already-sorted
+// `outs`. Lifted out of runLint's two per-rule tally loops (built-in and user) for the same reason
+// mergeAtomsPack/dedupeLintFindings/lintSymbolLevelChecks above it were — runLint was already the file's
+// largest dispatcher, and this is a second full-`outs` scan per rule either way, not new algorithmic
+// weight, just a home outside the function whose size this whole file already works to keep down.
+// `wantSevEmpty` is the one distinction between the built-in loop (bare rows, sev.empty()) and the user
+// loop (every user finding carries sev=); passing it explicitly keeps this one function instead of two.
+struct RuleTally { std::uint32_t count = 0, shown = 0; };
+RuleTally tallyLintRule( const std::vector<LintOut>& outs, const std::string& ruleId, bool wantSevEmpty, rw::PageWindow lintPage )
+{
+    RuleTally t;
+    for( std::size_t oi = 0; oi < outs.size(); ++oi )
+    {
+        const LintOut& m = outs[oi];
+        if( m.rule == ruleId && m.sev.empty() == wantSevEmpty )
+        {
+            ++t.count;
+            if( oi >= lintPage.begin && oi < lintPage.end )
+            {
+                ++t.shown;
+            }
+        }
+    }
+    return t;
+}
+
 // §P0.2: rules whose RAW capture stream spent its whole per-rule budget — their count= is a floor, not
 // a total, and must say so (the contract --match already honours with hits_capped="1"). Keyed by
 // (name, namespace): a user rule may share a built-in rule's name, and a cap must never leak across
@@ -12306,23 +12332,10 @@ std::optional<int> runLint( const MainDispatch& d )
                 { // deselected — no row at all, so it can never look like a checked-and-empty rule
                     continue;
                 }
-                std::uint32_t n     = 0;
-                std::uint32_t shown = 0;   // wave-4 item 12: how many of THIS rule's rows fall inside lintPage
-                for( std::size_t oi = 0; oi < outs.size(); ++oi )
-                {
-                    const LintOut& m = outs[oi];
-                    if( m.rule == rn && m.sev.empty() )
-                    {
-                        ++n;
-                        if( oi >= lintPage.begin && oi < lintPage.end )
-                        {
-                            ++shown;
-                        }
-                    }
-                }
+                const RuleTally rt = tallyLintRule( outs, rn, /*wantSevEmpty=*/true, lintPage );
                 const rw::lintcatalog::LintCatalogRow* catRow = rw::lintcatalog::lintCatalogFind( rn );
                 const bool applicable = catRow == nullptr || ( catRow->langMask & corpusLangs ) != 0;
-                printLintRuleTallyRow( rn, nullptr, n, shown, capOf( rn, false ) != nullptr, applicable );
+                printLintRuleTallyRow( rn, nullptr, rt.count, rt.shown, capOf( rn, false ) != nullptr, applicable );
             }
         }
         for( const LintRule& r : userRules )                          // user per-rule tally (declaration order → deterministic)
@@ -12331,23 +12344,10 @@ std::optional<int> runLint( const MainDispatch& d )
             {
                 continue;
             }
-            std::uint32_t n     = 0;
-            std::uint32_t shown = 0;   // wave-4 item 12: how many of THIS rule's rows fall inside lintPage
-            for( std::size_t oi = 0; oi < outs.size(); ++oi )
-            {
-                const LintOut& m = outs[oi];
-                if( m.rule == r.id && !m.sev.empty() )
-                {
-                    ++n;
-                    if( oi >= lintPage.begin && oi < lintPage.end )
-                    {
-                        ++shown;
-                    }
-                }
-            }
+            const RuleTally rt = tallyLintRule( outs, r.id, /*wantSevEmpty=*/false, lintPage );
             const bool  applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
             const std::string sevEx = ex( r.severity );
-            printLintRuleTallyRow( ex( r.id ), &sevEx, n, shown, capOf( r.id, true ) != nullptr, applicable );
+            printLintRuleTallyRow( ex( r.id ), &sevEx, rt.count, rt.shown, capOf( r.id, true ) != nullptr, applicable );
         }
         for( std::size_t findingIndex = lintPage.begin; findingIndex < lintPage.end; ++findingIndex )
         {
