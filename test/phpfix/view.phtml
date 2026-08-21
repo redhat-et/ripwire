@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h1>greeting</h1>
+<?php
+
+function renderGreeting(string $who): string
+{
+    return htmlspecialchars($who);
+}
+
+?>
+<p><?= renderGreeting('world') ?></p>
+</body>
+</html>
