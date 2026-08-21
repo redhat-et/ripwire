@@ -190,6 +190,16 @@ emits a flat `<cand r= s= n= id= k= p= l=>` top-K — identity + score + signatu
     latter) vs git HEAD, plus SYM's 1-hop callers with any call-site whose argument count is now provably
     incompatible flagged `incompatible="1"`. Warm (cache-hit) on ripwire's own tree.
 
+11. **"Can I delete this?" for one symbol** — `ripwire <dir> --safe-delete=SYM` (file:name disambiguates,
+    same grammar as `--edit-check`/`--around`/`--lego`). The removal-side sibling of step 10: composes
+    1-hop `callers=`, the transitive `--impact` blast radius (`impact_reaches=`), every `--uses`
+    read/write/import/call/extends site (`uses=`), how much of that radius the `tested=` lens covers
+    (`radius_tested=`/`radius_untested=`), and `--dead-code`'s own high-confidence shape at `defs=1`
+    (`dead_code_candidate=`), into ONE call. `risk=` NAMES what was found — `none-found` / `uses-exist` /
+    `untested-radius` — never a go/no-go verdict; `radius_untested=` equal to `impact_reaches=` is the
+    strongest signal ("nothing downstream is test-covered"). `ambiguous_callers=`/per-row `amb="1"` disclose
+    the same call-graph resolution limit `--edit-check`'s `incompatible=` and `--for`'s `amb=` already carry.
+
 ## Output
 
 Impact summary: blast-radius count, test coverage (zero = blocking concern), whether any changed file is a
