@@ -1623,6 +1623,15 @@ between the two binaries), and `editcheckcheck`'s 100 ms warm budget, which fail
 lane 142/101 ms) — environmental, not a lane effect. `docscommandscheck` arm G was green: no recorded
 capture in `docs/COMMANDS.md` moved.
 
+**Battery at the reverted head `5d7ec08`.** Clean rebuild, then `edges=13933 ambiguous=5519` — the
+`cd30104` baseline restored exactly. Suite: `gates=440 pass=436 skip=2 fail=2 wall=1007.5s jobs=6`, both
+failures cleared: `g1freshcheck` fired correctly because the `asan/` tree still held the `c3ebbd8` binary
+that the revert made older than `src/` (the stale-artifact class `CLAUDE.md` documents — cleared by
+`cmake --build asan --clean-first`, then ALL PASS), and `editcheckcheck` is ALL PASS on a solo re-run.
+The two skips are the standing self-skips (`namingcalibrationcheck` withholds live judgement,
+`argvdiffcheck` has no `RIPWIRE_BASE`). ASan+LSan clean, determinism byte-identical ×3, `xmllint` clean,
+`--quality-delta=cd30104..HEAD` → `regressions="0" gating="0"`, exit 0.
+
 ---
 
 ## 5. Token and output economy
