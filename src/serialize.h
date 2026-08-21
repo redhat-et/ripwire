@@ -522,6 +522,19 @@ inline constexpr TokenCalib kTokenCalib[] =
                                    // shape (t="sec" rows whose names ARE the config keys). Recalibrate with
                                    // Json/Toml together. Same headroom clamp: `s.lang==Yaml` (17) never
                                    // reaches contentBytesByLang[13].
+    { Lang::Php,        2.55 },   // REASONED, not measured — PHP's emitted stream is dominated by verbose
+                                   // PascalCase class names and camelCase methods (PSR-1/PSR-12 make that a
+                                   // near-universal convention, and the laravel/framework shape-recall run in
+                                   // the port round confirmed the shape), which is Java's and C#'s band, so
+                                   // PHP borrows their 2.55 rather than guessing a new rate. Recalibrate with
+                                   // Java/CSharp when tokenbudgetcheck next gets a PHP corpus sample. Same
+                                   // headroom clamp as CSharp/C/Toml/Yaml above: `s.lang==Php` (18) never
+                                   // reaches contentBytesByLang[13].
+    { Lang::Lua,        2.40 },   // REASONED, not measured — Lua's convention is short lower-case and
+                                   // snake_case names over a very small keyword set, the same identifier shape
+                                   // that put Ruby at the dense end of the band, so Lua borrows Ruby's exact
+                                   // 2.40 rather than guessing. Recalibrate with Ruby. Same headroom clamp:
+                                   // `s.lang==Lua` (19) never reaches contentBytesByLang[13].
 };
 inline constexpr double kBytesPerTokenDefault = 2.50;   // Unknown-language / empty-map fallback (mid-band)
 
