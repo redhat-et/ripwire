@@ -1455,6 +1455,85 @@ map, `--uses`, `--metrics` and both fixtures; determinism byte-identical ×3 col
 the RICH `--uses` path; `xmllint` clean; golden unchanged; `--quality-delta` exit 0 with
 `regressions="0" gating="0"` (the 16 stale acks are identical at the baseline).
 
+### Depth-2 receiver-chain resolution — PRE-REGISTERED 2026-08-21 (before any feature code)
+
+Item #3 of the stack-graphs recon lane, deliberately excluded from the round above and registered here
+on its own. `ingest.cpp::receiverOf` classifies a call-site receiver as `ThisObj` (`this`/`self`),
+`NamedVar` (a bare identifier) or `None`. Every **chained** receiver — `this->m_pool.acquire()`,
+`cfg.opts.enable()`, `m_cfg.opts.enable()` — lands in `None`, so the call reaches neither Rule 1, Rule 2,
+Rule 2b, CHA-lite nor `receiverStaticType`, and falls to the bare-name spray. The change widens
+`RecvKind` by exactly ONE intermediate hop (`FieldOfThis`, `FieldOfVar`), carries the intermediate field
+name through the existing `Reference::fieldName` slot, and adds a Rule 4 that resolves the intermediate
+through the `class#field → declared type` table Rule 2b already consumes, then applies Rule 2b's own
+member/base-walk at the final hop.
+
+**Two claims of the recon report re-derived before registering, and the design changed by both.**
+
+* *"`composeEdges` is built after the resolve loop; Rule 4 needs it before, so the hoist is the thing to
+  prove first."* The hoist is **unnecessary**. `graph.h::buildFieldNarrowTables` (`graph.h:648`) is
+  already called at `graph.h:919`, ahead of the resolve loop, and is built from the SAME `isCompose`
+  reference stream `composeEdges` is built from at `graph.h:1907` — `fieldTypeByClass` is the
+  `(owner, field) → declared type` table under a third name, already tombstoned on conflict and already
+  consumed by Rule 2b. Rule 4 reads that table. `buildGraph`'s statement order does not move at all, so
+  the reordering risk the report flagged is not taken rather than being proven safe.
+* *"`RecvKind` widens ⇒ `kParserVer` bump"* — confirmed, and it is not the only consequence. Five sites
+  test `recv == RecvKind::None` (`model.h:848` macro retag, `model.h:969` shadow suppression,
+  `graph.h:1195` fn-pointer binding, `resolve.h:1403` Rule 1's `bareCish`, `resolve.h:1655`
+  `receiverStaticType`). A chained receiver stops satisfying all five. Rule 1's `bareCish` is the
+  load-bearing one: **today `this->m_pool.acquire()` is treated as a bare unqualified call and Rule 1
+  will pin it to the enclosing class's own `acquire` when one exists** — a wrong narrow that this change
+  removes. That removal can *raise* ambiguity where it fires, which is why criterion **#3b** below is
+  registered as a whole-tree measurement and not assumed.
+
+**Baseline, re-derived on this lane's own base build** (`cd30104`, `./build/ripwire` built in
+`lane/depth2-chains`, measured against a pristine detached checkout of `cd30104` so no untracked plan doc
+or build tree can move it):
+
+```
+files=1308 symbols=11367 edges=13933 ambiguous=5519 unresolved=3203 precise=3
+```
+
+`ambiguous/edges = 39.6%`. Fixture-level baseline, same binary, `test/fieldnarrowcheck.sh`'s generated
+corpus: `ambiguous=7`, with its `(b) expl` arm asserting that `this->m_pool.acquire()` **stays split** —
+that arm is a statement of exactly the limit this lane closes and must flip in the same commit.
+
+**Success criteria, registered before the code.**
+
+* **#3a** On a chained-receiver fixture, calls that spray today resolve to the intermediate field type's
+  member: `this->m_pool.acquire()` → `Pool::acquire` only, `cfg.opts.enable()` (typed local base) →
+  `Opts::enable` only, `m_cfg.opts.enable()` (field base) → `Opts::enable` only, with every same-named
+  decoy left unlinked. Each is RED against the `cd30104` binary.
+* **#3b** `ambiguous=` on ripwire's own tree **strictly decreases** against the 5519 baseline.
+* **#3c** Zero Call edges lost on a pinned fixture, in the auditable form: every positive arm's correct
+  edge is present, and every degrade arm keeps its COMPLETE honest split (both decoy edges), so the only
+  edges the change removes are the ones the narrow provably excludes. The fixture's `edges=` is pinned to
+  an exactly-derived post value, so a silently dropped edge is a gate failure rather than a smaller number.
+* **#3d** Determinism byte-identical ×3 cold, and warm == cold across the `kParserVer` bump.
+* **#3e** The disclosed limits stay disclosed, each with its own negative-control arm: a depth-3 chain
+  (`this->m_cfg.opts.enable()`) refuses; an unindexed intermediate type refuses; a tombstoned
+  `class#field` refuses; a scope-less free function refuses; and **Python `self.pool.acquire()` stays
+  honestly split** — the receiver SHAPE is captured for Python (it is a fact about syntax), but the
+  field-type table is C++ evidence only, so Rule 4 is C-family gated exactly as Rule 2b is.
+
+**Failure criteria that revert the lane.**
+
+* Reverts if **#3b** is unmet — if `ambiguous=` fails to strictly decrease on ripwire's own tree, the
+  wrong-narrow removal costs more than the chain resolution buys and the widening is not worth an
+  extraction change plus a `kParserVer` bump.
+* Reverts if any degrade arm loses part of its honest split (a narrow that guesses), if determinism or
+  warm==cold breaks, or if a Rule-4 target is ever a definition the bare ladder could not also reach
+  (the "never invent a candidate" contract).
+
+**What moves if it lands.** Extraction changes ⇒ `kParserVer` 67 → 68 and
+`quality.h::kIngestParserVerMirror` 67 → 68 in the same commit (`qextractionkeycheck`).
+`test/fieldnarrowcheck.sh`'s `(b) expl` and `(h) ambiguous=7` arms are re-derived in the same commit —
+they pin the limit being closed. `edges=` / `ambiguous=` move on real corpora ⇒ the `docs/COMMANDS.md`
+byte-parity captures (`docscommandscheck` arm G) are re-recorded from this tree.
+
+**Red-first reference binary.** `build/ripwire` built at `cd30104` — the commit this lane branches from —
+copied aside before any source edit. `test/chainrecvcheck.sh` is recorded FAILING against it before the
+feature code exists.
+
 ---
 
 ## 5. Token and output economy
