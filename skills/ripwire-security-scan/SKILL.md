@@ -102,13 +102,18 @@ available.
    class), `c-style-cast` (masks a `reinterpret_cast` as an implicit conversion — hides type-safety holes),
    `weak-crypto` (MD5/SHA1/DES-class primitives). A nonzero count on any of these in a file that touches
    untrusted input is the starting read list, ranked by rule severity not just count.
-   **Read `shown=` before you read the rows.** The default payload is capped at ~100 KB, and the header
-   discloses it: `<lint findings="N" shown="M" capped="1">` means the per-rule `count=` totals are complete
-   but only `M` locator rows printed — the cap keeps a sorted path *prefix*, so whole rules can report a
-   truthful nonzero `count=` with **zero** `<f>` rows of their own. On this repo, 14 of 31 firing rules lose
-   every locator that way. If the rule you care about shows a count with no rows, raise the cap with
-   `--limit=N` (or narrow the scan to the subsystem) before concluding the hits are elsewhere. `capped="0"`
-   means you are seeing everything.
+   **Read `shown=` before you read the rows — then check the RULE's own `shown_rows=`.** The default
+   payload is capped at ~100 KB, and the header discloses it: `<lint findings="N" shown="M" capped="1">`
+   means the per-rule `count=` totals are complete but only `M` locator rows printed in total — the cap
+   keeps a sorted path *prefix*, so whole rules can report a truthful nonzero `count=` with **zero** `<f>`
+   rows of their own. Each `<rule>` row now carries its own `shown_rows=`/`rows_capped=` pair naming exactly
+   that: `<rule name="unsafe-c-fn" count="4" shown_rows="0" rows_capped="1"/>` means all 4 hits exist but
+   none printed — don't read the absence of `<f rule="unsafe-c-fn" ...>` rows as "nothing here" without
+   checking this first. (`rows_capped=` is a DIFFERENT fact from that row's own bare `capped=`, if present —
+   that one means the rule's own raw-capture stream hit its per-rule match budget, so `count=` itself is a
+   floor; the two can disagree on the same row.) If the rule you care about shows `rows_capped="1"`, raise
+   the cap with `--limit=N` (or narrow the scan to the subsystem) before concluding the hits are elsewhere.
+   Root `capped="0"` means you are seeing everything.
 
 2. **Taint-reach (structural, not real taint)** — `ripwire <dir> --graph-query='callees(name("SYM"),6)'`
    where SYM is the parse/deserialize/handler entry point that receives untrusted input (the number bounds
