@@ -1712,7 +1712,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --whereis --grep/--regex --match --pattern --impact --uses --exercises --seams\n"
         "                               --zoom --external-surface --dead-code --mentions --graph-query --stray-content\n"
         "                               --test-gate --readability --ensemble --quality-panel --context-ratio\n"
-        "                               --nonlocal-state --comment-coherence --naming-consistency.\n"
+        "                               --nonlocal-state --comment-coherence --naming-consistency --safe-delete.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
         "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio\n"
@@ -2721,7 +2721,7 @@ struct ShapingVerb
 //   HONOURS --top-k       default map (+ the same riders), --query, --format=candidates, --recall,
 //                         --graph-query, and the MCP/batch/--listen pass-throughs
 //   IGNORES both          --pack-task, --exemplar, --around, --path, --lego, --report, --edit-check,
-//                         --safe-delete, --situ, --scan-skills, --merge-scout, and --for for --top-k (R12's residual)
+//                         --situ, --scan-skills, --merge-scout, and --for for --top-k (R12's residual)
 //   IGNORES --top-k only  --connect, --pr-context, --from-trace — the three the verifier first read as
 //                         ignoring --max-tokens too. They were INERT on its probes: --connect answered a
 //                         705 B subgraph, so a 200-token ceiling had nothing to trim. On a shape where the
@@ -2746,7 +2746,6 @@ inline constexpr ShapingVerb kShapingVerbs[] = {
     { "--lego",         nullptr, &Config::legoType     },
     { "--report",       &Config::report,       nullptr },
     { "--edit-check",   nullptr, &Config::editCheckSym },
-    { "--safe-delete",  nullptr, &Config::safeDeleteSym },
     { "--situ",         &Config::situ,         nullptr },
     { "--handoff",      &Config::handoff,      nullptr, false, false, true },   // writeHandoffPacket takes the budget
     { "--scan-skills",  &Config::scanSkills,   nullptr },

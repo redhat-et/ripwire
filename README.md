@@ -465,7 +465,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 ## What it answers
 
-Around the core sit 154 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 155 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 Not sure which of them fits the task in front of you? `ripwire . --help-task="<task in words>"`
 recommends ONE executable command with the evidence behind the pick — advice only, it never runs
@@ -799,8 +799,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="src/graph.h:2168"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:2504"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:12534"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:12649"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:12781"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:12896"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:950"/>
 </callers>
 ```
