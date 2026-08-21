@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 433 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 432 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -1534,6 +1534,95 @@ byte-parity captures (`docscommandscheck` arm G) are re-recorded from this tree.
 copied aside before any source edit. `test/chainrecvcheck.sh` is recorded FAILING against it before the
 feature code exists.
 
+#### RESULT — REJECT on the registered criterion, and REVERTED (2026-08-21)
+
+The feature was built, gated red-first, measured, and then **reverted at `lane/depth2-chains`** because
+criterion **#3b** — the one the registration named as the lane's value test — was not met. The code is
+in this branch's history at `c3ebbd8` (implementation) and `71ec7c5` (the gate) for a future round that
+registers a different instrument; the tree at the lane head is byte-identical to `cd30104` outside this
+section.
+
+**Red-first, recorded.** Against the `cd30104` binary, `test/chainrecvcheck.sh` was **6 FAIL / 16 PASS**,
+failing on exactly the four chain shapes Rule 4 resolves plus the two header gauges, and on no others.
+The six degrade arms were green before and after. On the lane binary the gate was ALL PASS, including
+under ASan.
+
+**#3a MET.** `this->m_pool.acquire()` → `Pool::acquire` alone; `c.opts.enable()` over a typed local →
+`Opts::enable` alone; `m_cfg.opts.enable()` over a field base → `Opts::enable` alone; a declared local
+`DCfg cfg` shadowing a field `Cfg cfg` → `DOpts::enable`, never `Opts::enable`. Every decoy unlinked.
+
+**#3b NOT MET ⇒ REJECT.** On ripwire's own tree, against a pristine detached `cd30104` checkout:
+
+| binary | edges= | ambiguous= |
+| --- | --- | --- |
+| `cd30104` baseline | 13933 | **5519** |
+| capture widening ONLY (Rule 4 disabled in a scratch worktree) | 13941 | **5522** |
+| capture widening + Rule 4 (the lane) | 13941 | **5521** |
+
+`ambiguous=` rose by 2 where the criterion required a strict decrease. The three-way split is the finding,
+and it is worse for the feature than the aggregate looks: **Rule 4's own lever on 1308 files, 11367
+symbols and 13941 edges is exactly ONE call site** (5522 → 5521). The rule is correct — the fixture proves
+each shape — but ripwire's own data-oriented C++ (free functions, public POD fields, subscripted access
+like `ing.symbols[i].name`, and chains through `std::` types the index does not define) barely contains
+the idiom it resolves. A `kParserVer` bump costs every user a full re-parse; one resolved call site does
+not buy it.
+
+**Where the +3 comes from — mechanism, not attribution guesswork.** Widening `RecvKind` changes five
+sites that test `recv == RecvKind::None`. Three micro-fixtures, base binary vs lane binary:
+
+* *Rule 1's `bareCish` arm was WRONG-narrowing chained receivers.* `struct App { Pool m_pool; void run();
+  void go(){ this->m_pool.run(); } }` — the base binary binds `go` to **`App::run`** (the caller's own
+  class) because a chained receiver reads as a bare unqualified call; the lane binary binds it to
+  **`Pool::run`**. A silently wrong edge replaced by the right one, invisible in `ambiguous=` because
+  both are one edge. Where Rule 4 then cannot resolve the field's type, the same site degrades from a
+  wrong pin to an honest split — that is the direction that ADDS to `ambiguous=`.
+* *Shadow suppression was deleting real member calls.* `void go(){ int enable = 0;
+  this->m_cfg.enable(); }` — the base binary emits **zero** call edges for `go`: the local named `enable`
+  suppressed the reference outright. The lane binary emits the correct edge to `Cfg::enable`. This is the
+  `edges=` +8: recovered calls, not invented ones. Each recovered call is then honestly ambiguous wherever
+  its name is.
+* The macro-retag and fn-pointer-binding guards move in the same direction (a receiver-qualified name is
+  neither a macro invocation nor a call through a bare variable) and are not separately measurable here.
+
+So the `ambiguous=` rise is **recovered and corrected information, not new noise** — and that is precisely
+why this is recorded as a REJECT rather than quietly re-read as a pass: the criterion was registered
+before the measurement, it is unmet, and revising an instrument after seeing its answer is the failure
+mode pre-registration exists to prevent. The two bugs above are real, are reproducible from the fixtures
+in `71ec7c5`, and want their own round with an instrument that can see them (recovered-edge count and
+corrected-target count, not `ambiguous=`).
+
+**#3c MET** — the fixture's `edges=` pin (22 → 15) accounts for every removed edge as a decoy the narrow
+provably excludes, and all four degrade arms keep their COMPLETE split.
+**#3d MET** — determinism byte-identical ×3 cold, warm == cold across the version bump, `xmllint` clean.
+**#3e MET** — depth-3, unindexed intermediate type, tombstoned `class#field`, scope-less free function,
+Python and TypeScript all refuse. One limit the fixture DISCOVERED and now pins: a **parameter** base
+(`void f( DCfg cfg ){ cfg.opts.enable(); }`) cannot narrow, because the binding capture records a
+parameter's name but not its type, and the parameter still shadows a same-named field — so the honest
+split is the only sound answer. That is the same answer Rule 2 already gives a depth-1 parameter receiver.
+
+**The recon report's `composeEdges` hoist is unnecessary — re-derived, and the design changed by it.**
+`graph.h::buildFieldNarrowTables` (`graph.h:648`) already runs at `graph.h:919`, ahead of the resolve
+loop, over the SAME `isCompose` reference stream `composeEdges` is built from at `graph.h:1907`; its
+`fieldTypeByClass` IS the `(owner, field) → declared type` table, already tombstoned on conflict and
+already consumed by Rule 2b. Rule 4 read that table and `buildGraph`'s statement order never moved, so
+the reordering the report wanted proven red-first was not taken at all. The compose builder's
+`langCompatible` guard is respected transitively: Rule 4's candidates pass the same
+`langCompatible && sameRoot` filter at the call site that every other rule's candidates do.
+
+**Cost, measured, for the next round to weigh.** `--quality-delta=cd30104..HEAD` on the feature build:
+`regressions="16" gating="6"` — `receiverOf` complexity 16 → 33 and LOC 46 → 88, `buildGraph` complexity
+764 → 780, plus one duplication finding pairing the new 53-token `Narrower::finalScopeSegment` with an
+unrelated `mcphttp::isJsonContentType`. ASan+LSan clean on the default map and on the gate.
+
+**Battery on the feature build (`c3ebbd8`, before the revert).** Suite green apart from three, all
+accounted for: `qschemetripcheck` (expected — `kParserVer` moved; re-pinned with `UPDATE_GOLDEN=1`),
+`readmeexamplecheck` (the README's recorded `--callers=rankGraphTeleport` capture carries `src/graph.h`
+line numbers, which the 23-line Rule 4 block shifted by exactly 23 — the caller SET was byte-identical
+between the two binaries), and `editcheckcheck`'s 100 ms warm budget, which fails **identically on the
+`cd30104` binary in a clean short-path worktree under the same concurrent-lane load** (base 201/120 ms,
+lane 142/101 ms) — environmental, not a lane effect. `docscommandscheck` arm G was green: no recorded
+capture in `docs/COMMANDS.md` moved.
+
 ---
 
 ## 5. Token and output economy
@@ -1876,7 +1965,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **433 gate scripts**, all of which exist on disk.
+naming **432 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -2684,7 +2773,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 433. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 432. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a

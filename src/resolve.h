@@ -1373,18 +1373,6 @@ struct Narrower
         dst.append( p, std::size_t( buf + sizeof( buf ) - p ) );
     }
 
-    // The FINAL segment of a scope string — the key space the field tables live in. Symbol::scope is the bare
-    // class name for a method, and a nested scope's last segment is the innermost class; namespaces are already
-    // dropped, which is exactly why two same-NAMED classes collapse onto one key and tombstone on conflict.
-    static std::string_view finalScopeSegment( std::string_view scope ) noexcept
-    {
-        if( const std::size_t cut = scope.rfind( "::" ); cut != std::string_view::npos )
-        {
-            scope.remove_prefix( cut + 2 );
-        }
-        return scope;
-    }
-
     // Rule 1 — class-membership narrow. Returns the enclosing scope's same-named definition(s) when the call
     // is a *member-scope* call inside a known class/namespace; nullptr ⇒ the caller falls through to the
     // unchanged §2a ladder. Deterministic (canonical-map insertion order = symbol-id order).
@@ -1533,8 +1521,13 @@ struct Narrower
 
         // (3) the enclosing class's field entry — keyed by the scope's FINAL segment (Symbol::scope is the
         // bare class name for methods; a nested scope's last segment is the innermost class), "" = tombstone.
+        std::string_view scopeFinal( callerScope );
+        if( const std::size_t cut = scopeFinal.rfind( "::" ); cut != std::string_view::npos )
+        {
+            scopeFinal.remove_prefix( cut + 2 );
+        }
         keyBind.clear();
-        keyBind.append( finalScopeSegment( callerScope ) );
+        keyBind.append( scopeFinal );
         keyBind.push_back( '#' );
         keyBind.append( r.recvVar );
         const auto fit = fieldTypes.find( keyBind );
@@ -1543,31 +1536,19 @@ struct Narrower
             return nullptr;
         }
 
-        // (4) the declared type's own method set, then its bases — the final hop, shared with Rule 4.
-        return memberOnTypeOrBase( fit->second, r.calleeName, chaUp );
-    }
-
-    // The FINAL HOP, shared by Rule 2b and Rule 4: resolve `member` against the declared type `typeName`'s own
-    // method set (canonByName, DEFS only) and — when the type itself does not define it — over a bounded,
-    // breadth-first DIRECT-base walk (frontier levels over chaUp). The SHALLOWEST level with a hit decides:
-    // exactly one hitting base name → narrow; two or more at that level → honest refuse. nullptr ⇒ the caller
-    // degrades to the unchanged §2a ladder. The returned ids are always real `Type::member` definitions the
-    // bare ladder could also reach — this only PICKS the type-correct one earlier, never invents a candidate.
-    // Deterministic: chaUp lists are sorted+deduped, the frontier is expanded in stored order under a fixed
-    // visit cap, and canonByName insertion order = symbol-id order.
-    const rw::SmallVec<NodeId, 2>* memberOnTypeOrBase( const std::string& typeName, const std::string& member,
-                                                       const HashMap<std::string, std::vector<std::string>>& chaUp ) const
-    {
+        // (4) the declared type's own method set first…
         keyScope.clear();
-        keyScope.append( typeName ).append( "::" ).append( member );
+        keyScope.append( fit->second ).append( "::" ).append( r.calleeName );
         if( const auto it = canonByName.find( keyScope ); it != canonByName.end() && it->second.size() != 0 )
         {
             return &it->second;
         }
 
+        // …then a bounded breadth-first DIRECT-base walk (frontier levels over chaUp). The SHALLOWEST level
+        // with a hit decides: exactly one hitting base name → narrow; two or more → honest refuse.
         constexpr std::size_t kFieldWalkCap = 16;   // total visited names — bounds depth and width together
         fieldWalk.clear();
-        fieldWalk.push_back( typeName );
+        fieldWalk.push_back( fit->second );
         std::size_t lvlBegin = 0;
         while( lvlBegin < fieldWalk.size() )
         {
@@ -1598,7 +1579,7 @@ struct Narrower
             for( std::size_t i = lvlEnd; i < fieldWalk.size(); ++i )
             {
                 keyScope.clear();
-                keyScope.append( fieldWalk[ i ] ).append( "::" ).append( member );
+                keyScope.append( fieldWalk[ i ] ).append( "::" ).append( r.calleeName );
                 if( const auto it = canonByName.find( keyScope ); it != canonByName.end() && it->second.size() != 0 )
                 {
                     if( found != nullptr ) { multi = true; break; }
@@ -1616,122 +1597,6 @@ struct Narrower
             lvlBegin = lvlEnd;
         }
         return nullptr;
-    }
-
-    // Rule 4 — DEPTH-2 receiver-CHAIN narrow (lane J2). For a member call whose receiver is ITSELF one field
-    // access — `this->m_pool.acquire()` (FieldOfThis) or `cfg.opts.enable()` / `m_cfg.opts.enable()`
-    // (FieldOfVar) — resolve the INTERMEDIATE field through the same `class#field → declared type` table
-    // Rule 2b consumes, then apply the shared final hop against that type. Before this rule these calls were
-    // `RecvKind::None`: they reached no rule at all and sprayed across every same-named definition in the
-    // corpus, while Rule 1's C++ `bareCish` arm could even PIN one to the caller's own class — a wrong narrow
-    // that the widened receiver capture removes. nullptr ⇒ the unchanged §2a ladder.
-    //
-    // Airtight "no wrong narrow" (Rule 2b's contract, one hop further). It narrows ONLY when ALL hold —
-    //   (1) the receiver is a depth-2 chain with a captured intermediate field, no explicit qualifier, from a
-    //       known def, C-family — the field table is built from C++ field captures, so Python's `self.x.m()`
-    //       (captured as FieldOfThis: the SHAPE is a fact about syntax) finds no evidence here and degrades,
-    //       and TS/JS receivers are not captured at all. Both are pinned by chainrecvcheck arm (j);
-    //   (2) the BASE static type is known by the same conservative signals Rule 2/2b use —
-    //       FieldOfThis ⇒ the enclosing class (an explicit `this->` CANNOT be shadowed by a local, so the
-    //       localNames veto that Rule 2b needs for its bare-field shape does not apply here);
-    //       FieldOfVar ⇒ the var's single non-tombstoned type binding, else — and ONLY when NO local binding
-    //       of any kind exists for that name, since a param or declared local shadows a same-named field in
-    //       real C++ lookup — the enclosing class's field of that name;
-    //   (3) that base type declares the INTERMEDIATE field with exactly one type corpus-wide (a tombstoned
-    //       `class#field` refuses, same as Rule 2b);
-    //   (4) the intermediate type — or exactly one base at the shallowest hit level — DEFINES the member.
-    // Every other shape degrades to the honest split. Deterministic: the same ordered maps as Rule 2b.
-    const rw::SmallVec<NodeId, 2>* rule4RecvChain( const Reference& r, const std::string& callerScope,
-                                                   const HashMap<std::string, std::string>&              fieldTypes,
-                                                   const HashMap<std::string, char>&                     localNames,
-                                                   const HashMap<std::string, std::vector<std::string>>& chaUp ) const
-    {
-        if( r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar )
-        {
-            return nullptr; // not a depth-2 chain
-        }
-        if( r.fieldName.empty() || !r.qualifier.empty() || r.fromSymbol == kNoNode )
-        {
-            return nullptr; // (1) no captured intermediate, an explicit `A::m()`, or a file-scope call
-        }
-        if( r.lang != Lang::Cpp && r.lang != Lang::ObjC )
-        {
-            return nullptr; // (1) the field-type table is C++ evidence only — disclosed limit, gate arm (j)
-        }
-        if( fieldTypes.empty() )
-        {
-            return nullptr; // field-capture-free corpus
-        }
-
-        // (2) the chain's BASE static type.
-        const std::string* baseType = nullptr;
-        if( r.recv == RecvKind::FieldOfThis )
-        {
-            if( callerScope.empty() )
-            {
-                return nullptr; // free function: no enclosing class for `this` to name
-            }
-            keyBind.clear();
-            keyBind.append( finalScopeSegment( callerScope ) );
-            keyBind.push_back( '#' );
-            keyBind.append( r.fieldName );
-            const auto tit = fieldTypes.find( keyBind );   // `this->FIELD` — base and intermediate collapse into one lookup
-            if( tit == fieldTypes.end() || tit->second.empty() )
-            {
-                return nullptr; // (3) unknown or tombstoned field of the enclosing class
-            }
-            return memberOnTypeOrBase( tit->second, r.calleeName, chaUp );   // (4)
-        }
-
-        if( r.recvVar.empty() )
-        {
-            return nullptr;
-        }
-        keyBind.clear();
-        appendUint( keyBind, r.fromSymbol );
-        keyBind.push_back( '#' );
-        keyBind.append( r.recvVar );
-        if( const auto vit = varType.find( keyBind ); vit != varType.end() )
-        {
-            if( vit->second.empty() )
-            {
-                return nullptr; // a tombstoned (conflicting) local binding → refuse
-            }
-            baseType = &vit->second;   // a typed local/param — it shadows any same-named field
-        }
-        else
-        {
-            if( localNames.find( keyBind ) != localNames.end() )
-            {
-                return nullptr; // the name IS a local here, just not usably typed — it still shadows the field
-            }
-            if( callerScope.empty() )
-            {
-                return nullptr; // free function over a file-scope base: no field scope to look the base up in
-            }
-            keyBind.clear();
-            keyBind.append( finalScopeSegment( callerScope ) );
-            keyBind.push_back( '#' );
-            keyBind.append( r.recvVar );
-            const auto bit = fieldTypes.find( keyBind );
-            if( bit == fieldTypes.end() || bit->second.empty() )
-            {
-                return nullptr; // the base is neither a typed local nor a known field → refuse
-            }
-            baseType = &bit->second;
-        }
-
-        // (3) the INTERMEDIATE hop: the base type's own field of that name.
-        keyBind.clear();
-        keyBind.append( *baseType );
-        keyBind.push_back( '#' );
-        keyBind.append( r.fieldName );
-        const auto fit = fieldTypes.find( keyBind );
-        if( fit == fieldTypes.end() || fit->second.empty() )
-        {
-            return nullptr;
-        }
-        return memberOnTypeOrBase( fit->second, r.calleeName, chaUp );   // (4)
     }
 
     // L3 — the fn-pointer/callback binding visible at a bare call site `fn()`. The two tables are passed
