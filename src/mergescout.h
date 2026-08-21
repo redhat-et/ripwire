@@ -23,6 +23,33 @@
 // fewest true conflicts against the arms still remaining (so landing it never blocks on a conflict that a
 // later landing would have to re-resolve anyway); ties break on ref name ascending — deterministic.
 //
+// ── FILE-LEVEL FALLBACK, stated rather than assumed (2026-08-21 long-line round) ─────────────────────────
+// Everything above is keyed on `quality::bodyHashesBySym`, which is itself keyed on tree-sitter SYMBOL
+// spans — a file that contributes zero real-body symbols contributes NOTHING to that map (quality.h's
+// bodyHashesBySym skips it outright) and is therefore invisible to every lane above, conflict AND risk
+// alike, no matter how much of it changed. `test/regression.sh` is the case this was found by: its absorb
+// loop is one 6 751-byte physical line, a top-level bash `for`, never wrapped in a `function_definition` —
+// `queries/bash/tags.scm` only captures functions — so the file carries zero symbols and conflicted
+// silently on 3 of 5 harvest-exec merges (PLAN_HARVEST_REPORTS_2026-08-20/merge-phase.md §1/§6) without
+// ever appearing in a merge-scout row. `buildTreeIndex` below closes exactly that gap: every file with zero
+// real-body symbols gets a WHOLE-FILE content hash folded into the SAME bodyHash/identity maps, under its
+// own key space (fnv1a64 of the bare relative path, never colliding in practice with a pathQualifiedKey —
+// that always embeds two NUL separators the bare path lacks) and tagged `ChangedSym::fileLevel=true`.
+// Because every lane below — diffTreeIndex, the arm's `changed=` count, landingOrder's no-work check,
+// computeOnePairOverlap's conflict/risk split, the r26 head-conflict lane — all key off `bodyHash`/
+// `identity` generically, that one injection is the whole fix: nothing else in this file needed to change
+// to make these files counted, landable, and conflict-detectable. Disclosed, never silent: every such row
+// carries `anchoring="file-level"` in the XML (writeSymRows) instead of implying symbol-level attribution
+// reached it. Two arms editing the SAME zero-symbol file share the SAME file-level key (it depends only on
+// the path), so they land in `<pair conflicts=…>` as a same-file CONFLICT — the honest answer, since with
+// no symbol boundary inside the file there is no way to tell their edits apart as distinct risks.
+//
+// Scope, stated so the gap doesn't get re-discovered as a surprise: this closes the ZERO-symbol-file case
+// exactly (the reported bug). A file that has SOME real-body symbols but ALSO carries edits outside every
+// symbol's span (top-level globals beside real functions, say) is a narrower residual gap this round does
+// not close — bodyHashesBySym still only hashes the symbol spans it found, and the fallback below only
+// fires when a file contributed NO symbol at all.
+//
 // ── ANCHORING, stated rather than assumed (r26 merge-base audit) ─────────────────────────────────────────
 // Every arm here is BASE-ANCHORED by construction: a named arm is `merge-base(REF,HEAD) → REF`, and the
 // working-tree arm is `HEAD → disk` (a working tree has not diverged by commits, so HEAD *is* its base).
@@ -82,8 +109,14 @@ struct ChangedSym
                                // independently-materialized temp trees compares key-for-key regardless of
                                // where each tree was archived to (S2 root-spelling independence — exploited
                                // here across genuinely DIFFERENT temp roots, not just different spellings).
+                               // For a fileLevel entry, key = fnv1a64(relPath) instead — see the FILE-LEVEL
+                               // FALLBACK header comment above.
     std::string   file;        // root-relative path (relForHash)
-    std::string   id;          // canonicalId — the human-readable identity
+    std::string   id;          // canonicalId — the human-readable identity (== `file` for a fileLevel entry)
+    bool          fileLevel = false;   // true ⇒ this entry did NOT come from symbol-level attribution — the
+                                       // whole-file fallback for a file with zero real-body symbols. Written
+                                       // as `anchoring="file-level"` on the XML row (writeSymRows) instead of
+                                       // silently looking like an ordinary attributed symbol change.
 };
 
 // One arm's derived state: what it changed since its base.
@@ -111,6 +144,51 @@ struct SymTreeIndex
     gtl::btree_map<std::uint64_t, ChangedSym>     identity;
 };
 
+// The file-level fallback lane (see this file's FILE-LEVEL FALLBACK header comment): fold a whole-file
+// content hash into `out` for every file that produced zero real-body symbols, under its own key space
+// (fnv1a64 of the bare relative path). Split out of buildTreeIndex so that function stays one clear loop
+// per concern instead of growing a second nested loop inline. `realBodySyms` is keyed by fileId, same
+// shape `symbolsByFileInIdOrder` returns and the SAME keep predicate quality::bodyHashesBySym uses
+// (`s.endByte > s.sigStartByte`), so "has symbol coverage" here agrees byte-for-byte with what
+// bodyHashesBySym already skipped — no file is ever double-counted between the two lanes.
+inline void injectFileLevelFallback( SymTreeIndex& out, const IngestResult& ing, std::string_view root, const SymbolsByFile& realBodySyms )
+{
+    std::string bytes;
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        if( f < realBodySyms.size() && !realBodySyms[f].empty() )
+        {
+            continue;   // this file already has symbol-level coverage — bodyHashesBySym owns it
+        }
+        std::FILE* fp = std::fopen( ing.files[f].c_str(), "rb" );
+        if( !fp )
+        {
+            continue;   // unreadable — degrade, never crash (mirrors quality.h's own fopen degrade)
+        }
+        std::fseek( fp, 0, SEEK_END );
+        const long sz = std::ftell( fp );
+        std::fseek( fp, 0, SEEK_SET );
+        bytes.clear();
+        if( sz > 0 )
+        {
+            bytes.resize( std::size_t( sz ) );
+            if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
+            {
+                bytes.clear();
+            }
+        }
+        std::fclose( fp );
+        if( bytes.empty() )
+        {
+            continue;   // empty or unreadable — nothing to diff, nothing hidden (there is no content)
+        }
+        const std::string    relFile( relForHash( ing.files[f], root ) );
+        const std::uint64_t  key = fnv1a64( relFile );   // file-level key space — see ChangedSym::fileLevel
+        out.bodyHash[ key ] = fnv1a64( bytes );
+        out.identity.try_emplace( key, ChangedSym{ key, relFile, relFile, /*fileLevel=*/true } );
+    }
+}
+
 inline SymTreeIndex buildTreeIndex( const IngestResult& ing, std::string_view root )
 {
     SymTreeIndex out;
@@ -127,6 +205,8 @@ inline SymTreeIndex buildTreeIndex( const IngestResult& ing, std::string_view ro
         const std::uint64_t  key   = quality::pathQualifiedKey( relFile, s.scope, s.name );   // COMPARISON key — the one body-hash key space
         out.identity.try_emplace( key, ChangedSym{ key, relFile, canon } );   // first writer wins — overloads share one id
     }
+    const SymbolsByFile realBodySyms = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
+    injectFileLevelFallback( out, ing, root, realBodySyms );
     return out;
 }
 
@@ -638,7 +718,17 @@ inline void writeSymRows( std::FILE* out, const char* tag, const std::vector<Cha
 {
     for( const ChangedSym& s : syms )
     {
-        std::fprintf( out, "<%s p=\"%s\" id=\"%s\"/>", tag, ex( s.file ).c_str(), ex( s.id ).c_str() );
+        // fileLevel rows carry an extra anchoring= attribute (never omitted, never silent — see the
+        // FILE-LEVEL FALLBACK header comment): the file had zero real-body symbols, so this row is a
+        // whole-file content diff, not a symbol attribution. Ordinary rows are byte-identical to before.
+        if( s.fileLevel )
+        {
+            std::fprintf( out, "<%s p=\"%s\" id=\"%s\" anchoring=\"file-level\"/>", tag, ex( s.file ).c_str(), ex( s.id ).c_str() );
+        }
+        else
+        {
+            std::fprintf( out, "<%s p=\"%s\" id=\"%s\"/>", tag, ex( s.file ).c_str(), ex( s.id ).c_str() );
+        }
     }
 }
 
@@ -716,7 +806,10 @@ inline void writeMergeScout( std::FILE* out, const ScoutResult& result )
                        "against live HEAD — so a file an arm never opened can never appear here just because the "
                        "live line moved. head_conflicts= is the one thing that anchor hides, kept as its own row "
                        "class: symbols this arm changed that the LIVE LINE also changed since the arm forked, a "
-                       "merge fight no pairwise ARM comparison can see because HEAD is not an arm. -->", result.arms.size() );
+                       "merge fight no pairwise ARM comparison can see because HEAD is not an arm. A row carrying "
+                       "anchoring=file-level is a whole-file fallback for a file with zero real-body symbols (no "
+                       "tree-sitter symbol spans it) — counted and conflict-checked like any other row, just not "
+                       "attributed to a symbol inside it. -->", result.arms.size() );
     // §P8: head= was a FULL 40 here vs 9 hex in <abi>/<stray-content>/<landing-plan>/<history> — one name,
     // two widths. Aligned to the majority; nothing reads this one. (`base=` on the <arm> rows is still full
     // against <stray-content>'s 9-char base= — a second split, documented, not widened into this change.)
