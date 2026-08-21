@@ -28,7 +28,7 @@
 # Usage:  test/qrevtokencheck.sh   |   RIPWIRE_BIN=build/ripwire test/qrevtokencheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 QSRC="$ROOT/src/quality.h"
 fail=0

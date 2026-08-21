@@ -18,7 +18,7 @@
 # against, and a gate that cannot run must say so rather than pretend to pass.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 BASE="${RIPWIRE_BASE:-}"
 [ -n "$BASE" ] && [ "${BASE#/}" = "$BASE" ] && BASE="$ROOT/$BASE"

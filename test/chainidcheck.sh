@@ -12,7 +12,7 @@
 #   consumer -> producer : the bare name and file:name forms still resolve (purely additive)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 cd "$ROOT"
 fail=0

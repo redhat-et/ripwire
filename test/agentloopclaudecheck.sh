@@ -347,7 +347,7 @@ grep -q 'Traceback' "$TMP/out.txt" && no "python contract checks raised"
 # REAL ripwire binary, not just asserted in strings. Optional: a missing binary SKIPs rather than
 # FAILs, so this stays meaningful on a bench-only checkout with no C++ build and green once one
 # exists (this repo's own build, or RIPWIRE_BIN naming a pinned worktree binary explicitly).
-PROBE_BIN="${RIPWIRE_BIN:-}"
+PROBE_BIN="${1:-${RIPWIRE_BIN:-}}"
 if [ -z "$PROBE_BIN" ] && [ -x "$ROOT/build/ripwire" ]; then
     PROBE_BIN="$ROOT/build/ripwire"
 fi

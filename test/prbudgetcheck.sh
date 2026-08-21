@@ -17,7 +17,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
@@ -52,8 +52,18 @@ BASE=HEAD~1
 attr(){ grep -oE "<pr-context[^>]*>" "$1" | grep -oE " $2=\"[^\"]*\"" | head -1 | sed -E "s/.*=\"([^\"]*)\"/\1/"; }
 filecount(){ grep -o '<file ' "$1" | wc -l | tr -d ' '; }
 
+# ── #0: the invocation itself must actually have worked — otherwise "no est_tokens=" and "0 changed
+#    files" are both trivially true of EMPTY output from a broken/crashed binary, and every assertion
+#    below it would pass (or SKIP) vacuously. Require the real success shape first: exit 0 and a
+#    well-formed <pr-context> root tag (binoverridecheck.sh wave-4 item #10).
+UNC_RC=0
+"$BIN" "$ROOT" --pr-context="$BASE" --no-cache >"$TMP/unc" 2>"$TMP/unc.err" || UNC_RC=$?
+if [ "$UNC_RC" -ne 0 ] || ! grep -q '<pr-context' "$TMP/unc"; then
+    no "prbudgetcheck: --pr-context invocation failed or produced no <pr-context> root (rc=$UNC_RC) — $( tail -c 300 "$TMP/unc.err" )"
+    exit "$fail"
+fi
+
 # ── #1: UNBUDGETED == byte-identical to no-budget path (no est_tokens/truncated attrs) ──────────────────
-"$BIN" "$ROOT" --pr-context="$BASE" --no-cache >"$TMP/unc" 2>/dev/null
 if grep -q 'est_tokens=' "$TMP/unc"; then
     no "unbudgeted --pr-context leaked budget attributes (should be byte-identical to pre-budget output)"
 else

@@ -17,7 +17,7 @@
 # Uses its OWN temp repo. Does NOT edit regression.sh. Needs git.
 # Usage:  test/qualityexcludecheck.sh   |   RIPWIRE_BIN=build/ripwire test/qualityexcludecheck.sh
 set -u
-BIN="${RIPWIRE_BIN:-./build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-./build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }

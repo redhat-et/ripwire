@@ -10,7 +10,7 @@
 # control (lever off ⇒ target absent from top-3) proving the lever, not ambient rank, did the work.
 # Red-first: at a418b5a both positive arms FAIL because the levers do not exist yet.
 set -u
-BIN="${1:-./build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-./build/ripwire}}"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/lb3name.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 FAIL=0

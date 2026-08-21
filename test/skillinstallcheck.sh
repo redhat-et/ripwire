@@ -79,7 +79,7 @@ fi
 
 CODEX_ADAPTER="$ROOT/hooks/ripwire-codex-nudge.sh"
 ADAPTER_TMP="$TMP/adapter"; mkdir -p "$ADAPTER_TMP"
-ADAPTER_BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+ADAPTER_BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${ADAPTER_BIN#/}" = "$ADAPTER_BIN" ] && ADAPTER_BIN="$ROOT/$ADAPTER_BIN"
 ADAPTER_JSON='{"session_id":"codex-adapter","cwd":"'"$ROOT"'","tool_name":"Grep","tool_input":{"pattern":"releaseTag","path":"."}}'
 ADAPTER_OUT="$( printf '%s' "$ADAPTER_JSON" | PATH="$( dirname "$ADAPTER_BIN" ):$PATH" TMPDIR="$ADAPTER_TMP" \
@@ -121,7 +121,7 @@ grep -rqiE 'install\.sh' "$ROOT/README.md" "$SK"/ripwire-router/SKILL.md 2>/dev/
 # ever discovers it. Every flag in `ripwire --help` must appear in at least one skills/*/SKILL.md (or a
 # companion .md, e.g. quality-metrics.md), OR be named below with a one-word reason it's deliberately
 # unrouted. A flag that is neither is the drift this gate exists to catch.
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 [ -x "$BIN" ] || BIN="$( command -v ripwire 2>/dev/null || true )"
 

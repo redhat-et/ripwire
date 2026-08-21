@@ -18,7 +18,7 @@
 set -uo pipefail
 
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 SCORECARD="$ROOT/scripts/scorecard.sh"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
