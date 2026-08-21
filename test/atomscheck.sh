@@ -329,7 +329,9 @@ zeroed=1
 for rule in atom-comma-operator atom-embedded-crement atom-assign-as-value atom-nested-ternary \
             atom-implicit-predicate atom-octal-literal atom-reversed-subscript
 do
-    grep -q "<rule name=\"$rule\" count=\"0\" applicable=\"0\"/>" "$TMP/js" || { zeroed=0; echo "    (missing zero+inert row for $rule)"; }
+    # wave-4 item 12 added a per-rule shown= between count= and applicable= (--lint's row cap disclosure),
+    # so the exact literal now has one more attribute in between — matched, not restated as a new literal.
+    grep -q "<rule name=\"$rule\" count=\"0\" shown=\"0\" applicable=\"0\"/>" "$TMP/js" || { zeroed=0; echo "    (missing zero+inert row for $rule)"; }
 done
 [ "$zeroed" = 1 ] \
     && ok "a JavaScript-only corpus declares all seven atom rules at count=\"0\" applicable=\"0\"" \

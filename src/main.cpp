@@ -1745,7 +1745,16 @@ struct LintOut { std::uint32_t fileId, startByte, line; std::string rule, sev, t
 // identical branching duplicated twice; this is the one copy. Callers pass already-escaped strings
 // (name/sev safety differs: built-in names are compile-time-known, user ids/severities are ex()'d at
 // the call site) so this stays a pure formatter with no XML-escaping policy of its own.
-void printLintRuleTallyRow( const std::string& name, const std::string* sev, std::uint32_t count, bool capped, bool applicable )
+//
+// wave-4 item 12 (the recorded liability from the six-smalls round, docs/EVALS.md): the DEFAULT PAYLOAD
+// byte cap (kLintDefaultPayloadBytes above) keeps a sorted PREFIX of `outs`, so a rule whose findings all
+// sort past that prefix loses every <f> locator row while its own count= — computed over the full,
+// uncapped `outs` — stays a truthful total. Before this, that rule's tally row was indistinguishable from
+// one with real locator rows sitting just below the fold; `shown=` closes the gap by naming exactly how
+// many of THIS rule's rows survived the row/byte window the caller actually gets, unconditionally (never
+// omitted, so a fully-capped-away rule reads `shown="0"` instead of silently locator-less) and always
+// <= count (== count on an unpaged, uncapped run, or under an explicit --limit/--offset).
+void printLintRuleTallyRow( const std::string& name, const std::string* sev, std::uint32_t count, std::uint32_t shown, bool capped, bool applicable )
 {
     const char* sevPart        = "";
     std::string sevBuf;
@@ -1754,7 +1763,7 @@ void printLintRuleTallyRow( const std::string& name, const std::string* sev, std
         sevBuf   = " sev=\"" + *sev + "\"";
         sevPart  = sevBuf.c_str();
     }
-    std::printf( "<rule name=\"%s\"%s count=\"%u\"%s%s/>", name.c_str(), sevPart, count,
+    std::printf( "<rule name=\"%s\"%s count=\"%u\" shown=\"%u\"%s%s/>", name.c_str(), sevPart, count, shown,
                  capped ? " capped=\"1\"" : "", applicable ? "" : " applicable=\"0\"" );
 }
 
@@ -12250,7 +12259,10 @@ std::optional<int> runLint( const MainDispatch& d )
                      "A rule row's applicable=\"0\" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this "
                      "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
                      "how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a "
-                     "family (e.g. cache-); the root then carries selected=\"K of N\" plus the raw select=/ignore= you passed. -->" );
+                     "family (e.g. cache-); the root then carries selected=\"K of N\" plus the raw select=/ignore= you passed. "
+                     "Each rule row's own shown= is how many of THAT rule's rows fall inside the printed <f> window (the root's "
+                     "shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the cut carries "
+                     "shown=\"0\" while its count= stays the true total — never confuse a capped-away rule with one that measured zero). -->" );
         if( !cfg.withProfile.empty() )
         {
             std::printf( "<!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest "
@@ -12284,17 +12296,23 @@ std::optional<int> runLint( const MainDispatch& d )
                 { // deselected — no row at all, so it can never look like a checked-and-empty rule
                     continue;
                 }
-                std::uint32_t n = 0;
-                for( const LintOut& m : outs )
+                std::uint32_t n     = 0;
+                std::uint32_t shown = 0;   // wave-4 item 12: how many of THIS rule's rows fall inside lintPage
+                for( std::size_t oi = 0; oi < outs.size(); ++oi )
                 {
+                    const LintOut& m = outs[oi];
                     if( m.rule == rn && m.sev.empty() )
                     {
                         ++n;
+                        if( oi >= lintPage.begin && oi < lintPage.end )
+                        {
+                            ++shown;
+                        }
                     }
                 }
                 const rw::lintcatalog::LintCatalogRow* catRow = rw::lintcatalog::lintCatalogFind( rn );
                 const bool applicable = catRow == nullptr || ( catRow->langMask & corpusLangs ) != 0;
-                printLintRuleTallyRow( rn, nullptr, n, capOf( rn, false ) != nullptr, applicable );
+                printLintRuleTallyRow( rn, nullptr, n, shown, capOf( rn, false ) != nullptr, applicable );
             }
         }
         for( const LintRule& r : userRules )                          // user per-rule tally (declaration order → deterministic)
@@ -12303,17 +12321,23 @@ std::optional<int> runLint( const MainDispatch& d )
             {
                 continue;
             }
-            std::uint32_t n = 0;
-            for( const LintOut& m : outs )
+            std::uint32_t n     = 0;
+            std::uint32_t shown = 0;   // wave-4 item 12: how many of THIS rule's rows fall inside lintPage
+            for( std::size_t oi = 0; oi < outs.size(); ++oi )
             {
+                const LintOut& m = outs[oi];
                 if( m.rule == r.id && !m.sev.empty() )
                 {
                     ++n;
+                    if( oi >= lintPage.begin && oi < lintPage.end )
+                    {
+                        ++shown;
+                    }
                 }
             }
             const bool  applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
             const std::string sevEx = ex( r.severity );
-            printLintRuleTallyRow( ex( r.id ), &sevEx, n, capOf( r.id, true ) != nullptr, applicable );
+            printLintRuleTallyRow( ex( r.id ), &sevEx, n, shown, capOf( r.id, true ) != nullptr, applicable );
         }
         for( std::size_t findingIndex = lintPage.begin; findingIndex < lintPage.end; ++findingIndex )
         {
