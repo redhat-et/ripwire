@@ -293,6 +293,12 @@ struct Config
                                                             // param count + publicness now vs git HEAD (unchanged/new-symbol/contract-change),
                                                             // plus its 1-hop callers with any call-site provably incompatible with the NEW
                                                             // arity flagged. file:name disambiguates like --around/--lego.
+    std::string_view safeDeleteSym;                        // --safe-delete=SYM: "can I delete this?" composed from signals the tool already
+                                                            // computes — 1-hop callers, the transitive --impact blast radius, every --uses
+                                                            // read/write/import/call/extends site, how much of the radius the tested= lens
+                                                            // covers, and --dead-code's own high-confidence shape at defs=1. FACTS only:
+                                                            // risk= names what was found (none-found/uses-exist/untested-radius), never a
+                                                            // go/no-go verdict. file:name disambiguates like --around/--lego.
     bool             prContext       = false;              // --pr-context[=BASEREF]: no-LLM review-evidence bundle for the diff (Wave-4)
     std::string_view prContextBase;                        // --pr-context=BASEREF: diff vs this ref (else the working-tree diff)
     bool             mergeScoutFlag  = false;               // --merge-scout was given at all (tracked separately from the CSV value so a bare
@@ -1279,6 +1285,15 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               provably incompatible with the NEW arity flagged. A contract is PER DEFINITION, so a SYM\n"
         "                               matching several definition sites REFUSES (exit 1) and lists the file:name spellings that\n"
         "                               pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=.\n"
+        "    --safe-delete=SYM          \"can I delete this?\" — ONE call composing signals the tool already computes for one\n"
+        "                               already-resolved SYM: 1-hop callers=, the transitive --impact blast radius (impact_reaches=),\n"
+        "                               every --uses read/write/import/call/extends site (uses=), how much of the blast radius the\n"
+        "                               tested= lens covers (tested_self=/radius_tested=/radius_untested=), and --dead-code's own\n"
+        "                               high-confidence shape at defs=1 (dead_code_candidate=). ambiguous_callers= names callers\n"
+        "                               whose own calls include an ambiguously-resolved one (g.ambOut) — a caveat, not a count of\n"
+        "                               proven-wrong edges. FACTS only: risk= names what was found — none-found (zero callers AND\n"
+        "                               zero uses), untested-radius (a radius exists and none of it is test-covered), or\n"
+        "                               uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict.\n"
         "    --pr-context[=BASEREF]     no-LLM review-evidence bundle for the diff (working-tree, or vs BASEREF): per changed file,\n"
         "                               its symbols + callers + blast radius + affected tests + co-change partners + owners.\n"
         "                               With --max-tokens=N the bundle degrades to fit: per-file structural counts survive for\n"
@@ -2032,6 +2047,7 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--scan-skill=",  &Config::scanSkillFile   , EmptyValue::Refuse, "a skill file path (any file, not just .md)", "--scan-skill=skills/ripwire-orient/SKILL.md" },
     { "--batch=",       &Config::batchFile       , EmptyValue::Refuse, "a batch file path, or - for stdin",      "--batch=queries.txt" },
     { "--edit-check=",  &Config::editCheckSym    , EmptyValue::Refuse, "a symbol name (file:name disambiguates)", "--edit-check=parseArgs" },
+    { "--safe-delete=", &Config::safeDeleteSym   , EmptyValue::Refuse, "a symbol name (file:name disambiguates)", "--safe-delete=parseArgs" },
     { "--eval-stray=",  &Config::evalStray       , EmptyValue::Refuse, "a labelled TSV file path",               "--eval-stray=bench/strayverdicts.tsv" },
     { "--from-trace=",  &Config::fromTrace       , EmptyValue::Refuse, "a trace file path, or - for stdin",      "--from-trace=crash.txt" },
     { "--run-trace=",   &Config::runTrace        , EmptyValue::Refuse, "a shell command line to execute",        "--run-trace=\"make -j\"" },
@@ -2241,7 +2257,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 184;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search)
+inline constexpr std::size_t kTotalFlagArms = 185;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2442,7 +2458,7 @@ constexpr const char* kPagingHonoringVerbs =
     "--communities --community --whereis --grep/--regex --match --pattern --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
     "--readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence "
-    "--naming-consistency";
+    "--naming-consistency --safe-delete";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -2453,7 +2469,7 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
         || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
         || c.readability || c.ensemble || c.qualityPanel || c.contextRatio || c.nonlocalState || c.commentCoherence
-        || c.namingConsistency;
+        || c.namingConsistency || !c.safeDeleteSym.empty();
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in
@@ -2705,7 +2721,7 @@ struct ShapingVerb
 //   HONOURS --top-k       default map (+ the same riders), --query, --format=candidates, --recall,
 //                         --graph-query, and the MCP/batch/--listen pass-throughs
 //   IGNORES both          --pack-task, --exemplar, --around, --path, --lego, --report, --edit-check,
-//                         --situ, --scan-skills, --merge-scout, and --for for --top-k (R12's residual)
+//                         --safe-delete, --situ, --scan-skills, --merge-scout, and --for for --top-k (R12's residual)
 //   IGNORES --top-k only  --connect, --pr-context, --from-trace — the three the verifier first read as
 //                         ignoring --max-tokens too. They were INERT on its probes: --connect answered a
 //                         705 B subgraph, so a 200-token ceiling had nothing to trim. On a shape where the
@@ -2730,6 +2746,7 @@ inline constexpr ShapingVerb kShapingVerbs[] = {
     { "--lego",         nullptr, &Config::legoType     },
     { "--report",       &Config::report,       nullptr },
     { "--edit-check",   nullptr, &Config::editCheckSym },
+    { "--safe-delete",  nullptr, &Config::safeDeleteSym },
     { "--situ",         &Config::situ,         nullptr },
     { "--handoff",      &Config::handoff,      nullptr, false, false, true },   // writeHandoffPacket takes the budget
     { "--scan-skills",  &Config::scanSkills,   nullptr },
