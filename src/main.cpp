@@ -1750,10 +1750,18 @@ struct LintOut { std::uint32_t fileId, startByte, line; std::string rule, sev, t
 // byte cap (kLintDefaultPayloadBytes above) keeps a sorted PREFIX of `outs`, so a rule whose findings all
 // sort past that prefix loses every <f> locator row while its own count= — computed over the full,
 // uncapped `outs` — stays a truthful total. Before this, that rule's tally row was indistinguishable from
-// one with real locator rows sitting just below the fold; `shown=` closes the gap by naming exactly how
+// one with real locator rows sitting just below the fold; shown_rows= closes the gap by naming exactly how
 // many of THIS rule's rows survived the row/byte window the caller actually gets, unconditionally (never
-// omitted, so a fully-capped-away rule reads `shown="0"` instead of silently locator-less) and always
+// omitted, so a fully-capped-away rule reads shown_rows="0" instead of silently locator-less) and always
 // <= count (== count on an unpaged, uncapped run, or under an explicit --limit/--offset).
+//
+// NOUN-PREFIXED, not the bare shown=/capped= pair (src/pageview.h, THE TRUNCATION VOCABULARY rule 1's
+// exception): this element's bare `capped=` already carries a DIFFERENT fact — this rule's own raw-capture
+// stream hit ITS OWN per-rule match budget, so count= itself is a floor — and rule 3 requires the bit
+// paired with shown= to describe the SAME truncation event. Conflating the two under one name would make
+// capped="1" mean "match-budget floor" on one row and "row-window cut" on the next, indistinguishably;
+// shown_rows=/rows_capped= is its own pair (truncvocabcheck.sh rules 1+3) so the two facts stay legible
+// side by side rather than colliding under one bit.
 void printLintRuleTallyRow( const std::string& name, const std::string* sev, std::uint32_t count, std::uint32_t shown, bool capped, bool applicable )
 {
     const char* sevPart        = "";
@@ -1763,8 +1771,8 @@ void printLintRuleTallyRow( const std::string& name, const std::string* sev, std
         sevBuf   = " sev=\"" + *sev + "\"";
         sevPart  = sevBuf.c_str();
     }
-    std::printf( "<rule name=\"%s\"%s count=\"%u\" shown=\"%u\"%s%s/>", name.c_str(), sevPart, count, shown,
-                 capped ? " capped=\"1\"" : "", applicable ? "" : " applicable=\"0\"" );
+    std::printf( "<rule name=\"%s\"%s count=\"%u\" shown_rows=\"%u\" rows_capped=\"%u\"%s%s/>", name.c_str(), sevPart, count, shown,
+                 shown < count ? 1u : 0u, capped ? " capped=\"1\"" : "", applicable ? "" : " applicable=\"0\"" );
 }
 
 // §P0.2: rules whose RAW capture stream spent its whole per-rule budget — their count= is a floor, not
@@ -12260,9 +12268,11 @@ std::optional<int> runLint( const MainDispatch& d )
                      "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
                      "how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a "
                      "family (e.g. cache-); the root then carries selected=\"K of N\" plus the raw select=/ignore= you passed. "
-                     "Each rule row's own shown= is how many of THAT rule's rows fall inside the printed <f> window (the root's "
-                     "shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the cut carries "
-                     "shown=\"0\" while its count= stays the true total — never confuse a capped-away rule with one that measured zero). -->" );
+                     "Each rule row's own shown_rows=/rows_capped= is how many of THAT rule's rows fall inside the printed <f> window "
+                     "(the root's shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the "
+                     "cut carries shown_rows=\"0\" rows_capped=\"1\" while its count= stays the true total — never confuse a capped-away "
+                     "rule with one that measured zero); this is a DIFFERENT fact from the row's own bare capped=\"1\" above (that rule's "
+                     "own raw-capture stream hit its per-rule match budget) — the two can disagree on the same row. -->" );
         if( !cfg.withProfile.empty() )
         {
             std::printf( "<!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest "
