@@ -27,7 +27,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 # V1 MED-2 fix: honor the harness convention — regression.sh/pargates pass RIPWIRE_BIN only, so
 # the probe is derived from the binary under test (house pattern, probecheck.sh), not a hardcoded
