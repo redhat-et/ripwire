@@ -21,8 +21,10 @@
 #   * Python `self.pool.acquire()` and TS `this.cfg.opts.enable()` — the receiver SHAPE is captured for
 #     Python (a fact about syntax) but the field-type table is C++ evidence only, so Rule 4 is C-family
 #     gated exactly as Rule 2b is, and TS receivers are not captured at all. Both stay split.
-# A precedence arm pins real C++ lookup order: a PARAMETER shadows a same-named field, so the param's
-# type — not the field's — decides the chain.
+#   * a PARAMETER base — the binding capture records a param's NAME but not its TYPE, and the param still
+#     shadows a same-named field, so there is no usable base type and the split stays. Arm (d2).
+# A precedence arm pins real C++ lookup order: a declared LOCAL shadows a same-named field, so the local's
+# type — not the field's — decides the chain. Arm (d).
 #
 # The fixture is GENERATED here (self-contained; nothing committed under test/). Line numbers in the
 # fixture are load-bearing: `--callees` rows carry p="file:LINE", which is how an Opts::enable edge is
@@ -63,6 +65,7 @@ struct App {
     void viaThis() { this->m_pool.acquire(); }
     void viaLocal() { Cfg c; c.opts.enable(); }
     void viaField() { m_cfg.opts.enable(); }
+    void viaShadow() { DCfg cfg; cfg.opts.enable(); }
     void viaParam( DCfg cfg ) { cfg.opts.enable(); }
     void deep3() { this->m_cfg.opts.enable(); }
 };
@@ -114,7 +117,7 @@ callees(){ "$BIN" "$FIX" "--callees=$1" --no-cache 2>/dev/null | grep -o '<calle
 
 # ── presence guards (a gate that cannot observe what it asserts is green-while-inert) ──
 for want in '::Pool::acquire"' '::Decoy::acquire"' '::Opts::enable"' '::OptDecoy::enable"' '::DOpts::enable"' \
-            '::App::viaThis"' '::App::viaLocal"' '::App::viaField"' '::App::viaParam"' '::App::deep3"' \
+            '::App::viaThis"' '::App::viaLocal"' '::App::viaField"' '::App::viaShadow"' '::App::viaParam"' '::App::deep3"' \
             '::UnkOwner::unk"' 'n="freeChain"'; do   # a free function is unscoped → no id= attribute, match by name
     printf '%s\n' "$MAP" | grep -qF "$want" || no "presence guard: fixture symbol $want not indexed"
 done
@@ -147,15 +150,24 @@ printf '%s\n' "$F" | grep -q 'a.cpp:3"' \
     && no "(c) viaField() still linked to a decoy enable (a.cpp:4 / a.cpp:5)" \
     || ok "(c) viaField() decoys NOT linked"
 
-# ── (d) precedence: a PARAMETER shadows the same-named field, so the PARAM's type decides the chain.
-#        `void viaParam( DCfg cfg )` against field `Cfg cfg` → DOpts::enable (a.cpp:5), never Opts (a.cpp:3) ──
+# ── (d) precedence: a declared LOCAL shadows the same-named field, so the LOCAL's type decides the chain.
+#        `void viaShadow() { DCfg cfg; … }` against field `Cfg cfg` → DOpts::enable (a.cpp:5), never Opts (a.cpp:3) ──
+S="$( callees viaShadow )"
+printf '%s\n' "$S" | grep -q 'a.cpp:5"' \
+    && ok "(d) viaShadow() local DCfg cfg → DOpts::enable — the local shadows the same-named field" \
+    || no "(d) viaShadow() has NO edge to DOpts::enable — the local's type lost to the field's"
+printf '%s\n' "$S" | grep -q 'a.cpp:3"' \
+    && no "(d) viaShadow() linked to Opts::enable — the FIELD type beat the shadowing local (wrong C++ lookup order)" \
+    || ok "(d) viaShadow() field type Cfg NOT used (local shadows field)"
+
+# ── (d2) degrade, and a DISCLOSED LIMIT: a PARAMETER's type is not part of the binding capture, so a
+#        param base has no usable type — and the param name still shadows the same-named field, so the
+#        field's type must NOT be substituted for it. The honest 3-way split is the right answer, and it
+#        is the same answer Rule 2 already gives a depth-1 param receiver. ──
 P="$( callees viaParam )"
-printf '%s\n' "$P" | grep -q 'a.cpp:5"' \
-    && ok "(d) viaParam( DCfg cfg ) → DOpts::enable — the param shadows the same-named field" \
-    || no "(d) viaParam() has NO edge to DOpts::enable — the param's type lost to the field's"
-printf '%s\n' "$P" | grep -q 'a.cpp:3"' \
-    && no "(d) viaParam() linked to Opts::enable — the FIELD type beat the shadowing param (wrong C++ lookup order)" \
-    || ok "(d) viaParam() field type Cfg NOT used (param shadows field)"
+( printf '%s\n' "$P" | grep -q 'a.cpp:3"' ) && ( printf '%s\n' "$P" | grep -q 'a.cpp:4"' ) && ( printf '%s\n' "$P" | grep -q 'a.cpp:5"' ) \
+    && ok "(d2) viaParam( DCfg cfg ) keeps its COMPLETE 3-way split (param types uncaptured; the param still shadows the field)" \
+    || no "(d2) viaParam() lost part of its honest split — an untyped-but-shadowing base must refuse, not fall back to the field"
 
 # ── (e) degrade: a DEPTH-3 chain refuses — one hop is the pinned bound, not a step toward N ──
 D3="$( callees deep3 )"
@@ -176,17 +188,17 @@ FR="$( callees freeChain )"
     || no "(g) freeChain() lost part of its honest split — a file-scope base must not narrow"
 
 # ── (h) the header gauges agree with the arms above, counted from the fixture rather than guessed.
-#        4 chains narrowed (viaThis/viaLocal/viaField/viaParam), 3 honest splits kept (deep3/unk/freeChain).
-#        edges: 4*1 + 3 + 2 + 3 = 12. ZERO correct edges lost — every removed edge is a decoy the narrow
-#        provably excludes, and every degrade arm above still carries its full split. ──
+#        4 chains narrowed (viaThis/viaLocal/viaField/viaShadow), 4 honest splits kept (viaParam/deep3/
+#        unk/freeChain). edges: 4*1 + 3 + 3 + 2 + 3 = 15. ZERO correct edges lost — every removed edge is
+#        a decoy the narrow provably excludes, and every degrade arm above still carries its full split. ──
 AMB="$( printf '%s\n' "$MAP" | grep -o 'ambiguous=[0-9]*' | head -1 )"
-[ "$AMB" = "ambiguous=3" ] \
-    && ok "(h) header gauge ambiguous=3 — only deep3/unk/freeChain remain honestly split" \
-    || no "(h) header gauge is '$AMB', expected ambiguous=3 (4 chains narrowed, 3 honest splits kept)"
+[ "$AMB" = "ambiguous=4" ] \
+    && ok "(h) header gauge ambiguous=4 — only viaParam/deep3/unk/freeChain remain honestly split" \
+    || no "(h) header gauge is '$AMB', expected ambiguous=4 (4 chains narrowed, 4 honest splits kept)"
 EDG="$( printf '%s\n' "$MAP" | grep -o 'edges=[0-9]*' | head -1 )"
-[ "$EDG" = "edges=12" ] \
-    && ok "(h) header gauge edges=12 — the four narrows removed decoy edges only" \
-    || no "(h) header gauge is '$EDG', expected edges=12 — a correct edge was dropped or a decoy survived"
+[ "$EDG" = "edges=15" ] \
+    && ok "(h) header gauge edges=15 — the four narrows removed decoy edges only" \
+    || no "(h) header gauge is '$EDG', expected edges=15 — a correct edge was dropped or a decoy survived"
 
 # ── (i) TOMBSTONE (FIX2): two same-NAMED classes whose same-named field has DIFFERENT types → neither narrows ──
 MAP2="$( "$BIN" "$FIX2" --no-cache 2>/dev/null | tr '>' '\n' )"
