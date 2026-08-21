@@ -117,7 +117,17 @@ inline const char* langTag( Lang l ) noexcept
 //   ThisObj — receiver is `this` (C++) / `self` (Python): the enclosing class is definitive → Rule 1.
 //   NamedVar— receiver is a plain local variable `x` (`x->m()` / `x.m()`): the var's TYPE pins the method
 //             (Rule 2, one-hop return-type — captured here so the rule is a later drop-in; see resolve.h).
-enum class RecvKind : std::uint8_t { None, ThisObj, NamedVar };
+// Lane J2 widens the capture by EXACTLY ONE intermediate field hop — the dominant C++ member-call idiom,
+// which used to land in `None` and so reached NO rule at all (not Rule 1/2/2b, not CHA-lite). The
+// intermediate field NAME rides in `Reference::fieldName`, free on a call ref (see its comment below), so
+// no struct grows:
+//   FieldOfThis — `this->m_pool.acquire()` / `self.pool.acquire()`: base type = the enclosing class,
+//                 intermediate field = fieldName → Rule 4. No local can shadow an explicit `this->`.
+//   FieldOfVar  — `cfg.opts.enable()` / `m_cfg.opts.enable()`: base = recvVar (a typed local first, else a
+//                 field of the enclosing class — real C++ lookup order), intermediate = fieldName → Rule 4.
+// DEPTH IS PINNED AT ONE HOP, not opened toward N: a depth-3 chain classifies `None` and degrades to the
+// honest §2a split, and `test/chainrecvcheck.sh` arm (e) is the gate that keeps it that way.
+enum class RecvKind : std::uint8_t { None, ThisObj, NamedVar, FieldOfThis, FieldOfVar };
 
 // ABS-3 reference / use-site ROLE: WHAT a reference does at the use site, captured at ingest so a
 // use-site index (`--uses=SYM`) can report the resolvable places a name is referenced, not just calls.
@@ -407,7 +417,11 @@ struct Reference
     std::string   calleeName;             // referenced name (final identifier segment)
     std::string   qualifier;              // explicit scope at the call site (`A` in `A::b()`); "" if bare/method — for canonical resolve
     std::string   recvVar;                // receiver variable identifier when recv==NamedVar (`x` in `x->m()`); "" otherwise — for Rule 2
-    std::string   fieldName;              // member variable name when isCompose (e.g. "m_pool"); "" otherwise
+    std::string   fieldName;              // member variable name when isCompose (e.g. "m_pool"); ALSO the INTERMEDIATE
+                                          //   field of a depth-2 chained receiver when recv is FieldOfThis/FieldOfVar
+                                          //   (`this->m_pool.acquire()` → "m_pool") — the two are mutually exclusive
+                                          //   (a compose ref is never a call ref, and buildGraph's compose readers all
+                                          //   gate on isCompose), so one slot carries both; "" otherwise
     std::string   composeRel;             // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
 };
 

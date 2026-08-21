@@ -1283,6 +1283,29 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 narrowed = !cand.empty();
             }
         }
+        // P2-D Rule 4 (depth-2 receiver CHAIN, lane J2): a member call whose receiver is itself ONE field
+        // access — `this->m_pool.acquire()` / `cfg.opts.enable()` / `m_cfg.opts.enable()` — resolves through
+        // the intermediate field's DECLARED type, BEFORE the bare-name spray. These calls reached no rule at
+        // all until the receiver capture widened (they classified RecvKind::None), so this is the ladder's
+        // first look at the dominant C++ member-call idiom. Fires only when the base type, the intermediate
+        // field's type and the member are ALL unambiguous by the same tables Rule 2b uses (tombstone ⇒ refuse,
+        // local shadow ⇒ refuse, depth ≥3 ⇒ never captured); every other shape degrades to the unchanged
+        // honest ladder. Placed after Rules 1/2/2b for ladder readability only — a chained receiver can never
+        // satisfy their guards, so the three are mutually exclusive by construction.
+        if( !scipPinned && !canonical && !narrowed )
+        {
+            if( const auto* hit = narrower.rule4RecvChain( r, ing.symbols[ r.fromSymbol ].scope, fieldNarrow.fieldTypeByClass, fieldNarrow.localNameSet, chaUp ) )
+            {
+                for( NodeId c : *hit )
+                {
+                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                    {
+                        cand.push_back( c );
+                    }
+                }
+                narrowed = !cand.empty();
+            }
+        }
         // P2-D Rule 3 (import/include-based file narrow): when the name is ambiguous (K same-name defs) but the
         // caller's file #includes / imports EXACTLY ONE file that defines it, resolve to that file's def(s) and
         // DROP the rest — BEFORE the bare-name spray. Sound with no type info: it consumes only the file→file
