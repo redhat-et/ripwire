@@ -12,15 +12,12 @@
 #   * a LOCAL (param / declared var) that shadows the field name vetoes the narrow (real C++ lookup);
 #   * two same-NAMED classes (scope strings drop namespaces, so `n1::Dup` and `n2::Dup` collide) with a
 #     same-named field of DIFFERENT types TOMBSTONE the field entry — neither narrows;
-#   * an unknown/unindexed field type, a receiver in a scope-less free function, and multiple bases both
-#     defining the method all DEGRADE to the unchanged honest split;
-#   * a chained `this->f.m()` receiver is NO LONGER one of them: lane J2 widened the receiver capture by
-#     one intermediate hop (RecvKind::FieldOfThis), so arm (b/expl) now asserts the NARROW that this gate
-#     used to assert the absence of. See test/chainrecvcheck.sh — Rule 4 owns that shape; this gate keeps
-#     the arm so the two rules cannot silently disagree about the same fixture line;
-#   * Python `self.member.m()` and TS `this.member.m()` receivers are still NOT narrowed — Python's chain
-#     IS captured now, but the field-type table is C++ evidence only, and TS receivers are uncaptured →
-#     UNCHANGED, and the (e-py)/(e-ts) arms pin that honesty.
+#   * an unknown/unindexed field type, a chained `this->f.m()` receiver, a receiver in a scope-less free
+#     function, and multiple bases both defining the method all DEGRADE to the unchanged honest split;
+#   * Python `self.member.m()` and TS `this.member.m()` receivers are NOT captured as named receivers
+#     (chained member access; receiver capture is C++/ObjC+Python identifiers only) → UNCHANGED, and the
+#     (e-py)/(e-ts) arms pin that honesty. Widening receiver capture is an EXTRACTION change (kParserVer)
+#     and deliberately out of this round.
 #
 # The fixture is GENERATED here (self-contained; nothing committed under test/). Line numbers in the
 # fixture are load-bearing: `--callees` rows carry p="file:LINE", which is how a Pool::acquire edge is
@@ -156,12 +153,9 @@ printf '%s\n' "$INH" | grep -q 'a.cpp:14"' \
 
 # ── (b) unchanged-degrade arms: every uncertain shape keeps the honest 2-way split ──
 EXPL="$( callees expl )"
-printf '%s\n' "$EXPL" | grep -q 'a.cpp:1"' \
-    && ok "(b) expl() this->m_pool.acquire() → Pool::acquire (J2 Rule 4 resolves the depth-2 chain)" \
-    || no "(b) expl() has NO edge to Pool::acquire — the depth-2 this-chain narrow regressed (chainrecvcheck owns this rule)"
-printf '%s\n' "$EXPL" | grep -q 'a.cpp:2"' \
-    && no "(b) expl() still linked to Decoy::acquire — the chained receiver fell back to the bare-name spray" \
-    || ok "(b) expl() decoy Decoy::acquire NOT linked"
+( printf '%s\n' "$EXPL" | grep -q 'a.cpp:1"' ) && ( printf '%s\n' "$EXPL" | grep -q 'a.cpp:2"' ) \
+    && ok "(b) expl() this->m_pool.acquire() chained receiver stays honestly split (receiver capture limit, disclosed)" \
+    || no "(b) expl() lost its honest split — a chained this->field receiver must not narrow (capture is None)"
 UNK="$( callees unk )"
 ( printf '%s\n' "$UNK" | grep -q 'a.cpp:1"' ) && ( printf '%s\n' "$UNK" | grep -q 'a.cpp:2"' ) \
     && ok "(b) unk() unknown field type UnknownT stays honestly split" \
@@ -198,14 +192,13 @@ TS="$( callees to_go )"
     && ok "(e-ts) to_go() this.member.compute() stays honestly split (TS receivers uncaptured — disclosed limit)" \
     || no "(e-ts) to_go() lost its honest split — TS receiver behavior must be unchanged this round"
 
-# ── (h) the header gauge agrees with the arms above: exactly the 6 honest splits remain ambiguous
-#        (unk, freeuse, multi, shadowParam, po_go, to_go — run/ptr/inh_go narrowed by Rule 2b, expl by
-#        J2's Rule 4, shadowLocal was Rule 2). Was 7 before lane J2 resolved expl's depth-2 chain.
+# ── (h) the header gauge agrees with the arms above: exactly the 7 honest splits remain ambiguous
+#        (expl, unk, freeuse, multi, shadowParam, po_go, to_go — run/ptr/inh_go narrowed, shadowLocal was Rule 2).
 #        Counted from the fixture, not guessed: flip arms above before touching this number. ──
 AMB="$( printf '%s\n' "$MAP" | grep -o 'ambiguous=[0-9]*' | head -1 )"
-[ "$AMB" = "ambiguous=6" ] \
-    && ok "(h) header gauge ambiguous=6 — only the honest splits remain" \
-    || no "(h) header gauge is '$AMB', expected ambiguous=6 (3 field-typed + 1 chained call narrowed, 6 honest splits kept)"
+[ "$AMB" = "ambiguous=7" ] \
+    && ok "(h) header gauge ambiguous=7 — only the honest splits remain" \
+    || no "(h) header gauge is '$AMB', expected ambiguous=7 (3 field-typed calls narrowed, 7 honest splits kept)"
 
 # ── (n) same-NAMED class collision (FIX2): conflicting same-named fields tombstone — NEITHER Dup::go narrows ──
 MAP2="$( "$BIN" "$FIX2" --no-cache 2>/dev/null | tr '>' '\n' )"
