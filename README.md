@@ -81,7 +81,7 @@ Ordered understand → navigate → review-the-change:
 | Ask it | Command | ripwire | naive read | token savings |
 | --- | --- | --- | --- | --- |
 | "Orient me in this repo" | `ripwire .` | **~5.6K tok** | ~20K–25K tok — read `README.md` (+`docs/ARCHITECTURE.md`) | 3.6×–4.5× |
-| "Where is X handled?" | `ripwire . --for="…"` | **~1.9K tok** | ~4.9K–20K tok — `grep -rn <term> src/`, then read the file it points at | 2.6×–10.7× |
+| "Where is X handled?" | `ripwire . --for="…"` | **~2.1K tok** | ~4.9K–20K tok — `grep -rn <term> src/`, then read the file it points at | 2.3×–9.3× |
 | "What do I already know?" | `ripwire . --recall="…"` | **~15K tok** | ~445K tok — read all 119 markdown docs this repo carries | 29.2× |
 | "Set me up for this task" | `ripwire . --pack-task="…"` | **~2.1K tok** | ~16K–80K tok — read every relevant file, whole | 7.7×–37.7× |
 | "Show me this one function" | `ripwire . --expand=SYM --top-k=0` | **~260–16.5K tok** body (+~5.7K for the ranked-neighborhood bundle) | ~43K–174K tok — read the whole file it lives in | 2.6×–670× |
@@ -465,7 +465,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 ## What it answers
 
-Around the core sit 155 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 156 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 Not sure which of them fits the task in front of you? `ripwire . --help-task="<task in words>"`
 recommends ONE executable command with the evidence behind the pick — advice only, it never runs
@@ -799,8 +799,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="src/graph.h:2176"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:2512"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:12924"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:13039"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:13135"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:13250"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:950"/>
 </callers>
 ```

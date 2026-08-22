@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 445 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 446 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -761,6 +761,231 @@ bodies fit; the baseline and the readout therefore use identical short relative 
 long-absolute-path invocation is not a valid re-run of this band. The anchor's defining file is the
 FIRST definition of that name in NodeId order, so on a name with several definitions the rule follows
 the same disclosed choice the route header already prints, and inherits whatever that choice is.
+### Compact conceptual serving — T3 route-narrowing round, PRE-REGISTERED 2026-08-22 (before any code)
+
+**Scope guard, first, for the same reason the anchor-only round needed one.** This is **not** a
+KEEP/REJECT on T3 and it does **not** repeal it. T3's registered primary metric is the transcript-mined
+map-then-read rate above; its readout waits on ≥ 30 post-deploy `--for` episodes and the first
+observational pass reached 26, which the registration itself declares underpowered rather than null.
+Nothing below stands in for that readout. This round narrows **where** the body allowance applies: it
+stays on the route T3's own evidence is about — the name-exact/anchor route, where the anchor-only rule
+already governs *which* body may be served and the served body IS the queried symbol — and comes off the
+conceptual (subtoken+body) route, which no round has ever measured the allowance on. The anchor-only
+round's own confounds paragraph says as much in the other direction: "the round claims nothing about
+conceptual queries, which the rule does not touch." Neither did T3's evidence.
+
+**The mechanism under test.** When `--for`'s router chooses the subtoken+body ranker — a conceptual
+query, the route that names no anchor — the default bundle becomes COMPACT: the ranked `<sigs>` map
+exactly as `--signatures-only` renders it, plus a `<hops>` section carrying the ONE-HOP EDGE CONTEXT of
+the same rank-first candidate head the body walk would have used (each candidate's `<calls>` callee
+signatures, the identical `emitCalleeCallsBlock` disclosure that rides on a body today), and NO body
+CDATA. Disclosure rides the container exactly as T3's does: the `<ctx>` root carries
+`bundle="compact" bodies="0" reason="compact-route"`, the legend defines every attribute a reader meets,
+and the legend names the continuation — the expand verb on any name in the map — so the map-then-expand
+flow is a disclosed surface rather than a thing the agent has to guess. `--auto-bodies` is a **first-class, permanent opt-out** —
+it restores today's bundle on this route byte-identically, and it is a standing posture flag beside
+`--signatures-only` and `--detail=N`, not a migration aid with an expiry. A caller who wants inline
+bodies on conceptual queries is a supported caller indefinitely; nothing about this round is scheduled to
+remove the flag. The name-exact route, `--detail=N`, `--signatures-only`, `--pack-task`, `--expand` and
+`--no-route` are untouched.
+
+**Why — the byte economics, which is the whole case on its own.** Class B is the one class of the
+standing head-to-head that fails the publication gate's ≤1.5× threshold, and it fails it badly: **2.39×**
+the competitor's bytes, against 1.35× / 0.39× / 0.06× for the other three. The decomposition says where
+that goes — bodies, CDATA plus their `<calls>` lists, are **52.7% of every class-B byte**, the majority
+section in two of the three corpora. And a compact one-hop answer is a *demonstrated* shape at a
+fraction of the cost, not a hypothesis: the competitor's own `context` verb answers a symbol
+neighbourhood in 0.7–1.0 KB, carrying callers, callees and field accesses. Half the bundle's bytes, on
+the one route that misses the gate, spent on a section for which a much cheaper form of the same
+navigational value is known to exist — that is the case for this round, and it stands whether or not
+any agent harness behaves the way the next paragraph describes.
+
+**Supporting evidence, explicitly scoped, on what the body allowance buys an agent.** The first
+transcript pass over post-deploy episodes found **17 of 17** body-serving episodes that produced an edit
+doing a native read of the file first, **zero** clean body-use episodes, and 51,161 prepaid body tokens
+riding *alongside* ≈48,339 tokens of native reads rather than replacing them. One mechanism behind that
+shape is a property of the harness those transcripts came from: **Claude Code 2.1.209's `Edit` tool
+requires a prior `Read` of the target file**, so under that harness+version a served body cannot
+substitute for the edit-path read whatever the ranking does. **That scope is a limit on this evidence,
+not a premise of the round.** Other harnesses (codex, opencode, aider) are not known to share the
+contract, and it may change in any Claude Code release. **Re-measure trigger, registered here:** if the
+Read-before-Edit precondition is removed or relaxed in a harness this tool is measured on, this
+paragraph's support expires and the transcript pass must be re-run before it is cited again — the byte
+case above is unaffected either way. Nothing in the implementation detects a harness, conditions on one,
+or may be changed to do so under this round; the only condition the serving reads is the tool's own
+route tag.
+
+**Why one-hop edges and not plain `--signatures-only`.** Measured before the design was fixed, on the
+15-query class-B set: of the 11 queries whose head-to-head note names a decisive symbol or file, ten
+have that marker on a top-level signature row and ONE — `DJ-B1`'s `build_filter` — appears *only* inside
+`split_exclude`'s `<calls>` list, four occurrences, none of them a `<d>` row. Both cheap existing levers
+therefore destroy it outright: `--signatures-only` and `--token-budget=3000` each drop that marker
+entirely (10/11 present), because a callee reachable only through another symbol's callee-signature list
+has no home once the bodies section goes. Keeping the edge context is precisely what recovers it, and it
+is the only measured reason to keep anything from the bodies section at all.
+
+**Baselines, re-derived in this lane before any code was written** (short relative roots, stdout to a
+file, warm index; corpora at the recorded pins `django@03988c5a5`, `webpack@a943d69c4`, this repo
+`@4692076`, all three tree-hash verified clean; binary built at `85fef26`). The re-derivation reproduces
+the class-A and class-B byte columns of the round it follows **exactly** — 52,480 B and 184,857 B — so
+the instrument is the same one:
+
+| arm, 15 class-B queries | bytes | ÷ GNX class-B (77,316 B, frozen) | markers present | markers with a full body |
+|---|---:|---:|---:|---:|
+| current default (allowance on) | **184,857** | 2.391× | 11/11 | 10/11 |
+| `--signatures-only` | **79,375** | 1.027× | **10/11** | 0/11 |
+| `--token-budget=3000` | **97,163** | 1.257× | **10/11** | 2/11 |
+
+**The allowance constant, derived rather than tuned.** The compact section's own byte allowance is the
+measured edge-context share of what the body allowance buys: `<calls>` lists are 14,602 B of the
+97,470 B bodies section across the 15 queries, i.e. 15.0%, and 15.0% of `kForAutoBodyBudgetBytes`
+(6,000 B) is **900 B** — `kForCompactHopBudgetBytes`. It is written down here before the readout so a
+later reader can see it was not chosen to land the band.
+
+**Band, pre-registered before the code exists.** Judged on the class-B TOTAL of the same 15 queries,
+same method, as a two-sided byte band. The projection is 79,375 + 15 × 900 ≈ **92,875 B (1.201×)**:
+
+| Verdict | class-B total bytes, 15 queries |
+| --- | --- |
+| **ACCEPT** | **79,635 … 96,645 B** (1.030× … 1.250×) |
+| **REJECT** | outside that band |
+
+Two-sided on purpose, and both sides are load-bearing. The upper bound is **1.250×**: it clears the
+publication gate's ≤1.5× class threshold, clears the competitor-ratio target of ≤1.3×, and must BEAT the
+best lever that already exists behind a flag (`--token-budget=3000`, 1.257×) — a new DEFAULT that is
+worse than a flag anyone can already pass is not worth a default change. The lower bound is **1.030×**,
+one point above the `--signatures-only` floor: a total at or below it means the compact route served no
+edge context at all, i.e. it is `--signatures-only` wearing a new name, and it would carry that lever's
+measured marker loss with it.
+
+**Success criteria, all four required.** (a) The class-B total lands in the band. (b) Every one of the
+11 judged-decisive markers is PRESENT in the compact bundle — 11/11, strictly better than either
+existing lever's 10/11 — and for each marker whose body the baseline served, the decisive content is
+reachable in ONE disclosed continuation call, with `compact bytes + expand bytes < today's one-call
+bytes` for that query. (c) The name-exact route is byte-identical: all 12 class-A queries, and the 21
+class-C/D queries, reproduce the pre-change capture byte for byte. (d) Determinism holds (byte-identical
+×3), the gate suite stays green including the skill-routing floors and the frozen recall lanes, and
+`--quality-delta` gates zero.
+
+**Failure criteria that revert the change, stated before it is measured.** Any of the 11 markers
+becoming unreachable — absent from the compact bundle AND not recoverable by one disclosed continuation
+call. Any query whose two-call total exceeds today's one-call total. Any byte movement on the name-exact
+route. Any guard regression. Each one reverts on its own; none is negotiable by re-reading the band.
+
+#### The two-call criterion — SUPERSEDED, deliberate recalibration commit, 2026-08-22 (before re-scoring)
+
+**Nothing above is deleted.** The two sentences this supersedes stay where they are, verbatim: success
+criterion (b)'s second clause (*"with `compact bytes + expand bytes < today's one-call bytes` for that
+query"*) and the failure clause (*"Any query whose two-call total exceeds today's one-call total"*).
+This block replaces those two sentences and **nothing else** — the byte band (a), the 11/11 marker count
+in (b), the byte-identity criterion (c), the guard criterion (d), and every other failure clause stand
+exactly as registered.
+
+**Why it is superseded, written before any figure is re-scored under it.** The superseded instrument
+charges every marker ONE FULL `--expand` — which is the assumption that an agent needs the body 100% of
+the time. This round's own evidence base measures that rate, and it is not 1. Over the 17 body-serving
+`--for` episodes the first transcript pass classified: **BODY-USE — the episode that edited off the
+prepaid body — was observed zero times**; 11 episodes were MAP-USE(insufficient), where the served body
+demonstrably did NOT contain the text that was edited; 6 were AMBIGUOUS. A criterion that prices a
+CONDITIONAL cost as an UNCONDITIONAL one is not measuring the thing it names, and that gap is the entire
+disagreement between the two readings this lane recorded. This is the separate disclosed commit the
+house convention requires for exactly this move — the snapshot/floor update policy earlier in this file,
+and the precedent of the subtoken round, which left a behavioral arm red rather than reword it and said
+so: *"the choice is the owner's: recalibrate the arm in a separate disclosed commit, or reject."* The
+owner chose recalibrate. It is recorded here, ahead of the numbers, so that the recalibration cannot be
+read as a band widened after seeing them.
+
+**`p_body`, derived conservatively and fixed HERE, before use.** `p_body` is the probability that a
+compact bundle costs the agent a follow-up `--expand` for the decisive content. Its derivation:
+
+- The **empirical point estimate is 0/17 = 0.0** — the measured BODY-USE count. It is not used. A
+  criterion built on 0 collapses the expected-cost arm into "compact alone is cheaper", which the
+  per-query bytes already guarantee and which therefore tests nothing.
+- The **11 MAP-USE(insufficient) episodes are excluded** on direct observation, not on convenience: in
+  those the prepaid body did not contain the edited text, so a bundle that omits that body costs the
+  agent nothing it was using. Charging an `--expand` for them would charge for a call the evidence says
+  was not the substitute.
+- The **6 AMBIGUOUS episodes are all charged as body-need** — every one of them, including the 2 with an
+  empty window and the 4 whose per-edit verdicts disagreed. These are the cases the mining could not
+  rule out, and the conservative move is to price every unresolved case against the change.
+
+That gives **`p_body` = (0 BODY-USE + 6 AMBIGUOUS) / 17 body-serving episodes = 6/17 ≈ 0.353**, i.e. the
+upper bound on the share of episodes in which the prepaid body could not be ruled out as the content the
+agent actually needed. It is conservative in the direction that hurts this round: a higher `p_body`
+makes the compact default look more expensive.
+
+**The recalibrated criterion, result-free, BOTH arms required.**
+
+| Arm | Test |
+| --- | --- |
+| **(a) expected cost** | for every query carrying a marker whose body the baseline served: `compact_total + p_body × expand_cost < today's one-call total` |
+| **(b) worst case** | no query's RAW two-call total (compact + a full `--expand`, i.e. `p = 1`) may exceed today's one-call total by more than **+10%** |
+
+Arm (a) is the criterion the superseded one should have been. Arm (b) is what stops (a) from being a
+licence: an expected-value test can be cleared by a query that is catastrophic in the tail, so the tail
+is bounded separately and unconditionally, at a margin fixed here rather than at whatever the data turns
+out to need.
+
+**The re-scoring is a re-scoring, and is bounded as one.** It reads the bytes already captured at this
+lane's head. No query is re-run, no measurement is re-taken, no binary is rebuilt. It must additionally
+**report the break-even `p_body` per query** — the value at which arm (a) would flip — so the criterion's
+sensitivity to a constant chosen from n=17 is visible on the page instead of buried in it.
+
+**Failure, and the end of the line.** If either arm misses, the round REVERTS. There is no third
+criterion: a second recalibration after seeing a second set of numbers would be the band-widening this
+block exists to not be.
+
+#### READOUT — re-scored under the recalibrated criterion (2026-08-22, after the commit above)
+
+Pure re-scoring of the bytes this lane already captured: no query re-run, no measurement re-taken, no
+rebuild. 7 of the 11 markers had a body served at baseline and are therefore applicable; the other 4
+never had inline content to recover and cost no continuation at all.
+
+| id | marker | today 1-call | compact | expand | expected (p=0.353) | arm (a) | worst case | arm (b) | break-even p |
+|---|---|---:|---:|---:|---:|---|---:|---|---:|
+| DJ-B1 | `build_filter` | 13,057 | 4,442 | 5,090 | 6,239 | PASS | −27.0% | PASS | 1.693 |
+| DJ-B2 | `_does_token_match` | 10,785 | 4,271 | 2,196 | 5,046 | PASS | −40.0% | PASS | 2.966 |
+| DJ-B5 | `process_response` | 13,945 | 5,212 | 4,051 | 6,642 | PASS | −33.6% | PASS | 2.156 |
+| RW-B1 | `subtokens` | 12,379 | 8,260 | 2,066 | 8,989 | PASS | −16.6% | PASS | 1.994 |
+| RW-B2 | `kReductionBlockSize` | 14,220 | 8,454 | 6,552 | 10,767 | PASS | **+5.5%** | PASS | 0.880 |
+| RW-B3 | `runAffected` | 14,510 | 8,398 | 7,059 | 10,889 | PASS | **+6.5%** | PASS | 0.866 |
+| WP-B4 | `HotModuleReplacementPlugin` | 12,457 | 7,555 | 3,095 | 8,647 | PASS | −14.5% | PASS | 1.584 |
+
+**Arm (a): 7/7 pass. Arm (b): 7/7 pass.** The two queries that failed the superseded criterion are the
+only two anywhere near the bound, and their worst-case overruns are **+5.5%** (`RW-B2`) and **+6.5%**
+(`RW-B3`) — both inside the +10% tail bound, stated plainly here rather than rounded away.
+
+**Sensitivity, reported as the recalibration required.** Five of the seven applicable queries have a
+break-even `p_body` **above 1.0**, meaning they pass even if the agent needs the body on every single
+call. Only `RW-B3` (0.866) and `RW-B2` (0.880) are conditional at all, and both need the agent to want
+the body **more than 86% of the time** before arm (a) would flip. Against a measured BODY-USE rate of
+**0/17** and a maximally conservative bound of **0.353**, the headroom to the tightest query is **0.513**.
+The verdict is therefore not knife-edge on the choice of `p_body`: every value from 0 to 0.866 gives the
+same answer, and the constant would have to be wrong by more than a factor of two in the direction the
+evidence does not support before it mattered.
+
+**Verdict: ACCEPT.** Criterion (a) the byte band — 95,256 B, 1.2320×, inside 79,635…96,645 B.
+Criterion (b) markers 11/11 present, and both recalibrated two-call arms clear 7/7. Criterion (c) the
+name-exact route and classes C/D byte-identical. Criterion (d) determinism ×3, the full gate suite, the
+sanitizers and `--quality-delta` (`gating="0"`) all clean. **Recorded as an ACCEPT under a SUPERSEDED
+criterion**, which is the honest label: the round would have REVERTED under the criterion as originally
+registered, the recalibration that changed that was made deliberately and in its own commit ahead of the
+re-scoring, and both texts stand above so a later reader can judge the substitution rather than take it.
+
+**Confounds, stated.** The 15-query class-B set was authored for a head-to-head round and frozen; it is
+not a sample of what agents ask, and its one recorded loss (`WP-B2`) is a ranking miss that no
+serving-side change can reach. "Markers present" is a substring test over the emitted bundle, which is
+generous — it credits a name that appears anywhere — and "markers with a full body" is a substring test
+against the `<b>` blocks, which is why this lane's full-body column for `--token-budget=3000` reads 2/11
+where the memo that preceded it read 4/11 by a per-symbol rule; both instruments are stated so the
+columns are not mixed. The GitNexus denominator is the frozen one recorded four days earlier and was not
+re-run. Byte totals move with the invoking path string, so this band is only valid re-run at the same
+short relative roots. And the one thing this round CANNOT show: whether an agent that gets edges instead
+of bodies does better, worse, or the same. That is T3's own transcript readout, still waiting at 26 of
+its 30 episodes, and this registration does not pre-empt it — if that readout later rejects the
+narrowing, `--auto-bodies` is already the switch that restores the previous default on this route, and
+it is a permanent flag rather than one that would have to be re-added.
+
 ### Markdown section tier — G2/G3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **What the round deletes.** The residual this tier removes is *"find the section inside the doc"*:
@@ -2410,13 +2635,18 @@ all ten measure the current build, not a pre-wave one.
 | Review this PR/diff | `ripwire . --pr-context=HEAD~6` | **7,437 B** | 19,298–204,294 B (`git diff HEAD~6` alone, or that diff + the 6 touched files read whole) | 2.6×–27.5× |
 | I have a stack trace | `ripwire . --from-trace=trace.txt` (7-frame trace, real symbols) | **5,718 B** | 497,104–1,192,992 B (grepping the 7 frame names — 5,150 B — plus the innermost file opened, or both files the trace touches) | 86.9×–208.6× |
 
-**Re-measured 2026-08-12, T3 terminal-by-default `--for` (pre-registered above, §4):** the "Where is
-X handled?" row's command now serves the top-ranked FULL bodies inline by default — 13,859 B at this
-binary (`bundle="auto" bodies="3"`), 1.4×–5.8× against the same naive read — and the bundle now
-already contains the follow-up the naive side still pays ("then read the file it points at").
-`--signatures-only` reproduces the signatures-only shape at 7,196 B (2.7×–11.1×). The README table
-states the new default; the 7,501 B figure in the row above is the pre-T3 measurement, kept as the
-2026-08-08 record.
+**Re-measured 2026-08-22, COMPACT conceptual serving (pre-registered above, the T3 route-narrowing
+round):** the "Where is X handled?" query is a conceptual phrase, so it routes subtoken+body and the
+row's command now serves the COMPACT bundle — **8,563 B** at this binary
+(`bundle="compact" bodies="0" reason="compact-route"`), **2.3×–9.3×** against the same naive read. It
+still names `mcpStale` in `src/mcpindex.h`, and the `<hops>` section carries that symbol's one-hop
+callees, so the map still terminates on the right symbol; what it no longer does is prepay the body.
+`--auto-bodies` restores the pre-compact shape at **14,397 B**, and `--signatures-only` the
+signatures-only one at **7,470 B** (2.6×–10.7×) — the two flags bracket the compact default, which is
+the honest way to read it. PRIOR PINS, kept as the record rather than overwritten: 13,859 B was the
+T3 terminal-by-default measurement of 2026-08-12 (`bundle="auto" bodies="3"`, 1.4×–5.8×) with
+`--signatures-only` at 7,196 B, and the 7,501 B figure in the row above is the pre-T3 measurement of
+2026-08-08.
 
 **Same-answer verification, one line per row:**
 - **Orient** — both surface the pipeline's own core files (`ingest.cpp`, `graph.h`, `serialize.h`) as
@@ -2535,7 +2765,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **445 gate scripts**, all of which exist on disk.
+naming **446 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -3343,7 +3573,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 445. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 446. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
