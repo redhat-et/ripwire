@@ -427,6 +427,78 @@ if patch_path.exists() and patch_path.read_text() == _expected_diff:
 else:
     no( "the persisted patch does not match the scored git diff" )
 
+# ── 16. per-run trace persistence — the events/ archive must contain EVENTS, not just trailers ──
+# The 2026-08-22 Lane-AA transcript mine (bodyuse-memo §1) found every events/*.json was the SDK's
+# final result trailer only; the real per-tool-call transcripts lived under the ephemeral
+# CLAUDE_CONFIG_DIR on /tmp and survived only because the machine had not rebooted. run_one must
+# copy the session JSONL (main + Task-tool sidechains) into events/ beside the trailer, name the
+# main one in trace_path, and derive command_calls/native_read_calls from it (both were null on all
+# 48 archive records) — so a future mine reruns from the archive alone, never from machine ephemera.
+work3 = pathlib.Path( tmp ) / "work3"
+_home3 = work3 / "home"                      # what the stubbed prepare_environment returns for work3
+_proj = _home3 / "projects" / "-tmp-fakerepo"
+_proj.mkdir( parents=True, exist_ok=True )
+_main_lines = [
+    json.dumps( { "type": "assistant", "message": { "content": [
+        { "type": "tool_use", "name": "Bash", "input": { "command": "cat a.txt" } },
+        { "type": "tool_use", "name": "Read", "input": { "file_path": "a.txt" } } ] } } ),
+    json.dumps( { "type": "assistant", "message": { "content": [
+        { "type": "tool_use", "name": "Bash", "input": { "command": "python x.py" } } ] } } ),
+    json.dumps( { "type": "user", "message": { "content": [
+        { "type": "tool_result", "content": "ok" } ] } } ),
+]
+( _proj / "sess-main.jsonl" ).write_text( "\n".join( _main_lines ) + "\n" )
+( _proj / "sess-side.jsonl" ).write_text( json.dumps( { "type": "assistant", "message": {
+    "content": [ { "type": "tool_use", "name": "Read", "input": { "file_path": "b.txt" } } ] } } ) + "\n" )
+_trace_stdout = json.dumps( { "result": "ok", "session_id": "sess-main",
+                             "usage": { "input_tokens": 10, "output_tokens": 20 },
+                             "total_cost_usd": 0.01 } )
+R.sh = _fake_sh_claude( _FakeProc( 0, _trace_stdout, "" ) )
+rec3 = R.run_one( _fake_task, "baseline", 3, "claude-code-p", "", work_dir=str( work3 ),
+                  gold_rows=_fake_gold_rows, evaluator="none" )
+_trace_dir = work3 / "events" / ( "%s-%s-%s-trace" % ( _fake_task[ "instance_id" ], "baseline", 3 ) )
+if ( _trace_dir / "sess-main.jsonl" ).exists() and ( _trace_dir / "sess-side.jsonl" ).exists():
+    ok( "the session transcripts (main + sidechain) are copied into events/<run>-trace/" )
+else:
+    no( "session transcripts were not copied into events/ (the archive holds trailers only): %s" % _trace_dir )
+if rec3.get( "trace_path" ) == str( _trace_dir / "sess-main.jsonl" ):
+    ok( "trace_path names the copied MAIN session transcript (picked by the trailer's session_id)" )
+else:
+    no( "trace_path wrong or missing: %r" % ( rec3.get( "trace_path" ), ) )
+if ( _trace_dir / "sess-main.jsonl" ).exists() \
+        and ( _trace_dir / "sess-main.jsonl" ).read_text() == ( _proj / "sess-main.jsonl" ).read_text():
+    ok( "the copied trace is byte-identical to the session file" )
+else:
+    no( "the copied trace differs from the session file" )
+if rec3.get( "command_calls" ) == 2:
+    ok( "command_calls derived from the trace (2 Bash tool_use blocks)" )
+else:
+    no( "command_calls wrong (expected 2, the Bash tool_use count): %r" % ( rec3.get( "command_calls" ), ) )
+if rec3.get( "native_read_calls" ) == 2:
+    ok( "native_read_calls derived from the trace (1 Read tool + 1 shell cat; python x.py excluded)" )
+else:
+    no( "native_read_calls wrong (expected 2): %r" % ( rec3.get( "native_read_calls" ), ) )
+
+# degrade half: a trailer with NO session_id (crash/timeout shape) still copies the files, but the
+# three derived fields stay honest nulls — never a count over a guessed file.
+work4 = pathlib.Path( tmp ) / "work4"
+_proj4 = work4 / "home" / "projects" / "-tmp-fakerepo"
+_proj4.mkdir( parents=True, exist_ok=True )
+( _proj4 / "sess-x.jsonl" ).write_text( _main_lines[ 0 ] + "\n" )
+R.sh = _fake_sh_claude( _FakeProc( 0, json.dumps( { "result": "ok" } ), "" ) )
+rec4 = R.run_one( _fake_task, "baseline", 4, "claude-code-p", "", work_dir=str( work4 ),
+                  gold_rows=_fake_gold_rows, evaluator="none" )
+_trace_dir4 = work4 / "events" / ( "%s-%s-%s-trace" % ( _fake_task[ "instance_id" ], "baseline", 4 ) )
+if ( _trace_dir4 / "sess-x.jsonl" ).exists():
+    ok( "no-session_id degrade: the session file is STILL copied (evidence survives a crashed trailer)" )
+else:
+    no( "no-session_id degrade: session file not copied" )
+if rec4.get( "trace_path" ) is None and rec4.get( "command_calls" ) is None:
+    ok( "no-session_id degrade: trace_path/command_calls stay honest nulls (no guessed main file)" )
+else:
+    no( "no-session_id degrade fabricated fields: trace_path=%r command_calls=%r"
+        % ( rec4.get( "trace_path" ), rec4.get( "command_calls" ) ) )
+
 R.sh = _real_sh
 PY
 
