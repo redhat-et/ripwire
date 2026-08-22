@@ -2597,6 +2597,21 @@ inline std::size_t relevanceFlooredKeep( const std::vector<NodeId>& order, const
     return keep;
 }
 
+// WHY THE FLOOR EXISTS (measured, r10 §5 LB-A). --for's --pack-top-n was read as a TARGET rather than a
+// ceiling: once the name-exact route resolved its anchor, the remaining slots were filled from the
+// (score desc, id asc) tail — which, for a wall of zeros, is crawl/path order, and dot-directories sort
+// first. Over that round's twelve symbol-lookup queries those rows were 64-84% of a class-A bundle's bytes
+// (mean ~73%), and 17.5% of everything the tool emitted across the whole 48-query sweep. It is NOT those
+// directories: excluding them refilled with the next files in path order and the bundle got BIGGER.
+//
+// WHERE THE CALLER APPLIES IT. On the FINAL lens rank — after route, anchor, mention, co-change and
+// doc-mention have all landed — so a row still at zero matched no query term under any of them. --for's
+// forTopN is the one knob every consumer reads (the sigs quota, lensSurfaceIds, the lego/compose scope,
+// the JSON dialect, the auto-bodies set), so narrowing it there floors all of them at once. The emitters
+// take the floor as a flag TOO, and that is not belt-and-braces: their `topN == 0 ⇒ all` convention makes
+// an empty kept set unrepresentable through the count alone, and a query nothing scores on must emit zero
+// rows, not the corpus.
+//
 // The caller-side half of the floor: how many slots of the quota survive it, and the note that says so.
 // ONE spelling for both --for dialects (CLI runForLens, MCP forTaskText) — a bundle-composition rule with
 // two implementations is a rule with two behaviours, which is the drift class the §B4 echo-site rule and
