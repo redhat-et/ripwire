@@ -568,6 +568,46 @@ bool isHeaderPath( std::string_view path ) noexcept
     return extension == "h" || extension == "hpp" || extension == "hh" || extension == "hxx";
 }
 
+// lane/safe-delete: the whole-word "static" token scan behind the --dead-code high-confidence detector's
+// internal-linkage check, factored to a PURE function (source text + a signature byte range in, bool out)
+// so a single-symbol check (--safe-delete's dead_code_candidate=) can ask the identical question without
+// re-deriving it. The --dead-code block below keeps only what is its own — the per-file sourceFor() cache
+// that amortizes this scan across every candidate in the tree; a single-symbol check has nothing to
+// amortize, so it calls this directly on its own one-off read.
+inline bool sourceHasStaticToken( std::string_view source, std::size_t sigStartByte, std::size_t sigEndByte ) noexcept
+{
+    const std::size_t begin = std::min( sigStartByte, source.size() );
+    const std::size_t end   = std::min( sigEndByte, source.size() );
+    if( begin >= end )
+    {
+        return false;
+    }
+    constexpr std::string_view token = "static";
+    std::size_t position = begin;
+    while( ( position = source.find( token, position ) ) != std::string_view::npos && position + token.size() <= end )
+    {
+        const auto isIdentifier = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
+        const bool leftBoundary  = position == begin || !isIdentifier( source[ position - 1 ] );
+        const bool rightBoundary = position + token.size() == end || !isIdentifier( source[ position + token.size() ] );
+        if( leftBoundary && rightBoundary )
+        {
+            return true;
+        }
+        position += token.size();
+    }
+    return false;
+}
+
+// lane/safe-delete: the --dead-code high-confidence PRECONDITIONS on symbol KIND/PLACEMENT alone — a
+// source free function with a body, living outside a header. Deliberately excludes in-degree (the
+// --dead-code block tests the corpus-wide in-edge CSR; --safe-delete already has its own 1-hop caller
+// list for one already-resolved definition and reuses that instead of recomputing it here) and internal
+// linkage (sourceHasStaticToken above — a separate question, needing the file's bytes).
+inline bool deadCodeEligibleKind( const rw::IngestResult& ing, const rw::Symbol& s ) noexcept
+{
+    return s.kind == rw::SymKind::Function && s.sigEndByte < s.endByte && !isHeaderPath( ing.files[ s.fileId ] );
+}
+
 struct IsolateStats
 {
     std::uint32_t total               = 0;
@@ -5808,29 +5848,13 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             std::fclose( file );
             return sourceByFile[fileId];
         };
+        // lane/safe-delete: the scan itself now lives in sourceHasStaticToken (near isHeaderPath, above) —
+        // --safe-delete's dead_code_candidate= asks the identical question for one already-resolved symbol
+        // and needs the same predicate, not a second derivation of it. This lambda keeps only what is
+        // --dead-code's own: the per-file sourceFor() cache amortizing the scan across every candidate.
         const auto hasStaticToken = [ & ]( const Symbol& symbol ) -> bool
         {
-            const std::string& source = sourceFor( symbol.fileId );
-            const std::size_t begin = std::min<std::size_t>( symbol.sigStartByte, source.size() );
-            const std::size_t end   = std::min<std::size_t>( symbol.sigEndByte, source.size() );
-            if( begin >= end )
-            {
-                return false;
-            }
-            constexpr std::string_view token = "static";
-            std::size_t position = begin;
-            while( ( position = source.find( token, position ) ) != std::string::npos && position + token.size() <= end )
-            {
-                const auto isIdentifier = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
-                const bool leftBoundary  = position == begin || !isIdentifier( source[ position - 1 ] );
-                const bool rightBoundary = position + token.size() == end || !isIdentifier( source[ position + token.size() ] );
-                if( leftBoundary && rightBoundary )
-                {
-                    return true;
-                }
-                position += token.size();
-            }
-            return false;
+            return sourceHasStaticToken( sourceFor( symbol.fileId ), symbol.sigStartByte, symbol.sigEndByte );
         };
 
         // Optional path filter (--dead-code=DIR). §P0.3: this was a bare SUFFIX test, so it could only ever
@@ -6643,6 +6667,229 @@ std::optional<int> runUses( const MainDispatch& d )
         return 0;
     }
     return std::nullopt;
+}
+
+// ── lane/safe-delete: --safe-delete=SYM — "can I delete this?" answered as FACTS, never a verdict ──────
+//
+// Composes four signals this tool already computes elsewhere, over ONE already-resolved selector, instead
+// of a new analysis: the transitive blast radius (rw::transitiveCallers, --impact's own walk), every
+// read/write/import/call/extends use-site (resolveUsesSelector/collectUseSites, --uses' own machinery,
+// called verbatim — this verb never takes the file: qualifier --uses does, so the selector is always
+// name-wide), whether an indexed test transitively reaches the symbol and how much of its blast radius
+// does too (the same forward test-seed BFS computeQMetrics's tested= column runs, re-derived locally here
+// rather than reached through MainDispatch's testedPtr — that pointer is null unless --metrics/--for/
+// --exemplar is ALSO given, and a single-symbol BFS has nothing to amortize against that gate), and
+// dead-code candidacy (--dead-code's own high-confidence shape — sourceHasStaticToken/deadCodeEligibleKind
+// above — asked about one already-resolved definition instead of the whole tree).
+//
+// risk= NAMES what was found, never a go/no-go verdict: "none-found" (zero 1-hop callers AND zero use
+// sites of any role — an ABSENCE of evidence, never evidence of absence: dynamic dispatch, callbacks and
+// unindexed macros contribute no edge either, same as every call-graph surface here), "untested-radius"
+// (callers/uses exist and NONE of the transitive blast radius is test-covered), or "uses-exist" (callers/
+// uses exist and at least part of the radius is tested).
+std::optional<int> runSafeDelete( const MainDispatch& d )
+{
+    using namespace rw;
+    const Config&        cfg = d.cfg;
+    const IngestResult&  ing = d.ing;
+    const Graph&         g   = d.g;
+
+    if( cfg.safeDeleteSym.empty() )
+    {
+        return std::nullopt;
+    }
+
+    // file:name disambiguates like --around/--lego/--edit-check/--impact/--uses/--callers.
+    const std::vector<NodeId> defs = resolveAllByNameQualified( ing, cfg.safeDeleteSym );
+    if( defs.empty() )
+    {
+        // §B4.2: the shared did-you-mean refusal every SYM-taking verb speaks (selectorrefuse.h).
+        std::fprintf( stderr, "%s\n", selectorNotFoundMessage( ing, "ripwire: --safe-delete symbol not found: ",
+                                                               cfg.safeDeleteSym, "--safe-delete=" ).c_str() );
+        return 1;
+    }
+
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool        sdSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string sdRootPrefix = sdSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    const auto         sdPathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return sdSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ fileId ], sdRootPrefix ) : std::string_view( ing.files[ fileId ] );
+    };
+
+    // 1-hop callers: the --callers walk (in-edges), unioned over every def this selector matched.
+    std::vector<char>   sdSeenCaller( ing.symbols.size(), 0 );
+    std::vector<NodeId> callerIds;
+    {
+        const auto* ro = g.inEdges.rowOffsets();
+        const auto* ci = g.inEdges.colIndices();
+        for( NodeId def : defs )
+        {
+            if( def >= ing.symbols.size() )
+            {
+                continue;
+            }
+            for( std::uint32_t k = ro[def]; k < ro[def + 1]; ++k )
+            {
+                if( NodeId c = ci[k]; c < sdSeenCaller.size() && !sdSeenCaller[c] ) { sdSeenCaller[c] = 1; callerIds.push_back( c ); }
+            }
+        }
+    }
+    std::sort( callerIds.begin(), callerIds.end(), [ & ]( NodeId a, NodeId b )
+    {
+        const Symbol& sa = ing.symbols[a];  const Symbol& sb = ing.symbols[b];
+        if( sa.fileId != sb.fileId )
+        {
+            return ing.files[sa.fileId] < ing.files[sb.fileId];
+        }
+        return sa.line != sb.line ? sa.line < sb.line : sa.name < sb.name;
+    } );
+
+    // transitive blast radius: the --impact walk, verbatim.
+    const std::vector<NodeId> reach = rw::transitiveCallers( g, defs );
+
+    // every use-site: the --uses walk, verbatim. Always a bare-name selector (fileQualified is only ever
+    // set by resolveUsesSelector when SYM itself carries a file: prefix, which still works here — --uses'
+    // own selector grammar, unchanged).
+    const UsesSelector        sel            = resolveUsesSelector( ing, cfg.safeDeleteSym, defs.size() );
+    const std::vector<char>   isChosenCaller = sel.fileQualified ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
+    const auto                sitesPair      = collectUseSites( ing, sel, isChosenCaller );   // .second (the un-narrowed
+                                                                                               // call-site total) is not read here
+    const std::vector<UseSite>& sites        = sitesPair.first;
+
+    // tested= lens: an indexed test transitively CALLS the symbol — the identical rule computeQMetrics
+    // applies for --metrics/--for/--exemplar (a test symbol is a SEED, never a covered production row
+    // itself), re-derived here rather than reached through MainDispatch's testedPtr for the reason in the
+    // header comment above.
+    std::vector<NodeId> testSeeds;
+    testSeeds.reserve( ing.symbols.size() );
+    for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
+    {
+        if( isTestSymbol( ing, i ) )
+        {
+            testSeeds.push_back( i );
+        }
+    }
+    const std::vector<char> testReach = rw::forwardReach( g, testSeeds );
+    const auto isTested = [ & ]( NodeId n ) -> bool
+    { return n < testReach.size() && testReach[n] != 0 && !isTestSymbol( ing, n ); };
+
+    bool testedSelf = false;
+    for( NodeId def : defs )
+    {
+        if( isTested( def ) ) { testedSelf = true; break; }
+    }
+    std::size_t radiusTested = 0;
+    for( NodeId n : reach )
+    {
+        if( isTested( n ) ) { ++radiusTested; }
+    }
+    const std::size_t radiusUntested = reach.size() - radiusTested;
+
+    // dead-code candidacy: --dead-code's own high-confidence shape, asked about ONE already-resolved
+    // definition. Only meaningful at defs=1 — a contract is per definition site (same reasoning
+    // --edit-check's overload fold states) — so a multi-def selector withholds the claim rather than
+    // guessing which definition it would apply to.
+    bool deadCodeCandidate = false;
+    if( defs.size() == 1 && callerIds.empty() )
+    {
+        const Symbol& only = ing.symbols[ defs[0] ];
+        if( deadCodeEligibleKind( ing, only ) )
+        {
+            std::FILE* file = std::fopen( diskPath( ing, only.fileId ).c_str(), "rb" );
+            if( file )
+            {
+                std::fseek( file, 0, SEEK_END );
+                const long byteCount = std::ftell( file );
+                std::fseek( file, 0, SEEK_SET );
+                std::string source;
+                if( byteCount > 0 )
+                {
+                    source.resize( std::size_t( byteCount ) );
+                    const std::size_t bytesRead = std::fread( source.data(), 1, std::size_t( byteCount ), file );
+                    source.resize( bytesRead );
+                }
+                std::fclose( file );
+                deadCodeCandidate = sourceHasStaticToken( source, only.sigStartByte, only.sigEndByte );
+            }
+        }
+    }
+
+    // amb=: callers whose OWN outgoing calls include at least one that resolved to more than one candidate
+    // definition (g.ambOut, the identical per-symbol counter a map row's amb= reads) — a caveat that ONE of
+    // the callers below may in fact be reaching a DIFFERENT same-named definition, never proof that this
+    // one is. Disclosed in aggregate on the root and per-row below (read the source if which-target
+    // matters — the same limit --edit-check/--for's amb= already carry).
+    std::size_t ambiguousCallers = 0;
+    for( NodeId c : callerIds )
+    {
+        if( c < g.ambOut.size() && g.ambOut[c] > 0 ) { ++ambiguousCallers; }
+    }
+
+    const bool  anyEvidence = !callerIds.empty() || !sites.empty();
+    const char* risk        = !anyEvidence                                    ? "none-found"
+                            : ( !reach.empty() && radiusTested == 0 )         ? "untested-radius"
+                            :                                                   "uses-exist";
+
+    std::vector<char> esc;
+    const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+
+    // §G4: an XML comment may never contain the literal byte pair "--", so every sibling-verb mention below
+    // is spelled WITHOUT its leading flag dashes (impact/uses/callers/dead-code, never --impact/--uses/
+    // --callers/--dead-code) — the one departure from how this file's prose comments spell them elsewhere.
+    std::printf( "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
+                "— never a verdict. defs= is resolveAllByNameQualified's match count, exactly as the impact/uses/callers "
+                "verbs already disclose it; above 1, every count below UNIONS more than one physical definition sharing this "
+                "name. callers= is the 1-hop caller count (the callers verb's own walk over defs' in-edges); impact_reaches= "
+                "is the FULL transitive blast radius (the impact verb's own walk) — like every graph-count surface here it "
+                "is a counts_floor= FLOOR, never a total (dynamic dispatch, callbacks and unindexed macros contribute no "
+                "edge — see COUNTING UNIT below). uses= is every read/write/import/call/extends SITE of the name (the uses "
+                "verb's own walk); reference-name-based, so an overloaded name unions every definition's sites. "
+                "tested_self=\"1\" means an indexed test transitively CALLS this symbol (the tested= lens — a test symbol "
+                "itself is never counted, matching the metrics/for/exemplar verbs' own rule). Of the impact_reaches= blast "
+                "radius, radius_tested=/radius_untested= partition it by that same lens; radius_untested= == impact_reaches= "
+                "means NOTHING downstream of this symbol is covered by an indexed test — the strongest signal this element "
+                "carries. dead_code_candidate=\"1\" fires ONLY when this selector resolves to exactly ONE definition and it "
+                "is the dead-code verb's own high-confidence shape (a source free function, non-header, internal/static "
+                "linkage, zero direct callers) — \"0\" never means \"in use\", only that this narrow detector's preconditions "
+                "do not hold here; run the dead-code verb for the full-corpus scan (it also accepts a directory filter). "
+                "ambiguous_callers= counts callers whose OWN outgoing calls include at least one that resolved to more than "
+                "one candidate definition (g.ambOut, the same per-symbol counter a ranked row's amb= reads) — a caveat that "
+                "one of the callers below MAY be reaching a different same-named definition, never proof that this one is "
+                "(a caller row that is itself ambiguous carries amb=\"1\"); read the source if which-target matters. risk= "
+                "NAMES what was found, never a go/no-go verdict: \"none-found\" (zero callers AND zero uses — an ABSENCE of "
+                "evidence, never evidence of absence), \"untested-radius\" (callers/uses exist and NONE of the transitive "
+                "blast radius is test-covered), or \"uses-exist\" (callers/uses exist and at least part of the radius is "
+                "tested). %s-->%s",
+                rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( sdSingleRoot ) );
+
+    const Symbol&      lead = ing.symbols[ defs[0] ];   // resolveAllByNameQualified walks ascending id — defs[0] is the
+                                                        // lowest, same convention --impact/--uses/--callers's of=/defs=
+                                                        // pairing relies on for orientation when defs > 1.
+    const PageWindow   cw   = pageWindow( callerIds.size(), effectiveRowCap( cfg.pageLimit, 40 ), cfg.pageOffset );
+    char               cab[ kPageDisclosureCap ];
+    const std::string  sdRootAttr = sdSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
+    std::printf( "<safe-delete sym=\"%s\" t=\"%s\" p=\"%s:%u\" defs=\"%zu\" callers=\"%zu\" ambiguous_callers=\"%zu\" "
+                "impact_reaches=\"%zu\" uses=\"%zu\" tested_self=\"%d\" radius_tested=\"%zu\" radius_untested=\"%zu\" "
+                "dead_code_candidate=\"%d\" risk=\"%s\"%s%s%s>",
+                ex( cfg.safeDeleteSym ).c_str(), symTag( lead.kind ), ex( sdPathRel( lead.fileId ) ).c_str(), lead.line,
+                defs.size(), callerIds.size(), ambiguousCallers, reach.size(), sites.size(), testedSelf ? 1 : 0,
+                radiusTested, radiusUntested, deadCodeCandidate ? 1 : 0, risk,
+                pageDisclosure( cab, sizeof( cab ), cw.end - cw.begin, callerIds.size(), cw.end, cfg.pageLimit, cfg.pageOffset, true ),
+                rw::kGraphCountFloorAttrXml, sdRootAttr.c_str() );
+    for( std::size_t i = cw.begin; i < cw.end; ++i )
+    {
+        const NodeId  callerId = callerIds[i];
+        const Symbol& cs       = ing.symbols[ callerId ];
+        std::printf( "<c n=\"%s\" p=\"%s:%u\"", ex( cs.name ).c_str(), ex( sdPathRel( cs.fileId ) ).c_str(), cs.line );
+        if( callerId < g.ambOut.size() && g.ambOut[ callerId ] > 0 )
+        {
+            std::printf( " amb=\"1\"" );
+        }
+        std::printf( "/>" );
+    }
+    std::printf( "</safe-delete>" );
+    return 0;
 }
 
 // ── G4 VERIFY-A-CLAIM: --verify="CLAIM" — one structured claim, a three-valued verdict, evidence inline ──
@@ -13568,7 +13815,8 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
         { "--nonlocal-state",    c.nonlocalState          }, { "--quality-panel", c.qualityPanel          },
         { "--naming-calibration", c.namingCalibration     }, { "--naming-consistency", c.namingConsistency },
         { "--dead-code",         c.deadCode               },   // the row order IS the dispatch order (test/dispatchordercheck.sh pins every pair) — never re-pair for layout
-        { "--edit-check",       !c.editCheckSym.empty()   }, { "--eval",          c.eval                  },
+        { "--edit-check",       !c.editCheckSym.empty()   }, { "--safe-delete",  !c.safeDeleteSym.empty()  },
+        { "--eval",              c.eval                   },
         { "--eval-retrieval",    c.evalRetrieval          }, { "--eval-skills",  !c.evalSkills.empty()    },
         { "--callers",          !c.callers.empty()        }, { "--callees",      !c.callees.empty()       },
         { "--graph-query",      !c.graphQuery.empty()     }, { "--uses",         !c.usesSym.empty()       },
@@ -15056,6 +15304,13 @@ int main( int argc, char** argv )
     }
 
     if( std::optional<int> handled = runEditCheck( dsp ) )
+    {
+        return *handled;
+    }
+
+    // lane/safe-delete: dispatches right after --edit-check — the same "one already-resolved SYM, one
+    // composed answer" family, outside the pinned nine navigate verbs (test/dispatchordercheck.sh).
+    if( std::optional<int> handled = runSafeDelete( dsp ) )
     {
         return *handled;
     }
