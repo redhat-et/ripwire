@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 438 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 439 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -1632,6 +1632,196 @@ The two skips are the standing self-skips (`namingcalibrationcheck` withholds li
 `argvdiffcheck` has no `RIPWIRE_BASE`). ASan+LSan clean, determinism byte-identical ×3, `xmllint` clean,
 `--quality-delta=cd30104..HEAD` → `regressions="0" gating="0"`, exit 0.
 
+### Receiver-guard misfires: `bareCish` wrong-narrow + shadow deletion — PRE-REGISTERED 2026-08-21 (before any fix code)
+
+The two resolver-correctness bugs the depth-2 lane's REJECT surfaced and declined to rescue
+(`lane/depth2-chains` @ `21f75a9`, its RESULT section in that branch's copy of this file;
+`PLAN_HARVEST_REPORTS_2026-08-20/depth2-lane.md` §6). Both share one root cause: `receiverOf`
+classifies EVERY chained receiver as `RecvKind::None`, and five guard sites key on
+`recv == RecvKind::None` (`model.h` macro retag + shadow suppression, `graph.h` fn-pointer binding,
+`resolve.h` Rule 1 `bareCish` + `receiverStaticType`). Two of the five misfire observably:
+
+* **Bug 1 — Rule 1's `bareCish` arm wrong-narrows chained receivers.** `struct App { Pool m_pool;
+  void run(); void go(){ this->m_pool.run(); } }` — the chained receiver reads as a bare unqualified
+  call, so Rule 1 pins `go → App::run` (the caller's OWN class), a silently wrong PRECISE edge where
+  the honest answer is the split that includes `Pool::run`.
+* **Bug 2 — shadow suppression deletes real member calls.** `void go(){ int enable = 0;
+  this->m_cfg.enable(); }` — the receiver-qualified call cannot resolve to the local, but the
+  `recv == None` guard cannot see the receiver, so the reference is deleted outright: `go` emits ZERO
+  call edges.
+
+**Why a new instrument.** The two bugs NET against each other in `ambiguous=` — a removed wrong pin
+*raises* it, a recovered call raises it only where the name is multi-def — which is exactly how the
+depth-2 lane's #3b criterion (strict decrease) rejected a change that fixed both. This round's
+instrument counts each bug separately: **recovered-edge count** (calls that exist in source and emit no
+edge today) and **corrected-target count** (calls whose lone edge today is a provably wrong pin), per
+change, against a pinned corpus.
+
+**The fix under measurement, and its re-justified scope.** The capture widening from the reverted
+`c3ebbd8`, ALONE: `RecvKind` gains `FieldOfThis` / `FieldOfVar` (depth-2 chains only; depth ≥3 stays
+`None`), the intermediate field name rides the call ref's otherwise-free `fieldName` slot, and the five
+guards are NOT edited — a chained receiver simply stops satisfying `recv == None`, which is the whole
+fix. Rule 4 (chain RESOLUTION through the field-type table) stays out, per the lane's own finding: its
+lever on this tree is one call site and it wants a heavily-OO corpus head-to-head before it is funded.
+Carrying the field/var names now is deliberate: the classifier must read those nodes anyway to bound the
+shape, and a future Rule 4 round becomes resolve-side only — no second `kParserVer` re-parse for every
+user. Extraction VALUES change ⇒ `kParserVer` 67 → 68 + `quality.h` mirror in the fix commit.
+
+**The instrument, built and shown red before the fix.**
+
+* `test/chainguardcheck.sh` — micro-fixture gate (fixtures generated, line-numbers load-bearing,
+  `--callees` def-site assertions). Bug-1 arms assert the full honest split WITH the old target
+  retained; Bug-2 arms assert the recovered edge (one single-def flavor that lands precise, one
+  multi-def flavor that lands honestly split). Controls that must be green before AND after: bare
+  Rule-1 narrow (`run()` inside `App`), depth-1 `NamedVar` Rule 2b narrow, Python `self.pool.acquire()`
+  and TS `this.cfg.opts.enable()` edge sets unchanged, and the depth-3 residual pinned as DISCLOSED
+  (both bugs persist for `this->a.b.m()` — the capture bound is one hop; separately fundable).
+  Determinism + warm==cold across the version bump ride in the gate.
+* `test/edgediff.py` — the whole-tree audit: parses two full maps (`--top-k` ≥ symbol count) of the SAME
+  pinned corpus from two binaries, keys symbols by `(file, id|name, kind)`, and classifies every changed
+  caller: **RECOVERED** (a callee name appears that had no edge before), **SPLIT-WIDENED** (same callee
+  names, edge count and `amb=` rose — a pin became an honest split), **REMOVED** (an edge vanished —
+  this class must be EMPTY), plus header-gauge deltas. Deterministic output, sorted.
+
+**Pinned corpus.** The gate's generated fixtures, plus ripwire's own tree at `cd30104` measured as a
+pristine detached checkout. Baseline re-derived on this round's base build of `cd30104`:
+
+```
+files=1308 symbols=11367 edges=13933 ambiguous=5519 unresolved=3203 precise=3
+```
+
+**Success criteria, registered before the code.**
+
+* **#B1 (corrected targets, fixture)** Every Bug-1 arm flips: base binary emits the lone wrong pin to
+  the caller's own class; fixed binary emits the complete honest split, old target retained. RED at
+  `cd30104`.
+* **#B2 (recovered edges, fixture)** Every Bug-2 arm flips: base binary emits zero call edges for the
+  shadowed member call; fixed binary emits the member-call edge(s). RED at `cd30104`.
+* **#B3 (whole tree, exact prediction)** On the pristine `cd30104` checkout the fixed binary lands
+  `edges=13941`, `ambiguous=5522`, `symbols=11367`, `files=1308` — the depth-2 lane's measured
+  capture-widening-only arm IS this prior (`rw-d2-probe`, Rule 4 disabled). Any other landing is an
+  unexplained divergence: the round does not accept until `test/edgediff.py` decomposes it.
+* **#B4 (whole tree, accounting)** `test/edgediff.py` accounts EVERY changed caller: each RECOVERED
+  site and each SPLIT-WIDENED site is hand-verified against source (the call exists; the receiver is
+  chained; for splits, the old lone target was the caller's own class or otherwise provably
+  wrong-pinned) and listed in the RESULT. The REMOVED class is empty — this fix deletes nothing.
+* **#B5 (no collateral)** `test/shadowcheck.sh` (bare-name suppression), `test/fieldnarrowcheck.sh`
+  (Rule 2b) and the full suite stay green; Python/TS fixture edge sets byte-stable.
+* **#B6 (contract)** Determinism byte-identical ×3 cold on the pristine checkout, warm == cold across
+  the `kParserVer` bump, `xmllint` clean.
+
+**Failure criteria that revert the round.** Any REMOVED edge on fixture or tree; any hand-verified site
+that turns out not to be a real call / not a wrong pin; #B3 landing off-prediction with a decomposition
+that reveals an unintended behavior change; determinism or cache transparency breaking. `ambiguous=` is
+NOT a criterion here in either direction — that gauge cannot see these bugs, which is this
+registration's reason to exist.
+
+**What moves if it lands.** `kParserVer` 67 → 68 and `quality.h::kIngestParserVerMirror` in the same
+commit (`qextractionkeycheck`); `qschemetripcheck` golden re-pinned; gate count 432 → 433
+(`manifestcheck` pins). Predicted NOT to move: `test/fieldnarrowcheck.sh` arms and gauges (its fixture
+has no same-named member in the enclosing class and no shadowing local over a chained call) — verified,
+not assumed, in the fix commit.
+
+#### RESULT — ACCEPT on every registered criterion (2026-08-21)
+
+The fix is the capture widening alone plus ONE discovery the red gate forced (below); `kParserVer`
+67 → 68 with the `quality.h` mirror in the same commit. Rule 4 stayed out, as registered.
+
+**Red-first, recorded.** Against the `cd30104` binary, `test/chainguardcheck.sh` was **8 FAIL /
+17 PASS** — failing on exactly the five bug arms plus the two fixture gauges (the base binary reads the
+bug fixture as `edges=6 ambiguous=0`: six calls pinned or deleted, ZERO disclosed ambiguity, wrong five
+times over), and on no others. On the fixed binary: ALL PASS, including under ASan.
+
+**The discovery the gate forced — a SIXTH `recv`-ignorant site.** With the widening in place and Rule 1
+correctly refusing, arms (a)(b)(c) stayed RED: the **S6-C locality tie-break** re-minted the identical
+wrong pin. The caller's canonical id shares its scope segment with the caller's own class's member and
+not with the field type's, so `App::run` won the tie-break and `Pool::run` was dropped as "strictly
+less local". The registration's mechanism list (five guard sites) was incomplete — the tie-break is a
+sixth consumer of receiver ignorance, invisible to `ambiguous=` for the same netting reason. Fix: a
+depth-2 chained-receiver call takes NO locality tie-break (the explicit receiver redirects the call
+away from the enclosing scope, so scope-segment credit there is anti-evidence); ThisObj/NamedVar keep
+the tie-break unchanged. One added guard in `graph.h`, disclosed here because the registration said
+"the five guards are NOT edited" — five were not; the sixth did not exist in the registration's model
+of the bug. Finding it is the gate-before-code discipline doing its job.
+
+**#B1 MET (corrected targets, fixture).** `this->m_pool.run()` → the complete split
+{`Pool::run`, `App::run`}, old target retained; same for the field-base and typed-local-base FieldOfVar
+arms. **#B2 MET (recovered edges, fixture).** `int enable = 0; this->m_cfg.enable();` → recovered as
+the complete 2-way split; the single-def flavor (`m_box.opts.ping()` under a local `ping`) recovers
+precise.
+
+**#B3 MET — the whole-tree landing hits the registered prediction EXACTLY.** Pristine detached
+`cd30104` checkout, `test/edgediff.py` between the base and fixed binaries:
+
+| gauge | base | fixed |
+| --- | --- | --- |
+| edges= | 13933 | **13941** (+8, predicted +8) |
+| ambiguous= | 5519 | **5522** (+3, predicted +3) |
+| symbols= / files= | 11367 / 1308 | unchanged |
+
+**#B4 MET — every changed caller accounted and hand-verified.** The audit classifies ALL +8 edges as
+RECOVERED (the shadow-deletion class); **SPLIT-WIDENED is EMPTY** — ripwire's own tree contains no
+chained-receiver wrong-pin for either mechanism, consistent with the depth-2 lane's "one call site"
+ceiling finding — and **REMOVED is EMPTY**: the fix deletes nothing. The five recovered sites, each
+read in source:
+
+* `src/lexindex.h::buildDefLexStats` — `std::sort( out.tokenHashes.begin(), out.tokenHashes.end() )`
+  under the function's own local `end`. Recovered → `rw::svector::end()` ×2 (`svector.h:270`/`272`, the
+  const/non-const overloads — the split is the two real overloads of the CORRECT class: `tokenHashes`
+  IS an `rw::svector`). +2 edges, amb 4→5.
+* `src/nonlocalstate.h::propagateToCallers` — `const auto* rowOffsets = g.inEdges.rowOffsets();` and
+  its `colIndices` twin: the declarator's OWN name shadows the method being called in its initializer
+  ([basic.scope.pdecl] — the initializer sits inside the new name's scope), so the base binary emitted
+  NO edge for either call. Recovered → `sparseCsr::rowOffsets()` ×2 / `colIndices()` ×2 (the
+  mutable/const overload pairs, `sparseCsr.h:248-252` — again the correct class). +4 edges, amb 4→6.
+  The same idiom with a DIFFERENT local name (`editcheck.h:414`, `const auto* ro = …`) was never
+  deleted — the bug required the name collision, which is why it hid.
+* `test/cloneband_harness.cpp` / `test/type3clone_harness.cpp` `addWholeFileFn` — `ing.files.size()`
+  under the parameter `size`. Recovered → `rw::svector::size()` (`svector.h:285`), +1 edge each, amb
+  unchanged. Caveat recorded: the TRUE callee is `std::vector::size` (unindexed), so the recovered
+  edge is the name-ladder's answer — the same answer every unshadowed `.size()` call in the corpus
+  already gets. Recovery to parity, not a new claim of precision.
+
+**#B5 MET.** `fieldnarrowcheck` green UNCHANGED (as the registration predicted — verified, not
+assumed); `shadowcheck` green (bare-name suppression intact); Python/TS fixture gauges byte-stable
+(`edges=4 ambiguous=2`). **#B6 MET.** Determinism byte-identical ×3 cold on the pristine checkout;
+warm == cold across the `kParserVer` bump; `xmllint` clean.
+
+**Cost, measured — and the delta findings the instrument round-tripped.**
+`--quality-delta=cd30104..HEAD`: `regressions="6" gating="0"`, exit 0. The first cut GATED
+(`receiverOf` complexity 16→33, LOC 46→88) and was refactored rather than acked: the depth-2 arm became
+a bounded recursion (`classifyReceiver`, the one-hop bound enforced by an `allowChain` flag), and the
+first extraction attempt itself round-tripped through TWO further gating findings — a fresh
+`recvNodeText` duplicating the existing `pattern::nodeText` (deleted; `ingest.cpp` already includes
+`pattern.h`) and a 272-token `chainReceiverShape`/`receiverOf` clone pair (dissolved by the recursion).
+The refactor is behavior-neutral: the full pristine-tree map is byte-identical before and after it.
+Remaining rows are all origin=new-symbol or sev=minor — `classifyReceiver` cx 21 (the guard ladder IS
+the feature), `parseMap` cx 22 (the Python instrument), the 31-token
+`memberAccessReceiver`/`memberAccessField` accessor pair (kept: a bool-parameter merge reads worse),
+`buildGraph` +8 LOC (the locality-guard comment), `captureTagsFacts` +1 LOC.
+
+**Battery at the fix tree.** Final full suite at the finished tree:
+**`gates=441 pass=439 skip=2 fail=0 wall=443.0s jobs=6` — ALL PASS**; the two skips are the standing
+self-skips (`namingcalibrationcheck` withholds live judgement; `argvdiffcheck` has no `RIPWIRE_BASE`).
+The mid-round run had two failures, both accounted before the final run: `readmeexamplecheck` — the
+README's recorded `--callers=rankGraphTeleport` capture carries `src/graph.h` line numbers, which the
+9-line locality-guard block shifted by exactly 9 (2168→2176, 2504→2512); the caller SET was
+byte-identical, re-recorded, and `docscommandscheck` arm G stayed green throughout. `editcheckcheck` —
+the 100 ms warm budget under sustained parallel-lane load (load average ~25 during the mid-round runs);
+**control run: the `cd30104` base binary fails it HARDER under the same load (183/169 ms vs the fix
+binary's 144-163 ms)** — environmental, not a regression, and ALL PASS in the final suite run.
+ASan/LSan (`-DRIPWIRE_ASAN=ON`, committed suppressions, clean-first rebuild): exit 0, zero sanitizer
+lines on the whole-tree default map, and `chainguardcheck` is ALL PASS under the ASan binary.
+`qschemetripcheck` golden re-pinned (the mirror value keys the snapshot cache, so stale snapshots
+self-invalidate — the "just re-pin" path, as the depth-2 lane took).
+
+**Residuals, disclosed.** (1) Depth ≥3 chains still classify `None`: BOTH bugs persist there
+(`chainguardcheck` arm (h) pins `deepPin`/`deepShadow` as recorded facts) — the capture bound is
+deliberate, and the residual is separately fundable. (2) TS/JS receivers are not captured at all, so a
+TS chained call keeps whatever the bare ladder gives it (arm (j-ts) pins the stability). (3) The `size`
+caveat above: recovery restores name-ladder parity; it cannot invent `std::` targets the index does not
+hold.
+
 ---
 
 ## 5. Token and output economy
@@ -1974,7 +2164,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **438 gate scripts**, all of which exist on disk.
+naming **439 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -2782,7 +2972,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 438. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 439. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a

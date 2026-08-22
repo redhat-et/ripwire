@@ -1585,7 +1585,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // — no locality to compare — leaving the honest split intact. When every survivor ties at the same locality
         // (e.g. all share only the path, none the scope), NO candidate is strictly more local → the tier is left
         // FULL → the call stays correctly ambiguous below.
-        if( !scipPinned && !bindingPinned && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty() )
+        // A depth-2 chained-receiver call takes NO locality tie-break: the explicit receiver redirects the
+        // call AWAY from the enclosing scope, so the caller's own class winning the scope-segment credit is
+        // anti-evidence — it re-mints exactly the wrong pin Rule 1's bareCish guard stopped making when the
+        // receiver capture widened (the sixth `recv`-ignorant site, found RED by chainguardcheck arm (a):
+        // `this->m_pool.run()` pinned to App::run through THIS block after Rule 1 refused). The honest split
+        // stands instead. ThisObj/NamedVar keep the tie-break: for them the scope/locality prior is not
+        // contradicted by the receiver (`this->` IS the enclosing class; a typed var already narrowed above).
+        if( !scipPinned && !bindingPinned && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
+         && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar )
         {
             const std::string& callerCanon = g.canonId[ r.fromSymbol ];
             // memoize each survivor's shared-locality ONCE (was computed twice: once for bestShare, once inside the
