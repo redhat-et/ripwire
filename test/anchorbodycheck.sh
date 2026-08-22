@@ -36,7 +36,8 @@
 #       whole, in CDATA — this change may never cost a body that was already the right answer.
 #   (3b) …and ONLY the anchor: the same-named bystander that used to ride alongside it is gone.
 #   (4) INERT WITHOUT A BYSTANDER: an anchor with no namesake is served exactly as before (bodies="1").
-#   (5) CONCEPTUAL ROUTES UNTOUCHED: a subtoken+body query names no anchor, so it still escalates to
+#   (5) CONCEPTUAL ROUTES UNTOUCHED by THIS rule: a subtoken+body query names no anchor, so under
+#       --auto-bodies (which is where the body walk lives on that route since the compact round) it still escalates to
 #       several bodies. This is the arm that keeps the rule scoped to what the memo measured.
 #   (6) determinism x3 + xmllint-clean (G4) on every shape above.
 #
@@ -126,7 +127,13 @@ rootbodies(){ printf '%s' "$1" | grep -o 'bundle="auto" bodies="[0-9]*"' | head 
 BIG="$( rw --for=widgetAnchorProbe )"
 FIT="$( rw --for=widgetFitProbe )"
 SOLO="$( rw --for=widgetSoloProbe )"
-CONC="$( rw --for="reclaim an expired cache slot lease" )"
+# COMPACT conceptual serving (docs/EVALS.md, the T3 route-narrowing round) moved the rank-first BODY
+# walk on this route behind --auto-bodies. That flag is where arm (5b)'s claim now lives: this gate is
+# about the anchor-only rule not LEAKING past name-exact routes, and the walk it must not have shrunk is
+# the one --auto-bodies serves. Without the flag the conceptual bundle serves <hops>, which would make
+# (5b) read zero bodies for a reason that has nothing to do with the rule under test — green (or here,
+# red) while inert, the failure mode CONTRIBUTING §2 names.
+CONC="$( rw --for="reclaim an expired cache slot lease" --auto-bodies )"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== (0) presence guard: the substitution this gate forbids is actually reachable here ==="

@@ -139,6 +139,7 @@ struct Config
     bool             cochangeBoost = false;                 // --cochange-boost (with --for): OPT-IN, EXPERIMENTAL (the --anchor precedent) — the B3 co-change prior: files that historically change WITH the top-ranked files (git co-change, last 500 commits, support >= 3) get a small bounded score boost into the lower bundle; the top seeds can never be displaced. Honest numbers (B3 held-out record): train multi-file strict@10 +6.4pp but held-out +0.0pp (n=55) at warm p50 +19% — did NOT confirm on the Python LocBench corpus; default stays OFF pending a large-C++-corpus history eval. Env RIPWIRE_COCHANGE=1 enables everywhere (incl. the MCP `for` verb, which has no per-call flags).
     bool             noDocMention = false;                  // --no-doc-mention (with --for): disable the doc-mention surfacing — by default, a doc that names one of the task's top-resolved symbols in a `backtick` (the g.mentions edges `--mentions=SYM` already exposes) is lifted into the bundle, strictly below that symbol's own score. Inert when nothing resolved has a mentioning doc (byte-identical). Route-agnostic (applies under --no-route too). Env RIPWIRE_NO_DOC_MENTION=1 disables everywhere (incl. the MCP `for`/`pack_task` verbs).
     bool             signaturesOnly = false;                // --signatures-only (with --for): opt OUT of the T3 terminal-by-default bundle — no auto <bodies> section, no bundle="auto" disclosure; restores the pre-T3 signatures-only lens byte-identically. Contradicts --detail=N (the explicit body knob), refused together. Pre-registered: docs/EVALS.md §4, T3 round.
+    bool             autoBodies = false;                    // --auto-bodies (with --for): opt OUT of COMPACT conceptual serving — restore the rank-first auto <bodies> walk on the subtoken+body route, which by default serves the ranked map plus a <hops> one-hop edge section and no body CDATA. A permanent posture flag, not a transition aid. Inert on the name-exact route (the allowance is already on there). Contradicts --signatures-only (no bodies at all) and --detail=N (the explicit body knob), refused with either. Pre-registered: docs/EVALS.md, the T3 route-narrowing round.
     std::string_view legoType;                             // --lego=TYPE: the interface→impls "Lego" view for ONE named interface/base (signature + method contract + every implementor, own-language only). file:name disambiguates a same-named type across languages.
     std::string_view exemplar;                             // --exemplar=TASK|KIND (Q7): the repo's best-in-class instance of what you're about to write (by ROLE, not text similarity). A plain TASK string infers KIND from the top match; a KIND token selects directly.
     std::string_view recall;                               // --recall=TASK: retrieve the most relevant DOCS (memory/notes) + emit their full bodies
@@ -770,13 +771,21 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own\n"
         "                               body or NO body — never a same-named doc section, type stub or re-export shim from another\n"
         "                               file standing in for it. If the anchor's own body does not fit, the bundle serves nothing\n"
-        "                               and says so, and the per-item over-budget comment names what was dropped. A conceptual\n"
-        "                               query anchors nothing, so it keeps the rank-first walk over the whole candidate head.\n"
+        "                               and says so, and the per-item over-budget comment names what was dropped.\n"
+        "                               COMPACT ON THE CONCEPTUAL ROUTE: a query that anchors nothing (subtoken+body) gets the\n"
+        "                               ranked map plus a <hops> section — the same candidate head's ONE-HOP callee signatures,\n"
+        "                               the <calls> block a body carries — and NO body CDATA, disclosed as bundle=\"compact\"\n"
+        "                               bodies=\"0\" reason=\"compact-route\". Read the map, then --expand=SYM the one you want.\n"
+        "                               --auto-bodies restores the body walk there.\n"
         "                               An explicit --token-budget=N is a hard ceiling: bodies take only what the signature bundle\n"
         "                               left over, and the signatures themselves are unchanged either way\n"
         "    --signatures-only          (with --for) opt out of the terminal-by-default bundle: no auto bodies, no bundle=\"auto\"\n"
         "                               attribute — the signatures-only lens exactly as before. Contradicts --detail=N (refused\n"
         "                               together); --detail=N remains the explicit body knob and supersedes the automatic pick\n"
+        "    --auto-bodies              (with --for) opt out of COMPACT conceptual serving: restore the rank-first auto <bodies>\n"
+        "                               walk on the subtoken+body route (bundle=\"auto\", up to 6 full bodies) instead of the\n"
+        "                               <hops> edge section. Inert on the name-exact route, where the allowance already runs.\n"
+        "                               Contradicts --signatures-only and --detail=N (refused with either)\n"
         "    --no-route                 (with --for/--query) force plain subtoken+body BM25. Routing is now the DEFAULT: a deterministic,\n"
         "                               confidence-gated query-shape router picks name-exact BM25 when the query NAMES a symbol (identifier\n"
         "                               syntax, or every content word is a symbol name) else subtoken+body, and prints which/why in the\n"
@@ -1957,6 +1966,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     { "--cochange-boost",     &Config::cochangeBoost      },
     { "--no-doc-mention",     &Config::noDocMention       },
     { "--signatures-only",    &Config::signaturesOnly     },   // T3 opt-out: the pre-terminal signatures-only --for bundle
+    { "--auto-bodies",        &Config::autoBodies         },   // compact-route opt-out: the rank-first body walk, back on the conceptual route
 
     // graph surface
     { "--external-surface",   &Config::externalSurface    },
@@ -2262,7 +2272,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 185;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read)
+inline constexpr std::size_t kTotalFlagArms = 186;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -3088,6 +3098,32 @@ inline void validateModifierGuards( Config& c ) noexcept
     }
 }
 
+// The three --auto-bodies guards, lifted out of validateConfig, which is already one of the longest
+// functions in this file and grows by a stanza on every flag added. Same shape as the --signatures-only
+// pair it sits beside: --auto-bodies opts out of COMPACT conceptual serving, so ALONE it modifies
+// nothing, and it contradicts BOTH of the other body postures — honoring one of a contradictory pair
+// silently drops the other's effect with no tell, so the pair is refused loudly instead, each with the
+// distinction spelled out. It is a PERMANENT posture flag beside --signatures-only and --detail=N, not a
+// migration aid: a caller who wants inline bodies on conceptual queries stays supported indefinitely.
+inline void refuseAutoBodiesMisuse( Config& c )
+{
+    if( c.autoBodies && c.forTask.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --auto-bodies modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --auto-bodies)\n" );
+        c.ok = false;
+    }
+    if( c.autoBodies && c.signaturesOnly )
+    {
+        std::fprintf( stderr, "ripwire: --auto-bodies contradicts --signatures-only — pass one (--auto-bodies asks for the automatic bodies; --signatures-only means no bodies at all)\n" );
+        c.ok = false;
+    }
+    if( c.autoBodies && c.detail > 0 )
+    {
+        std::fprintf( stderr, "ripwire: --auto-bodies contradicts --detail=N — pass one (--detail=N is the explicit body knob and already supersedes the automatic pick)\n" );
+        c.ok = false;
+    }
+}
+
 inline void validateConfig( Config& c ) noexcept
 {
     if( c.rootPath.empty() && !c.mcp && !c.scanSkills && c.scanSkillFile.empty() )   // scan / --mcp may run without a path
@@ -3182,6 +3218,8 @@ inline void validateConfig( Config& c ) noexcept
         std::fprintf( stderr, "ripwire: --signatures-only contradicts --detail=N — pass one (--detail=N is the explicit body knob; --signatures-only means no bodies at all)\n" );
         c.ok = false;
     }
+
+    refuseAutoBodiesMisuse( c );   // the three --auto-bodies guards, out of line (see above validateConfig)
 
     // §P6.4: --owners is ALSO a legal --detail=N companion (restores the full per-file listing instead of
     // the <uniform/> collapse) — stacked as its own `if` rather than folded into the && chain below so this

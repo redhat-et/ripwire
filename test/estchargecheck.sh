@@ -510,12 +510,30 @@ print( f"{len(d)} {span} {est} {expected}" )
 sys.exit( 0 if est == expected else 1 )
 PY
 }
-if out="$( mixedconsistent "$TMP/f_for.out" )"; then
-    ok "#11 A9/A10 --for (auto bodies): est_tokens matches markup@2.50 + bodies@3.80 — bytes/span/est/expected = $out"
+# COMPACT conceptual serving (docs/EVALS.md, the T3 route-narrowing round) made "$FOR_TASK" — a
+# multi-word conceptual query — serve <hops> instead of <bodies> by default, so the AUTO-BODY shape this
+# arm is about now lives behind --auto-bodies. Re-anchored there rather than deleted: the mixed-rate
+# identity is the only arm that can catch a mis-rated body span.
+"$BIN" src --for="$FOR_TASK" --auto-bodies --no-cache >"$TMP/f_forauto.out" 2>/dev/null
+if out="$( mixedconsistent "$TMP/f_forauto.out" )"; then
+    ok "#11 A9/A10 --for --auto-bodies: est_tokens matches markup@2.50 + bodies@3.80 — bytes/span/est/expected = $out"
 else
-    mix_out="$( mixedconsistent "$TMP/f_for.out" 2>/dev/null || true )"
-    no "#11 A9/A10 --for (auto bodies): mixed-rate identity broken — bytes/span/est/expected = ${mix_out:-unreadable} (the auto section is mischarged)"
+    mix_out="$( mixedconsistent "$TMP/f_forauto.out" 2>/dev/null || true )"
+    no "#11 A9/A10 --for --auto-bodies: mixed-rate identity broken — bytes/span/est/expected = ${mix_out:-unreadable} (the auto section is mischarged)"
 fi
+
+# …and the COMPACT default satisfies the FLAT identity, which is the whole point of charging <hops> at the
+# markup rate: that bundle carries no source text at all, so every byte in it — the section included —
+# tokenizes like markup. A <hops> span priced at the body rate would under-report and this arm would fail.
+if out="$( selfconsistent "$TMP/f_for.out" )"; then
+    ok "#11 A9/A10 --for (compact route): est_tokens = round(bytes/2.50) — bytes/est/expected = $out (the <hops> section is charged at the markup rate)"
+else
+    flat_out="$( selfconsistent "$TMP/f_for.out" 2>/dev/null || true )"
+    no "#11 A9/A10 --for (compact route): flat-rate identity broken — bytes/est/expected = ${flat_out:-unreadable} (the compact section is mischarged)"
+fi
+grep -aq '<hops ' "$TMP/f_for.out" \
+    && ok "#11 A9/A10 presence: the compact arm really did serve a <hops> section (the arm is not inert)" \
+    || no "#11 A9/A10 presence: no <hops> in the default --for bundle — re-anchor this arm, it proves nothing"
 # the weak="1" path: a nonsense query trips the weak-score threshold, so the 9-byte attribute is present and
 # the same identity must still hold with it in the document. R9 fix (W3-S, 2026-08-19): a query this weak
 # also has no positive-score body candidates, so buildForAutoBodies now ALWAYS emits the honest
@@ -524,12 +542,15 @@ fi
 # mixedconsistent (already proven above for the non-weak auto-bodies case) instead of the flat-rate
 # selfconsistent, which cannot see the mixed rate and would false-positive on a span the emitter prices
 # correctly.
+# The weak query is a single nonsense word, which routes subtoken+body and therefore goes COMPACT: the
+# R9 shell it emits is <hops shown="0" total="0" capped="0">, markup-rate like the rest of that document,
+# so the FLAT identity is the right one here now (mixedconsistent would exit on the absent <bodies>).
 "$BIN" src --for="zzqqxx" --no-cache >"$TMP/f_weak.out" 2>/dev/null
 if grep -aq 'weak="1"' "$TMP/f_weak.out"; then
-    if out="$( mixedconsistent "$TMP/f_weak.out" )"; then
-        ok "#11 A9 --for with weak=\"1\": est_tokens self-consistent — bytes/span/est/expected = $out (the 9 B attr + the empty <bodies> shell are both charged)"
+    if out="$( selfconsistent "$TMP/f_weak.out" )"; then
+        ok "#11 A9 --for with weak=\"1\": est_tokens self-consistent — bytes/est/expected = $out (the 9 B attr + the R9 <hops> shell are both charged)"
     else
-        no "#11 A9 --for with weak=\"1\": est_tokens != mixed-rate expected — the weak attr or the R9 <bodies> shell is spliced in outside the sum"
+        no "#11 A9 --for with weak=\"1\": est_tokens != flat expected — the weak attr or the R9 <hops> shell is spliced in outside the sum"
     fi
 else
     no "#11 A9 could not produce a weak=\"1\" bundle (threshold or query shape changed — re-anchor this arm)"

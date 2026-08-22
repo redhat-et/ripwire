@@ -170,7 +170,12 @@ def extract_flag_tokens_from_legend(legend_text):
     # "=N"-shaped output attribute whose bareword happens to collide with no real flag, add it here
     # (a live-arm FALSE positive is the failure mode this list exists to prevent, and the fix is always
     # "add the name", never "narrow the pattern back to uselessness").
-    placeholder_exclude = {"bodies", "overloads", "files", "hits", "toks"}
+    # "noedge" joins the list for exactly the documented reason (compact conceptual serving, 2026-08-22):
+    # the <hops> legend defines its own output attribute as "noedge=N counts ranked symbols with no
+    # RESOLVED callee found", there is no --noedge flag and there never will be, and admitting it makes
+    # the live arm cry wolf on correct legend text. Note the same legend's "the auto-bodies flag" IS a
+    # real flag and is correctly matched by pattern 4 — the two shapes are doing different jobs.
+    placeholder_exclude = {"bodies", "overloads", "files", "hits", "toks", "noedge"}
     for match in re.finditer(r'\b([a-z][a-z0-9\-]*)=[NM]\b', legend_text):
         word = match.group(1)
         if word not in placeholder_exclude:
