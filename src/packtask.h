@@ -14,6 +14,7 @@
 #include "model.h"
 #include "graph.h"
 #include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
+#include "lexical.h"       // RouteAnchorDef — the resolved form of the route's own `anchors:` clause
 #include "serialize.h"     // packSignatures / packBodies / escapeXml / kMinBytesPerToken / kBudgetHeadroom
 #include "redact.h"
 #include "notes.h"
@@ -55,6 +56,11 @@ struct LensRanking
     // into, so it needs the tag and the count themselves.
     const char*        routeTag    = "no-route";   // "name-exact" | "subtoken+body" | "no-route" (--no-route)
     std::uint32_t      anchorLifts = 0;            // §B8 mention-anchor lifts folded into `rank` (0 = the anchor moved nothing)
+    // The route's own anchors, RESOLVED to definitions (lexical.h RouteAnchorDef) — the machine form of the
+    // `anchors:` clause routeNote already carries as prose. Non-empty on the name-exact route only, and only
+    // for words that named something. The T3 auto-body allowance reads it so the bundle serves the anchor's
+    // OWN body or none at all (docs/EVALS.md, the anchor-only substitution round).
+    std::vector<RouteAnchorDef> anchorDefs;
 };
 
 inline constexpr int         kPackTaskDefaultTokens  = 6000;   // the default budget when no explicit budget is given
