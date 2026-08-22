@@ -43,7 +43,13 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 echo "routeedgecheck: BIN=$BIN  FIXTURE=$FIXTURE"
 
-forDump(){ "$BIN" "$@" --for="test" --no-cache 2>/dev/null; }
+# LB-A (relevance floor, r10 round): the query names the fixture's own route handlers. It used to be the
+# bare word "test", on which every symbol in this fixture scores ZERO — the whole bundle (and therefore the
+# <routes> block, which is scoped to the bundle's resolved surface) existed only as quota padding, and the
+# floor correctly serves nothing for a query that matches nothing. This gate is about ROUTE-EDGE
+# EXTRACTION, not about ranking, so it now asks a question the fixture can actually answer.
+FORQ="load user order widget register item"
+forDump(){ "$BIN" "$@" --for="$FORQ" --no-cache 2>/dev/null; }
 
 # ---------------------------------------------------------------------------------------------------
 # form 1: SINGLE ROOT (server + client under one crawl root)
@@ -52,9 +58,9 @@ echo "-- single-root form --"
 SINGLE="$( forDump "$FIXTURE" )"
 
 # (e) determinism x3 + xmllint
-"$BIN" "$FIXTURE" --for="test" --no-cache >"$TMP/s1" 2>/dev/null
-"$BIN" "$FIXTURE" --for="test" --no-cache >"$TMP/s2" 2>/dev/null
-"$BIN" "$FIXTURE" --for="test" --no-cache >"$TMP/s3" 2>/dev/null
+"$BIN" "$FIXTURE" --for="$FORQ" --no-cache >"$TMP/s1" 2>/dev/null
+"$BIN" "$FIXTURE" --for="$FORQ" --no-cache >"$TMP/s2" 2>/dev/null
+"$BIN" "$FIXTURE" --for="$FORQ" --no-cache >"$TMP/s3" 2>/dev/null
 diff -q "$TMP/s1" "$TMP/s2" >/dev/null && diff -q "$TMP/s2" "$TMP/s3" >/dev/null \
   && ok "single-root: determinism x3 (byte-identical)" || no "single-root: non-deterministic output"
 printf '%s' "$SINGLE" | xmllint --noout - 2>/dev/null && ok "single-root: xmllint-clean" || no "single-root: xmllint failed"
@@ -104,9 +110,9 @@ EDGECOUNT="$( printf '%s' "$SINGLE" | grep -o '<route ' | wc -l | tr -d ' ' )"
 echo "-- multi-root form --"
 MULTI="$( forDump "$SERVER" "$CLIENT" )"
 
-"$BIN" "$SERVER" "$CLIENT" --for="test" --no-cache >"$TMP/m1" 2>/dev/null
-"$BIN" "$SERVER" "$CLIENT" --for="test" --no-cache >"$TMP/m2" 2>/dev/null
-"$BIN" "$SERVER" "$CLIENT" --for="test" --no-cache >"$TMP/m3" 2>/dev/null
+"$BIN" "$SERVER" "$CLIENT" --for="$FORQ" --no-cache >"$TMP/m1" 2>/dev/null
+"$BIN" "$SERVER" "$CLIENT" --for="$FORQ" --no-cache >"$TMP/m2" 2>/dev/null
+"$BIN" "$SERVER" "$CLIENT" --for="$FORQ" --no-cache >"$TMP/m3" 2>/dev/null
 diff -q "$TMP/m1" "$TMP/m2" >/dev/null && diff -q "$TMP/m2" "$TMP/m3" >/dev/null \
   && ok "multi-root: determinism x3 (byte-identical)" || no "multi-root: non-deterministic output"
 printf '%s' "$MULTI" | xmllint --noout - 2>/dev/null && ok "multi-root: xmllint-clean" || no "multi-root: xmllint failed"

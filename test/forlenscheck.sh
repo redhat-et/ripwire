@@ -74,7 +74,11 @@ from lib import compute_area
 def test_it():
     assert compute_area(2, 3) == 6
 PY
-SCFOR="$( "$BIN" "$SC" --no-cache --for="compute area volume" 2>/dev/null )"
+# LB-A (relevance floor, r10 round): the query names "clone" too. It used to be "compute area volume",
+# and clone_a/clone_b scored ZERO on it — they reached the bundle only as quota PADDING, which the floor
+# now (correctly) drops. Asserting the clone= lens through a row with no textual evidence was measuring the
+# padding, not the lens; the query now reaches clone_a on its own terms and the assertion is unchanged.
+SCFOR="$( "$BIN" "$SC" --no-cache --for="compute area volume clone" 2>/dev/null )"
 printf '%s' "$( dline "$SCFOR" 'def compute_area' )" | grep -q ' tested="1"' \
     && ok "tested=1 folded onto --for for a test-referenced symbol (compute_area)" \
     || no "tested= missing on compute_area in --for: $( dline "$SCFOR" 'def compute_area' )"

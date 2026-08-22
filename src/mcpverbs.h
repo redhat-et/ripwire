@@ -1161,7 +1161,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // symbol (recall@1 ~99% vs ~77% plain) while conceptual queries keep the subtoken+body behavior
     // (lexical.h chooseForRanker). MCP-only agents get the same optimization the CLI ships.
     const RouteChoice        rc        = chooseForRanker( ing, task );
-    const int                forTopN   = topK > 0 ? topK : 40;
+    // NOT const: LB-A's relevance floor narrows it below, once every boost has landed on lensRank. The
+    // MaxScore pruning bound two stanzas down consumes the PRE-floor value, which is the safe direction —
+    // a bound computed for a larger K can only keep more candidates, never fewer.
+    int                      forTopN   = topK > 0 ? topK : 40;
     // H2 (B0 r2): the MCP `for` bundle reads only the top-forTopN of this rank plus every interface
     // (packLego) — same exact MaxScore pruning contract as the CLI --for (byte-identical output).
     std::vector<char> ifaceExact( ing.symbols.size(), 0 );
@@ -1236,6 +1239,28 @@ inline std::string forTaskText( const std::string& root, const std::string& task
         }
     }
 
+    // LB-A (r10 GitNexus round) — THE RELEVANCE FLOOR, byte-for-byte the CLI --for's rule (main.cpp
+    // runForLens), applied here for the same reason every other bundle-composition rule is mirrored: one
+    // composition contract may not have two behaviours. lensRank is FINAL at this point (route, mention,
+    // co-change and doc-mention have all landed), so a row still scoring zero matched nothing under any of
+    // them; the bundle shrinks past that tail instead of padding the quota with it, and says so.
+    std::string floorNote;
+    {
+        std::size_t positiveCount = 0;
+        for( const float sc : lensRank )
+        {
+            if( sc > 0.0f ) { ++positiveCount; }
+        }
+        if( positiveCount < std::size_t( forTopN ) )
+        {
+            char fb[ 200 ];
+            std::snprintf( fb, sizeof( fb ), " [relevance floor: kept %zu of %d - the other %zu scored zero on this query, so the bundle shrank instead of padding]",
+                           positiveCount, forTopN, std::size_t( forTopN ) - positiveCount );
+            floorNote = fb;
+            forTopN   = int( positiveCount );
+        }
+    }
+
     const std::vector<char>  impure    = computeImpure( ing, ix.g );
 
     // fan-in counts: in-degree per node (how many symbols call this one — the "reuse" metric)
@@ -1278,7 +1303,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     //    header comment — so the two dialects stay byte-consistent on what they say and what they explain.
     const std::string_view flRootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
     std::string headerStr = ctxRootOpen( task, " [routed: " + rc.reason + "]", flRootArg )   // §B1.7: same root attrs as the CLI twin
-                          + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote
+                          + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote + floorNote
                           + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing -->"
                           + rw::forRootRelPathsLegendShort( !flRootArg.empty() );   // W3-S item 5: closes the gap this comment used to record
     // W3-S item 5 (2026-08-19): both --for dialects now carry rw::kForRootRelPathsLegendShort (graphlegend.h)
@@ -1341,7 +1366,8 @@ inline std::string forTaskText( const std::string& root, const std::string& task
                     /*rankAdaptivePayload=*/true,         // B0.3: same rank-adaptive payload rule as the CLI --for lens
                     sigsBudget,                           // H1: global payload budget (trim ladder; payload="capped" marker)
                     notesPtr,                             // L3: field-notes surfacing (inert when null)
-                    flRootArg );                          // R-E: root-relative p=, same argument the CLI twin passes
+                    flRootArg,                            // R-E: root-relative p=, same argument the CLI twin passes
+                    /*hasRelevanceFloor=*/true );         // LB-A: shrink past the zero-score tail, never pad
     // §P3 × §P4 (parity with the CLI --for): after a flush the memstream buffer holds header+sigs — narrow
     // the lego block to the files the budget-trimmed sigs actually kept and re-render (a byte-subset of what
     // the budget charged for). The header prefix is skipped so only rendered sigs rows are consulted.

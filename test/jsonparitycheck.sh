@@ -319,9 +319,13 @@ XML_FIELDS="$( "$BIN" "$ROOT/src" --for="parse arguments" --no-cache 2>/dev/null
     && ok "§B1.4: compose_total ($COMPOSE_TOTAL) matches the XML sibling's <field> row count exactly" \
     || no "§B1.4: compose_total ($COMPOSE_TOTAL) != XML sibling's <field> count ($XML_FIELDS)"
 
-RJ="$( "$BIN" "$ROOT/test/routeedgefix" --for="test" --json --no-cache 2>/dev/null | jsonok "--for --json (route-edge surface)" )"
+# LB-A (relevance floor, r10 round): the query names the route fixture's own handlers. It used to be the
+# bare word "test", which scores ZERO on every symbol there — the surface the <routes> block is scoped to
+# existed only as quota padding. test/routeedgecheck.sh moved for the same reason and to the same query.
+RQ="load user order widget register item"
+RJ="$( "$BIN" "$ROOT/test/routeedgefix" --for="$RQ" --json --no-cache 2>/dev/null | jsonok "--for --json (route-edge surface)" )"
 ROUTES_TOTAL="$( printf '%s' "$RJ" | jget routes_total )"
-XML_ROUTES="$( "$BIN" "$ROOT/test/routeedgefix" --for="test" --no-cache 2>/dev/null | grep -oE '<route method=' | wc -l | tr -d ' ' )"
+XML_ROUTES="$( "$BIN" "$ROOT/test/routeedgefix" --for="$RQ" --no-cache 2>/dev/null | grep -oE '<route method=' | wc -l | tr -d ' ' )"
 { [ -n "$ROUTES_TOTAL" ] && [ "$ROUTES_TOTAL" = "$XML_ROUTES" ] && [ "$ROUTES_TOTAL" -gt 0 ]; } 2>/dev/null \
     && ok "§B1.4: routes_total ($ROUTES_TOTAL) matches the XML sibling's <route> row count exactly, and is > 0" \
     || no "§B1.4: routes_total ($ROUTES_TOTAL) != XML sibling's <route> count ($XML_ROUTES), or both zero"

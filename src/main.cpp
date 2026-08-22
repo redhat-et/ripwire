@@ -2585,6 +2585,7 @@ struct ForLensNotes
     const std::string& boost;
     const std::string& docMention;
     const std::string& adaptive;
+    const std::string& floor;       // LB-A: the relevance floor's shrink note, "" when it did not fire
     bool               weak;
 };
 
@@ -2598,6 +2599,7 @@ struct ForLensHeaderParts
     std::string_view rootOpenStr;      // ctxRootOpen( task, routeNoteRaw ), pre-built (its size is charged)
     std::string_view taskNote;         // the comment's scrubbed echo of `task` (xmlCommentText)
     std::string_view adaptiveNote, mentionNote, boostNote, docMentionNote;
+    std::string_view floorNote;        // LB-A: present only when the relevance floor actually shrank the quota
     bool             anchor     = false;   // --anchor's EXPERIMENTAL caveat paragraph
     bool             autoBundle = false;   // T3: auto mode is on (cfg.detail==0, no --signatures-only) — appends the bundle=auto legend
     std::string_view rootArg;              // R-E (2026-08-17): the single-root run's own root= — the ladder's
@@ -2626,7 +2628,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
 {
     std::string h;
     h.reserve( 640 + kForAutoBundleLegend.size() + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
-               + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + extraNotes.size() );
+               + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + p.floorNote.size() + extraNotes.size() );
     h += withRouteAttr ? std::string( p.rootOpenStr ) : rw::ctxRootOpen( p.task, {}, p.rootArg );
     h += "<!-- ripwire lens for ";
     if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
@@ -2642,6 +2644,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     h.append( p.mentionNote );      // B8: present only when the task named something indexed (else "")
     h.append( p.boostNote );        // B3: present only when the co-change prior actually promoted something
     h.append( p.docMentionNote );   // R5: present only when a resolved symbol's mentioning docs surfaced
+    h.append( p.floorNote );        // LB-A: present only when the relevance floor shrank the quota (else "")
     if( p.anchor )
     {
         h += " [anchored, EXPERIMENTAL: lexical + graph-expanded rank; honest numbers: on the 80-commit co-change "
@@ -2713,6 +2716,11 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
     {
         h += ",\"adaptive\":\"" + jsonStr( notes.adaptive ) + "\"";
     }
+    // LB-A: the XML twin appends this note to the header comment; the faithful dialect gets its own key.
+    if( !notes.floor.empty() )
+    {
+        h += ",\"relevance_floor\":\"" + jsonStr( notes.floor ) + "\"";
+    }
     if( notes.weak )
     {
         h += ",\"weak\":true";
@@ -2773,7 +2781,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
                             in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex };
     JsonSigNoteCounts noteCounts;
     const auto packSigs = [ & ]( std::FILE* dst, std::size_t budget, bool* outCapped )
-    { packSignaturesJson( dst, in.ing, in.rank, in.topN, lens, in.redact, in.packBudgetBytes, budget, outCapped, &noteCounts ); };
+    { packSignaturesJson( dst, in.ing, in.rank, in.topN, lens, in.redact, in.packBudgetBytes, budget, outCapped, &noteCounts,
+                          /*rootArg=*/{}, /*hasRelevanceFloor=*/true ); };   // LB-A: same admission rule as the XML twin
 
     // §B1.4: built once, used on both the degrade path below and the normal return — these three are plain
     // size_t values already computed by the caller (no rendering, no redaction seam), so unlike est_tokens
@@ -3111,6 +3120,43 @@ std::optional<int> runForLens( const MainDispatch& d )
             adaptiveNote = nb;
         }
 
+        // LB-A (r10 GitNexus round, PLAN_HARVEST_REPORTS_2026-08-20/r10-gitnexus.md §5) — THE RELEVANCE
+        // FLOOR. The quota above is a CEILING on how many rows the bundle may carry, and it used to be
+        // taken as a target: once the name-exact route resolved its anchor, the remaining slots were
+        // filled by the (score desc, id asc) tail — which, for a wall of zeros, is crawl/path order, and
+        // dot-directories sort first. Measured on that round's 12 symbol-lookup queries, those rows were
+        // 64-84% of a class-A bundle's bytes (mean ~73%) and 17.5% of everything the tool emitted across
+        // the whole 48-query sweep. It is not the directories: excluding them refilled with the NEXT
+        // files in path order and the bundle got BIGGER.
+        //
+        // ADMISSION, NOT RANKING. No score is touched and no row moves — lensRank here is FINAL (route,
+        // anchor, mention, co-change and doc-mention have all landed above), so a row still scoring zero
+        // matched no query term under any of them. What changes is where the head stops. The bundle
+        // SHRINKS rather than padding, and says so, on the --adaptive note's idiom two stanzas up: a
+        // quota that silently shrinks would be the same honesty defect as one that silently pads.
+        //
+        // forTopN is the ONE knob every consumer below reads (lensSurfaceIds, the <lego>/<compose> scope,
+        // the JSON dialect's own quota, the auto-bodies set), so clamping it here floors all of them at
+        // once. packSignatures/packSignaturesJson take the floor as a flag TOO, and that is not
+        // belt-and-braces: their `topN == 0 ⇒ all` convention makes an empty kept set unrepresentable
+        // through the count alone, and a query nothing scores on must emit zero rows, not the corpus.
+        std::string floorNote;
+        {
+            std::size_t positiveCount = 0;
+            for( const float s : lensRank )
+            {
+                if( s > 0.0f ) { ++positiveCount; }
+            }
+            if( positiveCount < std::size_t( forTopN ) )
+            {
+                char fb[ 200 ];
+                std::snprintf( fb, sizeof( fb ), " [relevance floor: kept %zu of %d - the other %zu scored zero on this query, so the bundle shrank instead of padding]",
+                               positiveCount, forTopN, std::size_t( forTopN ) - positiveCount );
+                floorNote = fb;
+                forTopN   = int( positiveCount );
+            }
+        }
+
         // H1 (B0 r2): the bundle is emitted under a GLOBAL payload budget (serialize.h kForPayloadBudgetBytes; an
         // EXPLICIT --token-budget=N overrides it at the same conservative byte rate the --max-tokens fitter uses).
         // Trimming happens inside <sigs> only, so the header is built as a string and the sibling blocks (lego,
@@ -3129,7 +3175,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // (autoBundle=false) and rebuild the header without the legend — the ladder's later rebuilds read
         // this struct through buildForHeader and must honor that decision.
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
-                                        mentionNote, boostNote, docMentionNote, cfg.anchor, autoBundleMode, flRootArg };
+                                        mentionNote, boostNote, docMentionNote, floorNote, cfg.anchor, autoBundleMode, flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -3239,7 +3285,7 @@ std::optional<int> runForLens( const MainDispatch& d )
 
             const int jsonRc = emitForLensJson( stdout,
                                                 forLensJsonHeader( cfg.forTask, ForLensNotes{ routeNoteRaw, mentionNote, boostNote,
-                                                                                              docMentionNote, adaptiveNote, forWeak } ),
+                                                                                              docMentionNote, adaptiveNote, floorNote, forWeak } ),
                                                 ForLensJsonInputs{ ing, lensRank, forTopN, fanInPtr, impurePtr, &forChurn,
                                                                    &forClone, testedPtr, ampPtr, redactPtr,
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
@@ -3368,7 +3414,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 /*rankAdaptivePayload=*/true,                // B0.3: tail entries excerpt-trimmed by global rank (serialize.h kForDoc*)
                                 sigsBudget,                                  // H1: global payload budget (trim ladder; payload="capped" marker)
                                 notesPtr,                                    // L3: field-notes surfacing (inert when null)
-                                flRootArg );                                 // R-E: root-relative p=
+                                flRootArg,                                   // R-E: root-relative p=
+                                /*hasRelevanceFloor=*/true );                // LB-A: shrink past the zero-score tail, never pad
                 std::fflush( sm );  std::fclose( sm );
                 if( sbuf ) { sigsStr.assign( sbuf, ssz );  std::free( sbuf ); }
                 sigsPreRendered = true;
@@ -3583,7 +3630,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         else
         {
             packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
-                            &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg );
+                            &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg,
+                            /*hasRelevanceFloor=*/true );   // LB-A: the direct-emission degrade path selects identically
         }
         if( legoPreRendered )
         {
