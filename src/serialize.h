@@ -673,6 +673,31 @@ inline constexpr std::size_t kForCapTailSigBytes    = 96;
 // selection. Candidate cap: kPackTaskBodyCandidates — the default --for converges on the pack-task shape.
 inline constexpr std::size_t kForAutoBodyBudgetBytes = 6000;
 
+// ── COMPACT CONCEPTUAL SERVING (pre-registered: docs/EVALS.md, the T3 route-narrowing round) ──────────
+// On the CONCEPTUAL route — the subtoken+body ranker, the route that names no anchor — the allowance
+// above buys body CDATA nobody was measured using: the Claude Code harness REQUIRES a Read before an
+// Edit, so a served body cannot substitute for the edit-path read by construction, and the first
+// transcript pass found 17 of 17 body-serving episodes re-reading the file anyway. What is left is
+// navigational value, and the cheap half of the bodies section carries it: each body's <calls> child.
+// So this route serves the ranked map plus that edge context and no body text at all.
+//
+// THE CONSTANT IS DERIVED, NOT TUNED, and TWO independent derivations agree on it inside 11%, which is
+// why it is one number rather than a range:
+//   • the edge-context SHARE of what the body allowance buys — across the 15-query class-B set the
+//     <calls> lists are 14,602 B of the 97,470 B bodies section, 15.0%, and 15.0% of
+//     kForAutoBodyBudgetBytes is 900 B;
+//   • the competitor's own recorded one-hop `context` answer, the shape this mode copies, measured at
+//     0.7–1.0 KB per query in the same head-to-head round.
+//
+// IT BUDGETS THE WHOLE COMPACT SURFACE, not just the rows. The first registration draft priced the hops
+// alone and left the legend, the root attribute and the section wrapper riding free — the same "a
+// disclosure has BYTES" trap the --for root legend already recorded once. Corrected before any compact
+// byte was measured: the caller subtracts its own fixed disclosure from this number and passes the
+// remainder to packHops, so a longer legend buys fewer edges rather than a bigger bundle. Same regimes
+// as the body allowance otherwise: it is what the DEFAULT bundle gains on top of kForPayloadBudgetBytes,
+// and an EXPLICIT --token-budget=N stays a hard ceiling (the hops take only genuine leftover).
+inline constexpr std::size_t kForCompactSurfaceBudgetBytes = 1000;
+
 // deterministic UTF-8-safe prefix cut + a visible ellipsis (the honest "there was more" marker); the
 // boundary back-off mirrors docCommentBefore's cap cut. No-op when the text already fits.
 inline void truncateUtf8WithEllipsis( std::string& s, std::size_t maxBytes )
@@ -3480,6 +3505,36 @@ struct CalleeCallsSink
 {
     RedactCounts*                 redact;     // §B0/W3-N1: REQUIRED — the <c> callee sigs are emitted text
     std::vector<EmittedBodyCall>* recorded;   // §H5: nullptr ⇒ do not record (every caller that wants XML only)
+    // COMPACT conceptual serving (docs/EVALS.md, the T3 route-narrowing round): render each callee as
+    // `<c n= l=/>` — the NAME and the line, no signature text. Defaulted false, so every pre-existing
+    // caller is byte-identical; only packHops passes true.
+    //
+    // WHY A NAMES-ONLY RENDERING EXISTS AT ALL, since a signature is strictly more information: it is 3-4x
+    // cheaper (~30 B against ~110 B), and the compact bundle's whole allowance is smaller than one body's.
+    // Measured on the 15-query class-B set: at the registered allowance the signature form bought 32 callee
+    // rows across all 15 queries and lost the one marker the section exists to keep (`build_filter`, which
+    // is reachable in the whole corpus only through another symbol's callee list); the names-only form buys
+    // several times that at the same bytes. A name plus a line is also exactly what the continuation needs —
+    // you expand a NAME — so the denser form is not a lesser answer for this section's actual job.
+    //
+    // It also reads no files: a name and a line come from the symbol table, where the signature has to be
+    // sliced out of the callee's own source. Nothing is silently dropped for an unreadable span here.
+    bool                          namesOnly = false;
+    // Optional query relevance for ORDERING a callee listing that has to be CUT (namesOnly only; nullptr
+    // ⇒ the CSR's own node-id order, which is what every pre-existing caller keeps).
+    //
+    // A body's <calls> list is node-id order because it is almost always COMPLETE, and the order of a
+    // complete listing carries no claim. The compact bundle cuts these listings routinely — its whole
+    // allowance is smaller than one body — and an arbitrary cut of a listing is a real defect however it
+    // is disclosed: `shown="4" capped="1"` is honest about the fact and silent about the choice. Every
+    // other listing in this tool that can be cut is ordered by something (the ranked map by score, the
+    // caller list source-before-test); this one had nothing. With a rank vector it keeps the callees the
+    // QUERY is about, which is the only ordering a task lens can defend.
+    //
+    // Found by measurement, and worth saying so: on the class-B query about turning a filter call into
+    // SQL, `split_exclude`'s nine callees were cut to the first four by node id and dropped
+    // `build_filter` — the one callee the query was actually about.
+    const std::vector<float>*     rank = nullptr;
 };
 
 // §P10.1: the disclosed <calls total=... [shown=... capped="1"]> block
@@ -3506,16 +3561,49 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
         return;
     }
 
+    // the walk order: the CSR's own (node-id ascending) by default, or query-relevance when the caller
+    // supplied a rank and the listing is one that gets cut — see CalleeCallsSink::rank. The tie-break is
+    // node id, so the order is total and the output stays deterministic.
+    std::vector<NodeId> walk;
+    if( sink.namesOnly && sink.rank != nullptr )
+    {
+        walk.assign( outTargets.begin() + outOff[id], outTargets.begin() + outOff[id + 1] );
+        const std::vector<float>& rk = *sink.rank;
+        std::sort( walk.begin(), walk.end(), [ & ]( NodeId a, NodeId b )
+        {
+            const float ra = a < rk.size() ? rk[a] : 0.0f;
+            const float rb = b < rk.size() ? rk[b] : 0.0f;
+            if( ra != rb ) { return ra > rb; }
+            return a < b;
+        } );
+    }
+
     std::string callsBody;
     int         shown = 0;
     for( std::uint32_t k = outOff[id]; k < outOff[id + 1] && shown < 16 && used < budgetBytes; ++k )
     {
-        const NodeId cid = outTargets[k];
+        const NodeId cid = walk.empty() ? outTargets[k] : walk[ k - outOff[id] ];
         if( cid >= ing.symbols.size() )
         {
             continue;
         }
-        const Symbol&      cs   = ing.symbols[cid];
+        const Symbol& cs = ing.symbols[cid];
+
+        // COMPACT: the names-only rendering — no file read, no signature slice, no redaction seam (a bare
+        // identifier is not a credential shape). Charged at what it actually emits, like the branch below.
+        if( sink.namesOnly )
+        {
+            char nb[ 32 ];  std::snprintf( nb, sizeof( nb ), "\" l=\"%u\"/>", cs.line );
+            callsBody += "<c n=\"";  callsBody += escapeXml( cs.name, esc );  callsBody += nb;
+            used += cs.name.size() + 16;
+            ++shown;
+            if( sink.recorded )
+            {
+                sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, std::string() } ); // §H5: no sig to record
+            }
+            continue;
+        }
+
         const std::string& csrc = contentOf( cs.fileId );
         if( cs.sigStartByte >= cs.sigEndByte || cs.sigEndByte > csrc.size() )
         {
@@ -3995,6 +4083,154 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     w.write( children );
     w.write( "</bodies>" );
     w.flush();
+}
+
+// ── THE <hops> SECTION: one-hop edge context without the body text ────────────────────────────────────
+// (pre-registered: docs/EVALS.md, the T3 route-narrowing round; the allowance is
+// kForCompactHopBudgetBytes above, with its derivation.)
+//
+// The compact --for bundle's answer to "what does this reach", WITHOUT paying for the source. Each
+// requested node gets one <h> row carrying the SAME t=/l=/p=/n= identity <b> carries — a reader who can
+// read one row shape can read the other — and that row's only child is the <calls> block packBodies
+// already attaches to every body: emitCalleeCallsBlock, the same 16-per-symbol cap, the same
+// total=/shown=/capped= disclosure, in its NAMES-ONLY rendering (`<c n= l=/>`; see CalleeCallsSink for the
+// measurement that chose it over the signature form). Nothing else rides along. No CDATA, and no notes: the <d> signature
+// row that ranked this symbol already surfaced its field notes, which is the same reason the auto body
+// walk passes noteIndex=nullptr rather than duplicating them.
+//
+// RANK ORDER, not file order, and that is a real difference from packBodies rather than an oversight.
+// packBodies groups its requests by file so each file is read exactly once for the body text; an <h>
+// row needs no file bytes at all (a name and a line come from the symbol table) — so there is nothing to
+// group for, and walking `nodes` in the order the caller ranked them spends the budget on the
+// best-ranked symbols first.
+//
+// A candidate with no resolved out-edges gets NO row and is counted in `noedge=` instead — see the loop
+// for why that is the honest form rather than the cheap one. Call edges are name-based, so dynamic
+// dispatch, callbacks and macros can be missing: `noedge=` means none FOUND, never none exists
+// (CONTRIBUTING #3), and it is deliberately a separate number from `capped=`, which says only that the
+// byte budget stopped before the remaining candidates.
+inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& nodes,
+                      std::size_t budgetBytes,
+                      const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+                      RedactCounts* redact = nullptr,
+                      std::size_t* outShown = nullptr,          // rows actually emitted; nullptr ⇒ not recorded
+                      const std::vector<float>* rank = nullptr, // query relevance, for ordering a CUT callee listing
+                      std::string_view rootArg = {} )           // R-E: same single-root-only root= every verb takes
+{
+    if( budgetBytes == 0 )                                      // 0 ⇒ UNLIMITED, packBodies' own convention
+    {
+        budgetBytes = SIZE_MAX;
+    }
+
+    XmlWriter         w( out );
+    std::vector<char> esc;
+    std::size_t       used = 0;
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto        pathRel    = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
+
+    // callee-signature file cache: each callee's file read once, shared across every row (the <h> rows'
+    // own files are never read — there is no body to take from them).
+    HashMap<std::uint32_t, std::string> contents;
+    const auto contentOf = [ & ]( std::uint32_t fid ) -> const std::string&
+    {
+        const auto it = contents.find( fid );
+        if( it != contents.end() )
+        {
+            return it->second;
+        }
+        std::string s;
+        if( fid < ing.files.size() )
+        {
+            if( std::FILE* in = std::fopen( diskPath( ing, fid ).c_str(), "rb" ) )
+            {
+                char        b[ 4096 ];
+                std::size_t n;
+                while( ( n = std::fread( b, 1, sizeof( b ), in ) ) > 0 )
+                {
+                    s.append( b, n );
+                }
+                std::fclose( in );
+            }
+        }
+        return contents.emplace( fid, std::move( s ) ).first->second;
+    };
+
+    std::string children;
+    std::size_t requestedCount = 0;
+    std::size_t shownCount     = 0;
+    std::size_t noEdgeCount    = 0;
+    for( NodeId id : nodes )
+    {
+        if( id >= ing.symbols.size() )
+        {
+            continue;                                           // never a request this function could answer
+        }
+        ++requestedCount;
+
+        // NO RESOLVED CALLEES: counted, not printed, and told apart from the budget cut by its own
+        // attribute. A row for such a candidate costs ~90 B to carry nothing — up to six of them would
+        // spend the whole allowance saying "none" before a single real edge is served, which is exactly
+        // what the first measurement of this section showed happening. So the row goes and `noedge="N"`
+        // stays, and that is the HONEST trade rather than the cheap one: `capped="1"` alone cannot say
+        // WHY a candidate has no row, and folding "has no edges" into "the budget stopped" would make
+        // a fact about the graph look like a fact about the budget.
+        const std::uint32_t outDeg = ( id + 1 < outOff.size() ) ? outOff[ id + 1 ] - outOff[ id ] : 0u;
+        if( outDeg == 0 )
+        {
+            ++noEdgeCount;
+            continue;
+        }
+        if( used >= budgetBytes )
+        {
+            continue;                                           // counted as requested → capped="1" says so
+        }
+
+        const Symbol& s = ing.symbols[ id ];
+        std::string   row;
+        char          hdr[ 64 ];
+        std::snprintf( hdr, sizeof( hdr ), "<h l=\"%u\" p=\"", s.line );
+        row += hdr;
+        row += escapeXml( pathRel( s.fileId ), esc );
+        row += "\" n=\"";
+        row += escapeXml( s.name, esc );
+        row += "\">";
+        used += row.size();
+        // the 1-hop callee signatures — the identical block a body carries, charged against the same
+        // running `used` so the row identity bytes and the edge bytes share one budget.
+        emitCalleeCallsBlock( row, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
+                              CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank } );
+        row += "</h>";
+        children += row;
+        ++shownCount;
+    }
+
+    // pageview.h THE TRUNCATION VOCABULARY rules 1+2+3, the same triple <bodies> carries: shown= rows
+    // printed, total= rows requested, capped= the bit that always rides with shown=.
+    // capped= is the BUDGET bit only: the candidates neither printed nor accounted by noedge=. Emitted
+    // as the 0|1 boolean the vocabulary requires either way; noedge= follows the house silence rule and
+    // appears only when it is non-zero.
+    char open[ 128 ];
+    if( noEdgeCount > 0 )
+    {
+        std::snprintf( open, sizeof( open ), "<hops shown=\"%zu\" total=\"%zu\" capped=\"%d\" noedge=\"%zu\">",
+                       shownCount, requestedCount, shownCount + noEdgeCount < requestedCount ? 1 : 0, noEdgeCount );
+    }
+    else
+    {
+        std::snprintf( open, sizeof( open ), "<hops shown=\"%zu\" total=\"%zu\" capped=\"%d\">",
+                       shownCount, requestedCount, shownCount < requestedCount ? 1 : 0 );
+    }
+    w.write( open );
+    w.write( children );
+    w.write( "</hops>" );
+    w.flush();
+    if( outShown )
+    {
+        *outShown = shownCount;
+    }
 }
 
 // ── M6 (density audit 2026-08-08): the WHOLE-FILE form a bare --expand can serve ─────────────────────
