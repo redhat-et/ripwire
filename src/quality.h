@@ -762,7 +762,15 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 13;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 67;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 68;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 68 = 2026-08-21 receiver-guard misfires: receiverOf widens by ONE
+                                                          // intermediate field hop (RecvKind FieldOfThis/FieldOfVar, the field
+                                                          // name carried in the call ref's otherwise-free fieldName slot), so
+                                                          // the five `recv == None` guard sites stop misreading a chained
+                                                          // receiver as a BARE name (Rule 1 bareCish wrong-narrow + shadow
+                                                          // deletion). Extraction VALUES change (the wire format does not) and
+                                                          // MOVE edges=/ambiguous= — a v67 blob holds None where this binary
+                                                          // expects a chain, so it must be rejected rather than served.
                                                           // 67 = 2026-08-20 RefRole::Type use-sites: usesVisitNode's accept
                                                           // set widens from bare `identifier` to `type_identifier` too, so a
                                                           // bare TYPE mention becomes a recorded use-site. The extracted SET
