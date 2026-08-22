@@ -272,8 +272,9 @@ function row(s, y, h, cols, opts={}){
     ["r7", "2026-08-08",    "CodeGraph, loss-first — we looked for our losses", "fix REJECTED by its own preregistered band", RED],
     ["r8", "2026-08-08",    "aider again, at equal token budget",               "loss questions traced to one root cause", TEXT],
     ["r9", "2026-08-09",    "Serena / scip-clang oracle",                       "0 silent misses; the fix list it produced", CYAN],
+    ["r10","2026-08-22",    "GitNexus 1.6.9 — a graph-database context server", "27-7-14 AFTER the fix list; first pass unpublished", CYAN],
   ];
-  let y = 1.7;
+  let y = 1.68;
   for (const [r, when, what, outcome, c] of rounds){
     row(s, y, 0.5, [
       { t: r,       w: 0.5,  mono: true, bold: true, color: c, size: 12.5 },
@@ -281,14 +282,14 @@ function row(s, y, h, cols, opts={}){
       { t: what,    w: 5.3,  color: TEXT, size: 11.5 },
       { t: outcome, w: 4.3,  color: c === MUTED ? MUTED : c, size: 11, italic: c === MUTED },
     ]);
-    y += 0.575;
+    y += 0.49;
   }
   card(s, MX, 6.32, 12.09, 0.62, CARD2);
   s.addText([
     { text: "r7 in full, because it is the point: ", options: { color: AMBER, bold: true } },
     { text: "the fix was built, gated green, measured — predicted 12/22 against a pre-registered band of 10–14, measured 5/22 — and reverted rather than tuned. Published as a negative in docs/EVALS.md §7.", options: { color: MUTED } },
   ], { x: MX+0.25, y: 6.41, w: 11.6, h: 0.46, fontFace: SANS, fontSize: 11, valign: "middle", margin: 0 });
-  foot(s, "bench/headtohead/ (r1–r4, r9) · bench/r7/ · bench/r8/ — harnesses committed even for rounds that rejected their own fix · r5 left no head-to-head record in this tree, so it is not listed");
+  foot(s, "bench/headtohead/ (r1–r4, r9) · bench/r7/ · bench/r8/ — harnesses committed even for rounds that rejected their own fix · r5 left no head-to-head record in this tree, so it is not listed · r10's method and pins are published in docs/EVALS.md §2, its pre-fix numbers nowhere");
 }
 
 /* ── S7 · locbench ──────────────────────────────────────────────────────── */

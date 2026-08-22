@@ -43,6 +43,35 @@ the tests that reach them.
 | finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
 | pays for every line it read, right or wrong | measured at **7.3%** of what that grep-and-read pass spends |
 
+### Against the leading graph-database code-context MCP server
+
+On 48 matched questions across django, webpack and this repository — symbol lookup, conceptual
+search, blast radius, and one-call task orientation — ripwire won 27, lost 7 and tied 14, spending
+**~77K tokens against its ~486K** for the whole sweep. It indexes the same three repositories in
+0.25–0.45 s and 6.6–16.5 MB, against that server's 23–52 s and 391–623 MB, and answers a warm query
+in a median 197 ms against its 1,082 ms. Its seven wins are real and named one by one in the method.
+
+<details>
+<summary>How it was measured, and where ripwire still loses</summary>
+
+Both arms warm with a pre-built index, median of 3 timed calls, stdout to a file rather than a pipe.
+The competitor ran in its stronger retrieval configuration; its numbers were recorded once and then
+frozen, and ripwire's side was re-run after the fixes the first pass produced. Per class, as a share
+of the competitor's bytes on totals: symbol lookup **1.35×**, conceptual search **1.23×**, blast
+radius **0.39×**, task orientation **0.06×**.
+
+Where it loses: on a plain one-symbol lookup the competitor answers in about a kilobyte carrying
+callers and callees, and ripwire spends roughly three times that to also hand back the body. It
+ranks a chunk-id plugin first on one webpack query where ripwire never surfaces the directory at
+all — a ranking miss, and a fix for it was built, met its pre-registered band, and was reverted
+anyway for failing a separate standing requirement. Its depth-labelled blast radius and its import
+edges are both better presentations than ripwire's flat reaching-set.
+
+Full method, pins, per-class tables, the carried-versus-re-judged ledger, and the complete list of
+what the competitor does better:
+[`docs/EVALS.md` §2](docs/EVALS.md#2-head-to-head-against-other-tools).
+</details>
+
 **Nothing it is unsure about reaches your agent unlabelled — and nothing it could not see goes
 unnamed.** Every guess is marked in the output, and every mark has a next step — up to handing it a
 compiler-grade index. Point it at a repository whose main language it has no grammar for and the
