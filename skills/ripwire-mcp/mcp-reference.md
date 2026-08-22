@@ -39,23 +39,27 @@ followed by `\nint sub(...) {...}` on its own line, with every other byte of the
   edit — rebuilds from the just-written disk state. The response JSON includes the applied `span`,
   `old_file_bytes`/`new_file_bytes`, the pre-edit `stale_index` stamp, and a note that the index will refresh.
 
-**When to reach for these vs your normal editor tool**: unique value is a **span-addressed edit without
-reading the file first** — you already know the symbol name from a prior ripwire call (e.g. `--callers`
-told you who to fix), so you can edit it in one round-trip instead of read → locate → edit. The trade-off:
-**name ambiguity needs the `file` arg** — if the codebase has multiple symbols with that name (overloads,
-same-named methods on different types), the first call will refuse and hand you the candidate list; a
-native editor tool addressed by file:line doesn't have this failure mode. Prefer your editor tool when
-you're already looking at the file, or when the edit isn't a whole-definition replace/insert (a mid-body
-tweak isn't representable — `replace_symbol_body` is signature-through-closing-brace or nothing).
+**When to reach for these vs your normal editor tool** — lead with the harness-independent case: **if you
+already have the body** — `fetch_body` or `--expand` served it this session — these verbs never re-read the
+file. They splice directly at the already-known span, checked against their own staleness hash (see above),
+not a fresh Read. Several coding-agent harnesses require their native edit tool to Read a file immediately
+before an Edit on it, even when the agent already has the text from a prior call in the same session — under
+that kind of harness, a served body plus a native Edit still pays for the file twice. `replace_symbol_body`/
+`insert_before_symbol`/`insert_after_symbol` were never routed through the native edit tool, so they don't
+inherit that requirement under any harness. Reach for the edit verb over native Edit whenever the body
+already arrived via ripwire this session; once you've opened the file in your own editor tool anyway, the
+advantage is gone. (Whether your specific harness enforces a pre-edit Read is worth checking against its own
+behavior rather than assuming — this reasoning holds either way, since the edit verbs skip a Read regardless
+of whether one would otherwise be required.)
 
-**The double-pay case these verbs are built to avoid**: if you already have the body — `fetch_body` or
-`--expand` served it — a native Edit tool still forces a fresh Read of that same file first (the agent tool
-contract requires a Read immediately before an Edit on that file, and a served body doesn't count as one).
-That Read pays for the file a second time. `replace_symbol_body`/`insert_before_symbol`/`insert_after_symbol`
-splice at the already-known span directly — their own staleness hash (see above) is the freshness check,
-not a Read — so a `fetch_body` → edit-verb sequence never re-reads the file at all. Reach for the edit verb
-over native Edit specifically when the body arrived via ripwire this session; once you've opened the file in
-your editor tool anyway, that advantage is gone.
+The other unique value: a **span-addressed edit without reading the file first at all** — you already know
+the symbol name from a prior ripwire call (e.g. `--callers` told you who to fix), so you can edit it in one
+round-trip instead of read → locate → edit. The trade-off: **name ambiguity needs the `file` arg** — if the
+codebase has multiple symbols with that name (overloads, same-named methods on different types), the first
+call will refuse and hand you the candidate list; a native editor tool addressed by file:line doesn't have
+this failure mode. Prefer your editor tool when you're already looking at the file, or when the edit isn't a
+whole-definition replace/insert (a mid-body tweak isn't representable — `replace_symbol_body` is
+signature-through-closing-brace or nothing).
 
 ## Remote transport — `--listen` reference {#remote-transport}
 

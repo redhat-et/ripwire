@@ -159,9 +159,11 @@ atomic-write guarantee) or when you need server internals (`--mcp` implies `--st
 stamps, warm content-hash rebuilds, working-set PageRank personalization, the background `qsnap` HEAD-warm on
 large workspaces). Short version: every edit-verb failure leaves the file byte-for-byte unchanged, writes are
 atomic (`tmp` + `rename(2)`), and the server never goes stale silently — it rebuilds warm from mtime checks
-before every verb call. If the body already came from `fetch_body`/`--expand` this session, splice it in with
-one of these 3 instead of a native Edit — Edit needs a fresh Read of the file first even when you already
-have the body; these verbs check their own staleness hash instead, so the file gets read once, not twice.
+before every verb call. **Lead with this when the body already came from `fetch_body`/`--expand` this
+session**: splice it in with one of these 3 instead of a native Edit. Several harnesses' native Edit tool
+needs a fresh Read of the file immediately before the edit, even when you already have the body from
+elsewhere in the session — these verbs check their own staleness hash instead of requiring one, so under any
+harness the file gets read at most once, never twice.
 
 **Workspace pin (stdio, D3/D4):** when the server was started `ripwire <root> --mcp`, an omitted
 `path` on ANY verb (read or edit) defaults to that startup root; the 3 edit verbs above additionally
