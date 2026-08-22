@@ -13,7 +13,12 @@
 #   4) --signatures-only opts out: no bundle= attribute, no <bodies> — the pre-T3 bundle shape.
 #      It refuses loudly without --for, and refuses the contradictory --signatures-only --detail=N.
 #   5) escalation is capped and disclosed: bodies= on the root equals the emitted <b> count and
-#      never exceeds the pack-task body-candidate cap (6).
+#      never exceeds the pack-task body-candidate cap (6). Asserted on a CONCEPTUAL query, because
+#      that is the route the rank-first walk still runs on — see (5b).
+#   5b) on a route that NAMES an anchor, the allowance serves that anchor's own body or none at all;
+#      a generous budget does not escalate past it, and a same-named symbol in another file is never
+#      substituted for it. Mechanism + band: docs/EVALS.md, the anchor-only round; the dedicated
+#      gate is test/anchorbodycheck.sh.
 #   6) auto bodies take only genuine LEFTOVER budget: at the same explicit --token-budget, the
 #      <sigs> block is byte-identical with and without --signatures-only.
 #   7) the budget ledger accounts the bodies: est_tokens(default) > est_tokens(--signatures-only).
@@ -115,13 +120,34 @@ grep -q '<b [^>]*><!\[CDATA\[' "$TMP/nofit" \
     || no "--signatures-only + --detail did not refuse (rc=$rc)"
 
 # ── #5: escalation capped at the pack-task candidate cap (6) and disclosed ──────────────────────────────
-"$BIN" src --for="$TASK" --token-budget=20000 --no-cache >"$TMP/big" 2>/dev/null
+# RE-ANCHORED (the anchor-only round, docs/EVALS.md): this arm used to escalate $TASK, a name-exact
+# query. The allowance now serves the ANCHOR's own body or none on a route that names one, so a name-exact
+# query has exactly ONE candidate by construction and "capped at 6" stopped being observable through it —
+# green while inert, the failure mode CONTRIBUTING §2 names. A CONCEPTUAL query names no anchor, keeps the
+# rank-first walk, and is where the cap is still a real bound. The presence guard is what keeps that true.
+CONCEPTUAL="how are identifiers split into subtokens for ranking"
+"$BIN" src --for="$CONCEPTUAL" --token-budget=20000 --no-cache >"$TMP/big" 2>/dev/null
+grep -q 'anchors: ' "$TMP/big" \
+    && no "#5 presence: the escalation query routed name-exact — re-author it, the cap is unobservable there" \
+    || ok "#5 presence: the escalation query routed subtoken+body, where the candidate cap still binds"
 BB=$( bodycount "$TMP/big" )
 BATTR=$( rootattr "$TMP/big" 'bundle="auto" bodies="[0-9]*"' )
 BN=${BATTR##*bodies=\"}; BN=${BN%\"}
-{ [ -n "$BATTR" ] && [ "${BN:-x}" = "$BB" ] && [ "$BB" -ge 1 ] && [ "$BB" -le 6 ]; } \
+{ [ -n "$BATTR" ] && [ "${BN:-x}" = "$BB" ] && [ "$BB" -gt 1 ] && [ "$BB" -le 6 ]; } \
     && ok "generous budget escalates to $BB bodies — capped at 6, disclosed ($BATTR)" \
-    || no "escalation cap/disclosure wrong (attr='$BATTR', emitted $BB, expected 1..6)"
+    || no "escalation cap/disclosure wrong (attr='$BATTR', emitted $BB, expected 2..6)"
+
+# ── #5b: …and on a route that NAMES an anchor, the allowance serves that anchor alone (never a namesake
+#         substituted for it). The mechanism and its band: docs/EVALS.md, the anchor-only round; the
+#         dedicated gate is test/anchorbodycheck.sh. Asserted here too so T3's own contract carries it.
+"$BIN" src --for="$TASK" --token-budget=20000 --no-cache >"$TMP/bigname" 2>/dev/null
+grep -q 'anchors: ' "$TMP/bigname" \
+    && ok "#5b presence: the name-exact query does name an anchor" \
+    || no "#5b presence: no anchors: clause on $TASK — this arm cannot observe the anchor-only rule"
+NBB=$( bodycount "$TMP/bigname" )
+{ [ "$NBB" = "1" ] && grep -q '<b [^>]*n="pageRankDouble"[^>]*><!\[CDATA\[' "$TMP/bigname"; } \
+    && ok "#5b a generous budget does NOT escalate past the anchor on a name-exact route (1 body, the anchor's own)" \
+    || no "#5b expected exactly the anchor's own body at a generous budget, got $NBB bod(ies)"
 
 # ── #6: auto bodies ride only the LEFTOVER — <sigs> byte-identical with and without the opt-out ─────────
 "$BIN" src --for="$TASK" --token-budget=6000 --no-cache >"$TMP/b6a" 2>/dev/null
