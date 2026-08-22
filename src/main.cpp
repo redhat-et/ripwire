@@ -3120,26 +3120,11 @@ std::optional<int> runForLens( const MainDispatch& d )
             adaptiveNote = nb;
         }
 
-        // LB-A (r10 GitNexus round, PLAN_HARVEST_REPORTS_2026-08-20/r10-gitnexus.md §5) — THE RELEVANCE
-        // FLOOR. The quota above is a CEILING on how many rows the bundle may carry, and it used to be
-        // taken as a target: once the name-exact route resolved its anchor, the remaining slots were
-        // filled by the (score desc, id asc) tail — which, for a wall of zeros, is crawl/path order, and
-        // dot-directories sort first. Measured on that round's 12 symbol-lookup queries, those rows were
-        // 64-84% of a class-A bundle's bytes (mean ~73%) and 17.5% of everything the tool emitted across
-        // the whole 48-query sweep. It is not the directories: excluding them refilled with the NEXT
-        // files in path order and the bundle got BIGGER.
-        //
-        // ADMISSION, NOT RANKING. No score is touched and no row moves — lensRank here is FINAL (route,
-        // anchor, mention, co-change and doc-mention have all landed above), so a row still scoring zero
-        // matched no query term under any of them. What changes is where the head stops. The bundle
-        // SHRINKS rather than padding, and says so, on the --adaptive note's idiom two stanzas up: a
-        // quota that silently shrinks would be the same honesty defect as one that silently pads.
-        //
-        // forTopN is the ONE knob every consumer below reads (lensSurfaceIds, the <lego>/<compose> scope,
-        // the JSON dialect's own quota, the auto-bodies set), so clamping it here floors all of them at
-        // once. packSignatures/packSignaturesJson take the floor as a flag TOO, and that is not
-        // belt-and-braces: their `topN == 0 ⇒ all` convention makes an empty kept set unrepresentable
-        // through the count alone, and a query nothing scores on must emit zero rows, not the corpus.
+        // LB-A (r10 §5) — THE RELEVANCE FLOOR: shrink the quota past its zero-score tail rather than pad
+        // with it. ADMISSION, NOT RANKING — no score moves, only where the (score desc, id asc) head
+        // stops. Applied HERE because lensRank is final at this point and forTopN is the one knob every
+        // consumer below reads. The measurement and the rest of the reasoning: serialize.h,
+        // relevanceFloorCut. The note lands in the header comment beside --adaptive's.
         auto [ flooredTopN, floorNote ] = relevanceFloorCut( lensRank, forTopN );
         forTopN = flooredTopN;
 
@@ -6270,10 +6255,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                 }
             }
         }
-        // LB-G (r10 GitNexus round): TIER before path. This used to be plain path order, and on django
-        // `--callers=bulk_create` that meant 175 rows of which 171 were `tests/` — the four real source
-        // callers survived the first page only because `django/` happens to sort before `tests/`. The key
-        // itself is stated once, in filter.h, and shared with --uses and the MCP twin.
+        // LB-G (r10 §5): TIER before path — filter.h states the key once and --uses shares it. Plain path
+        // order put 171 `tests/` rows ahead of nothing on django's `--callers=bulk_create`.
         const std::vector<std::uint8_t> tierOfFile = rw::pathTierIndexOver( ing, result, [ & ]( NodeId r ) { return ing.symbols[r].fileId; } );
         std::sort( result.begin(), result.end(), [ & ]( NodeId a, NodeId b )
         {
@@ -6307,12 +6290,10 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // when paging is active — discloseCap=false because these two verbs have NO display cap of their own
         // (an un-paginated --callers always emitted every caller), so the un-paged opening tag stays
         // byte-identical. See src/pageview.h, THE TRUNCATION VOCABULARY.
-        // LB-G: a DEFAULT display cap, the one --impact has had since §P8 (pageview.h kCallHierarchyRowCap),
-        // where these two verbs previously had none at all. count= is untouched and stays the un-windowed
-        // total, so the cap costs no honesty — the rows shrink, the number does not move. discloseCap is
-        // the answer's OWN capped state rather than a constant true: these verbs shipped for their whole
-        // life uncapped, so an answer that drops nothing stays byte-identical to what it was. THE
-        // TRUNCATION VOCABULARY (pageview.h) names that shape conformant and cites --skill-scan for it.
+        // LB-G: the family's DEFAULT display cap (pageview.h kCallHierarchyRowCap), where these two verbs
+        // had none. count= stays the un-windowed total, so the cap costs no honesty. discloseCap is the
+        // answer's OWN capped state, not a constant true — these verbs shipped uncapped for their whole
+        // life, and THE TRUNCATION VOCABULARY names that shape conformant (its --skill-scan precedent).
         const PageWindow  pw = pageWindow( result.size(), effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ), cfg.pageOffset );
         const bool        chDiscloseCap = ( pw.end - pw.begin ) < result.size();
         char              pab[ kPageDisclosureCap ];
@@ -6595,9 +6576,8 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
         sites.push_back( { r.fileId, r.line, r.role, std::move( in ) } );
     }
 
-    // LB-G (r10 GitNexus round): TIER before path, the same key stated in filter.h that the callers/callees
-    // arm and the MCP twin sort by. Plain path order put `--uses=bulk_create`'s 207 django rows in whatever
-    // sequence the directory names happened to fall in.
+    // LB-G (r10 §5): TIER before path, filter.h's shared key — `--uses=bulk_create` was 207 django rows
+    // in whatever sequence the directory names happened to fall in.
     const std::vector<std::uint8_t> tierOfFile = rw::pathTierIndexOver( ing, sites, [ ]( const UseSite& u ) { return u.fileId; } );
     std::sort( sites.begin(), sites.end(), [ & ]( const UseSite& a, const UseSite& b )
                {
@@ -6705,10 +6685,8 @@ std::optional<int> runUses( const MainDispatch& d )
         const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
         // §P8 G1: the page window over the sorted sites; count= stays the un-windowed total (note above
         // runUses) — of the sites the extractor RESOLVED, which counts_floor= is there to say (V3 L-4).
-        // LB-G: a DEFAULT display cap on the SITE unit (pageview.h kUseSiteRowCap = 100, --grep's number),
-        // where this verb previously had none: `--uses=bulk_create` on django was 207 rows / 38,546 B.
-        // count= stays the un-windowed total, and discloseCap is the answer's own capped state, so an
-        // answer that drops nothing keeps its pre-LB-G bytes exactly (the callers arm's reasoning verbatim).
+        // LB-G: a DEFAULT cap on the SITE unit (pageview.h kUseSiteRowCap), and discloseCap is the
+        // answer's own capped state — the callers arm's reasoning verbatim.
         const PageWindow  upw      = pageWindow( sites.size(), effectiveRowCap( cfg.pageLimit, rw::kUseSiteRowCap ), cfg.pageOffset );
         const std::size_t pageRows = upw.end - upw.begin;
         const bool        usDiscloseCap = pageRows < sites.size();

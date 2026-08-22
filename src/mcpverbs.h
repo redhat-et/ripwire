@@ -1239,11 +1239,8 @@ inline std::string forTaskText( const std::string& root, const std::string& task
         }
     }
 
-    // LB-A (r10 GitNexus round) — THE RELEVANCE FLOOR, byte-for-byte the CLI --for's rule (main.cpp
-    // runForLens), applied here for the same reason every other bundle-composition rule is mirrored: one
-    // composition contract may not have two behaviours. lensRank is FINAL at this point (route, mention,
-    // co-change and doc-mention have all landed), so a row still scoring zero matched nothing under any of
-    // them; the bundle shrinks past that tail instead of padding the quota with it, and says so.
+    // LB-A (r10 §5) — THE RELEVANCE FLOOR, the CLI --for's own call (serialize.h relevanceFloorCut): one
+    // bundle-composition contract may not have two behaviours. lensRank is final at this point.
     auto [ flooredTopN, floorNote ] = relevanceFloorCut( lensRank, forTopN );
     forTopN = flooredTopN;
 
@@ -1811,11 +1808,8 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
         }
         sites.push_back( { r.fileId, r.line, r.role, std::move( in ) } );
     }
-    // LB-G (r10 GitNexus round): TIER before path, and the same default site cap the CLI --uses now
-    // applies — the two surfaces are one contract (test/mcpclidiffcheck.sh LENS 1 pins their root-attribute
-    // sets equal), so a cap on one and not the other is a divergence, not a saving. Both halves are the
-    // CLI arm's code read across: rw::pathTierOf materialized once per hit file, then
-    // effectiveRowCap/pageWindow/pageDisclosure.
+    // LB-G (r10 §5): TIER before path and the CLI --uses' own default site cap. mcpclidiffcheck LENS 1
+    // pins the two surfaces' root-attribute sets equal, so a cap on one and not the other is a divergence.
     const std::vector<std::uint8_t> tierOfFile = pathTierIndexOver( ing, sites, [ ]( const UseSite& u ) { return u.fileId; } );
     std::sort( sites.begin(), sites.end(), [ & ]( const UseSite& a, const UseSite& b )
                {
