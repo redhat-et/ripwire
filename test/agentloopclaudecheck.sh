@@ -331,11 +331,11 @@ if rec["status"] == "contaminated" and rec["error"]:
 else:
     no( "make_record mishandled a contaminated record: %r" % ( rec, ) )
 
-# ── 14 — an end-to-end run_one() drive with the harness faked out, real git underneath ──────────
-# This section drives the ACTUAL run_one(), not a reimplementation of its logic: checkout_repo and
-# prepare_environment are stubbed (no network, no real CLAUDE_CONFIG_DIR), but `sh()` for every
-# non-`claude` argv (git init/diff/etc.) still hits the real subprocess, so the diff run_one scores
-# is a real `git diff` of a real working tree — only the harness invocation itself is canned.
+# ── 14/15 — an end-to-end run_one() drive with the harness faked out, real git underneath ───────
+# Both sections below drive the ACTUAL run_one(), not a reimplementation of its logic: checkout_repo
+# and prepare_environment are stubbed (no network, no real CLAUDE_CONFIG_DIR), but `sh()` for every
+# non-`claude` argv (git init/diff/etc.) still hits the real subprocess, so the diff run_one persists
+# and scores is a real `git diff` of a real working tree — only the harness invocation itself is canned.
 class _FakeProc:
     def __init__( self, returncode, stdout, stderr ):
         self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
@@ -400,6 +400,32 @@ if "a real stderr message" in ( rec1b[ "error" ] or "" ) and "stdout:" not in ( 
     ok( "a nonempty stderr is still used as-is, without the stdout fallback" )
 else:
     no( "a nonempty stderr was not used as-is: %r" % ( rec1b[ "error" ], ) )
+
+# ── 15. unconditional candidate-patch persistence — the run's product survives regardless of scoring ──
+# Before this fix, with --evaluator none (the default) the `git diff` was computed, scored (a no-op),
+# and then discarded — deferred scoring of a completed run was impossible. Now every run that reaches
+# the harness successfully writes work_dir/patches/{instance}-{arm}-{seed}.patch, byte-for-byte the
+# same diff that gets scored.
+_ok_stdout = json.dumps( { "result": "ok", "usage": { "input_tokens": 10, "output_tokens": 20 },
+                          "total_cost_usd": 0.01 } )
+R.sh = _fake_sh_claude( _FakeProc( 0, _ok_stdout, "" ) )
+work2 = pathlib.Path( tmp ) / "work2"
+rec2 = R.run_one( _fake_task, "baseline", 2, "claude-code-p", "", work_dir=str( work2 ),
+                  gold_rows=_fake_gold_rows, evaluator="none" )
+if rec2[ "status" ] == "ok":
+    ok( "run_one reports status=ok for a zero-exit claude-code-p child" )
+else:
+    no( "run_one did not report status=ok: %r" % ( rec2, ) )
+patch_path = work2 / "patches" / ( "%s-%s-%s.patch" % ( _fake_task[ "instance_id" ], "baseline", 2 ) )
+if patch_path.exists():
+    ok( "the candidate patch is persisted to work_dir/patches/{instance}-{arm}-{seed}.patch" )
+else:
+    no( "no patch file was written at %s" % patch_path )
+_expected_diff = subprocess.run( [ "git", "diff" ], cwd=_fake_repo, capture_output=True, text=True ).stdout
+if patch_path.exists() and patch_path.read_text() == _expected_diff:
+    ok( "the persisted patch is byte-identical to the git diff run_one scored (evaluator=none)" )
+else:
+    no( "the persisted patch does not match the scored git diff" )
 
 R.sh = _real_sh
 PY

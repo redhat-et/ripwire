@@ -1092,6 +1092,13 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
                       f"check credentials; opencode routes to its own free model when auth is absent",
                       wall_seconds=wall, harness_version=agent_version( harness ), **metrics )
 
+    # Persist the candidate patch unconditionally: with --evaluator none the diff used to be computed
+    # and then dropped, which made deferred scoring impossible — an agent run is the expensive half,
+    # so its product must survive the process regardless of which evaluator runs tonight.
+    patch_dir = pathlib.Path( work_dir ) / "patches"
+    patch_dir.mkdir( parents=True, exist_ok=True )
+    ( patch_dir / f"{task['instance_id']}-{arm}-{seed}.patch" ).write_text( diff or "" )
+
     resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator, swebench_dataset )
     # The contamination gate: a baseline run that actually reached for ripwire is not a usable control
     # datapoint. status != "ok" is enough on its own to keep it out of analyze.py's paired set
