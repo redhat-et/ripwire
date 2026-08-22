@@ -3550,7 +3550,9 @@ struct CalleeCallsSink
 //
 // Extracted rather than inlined because emitCalleeCallsBlock is a budget walk with a disclosure contract
 // and this is a comparator — two different things, and folding them together is what pushed that
-// function's complexity from 15 to 33 in one edit.
+// function's complexity from 15 to 33 in one edit. It MATERIALIZES the CSR's own order too, rather than
+// signalling "walk in place" with an empty return: that saves a bounded copy (out-degree, and the listing
+// is capped at 16 rows anyway) and pays for it with a branch on every emitted row.
 inline std::vector<NodeId> calleeWalkOrder( NodeId id, const std::vector<std::uint32_t>& outOff,
                                             const std::vector<NodeId>& outTargets, const CalleeCallsSink& sink )
 {
@@ -3615,11 +3617,7 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
         return;
     }
 
-    // this symbol's callees, in the order they are to be walked (see calleeWalkOrder above). Materialized
-    // even when that order IS the CSR's, so the loop below indexes ONE sequence unconditionally: the
-    // alternative — an empty vector meaning "walk the CSR in place" — saves a bounded copy (out-degree,
-    // and the listing is capped at 16 rows anyway) and pays for it with a branch on every row.
-    const std::vector<NodeId> walk = calleeWalkOrder( id, outOff, outTargets, sink );
+    const std::vector<NodeId> walk = calleeWalkOrder( id, outOff, outTargets, sink );   // see it for the order
 
     std::string callsBody;
     int         shown = 0;
