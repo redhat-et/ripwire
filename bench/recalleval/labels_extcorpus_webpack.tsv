@@ -1,0 +1,137 @@
+# labels_extcorpus_webpack.tsv — held-out labels for the EXTERNAL-CORPUS slice of the RANKING lane,
+# scored against webpack/webpack pinned in bench/recalleval/extcorpus.lock. Driven exactly as
+# labels_ranking.tsv is: `--for=<query> --format=candidates`, gold = the 1-based rank of the first
+# candidate matching a labelled target. Same 4-column shape, same matcher, same loader — this is not
+# a fifth format:
+#
+#   query<TAB>primary<TAB>acceptable<TAB>class
+#   primary    = comma-separated repo-relative path(s), each optionally `path#SymbolName`. A hit on
+#                ANY primary target is primary (strict) credit.
+#   acceptable = comma-separated targets earning lenient (graded) credit, or `-` for none.
+#   class      = the RETRIEVAL LOSS SHAPE this row exercises, not the query's grammatical shape. The
+#                in-tree label files classify by query shape (name/concept/task/adversarial) because
+#                they measure the ranker end to end; this slice exists to put a number on four
+#                SPECIFIC, separately-diagnosed loss shapes, so per-bucket rates are the whole point
+#                and the class column carries the bucket:
+#
+#     diagnostic-class     — a conceptual query whose content words are also the NAME of a diagnostic
+#                            class (a *Warning / *Error / a plugin that only reports one). The
+#                            diagnostic is named after the failure the mechanism can produce, so it
+#                            matches the query's words with a tiny body and no competition; the
+#                            labelled answer is the MECHANISM, never the diagnostic.
+#     thin-registration    — the labelled answer is a small registration/wiring class with near-zero
+#                            graph centrality (cx~0, in~0) whose NAME literally spells most of the
+#                            query's content words. Structurally central symbols sharing fewer terms
+#                            are expected to displace it; this bucket measures whether they do.
+#     subsystem-directory  — the concept the query names is the name of a DIRECTORY, and the answer is
+#                            the files inside it. Path components are not ranking evidence today, so
+#                            the query word matches inside unrelated symbol names elsewhere while the
+#                            directory literally named for the concept contributes nothing.
+#     vendored-asset       — task-shaped queries whose bundles are polluted by vendored front-end
+#                            assets and numbered migrations. webpack carries no row of this class
+#                            (that population lives in the django half of the slice); it is named here
+#                            only so the two files share one vocabulary.
+#
+# LABELING PROTOCOL (held-out means held out, and this file is the honest-fixture case). Every gold
+# below was chosen by READING the pinned source at the pinned commit — the file's own body, its class
+# and its hooks — and deciding which file IS the on-task answer. NOTHING here was produced by running
+# `--for` and transcribing a rank, and the baseline was measured only after this file was complete.
+# Provenance is recorded per row in the trailing comment blocks below, split two ways:
+#   * OBSERVED  — the query shape came from the competitor head-to-head that first diagnosed the
+#                 bucket. Kept because dropping it would discard the only rows with an outside
+#                 arm's answer on record. Re-verified against source here regardless.
+#   * NEW       — authored in this lane, from source, to keep the slice from being a restatement of
+#                 the queries that produced the diagnosis. New rows are the MAJORITY of every bucket
+#                 on purpose: a band fitted to the exact set that motivated it measures the fit.
+#
+# HONESTY NOTE, stated up front rather than discovered later: `acceptable` is used narrowly. A file
+# earns lenient credit only when a competent agent handed THAT file instead of the primary would still
+# land the task without another call. Where no such second file exists the column is `-`, even though
+# a wider `acceptable` list would flatter every number this file produces.
+#
+# Counts: diagnostic-class 8 · thin-registration 8 · subsystem-directory 8 · 24 rows.
+
+how does tree shaking mark exports as unused	lib/FlagDependencyUsagePlugin.js	lib/ExportsInfo.js	diagnostic-class
+fix a bug where splitChunks produces an empty chunk	lib/optimize/SplitChunksPlugin.js	lib/optimize/RemoveEmptyChunksPlugin.js	diagnostic-class
+where are circular dependencies between modules detected	lib/CircularModulesPlugin.js	-	diagnostic-class
+how does scope hoisting decide that a module cannot be concatenated	lib/optimize/ModuleConcatenationPlugin.js	-	diagnostic-class
+how is a package sideEffects flag applied to a module	lib/optimize/SideEffectsFlagPlugin.js	-	diagnostic-class
+how is an emitted asset checked against the maximum size budget	lib/performance/SizeLimitsPlugin.js	-	diagnostic-class
+where are duplicate copies of the same package found in a bundle	lib/performance/DuplicatePackagesPlugin.js	-	diagnostic-class
+how are compile time constants substituted into module source	lib/DefinePlugin.js	-	diagnostic-class
+where are chunk ids assigned deterministically	lib/ids/DeterministicChunkIdsPlugin.js	-	thin-registration
+how are module ids made deterministic across builds	lib/ids/DeterministicModuleIdsPlugin.js	-	thin-registration
+which plugin gives chunks readable names as their ids	lib/ids/NamedChunkIdsPlugin.js	-	thin-registration
+how are module ids derived from a hash of the module path	lib/ids/HashedModuleIdsPlugin.js	-	thin-registration
+which plugin assigns module ids by occurrence count	lib/ids/OccurrenceModuleIdsPlugin.js	-	thin-registration
+where is the module id range for one chunk restricted	lib/ids/ChunkModuleIdRangePlugin.js	-	thin-registration
+which plugin caps the total number of chunks emitted	lib/optimize/LimitChunkCountPlugin.js	-	thin-registration
+which plugin prepends a banner comment to every output chunk	lib/BannerPlugin.js	-	thin-registration
+understand the caching layer so I can add a new cache backend	lib/cache/PackFileCacheStrategy.js,lib/cache/MemoryCachePlugin.js	lib/Cache.js,lib/CacheFacade.js,lib/cache/IdleFileCachePlugin.js	subsystem-directory
+how does module federation share modules between separate builds	lib/container/ModuleFederationPlugin.js,lib/sharing/SharePlugin.js	lib/container/ContainerPlugin.js,lib/sharing/ConsumeSharedPlugin.js	subsystem-directory
+how are javascript objects written into the persistent cache file	lib/serialization/ObjectMiddleware.js,lib/serialization/FileMiddleware.js	lib/serialization/BinaryMiddleware.js	subsystem-directory
+how does the hot module replacement runtime apply an update	lib/hmr/HotModuleReplacement.runtime.js	lib/hmr/HotModuleReplacementRuntimeModule.js	subsystem-directory
+where is css module handling implemented	lib/css/CssModulesPlugin.js	lib/css/CssParser.js,lib/css/CssGenerator.js	subsystem-directory
+how is the stats object formatted into printable output	lib/stats/StatsPrinter.js,lib/stats/DefaultStatsPrinterPlugin.js	-	subsystem-directory
+how is a umd library wrapper emitted around the bundle	lib/library/UmdLibraryPlugin.js	lib/library/AbstractLibraryPlugin.js	subsystem-directory
+how is an asset module emitted as a separate output file	lib/asset/AssetGenerator.js,lib/asset/AssetModulesPlugin.js	-	subsystem-directory
+
+# ── PER-ROW PROVENANCE AND THE READING THAT PRODUCED EACH GOLD ────────────────────────────────────
+#
+# diagnostic-class
+#   OBSERVED "tree shaking … exports as unused" — FlagDependencyUsagePlugin.js imports UsageState from
+#     ExportsInfo and drives setUsedConditionally over the module graph; it IS the marking pass. The
+#     displacing population at this commit is lib/errors/UnusedReexportsWarning.js,
+#     DynamicExportsWarning.js, MissingSideEffectsWarning.js plus their lib/performance/*Plugin.js
+#     reporters. ExportsInfo.js is acceptable: it owns UsageState and an agent landing there finds the
+#     marking call sites one hop away.
+#   OBSERVED "splitChunks produces an empty chunk" — lib/optimize/SplitChunksPlugin.js is the splitter;
+#     lib/errors/SplitChunksCappedWarning.js and lib/performance/SplitChunksCappedPlugin.js are the
+#     diagnostics named after its failure. RemoveEmptyChunksPlugin.js is acceptable — a genuinely
+#     empty chunk is removed there, so an agent handed it can still close the bug.
+#   NEW "circular dependencies … detected" — lib/CircularModulesPlugin.js contains CycleGraph and the
+#     iterative SCC that finds circular modules ("Detects circular dependencies among synchronous
+#     module imports"). lib/errors/CircularDependenciesWarning.js is the diagnostic it constructs.
+#   NEW "scope hoisting … cannot be concatenated" — ModuleConcatenationPlugin.js owns BAILOUT_PREFIX,
+#     formatBailoutReason and setBailoutReason. lib/errors/ScopeHoistingBailoutsWarning.js and
+#     lib/performance/ScopeHoistingBailoutsPlugin.js only report what it decided.
+#   NEW "package sideEffects flag" — SideEffectsFlagPlugin.js reads the flag off BuildMeta and rewires
+#     Harmony re-export connections. lib/errors/MissingSideEffectsWarning.js is the diagnostic.
+#   NEW "maximum size budget" — lib/performance/SizeLimitsPlugin.js holds maxAssetSize/
+#     maxEntrypointSize and does the comparison; AssetsOverSizeLimitWarning.js and
+#     EntrypointsOverSizeLimitWarning.js are what it emits.
+#   NEW "duplicate copies of the same package" — DuplicatePackagesPlugin.js taps thisCompilation/seal/
+#     afterSeal and does the grouping; DuplicatePackagesWarning.js is its output. Deliberately kept
+#     even though implementation and diagnostic are siblings in one directory: that is the harder
+#     case for the bucket, not an easier one.
+#   NEW "compile time constants substituted" — DefinePlugin.js's walkDefinitions/walkDefinitionsForValues
+#     are the substitution; lib/errors/UnusedDefinesWarning.js + lib/performance/UnusedDefinesPlugin.js
+#     are the report.
+#
+# thin-registration  (every gold read; each is a single class whose apply() taps one hook)
+#   OBSERVED "chunk ids assigned deterministically" — DeterministicChunkIdsPlugin.js, 75 lines.
+#   NEW  DeterministicModuleIdsPlugin.js (100) · NamedChunkIdsPlugin.js (94) ·
+#        HashedModuleIdsPlugin.js (88) · OccurrenceModuleIdsPlugin.js (179) ·
+#        ChunkModuleIdRangePlugin.js (96) · LimitChunkCountPlugin.js (319) · BannerPlugin.js (150).
+#        Six of the eight live under lib/ids/, which is also a subsystem-directory population — the
+#        two buckets genuinely overlap in this tree and the overlap is not hidden: a fix that only
+#        works by lifting the directory would show up in BOTH bucket rates, and the interpretation
+#        note in the registration draft says so.
+#
+# subsystem-directory
+#   OBSERVED "caching layer … new cache backend" — lib/cache/ holds PackFileCacheStrategy.js (1897
+#     lines, the on-disk pack format), MemoryCachePlugin.js, IdleFileCachePlugin.js; lib/Cache.js and
+#     lib/CacheFacade.js are the API above them. All five read.
+#   NEW "module federation" — lib/container/ModuleFederationPlugin.js composes ContainerPlugin and
+#     ContainerReferencePlugin; lib/sharing/SharePlugin.js composes Provide/ConsumeSharedPlugin.
+#   NEW "objects written into the persistent cache file" — lib/serialization/ObjectMiddleware.js (941)
+#     is the object graph walker, FileMiddleware.js the writer, BinaryMiddleware.js the encoder.
+#   NEW "hot module replacement runtime applies an update" — lib/hmr/HotModuleReplacement.runtime.js is
+#     the runtime itself; HotModuleReplacementRuntimeModule.js (50 lines) only injects it.
+#   NEW "css module handling" — lib/css/CssModulesPlugin.js (1281) wires parser and generator;
+#     CssParser.js and CssGenerator.js are those two halves.
+#   NEW "stats … printable output" — lib/stats/StatsPrinter.js is the printer engine,
+#     DefaultStatsPrinterPlugin.js (1774) the format definitions.
+#   NEW "umd library wrapper" — lib/library/UmdLibraryPlugin.js extends AbstractLibraryPlugin.
+#   NEW "asset module emitted as a separate file" — lib/asset/AssetGenerator.js decides inline vs
+#     resource and produces the file; AssetModulesPlugin.js registers the module types.

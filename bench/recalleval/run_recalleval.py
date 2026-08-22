@@ -66,6 +66,19 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 FIXTURE_COMPONENTS = {"test", "tests", "fixture", "fixtures", "testdata", "present"}
 GENERATED_PREFIX = "docs/captures/"
 
+# The class vocabulary the 4-column label format accepts. BASE_CLASSES are the QUERY SHAPES the two
+# in-tree label files use (this harness's own two lanes score nothing else, and its per-class report
+# below still leads with them, in this order). BUCKET_CLASSES are the RETRIEVAL LOSS SHAPES the
+# external-corpus slice uses instead — same file format, same loader, same matcher, different thing
+# being partitioned, because that slice exists to produce a rate PER LOSS SHAPE rather than per query
+# shape. Widening the vocabulary here rather than forking a fifth parser is deliberate: a second
+# loader is a second place for the column contract to drift. It costs one thing and the cost is named
+# — labels_ranking.tsv/labels_recall.tsv would no longer be rejected for carrying a bucket class, so
+# the header comments in those two files remain the statement of which vocabulary each one uses.
+BASE_CLASSES = ("name", "concept", "task", "adversarial")
+BUCKET_CLASSES = ("diagnostic-class", "thin-registration", "subsystem-directory", "vendored-asset")
+VALID_CLASSES = BASE_CLASSES + BUCKET_CLASSES
+
 RECALL_SEP_RE = re.compile(r"━━ (\S+)\s+\(relevance")          # "━━ <path>  (relevance X) ━━"
 CAND_TAG_RE = re.compile(r"<cand ([^>]*?)/?>")
 ATTR_RE = re.compile(r'([a-zA-Z_]+)="([^"]*)"')
@@ -115,7 +128,7 @@ def load_labels(tsv_path):
             if len(cols) != 4:
                 raise ValueError("%s:%d: expected 4 tab-separated fields, got %d" % (tsv_path, lineno, len(cols)))
             query, primary, acceptable, qclass = cols
-            if qclass not in ("name", "concept", "task", "adversarial"):
+            if qclass not in VALID_CLASSES:
                 raise ValueError("%s:%d: unknown class '%s'" % (tsv_path, lineno, qclass))
             prim = [parse_target(t) for t in primary.split(",") if t]
             acc = [] if acceptable == "-" else [parse_target(t) for t in acceptable.split(",") if t]
@@ -281,7 +294,7 @@ def run_lane(name, labels, bin_path, root, ranker, verbose):
     print("  %-8s %8.1f%% %8.1f%% %7.3f" % ("strict", pct(agg.strict_r1, n), pct(agg.strict_r5, n), agg.mrr_strict / n))
     print("  %-8s %8.1f%% %8.1f%% %7.3f" % ("lenient", pct(agg.lenient_r1, n), pct(agg.lenient_r5, n), agg.mrr_lenient / n))
     print("  pollution@5 = %.1f%% of top-5 slots are fixture/present/generated paths" % pct(agg.polluted_slots, agg.slot_total))
-    for cls in ("name", "concept", "task", "adversarial"):
+    for cls in VALID_CLASSES:
         if cls in agg.by_class:
             cn, cr5, cpol, cslots = agg.by_class[cls]
             print("  CLASS\t%s\t%s\tn=%d\tlenient_r5=%.1f%%\tpollution5=%.1f%%" % (name, cls, cn, pct(cr5, cn), pct(cpol, cslots)))
