@@ -171,6 +171,188 @@ Codex's model nondeterminism between runs, and a mid-pilot confound: the guard c
 the pilot ran, so the Xarray treatment run used guarded skills while the other two did not (its
 task is a multi-line fix the one-line skips deliberately do not cover).
 
+### GitNexus 1.6.9 — a graph-database code-context MCP server (2026-08-22)
+
+**Source:** the round's own record, its cheap-bucket and body-allowance fix lanes, and the post-fix
+re-measurement, all kept with this project's harvest reports. The pre-fix numbers are **not**
+published anywhere, per the improve-first rule below; what is published here is the post-fix state.
+
+**Arms and pins.**
+
+| Arm | Pin |
+| --- | --- |
+| **GitNexus** | `gitnexus@1.6.9` from npm (dist-tag `latest` at 2026-08-22), Node v26.4.0, npm 11.17.0 |
+| **ripwire** | built at `7eb638e` in a detached scratch worktree, plain dev build (no build type), binary sha256 `e355cbc65d951bf1d05a0ee9e5e0c42a0eb820de056b319cb661dacf74018739` |
+
+**Corpora**, all three `git status`-clean and tree-hash verified:
+
+| Corpus | Commit | Tree | ripwire index |
+| --- | --- | --- | --- |
+| `django/django` | `03988c5a5` | `1afcf39f4d09f8b99b449903fa7822efb0dd162e` | files=3442 symbols=47699 edges=62398 ambiguous=3152 |
+| `webpack/webpack` | `a943d69c4` | `4d708c08ef0b0f9ab7afaae0a330e2b31e6434e2` | files=13782 symbols=30429 edges=21859 ambiguous=2491 |
+| this repository (C++) | `4692076` | `249f2bb7caceddcfb705c4bba20ee94adc537c12` | files=1332 symbols=11536 edges=14117 ambiguous=5557 |
+
+The C++ corpus is this repository, pinned three commits behind the binary on purpose: it is the pin
+the serving rounds registered their bands on, and holding it fixed makes the output-level byte
+comparison that decides which verdicts were carried and which re-judged a comparison of binaries
+only. The pre-fix pass used a still earlier commit of this repository, +8 files / +83 symbols
+smaller — disclosed rather than smoothed over, and its measurable effect costs ripwire bytes.
+
+**Sandbox provenance, because the competitor is untrusted external code.** Installed into a sandbox
+prefix with `HOME` redirected for every invocation; no credentials or user config exposed. npm 11
+blocked all 13 install/postinstall scripts by default and they were never approved — the CLI works
+from its prebuilds. Its editor-integration setup (which writes MCP entries, skills and hooks into
+eight editors) was never run, and neither was its publish verb. All of its output was treated as
+data: nothing in it was executed or acted on as instruction, including a banner recommending a
+different install channel. It ran only against its own copies of the corpora; ripwire's copies were
+never handed to it.
+
+**Two fairness adjustments, both recorded, both favouring the competitor or protecting it.** Its
+full-text-search extension was force-enabled, because the sandbox otherwise silently degraded it to
+a no-FTS mode — the configuration measured is its stronger one. And its analyze step was told not to
+write `AGENTS.md`/`CLAUDE.md` sections and a skills directory into the target repository, which it
+does by default; letting it would have injected fresh markdown into the corpus that ripwire indexes
+and can retrieve, so suppressing it removes an unfair advantage *for ripwire*, not against it.
+
+**Method.** 48 matched questions, 16 per corpus, in four classes: symbol lookup by name (12),
+conceptual "where is the code that…" (15), callers/blast radius (12), and one-call task orientation
+(9). Queries were authored against the source before either tool ran, and frozen. Both arms: warm-up
+call, then **median of 3 timed calls, both indexes pre-built — warm against warm**. Every invocation
+wrote stdout to a **file, not a pipe**. Judging is adversarial toward ripwire: correctness first
+(would this output let a coding agent land on the right code without another call?), token cost only
+as a tie-break.
+
+**Which judgments were carried and which were re-judged, stated because it changes what the tally
+means.** The competitor's arm was measured once and **frozen** — its version did not change, so
+re-running it would re-measure a fixed arm. On ripwire's side every one of the 48 outputs was
+byte-compared against the pre-fix capture. **17 were byte-identical and carried their original
+verdict; 31 changed and were re-judged against the new output**, each against the specific symbol or
+file the original per-query note named as decisive. Across the whole exercise **exactly one verdict
+moved**, and it moved on strict dominance: the django password-hash lookup, where ripwire now
+answers in 3,912 B carrying the function's full body against the competitor's 7,982 B of names —
+cheaper *and* strictly more complete. Three verdicts whose stated original reason had expired were
+deliberately **left with the competitor** anyway, and five that could plausibly have been upgraded
+were left as ties. Every one of the competitor's seven wins survives.
+
+**Results, 48 paired, zero exclusions, both arms exit 0 on all 48.**
+
+| Split | ripwire | GitNexus | tie |
+| --- | ---: | ---: | ---: |
+| **All (48)** | **27** | **7** | 14 |
+| symbol lookup (12) | 6 | 2 | 4 |
+| conceptual search (15) | 8 | 1 | 6 |
+| callers / blast radius (12) | 7 | 2 | 3 |
+| task orientation (9) | 6 | 2 | 1 |
+| django (16) | 12 | 0 | 4 |
+| webpack (16) | 5 | 4 | 7 |
+| this repository, C++ (16) | 10 | 3 | 3 |
+
+**All seven of GitNexus's wins, named.** Four are cost losses on an answer ripwire gets right:
+looking up `pathQualifiedKey` and `takeRank` by name (it answers in ~1 KB with callers and callees;
+ripwire spends 3.0× and 3.1× that to also serve the body), and the caller lists for `biasPrior` and
+`processRuntimeRequirements` (identical answers, ripwire at 4.5× and 2.25×). Three are ranking
+misses on webpack, where ripwire returns plausible neighbours and never reaches the gold: "where are
+chunk ids assigned deterministically" (it ranks `lib/ids/DeterministicChunkIdsPlugin.js` first;
+ripwire never surfaces `lib/ids/`), "fix a bug where splitChunks produces an empty chunk" (it hits
+`lib/optimize/SplitChunksPlugin.js`; ripwire returns two `*Warning` classes named after the failure
+the mechanism produces), and "understand the caching layer so I can add a new cache backend" (it
+hits `lib/cache/`; ripwire returns `util/StackedCacheMap.js` and `util/StackedMap.js`, and the
+directory literally named for the concept contributes nothing to its ranking). The last two share
+one mechanism — a symbol whose *name* matches the query's content words beats the implementation
+that carries them in its body — and it is unfixed.
+
+**Bytes, as a share of the competitor's, on class totals.** Tokens elsewhere in this project are
+quoted as ≈ bytes/4; the raw byte counts are the instrument and are given here.
+
+| Class | GitNexus total | ripwire total | ratio (totals) | ratio (medians) |
+| --- | ---: | ---: | ---: | ---: |
+| symbol lookup (12) | 38,962 B | 52,480 B | **1.35×** | 1.53× |
+| conceptual search (15) | 77,316 B | 95,256 B | **1.23×** | 1.42× |
+| callers / blast radius (12) | 142,751 B | 55,539 B | **0.39×** | 3.31× |
+| task orientation (9) | 1,686,202 B | 106,073 B | **0.06×** | 0.09× |
+| **all 48** | **1,945,231 B** | **309,348 B** | **0.159×** | — |
+
+**Both ratio forms are printed because they disagree, and any claim has to say which it quotes.**
+The blast-radius class reads 0.39× on totals and 3.31× on medians: the competitor's total there is
+carried by three very large answers (53,881 B, 53,412 B and 14,561 B) while its typical one is about
+1.4 KB. The totals form is the one this project's cost tables use.
+
+**Byte totals move with the invoking root path string**, because ripwire embeds it and prices its
+bundles in bytes. The figures above use short relative roots. The whole sweep was re-run at a
+118-character absolute root as a sensitivity check: the overall share moves 0.159× → 0.163× and the
+four class ratios to 1.44× / 1.24× / 0.40× / 0.06×, moving no verdict.
+
+**Latency and index cost.** Median warm wall over the 48: ripwire **197 ms**, GitNexus **1,082 ms**.
+Both warm with a pre-built index, so the multiple is an apples-to-apples cache state — but it
+excludes the index build, which is not comparable at all:
+
+| Corpus | ripwire cold | ripwire warm | ripwire cache on disk | GitNexus analyze | GitNexus index on disk |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| this repository (C++) | 0.25 s | 0.04 s | 6.6 MB | 46.8 s | 391 MB |
+| django | 0.40 s | 0.15 s | 16.5 MB | 23.4 s | 623 MB |
+| webpack | 0.45 s | 0.15 s | 10.6 MB | 52.2 s | 399 MB |
+
+GitNexus writes its index **into the repository** and keeps the tree clean by appending to git's own
+`.git/info/exclude`; ripwire's cache lives in `$TMPDIR` and it writes nothing into the repository.
+Its statement-level dependence mode, not benchmarked here beyond one probe, raises the C++ index to
+142.1 s.
+
+**Failure modes counted, both directions.** Answers needing a second call before they answer at all:
+ripwire 0, GitNexus **8/48** (an ambiguity gate that fires on two structural patterns it does not
+model — a C/C++ declaration/definition pair, and a directory whose name equals the symbol's).
+Blast-radius calls returning an empty radius for a symbol with real callers: ripwire 0, GitNexus
+**1**, and that one is labelled low-risk and epistemically exact, which is a wrong answer wearing a
+correctness label. Malformed output as consumed: ripwire 0 (48/48 clean under `xmllint --noout`),
+GitNexus **7/48 through a pipe** — its content-bearing query truncates at about 64 KB mid-string and
+emits invalid JSON, while the same command redirected to a file is complete and valid. **The
+published numbers above use the file-redirected form, which is the configuration favourable to it.**
+
+**What GitNexus does better, stated plainly.**
+
+- **Compact one-hop context.** Its context verb on an unambiguous symbol is 0.7–1.0 KB and carries
+  callers, callees and field accesses. For "who calls this", it is cheaper per unit of signal than
+  `--for`, and it stays cheaper after this round's fixes.
+- **Depth-labelled blast radius.** Depth buckets plus affected processes and modules is a better
+  presentation than ripwire's flat reaching-set, and adopting it would cost nothing.
+- **Import edges as a first-class edge class**, which ripwire's `--impact` does not fold in — it has
+  the data, and `--uses` finds it, but an agent asking `--impact` is not told to ask.
+- **Self-reported per-stage timing** on every query. A free instrument for the caller; ripwire only
+  offers this behind eval flags.
+- **Epistemic labels** are a real honesty surface in the same spirit as `amb=` and `counts_floor=` —
+  undermined by the empty-radius case above, but the design intent is right.
+- **Distribution.** Two-command onboarding into eight agents, with editor hooks that auto-enrich
+  grep and read calls. Nothing in ripwire's `wrap` list matches that posture.
+- It also has capabilities ripwire has no equivalent for at all: statement-level program-dependence
+  queries, raw graph queries in a general query language, a multi-file coordinated rename executor,
+  persistent cross-repo groups with staleness tracking, repo wiki generation, and an embedding-based
+  semantic mode.
+
+**Improve-first provenance — the rule this section exists under.** The first pass of this round was
+run before any fix and **its numbers were never published**. Its product was a loss-bucket list, and
+every one of the competitor's wins was scored as a ripwire loss bucket. What then shipped, by
+commit:
+
+| What the first pass found | Fix |
+| --- | --- |
+| `--for` filled its quota in path order, so rows scoring zero on the query consumed 64–84% of a symbol-lookup bundle | `13291b9` — a relevance floor: the bundle shrinks past a zero-score row instead of padding with it, and discloses that it did |
+| caller and use-site listings were neither ordered source-before-test nor capped — one answer ran to 175 rows | `2a3d52a` — the existing `--grep` ordering and the existing `--impact` disclosed cap, reused in the callers/callees/uses emitters |
+| the inline body allowance could serve a same-named symbol from another file in place of the queried one | `0c1e171` — the allowance serves the anchor's own body, or nothing, and says so |
+| vendored front-end assets and numbered migrations ranked into a database-backend task bundle | `4e187dd` — both path families join the already-calibrated de-prioritized tier |
+| bodies were 52.7% of every conceptual-query byte, the one class that missed the byte target | `63941c8` — the conceptual route serves a compact map with one-hop edge context instead of bodies |
+| a webpack query whose gold plugin ripwire never surfaced | `dee6eb0` built a name-coverage floor; it met its pre-registered band and was **reverted** at `15af250` for failing a separate standing requirement. **The loss stands and is counted above.** |
+
+**What this round does NOT show.** Three corpora, one language each in practice, and 48 queries is a
+small N — a 27–7–14 split is directional, and individual class splits are not separable. The queries
+are this project's own, authored from source before either tool ran and frozen, but not drawn from
+an external gold set. One judge, and it is the tool's own project — mitigated by freezing the
+competitor's arm, by carrying every one of its wins, by leaving three expired-reason verdicts with
+it and five upgradable ones as ties, but not eliminated. GitNexus ran at its default retrieval
+configuration: its embedding arm and its MCP-only verbs were not benchmarked. Its analyze step drops
+source files over 512 KB by default, which on the C++ corpus silently excluded that tree's two
+largest and most central files while ripwire indexed both — some of ripwire's margin on that corpus
+is that asymmetry rather than ranking. And the latency figure is warm against warm: it does not
+include either tool's index build.
+
 ---
 
 ## 3. LocBench — localization accuracy
