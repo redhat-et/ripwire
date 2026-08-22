@@ -2398,11 +2398,8 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         }
     }
 
-    // Name-coverage floor (lexical.h applyNameCoverageFloor, registered in docs/EVALS.md): a wiring class
-    // whose own NAME spells at least half the task's content words is floored into the head of the bundle
-    // regardless of graph centrality. CONCEPTUAL ROUTE ONLY — the name-exact route already lands such a
-    // class at rank 1, and running the floor there would fight the anchor the route just resolved. Inert
-    // (byte-identical) on any query where no symbol name covers enough, which is most of them.
+    // Name-coverage floor (lexical.h applyNameCoverageFloor — the rule and its bounds live there). The one
+    // fact that is LOCAL: conceptual route only, because the name-exact route already resolved an anchor.
     if( !cfg.noRoute && std::strcmp( out.routeTag, "subtoken+body" ) == 0 )
     {
         out.routeNote += applyNameCoverageFloor( ing, task, lensRank );   // "" — byte-identical — when nothing covers
