@@ -989,6 +989,17 @@ def _harness_metrics( harness, stdout, work_dir, task, arm, seed, ripwire_bin, s
     return _claude_metrics( stdout if isinstance( stdout, str ) else ( stdout or b"" ).decode( "utf-8", "replace" ),
                             shim_log, retain )
 
+def _child_failure_detail( proc ):
+    """The best 2000 chars of evidence for a nonzero-exit harness child.
+
+    `--output-format json` puts the CLI's own error report on STDOUT; a record that kept only stderr
+    could say `exit 1: ` and nothing else (measured live 2026-08-20, claude-code-p). Fall back to
+    stdout only when stderr is genuinely empty — a real stderr message still wins outright."""
+    detail = ( proc.stderr or "" )[:2000]
+    if not detail.strip():
+        detail = "(stderr empty) stdout: " + ( proc.stdout or "" )[:2000]
+    return detail
+
 def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWIRE_BIN_DEFAULT,
              timeout_s=DEFAULT_TIMEOUT_SECONDS, evaluator="none", gold_rows=None, lane="",
              local_corpus="", swebench_dataset=SWEBENCH_SCORE_DATASET_DEFAULT ):
@@ -1065,7 +1076,7 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
     diff = sh( [ "git", "diff" ], cwd=repo_dir ).stdout   # candidate patch: working tree vs base_commit
 
     if proc.returncode != 0:
-        return _fail( "error", f"{harness} exit {proc.returncode}: {(proc.stderr or '')[:2000]}",
+        return _fail( "error", f"{harness} exit {proc.returncode}: {_child_failure_detail( proc )}",
                        wall_seconds=wall )
 
     metrics = _harness_metrics( harness, proc.stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )

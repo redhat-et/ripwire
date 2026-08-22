@@ -27,7 +27,7 @@ command -v python3 >/dev/null 2>&1 || { echo "agentloopclaudecheck: python3 requ
 [ -f "$ROOT/bench/agentloop/run_agentloop.py" ] || { echo "agentloopclaudecheck: harness missing"; exit 2; }
 
 python3 - "$ROOT" "$TMP" >"$TMP/out.txt" 2>&1 <<'PY'
-import hashlib, inspect, json, pathlib, sys
+import hashlib, inspect, json, pathlib, subprocess, sys
 
 root, tmp = sys.argv[1], sys.argv[2]
 sys.path.insert( 0, str( pathlib.Path( root ) / "bench" / "agentloop" ) )
@@ -330,6 +330,78 @@ if rec["status"] == "contaminated" and rec["error"]:
     ok( "make_record accepts status=\"contaminated\" (record schema was extended, not narrowed)" )
 else:
     no( "make_record mishandled a contaminated record: %r" % ( rec, ) )
+
+# ── 14 — an end-to-end run_one() drive with the harness faked out, real git underneath ──────────
+# This section drives the ACTUAL run_one(), not a reimplementation of its logic: checkout_repo and
+# prepare_environment are stubbed (no network, no real CLAUDE_CONFIG_DIR), but `sh()` for every
+# non-`claude` argv (git init/diff/etc.) still hits the real subprocess, so the diff run_one scores
+# is a real `git diff` of a real working tree — only the harness invocation itself is canned.
+class _FakeProc:
+    def __init__( self, returncode, stdout, stderr ):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+def _fake_sh_claude( result ):
+    def fake_sh( args, cwd=None, timeout=1800, env=None ):
+        if args and args[ 0 ] == "claude":
+            return result
+        return subprocess.run( args, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env )
+    return fake_sh
+
+_fake_repo = pathlib.Path( tmp ) / "fakerepo"
+_fake_repo.mkdir( parents=True, exist_ok=True )
+subprocess.run( [ "git", "init", "-q" ], cwd=_fake_repo )
+subprocess.run( [ "git", "config", "user.email", "t@example.com" ], cwd=_fake_repo )
+subprocess.run( [ "git", "config", "user.name", "t" ], cwd=_fake_repo )
+( _fake_repo / "a.txt" ).write_text( "orig\n" )
+subprocess.run( [ "git", "add", "a.txt" ], cwd=_fake_repo )
+subprocess.run( [ "git", "commit", "-q", "-m", "init" ], cwd=_fake_repo )
+( _fake_repo / "a.txt" ).write_text( "changed\n" )   # the agent's (faked) edit — this IS the candidate patch
+
+_real_sh = R.sh
+R.checkout_repo = lambda repo, base_commit, repos_dir: _fake_repo
+R.prepare_environment = ( lambda harness, work_dir, instance_id, arm, seed, ripwire_bin:
+                          ( {}, pathlib.Path( work_dir ) / "home", "shim" ) )
+R.evaluate_patch = lambda *a, **k: ( None, None )
+_fake_task = dict( instance_id="fake-1", repo="fake/repo", base_commit="deadbeef" )
+_fake_gold_rows = { "fake-1": dict( problem_statement="fix the bug" ) }
+
+# ── 14. error-capture keep-both-streams — stdout detail must survive an empty-stderr failure ────
+# `claude -p --output-format json` puts the CLI's own error report on STDOUT (measured live
+# 2026-08-20); a record that kept only stderr used to read `claude-code-p exit 1: ` and nothing else.
+_MARKER = "RIPWIRE_SELFTEST_STDOUT_ONLY_DETAIL_9f2c"
+_err_stdout = json.dumps( { "type": "result", "is_error": True, "result": _MARKER } )
+R.sh = _fake_sh_claude( _FakeProc( 1, _err_stdout, "" ) )
+work1 = pathlib.Path( tmp ) / "work1"
+rec1 = R.run_one( _fake_task, "baseline", 1, "claude-code-p", "", work_dir=str( work1 ),
+                  gold_rows=_fake_gold_rows )
+if rec1[ "status" ] == "error":
+    ok( "run_one reports status=error for a nonzero-exit claude-code-p child" )
+else:
+    no( "run_one did not report status=error for a nonzero-exit child: %r" % ( rec1, ) )
+if _MARKER in ( rec1[ "error" ] or "" ):
+    ok( "an empty-stderr failure record's error field still carries the stdout detail" )
+else:
+    no( "the stdout detail was dropped from an empty-stderr failure record: %r" % ( rec1[ "error" ], ) )
+if "stderr empty" in ( rec1[ "error" ] or "" ):
+    ok( "the record discloses that stderr was empty, rather than implying stdout was the CLI's stderr" )
+else:
+    no( "the record does not disclose the empty-stderr / stdout-fallback substitution: %r"
+        % ( rec1[ "error" ], ) )
+if not ( work1 / "patches" ).exists():
+    ok( "an error run writes no patch file (unconditional persistence is for scored/scorable runs only)" )
+else:
+    no( "an error run unexpectedly created a patches/ directory" )
+
+# stderr still wins when it actually carries something — this is not "always prefer stdout".
+R.sh = _fake_sh_claude( _FakeProc( 1, _err_stdout, "a real stderr message" ) )
+rec1b = R.run_one( _fake_task, "baseline", 1, "claude-code-p", "", work_dir=str( pathlib.Path( tmp ) / "work1b" ),
+                   gold_rows=_fake_gold_rows )
+if "a real stderr message" in ( rec1b[ "error" ] or "" ) and "stdout:" not in ( rec1b[ "error" ] or "" ):
+    ok( "a nonempty stderr is still used as-is, without the stdout fallback" )
+else:
+    no( "a nonempty stderr was not used as-is: %r" % ( rec1b[ "error" ], ) )
+
+R.sh = _real_sh
 PY
 
 while IFS= read -r line; do
