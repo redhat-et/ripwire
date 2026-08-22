@@ -2603,6 +2603,7 @@ struct ForLensHeaderParts
     std::string_view floorNote;        // LB-A: present only when the relevance floor actually shrank the quota
     bool             anchor     = false;   // --anchor's EXPERIMENTAL caveat paragraph
     bool             autoBundle = false;   // T3: auto mode is on (cfg.detail==0, no --signatures-only) — appends the bundle=auto legend
+    bool             compactBundle = false;   // COMPACT conceptual serving: appends the bundle=compact legend INSTEAD of the auto one — never both, because only one of the two sections can be emitted
     std::string_view rootArg;              // R-E (2026-08-17): the single-root run's own root= — the ladder's
                                             // route-dropped rebuild below calls ctxRootOpen a second time and
                                             // must carry the SAME root as the pre-built rootOpenStr did.
@@ -2621,6 +2622,24 @@ inline constexpr std::string_view kForAutoBundleLegend =
     "differ; each body's calls child lists its callee signatures, total= always, shown=/capped= only "
     "when that list is cut";
 
+// COMPACT conceptual serving — the legend that REPLACES the one above on the subtoken+body route
+// (pre-registered: docs/EVALS.md, the T3 route-narrowing round). Same constraints as its sibling: a
+// named constant so the sigs-budget exemption subtracts exactly what it adds, and no "--" anywhere,
+// because it rides inside an XML comment where "--" is ill-formed (G4) — which is why the two flags it
+// mentions are named without their dashes.
+//
+// IT IS DELIBERATELY TERSE, and the terseness is enforced rather than merely intended: the compact
+// surface has ONE byte allowance (kForCompactSurfaceBudgetBytes) that this legend is charged against,
+// so every byte spent explaining the section is a byte of edge context the section cannot serve. That
+// is the honest shape for a disclosure — it competes with the content it describes instead of riding
+// free — and the static_assert below is what stops a future edit from quietly eating the payload.
+inline constexpr std::string_view kForCompactBundleLegend =
+    "; bundle=compact: conceptual query, so this map ships one-hop EDGE context, no bodies (bodies=0, "
+    "reason=compact-route or no_candidates). hops rows are h l=line p=file n=name, and a row's calls "
+    "child names its callees (c n= l=). hops and calls disclose total=requested shown=printed capped=1 "
+    "when the BUDGET cut a listing; noedge=N counts ranked symbols with no RESOLVED callee found (never "
+    "none exists). For a body: expand=p:n pasted off a row; the auto-bodies flag puts the bodies back";
+
 // One spelling of --for's header, three shapes of it. `withTaskEcho=false` replaces the comment's echo with a
 // note pointing at the task= attribute that still holds the verbatim copy — the duplicate goes, nothing else.
 // Byte-identical to the pre-ladder header when both flags are true and extraNotes is empty (golden-neutral).
@@ -2628,7 +2647,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
                                       std::string_view extraNotes )
 {
     std::string h;
-    h.reserve( 640 + kForAutoBundleLegend.size() + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
+    h.reserve( 640 + std::max( kForAutoBundleLegend.size(), kForCompactBundleLegend.size() ) + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
                + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + p.floorNote.size() + extraNotes.size() );
     h += withRouteAttr ? std::string( p.rootOpenStr ) : rw::ctxRootOpen( p.task, {}, p.rootArg );
     h += "<!-- ripwire lens for ";
@@ -2655,7 +2674,11 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     h += ": reusable building blocks + quality facts for what you're about to touch "
          "(cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) "
          "— prefer composing/reusing these; watch the high-churn/high-amp/cloned ones";
-    if( p.autoBundle )
+    if( p.compactBundle )
+    {
+        h.append( kForCompactBundleLegend );   // COMPACT: replaces the auto legend on the conceptual route — never both
+    }
+    else if( p.autoBundle )
     {
         h.append( kForAutoBundleLegend );   // T3: present whenever auto mode is on, whatever the fit outcome — it explains bodies="0" too
     }
@@ -3057,6 +3080,78 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     return out;
 }
 
+// ── COMPACT CONCEPTUAL SERVING: the <hops> surface (pre-registered: docs/EVALS.md, T3 route-narrowing) ──
+//
+// The conceptual route's replacement for buildForAutoBodies above, and deliberately its twin in shape so
+// the call site wires ONE verdict either way: same ForAutoBodiesResult, same candidate head (the
+// positive-score head of the ranked surface, capped at kPackTaskBodyCandidates), same two budget regimes,
+// same surfaceOff degrade contract. What differs is what the allowance buys — one-hop callee signatures
+// instead of body CDATA — and that the allowance covers this surface's OWN disclosure (see
+// kForCompactSurfaceBudgetBytes): the legend and the root attribute are subtracted here, before packHops
+// ever sees a byte, so the compact bundle cannot grow by explaining itself.
+//
+// THE ROOT ATTRIBUTE'S TWO REASONS ARE NOT THE SAME FACT. `reason="compact-route"` means the route chose
+// this shape and the edges are the answer; `reason="no_candidates"` means nothing scored above zero, so
+// there was nothing to take edges FROM. Collapsing them would make a ranking miss look like a serving
+// decision, which is the honesty rule (#3) in its most literal form.
+constexpr std::size_t kCompactAttrReserve = 56;   // ' bundle="compact" bodies="0" reason="no_candidates"' — the widest spelling
+constexpr std::size_t kCompactWrapReserve = 56;   // '<hops shown="N" total="N" capped="1">' + '</hops>' — the section's own envelope
+static_assert( rw::kForCompactSurfaceBudgetBytes > kCompactAttrReserve + kCompactWrapReserve + 512,
+               "the compact surface allowance must leave real room for edges after its own disclosure — "
+               "if a legend edit tripped this, shorten the legend rather than raising the allowance" );
+
+ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
+                                          const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
+                                          std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr )
+{
+    ForAutoBodiesResult out;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool             fcSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string_view fcRootArg    = fcSingleRoot ? cfg.roots[0] : std::string_view();
+
+    // candidates: EXACTLY the head buildForAutoBodies would have bodied — same rule, same order, so the
+    // two shapes describe the same symbols and only differ in how much of each they serve.
+    std::vector<rw::NodeId> hopIds;
+    for( rw::NodeId sid : lensSurfaceIds )
+    {
+        if( hopIds.size() >= rw::kPackTaskBodyCandidates || lensRank[sid] <= 0.0f )
+        {
+            break;
+        }
+        hopIds.push_back( sid );
+    }
+
+    std::size_t leftBytes = bundleBudget > committedBytes ? bundleBudget - committedBytes : 0;
+    if( cfg.tokenBudget == 0 )
+    {
+        leftBytes += rw::kForCompactSurfaceBudgetBytes;   // the default bundle's compact allowance (serialize.h)
+    }
+    if( cfg.tokenBudget > 0 && leftBytes == 0 )
+    {
+        out.surfaceOff = true;                            // explicit ceiling too tight for even the disclosure
+        return out;
+    }
+
+    // the surface allowance MINUS this surface's own fixed disclosure — see kForCompactSurfaceBudgetBytes.
+    constexpr std::size_t kCompactFixedBytes = kForCompactBundleLegend.size() + kCompactAttrReserve + kCompactWrapReserve;
+    const std::size_t     hopBudget          = std::min( leftBytes, rw::kForCompactSurfaceBudgetBytes > kCompactFixedBytes
+                                                                        ? rw::kForCompactSurfaceBudgetBytes - kCompactFixedBytes
+                                                                        : std::size_t( 1 ) );
+
+    out.section = rw::chargeSection( [ & ]( std::FILE* f )
+        { rw::packHops( f, ing, hopIds, hopBudget, g.outOff, g.outTargets, redactPtr, /*outShown=*/nullptr, &lensRank, fcRootArg ); },
+        rw::kBytesPerTokenBody );
+    if( !out.section.isRendered )
+    {
+        out.surfaceOff = true;                            // degrade: pre-compact output exactly (alert already on stderr)
+        out.section    = rw::ChargedSection{};
+        return out;
+    }
+    out.attr = hopIds.empty() ? " bundle=\"compact\" bodies=\"0\" reason=\"no_candidates\""
+                              : " bundle=\"compact\" bodies=\"0\" reason=\"compact-route\"";
+    return out;
+}
+
 std::optional<int> runForLens( const MainDispatch& d )
 {
     using namespace rw;
@@ -3108,6 +3203,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         const std::string  mentionNote( std::move( lr.mentionNote ) );
         const std::string  boostNote( std::move( lr.boostNote ) );
         const std::string  docMentionNote( std::move( lr.docMentionNote ) );
+        // COMPACT conceptual serving: the route the ROUTER chose, read from its own machine tag rather
+        // than re-derived. "no-route" is deliberately NOT this route: --no-route means
+        // the router never ran, so there is no route decision to condition a default on, and that path
+        // keeps its golden neutrality (byte-identical output, see the ROUTING comment above).
+        const bool         conceptualRoute = std::strcmp( lr.routeTag, "subtoken+body" ) == 0;
         // the route's own anchors, resolved — read ONLY by the T3 auto-body allowance below (anchor-only)
         const std::vector<RouteAnchorDef> routeAnchorDefs( std::move( lr.anchorDefs ) );
         // R4: weak-result honesty signal — the top match's RAW lexical score (pre-anchor/mention/cochange,
@@ -3206,11 +3306,17 @@ std::optional<int> runForLens( const MainDispatch& d )
         // --json and --format=candidates dialects never reach the auto machinery (candidates returned above;
         // --json returns before it below), so this mode is an XML-bundle fact only.
         const bool         autoBundleMode = cfg.detail == 0 && !cfg.signaturesOnly;
-        // NOT const: the tight-explicit-budget path in the auto block below may turn the auto surface off
-        // (autoBundle=false) and rebuild the header without the legend — the ladder's later rebuilds read
-        // this struct through buildForHeader and must honor that decision.
+        // COMPACT conceptual serving (pre-registered: docs/EVALS.md, the T3 route-narrowing round): on the
+        // route the router sent to subtoken+body, the enrichment the bundle gains is the <hops> edge section
+        // rather than the <bodies> allowance — unless the caller opted back in with --auto-bodies. The two
+        // are mutually exclusive by construction: one enrichment section, one legend, one root attribute.
+        const bool         compactMode    = autoBundleMode && conceptualRoute && !cfg.autoBodies;
+        // NOT const: the tight-explicit-budget path in the auto block below may turn the surface off
+        // (autoBundle/compactBundle=false) and rebuild the header without the legend — the ladder's later
+        // rebuilds read this struct through buildForHeader and must honor that decision.
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
-                                        mentionNote, boostNote, docMentionNote, floorNote, cfg.anchor, autoBundleMode, flRootArg };
+                                        mentionNote, boostNote, docMentionNote, floorNote, cfg.anchor,
+                                        autoBundleMode && !compactMode, compactMode, flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -3415,7 +3521,12 @@ std::optional<int> runForLens( const MainDispatch& d )
         // leftover under the stated ceiling or is turned off entirely (see the auto block below), and
         // est_tokens always measures the emitted header.
         constexpr std::size_t kAutoAttrReserve = 48;   // ' bundle="auto" bodies="0" reason="no_candidates"' — the widest spelling
-        const std::size_t autoLegendBytes = autoBundleMode ? kForAutoBundleLegend.size() : 0u;
+        // COMPACT: the same exemption, for whichever of the two legends is actually on the header — the
+        // contract "the ranked map is byte-identical with and without the enrichment" has to hold for the
+        // compact shape too, or the round would be changing signatures while claiming to change only bodies.
+        const std::size_t autoLegendBytes = compactMode      ? kForCompactBundleLegend.size()
+                                          : autoBundleMode   ? kForAutoBundleLegend.size()
+                                                             : 0u;
         const std::size_t fixedBytes = headerStr.size() - adaptiveNote.size() - autoLegendBytes
                                      + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
         const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;   // ≥1: 0 would mean "no budget"
@@ -3546,16 +3657,23 @@ std::optional<int> runForLens( const MainDispatch& d )
         if( autoBundleMode && sigsPreRendered )
         {
             // committed so far: the real header (legend included), the rendered sections, "</ctx>", and the
-            // post-ladder splices (est_tokens/weak reserves + the root attribute's worst case, kAutoAttrReserve)
+            // post-ladder splices (est_tokens/weak reserves + the root attribute's worst case). The compact
+            // root attribute is the longer of the two spellings, so its own reserve is used in that regime.
+            const std::size_t attrReserve    = compactMode ? kCompactAttrReserve : kAutoAttrReserve;
             const std::size_t committedBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
-                                             + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + kAutoAttrReserve;
-            ForAutoBodiesResult autoBodies = buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank,
-                                                                 committedBytes, bundleBudget, redactPtr, routeAnchorDefs );
+                                             + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + attrReserve;
+            // ONE verdict, two shapes: the compact route's <hops> surface or T3's <bodies> allowance. Both
+            // builders return the same struct so the wiring below (section, attribute, surface-off header
+            // rebuild) is written once and cannot drift between the two.
+            ForAutoBodiesResult autoBodies = compactMode
+                ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committedBytes, bundleBudget, redactPtr )
+                : buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank, committedBytes, bundleBudget, redactPtr, routeAnchorDefs );
             autoSection = std::move( autoBodies.section );
             autoAttr    = std::move( autoBodies.attr );
             if( autoBodies.surfaceOff )
             {
-                headerParts.autoBundle = false;
+                headerParts.autoBundle    = false;
+                headerParts.compactBundle = false;
                 headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
             }
         }

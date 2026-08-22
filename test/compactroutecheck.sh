@@ -76,17 +76,17 @@ grep -q 'bundle="compact" bodies="0" reason="compact-route"' "$TMP/conc" \
     || no '(1c) missing the bundle="compact" bodies="0" reason="compact-route" disclosure (every removal is disclosed)'
 
 # ── (2) the one-hop edge context is really served ───────────────────────────────────────────────────────
-grep -qE '<hops shown="[0-9]+" total="[0-9]+" capped="[01]">' "$TMP/conc" \
+grep -qE '<hops shown="[0-9]+" total="[0-9]+" capped="[01]"( noedge="[0-9]+")?>' "$TMP/conc" \
     && ok "(2) <hops shown= total= capped=> present with the rule-1/2/3 triple" \
     || no "(2) <hops> missing or malformed — the compact route must still carry the edge context"
 HSHOWN=$( grep -o '<hops shown="[0-9]*"' "$TMP/conc" | head -1 | sed -E 's/.*shown="([0-9]*)"/\1/' )
-HROWS=$( grep -o '<h t=' "$TMP/conc" | wc -l | tr -d ' ' )
+HROWS=$( grep -o '<h l=' "$TMP/conc" | wc -l | tr -d ' ' )
 { [ -n "${HSHOWN:-}" ] && [ "$HSHOWN" -ge 1 ] && [ "$HSHOWN" = "$HROWS" ]; } \
     && ok "(2b) shown=\"$HSHOWN\" is arithmetic — it equals the $HROWS <h> rows actually emitted" \
     || no "(2b) shown=\"${HSHOWN:-}\" disagrees with the $HROWS emitted <h> rows (the disclosure must be arithmetic)"
 grep -q '<h [^>]*><calls total="[0-9]*"[^>]*><c n=' "$TMP/conc" \
-    && ok "(2c) at least one <h> row carries a real <calls> list with a <c> callee signature" \
-    || no "(2c) no <h> row carries any callee signature — an empty shell is not edge context"
+    && ok "(2c) at least one <h> row carries a real <calls> list naming a callee" \
+    || no "(2c) no <h> row names any callee — an empty shell is not edge context"
 
 # ── (3) the continuation is a disclosed surface, not a guess ────────────────────────────────────────────
 # the LEADING comment block — the legend the reader actually meets first. Extracted with python3, not
@@ -95,7 +95,7 @@ grep -q '<h [^>]*><calls total="[0-9]*"[^>]*><c n=' "$TMP/conc" \
 LEGEND="$( python3 -c 'import sys
 s=open(sys.argv[1],encoding="utf-8",errors="replace").read()
 a=s.find("<!--"); b=s.find("-->",a)
-sys.stdout.write(s[a:b] if a>=0 and b>=0 else "")' "$TMP/conc" )"
+sys.stdout.write(s[a+4:b] if a>=0 and b>=0 else "")' "$TMP/conc" )"
 for A in 'bundle=' 'bodies=' 'reason=' 'hops' 'calls'; do
     case "$LEGEND" in
         *"$A"*) ok "(3) the legend defines/names '$A'" ;;
