@@ -7,27 +7,20 @@ solves the task.** This directory is that harness.
 
 Design source: the Phase B4 research and R4 eval-methodology notes ("Minimal agent-in-the-loop eval design").
 
-**Status: HARNESS READY FOR AN UNATTENDED MATRIX; RESOLUTION SCORING STILL UNEXERCISED.**
+**Status: HARNESS READY FOR AN UNATTENDED MATRIX; RESOLUTION SCORING EXERCISED.**
 `run_agentloop.py` supports `claude -p`, `codex exec`, and `opencode run`. Every arm disables MCP; the
 ripwire arms use the CLI through a logging shim. Codex and opencode runs get fully isolated homes,
 `--resume` skips already-completed cells so an interruption cannot re-spend money, and `--concurrency`
 runs N cells at once in separate checkout lanes. One locked Astropy pair plus one post-skill-fix
 treatment rerun completed on 2026-08-04; see [`PLAN.md`](../../PLAN.md).
 
-**The headline metric has still never been produced.** `--evaluator swebench` remains unexercised:
-scoring needs the `swebench` package (not installed) plus ~120GB of free disk *inside the Docker VM*.
-Measured 2026-08-10: Docker is up and usable, the **host** has ~531GB free, but the active colima
-`amd64` profile is provisioned with a 40GiB virtual disk (~31GB free). That is an allocation, not a
-hardware limit — `colima stop amd64 && colima start amd64 --disk 250 --cpu 8 --memory 16` grows it
-(colima grows disks but never shrinks them). Note also that this profile's VM arch is `aarch64`, so
-SWE-bench's official `linux/amd64` images run emulated; budget wall-clock accordingly, or track
-upstream's experimental native-arm64 support. Until that runs, these arms measure
-localization / tokens / wall time — **not solve rate** — and localization is already at ceiling
-(6/6 on both arms in the pilot), so it has no discriminating power left. (The pilot itself is also
-train-contaminated — it ran `pydata__xarray-3364`, a LocBench-TRAIN instance frozen by the pre-fix
-lock; see "Task selection" below.) Two defects in the scoring
-path were fixed on 2026-08-10 without being able to execute it: the report was being written to the
-*caller's* cwd, and an infrastructure failure (Docker down, disk full) was being recorded as
+**The headline metric has now been produced.** Stage 1 tranche 1 completed 2026-08-21: `--evaluator
+swebench` ran end to end against the official SWE-bench harness, every run reached `status=ok`, and
+every one was scored (see "Scoring on an aarch64 Mac (Docker)" below for the recipe that got the
+harness running on non-`linux/amd64` hardware). This line only tracks whether the scoring path itself
+is exercised, not what it found — results are not republished in this file. Two defects in the
+scoring path were fixed on 2026-08-10 before it could first execute: the report was being written to
+the *caller's* cwd, and an infrastructure failure (Docker down, disk full) was being recorded as
 `resolved=False` — indistinguishable from a patch that genuinely did not fix the bug, which would
 have read as "ripwire did not help". Infra failures now stop the run instead of scoring it.
 
@@ -330,6 +323,38 @@ That's **3 tasks x 2 arms x 1 seed = 6 runs**, ~$2-9 at the $0.30-$1.50/instance
 enough to sanity-check checkout, patch capture, CLI-use evidence, skill isolation, and token accounting before committing to the
 full run. Pass `--evaluator swebench` once Docker + `pip install swebench` are available to get real
 `resolved=` scores instead of `null`.
+
+## Scoring on an aarch64 Mac (Docker)
+
+The official SWE-bench harness's eval images are `linux/amd64` only. On an aarch64 host the swebench
+package pulls images through the `docker-py` SDK, and the SDK **ignores `DOCKER_DEFAULT_PLATFORM`** —
+it always resolves the host's native manifest, which does not exist for these images, so the pull
+404s before a single test runs.
+
+**Fix: pre-pull every eval image with the `docker` CLI, at the platform, before invoking the
+harness.** The CLI's `--platform` flag is honored where the SDK's env var isn't:
+
+```sh
+docker pull --platform linux/amd64 swebench/sweb.eval.x86_64.<mapped-instance-id>:latest
+```
+
+The image name is not the bare `instance_id` — SWE-bench maps `__` in the instance ID to `_1776_` when
+naming eval images (e.g. `pydata__xarray-1234` → `sweb.eval.x86_64.pydata_1776_xarray-1234`). Pre-pull
+every locked instance's image this way, then run the harness normally: it finds the local images by
+tag and never attempts its own pull, so the SDK's platform blindness never triggers.
+
+Two things that look like new failures but aren't:
+
+- **Cosmetic `docker-py` teardown tracebacks on Python 3.14** — an `I/O operation on closed file`
+  during client cleanup, after the eval report has already been written correctly. Ignorable.
+- **Emulated test-suite wall time.** `linux/amd64` images run emulated on Apple Silicon; budget
+  wall-clock per instance accordingly (observed: acceptable, on the order of minutes/instance on
+  M-series, not the multi-tens-of-minutes emulation can produce on a heavier suite).
+
+**Alternative: [Modal](https://modal.com/)** runs the official harness on real `x86_64` cloud workers,
+sidestepping the whole emulation/pre-pull question — the SWE-bench project documents a `--modal`
+backend for exactly this case. Worth it if local Docker capacity or wall-clock becomes the bottleneck;
+`swebench_arch_warning()` in `run_agentloop.py` names it as the alternative on any non-`x86_64` host.
 
 ## SAFETY NOTE — read before ever passing `--live`
 
