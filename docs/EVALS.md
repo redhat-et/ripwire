@@ -935,6 +935,43 @@ sensitivity to a constant chosen from n=17 is visible on the page instead of bur
 criterion: a second recalibration after seeing a second set of numbers would be the band-widening this
 block exists to not be.
 
+#### READOUT — re-scored under the recalibrated criterion (2026-08-22, after the commit above)
+
+Pure re-scoring of the bytes this lane already captured: no query re-run, no measurement re-taken, no
+rebuild. 7 of the 11 markers had a body served at baseline and are therefore applicable; the other 4
+never had inline content to recover and cost no continuation at all.
+
+| id | marker | today 1-call | compact | expand | expected (p=0.353) | arm (a) | worst case | arm (b) | break-even p |
+|---|---|---:|---:|---:|---:|---|---:|---|---:|
+| DJ-B1 | `build_filter` | 13,057 | 4,442 | 5,090 | 6,239 | PASS | −27.0% | PASS | 1.693 |
+| DJ-B2 | `_does_token_match` | 10,785 | 4,271 | 2,196 | 5,046 | PASS | −40.0% | PASS | 2.966 |
+| DJ-B5 | `process_response` | 13,945 | 5,212 | 4,051 | 6,642 | PASS | −33.6% | PASS | 2.156 |
+| RW-B1 | `subtokens` | 12,379 | 8,260 | 2,066 | 8,989 | PASS | −16.6% | PASS | 1.994 |
+| RW-B2 | `kReductionBlockSize` | 14,220 | 8,454 | 6,552 | 10,767 | PASS | **+5.5%** | PASS | 0.880 |
+| RW-B3 | `runAffected` | 14,510 | 8,398 | 7,059 | 10,889 | PASS | **+6.5%** | PASS | 0.866 |
+| WP-B4 | `HotModuleReplacementPlugin` | 12,457 | 7,555 | 3,095 | 8,647 | PASS | −14.5% | PASS | 1.584 |
+
+**Arm (a): 7/7 pass. Arm (b): 7/7 pass.** The two queries that failed the superseded criterion are the
+only two anywhere near the bound, and their worst-case overruns are **+5.5%** (`RW-B2`) and **+6.5%**
+(`RW-B3`) — both inside the +10% tail bound, stated plainly here rather than rounded away.
+
+**Sensitivity, reported as the recalibration required.** Five of the seven applicable queries have a
+break-even `p_body` **above 1.0**, meaning they pass even if the agent needs the body on every single
+call. Only `RW-B3` (0.866) and `RW-B2` (0.880) are conditional at all, and both need the agent to want
+the body **more than 86% of the time** before arm (a) would flip. Against a measured BODY-USE rate of
+**0/17** and a maximally conservative bound of **0.353**, the headroom to the tightest query is **0.513**.
+The verdict is therefore not knife-edge on the choice of `p_body`: every value from 0 to 0.866 gives the
+same answer, and the constant would have to be wrong by more than a factor of two in the direction the
+evidence does not support before it mattered.
+
+**Verdict: ACCEPT.** Criterion (a) the byte band — 95,256 B, 1.2320×, inside 79,635…96,645 B.
+Criterion (b) markers 11/11 present, and both recalibrated two-call arms clear 7/7. Criterion (c) the
+name-exact route and classes C/D byte-identical. Criterion (d) determinism ×3, the full gate suite, the
+sanitizers and `--quality-delta` (`gating="0"`) all clean. **Recorded as an ACCEPT under a SUPERSEDED
+criterion**, which is the honest label: the round would have REVERTED under the criterion as originally
+registered, the recalibration that changed that was made deliberately and in its own commit ahead of the
+re-scoring, and both texts stand above so a later reader can judge the substitution rather than take it.
+
 **Confounds, stated.** The 15-query class-B set was authored for a head-to-head round and frozen; it is
 not a sample of what agents ask, and its one recorded loss (`WP-B2`) is a ranking miss that no
 serving-side change can reach. "Markers present" is a substring test over the emitted bundle, which is
