@@ -3140,22 +3140,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         // once. packSignatures/packSignaturesJson take the floor as a flag TOO, and that is not
         // belt-and-braces: their `topN == 0 ⇒ all` convention makes an empty kept set unrepresentable
         // through the count alone, and a query nothing scores on must emit zero rows, not the corpus.
-        std::string floorNote;
-        {
-            std::size_t positiveCount = 0;
-            for( const float s : lensRank )
-            {
-                if( s > 0.0f ) { ++positiveCount; }
-            }
-            if( positiveCount < std::size_t( forTopN ) )
-            {
-                char fb[ 200 ];
-                std::snprintf( fb, sizeof( fb ), " [relevance floor: kept %zu of %d - the other %zu scored zero on this query, so the bundle shrank instead of padding]",
-                               positiveCount, forTopN, std::size_t( forTopN ) - positiveCount );
-                floorNote = fb;
-                forTopN   = int( positiveCount );
-            }
-        }
+        auto [ flooredTopN, floorNote ] = relevanceFloorCut( lensRank, forTopN );
+        forTopN = flooredTopN;
 
         // H1 (B0 r2): the bundle is emitted under a GLOBAL payload budget (serialize.h kForPayloadBudgetBytes; an
         // EXPLICIT --token-budget=N overrides it at the same conservative byte rate the --max-tokens fitter uses).
@@ -6287,28 +6273,14 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // LB-G (r10 GitNexus round): TIER before path. This used to be plain path order, and on django
         // `--callers=bulk_create` that meant 175 rows of which 171 were `tests/` — the four real source
         // callers survived the first page only because `django/` happens to sort before `tests/`. The key
-        // is rw::pathTierOf (filter.h), the same classifier --grep has ordered by since the span-tier
-        // round, materialized ONCE PER DISTINCT FILE exactly as search.h does it: pathTierOf lowercases an
-        // extension into a fresh std::string, so calling it inside the comparator would allocate O(n log n)
-        // times. 0xFF = not yet computed (PathTier has three values, so it can never collide).
-        std::vector<std::uint8_t> tierOfFile( ing.files.size(), 0xFFu );
-        for( NodeId r : result )
-        {
-            if( const std::uint32_t f = ing.symbols[r].fileId; f < tierOfFile.size() && tierOfFile[f] == 0xFFu )
-            {
-                tierOfFile[f] = std::uint8_t( rw::pathTierOf( ing.files[f] ) );
-            }
-        }
+        // itself is stated once, in filter.h, and shared with --uses and the MCP twin.
+        const std::vector<std::uint8_t> tierOfFile = rw::pathTierIndexOver( ing, result, [ & ]( NodeId r ) { return ing.symbols[r].fileId; } );
         std::sort( result.begin(), result.end(), [ & ]( NodeId a, NodeId b )
         {
             const Symbol& sa = ing.symbols[a];  const Symbol& sb = ing.symbols[b];
-            if( sa.fileId != sb.fileId )
+            if( const int c = rw::compareTierThenPath( ing, tierOfFile, sa.fileId, sb.fileId ); c != 0 )
             {
-                if( tierOfFile[sa.fileId] != tierOfFile[sb.fileId] )
-                {
-                    return tierOfFile[sa.fileId] < tierOfFile[sb.fileId];
-                }
-                return ing.files[sa.fileId] < ing.files[sb.fileId];
+                return c < 0;
             }
             return sa.line != sb.line ? sa.line < sb.line : sa.name < sb.name;
         } );
@@ -6623,25 +6595,14 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
         sites.push_back( { r.fileId, r.line, r.role, std::move( in ) } );
     }
 
-    // LB-G (r10 GitNexus round): TIER before path, the same key --grep and the callers/callees arm order by
-    // (rw::pathTierOf, filter.h). Plain path order put `--uses=bulk_create`'s 207 django rows in whatever
-    // sequence the directory names fell in. Materialized once per distinct hit file, not inside the
-    // comparator — pathTierOf allocates a std::string per call (search.h's own note). 0xFF = not computed.
-    std::vector<std::uint8_t> tierOfFile( ing.files.size(), 0xFFu );
-    for( const UseSite& u : sites )
-    {
-        if( u.fileId < tierOfFile.size() && tierOfFile[ u.fileId ] == 0xFFu )
-        {
-            tierOfFile[ u.fileId ] = std::uint8_t( rw::pathTierOf( ing.files[ u.fileId ] ) );
-        }
-    }
+    // LB-G (r10 GitNexus round): TIER before path, the same key stated in filter.h that the callers/callees
+    // arm and the MCP twin sort by. Plain path order put `--uses=bulk_create`'s 207 django rows in whatever
+    // sequence the directory names happened to fall in.
+    const std::vector<std::uint8_t> tierOfFile = rw::pathTierIndexOver( ing, sites, [ ]( const UseSite& u ) { return u.fileId; } );
     std::sort( sites.begin(), sites.end(), [ & ]( const UseSite& a, const UseSite& b )
                {
-        if( a.fileId != b.fileId )
-        {
-            if( tierOfFile[ a.fileId ] != tierOfFile[ b.fileId ] ) { return tierOfFile[ a.fileId ] < tierOfFile[ b.fileId ]; }
-            return ing.files[ a.fileId ] < ing.files[ b.fileId ];
-        }
+        if( const int c = rw::compareTierThenPath( ing, tierOfFile, a.fileId, b.fileId ); c != 0 ) { return c < 0;
+}
         if( a.line   != b.line ) {   return a.line < b.line;
 }
         if( a.role   != b.role ) {   return std::uint8_t( a.role ) < std::uint8_t( b.role );
