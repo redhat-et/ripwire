@@ -2934,6 +2934,35 @@ bool isRouteAnchorSymbol( const rw::IngestResult& ing, rw::NodeId sid, const std
     return false;
 }
 
+// Narrow a ranked auto-body candidate head to the route's anchor. Whatever this drops cannot be served "in
+// the anchor's place", because there is no place: if the anchor's own body does not fit, the caller's budget
+// branch renders the honest zero it already renders — `bodies="0" reason="budget"` plus the per-item
+// over-budget comment naming what was dropped. That is strictly more informative than a smaller namesake's
+// body, which reads like an answer and is not one.
+//
+// A NO-OP when `anchorDefs` is empty, and it must stay one. Two different routes arrive that way and both
+// keep the rank-first walk: a subtoken+body (conceptual) query, which nothing anchored; and a camel/snake
+// query whose token names no symbol at all, which the route's own reason already marks `syntax`. There is no
+// anchor definition to restrict TO in either case, and restricting to an empty set would turn "no substitute"
+// into "no bodies, ever" on a class this round never measured.
+void restrictBodiesToRouteAnchor( const rw::IngestResult& ing, std::vector<rw::NodeId>& candidateIds,
+                                  const std::vector<rw::RouteAnchorDef>& anchorDefs )
+{
+    if( anchorDefs.empty() )
+    {
+        return;
+    }
+    std::vector<rw::NodeId> anchorOnly;
+    for( rw::NodeId sid : candidateIds )
+    {
+        if( isRouteAnchorSymbol( ing, sid, anchorDefs ) )
+        {
+            anchorOnly.push_back( sid );
+        }
+    }
+    candidateIds = std::move( anchorOnly );
+}
+
 ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
                                         const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                         std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr,
@@ -2956,30 +2985,9 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
         autoBodyIds.push_back( sid );
     }
 
-    // ANCHOR-ONLY (see isRouteAnchorSymbol): when the route named an anchor, the candidate set IS the
-    // anchor. Whatever is left after this cannot fit "in the anchor's place" because there is no place —
-    // if the anchor's own body does not fit, the section renders the honest zero the budget branch below
-    // already emits, and the reader gets `bodies="0" reason="budget"` plus the per-item over-budget
-    // comment naming what was dropped. That is strictly more informative than a smaller namesake's body,
-    // which reads like an answer and is not one.
-    //
-    // Deliberately NOT applied when anchorDefs is empty. Two different ways that happens and both must keep
-    // the rank-first walk: a subtoken+body (conceptual) route, which nothing anchored; and a camel/snake
-    // query whose token names no symbol at all, whose route the reason already marks `syntax` — there is no
-    // anchor definition to restrict to, and restricting to an empty set would turn "no substitute" into
-    // "no bodies, ever" on a class this round never measured.
-    if( !anchorDefs.empty() )
-    {
-        std::vector<rw::NodeId> anchorOnly;
-        for( rw::NodeId sid : autoBodyIds )
-        {
-            if( isRouteAnchorSymbol( ing, sid, anchorDefs ) )
-            {
-                anchorOnly.push_back( sid );
-            }
-        }
-        autoBodyIds = std::move( anchorOnly );
-    }
+    // ANCHOR-ONLY: when the route named an anchor, the candidate set IS the anchor (see the function above
+    // for the rule and for why it is a no-op on every other route).
+    restrictBodiesToRouteAnchor( ing, autoBodyIds, anchorDefs );
 
     std::size_t leftBytes = bundleBudget > committedBytes ? bundleBudget - committedBytes : 0;
     if( cfg.tokenBudget == 0 )
