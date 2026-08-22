@@ -72,7 +72,8 @@ file's body, its class, its hooks — never by transcribing a rank. Per-row prov
 each label file, split into `OBSERVED` (the query shape came from the head-to-head that diagnosed the
 bucket) and `NEW` (authored in this lane from source). **New rows are the majority of every bucket on
 purpose**: a band fitted to the exact query set that produced a diagnosis measures the fit, not the
-mechanism. Of 54 rows, 3 are `OBSERVED` and 51 are `NEW`.
+mechanism. Of 54 rows, **5 are `OBSERVED`** (2 `diagnostic-class`, 1 `thin-registration`,
+1 `subsystem-directory`, 1 `vendored-asset`) and **49 are `NEW`**.
 
 ## 3. Baseline — measured at `3702693`, before any ranker code was written
 
@@ -227,7 +228,7 @@ commit as a measurement — each of those turns the instrument into a descriptio
 - **54 labels across 4 buckets** is small. Per-bucket n of 12–14 is why the bands are stated in whole
   rows and why a 1-row move is registered as indistinguishable from noise.
 - **The labels are ours.** Authored from source before any ranking work and frozen, but not drawn
-  from an external gold set. Three rows carry an outside arm's answer on record; 51 do not.
+  from an external gold set. Five rows carry an outside arm's answer on record; 49 do not.
 - **`acceptable` is used narrowly** — only a file that would let an agent land the task without
   another call. A wider list would flatter every number in §3.
 - **The corpus is pinned to a moving upstream.** Both trees are active projects; these commits are
