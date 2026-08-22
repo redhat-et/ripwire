@@ -1122,6 +1122,149 @@ inline bool isRouteStopword( std::string_view w ) noexcept
     return false;
 }
 
+// ── NAME-COVERAGE FLOOR (the conceptual route's centrality-independent lift) ──────────────────────────
+//
+// THE FAILURE IT ADDRESSES. A small registration or wiring class — one that installs a hook and does
+// nothing else — can carry most of a task's content words in its own NAME and still never surface, because
+// it has near-zero graph centrality and loses to structurally central symbols that share FEWER of those
+// words. The name-exact route already lands such a class at rank 1 when the caller types its identifier;
+// this is the same class arriving through a sentence instead, which is the route that misses it.
+//
+// THE RULE. On the conceptual route only: when one symbol's own name subtokens cover at least
+// kNameCoverageMinPercent of the query's CONTENT subtokens (stopwords dropped through isRouteStopword
+// above — the same list the router counts intent words with, never a second copy), its score is floored
+// into the head of the bundle. A floor, not a boost: max() keeps anything the ranker already scored higher
+// exactly where it was, so the rule can never reorder two symbols that both clear it, and it is inert on
+// every query where no name spells the task.
+//
+// WHY IT IS BOUNDED THE WAY IT IS. This is a lift, and lifts are how a ranking round buys a win it cannot
+// pay for — an earlier round in this project was rejected for exactly that. Three bounds, all deliberate:
+// the ladder starts BELOW the current top so a covering name cannot displace the ranker's own first
+// answer; at most kNameCoverageMaxLifts symbols are lifted, chosen by (coverage desc, current score desc,
+// id asc) so the selection is deterministic and the best-covered wins; and a query with fewer than
+// kNameCoverageMinContentWords content words is refused outright — on a one- or two-word query "half the
+// content words" is one word, which is a coincidence, not a name that spells the task.
+struct NameCoverageInfo
+{
+    std::uint32_t liftedCount      = 0;
+    std::uint32_t contentWordCount = 0;
+};
+
+inline constexpr int         kNameCoverageMinPercent      = 50;   // "the name spells at least half the task"
+inline constexpr std::size_t kNameCoverageMinContentWords = 3;    // below this, half the words is one word
+inline constexpr std::size_t kNameCoverageMaxLifts        = 8;
+inline constexpr float       kNameCoverageTopGapStep      = 0.05f;   // slot i lands at top*(1 - step*(i+1))
+
+inline bool applyNameCoverageFloor( const IngestResult& ing, std::string_view task, std::vector<float>& lensRank,
+                                    NameCoverageInfo* outInfo = nullptr )
+{
+    VERIFY( lensRank.size() == ing.symbols.size() );
+    if( task.empty() || lensRank.empty() || lensRank.size() != ing.symbols.size() )
+    {
+        return false;
+    }
+
+    // the query's CONTENT subtokens, deduped, in text order (order is irrelevant to the count — the dedupe
+    // is what matters, so a repeated word cannot cover itself twice)
+    std::vector<std::string> qToks;
+    subtokens( task, qToks );
+    std::vector<std::string> content;
+    for( std::string& t : qToks )
+    {
+        if( isRouteStopword( t ) )
+        {
+            continue;
+        }
+        if( std::find( content.begin(), content.end(), t ) == content.end() )
+        {
+            content.push_back( std::move( t ) );
+        }
+    }
+    if( content.size() < kNameCoverageMinContentWords )
+    {
+        return false;
+    }
+    if( outInfo )
+    {
+        outInfo->contentWordCount = std::uint32_t( content.size() );
+    }
+
+    // integer threshold — no float rounding decides admission
+    const std::size_t needed = ( content.size() * std::size_t( kNameCoverageMinPercent ) + 99 ) / 100;
+
+    float topScore = 0.0f;
+    for( const float s : lensRank )
+    {
+        topScore = std::max( topScore, s );
+    }
+    if( !( topScore > 0.0f ) )
+    {
+        topScore = 1.0f;
+    }
+
+    struct Candidate
+    {
+        NodeId        id;
+        std::uint32_t covered;
+    };
+    std::vector<Candidate>   qualifying;
+    std::vector<std::string> nameToks;
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        nameToks.clear();
+        subtokens( ing.symbols[i].name, nameToks );
+        if( nameToks.size() < needed )
+        {
+            continue;                        // cannot possibly cover enough — cheap reject before the compare
+        }
+        std::size_t covered = 0;
+        for( const std::string& c : content )
+        {
+            if( std::find( nameToks.begin(), nameToks.end(), c ) != nameToks.end() )
+            {
+                ++covered;
+            }
+        }
+        if( covered >= needed )
+        {
+            qualifying.push_back( { NodeId( i ), std::uint32_t( covered ) } );
+        }
+    }
+    if( qualifying.empty() )
+    {
+        return false;
+    }
+
+    std::stable_sort( qualifying.begin(), qualifying.end(),
+                      [ & ]( const Candidate& a, const Candidate& b )
+                      {
+                          if( a.covered != b.covered ) { return a.covered > b.covered; }
+                          if( lensRank[a.id] != lensRank[b.id] ) { return lensRank[a.id] > lensRank[b.id]; }
+                          return a.id < b.id;
+                      } );
+
+    std::uint32_t liftedCount = 0;
+    for( std::size_t slotIndex = 0; slotIndex < qualifying.size() && slotIndex < kNameCoverageMaxLifts; ++slotIndex )
+    {
+        const NodeId id     = qualifying[slotIndex].id;
+        const float  target = topScore * ( 1.0f - kNameCoverageTopGapStep * float( slotIndex + 1 ) );
+        if( lensRank[id] < target )
+        {
+            lensRank[id] = target;
+            ++liftedCount;
+        }
+    }
+    if( liftedCount == 0 )
+    {
+        return false;
+    }
+    if( outInfo )
+    {
+        outInfo->liftedCount = liftedCount;
+    }
+    return true;
+}
+
 // ── ANCHOR DISCLOSURE (the `anchors:` clause of a name-exact reason) ──────────────────────────────────
 //
 // The confidence gate above is DOCUMENTED FRAGILE, three lines up: "a single generic word that happens to
