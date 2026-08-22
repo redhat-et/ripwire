@@ -2398,13 +2398,6 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         }
     }
 
-    // Name-coverage floor (lexical.h applyNameCoverageFloor — the rule and its bounds live there). The one
-    // fact that is LOCAL: conceptual route only, because the name-exact route already resolved an anchor.
-    if( !cfg.noRoute && std::strcmp( out.routeTag, "subtoken+body" ) == 0 )
-    {
-        out.routeNote += applyNameCoverageFloor( ing, task, lensRank );   // "" — byte-identical — when nothing covers
-    }
-
     // r4 sibling lift (EXPERIMENTAL, pre-registered — bench/locbench/results/r4_siblift/PREREG.md): lift the
     // strongest query-relevant same-directory siblings of the top-ranked files into the slot ladder. INERT
     // (byte-identical) unless RIPWIRE_SIBLIFT="<seed>,<sib>" parses in range. Routed path only.

@@ -1199,11 +1199,6 @@ inline std::string forTaskText( const std::string& root, const std::string& task
         }
     }
 
-    // Name-coverage floor — same contract, same order (after the mention anchor, before the co-change
-    // prior) as the CLI --for, so the two dialects still answer a conceptual query identically.
-    const std::string coverageNote = rc.which == LexMode::NameExact ? std::string()
-                                                                    : applyNameCoverageFloor( ing, task, lensRank );
-
     // B3 (co-change prior boost) — OPT-IN, EXPERIMENTAL, same contract as CLI --cochange-boost: files that
     // historically change WITH the top-ranked files promote their best symbols into the lower bundle (never
     // displacing the seeds). Default OFF — honest numbers in cli.h: held-out multi-file +0.0pp on Python
@@ -1290,7 +1285,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     //    (ctxRootOpen / packSignatures / packLego), and the same shared legend clause on the tail of the
     //    header comment — so the two dialects stay byte-consistent on what they say and what they explain.
     const std::string_view flRootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
-    std::string headerStr = ctxRootOpen( task, " [routed: " + rc.reason + "]" + coverageNote, flRootArg )   // §B1.7: same root attrs as the CLI twin
+    std::string headerStr = ctxRootOpen( task, " [routed: " + rc.reason + "]", flRootArg )   // §B1.7: same root attrs as the CLI twin
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote + floorNote
                           + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing -->"
                           + rw::forRootRelPathsLegendShort( !flRootArg.empty() );   // W3-S item 5: closes the gap this comment used to record
