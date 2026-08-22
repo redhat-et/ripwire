@@ -104,13 +104,17 @@ COLLIDE="$( mktemp -d )"; trap 'rm -rf "$COLLIDE"' RETURN 2>/dev/null || true
 printf -- '- id: goto\n  severity: warn\n  message: noisy collider\n  query: (number_literal) @hit\n' > "$COLLIDE/goto.yml"
 crow_builtin="$( "$BIN" "$ROOT" --lint --lint-rules="$COLLIDE" 2>/dev/null | grep -oE '<rule name="goto"[^/]*/>' | grep -v 'sev=' )"
 crow_user="$(    "$BIN" "$ROOT" --lint --lint-rules="$COLLIDE" 2>/dev/null | grep -oE '<rule name="goto"[^/]*/>' | grep    'sev=' )"
+# wave-4 item 12 added a per-rule shown_rows=/rows_capped= pair (--lint's row-window disclosure) that sits
+# beside this bare capped= (this rule's own MATCH-BUDGET saturation) on the same row — a plain substring
+# match on "capped" now also hits "rows_capped", so the check must anchor on the bare ` capped="` spelling
+# (leading space) to keep testing the fact it was written for, not the unrelated new one.
 case "$crow_builtin" in
-    *capped* ) no "built-in goto row inherited the colliding USER rule's cap: $crow_builtin" ;;
+    *' capped='* ) no "built-in goto row inherited the colliding USER rule's cap: $crow_builtin" ;;
     *count=\"2\"* ) ok "built-in goto row stays a clean total beside a saturating same-named user rule" ;;
     * ) no "built-in goto row unexpected shape: $crow_builtin" ;;
 esac
 case "$crow_user" in
-    *capped=\"1\"* ) ok "colliding user rule's own saturation still disclosed: capped=\"1\"" ;;
+    *' capped="1"'* ) ok "colliding user rule's own saturation still disclosed: capped=\"1\"" ;;
     * ) no "user goto rule saturated its budget but carries no capped=: $crow_user" ;;
 esac
 rm -rf "$COLLIDE"
