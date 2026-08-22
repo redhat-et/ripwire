@@ -30,7 +30,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 GOLD="${GOLD_BIN:-$ROOT/build/ripwire}"
 [ "${GOLD#/}" = "$GOLD" ] && GOLD="$ROOT/$GOLD"

@@ -70,7 +70,7 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 cd "$ROOT" || { echo "deckcheck: cannot cd to repo root $ROOT"; exit 2; }
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 ALLOWLIST="$ROOT/test/deckcheck_allowlist.txt"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT

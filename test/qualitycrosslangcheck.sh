@@ -10,7 +10,7 @@
 # Usage:  test/qualitycrosslangcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/qualitycrosslangcheck.sh
 # Exits non-zero on any failure. Does NOT edit regression.sh. Needs git.
 set -u
-BIN="${RIPWIRE_BIN:-./build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-./build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }

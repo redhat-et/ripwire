@@ -41,7 +41,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="test/subtokfix"                                  # kept REPO-RELATIVE: the p= attributes the CLI
 cd "$ROOT" || exit 2                                  # arm compares against are relative to the cwd

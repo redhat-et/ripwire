@@ -11,7 +11,7 @@
 # Usage:  test/rubymetricscheck.sh   |   RIPWIRE_BIN=asan/ripwire test/rubymetricscheck.sh
 # Exits non-zero on any failure. Does NOT edit test/regression.sh. Self-contained via mktemp.
 set -u
-BIN="${RIPWIRE_BIN:-./build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-./build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 fail=0
 ok(){ echo "  PASS  $1"; }
