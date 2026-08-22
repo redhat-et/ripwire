@@ -92,6 +92,7 @@ presence main.lua    'total < 0 and n > 0'       'the WORD boolean operator `and
 presence greeter.lua 'elseif n == ""'            'an elseif arm'
 presence greeter.lua 'setmetatable('             'the metatable idiom the inheritance floor is about'
 presence greeter.lua 'require("util")'           'a require call (NOT an import directive)'
+presence main.lua    'local iife_pick = (function()' 'the IIFE module idiom the definition floor is about'
 
 MAP_OUT="$TMP/map.xml"
 "$BIN" "$FIX" --no-cache >"$MAP_OUT" 2>"$TMP/map.err"
@@ -216,6 +217,19 @@ LEGO="$( "$BIN" "$FIX" --lego=Greeter --no-cache 2>/dev/null )"
 echo "$LEGO" | grep -q '<impl ' \
     && no "--lego=Greeter listed an implementor on a Lua corpus: $LEGO" \
     || ok '--lego=Greeter lists no implementors (same floor, second surface)'
+
+# The SECOND stated floor: the IIFE module idiom. `local iife_pick = (function() … end)()` is a callable
+# local whose value node is a parenthesized_expression, so shape 4 declines it — and MUST, because what
+# the call binds is that expression's RETURN value, which no static read can name. The honest posture is
+# what is asserted: NO definition, and the use-site index says so out loud (defs="0" external="1") rather
+# than inventing one. Measured on plenary.nvim's lua/plenary/path.lua before it was written down here.
+grep -q '<s t="[a-z]*" n="iife_pick"' "$MAP_OUT" \
+    && no 'iife_pick was DEFINED — the IIFE value is a parenthesized_expression, so this def was invented' \
+    || ok 'no definition of iife_pick (the IIFE floor holds; queries/lua/tags.scm states it)'
+USES_IIFE="$( "$BIN" "$FIX" --uses=iife_pick --no-cache 2>/dev/null )"
+echo "$USES_IIFE" | grep -q 'defs="0"' \
+    && ok '--uses=iife_pick reports defs="0" — "no definition found here", never a wrong one' \
+    || no "--uses=iife_pick did not report defs=0: $( echo "$USES_IIFE" | grep -o '<uses [^>]*>' )"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo

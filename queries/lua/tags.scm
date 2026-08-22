@@ -25,6 +25,13 @@
 ;     `Base.__index = Base` likewise mints nothing.
 ;   - Dispatch through a variable: `local fn = M.f; fn()` calls `fn`, and `obj[ key ]()` names nothing
 ;     at all. Both produce no resolvable edge.
+;   - The IIFE module idiom: `local shorten = (function() … end)()`. Shape 4 below declines it, and
+;     correctly so — the assignment's value node is a `parenthesized_expression`, not a
+;     `function_definition`, and what the call actually binds is that expression's RETURN value, which
+;     no static reading of the text can name. MEASURED, not predicted: found on plenary.nvim's
+;     `lua/plenary/path.lua`, which defines `shorten` and `_get_parent` this way. It degrades honestly
+;     rather than guessing — `--uses=_get_parent` reports `defs="0" external="1" count="2"`, i.e. "two
+;     use-sites, no definition found here", never a wrong definition.
 ;   - `require "mod"` is NOT an import directive — Lua has no import syntax; require is an ordinary
 ;     global function. It is therefore captured by the plain call pattern below (exactly as Ruby's
 ;     `require` is), NOT by ingest.cpp::captureIncludes, and Lua is correspondingly absent from
