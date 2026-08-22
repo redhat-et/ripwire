@@ -2571,6 +2571,32 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
     return head;
 }
 
+// ── LB-A (r10 GitNexus round) — THE RELEVANCE FLOOR ──────────────────────────────────────────────────
+// `order` is already sorted by (score desc, id asc), so every row that scored ZERO forms one contiguous
+// TAIL. This walks that tail off the kept head and returns the shortened count.
+//
+// It is an ADMISSION rule, not a ranking one: no score is touched and no row moves, so the emitted set
+// stays exactly the (score desc, id asc) head — only where the head STOPS changes. That distinction is
+// what keeps this out of the pre-registered-band regime: a row with score 0 matched no query term at all,
+// so there is no recall hypothesis to be wrong about. (r10 §5 LB-A measured such rows at 64-84% of a
+// class-A bundle's bytes on all 12/12 of that round's symbol-lookup queries — mean ~73%, and 17.5% of
+// everything the tool emitted over the whole 48-query sweep.)
+//
+// Shared by packSignatures and packSignaturesJson for the §A4a reason the trim ladder above is shared: two
+// copies of a selection rule are how the two dialects silently diverge one round from now.
+//
+// The `topN == 0 ⇒ all` convention below makes an empty kept set unrepresentable through topN alone, which
+// is why this is a floor applied AFTER `keep` rather than a caller-side clamp: a query nothing scores on
+// must emit ZERO rows, not the whole corpus.
+inline std::size_t relevanceFlooredKeep( const std::vector<NodeId>& order, const std::vector<float>& rank, std::size_t keep ) noexcept
+{
+    while( keep > 0 && order[ keep - 1 ] < rank.size() && !( rank[ order[ keep - 1 ] ] > 0.0f ) )
+    {
+        --keep;
+    }
+    return keep;
+}
+
 // ── §A4a — THE ONE SIGNATURE-PAYLOAD TRIM LADDER (steps A..F, kForPayloadBudgetBytes above) ──────────
 // Extracted from packSignatures so the JSON sibling runs the SAME ladder rather than a second copy of it:
 // §A4a found `--for --json` byte-identical at --token-budget=1000 and 20000 because the
@@ -2685,8 +2711,11 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                                                                             //   note — user-attached memory always survives; the payload around
                                                                             //   it shrinks to make room. Charging nothing put a note-heavy tree
                                                                             //   56% over a tight --token-budget the JSON mode honored.
-                            std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
-                                                              // argument serialize() takes — see its comment.
+                            std::string_view rootArg = {},   // R-E (2026-08-17): same single-root-only root
+                                                             // argument serialize() takes — see its comment.
+                            bool hasRelevanceFloor = false ) // LB-A: drop the zero-score TAIL of the kept head rather
+                                                             //   than padding the quota with it (relevanceFlooredKeep
+                                                             //   above). Off ⇒ byte-identical to the pre-LB-A path.
 {
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F1): the MCP `for` verb has no byte budget, and 0 must never mean
     // "cap at zero bytes" (the cap fired before the first signature and emitted a bare <sigs></sigs>).
@@ -2713,7 +2742,11 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         order[i] = i;
     }
     sortutil::radixSortByScoreDescId( order, rank );
-    const std::size_t keep = std::min<std::size_t>( topN > 0 ? std::size_t( topN ) : S, S );
+    std::size_t keep = std::min<std::size_t>( topN > 0 ? std::size_t( topN ) : S, S );
+    if( hasRelevanceFloor )
+    {
+        keep = relevanceFlooredKeep( order, rank, keep );   // LB-A: shrink, never pad
+    }
 
     // bucket kept symbols by file; files ordered by first-seen (best) rank
     std::vector<std::vector<NodeId>> buckets( ing.files.size() );
@@ -6035,8 +6068,11 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
                                 std::size_t payloadBudgetBytes = 0,        // H1 global payload budget for this array; 0 = no ladder
                                 bool*       outCapped          = nullptr,  // set true iff the ladder trimmed something
                                 JsonSigNoteCounts* outNotes    = nullptr,  // §B1.3: matched vs emitted note counts
-                                std::string_view rootArg       = {} )      // R-E (2026-08-17): same single-root-only
+                                std::string_view rootArg       = {},       // R-E (2026-08-17): same single-root-only
                                                                            // root argument serialize() takes.
+                                bool hasRelevanceFloor = false )           // LB-A: the XML sibling's own admission rule,
+                                                                           //   shared through relevanceFlooredKeep so the
+                                                                           //   two dialects cannot select differently.
 {
     const bool rankAdaptivePayload = lens.rankAdaptivePayload;
     if( outCapped )
@@ -6059,7 +6095,11 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         order[i] = i;
     }
     sortutil::radixSortByScoreDescId( order, rank );
-    const std::size_t keep = std::min<std::size_t>( topN > 0 ? std::size_t( topN ) : S, S );
+    std::size_t keep = std::min<std::size_t>( topN > 0 ? std::size_t( topN ) : S, S );
+    if( hasRelevanceFloor )
+    {
+        keep = relevanceFlooredKeep( order, rank, keep );   // LB-A: the XML sibling's rule, verbatim
+    }
 
     std::vector<std::vector<NodeId>> buckets( ing.files.size() );
     std::vector<std::uint32_t>       fileOrder;

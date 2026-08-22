@@ -84,8 +84,14 @@ MARK_GH="REDACTED:github-token"
 run(){ "$BIN" "$CORPUS" "$@" 2>/dev/null; }
 
 # ── arm 1-2: the <d>/"sig" pair — the direct repro, both dialects ──────────────────────────────────
-XMLFOR="$( run --for="probeVaultLoader" )"
-JSONFOR="$( run --for="probeVaultLoader" --json )"
+# LB-A (relevance floor, r10 round): the query names BOTH probe functions. It used to name only
+# probeVaultLoader, on which probeVaultHelper scores zero — the JSON dialect saw that row (and therefore
+# the github-token) only as quota PADDING, while the XML dialect saw it for real through its auto-<bodies>
+# <calls> child. The kind-set parity arm below was consequently asserting parity that rested on filler, and
+# would have gone red the moment the padding did. Both dialects now carry both rows on their own terms.
+SECRETQ="probe vault loader helper"
+XMLFOR="$( run --for="$SECRETQ" )"
+JSONFOR="$( run --for="$SECRETQ" --json )"
 
 case "$XMLFOR" in *"$AWSKEY"*) no "XML --for leaks the default-arg AWS key verbatim in the row signature";; *) ok "XML --for row signature carries no raw key";; esac
 case "$XMLFOR" in *"$MARK_AWS"*) ok "XML --for row signature carries the $MARK_AWS marker";; *) no "XML --for row signature has no redaction marker (the key vanished instead of being marked?)";; esac
@@ -161,7 +167,7 @@ fi
 if printf '%s' "$JSONFOR" | python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null; then ok "redacted JSON still parses"; else no "redacted JSON no longer parses"; fi
 
 # ── arm 12: determinism (redaction must not perturb ordering or content run-to-run) ────────────────
-if [ "$( run --for="probeVaultLoader" )" = "$XMLFOR" ]; then ok "redacted XML is byte-identical run-to-run"; else no "redacted XML is not deterministic"; fi
+if [ "$( run --for="$SECRETQ" )" = "$XMLFOR" ]; then ok "redacted XML is byte-identical run-to-run"; else no "redacted XML is not deterministic"; fi
 
 [ "$fail" -eq 0 ] && { echo "ALL PASS"; exit 0; }
 echo "FAILURES PRESENT"; exit 1

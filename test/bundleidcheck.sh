@@ -34,7 +34,11 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 cd "$ROOT"
 echo "bundleidcheck: BIN=$BIN"
 
-TASK="compute perimeter distance"
+# LB-A (relevance floor, r10 round): the task names Point explicitly. It used to be "compute perimeter
+# distance", on which the fixture's only SCOPED symbol (Point) scores zero — it reached the bundle purely as
+# quota padding, which the floor now drops. Arm (2) is about whether a scoped row's id= matches the default
+# map's canonical id, not about whether an unrelated row gets padded in, so the task reaches Point directly.
+TASK="compute perimeter distance Point"
 FIX="test/fixture"
 
 # a stack trace pointing INTO the fixture, so --from-trace has in-corpus frames to rank
