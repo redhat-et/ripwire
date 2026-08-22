@@ -2398,6 +2398,23 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         }
     }
 
+    // Name-coverage floor (lexical.h applyNameCoverageFloor, registered in docs/EVALS.md): a wiring class
+    // whose own NAME spells at least half the task's content words is floored into the head of the bundle
+    // regardless of graph centrality. CONCEPTUAL ROUTE ONLY — the name-exact route already lands such a
+    // class at rank 1, and running the floor there would fight the anchor the route just resolved. Inert
+    // (byte-identical) on any query where no symbol name covers enough, which is most of them.
+    if( !cfg.noRoute && std::strcmp( out.routeTag, "subtoken+body" ) == 0 )
+    {
+        NameCoverageInfo coverageInfo;
+        if( applyNameCoverageFloor( ing, task, lensRank, &coverageInfo ) )
+        {
+            char cb[ 160 ];
+            std::snprintf( cb, sizeof( cb ), " [name coverage: %u symbol%s whose own name spells >=half of the task's %u content words lifted]",
+                           coverageInfo.liftedCount, coverageInfo.liftedCount == 1 ? "" : "s", coverageInfo.contentWordCount );
+            out.routeNote += cb;
+        }
+    }
+
     // r4 sibling lift (EXPERIMENTAL, pre-registered — bench/locbench/results/r4_siblift/PREREG.md): lift the
     // strongest query-relevant same-directory siblings of the top-ranked files into the slot ladder. INERT
     // (byte-identical) unless RIPWIRE_SIBLIFT="<seed>,<sib>" parses in range. Routed path only.
