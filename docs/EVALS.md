@@ -681,6 +681,86 @@ the readout is declared underpowered — not null — and waits; the T0 terminal
 sessions. The pass-2 episode method inherits its window definition; changing the window after
 seeing post-deploy data would be tuning the instrument — the readout uses the same pass-2 method
 that produced the baseline. Metric (b) confounded as stated above.
+### Anchor-only auto bodies — T3 substitution round, PRE-REGISTERED 2026-08-22 (before any fix code)
+
+**Scope guard, first, because it is the thing this round is most likely to be mistaken for.** This is
+**not** a KEEP/REJECT on T3. T3's registered primary metric is the transcript-mined map-then-read
+rate above, its readout waits on ≥ 30 post-deploy `--for` episodes, and no byte table can stand in
+for it. This round changes one narrow behaviour *inside* the allowance and is judged on its own band.
+The T3 registration's text is the boundary: it binds "rank-first, whole-body-or-not-at-all (a body
+that does not fit is dropped and disclosed, never cut mid-def)" and the candidate CAP. It makes no
+claim, anywhere, that a body other than the queried symbol's own may be served in its place — so
+removing that behaviour takes nothing the registration promised.
+
+**The mechanism under test.** When `--for`'s route names an ANCHOR — the `anchors: NAME(path)` clause
+a name-exact reason carries — the auto-body candidate set becomes exactly that anchor, identified by
+lowercased NAME *and* by the anchor's own defining FILE. A same-named symbol in a different file is
+not the anchor. If the anchor's body does not fit the allowance, the bundle serves NO body and says
+so through the disclosure that already exists for that case (`bodies="0" reason="budget"`, the
+`<bodies shown="0" total="N" capped="1">` shell, and the per-item over-budget comment naming what was
+dropped). Routes that name no anchor — a subtoken+body conceptual query — are untouched, because
+nothing anchored them and there is therefore nothing to restrict to. `--detail=N`, `--pack-task`,
+`--expand` and `--signatures-only` are all unaffected.
+
+**Why.** Measured on the 12 symbol-lookup queries of the standing head-to-head query set, re-derived
+at `3702693` with the corpora at their recorded pins: the allowance serves **19 body blocks**, of
+which **8 are the anchor's own body and 11 are not**. The 11 are **43.9% of every served body byte**.
+They are not near-misses — the largest is a `CHANGELOG.md` "Patch Changes" section that mentions a
+class name and costs 8,605 B, i.e. the entire allowance for that query, while both real definitions
+of the class sit next to it marked `body omitted (over budget)`. Others are a `types.d.ts` one-line
+type stub, a re-export shim in `lib/index.js`, and two copies of a document's "Project overview"
+heading. The pattern is structural rather than incidental: substitution happens exactly when the
+anchor's own body is LARGE, which is exactly when a caller most needs it, and the replacement is by
+construction something small enough to fit — i.e. something with less in it.
+
+**Baseline, re-derived in this lane before any code was written** (not copied from the memo it
+follows; the re-derivation reproduces that memo's per-query byte column exactly on all 12 queries):
+
+| | class-A total bytes |
+|---|---:|
+| current default (allowance on) | **65,016** |
+| `--signatures-only` (the registered opt-out) | **26,523** |
+| the allowance, isolated | **38,493** |
+
+The anchor's own body IS served on `get_object_or_404`, `make_password`, `bulk_create`, `subtokens`,
+`pageRankDouble`, `pathQualifiedKey`, `takeRank` and `RuntimeTemplate` — 8 of 12. It is NOT served on
+`URLResolver`, `ChunkGraph`, `seal` and `NormalModuleFactory`, the four whose anchor body is too large
+for the allowance. `URLResolver` already serves nothing and discloses it; the other three each serve a
+substitute instead.
+
+**Band, pre-registered before the fix exists.** Judged on the same 12 queries, same binaryless method
+(short relative roots, stdout to a file, warm index), as a two-sided byte band on the class-A total.
+The band's derivation — a fixed external denominator from a head-to-head round the improve-first rule
+keeps unpublished — lives in the operator-local lane report; only the resulting byte band is public,
+because only the byte band is a fact about this tool:
+
+| Verdict | class-A total bytes, 12 queries |
+| --- | --- |
+| **ACCEPT** | **48,703 … 54,547** (the projection is 51,548) |
+| **REJECT** | outside that band |
+
+It is two-sided on purpose. The upper bound is the payoff — the substituted bytes have to actually
+leave. The lower bound is the trap: a total below it means the change did not merely stop
+substituting, it also cost an anchor body that was already the right answer, and a cheaper bundle
+bought by deleting correct answers is a regression wearing a win's numbers.
+
+**Success criteria, all four required.** (a) The 8 anchor bodies above are still served, and each is
+**byte-identical** to its pre-change text. (b) The four queries whose anchor does not fit serve no
+body at all and disclose the zero. (c) The class-A total lands in the band. (d) Determinism holds
+(byte-identical ×3) and the gate suite stays green.
+
+**Failure criteria that revert the change, stated before it is measured.** Any anchor body lost from
+the 8 — including one lost to a budget interaction rather than to the rule itself — or any regression
+in the relevance floor's own gate. Either one reverts; neither is negotiable by re-reading the band.
+
+**Confounds, stated.** The 12-query set is a symbol-lookup set on three corpora, authored for a
+different round and frozen — it is not a sample of what agents ask, and the round claims nothing about
+conceptual queries, which the rule does not touch. Byte totals move with the invoking path string,
+because the root and per-section id strings are charged against the same budget that decides which
+bodies fit; the baseline and the readout therefore use identical short relative roots, and a
+long-absolute-path invocation is not a valid re-run of this band. The anchor's defining file is the
+FIRST definition of that name in NodeId order, so on a name with several definitions the rule follows
+the same disclosed choice the route header already prints, and inherits whatever that choice is.
 ### Markdown section tier — G2/G3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **What the round deletes.** The residual this tier removes is *"find the section inside the doc"*:
