@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 444 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 445 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -761,6 +761,40 @@ bodies fit; the baseline and the readout therefore use identical short relative 
 long-absolute-path invocation is not a valid re-run of this band. The anchor's defining file is the
 FIRST definition of that name in NodeId order, so on a name with several definitions the rule follows
 the same disclosed choice the route header already prints, and inherits whatever that choice is.
+### Auto-bundle section split under an explicit `--token-budget` — budget-inflation fix, 2026-08-22
+
+**The defect, measured before any code moved** (the full decomposition:
+`PLAN_HARVEST_REPORTS_2026-08-20/classb-bytes-memo.md` §2, on the r10 class-B conceptual set at
+`4692076` with the corpora at their recorded pins). An explicit `--token-budget` ABOVE `--for`'s own
+default gave the signature side FIRST CLAIM on the whole ceiling (`sigsBudget = ceiling − fixed`),
+while the auto bodies' allowance (`kForAutoBodyBudgetBytes`) existed only in the default regime. So
+`--token-budget=8000` (≈17.0 KB at the conservative rate, wider than the default's ~13.5 KB effective
+ceiling) un-trimmed exactly the sig tail the default ladder trims — DJ-B1: `<sigs>` 1,782 B → 9,483 B,
+8 rows → 40, `<lego>` re-expanding with it — and crowded the auto body walk from 6 served bodies down
+to 2, dropping `split_exclude` (and with it the judged-decisive `build_filter` callee row). The class-B
+15-query total rose to 3.33× the competitor baseline, *worse than doing nothing*, while serving less of
+what the r10 judging credited. This is a distinct mechanism from LB-A's zero-score padding: it needs an
+explicit ceiling wider than the default to fire, so the class-A measurements never saw it.
+
+**The invariant, designed before the fix and gated red-first** (`test/forbudgetmonotoncheck.sh`, RED at
+`4692076` on an engineered fixture reproducing the trap, GREEN after): **a wider ceiling never buys
+less decisive content.** In auto-bundle mode with no explicit `--pack-top-n`, the sig side's claim on
+the ceiling is `min( ceiling, kForPayloadBudgetBytes )` — so (i) the default regime is byte-identical
+(its ceiling IS that budget; golden-neutral by construction), (ii) at any explicit ceiling ≥
+`kForPayloadBudgetBytes + kForAutoBodyBudgetBytes` the `<sigs>`/`<lego>` render equals the default
+regime's byte for byte, hence the bodies' leftover is provably ≥ the default's and every body the
+default serves still fits, and (iii) within that band a larger ceiling serves a body superset. Body
+COUNT inside one `packBodies` walk stays rank-priority (the §H5 re-diagnosis stands un-relitigated);
+this invariant binds the SECTION split, not the walk. An explicit `--pack-top-n` is an explicit sig
+posture and keeps the legacy whole-ceiling claim; `--signatures-only`, `--detail=N` and `--json` have
+no auto bodies to reserve for and are likewise uncapped.
+
+**Discipline note.** Serving-side ADMISSION only, the LB-A class: no score moves, no candidate
+re-ranks, and the default bundle is byte-identical — which is why this is a defect fix with a
+red-first gate rather than a pre-registered-band round. Verified on the memo's own trap: DJ-B1 at
+`--token-budget=8000` now serves the default's full 6-body set (13,057 B, `split_exclude` body and
+`build_filter` row included) instead of 17,419 B carrying 2 bodies. T3's transcript-mined primary
+metric is untouched by this entry.
 ### Markdown section tier — G2/G3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **What the round deletes.** The residual this tier removes is *"find the section inside the doc"*:
@@ -2244,7 +2278,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **444 gate scripts**, all of which exist on disk.
+naming **445 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -3052,7 +3086,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 444. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 445. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
