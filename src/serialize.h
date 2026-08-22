@@ -2597,6 +2597,37 @@ inline std::size_t relevanceFlooredKeep( const std::vector<NodeId>& order, const
     return keep;
 }
 
+// The caller-side half of the floor: how many slots of the quota survive it, and the note that says so.
+// ONE spelling for both --for dialects (CLI runForLens, MCP forTaskText) — a bundle-composition rule with
+// two implementations is a rule with two behaviours, which is the drift class the §B4 echo-site rule and
+// this file's own shared trim ladder both exist to stop. Structured-binding return (CONTRIBUTING §3) rather
+// than an in/out `int&` so the caller cannot forget the note.
+//
+// `note` is empty EXACTLY when the floor did not fire, so an inert call is byte-identical. The note's
+// wording is the --adaptive cut's idiom, because it reports the same kind of fact: this quota is smaller
+// than you asked for, here is by how much and why.
+struct RelevanceFloorCut
+{
+    int         topN;   // the narrowed quota (never above the requested one)
+    std::string note;
+};
+inline RelevanceFloorCut relevanceFloorCut( const std::vector<float>& rank, int topN )
+{
+    std::size_t positiveCount = 0;
+    for( const float s : rank )
+    {
+        if( s > 0.0f ) { ++positiveCount; }
+    }
+    if( topN <= 0 || positiveCount >= std::size_t( topN ) )
+    {
+        return { topN, {} };
+    }
+    char nb[ 200 ];
+    std::snprintf( nb, sizeof( nb ), " [relevance floor: kept %zu of %d - the other %zu scored zero on this query, so the bundle shrank instead of padding]",
+                   positiveCount, topN, std::size_t( topN ) - positiveCount );
+    return { int( positiveCount ), std::string( nb ) };
+}
+
 // ── §A4a — THE ONE SIGNATURE-PAYLOAD TRIM LADDER (steps A..F, kForPayloadBudgetBytes above) ──────────
 // Extracted from packSignatures so the JSON sibling runs the SAME ladder rather than a second copy of it:
 // §A4a found `--for --json` byte-identical at --token-budget=1000 and 20000 because the

@@ -130,6 +130,49 @@ inline PathTier pathTierOf( std::string_view p ) noexcept
     return PathTier::Source;
 }
 
+// ── LB-G (r10 GitNexus round) — the ORDERING key, in ONE place for every verb that sorts rows by it ──────
+// --grep has ordered SOURCE > TEST/BENCH > DOC since the span-tier round; --callers/--callees/--uses joined
+// it in the r10 fix round. Three verbs sorting by "tier then path" is three chances to spell the key
+// differently, which is the echo-site drift class this tree keeps re-finding, so the key is stated once.
+//
+// The index is materialized ONCE PER DISTINCT FILE the row list actually touches, never inside a
+// comparator: pathTierOf() lowercases an extension into a fresh std::string, so an O(n log n) comparator
+// that called it would allocate millions of times on a large --grep. search.h derives the same fact the
+// same way for the same reason; this is that reasoning hoisted rather than a second copy of it.
+// 0xFF = not computed (PathTier has three values, so the sentinel can never collide with a real tier).
+template<class RowRange, class FileIdOf>
+inline std::vector<std::uint8_t> pathTierIndexOver( const IngestResult& ing, const RowRange& rows, FileIdOf fileIdOf )
+{
+    std::vector<std::uint8_t> tierOfFile( ing.files.size(), 0xFFu );
+    for( const auto& row : rows )
+    {
+        const std::uint32_t f = fileIdOf( row );
+        if( f < tierOfFile.size() && tierOfFile[f] == 0xFFu )
+        {
+            tierOfFile[f] = std::uint8_t( pathTierOf( ing.files[f] ) );
+        }
+    }
+    return tierOfFile;
+}
+
+// Three-way compare on the (tier, path) key of two FILES. 0 means "the same file" — the row-level tiebreak
+// (line, name, role …) is the caller's, because it differs per verb; everything above it does not.
+// Three-way rather than a `less` predicate so a caller spends ONE branch on the file key instead of the two
+// nested ones each open-coded copy needed.
+inline int compareTierThenPath( const IngestResult& ing, const std::vector<std::uint8_t>& tierOfFile,
+                                std::uint32_t a, std::uint32_t b ) noexcept
+{
+    if( a == b )
+    {
+        return 0;
+    }
+    if( tierOfFile[a] != tierOfFile[b] )
+    {
+        return tierOfFile[a] < tierOfFile[b] ? -1 : 1;
+    }
+    return ing.files[a] < ing.files[b] ? -1 : 1;
+}
+
 // ── §P4 de-prioritization tier (SCORING, not ordering) ───────────────────────────────────────────────────
 // The retrieval lenses treated test fixtures and presentation decks as first-class source: a fixture stub
 // outranked the real algorithm on the plan's cited example, and a deck-build local got bodied as a top hit.

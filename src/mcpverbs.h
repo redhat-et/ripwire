@@ -1244,22 +1244,8 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // composition contract may not have two behaviours. lensRank is FINAL at this point (route, mention,
     // co-change and doc-mention have all landed), so a row still scoring zero matched nothing under any of
     // them; the bundle shrinks past that tail instead of padding the quota with it, and says so.
-    std::string floorNote;
-    {
-        std::size_t positiveCount = 0;
-        for( const float sc : lensRank )
-        {
-            if( sc > 0.0f ) { ++positiveCount; }
-        }
-        if( positiveCount < std::size_t( forTopN ) )
-        {
-            char fb[ 200 ];
-            std::snprintf( fb, sizeof( fb ), " [relevance floor: kept %zu of %d - the other %zu scored zero on this query, so the bundle shrank instead of padding]",
-                           positiveCount, forTopN, std::size_t( forTopN ) - positiveCount );
-            floorNote = fb;
-            forTopN   = int( positiveCount );
-        }
-    }
+    auto [ flooredTopN, floorNote ] = relevanceFloorCut( lensRank, forTopN );
+    forTopN = flooredTopN;
 
     const std::vector<char>  impure    = computeImpure( ing, ix.g );
 
@@ -1830,21 +1816,11 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
     // sets equal), so a cap on one and not the other is a divergence, not a saving. Both halves are the
     // CLI arm's code read across: rw::pathTierOf materialized once per hit file, then
     // effectiveRowCap/pageWindow/pageDisclosure.
-    std::vector<std::uint8_t> tierOfFile( ing.files.size(), 0xFFu );
-    for( const UseSite& u : sites )
-    {
-        if( u.fileId < tierOfFile.size() && tierOfFile[ u.fileId ] == 0xFFu )
-        {
-            tierOfFile[ u.fileId ] = std::uint8_t( pathTierOf( ing.files[ u.fileId ] ) );
-        }
-    }
+    const std::vector<std::uint8_t> tierOfFile = pathTierIndexOver( ing, sites, [ ]( const UseSite& u ) { return u.fileId; } );
     std::sort( sites.begin(), sites.end(), [ & ]( const UseSite& a, const UseSite& b )
                {
-        if( a.fileId != b.fileId )
-        {
-            if( tierOfFile[ a.fileId ] != tierOfFile[ b.fileId ] ) { return tierOfFile[ a.fileId ] < tierOfFile[ b.fileId ]; }
-            return ing.files[ a.fileId ] < ing.files[ b.fileId ];
-        }
+        if( const int c = compareTierThenPath( ing, tierOfFile, a.fileId, b.fileId ); c != 0 ) { return c < 0;
+}
         if( a.line   != b.line ) {   return a.line < b.line;
 }
         if( a.role   != b.role ) {   return std::uint8_t( a.role ) < std::uint8_t( b.role );
