@@ -2314,7 +2314,16 @@ std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, std::vecto
 // Compute the lens rank for `task` exactly as the --for path does (all existing boosts: routing, --anchor,
 // the B8 mention anchor, the B3 opt-in co-change prior). Pure function of (d, task): reads d.cfg for the same
 // flags --for reads, so both callers get identical rankings for the same query + flags.
-rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task )
+// `compactCandidate` — the caller is --for in a posture that may serve the COMPACT bundle, whose <hops>
+// section ORDERS a cut callee listing by this very rank vector. That makes it a FULL-DISTRIBUTION
+// consumer, like --adaptive and --anchor: a callee is not necessarily in the bundle's own top-K, so a
+// MaxScore-pruned score for it is not merely approximate, it is whatever the pruning left behind — and
+// the order of two callees would then depend on a performance optimization. postingscheck arm (e) found
+// exactly that (the same query returned two different callee orders with and without RIPWIRE_NO_PRUNE),
+// which is the gate doing its job: pruning is contracted to be BYTE-NEUTRAL, not nearly so. Measured
+// cost of giving it up on this route: none detectable — 384.7 vs 378.2 ms on django, 283.2 vs 269.8 ms
+// on webpack, 159.3 vs 159.0 ms on this repo, exhaustive at or inside the noise of pruned every time.
+rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task, bool compactCandidate = false )
 {
     using namespace rw;
     const Config&                     cfg       = d.cfg;
@@ -2327,9 +2336,16 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     // H2 (B0 r2): --for's consumers only read the top-K of this rank, so lexicalScores may skip symbols that
     // provably cannot enter that top-K (exact MaxScore pruning — emitted bytes identical). --adaptive/--anchor
     // are full-distribution consumers and force exhaustive scoring.
+    // The route decides the ranker AND (with compactCandidate) whether pruning may run at all, so it is
+    // chosen ONCE here and reused below rather than classified twice — chooseForRanker is pure over
+    // (ing, task), so hoisting it is byte-neutral by construction.
+    const bool        routeOn      = !cfg.noRoute;
+    const RouteChoice rc           = routeOn ? chooseForRanker( ing, task ) : RouteChoice{};
+    const bool        compactRoute = routeOn && compactCandidate && rc.which == LexMode::SubtokenBody;
+
     std::size_t       forPruneK = 0;
     std::vector<char> ifaceExact;
-    if( !cfg.adaptive && !cfg.anchor )
+    if( !cfg.adaptive && !cfg.anchor && !compactRoute )
     {
         forPruneK = cfg.candidates ? ( cfg.topK > 0 ? std::size_t( cfg.topK ) : 0 )
                                    : std::size_t( cfg.packTopN > 0 ? cfg.packTopN : 40 );
@@ -2354,14 +2370,13 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
 
     LensRanking out;
     std::vector<float>& lensRank = out.rank;
-    if( !cfg.noRoute )
+    if( routeOn )
     {
-        const RouteChoice rc = chooseForRanker( ing, task );
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactTiered( ing, task, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul );
         out.routeNote  = " [routed: " + rc.reason + "]";
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
-        out.anchorDefs = std::move( rc.anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
+        out.anchorDefs = std::move( const_cast<RouteChoice&>( rc ).anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
     }
     else
     {
@@ -3140,7 +3155,14 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
 
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
         { rw::packHops( f, ing, hopIds, hopBudget, g.outOff, g.outTargets, redactPtr, /*outShown=*/nullptr, &lensRank, fcRootArg ); },
-        rw::kBytesPerTokenBody );
+        // MARKUP rate, not the body rate — and this is an honesty choice, not a copy-paste slip. The body
+        // rate (3.80 B/tok) prices SOURCE TEXT; the compact section contains none, only tags, identifiers
+        // and line numbers, which tokenize like the rest of the bundle. Charging structured markup at the
+        // body rate would divide by a larger number and report FEWER tokens than the section really costs,
+        // which is the one direction a disclosure may never round (CONTRIBUTING #3). It also makes the
+        // compact document uniformly markup-rate, so its est_tokens satisfies the flat identity rather
+        // than a mixed-rate one — see test/estchargecheck.sh #11 A9/A10.
+        rw::kBytesPerTokenDefault );
     if( !out.section.isRendered )
     {
         out.surfaceOff = true;                            // degrade: pre-compact output exactly (alert already on stderr)
@@ -3197,7 +3219,12 @@ std::optional<int> runForLens( const MainDispatch& d )
         // ROUTING + anchoring + the B8 mention anchor + the opt-in B3 co-change prior all live in
         // computeLensRanking (shared with runPackTask so the ranking is defined once). Compose order with
         // --anchor: ROUTE picks the base lens rank, then ANCHOR expands it; mention/co-change run after.
-        LensRanking        lr        = computeLensRanking( d, cfg.forTask );
+        // COMPACT posture: --for with no explicit body knob and no opt-out MAY serve the compact bundle,
+        // which orders a cut callee listing by this rank — so the ranking has to be exact everywhere.
+        // Decided from cfg alone (the route is not known yet); a name-exact query simply never goes
+        // compact, and computeLensRanking checks the route itself before it acts on this.
+        const bool         compactPosture = cfg.detail == 0 && !cfg.signaturesOnly && !cfg.autoBodies && !cfg.candidates;
+        LensRanking        lr        = computeLensRanking( d, cfg.forTask, compactPosture );
         std::vector<float> lensRank  = std::move( lr.rank );
         const std::string  routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
         const std::string  mentionNote( std::move( lr.mentionNote ) );
@@ -3753,9 +3780,19 @@ std::optional<int> runForLens( const MainDispatch& d )
             // would over-read the bodies by ~1.5x — the same "one number for two kinds of bytes" defect §H7
             // is about, aimed the other way, and it would report a --for --detail bundle at 2.50 B/tok when
             // its real shape is ~3.6.
+            // COMPACT: the <hops> section is markup, so it belongs in markupBytes and NOT in a second
+            // charge of its own. Charging it separately at the same rate is not merely redundant — it
+            // rounds twice, and two roundings of one rate do not equal one rounding of it: the weak-query
+            // bundle came out at 529 tokens where round(1321/2.50) is 528, an off-by-one in the number
+            // that is contracted to BE the document's own measurement (test/estchargecheck.sh #11 A9/A10
+            // asserts the identity, not a band). One rate, one rounding.
+            const std::size_t compactBytes = compactMode ? autoSection.xml.size() : 0u;
             const std::size_t markupBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
-                                          + routeStr.size() + graphSection.xml.size() + 6;   // + "</ctx>"
-            const std::size_t bodyTokens  = detailSection.tokens + autoSection.tokens;   // T3: the auto bodies are charged at the body rate too
+                                          + routeStr.size() + graphSection.xml.size() + compactBytes + 6;   // + "</ctx>"
+            // T3: the auto bodies are charged at the body rate too — def-body text BPE-merges differently
+            // from markup, which is the whole reason this sum is split by kind. On the compact route
+            // autoSection is markup and was folded into markupBytes above, so it contributes nothing here.
+            const std::size_t bodyTokens  = detailSection.tokens + ( compactMode ? 0u : autoSection.tokens );
             std::size_t estTokens = rw::tokensForEmittedBytes( markupBytes, kBytesPerTokenDefault ) + bodyTokens;
             std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
             for( int pass = 0; pass < 4; ++pass )

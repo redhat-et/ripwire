@@ -13,8 +13,9 @@
 #   4) --signatures-only opts out: no bundle= attribute, no <bodies> — the pre-T3 bundle shape.
 #      It refuses loudly without --for, and refuses the contradictory --signatures-only --detail=N.
 #   5) escalation is capped and disclosed: bodies= on the root equals the emitted <b> count and
-#      never exceeds the pack-task body-candidate cap (6). Asserted on a CONCEPTUAL query, because
-#      that is the route the rank-first walk still runs on — see (5b).
+#      never exceeds the pack-task body-candidate cap (6). Asserted on a CONCEPTUAL query UNDER
+#      --auto-bodies, because that is where the rank-first walk still runs — see (5b) and the compact
+#      round in docs/EVALS.md.
 #   5b) on a route that NAMES an anchor, the allowance serves that anchor's own body or none at all;
 #      a generous budget does not escalate past it, and a same-named symbol in another file is never
 #      substituted for it. Mechanism + band: docs/EVALS.md, the anchor-only round; the dedicated
@@ -125,8 +126,11 @@ grep -q '<b [^>]*><!\[CDATA\[' "$TMP/nofit" \
 # query has exactly ONE candidate by construction and "capped at 6" stopped being observable through it —
 # green while inert, the failure mode CONTRIBUTING §2 names. A CONCEPTUAL query names no anchor, keeps the
 # rank-first walk, and is where the cap is still a real bound. The presence guard is what keeps that true.
+# COMPACT conceptual serving (docs/EVALS.md, the T3 route-narrowing round): the rank-first body walk on
+# the conceptual route now lives behind --auto-bodies, so that is where the candidate cap is still a real
+# bound and where this arm has to look. The compact default's own contract is test/compactroutecheck.sh.
 CONCEPTUAL="how are identifiers split into subtokens for ranking"
-"$BIN" src --for="$CONCEPTUAL" --token-budget=20000 --no-cache >"$TMP/big" 2>/dev/null
+"$BIN" src --for="$CONCEPTUAL" --auto-bodies --token-budget=20000 --no-cache >"$TMP/big" 2>/dev/null
 grep -q 'anchors: ' "$TMP/big" \
     && no "#5 presence: the escalation query routed name-exact — re-author it, the cap is unobservable there" \
     || ok "#5 presence: the escalation query routed subtoken+body, where the candidate cap still binds"
