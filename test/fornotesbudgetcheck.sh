@@ -29,26 +29,30 @@
 # The corpus is built here, in a temp dir this script creates and removes: it needs its own git repo
 # (notes are provenance-stamped) and its own .ripwire_notes, neither of which belongs in the tree.
 #
-# ── CEILING MARGIN, RECORDED 2026-08-19 (wave-3 verifier P5-4) — READ THIS BEFORE DEBUGGING A RED ──────
-# The `--token-budget=800` XML arm now runs at **est_tokens=798 of 800: TWO tokens of headroom.**
+# ── CEILING MARGIN, RE-ANCHORED 2026-08-22 (T3 disclosure-gap fix) — READ THIS BEFORE DEBUGGING A RED ──
+# The tight XML arm now runs at --token-budget=850 with **est_tokens=814: 36 tokens of headroom.**
 #
-#   · baseline binary at adb0831 (wave-2 close): est_tokens=747, i.e. 53 tokens of headroom
-#   · wave-3 head:                               est_tokens=798, i.e.  2 tokens of headroom
+#   · baseline binary at adb0831 (wave-2 close):  est_tokens=747 of 800 — 53 tokens of headroom
+#   · wave-3 head (P5-4 recorded, not re-anchored): est_tokens=798 of 800 —  2 tokens of headroom
+#   · disclosure-gap fix (this re-anchor):          est_tokens=814 of 850 — 36 tokens of headroom
 #
-# The 51-token move is ONE identified change — W3-S item 5's `root=` legend clause, +126 B on every --for,
-# charged at kMinBytesPerToken. It is not drift and it is not this gate rotting: the corpus is a generated
-# temp fixture, not the live tree, so the number does NOT move with repo growth. It is stable across
-# consecutive runs.
+# Each move is ONE identified change. Wave 3's +51 was W3-S item 5's `root=` legend clause (+126 B on
+# every --for, charged at kMinBytesPerToken). This lane's +16 is the T3 exhausted-ceiling disclosure:
+# `bundle="auto" bodies="0" reason="budget"` (~40 B) now rides the <ctx> root on EVERY auto-mode run,
+# including one whose signature bundle spent the whole allowance — the silent branch the 2026-08-22
+# Lane-AA transcript mine caught is gone (test/fordisclosurecheck.sh). The tight ceiling moved 800→850
+# in its own commit, immediately preceding that change, per the instruction the previous anchor left
+# below: wave-3 spent the margin to 2 tokens, so ANY header addition had to re-anchor (at 850 the
+# pre-change binary's 798 still passes, so the history is green at every step). est_tokens is FLAT from 830 to 900
+# (measured: no additional row fits), so 850 buys real headroom, not a different selection. The corpus
+# is a generated temp fixture, not the live tree, so the number does NOT move with repo growth.
 #
 # CONSEQUENCE FOR THE NEXT LANE: **any** addition to --for's legend or header, of any size, turns this arm
-# red — and it will read as YOUR regression when it is this wave's ratchet. If you added a clause to --for
-# and this went red, that is the expected signal, not a bug in your change; the correct response is a
-# DELIBERATE re-anchor of the 800 ceiling in its own commit with the new number recorded here (the gate's
-# own philosophy elsewhere: a recalibration is a commit, never a mid-lane bar move). Do not widen the bar
+# red — and it will read as YOUR regression when it is a ratchet. If you added a clause to --for and this
+# went red, that is the expected signal, not a bug in your change; the correct response is a DELIBERATE
+# re-anchor of the tight ceiling in its own commit with the new number recorded here (the gate's own
+# philosophy elsewhere: a recalibration is a commit, never a mid-lane bar move). Do not widen the bar
 # quietly, and do not "fix" it by trimming the legend without deciding that the trim is what you want.
-#
-# The ceiling itself was NOT moved by this lane: the number is recorded, not re-anchored, because
-# re-anchoring on a lane that did not spend the margin would hide who spent it.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -100,7 +104,8 @@ jsonRows(){ "$BIN" "$CORPUS" --for="$TASK" --token-budget="$1" --json 2>/dev/nul
             | python3 -c 'import sys,json; d=json.load(sys.stdin); print(sum(len(f["symbols"]) for f in d["sigs"]))' 2>/dev/null; }
 
 # ── arm 1: est_tokens must fit the ceiling the user asked for, in BOTH dialects ────────────────────
-for tb in 800 1500 3000; do
+# (tight budget 850, re-anchored 2026-08-22 — see the CEILING MARGIN block above for the arithmetic)
+for tb in 850 1500 3000; do
   xe="$( xmlEst "$tb" )"; je="$( jsonEst "$tb" )"
   if [ -z "$xe" ] || [ -z "$je" ]; then no "budget=$tb: could not read est_tokens from one of the dialects (xml='$xe' json='$je')"; continue; fi
   if [ "$xe" -le "$tb" ]; then ok "budget=$tb: XML est_tokens=$xe fits the ceiling"
@@ -111,7 +116,7 @@ done
 
 # ── arm 2: the two dialects select COMPARABLE row counts (they need not be equal) ──────────────────
 # Before the fix the XML lens bought 2-2.4x the rows with the same budget, because notes were free.
-for tb in 800 1500 3000; do
+for tb in 850 1500 3000; do
   xr="$( xmlRows "$tb" )"; jr="$( jsonRows "$tb" )"
   if [ -z "$jr" ] || [ "$jr" -eq 0 ]; then no "budget=$tb: JSON selected no rows — the comparison has no denominator"; continue; fi
   if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge $(( jr * 7 / 10 )) ]; then
