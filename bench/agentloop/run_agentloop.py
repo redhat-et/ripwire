@@ -350,8 +350,9 @@ def install_ripwire_shim( run_home, ripwire_bin ):
     """Return a path to a logging wrapper around ripwire, and the log file it appends to.
 
     Counting ripwire invocations by grepping an agent's transcript only works for agents that
-    self-log every shell command. Codex does; opencode does; `claude -p` does NOT, which is why every
-    claude-harness run in this file has recorded ripwire_calls=None since it was written. A shim is
+    self-log every shell command. Codex does; opencode does; `claude -p`'s STDOUT does NOT (its
+    session file under CLAUDE_CONFIG_DIR/projects/ does — parsed since 2026-08-22 — but the shim
+    predates that and stays authoritative for the ripwire count). A shim is
     harness-agnostic: the arm's prompt names THIS path, so the call is counted no matter which agent
     ran it and no matter whether it was invoked via PATH or absolutely.
 
@@ -413,9 +414,12 @@ def parse_codex_jsonl_usage( stdout ):
 #   - Codex has NO native read tool — every read is a shell command — while opencode has both a native
 #     `read`/`grep`/`glob` and a `bash`. So this counts BOTH channels, and the number is comparable
 #     WITHIN a harness, never across harnesses.
-#   - `claude -p` self-logs neither, so its native_read_calls stays None (same known gap that has kept
-#     ripwire_calls None for that harness since this file was written). None, never 0 — a missing
-#     measurement that reads as "never defaulted" would invert the conclusion.
+#   - `claude -p`'s STDOUT self-logs neither — the trailer is a 20-key summary with no tool calls —
+#     but the CLI writes the full per-message stream into CLAUDE_CONFIG_DIR/projects/, which on a
+#     benchmark run is inside the ephemeral run home. parse_claude_session_metrics() reads that file,
+#     so since 2026-08-22 the claude harness populates command_calls/native_read_calls too (they were
+#     None for every run before then — a missing measurement, never 0, because a null that read as
+#     "never defaulted" would invert the conclusion).
 NATIVE_READ_TOOLS = frozenset( { "read", "grep", "glob", "list", "ls", "search", "find" } )
 
 # Shell forms of the same habit. Anchored at a command boundary (start, pipe, ;, &&, ||) so that a
@@ -552,6 +556,67 @@ def parse_opencode_ndjson_metrics( stdout, ripwire_bin ):
             elif classify_native_read( tool_name=tool ):
                 native_read_calls += 1
     return tokens_in, tokens_out, cost, model_id, command_calls, ripwire_calls, ripwire_commands, native_read_calls
+
+def parse_claude_session_metrics( transcript_text, ripwire_bin ):
+    """Command/read accounting from a Claude Code SESSION transcript (projects/<cwd-slug>/<sid>.jsonl).
+
+    `claude -p` prints only a single summary trailer on stdout — no tool calls anywhere in it — but
+    the CLI self-logs the full per-message stream (every assistant turn with its tool_use blocks)
+    under CLAUDE_CONFIG_DIR/projects/. On a benchmark run that directory is inside the ephemeral run
+    home, so the stream both exists and dies with /tmp unless _claude_metrics() retains it. This
+    parser is what turns the retained stream into the same accounting the codex/opencode parsers
+    produce: Bash tool_use → command_calls, classified further into ripwire evidence vs native shell
+    reads; the CLI's own Read/Grep/Glob tools → native_read_calls. Same degrade posture as the other
+    two parsers: an unparseable line is skipped, never a crash — the retained file is the evidence of
+    record either way."""
+    command_calls = ripwire_calls = native_read_calls = 0
+    ripwire_commands = []
+    for line in ( transcript_text or "" ).splitlines():
+        try:
+            event = json.loads( line )
+        except ValueError:
+            continue
+        if not isinstance( event, dict ) or event.get( "type" ) != "assistant":
+            continue
+        message = event.get( "message" ) or {}
+        content = message.get( "content" ) if isinstance( message, dict ) else None
+        if not isinstance( content, list ):
+            continue
+        for block in content:
+            if not isinstance( block, dict ) or block.get( "type" ) != "tool_use":
+                continue
+            tool = str( block.get( "name" ) or "" )
+            if tool == "Bash":
+                command_calls += 1
+                payload = block.get( "input" ) or {}
+                command = payload.get( "command" ) if isinstance( payload, dict ) else payload
+                command = " ".join( map( str, command ) ) if isinstance( command, list ) else str( command or "" )
+                # same substring rule classify_native_read() uses for its ripwire exclusion, so a
+                # command can never count as both ripwire evidence and a native read
+                if ( ripwire_bin and str( ripwire_bin ) in command ) or "ripwire" in command:
+                    ripwire_calls += 1
+                    ripwire_commands.append( command )
+                elif classify_native_read( command=command ):
+                    native_read_calls += 1
+            elif classify_native_read( tool_name=tool ):
+                native_read_calls += 1
+    return command_calls, ripwire_calls, ripwire_commands, native_read_calls
+
+def find_claude_session_transcript( run_home, session_id=None ):
+    """Locate the session JSONL under run_home/projects, or None.
+
+    With a session_id (read back from the run's own trailer) only the exact file matches — a guessed
+    transcript is worse than a missing one, because it would attribute another run's tool calls to
+    this record; run homes ARE reused when the same (instance, arm, seed) is re-run across lanes.
+    Without one (the trailer was unparseable — the timeout path hands over partial stdout), the
+    newest session file is the best evidence available and the only evidence at all, so that
+    disclosed best-effort is returned instead of nothing."""
+    projects = pathlib.Path( run_home ) / "projects"
+    if session_id:
+        hits = sorted( projects.glob( f"*/{session_id}.jsonl" ) )
+        return hits[ 0 ] if hits else None
+    hits = sorted( projects.glob( "*/*.jsonl" ), key=lambda p: p.stat().st_mtime )
+    return hits[ -1 ] if hits else None
 
 def prepare_opencode_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
     """Create a fully isolated opencode environment for one run, and return (env, run_home, shim).
@@ -961,12 +1026,18 @@ def _opencode_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log=
                  ripwire_commands=ripwire_commands, native_read_calls=native_read_calls,
                  events_path=str( events_file ), resolved_model=model_id )
 
-def _claude_metrics( stdout, shim_log=None, retain=None ):
-    """Parse the `claude -p --output-format json` single-result trailer into record fields.
+def _claude_metrics( stdout, shim_log=None, retain=None, run_home=None, ripwire_bin=None ):
+    """Parse the `claude -p --output-format json` single-result trailer into record fields, and
+    retain the run's SESSION transcript next to it.
 
-    `retain` is the path the raw trailer is written to and recorded as events_path. codex and opencode
-    have always retained their transcripts; claude did not, which meant the run's terminal ANSWER —
-    the only thing grade_answers.py can score — was parsed for tokens and then thrown away.
+    `retain` is the path the raw trailer is written to and recorded as events_path — grade_answers.py
+    reads the terminal ANSWER from there, so events_path never moves off the trailer. But the trailer
+    is a summary object with no tool calls in it: an events/ directory holding only trailers implies
+    evidence it does not contain (found 2026-08-22, mining an archive whose real transcripts survived
+    only because /tmp had not cycled). So when `run_home` is given, the session stream the CLI wrote
+    under CLAUDE_CONFIG_DIR/projects/ — located by the trailer's own session_id — is copied to
+    `<retain stem>.transcript.jsonl` beside the trailer, and parsed into
+    command_calls/native_read_calls (parse_claude_session_metrics).
 
     TODO-verify: field names match the documented schema (top-level total_cost_usd;
     usage.input_tokens/usage.output_tokens) as of the Claude Code CLI installed when this was written
@@ -977,31 +1048,45 @@ def _claude_metrics( stdout, shim_log=None, retain=None ):
         pathlib.Path( retain ).parent.mkdir( parents=True, exist_ok=True )
         pathlib.Path( retain ).write_text( stdout or "" )
         out[ "events_path" ] = str( retain )
+    session_id = None
     try:
         payload = json.loads( stdout )
     except ValueError:
-        return out
-    usage = payload.get( "usage" ) or {}
-    out.update( tokens_in=usage.get( "input_tokens" ), tokens_out=usage.get( "output_tokens" ),
-                cost_usd=payload.get( "total_cost_usd" ) )
-    # `claude -p` does not log individual shell commands, so before the shim there was no
-    # ripwire-invocation evidence for this harness at all — every claude run recorded
-    # ripwire_calls=None. The shim closes that gap without depending on the agent's transcript.
+        payload = None
+    if isinstance( payload, dict ):
+        usage = payload.get( "usage" ) or {}
+        session_id = payload.get( "session_id" )
+        out.update( tokens_in=usage.get( "input_tokens" ), tokens_out=usage.get( "output_tokens" ),
+                    cost_usd=payload.get( "total_cost_usd" ) )
+    if run_home is not None and retain is not None:
+        transcript = find_claude_session_transcript( run_home, session_id )
+        if transcript is not None:
+            text = transcript.read_text( errors="replace" )
+            retain = pathlib.Path( retain )
+            ( retain.parent / ( retain.stem + ".transcript.jsonl" ) ).write_text( text )
+            ( command_calls, ripwire_calls,
+              ripwire_commands, native_read_calls ) = parse_claude_session_metrics( text, ripwire_bin )
+            out.update( command_calls=command_calls, native_read_calls=native_read_calls,
+                        ripwire_calls=ripwire_calls, ripwire_commands=ripwire_commands )
+    # The shim log is the AUTHORITATIVE ripwire counter and overrides the transcript-parsed count:
+    # it sees every spawned invocation (absolute paths, subshells) that a transcript classifier
+    # could misread, and it existed for years before the transcript was retained at all.
     if shim_log is not None:
         calls, commands = read_shim_log( shim_log )
         out.update( ripwire_calls=calls, ripwire_commands=commands )
     return out
 
-def _harness_metrics( harness, stdout, work_dir, task, arm, seed, ripwire_bin, shim_log ):
+def _harness_metrics( harness, stdout, work_dir, task, arm, seed, ripwire_bin, shim_log, run_home=None ):
     """Route stdout to the right parser. Explicit per-harness dispatch, never a binary fallthrough:
-    the two-branch ternaries this replaces silently gave any third harness claude's parser."""
+    the two-branch ternaries this replaces silently gave any third harness claude's parser.
+    `run_home` is claude-only: the session transcript the CLI wrote lives under it (projects/)."""
     if harness == "codex-exec":
         return _codex_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )
     if harness == "opencode":
         return _opencode_metrics( stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )
     retain = pathlib.Path( work_dir ) / "events" / f"{task['instance_id']}-{arm}-{seed}.json"
     return _claude_metrics( stdout if isinstance( stdout, str ) else ( stdout or b"" ).decode( "utf-8", "replace" ),
-                            shim_log, retain )
+                            shim_log, retain, run_home=run_home, ripwire_bin=ripwire_bin )
 
 def _child_failure_detail( proc ):
     """The best 2000 chars of evidence for a nonzero-exit harness child.
@@ -1081,7 +1166,8 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
     except subprocess.TimeoutExpired as exc:
         diff = sh( [ "git", "diff" ], cwd=repo_dir ).stdout
         resolved, localization_hit = evaluate_patch( task, gold_row, diff, evaluator, swebench_dataset )
-        metrics = _harness_metrics( harness, exc.stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )
+        metrics = _harness_metrics( harness, exc.stdout, work_dir, task, arm, seed, ripwire_bin, shim_log,
+                                    run_home=run_home )
         return _fail( "timeout", f"{harness} exceeded {timeout_s}s", resolved=resolved,
                       localization_hit=localization_hit, wall_seconds=float( timeout_s ),
                       harness_version=agent_version( harness ), **metrics )
@@ -1093,7 +1179,8 @@ def run_one( task, arm, seed, harness, model, *, work_dir=".", ripwire_bin=RIPWI
         return _fail( "error", f"{harness} exit {proc.returncode}: {_child_failure_detail( proc )}",
                        wall_seconds=wall )
 
-    metrics = _harness_metrics( harness, proc.stdout, work_dir, task, arm, seed, ripwire_bin, shim_log )
+    metrics = _harness_metrics( harness, proc.stdout, work_dir, task, arm, seed, ripwire_bin, shim_log,
+                                run_home=run_home )
 
     # The model-substitution guard. opencode silently falls back to its own free hosted model when no
     # credential resolves, so a run can succeed against a model nobody asked for. A record whose

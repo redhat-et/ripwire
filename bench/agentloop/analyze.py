@@ -137,7 +137,9 @@ def substitution_rate( rec ):
     not previously express: `ripwire_calls` alone cannot tell a run that used the tool for everything
     apart from one that used it once and then read twenty files.
 
-    None (never 0.0) when either count is missing — `claude -p` self-logs neither, and a missing
+    None (never 0.0) when either count is missing — claude records before 2026-08-22 carried neither
+    count (the session transcript was not parsed; backfill_claude_transcripts.py repairs an archived
+    bundle), and a missing
     measurement rendered as 0.0 would read as "defaulted every time", inverting the conclusion. A run
     that genuinely did neither (no reads AND no ripwire calls) is also None: no denominator, no rate."""
     rw, native = rec.get( "ripwire_calls" ), rec.get( "native_read_calls" )
@@ -222,7 +224,8 @@ def print_report( out ):
            f"(n={out.get('n_substitution_baseline', 0)})" )
     print(  "    ^ how often the agent reached for ripwire instead of defaulting to a read/grep/glob."
             " Baseline is 0% by construction (no ripwire on PATH); n counts runs where BOTH counts were"
-            " measured — `claude -p` self-logs neither, so its runs are excluded rather than scored 0." )
+            " measured — unmeasured runs (claude records from before 2026-08-22, unless backfilled) are"
+            " excluded rather than scored 0." )
 
 # ── self-test: synthetic fixture, no real run data needed ────────────────────────────────────────────
 def _fixture_record( repo, instance_id, seed, arm, resolved, tokens_out, wall_seconds, cost_usd ):
