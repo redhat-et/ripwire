@@ -2943,6 +2943,11 @@ struct ForAutoBodiesResult
     rw::ChargedSection section;             // rendered auto <bodies> bytes; empty when nothing is emitted
     std::string        attr;                // the <ctx> root disclosure; empty ⇒ no attribute (surface off / degrade)
     bool               surfaceOff = false;  // true ⇒ the caller rebuilds the header WITHOUT the bundle=auto legend
+    // THE est_tokens SPLIT, filled by buildForEnrichment: exactly one of these is non-zero, because a
+    // section is either markup (compact <hops>: summed with the rest of the markup and rounded ONCE) or
+    // body text (T3 <bodies>: charged at the body rate, which is why the sum splits by kind at all).
+    std::size_t        markupBytes = 0;
+    std::size_t        bodyTokens  = 0;
 };
 
 // ── ANCHOR-ONLY: the allowance serves the anchor's OWN body, or none (docs/EVALS.md, T3 substitution round) ──
@@ -3149,21 +3154,25 @@ inline bool forCompactPosture( const rw::Config& cfg )
 struct ForEnrichmentPlan
 {
     bool        compact      = false;   // the conceptual route serves <hops>; otherwise T3's <bodies>
+    bool        autoBodies   = false;   // T3's <bodies> allowance is on — the two are mutually exclusive
     std::size_t legendBytes  = 0;       // whichever legend rides the header (exempt from the sigs trim)
     std::size_t attrReserve  = 0;       // the root attribute's widest spelling for THIS shape
 };
 
-inline ForEnrichmentPlan planForEnrichment( bool autoBundleMode, bool compactMode )
+// Every input the decision needs, so the CALLER states facts and this function does the deciding — the
+// alternative (a caller-side `autoBundleMode && conceptualRoute && !cfg.autoBodies`) puts the rule in the
+// one function in this file that can least afford another branch.
+inline ForEnrichmentPlan planForEnrichment( bool autoBundleMode, bool conceptualRoute, bool autoBodiesFlag )
 {
     if( !autoBundleMode )
     {
         return ForEnrichmentPlan{};                     // --detail=N or --signatures-only: no enrichment at all
     }
-    if( compactMode )
+    if( conceptualRoute && !autoBodiesFlag )
     {
-        return ForEnrichmentPlan{ true, kForCompactBundleLegend.size(), kCompactAttrReserve };
+        return ForEnrichmentPlan{ true, false, kForCompactBundleLegend.size(), kCompactAttrReserve };
     }
-    return ForEnrichmentPlan{ false, kForAutoBundleLegend.size(), kAutoAttrReserve };
+    return ForEnrichmentPlan{ false, true, kForAutoBundleLegend.size(), kAutoAttrReserve };
 }
 
 ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
@@ -3237,10 +3246,19 @@ ForAutoBodiesResult buildForEnrichment( const rw::Config& cfg, const rw::IngestR
                                         const ForEnrichmentPlan& plan, const std::vector<rw::RouteAnchorDef>& anchorDefs,
                                         rw::RedactCounts* redactPtr, std::size_t committedBytes, std::size_t bundleBudget )
 {
-    const std::size_t committed = committedBytes + plan.attrReserve;
-    return plan.compact
+    const std::size_t   committed = committedBytes + plan.attrReserve;
+    ForAutoBodiesResult out       = plan.compact
         ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr )
         : buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, anchorDefs );
+    if( plan.compact )
+    {
+        out.markupBytes = out.section.xml.size();
+    }
+    else
+    {
+        out.bodyTokens = out.section.tokens;
+    }
+    return out;
 }
 
 std::optional<int> runForLens( const MainDispatch& d )
@@ -3294,7 +3312,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         const std::string  mentionNote( std::move( lr.mentionNote ) );
         const std::string  boostNote( std::move( lr.boostNote ) );
         const std::string  docMentionNote( std::move( lr.docMentionNote ) );
-        const bool         conceptualRoute = isConceptualRoute( lr.routeTag );   // see the predicate for what "no-route" does here
+        const bool         conceptualRoute = isConceptualRoute( lr.routeTag );   // see the predicate for what "no-route" means here
         // the route's own anchors, resolved — read ONLY by the T3 auto-body allowance below (anchor-only)
         const std::vector<RouteAnchorDef> routeAnchorDefs( std::move( lr.anchorDefs ) );
         // R4: weak-result honesty signal — the top match's RAW lexical score (pre-anchor/mention/cochange,
@@ -3394,13 +3412,13 @@ std::optional<int> runForLens( const MainDispatch& d )
         // --json returns before it below), so this mode is an XML-bundle fact only.
         const bool         autoBundleMode = cfg.detail == 0 && !cfg.signaturesOnly;
         // COMPACT conceptual serving (docs/EVALS.md, the T3 route-narrowing round) — see planForEnrichment.
-        const ForEnrichmentPlan plan = planForEnrichment( autoBundleMode, autoBundleMode && conceptualRoute && !cfg.autoBodies );
+        const ForEnrichmentPlan plan = planForEnrichment( autoBundleMode, conceptualRoute, cfg.autoBodies );
         // NOT const: the tight-explicit-budget path in the auto block below may turn the surface off
         // (autoBundle/compactBundle=false) and rebuild the header without the legend — the ladder's later
         // rebuilds read this struct through buildForHeader and must honor that decision.
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
                                         mentionNote, boostNote, docMentionNote, floorNote, cfg.anchor,
-                                        autoBundleMode && !plan.compact, plan.compact, flRootArg };
+                                        plan.autoBodies, plan.compact, flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -3824,14 +3842,13 @@ std::optional<int> runForLens( const MainDispatch& d )
             // would over-read the bodies by ~1.5x — the same "one number for two kinds of bytes" defect §H7
             // is about, aimed the other way, and it would report a --for --detail bundle at 2.50 B/tok when
             // its real shape is ~3.6.
-            // COMPACT: the <hops> section is markup, so it is markupBytes and NOT a second charge of its
-            // own — one rate, one rounding (see ForEnrichmentPlan for the off-by-one that proves it).
-            const std::size_t compactBytes = plan.compact ? autoSection.xml.size() : 0u;
+            // enrich.markupBytes is the compact <hops> section, folded in HERE rather than charged
+            // separately — one rate, one rounding (see ForEnrichmentPlan for the off-by-one that proves it).
             const std::size_t markupBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
-                                          + routeStr.size() + graphSection.xml.size() + compactBytes + 6;   // + "</ctx>"
+                                          + routeStr.size() + graphSection.xml.size() + enrich.markupBytes + 6;   // + "</ctx>"
             // T3: the auto bodies at the body rate — def-body text BPE-merges differently from markup, which
-            // is why this sum splits by kind. On the compact route that section was markup, folded in above.
-            const std::size_t bodyTokens  = detailSection.tokens + ( plan.compact ? 0u : autoSection.tokens );
+            // is why this sum splits by kind. enrich.bodyTokens is zero on the compact route (markup, above).
+            const std::size_t bodyTokens  = detailSection.tokens + enrich.bodyTokens;
             std::size_t estTokens = rw::tokensForEmittedBytes( markupBytes, kBytesPerTokenDefault ) + bodyTokens;
             std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
             for( int pass = 0; pass < 4; ++pass )
