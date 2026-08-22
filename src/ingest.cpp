@@ -1384,8 +1384,9 @@ struct RawRef
     bool          argCountKnown = false;        // B2.2: true ⇒ argCount is reliable (no spread/splat/apply)
     std::string   name;
     std::string   qualifier;           // explicit scope at a call site (`A` in `A::b()`); C++; "" if bare/method
-    std::string   recvVar;             // receiver variable when recv==NamedVar (`x` in `x->m()`); Rule 2 fuel
-    std::string   fieldName;           // member variable name when isCompose (e.g. "m_pool"); "" otherwise
+    std::string   recvVar;             // receiver variable when recv==NamedVar/FieldOfVar (`x` in `x->m()`); Rule 2 fuel
+    std::string   fieldName;           // member variable name when isCompose (e.g. "m_pool"); ALSO the intermediate
+                                       //   field of a depth-2 chained receiver (recv FieldOfThis/FieldOfVar); "" otherwise
     std::string   composeRel;          // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
 };
 
@@ -1483,7 +1484,26 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 67;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 68;           // bump on any grammar/.scm/extraction change
+                                                      // 68 (2026-08-21 receiver-guard misfires, chainguardcheck.sh):
+                                                      //    receiverOf classified EVERY chained receiver as
+                                                      //    RecvKind::None, so five guard sites keyed on
+                                                      //    `recv == None` misread `this->m_pool.run()` as a
+                                                      //    BARE name: Rule 1's bareCish arm wrong-narrowed it
+                                                      //    to the caller's OWN class, and shadow suppression
+                                                      //    deleted it under a same-named local. RecvKind gains
+                                                      //    FieldOfThis / FieldOfVar (u8, 5 of 256 used) and the
+                                                      //    INTERMEDIATE field name rides RawRef::fieldName,
+                                                      //    which is free on a call ref (isCompose owns it
+                                                      //    otherwise). The wire FORMAT is unchanged —
+                                                      //    writeRef/readRef already carry recv and fieldName —
+                                                      //    but the extracted VALUES change and DO move edges= /
+                                                      //    ambiguous= (recovered + split-widened calls). NO
+                                                      //    resolve rule consumes the new kinds yet. A v67 blob
+                                                      //    holds None where this binary expects a chain and
+                                                      //    must be rejected rather than served. quality.h
+                                                      //    kIngestParserVerMirror bumped in the SAME commit.
+                                                      //    Registered + measured: docs/EVALS.md §4.
                                                       // 67 (2026-08-20 RefRole::Type use-sites, typerefcheck.sh):
                                                       //    usesVisitNode's accept set was the single test
                                                       //    `strcmp( t, "identifier" ) != 0 → return`, so a
@@ -6870,59 +6890,133 @@ inline bool isPyEnumMemberTarget( TSNode nameNode, std::string_view src ) noexce
 }
 
 
+// ── receiver capture: the member-access vocabulary, one declarative place ────────────────────────────
+// The two shapes whose receiver we inspect: C++/ObjC `field_expression` (`.argument` / `.field`) and
+// Python `attribute` (`.object` / `.attribute`). Named here rather than re-spelled per call site because
+// the depth-2 chain walk below applies exactly the same three questions twice, one level apart.
+inline bool isMemberAccessNode( const char* t, Lang lang ) noexcept
+{
+    if( lang == Lang::Cpp || lang == Lang::ObjC ) { return std::strcmp( t, "field_expression" ) == 0; }
+    if( lang == Lang::Python )                    { return std::strcmp( t, "attribute" ) == 0; }
+    return false;
+}
+
+inline TSNode memberAccessReceiver( TSNode access, Lang lang ) noexcept
+{
+    return ( lang == Lang::Python ) ? ts_node_child_by_field_name( access, "object",   6 )
+                                    : ts_node_child_by_field_name( access, "argument", 8 );
+}
+
+inline TSNode memberAccessField( TSNode access, Lang lang ) noexcept
+{
+    return ( lang == Lang::Python ) ? ts_node_child_by_field_name( access, "attribute", 9 )
+                                    : ts_node_child_by_field_name( access, "field",     5 );
+}
+
+// The classified receiver of one call site. `var` is set for NamedVar / FieldOfVar, `field` for
+// FieldOfThis / FieldOfVar; both "" for None / ThisObj.
+struct RecvShape
+{
+    RecvKind    kind = RecvKind::None;
+    std::string var;
+    std::string field;
+};
+
+// One receiver NODE → its RecvShape. `allowChain` is the ONE-hop bound: true at the call's immediate
+// receiver (a member-access receiver descends exactly one level, re-asking the same questions of its
+// INNER receiver), false inside that descent — so a depth-3 chain's inner member-access classifies None
+// and the whole chain degrades to the honest §2a split. `test/chainguardcheck.sh` arm (h) pins the
+// bound, and the residual it leaves, as disclosed.
+inline RecvShape classifyReceiver( TSNode node, Lang lang, std::string_view src, bool allowChain )
+{
+    const char* rt = ts_node_type( node );
+    if( std::strcmp( rt, "this" ) == 0 )
+    {
+        return { RecvKind::ThisObj, {}, {} }; // C++ `this`
+    }
+    if( std::strcmp( rt, "identifier" ) == 0 )
+    {
+        const std::string_view v = pattern::nodeText( node, src );
+        if( v.empty() )
+        {
+            return {};
+        }
+        if( lang == Lang::Python && v == "self" )
+        {
+            return { RecvKind::ThisObj, {}, {} }; // Python `self`
+        }
+        return { RecvKind::NamedVar, std::string( v ), {} };                          // `x` — Rule 2 fuel
+    }
+    if( allowChain && isMemberAccessNode( rt, lang ) )
+    { // depth 2: the receiver is ITSELF one member access — `this->FIELD.m()` / `base.FIELD.m()`
+        const TSNode innerRecv  = memberAccessReceiver( node, lang );
+        const TSNode innerField = memberAccessField( node, lang );
+        if( ts_node_is_null( innerRecv ) || ts_node_is_null( innerField ) )
+        {
+            return {};
+        }
+        // the intermediate must be a plain NAME — a template/computed/parenthesized form is not a field
+        const char* ift = ts_node_type( innerField );
+        if( std::strcmp( ift, "field_identifier" ) != 0 && std::strcmp( ift, "identifier" ) != 0 )
+        {
+            return {};
+        }
+        const std::string_view fieldTxt = pattern::nodeText( innerField, src );
+        if( fieldTxt.empty() )
+        {
+            return {};
+        }
+        const RecvShape base = classifyReceiver( innerRecv, lang, src, false );
+        if( base.kind == RecvKind::ThisObj )
+        {
+            return { RecvKind::FieldOfThis, {}, std::string( fieldTxt ) };            // `this->m_pool.run()` / `self.pool.acquire()`
+        }
+        if( base.kind == RecvKind::NamedVar )
+        {
+            return { RecvKind::FieldOfVar, base.var, std::string( fieldTxt ) };       // `cfg.opts.enable()`
+        }
+        return {};   // depth-3 or richer base → not decidable in one hop; degrade to §2a
+    }
+    return {};   // parenthesized / subscripted / call receiver → not one-hop
+}
+
 // P2-D RECEIVER capture: classify the call-site receiver of `recv.method()` / `recv->method()` so
 // resolve.h can narrow before the ambiguous §2a name spray. `nameNode` is the @name capture (the called
 // identifier). When it is the `.field`/`.attribute` of a member-access node, inspect that node's
 // receiver (`.argument` in C++ `field_expression`, `.object` in Python `attribute`):
 //   `this`/`self`        → ThisObj  (the enclosing class is definitive — Rule 1)
 //   a bare `(identifier)` → NamedVar, recvVar = the variable text (the var's type pins the method — Rule 2)
-//   anything else (chained `a.b.c`, `(expr)`, subscripts, …) → None — too rich for one-hop; degrade to §2a.
-// Returns { RecvKind, recvVar }. Pure-syntactic, deterministic, allocation-light; "" recvVar unless NamedVar.
-inline std::pair<RecvKind, std::string> receiverOf( TSNode nameNode, Lang lang, std::string_view src )
+//   ONE more member access whose OWN receiver is `this`/`self` or a bare identifier → FieldOfThis /
+//     FieldOfVar, carrying the intermediate field name (`this->m_pool.run()` → field "m_pool";
+//     `cfg.opts.enable()` → var "cfg", field "opts"). NO resolve rule consumes these yet: the receiver
+//     kind exists so the five `recv == RecvKind::None` guard sites stop misclassifying a chained
+//     receiver as a BARE name — Rule 1's bareCish arm wrong-narrowed `this->m_pool.run()` to the
+//     caller's own class, and shadow suppression deleted `this->m_cfg.enable()` under a local named
+//     `enable` (docs/EVALS.md §4 "Receiver-guard misfires"; the names carried here make a future
+//     chain-resolution rule resolve-side only, with no second re-parse).
+//   anything else (a depth-3 chain, `(expr)`, subscripts, a call in the chain, …) → None. The bound is
+//     ONE intermediate hop, deliberately: past that the receiver is too rich to decide syntactically.
+//     `test/chainguardcheck.sh` arm (h) pins the bound — and the residual it leaves — as disclosed.
+// Pure-syntactic, deterministic, allocation-light: at most two short identifier copies, and none at all
+// for the None/ThisObj shapes that dominate.
+inline RecvShape receiverOf( TSNode nameNode, Lang lang, std::string_view src )
 {
     const TSNode parent = ts_node_parent( nameNode );
     if( ts_node_is_null( parent ) )
     {
-        return { RecvKind::None, {} };
+        return {};
     }
-    const char* pt = ts_node_type( parent );
-
-    // the member-access node whose receiver we want
-    const bool isCppField = ( lang == Lang::Cpp || lang == Lang::ObjC ) && std::strcmp( pt, "field_expression" ) == 0;
-    const bool isPyAttr   = ( lang == Lang::Python )                    && std::strcmp( pt, "attribute" ) == 0;
-    if( !isCppField && !isPyAttr )
+    if( !isMemberAccessNode( ts_node_type( parent ), lang ) )
     {
-        return { RecvKind::None, {} };
+        return {};
     }
 
-    const TSNode recvNode = isCppField ? ts_node_child_by_field_name( parent, "argument", 8 )
-                                       : ts_node_child_by_field_name( parent, "object",   6 );
+    const TSNode recvNode = memberAccessReceiver( parent, lang );
     if( ts_node_is_null( recvNode ) )
     {
-        return { RecvKind::None, {} };
+        return {};
     }
-
-    const char* rt = ts_node_type( recvNode );
-    if( std::strcmp( rt, "this" ) == 0 )
-    {
-        return { RecvKind::ThisObj, {} }; // C++ `this->m()`
-    }
-
-    if( std::strcmp( rt, "identifier" ) == 0 )
-    {
-        const std::uint32_t a = ts_node_start_byte( recvNode ), b = ts_node_end_byte( recvNode );
-        if( a > b || b > src.size() )
-        {
-            return { RecvKind::None, {} };
-        }
-        std::string_view v = src.substr( a, b - a );
-        if( lang == Lang::Python && v == "self" )
-        {
-            return { RecvKind::ThisObj, {} }; // Python `self.m()`
-        }
-        return { RecvKind::NamedVar, std::string( v ) };                              // `x->m()` / `x.m()` — Rule 2 fuel
-    }
-    return { RecvKind::None, {} };   // chained / parenthesized / subscripted receiver → not one-hop
+    return classifyReceiver( recvNode, lang, src, /*allowChain=*/ true );
 }
 
 // ── P2-D Rule 2 LOCAL-VARIABLE TYPE BINDING capture (`Foo x;` → x:Foo) ───────────────────────────────
@@ -9750,8 +9844,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
 
                 if( !isImportRef )                                                       // an import site has no receiver and no argument list —
                 {                                                                        //   the defaults (RecvKind::None, argCountKnown=false) are the truth
-                    auto [ rk, rv ] = receiverOf( nameNode, le.lang, src );              // P2-D: `this`/`self`/`x` receiver shape
-                    r.recv = rk;  r.recvVar = std::move( rv );                           //   → one-hop narrowing in resolve.h
+                    RecvShape rs = receiverOf( nameNode, le.lang, src );                 // P2-D: `this`/`self`/`x`/`base.field` shape
+                    r.recv = rs.kind;  r.recvVar = std::move( rs.var );                  //   → one-hop narrowing in resolve.h
+                    r.fieldName = std::move( rs.field );                                 //   depth-2 intermediate field; "" otherwise
                     auto [ ac, ak ] = callArity( nameNode, le.lang, src );               // B2.2: call-site positional arg count
                     r.argCount = ac;  r.argCountKnown = ak;                              //   → arity filter in graph.h
                 }

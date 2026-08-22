@@ -117,7 +117,19 @@ inline const char* langTag( Lang l ) noexcept
 //   ThisObj — receiver is `this` (C++) / `self` (Python): the enclosing class is definitive → Rule 1.
 //   NamedVar— receiver is a plain local variable `x` (`x->m()` / `x.m()`): the var's TYPE pins the method
 //             (Rule 2, one-hop return-type — captured here so the rule is a later drop-in; see resolve.h).
-enum class RecvKind : std::uint8_t { None, ThisObj, NamedVar };
+// The capture widens by EXACTLY ONE intermediate field hop because five guard sites key on
+// `recv == RecvKind::None`, and a chained receiver classified `None` misread as a BARE name: Rule 1's
+// bareCish arm wrong-narrowed `this->m_pool.run()` to the caller's own class, and shadow suppression
+// deleted `this->m_cfg.enable()` under a local named `enable` (docs/EVALS.md §4 "Receiver-guard
+// misfires"; gate test/chainguardcheck.sh). NO resolve rule consumes the two chain kinds yet — they
+// exist so those guards stop misfiring, and they carry their names (`Reference::fieldName` below is
+// free on a call ref) so a future chain-resolution rule needs no second re-parse:
+//   FieldOfThis — `this->m_pool.run()` / `self.pool.acquire()`: base = the enclosing class,
+//                 intermediate field = fieldName.
+//   FieldOfVar  — `cfg.opts.enable()` / `m_cfg.opts.enable()`: base = recvVar, intermediate = fieldName.
+// DEPTH IS PINNED AT ONE HOP, not opened toward N: a depth-3 chain still classifies `None` (its
+// residual misfires are DISCLOSED — chainguardcheck arm (h) pins them as a recorded fact).
+enum class RecvKind : std::uint8_t { None, ThisObj, NamedVar, FieldOfThis, FieldOfVar };
 
 // ABS-3 reference / use-site ROLE: WHAT a reference does at the use site, captured at ingest so a
 // use-site index (`--uses=SYM`) can report the resolvable places a name is referenced, not just calls.
@@ -406,8 +418,12 @@ struct Reference
                                           //   splat / apply) → arity-filter candidates against argCount; false ⇒ never filter
     std::string   calleeName;             // referenced name (final identifier segment)
     std::string   qualifier;              // explicit scope at the call site (`A` in `A::b()`); "" if bare/method — for canonical resolve
-    std::string   recvVar;                // receiver variable identifier when recv==NamedVar (`x` in `x->m()`); "" otherwise — for Rule 2
-    std::string   fieldName;              // member variable name when isCompose (e.g. "m_pool"); "" otherwise
+    std::string   recvVar;                // receiver variable identifier when recv==NamedVar/FieldOfVar (`x` in `x->m()`); "" otherwise — for Rule 2
+    std::string   fieldName;              // member variable name when isCompose (e.g. "m_pool"); ALSO the INTERMEDIATE
+                                          //   field of a depth-2 chained receiver when recv is FieldOfThis/FieldOfVar
+                                          //   (`this->m_pool.run()` → "m_pool") — the two are mutually exclusive
+                                          //   (a compose ref is never a call ref, and the compose readers all gate
+                                          //   on isCompose), so one slot carries both; "" otherwise
     std::string   composeRel;             // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
 };
 
