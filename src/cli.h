@@ -3098,6 +3098,32 @@ inline void validateModifierGuards( Config& c ) noexcept
     }
 }
 
+// The three --auto-bodies guards, lifted out of validateConfig, which is already one of the longest
+// functions in this file and grows by a stanza on every flag added. Same shape as the --signatures-only
+// pair it sits beside: --auto-bodies opts out of COMPACT conceptual serving, so ALONE it modifies
+// nothing, and it contradicts BOTH of the other body postures — honoring one of a contradictory pair
+// silently drops the other's effect with no tell, so the pair is refused loudly instead, each with the
+// distinction spelled out. It is a PERMANENT posture flag beside --signatures-only and --detail=N, not a
+// migration aid: a caller who wants inline bodies on conceptual queries stays supported indefinitely.
+inline void refuseAutoBodiesMisuse( Config& c )
+{
+    if( c.autoBodies && c.forTask.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --auto-bodies modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --auto-bodies)\n" );
+        c.ok = false;
+    }
+    if( c.autoBodies && c.signaturesOnly )
+    {
+        std::fprintf( stderr, "ripwire: --auto-bodies contradicts --signatures-only — pass one (--auto-bodies asks for the automatic bodies; --signatures-only means no bodies at all)\n" );
+        c.ok = false;
+    }
+    if( c.autoBodies && c.detail > 0 )
+    {
+        std::fprintf( stderr, "ripwire: --auto-bodies contradicts --detail=N — pass one (--detail=N is the explicit body knob and already supersedes the automatic pick)\n" );
+        c.ok = false;
+    }
+}
+
 inline void validateConfig( Config& c ) noexcept
 {
     if( c.rootPath.empty() && !c.mcp && !c.scanSkills && c.scanSkillFile.empty() )   // scan / --mcp may run without a path
@@ -3193,28 +3219,7 @@ inline void validateConfig( Config& c ) noexcept
         c.ok = false;
     }
 
-    // --auto-bodies opts out of COMPACT conceptual serving; alone it modifies nothing — refuse loudly, the
-    // --signatures-only precedent directly above. It is a PERMANENT posture flag beside that one, not a
-    // migration aid: a caller who wants inline bodies on conceptual queries stays supported indefinitely.
-    if( c.autoBodies && c.forTask.empty() )
-    {
-        std::fprintf( stderr, "ripwire: --auto-bodies modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --auto-bodies)\n" );
-        c.ok = false;
-    }
-
-    // --auto-bodies ("serve the automatic bodies on this route") contradicts BOTH of the other body
-    // postures, and for the same reason --signatures-only contradicts --detail=N: honoring one silently
-    // drops the other's effect with no tell. Refused loudly instead, each with the distinction spelled out.
-    if( c.autoBodies && c.signaturesOnly )
-    {
-        std::fprintf( stderr, "ripwire: --auto-bodies contradicts --signatures-only — pass one (--auto-bodies asks for the automatic bodies; --signatures-only means no bodies at all)\n" );
-        c.ok = false;
-    }
-    if( c.autoBodies && c.detail > 0 )
-    {
-        std::fprintf( stderr, "ripwire: --auto-bodies contradicts --detail=N — pass one (--detail=N is the explicit body knob and already supersedes the automatic pick)\n" );
-        c.ok = false;
-    }
+    refuseAutoBodiesMisuse( c );   // the three --auto-bodies guards, out of line (see above validateConfig)
 
     // §P6.4: --owners is ALSO a legal --detail=N companion (restores the full per-file listing instead of
     // the <uniform/> collapse) — stacked as its own `if` rather than folded into the && chain below so this

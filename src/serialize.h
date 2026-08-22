@@ -3543,6 +3543,56 @@ struct CalleeCallsSink
     const std::vector<float>*     rank = nullptr;
 };
 
+// The walk order for one symbol's callee listing: the CSR's own (node-id ascending, returned as an EMPTY
+// vector so the caller keeps walking the CSR in place and no copy is made) by default, or query relevance
+// when the caller supplied a rank and asked for the names-only rendering — see CalleeCallsSink::rank for
+// why an arbitrarily-ordered CUT listing is a defect worth a sort. The tie-break is node id, so the order
+// is TOTAL and the output stays deterministic whatever the scores do.
+//
+// Extracted rather than inlined because emitCalleeCallsBlock is a budget walk with a disclosure contract
+// and this is a comparator — two different things, and folding them together is what pushed that
+// function's complexity from 15 to 33 in one edit.
+inline std::vector<NodeId> calleeWalkOrder( NodeId id, const std::vector<std::uint32_t>& outOff,
+                                            const std::vector<NodeId>& outTargets, const CalleeCallsSink& sink )
+{
+    std::vector<NodeId> walk;
+    if( !sink.namesOnly || sink.rank == nullptr )
+    {
+        return walk;                                   // empty ⇒ "walk the CSR as it lies"
+    }
+    walk.assign( outTargets.begin() + outOff[id], outTargets.begin() + outOff[id + 1] );
+    const std::vector<float>& rk = *sink.rank;
+    std::sort( walk.begin(), walk.end(), [ & ]( NodeId a, NodeId b )
+    {
+        const float ra = a < rk.size() ? rk[a] : 0.0f;
+        const float rb = b < rk.size() ? rk[b] : 0.0f;
+        if( ra != rb )
+        {
+            return ra > rb;
+        }
+        return a < b;
+    } );
+    return walk;
+}
+
+// One callee as `<c n= l=/>` — the names-only row. No file read, no signature slice, and no redaction
+// seam: a bare identifier is not a credential shape, which is why this row does not take a RedactCounts
+// the way the signature row below does. Charged at what it actually emits.
+inline void appendCalleeNameRow( std::string& callsBody, const Symbol& cs, std::vector<char>& esc,
+                                 std::size_t& used, const CalleeCallsSink& sink )
+{
+    char nb[ 32 ];
+    std::snprintf( nb, sizeof( nb ), "\" l=\"%u\"/>", cs.line );
+    callsBody += "<c n=\"";
+    callsBody += escapeXml( cs.name, esc );
+    callsBody += nb;
+    used += cs.name.size() + 16;
+    if( sink.recorded )
+    {
+        sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, std::string() } );   // §H5: no sig to record
+    }
+}
+
 // §P10.1: the disclosed <calls total=... [shown=... capped="1"]> block
 // for one body's 1-hop callee signatures — extracted out of packBodies so the disclosure logic doesn't
 // inflate packBodies' own complexity/LOC. `total` is outOff[id+1]-outOff[id] — outTargets is deduped-per-
@@ -3567,22 +3617,8 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
         return;
     }
 
-    // the walk order: the CSR's own (node-id ascending) by default, or query-relevance when the caller
-    // supplied a rank and the listing is one that gets cut — see CalleeCallsSink::rank. The tie-break is
-    // node id, so the order is total and the output stays deterministic.
-    std::vector<NodeId> walk;
-    if( sink.namesOnly && sink.rank != nullptr )
-    {
-        walk.assign( outTargets.begin() + outOff[id], outTargets.begin() + outOff[id + 1] );
-        const std::vector<float>& rk = *sink.rank;
-        std::sort( walk.begin(), walk.end(), [ & ]( NodeId a, NodeId b )
-        {
-            const float ra = a < rk.size() ? rk[a] : 0.0f;
-            const float rb = b < rk.size() ? rk[b] : 0.0f;
-            if( ra != rb ) { return ra > rb; }
-            return a < b;
-        } );
-    }
+    // empty ⇒ walk the CSR in its own order; non-empty ⇒ walk this instead (see calleeWalkOrder above)
+    const std::vector<NodeId> walk = calleeWalkOrder( id, outOff, outTargets, sink );
 
     std::string callsBody;
     int         shown = 0;
@@ -3595,18 +3631,11 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
         }
         const Symbol& cs = ing.symbols[cid];
 
-        // COMPACT: the names-only rendering — no file read, no signature slice, no redaction seam (a bare
-        // identifier is not a credential shape). Charged at what it actually emits, like the branch below.
+        // COMPACT: the names-only rendering — see appendCalleeNameRow above for what it does and does not do.
         if( sink.namesOnly )
         {
-            char nb[ 32 ];  std::snprintf( nb, sizeof( nb ), "\" l=\"%u\"/>", cs.line );
-            callsBody += "<c n=\"";  callsBody += escapeXml( cs.name, esc );  callsBody += nb;
-            used += cs.name.size() + 16;
+            appendCalleeNameRow( callsBody, cs, esc, used, sink );
             ++shown;
-            if( sink.recorded )
-            {
-                sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, std::string() } ); // §H5: no sig to record
-            }
             continue;
         }
 
