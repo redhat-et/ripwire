@@ -246,7 +246,9 @@ set(_ripwire_query_names
   java
   javascript
   json
+  lua
   objc
+  php
   python
   ruby
   rust
@@ -434,6 +436,30 @@ add_ts_grammar(c      https://github.com/tree-sitter/tree-sitter-c.git          
 # LANGUAGE_VERSION]=[13,15] for core v0.26.9. Ships a scanner.c (inherited from cpp: raw strings)
 # which the macro picks up. The tag is lightweight, so the SHA below IS the tagged commit.
 add_ts_grammar(cuda   https://github.com/tree-sitter-grammars/tree-sitter-cuda.git 48b066f334f4cf2174e05a50218ce2ed98b6fd01)  # v0.21.1
+# Lua (.lua): tree-sitter-grammars/tree-sitter-lua — there is no first-party Lua grammar under
+# tree-sitter/. v0.5.0 → ABI 15, in [MIN_COMPATIBLE, LANGUAGE_VERSION]=[13,15] for core v0.26.9.
+# Ships a scanner.c (long-bracket `[[ … ]]` strings and `--[[ … ]]` block comments, whose level count
+# the LR parser cannot express) which the macro picks up. That scanner DOES allocate and DOES
+# serialize (unlike toml's stateless one), but through create/destroy/serialize callbacks the core
+# owns — no new leak surface, and the G1 leg is run with the existing suppressions unchanged.
+add_ts_grammar(lua    https://github.com/tree-sitter-grammars/tree-sitter-lua.git 10fe0054734eec83049514ea2e718b2a56acd0c9)  # v0.5.0
+
+# PHP (.php): the official tree-sitter org grammar. Like TypeScript this repo hosts TWO sub-grammars
+# in subdirectories — `php/` (the full one: HTML text interleaved with `<?php … ?>` blocks) and
+# `php_only/` (no surrounding text). ONLY `php/` is vendored and built: a real .php file in a real
+# project can and does open with markup, and the `php_only` grammar reports the whole file as an
+# ERROR node when it does. Both sub-grammars' scanner.c `#include "../../common/scanner.h"`, so the
+# vendored tree keeps the repo-relative layout (deps/php/common + deps/php/php/src) exactly as
+# deps/ts_typescript does — flattening to deps/php/src would break that relative include.
+# v0.24.2 → ABI 15, in [MIN_COMPATIBLE, LANGUAGE_VERSION]=[13,15] for core v0.26.9.
+ripwire_use_vendored_source(php php/src/parser.c)
+FetchContent_Declare(php
+  GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-php.git
+  GIT_TAG 5b5627faaa290d89eb3d01b9bf47c3bb9e797dea  # v0.24.2
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _none_)
+FetchContent_MakeAvailable(php)
+add_ts_object(php ${php_SOURCE_DIR}/php/src)
 
 # TypeScript: ONE repo cloned once (SOURCE_SUBDIR _none_ skips its CMakeLists), then TWO
 # OBJECT libs (ts_tsts from typescript/src, ts_tstsx from tsx/src). Both share common/scanner.c
@@ -476,6 +502,8 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_java>
   $<TARGET_OBJECTS:ts_ruby>
   $<TARGET_OBJECTS:ts_json>
+  $<TARGET_OBJECTS:ts_lua>
+  $<TARGET_OBJECTS:ts_php>
   $<TARGET_OBJECTS:ts_toml>
   $<TARGET_OBJECTS:ts_yaml>
   $<TARGET_OBJECTS:ts_csharp>
@@ -666,7 +694,8 @@ endif()
 # ---- G1 sanitizer build (CONTRIBUTING.md §4): owned code + tree-sitter core + every grammar ----
 set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
-  ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_yaml ts_csharp ts_c ts_cuda ts_markdown)
+  ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_yaml ts_csharp ts_c ts_cuda ts_markdown
+  ts_php ts_lua)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
 # The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so
@@ -884,5 +913,7 @@ if(RIPWIRE_FUZZ)
   add_ripwire_fuzzer(yaml       tree_sitter_yaml       yaml)
   add_ripwire_fuzzer(csharp     tree_sitter_c_sharp    csharp)
   add_ripwire_fuzzer(c          tree_sitter_c          c)
+  add_ripwire_fuzzer(php        tree_sitter_php        php)
+  add_ripwire_fuzzer(lua        tree_sitter_lua        lua)
   add_custom_target(ripwire_fuzzers DEPENDS ${RIPWIRE_FUZZ_TARGETS})
 endif()

@@ -1,0 +1,30 @@
+local M = {}
+
+function M.leaf(n)
+  return n + 1
+end
+
+function M:root(n)
+  local total = 0
+  do
+    total = total + 1
+  end
+  for i = 1, n do
+    total = total + M.leaf(i)
+  end
+  repeat
+    total = total - 1
+  until total <= 0 or n == 0
+  if total < 0 then
+    return 0
+  elseif total > 99 then
+    return 99
+  end
+  return total
+end
+
+M.alias = function(x)
+  return x
+end
+
+return { run = function(n) return M:root(n) end, M = M }

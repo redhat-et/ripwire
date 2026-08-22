@@ -81,9 +81,13 @@ inline const char* symTag( SymKind k ) noexcept
 // language — lang-incompatible with everything but itself, zero references, zero call edges.
 // Yaml is appended AFTER Toml for the SAME reason a FIFTH time: index 17 clamps into the identical
 // Unknown-bucket headroom in serialize.h, zero renumbering of Cpp..Toml. The third pure-data lane.
-enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml };
+// Php (18) and Lua (19) are appended AFTER Yaml for the SAME reason a SIXTH and SEVENTH time: both
+// clamp into the identical Unknown-bucket headroom in serialize.h, zero renumbering of Cpp..Yaml.
+// UNLIKE Json/Toml/Yaml these two are CODE languages with real call graphs — they are simply the next
+// two free indexes, and APPENDING (never inserting) is what keeps every on-disk cache key stable.
+enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua };
 
-// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml").
+// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
 // caller (naming-consistency's per-language vote groups) reuses it instead of growing a second copy.
 inline const char* langTag( Lang l ) noexcept
@@ -107,6 +111,8 @@ inline const char* langTag( Lang l ) noexcept
         case Lang::C:          return "c";
         case Lang::Toml:       return "toml";
         case Lang::Yaml:       return "yaml";
+        case Lang::Php:        return "php";
+        case Lang::Lua:        return "lua";
         default:               return "?";
     }
 }
@@ -353,9 +359,15 @@ inline bool localsCountedLang( Lang lang ) noexcept
     return lang == Lang::Cpp || lang == Lang::C;
 }
 
-// Essential-complexity coverage: 15 of 18 languages — every code language EXCEPT Bash
-// (the essential-complexity design note, §3.2.8: `break N`/`continue N` take a numeric level count, `exit` and
-// `trap` are process-level, and function boundaries are weak — not worth a wrong number). Markdown/Json/Toml/
+// Essential-complexity coverage: 12 of the 15 CODE languages — every one EXCEPT Bash, PHP and Lua.
+// Bash (the essential-complexity design note, §3.2.8: `break N`/`continue N` take a numeric level count, `exit` and
+// `trap` are process-level, and function boundaries are weak — not worth a wrong number). PHP and Lua are
+// out for the language-port round's own reason and it is a DISCLOSED NON-GOAL, not an oversight: ev's
+// per-construct weights must mirror isDecisionType exactly (the ev <= cx containment below depends on it),
+// and neither language's exit vocabulary was measured in that round — PHP adds `goto`, `exit`/`die` as
+// expression-position process exits and `match` arms; Lua has `repeat … until`, `goto`, and NO `continue`
+// at all. cx/ccx/nest ARE emitted for both (the shared walk covers their node kinds); only ev is withheld,
+// so the reading is "not measured", never "measured zero". Markdown/Json/Toml/
 // Yaml/Unknown never carry a cx row, so listing them here would be vacuous either way. ANY consumer asking
 // whether Symbol::ev/evWhy can be trusted for a def — serialize.h's two emitters, ensemble.h's
 // annotation — MUST route through this ONE predicate, for localsCountedLang's reason: the covered set

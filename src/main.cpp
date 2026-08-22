@@ -1034,6 +1034,8 @@ extern "C"
     const TSLanguage* tree_sitter_c( void );
     const TSLanguage* tree_sitter_cuda( void );
     const TSLanguage* tree_sitter_markdown( void );
+    const TSLanguage* tree_sitter_php( void );
+    const TSLanguage* tree_sitter_lua( void );
 }
 
 // This process's own executable path, realpath'd. macOS uses _NSGetExecutablePath and Linux uses
@@ -1198,6 +1200,8 @@ inline DoctorGrammarProbe doctorProbeGrammars()
         { "csharp",     &tree_sitter_c_sharp,    "csharp"     },
         { "c",          &tree_sitter_c,          "c"          },
         { "cpp",        &tree_sitter_cuda,       "cuda"       },
+        { "php",        &tree_sitter_php,        "php"        },
+        { "lua",        &tree_sitter_lua,        "lua"        },
         // markdown carries NO tags.scm — ingest extracts sections by a custom tree walk, so the honest
         // probe is the pairing ingest actually uses: set_language + a real parse, not a query compile.
         { nullptr,      &tree_sitter_markdown,   "markdown"   },
@@ -8832,7 +8836,7 @@ std::vector<LangCount> computeLangCounts( const rw::IngestResult& ing )
     // grammar, Metal/CUDA's C++/CUDA-as-a-language routing included, so there is nothing to disambiguate
     // — the last write among a file's own symbols is the same value every earlier one already wrote).
     std::vector<Lang> fileLangOf( ing.files.size(), Lang::Unknown );
-    std::array<std::uint64_t, std::size_t( Lang::Yaml ) + 1> symbolTally {};
+    std::array<std::uint64_t, std::size_t( Lang::Lua ) + 1> symbolTally {};   // sized on the LAST enum member
     for( const Symbol& s : ing.symbols )
     {
         if( s.fileId < fileLangOf.size() )
@@ -8844,7 +8848,7 @@ std::vector<LangCount> computeLangCounts( const rw::IngestResult& ing )
             ++symbolTally[ std::size_t( s.lang ) ];
         }
     }
-    std::array<std::uint64_t, std::size_t( Lang::Yaml ) + 1> fileTally {};
+    std::array<std::uint64_t, std::size_t( Lang::Lua ) + 1> fileTally {};     // sized on the LAST enum member
     for( Lang l : fileLangOf )
     {
         if( l != Lang::Unknown && std::size_t( l ) < fileTally.size() )

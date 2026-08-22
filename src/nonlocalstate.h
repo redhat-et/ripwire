@@ -190,14 +190,19 @@ inline bool isAnalyzedLang( Lang l ) noexcept
 
 // The indexed languages this lens does NOT analyse — the ones the root names, so their absence from the
 // report reads as "not measured" and never as "measured, found nothing". A declarative table, not a switch
-// chain. Markdown, JSON and TOML are deliberately absent: they hold no functions, so naming them would be
-// noise rather than a disclosure. The emission order is this table's order, which makes it deterministic.
+// chain. Markdown, JSON, TOML and YAML are deliberately absent: they hold no functions, so naming them would
+// be noise rather than a disclosure. PHP and Lua ARE named, for the reason the ceiling note above gives:
+// both hold real functions and real module-level state (`static $x`, a PHP class `const`, a Lua file-scope
+// `local`), and captureUses knows neither language's assignment shapes — so an unnamed zero would be exactly
+// the confident, wrong zero this table exists to prevent. The emission order is this table's order, which
+// makes it deterministic.
 struct UnanalyzedLang { Lang lang; std::string_view name; };
-inline constexpr std::array<UnanalyzedLang, 10> kUnanalyzedLangs = { {
+inline constexpr std::array<UnanalyzedLang, 12> kUnanalyzedLangs = { {
     { Lang::C, "c" }, { Lang::Go, "go" }, { Lang::Rust, "rust" },
     { Lang::JavaScript, "javascript" }, { Lang::TypeScript, "typescript" },
     { Lang::Java, "java" }, { Lang::CSharp, "csharp" }, { Lang::Swift, "swift" },
-    { Lang::Ruby, "ruby" }, { Lang::Bash, "bash" } } };
+    { Lang::Ruby, "ruby" }, { Lang::Bash, "bash" },
+    { Lang::Php, "php" }, { Lang::Lua, "lua" } } };
 
 // The immutability keywords of the covered families. A declaration prefix carrying any of these is not
 // mutable state. Conservative on purpose: a type argument that merely MENTIONS const (`vector<const T*> v`)

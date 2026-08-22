@@ -1,0 +1,44 @@
+<?php
+
+namespace Seed\Fuzz;
+
+use Seed\Support\Helper;
+
+interface Leaf
+{
+    public function leaf(): int;
+}
+
+trait Loud
+{
+    public function shout(string $s): string
+    {
+        return strtoupper($s);
+    }
+}
+
+enum Mode: string
+{
+    case Fast = 'fast';
+    case Slow = 'slow';
+}
+
+class Root implements Leaf
+{
+    use Loud;
+
+    public const LIMIT = 13;
+
+    public function leaf(): int
+    {
+        return self::LIMIT;
+    }
+
+    public function root(Mode $m): int
+    {
+        return match ($m) {
+            Mode::Fast => $this->leaf(),
+            default => Helper::wrap($this?->leaf()),
+        };
+    }
+}
