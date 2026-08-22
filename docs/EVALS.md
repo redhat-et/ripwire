@@ -2100,6 +2100,96 @@ measurement each turn the instrument into a description of the fix, and none is 
   drifts if a pin stops being reachable, which is a weaker anchor than the content-hashed packs the
   two in-tree corpora use.
 
+#### Results — measured 2026-08-22, one measurement per bucket, against the bands above
+
+Two of the four bands are met and ship; two are missed and the code was reverted. The registration
+above is unchanged: nothing here re-cuts a band, adds a label, or re-reads an edge.
+
+| Bucket | Registered metric | Baseline | Measured | Band | Verdict |
+| --- | --- | ---: | ---: | --- | --- |
+| `vendored-asset` (primary) | vendored/generated slots in top-5, of 60 | 6 | **0** | [0, 2] | **ACCEPT** |
+| `vendored-asset` (guard) | net flipped rows, n=12 | 6 | 7 at its own commit, **6** at the round's head | [−1, +4] | in band both ways |
+| `thin-registration` | net flipped rows, n=14 | 7 | **9 (+2)** | [+2, +6] | **ACCEPT** |
+| `diagnostic-class` | net flipped rows, n=14 | 7 | **7 (+0)** | [+2, +6] | **REJECT — reverted** |
+| `subsystem-directory` | net flipped rows, n=14 | 4 | **4 (+0)** | [+3, +8] | **REJECT — reverted** |
+
+Each bucket was measured immediately after its own commit and again at the round's head, so a later
+change cannot mask an earlier one. That ordering earned its keep twice, and both facts are recorded
+rather than netted away:
+
+- The name-coverage floor costs `vendored-asset` one gold row (7 → 6 in top-5). Its primary metric —
+  the slot share the bucket is actually about — stays at 0, and its guard band explicitly allows one
+  row; but the row moved, and the number at the head is the one that counts.
+- The name-coverage floor also costs `subsystem-directory` two rows at DEPTH 10 (50.0% → 35.7% strict
+  r@10) while leaving its registered top-5 rate untouched. No registered guard covers that depth. It
+  is a real cost of a lift, disclosed rather than discovered later.
+
+**The overlap decomposition the registration demands.** Of the two `thin-registration` flips, exactly
+**one** is a `lib/ids/` row (the deterministic-chunk-id registration class) and one is not (a django
+app-config class under `contrib/admin/`). The bucket's gain is therefore **not** a directory effect
+wearing two hats — which the `subsystem-directory` result independently confirms, since the directory
+mechanism was measured separately and moved that bucket's registered metric by zero.
+
+**One correction to the registration's own feasibility audit, in the direction that matters.** The
+audit bounded the name-coverage shape at +2 by measuring coverage against each gold's FILE BASENAME.
+The shipped rule reads SYMBOL names, and a file's best-covering symbol is not always named after the
+file — `django/contrib/admin/apps.py` defines an app-config class whose name covers half the query
+its basename covers none of. The realized ceiling was therefore higher than the registered proxy, and
+the +2 result sits at the band's lower edge rather than at a ceiling. The audit was conservative in
+the direction that could only have produced a false REJECT, never a false ACCEPT.
+
+**Both rejections are mechanism-level, not constant-level**, and each was checked across its whole
+knob range before the code came out — a rejected fix that was merely mistuned would be worth retrying,
+and neither of these is:
+
+| Rejected mechanism | Knob swept | Best `strict r@5` for its own bucket | Band |
+| --- | --- | --- | ---: |
+| short-document floor on BM25 length normalization | 0 / 25 / 50 / 75 / 100 percent of average document length | **7/14 at every setting** | [+2, +6] |
+| directory-component lexical field | weight 1 / 2 / 3 on the field scale | 4/14 at weight 1, **5/14 at weights 2 and 3** | [+3, +8] |
+
+The short-document floor is the more interesting negative, because it also refutes the mechanism the
+registration corrected TO. The displacing diagnostics are not short documents relative to their
+corpus: a fifteen-line constructor sits at or above the average symbol's weighted length on a
+JavaScript tree full of one-line arrow functions, so a floor expressed as a fraction of that average
+cannot reach them at any setting. What they have is term DENSITY at ordinary length — the failure
+recited in the query's own words — and neither of the two shapes proposed for this bucket addresses
+that. A future round would have to register density, not length and not name-only matching.
+
+The directory field reached +1 at weights 2 and 3 and moved OTHER buckets up at weight 3. Shipping it
+on that basis would be choosing the metric after seeing the result, which the decision rule above
+forbids; the negative stands and the knob (`RIPWIRE_DIRTOK_W`) is not retained, because a reverted
+mechanism should not leave scaffolding that reads like a shipped feature.
+
+**Guard readout at the round's head** — every floor green, measured on the shipped binary:
+
+| Guard | Floor / ceiling | At `4692076` | At the round's head |
+| --- | ---: | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 | ≥ 60.0% | 73.1% | **73.1%** |
+| skill routing split=test sep-auc | ≥ 0.89 | 0.957 | **0.957** |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 93/152 | 98/152 / **93/152** |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| LIVE-corpus pollution@5 | ≤ 16% | 2.4% | 2.4% |
+| ranking lane lenient recall@5 | ≥ 70% | 71.9% | **75.0%** |
+| ranking lane lenient MRR | ≥ 0.55 | 0.639 | **0.647** |
+| ranking lane / adversarial pollution@5 | ≤ 5% / ≤ 8% | 0.0% / 0.0% | 0.0% / 0.0% |
+
+**The tightest floor moved UP, and that is an unregistered result — reported, not banked.** The
+registration predicted the in-tree lanes would be close to inert and registered no direction, so
+71.9% → 75.0% is not a claim this round makes. The per-query diff says exactly what happened and it
+is one query, not a trend: on the frozen source corpus, 29 of 32 rows are unchanged, one moves up
+seven ranks (a token-estimate query whose answer is a symbol whose name spells it, 11 → 4, which is
+the accepted mechanism doing the thing it was built for), and two move down one rank each at depths
+10 and 14 — outside the top-5 the floor metric reads, which is why the metric rose while the
+instrument's own win/loss count is 1–2. On the frozen doc corpus all 42 rows are byte-identical.
+**Every figure of 71.9% / 0.639 elsewhere in this document is a measurement taken before this round**;
+the lane's floors and labels are deliberately not re-pinned, because a floor that follows the number
+it guards is not a floor.
+
+**Standing constraint, still not discharged.** The full-path field's default remains 0 and its earlier
+held-out registration is untouched. The directory-component field that would have engaged it was
+rejected here on its own band and removed, so nothing in this round moves that question either way.
+
 ---
 
 ## 5. Token and output economy
