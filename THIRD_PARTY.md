@@ -63,6 +63,8 @@ is why the sizes are what they are — `parser.c` is one big static table, not h
 | `deps/yaml` | tree-sitter-yaml (v0.7.2) | Ika (ikatyang) | MIT | `7708026449bed86239b1cd5bce6e3c34dbca6415` | https://github.com/tree-sitter-grammars/tree-sitter-yaml | 1.3 MB |
 | `deps/objc` | tree-sitter-objc (v3.0.2) | Amaan Qureshi | MIT | `18802acf31d0b5c1c1d50bdbc9eb0e1636cab9ed` | https://github.com/amaanq/tree-sitter-objc | 27 MB |
 | `deps/swift` | tree-sitter-swift | Alex Pinkus | MIT | `31d17fe7e818a2048c808b5c6fdc2dc792f4f5b5` | https://github.com/alex-pinkus/tree-sitter-swift | 20 MB |
+| `deps/php` | tree-sitter-php (v0.24.2; the `php/` sub-grammar only) | Josh Vera, GitHub | MIT | `5b5627faaa290d89eb3d01b9bf47c3bb9e797dea` | https://github.com/tree-sitter/tree-sitter-php | 6.9 MB |
+| `deps/lua` | tree-sitter-lua (v0.5.0) | Munif Tanjim | MIT | `10fe0054734eec83049514ea2e718b2a56acd0c9` | https://github.com/tree-sitter-grammars/tree-sitter-lua | 392 KB |
 | `deps/doctest` | doctest (v2.4.12) | Viktor Kirilov | MIT | `1da23a3e8119ec5cce4f9388e91b065e20bf06f5` | https://github.com/doctest/doctest | 0.7 MB |
 
 Notes:
@@ -73,6 +75,11 @@ Notes:
 - `deps/swift` is pinned to a bare commit rather than a tag because upstream's default branch does
   not carry a generated `parser.c`; that commit's generated output is what is vendored here.
 - `deps/ts_typescript` keeps `common/scanner.h`, which both sub-grammars' `src/scanner.c` include.
+- `deps/php` keeps the repo-relative layout `common/scanner.h` + `php/src/…` for the same reason, and
+  for one more: upstream hosts TWO sub-grammars (`php/`, `php_only/`) whose `src/scanner.c` each
+  `#include "../../common/scanner.h"`, so flattening to `deps/php/src` would break that include.
+  Only `php/` — the sub-grammar that accepts markup around `<?php … ?>` islands — is vendored and
+  built; `php_only/` is pruned.
 - `deps/doctest` keeps the single header plus `doctest/parts/`, `scripts/version.txt` and
   `scripts/cmake/` — everything its own `CMakeLists.txt` reads. Its `doctest/extensions/` MPI
   headers are dropped: they include an external `<mpi.h>` this build never compiles. doctest is

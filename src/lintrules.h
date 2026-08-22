@@ -77,7 +77,7 @@ inline bool isValidSeverity( std::string_view s ) noexcept
 inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
 {
     struct Row { std::string_view name; Lang lang; };
-    static constexpr std::array<Row, 13> kMap = { {
+    static constexpr std::array<Row, 15> kMap = { {
         { "cpp",        Lang::Cpp        },
         { "python",     Lang::Python     },
         { "typescript", Lang::TypeScript },
@@ -91,6 +91,8 @@ inline bool langFromToken( std::string_view tok, Lang& out ) noexcept
         { "ruby",       Lang::Ruby       },
         { "csharp",     Lang::CSharp     },
         { "c",          Lang::C          },
+        { "php",        Lang::Php        },
+        { "lua",        Lang::Lua        },
     } };
     for( const Row& r : kMap )
     {
@@ -122,7 +124,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
     }
 
     struct Row { std::string_view ext; Lang lang; };
-    static const std::array<Row, 28> kExt = { {
+    static const std::array<Row, 30> kExt = { {
         { ".cpp", Lang::Cpp }, { ".cc", Lang::Cpp }, { ".cxx", Lang::Cpp },
         { ".h", Lang::Cpp }, { ".hpp", Lang::Cpp }, { ".hh", Lang::Cpp }, { ".hxx", Lang::Cpp }, { ".c", Lang::C },
         { ".py", Lang::Python },
@@ -136,6 +138,8 @@ inline Lang langOfPath( std::string_view path ) noexcept
         { ".java", Lang::Java },
         { ".rb", Lang::Ruby },
         { ".cs", Lang::CSharp },
+        { ".php", Lang::Php },
+        { ".lua", Lang::Lua },
     } };
     for( const Row& r : kExt )
     {
@@ -156,9 +160,13 @@ inline Lang langOfPath( std::string_view path ) noexcept
 // ingest.cpp's captureIncludes(): every language below has a node-type branch there (Cpp/C/ObjC's
 // preproc_include/#import, Python/TS/JS's import_statement(_from), Rust's use_declaration/mod_item,
 // Go/Swift/Java's import_declaration — Java shares that node-type SPELLING with Go/Swift so it is
-// captured too, even though only best-effort resolved — and C#'s using_directive). Bash/Ruby/Json/Toml/Yaml/
+// captured too, even though only best-effort resolved — and C#'s using_directive; PHP's
+// namespace_use_declaration joined them in the PHP/Lua port round). Bash/Ruby/Lua/Json/Toml/Yaml/
 // Markdown/Unknown have no branch there and never produce an Include record (confirmed empirically: a
-// require/source/JSON-only fixture emits `<deps files="0">`). TOML is worth a word because it LOOKS like a
+// require/source/JSON-only fixture emits `<deps files="0">`). LUA is worth a word for the same reason
+// Ruby is: `require "mod"` LOOKS like an import and is not one — it is an ordinary call to an ordinary
+// global function, captured as a call reference by queries/lua/tags.scm, so a Lua file is never a node
+// in this graph. TOML is worth a word because it LOOKS like a
 // counterexample: a Cargo.toml [dependencies] table names real dependencies. They are PACKAGE deps, not the
 // physical file-include edges this graph is built from, and inventing a node for one would put a name with
 // no in-repo file behind it into a denominator that propagation_cost divides by.
@@ -169,9 +177,9 @@ inline bool dependencyCapable( Lang lang ) noexcept
         case Lang::Cpp: case Lang::C: case Lang::ObjC:
         case Lang::Python: case Lang::TypeScript: case Lang::JavaScript:
         case Lang::Rust: case Lang::Go: case Lang::Swift:
-        case Lang::Java: case Lang::CSharp:
+        case Lang::Java: case Lang::CSharp: case Lang::Php:
             return true;
-        case Lang::Bash: case Lang::Ruby: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
+        case Lang::Bash: case Lang::Ruby: case Lang::Lua: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
         default:
             return false;
     }

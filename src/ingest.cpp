@@ -150,6 +150,8 @@ extern "C"
     const TSLanguage* tree_sitter_c( void );
     const TSLanguage* tree_sitter_cuda( void );
     const TSLanguage* tree_sitter_markdown( void );
+    const TSLanguage* tree_sitter_php( void );
+    const TSLanguage* tree_sitter_lua( void );
 }
 
 namespace rw
@@ -192,11 +194,11 @@ struct LangEntry
 
 // Order does not matter (linear scan); kept grouped by language for readability.
 // The extent is EXACT, not headroom: it was 32 with 32 rows, .toml made it 33, .pyi made it 34 and the
-// .yml/.yaml pair made it 36. Sizing it to the row count is what makes
+// .yml/.yaml pair made it 36, and the .php/.phtml/.lua trio made it 40. Sizing it to the row count is what makes
 // `std::array<bool, kLangTable.size()> present` (the grammar-prewarm set,
 // below) exact too, and it turns "added a row and forgot the extent" into a compile error rather than a
 // silent drop.
-constexpr std::array<LangEntry, 37> kLangTable = {{
+constexpr std::array<LangEntry, 40> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -278,6 +280,15 @@ constexpr std::array<LangEntry, 37> kLangTable = {{
     { ".yml",  Lang::Yaml,       &tree_sitter_yaml,       "yaml"       },   // YAML — mapping keys (mdepth<=2, seqs transparent) as t="sec"; DATA, no call edges
     { ".yaml", Lang::Yaml,       &tree_sitter_yaml,       "yaml"       },   // YAML sibling extension (k8s manifests favour it)
     { ".cs",   Lang::CSharp,     &tree_sitter_c_sharp,    "csharp"     },   // C# — classes/structs/interfaces/records/enums/methods/props + calls
+    // PHP rides tree-sitter-php's `php/` sub-grammar (NOT `php_only/`) — see CMakeLists. That grammar
+    // treats everything outside `<?php … ?>` as `text`, which is why a `.phtml` template and a Blade
+    // view (`*.blade.php` — still a `.php` extension) index without an ERROR subtree instead of parsing
+    // as one. Both extensions therefore share one row shape; no separate template tier exists or is needed.
+    { ".php",  Lang::Php,        &tree_sitter_php,        "php"        },   // PHP — classes/interfaces/traits/enums/functions/methods + calls
+    { ".phtml", Lang::Php,       &tree_sitter_php,        "php"        },   // PHP template (markup + <?php ?> islands) — same grammar, same query
+    // Lua: no classes, no imports. The five function-definition spellings and the one call node are the
+    // whole extractable structure (queries/lua/tags.scm states the metatable/dynamic-dispatch floor).
+    { ".lua",  Lang::Lua,        &tree_sitter_lua,        "lua"        },   // Lua — function/method defs (5 shapes) + calls
     { ".md",   Lang::Markdown,   &tree_sitter_markdown,   ""           },   // Markdown DOC tier — headings/sections via extractMarkdown()'s custom tree walk; NO tags.scm (query stays "")
     { ".markdown", Lang::Markdown, &tree_sitter_markdown, ""           },   // sibling extension, same walk — scope disclosed: .md/.markdown only
 }};
@@ -1483,7 +1494,27 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 67;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 68;           // bump on any grammar/.scm/extraction change
+                                                      // 68 (PHP + Lua language port, phpcheck/luacheck):
+                                                      //    TWO new grammars (tree-sitter-php v0.24.2's `php/`
+                                                      //    sub-grammar, tree-sitter-grammars/tree-sitter-lua
+                                                      //    v0.5.0) and TWO new .scm files, so the extracted SET
+                                                      //    changes on any tree holding a .php/.phtml/.lua file
+                                                      //    that previously fell out as unsupported-ext. ONE bump
+                                                      //    for both is deliberate: they land in the same commit,
+                                                      //    so no released version ever keyed a cache on one
+                                                      //    without the other. Three shared-path edits ride along
+                                                      //    and each is LANG-GATED so every existing corpus stays
+                                                      //    byte-identical: isDecisionType/cc_isNestingControl take
+                                                      //    a Lang and exclude Lua's `do … end` (a bare scope
+                                                      //    block, not a loop — counting it would be a WRONG
+                                                      //    number, not a floor) while admitting Lua
+                                                      //    repeat/elseif and PHP `match` arms; the &&/||
+                                                      //    accumulator learns the word forms `and`/`or`/`xor`
+                                                      //    behind a Php||Lua gate; captureBases learns PHP's
+                                                      //    base_clause/class_interface_clause and captureIncludes
+                                                      //    its namespace_use_declaration. Known, disclosed cost:
+                                                      //    one cold re-parse everywhere.
                                                       // 67 (2026-08-20 RefRole::Type use-sites, typerefcheck.sh):
                                                       //    usesVisitNode's accept set was the single test
                                                       //    `strcmp( t, "identifier" ) != 0 → return`, so a
@@ -2791,13 +2822,27 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
 // ---- cyclomatic complexity: 1 + decision points in a def's subtree (Myers' &&/|| extension). ----
 // Decision-point node types across our grammars (C++/Python/TS/Go/Rust/Swift + Ruby). Reported as a raw
 // number (--metrics), never a gate — the map's distribution is the local baseline the agent reads against.
-inline bool isDecisionType( const char* t ) noexcept
+//
+// `lang` exists for exactly ONE reason and the PHP/Lua port round added it: `do_statement` is a LOOP in
+// the C family and a TRY in Swift (both decisions), but in Lua `do … end` is a bare SCOPE BLOCK — no
+// condition, no branch. Counting it would not be a floor, it would be a wrong number, which is the one
+// direction the honesty rule forbids. Every other language's answer is byte-identical to before the
+// parameter existed (the Lua carve-out is the only place `lang` is read).
+inline bool isDecisionType( const char* t, Lang lang ) noexcept
 {
     return    std::strcmp( t, "if_statement" ) == 0       || std::strcmp( t, "if_expression" ) == 0
            || std::strcmp( t, "for_statement" ) == 0      || std::strcmp( t, "for_range_loop" ) == 0
            || std::strcmp( t, "for_in_statement" ) == 0   || std::strcmp( t, "for_expression" ) == 0
            || std::strcmp( t, "while_statement" ) == 0    || std::strcmp( t, "while_expression" ) == 0
-           || std::strcmp( t, "do_statement" ) == 0       || std::strcmp( t, "loop_expression" ) == 0
+           || ( std::strcmp( t, "do_statement" ) == 0 && lang != Lang::Lua ) || std::strcmp( t, "loop_expression" ) == 0
+           // Lua: `repeat … until c` is a real post-test loop, and `elseif c then` is the flat +1 arm of
+           // an if-chain (a SIBLING statement in this grammar, not a child clause, so cc_walk's else-if
+           // flattening below never sees it and it must be counted here).
+           || std::strcmp( t, "repeat_statement" ) == 0   || std::strcmp( t, "elseif_statement" ) == 0
+           // PHP 8: each `match` arm is a decision, exactly like C#'s switch_expression_arm and Ruby's
+           // `when`. `match_default_expression` is the fall-through arm and is deliberately NOT counted,
+           // matching how a C-family `default:` label is not a decision.
+           || std::strcmp( t, "match_conditional_expression" ) == 0
            || std::strcmp( t, "case_statement" ) == 0     || std::strcmp( t, "match_arm" ) == 0
            || std::strcmp( t, "expression_case" ) == 0    || std::strcmp( t, "communication_case" ) == 0
            || std::strcmp( t, "catch_clause" ) == 0       || std::strcmp( t, "except_clause" ) == 0
@@ -2835,13 +2880,20 @@ inline bool isDecisionType( const char* t ) noexcept
 // else-if chains are flattened (a C-family else-if = +1, not +1+nesting). Boolean runs collapse:
 // `a && b && c` = +1, `a && b || c` = +2. Reported as `ccx` (raw fact, never a gate).
 // Known approximations: plain C-family `else {}` blocks aren't separately scored; recursion isn't added.
-inline bool cc_isNestingControl( const char* t ) noexcept
+// `lang` is read for the SAME single carve-out isDecisionType documents: Lua's `do … end` is a bare scope
+// block, not a loop or a try, so it neither scores nor deepens nesting. Every other language is unchanged.
+inline bool cc_isNestingControl( const char* t, Lang lang ) noexcept
 {
     return    std::strcmp( t, "if_statement" ) == 0      || std::strcmp( t, "if_expression" ) == 0
            || std::strcmp( t, "for_statement" ) == 0     || std::strcmp( t, "for_range_loop" ) == 0
            || std::strcmp( t, "for_in_statement" ) == 0  || std::strcmp( t, "for_expression" ) == 0
            || std::strcmp( t, "while_statement" ) == 0   || std::strcmp( t, "while_expression" ) == 0
-           || std::strcmp( t, "do_statement" ) == 0      || std::strcmp( t, "loop_expression" ) == 0
+           || ( std::strcmp( t, "do_statement" ) == 0 && lang != Lang::Lua ) || std::strcmp( t, "loop_expression" ) == 0
+           // Lua `repeat … until c` opens a nested body and scores, exactly like `while`. Lua's
+           // `elseif_statement` is deliberately absent for the C-family else-if reason: flat +1, no deeper
+           // nesting — and because it is a SIBLING here, cc_walk's else-if detector cannot flatten it, so
+           // admitting it would charge 1+nesting for what is one arm of one chain.
+           || std::strcmp( t, "repeat_statement" ) == 0
            || std::strcmp( t, "switch_statement" ) == 0  || std::strcmp( t, "switch_expression" ) == 0
            || std::strcmp( t, "match_expression" ) == 0
            || std::strcmp( t, "catch_clause" ) == 0      || std::strcmp( t, "except_clause" ) == 0
@@ -2864,8 +2916,13 @@ inline bool cc_isNestingOnly( const char* t ) noexcept   // raises nesting, scor
     return    std::strcmp( t, "lambda_expression" ) == 0 || std::strcmp( t, "lambda" ) == 0
            || std::strcmp( t, "closure_expression" ) == 0;
 }
-// the boolean-operator spelling of a node, or "" if it isn't one (&&/|| for C-family, and/or for Python)
-inline std::string_view cc_boolOp( TSNode n, std::string_view src ) noexcept
+
+// The written spelling of a node's `operator:` field, or "" when it has none / the span is out of range.
+// ONE derivation, shared by the two consumers below — cc_boolOp (cognitive: does this operator CONTINUE
+// a boolean run?) and cc_isBooleanJoin (cyclomatic: does it count as a decision at all?). They ask
+// different questions of the same string, and before the PHP/Lua port they answered them from two
+// hand-copied spans — a duplication --quality-delta scored the moment the second one grew a case.
+inline std::string_view cc_operatorText( TSNode n, std::string_view src ) noexcept
 {
     const TSNode op = ts_node_child_by_field_name( n, "operator", 8 );
     if( ts_node_is_null( op ) )
@@ -2873,12 +2930,35 @@ inline std::string_view cc_boolOp( TSNode n, std::string_view src ) noexcept
         return {};
     }
     const std::uint32_t a = ts_node_start_byte( op ), b = ts_node_end_byte( op );
-    if( b > src.size() || b <= a )
-    {
-        return {};
-    }
-    const std::string_view o = src.substr( a, b - a );
+    return ( b > src.size() || b <= a ) ? std::string_view{} : src.substr( a, b - a );
+}
+
+// the boolean-operator spelling of a node, or "" if it isn't one (&&/|| for C-family, and/or for Python)
+inline std::string_view cc_boolOp( TSNode n, std::string_view src ) noexcept
+{
+    const std::string_view o = cc_operatorText( n, src );
     return ( o == "&&" || o == "||" || o == "and" || o == "or" ) ? o : std::string_view{};
+}
+
+// Myers' &&/|| extension for CYCLOMATIC counting: does this `binary_expression` join two conditions?
+// Extracted from cc_walk rather than written inline — the PHP/Lua port needed a second spelling family
+// (the WORD operators), and the inline form scored a measured +12 cx / +13 LOC on cc_walk, which is a
+// --quality-delta regression on a function already at the top of this file's complexity distribution.
+//
+// Two spelling families, and the Lang gate is what keeps the second from touching any other grammar:
+//   * `&&` / `||`  — C/C++/ObjC, TS/JS, Java, C#, Swift, Rust, Go, PHP. Two bytes.
+//   * `and`/`or`/`xor` — Lua (its ONLY spelling) and PHP (its low-precedence alternative). `or` is also
+//     two bytes, so the Lang test, not the length test, is what makes this sound: without it a
+//     hypothetical grammar spelling some non-boolean operator `or` would start scoring.
+// Python is deliberately absent from both: its `and`/`or` parse to a `boolean_operator` NODE, which
+// isDecisionType already names, so counting it here too would double it.
+inline bool cc_isBooleanJoin( TSNode n, std::string_view src, Lang lang ) noexcept
+{
+    const std::string_view o        = cc_operatorText( n, src );
+    const bool             wordLang = ( lang == Lang::Lua || lang == Lang::Php );
+    return    o == "&&" || o == "||"
+           || ( wordLang && ( o == "and" || o == "or" ) )
+           || ( lang == Lang::Php && o == "xor" );
 }
 
 // ── O(children) child collection for whole-subtree walks ─────────────────────────────────────────────
@@ -3389,7 +3469,7 @@ inline std::uint32_t ev_noteNode( EvCtx& ctx, TSNode n, const char* t, std::uint
     CtrlKind kind;
     if( ev_ctrlKindFor( t, lang, kind ) )
     {
-        return ev_appendCtrl( ctx, n, kind, std::uint16_t( isDecisionType( t ) ? 1 : 0 ), parentIdx, lang, src );
+        return ev_appendCtrl( ctx, n, kind, std::uint16_t( isDecisionType( t, lang ) ? 1 : 0 ), parentIdx, lang, src );
     }
 
     // ── jumps. Every rule below: resolve the target (ancestors only — the arena already holds them in a
@@ -3746,7 +3826,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         const std::uint32_t ctrl = ( evCtx != nullptr && isNamed ) ? ev_noteNode( *evCtx, n, t, frame.ctrl, lang, src ) : frame.ctrl;
 
         // cyclomatic (flat decision count) accumulated in the SAME DFS as cognitive — one walk, both metrics.
-        if( isNamed && isDecisionType( t ) )
+        if( isNamed && isDecisionType( t, lang ) )
         {
             ++acc.cyclo;
         }
@@ -3766,24 +3846,12 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         {
             acc.locals += cc_countLocalDeclarators( n );
         }
-        else if( std::strcmp( t, "binary_expression" ) == 0 )
+        else if( std::strcmp( t, "binary_expression" ) == 0 && cc_isBooleanJoin( n, src, lang ) )
         {
-            const TSNode op = ts_node_child_by_field_name( n, "operator", 8 );
-            if( !ts_node_is_null( op ) )
-            {
-                const std::uint32_t a = ts_node_start_byte( op ), b = ts_node_end_byte( op );
-                if( b <= src.size() && b - a == 2 )
-                {
-                    const std::string_view o = src.substr( a, 2 );
-                    if( o == "&&" || o == "||" )
-                    {
-                        ++acc.cyclo;
-                    }
-                }
-            }
+            ++acc.cyclo;   // Myers' &&/|| extension — see cc_isBooleanJoin for the two spelling families
         }
 
-        if( isNamed && cc_isNestingControl( t ) )
+        if( isNamed && cc_isNestingControl( t, lang ) )
         {
             const bool   isIf = ( std::strcmp( t, "if_statement" ) == 0 || std::strcmp( t, "if_expression" ) == 0 );
             const TSNode p    = ts_node_parent( n );
@@ -4328,7 +4396,9 @@ inline bool isBaseTypeNode( const char* nt ) noexcept
         "user_type",              // Swift base/protocol type
         "generic_type",           // Java/TS `implements List<T>` — final segment is still the raw name
         "generic_name",           // C# `class Foo : IList<T>` — final segment is still the raw name
-        "qualified_name",         // C# `class Foo : Ns.Base` — dotted base/interface name
+        "qualified_name",         // C# `class Foo : Ns.Base` — dotted base/interface name; PHP `extends \Ns\Base`
+        "name",                   // PHP's identifier node kind — `class Foo extends Bar implements Baz`
+        "relative_name",          // PHP `extends namespace\Base` (namespace-relative)
     };
     for( const char* k : kBaseTypeKinds )
     {
@@ -4563,13 +4633,21 @@ void captureMacroBodyCalls( TSNode defineNode, std::uint32_t fileId, Lang lang, 
 
 // Capture base classes for the inheritance/Lego view: walk a class node's base clause and emit an
 // inherit RawRef per base (derived → base). startByte sits inside the class header, so the enclosing
-// attribution assigns fromSymbol = the derived class. Explicit-syntax langs: C++/TS/JS/Java/Python/Swift/C#.
+// attribution assigns fromSymbol = the derived class. Explicit-syntax langs: C++/TS/JS/Java/Python/Swift/
+// C#/PHP. Lua is deliberately absent and it is a DISCLOSED non-goal, not an omission: Lua inheritance IS
+// `setmetatable( Derived, { __index = Base } )`, an ordinary runtime call over an ordinary table, so there
+// is no syntax to read and a Lua corpus correctly reports no inheritance edges at all.
 //
 // The base type can sit at one of two depths under the class node (measured against the vendored grammars):
 //   DIRECT  — a type node is an immediate child of the clause:
 //               C++ base_class_clause → type_identifier ; Swift inheritance_specifier → user_type ;
 //               Java superclass → type_identifier ; Python superclasses/argument_list → identifier ;
-//               C# base_list → identifier/generic_name/qualified_name (`class Foo : Base, IBar`)
+//               C# base_list → identifier/generic_name/qualified_name (`class Foo : Base, IBar`) ;
+//               PHP base_clause / class_interface_clause → name/qualified_name/relative_name. PHP is the
+//               only language here whose EXTENDS and IMPLEMENTS clauses are two distinct node kinds that
+//               are both DIRECT children of the class node, so both are named above and neither wraps.
+//               A trait acquired with `use SomeTrait;` INSIDE the class body is NOT an inheritance edge
+//               here — it is a use_declaration under declaration_list, a different shape (disclosed).
 //   WRAPPED — the clause holds a wrapper that in turn holds the type node(s):
 //               TS class_heritage → {extends_clause,implements_clause} → (type_)identifier
 //               Java super_interfaces → type_list → type_identifier
@@ -4591,7 +4669,9 @@ void captureBases( TSNode classNode, std::uint32_t fileId, Lang lang, std::strin
                                 || std::strcmp( ct, "superclass" ) == 0            // Java   extends Base
                                 || std::strcmp( ct, "super_interfaces" ) == 0      // Java   implements I, J   (wraps type_list)
                                 || std::strcmp( ct, "inheritance_specifier" ) == 0 // Swift  : Protocol
-                                || std::strcmp( ct, "base_list" ) == 0;            // C#     : Base, IBar
+                                || std::strcmp( ct, "base_list" ) == 0             // C#     : Base, IBar
+                                || std::strcmp( ct, "base_clause" ) == 0           // PHP    extends Base
+                                || std::strcmp( ct, "class_interface_clause" ) == 0; // PHP  implements I, J
         if( !isClause )
         {
             continue;
@@ -4923,6 +5003,61 @@ inline std::string csharpUsingTarget( TSNode usingNode, std::string_view src )
     return {};
 }
 
+// csharpUsingTarget's PHP sibling: the written specifier of a `use` statement. Node shapes read off
+// tree-sitter-php v0.24.2's node-types.json and confirmed on a real parse:
+//   use Foo\Bar;             namespace_use_declaration > namespace_use_clause > qualified_name
+//   use Bar;                 namespace_use_declaration > namespace_use_clause > name
+//   use Foo\Bar as Baz;      the same, plus an `alias:` field we deliberately ignore — the DEPENDENCY is
+//                            the real name, not the local nickname (mirroring csharpUsingTarget, which
+//                            also reports the aliased target rather than the alias)
+//   use function Foo\bar;    a `type:` field on the CLAUSE ("function"/"const"); the specifier is
+//                            unchanged, so nothing here needs to branch on it
+//   use Foo\{A, B};          namespace_use_declaration > namespace_name + namespace_use_group — the
+//                            group prefix IS the dependency, so the namespace_name is the right answer
+//
+// DISCLOSED FLOOR: a comma-grouped `use A\B, C\D;` yields ONE Include (the first clause). One directive
+// node can only carry one target through directiveTargetOf, and PSR-12 forbids the multi-clause form, so
+// this is the cheap honest cut rather than a reshape of the include record. Same posture as the nesting
+// limit above it: a `use` written inside a BRACED `namespace Foo { … }` block is not reached at all,
+// because PHP has no entry in isImportContainer (the file-scoped `namespace Foo;` form PSR-12 mandates
+// is top-level and unaffected). Both are misses, never wrong answers.
+inline std::string phpUseTarget( TSNode useNode, std::string_view src )
+{
+    const uint32_t cc = ts_node_child_count( useNode );
+    for( uint32_t k = 0; k < cc; ++k )
+    {
+        const TSNode c = ts_node_child( useNode, k );
+        if( !ts_node_is_named( c ) )
+        {
+            continue;
+        }
+        const char* ct = ts_node_type( c );
+        if( std::strcmp( ct, "namespace_name" ) == 0 )      // the `use Foo\{A, B}` group prefix
+        {
+            return importSpecifierText( c, src );
+        }
+        if( std::strcmp( ct, "namespace_use_clause" ) != 0 )
+        {
+            continue;
+        }
+        const uint32_t gc = ts_node_child_count( c );
+        for( uint32_t j = 0; j < gc; ++j )
+        {
+            const TSNode g = ts_node_child( c, j );
+            if( !ts_node_is_named( g ) )
+            {
+                continue;
+            }
+            const char* gt = ts_node_type( g );
+            if( std::strcmp( gt, "qualified_name" ) == 0 || std::strcmp( gt, "name" ) == 0 )
+            {
+                return importSpecifierText( g, src );
+            }
+        }
+    }
+    return {};
+}
+
 // The bare header path inside a C-family include spelling: `"dir/x.h"` / `<dir/x.h>` → `dir/x.h`, with
 // isAngleOut set from the delimiter BEFORE it is stripped (angle = external ⇒ path-precise resolution
 // leaves it unresolved). Shared by the two C-family spellings so they can never drift apart:
@@ -5183,6 +5318,15 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
     else if( std::strcmp( t, "using_directive" ) == 0 )
     { // C# `using Foo.Bar;` / `using static Foo;` / `using X = Foo.Bar;`
         target = csharpUsingTarget( n, src );                            // see csharpUsingTarget for the shape rationale
+    }
+    else if( std::strcmp( t, "namespace_use_declaration" ) == 0 )
+    { // PHP `use Foo\Bar;` / `use Foo\Bar as Baz;` / `use function Foo\bar;` / `use Foo\{A, B};`
+        // Captured for --uses / --deps visibility, NEVER precise-resolved: PHP has no entry in
+        // resolve.h's includeLangOf table, so it falls through to IncludeLang::Other exactly as Java and
+        // C# do. The reason is the same one stated there — a PHP namespace does not map 1:1 onto a file
+        // (PSR-4 maps it onto a DIRECTORY through a composer.json `autoload` block this tool does not
+        // read), so there is no sound string→fileId rule to write, and a wrong narrow is worse than none.
+        target = phpUseTarget( n, src );                                 // see phpUseTarget for the shape rationale
     }
     return { std::move( target ), isAngle };
 }

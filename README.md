@@ -16,8 +16,8 @@ deterministic call graph — what to touch, what it breaks, which tests to run �
 around and reading whole files.
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
-JavaScript · Java · Ruby · Bash · C# · JSON · TOML · YAML · Markdown — [nineteen vendored
-grammars](#languages), and adding another is a vendored tree-sitter grammar plus one row in a
+JavaScript · Java · Ruby · PHP · Lua · Bash · C# · JSON · TOML · YAML · Markdown — [twenty-one
+vendored grammars](#languages), and adding another is a vendored tree-sitter grammar plus one row in a
 declarative table.
 
 ### No API key. No embeddings. No index server. No daemon.
@@ -540,8 +540,8 @@ cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release && cmake --build build-re
 cmake -S . -B build && cmake --build build -j
 ```
 
-Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, Bash, Go, Rust,
-Swift, C#** — plus JSON/TOML/YAML config keys, markdown sections, Metal, and CUDA (`<<<>>>`
+Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, PHP, Lua, Bash, Go,
+Rust, Swift, C#** — plus JSON/TOML/YAML config keys, markdown sections, Metal, and CUDA (`<<<>>>`
 launches are call edges).
 
 To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
@@ -799,8 +799,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="src/graph.h:2168"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:2504"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:12534"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:12649"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:12538"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:12653"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:950"/>
 </callers>
 ```
@@ -1421,13 +1421,19 @@ so `kernel<<<grid, block>>>( … )` launch sites are real call edges and `--call
 its host-side launchers; `__constant__` module tables index as symbols even uninitialized — the
 `cudaMemcpyToSymbol` idiom — and SCREAMING_SNAKE `__device__`/`__managed__` globals join them;
 dual-compile `.cuh` headers resolve from both halves), Python, TypeScript,
-JavaScript, Java, Ruby, Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
+JavaScript, Java, Ruby, **PHP** (`.php`/`.phtml` — classes, interfaces, traits, enums, functions,
+methods and constants; `$o?->m()` null-safe and `A::m()` static calls are edges; `use` directives are
+imports. Dynamic dispatch — `$fn()`, `call_user_func`, `__call` — names its callee at run time and is
+a stated floor, not a silence), **Lua** (all five spellings that define a function, including the
+`M.f = function` and table-constructor forms; `function M:f()` is a method. Metatable inheritance is
+a runtime call with no syntax to read, so a Lua corpus reports no inheritance edges — stated, not
+implied), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
 `[tool.ruff.lint]` table is one symbol under its full dotted name, and
 `pyproject.toml`/`Cargo.toml`/CI workflows become greppable), and **Markdown** (`.md`/`.markdown` —
 the DOC tier: every heading, ATX or setext, is a section symbol whose span runs to the next
 same-or-higher heading, so `--for` ranks the section, `--expand` serves the section body, `--recall`
 answers section-granular, and links/`backtick` mentions are doc→doc and doc→code edges).
-Nineteen tree-sitter grammars, all vendored.
+Twenty-one tree-sitter grammars, all vendored.
 
 Want another language? The pipeline is language-agnostic past the parse: a new language is a
 vendored tree-sitter grammar, its query file, and one row in the declarative
