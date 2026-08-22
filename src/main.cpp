@@ -6284,11 +6284,30 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                 }
             }
         }
+        // LB-G (r10 GitNexus round): TIER before path. This used to be plain path order, and on django
+        // `--callers=bulk_create` that meant 175 rows of which 171 were `tests/` — the four real source
+        // callers survived the first page only because `django/` happens to sort before `tests/`. The key
+        // is rw::pathTierOf (filter.h), the same classifier --grep has ordered by since the span-tier
+        // round, materialized ONCE PER DISTINCT FILE exactly as search.h does it: pathTierOf lowercases an
+        // extension into a fresh std::string, so calling it inside the comparator would allocate O(n log n)
+        // times. 0xFF = not yet computed (PathTier has three values, so it can never collide).
+        std::vector<std::uint8_t> tierOfFile( ing.files.size(), 0xFFu );
+        for( NodeId r : result )
+        {
+            if( const std::uint32_t f = ing.symbols[r].fileId; f < tierOfFile.size() && tierOfFile[f] == 0xFFu )
+            {
+                tierOfFile[f] = std::uint8_t( rw::pathTierOf( ing.files[f] ) );
+            }
+        }
         std::sort( result.begin(), result.end(), [ & ]( NodeId a, NodeId b )
         {
             const Symbol& sa = ing.symbols[a];  const Symbol& sb = ing.symbols[b];
             if( sa.fileId != sb.fileId )
             {
+                if( tierOfFile[sa.fileId] != tierOfFile[sb.fileId] )
+                {
+                    return tierOfFile[sa.fileId] < tierOfFile[sb.fileId];
+                }
                 return ing.files[sa.fileId] < ing.files[sb.fileId];
             }
             return sa.line != sb.line ? sa.line < sb.line : sa.name < sb.name;
@@ -6316,7 +6335,14 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // when paging is active — discloseCap=false because these two verbs have NO display cap of their own
         // (an un-paginated --callers always emitted every caller), so the un-paged opening tag stays
         // byte-identical. See src/pageview.h, THE TRUNCATION VOCABULARY.
-        const PageWindow  pw = pageWindow( result.size(), cfg.pageLimit, cfg.pageOffset );
+        // LB-G: a DEFAULT display cap, the one --impact has had since §P8 (pageview.h kCallHierarchyRowCap),
+        // where these two verbs previously had none at all. count= is untouched and stays the un-windowed
+        // total, so the cap costs no honesty — the rows shrink, the number does not move. discloseCap is
+        // the answer's OWN capped state rather than a constant true: these verbs shipped for their whole
+        // life uncapped, so an answer that drops nothing stays byte-identical to what it was. THE
+        // TRUNCATION VOCABULARY (pageview.h) names that shape conformant and cites --skill-scan for it.
+        const PageWindow  pw = pageWindow( result.size(), effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ), cfg.pageOffset );
+        const bool        chDiscloseCap = ( pw.end - pw.begin ) < result.size();
         char              pab[ kPageDisclosureCap ];
 
         // §H4 §3.4: the FIRST legend these two verbs have ever shipped (0 bytes before — which is why every
@@ -6331,7 +6357,10 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // already-large dispatcher's own complexity.
         if( !cfg.json )
         {
-            std::printf( "%s%s-->%s", rw::callHierarchyLegendOpen( wantCallers ).c_str(), rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( chSingleRoot ) );
+            std::printf( "%s%s%s-->%s", rw::callHierarchyLegendOpen( wantCallers ).c_str(),
+                         rw::capLegendClause( rw::computePageDisclosure( pw.end - pw.begin, result.size(), pw.end,
+                                                                        cfg.pageLimit, cfg.pageOffset, chDiscloseCap ).active ),
+                         rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( chSingleRoot ) );
         }
 
         // --format=columnar (RESEARCH lever 1): the same page window, re-encoded as a path-table + parallel
@@ -6351,7 +6380,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                                    + ( !wantCallers && bodylessDefsCount > 0 ? " bodyless_defs=\"" + std::to_string( bodylessDefsCount ) + "\"" : "" )
                                    + chRootAttr   // R-E: same root= the XML/JSON branches carry
                                    + pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
-                                                     cfg.pageLimit, cfg.pageOffset, false )
+                                                     cfg.pageLimit, cfg.pageOffset, chDiscloseCap )
                                    + rw::kGraphCountFloorAttrXml;   // §H4 §3.4 — every dialect carries the marker
             emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix );
             return 0;
@@ -6371,7 +6400,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             // R-E: the JSON twin of the XML root= below — right after the leading identifying fields.
             if( chSingleRoot ) { std::printf( ",\"root\":\"%s\"", jsonStr( cfg.roots[0] ).c_str() ); }
             std::printf( "%s%s", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
-                                        cfg.pageLimit, cfg.pageOffset, false, kJsonPageSyntax ),
+                                        cfg.pageLimit, cfg.pageOffset, chDiscloseCap, kJsonPageSyntax ),
                          rw::kGraphCountFloorAttrJson );   // §H4 §3.4 — the JSON dialect's spelling of the same marker
             std::printf( ",\"%s\":[", tag );
             printJsonSymbolRows( ing, result, pw.begin, pw.end, chRootPrefix );
@@ -6387,7 +6416,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             std::printf( " bodyless_defs=\"%zu\"", bodylessDefsCount );
         }
         std::printf( "%s%s>", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
-                                    cfg.pageLimit, cfg.pageOffset, false ),
+                                    cfg.pageLimit, cfg.pageOffset, chDiscloseCap ),
                      rw::kGraphCountFloorAttrXml );
         for( std::size_t i = pw.begin; i < pw.end; ++i )
         {
@@ -6594,10 +6623,25 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
         sites.push_back( { r.fileId, r.line, r.role, std::move( in ) } );
     }
 
+    // LB-G (r10 GitNexus round): TIER before path, the same key --grep and the callers/callees arm order by
+    // (rw::pathTierOf, filter.h). Plain path order put `--uses=bulk_create`'s 207 django rows in whatever
+    // sequence the directory names fell in. Materialized once per distinct hit file, not inside the
+    // comparator — pathTierOf allocates a std::string per call (search.h's own note). 0xFF = not computed.
+    std::vector<std::uint8_t> tierOfFile( ing.files.size(), 0xFFu );
+    for( const UseSite& u : sites )
+    {
+        if( u.fileId < tierOfFile.size() && tierOfFile[ u.fileId ] == 0xFFu )
+        {
+            tierOfFile[ u.fileId ] = std::uint8_t( rw::pathTierOf( ing.files[ u.fileId ] ) );
+        }
+    }
     std::sort( sites.begin(), sites.end(), [ & ]( const UseSite& a, const UseSite& b )
                {
-        if( a.fileId != b.fileId ) { return ing.files[ a.fileId ] < ing.files[ b.fileId ];
-}
+        if( a.fileId != b.fileId )
+        {
+            if( tierOfFile[ a.fileId ] != tierOfFile[ b.fileId ] ) { return tierOfFile[ a.fileId ] < tierOfFile[ b.fileId ]; }
+            return ing.files[ a.fileId ] < ing.files[ b.fileId ];
+        }
         if( a.line   != b.line ) {   return a.line < b.line;
 }
         if( a.role   != b.role ) {   return std::uint8_t( a.role ) < std::uint8_t( b.role );
@@ -6698,6 +6742,15 @@ std::optional<int> runUses( const MainDispatch& d )
 
         std::vector<char> esc;
         const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+        // §P8 G1: the page window over the sorted sites; count= stays the un-windowed total (note above
+        // runUses) — of the sites the extractor RESOLVED, which counts_floor= is there to say (V3 L-4).
+        // LB-G: a DEFAULT display cap on the SITE unit (pageview.h kUseSiteRowCap = 100, --grep's number),
+        // where this verb previously had none: `--uses=bulk_create` on django was 207 rows / 38,546 B.
+        // count= stays the un-windowed total, and discloseCap is the answer's own capped state, so an
+        // answer that drops nothing keeps its pre-LB-G bytes exactly (the callers arm's reasoning verbatim).
+        const PageWindow  upw      = pageWindow( sites.size(), effectiveRowCap( cfg.pageLimit, rw::kUseSiteRowCap ), cfg.pageOffset );
+        const std::size_t pageRows = upw.end - upw.begin;
+        const bool        usDiscloseCap = pageRows < sites.size();
         // §H4 §3.4 item 2: the opener is shared with the MCP twin (src/graphlegend.h) — the two were
         // byte-identical copies of a sentence that promised "every use-site of SYM", which the qualified-call
         // round proved false and which a name-based static reference index cannot make true.
@@ -6709,13 +6762,12 @@ std::optional<int> runUses( const MainDispatch& d )
                      "chosen def (the callers verb's own narrowing, read the other way, so the two agree); read/write/import/extends carry no "
                      "resolution and stay name-matched across every def sharing the name. narrowed_roles= names what narrowed, and "
                      "defs_of_name=/call_sites_of_name= (file: qualifier only) are the un-narrowed totals. "
-                     "%s-->%s", rw::kUsesLegendOpen, rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( usSingleRoot ) );
-        // §P8 G1: the page window over the sorted sites; count= stays the un-windowed total (note above
-        // runUses) — of the sites the extractor RESOLVED, which counts_floor= is there to say (V3 L-4).
-        const PageWindow  upw      = pageWindow( sites.size(), cfg.pageLimit, cfg.pageOffset );
-        const std::size_t pageRows = upw.end - upw.begin;
+                     "%s%s-->%s", rw::kUsesLegendOpen,
+                     rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
+                                                                    cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
+                     rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( usSingleRoot ) );
         char              upab[ kPageDisclosureCap ];
-        const char* const upage    = pageDisclosure( upab, sizeof( upab ), pageRows, sites.size(), upw.end, cfg.pageLimit, cfg.pageOffset, false );
+        const char* const upage    = pageDisclosure( upab, sizeof( upab ), pageRows, sites.size(), upw.end, cfg.pageLimit, cfg.pageOffset, usDiscloseCap );
 
         // --format=columnar (RESEARCH lever 1): the use-site rows as a path-table + parallel arrays.
         if( cfg.columnar )
@@ -7638,7 +7690,9 @@ std::optional<int> runImpact( const MainDispatch& d )
         // above runImpact. reaches= stays the un-windowed reach-set size — the blast radius the INDEXED graph
         // can see, which counts_floor= discloses is a floor (V3 L-4); pageDisclosure emits the same ` shown=
         // capped=` bytes this tag used to hand-roll (src/pageview.h, THE TRUNCATION VOCABULARY, rules 1-3).
-        const PageWindow  ipw       = pageWindow( show.size(), effectiveRowCap( cfg.pageLimit, 40 ), cfg.pageOffset );
+        // LB-G: the same NAMED constant --callers/--callees now use (pageview.h). Identical value, identical
+        // behaviour — what changes is that the family's default lives in one place instead of three literals.
+        const PageWindow  ipw       = pageWindow( show.size(), effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ), cfg.pageOffset );
         const std::size_t shownRows = ipw.end - ipw.begin;
         char              ipab[ kPageDisclosureCap ];
 

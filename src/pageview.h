@@ -117,6 +117,25 @@ inline int effectiveRowCap( int pageLimit, int historicCap ) noexcept
     return pageLimit > 0 ? pageLimit : historicCap;
 }
 
+// ── LB-G (r10 GitNexus round) — the NEIGHBOUR family's two display caps ──────────────────────────────────
+// --callers/--callees/--impact/--uses answer one question ("what touches this symbol") and had two
+// different postures: --impact capped at a bare literal 40, the other three at nothing at all.
+// `--callers=bulk_create` on django was 175 rows / 17,694 B — the largest single answer of that round's
+// 48-query sweep — and 171 of the 175 rows were `tests/`. Named here rather than left as literals at four
+// call sites so the family cannot drift apart again, and split in TWO because the halves count different
+// things:
+//
+//   * kCallHierarchyRowCap — SYMBOL rows (--callers/--callees/--impact). 40 is --impact's own number since
+//     §P8; adopting it is what makes this one family rather than three verbs that happen to agree today.
+//   * kUseSiteRowCap — use SITES (--uses). A site is a reference, several per symbol, which is the unit
+//     --grep counts, so it takes --grep's 100 rather than the symbol cap. A symbol-sized cap on a
+//     site-sized listing would cut a 40-symbol answer down to about a dozen symbols' worth of sites.
+//
+// Both are DEFAULTS, never ceilings: effectiveRowCap above lets --limit=N beat either, and every capped
+// answer discloses shown=/capped= plus has_more=/next_offset= so a paging loop terminates.
+inline constexpr int kCallHierarchyRowCap = 40;
+inline constexpr int kUseSiteRowCap       = 100;
+
 // The values pageDisclosure() renders under EVERY PageSyntax (XML attrs and §A3a/§A4c JSON keys) — hoisted
 // so every format's rendering shares the ONE isCapped/hasMore/paging decision instead of re-deriving it
 // (a real duplicate found by --quality-delta when a separate JSON mirror briefly landed next to this: same

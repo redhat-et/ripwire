@@ -41,8 +41,13 @@ done
     || no "default and --format=xml differ for some flat verb"
 
 # ── #2: columnar is MATERIALLY SMALLER (bytes) than xml on a multi-row verb ────────────────────────────
-XB=$( "$BIN" src "$VERB_USES" --no-cache 2>/dev/null | wc -c | tr -d ' ' )
-CB=$( "$BIN" src "$VERB_USES" --format=columnar --no-cache 2>/dev/null | wc -c | tr -d ' ' )
+# LB-G (r10 round): measured on the WHOLE listing (--limit raises the new default 100-site display cap).
+# What this arm claims is that columnar's path-table + parallel arrays encode a ROW more cheaply than the
+# XML dialect does; under a display cap the row count is fixed and the shared legend dominates the total,
+# so a capped measurement would be reporting the legend's size, not the encoding's. Both dialects take the
+# same --limit, so the comparison stays like-for-like.
+XB=$( "$BIN" src "$VERB_USES" --limit=100000 --no-cache 2>/dev/null | wc -c | tr -d ' ' )
+CB=$( "$BIN" src "$VERB_USES" --format=columnar --limit=100000 --no-cache 2>/dev/null | wc -c | tr -d ' ' )
 { [ "$XB" -gt 0 ] && [ "$CB" -lt "$XB" ] && [ $(( (XB - CB) * 100 / XB )) -ge 20 ]; } \
     && ok "columnar --uses materially smaller: ${XB}B -> ${CB}B ($(( (XB-CB)*100/XB ))% off, >=20%)" \
     || no "columnar --uses not >=20% smaller (${XB}B -> ${CB}B)"
