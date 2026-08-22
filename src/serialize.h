@@ -3543,9 +3543,8 @@ struct CalleeCallsSink
     const std::vector<float>*     rank = nullptr;
 };
 
-// The walk order for one symbol's callee listing: the CSR's own (node-id ascending, returned as an EMPTY
-// vector so the caller keeps walking the CSR in place and no copy is made) by default, or query relevance
-// when the caller supplied a rank and asked for the names-only rendering — see CalleeCallsSink::rank for
+// The walk order for one symbol's callee listing: the CSR's own (node-id ascending) by default, or query
+// relevance when the caller supplied a rank and asked for the names-only rendering — see CalleeCallsSink::rank for
 // why an arbitrarily-ordered CUT listing is a defect worth a sort. The tie-break is node id, so the order
 // is TOTAL and the output stays deterministic whatever the scores do.
 //
@@ -3555,12 +3554,11 @@ struct CalleeCallsSink
 inline std::vector<NodeId> calleeWalkOrder( NodeId id, const std::vector<std::uint32_t>& outOff,
                                             const std::vector<NodeId>& outTargets, const CalleeCallsSink& sink )
 {
-    std::vector<NodeId> walk;
+    std::vector<NodeId> walk( outTargets.begin() + outOff[id], outTargets.begin() + outOff[id + 1] );
     if( !sink.namesOnly || sink.rank == nullptr )
     {
-        return walk;                                   // empty ⇒ "walk the CSR as it lies"
+        return walk;                                   // the CSR's own order, materialized (see below)
     }
-    walk.assign( outTargets.begin() + outOff[id], outTargets.begin() + outOff[id + 1] );
     const std::vector<float>& rk = *sink.rank;
     std::sort( walk.begin(), walk.end(), [ & ]( NodeId a, NodeId b )
     {
@@ -3617,14 +3615,17 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
         return;
     }
 
-    // empty ⇒ walk the CSR in its own order; non-empty ⇒ walk this instead (see calleeWalkOrder above)
+    // this symbol's callees, in the order they are to be walked (see calleeWalkOrder above). Materialized
+    // even when that order IS the CSR's, so the loop below indexes ONE sequence unconditionally: the
+    // alternative — an empty vector meaning "walk the CSR in place" — saves a bounded copy (out-degree,
+    // and the listing is capped at 16 rows anyway) and pays for it with a branch on every row.
     const std::vector<NodeId> walk = calleeWalkOrder( id, outOff, outTargets, sink );
 
     std::string callsBody;
     int         shown = 0;
     for( std::uint32_t k = outOff[id]; k < outOff[id + 1] && shown < 16 && used < budgetBytes; ++k )
     {
-        const NodeId cid = walk.empty() ? outTargets[k] : walk[ k - outOff[id] ];
+        const NodeId cid = walk[ k - outOff[id] ];
         if( cid >= ing.symbols.size() )
         {
             continue;

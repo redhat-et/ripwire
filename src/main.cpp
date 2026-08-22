@@ -3109,11 +3109,36 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
 // this shape and the edges are the answer; `reason="no_candidates"` means nothing scored above zero, so
 // there was nothing to take edges FROM. Collapsing them would make a ranking miss look like a serving
 // decision, which is the honesty rule (#3) in its most literal form.
+constexpr std::size_t kAutoAttrReserve    = 48;   // ' bundle="auto" bodies="0" reason="no_candidates"' — the widest spelling
 constexpr std::size_t kCompactAttrReserve = 56;   // ' bundle="compact" bodies="0" reason="no_candidates"' — the widest spelling
 constexpr std::size_t kCompactWrapReserve = 56;   // '<hops shown="N" total="N" capped="1">' + '</hops>' — the section's own envelope
 static_assert( rw::kForCompactSurfaceBudgetBytes > kCompactAttrReserve + kCompactWrapReserve + 512,
                "the compact surface allowance must leave real room for edges after its own disclosure — "
                "if a legend edit tripped this, shorten the legend rather than raising the allowance" );
+
+// WHICH ENRICHMENT THE BUNDLE GAINS, decided once and carried as a value rather than re-derived at each
+// of the four places that need it (the legend's sigs-budget exemption, the root attribute's reserve, the
+// builder call, and the est_tokens split). runForLens is the largest function in this file; four
+// independent ternaries on the same predicate is exactly how it got that way.
+struct ForEnrichmentPlan
+{
+    bool        compact      = false;   // the conceptual route serves <hops>; otherwise T3's <bodies>
+    std::size_t legendBytes  = 0;       // whichever legend rides the header (exempt from the sigs trim)
+    std::size_t attrReserve  = 0;       // the root attribute's widest spelling for THIS shape
+};
+
+inline ForEnrichmentPlan planForEnrichment( bool autoBundleMode, bool compactMode )
+{
+    if( !autoBundleMode )
+    {
+        return ForEnrichmentPlan{};                     // --detail=N or --signatures-only: no enrichment at all
+    }
+    if( compactMode )
+    {
+        return ForEnrichmentPlan{ true, kForCompactBundleLegend.size(), kCompactAttrReserve };
+    }
+    return ForEnrichmentPlan{ false, kForAutoBundleLegend.size(), kAutoAttrReserve };
+}
 
 ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
                                           const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
@@ -3338,6 +3363,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // rather than the <bodies> allowance — unless the caller opted back in with --auto-bodies. The two
         // are mutually exclusive by construction: one enrichment section, one legend, one root attribute.
         const bool         compactMode    = autoBundleMode && conceptualRoute && !cfg.autoBodies;
+        const ForEnrichmentPlan plan       = planForEnrichment( autoBundleMode, compactMode );
         // NOT const: the tight-explicit-budget path in the auto block below may turn the surface off
         // (autoBundle/compactBundle=false) and rebuild the header without the legend — the ladder's later
         // rebuilds read this struct through buildForHeader and must honor that decision.
@@ -3547,13 +3573,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // explicit --token-budget the whole auto surface (legend + root attribute + bodies) must fit the
         // leftover under the stated ceiling or is turned off entirely (see the auto block below), and
         // est_tokens always measures the emitted header.
-        constexpr std::size_t kAutoAttrReserve = 48;   // ' bundle="auto" bodies="0" reason="no_candidates"' — the widest spelling
         // COMPACT: the same exemption, for whichever of the two legends is actually on the header — the
         // contract "the ranked map is byte-identical with and without the enrichment" has to hold for the
         // compact shape too, or the round would be changing signatures while claiming to change only bodies.
-        const std::size_t autoLegendBytes = compactMode      ? kForCompactBundleLegend.size()
-                                          : autoBundleMode   ? kForAutoBundleLegend.size()
-                                                             : 0u;
+        const std::size_t autoLegendBytes = plan.legendBytes;
         const std::size_t fixedBytes = headerStr.size() - adaptiveNote.size() - autoLegendBytes
                                      + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
         const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;   // ≥1: 0 would mean "no budget"
@@ -3686,13 +3709,12 @@ std::optional<int> runForLens( const MainDispatch& d )
             // committed so far: the real header (legend included), the rendered sections, "</ctx>", and the
             // post-ladder splices (est_tokens/weak reserves + the root attribute's worst case). The compact
             // root attribute is the longer of the two spellings, so its own reserve is used in that regime.
-            const std::size_t attrReserve    = compactMode ? kCompactAttrReserve : kAutoAttrReserve;
             const std::size_t committedBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
-                                             + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + attrReserve;
+                                             + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + plan.attrReserve;
             // ONE verdict, two shapes: the compact route's <hops> surface or T3's <bodies> allowance. Both
             // builders return the same struct so the wiring below (section, attribute, surface-off header
             // rebuild) is written once and cannot drift between the two.
-            ForAutoBodiesResult autoBodies = compactMode
+            ForAutoBodiesResult autoBodies = plan.compact
                 ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committedBytes, bundleBudget, redactPtr )
                 : buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank, committedBytes, bundleBudget, redactPtr, routeAnchorDefs );
             autoSection = std::move( autoBodies.section );
@@ -3786,13 +3808,13 @@ std::optional<int> runForLens( const MainDispatch& d )
             // bundle came out at 529 tokens where round(1321/2.50) is 528, an off-by-one in the number
             // that is contracted to BE the document's own measurement (test/estchargecheck.sh #11 A9/A10
             // asserts the identity, not a band). One rate, one rounding.
-            const std::size_t compactBytes = compactMode ? autoSection.xml.size() : 0u;
+            const std::size_t compactBytes = plan.compact ? autoSection.xml.size() : 0u;
             const std::size_t markupBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
                                           + routeStr.size() + graphSection.xml.size() + compactBytes + 6;   // + "</ctx>"
             // T3: the auto bodies are charged at the body rate too — def-body text BPE-merges differently
             // from markup, which is the whole reason this sum is split by kind. On the compact route
             // autoSection is markup and was folded into markupBytes above, so it contributes nothing here.
-            const std::size_t bodyTokens  = detailSection.tokens + ( compactMode ? 0u : autoSection.tokens );
+            const std::size_t bodyTokens  = detailSection.tokens + ( plan.compact ? 0u : autoSection.tokens );
             std::size_t estTokens = rw::tokensForEmittedBytes( markupBytes, kBytesPerTokenDefault ) + bodyTokens;
             std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
             for( int pass = 0; pass < 4; ++pass )
