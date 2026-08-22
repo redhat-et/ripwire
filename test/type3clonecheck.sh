@@ -85,7 +85,7 @@ cap_run default 6   # shipped cap never trips on 6 pairs → all 6 emitted (prov
 # PART 2 (P0-6) — clone GROUPING (union-find over the pair graph) and the corpus duplication percentage,
 # on the shipped --clones surface.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 [ -x "$BIN" ] || { echo "  FAIL  PART 2 needs a ripwire binary at $BIN (build first, or set RIPWIRE_BIN)"; exit 2; }
 p2fail=0

@@ -12,7 +12,7 @@
 # Usage:  RIPWIRE_BIN=build_w3/ripwire bash test/qualitykindscheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # absolutize BEFORE we cd away
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }

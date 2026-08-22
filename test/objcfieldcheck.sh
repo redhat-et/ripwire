@@ -27,7 +27,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 # V1 MED-1 fix: the probe must FOLLOW the binary under test (house pattern, probecheck.sh) — the
 # harness invokes gates with RIPWIRE_BIN only, never RIPWIRE_PROBE, so a hardcoded build/ default

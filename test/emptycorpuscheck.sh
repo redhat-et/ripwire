@@ -20,7 +20,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
@@ -48,11 +48,15 @@ run_and_check() {
     fi
     local exit_code=$?
 
-    # Check exit code: must be < 128 (no crash/signal)
-    if [ "$exit_code" -lt 128 ]; then
+    # Check exit code: must be exactly 0. This USED to accept any exit_code < 128 ("no crash/signal"),
+    # which let a binary that runs and then exits with an ordinary nonzero error code sail through as
+    # "clean" — measured against the real binary, ripwire always exits 0 and emits a non-empty
+    # legend/root tag even on a fully empty corpus (files=0 symbols=0), so the empty-output branch
+    # below is not a real success shape; exit_code!=0 is (binoverridecheck.sh wave-4 item #10).
+    if [ "$exit_code" -eq 0 ]; then
         ok "$name exits cleanly ($exit_code)"
     else
-        no "$name crashed or signaled (exit $exit_code)"
+        no "$name did not exit 0 (exit $exit_code)"
         return 1
     fi
 

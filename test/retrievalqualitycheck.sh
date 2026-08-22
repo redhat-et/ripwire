@@ -2,7 +2,7 @@
 # A7 retrieval gate: adversarial relevance fixtures plus corrected evaluator identity semantics.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/retrievalfix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT

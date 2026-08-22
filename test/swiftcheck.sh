@@ -12,7 +12,7 @@
 
 set -uo pipefail
 
-BIN="${RIPWIRE_BIN:-build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-build/ripwire}}"
 FIXTURE="test/swiftfix"
 PASS=0
 FAIL=0

@@ -56,7 +56,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CPPFIX="test/importnarrowfix"          # relative — so emitted p="..." paths match the C++ control's own gate style
 PYFIX="test/narrowlangfix/py"

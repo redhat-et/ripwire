@@ -235,7 +235,7 @@ OUT3H2="$( run_hook "$READ_JSON" "$NO_RIPWIRE" "$T3H2" )"; RC3H2=$?
 # ── (3i) SessionStart mode: emits the wrap blurb as additionalContext, once ────────────────────────
 # The blurb is EXTRACTED from `ripwire wrap claude`, so this also pins that the two cannot drift. Needs
 # the REAL binary (the stub cannot emit a wrap recipe), so it is skipped when one isn't available.
-REALBIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+REALBIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${REALBIN#/}" = "$REALBIN" ] && REALBIN="$ROOT/$REALBIN"
 if [ -x "$REALBIN" ]; then
     RBIN="$TMP/realbin"; mkdir -p "$RBIN"; ln -sf "$REALBIN" "$RBIN/ripwire"
