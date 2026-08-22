@@ -272,9 +272,13 @@ def aider_rank( repo_path, query, universe, personalize=True ):
                      HERE, stdin_data=json.dumps( abs_files ) )
     if r.returncode != 0:
         raise RuntimeError( f"aider repomap failed: {(r.stderr or r.stdout)[-800:]}" )
+    # aider's transport is a FILE, not stdout (see the driver's own comment above), so its answer-bytes
+    # analog of every other arm's `len(r.stdout)` is this file's serialized size — the same "full
+    # response body crossing the process boundary" measure, just over a different channel.
+    nbytes = os.path.getsize( outp )
     data = json.loads( pathlib.Path( outp ).read_text() )
     os.unlink( outp )
-    return dedup_files( data["ranked"], repo_path ), wall, data["n_idents"]
+    return dedup_files( data["ranked"], repo_path ), wall, data["n_idents"], nbytes
 
 
 # ── scoring helper: the SAME RL metric for every arm ─────────────────────────
@@ -362,10 +366,10 @@ def main():
                 shutil.rmtree( out_dir, ignore_errors=True )
 
             elif a.arm == "aider":
-                f, w, nid = aider_rank( repo_path, inst["query"], universe, personalize=True )
-                rec["search"] = score_block( f, inst, universe, w, extra={"n_idents": nid} )
-                f0, w0, _ = aider_rank( repo_path, inst["query"], universe, personalize=False )
-                rec["nopersona"] = score_block( f0, inst, universe, w0 )
+                f, w, nid, b = aider_rank( repo_path, inst["query"], universe, personalize=True )
+                rec["search"] = score_block( f, inst, universe, w, b, extra={"n_idents": nid} )
+                f0, w0, _, b0 = aider_rank( repo_path, inst["query"], universe, personalize=False )
+                rec["nopersona"] = score_block( f0, inst, universe, w0, b0 )
                 rec["index_wall"] = 0.0     # aider builds its map inside the timed call
         except Exception as e:
             raise SystemExit( f"{iid}: ARM FAIL: {type(e).__name__}: {e} (zero-silent-skip)" )
