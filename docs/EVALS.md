@@ -782,21 +782,38 @@ signatures, the identical `emitCalleeCallsBlock` disclosure that rides on a body
 CDATA. Disclosure rides the container exactly as T3's does: the `<ctx>` root carries
 `bundle="compact" bodies="0" reason="compact-route"`, the legend defines every attribute a reader meets,
 and the legend names the continuation — the expand verb on any name in the map — so the map-then-expand
-flow is a disclosed surface rather than a thing the agent has to guess. `--auto-bodies` is the full
-opt-out, restoring today's bundle on this route byte-identically. The name-exact route, `--detail=N`,
-`--signatures-only`, `--pack-task`, `--expand` and `--no-route` are untouched.
+flow is a disclosed surface rather than a thing the agent has to guess. `--auto-bodies` is a **first-class, permanent opt-out** —
+it restores today's bundle on this route byte-identically, and it is a standing posture flag beside
+`--signatures-only` and `--detail=N`, not a migration aid with an expiry. A caller who wants inline
+bodies on conceptual queries is a supported caller indefinitely; nothing about this round is scheduled to
+remove the flag. The name-exact route, `--detail=N`, `--signatures-only`, `--pack-task`, `--expand` and
+`--no-route` are untouched.
 
-**Why, and the mechanism note that makes the body allowance's residual value navigational.** Under the
-Claude Code harness the `Edit` tool REQUIRES a prior `Read` of the target file, so a served body can
-never substitute for the edit-path read *by construction of the harness*, whatever the ranking does.
-The first transcript pass measured exactly that shape and nothing else: 17 of 17 body-serving episodes
-that produced an edit had a native read of the file first, zero clean body-use episodes, and 51,161
-prepaid body tokens riding alongside ≈48,339 tokens of native reads rather than replacing them. The
-allowance's residual value on the conceptual route is therefore navigation and exploration-read
-avoidance — which is what the ranked map and its edges deliver — not edit-path substitution. The
-conceptual route is also where the allowance is most expensive: bodies (CDATA + their `<calls>`) are
-52.7% of every class-B byte, and class B is the one class of the standing head-to-head that fails the
-publication gate's ≤1.5× threshold, at 2.39×.
+**Why — the byte economics, which is the whole case on its own.** Class B is the one class of the
+standing head-to-head that fails the publication gate's ≤1.5× threshold, and it fails it badly: **2.39×**
+the competitor's bytes, against 1.35× / 0.39× / 0.06× for the other three. The decomposition says where
+that goes — bodies, CDATA plus their `<calls>` lists, are **52.7% of every class-B byte**, the majority
+section in two of the three corpora. And a compact one-hop answer is a *demonstrated* shape at a
+fraction of the cost, not a hypothesis: the competitor's own `context` verb answers a symbol
+neighbourhood in 0.7–1.0 KB, carrying callers, callees and field accesses. Half the bundle's bytes, on
+the one route that misses the gate, spent on a section for which a much cheaper form of the same
+navigational value is known to exist — that is the case for this round, and it stands whether or not
+any agent harness behaves the way the next paragraph describes.
+
+**Supporting evidence, explicitly scoped, on what the body allowance buys an agent.** The first
+transcript pass over post-deploy episodes found **17 of 17** body-serving episodes that produced an edit
+doing a native read of the file first, **zero** clean body-use episodes, and 51,161 prepaid body tokens
+riding *alongside* ≈48,339 tokens of native reads rather than replacing them. One mechanism behind that
+shape is a property of the harness those transcripts came from: **Claude Code 2.1.209's `Edit` tool
+requires a prior `Read` of the target file**, so under that harness+version a served body cannot
+substitute for the edit-path read whatever the ranking does. **That scope is a limit on this evidence,
+not a premise of the round.** Other harnesses (codex, opencode, aider) are not known to share the
+contract, and it may change in any Claude Code release. **Re-measure trigger, registered here:** if the
+Read-before-Edit precondition is removed or relaxed in a harness this tool is measured on, this
+paragraph's support expires and the transcript pass must be re-run before it is cited again — the byte
+case above is unaffected either way. Nothing in the implementation detects a harness, conditions on one,
+or may be changed to do so under this round; the only condition the serving reads is the tool's own
+route tag.
 
 **Why one-hop edges and not plain `--signatures-only`.** Measured before the design was fixed, on the
 15-query class-B set: of the 11 queries whose head-to-head note names a decisive symbol or file, ten
@@ -866,7 +883,8 @@ re-run. Byte totals move with the invoking path string, so this band is only val
 short relative roots. And the one thing this round CANNOT show: whether an agent that gets edges instead
 of bodies does better, worse, or the same. That is T3's own transcript readout, still waiting at 26 of
 its 30 episodes, and this registration does not pre-empt it — if that readout later rejects the
-narrowing, `--auto-bodies` is already the switch that restores the previous default on this route.
+narrowing, `--auto-bodies` is already the switch that restores the previous default on this route, and
+it is a permanent flag rather than one that would have to be re-added.
 
 ### Markdown section tier — G2/G3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
