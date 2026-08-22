@@ -2102,45 +2102,54 @@ measurement each turn the instrument into a description of the fix, and none is 
 
 #### Results — measured 2026-08-22, one measurement per bucket, against the bands above
 
-Two of the four bands are met and ship; two are missed and the code was reverted. The registration
-above is unchanged: nothing here re-cuts a band, adds a label, or re-reads an edge.
+One of the four bands is met and ships. One is met and was reverted anyway. Two are missed. The
+registration above is unchanged: nothing here re-cuts a band, adds a label, or re-reads an edge.
 
 | Bucket | Registered metric | Baseline | Measured | Band | Verdict |
 | --- | --- | ---: | ---: | --- | --- |
-| `vendored-asset` (primary) | vendored/generated slots in top-5, of 60 | 6 | **0** | [0, 2] | **ACCEPT** |
-| `vendored-asset` (guard) | net flipped rows, n=12 | 6 | 7 at its own commit, **6** at the round's head | [−1, +4] | in band both ways |
-| `thin-registration` | net flipped rows, n=14 | 7 | **9 (+2)** | [+2, +6] | **ACCEPT** |
+| `vendored-asset` (primary) | vendored/generated slots in top-5, of 60 | 6 | **0** | [0, 2] | **ACCEPT — shipped** |
+| `vendored-asset` (guard) | net flipped rows, n=12 | 6 | **7 (+1)** | [−1, +4] | in band |
+| `thin-registration` | net flipped rows, n=14 | 7 | **9 (+2)** | [+2, +6] | **in band, REVERTED — see below** |
 | `diagnostic-class` | net flipped rows, n=14 | 7 | **7 (+0)** | [+2, +6] | **REJECT — reverted** |
 | `subsystem-directory` | net flipped rows, n=14 | 4 | **4 (+0)** | [+3, +8] | **REJECT — reverted** |
 
 Each bucket was measured immediately after its own commit and again at the round's head, so a later
-change cannot mask an earlier one. That ordering earned its keep twice, and both facts are recorded
-rather than netted away:
+change cannot mask an earlier one. That ordering earned its keep: while the name-coverage floor was
+in the tree it cost `vendored-asset` one gold row (7 → 6 in top-5) and cost `subsystem-directory` two
+rows at DEPTH 10 (50.0% → 35.7% strict r@10) while leaving that bucket's registered top-5 rate
+untouched. Both are displacement, both were visible only because the intermediate measurement was
+taken, and both are gone with the revert.
 
-- The name-coverage floor costs `vendored-asset` one gold row (7 → 6 in top-5). Its primary metric —
-  the slot share the bucket is actually about — stays at 0, and its guard band explicitly allows one
-  row; but the row moved, and the number at the head is the one that counts.
-- The name-coverage floor also costs `subsystem-directory` two rows at DEPTH 10 (50.0% → 35.7% strict
-  r@10) while leaving its registered top-5 rate untouched. No registered guard covers that depth. It
-  is a real cost of a lift, disclosed rather than discovered later.
+**A band met is not a change shipped.** `thin-registration`'s +2 sat inside its band with every
+simultaneous floor green, and the code still came out, because the gate suite found a displacement
+the slice's 54 labels could not see. On `test/packtaskcheck.sh`'s fixture the floor lifts SEVEN
+symbols — one real hit and six leaf functions named `decoyBudgetOne`…`Six` — because each of their
+names covers two of that query's four content words; a genuinely relevant symbol is pushed out of the
+anchor set by the six decoys, and the 1-hop caller the gate exists to assert disappears with it. Half
+of four words is two words, and two shared subtokens is coincidence-level evidence — the same
+strength an earlier round in this project was rejected twice for trusting. It is not a fixture that
+happens to collide with a sound rule: **both** of the flipped label rows are themselves 2-of-4
+coverage, so the measured win rests on exactly the strength the gate caught misfiring. Tightening the
+rule and measuring again is a second measurement against a band that allows one, so the honest move
+is the revert and the negative on record. A future round re-registers this mechanism with
+displacement as a NAMED guard rather than something the gate suite has to catch.
 
-**The overlap decomposition the registration demands.** Of the two `thin-registration` flips, exactly
-**one** is a `lib/ids/` row (the deterministic-chunk-id registration class) and one is not (a django
-app-config class under `contrib/admin/`). The bucket's gain is therefore **not** a directory effect
-wearing two hats — which the `subsystem-directory` result independently confirms, since the directory
-mechanism was measured separately and moved that bucket's registered metric by zero.
+**The overlap decomposition the registration demands** was computed while the change was in the tree,
+and it acquits the mechanism on that axis at least: of the two `thin-registration` flips, exactly
+**one** was a `lib/ids/` row and one was not (a django app-config class under `contrib/admin/`). The
+gain was therefore not a directory effect wearing two hats — which the `subsystem-directory` result
+independently confirms, since the directory mechanism was measured separately and moved that bucket's
+registered metric by zero.
 
 **One correction to the registration's own feasibility audit, in the direction that matters.** The
 audit bounded the name-coverage shape at +2 by measuring coverage against each gold's FILE BASENAME.
-The shipped rule reads SYMBOL names, and a file's best-covering symbol is not always named after the
-file — `django/contrib/admin/apps.py` defines an app-config class whose name covers half the query
-its basename covers none of. The realized ceiling was therefore higher than the registered proxy, and
-the +2 result sits at the band's lower edge rather than at a ceiling. The audit was conservative in
-the direction that could only have produced a false REJECT, never a false ACCEPT.
+The rule as built reads SYMBOL names, and a file's best-covering symbol is not always named after the
+file. The realized ceiling was therefore higher than the registered proxy — the audit was
+conservative in the direction that could only have produced a false REJECT, never a false ACCEPT.
 
-**Both rejections are mechanism-level, not constant-level**, and each was checked across its whole
-knob range before the code came out — a rejected fix that was merely mistuned would be worth retrying,
-and neither of these is:
+**Both outright rejections are mechanism-level, not constant-level**, and each was swept across its
+whole knob range before the code came out — a rejected fix that was merely mistuned would be worth
+retrying, and neither of these is:
 
 | Rejected mechanism | Knob swept | Best `strict r@5` for its own bucket | Band |
 | --- | --- | --- | ---: |
@@ -2156,39 +2165,33 @@ recited in the query's own words — and neither of the two shapes proposed for 
 that. A future round would have to register density, not length and not name-only matching.
 
 The directory field reached +1 at weights 2 and 3 and moved OTHER buckets up at weight 3. Shipping it
-on that basis would be choosing the metric after seeing the result, which the decision rule above
-forbids; the negative stands and the knob (`RIPWIRE_DIRTOK_W`) is not retained, because a reverted
-mechanism should not leave scaffolding that reads like a shipped feature.
+on that basis would be choosing the metric after seeing the result, which the decision rule forbids;
+the negative stands, and its knob is not retained — a reverted mechanism should not leave scaffolding
+that reads like a shipped feature.
 
-**Guard readout at the round's head** — every floor green, measured on the shipped binary:
+**Guard readout at the round's head** — every floor green, and every one of them byte-identical to
+its value at the base, because the one shipped change cannot fire on a tree that contains none of the
+paths it names:
 
 | Guard | Floor / ceiling | At `4692076` | At the round's head |
 | --- | ---: | ---: | ---: |
-| skill routing split=test `bm25-desc` hit@1 | ≥ 60.0% | 73.1% | **73.1%** |
-| skill routing split=test sep-auc | ≥ 0.89 | 0.957 | **0.957** |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
 | skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
-| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 93/152 | 98/152 / **93/152** |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 93/152 | 98/152 / 93/152 |
 | recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
 | LIVE-corpus pollution@5 | ≤ 16% | 2.4% | 2.4% |
-| ranking lane lenient recall@5 | ≥ 70% | 71.9% | **75.0%** |
-| ranking lane lenient MRR | ≥ 0.55 | 0.639 | **0.647** |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
 | ranking lane / adversarial pollution@5 | ≤ 5% / ≤ 8% | 0.0% / 0.0% | 0.0% / 0.0% |
 
-**The tightest floor moved UP, and that is an unregistered result — reported, not banked.** The
-registration predicted the in-tree lanes would be close to inert and registered no direction, so
-71.9% → 75.0% is not a claim this round makes. The per-query diff says exactly what happened and it
-is one query, not a trend: on the frozen source corpus, 29 of 32 rows are unchanged, one moves up
-seven ranks (a token-estimate query whose answer is a symbol whose name spells it, 11 → 4, which is
-the accepted mechanism doing the thing it was built for), and two move down one rank each at depths
-10 and 14 — outside the top-5 the floor metric reads, which is why the metric rose while the
-instrument's own win/loss count is 1–2. On the frozen doc corpus all 42 rows are byte-identical.
-**Every figure of 71.9% / 0.639 elsewhere in this document is a measurement taken before this round**;
-the lane's floors and labels are deliberately not re-pinned, because a floor that follows the number
-it guards is not a floor.
+The per-query comparative diff says the same thing without averaging: base binary against the round's
+head, on both frozen corpora, **32 of 32 and 42 of 42 rows byte-identical, zero wins and zero
+losses**. That is the honest shape of this round — the change that shipped is a path-tier rule for
+paths this repository does not contain, so on this repository it does nothing at all, and the only
+instrument that can see it is the external slice it was registered against.
 
 **Standing constraint, still not discharged.** The full-path field's default remains 0 and its earlier
 held-out registration is untouched. The directory-component field that would have engaged it was
-rejected here on its own band and removed, so nothing in this round moves that question either way.
+rejected on its own band and removed, so nothing here moves that question either way.
 
 ---
 
