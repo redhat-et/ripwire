@@ -122,9 +122,11 @@ When you need to understand a specific function/class/concept in full (its body,
    signatures for everything it calls — read the body with the callee signatures beside it. (No `<doc>` block
    here; SYM's own doc-comment is in the CDATA body if it sits inside the definition — otherwise read the
    source lines just above `l=`.)
-   About to Edit what you just expanded? The tool contract still needs a native Read of that file first —
-   the served body doesn't substitute it — but the read doesn't need to start at line 1: Read at `l=`, not
-   the whole file. Same for a `--for` hit before you've expanded it — its `<d>` row carries `l=` too.
+   About to Edit what you just expanded? If your edit tool needs a fresh native Read of the file first
+   (true of Claude Code's Edit; other harnesses may differ), the served body doesn't satisfy that — but the
+   read doesn't need to start at line 1: Read at `l=`, not the whole file. Same for a `--for` hit before
+   you've expanded it — its `<d>` row carries `l=` too. Over MCP, skip the Read requirement altogether —
+   see ripwire-mcp's edit verbs.
 2. **Who calls it** — `ripwire <dir> --callers=SYM` → `<callers of="SYM" count="N">` with type, name,
    file:line. Callers reveal SYM's contract from the outside — expected preconditions.
 3. **What it calls** — `ripwire <dir> --callees=SYM` → cross with the `--expand` body to understand the flow.

@@ -53,12 +53,12 @@ the table below is what you reach for *instead*.
 - **Do NOT open a file you have not located first.** Rank with `--for`/`--grep`, then read what it names.
 - **Do NOT read a whole file to understand one symbol.** `--expand=SYM` returns the body plus its callees'
   signatures; the file it happens to live in is not the unit of an answer.
-- **Do NOT Read whole-file just because you're about to Edit.** The agent tool contract requires a native
-  Read before an Edit on that file even when ripwire already served the body — that Read still has to
-  happen, but it doesn't have to start at line 1. Every `<d>`/`<b>` element carries `l="N"`, the def's start
-  line; Read with `offset=N` (back off a few lines for a leading doc-comment) and `limit` sized to the body
-  you already have, not the file's total line count. A served body cannot substitute the Read; it can only
-  make it narrow.
+- **Do NOT Read whole-file just because you're about to Edit.** When your edit tool requires a fresh native
+  Read of the file first (Claude Code's Edit does this; check your own harness — it may not), a body ripwire
+  already served doesn't satisfy that requirement, but the Read doesn't have to start at line 1 either. Every
+  `<d>`/`<b>` element carries `l="N"`, the def's start line; Read with `offset=N` (back off a few lines for a
+  leading doc-comment) and `limit` sized to the body you already have, not the file's total line count. On
+  ripwire's MCP server, prefer skipping the Read entirely instead — see ripwire-mcp's edit verbs.
 - **Do NOT fan reads across several files to learn one thing.** `--pack-task="<task>"` answers in ONE
   budgeted call.
 - **Do NOT hand-translate a stack trace into a search query.** `--from-trace=FILE` takes it verbatim.
