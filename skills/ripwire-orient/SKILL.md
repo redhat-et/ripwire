@@ -51,11 +51,17 @@ highest-leverage, highest-risk files. For most "orient me" asks this one rung is
 **2. Task-relevant code** — `ripwire <dir> --for="<the task in your own words>"`
 Ranked signatures + doc-comments + cx/in metrics by relevance (matches names, docs, AND bodies — not just
 identifiers). This is the rung that answers "where's the code for X".
-**Terminal by default**: the bundle also serves the top-ranked symbols' FULL bodies inline (CDATA + callee
-signatures) under its budget — `bundle="auto" bodies="N"` on the root says how many. **Read those bodies
-here instead of opening the files the map named** — that follow-up read is the cost this default deletes.
-`bodies="0" reason="budget"` means none fit whole; `--signatures-only` opts out; `--detail=N` picks the
-body count explicitly.
+**What the bundle serves depends on which way the query routed, and the root says which.**
+*Named a symbol* (`bundle="auto" bodies="N"`): the anchor's FULL body rides inline, CDATA plus callee
+signatures — **read it here instead of opening the file the map named**, that follow-up read is the cost
+this default deletes. `bodies="0" reason="budget"` means it did not fit whole.
+*Conceptual phrase* (`bundle="compact" bodies="0" reason="compact-route"`): no bodies — you get the ranked
+map plus a `<hops>` section, one row per top-ranked symbol with its one-hop callee names. **Read the map,
+pick ONE symbol, then `--expand=path:name`** (paste the row's own `p=` and `n=`; a bare name that is not
+unique costs you the whole map). That is the flow, and it is cheaper than the bodies were: half the bytes
+of the old bundle on conceptual queries, and the edges tell you which symbol is worth the second call.
+`--auto-bodies` restores inline bodies on that route if you want them; `--signatures-only` drops both
+shapes; `--detail=N` picks the body count explicitly.
 `--for` **auto-routes** (default, no flag needed): a query that *names a symbol* (`--for="buildGraph"`) gets
 name-exact BM25 (recall@1 ~99% vs ~77% generic) — **know the name, query it verbatim**; a conceptual phrase
 uses subtoken+body BM25 instead. The header prints which ranker fired; `--no-route` forces the plain ranker.

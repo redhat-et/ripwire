@@ -42,24 +42,27 @@ run(){ "$BIN" "$@" 2>/dev/null; }
 
 # shownzero FILE LABEL: asserts <bodies shown="0" total="N" capped="C"> is present (N a real number, C 0|1
 # consistent with N), rather than the element being absent from the document entirely.
+# The optional third argument names the ELEMENT, so the same R9 contract ("a zero means none found, never
+# none exists" applies to elements, not only to counts) can be asserted on the compact route's <hops>
+# section as well as on <bodies>. Defaults to bodies, so every pre-existing call site is unchanged.
 shownzero(){
-    local f="$1" label="$2"
-    local tag; tag="$( grep -o '<bodies shown="0"[^>]*>' "$f" | head -1 )"
+    local f="$1" label="$2" el="${3:-bodies}"
+    local tag; tag="$( grep -o "<$el shown=\"0\"[^>]*>" "$f" | head -1 )"
     if [ -z "$tag" ]; then
-        no "$label: no <bodies shown=\"0\" ...> tag found — the element is ABSENT (the exact R9 bug)"
+        no "$label: no <$el shown=\"0\" ...> tag found — the element is ABSENT (the exact R9 bug)"
         return
     fi
     local total capped
     total="$(  printf '%s' "$tag" | sed -n 's/.*total="\([0-9]*\)".*/\1/p' )"
     capped="$( printf '%s' "$tag" | sed -n 's/.*capped="\([01]\)".*/\1/p' )"
     if [ -z "$total" ] || [ -z "$capped" ]; then
-        no "$label: <bodies shown=\"0\"> is missing total=/capped= ($tag)"
+        no "$label: <$el shown=\"0\"> is missing total=/capped= ($tag)"
     elif [ "$total" = "0" ] && [ "$capped" != "0" ]; then
         no "$label: total=0 but capped=\"$capped\" (want 0 — nothing was requested, nothing was dropped)"
     elif [ "$total" != "0" ] && [ "$capped" != "1" ]; then
         no "$label: total=$total but capped=\"$capped\" (want 1 — shown=0 < total means something WAS dropped)"
     else
-        ok "$label: <bodies shown=\"0\" total=\"$total\" capped=\"$capped\"> present and arithmetic"
+        ok "$label: <$el shown=\"0\" total=\"$total\" capped=\"$capped\"> present and arithmetic"
     fi
 }
 
@@ -75,12 +78,24 @@ grep -q 'bundle="auto" bodies="0" reason="budget"' "$TMP/for_budget.xml" \
     || no "arm1: <ctx> lost its bundle=/reason= attribute"
 
 # ── arm 2: --for auto-bundle, zero candidates from the start (autoBodyIds.empty()) ──────────────────────
-# a query with no positive-score ranked surface at all — weak="1" fires for the same reason.
-run src --for="zzqqxx" --no-cache > "$TMP/for_none.xml"
+# a query with no positive-score ranked surface at all — weak="1" fires for the same reason. `zzqqxx` is a
+# single nonsense word, which the router sends to subtoken+body, so since the compact round it needs
+# --auto-bodies to reach the auto BODY path this arm is about; arm 2b below asserts the same R9 contract
+# on the shape the same query gets by default.
+run src --for="zzqqxx" --auto-bodies --no-cache > "$TMP/for_none.xml"
 shownzero "$TMP/for_none.xml" "arm2 (--for, no candidates at all)"
 grep -q 'bundle="auto" bodies="0" reason="no_candidates"' "$TMP/for_none.xml" \
     && ok "arm2: <ctx> still carries bundle=\"auto\" bodies=\"0\" reason=\"no_candidates\" (unchanged, additive)" \
     || no "arm2: <ctx> lost its bundle=/reason= attribute"
+
+# ── arm 2b: the COMPACT twin of arm 2 — same query, default posture (docs/EVALS.md, the T3
+# route-narrowing round). The <hops> section is a budgeted section element like <bodies>, so it inherits
+# the same rule: when there is nothing to show it must still SAY so, element and counts both.
+run src --for="zzqqxx" --no-cache > "$TMP/for_none_compact.xml"
+shownzero "$TMP/for_none_compact.xml" "arm2b (--for compact, no candidates at all)" hops
+grep -q 'bundle="compact" bodies="0" reason="no_candidates"' "$TMP/for_none_compact.xml" \
+    && ok "arm2b: <ctx> carries bundle=\"compact\" bodies=\"0\" reason=\"no_candidates\"" \
+    || no "arm2b: <ctx> lost its compact bundle=/reason= attribute"
 
 # ── arm 3: --pack-task, candidates exist but the section never clears its own floor ─────────────────────
 run src --no-cache --pack-task="serialize signatures budget" --token-budget=50 > "$TMP/task_budget.xml"

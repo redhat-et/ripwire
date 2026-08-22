@@ -38,7 +38,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 ## Contents
 
-**understand a codebase cold** — [`--top-k`](#top-k-n) · [`--max-tokens`](#max-tokens-n) · [`--token-budget`](#token-budget-n-k-m-g) · [`--help-task`](#help-task-task) · [`--for`](#for-task) · [`--signatures-only`](#signatures-only) · [`--no-route`](#no-route) · [`--adaptive`](#adaptive) · [`--no-mention-boost`](#no-mention-boost) · [`--no-doc-mention`](#no-doc-mention) · [`--lego`](#lego-type) · [`--exemplar`](#exemplar-task-kind) · [`--recall`](#recall-task) · [`--tree`](#tree) · [`--html`](#html-file) · [`--color-by`](#color-by-mode) · [`--order`](#order-mode) · [`--no-stable`](#no-stable)
+**understand a codebase cold** — [`--top-k`](#top-k-n) · [`--max-tokens`](#max-tokens-n) · [`--token-budget`](#token-budget-n-k-m-g) · [`--help-task`](#help-task-task) · [`--for`](#for-task) · [`--signatures-only`](#signatures-only) · [`--auto-bodies`](#auto-bodies) · [`--no-route`](#no-route) · [`--adaptive`](#adaptive) · [`--no-mention-boost`](#no-mention-boost) · [`--no-doc-mention`](#no-doc-mention) · [`--lego`](#lego-type) · [`--exemplar`](#exemplar-task-kind) · [`--recall`](#recall-task) · [`--tree`](#tree) · [`--html`](#html-file) · [`--color-by`](#color-by-mode) · [`--order`](#order-mode) · [`--no-stable`](#no-stable)
 
 **navigate / answer a question** — [`--around`](#around-sym) · [`--callers`](#callers-sym) · [`--callees`](#callees-sym) · [`--uses`](#uses-sym) · [`--graph-query`](#graph-query-expr) · [`--external-surface`](#external-surface) · [`--path`](#path-src-dst) · [`--connect`](#connect-a-b-c) · [`--impact`](#impact-sym) · [`--verify`](#verify-claim) · [`--mentions`](#mentions-sym) · [`--affected`](#affected-f1-f2-sym) · [`--exercises`](#exercises-testfile) · [`--situ`](#situ-f1-f2) · [`--handoff`](#handoff) · [`--test-gate`](#test-gate-f1-f2) · [`--grep`](#grep-str-regex-pat) · [`--grep-scope`](#grep-scope-line-file) · [`--grep-in`](#grep-in-code-any) · [`--match`](#match-query) · [`--pattern`](#pattern-pat) · [`--query`](#query-terms)
 
@@ -174,7 +174,7 @@ $ ./build/ripwire . --help-task="write a cheerful release announcement"
 
 **Answers:** the task lens: ranked signatures + metrics framed for reuse.
 
-The bundle enforces a ~7.5KB default payload budget (tail entries trim first; <sigs capped="1"> marks it) — an explicit --token-budget=N overrides the default at the conservative byte rate (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens. TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance — whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6). The <ctx> root discloses it: bundle="auto" bodies="N" (bodies="0" reason="budget" when none fit). ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own body or NO body — never a same-named doc section, type stub or re-export shim from another file standing in for it. If the anchor's own body does not fit, the bundle serves nothing and says so, and the per-item over-budget comment names what was dropped. A conceptual query anchors nothing, so it keeps the rank-first walk over the whole candidate head. An explicit --token-budget=N is a hard ceiling: bodies take only what the signature bundle left over, and the signatures themselves are unchanged either way
+The bundle enforces a ~7.5KB default payload budget (tail entries trim first; <sigs capped="1"> marks it) — an explicit --token-budget=N overrides the default at the conservative byte rate (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens. TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance — whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6). The <ctx> root discloses it: bundle="auto" bodies="N" (bodies="0" reason="budget" when none fit). ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own body or NO body — never a same-named doc section, type stub or re-export shim from another file standing in for it. If the anchor's own body does not fit, the bundle serves nothing and says so, and the per-item over-budget comment names what was dropped. COMPACT ON THE CONCEPTUAL ROUTE: a query that anchors nothing (subtoken+body) gets the ranked map plus a <hops> section — the same candidate head's ONE-HOP callee signatures, the <calls> block a body carries — and NO body CDATA, disclosed as bundle="compact" bodies="0" reason="compact-route". Read the map, then --expand=SYM the one you want. --auto-bodies restores the body walk there. An explicit --token-budget=N is a hard ceiling: bodies take only what the signature bundle left over, and the signatures themselves are unchanged either way
 
 **Try it**
 
@@ -199,7 +199,7 @@ $ ./build/ripwire . --for="rankGraphTeleport"
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--token-budget`, `--signatures-only`, `--no-route`, `--adaptive`, `--no-mention-boost`, `--no-doc-mention`, `--grep`
+**Shaped by:** `--top-k`, `--token-budget`, `--signatures-only`, `--auto-bodies`, `--no-route`, `--adaptive`, `--no-mention-boost`, `--no-doc-mention`
 
 **Caveats (stated by the binary):**
 
@@ -236,9 +236,24 @@ $ ./build/ripwire . --for="rankGraphTeleport" --signatures-only
 ... [2 more line(s); run it to see the whole thing]
 ```
 
+**Shaped by:** `--auto-bodies`
+
 **Caveats (stated by the binary):**
 
 - Contradicts --detail=N (refused together);
+
+### `--auto-bodies`
+
+**Answers:** (with --for) opt out of COMPACT conceptual serving: restore the rank-first auto <bodies> walk on the subtoken+body route (bundle="auto", up to 6 full bodies) instead of the <hops> edge section.
+
+Inert on the name-exact route, where the allowance already runs. Contradicts --signatures-only and --detail=N (refused with either)
+
+**Shaped by:** `--for`
+
+**Caveats (stated by the binary):**
+
+- Inert on the name-exact route, where the allowance already runs.
+- Contradicts --signatures-only and --detail=N (refused with either)
 
 ### `--no-route`
 
@@ -1083,7 +1098,7 @@ $ ./build/ripwire . --for="pagerank power iteration" --detail=2
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--signatures-only`, `--owners`, `--plan`, `--abi`, `--flip`, `--from-trace`, `--json`
+**Shaped by:** `--signatures-only`, `--auto-bodies`, `--owners`, `--plan`, `--abi`, `--flip`, `--from-trace`, `--json`
 
 ### `--pack-signatures`
 
