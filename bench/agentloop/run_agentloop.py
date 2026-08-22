@@ -732,6 +732,20 @@ def prepare_claude_environment( work_dir, instance_id, arm, seed, ripwire_bin ):
                                               ripwire_bin, "skills" )
     link_credential( os.environ.get( "CLAUDE_CONFIG_DIR", pathlib.Path.home() / ".claude" ),
                      run_home, ".credentials.json", "credentials.json" )
+    # macOS keychain auth: the OAuth token never lives in a file, so the symlink above links nothing
+    # and a fresh CLAUDE_CONFIG_DIR reports "Not logged in" (measured live 2026-08-20, exit 1 in
+    # 0.8s). The CLI only consults the keychain when its config carries the account markers, so copy
+    # exactly those two identifier fields -- never a token -- from the operator's real config.
+    # Owner-applied 2026-08-20.
+    operator_config = pathlib.Path.home() / ".claude.json"
+    run_config = run_home / ".claude.json"
+    if operator_config.exists() and run_config.exists():
+        operator = json.loads( operator_config.read_text() )
+        merged = json.loads( run_config.read_text() )
+        for marker in ( "oauthAccount", "userID" ):
+            if marker in operator:
+                merged[marker] = operator[marker]
+        run_config.write_text( json.dumps( merged, indent=2 ) )
     env["CLAUDE_CONFIG_DIR"] = str( run_home )
     # Benchmark runs must never append to the operator's live substitution telemetry: that log is a
     # running two-week measurement clock, and poisoning it corrupts the very class weights this round
