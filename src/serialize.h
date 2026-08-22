@@ -3543,6 +3543,26 @@ struct CalleeCallsSink
     const std::vector<float>*     rank = nullptr;
 };
 
+// The <calls> wrapper, written in front of the rows it describes (they have to be walked before `shown`
+// is known). pageview.h THE TRUNCATION VOCABULARY rule 3: shown=/capped= are added ONLY when the 16-row
+// cap or the byte budget actually cut the list, and they are added TOGETHER — never shown="T" capped="0"
+// on a complete listing.
+inline void appendCallsBlock( std::string& out, std::uint32_t total, int shown, const std::string& rows )
+{
+    char callsHdr[ 64 ];
+    if( static_cast<std::uint32_t>( shown ) < total )
+    {
+        std::snprintf( callsHdr, sizeof( callsHdr ), "<calls total=\"%u\" shown=\"%d\" capped=\"1\">", total, shown );
+    }
+    else
+    {
+        std::snprintf( callsHdr, sizeof( callsHdr ), "<calls total=\"%u\">", total );
+    }
+    out += callsHdr;
+    out += rows;
+    out += "</calls>";
+}
+
 // The walk order for one symbol's callee listing: the CSR's own (node-id ascending) by default, or query
 // relevance when the caller supplied a rank and asked for the names-only rendering — see CalleeCallsSink::rank for
 // why an arbitrarily-ordered CUT listing is a defect worth a sort. The tie-break is node id, so the order
@@ -3658,18 +3678,7 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
             sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, sig } ); // §H5
         }
     }
-    char callsHdr[ 64 ];
-    if( static_cast<std::uint32_t>( shown ) < total )
-    {
-        std::snprintf( callsHdr, sizeof( callsHdr ), "<calls total=\"%u\" shown=\"%d\" capped=\"1\">", total, shown );
-    }
-    else
-    {
-        std::snprintf( callsHdr, sizeof( callsHdr ), "<calls total=\"%u\">", total );
-    }
-    out += callsHdr;
-    out += callsBody;
-    out += "</calls>";
+    appendCallsBlock( out, total, shown, callsBody );
 }
 
 // THE <bodies> DISCLOSURE (§B8.3). This was the one budgeted section element carrying NO attributes at all:
