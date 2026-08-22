@@ -181,9 +181,13 @@ inline int compareTierThenPath( const IngestResult& ing, const std::vector<std::
 // src/exemplar.h INVARIANT 2 set (fixtures lose to real code — a sort key there, a down-weight here).
 // Path-based, never language-based, so the tiers transfer unchanged to a C++ tree.
 //
-// ONE TABLE, ALL CONSUMERS: the classifier is pathTierOf (the §P11 ordering tiers above) plus the two §P4
-// path families that are neither test nor source — present/ decks and generated docs/captures/. Extend THIS
-// table; do not grow a second component list elsewhere (bench/recalleval's pollution predicate mirrors it).
+// ONE TABLE, ALL CONSUMERS: the classifier is pathTierOf (the §P11 ordering tiers above) plus the §P4 path
+// families that are neither test nor source — decks, generated captures, and (2026-08-22) the vendored and
+// machine-authored asset trees below. Extend THIS table; do not grow a second component list elsewhere
+// (bench/recalleval's pollution predicate mirrors it). The extension carries the SAME 0.35 factor rather
+// than a second constant: it is the same claim about the same kind of file, and a second knob would be a
+// second calibration nobody re-derived. It is registered and band-judged in docs/EVALS.md, on an external
+// slice, because THIS tree contains none of the new families — a gate here would be green while inert.
 // The factor 0.35 is calibrated against bench/recalleval (2026-07-28), measured at 0.5 / 0.35 / 0.2:
 // 0.5 left pollution@5 at 0.6% (one residual slot); 0.35 and 0.2 both reached 0.0% with byte-identical
 // recall/MRR — so 0.35 is the GENTLEST factor that empties the measured pollution, keeping down-weighted
@@ -195,18 +199,45 @@ inline int compareTierThenPath( const IngestResult& ing, const std::vector<std::
 // the plan and promptly ranked itself #1 for the quoted words). Blank lines detach this banner from the
 // functions (docCommentStart stops at a non-comment line).
 
-// tier check: deck / generated-capture directories (neither test nor source; checked before pathTierOf
-// because captures carry a doc extension and decks a source one). Same table-loop shape as pathTierOf.
+// ONE declarative table of directory components that are shipped-but-not-authored: nobody edits them to
+// change behaviour, so a task bundle that spends a slot on one has spent it on nothing. The first two rows
+// are this repo's own decks and recorded captures; the rest are the cross-ecosystem asset trees a retrieval
+// slice on outside repositories measured taking top slots on tasks that had nothing to do with them.
+// A component must be whole (hasDirSegment) — `staticfiles/` is ordinary source and must not match.
+//
+// DELIBERATELY ABSENT: vendor/, node_modules/, dist/. The crawl already PRUNES those subtrees whole
+// (ingest.h kCrawlSkipDirs), so a ranking tier for them would be a table row nothing can ever reach —
+// dead weight that reads like coverage. The same check removed a *.min.js filename rule from this file:
+// ingest.cpp isDenylistedName drops those before they are ever a symbol.
+inline constexpr std::string_view kDemoOrGeneratedDirs[] = { "present/", "docs/captures/", "static/", "locale/", "min/" };
+
+// 0001_initial.py — a numbered migration is machine-authored and append-only. The number is what makes it
+// one: an UNnumbered file in the same directory (migrations/__init__.py) is ordinary source and stays so.
+inline bool isNumberedMigrationFileName( std::string_view fileName ) noexcept
+{
+    std::size_t digitCount = 0;
+    while( digitCount < fileName.size() && fileName[digitCount] >= '0' && fileName[digitCount] <= '9' )
+    {
+        ++digitCount;
+    }
+    return digitCount >= 2 && digitCount < fileName.size() && fileName[digitCount] == '_';
+}
+
+// tier check: deck / generated-capture / vendored-asset directories (neither test nor source; checked before
+// pathTierOf because captures carry a doc extension and decks a source one). Same table-loop shape as
+// pathTierOf, then the one FILENAME family a directory component alone cannot see.
 inline bool isDemoOrGeneratedPath( std::string_view p ) noexcept
 {
-    for( std::string_view seg : { std::string_view( "present/" ), std::string_view( "docs/captures/" ) } )
+    for( std::string_view seg : kDemoOrGeneratedDirs )
     {
         if( hasDirSegment( p, seg ) )
         {
             return true;
         }
     }
-    return false;
+    const std::size_t      slashPos = p.rfind( '/' );
+    const std::string_view fileName = ( slashPos == std::string_view::npos ) ? p : p.substr( slashPos + 1 );
+    return hasDirSegment( p, "migrations/" ) && isNumberedMigrationFileName( fileName );
 }
 
 inline constexpr float kRankTierTestMul = 0.35f;
