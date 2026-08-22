@@ -675,11 +675,17 @@ inline constexpr std::size_t kForAutoBodyBudgetBytes = 6000;
 
 // ── COMPACT CONCEPTUAL SERVING (pre-registered: docs/EVALS.md, the T3 route-narrowing round) ──────────
 // On the CONCEPTUAL route — the subtoken+body ranker, the route that names no anchor — the allowance
-// above buys body CDATA nobody was measured using: the Claude Code harness REQUIRES a Read before an
-// Edit, so a served body cannot substitute for the edit-path read by construction, and the first
-// transcript pass found 17 of 17 body-serving episodes re-reading the file anyway. What is left is
-// navigational value, and the cheap half of the bodies section carries it: each body's <calls> child.
-// So this route serves the ranked map plus that edge context and no body text at all.
+// above is where this tool's bytes actually go and where they cost it the standing head-to-head: class B
+// runs 2.39x the competitor's bytes, bodies (CDATA plus their <calls> lists) are 52.7% of every class-B
+// byte, and the competitor answers the same neighbourhood question in 0.7-1.0 KB. That is the case for
+// this shape on its own. So the route serves the ranked map plus one-hop edge context and no body text.
+//
+// A transcript pass supports it — 17 of 17 body-serving episodes re-read the file before editing, zero
+// clean body-use — and that support is SCOPED: one mechanism behind it is that Claude Code 2.1.209's
+// Edit tool requires a prior Read, which other harnesses are not known to share and which any release
+// may change. Nothing here detects or conditions on a harness, and nothing here may be changed to: the
+// only condition this serving reads is the tool's own route tag. See docs/EVALS.md for the registered
+// re-measure trigger if that harness contract moves.
 //
 // THE CONSTANT IS DERIVED, NOT TUNED, and TWO independent derivations agree on it inside 11%, which is
 // why it is one number rather than a range:
