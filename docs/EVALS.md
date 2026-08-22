@@ -1902,6 +1902,204 @@ TS chained call keeps whatever the bare ladder gives it (arm (j-ts) pins the sta
 caveat above: recovery restores name-ladder parity; it cannot invent `std::` targets the index does not
 hold.
 
+### External-corpus retrieval-loss buckets — PRE-REGISTERED 2026-08-22 (before any fix code)
+
+**What this registers.** Four separately-diagnosed retrieval-loss *mechanisms*, each with its own
+baseline, its own ACCEPT band and its own revert decision. They are registered together because they
+share one instrument, and judged apart because they are four different claims:
+
+| Bucket slug | The mechanism |
+| --- | --- |
+| `diagnostic-class` | A conceptual query's content words are also the NAME of a diagnostic class (a `*Warning` / `*Error`, or a plugin whose only job is to report one). The diagnostic is named after the failure the real mechanism can produce, so it matches the query's words with a tiny body, and the implementation never surfaces. |
+| `thin-registration` | The answer is a small registration/wiring class whose name spells most of the query's content words but which carries near-zero graph centrality. Structurally central symbols sharing *fewer* query terms displace it. |
+| `subsystem-directory` | The concept the query names IS a directory name. Path components are not ranking evidence for the code lenses, so the query word matches inside unrelated symbol names elsewhere while the directory literally named for the concept contributes nothing. |
+| `vendored-asset` | Vendored front-end assets and numbered database migrations take top slots in task bundles that have nothing to do with either. |
+
+**Why a new instrument was needed.** `bench/recalleval/`'s two frozen corpora are snapshots of *this*
+repository, and this tree contains no vendored asset directory, no numbered migrations, no thin
+one-hook registration classes and no directory-per-subsystem layout with a diagnostic-class sibling
+per mechanism. A gate written here for those shapes passes because the offending population is
+**absent**, not because the ranker handles it — green-while-inert, the failure `CONTRIBUTING.md` §2
+exists to prevent. So the slice is pinned to two outside trees that do contain the populations, and
+the instrument is the same `--for` computation an agent actually consumes.
+
+**The instrument.**
+
+| Piece | File |
+| --- | --- |
+| Corpus pins + materialize recipe | `bench/recalleval/extcorpus.lock` |
+| Labels (30 django rows + 24 webpack rows = 54) | `bench/recalleval/labels_extcorpus_{django,webpack}.tsv` |
+| Absolute per-bucket scorer | `bench/recalleval/run_extcorpus.py` |
+| Per-query comparative diff | `bench/recalleval/run_r3diff.py` (unmodified — it runs the slice as-is) |
+
+Corpora are **pinned, not committed**: ~1 GB of third-party source under its own licences is not
+vendored into a public export. The integrity anchor is the commit pin *plus* the tree hash, verified
+before any query runs; a mismatch is a hard refusal (exit 2), never a quiet re-baseline. Both pins
+and both tree hashes were verified in this lane before the baseline below was taken.
+
+**Baselines — re-derived at `4692076` in this lane, before any fix code existed.** Plain dev build,
+`--top-k=10`, two full runs byte-identical, zero skipped labels. The re-derivation reproduces the
+draft registration's numbers exactly on all four buckets and on both per-corpus splits, which is the
+provenance check that the instrument and the corpora are the same instrument the bands were drawn
+against.
+
+| Bucket | n | gold in top-5 | strict r@1 | strict r@5 | strict r@10 | lenient r@5 | strict MRR | asset slots in top-5 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `diagnostic-class` | 14 | **7 / 14** | 21.4% | 50.0% | 57.1% | 57.1% | 0.332 | 0.0% |
+| `thin-registration` | 14 | **7 / 14** | 42.9% | 50.0% | 64.3% | 50.0% | 0.486 | 0.0% |
+| `subsystem-directory` | 14 | **4 / 14** | 7.1% | 28.6% | 50.0% | 35.7% | 0.159 | 0.0% |
+| `vendored-asset` | 12 | **6 / 12** | 16.7% | 50.0% | 58.3% | 58.3% | 0.326 | **10.0%** (6 of 60) |
+
+Per corpus, because the split matters: `diagnostic-class` 6 rows django at 66.7% strict r@5 against 8
+rows webpack at 37.5%; `thin-registration` the same 66.7% / 37.5%; `subsystem-directory` 33.3% /
+25.0%; `vendored-asset` is django-only (webpack's analogous noise is a different mechanism and
+folding it in would blur two of them).
+
+**Bands — registered before any fix code exists.** The unit is a whole label row, and a band is at
+least two units wide: the metric is a count over a fixed deterministic set, so a band narrower than
+two rows reads label-set sensitivity rather than a mechanism.
+
+| Bucket | Registered metric | Baseline | ACCEPT band | Width |
+| --- | --- | ---: | --- | ---: |
+| `diagnostic-class` | net flipped rows, gold-in-top-5, n=14 | 7 | **[+2, +6]** | 5 rows |
+| `thin-registration` | net flipped rows, gold-in-top-5, n=14 | 7 | **[+2, +6]** | 5 rows |
+| `subsystem-directory` | net flipped rows, gold-in-top-5, n=14 | 4 | **[+3, +8]** | 6 rows |
+| `vendored-asset` (primary) | vendored/generated slots in top-5, of 60 | 6 | **[0, 2] remaining** | 3 slots |
+| `vendored-asset` (guard) | net flipped rows, gold-in-top-5, n=12 | 6 | **[−1, +4]** | 6 rows |
+
+- *Lower edges are non-zero on the three ranking buckets* because each fix is a deliberate ranking
+  change with a real cost surface. A change that moves one row is indistinguishable from a change
+  that moved that row by accident. `subsystem-directory` starts at +3 because it starts from the
+  lowest base and its fix is the bluntest instrument on the list.
+- *Upper edges are leakage guards, not ceilings.* A perfect score is deliberately **outside** every
+  band: a change that lifts every gold in a bucket has probably found the label set rather than the
+  mechanism, and that result is to be audited, not banked.
+- *The asset band is stated in slots*, because slots is the unit the mechanism moves. Reaching 0 is
+  in band — unlike the ranking buckets there is no leakage story for a path weight that
+  de-prioritizes exactly the paths it names.
+- *The asset guard is non-inferiority-shaped* (`−1` allowed): de-prioritizing a path family can cost
+  a gold that sat behind one, and one row is an acceptable price for the slot recovery. Two is not.
+
+**The two name-driven buckets overlap by six rows, and any result must decompose it.** Six of the
+eight webpack `thin-registration` golds live under `lib/ids/`, which is also a `subsystem-directory`
+population. A fix that works purely by lifting directories would move BOTH rates. Every result below
+reports the two buckets separately AND states how many `thin-registration` flips were `lib/ids/`
+rows; a `thin-registration` gain that is entirely `lib/ids/` is a `subsystem-directory` fix wearing
+two hats.
+
+#### Pre-code feasibility audit — registered before the fixes were written
+
+The diagnosis that produced these buckets also proposed a fix *shape* per bucket. Two of those shapes
+can be bounded from above on this label set **without running them**, by measuring the trigger
+condition directly against the frozen labels. That bound is registered here, before any fix code
+exists, so that an out-of-band result reads as a refuted mechanism rather than a badly chosen
+constant discovered afterwards.
+
+Measured over the 54 frozen rows (query subtokens minus a closed-class function-word list, against
+the gold file's basename subtokens and its directory-component subtokens):
+
+| Proposed shape | Trigger | Rows that can fire | Of those, rows currently missing top-5 | Ceiling |
+| --- | --- | ---: | ---: | ---: |
+| name-coverage floor at ⅔ | one symbol name covers ≥ ⅔ of the query's content subtokens | 2 of 14 | 1 | **+1** |
+| name-coverage floor at ½ | same, at ½ | 4 of 14 | 2 | **+2** |
+| directory-component evidence | ≥ 1 query content subtoken equals a directory component of the gold path | 7 of 14 | 5 | **+5** |
+
+The `thin-registration` ceiling is the load-bearing number. At the proposed ⅔ threshold the shape can
+flip **at most one row**, which is below the registered band's lower edge — so that instantiation is
+refuted before it is built. The loosest threshold that still means "the name spells most of the
+query" is ½, whose ceiling is exactly the band's lower edge; that is the instantiation this round
+attempts, and it is registered as such. The reason the shape is so weak here is morphological, not
+structural: the golds that miss are missed because `deterministically` is not the subtoken
+`deterministic` and `chunks` is not `chunk`, and because one gold's concept word (`caps`) is a
+synonym of its name's (`limit`) — six of the fourteen golds share only a single content subtoken with
+their query, and six django golds share none at all.
+
+The `diagnostic-class` shape is **not** bounded this way, and one part of its stated diagnosis is
+corrected here before any code exists. The proposed shape was "require body-term evidence before
+name-match alone can top-rank a tiny-body symbol". Read against the pinned tree, the displacing
+symbols mostly *do* carry body evidence: a diagnostic's constructor recites the failure in the
+reader's own vocabulary, so `lib/errors/UnusedReexportsWarning.js`'s constructor contains `unused`,
+`exports` and `modules` in a fifteen-line body. A name-only predicate would therefore be largely
+inert on the population it was written for. What the offenders share is not the *absence* of body
+evidence but the *tininess* of the document that carries it — the same shape puts a one-line
+`types.d.ts` method stub and a single-line constant above real implementations. The mechanism
+registered here is accordingly **short-document over-reward in BM25 length normalization**, and the
+fix attempted is a document-length floor: a symbol whose weighted subtoken length falls below a named
+constant is normalized as if it were that long. The band is unchanged.
+
+#### Simultaneous floors — all must hold; a bucket win bought past a floor is a REJECT
+
+Every value was re-measured at `4692076` in this lane, on the binary that produced the baselines
+above.
+
+| Guard | Floor / ceiling | Measured at `4692076` | Headroom |
+| --- | ---: | ---: | --- |
+| skill routing split=test `bm25-desc` hit@1 | **≥ 60.0%** | **73.1%** | 13.1pp |
+| skill routing split=test `bm25-desc` sep-auc | **≥ 0.89** | **0.957** | 0.067 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | wide |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 64.5% (98/152) / 61.2% (93/152) | wide |
+| recall lane lenient recall@5 | ≥ 71% | 88.1% | 17.1pp |
+| recall lane lenient MRR | ≥ 0.57 | 0.643 | 0.073 |
+| LIVE-corpus pollution@5 | ≤ 16% | 2.4% | 13.6pp |
+| **ranking lane lenient recall@5** | **≥ 70%** | **71.9%** | **1.9pp — the tightest floor on the board** |
+| ranking lane lenient MRR | ≥ 0.55 | 0.639 | 0.089 |
+| ranking lane / adversarial-class pollution@5 | ≤ 5% / ≤ 8% | 0.0% / 0.0% | full |
+
+Frozen corpora at the measurement: docs `commit=7a7f79892034 files=113 sha=cfeb23c71cd2`, source
+`commit=7a3194b51ac6 files=1422 sha=eb25c17569d5`.
+
+**The ranking lane's lenient recall@5 is the one to watch.** 71.9% against a 70% floor is under two
+labels of margin on a 32-label lane. Three of the four fixes are general ranking changes, so this is
+the floor a bucket win is most likely to be bought past — and buying it is a REJECT, not a trade.
+**Expected direction on the in-tree lanes: neutral, and no directional claim is registered** — the
+frozen corpora carry none of the four populations, which is why the slice exists. An in-tree lane
+moving *up* is an unregistered result and is reported, not banked.
+
+Standing requirements, not part of any band: `python3 test/pargates.py . ./build/ripwire -j 6` rc=0 ·
+ASan/LSan clean under the committed suppressions · two runs of the slice and of both lanes
+byte-identical · `--quality-delta` with zero unacked regressions · `bash test/ripwirepubliccheck.sh`
+clean.
+
+**One standing constraint that this round does not discharge.** The full-path BM25 field in
+`src/lexical.h` (`pathFieldDefaultW`) carries an earlier held-out REJECT whose pre-registration binds
+a nonzero *code-lens* default to a LocBench held-out acceptance run, and whose retry clause requires
+"multi-file-primary, amortized first". The `subsystem-directory` fix attempted here is a **narrower,
+separately-named** field — directory components only, basename excluded, amortized per file — and its
+acceptance instrument is the slice registered above. It does **not** turn the full-path field on, and
+it does **not** discharge that earlier obligation; if the narrower field is accepted here, the wider
+one stays at 0 and the earlier registration stands untouched.
+
+#### Decision rule
+
+For each bucket independently: **in band with every floor above green → keep that bucket's change.**
+Out of band on either edge, or any floor breached → **revert that bucket's change**, keep this
+registration and the negative result on record, and keep any gate added for it only if it still
+describes shipped behaviour. The four buckets are separable and land in separate commits; a reverted
+bucket does not invalidate the others.
+
+**One measurement, one attempt.** Each bucket gets exactly one measurement against these bands. A
+retry is a new round with a fresh registration. Re-cutting a band after seeing a result, adding
+labels to a bucket after measuring it, or refreshing the corpus pins in the same commit as a
+measurement each turn the instrument into a description of the fix, and none is permitted.
+
+#### Limits of this slice, recorded before it decides anything
+
+- **Two repositories, two languages** (Python, JavaScript). Nothing here says a fix generalizes to
+  C++, Go, Rust or Swift. A fix that is language-neutral by construction inherits that claim from its
+  own shape, not from this measurement.
+- **54 labels, per-bucket n of 12–14.** That smallness is why bands are stated in whole rows and why
+  a one-row move is registered as indistinguishable from noise.
+- **The labels are ours** — authored from the pinned source and frozen, but not an external gold set.
+  Five rows carry an outside arm's answer on record; 49 do not.
+- **`acceptable` is used narrowly** — only a file that lands the task without another call. A wider
+  list would flatter every number above.
+- **`vendored-asset` gold rank is not evidence for that bucket.** Several of those queries are hard
+  for reasons unrelated to asset noise. The slot share is the metric that sees the mechanism; gold
+  rank there is registered as a non-inferiority guard only.
+- **Pinned to a moving upstream.** Both trees are active projects; the harness refuses rather than
+  drifts if a pin stops being reachable, which is a weaker anchor than the content-hashed packs the
+  two in-tree corpora use.
+
 ---
 
 ## 5. Token and output economy
