@@ -1753,37 +1753,37 @@ ripwire: --pack-top-n is deprecated — use --pack-task/--detail instead (unchan
 *Built-in AST checks (c-cast, goto, unsafe-c-fn, ...).*
 
 `````
-<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. A rule that spends its whole budget carries capped="1" — its count= is then a FLOOR (that rule's raw captures reached the per-rule budget; only its own matches can cap it); findings_capped="1" on the root ⇒ at least one rule is a floor. Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed them, absent an explicit limit=) — a different fact from the per-rule capped="1" above, which is a MATCH-BUDGET floor on one rule's own count=; findings= is always the true total either way. A rule row's applicable="0" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this corpus at all — its count="0" is structural inertness, never a measurement; the root's inert_rules=N tallies how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a family (e.g. cache-); the root then carries selected="K of N" plus the raw select=/ignore= you passed. Each rule row's own shown_rows=/rows_capped= is how many of THAT rule's rows fall inside the printed <f> window (the root's shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the cut carries shown_rows="0" rows_capped="1" while its count= stays the true total — never confuse a capped-away rule with one that measured zero); this is a DIFFERENT fact from the row's own bare capped="1" above (that rule's own raw-capture stream hit its per-rule match budget) — the two can disagree on the same row. -->
-<lint findings="3263" shown="693" capped="1" findings_capped="1" root=".">
-<rule name="c-style-cast" count="294" shown_rows="107" rows_capped="1"/>
-<rule name="goto" count="2" shown_rows="1" rows_capped="1"/>
-<rule name="do-while" count="3" shown_rows="0" rows_capped="1"/>
-<rule name="unsafe-c-fn" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="weak-crypto" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="redundant-parens" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="suspicious-semicolon" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="typedef-over-using" count="12" shown_rows="0" rows_capped="1"/>
-<rule name="magic-number" count="456" shown_rows="296" rows_capped="1" capped="1"/>
-<rule name="empty-catch" count="1" shown_rows="0" rows_capped="1"/>
-<rule name="self-assign" count="3" shown_rows="0" rows_capped="1"/>
-<rule name="large-function" count="205" shown_rows="42" rows_capped="1"/>
-<rule name="deep-nesting" count="205" shown_rows="45" rows_capped="1"/>
-<rule name="inconsistent-return" count="1" shown_rows="0" rows_capped="1"/>
-<rule name="unreachable-code" count="5" shown_rows="0" rows_capped="1"/>
-<rule name="naming-short" count="1013" shown_rows="35" rows_capped="1"/>
-<rule name="naming-wordy" count="72" shown_rows="21" rows_capped="1"/>
-<rule name="naming-series" count="273" shown_rows="0" rows_capped="1"/>
-<rule name="naming-underscore" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="naming-case" count="48" shown_rows="0" rows_capped="1"/>
-<rule name="naming-predicate" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="naming-setter" count="1" shown_rows="0" rows_capped="1"/>
-<rule name="naming-confusable" count="124" shown_rows="14" rows_capped="1"/>
-<rule name="naming-uninformative" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="atom-comma-operator" count="1" shown_rows="0" rows_capped="1"/>
-<rule name="atom-embedded-crement" count="83" shown_rows="17" rows_capped="1"/>
-<rule name="atom-assign-as-value" count="36" shown_rows="9" rows_capped="1"/>
-<rule name="atom-nested-ternary" count="52" shown_rows="9" rows_capped="1"/>
-… [705 more display lines; full output is 69671 bytes on 1 raw line(s)]
+<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. A rule that spends its whole budget carries capped="1" — its count= is then a FLOOR (that rule's raw captures reached the per-rule budget; only its own matches can cap it); findings_capped="1" on the root ⇒ at least one rule is a floor. Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed them, absent an explicit limit=) — a different fact from the per-rule capped="1" above, which is a MATCH-BUDGET floor on one rule's own count=; findings= is always the true total either way. A rule row's applicable="0" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this corpus at all — its count="0" is structural inertness, never a measurement; the root's inert_rules=N tallies how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a family (e.g. cache-); the root then carries selected="K of N" plus the raw select=/ignore= you passed. -->
+<lint findings="3256" shown="693" capped="1" findings_capped="1" root=".">
+<rule name="c-style-cast" count="294"/>
+<rule name="goto" count="2"/>
+<rule name="do-while" count="3"/>
+<rule name="unsafe-c-fn" count="0"/>
+<rule name="weak-crypto" count="0"/>
+<rule name="redundant-parens" count="0"/>
+<rule name="suspicious-semicolon" count="0"/>
+<rule name="typedef-over-using" count="12"/>
+<rule name="magic-number" count="456" capped="1"/>
+<rule name="empty-catch" count="1"/>
+<rule name="self-assign" count="3"/>
+<rule name="large-function" count="205"/>
+<rule name="deep-nesting" count="205"/>
+<rule name="inconsistent-return" count="1"/>
+<rule name="unreachable-code" count="5"/>
+<rule name="naming-short" count="1006"/>
+<rule name="naming-wordy" count="72"/>
+<rule name="naming-series" count="273"/>
+<rule name="naming-underscore" count="0"/>
+<rule name="naming-case" count="48"/>
+<rule name="naming-predicate" count="0"/>
+<rule name="naming-setter" count="1"/>
+<rule name="naming-confusable" count="124"/>
+<rule name="naming-uninformative" count="0"/>
+<rule name="atom-comma-operator" count="1"/>
+<rule name="atom-embedded-crement" count="83"/>
+<rule name="atom-assign-as-value" count="36"/>
+<rule name="atom-nested-ternary" count="52"/>
+… [705 more display lines; full output is 67901 bytes on 1 raw line(s)]
 `````
 
 ## `./build/ripwire . --lint-rules=test/lintrulesfix/rules`
@@ -1791,10 +1791,10 @@ ripwire: --pack-top-n is deprecated — use --pack-task/--detail instead (unchan
 *User lint rules (YAML, ast-grep style) from a directory.*
 
 `````
-<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. A rule that spends its whole budget carries capped="1" — its count= is then a FLOOR (that rule's raw captures reached the per-rule budget; only its own matches can cap it); findings_capped="1" on the root ⇒ at least one rule is a floor. Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed them, absent an explicit limit=) — a different fact from the per-rule capped="1" above, which is a MATCH-BUDGET floor on one rule's own count=; findings= is always the true total either way. A rule row's applicable="0" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this corpus at all — its count="0" is structural inertness, never a measurement; the root's inert_rules=N tallies how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a family (e.g. cache-); the root then carries selected="K of N" plus the raw select=/ignore= you passed. Each rule row's own shown_rows=/rows_capped= is how many of THAT rule's rows fall inside the printed <f> window (the root's shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the cut carries shown_rows="0" rows_capped="1" while its count= stays the true total — never confuse a capped-away rule with one that measured zero); this is a DIFFERENT fact from the row's own bare capped="1" above (that rule's own raw-capture stream hit its per-rule match budget) — the two can disagree on the same row. -->
+<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. A rule that spends its whole budget carries capped="1" — its count= is then a FLOOR (that rule's raw captures reached the per-rule budget; only its own matches can cap it); findings_capped="1" on the root ⇒ at least one rule is a floor. Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed them, absent an explicit limit=) — a different fact from the per-rule capped="1" above, which is a MATCH-BUDGET floor on one rule's own count=; findings= is always the true total either way. A rule row's applicable="0" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this corpus at all — its count="0" is structural inertness, never a measurement; the root's inert_rules=N tallies how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a family (e.g. cache-); the root then carries selected="K of N" plus the raw select=/ignore= you passed. -->
 <lint findings="5" shown="5" capped="0" root=".">
-<rule name="broken-query" sev="error" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="no-printf" sev="warn" count="5" shown_rows="5" rows_capped="0"/>
+<rule name="broken-query" sev="error" count="0"/>
+<rule name="no-printf" sev="warn" count="5"/>
 <f rule="no-printf" sev="warn" p="test/coplintfix/position.cpp:41" in="demo">use LOG() instead of printf</f>
 <f rule="no-printf" sev="warn" p="test/coplintfix/safe.cpp:15" in="safe_demo">use LOG() instead of printf</f>
 <f rule="no-printf" sev="warn" p="test/coplintfix/safe.cpp:27" in="safe_demo">use LOG() instead of printf</f>
@@ -1825,37 +1825,37 @@ walk: chase pass	x.cpp	9	12	48.500	7.250
 `````
 
 `````
-<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. A rule that spends its whole budget carries capped="1" — its count= is then a FLOOR (that rule's raw captures reached the per-rule budget; only its own matches can cap it); findings_capped="1" on the root ⇒ at least one rule is a floor. Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed them, absent an explicit limit=) — a different fact from the per-rule capped="1" above, which is a MATCH-BUDGET floor on one rule's own count=; findings= is always the true total either way. A rule row's applicable="0" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this corpus at all — its count="0" is structural inertness, never a measurement; the root's inert_rules=N tallies how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a family (e.g. cache-); the root then carries selected="K of N" plus the raw select=/ignore= you passed. Each rule row's own shown_rows=/rows_capped= is how many of THAT rule's rows fall inside the printed <f> window (the root's shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the cut carries shown_rows="0" rows_capped="1" while its count= stays the true total — never confuse a capped-away rule with one that measured zero); this is a DIFFERENT fact from the row's own bare capped="1" above (that rule's own raw-capture stream hit its per-rule match budget) — the two can disagree on the same row. -->
+<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. A rule that spends its whole budget carries capped="1" — its count= is then a FLOOR (that rule's raw captures reached the per-rule budget; only its own matches can cap it); findings_capped="1" on the root ⇒ at least one rule is a floor. Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed them, absent an explicit limit=) — a different fact from the per-rule capped="1" above, which is a MATCH-BUDGET floor on one rule's own count=; findings= is always the true total either way. A rule row's applicable="0" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this corpus at all — its count="0" is structural inertness, never a measurement; the root's inert_rules=N tallies how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a family (e.g. cache-); the root then carries selected="K of N" plus the raw select=/ignore= you passed. -->
 <!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest PROFILE_SCOPE site at/above the finding inside its own enclosing symbol. Columns are whatever counter tier the profiled run armed; an ABSENT heat column was not measured, never zero. heat_joined= on the root counts annotated findings; 0 is honest (no finding sits inside a profiled scope), never an error. -->
 <lint findings="1" shown="1" capped="0" heat_joined="1" root=".">
-<rule name="c-style-cast" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="goto" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="do-while" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="unsafe-c-fn" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="weak-crypto" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="redundant-parens" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="suspicious-semicolon" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="typedef-over-using" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="magic-number" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="empty-catch" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="self-assign" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="large-function" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="deep-nesting" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="inconsistent-return" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="unreachable-code" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="naming-short" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="naming-wordy" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="naming-series" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="naming-underscore" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="naming-case" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="naming-predicate" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="naming-setter" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="naming-confusable" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="naming-uninformative" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="atom-comma-operator" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="atom-embedded-crement" count="0" shown_rows="0" rows_capped="0"/>
-<rule name="atom-assign-as-value" count="0" shown_rows="0" rows_capped="0"/>
-… [14 more display lines; full output is 5564 bytes on 1 raw line(s)]
+<rule name="c-style-cast" count="0"/>
+<rule name="goto" count="0"/>
+<rule name="do-while" count="0"/>
+<rule name="unsafe-c-fn" count="0"/>
+<rule name="weak-crypto" count="0"/>
+<rule name="redundant-parens" count="0"/>
+<rule name="suspicious-semicolon" count="0"/>
+<rule name="typedef-over-using" count="0"/>
+<rule name="magic-number" count="0"/>
+<rule name="empty-catch" count="0"/>
+<rule name="self-assign" count="0"/>
+<rule name="large-function" count="0"/>
+<rule name="deep-nesting" count="0"/>
+<rule name="inconsistent-return" count="0"/>
+<rule name="unreachable-code" count="0"/>
+<rule name="naming-short" count="0"/>
+<rule name="naming-wordy" count="0"/>
+<rule name="naming-series" count="0"/>
+<rule name="naming-underscore" count="0"/>
+<rule name="naming-case" count="0"/>
+<rule name="naming-predicate" count="0"/>
+<rule name="naming-setter" count="0"/>
+<rule name="naming-confusable" count="0"/>
+<rule name="naming-uninformative" count="0"/>
+<rule name="atom-comma-operator" count="0"/>
+<rule name="atom-embedded-crement" count="0"/>
+<rule name="atom-assign-as-value" count="0"/>
+… [14 more display lines; full output is 3806 bytes on 1 raw line(s)]
 `````
 
 The joined finding — past the display cut above, extracted so the join is visible:
@@ -3824,22 +3824,6 @@ ripwire: --ack-only=SUBSTR narrows --quality-ack — pass both (e.g. ripwire <di
 <c n="radixSortNonNegativeFloatsDesc" p="src/infra/sortutil.h:103" incompatible="1"/>
 <c n="radixSortByScoreDescId" p="src/infra/sortutil.h:118" incompatible="1"/>
 </edit-check>
-`````
-
-## `./build/ripwire . --safe-delete=deadCodeEligibleKind`
-
-*NEW VERB: "can I delete this?" composed from signals the tool already computes — 1-hop callers, the*
-*transitive impact blast radius, tested= coverage of that radius, and dead-code candidacy, in one call.*
-*deadCodeEligibleKind() has a real caller here, so risk="untested-radius" (a blast radius exists and no*
-*indexed test covers any of it) — and that caller's own call to it happened to resolve ambiguously*
-*(ambiguous_callers="1"), which the amb="1" row below names directly.*
-
-`````
-<!-- ripwire safe-delete: composes signals the tool already computes into one "can I delete this?" READ — never a verdict. defs= is resolveAllByNameQualified's match count, exactly as the impact/uses/callers verbs already disclose it; above 1, every count below UNIONS more than one physical definition sharing this name. callers= is the 1-hop caller count (the callers verb's own walk over defs' in-edges); impact_reaches= is the FULL transitive blast radius (the impact verb's own walk) — like every graph-count surface here it is a counts_floor= FLOOR, never a total (dynamic dispatch, callbacks and unindexed macros contribute no edge — see COUNTING UNIT below). uses= is every read/write/import/call/extends SITE of the name (the uses verb's own walk); reference-name-based, so an overloaded name unions every definition's sites. tested_self="1" means an indexed test transitively CALLS this symbol (the tested= lens — a test symbol itself is never counted, matching the metrics/for/exemplar verbs' own rule). Of the impact_reaches= blast radius, radius_tested=/radius_untested= partition it by that same lens; radius_untested= == impact_reaches= means NOTHING downstream of this symbol is covered by an indexed test — the strongest signal this element carries. dead_code_candidate="1" fires ONLY when this selector resolves to exactly ONE definition and it is the dead-code verb's own high-confidence shape (a source free function, non-header, internal/static linkage, zero direct callers) — "0" never means "in use", only that this narrow detector's preconditions do not hold here; run the dead-code verb for the full-corpus scan (it also accepts a directory filter). ambiguous_callers= counts callers whose OWN outgoing calls include at least one that resolved to more than one candidate definition (g.ambOut, the same per-symbol counter a ranked row's amb= reads) — a caveat that one of the callers below MAY be reaching a different same-named definition, never proof that this one is (a caller row that is itself ambiguous carries amb="1"); read the source if which-target matters. risk= NAMES what was found, never a go/no-go verdict: "none-found" (zero callers AND zero uses — an ABSENCE of evidence, never evidence of absence), "untested-radius" (callers/uses exist and NONE of the transitive blast radius is test-covered), or "uses-exist" (callers/uses exist and at least part of the radius is tested). counts_floor="1" means every count on this element is a FLOOR, never a total. Call edges are extracted from source text by NAME, so a call that reaches its target through dynamic dispatch (a virtual, interface or duck-typed receiver), or a declaration that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. A call through a function pointer or callback resolves only when ONE function is bound to that variable in scope (C-family; a reassigned, table-indexed, lambda-bound or escaped pointer — its address taken or reference-bound — still contributes no edge). A binding written as a plain name rather than an address-of (fp = handler, not fp = &handler) is read as a function only when the variable is PROVEN able to hold one: a function-pointer declarator, or a function-pointer typedef declared in the SAME FILE, or a type the parse cannot pin down at all (auto, a template type). Under any other concrete written type it is a value copy and contributes no edge, so a variable whose function-pointer typedef lives in a HEADER is missed. A macro-generated call site contributes a role="macro" edge when its name uniquely names an indexed function-like #define (C-family, t="macro"); a name shared with any non-macro definition stays a plain call for the resolver, and an unindexed macro's call site contributes no edge. Read a zero as "none found", never as "none exists". COUNTING UNIT, and it differs by verb — which is why two of them report different numbers for one symbol. The callers, callees, edit-check, graph-query and pr-context counts are DISTINCT SYMBOLS: repeated calls from one caller, and calls to two overloads of one name, collapse into ONE row, their multiplicity surviving only in the call graph's edge weight. The reach counts (impact's reaches=, pr-context's dependents=) are the size of a transitive reach SET, each symbol counted once — not a count of calls or edges. The uses verb counts call SITES, one row per occurrence, so a larger count= there for the same symbol is these units agreeing, not disagreeing. The map header's edges= is a unit again different — distinct (caller,callee) PAIRS — and that document carries neither this marker nor this clause, so its numbers answer a different question. -->
-<!-- root= on this element is the crawl root every p= below is RELATIVE to (single-root runs only; absent => p= is the path ingest itself used, unchanged). -->
-<safe-delete sym="deadCodeEligibleKind" t="fn" p="src/main.cpp:606" defs="1" callers="1" ambiguous_callers="1" impact_reaches="2" uses="1" tested_self="0" radius_tested="0" radius_untested="2" dead_code_candidate="0" risk="untested-radius" shown="1" capped="0" counts_floor="1" root=".">
-<c n="runSafeDelete" p="src/main.cpp:6686" amb="1"/>
-</safe-delete>
 `````
 
 ## `./build/ripwire . --pr-context`
