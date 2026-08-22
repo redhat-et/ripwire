@@ -174,7 +174,7 @@ $ ./build/ripwire . --help-task="write a cheerful release announcement"
 
 **Answers:** the task lens: ranked signatures + metrics framed for reuse.
 
-The bundle enforces a ~7.5KB default payload budget (tail entries trim first; <sigs capped="1"> marks it) — an explicit --token-budget=N overrides the default at the conservative byte rate (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens. TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance — whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6). The <ctx> root discloses it: bundle="auto" bodies="N" (bodies="0" reason="budget" when none fit). ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own body or NO body — never a same-named doc section, type stub or re-export shim from another file standing in for it. If the anchor's own body does not fit, the bundle serves nothing and says so, and the per-item over-budget comment names what was dropped. A conceptual query anchors nothing, so it keeps the rank-first walk over the whole candidate head. An explicit --token-budget=N is a hard ceiling: bodies take only what the signature bundle left over, and the signatures themselves are unchanged either way
+The bundle enforces a ~7.5KB default payload budget (tail entries trim first; <sigs capped="1"> marks it) — an explicit --token-budget=N overrides the default at the conservative byte rate (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens. TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance — whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6). The <ctx> root discloses it: bundle="auto" bodies="N" (bodies="0" reason="budget" when none fit) — on EVERY auto-mode run: a ceiling the signatures alone exhaust still carries the attribute (legend and empty <bodies> shell dropped there; only the attribute has reserved bytes), and --for --json, which serves no bodies by design, says so with "bundle":"sigs". Only the caller-chosen postures (--signatures-only, --detail=N) are attribute-free. ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own body or NO body — never a same-named doc section, type stub or re-export shim from another file standing in for it. If the anchor's own body does not fit, the bundle serves nothing and says so, and the per-item over-budget comment names what was dropped. A conceptual query anchors nothing, so it keeps the rank-first walk over the whole candidate head. An explicit --token-budget=N is a hard ceiling: bodies take only what the signature bundle left over, and the signatures themselves are unchanged either way
 
 **Try it**
 
@@ -235,6 +235,8 @@ $ ./build/ripwire . --for="rankGraphTeleport" --signatures-only
 </f>
 ... [2 more line(s); run it to see the whole thing]
 ```
+
+**Shaped by:** `--for`
 
 **Caveats (stated by the binary):**
 
@@ -1083,7 +1085,7 @@ $ ./build/ripwire . --for="pagerank power iteration" --detail=2
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--signatures-only`, `--owners`, `--plan`, `--abi`, `--flip`, `--from-trace`, `--json`
+**Shaped by:** `--for`, `--signatures-only`, `--owners`, `--plan`, `--abi`, `--flip`, `--from-trace`, `--json`
 
 ### `--pack-signatures`
 
@@ -2792,7 +2794,7 @@ $ ./build/ripwire . --hotspots --json
 (empty)
 ```
 
-**Shaped by:** `--max-tokens`, `--token-budget`
+**Shaped by:** `--max-tokens`, `--token-budget`, `--for`
 
 **Caveats (stated by the binary):**
 

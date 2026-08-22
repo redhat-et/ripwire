@@ -2749,8 +2749,16 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     // the SAME budget arithmetic the XML bundle runs: default kForPayloadBudgetBytes, an explicit
     // --token-budget wins, and the envelope's own bytes are charged before the sigs budget.
     //
+    // T3 disclosure (test/fordisclosurecheck.sh #3): this dialect renders no bodies by design — the XML
+    // sibling's auto <bodies> section stays XML-only — and per the B1.4 rule ("0 must mean genuinely none,
+    // not not-computed-this-run") it has to SAY so, or a reader cannot tell "no bodies here" from "bodies
+    // ride the other dialect". One always-present envelope key names the serving posture, the same
+    // vocabulary the XML root's bundle= attribute uses ("auto" = bodies inline; "sigs" = signatures only).
+    constexpr std::string_view kJsonBundleSigsKey = ",\"bundle\":\"sigs\"";   // 16 B, charged below
+    //
     // §C1 (capture-audit-4) — this was 40, and the text it covers is `,"capped":false` (15) +
-    // `,"est_tokens":` (14) + the digits + `,"sigs":` (8) + `}` (1) = 38 fixed. So 40 reserved room for a
+    // `,"est_tokens":` (14) + the digits + `,"sigs":` (8) + `}` (1) = 38 fixed (54 with the 16 B bundle
+    // key above). So 40 reserved room for a
     // TWO-digit est_tokens and under-reserved from five digits up — which is every real bundle. The two
     // halves are now named separately because they are two different jobs: the RESERVATION below must be an
     // upper bound (it is subtracted from the budget before the sigs are built), while the CHARGE further
@@ -2759,9 +2767,9 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     //
     // Ten digits is 9 999 999 999 tokens — a ~36 GB bundle. The bound is stated rather than computed so the
     // reservation stays a compile-time constant, as its two sibling stanzas below already are.
-    constexpr std::size_t kJsonEnvelopeFixedBytes = 38;
+    constexpr std::size_t kJsonEnvelopeFixedBytes = 38 + kJsonBundleSigsKey.size();
     constexpr std::size_t kJsonEnvelopeDigitsMax  = 10;
-    constexpr std::size_t kJsonEnvelopeBytes      = kJsonEnvelopeFixedBytes + kJsonEnvelopeDigitsMax;   // 48, the RESERVATION
+    constexpr std::size_t kJsonEnvelopeBytes      = kJsonEnvelopeFixedBytes + kJsonEnvelopeDigitsMax;   // 64, the RESERVATION
     // §B1.3: the notes stanza `,"notes_total":N,"notes_kept":M` is charged too — but ONLY when a NoteIndex
     // exists, so a tree with no .ripwire_notes keeps its budget arithmetic (and therefore its bytes) exactly
     // as before. That is the L3 inertness contract, not a rounding convenience.
@@ -2804,6 +2812,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
             // a number this path cannot compute must never be fabricated.
             DEGRADED_PATH_ALERT( "main: open_memstream failed for the --for --json sigs block — emitting unbudgeted, est_tokens omitted" );
             std::fputs( header.c_str(), out );
+            std::fwrite( kJsonBundleSigsKey.data(), 1, kJsonBundleSigsKey.size(), out );   // the posture disclosure survives the degrade (a plain constant — nothing here can fail to compute it)
             std::fwrite( surfaceCountsStanza.data(), 1, surfaceCountsStanza.size(), out );
             std::fputs( ",\"sigs\":", out );
             packSigs( out, 0, nullptr );
@@ -2832,7 +2841,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     // rides the same fixed point in the safe direction: the key is emitted only when the document is already
     // over, and adding its 20 bytes can only keep it over, never bring it back under.
     const std::size_t cappedClauseBytes = sigsCapped ? 14u : 15u;      // ,"capped":true / ,"capped":false
-    const std::size_t envelopeTextBytes = cappedClauseBytes + 14u + 8u + 1u;   // + ,"est_tokens": + ,"sigs": + }
+    const std::size_t envelopeTextBytes = cappedClauseBytes + 14u + 8u + 1u + kJsonBundleSigsKey.size();   // + ,"est_tokens": + ,"sigs": + } + ,"bundle":"sigs"
     const std::size_t bundleBytesBase   = header.size() + sigsJson.size() + notesStanza.size()
                                         + surfaceCountsStanza.size() + envelopeTextBytes;
     const std::size_t ceilingAllowance  = in.tokenBudget > 0 ? ceilingAllowanceBytes( in.tokenBudget ) : 0;
@@ -2868,6 +2877,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     }
     VERIFY( overCeiling.size() == 0 || overCeiling.size() == 20 );   // the 20 the charge above reserved for it
     std::fputs( header.c_str(), out );
+    std::fwrite( kJsonBundleSigsKey.data(), 1, kJsonBundleSigsKey.size(), out );
     std::fwrite( surfaceCountsStanza.data(), 1, surfaceCountsStanza.size(), out );
     std::fwrite( notesStanza.data(), 1, notesStanza.size(), out );
     std::fwrite( overCeiling.data(), 1, overCeiling.size(), out );
@@ -2888,9 +2898,16 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
 //
 // BUDGET: an explicit --token-budget is a hard ceiling — the bodies get only what the rendered bundle
 // genuinely left under it (`committedBytes`; the sigs/lego/compose/routes/graph bytes are computed exactly
-// as before — auto mode never shrinks them), and a ceiling too tight for even the disclosure turns the
-// whole surface off (`surfaceOff`): the output is then the pre-T3 bundle exactly, so the stated ceiling
-// holds exactly as it did before this feature (D10) and nothing present goes undisclosed. WITHOUT an
+// as before — auto mode never shrinks them). A ceiling the signature bundle already exhausted serves no
+// body and STILL discloses — as the root attribute alone (bodies="0" reason="budget"; the legend and the
+// empty <bodies> shell are dropped there, because only the attribute has reserved bytes at a spent
+// ceiling — see the leftBytes==0 branch below). The registration promises the attribute for "no body fits
+// the remaining budget" (docs/EVALS.md §4 T3) and there is no leftover-budget value that licenses
+// silence. The exhausted branch used to turn the whole surface off silently;
+// the 2026-08-22 Lane-AA transcript mine caught it in the wild on 5 of 26 real --for calls (a
+// sphinx-sized corpus exhausts a 4000-token allowance with signatures alone, and est_tokens' mid-band
+// rate reads BELOW the stated budget while the conservative byte allowance is spent — so the output
+// looked both under budget and undisclosed). Gate: test/fordisclosurecheck.sh. WITHOUT an
 // explicit budget, the default bundle gains the fixed kForAutoBodyBudgetBytes allowance on top of
 // kForPayloadBudgetBytes — the per-call cost the T3 registration's guard covers, disclosed through
 // est_tokens, which charges these bytes at the body rate. Every input is deterministic (ranked surface,
@@ -2905,6 +2922,8 @@ struct ForAutoBodiesResult
     rw::ChargedSection section;             // rendered auto <bodies> bytes; empty when nothing is emitted
     std::string        attr;                // the <ctx> root disclosure; empty ⇒ no attribute (surface off / degrade)
     bool               surfaceOff = false;  // true ⇒ the caller rebuilds the header WITHOUT the bundle=auto legend
+    bool               legendOff  = false;  // exhausted explicit ceiling: attr KEPT (its bytes are the reserve), legend + section dropped —
+                                            //   the D10 fit contract and the T3 disclosure contract met at once (fordisclosurecheck #2)
 };
 
 // ── ANCHOR-ONLY: the allowance serves the anchor's OWN body, or none (docs/EVALS.md, T3 substitution round) ──
@@ -2995,9 +3014,20 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
         leftBytes += rw::kForAutoBodyBudgetBytes;   // the default bundle's body allowance (see serialize.h)
     }
 
+    // Exhausted explicit ceiling (the signature bundle consumed every byte): the disclosure survives,
+    // but as the ATTRIBUTE ALONE. The attribute's bytes are exactly what the caller reserved up front
+    // (kAutoAttrReserve is inside committedBytes), so it fits by construction; the legend (~half a KB,
+    // exempt from the sigs trim charge, never trimmed by the ladder) and the empty <bodies> shell
+    // (whose per-item over-budget comments are unbudgeted) have NO reserved bytes here, and keeping
+    // them at an already-spent ceiling is what fornotesbudgetcheck/forrootlegendcheck measured as a
+    // 45% est_tokens overrun — D10's "trims to fit" is a contract too. reason="budget" is the tell
+    // for why nothing but the attribute appears. This branch used to turn the WHOLE surface off with
+    // no attribute at all — the silent shape the 2026-08-22 Lane-AA mine caught on 5 of 26 real
+    // --for calls (see the BUDGET paragraph above); the T3 registration makes no exception for it.
     if( cfg.tokenBudget > 0 && leftBytes == 0 )
     {
-        out.surfaceOff = true;                      // explicit ceiling too tight for even the disclosure
+        out.attr      = " bundle=\"auto\" bodies=\"0\" reason=\"budget\"";
+        out.legendOff = true;
         return out;
     }
     if( autoBodyIds.empty() )
@@ -3019,6 +3049,7 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
         {
             out.surfaceOff = true;                      // degrade: pre-T3 output exactly (alert already on stderr)
             out.section    = rw::ChargedSection{};
+            out.attr.clear();                           // the attr was staged above the render — an attribute describing a section that failed to render must not outlive it
         }
         return out;
     }
@@ -3027,7 +3058,9 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     // <d> row ALREADY surfaces its field notes — repeating them on the body would spend allowance bytes on
     // duplicates AND desync the --json dialect's notes_kept from the XML sibling's note count
     // (fornotesjsoncheck), since the JSON bundle renders no bodies.
-    const std::size_t  autoBodyBudget = std::min( leftBytes, cfg.packBudgetBytes );
+    // floor of 1, never 0: to packBodies a zero budget means "unlimited" (the packSignatures convention),
+    // and the exhausted-ceiling case must render the empty shell, not every candidate body.
+    const std::size_t  autoBodyBudget = std::max<std::size_t>( 1, std::min( leftBytes, cfg.packBudgetBytes ) );
     rw::EmittedBodies autoEmitted;
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
         { rw::packBodies( f, ing, autoBodyIds, autoBodyBudget, g.outOff, g.outTargets, cfg.compress, redactPtr,
@@ -3206,9 +3239,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // --json and --format=candidates dialects never reach the auto machinery (candidates returned above;
         // --json returns before it below), so this mode is an XML-bundle fact only.
         const bool         autoBundleMode = cfg.detail == 0 && !cfg.signaturesOnly;
-        // NOT const: the tight-explicit-budget path in the auto block below may turn the auto surface off
+        // NOT const: the chargeSection-degrade path in the auto block below may turn the auto surface off
         // (autoBundle=false) and rebuild the header without the legend — the ladder's later rebuilds read
-        // this struct through buildForHeader and must honor that decision.
+        // this struct through buildForHeader and must honor that decision. (A tight explicit budget no
+        // longer turns the surface off: the disclosure survives any ceiling — test/fordisclosurecheck.sh.)
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
                                         mentionNote, boostNote, docMentionNote, floorNote, cfg.anchor, autoBundleMode, flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
@@ -3539,8 +3573,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         // ── T3: the terminal-by-default auto <bodies> section (pre-registered: docs/EVALS.md §4) ────────────
         // The decision + render live in buildForAutoBodies (above runForLens — this function is already one
         // of the largest in the file); this site only wires its verdict in: keep the section + attribute, or
-        // rebuild the header WITHOUT the legend when the surface turned off (tight explicit ceiling, or the
-        // chargeSection degrade), so the ladder's later rebuilds honor the decision too.
+        // rebuild the header WITHOUT the legend when the surface turned off (the chargeSection degrade —
+        // the ONLY remaining off-switch), so the ladder's later rebuilds honor the decision too.
         rw::ChargedSection autoSection;
         std::string        autoAttr;   // spliced onto the <ctx> root after the ladder; its exact bytes are priced there
         if( autoBundleMode && sigsPreRendered )
@@ -3553,8 +3587,11 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                  committedBytes, bundleBudget, redactPtr, routeAnchorDefs );
             autoSection = std::move( autoBodies.section );
             autoAttr    = std::move( autoBodies.attr );
-            if( autoBodies.surfaceOff )
+            if( autoBodies.surfaceOff || autoBodies.legendOff )
             {
+                // both rebuild the header WITHOUT the legend; they differ in the attr — surfaceOff
+                // (chargeSection degrade) cleared it, legendOff (exhausted ceiling) kept it, so the
+                // exhausted case still discloses on the root while paying only its reserved bytes.
                 headerParts.autoBundle = false;
                 headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
             }
