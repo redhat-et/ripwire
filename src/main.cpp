@@ -3116,10 +3116,36 @@ static_assert( rw::kForCompactSurfaceBudgetBytes > kCompactAttrReserve + kCompac
                "the compact surface allowance must leave real room for edges after its own disclosure — "
                "if a legend edit tripped this, shorten the legend rather than raising the allowance" );
 
+// COMPACT conceptual serving: is this the route the ROUTER chose the subtoken+body ranker for? Read from
+// the router's own machine tag rather than re-derived from the query, so there is exactly one classifier.
+// "no-route" is deliberately NOT this route: --no-route means the router never ran, so there is no route
+// decision to condition a default on, and that path keeps its golden neutrality (byte-identical output).
+inline bool isConceptualRoute( const char* routeTag )
+{
+    return routeTag != nullptr && std::strcmp( routeTag, "subtoken+body" ) == 0;
+}
+
+// …and MAY this --for call serve the compact bundle at all? Decided from cfg alone, because the route is
+// not known until the ranking has run and the RANKING needs this answer first: the compact bundle orders a
+// cut callee listing by the rank vector, which makes it a full-distribution consumer (see
+// computeLensRanking). Answering "maybe" here is safe and cheap — a name-exact query simply never goes
+// compact, and computeLensRanking re-checks the route before it acts on this.
+inline bool forCompactPosture( const rw::Config& cfg )
+{
+    return cfg.detail == 0 && !cfg.signaturesOnly && !cfg.autoBodies && !cfg.candidates;
+}
+
 // WHICH ENRICHMENT THE BUNDLE GAINS, decided once and carried as a value rather than re-derived at each
 // of the four places that need it (the legend's sigs-budget exemption, the root attribute's reserve, the
 // builder call, and the est_tokens split). runForLens is the largest function in this file; four
 // independent ternaries on the same predicate is exactly how it got that way.
+//
+// The compact section's bytes are MARKUP bytes, which is why the plan carries no rate: <hops> holds tags,
+// identifiers and line numbers, never source text, so it is summed with the rest of the markup at one rate
+// and rounded once. Charging it separately at the same rate rounds twice, and two roundings of one rate do
+// not equal one rounding of it — the weak-query bundle came out at 529 tokens where round(1321/2.50) is
+// 528, an off-by-one in the number contracted to BE the document's own measurement
+// (test/estchargecheck.sh #11 A9/A10 asserts that identity, not a band).
 struct ForEnrichmentPlan
 {
     bool        compact      = false;   // the conceptual route serves <hops>; otherwise T3's <bodies>
@@ -3244,22 +3270,13 @@ std::optional<int> runForLens( const MainDispatch& d )
         // ROUTING + anchoring + the B8 mention anchor + the opt-in B3 co-change prior all live in
         // computeLensRanking (shared with runPackTask so the ranking is defined once). Compose order with
         // --anchor: ROUTE picks the base lens rank, then ANCHOR expands it; mention/co-change run after.
-        // COMPACT posture: --for with no explicit body knob and no opt-out MAY serve the compact bundle,
-        // which orders a cut callee listing by this rank — so the ranking has to be exact everywhere.
-        // Decided from cfg alone (the route is not known yet); a name-exact query simply never goes
-        // compact, and computeLensRanking checks the route itself before it acts on this.
-        const bool         compactPosture = cfg.detail == 0 && !cfg.signaturesOnly && !cfg.autoBodies && !cfg.candidates;
-        LensRanking        lr        = computeLensRanking( d, cfg.forTask, compactPosture );
+        LensRanking        lr        = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ) );
         std::vector<float> lensRank  = std::move( lr.rank );
         const std::string  routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
         const std::string  mentionNote( std::move( lr.mentionNote ) );
         const std::string  boostNote( std::move( lr.boostNote ) );
         const std::string  docMentionNote( std::move( lr.docMentionNote ) );
-        // COMPACT conceptual serving: the route the ROUTER chose, read from its own machine tag rather
-        // than re-derived. "no-route" is deliberately NOT this route: --no-route means
-        // the router never ran, so there is no route decision to condition a default on, and that path
-        // keeps its golden neutrality (byte-identical output, see the ROUTING comment above).
-        const bool         conceptualRoute = std::strcmp( lr.routeTag, "subtoken+body" ) == 0;
+        const bool         conceptualRoute = isConceptualRoute( lr.routeTag );   // see the predicate for what "no-route" does here
         // the route's own anchors, resolved — read ONLY by the T3 auto-body allowance below (anchor-only)
         const std::vector<RouteAnchorDef> routeAnchorDefs( std::move( lr.anchorDefs ) );
         // R4: weak-result honesty signal — the top match's RAW lexical score (pre-anchor/mention/cochange,
@@ -3358,18 +3375,14 @@ std::optional<int> runForLens( const MainDispatch& d )
         // --json and --format=candidates dialects never reach the auto machinery (candidates returned above;
         // --json returns before it below), so this mode is an XML-bundle fact only.
         const bool         autoBundleMode = cfg.detail == 0 && !cfg.signaturesOnly;
-        // COMPACT conceptual serving (pre-registered: docs/EVALS.md, the T3 route-narrowing round): on the
-        // route the router sent to subtoken+body, the enrichment the bundle gains is the <hops> edge section
-        // rather than the <bodies> allowance — unless the caller opted back in with --auto-bodies. The two
-        // are mutually exclusive by construction: one enrichment section, one legend, one root attribute.
-        const bool         compactMode    = autoBundleMode && conceptualRoute && !cfg.autoBodies;
-        const ForEnrichmentPlan plan       = planForEnrichment( autoBundleMode, compactMode );
+        // COMPACT conceptual serving (docs/EVALS.md, the T3 route-narrowing round) — see planForEnrichment.
+        const ForEnrichmentPlan plan = planForEnrichment( autoBundleMode, autoBundleMode && conceptualRoute && !cfg.autoBodies );
         // NOT const: the tight-explicit-budget path in the auto block below may turn the surface off
         // (autoBundle/compactBundle=false) and rebuild the header without the legend — the ladder's later
         // rebuilds read this struct through buildForHeader and must honor that decision.
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
                                         mentionNote, boostNote, docMentionNote, floorNote, cfg.anchor,
-                                        autoBundleMode && !compactMode, compactMode, flRootArg };
+                                        autoBundleMode && !plan.compact, plan.compact, flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -3802,18 +3815,13 @@ std::optional<int> runForLens( const MainDispatch& d )
             // would over-read the bodies by ~1.5x — the same "one number for two kinds of bytes" defect §H7
             // is about, aimed the other way, and it would report a --for --detail bundle at 2.50 B/tok when
             // its real shape is ~3.6.
-            // COMPACT: the <hops> section is markup, so it belongs in markupBytes and NOT in a second
-            // charge of its own. Charging it separately at the same rate is not merely redundant — it
-            // rounds twice, and two roundings of one rate do not equal one rounding of it: the weak-query
-            // bundle came out at 529 tokens where round(1321/2.50) is 528, an off-by-one in the number
-            // that is contracted to BE the document's own measurement (test/estchargecheck.sh #11 A9/A10
-            // asserts the identity, not a band). One rate, one rounding.
+            // COMPACT: the <hops> section is markup, so it is markupBytes and NOT a second charge of its
+            // own — one rate, one rounding (see ForEnrichmentPlan for the off-by-one that proves it).
             const std::size_t compactBytes = plan.compact ? autoSection.xml.size() : 0u;
             const std::size_t markupBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
                                           + routeStr.size() + graphSection.xml.size() + compactBytes + 6;   // + "</ctx>"
-            // T3: the auto bodies are charged at the body rate too — def-body text BPE-merges differently
-            // from markup, which is the whole reason this sum is split by kind. On the compact route
-            // autoSection is markup and was folded into markupBytes above, so it contributes nothing here.
+            // T3: the auto bodies at the body rate — def-body text BPE-merges differently from markup, which
+            // is why this sum splits by kind. On the compact route that section was markup, folded in above.
             const std::size_t bodyTokens  = detailSection.tokens + ( plan.compact ? 0u : autoSection.tokens );
             std::size_t estTokens = rw::tokensForEmittedBytes( markupBytes, kBytesPerTokenDefault ) + bodyTokens;
             std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
