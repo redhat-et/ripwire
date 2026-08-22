@@ -1792,7 +1792,7 @@ inline std::string usesSelectorRefusal( const IngestResult& ing, const std::stri
                                 "real use-sites are answered with external=\"1\", this one has neither" );
 }
 
-inline std::string usesText( const std::string& root, const std::string& symbol )
+inline std::string usesText( const std::string& root, const std::string& symbol, McpPageArgs page = {} )
 {
     const McpIndex&        ix   = getIndex( root );
     const IngestResult&    ing  = ix.ing;
@@ -1825,15 +1825,38 @@ inline std::string usesText( const std::string& root, const std::string& symbol 
         }
         sites.push_back( { r.fileId, r.line, r.role, std::move( in ) } );
     }
+    // LB-G (r10 GitNexus round): TIER before path, and the same default site cap the CLI --uses now
+    // applies — the two surfaces are one contract (test/mcpclidiffcheck.sh LENS 1 pins their root-attribute
+    // sets equal), so a cap on one and not the other is a divergence, not a saving. Both halves are the
+    // CLI arm's code read across: rw::pathTierOf materialized once per hit file, then
+    // effectiveRowCap/pageWindow/pageDisclosure.
+    std::vector<std::uint8_t> tierOfFile( ing.files.size(), 0xFFu );
+    for( const UseSite& u : sites )
+    {
+        if( u.fileId < tierOfFile.size() && tierOfFile[ u.fileId ] == 0xFFu )
+        {
+            tierOfFile[ u.fileId ] = std::uint8_t( pathTierOf( ing.files[ u.fileId ] ) );
+        }
+    }
     std::sort( sites.begin(), sites.end(), [ & ]( const UseSite& a, const UseSite& b )
                {
-        if( a.fileId != b.fileId ) { return ing.files[ a.fileId ] < ing.files[ b.fileId ];
-}
+        if( a.fileId != b.fileId )
+        {
+            if( tierOfFile[ a.fileId ] != tierOfFile[ b.fileId ] ) { return tierOfFile[ a.fileId ] < tierOfFile[ b.fileId ]; }
+            return ing.files[ a.fileId ] < ing.files[ b.fileId ];
+        }
         if( a.line   != b.line ) {   return a.line < b.line;
 }
         if( a.role   != b.role ) {   return std::uint8_t( a.role ) < std::uint8_t( b.role );
 }
         return a.in < b.in; } );
+
+    const PageWindow  upw           = pageWindow( sites.size(), effectiveRowCap( page.limit, kUseSiteRowCap ), page.offset );
+    const std::size_t upageRows     = upw.end - upw.begin;
+    const bool        usDiscloseCap = upageRows < sites.size();
+    char              upab[ kPageDisclosureCap ];
+    const char* const upage         = pageDisclosure( upab, sizeof( upab ), upageRows, sites.size(), upw.end,
+                                                      page.limit, page.offset, usDiscloseCap );
 
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -1853,7 +1876,10 @@ inline std::string usesText( const std::string& root, const std::string& symbol 
                        "Reference-name-based (same heuristic level as call edges) — verify in source if a name is overloaded. "
                        "external=\"1\" means SYM has no definition in the indexed tree under ANY spelling (stdlib/third-party); "
                        "a qualified file:name spelling whose bare name IS defined refuses instead (the CLI uses verb narrows it). "
-                       "%s-->%s", kUsesLegendOpen, graphCountDisclosure().c_str(),
+                       "%s%s-->%s", kUsesLegendOpen,
+                  capLegendClause( computePageDisclosure( upageRows, sites.size(), upw.end,
+                                                          page.limit, page.offset, usDiscloseCap ).active ),
+                  graphCountDisclosure().c_str(),
                   rootRelPathsLegend( ing.realPaths.empty() ) );   // R-E fix: the CLI --uses legend carries the
                                                                    // identical clause — floormarkcheck (4) pins
                                                                    // the two disclosure tails byte-identical.
@@ -1862,10 +1888,11 @@ inline std::string usesText( const std::string& root, const std::string& symbol 
     const bool         usSingleRoot = ing.realPaths.empty();
     const std::string  usRootPrefix = usSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const std::string  usRootAttr   = usSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
-    std::fprintf( mem, "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s%s>",
-                  ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), usRootAttr.c_str(), kGraphCountFloorAttrXml );
-    for( const UseSite& u : sites )
+    std::fprintf( mem, "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s%s%s>",
+                  ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), usRootAttr.c_str(), upage, kGraphCountFloorAttrXml );
+    for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
     {
+        const UseSite& u = sites[ siteIndex ];
         const std::string_view up = usSingleRoot ? sarif::rootRelativeUri( ing.files[ u.fileId ], usRootPrefix ) : std::string_view( ing.files[ u.fileId ] );
         std::fprintf( mem, "<u role=\"%s\" p=\"%s:%u\"", refRoleTag( u.role ), ex( up ).c_str(), u.line );
         if( !u.in.empty() )
@@ -3293,7 +3320,7 @@ inline std::string batchPageRefusal( std::string_view verb, const McpPageParse& 
     {
         return {};
     }
-    return ( verb == "grep" || verb == "impact" ) ? page.refusal : std::string{};
+    return ( verb == "grep" || verb == "impact" || verb == "uses" ) ? page.refusal : std::string{};   // LB-G: uses pages too
 }
 
 // The served set as ONE list (registry + the two aliases), for the membership test, the near-miss pool and
@@ -3521,7 +3548,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( refusal );
         }
-        r.payload = usesText( root, symbol );        // count="0" is a valid answer, never empty
+        r.payload = usesText( root, symbol, pageParse.page );   // LB-G: the batch arm honors the SAME window (the impact precedent)
     }
     else if( r.verb == "mentions" )
     {

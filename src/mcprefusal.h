@@ -914,7 +914,10 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "quality_delta",            "path" },
     { "quality_baseline",         "path", McpVerbFields::Effect::Writes },
     { "impact",                   "path paths symbol limit offset" },
-    { "uses",                     "path paths symbol" },
+    // LB-G (r10 GitNexus round): limit/offset are DECLARED here because the verb now HONORS them
+    // (mcpPageArgs -> pageWindow), exactly as `impact` one row up. `uses` grew a default site cap in the
+    // same round, so a caller that wants the whole footprint needs the hatch the CLI --uses already had.
+    { "uses",                     "path paths symbol limit offset" },
     { "path_between",             "path paths from to" },
     { "connect",                  "path paths symbols radius" },
     { "explore",                  "path paths task budget_tokens partition" },

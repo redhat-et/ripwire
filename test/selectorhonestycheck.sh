@@ -240,7 +240,10 @@ use_rows two/h.h:helper >"$TMP/u2"
 if [ -e "$ROOT/.git" ]; then
     SEL="src/notes.h:empty"
     NCALLERS="$( "$BIN" "$ROOT" --callers="$SEL" --no-cache 2>/dev/null | grep -o 'count="[0-9]*"' | head -1 | tr -dc '0-9' )"
-    NIN="$( "$BIN" "$ROOT" --uses="$SEL" --no-cache 2>/dev/null | tr '<' '\n' | grep 'role="call"' | grep -o 'in_id="[^"]*"' | sort -u | wc -l | tr -d ' ' )"
+    # LB-G (r10 round): --uses grew a default 100-SITE display cap, and this arm compares a SET derived from
+    # every site against --callers' un-windowed count=. It must therefore ask for the whole listing —
+    # comparing a page against a total would red on the cap rather than on a narrowing disagreement.
+    NIN="$( "$BIN" "$ROOT" --uses="$SEL" --limit=100000 --no-cache 2>/dev/null | tr '<' '\n' | grep 'role="call"' | grep -o 'in_id="[^"]*"' | sort -u | wc -l | tr -d ' ' )"
     if [ -n "$NCALLERS" ] && [ "$NCALLERS" -gt 0 ]; then
         [ "$NIN" = "$NCALLERS" ] \
             && ok "§A6b: --uses=$SEL role=\"call\" rows have exactly the --callers=$SEL enclosing symbols ($NIN)" \
@@ -250,7 +253,9 @@ if [ -e "$ROOT/.git" ]; then
     fi
 
     # and the two overloads' ROWS must not be identical (the finding's own repro: 1211 identical rows)
-    live_rows(){ "$BIN" "$ROOT" --uses="$1" --no-cache 2>/dev/null | tr '<' '\n' | sed -n 's/^u role=/role=/p'; }
+    # LB-G: the whole listing again — two overload row-sets that differ only past row 100 would compare
+    # equal under the display cap, which is exactly the false green this arm exists to prevent.
+    live_rows(){ "$BIN" "$ROOT" --uses="$1" --limit=100000 --no-cache 2>/dev/null | tr '<' '\n' | sed -n 's/^u role=/role=/p'; }
     live_rows src/notes.h:empty       >"$TMP/l1"
     live_rows src/scipoverlay.h:empty >"$TMP/l2"
     if [ -s "$TMP/l1" ] && [ -s "$TMP/l2" ]; then

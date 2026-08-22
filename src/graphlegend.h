@@ -150,7 +150,8 @@ inline constexpr const char* kUsesLegendOpen =
     "than role=\"type\" (that relation is modelled separately), and a type\'s own DEFINITION is never a use of itself. "
     "role=\"macro\" is the call-shaped invocation of a name "
     "that uniquely names an indexed function-like #define — never labelled role=\"call\", because an expansion "
-    "is not a plain call; a name shared with a non-macro definition stays role=\"call\" for the resolver. ";
+    "is not a plain call; a name shared with a non-macro definition stays role=\"call\" for the resolver. "
+    "Rows are ordered SOURCE first, then test/bench, then docs, and by path within a tier. ";   // LB-G
 
 // --impact's opener, identical on both surfaces before this header.
 inline constexpr const char* kImpactLegendOpen =
@@ -166,7 +167,8 @@ inline constexpr const char* kCallHierarchyLegendOpen =
     "you passed, defs= how many DEFINITIONS that name resolved to (the rows UNION every def's neighbours), and "
     "count= the number of DISTINCT neighbour symbols (a floor, per counts_floor=), which the rows window with limit= and offset=. "
     "A neighbour that is an indexed function-like #define is a macro row (t=\"macro\", role=\"macro\" on the XML row): "
-    "the edge crosses a macro expansion, not a plain call — rows carry no role= otherwise. ";
+    "the edge crosses a macro expansion, not a plain call — rows carry no role= otherwise. "
+    "Rows are ordered SOURCE first, then test/bench, then docs, and by path within a tier. ";   // LB-G
 
 // V1 fix (verifier finding 3, 2026-08-15): bodyless_defs= is a CALLEES-only attribute — main.cpp's emitter
 // gates it behind `!wantCallers`, so a --callers document can never carry it. It used to sit inside
@@ -184,6 +186,34 @@ inline std::string callHierarchyLegendOpen( bool wantCallers )
 {
     return wantCallers ? std::string( kCallHierarchyLegendOpen )
                        : std::string( kCallHierarchyLegendOpen ) + kCallHierarchyLegendCalleesOnly;
+}
+
+// ── LB-G (r10 GitNexus round) — the DISPLAY-CAP clause the neighbour verbs share ─────────────────────────
+// --callers/--callees/--uses grew a default row cap (pageview.h kCallHierarchyRowCap / kUseSiteRowCap), so
+// their first screen can now carry shown=/capped= — and by legendcoveragecheck's rule an attribute a reader
+// meets on the first screen has to be defined where they meet it. One literal for three verbs, for the same
+// reason kRootRelPathsLegend was hoisted out of eighteen: a second wording is echo-site drift waiting to
+// happen. It supersedes kPageRaiseCapClause for these three (that fragment defines limit= alone; this one
+// defines the whole pair the cap actually emits) — --grep and --impact keep the shorter one, which is what
+// their own baselines and gates are pinned against.
+//
+// EMITTED CONDITIONALLY, by capLegendClause() below. That is not byte-shaving for its own sake: these three
+// verbs shipped for their whole life with no cap, so an answer that drops nothing must stay byte-identical
+// to what it was — and THE TRUNCATION VOCABULARY (pageview.h) names exactly this shape conformant, citing
+// --skill-scan, which emits the shown=/capped= pair only on a capped scan. Same rule the callees-only
+// clause above already follows: a call never pays for vocabulary it cannot emit.
+inline constexpr const char* kNeighbourCapLegend =
+    "shown= is how many rows this answer PRINTED and capped=\"1\" says a default display cap dropped some; "
+    "count= above stays the true total, never the page's length. Raise the default cap with limit=N "
+    "(offset=M pages, which also adds total=/has_more=/next_offset= so a paging loop can terminate); on the "
+    "root, limit=\"0\" means no explicit limit was given and the verb's own default page size shaped the "
+    "window — never a zero-row page. ";
+
+// `active` is pageDisclosure()'s own activity decision, passed in rather than re-derived, so the clause and
+// the attributes it defines can never disagree about whether they are present.
+inline const char* capLegendClause( bool active ) noexcept
+{
+    return active ? kNeighbourCapLegend : "";
 }
 
 } // namespace rw

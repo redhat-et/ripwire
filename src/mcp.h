@@ -1411,7 +1411,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // V2-1: same shared guard as the batch dispatch — a qualified file:name spelling whose
                     // bare name IS defined refuses instead of answering external="1" (a false claim).
                     const std::string refusal = usesSelectorRefusal( getIndex( path ).ing, symbol );
-                    resp = refusal.empty() ? textResult( usesText( path, symbol ) )   // count="0" stays a valid answer
+                    // LB-G: limit/offset are read by the SAME mcpPageArgs impact uses, because this verb now
+                    // honors them — it grew a default site cap in that round and needs the hatch to match.
+                    resp = refusal.empty() ? pagedResult( [ & ]( McpPageArgs pg )
+                                             { return textResult( usesText( path, symbol, pg ) ); } )   // count="0" stays a valid answer
                                            : errResultMsg( -32602, refusal );
                 }
                 else if( name == "path_between" && !path.empty() && !from.empty() && !to.empty() )
