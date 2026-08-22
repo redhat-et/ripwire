@@ -872,6 +872,69 @@ becoming unreachable — absent from the compact bundle AND not recoverable by o
 call. Any query whose two-call total exceeds today's one-call total. Any byte movement on the name-exact
 route. Any guard regression. Each one reverts on its own; none is negotiable by re-reading the band.
 
+#### The two-call criterion — SUPERSEDED, deliberate recalibration commit, 2026-08-22 (before re-scoring)
+
+**Nothing above is deleted.** The two sentences this supersedes stay where they are, verbatim: success
+criterion (b)'s second clause (*"with `compact bytes + expand bytes < today's one-call bytes` for that
+query"*) and the failure clause (*"Any query whose two-call total exceeds today's one-call total"*).
+This block replaces those two sentences and **nothing else** — the byte band (a), the 11/11 marker count
+in (b), the byte-identity criterion (c), the guard criterion (d), and every other failure clause stand
+exactly as registered.
+
+**Why it is superseded, written before any figure is re-scored under it.** The superseded instrument
+charges every marker ONE FULL `--expand` — which is the assumption that an agent needs the body 100% of
+the time. This round's own evidence base measures that rate, and it is not 1. Over the 17 body-serving
+`--for` episodes the first transcript pass classified: **BODY-USE — the episode that edited off the
+prepaid body — was observed zero times**; 11 episodes were MAP-USE(insufficient), where the served body
+demonstrably did NOT contain the text that was edited; 6 were AMBIGUOUS. A criterion that prices a
+CONDITIONAL cost as an UNCONDITIONAL one is not measuring the thing it names, and that gap is the entire
+disagreement between the two readings this lane recorded. This is the separate disclosed commit the
+house convention requires for exactly this move — the snapshot/floor update policy earlier in this file,
+and the precedent of the subtoken round, which left a behavioral arm red rather than reword it and said
+so: *"the choice is the owner's: recalibrate the arm in a separate disclosed commit, or reject."* The
+owner chose recalibrate. It is recorded here, ahead of the numbers, so that the recalibration cannot be
+read as a band widened after seeing them.
+
+**`p_body`, derived conservatively and fixed HERE, before use.** `p_body` is the probability that a
+compact bundle costs the agent a follow-up `--expand` for the decisive content. Its derivation:
+
+- The **empirical point estimate is 0/17 = 0.0** — the measured BODY-USE count. It is not used. A
+  criterion built on 0 collapses the expected-cost arm into "compact alone is cheaper", which the
+  per-query bytes already guarantee and which therefore tests nothing.
+- The **11 MAP-USE(insufficient) episodes are excluded** on direct observation, not on convenience: in
+  those the prepaid body did not contain the edited text, so a bundle that omits that body costs the
+  agent nothing it was using. Charging an `--expand` for them would charge for a call the evidence says
+  was not the substitute.
+- The **6 AMBIGUOUS episodes are all charged as body-need** — every one of them, including the 2 with an
+  empty window and the 4 whose per-edit verdicts disagreed. These are the cases the mining could not
+  rule out, and the conservative move is to price every unresolved case against the change.
+
+That gives **`p_body` = (0 BODY-USE + 6 AMBIGUOUS) / 17 body-serving episodes = 6/17 ≈ 0.353**, i.e. the
+upper bound on the share of episodes in which the prepaid body could not be ruled out as the content the
+agent actually needed. It is conservative in the direction that hurts this round: a higher `p_body`
+makes the compact default look more expensive.
+
+**The recalibrated criterion, result-free, BOTH arms required.**
+
+| Arm | Test |
+| --- | --- |
+| **(a) expected cost** | for every query carrying a marker whose body the baseline served: `compact_total + p_body × expand_cost < today's one-call total` |
+| **(b) worst case** | no query's RAW two-call total (compact + a full `--expand`, i.e. `p = 1`) may exceed today's one-call total by more than **+10%** |
+
+Arm (a) is the criterion the superseded one should have been. Arm (b) is what stops (a) from being a
+licence: an expected-value test can be cleared by a query that is catastrophic in the tail, so the tail
+is bounded separately and unconditionally, at a margin fixed here rather than at whatever the data turns
+out to need.
+
+**The re-scoring is a re-scoring, and is bounded as one.** It reads the bytes already captured at this
+lane's head. No query is re-run, no measurement is re-taken, no binary is rebuilt. It must additionally
+**report the break-even `p_body` per query** — the value at which arm (a) would flip — so the criterion's
+sensitivity to a constant chosen from n=17 is visible on the page instead of buried in it.
+
+**Failure, and the end of the line.** If either arm misses, the round REVERTS. There is no third
+criterion: a second recalibration after seeing a second set of numbers would be the band-widening this
+block exists to not be.
+
 **Confounds, stated.** The 15-query class-B set was authored for a head-to-head round and frozen; it is
 not a sample of what agents ask, and its one recorded loss (`WP-B2`) is a ranking miss that no
 serving-side change can reach. "Markers present" is a substring test over the emitted bundle, which is
