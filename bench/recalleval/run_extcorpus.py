@@ -147,14 +147,20 @@ class BucketAgg:
     other symbols in the call graph and misattributes their edges — the same reason
     run_recalleval.py's Agg.accumulate is named that."""
 
-    __slots__ = ("n", "s1", "s5", "s10", "l1", "l5", "l10", "mrr_s", "mrr_l", "asset_slots", "slots")
+    # COUNTERS and RATIOS are named separately so __init__ can zero them from the declaration instead
+    # of restating it. Written out longhand this constructor is a 49-token clone of
+    # run_recalleval.py's Agg.__init__ (the tool's own --quality-delta says so, and it is right —
+    # both are "zero a fixed list of tally fields"); the loop deletes the duplication rather than
+    # acking it, and adding a counter here can no longer forget to initialize it.
+    COUNTERS = ("n", "s1", "s5", "s10", "l1", "l5", "l10", "asset_slots", "slots")
+    RATIOS = ("mrr_s", "mrr_l")
+    __slots__ = COUNTERS + RATIOS
 
     def __init__(self):
-        self.n = 0
-        self.s1 = self.s5 = self.s10 = self.l1 = self.l5 = self.l10 = 0
-        self.mrr_s = self.mrr_l = 0.0
-        self.asset_slots = 0
-        self.slots = 0
+        for field in self.COUNTERS:
+            setattr(self, field, 0)
+        for field in self.RATIOS:
+            setattr(self, field, 0.0)
 
     def absorb(self, rs, rl, ranked):
         self.n += 1
@@ -264,11 +270,11 @@ def run_extcorpus_cli():
             for cls in order:
                 b = buckets[cls]
                 t = totals.setdefault(cls, BucketAgg())
-                t.n += b.n
-                for attr in ("s1", "s5", "s10", "l1", "l5", "l10", "asset_slots", "slots"):
+                # Every tally field sums across repos, including the MRR numerators (they are running
+                # sums divided by n only at print time). Driving this off the field declaration is what
+                # keeps a newly added counter from being silently dropped from the combined row.
+                for attr in BucketAgg.__slots__:
                     setattr(t, attr, getattr(t, attr) + getattr(b, attr))
-                t.mrr_s += b.mrr_s
-                t.mrr_l += b.mrr_l
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as e:
         print("run_extcorpus: FAILED: %s" % e, file=sys.stderr)
         return 1
