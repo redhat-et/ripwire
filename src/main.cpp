@@ -2405,14 +2405,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     // (byte-identical) on any query where no symbol name covers enough, which is most of them.
     if( !cfg.noRoute && std::strcmp( out.routeTag, "subtoken+body" ) == 0 )
     {
-        NameCoverageInfo coverageInfo;
-        if( applyNameCoverageFloor( ing, task, lensRank, &coverageInfo ) )
-        {
-            char cb[ 160 ];
-            std::snprintf( cb, sizeof( cb ), " [name coverage: %u symbol%s whose own name spells >=half of the task's %u content words lifted]",
-                           coverageInfo.liftedCount, coverageInfo.liftedCount == 1 ? "" : "s", coverageInfo.contentWordCount );
-            out.routeNote += cb;
-        }
+        out.routeNote += applyNameCoverageFloor( ing, task, lensRank );   // "" — byte-identical — when nothing covers
     }
 
     // r4 sibling lift (EXPERIMENTAL, pre-registered — bench/locbench/results/r4_siblift/PREREG.md): lift the

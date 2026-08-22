@@ -1201,18 +1201,8 @@ inline std::string forTaskText( const std::string& root, const std::string& task
 
     // Name-coverage floor — same contract, same order (after the mention anchor, before the co-change
     // prior) as the CLI --for, so the two dialects still answer a conceptual query identically.
-    std::string coverageNote;
-    if( rc.which != LexMode::NameExact )
-    {
-        NameCoverageInfo coverageInfo;
-        if( applyNameCoverageFloor( ing, task, lensRank, &coverageInfo ) )
-        {
-            char cb[ 160 ];
-            std::snprintf( cb, sizeof( cb ), " [name coverage: %u symbol%s whose own name spells >=half of the task's %u content words lifted]",
-                           coverageInfo.liftedCount, coverageInfo.liftedCount == 1 ? "" : "s", coverageInfo.contentWordCount );
-            coverageNote = cb;
-        }
-    }
+    const std::string coverageNote = rc.which == LexMode::NameExact ? std::string()
+                                                                    : applyNameCoverageFloor( ing, task, lensRank );
 
     // B3 (co-change prior boost) — OPT-IN, EXPERIMENTAL, same contract as CLI --cochange-boost: files that
     // historically change WITH the top-ranked files promote their best symbols into the lower bundle (never

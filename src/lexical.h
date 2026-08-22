@@ -1144,24 +1144,20 @@ inline bool isRouteStopword( std::string_view w ) noexcept
 // id asc) so the selection is deterministic and the best-covered wins; and a query with fewer than
 // kNameCoverageMinContentWords content words is refused outright — on a one- or two-word query "half the
 // content words" is one word, which is a coincidence, not a name that spells the task.
-struct NameCoverageInfo
-{
-    std::uint32_t liftedCount      = 0;
-    std::uint32_t contentWordCount = 0;
-};
-
+// Returns the DISCLOSURE both --for dialects print, or "" when nothing was lifted — one function rather
+// than an out-param plus a copy of the sentence at each call site, because two copies of a sentence about
+// one rule is how the two dialects drift apart.
 inline constexpr int         kNameCoverageMinPercent      = 50;   // "the name spells at least half the task"
 inline constexpr std::size_t kNameCoverageMinContentWords = 3;    // below this, half the words is one word
 inline constexpr std::size_t kNameCoverageMaxLifts        = 8;
 inline constexpr float       kNameCoverageTopGapStep      = 0.05f;   // slot i lands at top*(1 - step*(i+1))
 
-inline bool applyNameCoverageFloor( const IngestResult& ing, std::string_view task, std::vector<float>& lensRank,
-                                    NameCoverageInfo* outInfo = nullptr )
+inline std::string applyNameCoverageFloor( const IngestResult& ing, std::string_view task, std::vector<float>& lensRank )
 {
     VERIFY( lensRank.size() == ing.symbols.size() );
     if( task.empty() || lensRank.empty() || lensRank.size() != ing.symbols.size() )
     {
-        return false;
+        return std::string();
     }
 
     // the query's CONTENT subtokens, deduped, in text order (order is irrelevant to the count — the dedupe
@@ -1182,11 +1178,7 @@ inline bool applyNameCoverageFloor( const IngestResult& ing, std::string_view ta
     }
     if( content.size() < kNameCoverageMinContentWords )
     {
-        return false;
-    }
-    if( outInfo )
-    {
-        outInfo->contentWordCount = std::uint32_t( content.size() );
+        return std::string();
     }
 
     // integer threshold — no float rounding decides admission
@@ -1232,7 +1224,7 @@ inline bool applyNameCoverageFloor( const IngestResult& ing, std::string_view ta
     }
     if( qualifying.empty() )
     {
-        return false;
+        return std::string();
     }
 
     std::stable_sort( qualifying.begin(), qualifying.end(),
@@ -1256,13 +1248,12 @@ inline bool applyNameCoverageFloor( const IngestResult& ing, std::string_view ta
     }
     if( liftedCount == 0 )
     {
-        return false;
+        return std::string();
     }
-    if( outInfo )
-    {
-        outInfo->liftedCount = liftedCount;
-    }
-    return true;
+    char note[ 160 ];
+    std::snprintf( note, sizeof( note ), " [name coverage: %u symbol%s whose own name spells >=half of the task's %zu content words lifted]",
+                   liftedCount, liftedCount == 1 ? "" : "s", content.size() );
+    return std::string( note );
 }
 
 // ── ANCHOR DISCLOSURE (the `anchors:` clause of a name-exact reason) ──────────────────────────────────
