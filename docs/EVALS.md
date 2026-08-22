@@ -2535,13 +2535,18 @@ all ten measure the current build, not a pre-wave one.
 | Review this PR/diff | `ripwire . --pr-context=HEAD~6` | **7,437 B** | 19,298–204,294 B (`git diff HEAD~6` alone, or that diff + the 6 touched files read whole) | 2.6×–27.5× |
 | I have a stack trace | `ripwire . --from-trace=trace.txt` (7-frame trace, real symbols) | **5,718 B** | 497,104–1,192,992 B (grepping the 7 frame names — 5,150 B — plus the innermost file opened, or both files the trace touches) | 86.9×–208.6× |
 
-**Re-measured 2026-08-12, T3 terminal-by-default `--for` (pre-registered above, §4):** the "Where is
-X handled?" row's command now serves the top-ranked FULL bodies inline by default — 13,859 B at this
-binary (`bundle="auto" bodies="3"`), 1.4×–5.8× against the same naive read — and the bundle now
-already contains the follow-up the naive side still pays ("then read the file it points at").
-`--signatures-only` reproduces the signatures-only shape at 7,196 B (2.7×–11.1×). The README table
-states the new default; the 7,501 B figure in the row above is the pre-T3 measurement, kept as the
-2026-08-08 record.
+**Re-measured 2026-08-22, COMPACT conceptual serving (pre-registered above, the T3 route-narrowing
+round):** the "Where is X handled?" query is a conceptual phrase, so it routes subtoken+body and the
+row's command now serves the COMPACT bundle — **8,563 B** at this binary
+(`bundle="compact" bodies="0" reason="compact-route"`), **2.3×–9.3×** against the same naive read. It
+still names `mcpStale` in `src/mcpindex.h`, and the `<hops>` section carries that symbol's one-hop
+callees, so the map still terminates on the right symbol; what it no longer does is prepay the body.
+`--auto-bodies` restores the pre-compact shape at **14,397 B**, and `--signatures-only` the
+signatures-only one at **7,470 B** (2.6×–10.7×) — the two flags bracket the compact default, which is
+the honest way to read it. PRIOR PINS, kept as the record rather than overwritten: 13,859 B was the
+T3 terminal-by-default measurement of 2026-08-12 (`bundle="auto" bodies="3"`, 1.4×–5.8×) with
+`--signatures-only` at 7,196 B, and the 7,501 B figure in the row above is the pre-T3 measurement of
+2026-08-08.
 
 **Same-answer verification, one line per row:**
 - **Orient** — both surface the pipeline's own core files (`ingest.cpp`, `graph.h`, `serialize.h`) as
