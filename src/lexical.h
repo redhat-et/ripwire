@@ -1130,6 +1130,11 @@ inline bool isRouteStopword( std::string_view w ) noexcept
 // words. The name-exact route already lands such a class at rank 1 when the caller types its identifier;
 // this is the same class arriving through a sentence instead, which is the route that misses it.
 //
+// WHERE IT RUNS. The CONCEPTUAL route only, in both --for dialects, immediately after the query-mention
+// anchor and before the co-change prior. Never on the name-exact route: that route has already resolved
+// an anchor of its own, and a second name rule arriving behind it would fight the answer it just gave.
+// Never on the unrouted lens either — nothing chose a route there, so there is no route to serve.
+//
 // THE RULE. On the conceptual route only: when one symbol's own name subtokens cover at least
 // kNameCoverageMinPercent of the query's CONTENT subtokens (stopwords dropped through isRouteStopword
 // above — the same list the router counts intent words with, never a second copy), its score is floored
