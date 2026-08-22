@@ -1545,6 +1545,106 @@ commit (`qextractionkeycheck`); `qschemetripcheck` golden re-pinned; gate count 
 has no same-named member in the enclosing class and no shadowing local over a chained call) — verified,
 not assumed, in the fix commit.
 
+#### RESULT — ACCEPT on every registered criterion (2026-08-21)
+
+The fix is the capture widening alone plus ONE discovery the red gate forced (below); `kParserVer`
+67 → 68 with the `quality.h` mirror in the same commit. Rule 4 stayed out, as registered.
+
+**Red-first, recorded.** Against the `cd30104` binary, `test/chainguardcheck.sh` was **8 FAIL /
+17 PASS** — failing on exactly the five bug arms plus the two fixture gauges (the base binary reads the
+bug fixture as `edges=6 ambiguous=0`: six calls pinned or deleted, ZERO disclosed ambiguity, wrong five
+times over), and on no others. On the fixed binary: ALL PASS, including under ASan.
+
+**The discovery the gate forced — a SIXTH `recv`-ignorant site.** With the widening in place and Rule 1
+correctly refusing, arms (a)(b)(c) stayed RED: the **S6-C locality tie-break** re-minted the identical
+wrong pin. The caller's canonical id shares its scope segment with the caller's own class's member and
+not with the field type's, so `App::run` won the tie-break and `Pool::run` was dropped as "strictly
+less local". The registration's mechanism list (five guard sites) was incomplete — the tie-break is a
+sixth consumer of receiver ignorance, invisible to `ambiguous=` for the same netting reason. Fix: a
+depth-2 chained-receiver call takes NO locality tie-break (the explicit receiver redirects the call
+away from the enclosing scope, so scope-segment credit there is anti-evidence); ThisObj/NamedVar keep
+the tie-break unchanged. One added guard in `graph.h`, disclosed here because the registration said
+"the five guards are NOT edited" — five were not; the sixth did not exist in the registration's model
+of the bug. Finding it is the gate-before-code discipline doing its job.
+
+**#B1 MET (corrected targets, fixture).** `this->m_pool.run()` → the complete split
+{`Pool::run`, `App::run`}, old target retained; same for the field-base and typed-local-base FieldOfVar
+arms. **#B2 MET (recovered edges, fixture).** `int enable = 0; this->m_cfg.enable();` → recovered as
+the complete 2-way split; the single-def flavor (`m_box.opts.ping()` under a local `ping`) recovers
+precise.
+
+**#B3 MET — the whole-tree landing hits the registered prediction EXACTLY.** Pristine detached
+`cd30104` checkout, `test/edgediff.py` between the base and fixed binaries:
+
+| gauge | base | fixed |
+| --- | --- | --- |
+| edges= | 13933 | **13941** (+8, predicted +8) |
+| ambiguous= | 5519 | **5522** (+3, predicted +3) |
+| symbols= / files= | 11367 / 1308 | unchanged |
+
+**#B4 MET — every changed caller accounted and hand-verified.** The audit classifies ALL +8 edges as
+RECOVERED (the shadow-deletion class); **SPLIT-WIDENED is EMPTY** — ripwire's own tree contains no
+chained-receiver wrong-pin for either mechanism, consistent with the depth-2 lane's "one call site"
+ceiling finding — and **REMOVED is EMPTY**: the fix deletes nothing. The five recovered sites, each
+read in source:
+
+* `src/lexindex.h::buildDefLexStats` — `std::sort( out.tokenHashes.begin(), out.tokenHashes.end() )`
+  under the function's own local `end`. Recovered → `rw::svector::end()` ×2 (`svector.h:270`/`272`, the
+  const/non-const overloads — the split is the two real overloads of the CORRECT class: `tokenHashes`
+  IS an `rw::svector`). +2 edges, amb 4→5.
+* `src/nonlocalstate.h::propagateToCallers` — `const auto* rowOffsets = g.inEdges.rowOffsets();` and
+  its `colIndices` twin: the declarator's OWN name shadows the method being called in its initializer
+  ([basic.scope.pdecl] — the initializer sits inside the new name's scope), so the base binary emitted
+  NO edge for either call. Recovered → `sparseCsr::rowOffsets()` ×2 / `colIndices()` ×2 (the
+  mutable/const overload pairs, `sparseCsr.h:248-252` — again the correct class). +4 edges, amb 4→6.
+  The same idiom with a DIFFERENT local name (`editcheck.h:414`, `const auto* ro = …`) was never
+  deleted — the bug required the name collision, which is why it hid.
+* `test/cloneband_harness.cpp` / `test/type3clone_harness.cpp` `addWholeFileFn` — `ing.files.size()`
+  under the parameter `size`. Recovered → `rw::svector::size()` (`svector.h:285`), +1 edge each, amb
+  unchanged. Caveat recorded: the TRUE callee is `std::vector::size` (unindexed), so the recovered
+  edge is the name-ladder's answer — the same answer every unshadowed `.size()` call in the corpus
+  already gets. Recovery to parity, not a new claim of precision.
+
+**#B5 MET.** `fieldnarrowcheck` green UNCHANGED (as the registration predicted — verified, not
+assumed); `shadowcheck` green (bare-name suppression intact); Python/TS fixture gauges byte-stable
+(`edges=4 ambiguous=2`). **#B6 MET.** Determinism byte-identical ×3 cold on the pristine checkout;
+warm == cold across the `kParserVer` bump; `xmllint` clean.
+
+**Cost, measured — and the delta findings the instrument round-tripped.**
+`--quality-delta=cd30104..HEAD`: `regressions="6" gating="0"`, exit 0. The first cut GATED
+(`receiverOf` complexity 16→33, LOC 46→88) and was refactored rather than acked: the depth-2 arm became
+a bounded recursion (`classifyReceiver`, the one-hop bound enforced by an `allowChain` flag), and the
+first extraction attempt itself round-tripped through TWO further gating findings — a fresh
+`recvNodeText` duplicating the existing `pattern::nodeText` (deleted; `ingest.cpp` already includes
+`pattern.h`) and a 272-token `chainReceiverShape`/`receiverOf` clone pair (dissolved by the recursion).
+The refactor is behavior-neutral: the full pristine-tree map is byte-identical before and after it.
+Remaining rows are all origin=new-symbol or sev=minor — `classifyReceiver` cx 21 (the guard ladder IS
+the feature), `parseMap` cx 22 (the Python instrument), the 31-token
+`memberAccessReceiver`/`memberAccessField` accessor pair (kept: a bool-parameter merge reads worse),
+`buildGraph` +8 LOC (the locality-guard comment), `captureTagsFacts` +1 LOC.
+
+**Battery at the fix tree.** Final full suite at the finished tree:
+**`gates=441 pass=439 skip=2 fail=0 wall=443.0s jobs=6` — ALL PASS**; the two skips are the standing
+self-skips (`namingcalibrationcheck` withholds live judgement; `argvdiffcheck` has no `RIPWIRE_BASE`).
+The mid-round run had two failures, both accounted before the final run: `readmeexamplecheck` — the
+README's recorded `--callers=rankGraphTeleport` capture carries `src/graph.h` line numbers, which the
+9-line locality-guard block shifted by exactly 9 (2168→2176, 2504→2512); the caller SET was
+byte-identical, re-recorded, and `docscommandscheck` arm G stayed green throughout. `editcheckcheck` —
+the 100 ms warm budget under sustained parallel-lane load (load average ~25 during the mid-round runs);
+**control run: the `cd30104` base binary fails it HARDER under the same load (183/169 ms vs the fix
+binary's 144-163 ms)** — environmental, not a regression, and ALL PASS in the final suite run.
+ASan/LSan (`-DRIPWIRE_ASAN=ON`, committed suppressions, clean-first rebuild): exit 0, zero sanitizer
+lines on the whole-tree default map, and `chainguardcheck` is ALL PASS under the ASan binary.
+`qschemetripcheck` golden re-pinned (the mirror value keys the snapshot cache, so stale snapshots
+self-invalidate — the "just re-pin" path, as the depth-2 lane took).
+
+**Residuals, disclosed.** (1) Depth ≥3 chains still classify `None`: BOTH bugs persist there
+(`chainguardcheck` arm (h) pins `deepPin`/`deepShadow` as recorded facts) — the capture bound is
+deliberate, and the residual is separately fundable. (2) TS/JS receivers are not captured at all, so a
+TS chained call keeps whatever the bare ladder gives it (arm (j-ts) pins the stability). (3) The `size`
+caveat above: recovery restores name-ladder parity; it cannot invent `std::` targets the index does not
+hold.
+
 ---
 
 ## 5. Token and output economy
