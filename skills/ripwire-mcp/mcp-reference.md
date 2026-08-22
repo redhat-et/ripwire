@@ -48,6 +48,15 @@ native editor tool addressed by file:line doesn't have this failure mode. Prefer
 you're already looking at the file, or when the edit isn't a whole-definition replace/insert (a mid-body
 tweak isn't representable — `replace_symbol_body` is signature-through-closing-brace or nothing).
 
+**The double-pay case these verbs are built to avoid**: if you already have the body — `fetch_body` or
+`--expand` served it — a native Edit tool still forces a fresh Read of that same file first (the agent tool
+contract requires a Read immediately before an Edit on that file, and a served body doesn't count as one).
+That Read pays for the file a second time. `replace_symbol_body`/`insert_before_symbol`/`insert_after_symbol`
+splice at the already-known span directly — their own staleness hash (see above) is the freshness check,
+not a Read — so a `fetch_body` → edit-verb sequence never re-reads the file at all. Reach for the edit verb
+over native Edit specifically when the body arrived via ripwire this session; once you've opened the file in
+your editor tool anyway, that advantage is gone.
+
 ## Remote transport — `--listen` reference {#remote-transport}
 
 ```
