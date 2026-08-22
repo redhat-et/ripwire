@@ -1455,6 +1455,96 @@ map, `--uses`, `--metrics` and both fixtures; determinism byte-identical ×3 col
 the RICH `--uses` path; `xmllint` clean; golden unchanged; `--quality-delta` exit 0 with
 `regressions="0" gating="0"` (the 16 stale acks are identical at the baseline).
 
+### Receiver-guard misfires: `bareCish` wrong-narrow + shadow deletion — PRE-REGISTERED 2026-08-21 (before any fix code)
+
+The two resolver-correctness bugs the depth-2 lane's REJECT surfaced and declined to rescue
+(`lane/depth2-chains` @ `21f75a9`, its RESULT section in that branch's copy of this file;
+`PLAN_HARVEST_REPORTS_2026-08-20/depth2-lane.md` §6). Both share one root cause: `receiverOf`
+classifies EVERY chained receiver as `RecvKind::None`, and five guard sites key on
+`recv == RecvKind::None` (`model.h` macro retag + shadow suppression, `graph.h` fn-pointer binding,
+`resolve.h` Rule 1 `bareCish` + `receiverStaticType`). Two of the five misfire observably:
+
+* **Bug 1 — Rule 1's `bareCish` arm wrong-narrows chained receivers.** `struct App { Pool m_pool;
+  void run(); void go(){ this->m_pool.run(); } }` — the chained receiver reads as a bare unqualified
+  call, so Rule 1 pins `go → App::run` (the caller's OWN class), a silently wrong PRECISE edge where
+  the honest answer is the split that includes `Pool::run`.
+* **Bug 2 — shadow suppression deletes real member calls.** `void go(){ int enable = 0;
+  this->m_cfg.enable(); }` — the receiver-qualified call cannot resolve to the local, but the
+  `recv == None` guard cannot see the receiver, so the reference is deleted outright: `go` emits ZERO
+  call edges.
+
+**Why a new instrument.** The two bugs NET against each other in `ambiguous=` — a removed wrong pin
+*raises* it, a recovered call raises it only where the name is multi-def — which is exactly how the
+depth-2 lane's #3b criterion (strict decrease) rejected a change that fixed both. This round's
+instrument counts each bug separately: **recovered-edge count** (calls that exist in source and emit no
+edge today) and **corrected-target count** (calls whose lone edge today is a provably wrong pin), per
+change, against a pinned corpus.
+
+**The fix under measurement, and its re-justified scope.** The capture widening from the reverted
+`c3ebbd8`, ALONE: `RecvKind` gains `FieldOfThis` / `FieldOfVar` (depth-2 chains only; depth ≥3 stays
+`None`), the intermediate field name rides the call ref's otherwise-free `fieldName` slot, and the five
+guards are NOT edited — a chained receiver simply stops satisfying `recv == None`, which is the whole
+fix. Rule 4 (chain RESOLUTION through the field-type table) stays out, per the lane's own finding: its
+lever on this tree is one call site and it wants a heavily-OO corpus head-to-head before it is funded.
+Carrying the field/var names now is deliberate: the classifier must read those nodes anyway to bound the
+shape, and a future Rule 4 round becomes resolve-side only — no second `kParserVer` re-parse for every
+user. Extraction VALUES change ⇒ `kParserVer` 67 → 68 + `quality.h` mirror in the fix commit.
+
+**The instrument, built and shown red before the fix.**
+
+* `test/chainguardcheck.sh` — micro-fixture gate (fixtures generated, line-numbers load-bearing,
+  `--callees` def-site assertions). Bug-1 arms assert the full honest split WITH the old target
+  retained; Bug-2 arms assert the recovered edge (one single-def flavor that lands precise, one
+  multi-def flavor that lands honestly split). Controls that must be green before AND after: bare
+  Rule-1 narrow (`run()` inside `App`), depth-1 `NamedVar` Rule 2b narrow, Python `self.pool.acquire()`
+  and TS `this.cfg.opts.enable()` edge sets unchanged, and the depth-3 residual pinned as DISCLOSED
+  (both bugs persist for `this->a.b.m()` — the capture bound is one hop; separately fundable).
+  Determinism + warm==cold across the version bump ride in the gate.
+* `test/edgediff.py` — the whole-tree audit: parses two full maps (`--top-k` ≥ symbol count) of the SAME
+  pinned corpus from two binaries, keys symbols by `(file, id|name, kind)`, and classifies every changed
+  caller: **RECOVERED** (a callee name appears that had no edge before), **SPLIT-WIDENED** (same callee
+  names, edge count and `amb=` rose — a pin became an honest split), **REMOVED** (an edge vanished —
+  this class must be EMPTY), plus header-gauge deltas. Deterministic output, sorted.
+
+**Pinned corpus.** The gate's generated fixtures, plus ripwire's own tree at `cd30104` measured as a
+pristine detached checkout. Baseline re-derived on this round's base build of `cd30104`:
+
+```
+files=1308 symbols=11367 edges=13933 ambiguous=5519 unresolved=3203 precise=3
+```
+
+**Success criteria, registered before the code.**
+
+* **#B1 (corrected targets, fixture)** Every Bug-1 arm flips: base binary emits the lone wrong pin to
+  the caller's own class; fixed binary emits the complete honest split, old target retained. RED at
+  `cd30104`.
+* **#B2 (recovered edges, fixture)** Every Bug-2 arm flips: base binary emits zero call edges for the
+  shadowed member call; fixed binary emits the member-call edge(s). RED at `cd30104`.
+* **#B3 (whole tree, exact prediction)** On the pristine `cd30104` checkout the fixed binary lands
+  `edges=13941`, `ambiguous=5522`, `symbols=11367`, `files=1308` — the depth-2 lane's measured
+  capture-widening-only arm IS this prior (`rw-d2-probe`, Rule 4 disabled). Any other landing is an
+  unexplained divergence: the round does not accept until `test/edgediff.py` decomposes it.
+* **#B4 (whole tree, accounting)** `test/edgediff.py` accounts EVERY changed caller: each RECOVERED
+  site and each SPLIT-WIDENED site is hand-verified against source (the call exists; the receiver is
+  chained; for splits, the old lone target was the caller's own class or otherwise provably
+  wrong-pinned) and listed in the RESULT. The REMOVED class is empty — this fix deletes nothing.
+* **#B5 (no collateral)** `test/shadowcheck.sh` (bare-name suppression), `test/fieldnarrowcheck.sh`
+  (Rule 2b) and the full suite stay green; Python/TS fixture edge sets byte-stable.
+* **#B6 (contract)** Determinism byte-identical ×3 cold on the pristine checkout, warm == cold across
+  the `kParserVer` bump, `xmllint` clean.
+
+**Failure criteria that revert the round.** Any REMOVED edge on fixture or tree; any hand-verified site
+that turns out not to be a real call / not a wrong pin; #B3 landing off-prediction with a decomposition
+that reveals an unintended behavior change; determinism or cache transparency breaking. `ambiguous=` is
+NOT a criterion here in either direction — that gauge cannot see these bugs, which is this
+registration's reason to exist.
+
+**What moves if it lands.** `kParserVer` 67 → 68 and `quality.h::kIngestParserVerMirror` in the same
+commit (`qextractionkeycheck`); `qschemetripcheck` golden re-pinned; gate count 432 → 433
+(`manifestcheck` pins). Predicted NOT to move: `test/fieldnarrowcheck.sh` arms and gauges (its fixture
+has no same-named member in the enclosing class and no shadowing local over a chained call) — verified,
+not assumed, in the fix commit.
+
 ---
 
 ## 5. Token and output economy
