@@ -72,6 +72,7 @@ gates = [ g for g in gates if g not in ( "regression.sh", SELF ) ]
 #    name. Committed and counted (this file's own header + (2b) below assert the count out loud).
 EXEMPT = {
     "adaptivecutshapecheck.sh":  "compiles an isolated $CXX probe .cpp; never invokes build/ripwire",
+    "aiderbytescheck.sh":        "pure-python test of bench/headtohead/r4-2026-08-06/r4_worker.py's aider byte-count wiring; no ripwire binary invocation",
     "argvdiffcheck.sh":          "sanctioned skip fires BEFORE the RIPWIRE_BIN guard, gated on a second env var (RIPWIRE_BASE) neither pargates.py nor regression.sh ever sets; independent of RIPWIRE_BIN/broken-binary state, and already asserted intentional by gateexitcheck.sh arm (D)",
     "nulbytecheck.sh":           "reads the SOURCE TREE (git ls-files), not the binary; BIN is bound for interface uniformity and explicitly documented as unused in the gate's own header",
     "agentloopcodexcheck.sh":    "pure-python test of bench/agentloop prompt-building; the path to build/ripwire is asserted as a STRING, never executed",
