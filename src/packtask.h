@@ -170,7 +170,11 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
          // measured, not estimated. Every key is still named; the prose around them is what went.
          "Row keys: n=name (chain it), id=canonical(when scoped), in=reuse-count (absent = not measured, never a false 0)"
          ", l=line, p=path, t=kind, cx=cyclomatic, ccx=cognitive, rel=caller|callee; far=ranked but over 1 hop out; "
-         "of_top denominator is per-section. ";
+         "of_top denominator is per-section. "
+         // graphrag-recon.md idea #1 (2026-08-20, S-effort harvest pick): callers corroborated by SEVERAL
+         // top-K anchors outrank one tied to a single anchor — a pure re-sort of the SAME d1 edges, no new
+         // graph walk, no pooling. Kept to one clause, same trap-#8 discipline as the rest of this legend.
+         "callers: sorted by shared desc (ties=site order); shared=# of top-K anchors reached, omitted at 1. ";
     h.append( p.report );
     h.append( extraNotes );
     h += " -->";
@@ -299,8 +303,10 @@ struct PackTaskInputs
 
 // R2: the anchors' 1-hop neighbors, EITHER direction (g.inEdges = symbols that CALL an anchor; g.outOff/
 // outTargets = symbols an anchor CALLS), anchors themselves excluded (`d0Mark`) and deduped — a neighbor
-// reachable both ways keeps whichever direction is discovered first (caller before callee).
-struct D1Neighbors { std::vector<NodeId> ids;  std::vector<std::uint8_t> isCaller; };
+// reachable both ways keeps whichever direction is discovered first (caller before callee). `shared[i]` is
+// the corroboration weight (graphrag-recon.md idea #1, adapted from nano-graphrag's relation_counts): how
+// many of the anchor set's bodyIds this neighbor is 1-hop adjacent to — 1 when only one anchor reaches it.
+struct D1Neighbors { std::vector<NodeId> ids;  std::vector<std::uint8_t> isCaller;  std::vector<std::uint32_t> shared; };
 
 // the mutable state one direction's walk needs — bundled (not individual params) so collectNeighborsOf and
 // computeD1Neighbors both stay comfortably under the params-regression bar.
@@ -375,6 +381,70 @@ inline D1Neighbors sortNeighborsBySite( const IngestResult& ing, D1Neighbors&& i
     return out;
 }
 
+// graphrag-recon.md idea #1 (adapted from nano-graphrag's `relation_counts`, _op.py:777-787): for each d1
+// neighbor, how many of the anchor set's `bodyIds` is it 1-hop adjacent to (either direction, deduped per
+// anchor so a mutual caller+callee pair with one anchor still counts once)? A pure count over the SAME CSR
+// edges collectNeighborsOf already reads — no new graph walk, no pooling, no change to --for's own ranking.
+// Indexed by NodeId (not d1 position) so the caller can look it up before OR after any reordering of d1.
+inline std::vector<std::uint32_t> computeD1SharedCounts( const IngestResult& ing, const Graph& g,
+                                                          const std::vector<NodeId>& bodyIds,
+                                                          const std::vector<char>& d0Mark )
+{
+    std::vector<std::uint32_t> shared( ing.symbols.size(), 0 );
+    std::vector<char>          touchedByThisAnchor( ing.symbols.size(), 0 );
+    std::vector<NodeId>        touchedList;
+    const D1WalkCtx ctx{ &ing, &g, nullptr, nullptr, nullptr };   // rawNeighborIdsOf only reads ing/g
+    for( NodeId b : bodyIds )
+    {
+        touchedList.clear();
+        for( bool viaCallerEdges : { true, false } )
+        {
+            for( NodeId n : rawNeighborIdsOf( ctx, b, viaCallerEdges ) )
+            {
+                if( n >= touchedByThisAnchor.size() || ( n < d0Mark.size() && d0Mark[n] ) || touchedByThisAnchor[n] )
+                {
+                    continue;
+                }
+                touchedByThisAnchor[n] = 1;  touchedList.push_back( n );  ++shared[n];
+            }
+        }
+        for( NodeId n : touchedList )
+        {
+            touchedByThisAnchor[n] = 0;   // reset only what this anchor touched — no O(N) clear per anchor
+        }
+    }
+    return shared;
+}
+
+// stable re-sort of an already d1-computed (and site-ordered) neighbor list by DESCENDING corroboration
+// weight — a neighbor reached by several top-K anchors sorts ahead of one tied to a single anchor, before the
+// caller-section's byte budget is applied. std::stable_sort keeps the incoming (site) order as the tie-break,
+// matching the brief's "ties broken by the existing order" — the minimal, deterministic re-sort this is.
+inline D1Neighbors sortNeighborsByCorroboration( D1Neighbors&& in, const std::vector<std::uint32_t>& sharedByNode )
+{
+    in.shared.resize( in.ids.size() );
+    for( std::size_t i = 0; i < in.ids.size(); ++i )
+    {
+        in.shared[i] = in.ids[i] < sharedByNode.size() ? sharedByNode[ in.ids[i] ] : 0;
+    }
+    std::vector<std::uint32_t> perm( in.ids.size() );
+    for( std::uint32_t i = 0; i < perm.size(); ++i )
+    {
+        perm[i] = i;
+    }
+    std::stable_sort( perm.begin(), perm.end(), [ & ]( std::uint32_t a, std::uint32_t b )
+    {
+        return in.shared[a] > in.shared[b];
+    } );
+    D1Neighbors out;
+    out.ids.resize( perm.size() );  out.isCaller.resize( perm.size() );  out.shared.resize( perm.size() );
+    for( std::size_t i = 0; i < perm.size(); ++i )
+    {
+        out.ids[i] = in.ids[ perm[i] ];  out.isCaller[i] = in.isCaller[ perm[i] ];  out.shared[i] = in.shared[ perm[i] ];
+    }
+    return out;
+}
+
 inline D1Neighbors computeD1Neighbors( const IngestResult& ing, const Graph& g,
                                        const std::vector<NodeId>& bodyIds, const std::vector<char>& d0Mark )
 {
@@ -389,7 +459,9 @@ inline D1Neighbors computeD1Neighbors( const IngestResult& ing, const Graph& g,
     {
         collectNeighborsOf( ctx, b, /*viaCallerEdges=*/false );
     }
-    return sortNeighborsBySite( ing, std::move( out ) );
+    D1Neighbors sited = sortNeighborsBySite( ing, std::move( out ) );
+    const std::vector<std::uint32_t> sharedByNode = computeD1SharedCounts( ing, g, bodyIds, d0Mark );
+    return sortNeighborsByCorroboration( std::move( sited ), sharedByNode );
 }
 
 // R2: one d1 row — its OWN one-line signature (d1's detail tier — never a full body) + declaration site +
@@ -397,6 +469,11 @@ inline D1Neighbors computeD1Neighbors( const IngestResult& ing, const Graph& g,
 // verbatim — one extraction, two shapes, never re-derived.
 struct D1Rows { std::vector<std::string> xml;  std::vector<std::string> rawSig; };
 struct D1Row  { std::string xml;              std::string rawSig; };
+
+// the two per-neighbor FACTS buildD1Row needs beyond the id itself — which direction it was reached from,
+// and its corroboration weight (graphrag-recon.md idea #1) — bundled so the params count doesn't creep
+// (same rationale as D1WalkCtx above: a params regression is cheaper to avoid than to explain away).
+struct D1RowMeta { bool isCaller; std::uint32_t shared; };
 
 // fetch (and cache) file `fileId`'s full source text — a small per-file cache so multiple d1 rows landing in
 // the same file don't re-read it.
@@ -446,7 +523,7 @@ inline std::string resolveD1Signature( const IngestResult& ing, const Symbol& s,
 // assembler (packTaskBundleText, called by both runPackTask and mcpverbs.h's packTaskText), so fixing it
 // here fixes both dialects in one place — they cannot drift.
 template<class EscFn>
-inline D1Row buildD1Row( const IngestResult& ing, NodeId id, bool isCaller,
+inline D1Row buildD1Row( const IngestResult& ing, NodeId id, D1RowMeta meta,
                          HashMap<std::uint32_t, std::string>& srcCache, EscFn&& ex, RedactCounts* redact,
                          std::string_view rootPrefix = {} )
 {
@@ -463,8 +540,17 @@ inline D1Row buildD1Row( const IngestResult& ing, NodeId id, bool isCaller,
     row.xml += "\" n=\"";   row.xml += ex( s.name );
     row.xml += "\" p=\"";   row.xml += ex( rp );
     row.xml += ":";         row.xml += std::to_string( s.line );
-    row.xml += "\" rel=\""; row.xml += isCaller ? "caller" : "callee";
+    row.xml += "\" rel=\""; row.xml += meta.isCaller ? "caller" : "callee";
     row.xml += "\"";
+    // graphrag-recon.md idea #1: corroboration weight, a count (like amp=/in=), never a judgment — see the
+    // <callers> ordering-rule clause in packTaskHeaderText's legend for what it means and how ties break.
+    // shared==1 is the uncorroborated default every d1 row already satisfies by construction (it is 1-hop
+    // from AT LEAST one anchor) — emitted only when >1, so a bundle with a single anchor (no corroboration
+    // possible) costs not one extra byte, matching the house "never a false 0"/economy-of-attributes rule.
+    if( meta.shared > 1 )
+    {
+        row.xml += " shared=\""; row.xml += std::to_string( meta.shared ); row.xml += "\"";
+    }
     if( sig.empty() )
     {
         row.xml += "/>";
@@ -488,7 +574,7 @@ inline D1Rows renderD1CallerRows( const IngestResult& ing, const D1Neighbors& d1
     HashMap<std::uint32_t, std::string> srcCache;
     for( std::size_t i = 0; i < d1.ids.size(); ++i )
     {
-        D1Row row = buildD1Row( ing, d1.ids[i], d1.isCaller[i] != 0, srcCache, ex, redact, rootPrefix );
+        D1Row row = buildD1Row( ing, d1.ids[i], D1RowMeta{ d1.isCaller[i] != 0, d1.shared[i] }, srcCache, ex, redact, rootPrefix );
         out.xml.emplace_back( std::move( row.xml ) );
         out.rawSig.emplace_back( std::move( row.rawSig ) );
     }
@@ -1375,7 +1461,11 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             j += ( i == 0 ? "" : "," );
             j += "{\"t\":\"" + std::string( symTag( s.kind ) ) + "\",\"n\":\"" + jsonStr( s.name )
                + "\",\"p\":\"" + jsonStr( std::string( jPathRel( s.fileId ) ) ) + ":" + std::to_string( s.line )
-               + "\",\"rel\":\"" + ( d1.isCaller[i] ? "caller" : "callee" ) + "\"";
+               + "\",\"rel\":\"" + ( d1.isCaller[i] ? "caller" : "callee" ) + "\""
+               // JSON twin of buildD1Row's XML shared= attribute — same economy rule (omitted at the
+               // uncorroborated default of 1), composed from the SAME primitive overloadsAttr uses
+               // (countFieldIfAbove, serialize.h) rather than re-deriving an equivalent ternary.
+               + countFieldIfAbove( d1.shared[i], 1, ",\"shared\":" );
             if( !d1SigRaw[i].empty() )
             {
                 j += ",\"sig\":\"" + jsonStr( d1SigRaw[i] ) + "\"";
