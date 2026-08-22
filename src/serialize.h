@@ -1029,11 +1029,20 @@ inline OverloadRows collapseOverloadRows( const IngestResult& ing, const std::ve
     return out;
 }
 
+// the shared "n > floor ? PREFIX+n+SUFFIX : empty" idiom behind every economy-of-attributes disclosure in
+// this tool (a count shown only when it says something the default value doesn't already imply) — one
+// primitive so a second dialect needing the same shape (e.g. packtask.h's JSON callers[].shared, the twin
+// of its own XML attribute) composes it instead of re-deriving an equivalent ternary.
+inline std::string countFieldIfAbove( std::uint32_t n, std::uint32_t floor, std::string_view prefix, std::string_view suffix = {} )
+{
+    return n > floor ? std::string( prefix ) + std::to_string( n ) + std::string( suffix ) : std::string();
+}
+
 // " overloads=\"N\"" when N>1 rows collapsed into this one; empty (writes nothing) in the overwhelming
 // common case (every id unique) — the golden map stays byte-identical wherever no collision exists.
 inline std::string overloadsAttr( std::uint32_t n )
 {
-    return n > 1 ? ( " overloads=\"" + std::to_string( n ) + "\"" ) : std::string();
+    return countFieldIfAbove( n, 1, " overloads=\"", "\"" );
 }
 
 // ── how THIS map was produced: the three OPTIONAL annotations, as one value ──────────────────────────
