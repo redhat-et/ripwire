@@ -1079,7 +1079,32 @@ inline std::vector<float> lexicalScoresNameExact( const IngestResult& ing, std::
 //      is correct: a one-word query whose only word IS a symbol name is an identifier lookup, and name-exact
 //      is the measured winner on that shape; the crater was multi-word phrases, not single-word lookups.)
 enum class LexMode { SubtokenBody, NameExact };
-struct RouteChoice { LexMode which = LexMode::SubtokenBody; std::string reason; };
+
+// ONE anchoring word's resolved DEFINITION — the same (name, defining file) pair the `anchors:` clause
+// below prints, in the form a consumer can compare a symbol against. Only words that actually name a
+// symbol get one: a camel/snake word matching nothing routes on SHAPE and anchors no definition, which
+// is exactly the `syntax` evidence the reason prints for it.
+//
+// The consumer is the T3 auto-body allowance (main.cpp buildForAutoBodies, registered at docs/EVALS.md
+// §4): "serve the anchor's own body or none" needs to know which symbol the anchor IS, and the NAME is
+// not enough — a doc section, a type stub or a re-export shim sharing the name is a different symbol in
+// a different file, and serving it in the anchor's place is the substitution that round removes.
+struct RouteAnchorDef
+{
+    std::string   lowerName;          // routeLower of the anchoring word == routeLower of the symbol's name
+    std::uint32_t fileId    = 0;      // NameAnchor::fileId — the FIRST definition of that name in NodeId order,
+                                      // i.e. the same one routeAnchorEvidence prints the path of
+    std::uint32_t extraDefs = 0;      // further definitions sharing the name — the "+N" the reason discloses
+};
+
+struct RouteChoice
+{
+    LexMode                     which = LexMode::SubtokenBody;
+    std::string                 reason;
+    // Populated on the name-exact route only, in QUERY WORD order (deterministic), and only for words that
+    // resolved to a definition. Empty on every other route — a route nothing anchored restricts nothing.
+    std::vector<RouteAnchorDef> anchorDefs;
+};
 
 // is `w` a single stopword we ignore when counting query intent words?
 inline bool isRouteStopword( std::string_view w ) noexcept
@@ -1161,6 +1186,23 @@ inline std::string routeAnchorEvidence( const IngestResult& ing, const HashMap<s
         evidence += "+" + std::to_string( at->second.extraDefs );
     }
     return evidence;
+}
+
+// The same lookup routeAnchorEvidence does, kept as a DEFINITION instead of rendered as a string. Appends
+// nothing when the word names no symbol — a shape-only (camel/snake `syntax`) anchor resolves to no
+// definition, so there is nothing for a consumer to compare against and the consumer must fall back to its
+// un-anchored behaviour rather than restrict to an empty set. Deliberately UNCAPPED where the printed
+// clause caps at four: the cap is a header-length rule, and silently dropping a resolved anchor from the
+// machine-readable list would cost a body the query genuinely named.
+inline void collectRouteAnchorDef( std::vector<RouteAnchorDef>& defs, const HashMap<std::string, NameAnchor>& names,
+                                   const std::string& lowerWord )
+{
+    const auto at = names.find( lowerWord );
+    if( at == names.end() || !at->second.wholeName )
+    {
+        return;
+    }
+    defs.push_back( RouteAnchorDef{ lowerWord, at->second.fileId, at->second.extraDefs } );
 }
 
 // The `anchors:` clause under construction. One `word(evidence)` per anchoring content word, appended in
@@ -1404,6 +1446,7 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
     // ONE lowercase-name index over all symbols, built once per query — see buildLowerNameIndex.
     const HashMap<std::string, NameAnchor> lowerSymbolNames = buildLowerNameIndex( ing );
     AnchorList                             anchors;
+    std::vector<RouteAnchorDef>            anchorDefs;   // the same anchors, resolved (see collectRouteAnchorDef)
 
     for( std::string_view w : words )
     {
@@ -1437,6 +1480,7 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
             }
             ++wholeNameHits;                                   // explicit identifier syntax also counts toward "all words name symbols"
             anchors.add( w, routeAnchorEvidence( ing, lowerSymbolNames, lw ) );
+            collectRouteAnchorDef( anchorDefs, lowerSymbolNames, lw );
             continue;
         }
 
@@ -1451,6 +1495,7 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
                 identifierHit = std::string( w );
             }
             anchors.add( w, routeAnchorEvidence( ing, lowerSymbolNames, lw ) );
+            collectRouteAnchorDef( anchorDefs, lowerSymbolNames, lw );
             noteAnchorPlausibility( imp, lw, at->second, carrierCap );
         }
     }
@@ -1481,6 +1526,7 @@ inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view qu
         // clause above out of this same string. A subtoken+body route names no anchors because nothing
         // anchored it — an anchors list on a route the names did not decide would be evidence after the fact.
         rc.reason += anchors.clause();
+        rc.anchorDefs = std::move( anchorDefs );   // the machine form of the same clause (see RouteAnchorDef)
     }
     else if( declined )
     {

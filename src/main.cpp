@@ -2359,8 +2359,9 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         const RouteChoice rc = chooseForRanker( ing, task );
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactTiered( ing, task, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul );
-        out.routeNote = " [routed: " + rc.reason + "]";
-        out.routeTag  = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
+        out.routeNote  = " [routed: " + rc.reason + "]";
+        out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
+        out.anchorDefs = std::move( rc.anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
     }
     else
     {
@@ -2906,9 +2907,66 @@ struct ForAutoBodiesResult
     bool               surfaceOff = false;  // true ⇒ the caller rebuilds the header WITHOUT the bundle=auto legend
 };
 
+// ── ANCHOR-ONLY: the allowance serves the anchor's OWN body, or none (docs/EVALS.md, T3 substitution round) ──
+//
+// Is `sid` the definition the route's `anchors:` clause names? Both halves are load-bearing. NAME alone is
+// not enough, and that is the whole finding of the round this implements: over the standing 12-query
+// symbol-lookup set, 11 of 19 served body blocks — 43.9% of all served body BYTES — were some other symbol,
+// and the substitutes are overwhelmingly SAME-NAMED things in other files (a doc section, a `types.d.ts`
+// one-line stub, a re-export shim, a changelog entry that merely mentions the class). FILE alone is not
+// enough either: an unrelated symbol in the anchor's own file is not what the query asked for.
+//
+// The file matched is NameAnchor::fileId — the FIRST definition of that name in NodeId order, which is
+// exactly the definition routeAnchorEvidence prints the path of. So the rule follows the header's own
+// disclosed choice rather than inventing a second one; when a name has several definitions the reason
+// already says so with its "+N".
+bool isRouteAnchorSymbol( const rw::IngestResult& ing, rw::NodeId sid, const std::vector<rw::RouteAnchorDef>& anchorDefs )
+{
+    const rw::Symbol& s     = ing.symbols[sid];
+    const std::string lower = rw::routeLower( s.name );
+    for( const rw::RouteAnchorDef& a : anchorDefs )
+    {
+        if( a.fileId == s.fileId && a.lowerName == lower )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Narrow a ranked auto-body candidate head to the route's anchor. Whatever this drops cannot be served "in
+// the anchor's place", because there is no place: if the anchor's own body does not fit, the caller's budget
+// branch renders the honest zero it already renders — `bodies="0" reason="budget"` plus the per-item
+// over-budget comment naming what was dropped. That is strictly more informative than a smaller namesake's
+// body, which reads like an answer and is not one.
+//
+// A NO-OP when `anchorDefs` is empty, and it must stay one. Two different routes arrive that way and both
+// keep the rank-first walk: a subtoken+body (conceptual) query, which nothing anchored; and a camel/snake
+// query whose token names no symbol at all, which the route's own reason already marks `syntax`. There is no
+// anchor definition to restrict TO in either case, and restricting to an empty set would turn "no substitute"
+// into "no bodies, ever" on a class this round never measured.
+void restrictBodiesToRouteAnchor( const rw::IngestResult& ing, std::vector<rw::NodeId>& candidateIds,
+                                  const std::vector<rw::RouteAnchorDef>& anchorDefs )
+{
+    if( anchorDefs.empty() )
+    {
+        return;
+    }
+    std::vector<rw::NodeId> anchorOnly;
+    for( rw::NodeId sid : candidateIds )
+    {
+        if( isRouteAnchorSymbol( ing, sid, anchorDefs ) )
+        {
+            anchorOnly.push_back( sid );
+        }
+    }
+    candidateIds = std::move( anchorOnly );
+}
+
 ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
                                         const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
-                                        std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr )
+                                        std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr,
+                                        const std::vector<rw::RouteAnchorDef>& anchorDefs )
 {
     ForAutoBodiesResult out;
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
@@ -2926,6 +2984,10 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
         }
         autoBodyIds.push_back( sid );
     }
+
+    // ANCHOR-ONLY: when the route named an anchor, the candidate set IS the anchor (see the function above
+    // for the rule and for why it is a no-op on every other route).
+    restrictBodiesToRouteAnchor( ing, autoBodyIds, anchorDefs );
 
     std::size_t leftBytes = bundleBudget > committedBytes ? bundleBudget - committedBytes : 0;
     if( cfg.tokenBudget == 0 )
@@ -3046,6 +3108,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         const std::string  mentionNote( std::move( lr.mentionNote ) );
         const std::string  boostNote( std::move( lr.boostNote ) );
         const std::string  docMentionNote( std::move( lr.docMentionNote ) );
+        // the route's own anchors, resolved — read ONLY by the T3 auto-body allowance below (anchor-only)
+        const std::vector<RouteAnchorDef> routeAnchorDefs( std::move( lr.anchorDefs ) );
         // R4: weak-result honesty signal — the top match's RAW lexical score (pre-anchor/mention/cochange,
         // see computeLensRanking) falls below kWeakLexicalScoreThreshold, so the ranking below this header
         // rests on thin-to-no textual evidence. Read below (with est_tokens) into the header comment.
@@ -3486,7 +3550,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             const std::size_t committedBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
                                              + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + kAutoAttrReserve;
             ForAutoBodiesResult autoBodies = buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank,
-                                                                 committedBytes, bundleBudget, redactPtr );
+                                                                 committedBytes, bundleBudget, redactPtr, routeAnchorDefs );
             autoSection = std::move( autoBodies.section );
             autoAttr    = std::move( autoBodies.attr );
             if( autoBodies.surfaceOff )
