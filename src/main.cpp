@@ -3225,6 +3225,24 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
     return out;
 }
 
+// ONE verdict, two shapes: the compact route's <hops> surface or T3's <bodies> allowance. Both builders
+// return the same struct, so the caller's wiring (section, root attribute, surface-off header rebuild) is
+// written once and cannot drift between them.
+//
+// `committedBytes` is what the bundle has already spent — the real header (legend included), the rendered
+// sections and "</ctx>", plus the post-ladder splices — and this function adds the plan's own root-attribute
+// reserve, because the compact spelling is the longer of the two and the caller should not have to know that.
+ForAutoBodiesResult buildForEnrichment( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
+                                        const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
+                                        const ForEnrichmentPlan& plan, const std::vector<rw::RouteAnchorDef>& anchorDefs,
+                                        rw::RedactCounts* redactPtr, std::size_t committedBytes, std::size_t bundleBudget )
+{
+    const std::size_t committed = committedBytes + plan.attrReserve;
+    return plan.compact
+        ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr )
+        : buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, anchorDefs );
+}
+
 std::optional<int> runForLens( const MainDispatch& d )
 {
     using namespace rw;
@@ -3715,30 +3733,21 @@ std::optional<int> runForLens( const MainDispatch& d )
         // of the largest in the file); this site only wires its verdict in: keep the section + attribute, or
         // rebuild the header WITHOUT the legend when the surface turned off (tight explicit ceiling, or the
         // chargeSection degrade), so the ladder's later rebuilds honor the decision too.
-        rw::ChargedSection autoSection;
-        std::string        autoAttr;   // spliced onto the <ctx> root after the ladder; its exact bytes are priced there
+        ForAutoBodiesResult enrich;   // .attr is spliced onto the <ctx> root after the ladder; its bytes are priced there
         if( autoBundleMode && sigsPreRendered )
         {
-            // committed so far: the real header (legend included), the rendered sections, "</ctx>", and the
-            // post-ladder splices (est_tokens/weak reserves + the root attribute's worst case). The compact
-            // root attribute is the longer of the two spellings, so its own reserve is used in that regime.
-            const std::size_t committedBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
-                                             + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + plan.attrReserve;
-            // ONE verdict, two shapes: the compact route's <hops> surface or T3's <bodies> allowance. Both
-            // builders return the same struct so the wiring below (section, attribute, surface-off header
-            // rebuild) is written once and cannot drift between the two.
-            ForAutoBodiesResult autoBodies = plan.compact
-                ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committedBytes, bundleBudget, redactPtr )
-                : buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank, committedBytes, bundleBudget, redactPtr, routeAnchorDefs );
-            autoSection = std::move( autoBodies.section );
-            autoAttr    = std::move( autoBodies.attr );
-            if( autoBodies.surfaceOff )
+            enrich = buildForEnrichment( cfg, ing, g, lensSurfaceIds, lensRank, plan, routeAnchorDefs, redactPtr,
+                                          headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
+                                              + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve,
+                                          bundleBudget );
+            if( enrich.surfaceOff )
             {
-                headerParts.autoBundle    = false;
-                headerParts.compactBundle = false;
+                headerParts.autoBundle = headerParts.compactBundle = false;
                 headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
             }
         }
+        const rw::ChargedSection& autoSection = enrich.section;
+        const std::string&        autoAttr    = enrich.attr;
 
         // W3FIX H2 — the ceiling ladder (rungs + rationale: serialize.h climbCeilingLadder), same rungs in the
         // same order --pack-task climbs. The header IS charged to the budget above, but charging is not FITTING: at
