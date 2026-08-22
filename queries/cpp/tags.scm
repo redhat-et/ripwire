@@ -297,3 +297,26 @@
 (call_expression
   function: (template_function
     (identifier) @name)) @reference.call
+
+; MACRO-DEFINED TEST BODIES (LB-E, r10 gitnexus harvest 2026-08-20): `TEST_CASE( "title" ) { … }` —
+; doctest/Catch2's block-forming test macros — cannot be expanded by tree-sitter, so the source parses
+; as TWO SIBLING nodes: an (expression_statement (call_expression …) (MISSING ";")) and a bare
+; (compound_statement …). Neither is a definition, so pre-70 the body's calls attributed to NOTHING
+; (measured on this repo: five pageRankDouble call sites invisible to --callers while --grep found all
+; five — and --test-gate/--affected/tested= all rest on exactly those test→subject edges).
+;
+; This pattern captures the SHAPE ONLY: any identifier-call statement whose immediate next named
+; sibling is a compound_statement. It deliberately over-matches — a real `logCall( "x" );` followed by
+; an unrelated block inside a function body is this exact shape — because tags-pass predicates never
+; run (same story as the cast keywords above). The three real gates live at capture time in
+; ingest.cpp's testMacroBlockPartsOf: the callee must be a KNOWN test macro (kTestBlockMacroNames),
+; the statement must carry the error-recovery MISSING ";" (a real semicolon disqualifies), and a title
+; string literal must be present in the argument list (it becomes the symbol's name; the identifier
+; captured as @name here is only the name-list key). TEST_CASE_TEMPLATE/SCENARIO_TEMPLATE are a
+; documented gap: error recovery swallows their block INTO the argument list, so no sibling
+; compound_statement exists and this pattern cannot see them.
+((expression_statement
+  (call_expression
+    function: (identifier) @name)) @definition.testmacroblock
+ .
+ (compound_statement))

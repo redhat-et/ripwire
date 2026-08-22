@@ -370,6 +370,10 @@ SymKind defKind( std::string_view tail ) noexcept
     {
         return SymKind::Var;
     }
+    if( tail == "testmacroblock" )   // LB-E: doctest/Catch2 `TEST_CASE( "title" ) { … }` — gated (testMacroBlockPartsOf)
+    {
+        return SymKind::Function;
+    }
     if( tail == "module" )
     {
         return SymKind::Other;
@@ -1495,7 +1499,21 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 69;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 70;           // bump on any grammar/.scm/extraction change
+                                                      // 70 = 2026-08-22 test-macro blocks (LB-E, r10 harvest): a known
+                                                      //    doctest/Catch2 block-forming test macro (kTestBlockMacroNames)
+                                                      //    invoked as `TEST_CASE( "title" ) { … }` — which tree-sitter-cpp
+                                                      //    parses as an expression_statement with a MISSING ";" plus a
+                                                      //    SIBLING compound_statement, so pre-70 it minted NO symbol and
+                                                      //    every call inside the body attributed to NOTHING (measured:
+                                                      //    five pageRankDouble sites invisible to --callers on this
+                                                      //    repo's own test/verify_pagerank.cpp) — now extracts as a
+                                                      //    t="fn" symbol named by its title literal, spanning through
+                                                      //    the block, testScope=1. queries/cpp/tags.scm gains the
+                                                      //    sibling pattern (@definition.testmacroblock). The extracted
+                                                      //    SET grows on any C++ tree using those harnesses, so a v69
+                                                      //    blob misses rows and must be rejected, not served. See
+                                                      //    test/testmacrocheck.sh.
                                                       // 69 (2026-08-21 wave-2 merge): TWO INDEPENDENT extraction changes
                                                       //    both landed on 68 in separate branches. Per the note at 65 below,
                                                       //    a collision is resolved by RE-BUMPING to the next free number, never
@@ -6633,6 +6651,115 @@ inline bool inFileTestScope( TSNode defNode, std::string_view src, Lang lang ) n
     }
 }
 
+// ---- LB-E (r10 gitnexus harvest 2026-08-20): macro-defined test bodies ----------------------------------
+// `TEST_CASE( "title" ) { … }` — doctest/Catch2's block-forming test macros — cannot be expanded by
+// tree-sitter, so the source parses as TWO SIBLING nodes: an (expression_statement (call_expression …)
+// (MISSING ";")) and a bare (compound_statement …). Neither is a definition, so pre-kParserVer-70 the
+// body's calls attributed to NOTHING (measured on this repo: five pageRankDouble sites invisible to
+// --callers) — and --test-gate/--affected/tested= all rest on exactly those test→subject edges.
+// queries/cpp/tags.scm captures the SHAPE only (@definition.testmacroblock); the real gates live here.
+//
+// The known block-forming test macros — doctest/Catch2 STRING-TITLE forms only. The GoogleTest family
+// (TEST/TEST_F/TEST_P — identifier arguments) parses as a plain function_definition and never reaches
+// this shape; TEST_CASE_TEMPLATE/SCENARIO_TEMPLATE lose their block INTO the argument list to error
+// recovery (no sibling compound_statement — the documented gap in queries/cpp/tags.scm); SUBCASE/
+// SECTION/GIVEN/WHEN/THEN are deliberately absent because they nest INSIDE a captured test body, and
+// splitting one test's calls across subcase symbols would be a worse answer than one spanning symbol.
+inline constexpr std::array<std::string_view, 5> kTestBlockMacroNames = { "TEST_CASE", "TEST_CASE_FIXTURE", "TEST_CASE_METHOD", "SCENARIO", "TEST_SUITE" };
+
+// The capture-time gate + parts for a @definition.testmacroblock candidate. PRECISION OVER RECALL: ok
+// only when ALL of — the callee identifier is a known test macro (an unknown `WIDGET_DEF( "x" ) { … }`
+// could be anything, and minting a phantom test symbol is worse than staying blind); the statement
+// carries the error-recovery MISSING ";" (a real `logCall( "x" );` before an unrelated block inside a
+// function body is the same query shape with a REAL semicolon, and must not trigger); the next named
+// sibling is the compound_statement body; and a non-empty title string literal sits in the argument
+// list (FIRST string wins: TEST_CASE_FIXTURE/TEST_CASE_METHOD put a fixture identifier before the
+// title, Catch2's "[tags]" literal comes after it).
+struct TestMacroBlockParts
+{
+    bool   ok = false;
+    TSNode body {};    // the sibling compound_statement — adopted as the def's body
+    TSNode title {};   // the title string_literal node — its content becomes the symbol's name
+};
+
+inline TestMacroBlockParts testMacroBlockPartsOf( TSNode exprStmtNode, std::string_view src ) noexcept
+{
+    if( ts_node_is_null( exprStmtNode ) || std::strcmp( ts_node_type( exprStmtNode ), "expression_statement" ) != 0 )
+    {
+        return {};
+    }
+
+    // the MISSING ";" — the one structural mark separating a macro-with-block from a real statement
+    bool hasMissingSemicolon = false;
+    const std::uint32_t childCount = ts_node_child_count( exprStmtNode );
+    for( std::uint32_t childIx = 0; childIx < childCount; ++childIx )
+    {
+        if( ts_node_is_missing( ts_node_child( exprStmtNode, childIx ) ) )
+        {
+            hasMissingSemicolon = true;
+            break;
+        }
+    }
+    if( !hasMissingSemicolon )
+    {
+        return {};
+    }
+
+    const TSNode body = ts_node_next_named_sibling( exprStmtNode );
+    if( ts_node_is_null( body ) || std::strcmp( ts_node_type( body ), "compound_statement" ) != 0 )
+    {
+        return {};
+    }
+
+    // the callee must be a KNOWN test macro
+    const TSNode call = ts_node_named_child( exprStmtNode, 0 );
+    if( ts_node_is_null( call ) || std::strcmp( ts_node_type( call ), "call_expression" ) != 0 )
+    {
+        return {};
+    }
+    const std::string_view callee = nodeTextOf( ts_node_child_by_field_name( call, "function", 8 ), src );
+    bool isKnownMacro = false;
+    for( const std::string_view macroName : kTestBlockMacroNames )
+    {
+        if( callee == macroName )
+        {
+            isKnownMacro = true;
+            break;
+        }
+    }
+    if( !isKnownMacro )
+    {
+        return {};
+    }
+
+    // the FIRST string literal among the arguments is the title
+    const TSNode args = ts_node_child_by_field_name( call, "arguments", 9 );
+    const std::uint32_t argCount = ts_node_is_null( args ) ? 0u : ts_node_named_child_count( args );
+    for( std::uint32_t argIx = 0; argIx < argCount; ++argIx )
+    {
+        const TSNode arg = ts_node_named_child( args, argIx );
+        if( std::strcmp( ts_node_type( arg ), "string_literal" ) == 0 && ts_node_end_byte( arg ) > ts_node_start_byte( arg ) + 2 )   // "" is not a name
+        {
+            return { true, body, arg };
+        }
+    }
+    return {};
+}
+
+// the title text: the string_literal's content with the delimiting quotes stripped. Escape sequences
+// stay as written — the title is a DISPLAY string, not an identifier (its consumer bypasses
+// defNameFromCapture on purpose: finalSegment would split a dotted title like "rank.step determinism").
+inline std::string_view testMacroTitleOf( TSNode titleNode, std::string_view src ) noexcept
+{
+    std::string_view raw = nodeTextOf( titleNode, src );
+    if( raw.size() >= 2 && raw.front() == '"' && raw.back() == '"' )
+    {
+        raw.remove_prefix( 1 );
+        raw.remove_suffix( 1 );
+    }
+    return raw;
+}
+
 // r3 q10 (bench/headtohead/r3-headroom-2026-08-03 REPORT.md §(v) item 1): SCREAMING_SNAKE — an
 // ALL-CAPS identifier of ≥2 chars ([A-Z][A-Z0-9_]+), the cross-language naming convention for a
 // module-level settings/config constant. The ≥2 floor drops single-letter names (a top-level `X = …`
@@ -6923,6 +7050,12 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
     if( defCapSv == "definition.yamlkey" )
     {
         return yamlKeyCaptureDropped( name, roleNode );
+    }
+    if( defCapSv == "definition.testmacroblock" )
+    {
+        // LB-E: the query captures the shape only (any identifier-call statement before a block) —
+        // the name-list, MISSING-";", sibling-body and title gates all live in testMacroBlockPartsOf.
+        return !testMacroBlockPartsOf( roleNode, src ).ok;
     }
     if( defCapSv == "definition.macro" )
     {
@@ -9768,6 +9901,25 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // replacement text (`value:` field) is adopted as a macro symbol's body, set before the climb
             // below so the climb is skipped for macros.
             TSNode body    = defBodyNodeOf( roleNode, kind );
+            // LB-E testmacroblock: the def is TWO SIBLING nodes (see testMacroBlockPartsOf) — adopt the
+            // sibling compound_statement as the body and the title literal as the name BEFORE the shared
+            // span/complexity code below. The span's endByte and the loc row window are extended past
+            // defNode's own end further down (no single node covers both siblings).
+            const bool isTestMacroBlock = ( defCapSv == "definition.testmacroblock" );
+            if( isTestMacroBlock )
+            {
+                const TestMacroBlockParts parts = testMacroBlockPartsOf( roleNode, src );
+                if( !parts.ok )
+                {
+                    continue;   // dropGatedCapture already vetoed non-candidates — guard, don't assert
+                }
+                body     = parts.body;
+                nameNode = parts.title;
+                nameTxt  = testMacroTitleOf( parts.title, src );
+                nameByte = ts_node_start_byte( parts.title );
+                nameRow  = ts_node_start_point( parts.title ).row;
+                d.line   = nameRow + 1;   // re-seat: d.line above was filled from the @name capture (the macro identifier)
+            }
             // A Var's span is its own declaration — never climb. The climb exists to find a FUNCTION's
             // body; for a var it can only steal a container's span (a Ruby class-level constant's parent
             // chain is body_statement → class, and class owns a "body" field, so the climb would hand the
@@ -9857,11 +10009,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             }
 
             d.startByte = ts_node_start_byte( defNode );
-            d.endByte   = ts_node_end_byte( defNode );
+            d.endByte   = isTestMacroBlock ? ts_node_end_byte( body ) : ts_node_end_byte( defNode );   // LB-E: the span runs THROUGH the sibling block
             d.nameByte  = nameByte;
             d.bodyByte  = ts_node_is_null( body ) ? 0u : ts_node_start_byte( body );
             const bool  fnOrMethod = ( kind == SymKind::Function || kind == SymKind::Method );
-            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod ? complexityOf( defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
+            // LB-E: for a testmacroblock the body SIBLING is where the code lives — complexityOf walks
+            // INSIDE its root node, so handing it defNode (the bare macro statement) would count nothing.
+            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod ? complexityOf( isTestMacroBlock ? body : defNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
             d.cx        = cxVal;
             d.ccx       = ccxVal;
             d.locals    = localsVal;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -9873,15 +10027,17 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // param count + max nesting for functions/methods only (0 otherwise, absent in emit). All descriptive.
             {
                 const std::uint32_t startRow = ts_node_start_point( defNode ).row;
-                const std::uint32_t endRow   = ts_node_end_point( defNode ).row;
+                const std::uint32_t endRow   = ts_node_end_point( isTestMacroBlock ? body : defNode ).row;   // LB-E: rows through the sibling block
                 d.loc = ( endRow >= startRow ) ? ( endRow - startRow + 1u ) : 1u;
             }
             d.params    = fnOrMethod ? countParams( defNode ) : std::uint16_t( 0 );
-            d.arityExact = fnOrMethod ? std::uint8_t( cc_paramArityExact( defNode, le.lang, kind ) ? 1 : 0 ) : std::uint8_t( 0 );   // B2.2
+            // LB-E: a testmacroblock's parameter surface is the MACRO's business, not visible here — claim
+            // inexact so the resolver's arity narrowing never trusts params=0 on a test-title symbol.
+            d.arityExact = ( fnOrMethod && !isTestMacroBlock ) ? std::uint8_t( cc_paramArityExact( defNode, le.lang, kind ) ? 1 : 0 ) : std::uint8_t( 0 );   // B2.2
             // L8: the in-file test-scope bit, for EVERY kind (a `#[cfg(test)] mod` and a `class TestFoo`
             // are themselves symbols, and dropping the members while keeping the shell would be a worse
             // answer than either). Runs on defNode, whose ancestors are the enclosing scopes.
-            d.testScope = std::uint8_t( inFileTestScope( defNode, src, le.lang ) );
+            d.testScope = isTestMacroBlock ? std::uint8_t( 1 ) : std::uint8_t( inFileTestScope( defNode, src, le.lang ) );   // LB-E: a test macro IS the in-file convention
             d.maxNest   = fnOrMethod ? std::uint8_t( nestVal > 255u ? 255u : nestVal ) : std::uint8_t( 0 );
             // The nesting profile (model.h Symbol::humps/deepLoc). Saturating at 65535 on purpose: a def past
             // either bound is beyond every triage threshold, and deepLoc is a floor already, so a clamp there
@@ -9894,7 +10050,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.evWhy     = fnOrMethod ? evWhyVal : std::array<std::uint8_t, kEvWhyTagCount>{};
             d.kind      = kind;
             d.lang      = le.lang;
-            d.name      = defNameFromCapture( le.lang, nameTxt );
+            d.name      = isTestMacroBlock ? std::string( nameTxt ) : defNameFromCapture( le.lang, nameTxt );   // LB-E: a title is a display string — see testMacroTitleOf
             if( le.lang == Lang::Cpp )                              // canonical scope (E#4): out-of-line `A::b` → "A", else enclosing class/namespace
             {
                 d.scope = qualifierOf( nameNode, src );
