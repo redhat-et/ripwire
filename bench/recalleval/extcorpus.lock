@@ -1,0 +1,54 @@
+# extcorpus.lock — pins the EXTERNAL-CORPUS retrieval slice: two third-party repositories at exact
+# commits, scored by bench/recalleval/run_extcorpus.py and diffed by bench/recalleval/run_r3diff.py.
+#
+# WHY AN EXTERNAL CORPUS AT ALL. The two frozen corpora this directory already owns (snapshot.mdpack,
+# snapshot.srcpack) are snapshots of THIS repository. That is the right instrument for the ranker's
+# own regression floors, and it is the wrong instrument for four measured retrieval-loss shapes,
+# because this tree does not CONTAIN the populations that produce them: it has no vendored front-end
+# asset directory, no numbered database migrations, no thin single-method registration plugins, and
+# no directory-per-subsystem layout with a diagnostic-class sibling for every mechanism. A gate
+# written against this tree for those shapes would be green because the offending population is
+# absent, not because the ranker handles it — green-while-inert, the exact failure this repository's
+# own gate discipline exists to prevent. So the slice is pinned to two outside trees that do contain
+# them.
+#
+# THE CLONES ARE NOT COMMITTED, AND THAT IS A DELIBERATE DIFFERENCE FROM THE OTHER TWO CORPORA.
+# snapshot.mdpack/.srcpack are checked-in byte copies because they are small (7-17 MB), are this
+# project's own code, and must survive a force-rebased trunk. These two are ~1 GB of third-party
+# source under their own licences; vendoring them into a public export would be both a size and a
+# licensing decision nobody made. The integrity anchor is therefore the COMMIT PIN below plus the
+# tree hash: run_extcorpus.py verifies `git rev-parse HEAD` and `git rev-parse HEAD^{tree}` against
+# these values before it scores anything, and refuses loudly on a mismatch rather than silently
+# measuring a different tree. Recorded honestly: this is a weaker anchor than a content-hashed pack
+# (an upstream force-push could make a pin unfetchable), and the mitigation is that a mismatch is a
+# hard refusal, never a quiet re-baseline.
+#
+# HOW TO MATERIALIZE (both repos, exactly these commits):
+#   mkdir -p <corpora-dir> && cd <corpora-dir>
+#   git clone --filter=blob:none --no-checkout https://github.com/django/django.git django
+#   git -C django checkout --detach 03988c5a5ba248c3b9b11ea96fd4fda5e98849aa
+#   git clone --filter=blob:none --no-checkout https://github.com/webpack/webpack.git webpack
+#   git -C webpack checkout --detach a943d69c4fd4e7b3edcdc03bce7c41eceef3bfd6
+# Point the harness at <corpora-dir> with --corpora-dir, or export RIPWIRE_EXTCORPORA.
+#
+# THE PINS ARE NOT CHOSEN HERE. Both commits are the ones a prior competitor head-to-head measured
+# these four loss shapes on; re-pinning them would make this slice's baseline incomparable with the
+# observations that motivated it. Refresh only in a deliberate recalibration commit that re-measures
+# every per-bucket baseline in the same commit — the same update policy make_snapshot.py states for
+# the two in-tree corpora.
+#
+# FORMAT: one `key=value` per line, `repo.<name>.<field>`. Unknown keys are an error, not a warning.
+
+repo.django.url=https://github.com/django/django.git
+repo.django.commit=03988c5a5ba248c3b9b11ea96fd4fda5e98849aa
+repo.django.tree=1afcf39f4d09f8b99b449903fa7822efb0dd162e
+repo.django.commit_date=2026-08-21T08:34:30-04:00
+repo.django.labels=labels_extcorpus_django.tsv
+repo.django.buckets=diagnostic-class,thin-registration,subsystem-directory,vendored-asset
+
+repo.webpack.url=https://github.com/webpack/webpack.git
+repo.webpack.commit=a943d69c4fd4e7b3edcdc03bce7c41eceef3bfd6
+repo.webpack.tree=4d708c08ef0b0f9ab7afaae0a330e2b31e6434e2
+repo.webpack.commit_date=2026-08-21T17:08:30-07:00
+repo.webpack.labels=labels_extcorpus_webpack.tsv
+repo.webpack.buckets=diagnostic-class,thin-registration,subsystem-directory

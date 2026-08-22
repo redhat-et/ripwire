@@ -1,0 +1,139 @@
+# labels_extcorpus_django.tsv — held-out labels for the EXTERNAL-CORPUS slice of the RANKING lane,
+# scored against django/django pinned in bench/recalleval/extcorpus.lock. Same 4-column shape, same
+# loader, same matcher as labels_ranking.tsv and labels_extcorpus_webpack.tsv:
+#
+#   query<TAB>primary<TAB>acceptable<TAB>class
+#
+# The four class values and the labeling protocol are documented once, in full, at the head of
+# labels_extcorpus_webpack.tsv. The short form: `class` names the RETRIEVAL LOSS SHAPE the row
+# exercises — diagnostic-class, thin-registration, subsystem-directory, vendored-asset — so that
+# per-bucket rates, and therefore per-bucket bands, are computable from one run. Every gold was
+# chosen by READING the pinned source at the pinned commit, never by transcribing a rank.
+#
+# THIS HALF OF THE SLICE CARRIES THE vendored-asset BUCKET, and it is the whole reason the slice
+# exists as an outside corpus at all. That bucket is about front-end assets and numbered database
+# migrations taking bundle slots on a task that has nothing to do with either. At the pinned commit
+# this tree contains 101 shipped `*/static/**` js/css files and 23 `*/migrations/0*.py` files; the
+# repository this harness normally scores contains none of either, so the same measurement written
+# against it would report a clean zero forever without ever exercising the shape.
+#
+# vendored-asset ROWS ARE SCORED TWICE, and the second number is the one the bucket is really about.
+#   (1) gold rank, exactly like every other row — did the on-task source file surface at all;
+#   (2) asset-slot share, reported by run_extcorpus.py: what fraction of the top-5 candidate slots is
+#       occupied by a vendored/generated path (`*/static/*`, `*/migrations/0*.py`, `*/locale/*`,
+#       `*/vendor/*`, `node_modules/`, `*.min.js`). A row can hit its gold at rank 1 and still be
+#       carrying three slots of admin javascript; only (2) sees that, and only (2) can be moved by
+#       the de-prioritization this bucket is a case for. Both are reported; neither is allowed to
+#       stand in for the other.
+#
+# HONEST-FIXTURE NOTE. Two facts that make some of these numbers look worse and are recorded anyway.
+# First, `acceptable` is used narrowly here too — only a file that would let an agent land the task
+# without another call. Second, several vendored-asset queries are genuinely hard for reasons that
+# have nothing to do with asset noise (a task phrased in feature vocabulary whose answer is one
+# unglamorous module), so a low gold-rank rate in that bucket is NOT evidence for the bucket by
+# itself; the asset-slot share is. Reading them the other way would be exactly the overclaim this
+# file's protocol exists to prevent.
+#
+# Counts: diagnostic-class 6 · thin-registration 6 · subsystem-directory 6 · vendored-asset 12 ·
+# 30 rows.
+
+how is the csrf token validated on an incoming request	django/middleware/csrf.py	-	diagnostic-class
+how does a cache backend store a value with a timeout	django/core/cache/backends/base.py	django/core/cache/backends/locmem.py	diagnostic-class
+where is a translation catalog loaded and a string looked up	django/utils/translation/trans_real.py	-	diagnostic-class
+how is a session expiry date computed and stored	django/contrib/sessions/backends/base.py	-	diagnostic-class
+how does a static file finder locate a file on disk	django/contrib/staticfiles/finders.py	-	diagnostic-class
+where are email messages assembled before being sent	django/core/mail/message.py	-	diagnostic-class
+which management command deletes expired sessions	django/contrib/sessions/management/commands/clearsessions.py	-	thin-registration
+where is the admin application config registered	django/contrib/admin/apps.py	-	thin-registration
+which command removes all data from the database tables	django/core/management/commands/flush.py	-	thin-registration
+which command prints only the settings that differ from the defaults	django/core/management/commands/diffsettings.py	-	thin-registration
+which command sends a test email to verify the mail configuration	django/core/management/commands/sendtestemail.py	-	thin-registration
+where is the staticfiles application config defined	django/contrib/staticfiles/apps.py	-	thin-registration
+how are migration files written out to disk	django/db/migrations/writer.py	django/db/migrations/autodetector.py	subsystem-directory
+how are model instances serialized to json	django/core/serializers/json.py,django/core/serializers/python.py	django/core/serializers/base.py	subsystem-directory
+how is an email delivered through the smtp backend	django/core/mail/backends/smtp.py	django/core/mail/message.py	subsystem-directory
+how is a template string compiled into a node list	django/template/base.py	django/template/engine.py	subsystem-directory
+how does the wsgi handler turn a request into a response	django/core/handlers/wsgi.py,django/core/handlers/base.py	-	subsystem-directory
+where are geometry fields mapped to database columns	django/contrib/gis/db/models/fields.py	-	subsystem-directory
+add a new database backend feature flag and gate a query behind it	django/db/backends/base/features.py	django/db/backends/base/operations.py	vendored-asset
+add a new admin action available on the changelist page	django/contrib/admin/actions.py	django/contrib/admin/options.py	vendored-asset
+fix a bug where the admin date and time widget renders the wrong format	django/contrib/admin/widgets.py	django/forms/widgets.py	vendored-asset
+add a field to the admin log entry model	django/contrib/admin/models.py	-	vendored-asset
+change how default permissions are created for a new model	django/contrib/auth/management/__init__.py	django/contrib/auth/models.py	vendored-asset
+add a new option to the collectstatic management command	django/contrib/staticfiles/management/commands/collectstatic.py	-	vendored-asset
+fix the admin autocomplete endpoint returning the wrong page of results	django/contrib/admin/views/autocomplete.py	-	vendored-asset
+add a spatial index option to a geometry model field	django/contrib/gis/db/models/fields.py	-	vendored-asset
+make the admin login form require an extra verification step	django/contrib/admin/forms.py	django/contrib/auth/forms.py	vendored-asset
+add a new generic relation field to the contenttypes framework	django/contrib/contenttypes/fields.py	-	vendored-asset
+fix flatpages returning a 404 for a url with a trailing slash	django/contrib/flatpages/views.py	django/contrib/flatpages/middleware.py	vendored-asset
+add a new field to the sites framework model	django/contrib/sites/models.py	-	vendored-asset
+
+# ── PER-ROW PROVENANCE AND THE READING THAT PRODUCED EACH GOLD ────────────────────────────────────
+#
+# All rows below are NEW (authored in this lane from the pinned source) except the one marked
+# OBSERVED, which came from the competitor head-to-head that first diagnosed the vendored-asset
+# bucket and was re-verified here.
+#
+# diagnostic-class — django's diagnostic population is not *Warning classes but the system-check
+# modules: django/core/checks/{security/csrf.py,security/sessions.py,caches.py,translation.py,
+# mail.py,urls.py,model_checks.py} plus django/contrib/*/checks.py. Each is a small module NAMED for
+# a feature that only validates configuration; each of the six queries below is worded in exactly the
+# vocabulary of one of them, and the labelled answer is the module that implements the behavior.
+#   csrf              → django/middleware/csrf.py (484 lines: token rotation, comparison, the
+#                       process_view rejection path). Diagnostic sibling: core/checks/security/csrf.py.
+#   cache timeout     → django/core/cache/backends/base.py holds get_backend_timeout, set/add/set_many
+#                       and default_timeout; locmem.py is the concrete backend and is acceptable.
+#                       Diagnostic sibling: core/checks/caches.py.
+#   translation       → django/utils/translation/trans_real.py is the gettext catalog machinery.
+#                       Diagnostic sibling: core/checks/translation.py.
+#   session expiry    → django/contrib/sessions/backends/base.py owns get_expiry_date/set_expiry.
+#                       Diagnostic sibling: core/checks/security/sessions.py.
+#   staticfiles find  → django/contrib/staticfiles/finders.py is the finder hierarchy.
+#                       Diagnostic sibling: contrib/staticfiles/checks.py.
+#   email assembly    → django/core/mail/message.py builds the MIME message.
+#                       Diagnostic sibling: core/checks/mail.py.
+#
+# thin-registration — all six read in full. clearsessions.py is 21 lines and its whole body is one
+# import_module + one call; admin/apps.py and staticfiles/apps.py are AppConfig subclasses whose
+# ready() only registers checks; flush.py, diffsettings.py and sendtestemail.py are single-Command
+# modules of 91/92/57 lines. All six have near-zero fan-in by construction — a management command is
+# invoked by name through a registry, not called — which is precisely the shape this bucket is about.
+#
+# subsystem-directory — the concept named by each query is a directory name in this tree:
+# db/migrations/, core/serializers/, core/mail/, template/, core/handlers/, contrib/gis/db/.
+#   writer.py (323) serializes a Migration back to python source; autodetector.py (2050) produces the
+#     operations it writes and is acceptable.
+#   serializers/python.py (236) builds the intermediate dicts, json.py (114) encodes them; base.py is
+#     the Serializer/Deserializer contract and is acceptable.
+#   mail/backends/smtp.py (256) is the SMTP connection and send loop; message.py is acceptable.
+#   template/base.py (1224) is Lexer/Parser/NodeList; engine.py is the configured front door.
+#   handlers/wsgi.py (207) adapts the environ, handlers/base.py (375) runs the middleware chain — both
+#     primary, because either one alone answers the query.
+#   gis/db/models/fields.py (467) is BaseSpatialField and the geometry column types.
+#
+# vendored-asset — task-shaped, and every gold is a source module a person would edit to do the task.
+#   OBSERVED "database backend feature flag …" → django/db/backends/base/features.py (485 lines of
+#     `supports_*` flags); operations.py is acceptable because the gate itself is written there.
+#   NEW admin action              → contrib/admin/actions.py (96); options.py acceptable (ModelAdmin
+#                                   collects and dispatches actions).
+#   NEW admin date/time widget    → contrib/admin/widgets.py (633, AdminSplitDateTime); forms/widgets.py
+#                                   acceptable. This is the row whose displacing population is most
+#                                   visible: the behavior ALSO involves
+#                                   contrib/admin/static/admin/js/admin/DateTimeShortcuts.js, which is
+#                                   a vendored asset and not where the render format is decided.
+#   NEW admin log entry model     → contrib/admin/models.py (199, LogEntry). Its migration directory
+#                                   (0001_initial, 0002_logentry_remove_auto_add,
+#                                   0003_logentry_add_action_flag_choices) is the noise population.
+#   NEW default permissions       → contrib/auth/management/__init__.py (292, create_permissions);
+#                                   auth/models.py acceptable.
+#   NEW collectstatic option      → contrib/staticfiles/management/commands/collectstatic.py (403).
+#   NEW admin autocomplete        → contrib/admin/views/autocomplete.py (123). Sibling asset:
+#                                   contrib/admin/static/admin/js/autocomplete.js.
+#   NEW spatial index on a field  → contrib/gis/db/models/fields.py (467). Sibling asset:
+#                                   contrib/gis/static/gis/js/OLMapWidget.js.
+#   NEW admin login form          → contrib/admin/forms.py (31); auth/forms.py acceptable.
+#   NEW contenttypes relation     → contrib/contenttypes/fields.py (871, GenericForeignKey /
+#                                   GenericRelation).
+#   NEW flatpages trailing slash  → contrib/flatpages/views.py (70, the APPEND_SLASH retry);
+#                                   middleware.py (20) acceptable.
+#   NEW sites model field         → contrib/sites/models.py (120, Site).
