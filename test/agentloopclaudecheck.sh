@@ -145,7 +145,8 @@ if sk.exists() and any( sk.iterdir() ):
 else:
     no( "ripwire_skills arm has no skills tree" )
 
-# ── 6. the shim: claude self-logs no shell commands, so this is the ONLY ripwire counter ────────
+# ── 6. the shim: the AUTHORITATIVE ripwire counter (the session transcript, section 7b, is the
+# secondary witness — the shim also sees invocations a transcript parse could misclassify) ───────
 if pathlib.Path( shim ).parent.resolve().is_relative_to( pathlib.Path( run_home ).resolve() ):
     ok( "the ripwire shim lives in the run home" )
 else:
@@ -171,6 +172,77 @@ if R._claude_metrics( "not json", None, pathlib.Path( tmp ) / "events" / "y.json
     ok( "an unparseable trailer is still retained (the file is the evidence of record)" )
 else:
     no( "an unparseable trailer was discarded" )
+
+# ── 7b. the SESSION transcript is retained and parsed — the trailer alone is not tool-call evidence ──
+# The trailer `claude -p` prints is a 20-key summary object (cost, usage, result text, session_id) —
+# it records NO tool calls. The CLI self-logs the real per-message stream into
+# $CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<session_id>.jsonl, which on a benchmark run lives inside the
+# ephemeral run home and dies with /tmp. Found the hard way (2026-08-22 Lane AA transcript mining):
+# an archived events/ directory that held only trailers, plus command_calls/native_read_calls frozen
+# at null on every claude record. This section is the contract that the transcript is (a) copied into
+# events/ next to the trailer and (b) parsed into the two formerly-null accounting fields.
+sid = "11111111-2222-3333-4444-555555555555"
+t_home = pathlib.Path( tmp ) / "t-run-home"
+t_proj = t_home / "projects" / "-tmp-fake-repo"
+t_proj.mkdir( parents=True, exist_ok=True )
+_fixture_lines = [
+    json.dumps( { "type": "user", "message": { "role": "user", "content": "fix it" } } ),
+    json.dumps( { "type": "assistant", "message": { "content": [
+        { "type": "tool_use", "name": "Bash", "input": { "command": 'ripwire . --for="query" --token-budget=4000' } } ] } } ),
+    json.dumps( { "type": "assistant", "message": { "content": [
+        { "type": "text", "text": "reading" },
+        { "type": "tool_use", "name": "Read", "input": { "file_path": "a.py" } } ] } } ),
+    json.dumps( { "type": "assistant", "message": { "content": [
+        { "type": "tool_use", "name": "Bash", "input": { "command": "cat setup.py" } } ] } } ),
+    json.dumps( { "type": "assistant", "message": { "content": [
+        { "type": "tool_use", "name": "Grep", "input": { "pattern": "foo" } } ] } } ),
+    json.dumps( { "type": "assistant", "message": { "content": [
+        { "type": "tool_use", "name": "Edit", "input": { "file_path": "a.py" } } ] } } ),
+    "this line is not json and must be skipped, never a crash",
+]
+( t_proj / ( sid + ".jsonl" ) ).write_text( "\n".join( _fixture_lines ) + "\n" )
+t_retain = pathlib.Path( tmp ) / "events" / "t.json"
+t_stdout = json.dumps( { "result": "done", "session_id": sid,
+                         "usage": { "input_tokens": 1, "output_tokens": 2 } } )
+t_out = R._claude_metrics( t_stdout, None, t_retain, run_home=t_home, ripwire_bin="ripwire" )
+t_copy = t_retain.parent / "t.transcript.jsonl"
+if t_copy.exists() and t_copy.read_text() == ( t_proj / ( sid + ".jsonl" ) ).read_text():
+    ok( "the session transcript is copied byte-for-byte into events/ next to the trailer" )
+else:
+    no( "the session transcript was not retained at %s" % t_copy )
+if t_out.get( "events_path" ) == str( t_retain ):
+    ok( "events_path still names the trailer (grade_answers.py's answer source is unchanged)" )
+else:
+    no( "events_path moved off the trailer: %r" % ( t_out.get( "events_path" ), ) )
+if t_out.get( "command_calls" ) == 2:
+    ok( "command_calls counts the transcript's Bash tool_use blocks (2)" )
+else:
+    no( "command_calls=%r, expected 2 from the fixture transcript" % ( t_out.get( "command_calls" ), ) )
+if t_out.get( "native_read_calls" ) == 3:
+    ok( "native_read_calls counts Read + Grep tools plus the `cat` shell read (3), never the Edit" )
+else:
+    no( "native_read_calls=%r, expected 3 (Read, Grep, cat)" % ( t_out.get( "native_read_calls" ), ) )
+if t_out.get( "ripwire_calls" ) == 1 and "ripwire ." in ( t_out.get( "ripwire_commands" ) or [ "" ] )[ 0 ]:
+    ok( "transcript-parsed ripwire evidence fills in when no shim log exists (the shim still wins when it does)" )
+else:
+    no( "transcript ripwire accounting broke: calls=%r commands=%r"
+        % ( t_out.get( "ripwire_calls" ), t_out.get( "ripwire_commands" ) ) )
+# a session_id the run home does not contain must attach NOTHING — a guessed transcript is worse
+# than a missing one (it would attribute another run's tool calls to this record)
+t_out2 = R._claude_metrics( json.dumps( { "result": "x", "session_id": "not-there" } ), None,
+                            pathlib.Path( tmp ) / "events" / "t2.json", run_home=t_home, ripwire_bin="ripwire" )
+if t_out2.get( "command_calls" ) is None and not ( pathlib.Path( tmp ) / "events" / "t2.transcript.jsonl" ).exists():
+    ok( "an unmatched session_id attaches no transcript and leaves the counts null (never a guess)" )
+else:
+    no( "an unmatched session_id still attached evidence: %r" % ( t_out2, ) )
+# an unparseable trailer (the timeout path) falls back to the newest session file — for a timed-out
+# run the transcript is the ONLY evidence, and the fallback is disclosed in the docstring
+t_out3 = R._claude_metrics( "not json (timeout partial)", None,
+                            pathlib.Path( tmp ) / "events" / "t3.json", run_home=t_home, ripwire_bin="ripwire" )
+if t_out3.get( "command_calls" ) == 2 and ( pathlib.Path( tmp ) / "events" / "t3.transcript.jsonl" ).exists():
+    ok( "an unparseable trailer still retains+parses the newest session transcript (timeout evidence)" )
+else:
+    no( "the timeout path lost the session transcript: %r" % ( t_out3, ) )
 
 # ── 8. the questions task source and its prompt ─────────────────────────────────────────────────
 bank = pathlib.Path( root ) / "bench" / "agentloop" / "fixtures" / "grader" / "instances.tsv"
