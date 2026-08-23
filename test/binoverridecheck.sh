@@ -90,6 +90,7 @@ EXEMPT = {
     "g1freshcheck.sh":           "checks asan/ripwire's mtime on disk against src/; never executes the binary",
     "gateexitcheck.sh":          "meta-check of other gates' own shell/exit-code conventions; no binary invocation",
     "infraportcheck.sh":         "greps source files for the literal string 'ripwire'; no binary invocation",
+    "loopconservationcheck.sh":  "reads test/regression.sh's absorb loop via `git show REF:...` across HEAD and its merge parents (a pure git-history check); never invokes build/ripwire",
     "manifestcheck.sh":          "checks that every test/*check.sh is listed in test/regression.sh; pure file check",
     "optremarkscheck.sh":        "checks -DRIPWIRE_OPT_REMARKS/-DRIPWIRE_PGO CMake config text; no binary invocation",
     "pargatescheck.sh":          "meta-check of test/pargates.py's own source; pure file check",
