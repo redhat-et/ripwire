@@ -5,6 +5,7 @@
 
 #include "model.h"
 #include "filter.h"              // isTestPath — for the Q2 tested= post-pass
+#include "pageview.h"            // LB-H: kImportReachRowCap — the import tier's display cap lives with the rest of the truncation vocabulary
 #include "lintrules.h"           // §P9.4: langOfPath / dependencyCapable — the file-language classification
                                  // restrictDependencyHealth() needs (owns the extension table, kept in sync
                                  // by hand with ingest.cpp's kLangTable per its own header comment)
@@ -3000,6 +3001,107 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
 inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestResult& ing )
 {
     return buildPreciseIncludeAdj( ing, /*dedup=*/false );
+}
+
+// ── LB-H (r10 GitNexus round) — IMPORT REACH, the second and much weaker kind of blast radius ────────────
+// The files that DIRECTLY include/import one of `defFiles`, sorted by file id, each listed once, with the
+// defining files themselves removed (a file is not its own importer, and a mutual include would otherwise
+// put a def file in its own answer).
+//
+// It answers a different question from transitiveCallers() and the two must never be summed:
+//
+//   * CALL reach is symbol-granular and evidence-bearing — a caller names the symbol, so changing the
+//     symbol's contract provably concerns it.
+//   * IMPORT reach is FILE-granular and only says the importer pulled in the file the symbol lives in. It
+//     may use a different symbol from that file, or none at all. It is neither a subset nor a superset of
+//     the call set: webpack's 8 `require("./ChunkGraph")` files were entirely outside the 25-symbol call
+//     radius, while a file can also be in both (as a FILE here, as a SYMBOL there).
+//
+// DIRECT, not transitive, on purpose. The transitive closure of an include graph is enormous (webpack's
+// lib has a per-file transitive cone of ~100 files) and its far edge carries no information about the
+// symbol at all; one hop is the tier where "you named this file in an import" is still true of every row.
+inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, const std::vector<std::uint32_t>& defFiles )
+{
+    std::vector<std::uint32_t> importers;
+    if( defFiles.empty() || ing.includes.empty() )
+    {
+        return importers;
+    }
+
+    const std::uint32_t F = std::uint32_t( ing.files.size() );
+    std::vector<char>   isDef( F, 0 );
+    for( const std::uint32_t f : defFiles )
+    {
+        if( f < F )
+        {
+            isDef[f] = 1;
+        }
+    }
+
+    // dedup=true: this is a MEMBERSHIP question ("does this file import a def file"), not an
+    // occurrence-count one, so the deduped adjacency is both the right shape and the cheaper scan.
+    const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true );
+    for( std::uint32_t f = 0; f < F && f < adj.size(); ++f )
+    {
+        if( isDef[f] )
+        {
+            continue;                       // a def file's own includes are not importers OF it
+        }
+        for( const std::uint32_t to : adj[f] )
+        {
+            if( to < F && isDef[to] )
+            {
+                importers.push_back( f );
+                break;                      // one row per FILE, however many of the defs it imports
+            }
+        }
+    }
+    return importers;                       // ascending file id — already sorted, already unique
+}
+
+// The whole import tier as --impact reports it, computed ONCE for every dialect and for both surfaces.
+// The CLI arm and its MCP twin must not diverge on an honesty marker (the §B4 echo-site class, and
+// mcpclidiffcheck compares their attribute sets), so the seeds→rows→attributes derivation lives here
+// rather than twice at the two emitters. Only the per-row path rendering is left to the caller, because
+// XML escaping and JSON quoting are the caller's dialect, not this file's.
+//
+// `files` is the FULL, ordered list; `shown` is how many of it a row-bearing dialect prints. The order is
+// filter.h's shared tier key — SOURCE first, then test/bench, then docs, then by path — so a capped window
+// can never fill with fixtures while the real dependents sit below the cut (LB-G's lesson, applied here
+// before this listing could repeat it).
+struct ImportTier
+{
+    std::vector<std::uint32_t> files;
+    std::size_t                shown  = 0;
+    bool                       capped = false;
+    std::string                xmlAttrs;   // " importers= shown_importers= importers_capped=" — pure digits, nothing to escape
+};
+
+inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<NodeId>& seeds )
+{
+    std::vector<std::uint32_t> defFiles;
+    defFiles.reserve( seeds.size() );
+    for( const NodeId s : seeds )
+    {
+        defFiles.push_back( ing.symbols[s].fileId );
+    }
+    std::sort( defFiles.begin(), defFiles.end() );
+    defFiles.erase( std::unique( defFiles.begin(), defFiles.end() ), defFiles.end() );
+
+    ImportTier t;
+    t.files = importersOfFiles( ing, defFiles );
+    const std::vector<std::uint8_t> tierOfFile = rw::pathTierIndexOver( ing, t.files, [ ]( std::uint32_t f ) { return f; } );
+    std::sort( t.files.begin(), t.files.end(),
+               [ & ]( std::uint32_t a, std::uint32_t b ) { return rw::compareTierThenPath( ing, tierOfFile, a, b ) < 0; } );
+
+    t.shown  = std::min( t.files.size(), std::size_t( rw::kImportReachRowCap ) );
+    t.capped = t.shown < t.files.size();
+    // Emitted UNCONDITIONALLY, zero included: an absent importers= reads as "this build cannot measure it",
+    // and a shown_ without its capped= is the missing-attribute ambiguity pageview.h rule 3 forbids.
+    t.xmlAttrs = " importers=\"" + std::to_string( t.files.size() ) + "\""
+               + " shown_importers=\"" + std::to_string( t.shown ) + "\""
+               + " importers_capped=\"" + ( t.capped ? "1" : "0" ) + "\"";
+    return t;
 }
 
 // Tarjan SCC on the file→file graph → cycles (SCCs with >1 node). Cyclic physical dependencies are
