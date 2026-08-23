@@ -464,7 +464,7 @@ evidence families**, and ranks by how many of them *agree*, never as one blended
 implements published work — McCabe on shape, Butler on naming, Gopstein's atoms of confusion on
 idiom, Nagappan & Ball on churn, Beck & Diehl on colocation, Henry & Kafura on state — with the
 lesson taken from each paper, and the rules measured and *withdrawn*, in
-[`docs/LINEAGE.md`](docs/LINEAGE.md). Pooled over five corpora (n = 27,999) the largest correlation
+[`docs/LINEAGE.md`](docs/LINEAGE.md). Pooled over five corpora (n = 27,889) the largest correlation
 between any two families is **+0.168**: they really are measuring different things, so two families
 firing on the same function is corroboration rather than one metric counted twice.
 
@@ -552,7 +552,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 </p>
 
 <p align="center">
-  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 23 slides</b></a> — every figure names the instrument that pins it<br>
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 26 slides</b></a> — every figure names the instrument that pins it<br>
   <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
 </p>
 
@@ -701,7 +701,7 @@ contract, gated on every pull request and every push to main, not a tendency.
 
 **Six independent evidence families, ranked by how many of them agree — never one blended score.**
 Pointed at this repository's **4,956** eligible functions, 2-of-6 agreement leaves **401** worth a
-second look: an **8.1%** shortlist. Pooled over five corpora (n = 27,999) no two families correlate
+second look: an **8.1%** shortlist. Pooled over five corpora (n = 27,889) no two families correlate
 above **+0.168**, which is what makes agreement corroboration rather than one metric counted twice.
 What each family actually looks at — on this repository's own source, not a synthetic example:
 
@@ -723,7 +723,7 @@ and ranks by the *count* of families agreeing, never a weighted composite — av
 metrics and calling it several is the Maintainability Index's well-known failure mode. On this
 repository the panel measures **4,956** eligible functions and narrows them to **401** worth a
 second look at 2-of-6 agreement — an **8.1%** shortlist, not a guess — and the largest correlation
-between any two families, pooled across five independent corpora (n = 27,999), is **+0.168**: the
+between any two families, pooled across five independent corpora (n = 27,889), is **+0.168**: the
 families really are measuring different things. The six-family table above shows what each finds on
 this repository's own source; the sections below are the parts that need more than a row.
 
@@ -1601,7 +1601,7 @@ tier: it parses with its own vendored grammar, so its headings are symbols, not 
 | Orientation for a coding agent working *on* this repository | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) |
 | User-visible capabilities, behaviour changes, known limits | [`CHANGELOG.md`](CHANGELOG.md) |
 | Vendored dependencies and their licences | [`THIRD_PARTY.md`](THIRD_PARTY.md) |
-| The whole tool in 23 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
+| The whole tool in 26 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 
