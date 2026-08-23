@@ -9358,9 +9358,9 @@ std::optional<int> runNotes( const MainDispatch& d )
         {
             XmlWriter        w( stdout );
             std::vector<char> esc;
-            char hdr[ 320 ];
+            char hdr[ 512 ];
             std::snprintf( hdr, sizeof( hdr ),
-                           "<ctx><!-- ripwire field notes: notes=%zu targets=%zu dangling=%zu (a target with no matching indexed symbol/file — legal: listed here, surfaced nowhere) -->",
+                           "<ctx><!-- ripwire field notes: notes=%zu targets=%zu dangling=%zu (a target with no matching indexed symbol/file — legal: listed here, surfaced nowhere); note d=ISO-date(committer-clock,not-wall-time) sha=/branch=HEAD-provenance-at-add-time(only-on-stamped-notes) -->",
                            all.size(), targetCount, danglingCount );
             w.write( hdr );
             w.write( "<notes>" );
