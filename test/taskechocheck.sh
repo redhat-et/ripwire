@@ -122,6 +122,40 @@ else
     no "xmllint is required for the G4 arms (install libxml2) — the gate does not skip"
 fi
 
+# ── §B1.7 arm 4b: the SAME echo family on the AUTO serving shape (2026-08-23 serving-shape sweep) ──
+# The probe TASK above routes conceptual, which now serves the COMPACT bundle — so arms 1-4's --for
+# halves observe only that shape, and a regression confined to the name-exact route's header (the body
+# walk rebuilds its header through the same builder, but with a different enrichment plan) would pass
+# unobserved. This twin pins task=/route=/comment-echo on the auto shape, behind a presence guard that
+# fails if the query ever stops anchoring (CONTRIBUTING §2). The task still carries a real
+# double-hyphen flag name, which is the input this whole gate exists for.
+TASK2="ceilingArithmetic --token-budget"
+XMLFOR2="$( "$BIN" "$CORPUS" --for="$TASK2" 2>/dev/null )"
+[ -n "$XMLFOR2" ] || no "arm 4b: the auto-shape probe produced nothing — the twin cannot observe its contract"
+printf '%s' "$XMLFOR2" | grep -q 'bundle="auto"' \
+    && ok "arm 4b presence: the twin query routes name-exact and serves the AUTO shape" \
+    || no "arm 4b presence: the twin query no longer serves bundle=\"auto\" — re-anchor it, arms below observe the wrong shape"
+xfor2="$( printf '%s' "$XMLFOR2" | rootAttr task )"
+if   [ "$xfor2" = "$TASK2" ];       then ok "arm 4b: auto-shape XML root task= is the verbatim query (double-hyphen intact)"
+elif [ "$xfor2" = "@@MISSING@@" ];  then no "arm 4b: auto-shape XML root has no task= attribute"
+else                                     no "arm 4b: auto-shape XML root task= was rewritten: '$xfor2' != '$TASK2'"; fi
+rfor2="$( printf '%s' "$XMLFOR2" | rootAttr route )"
+case "$rfor2" in
+    "@@MISSING@@")  no "arm 4b: auto-shape XML root has no route= attribute";;
+    *"name-exact"*) ok "arm 4b: auto-shape route= names its ranker verbatim";;
+    *)              no "arm 4b: auto-shape route= names no ranker ('$rfor2')";;
+esac
+case "$XMLFOR2" in
+    *'<!-- ripwire lens for "ceilingArithmetic -token-budget"'*)
+        ok "arm 4b: the auto-shape comment echo is still dash-collapsed (G4 scrub intact on this shape)";;
+    *)  no "arm 4b: the auto-shape comment echo lost the collapsed form";;
+esac
+if command -v xmllint >/dev/null 2>&1; then
+    printf '%s' "$XMLFOR2" | xmllint --noout - 2>/dev/null \
+        && ok "arm 4b: the auto-shape XML with root attrs is well-formed (G4)" \
+        || no "arm 4b: the auto-shape XML fails xmllint"
+fi
+
 # ── §B1.7 arm 5: verbs that echo no task keep a root free of EMPTY attributes ──────────────────────
 # RE-PINNED 2026-08-19 (R-E CORRECTION): this arm read `head -c 5 == "<ctx>"`, which was a proxy for what
 # §B1.7 actually forbids — an attribute the verb has NO VALUE for (task="" / route=""). --lego now opens
