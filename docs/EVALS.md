@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 447 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 446 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -2711,7 +2711,7 @@ baseline or the guards moves with this correction, and no result had been taken 
 
 **The rule, corrected.** Inside `src/lexical.h`'s conceptual BM25 (`lexicalScoresTiered`), applied to the
 document's assembled score in both scoring branches identically, exactly where the Section down-weight
-and the §P4 tier multiplier already sit:
+and the fixture/generated-path tier multiplier already sit:
 
 ```
 D     = ( sum over query terms of tf ) / dl      # share of the document that IS query text
@@ -2822,6 +2822,87 @@ establishes whether a rejected mechanism is dead or merely mistuned — no verdi
 - **This rule cannot be measured on this repository's own populations.** The in-tree lanes carry no
   diagnostic-class population; they are here as floors, and any movement on them is a cost, never a win
   to bank.
+
+#### Result — measured 2026-08-22, one measurement, against the band above
+
+**REJECT, reverted.** The band is missed, both displacement guards are tripped, and the change is out
+of the tree. The registration above is unchanged: nothing here re-cuts a band, adds a label, or re-reads
+an edge.
+
+| Registered metric | Baseline | Measured | Band / bar | Verdict |
+| --- | ---: | ---: | --- | --- |
+| `diagnostic-class` net flipped rows, gold in top-5, n=14 | 7 | **8 (+1)** | [+2, +6] | **out of band** |
+| Displacement — other three buckets, combined gold in top-5, n=40 | 18 | **17 (−1)** | may not fall | **tripped** |
+| Displacement — `thin-registration` strict r@10 | 9 | **6 (−3)** | −1 row at most | **tripped** |
+| Displacement — `subsystem-directory` / `vendored-asset` / `diagnostic-class` strict r@10 | 7 / 7 / 8 | 6 / 8 / 10 | −1 row at most | in bar |
+
+**The audit predicted the outcome row for row, which is the useful part.** The two rows that flipped IN
+are exactly the two the pre-code table cleared comfortably — the cache backend storing a value with a
+timeout (rank 9 → 2) and the emitted asset checked against a size budget (unranked → 2). The one row
+that flipped OUT is from the inverting class the audit named: a package `sideEffects` flag applied to a
+module (5 → 9), whose gold is the densest document in its own neighbourhood, so a rule that prices
+density can only cost it. The borderline row the audit put 0.3% short did not land, and neither
+unreachable row moved. **+2 where predicted, −1 where predicted, net +1 against a lower edge of +2.**
+
+**The mechanism is dead, not mistuned.** Swept across the whole authority range after the verdict was
+taken — a diagnostic, and no verdict is drawn from it:
+
+| `RIPWIRE_TERMDENSITY_FLOOR` | 0 | 10 | 25 (shipped default) | 50 | 75 | 100 (rule off) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `diagnostic-class` strict r@5 | 8/14 | 8/14 | **8/14** | 8/14 | 8/14 | 7/14 |
+
+At floor 0 the factor is unbounded — a document may lose all but an arbitrarily small share of its
+evidence — and the bucket still reads 8/14. There is no setting of this knob at which the mechanism buys
+its band, so a future round should not retry it at a different constant.
+
+**The standing floors held, and that is not the same as the change being harmless:**
+
+| Guard | Floor / ceiling | At `d7061e2` | With the rule in |
+| --- | ---: | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / **91/152** |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / **0.627** |
+| LIVE-corpus pollution@5 | ≤ 16% | 2.4% | 2.4% |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / **0.586** |
+| ranking lane strict recall@1 | not a floor | 53.1% | **43.8%** |
+| ranking lane / adversarial pollution@5 | ≤ 5% / ≤ 8% | 0.0% / 0.0% | 0.0% / 0.0% |
+
+Every registered floor is green — the tightest one, the ranking lane's lenient recall@5, did not move
+at all. **Read alone that table would have licensed the change.** The per-query diff says otherwise:
+against the base binary on the frozen ranking corpus, `scored=32 wins=4 losses=4 net=+0 ties=24` — an
+aggregate that holds while a quarter of the rows churn underneath it, including one row lost outright
+and three rows displaced off rank 1. That is precisely the failure the diff is registered to expose, and
+it is why the ranking lane's strict recall@1 fell nine points while its lenient recall@5 did not move.
+The frozen docs corpus reads `scored=42 wins=3 losses=2 net=+1 ties=37`.
+
+**The gate suite is what makes this REJECT unarguable.** With the rule in the tree,
+`python3 test/pargates.py . ./build/ripwire -j 6` reported **`gates=455 pass=440 skip=3 fail=12`** —
+eleven substantive failures plus the known warm-timing flake. `routecheck.sh` and `anchorcheck.sh` drift
+from their golden `--for` outputs; `recallanchorcheck.sh` selects a different body anchor (`1-15` where
+the ground truth is `5-8`); `retrievalqualitycheck.sh` reports its explicit-query/denylist policy
+regressed; and `adaptivecheck`, `modifierguardcheck`, `fornotesbudgetcheck`, `packtaskmonotoncheck`,
+`cochangeboostcheck` and `sibliftcheck` each move. A global multiplier on the conceptual BM25 reaches
+every verb that ranks anything, and eleven gates is the honest measure of that reach — a scale of
+disturbance the four bucket rates and the eight standing floors together did not show.
+
+**What is now closed for this bucket.** All three readings it has been given are refuted with the
+evidence to keep them refuted: it is not name-only matching (the displacing diagnostics carry real body
+evidence), it is not short documents (they are not short, and the length floor was swept to zero effect),
+and it is not term density in either direction (per-term density points at the offenders and was refuted
+before code; document density buys exactly +2 and gives back −1 to its own inverting class, at every
+setting of its own knob). What actually separates a diagnostic from its implementation on these rows is
+visible in the anatomy and is not a density: the diagnostic's document contains the question's function
+words and its documentation URL, so it matches MORE DISTINCT query terms than the implementation does,
+and each of those matches is a hapax that BM25 already pays 40% of a saturated term for. Acting on that
+observation means pricing hapax coordination or filtering query function words — and the function-word
+strip is one of the two negatives recorded in §7 for exactly this family. **A fourth attempt on this
+bucket needs a new mechanism, not a new constant, and this round did not find one.**
+
+The gate written for the rule (`test/termdensitycheck.sh`) came out with it, since it no longer describes
+shipped behaviour; the gate count returns to 446. The rule's commit and this revert are both kept on
+record rather than rebased away: a negative is only reproducible while the code that produced it is still
+readable.
 
 ---
 
@@ -3170,7 +3251,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **447 gate scripts**, all of which exist on disk.
+naming **446 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -3978,7 +4059,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 447. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 446. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
