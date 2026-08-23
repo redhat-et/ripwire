@@ -227,6 +227,37 @@ else
         else
             no "(E) dmm for $WAVE_A..$WAVE_B was '$dmmVal'; the round record states 0.530"
         fi
+
+        # ── (F) the AMBIENT-GIT-CONFIG seam — the arm that would have caught the 19-vs-18 divergence ──────
+        # Arm (E) above compares two mechanisms; it does NOT ask whether either one answers the same way on
+        # a machine configured differently. It did not, and that is how this gate stayed green on every
+        # developer's tree while it was red on every CI leg: the churn SELF/AMBIENT split blames lines,
+        # `git blame` honors `blame.ignoreRevsFile` from REPO-LOCAL config, and git config is never cloned.
+        # Configured worktrees read the mechanical brace sweep through to the real author (AMBIENT, 18
+        # rows); CI's empty config counted the sweep itself as in-window thrash (SELF, 19). Nothing was
+        # stale and nothing had moved — the number was simply a function of an input nobody had written
+        # down. So the property to gate is not a count, it is INVARIANCE: the same shas and the same tree
+        # must produce the same rows no matter what the ambient git config says.
+        #
+        # GIT_CONFIG_* is the non-destructive way to say "a developer had this configured" — it injects
+        # config for the spawned git without writing to $ROOT's real config file, which a `git config` call
+        # in a gate would clobber (the worktree shares its repo's config with the developer's own checkout).
+        # Both directions are pinned: pointing AT this repo's ignore list (the exact value that caused the
+        # incident) and at an empty list (the CI-shaped value). RED BEFORE GREEN: against a binary built
+        # before the pin, the first of the two differs from the unconfigured run by exactly the one
+        # short-horizon-churn row on src/docdrift.h::computeDocDrift.
+        gatingRows "$TMP/overlay.xml" >"$TMP/ambient_base.rows"
+        for ignoreVal in "$WT/.git-blame-ignore-revs" "/dev/null"; do
+            env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=blame.ignoreRevsFile GIT_CONFIG_VALUE_0="$ignoreVal" \
+                "$BIN" "$WT" --quality-delta >"$TMP/overlay_ambient.xml" 2>/dev/null
+            gatingRows "$TMP/overlay_ambient.xml" >"$TMP/ambient.rows"
+            if diff -q "$TMP/ambient_base.rows" "$TMP/ambient.rows" >/dev/null; then
+                ok "(F) gating rows are invariant to an ambient blame.ignoreRevsFile=$ignoreVal"
+            else
+                no "(F) ambient blame.ignoreRevsFile=$ignoreVal MOVED the gating rows — the measurement inherits developer config"
+                diff "$TMP/ambient_base.rows" "$TMP/ambient.rows" | head -6
+            fi
+        done
     fi
 fi
 

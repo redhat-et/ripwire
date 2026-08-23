@@ -2605,6 +2605,28 @@ inline BaselineSelection selectBaseline( const std::string& root, const std::str
 // never sets `hot` → AMBIENT, the safe default that never inflates severity on missing evidence. Deterministic
 // for a fixed HEAD + fixed working tree (both diff and blame are pure functions of on-disk/committed state).
 
+// ── the AMBIENT-CONFIG SEAM, and why every git invocation here pins it ─────────────────────────────────
+// `git blame` does NOT read only on-disk/committed state: it also reads the repository's own config, and
+// `blame.ignoreRevsFile` there rewrites which commit a line is attributed to — and therefore which
+// committer-time this function compares against the window. Repo-local git config is never cloned, so a
+// developer who ran this repo's own one-time `git config blame.ignoreRevsFile .git-blame-ignore-revs`
+// measured a DIFFERENT churn facet than a fresh checkout of the same shas: CI, whose config is empty, read
+// the mechanical brace sweep 208611f8 as in-window thrash (SELF) where every configured worktree read
+// through it to the older real author (AMBIENT). That is one gating row of drift on ripwire's own history
+// (2026-08-15 wave: 19 rows on CI, 18 everywhere a developer looked), and it made the paragraph above
+// FALSE as written. The fix is to stop inheriting: the ignore list is pinned to TRACKED state — the
+// conventionally-named `.git-blame-ignore-revs` at the judged root when it exists, and explicitly EMPTY
+// when it does not, so ambient config can never reach the measurement in either direction. Content the
+// tree itself carries is exactly the "committed state" the purity claim means; a developer's config is not.
+// An unresolvable sha inside the file is git's problem and it degrades to a warning, not a failed blame.
+inline std::string gitBlameConfigPins( const std::string& root )
+{
+    std::error_code   ec;
+    const std::string ignoreRevs = root + "/.git-blame-ignore-revs";
+    const bool        hasFile    = std::filesystem::exists( std::filesystem::path( ignoreRevs ), ec ) && !ec;
+    return hasFile ? " -c blame.ignoreRevsFile=" + shSingleQuote( ignoreRevs ) : std::string( " -c blame.ignoreRevsFile=" );
+}
+
 // Blame `root`'s HEAD over `relPath`'s [startLine, startLine+lineCount-1] and report whether ANY line in that
 // range was last committed at or after `windowCutoffEpoch` (the same cutoff basis gitFileCommitCountsInDayWindow
 // and gitWindowRefSha use: HEAD's own committer epoch minus the window, never wall-clock).
@@ -2615,7 +2637,7 @@ inline bool gitBlameRangeHasWindowCommit( const std::string& root, const std::st
     {
         return false;
     }
-    const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
+    const std::string cmd = "git -c core.quotepath=false" + gitBlameConfigPins( root ) + " -C " + shSingleQuote( root )
                           + " blame --porcelain -L " + std::to_string( startLine ) + ",+" + std::to_string( lineCount )
                           + " HEAD -- " + shSingleQuote( relPath ) + " 2>/dev/null";
     std::FILE* pipe = popen( cmd.c_str(), "r" );
@@ -2671,11 +2693,23 @@ using DiffHunkMemo = HashMap<std::string, std::vector<DiffHunk>>;
 
 // Parse `relPath`'s zero-context hunk headers vs HEAD. Degrade-only: no git / no HEAD / path absent at HEAD →
 // an EMPTY vector, which the caller reads as "no evidence" → AMBIENT (never inflates severity).
+//
+// Same ambient-config seam as the blame above, pinned for the same reason and in the same commit: a
+// configured `diff.algorithm` moves hunk BOUNDARIES (which lines land in an oldCount>0 hunk at all), and a
+// `diff.external` driver replaces this output wholesale with something these two sscanf forms cannot parse —
+// silently emptying the vector, which the caller reads as AMBIENT. Neither is a hang or an error, which is
+// what makes them worth pinning: they change a reported number with nothing on the record saying so.
+//
+// The external driver is disarmed with git's own `--no-ext-diff` flag, NOT with `-c diff.external=`: an
+// EMPTY diff.external is not "no external diff", it is an external diff whose command is the empty string,
+// and git dies trying to exec it ("error: cannot run : No such file or directory / fatal: external diff
+// died"). That mistake reads as a fix in review and shows up as every churn row silently going AMBIENT —
+// measured here as 8 gating churn rows collapsing to 0 before the flag replaced it.
 inline std::vector<DiffHunk> gitDiffHunksVsHead( const std::string& root, const std::string& relPath )
 {
     std::vector<DiffHunk> hunks;
-    const std::string cmd = "git -c core.quotepath=false -C " + shSingleQuote( root )
-                          + " diff --unified=0 --no-color HEAD -- " + shSingleQuote( relPath ) + " 2>/dev/null";
+    const std::string cmd = "git -c core.quotepath=false -c diff.algorithm=myers -C " + shSingleQuote( root )
+                          + " diff --no-ext-diff --unified=0 --no-color HEAD -- " + shSingleQuote( relPath ) + " 2>/dev/null";
     std::FILE* pipe = popen( cmd.c_str(), "r" );
     if( !pipe ) { DEGRADED_PATH_ALERT( "quality: churn hunk diff could not be spawned" ); return hunks; }
 
