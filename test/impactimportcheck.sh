@@ -57,6 +57,9 @@ grep -q 'new Widget(' "$FIX/lib/user.js" \
     || no "fixture guard: user.js no longer constructs Widget — the two-tier case is inert"
 
 i(){ perl -e 'alarm 30; exec @ARGV' "$BIN" "$FIX" --impact="$1" --no-cache 2>/dev/null; }
+# The legend now SPELLS the row shape (`<f via="import" p="…"/>`), so a naive grep for a row matches the
+# documentation of the row. Every row-level assertion runs against the ELEMENT, not the whole document.
+body(){ printf '%s' "$1" | sed 's/^.*<impact /<impact /'; }
 attr(){ printf '%s' "$2" | grep -oE "(^|[^_a-z])$1=\"[^\"]*\"" | head -1 | grep -oE '"[^"]*"' | tr -d '"'; }
 
 OUT_W="$( i Widget )"
@@ -80,18 +83,18 @@ REACHES="$(   attr reaches   "$OUT_W" )"
     || no "--impact=Widget: reaches='$REACHES', expected 1 (import reach must not leak into it)"
 
 for f in alpha beta gamma user delta; do
-    printf '%s' "$OUT_W" | grep -qE "<f via=\"import\" p=\"lib/$f\.js\"/>" \
+    body "$OUT_W" | grep -qE "<f via=\"import\" p=\"lib/$f\.js\"/>" \
         && ok "--impact=Widget: import-tier row for lib/$f.js" \
         || no "--impact=Widget: missing <f via=\"import\" p=\"lib/$f.js\"/>"
 done
-printf '%s' "$OUT_W" | grep -qE '<f via="import" p="lib/Widget\.js"/>' \
+body "$OUT_W" | grep -qE '<f via="import" p="lib/Widget\.js"/>' \
     && no "--impact=Widget: the DEFINING file is listed as its own importer" \
     || ok "--impact=Widget: the defining file is not listed as an importer of itself"
 
 # ── #3 the two tiers stay distinct in the ROW space too ───────────────────────────────────────────────
 # user.js is in both: as the SYMBOL `build` in the call-reach rows, as the FILE in the import rows. The
 # symbol-row count must still equal shown=, i.e. no <f> row was counted into the primary listing.
-S_ROWS="$( printf '%s' "$OUT_W" | grep -oE '<s t=' | wc -l | tr -d ' ' )"
+S_ROWS="$( body "$OUT_W" | grep -oE '<s t=' | wc -l | tr -d ' ' )"
 SHOWN="$( attr shown "$OUT_W" )"
 { [ "$S_ROWS" = "$SHOWN" ] && [ "$S_ROWS" = 1 ]; } \
     && ok "--impact=Widget: shown=1 and exactly 1 <s> row — import rows are outside the paged listing" \
@@ -113,7 +116,7 @@ OUT_O="$( i lonely )"
     && [ "$( attr importers_capped "$OUT_O" )" = 0 ]; } \
     && ok "--impact=lonely: importers=0 shown_importers=0 importers_capped=0 (nobody imports orphan.js)" \
     || no "--impact=lonely: the zero case must still emit all three attributes — got: $( printf '%s' "$OUT_O" | grep -oE '<impact [^>]*>' )"
-printf '%s' "$OUT_O" | grep -qE '<f via="import"' \
+body "$OUT_O" | grep -qE '<f via="import"' \
     && no "--impact=lonely: emitted an import row for a file nothing imports" \
     || ok "--impact=lonely: no import rows"
 
@@ -148,9 +151,19 @@ COL="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$FIX" --impact=Widget --format=co
 printf '%s' "$COL" | grep -q 'import-tier rows are not emitted in this form' \
     && ok "--format=columnar: the legend says the count is there and the rows are not" \
     || no "--format=columnar: nothing in band explains that the import ROWS are absent in this form"
-printf '%s' "$COL" | grep -q '<f via="import"' \
+body "$COL" | grep -q '<f via="import"' \
     && no "--format=columnar: emitted <f> rows the columnar legend says are absent" \
     || ok "--format=columnar: no <f> rows, as the legend states"
+
+# ── #8b the MCP twin carries the tier too (the §B4 echo-site class: a marker landing on one surface) ──
+MCP_OUT="$( printf '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}\n{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"impact","arguments":{"path":"%s","symbol":"Widget"}}}\n' "$FIX" \
+            | perl -e 'alarm 60; exec @ARGV' "$BIN" --mcp 2>/dev/null | tail -1 )"
+{ printf '%s' "$MCP_OUT" | grep -q 'importers=\\"5\\"' \
+    && printf '%s' "$MCP_OUT" | grep -q 'shown_importers=\\"5\\"' \
+    && printf '%s' "$MCP_OUT" | grep -q 'importers_capped=\\"0\\"' \
+    && printf '%s' "$MCP_OUT" | grep -q 'p=\\"lib/alpha.js\\"'; } \
+    && ok "MCP impact verb: same importers=/shown_importers=/importers_capped= and the same rows" \
+    || no "MCP impact verb diverges from the CLI on the import tier — got: $( printf '%s' "$MCP_OUT" | head -c 400 )"
 
 # ── #9 the cap is a DEFAULT that discloses, measured on this repo (src/model.h has 60+ includers) ─────
 OUT_CAP="$( perl -e 'alarm 60; exec @ARGV' "$BIN" "$ROOT" --impact=IngestResult 2>/dev/null )"
@@ -161,7 +174,7 @@ if [ -n "$CAP_N" ] && [ "$CAP_N" -gt 40 ]; then
     { [ "$CAP_S" = 40 ] && [ "$CAP_C" = 1 ]; } \
         && ok "cap: importers=$CAP_N over 40 → shown_importers=40 importers_capped=1 (default, disclosed)" \
         || no "cap: importers=$CAP_N but shown_importers=$CAP_S importers_capped=$CAP_C (expected 40 / 1)"
-    ROWS_CAP="$( printf '%s' "$OUT_CAP" | grep -oE '<f via="import"' | wc -l | tr -d ' ' )"
+    ROWS_CAP="$( body "$OUT_CAP" | grep -oE '<f via="import"' | wc -l | tr -d ' ' )"
     [ "$ROWS_CAP" = 40 ] && ok "cap: exactly 40 import rows printed" || no "cap: printed $ROWS_CAP import rows, expected 40"
 else
     no "cap arm inert: --impact=IngestResult on this repo reported importers='$CAP_N', so the >40 case was never exercised"
