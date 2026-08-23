@@ -5177,6 +5177,54 @@ std::string includePathOf( std::string_view spelling, bool& isAngleOut )
     return std::string( spelling.substr( 1, end - 1 ) );
 }
 
+// C/C++/ObjC `#include "x.h"` / `<x.h>` → the bare path, isAngle set from the delimiter. Its own
+// function for the same reason csharpUsingTarget, phpUseTarget and jsModuleLoadTarget are: one AST shape
+// per language keeps directiveTargetOf's grain at one branch per grammar spelling, instead of one branch
+// plus its own null-and-bounds ladder. Empty when the node carries no readable path field.
+inline std::string preprocIncludeTarget( TSNode n, std::string_view src, bool& isAngleOut )
+{
+    const TSNode pth = ts_node_child_by_field_name( n, "path", 4 );
+    if( ts_node_is_null( pth ) )
+    {
+        return {};
+    }
+    const uint32_t a = ts_node_start_byte( pth ), b = ts_node_end_byte( pth );
+    if( a >= b || b > src.size() )
+    {
+        return {};
+    }
+    return includePathOf( src.substr( a, b - a ), isAngleOut );
+}
+
+// The `#import "x.h"` spelling under the C/C++ grammar. `#import` is `#include` + include-once, so it
+// MUST yield the same Include edge — this is the edge that connects a `.metal` shader to the FX headers
+// it pulls in (10 of the 45 shaders in the measured reference tree use it). Under the objc grammar it
+// already parses as preproc_include; under the C/C++ grammar there is no #import rule, so it lands as the
+// generic preproc_call: directive:(preproc_directive) `#import`, argument:(preproc_arg) `"x.h"` / `<x.h>`.
+// EVERY other preproc_call (`#pragma`, `#error`, `#warning`, an unknown directive) is not a physical
+// dependency — the directive-text check is what keeps them out, so this never widens the include graph
+// beyond #import.
+inline std::string preprocImportTarget( TSNode n, std::string_view src, bool& isAngleOut )
+{
+    const TSNode dir = ts_node_child_by_field_name( n, "directive", 9 );
+    const TSNode arg = ts_node_child_by_field_name( n, "argument",  8 );
+    if( ts_node_is_null( dir ) || ts_node_is_null( arg ) )
+    {
+        return {};
+    }
+    const uint32_t da = ts_node_start_byte( dir ), db = ts_node_end_byte( dir );
+    const uint32_t aa = ts_node_start_byte( arg ), ab = ts_node_end_byte( arg );
+    if( da >= db || db > src.size() || aa >= ab || ab > src.size() )
+    {
+        return {};
+    }
+    if( src.substr( da, db - da ) != "#import" )
+    {
+        return {};
+    }
+    return includePathOf( src.substr( aa, ab - aa ), isAngleOut );   // trailing comment ends at the closing delimiter
+}
+
 // tree-sitter does NOT flatten the preprocessor. `#if` / `#ifdef` / `#ifndef` / `#else` / `#elif` /
 // `#elifdef` each parse as a CONTAINER node that OWNS every directive written between it and its
 // `#endif` — so a directive under a feature guard is a GRANDchild of the file root, not a child, and the
@@ -5285,21 +5333,35 @@ inline constexpr std::array<std::string_view, 5> kJsImportContainers = {
     "lexical_declaration", "variable_declaration", "variable_declarator", "expression_statement", "assignment_expression"
 };
 
+// ONE TABLE, not a per-language switch. Adding the TS/JS row made this function an 87-token clone of
+// inFileTestScope's dispatch further down — a --quality-delta duplication finding, and a fair one: two
+// hand-maintained per-language switches are two places to forget a language. The table form is also what
+// CONTRIBUTING §3 asks for ("declarative constexpr tables over scattered switch/if"): which containers a
+// language has is DATA, and a language absent from the table simply has none.
+struct LangImportContainers { Lang lang; std::span<const std::string_view> nodes; };
+
+inline constexpr std::array<LangImportContainers, 5> kImportContainersByLang = { {
+    { Lang::Python,     kPythonImportContainers },
+    { Lang::Rust,       kRustImportContainers   },
+    { Lang::CSharp,     kCsharpImportContainers },
+    { Lang::TypeScript, kJsImportContainers     },
+    { Lang::JavaScript, kJsImportContainers     }
+} };
+
 inline bool isImportContainer( Lang lang, const char* type ) noexcept
 {
     if( isPreprocConditional( type ) )   // every grammar with a preprocessor: C/C++/ObjC/CUDA/Metal + C#
     {
         return true;
     }
-    switch( lang )
+    for( const LangImportContainers& e : kImportContainersByLang )
     {
-        case Lang::Python:     return namesNode( kPythonImportContainers, type );
-        case Lang::Rust:       return namesNode( kRustImportContainers, type );
-        case Lang::CSharp:     return namesNode( kCsharpImportContainers, type );
-        case Lang::TypeScript:
-        case Lang::JavaScript: return namesNode( kJsImportContainers, type );
-        default:               return false;
+        if( e.lang == lang )
+        {
+            return namesNode( e.nodes, type );
+        }
     }
+    return false;
 }
 
 // Nesting bound for the container descent. Real preprocessor guards nest a handful deep (the deepest in
@@ -5336,37 +5398,11 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
 
     if( std::strcmp( t, "preproc_include" ) == 0 )                       // C++/C/ObjC: exact file path
     {
-        const TSNode pth = ts_node_child_by_field_name( n, "path", 4 );
-        if( !ts_node_is_null( pth ) )
-        {
-            const uint32_t a = ts_node_start_byte( pth ), b = ts_node_end_byte( pth );
-            if( a < b && b <= src.size() )
-            {
-                target = includePathOf( src.substr( a, b - a ), isAngle );
-            }
-        }
+        target = preprocIncludeTarget( n, src, isAngle );
     }
     else if( std::strcmp( t, "preproc_call" ) == 0 )                     // C++-grammar `#import "x.h"` (ObjC/Metal spelling)
     {
-        // `#import` is `#include` + include-once, so it MUST yield the same Include edge — this is
-        // the edge that connects a `.metal` shader to the FX headers it pulls in (10 of the 45 shaders in
-        // the measured reference tree use the `#import` spelling). Under the objc grammar it already parses
-        // as preproc_include (handled above); under the C/C++ grammar there is no #import rule, so it
-        // lands here as the generic preproc_call: directive:(preproc_directive) `#import`,
-        // argument:(preproc_arg) `"x.h"` / `<x.h>`. EVERY other preproc_call (`#pragma`, `#error`,
-        // `#warning`, an unknown directive) is not a physical dependency — the directive check below
-        // is what keeps them out, so this branch never widens the include graph beyond #import.
-        const TSNode dir = ts_node_child_by_field_name( n, "directive", 9 );
-        const TSNode arg = ts_node_child_by_field_name( n, "argument",  8 );
-        if( !ts_node_is_null( dir ) && !ts_node_is_null( arg ) )
-        {
-            const uint32_t da = ts_node_start_byte( dir ), db = ts_node_end_byte( dir );
-            const uint32_t aa = ts_node_start_byte( arg ), ab = ts_node_end_byte( arg );
-            if( da < db && db <= src.size() && aa < ab && ab <= src.size() && src.substr( da, db - da ) == "#import" )
-            {
-                target = includePathOf( src.substr( aa, ab - aa ), isAngle );   // trailing comment ends at the closing delimiter
-            }
-        }
+        target = preprocImportTarget( n, src, isAngle );
     }
     else if( std::strcmp( t, "import_statement" ) == 0 )                 // Python `import a` / TS `import … from 'x'`
     {
