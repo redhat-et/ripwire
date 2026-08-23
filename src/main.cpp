@@ -9358,9 +9358,14 @@ std::optional<int> runNotes( const MainDispatch& d )
         {
             XmlWriter        w( stdout );
             std::vector<char> esc;
+            // The note-row attribute definitions live HERE because this header is the --notes reader's ONLY
+            // legend (legendcoveragecheck arm A): d= ISO date, sha=/branch= the provenance stamp, whose
+            // omitted-not-empty contract is appendOneNote's (serialize.h). NB: no `--` inside an XML comment.
             char hdr[ 512 ];
             std::snprintf( hdr, sizeof( hdr ),
-                           "<ctx><!-- ripwire field notes: notes=%zu targets=%zu dangling=%zu (a target with no matching indexed symbol/file — legal: listed here, surfaced nowhere); note d=ISO-date(committer-clock,not-wall-time) sha=/branch=HEAD-provenance-at-add-time(only-on-stamped-notes) -->",
+                           "<ctx><!-- ripwire field notes: notes=%zu targets=%zu dangling=%zu (a target with no matching indexed symbol/file — legal: listed here, surfaced nowhere)."
+                           " Each note row: d= is the ISO date it was recorded; sha= the abbreviated commit and branch= the branch checked out at record time,"
+                           " both omitted entirely on a note stored before provenance stamping (absent means none recorded, never empty) -->",
                            all.size(), targetCount, danglingCount );
             w.write( hdr );
             w.write( "<notes>" );

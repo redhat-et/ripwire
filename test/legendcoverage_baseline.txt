@@ -75,6 +75,11 @@
 #     src/packtask.h fired twice on a one-clause addition), so the gap is recorded here rather than closed.
 #     'cochange | pair@b' left in the same wave: the live cochange legend now spells "conf_ba= over b='s",
 #     meeting the definitional predicate.
+#   * SHAPE-DEPENDENCE RE-VERIFIED (2026-08-23, the .ripwire_notes round): a pristine origin/main clone
+#     reported 'pack-task | d@pure' AND both 'merge-scout | pair@b|risks' as (B2) gone, while a worktree of
+#     the same commit reproduced the pair@ lines and dropped only d@pure — the same lines flip per tree, so
+#     all three stay. d@pure's emitter is live at src/serialize.h (pure="1" on a const, side-effect-free
+#     signature); whether one reaches pack-task's first screen swings with the ranked pool.
 #   * 'for | field@name' surfaced when the L1 density fix (2026-08-08) dropped the route note's comment echo:
 #     the word "name" only ever appeared in that echo's routing prose ("names a symbol"), so the attribute
 #     was covered by ACCIDENT, never defined. Same <field> row as the owner|rel|type trio above; recorded
