@@ -43,6 +43,21 @@ grep -q 'route="' "$TMP/for.xml" \
     && ok "--for keeps the route= attribute (the machine-readable copy)" \
     || no "--for lost the route= attribute — the surviving copy must be the ATTRIBUTE, not the comment"
 
+# (a2) --for on the CONCEPTUAL route (2026-08-23 serving-shape sweep): the same single-copy contract on
+#      the COMPACT serving shape. (a)'s query anchors, so it pins the contract only on the auto body walk;
+#      the compact bundle rebuilds its header through the same builder with a DIFFERENT enrichment plan
+#      (its own legend, its own root attributes), which is exactly where a second 'routed:' copy could
+#      reappear unobserved. Presence guard first (CONTRIBUTING §2): the query must actually serve compact.
+"$BIN" fix --for="how does resolution work" --no-cache >"$TMP/forc.xml" 2>/dev/null
+grep -q 'bundle="compact"' "$TMP/forc.xml" \
+    && ok "--for conceptual presence: the query serves the COMPACT shape" \
+    || no "--for conceptual presence: the query no longer serves bundle=\"compact\" — re-author it, the compact arm observes the wrong shape"
+n="$( grep -o 'routed:' "$TMP/forc.xml" | wc -l | tr -d ' ' )"
+if [ "$n" = 1 ]; then ok "--for (compact shape) emits 'routed:' exactly once (got $n)"; else no "--for (compact shape) emits 'routed:' $n times (want exactly 1 — the route= attribute)"; fi
+grep -q 'route="' "$TMP/forc.xml" \
+    && ok "--for (compact shape) keeps the route= attribute" \
+    || no "--for (compact shape) lost the route= attribute"
+
 # (b) --pack-task, same contract.
 "$BIN" fix --pack-task="buildGraph" --no-cache >"$TMP/pt.xml" 2>/dev/null
 n="$( grep -o 'routed:' "$TMP/pt.xml" | wc -l | tr -d ' ' )"
