@@ -151,7 +151,7 @@ inline constexpr const char* kUsesLegendOpen =
     "role=\"macro\" is the call-shaped invocation of a name "
     "that uniquely names an indexed function-like #define — never labelled role=\"call\", because an expansion "
     "is not a plain call; a name shared with a non-macro definition stays role=\"call\" for the resolver. "
-    "Rows are ordered SOURCE first, then test/bench, then docs, and by path within a tier. ";   // LB-G
+    "Rows are ordered SOURCE first, then test/bench, then docs, and by path within a tier. "; // LB-G
 
 // --impact's opener, identical on both surfaces before this header.
 inline constexpr const char* kImpactLegendOpen =
@@ -202,7 +202,7 @@ inline constexpr const char* kCallHierarchyLegendOpen =
     "count= the number of DISTINCT neighbour symbols (a floor, per counts_floor=), which the rows window with limit= and offset=. "
     "A neighbour that is an indexed function-like #define is a macro row (t=\"macro\", role=\"macro\" on the XML row): "
     "the edge crosses a macro expansion, not a plain call — rows carry no role= otherwise. "
-    "Rows are ordered SOURCE first, then test/bench, then docs, and by path within a tier. ";   // LB-G
+    "Rows are ordered SOURCE first, then test/bench, then docs, and by path within a tier. "; // LB-G
 
 // V1 fix (verifier finding 3, 2026-08-15): bodyless_defs= is a CALLEES-only attribute — main.cpp's emitter
 // gates it behind `!wantCallers`, so a --callers document can never carry it. It used to sit inside
