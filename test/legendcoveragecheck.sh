@@ -104,7 +104,12 @@ ROSTER = [
     ("map-rrf",            [SMALL, "--rank-by=rrf"]),
     ("map-diff",           [ROOT,  "--map-diff"]),
     ("map-max-tokens",     [SMALL, "--max-tokens=3000"]),
+    # TWO --for rows, one per SERVING SHAPE (2026-08-23 sweep): the conceptual row serves the COMPACT
+    # bundle (<hops>), the name-exact row serves the AUTO body walk (<bodies>/<b>). With only the
+    # conceptual row, a new undefined attribute on the auto shape's first screen could land unseen —
+    # the exact decay class the chip-trio merge found in forbudgetmonotoncheck/fordisclosurecheck.
     ("for",                [SMALL, "--for=rank symbols by pagerank"]),
+    ("for-auto",           [SMALL, "--for=escapeXml"]),
     ("pack-task",          [SMALL, "--pack-task=rank symbols by pagerank"]),
     ("exemplar",           [SMALL, "--exemplar=rank symbols"]),
     ("hotspots",           [ROOT,  "--hotspots"]),

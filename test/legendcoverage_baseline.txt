@@ -79,6 +79,13 @@
 #     the word "name" only ever appeared in that echo's routing prose ("names a symbol"), so the attribute
 #     was covered by ACCIDENT, never defined. Same <field> row as the owner|rel|type trio above; recorded
 #     with them rather than papered over by keeping duplicate bytes in every routed bundle.
+#   * 'for-auto | ctx@route|task' (2026-08-23 serving-shape sweep): a SECOND --for roster row, name-exact,
+#     was added so the AUTO body-walk shape's first screen is inside the ratchet's window at all — the
+#     original row's conceptual query serves the COMPACT bundle, and a new undefined attribute on the auto
+#     shape could previously land unseen. The two lines are the SAME pre-existing ctx@route/ctx@task debt
+#     the conceptual row already records, now visible through the second window: the WINDOW widened, not
+#     the debt (the F2 precedent above). 'for | sigs@capped' deleted in the same commit: the --for legend
+#     now spells "capped=1 when the BUDGET cut a listing", meeting the definitional predicate.
 affected | affected@seeds
 clones | group@tokens
 cochange | cochange@capped
@@ -143,7 +150,8 @@ for | field@name
 for | field@owner
 for | field@rel
 for | field@type
-for | sigs@capped
+for-auto | ctx@route
+for-auto | ctx@task
 grep | grep@pattern
 hotspots | f@top_ccx
 hotspots | f@top_l
