@@ -63,6 +63,24 @@ diff -q "$TMP/src.warm" "$TMP/src.cold" >/dev/null \
     && ok "(a) src: warm rich-cache --for byte-identical to --no-cache (long conceptual query)" \
     || no "(a) src: warm rich-cache --for differs from --no-cache (long conceptual query)"
 
+# ── (a3) BODY-WALK EQUIVALENCE (2026-08-23 serving-shape sweep): warm == cold on the shape that ───────
+#         serves bodies. Every other full-bundle arm in this gate uses a conceptual query, which now
+#         serves the COMPACT bundle (zero bodies) — so warm/cold and pruning byte-identity stopped
+#         observing the body-serving path entirely: an equivalence defect confined to served body bytes
+#         would diff empty-vs-empty everywhere above. --auto-bodies restores the rank-first body walk on
+#         the same conceptual route (the forbudgetmonotoncheck house pattern), and the presence guard
+#         keeps the arm honest per CONTRIBUTING §2: it fires red if the fixture ever stops serving
+#         bodies here (verified red-capable at authoring by running the guard on the compact default).
+"$BIN" "$TMP/rf" --cache="$TMP/rf.rich" --auto-bodies --for="$QFIX" >"$TMP/rf.warm.ab" 2>/dev/null
+"$BIN" "$TMP/rf" --no-cache             --auto-bodies --for="$QFIX" >"$TMP/rf.cold.ab" 2>/dev/null
+AB_BODIES="$( grep -c '<b t=' "$TMP/rf.warm.ab" | tr -d ' ' )"
+[ "$AB_BODIES" -ge 1 ] 2>/dev/null \
+    && ok "(a3) presence: the --auto-bodies bundle serves $AB_BODIES real bodies (the shape this arm is about)" \
+    || no "(a3) presence: --auto-bodies served NO bodies — the equivalence below would compare empty-vs-empty"
+diff -q "$TMP/rf.warm.ab" "$TMP/rf.cold.ab" >/dev/null \
+    && ok "(a3) retrievalfix: warm rich-cache --for --auto-bodies byte-identical to --no-cache (body walk)" \
+    || no "(a3) retrievalfix: warm --auto-bodies bundle differs from cold — the body-serving path lost equivalence"
+
 # ── (a2) CROSS-PATH EQUIVALENCE: the postings branch vs the SCAN branch on the same query ─────────────
 # --query is a LEAN verb (no persisted stats → lexical.h's scan branch); --for is RICH (postings branch).
 # Both run the identical BM25 float loop over what must be identical integer dl/tf — so their candidate
@@ -146,6 +164,10 @@ pruneeq(){ # $1=dir $2=cache $3=query $4=label [$5=extra flags…]
     fi
 }
 pruneeq "$TMP/rf" "$TMP/rf.rich"   "$QFIX" "retrievalfix"
+# the body-serving shape too (2026-08-23 sweep): the body walk consumes the rank vector to pick which
+# bodies fit, so pruning-induced rank drift would surface as DIFFERENT SERVED BODIES — invisible to every
+# compact-shape arm above. (a3)'s presence guard already proves this query serves bodies on this fixture.
+pruneeq "$TMP/rf" "$TMP/rf.rich"   "$QFIX" "retrievalfix body walk" --auto-bodies
 pruneeq src       "$TMP/src.rich"  "$QSRC" "src"
 pruneeq src       "$TMP/src.rich"  "$QSRC" "src candidates top-50" --format=candidates --top-k=50
 "$BIN" . --cache="$TMP/root.rich" --for="$QSRC" >/dev/null 2>&1                                   # prime the repo-root rich cache
