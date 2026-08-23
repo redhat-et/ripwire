@@ -38,10 +38,10 @@ the tests that reach them.
 
 | The agent without a map | The agent with ripwire |
 | --- | --- |
-| greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="2934"` on this repository |
-| reads whole files to find the four symbols that matter | those four symbols, with complexity, churn and test coverage inline |
+| greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="3395"` on this repository (re-derived 2026-08-23) |
+| reads whole files to find the symbols that matter | those symbols, with complexity, churn and test coverage inline |
 | finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
-| pays for every line it read, right or wrong | measured at **7.3%** of what that grep-and-read pass spends |
+| pays for every line it read, right or wrong | measured at **5.0%** of what that grep-and-read pass spends (re-derived 2026-08-23) |
 
 ### Against the leading graph-database code-context MCP server
 
@@ -81,7 +81,54 @@ itemized with its reason. A confident-looking map that lies by omission is the f
 tool refuses.
 [What it misses, and what to run next →](#what-it-misses-and-what-to-run-next)
 
-**New (2026-08-15), each measured, gated, and re-derived on every CI run:**
+**New (2026-08-23), each measured on this tree's binary, with the command that re-derives it:**
+- **`--pattern` — structural search written in CODE, not in node kinds.** `--pattern='foo($X, ...)'`
+  where `$NAME` binds one node, `$_` binds nothing and `...` is an ellipsis over siblings; comments
+  are transparent, everything else is kind- and text-exact. Served across **13 grammar objects (11
+  languages)**, and it *refuses* rather than lying: a pattern no served grammar resolves, or that
+  collapses to a bare token, exits 1 naming the served and unserved families — never `hits=0`.
+  (`./build/ripwire . --pattern='VERIFY($X)'` on this repo: **101 hits over 625 eligible files**,
+  each row carrying its enclosing symbol; `--pattern='$X'` exits **1** with the refusal text.)
+- **`--safe-delete=SYM` — "can I delete this?" in ONE call.** Composes the signals the tool already
+  computes for a resolved symbol: 1-hop callers, the transitive blast radius, every read/write/
+  import/call site, how much of that radius any test reaches, and `--dead-code`'s own shape — then
+  reports `risk=` as a **fact**, never a go/no-go verdict. (`--safe-delete=coversOrEquals`:
+  `callers="2" impact_reaches="17" uses="2" radius_tested="0" radius_untested="17"
+  dead_code_candidate="0" risk="untested-radius"`.)
+- **`--impact` grew a disclosed import tier.** A class whose consumers `#include` or `require` the
+  file that defines it used to look like it had no blast radius at all. `importers=` is now a second,
+  weaker reach beside `reaches=` — with its own cap pair and `<f via="import">` rows, and **never
+  summed into `reaches=`**, because files and symbols are different units.
+  (`--impact=IngestResult` on this repo: `reaches="0" importers="70" shown_importers="40"
+  importers_capped="1"` — a symbol that reads as unreachable by calls and is included by 70 files.)
+- **Conceptual `--for` queries serve a compact map instead of inline bodies.** Bodies were **52.7% of
+  every conceptual-query byte** — the one class that missed the byte target — so the subtoken+body
+  route now ships the ranked map plus one-hop `<hops>` edge context and no body CDATA, disclosed on
+  the root as `bundle="compact" bodies="0" reason="compact-route"`. Across the frozen 15-query class-B
+  set that is **184,857 B → 95,256 B, −48.5%**, with all 11 judged-decisive markers still present
+  (better than either pre-existing lever's 10/11). `--auto-bodies` is a permanent opt-out, not a
+  migration aid. (One pair on this repo, re-derived 2026-08-23:
+  `--for="incremental cache invalidation"` **8,487 B** compact vs **12,044 B** with `--auto-bodies`,
+  **−29.5%**; the 15-query total is [`docs/EVALS.md` §5](docs/EVALS.md).)
+- **`--pack-task` orders callers by corroboration.** A neighbour reached by several of the bundle's
+  top anchors is more likely to be the thing you must touch than one reached by exactly one, so rows
+  sort by `shared=` — the count of top-K anchors that reach them — omitted at 1 because that is what
+  every 1-hop row satisfies by construction. (`--pack-task="emit the minified xml map"` puts
+  `escapeXml` first at `shared="4"`.)
+- **`--lint` rolls up per rule, so a capped view stops hiding whole rules.** Every rule gets a
+  `<rule name= count= shown_rows= rows_capped=/>` row, and a rule whose registered languages match
+  nothing in the corpus carries `applicable="0"` so its zero reads as structural inertness rather
+  than a measurement. On this repository the default view shows 692 of 3,332 findings — and **14 of
+  the 31 rules that fired contribute zero shown rows**, 368 findings whose only evidence is their
+  `count=`. (`./build/ripwire . --lint`, counted from the `<rule>` rows.)
+- **PHP and Lua joined the language line**, with their floors stated rather than implied: PHP's
+  dynamic dispatch (`$fn()`, `call_user_func`, `__call`) names its callee at run time and is a
+  declared floor; a Lua corpus reports no inheritance edges, because metatable inheritance is a
+  runtime call with no syntax to read.
+
+<details>
+<summary>Earlier — <b>New (2026-08-15)</b>, kept with its own dates rather than overwritten</summary>
+
 - **`--expand` answers "show me this function" in one call, −47.3% tokens** — an exact-name ask now
   skips the ranked-map preamble by default and the body arrives with its file's sibling symbols and
   imports inline (`sibs=`/`inc=`), so the follow-up "what else is in this file?" call never happens.
@@ -97,6 +144,8 @@ tool refuses.
   on one 6,600-file production tree that was ~15% of qualified definitions. Now indexed at any depth.
 - **Compound `--graph-query` filters run ~25× faster** via predicate pushdown — an exact algebraic
   identity, byte-identical output, gate-enforced.
+
+</details>
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
 
@@ -155,10 +204,18 @@ this project publishes against itself.
 
 ### Saves Tokens: It answers for a fraction of the context
 
-On mid-task questions it had never seen, ripwire answers at **7.3%** of what a grep-and-read pass
-spends — **1.7%** on the questions both arms fully answered. `--pack-signatures` returns **67% fewer
+On mid-task questions it had never seen, ripwire answers at **5.0%** of what a grep-and-read pass
+spends — **5.2%** on the questions both arms fully answered. `--pack-signatures` returns **81% fewer
 bytes** than full bodies at top-50. The output is already dense enough that running a dedicated
 context compressor over it saved **exactly 0 tokens**.
+
+Both of those first two figures moved when they were re-derived on 2026-08-23, and they moved in
+**opposite** directions — 7.3% → 5.0% overall, but 1.7% → 5.2% on the both-answered subset. Same
+frozen questions, same frozen verb ladders, same corpus pin, same tokenizer; the naive arm reproduced
+to the token. What changed is where ripwire spends: the compact conceptual route made its *misses*
+much cheaper, while richer default bundles made the questions it *answers* dearer. Both numbers are
+printed because printing only the one that improved would be the failure this project exists to not
+commit. The full per-question re-derivation is in the Round 3 note under [Measured](#measured).
 
 It is also cheap enough to call on reflex: this repository parses in **~0.15 s** cold and **~0.10 s**
 warm (`time ./build/ripwire . --no-cache`), so the agent asks instead of guessing.
@@ -407,7 +464,7 @@ evidence families**, and ranks by how many of them *agree*, never as one blended
 implements published work — McCabe on shape, Butler on naming, Gopstein's atoms of confusion on
 idiom, Nagappan & Ball on churn, Beck & Diehl on colocation, Henry & Kafura on state — with the
 lesson taken from each paper, and the rules measured and *withdrawn*, in
-[`docs/LINEAGE.md`](docs/LINEAGE.md). Pooled over five corpora (n = 27,999) the largest correlation
+[`docs/LINEAGE.md`](docs/LINEAGE.md). Pooled over five corpora (n = 27,889) the largest correlation
 between any two families is **+0.168**: they really are measuring different things, so two families
 firing on the same function is corroboration rather than one metric counted twice.
 
@@ -430,23 +487,36 @@ call a CLI.
 <summary><b>What comes back</b> — real output from this repository, pretty-printed and trimmed</summary>
 
 ```xml
-<ctx task="incremental cache invalidation" est_tokens="2934">
-  <f p="./src/quality.h">
-    <d l="440" n="cacheDirLadder"       cx="16" ccx="14" in="11" churn="10" amp="49" tested="1">inline std::string cacheDirLadder()</d>
-    <d l="810" n="resolveCacheBlobPath" cx="4"  ccx="3"  in="4"  churn="10" amp="42">inline std::string resolveCacheBlobPath( const std::string&amp; dir, const std::string&amp; filename )</d>
-    <d l="835" n="shaKeyedCachePath"    cx="1"  ccx="0"  in="6"  churn="10" amp="44">inline std::string shaKeyedCachePath( const char* family, const std::string&amp; repoHex, … )</d>
-    <d l="844" n="headSnapCachePath"    cx="1"  ccx="0"  in="2"  churn="10" amp="40">inline std::string headSnapCachePath( const std::string&amp; repoHex, const std::string&amp; exclHex, … )</d>
-  </f>
-  <f p="./src/ingest.h">
-    <d l="90" n="ingest" churn="4" amp="4"><doc>for vendored/generated trees not caught by the built-in dir denylist (--exclude=SUBSTR). cacheFi…</doc>IngestResult ingest( const char* rootDir, … )</d>
-  </f>
-  …
+<ctx task="incremental cache invalidation" route="[routed: subtoken+body BM25 — no strong name hit,
+     multi-word conceptual query]" bundle="compact" bodies="0" reason="compact-route" est_tokens="3395">
+  <sigs capped="1">
+    <f p="src/ingest.cpp">
+      <d l="1286" n="compiledQueryCache" cx="1" ccx="0" in="2" churn="105" amp="225" tested="1">HashMap&lt;const TSLanguage*, TSQuery*&gt;&amp; compiledQueryCache()</d>
+      <d l="1441" n="kCacheMagic"        cx="0" ccx="0" in="0" churn="105" amp="223" pure="1"><doc>incremental cache (--cache): per-file content hash + raw facts so a re-run re-parses ONLY c…</doc>constexpr std::uint32_t kCacheMagic = 0x4b505443</d>
+    </f>
+    <f p="src/mcpindex.h">
+      <d l="554" n="mcpCachePath" cx="2" ccx="1" in="1" churn="16" amp="29">inline std::string mcpCachePath( const std::string&amp; root )</d>
+      <d l="950" n="getIndex"     cx="22" ccx="39" in="26" churn="16" amp="54">inline const McpIndex&amp; getIndex( const std::string&amp; root )</d>
+    </f>
+    …
+  </sigs>
+  <hops shown="2" total="6" capped="0" noedge="4">
+    <h l="244" p="src/dmm.h" n="ingestCommitTree">
+      <calls total="10">
+        <c n="headSnapCachePath" l="984"/><c n="headSnapRepoHex" l="723"/><c n="ingest" l="10411"/>
+        <c n="materializeCommitTree" l="1618"/><c n="headSnapExclHex" l="923"/>…
+      </calls>
+    </h>
+  </hops>
 </ctx>
 ```
 
-The cache-path cluster, ranked and annotated in place: `cx`/`ccx` complexity, `in` reuse count,
-`churn` recent commits, `amp` change amplification, `tested` coverage — the fragile spots are
-visible *before* the agent touches them, in a few thousand tokens instead of five whole files.
+The cache cluster, ranked and annotated in place: `cx`/`ccx` complexity, `in` reuse count, `churn`
+recent commits, `amp` change amplification, `tested` coverage — the fragile spots are visible
+*before* the agent touches them, in a few thousand tokens instead of five whole files. This is a
+*conceptual* query, so the bundle is the **compact** shape: the ranked map plus one-hop callee edges,
+no inline bodies, and the root says so rather than leaving you to notice. Read the map, then
+`--expand=SYM` the one you want — or pass `--auto-bodies` to get bodies inline as before.
 
 </details>
 
@@ -455,21 +525,22 @@ visible *before* the agent touches them, in a few thousand tokens instead of fiv
 
 ```xml
 $ ripwire . --quality-panel --limit=1
-<quality_panel preset="default" families="6" enabled_n="6" cut="2" eligible="4956" ranked="401" …>
-<s p="./src/graph.h:462" n="buildGraph" fam="4" of="6" fired="structural,confusion,historical,colocation">
-<e f="structural" why="ccx=698 loc=1244 nest=8 humps=30 deep=283 rrank=1"/>
-<e f="confusion" why="atom-embedded-crement*3"/>
-<e f="historical" why="hrank=19 churn=9"/>
-<e f="colocation" why="crank=33"/>
+<quality_panel preset="default" families="6" enabled_n="6" cut="2" eligible="6497" ranked="524" …>
+<s p="src/graph.h:723" n="buildGraph" fam="4" of="6" fired="structural,confusion,historical,colocation">
+<e f="structural" counted="1" why="ccx=764 loc=1368 nest=8 humps=34 deep=315 ev=98 rrank=1"/>
+<e f="confusion" counted="1" why="atom-embedded-crement*4"/>
+<e f="historical" counted="1" why="hrank=12 churn=36"/>
+<e f="colocation" counted="1" why="crank=32"/>
 </s>
 …
 </quality_panel>
 ```
 
 Four of six independent evidence families corroborate on `buildGraph`, each with its own reason
-shown inline — never a single blended score. `eligible="4956"` narrows to `ranked="401"` (2-of-6
-agreement): an **8.1%** shortlist of this repository's own functions, not a guess. Full six-family
-breakdown, real numbers per family → [The quality panel](#the-quality-panel) below.
+shown inline — never a single blended score. `eligible="6497"` narrows to `ranked="524"` (2-of-6
+agreement): an **8.1%** shortlist of this repository's own functions, not a guess (re-derived
+2026-08-23 — the corpus grew, the shortlist share did not move). Full six-family breakdown, real
+numbers per family → [The quality panel](#the-quality-panel) below.
 
 </details>
 
@@ -481,7 +552,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 </p>
 
 <p align="center">
-  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 23 slides</b></a> — every figure names the instrument that pins it<br>
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 26 slides</b></a> — every figure names the instrument that pins it<br>
   <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
 </p>
 
@@ -504,8 +575,9 @@ the recommendation — and abstains honestly when the evidence is too thin to na
 <summary>Which surface is the authority — <code>--help</code> vs <code>docs/COMMANDS.md</code> — and the four reflex verbs worth memorising</summary>
 
 `./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
-[`docs/COMMANDS.md`](docs/COMMANDS.md) documents 92 of the flags with a real invocation and its
-recorded output. Each family below links there.
+[`docs/COMMANDS.md`](docs/COMMANDS.md) documents every one of the 131 advertised flags — 94 of them
+with a real invocation and its recorded output (counts re-derived 2026-08-23; `test/docscommandscheck.sh`
+fails if that documented set and the binary's own flag table ever disagree). Each family below links there.
 
 Four reflexes worth wiring into muscle memory: `--from-trace=FILE` for an error you have in hand,
 `--edit-check=SYM` right after an edit (did the contract change, and which callers are now provably
@@ -555,7 +627,7 @@ cmake -S . -B build && cmake --build build -j
 **Or build from source.** Requirements: CMake 3.24+ and a C++23 compiler — that means clang 16+ /
 AppleClang 15+ (Xcode 15) / gcc 13+ / MSVC 19.36+, and if your distro's CMake is older than 3.24,
 `pip install cmake` or `brew install cmake` gets a current one everywhere. Nothing else —
-tree-sitter's core, all 15 grammars and the test framework are vendored under `third_party/deps`,
+tree-sitter's core, all 21 grammars and the test framework are vendored under `third_party/deps`,
 so there is no download step and no package manager to satisfy. Prove that with the network off:
 add `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` and the build still completes.
 
@@ -629,7 +701,7 @@ contract, gated on every pull request and every push to main, not a tendency.
 
 **Six independent evidence families, ranked by how many of them agree — never one blended score.**
 Pointed at this repository's **4,956** eligible functions, 2-of-6 agreement leaves **401** worth a
-second look: an **8.1%** shortlist. Pooled over five corpora (n = 27,999) no two families correlate
+second look: an **8.1%** shortlist. Pooled over five corpora (n = 27,889) no two families correlate
 above **+0.168**, which is what makes agreement corroboration rather than one metric counted twice.
 What each family actually looks at — on this repository's own source, not a synthetic example:
 
@@ -651,7 +723,7 @@ and ranks by the *count* of families agreeing, never a weighted composite — av
 metrics and calling it several is the Maintainability Index's well-known failure mode. On this
 repository the panel measures **4,956** eligible functions and narrows them to **401** worth a
 second look at 2-of-6 agreement — an **8.1%** shortlist, not a guess — and the largest correlation
-between any two families, pooled across five independent corpora (n = 27,999), is **+0.168**: the
+between any two families, pooled across five independent corpora (n = 27,889), is **+0.168**: the
 families really are measuring different things. The six-family table above shows what each finds on
 this repository's own source; the sections below are the parts that need more than a row.
 
@@ -1008,8 +1080,10 @@ tools share.** headroom's default config passed every code chunk through **byte-
 own protective guards fired throughout, netting −410 tokens on a 685,682-token workload (its own
 limitations page says "Code — Passthrough"; this run confirms it live) — and stacking it on
 ripwire's output added **exactly 0 tokens** of savings: the map is already past the density
-compression targets. ripwire answered at **7.3%** of the naive grep-and-read baseline's tokens
-(**1.7%** on the subset both arms fully answered), warm in ~0.14 s per verb. **The losses in this
+compression targets. As measured then, ripwire answered at **7.3%** of the naive grep-and-read
+baseline's tokens (**1.7%** on the subset both arms fully answered), warm in ~0.14 s per verb. Those
+two figures were re-derived on 2026-08-23 and now read **5.0%** and **5.2%** — the block below.
+**The losses in this
 round are ripwire's own, and they are published first**: under the frozen no-human verb ladders it
 strictly satisfied only **5/12** questions vs the naive baseline's 11/12 — four ranking defects,
 one missing symbol kind, two harness artifacts, each bucketed with its fix disposition in the
@@ -1018,6 +1092,43 @@ provider-cache economics) was deliberately not measured — ripwire does not com
 Provenance: [`docs/EVALS.md` §2](docs/EVALS.md), full record + adversarial verification (which
 materially corrected the draft's arithmetic in headroom's favor) in
 [`bench/headtohead/r3-headroom-2026-08-03/`](bench/headtohead/r3-headroom-2026-08-03/).
+
+</details>
+
+<details>
+<summary>Round 3, re-derived 2026-08-23 — one headline improved, the other got worse, and both are printed</summary>
+
+The 2026-08-03 round is frozen; this is the same instrument pointed at today's binary. Arms **A**
+(idealized grep-and-read) and **C** (ripwire's pre-registered verb ladders) were re-run from the
+committed `harness.py`, importing its metric functions unmodified — same `questions.json`, same
+frozen `arms_spec.json` ladders, same `tiktoken cl100k_base` counter, same corpus pin
+(`django/django @ 70f39e46`). The headroom arms (B/B′/D) were not re-run; they contribute nothing to
+the ripwire-vs-naive ratio, and the round's finding about them is a passthrough result that does not
+depend on ripwire's side.
+
+**The naive arm reproduced exactly** — all 12 questions token-for-token, 685,682 t in total — which
+is what makes the comparison a measurement of ripwire's change and not of drift somewhere else.
+Satisfaction did not move either: **5/12** for ripwire, **11/12** for naive, and the both-satisfied
+set is the identical `{q02, q03, q04, q05, q11}`.
+
+| | 2026-08-03 | 2026-08-23 | |
+| --- | ---: | ---: | --- |
+| naive (arm A) total | 685,682 t | 685,682 t | reproduced to the token |
+| ripwire (arm C) total | 50,138 t | **33,948 t** | −32.3% |
+| **overall ripwire ÷ naive** | **7.3%** | **5.0%** | **better** |
+| both-satisfied, naive | 219,223 t | 219,223 t | same 5 questions |
+| both-satisfied, ripwire | 3,775 t | **11,471 t** | +204% |
+| **both-satisfied ripwire ÷ naive** | **1.7% (58×)** | **5.2% (19×)** | **worse** |
+| ripwire tokens spent on its own misses | 92.5% | 66.2% | |
+
+**Why they moved apart.** The compact conceptual route made the seven questions ripwire *misses*
+dramatically cheaper — `q07` 13,198 → 4,416 t, `q08` 11,192 → 2,016 t, `q01` 11,974 → 3,045 t — which
+is what pulls the overall share down. On the five it *answers*, richer default bundles cost more:
+`q05` 522 → 6,736 t and `q11` 280 → 1,373 t dominate that column. The 58× figure was always the
+flattering framing of a 5-of-12 result, and the honest reading of the pair is that ripwire got much
+better at being wrong cheaply and somewhat more expensive at being right. Nothing about the four
+ranking defects, the missing symbol kind or the two harness artifacts in the original loss buckets
+has been re-adjudicated here — the satisfaction column is unchanged, so those losses stand.
 
 </details>
 
@@ -1033,7 +1144,7 @@ pins it:
 
 | Where the saving comes from | Measured | Pinned by |
 | --- | --- | --- |
-| `--pack-signatures` — body-elided declaration skeletons instead of full bodies | **67.0% fewer element bytes** at top-50 (46.7% at top-10, 66.2% at top-100) | `test/showcasecapturecheck.sh`, re-derived from this repo every run |
+| `--pack-signatures` — body-elided declaration skeletons instead of full bodies | **81.4% fewer element bytes** at top-50 (86.5% at top-10, 81.6% at top-100) — re-derived 2026-08-23 | `test/showcasecapturecheck.sh`, re-derived from this repo every run |
 | Query-shape routing, on the production token ceiling | **−39.4%** p50, while strict file@10 rose +33.33pp | `bench/locbench/`, [EVALS §3](docs/EVALS.md) |
 | A whole-question bundle against a naive agent read | **96.0% fewer tokens (24.9×)** — 14,758 against 367,192, tiktoken `cl100k_base`, six realistic questions | `bench/BENCHMARK.md` — *historical, private corpus, not reproducible from this tree* |
 
@@ -1490,7 +1601,7 @@ tier: it parses with its own vendored grammar, so its headings are symbols, not 
 | Orientation for a coding agent working *on* this repository | [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) |
 | User-visible capabilities, behaviour changes, known limits | [`CHANGELOG.md`](CHANGELOG.md) |
 | Vendored dependencies and their licences | [`THIRD_PARTY.md`](THIRD_PARTY.md) |
-| The whole tool in 23 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
+| The whole tool in 26 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 
