@@ -79,6 +79,23 @@ printf '%s' "$MERM_FOR" | grep -qE '^n[0-9]+\[".* \(.*:[0-9]+\)"\]$' \
     && ok "--for --with-graph: node labels look like 'name (file:line)'" \
     || no "--for --with-graph: node label shape wrong"
 
+# ── 2b) WITH the flag, on the AUTO serving shape (2026-08-23 serving-shape sweep) ────────────────────────
+# $Q routes conceptual despite naming packSignatures, so section 2 observes --with-graph only on the
+# COMPACT bundle. The graph is appended right before </ctx> on BOTH --for shapes; a placement or
+# well-formedness regression specific to the auto body walk (whose last-child neighborhood is <bodies>,
+# not <hops>) would pass section 2 unobserved. Presence guard first (CONTRIBUTING §2).
+FORGA="$TMP/for_graph_auto.xml"
+"$BIN" "$CORPUS" --no-cache --for="packSignatures" --with-graph > "$FORGA" 2>/dev/null
+grep -q 'bundle="auto"' "$FORGA" \
+    && ok "--for --with-graph (auto shape) presence: the name-exact query serves bundle=\"auto\"" \
+    || no "--for --with-graph (auto shape) presence: query no longer routes name-exact — re-anchor it, this arm observes the wrong shape"
+xmllint --noout "$FORGA" 2>/dev/null && ok "--for --with-graph (auto shape): xmllint-clean (G4)" \
+    || no "--for --with-graph (auto shape): NOT well-formed"
+grep -qF '<graph fmt="mermaid"><![CDATA[' "$FORGA" && ok "--for --with-graph (auto shape): <graph> block present, CDATA opened" \
+    || no "--for --with-graph (auto shape): <graph> block missing"
+grep -qF '</graph></ctx>' "$FORGA" && ok "--for --with-graph (auto shape): <graph> sits immediately before </ctx>" \
+    || no "--for --with-graph (auto shape): <graph> is not the last child before </ctx>"
+
 # ── 3) WITH the flag: --pack-task ────────────────────────────────────────────────────────────────────────
 PACKG="$TMP/pack_graph.xml"
 "$BIN" "$CORPUS" --no-cache --pack-task="$Q" --with-graph > "$PACKG" 2>/dev/null
