@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 446 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 447 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -2688,6 +2688,84 @@ it should reach. Two rows invert: on those the gold is the *densest* thing in it
 this rule can only hurt them, which is stated now rather than discovered later. The audit's proxy is the
 gold's best-scoring symbol, which is the same conservative direction the previous round's audit erred in.
 
+**Correction to the rule block above, before any measurement.** The registration as first written was
+internally inconsistent: its feasibility audit measured a factor **non-increasing** in density (penalize
+the document that is mostly query terms) while its rule block spelled a factor **non-decreasing** in
+per-term density (reward the term that is a large share of its document). Those are opposite rules, and
+only one of them is the reading the earlier negative named. The two were separated by measuring both
+trigger conditions on the frozen labels, against the base binary, before either was built — over the
+seven `diagnostic-class` rows whose primary gold is outside the top-5, comparing the gold's
+best-scoring symbol against each of the five occupants it must pass:
+
+| Candidate reading | Favours the gold in |
+| --- | ---: |
+| **document** query-term density, `Σ tf / dl`, factor non-increasing | **24 of 35** occupant-comparisons |
+| **peak per-term** density, `max_u tf_u / dl`, factor non-decreasing | 12 of 35 occupant-comparisons |
+
+The per-term reading is the minority direction and is **refuted here, before code**: an offender reaches
+a document density comparable to the gold's by summing four or five terms it mentions once each, and its
+peak per-term density is therefore *lower* than the gold's, not higher — so rewarding peak per-term
+density lifts the offenders this bucket is about. The rule below is the document-level, non-increasing
+one, which is what the audit measures and what the earlier negative named. Nothing about the band, the
+baseline or the guards moves with this correction, and no result had been taken when it was made.
+
+**The rule, corrected.** Inside `src/lexical.h`'s conceptual BM25 (`lexicalScoresTiered`), applied to the
+document's assembled score in both scoring branches identically, exactly where the Section down-weight
+and the §P4 tier multiplier already sit:
+
+```
+D     = ( sum over query terms of tf ) / dl      # share of the document that IS query text
+dfac  = kDensityFloor + ( 1 - kDensityFloor ) * min( 1, kDensityCap / D )
+sc   *= dfac                                     # in [kDensityFloor, 1] — shrink-only
+```
+
+Three properties are structural, not asserted: `dfac ≤ 1` always, so the MaxScore impact bound (derived
+at `tf ≤ T`, `dl ≥ 0`) stays a valid upper bound and the pruned and exhaustive branches stay
+byte-identical; `tf > 0 ⇒ dl ≥ tf ≥ 1` (a scanned token increments both), so `D` is defined and finite
+wherever it is applied; and `tf`/`dl` are the same integers on the persisted-stats path and the scan
+path, so postings parity and the cache format are untouched. The name-exact ranker
+(`lexicalScoresNameExactTiered`) is a separate entry point and is **not** touched.
+
+**Both constants are derived from BM25's own algebra at this file's `k1 = 1.5`, `b = 0.75`, and neither
+is tuned against the slice.**
+
+| Constant | Value | Derivation |
+| --- | ---: | --- |
+| `kDensityCapPercent` | **10%** | A document's weighted mass is name ×3 + callee ×1 + doc ×2 + body ×1. A symbol whose NAME is entirely query terms already contributes 3 × \|name\| ≈ 6–12 weighted units of query mass; for the query to stay under a tenth of the whole document that symbol must carry roughly 60–120 further weighted units — a signature plus a handful of statements, which any real implementation has and a name-plus-one-sentence document does not. Above a tenth, the document is largely a restatement of the query. |
+| `kDensityFloorPercent` | **25%** | How much authority a density judgement may have. `1 / 0.25 = 4×` is exactly the factor `b = 0.75` already grants an empty document over an average one (`1 / (1 − b) = 4`), so the rule's maximum authority is the maximum authority BM25's own length normalization already hands a short document — and no more. A document keeps a quarter of its evidence however much of it is query text: evidence is **reduced, never deleted**, the recorded lesson of the two §7 negatives for this bucket family that removed query evidence outright. |
+
+**The corrected ceiling, and it is tight.** For a factor of this shape the best a gold with density `Dg`
+can do against an occupant with density `Do > Dg` is `1 / ( f + (1−f)·Dg/Do )`, maximised over any choice
+of cap; below, that bound is evaluated per row at `f = 0.25` alongside the score ratio the row actually
+needs, and again at the registered cap of 10%:
+
+| Row | Gold `D` | 5th-place `D` | Needs | Bound at any cap | At cap 10% | Reachable |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| a cache backend storing a value with a timeout | 0.191 | 0.244 | **1.05×** | 1.16× | **1.15×** | **yes** |
+| an emitted asset checked against a size budget | 0.100 | 0.167 | **1.05×** | 1.35× | **1.43×** | **yes** |
+| scope hoisting deciding a module cannot be concatenated | 0.096 | 0.216 | 1.68× | 1.72× | 1.675× | **borderline — 0.3% short at the registered cap** |
+| tree shaking marking exports as unused | 0.110 | 0.113 | 2.14× | 1.01× | 1.02× | no |
+| compile-time constants substituted into module source | 0.021 | 0.075 | 2.91× | 1.88× | 1.00× | no |
+| email messages assembled before being sent | 0.082 | 0.062 | — | gold is DENSER — the rule inverts | | no |
+| a splitChunks bug producing an empty chunk | 0.330 | 0.133 | — | gold is DENSER — the rule inverts | | no |
+
+**Ceiling: +2, or +3 if the borderline row lands — against a band whose lower edge is +2.** This
+supersedes the +3 stated above, which bounded each row by the floor's reciprocal alone and ignored that
+the gold is penalised too whenever its own density clears the cap. The corrected ceiling is
+registered here, before the code, and it is the least comfortable thing in this document: an in-band
+result requires the ceiling to be reached with **zero net displacement**, and a result of +0 or +1 is
+the outcome the arithmetic says is more likely. It is registered anyway rather than abandoned because
+the two rows the bound clears comfortably are real and the mechanism is the last of the three readings
+this bucket has left; a refutation at +0 or +1 closes the bucket rather than leaving it open on a shape
+nobody costed. Two rows invert outright — on those the gold is the densest document in its own
+neighbourhood and the rule can only hurt them, which is stated now rather than discovered later.
+
+The bound is conservative in exactly one direction, the same one the previous round's audit was: its
+proxy is the gold file's **best-scoring symbol**, and the rule can change WHICH symbol of that file
+scores best. So a realized result above the ceiling is possible and would mean the proxy was loose, not
+that a constant was chosen after the fact. A realized result at or below +1 is the mechanism failing on
+rows the audit says it should reach.
+
 **Displacement is a first-class registered guard this time, not something the gate suite has to find.**
 The previous round's band-met revert was caused by a displacement its 54 labels could not see. So:
 
@@ -3092,7 +3170,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **446 gate scripts**, all of which exist on disk.
+naming **447 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -3900,7 +3978,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 446. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 447. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
