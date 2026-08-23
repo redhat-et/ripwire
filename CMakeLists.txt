@@ -126,7 +126,7 @@ if(RIPWIRE_LTO)
   # The VARIABLE, set HERE — before the first add_executable/add_library and before FetchContent pulls
   # the vendored tree-sitter subproject in. CMAKE_INTERPROCEDURAL_OPTIMIZATION seeds the property on
   # targets created AFTER it, so this placement (and only this placement) reaches all three groups that
-  # matter: our C++, the sixteen C grammar objects, and the tree-sitter core in its own subdirectory.
+  # matter: our C++, the twenty-one C grammar objects, and the tree-sitter core in its own subdirectory.
   # Cross-language is the point — the accessors we want inlined are C, the loop calling them is C++.
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
   message(STATUS "RIPWIRE_LTO: ON — link-time optimization across our code and the vendored C (slower link, see docs/OPTREMARKS.md F1)")
