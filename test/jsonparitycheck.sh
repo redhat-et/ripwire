@@ -308,6 +308,13 @@ LON_LEGO="$( printf '%s' "$LON" | jget lego_total )"
 # lego_total is deliberately PRE-dedup/pre-cap (the notes_total "what matched" convention) — packLego then
 # dedups same-named interfaces and caps at topN=12, so it must be >= the XML sibling's own row count, never <.
 XML_IFACES="$( "$BIN" "$ROOT" --for="Circle Square shape area implementors" --no-cache 2>/dev/null | grep -oE '<iface ' | wc -l | tr -d ' ' )"
+# >0 guard on the XML side (2026-08-23 serving-shape sweep): without it this arm degrades to N>=0 the
+# moment the XML sibling stops emitting <iface> rows at all — an under-count is unobservable against an
+# empty roster, so the comparison must first prove the roster is non-empty (the routes arm below already
+# does this; the compose arm gains the same guard).
+{ [ -n "$XML_IFACES" ] && [ "$XML_IFACES" -gt 0 ]; } 2>/dev/null \
+    && ok "§B1.4 presence: the XML sibling emits $XML_IFACES <iface> row(s) (the roster the >= below compares against)" \
+    || no "§B1.4 presence: the XML sibling emits NO <iface> rows — the under-count comparison below is vacuous"
 { [ -n "$LON_LEGO" ] && [ "$LON_LEGO" -ge "$XML_IFACES" ]; } 2>/dev/null \
     && ok "§B1.4: lego_total ($LON_LEGO) >= the XML sibling's own <iface> row count ($XML_IFACES) — never UNDER-counts" \
     || no "§B1.4: lego_total ($LON_LEGO) is LESS than the XML row count ($XML_IFACES) — would hide a real interface"
@@ -315,9 +322,10 @@ XML_IFACES="$( "$BIN" "$ROOT" --for="Circle Square shape area implementors" --no
 CJ2="$( "$BIN" "$ROOT/src" --for="parse arguments" --json --no-cache 2>/dev/null | jsonok "--for --json (compose surface)" )"
 COMPOSE_TOTAL="$( printf '%s' "$CJ2" | jget compose_total )"
 XML_FIELDS="$( "$BIN" "$ROOT/src" --for="parse arguments" --no-cache 2>/dev/null | grep -oE '<field name=' | wc -l | tr -d ' ' )"
-{ [ -n "$COMPOSE_TOTAL" ] && [ "$COMPOSE_TOTAL" = "$XML_FIELDS" ]; } \
-    && ok "§B1.4: compose_total ($COMPOSE_TOTAL) matches the XML sibling's <field> row count exactly" \
-    || no "§B1.4: compose_total ($COMPOSE_TOTAL) != XML sibling's <field> count ($XML_FIELDS)"
+# same >0 guard as the lego arm above: 0==0 is parity of two absences, not parity of a surface.
+{ [ -n "$COMPOSE_TOTAL" ] && [ "$COMPOSE_TOTAL" = "$XML_FIELDS" ] && [ "$COMPOSE_TOTAL" -gt 0 ]; } 2>/dev/null \
+    && ok "§B1.4: compose_total ($COMPOSE_TOTAL) matches the XML sibling's <field> row count exactly, and is > 0" \
+    || no "§B1.4: compose_total ($COMPOSE_TOTAL) != XML sibling's <field> count ($XML_FIELDS), or both zero"
 
 # LB-A (relevance floor, r10 round): the query names the route fixture's own handlers. It used to be the
 # bare word "test", which scores ZERO on every symbol there — the surface the <routes> block is scoped to
