@@ -8,8 +8,12 @@
 #   1) default --for emits an auto <bodies> section (CDATA bodies, the --expand shape) AFTER the
 #      signatures, and the <ctx> root discloses it: bundle="auto" bodies="N" (N >= 1 when any fit).
 #   2) the header legend explains the bundle=auto attributes (a reader never guesses).
-#   3) a TIGHT explicit --token-budget drops the bodies (never cuts one mid-def): bundle="auto"
-#      bodies="0" reason="budget", NO <bodies> section, and the <sigs> block intact.
+#   3) a TIGHT explicit --token-budget drops the bodies (never cuts one mid-def), disclosed at ANY
+#      tightness: while an allowance exists, bundle="auto" bodies="0" reason="budget" plus the
+#      honest <bodies shown="0"> shell (W3-S: elements never vanish); at a ceiling the signature
+#      bundle already EXHAUSTED, the attribute alone (legend + shell dropped — only the attribute
+#      has reserved bytes there; the full path coverage is test/fordisclosurecheck.sh #2). The
+#      <sigs> block is intact either way and the disclosure is never silently dropped.
 #   4) --signatures-only opts out: no bundle= attribute, no <bodies> — the pre-T3 bundle shape.
 #      It refuses loudly without --for, and refuses the contradictory --signatures-only --detail=N.
 #   5) escalation is capped and disclosed: bodies= on the root equals the emitted <b> count and
@@ -76,15 +80,29 @@ grep -q 'bundle="auto"' "$TMP/auto" && grep -qi 'bodies.*inline\|inline.*bod' "$
     && ok "header legend names the bundle=auto mechanism" \
     || no "header legend does not explain bundle=auto"
 
-# ── #3a: an explicit --token-budget too tight for even the disclosure turns the WHOLE auto surface off —
-#         the old signatures-only bundle is the degraded path, byte-identical, ceiling honored (D10) ─────
+# ── #3a: an explicit --token-budget the signature bundle exhausts serves NO body and STILL discloses —
+#         the bodies="0" reason="budget" attribute (attribute ONLY: legend and shell have no reserved
+#         bytes at a spent ceiling — fordisclosurecheck #2 owns that half), per the registration's own
+#         sentence ("when no body fits the remaining budget"). This arm used to assert the OPPOSITE
+#         (surface silently off, byte-identical to --signatures-only) — the 2026-08-22 Lane-AA
+#         transcript mine caught that silent shape on 5 of 26 real --for calls (bodyuse-memo §7), and
+#         a disclosure that disappears exactly when the budget is tight is the opposite of a
+#         disclosure. The <sigs> block still may not move a byte vs the opt-out run (bodies/disclosure
+#         ride leftover only — the #6 contract, asserted here at the tight budget too). ────────────────
 "$BIN" src --for="$TASK" --token-budget=400 --no-cache >"$TMP/tight" 2>/dev/null; rc=$?
 [ "$rc" = 0 ] || no "tight-budget --for exited $rc (D10: --token-budget shapes, never gates, this bundle)"
 "$BIN" src --for="$TASK" --token-budget=400 --signatures-only --no-cache >"$TMP/tightso" 2>/dev/null
-{ ! grep -q 'bundle=' "$TMP/tight" && ! grep -q '<bodies [^>]*>' "$TMP/tight" \
-      && diff -q "$TMP/tight" "$TMP/tightso" >/dev/null; } \
-    && ok "ultra-tight budget: auto surface off, byte-identical to --signatures-only (the degraded path IS the old bundle)" \
-    || no "ultra-tight budget: auto surface leaked bytes past the stated ceiling (or drifted from the opt-out shape)"
+grep -q 'bundle="auto" bodies="0" reason="budget"' "$TMP/tight" \
+    && ok "ultra-tight budget: bodies=\"0\" reason=\"budget\" disclosed (never a silent surface)" \
+    || no "ultra-tight budget: missing bodies=\"0\" reason=\"budget\" disclosure (the memo's silent shape)"
+grep -q '<b [^>]*><!\[CDATA\[' "$TMP/tight" \
+    && no "ultra-tight budget: emitted body bytes past an exhausted ceiling" \
+    || ok "ultra-tight budget: no body bytes (whole-body-or-nothing holds)"
+sigsblock "$TMP/tight" >"$TMP/tight_sigs"; sigsblock "$TMP/tightso" >"$TMP/tightso_sigs"
+[ -s "$TMP/tight_sigs" ] || no "ultra-tight budget: could not extract a <sigs> block"
+diff -q "$TMP/tight_sigs" "$TMP/tightso_sigs" >/dev/null \
+    && ok "ultra-tight budget: <sigs> byte-identical to --signatures-only (disclosure rides leftover only)" \
+    || no "ultra-tight budget: the disclosure changed the <sigs> bytes"
 grep -q '<sigs' "$TMP/tight" && ok "ultra-tight budget: the <sigs> block is intact" \
     || no "ultra-tight budget: the <sigs> block vanished (signatures must survive)"
 

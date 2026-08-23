@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 449 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 450 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -872,6 +872,41 @@ the readout is declared underpowered — not null — and waits; the T0 terminal
 sessions. The pass-2 episode method inherits its window definition; changing the window after
 seeing post-deploy data would be tuning the instrument — the readout uses the same pass-2 method
 that produced the baseline. Metric (b) confounded as stated above.
+
+**Disclosure-gap correction, 2026-08-22 (found by measurement, fixed the same day).** The Lane-AA
+transcript mine over the 2026-08-20 Stage-1 archive found 5 of 26 real `--for` episodes whose
+`<ctx>` root carried **neither** `bundle=` **nor** `bodies=`: an explicit `--token-budget` whose
+byte allowance the signature bundle alone exhausted turned the whole auto surface off silently —
+and a gate arm asserted that silence as the contract. The registration's own sentence ("when no
+body fits the remaining budget, `bodies="0" reason="budget"`") makes no exception for a fully
+exhausted ceiling, so the code and the gate were wrong, not the registration. Fixed: the
+disclosure now survives any ceiling (the attribute's bytes were already reserved in the budget
+arithmetic), and the two `--for`-family paths that never serve bodies by design now say so from
+their own side (`--for --json`: an always-present `"bundle":"sigs"` key; the MCP `for` verb and
+`batch` for sub-query: `bundle="sigs"` on the ctx root plus a legend clause naming `fetch_body`).
+Caller-chosen postures (`--signatures-only`, `--detail=N`) stay attribute-free by registration.
+Gate: `test/fordisclosurecheck.sh` (every serving path), plus the corrected arm in
+`test/forautobodycheck.sh` #3a. No registered number moves: the map-then-read metric counts reads,
+not disclosures — but the mine's NO-BODY bucket classification depended on exactly the disclosure
+that was missing, which is how it surfaced.
+
+**A SECOND copy of the same silent branch, found and fixed at landing (2026-08-23).** This round was
+authored against a trunk where every conceptual `--for` query still took the body walk. It landed on
+one that had since gained the compact conceptual route, whose `<hops>` builder was written a day after
+the body builder and had inherited the identical branch: an explicit ceiling the signature bundle had
+already exhausted turned the compact surface off with **no attribute at all** — the same silent shape,
+one serving path over. The same fix applies unchanged (`bundle="compact" bodies="0" reason="budget"`,
+the attribute alone; its bytes are `kCompactAttrReserve`, already inside `committedBytes`), and
+`reason="budget"` joins `"compact-route"` and `"no_candidates"` as a third distinct fact under that
+builder's own two-reasons rule — the route choosing edges, nothing scoring, and the ceiling being
+spent are three different things and none may be reported as another. `fordisclosurecheck` arm #1
+therefore asserts the DISCLOSURE rather than one spelling of it (`bundle="auto"` on the body walk,
+`bundle="compact"` on the `<hops>` shape, a `reason=` on every `bodies="0"`), and new arm #1b holds
+the compact exhausted shape to the attribute-alone contract. Both halves were re-proved RED at the
+merged tree by restoring each silent branch in turn. The lesson generalizes past this diff: the
+disclosure contract binds serving PATHS, so a round that adds a path inherits it, and a gate that
+names one shape's spelling stops watching the moment a second shape exists.
+
 ### Anchor-only auto bodies — T3 substitution round, PRE-REGISTERED 2026-08-22 (before any fix code)
 
 **Scope guard, first, because it is the thing this round is most likely to be mistaken for.** This is
@@ -3327,7 +3362,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **449 gate scripts**, all of which exist on disk.
+naming **450 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -4135,7 +4170,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 449. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 450. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
