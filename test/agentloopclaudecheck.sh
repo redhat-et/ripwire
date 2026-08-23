@@ -499,6 +499,71 @@ if patch_path.exists() and patch_path.read_text() == _expected_diff:
 else:
     no( "the persisted patch does not match the scored git diff" )
 
+# ── 16. trace persistence END TO END — run_one must actually WIRE run_home to the parser ────────
+# Section 7b proves _claude_metrics retains and parses a session transcript when it is HANDED a run
+# home. That is the unit; this is the WIRING, and the wiring is a separate thing to get wrong — the
+# whole defect (2026-08-22 Lane-AA mine: 48 archived runs, events/ holding only trailers,
+# command_calls/native_read_calls null on every record) is exactly what a correct parser that is
+# never reached looks like from the archive. So: drive the real run_one, with only sh()/checkout_repo/
+# prepare_environment stubbed, and assert the RECORD it hands back carries the counts and that the
+# transcript landed in that run's own events/ directory next to its trailer.
+work3 = pathlib.Path( tmp ) / "work3"
+_home3 = work3 / "home"                      # what the stubbed prepare_environment returns for work3
+_proj3 = _home3 / "projects" / "-tmp-fakerepo"
+_proj3.mkdir( parents=True, exist_ok=True )
+_e2e_sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+_e2e_lines = [
+    json.dumps( { "type": "assistant", "message": { "content": [
+        { "type": "tool_use", "name": "Bash", "input": { "command": "cat a.txt" } },
+        { "type": "tool_use", "name": "Read", "input": { "file_path": "a.txt" } } ] } } ),
+    json.dumps( { "type": "assistant", "message": { "content": [
+        { "type": "tool_use", "name": "Bash", "input": { "command": "python x.py" } } ] } } ),
+    json.dumps( { "type": "user", "message": { "content": [
+        { "type": "tool_result", "content": "ok" } ] } } ),
+]
+( _proj3 / ( _e2e_sid + ".jsonl" ) ).write_text( "\n".join( _e2e_lines ) + "\n" )
+R.sh = _fake_sh_claude( _FakeProc( 0, json.dumps(
+    { "result": "ok", "session_id": _e2e_sid,
+      "usage": { "input_tokens": 10, "output_tokens": 20 }, "total_cost_usd": 0.01 } ), "" ) )
+rec3 = R.run_one( _fake_task, "baseline", 3, "claude-code-p", "", work_dir=str( work3 ),
+                  gold_rows=_fake_gold_rows, evaluator="none" )
+_stem3    = "%s-%s-%s" % ( _fake_task[ "instance_id" ], "baseline", 3 )
+_trailer3 = work3 / "events" / ( _stem3 + ".json" )
+_copy3    = work3 / "events" / ( _stem3 + ".transcript.jsonl" )
+if _copy3.exists() and _copy3.read_text() == ( _proj3 / ( _e2e_sid + ".jsonl" ) ).read_text():
+    ok( "run_one lands the session transcript in events/ beside the trailer, byte-identical" )
+else:
+    no( "run_one did not retain the transcript (the archive would hold trailers only): %s" % _copy3 )
+if rec3.get( "events_path" ) == str( _trailer3 ):
+    ok( "events_path still names the trailer after a full run_one (grade_answers.py contract holds)" )
+else:
+    no( "events_path moved off the trailer in run_one: %r" % ( rec3.get( "events_path" ), ) )
+if rec3.get( "command_calls" ) == 2:
+    ok( "command_calls reaches the RECORD through run_one (2 Bash tool_use blocks)" )
+else:
+    no( "command_calls null/wrong on the record — run_home is not wired through run_one: %r"
+        % ( rec3.get( "command_calls" ), ) )
+if rec3.get( "native_read_calls" ) == 2:
+    ok( "native_read_calls reaches the RECORD through run_one (Read tool + shell cat; python x.py excluded)" )
+else:
+    no( "native_read_calls null/wrong on the record: %r" % ( rec3.get( "native_read_calls" ), ) )
+
+# the timeout/crash shape end to end: a trailer with no session_id is exactly the run whose evidence
+# is otherwise lost, so the disclosed newest-file fallback must still land a transcript in events/.
+work4 = pathlib.Path( tmp ) / "work4"
+_proj4 = work4 / "home" / "projects" / "-tmp-fakerepo"
+_proj4.mkdir( parents=True, exist_ok=True )
+( _proj4 / "sess-x.jsonl" ).write_text( _e2e_lines[ 0 ] + "\n" )
+R.sh = _fake_sh_claude( _FakeProc( 0, json.dumps( { "result": "ok" } ), "" ) )
+rec4 = R.run_one( _fake_task, "baseline", 4, "claude-code-p", "", work_dir=str( work4 ),
+                  gold_rows=_fake_gold_rows, evaluator="none" )
+_copy4 = work4 / "events" / ( "%s-%s-%s.transcript.jsonl" % ( _fake_task[ "instance_id" ], "baseline", 4 ) )
+if _copy4.exists() and rec4.get( "command_calls" ) == 1:
+    ok( "no-session_id run_one still retains+parses the newest transcript (disclosed best effort)" )
+else:
+    no( "no-session_id run_one lost the transcript: exists=%s command_calls=%r"
+        % ( _copy4.exists(), rec4.get( "command_calls" ) ) )
+
 R.sh = _real_sh
 PY
 

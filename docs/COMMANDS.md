@@ -2807,7 +2807,7 @@ $ ./build/ripwire . --hotspots --json
 (empty)
 ```
 
-**Shaped by:** `--max-tokens`, `--token-budget`
+**Shaped by:** `--max-tokens`, `--token-budget`, `--for`
 
 **Caveats (stated by the binary):**
 

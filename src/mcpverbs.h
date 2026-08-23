@@ -1285,9 +1285,21 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     //    (ctxRootOpen / packSignatures / packLego), and the same shared legend clause on the tail of the
     //    header comment — so the two dialects stay byte-consistent on what they say and what they explain.
     const std::string_view flRootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
-    std::string headerStr = ctxRootOpen( task, " [routed: " + rc.reason + "]", flRootArg )   // §B1.7: same root attrs as the CLI twin
+    // T3 disclosure (test/fordisclosurecheck.sh #4): this verb serves the LAZY-BODY posture — signatures
+    // plus fetch_body handles, never inline bodies — and says so the way the CLI's auto bundle does:
+    // bundle= on the ctx root plus a legend clause naming the way to a body. The attribute-free root is
+    // reserved for the caller-CHOSEN opt-out (--signatures-only, pre-T3 byte-identical by registration);
+    // a posture the TOOL chose for the caller must be disclosed, or an MCP agent reading this bundle
+    // cannot tell "no bodies exist for this task" from "this dialect never serves them".
+    std::string rootOpenStr = ctxRootOpen( task, " [routed: " + rc.reason + "]", flRootArg );   // §B1.7: same root attrs as the CLI twin
+    if( !rootOpenStr.empty() && rootOpenStr.back() == '>' )
+    {
+        rootOpenStr.insert( rootOpenStr.size() - 1, " bundle=\"sigs\"" );
+    }
+    std::string headerStr = rootOpenStr
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote + floorNote
-                          + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing -->"
+                          + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing"
+                            "; bundle=sigs: signatures only in this bundle, no inline bodies — fetch a symbol's full body with the fetch_body verb -->"
                           + rw::forRootRelPathsLegendShort( !flRootArg.empty() );   // W3-S item 5: closes the gap this comment used to record
     // W3-S item 5 (2026-08-19): both --for dialects now carry rw::kForRootRelPathsLegendShort (graphlegend.h)
     // — the SAME short spelling, appended here exactly as the CLI twin (forLensHeaderText, main.cpp) does,
