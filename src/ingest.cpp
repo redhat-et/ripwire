@@ -2960,6 +2960,29 @@ inline bool cc_isNestingOnly( const char* t ) noexcept   // raises nesting, scor
            || std::strcmp( t, "closure_expression" ) == 0;
 }
 
+// A node's source text, or "" when the node is null or its byte range does not lie inside `src`. The
+// null+range guard is the same three lines every extraction helper in this file would otherwise repeat (it
+// is what --quality-delta flagged as a clone when the Rust helpers open-coded it, and again when the
+// preprocessor include readers did), so it lives once, here — hoisted above the first consumer rather
+// than sitting halfway down the file where three helpers ahead of it could not reach it.
+//
+// A FIELD read is the common case: nodeFieldText( n, "operator", 8, src ) is the whole of what most
+// callers want, and ts_node_child_by_field_name's length argument is the one thing easy to get wrong.
+inline std::string_view nodeTextOf( TSNode node, std::string_view src ) noexcept
+{
+    if( ts_node_is_null( node ) )
+    {
+        return {};
+    }
+    const std::uint32_t a = ts_node_start_byte( node ), b = ts_node_end_byte( node );
+    return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
+}
+
+inline std::string_view nodeFieldText( TSNode node, const char* field, std::uint32_t fieldLen, std::string_view src ) noexcept
+{
+    return nodeTextOf( ts_node_child_by_field_name( node, field, fieldLen ), src );
+}
+
 // The written spelling of a node's `operator:` field, or "" when it has none / the span is out of range.
 // ONE derivation, shared by the two consumers below — cc_boolOp (cognitive: does this operator CONTINUE
 // a boolean run?) and cc_isBooleanJoin (cyclomatic: does it count as a decision at all?). They ask
@@ -2967,13 +2990,7 @@ inline bool cc_isNestingOnly( const char* t ) noexcept   // raises nesting, scor
 // hand-copied spans — a duplication --quality-delta scored the moment the second one grew a case.
 inline std::string_view cc_operatorText( TSNode n, std::string_view src ) noexcept
 {
-    const TSNode op = ts_node_child_by_field_name( n, "operator", 8 );
-    if( ts_node_is_null( op ) )
-    {
-        return {};
-    }
-    const std::uint32_t a = ts_node_start_byte( op ), b = ts_node_end_byte( op );
-    return ( b > src.size() || b <= a ) ? std::string_view{} : src.substr( a, b - a );
+    return nodeFieldText( n, "operator", 8, src );
 }
 
 // the boolean-operator spelling of a node, or "" if it isn't one (&&/|| for C-family, and/or for Python)
@@ -5117,19 +5134,13 @@ inline std::string phpUseTarget( TSNode useNode, std::string_view src )
 //     unresolvable include: a floor, never a wrong answer.
 inline std::string jsModuleLoadTarget( TSNode n, std::string_view src )
 {
-    const TSNode fn = ts_node_child_by_field_name( n, "function",  8 );
-    const TSNode ar = ts_node_child_by_field_name( n, "arguments", 9 );
-    if( ts_node_is_null( fn ) || ts_node_is_null( ar ) )
-    {
-        return {};
-    }
-    const uint32_t fa = ts_node_start_byte( fn ), fb = ts_node_end_byte( fn );
-    if( fa >= fb || fb > src.size() )
-    {
-        return {};
-    }
-    const std::string_view callee = src.substr( fa, fb - fa );
+    const std::string_view callee = nodeFieldText( n, "function", 8, src );
     if( callee != "require" && callee != "import" )
+    {
+        return {};
+    }
+    const TSNode ar = ts_node_child_by_field_name( n, "arguments", 9 );
+    if( ts_node_is_null( ar ) )
     {
         return {};
     }
@@ -5183,17 +5194,8 @@ std::string includePathOf( std::string_view spelling, bool& isAngleOut )
 // plus its own null-and-bounds ladder. Empty when the node carries no readable path field.
 inline std::string preprocIncludeTarget( TSNode n, std::string_view src, bool& isAngleOut )
 {
-    const TSNode pth = ts_node_child_by_field_name( n, "path", 4 );
-    if( ts_node_is_null( pth ) )
-    {
-        return {};
-    }
-    const uint32_t a = ts_node_start_byte( pth ), b = ts_node_end_byte( pth );
-    if( a >= b || b > src.size() )
-    {
-        return {};
-    }
-    return includePathOf( src.substr( a, b - a ), isAngleOut );
+    const std::string_view spelling = nodeFieldText( n, "path", 4, src );
+    return spelling.empty() ? std::string{} : includePathOf( spelling, isAngleOut );
 }
 
 // The `#import "x.h"` spelling under the C/C++ grammar. `#import` is `#include` + include-once, so it
@@ -5206,23 +5208,12 @@ inline std::string preprocIncludeTarget( TSNode n, std::string_view src, bool& i
 // beyond #import.
 inline std::string preprocImportTarget( TSNode n, std::string_view src, bool& isAngleOut )
 {
-    const TSNode dir = ts_node_child_by_field_name( n, "directive", 9 );
-    const TSNode arg = ts_node_child_by_field_name( n, "argument",  8 );
-    if( ts_node_is_null( dir ) || ts_node_is_null( arg ) )
+    if( nodeFieldText( n, "directive", 9, src ) != "#import" )
     {
         return {};
     }
-    const uint32_t da = ts_node_start_byte( dir ), db = ts_node_end_byte( dir );
-    const uint32_t aa = ts_node_start_byte( arg ), ab = ts_node_end_byte( arg );
-    if( da >= db || db > src.size() || aa >= ab || ab > src.size() )
-    {
-        return {};
-    }
-    if( src.substr( da, db - da ) != "#import" )
-    {
-        return {};
-    }
-    return includePathOf( src.substr( aa, ab - aa ), isAngleOut );   // trailing comment ends at the closing delimiter
+    const std::string_view spelling = nodeFieldText( n, "argument", 8, src );   // preproc_arg: runs to end-of-line
+    return spelling.empty() ? std::string{} : includePathOf( spelling, isAngleOut );   // the closing delimiter ends the path
 }
 
 // tree-sitter does NOT flatten the preprocessor. `#if` / `#ifdef` / `#ifndef` / `#else` / `#elif` /
@@ -6353,18 +6344,6 @@ inline std::string qualifierOf( TSNode nameNode, std::string_view src )
 // WITH a qualifier (ref side) and a scope (def side); together they key the canonical `qualifier::name` tier
 // that C++ already uses, and idiomatic Rust resolves PRECISELY instead of silently vanishing.
 
-// A node's source text, or "" when the node is null or its byte range does not lie inside `src`. The
-// null+range guard is the same three lines every extraction helper below would otherwise repeat (it is what
-// --quality-delta flagged as a clone when the Rust helpers open-coded it), so it lives once, here.
-inline std::string_view nodeTextOf( TSNode node, std::string_view src ) noexcept
-{
-    if( ts_node_is_null( node ) )
-    {
-        return {};
-    }
-    const std::uint32_t a = ts_node_start_byte( node ), b = ts_node_end_byte( node );
-    return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
-}
 
 // True when `s` is spelled as a plain Rust identifier. The qualifier is a canonByName KEY half, so a segment
 // that is not an identifier (`<T as Trait>`, a stray `>` from an unbalanced spelling) can only ever produce a
