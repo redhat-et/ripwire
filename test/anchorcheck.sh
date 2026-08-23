@@ -84,9 +84,11 @@ diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \
 # ── 2) the targeted expansion case — a lexically-invisible direct callee, top-4 window ────────────────
 PLAIN="$( "$BIN" anchorfix --no-cache --for="$QUERY" --pack-top-n=4 2>/dev/null )"
 ANCH="$(  "$BIN" anchorfix --no-cache --for="$QUERY" --pack-top-n=4 --anchor 2>/dev/null )"
-# T3 (contract update, same wave): the default bundle now appends the top symbol's FULL body with its
-# callee signatures, where a direct callee's name legitimately appears — the property THIS gate pins is
-# the RANKED top-4 window, so both membership probes scope to the <sigs> span, not the whole document.
+# T3 (contract update, same wave): the default bundle appends an enrichment section beyond the sigs —
+# on this fixture's CONCEPTUAL query that is now the COMPACT <hops> edge context (2026-08-23 sweep:
+# both runs here serve bundle="compact"; a name-exact query would append the FULL body instead), and a
+# direct callee's name legitimately appears in either enrichment — the property THIS gate pins is the
+# RANKED top-4 window, so both membership probes scope to the <sigs> span, not the whole document.
 sigspan(){ python3 -c 'import sys; s=sys.stdin.buffer.read(); a=s.find(b"<sigs"); b=s.find(b"</sigs>"); sys.stdout.buffer.write(s[a:b+7] if a>=0 and b>=0 else b"")'; }
 PLAIN_SIGS="$( printf '%s' "$PLAIN" | sigspan )"
 ANCH_SIGS="$(  printf '%s' "$ANCH"  | sigspan )"
