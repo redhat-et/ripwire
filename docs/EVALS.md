@@ -2602,6 +2602,328 @@ rejected on its own band and removed, so nothing here moves that question either
 
 ---
 
+### Query-term density weighting — `diagnostic-class` retry, PRE-REGISTERED 2026-08-22 (before any fix code)
+
+**What this registers.** One mechanism, one bucket, one band. The `diagnostic-class` bucket registered
+above has now been read two ways and refuted twice: it is **not** name-only matching (the displacing
+diagnostics carry real body evidence — a diagnostic's constructor recites the failure in the reader's
+vocabulary), and it is **not** short documents (a fifteen-line constructor sits at or above the average
+symbol's weighted length on a JavaScript tree full of one-line arrow functions, so a floor expressed as
+a fraction of that average could not reach them at any setting in a full knob sweep). The surviving
+reading, named in that round's own negative, is **term density at ordinary length**. This registers it
+as a testable rule before any code exists.
+
+**The mechanism, stated so it can be wrong.** BM25 already discounts long documents, but it discounts
+the *score*, not the *term*. At `k1 = 1.5`, `b = 0.75` and a document of average weighted length, a term
+occurring ONCE receives `2.5 × 1 / (1 + 1.5) = 1.00` of the `k1 + 1 = 2.5` asymptote — **40% of what a
+fully saturated term ever receives**. A term occurring eight times receives `2.105`, 84% of the
+asymptote. So one mention is worth 0.475 of one subject, and **four mentions beat one subject 1.9 : 1**.
+A diagnostic class is exactly a document that mentions four or five of a natural-language query's words
+once each — in its message string, its doc comment, and often a documentation URL — while the
+implementation carries one or two of them at implementation density and nothing else. The claim under
+test: *a query term's contribution should be scaled by the share of the document that term actually
+occupies, so that a mention is priced below a subject.*
+
+**The rule.** Inside `src/lexical.h`'s conceptual BM25 (`lexicalScoresTiered`), per query-term
+contribution, both scoring branches identically:
+
+```
+rho   = tf / dl                                        # this term's share of the document's weighted mass
+ramp  = min( 1, rho / ( kDensityRefTf / avgdl ) )
+dfac  = kDensityFloor + ( 1 - kDensityFloor ) * ramp    # in [kDensityFloor, 1] — shrink-only
+sc   += idf * dfac * tf(k1+1) / ( tf + k1(1-b+b*dl/avgdl) )
+```
+
+Three properties are structural, not asserted: `dfac ≤ 1` always, so the MaxScore impact bound (derived
+at `tf ≤ T`, `dl ≥ 0`) stays a valid upper bound and the pruned and exhaustive branches stay
+byte-identical; `tf > 0 ⇒ dl ≥ tf ≥ 1`, so the ratio is always defined; and `tf`/`dl` are the same
+integers on the persisted-stats path and the scan path, so postings parity and the cache format are
+untouched. The name-exact ranker (`lexicalScoresNameExactTiered`) is a separate entry point and is **not
+touched** — the routing floors below therefore cannot move through this rule's own code.
+
+**Both constants are derived from BM25's own algebra, and neither is tuned against the slice.**
+
+| Constant | Value | Derivation |
+| --- | ---: | --- |
+| `kDensityRefTf` | **8** | The weighted term frequency at which BM25's own saturation curve reaches 84% of its asymptote at `dl = avgdl` — the count past which further occurrences buy almost nothing, i.e. where BM25 already treats the term as the document's subject. Full density weight is granted exactly there. Expressed as `kDensityRefTf / avgdl`, so the reference is corpus-relative, never a magic absolute density. |
+| `kDensityFloor` | **50%** | How far a density judgement may go. A mention is already worth only 0.475 of a subject; the floor halves that at worst and no term ever loses more than half its evidence. Evidence is **reduced, never deleted** — the recorded lesson of the filler-strip and IDF-floor negatives in §7, both of which removed query evidence and cut both ways. |
+
+**Baseline, re-derived in this round before any fix code existed.** Plain dev build, `--top-k=10`, two
+full runs byte-identical, zero skipped labels, both corpora verified against `bench/recalleval/
+extcorpus.lock` on commit **and** tree hash and both `git status`-clean:
+
+| Bucket | n | gold in top-5 | strict r@1 | strict r@5 | strict r@10 | lenient r@5 | strict MRR |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `diagnostic-class` | 14 | **7 / 14** | 21.4% | 50.0% | 57.1% | 57.1% | 0.332 |
+| `thin-registration` | 14 | 7 / 14 | 42.9% | 50.0% | 64.3% | 50.0% | 0.486 |
+| `subsystem-directory` | 14 | 4 / 14 | 7.1% | 28.6% | 50.0% | 35.7% | 0.159 |
+| `vendored-asset` | 12 | 7 / 12 | 16.7% | 58.3% | 58.3% | 66.7% | 0.336 |
+
+Per corpus: `diagnostic-class` 6 django rows at 66.7% strict r@5 against 8 webpack rows at 37.5%. The
+bucket's baseline is **identical to the digit** to the one the bands were drawn against; `vendored-asset`
+is the only row that moved, and it moved because the path-tier rule registered above shipped. **The
+registered band therefore stands unchanged at [+2, +6] net flipped rows**, and no edge is re-cut.
+
+**A pre-code feasibility audit, because this shape can be bounded from above without running it.**
+A shrink-only factor that is non-increasing in density can lift a gold past an occupant only if the gold
+is strictly *less* dense than that occupant, and only by at most `1 / kDensityFloor = 2.00×`. Both
+conditions are measurable on the frozen labels against the base binary, before the rule exists. Measured
+over the seven `diagnostic-class` rows whose primary gold is outside the top-5, comparing each gold's
+best-scoring symbol against the fifth-ranked occupant it must pass:
+
+| Row | Gold density | 5th-place density | Direction | Score ratio needed | Reachable at floor 50% |
+| --- | ---: | ---: | --- | ---: | --- |
+| a cache backend storing a value with a timeout | 0.191 | 0.244 | gold sparser | **1.05×** | **yes** |
+| an emitted asset checked against a size budget | 0.100 | 0.167 | gold sparser | **1.05×** | **yes** |
+| scope hoisting deciding a module cannot be concatenated | 0.096 | 0.216 | gold sparser | **1.68×** | **yes** |
+| tree shaking marking exports as unused | 0.110 | 0.113 | gold sparser | 2.14× | no |
+| compile-time constants substituted into module source | 0.021 | 0.075 | gold sparser | 2.91× | no |
+| email messages assembled before being sent | 0.082 | 0.062 | **gold denser — inverts** | — | no |
+| a splitChunks bug producing an empty chunk | 0.330 | 0.133 | **gold denser — inverts** | — | no |
+
+**Ceiling: +3, against a band of [+2, +6].** That is registered here, before the code, so that a result
+of +4 or higher would read as a mechanism this audit mismodelled rather than as a well-chosen constant
+found afterwards — and so that a result of +0 or +1 reads as the mechanism failing on rows the audit said
+it should reach. Two rows invert: on those the gold is the *densest* thing in its own neighbourhood and
+this rule can only hurt them, which is stated now rather than discovered later. The audit's proxy is the
+gold's best-scoring symbol, which is the same conservative direction the previous round's audit erred in.
+
+**Correction to the rule block above, before any measurement.** The registration as first written was
+internally inconsistent: its feasibility audit measured a factor **non-increasing** in density (penalize
+the document that is mostly query terms) while its rule block spelled a factor **non-decreasing** in
+per-term density (reward the term that is a large share of its document). Those are opposite rules, and
+only one of them is the reading the earlier negative named. The two were separated by measuring both
+trigger conditions on the frozen labels, against the base binary, before either was built — over the
+seven `diagnostic-class` rows whose primary gold is outside the top-5, comparing the gold's
+best-scoring symbol against each of the five occupants it must pass:
+
+| Candidate reading | Favours the gold in |
+| --- | ---: |
+| **document** query-term density, `Σ tf / dl`, factor non-increasing | **24 of 35** occupant-comparisons |
+| **peak per-term** density, `max_u tf_u / dl`, factor non-decreasing | 12 of 35 occupant-comparisons |
+
+The per-term reading is the minority direction and is **refuted here, before code**: an offender reaches
+a document density comparable to the gold's by summing four or five terms it mentions once each, and its
+peak per-term density is therefore *lower* than the gold's, not higher — so rewarding peak per-term
+density lifts the offenders this bucket is about. The rule below is the document-level, non-increasing
+one, which is what the audit measures and what the earlier negative named. Nothing about the band, the
+baseline or the guards moves with this correction, and no result had been taken when it was made.
+
+**The rule, corrected.** Inside `src/lexical.h`'s conceptual BM25 (`lexicalScoresTiered`), applied to the
+document's assembled score in both scoring branches identically, exactly where the Section down-weight
+and the fixture/generated-path tier multiplier already sit:
+
+```
+D     = ( sum over query terms of tf ) / dl      # share of the document that IS query text
+dfac  = kDensityFloor + ( 1 - kDensityFloor ) * min( 1, kDensityCap / D )
+sc   *= dfac                                     # in [kDensityFloor, 1] — shrink-only
+```
+
+Three properties are structural, not asserted: `dfac ≤ 1` always, so the MaxScore impact bound (derived
+at `tf ≤ T`, `dl ≥ 0`) stays a valid upper bound and the pruned and exhaustive branches stay
+byte-identical; `tf > 0 ⇒ dl ≥ tf ≥ 1` (a scanned token increments both), so `D` is defined and finite
+wherever it is applied; and `tf`/`dl` are the same integers on the persisted-stats path and the scan
+path, so postings parity and the cache format are untouched. The name-exact ranker
+(`lexicalScoresNameExactTiered`) is a separate entry point and is **not** touched.
+
+**Both constants are derived from BM25's own algebra at this file's `k1 = 1.5`, `b = 0.75`, and neither
+is tuned against the slice.**
+
+| Constant | Value | Derivation |
+| --- | ---: | --- |
+| `kDensityCapPercent` | **10%** | A document's weighted mass is name ×3 + callee ×1 + doc ×2 + body ×1. A symbol whose NAME is entirely query terms already contributes 3 × \|name\| ≈ 6–12 weighted units of query mass; for the query to stay under a tenth of the whole document that symbol must carry roughly 60–120 further weighted units — a signature plus a handful of statements, which any real implementation has and a name-plus-one-sentence document does not. Above a tenth, the document is largely a restatement of the query. |
+| `kDensityFloorPercent` | **25%** | How much authority a density judgement may have. `1 / 0.25 = 4×` is exactly the factor `b = 0.75` already grants an empty document over an average one (`1 / (1 − b) = 4`), so the rule's maximum authority is the maximum authority BM25's own length normalization already hands a short document — and no more. A document keeps a quarter of its evidence however much of it is query text: evidence is **reduced, never deleted**, the recorded lesson of the two §7 negatives for this bucket family that removed query evidence outright. |
+
+**The corrected ceiling, and it is tight.** For a factor of this shape the best a gold with density `Dg`
+can do against an occupant with density `Do > Dg` is `1 / ( f + (1−f)·Dg/Do )`, maximised over any choice
+of cap; below, that bound is evaluated per row at `f = 0.25` alongside the score ratio the row actually
+needs, and again at the registered cap of 10%:
+
+| Row | Gold `D` | 5th-place `D` | Needs | Bound at any cap | At cap 10% | Reachable |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| a cache backend storing a value with a timeout | 0.191 | 0.244 | **1.05×** | 1.16× | **1.15×** | **yes** |
+| an emitted asset checked against a size budget | 0.100 | 0.167 | **1.05×** | 1.35× | **1.43×** | **yes** |
+| scope hoisting deciding a module cannot be concatenated | 0.096 | 0.216 | 1.68× | 1.72× | 1.675× | **borderline — 0.3% short at the registered cap** |
+| tree shaking marking exports as unused | 0.110 | 0.113 | 2.14× | 1.01× | 1.02× | no |
+| compile-time constants substituted into module source | 0.021 | 0.075 | 2.91× | 1.88× | 1.00× | no |
+| email messages assembled before being sent | 0.082 | 0.062 | — | gold is DENSER — the rule inverts | | no |
+| a splitChunks bug producing an empty chunk | 0.330 | 0.133 | — | gold is DENSER — the rule inverts | | no |
+
+**Ceiling: +2, or +3 if the borderline row lands — against a band whose lower edge is +2.** This
+supersedes the +3 stated above, which bounded each row by the floor's reciprocal alone and ignored that
+the gold is penalised too whenever its own density clears the cap. The corrected ceiling is
+registered here, before the code, and it is the least comfortable thing in this document: an in-band
+result requires the ceiling to be reached with **zero net displacement**, and a result of +0 or +1 is
+the outcome the arithmetic says is more likely. It is registered anyway rather than abandoned because
+the two rows the bound clears comfortably are real and the mechanism is the last of the three readings
+this bucket has left; a refutation at +0 or +1 closes the bucket rather than leaving it open on a shape
+nobody costed. Two rows invert outright — on those the gold is the densest document in its own
+neighbourhood and the rule can only hurt them, which is stated now rather than discovered later.
+
+The bound is conservative in exactly one direction, the same one the previous round's audit was: its
+proxy is the gold file's **best-scoring symbol**, and the rule can change WHICH symbol of that file
+scores best. So a realized result above the ceiling is possible and would mean the proxy was loose, not
+that a constant was chosen after the fact. A realized result at or below +1 is the mechanism failing on
+rows the audit says it should reach.
+
+**Displacement is a first-class registered guard this time, not something the gate suite has to find.**
+The previous round's band-met revert was caused by a displacement its 54 labels could not see. So:
+
+| Registered guard | Bar |
+| --- | ---: |
+| **Band metric** — `diagnostic-class` net flipped rows, gold in top-5, n=14 | **[+2, +6]** |
+| **Displacement, other three buckets** — combined gold-in-top-5 count, n=40 | may **not fall at all** |
+| **Displacement, depth** — each of the four buckets' strict r@10 | may not fall by more than one row |
+| `test/packtaskcheck.sh` and its decoy population | rc=0, no arm red |
+
+**Standing floors, all re-derived in this round at `d7061e2` and all of them re-run after the change:**
+
+| Guard | Floor / ceiling | Measured at `d7061e2` | Headroom |
+| --- | ---: | ---: | --- |
+| skill routing split=test `bm25-desc` hit@1 | ≥ 60.0% | 73.1% | 13.1pp |
+| skill routing split=test `bm25-desc` sep-auc | ≥ 0.89 | 0.957 | 0.067 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | wide |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | wide |
+| recall lane lenient recall@5 | ≥ 71% | 88.1% | 17.1pp |
+| recall lane lenient MRR | ≥ 0.57 | 0.643 | 0.073 |
+| LIVE-corpus pollution@5 | ≤ 16% | 2.4% | 13.6pp |
+| **ranking lane lenient recall@5** | **≥ 70%** | **71.9%** | **1.9pp — the tightest floor on the board** |
+| ranking lane lenient MRR | ≥ 0.55 | 0.639 | 0.089 |
+| ranking lane / adversarial-class pollution@5 | ≤ 5% / ≤ 8% | 0.0% / 0.0% | full |
+| name-exact route recall@1 | unmoved | asserted by `test/routecheck.sh` in the suite | — |
+
+Frozen corpora at the measurement: docs `commit=7a7f79892034 files=113`, source `commit=7a3194b51ac6
+files=1422`. Unlike the four buckets above, **this rule is a global change to the conceptual BM25 that
+every in-tree lane runs**, so the ranking lane's 1.9pp is not a formality here: it is under two labels of
+margin on a 32-label lane and it is the floor this mechanism is most likely to be bought past. Buying it
+is a REJECT, not a trade. The per-query comparative diff (`bench/recalleval/run_r3diff.py`, base binary
+against the candidate, both frozen sets) is reported whatever the aggregate does, because an aggregate
+that holds while rows churn underneath it is the failure the diff exists to expose.
+
+Standing requirements, not part of any band: `python3 test/pargates.py . ./build/ripwire -j 6` rc=0 ·
+ASan/LSan clean under the committed suppressions · two runs of the slice and of both lanes
+byte-identical · pruned and exhaustive scoring byte-identical · `--quality-delta` with zero unacked
+regressions · `bash test/ripwirepubliccheck.sh` clean.
+
+#### Decision rule
+
+In band **and** every guard above green → keep. Out of band on either edge, or any floor breached, or any
+displacement guard tripped → **revert the rule**, keep this registration and the negative on record, and
+remove the gate written for it since it would no longer describe shipped behaviour. **One measurement,
+one attempt**: the constants are frozen above and a knob sweep, if one is run, is a diagnostic that
+establishes whether a rejected mechanism is dead or merely mistuned — no verdict may be taken from it.
+
+#### Limits carried into this attempt
+
+- **The same two repositories and two languages** as the slice above, with the same 14-row bucket. A ±1
+  row is inside this instrument's noise, which is why the band's lower edge is +2.
+- **The audit's ceiling of +3 is an upper bound on flips, not a prediction of the net.** Displacement can
+  subtract from it, and the two inverting rows are where it would come from.
+- **This rule cannot be measured on this repository's own populations.** The in-tree lanes carry no
+  diagnostic-class population; they are here as floors, and any movement on them is a cost, never a win
+  to bank.
+
+#### Result — measured 2026-08-22, one measurement, against the band above
+
+**REJECT, reverted.** The band is missed, both displacement guards are tripped, and the change is out
+of the tree. The registration above is unchanged: nothing here re-cuts a band, adds a label, or re-reads
+an edge.
+
+| Registered metric | Baseline | Measured | Band / bar | Verdict |
+| --- | ---: | ---: | --- | --- |
+| `diagnostic-class` net flipped rows, gold in top-5, n=14 | 7 | **8 (+1)** | [+2, +6] | **out of band** |
+| Displacement — other three buckets, combined gold in top-5, n=40 | 18 | **17 (−1)** | may not fall | **tripped** |
+| Displacement — `thin-registration` strict r@10 | 9 | **6 (−3)** | −1 row at most | **tripped** |
+| Displacement — `subsystem-directory` / `vendored-asset` / `diagnostic-class` strict r@10 | 7 / 7 / 8 | 6 / 8 / 10 | −1 row at most | in bar |
+
+**The audit predicted the outcome row for row, which is the useful part.** The two rows that flipped IN
+are exactly the two the pre-code table cleared comfortably — the cache backend storing a value with a
+timeout (rank 9 → 2) and the emitted asset checked against a size budget (unranked → 2). The one row
+that flipped OUT is from the inverting class the audit named: a package `sideEffects` flag applied to a
+module (5 → 9), whose gold is the densest document in its own neighbourhood, so a rule that prices
+density can only cost it. The borderline row the audit put 0.3% short did not land, and neither
+unreachable row moved. **+2 where predicted, −1 where predicted, net +1 against a lower edge of +2.**
+
+**The displacement guards are the part that worked, and they are worth naming row by row.** They were
+registered as first-class bars in this round precisely because the previous round's band-met revert was
+caught by a gate fixture rather than by the slice; here they fired on the slice itself, before any gate
+ran. `thin-registration` is where the cost landed:
+
+| Displaced row | Base | With the rule |
+| --- | ---: | ---: |
+| `where is the staticfiles application config defined` | **1** | unranked |
+| `which command prints only the settings that differ from the defaults` | 6 | unranked |
+| `which plugin gives chunks readable names as their ids` | 7 | unranked |
+| `which command sends a test email to verify the mail configuration` | **1** | 5 |
+
+Three rows off depth 10 and one gold lost from the top 5, from a bucket the change was not aimed at —
+and the first of them was a rank-1 answer. `subsystem-directory` and `vendored-asset` each churned two
+rows out and two rows in for a net of zero, which the combined-count bar cannot see and which is why the
+per-bucket depth bar was registered alongside it. A registration that had measured only its own bucket
+would have reported +1 and stopped; these bars are what turn that into a documented cost.
+
+**The mechanism is dead, not mistuned.** Swept across the whole authority range after the verdict was
+taken — a diagnostic, and no verdict is drawn from it:
+
+| `RIPWIRE_TERMDENSITY_FLOOR` | 0 | 10 | 25 (shipped default) | 50 | 75 | 100 (rule off) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `diagnostic-class` strict r@5 | 8/14 | 8/14 | **8/14** | 8/14 | 8/14 | 7/14 |
+
+At floor 0 the factor is unbounded — a document may lose all but an arbitrarily small share of its
+evidence — and the bucket still reads 8/14. There is no setting of this knob at which the mechanism buys
+its band, so a future round should not retry it at a different constant.
+
+**The standing floors held, and that is not the same as the change being harmless:**
+
+| Guard | Floor / ceiling | At `d7061e2` | With the rule in |
+| --- | ---: | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / **91/152** |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / **0.627** |
+| LIVE-corpus pollution@5 | ≤ 16% | 2.4% | 2.4% |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / **0.586** |
+| ranking lane strict recall@1 | not a floor | 53.1% | **43.8%** |
+| ranking lane / adversarial pollution@5 | ≤ 5% / ≤ 8% | 0.0% / 0.0% | 0.0% / 0.0% |
+
+Every registered floor is green — the tightest one, the ranking lane's lenient recall@5, did not move
+at all. **Read alone that table would have licensed the change.** The per-query diff says otherwise:
+against the base binary on the frozen ranking corpus, `scored=32 wins=4 losses=4 net=+0 ties=24` — an
+aggregate that holds while a quarter of the rows churn underneath it, including one row lost outright
+and three rows displaced off rank 1. That is precisely the failure the diff is registered to expose, and
+it is why the ranking lane's strict recall@1 fell nine points while its lenient recall@5 did not move.
+The frozen docs corpus reads `scored=42 wins=3 losses=2 net=+1 ties=37`.
+
+**The gate suite is what makes this REJECT unarguable.** With the rule in the tree,
+`python3 test/pargates.py . ./build/ripwire -j 6` reported **`gates=455 pass=440 skip=3 fail=12`** —
+eleven substantive failures plus the known warm-timing flake. `routecheck.sh` and `anchorcheck.sh` drift
+from their golden `--for` outputs; `recallanchorcheck.sh` selects a different body anchor (`1-15` where
+the ground truth is `5-8`); `retrievalqualitycheck.sh` reports its explicit-query/denylist policy
+regressed; and `adaptivecheck`, `modifierguardcheck`, `fornotesbudgetcheck`, `packtaskmonotoncheck`,
+`cochangeboostcheck` and `sibliftcheck` each move. A global multiplier on the conceptual BM25 reaches
+every verb that ranks anything, and eleven gates is the honest measure of that reach — a scale of
+disturbance the four bucket rates and the eight standing floors together did not show.
+
+**What is now closed for this bucket.** All three readings it has been given are refuted with the
+evidence to keep them refuted: it is not name-only matching (the displacing diagnostics carry real body
+evidence), it is not short documents (they are not short, and the length floor was swept to zero effect),
+and it is not term density in either direction (per-term density points at the offenders and was refuted
+before code; document density buys exactly +2 and gives back −1 to its own inverting class, at every
+setting of its own knob). What actually separates a diagnostic from its implementation on these rows is
+visible in the anatomy and is not a density: the diagnostic's document contains the question's function
+words and its documentation URL, so it matches MORE DISTINCT query terms than the implementation does,
+and each of those matches is a hapax that BM25 already pays 40% of a saturated term for. Acting on that
+observation means pricing hapax coordination or filtering query function words — and the function-word
+strip is one of the two negatives recorded in §7 for exactly this family. **A fourth attempt on this
+bucket needs a new mechanism, not a new constant, and this round did not find one.**
+
+The gate written for the rule (`test/termdensitycheck.sh`) came out with it, since it no longer describes
+shipped behaviour; the gate count returns to 446. The rule's commit and this revert are both kept on
+record rather than rebased away: a negative is only reproducible while the code that produced it is still
+readable.
+
+---
+
 ## 5. Token and output economy
 
 ### `--pack-signatures`
