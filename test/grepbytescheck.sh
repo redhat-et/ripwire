@@ -76,8 +76,39 @@ GREP=/usr/bin/grep
 [ -x "$GREP" ] || { echo "no $GREP — this gate needs the system grep as its independent baseline"; exit 2; }
 
 # Instrument fix (1): ONE corpus, both arms.
-CORPUS="$ROOT/src"
-[ -d "$CORPUS" ] || { echo "no $CORPUS — the fixture corpus is missing"; exit 2; }
+REALCORPUS="$ROOT/src"
+[ -d "$REALCORPUS" ] || { echo "no $REALCORPUS — the fixture corpus is missing"; exit 2; }
+
+# ── STABILIZATION (latent-gates lane, 2026-08-23): the median was measuring $ROOT's own absolute path
+# LENGTH, not just G1's grouping/collapse win — CI-green (PLAN_HARVEST_REPORTS_2026-08-20/ci-green-lane.md)
+# named it and left it open: median reduction re-derives as 19.7% @ a 9-char root, 37.4% @ 49, 55.9% @ 125,
+# against the hard 30% kill-condition bar below. CI's 33-char checkout path (/home/runner/work/ripwire/
+# ripwire) passes today by luck of that number; a repo rename or a self-hosted runner flips it red with no
+# code change.
+#
+# The mechanism (root cause, not just correlation): ripwire's `--grep` header carries the corpus root
+# EXACTLY ONCE (` root="…"` on the report element, from `cfg.roots[0]` verbatim — src/main.cpp's
+# emitGrepReport, not realpath'd), while the baseline `grep -rn` PREFIXES EVERY MATCHED LINE with the same
+# string. So as $ROOT grows by one character, ripwire's payload grows by one byte (a fixed cost, paid once);
+# grep's payload grows by one byte PER HIT (a cost that scales with the query's hit count). The "reduction"
+# is ( 1 − ripwire_bytes / grep_bytes ): a constant numerator term and a linearly-growing denominator term
+# mean the percentage climbs toward 100% as $ROOT lengthens, and sinks toward its floor as $ROOT shortens —
+# entirely independent of whether G1's grouping/collapse logic changed at all. (This is a DIFFERENT, larger
+# issue than the disclosed relative-vs-absolute residual a few lines below: that one is a bona fide owner
+# decision about which spelling to publish, deliberately left alone. This one is pure environment leakage —
+# the same $ROOT string reaching two arms that account for it on different bases — and is a gate-maintenance
+# bug like packtaskcheck.sh's W3-S item 6 root-depth fix, not a re-calibration.)
+#
+# The fix, in the same spirit as that precedent (pin the wandering input instead of letting it float): copy
+# the corpus to a FIXED path under $TMP. $TMP is already an mktemp(1)-derived path with no relationship to
+# $ROOT — pinning here does not make the measurement zero-length (that would erase the very byte asymmetry
+# the gate exists to measure, and is the change the disclosed residual above says is an owner call, not
+# this one), it just stops the measurement from being a function of WHERE THIS REPO HAPPENS TO BE CHECKED
+# OUT. Verified (see the lane report): re-running this gate from checkouts with $ROOT at 9, 33 and 125
+# characters gives the SAME median with this pin in place, and a materially different one without it.
+CORPUS="$TMP/pinned-corpus/src"
+mkdir -p "$( dirname "$CORPUS" )"
+cp -R "$REALCORPUS" "$CORPUS"
 
 # ── frozen fixture queries, CAPPED set — the round brief's own list (stale/cache/buffer/resize/multi-file).
 # resize is deliberately kept (the brief names it the HONEST COUNTER-CASE: hits genuinely are code in
