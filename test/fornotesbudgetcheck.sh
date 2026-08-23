@@ -79,7 +79,15 @@ for i in range( 12 ):
             f.write( '    """Route the widget pipeline stage %d.%d through the dispatcher."""\n' % ( i, j ) )
             f.write( "    return alpha + beta\n\n\n" )
 PY_EOF
-( cd "$CORPUS" && git init -q . && git add -A && git -c user.email=gate@example.invalid -c user.name=gate commit -qm corpus ) \
+# `-b main` is load-bearing, not tidiness. Notes are provenance-stamped with the branch they were taken on,
+# so the BRANCH NAME is charged against the token budget once per emitted note — and a bare `git init` takes
+# its name from the ambient `init.defaultBranch`, which a developer sets and a fresh CI runner does not.
+# Unset, git still names it `master`: two bytes more than `main`, per note, which against the two tokens of
+# headroom recorded above is the entire margin. Measured on one binary and one corpus, varying only this:
+# `main` → est_tokens 798 / 2528, `master` → 801 / 2543. That is the whole reason this gate was green on
+# every developer machine and red on macos-14 CI, and it is why the fixture pins the name instead of
+# inheriting one.
+( cd "$CORPUS" && git init -q -b main . && git add -A && git -c user.email=gate@example.invalid -c user.name=gate commit -qm corpus ) \
   || { echo "fornotesbudgetcheck: could not create the corpus git repo"; exit 2; }
 
 NOTE="this routine is load-bearing for the widget dispatcher and must not be reordered without rechecking the stage table downstream"
