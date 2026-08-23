@@ -45,6 +45,26 @@ TASK="rank the task surface and assemble the bundle sections"
 KMINBPT=2.36            # kMinBytesPerToken — the densest byte/token rate the budget contract is written in
 TOL=1.15                # the documented single-entry overshoot tolerance (packBodies emits its first body whole)
 
+# Same class, same fix as packtaskcheck.sh's W3-S item 6 (2026-08-19): a --partition bundle's <ctx> headers
+# and every ranked <d> row's path-qualified canonical id= key embed the corpus ROOT verbatim, so an absolute
+# "$SRC" spends bytes proportional to $ROOT's own path DEPTH — a worktree living under a long scratch path
+# measurably inflates every ceiling comparison below over a short-path checkout of the IDENTICAL commit
+# (reproduced on this lane: a 102-char root pushes core to 5785 B against the SAME 5536 B ceiling that a
+# ~50-char root clears at 2040 B's worth of tokens; a peer session on this same round independently measured
+# ~95-char → core 5717 B FAIL vs an 18-char root → PASS, and confirmed the mechanism: 26 absolute-path
+# occurrences per core bundle — 21 path-qualified id= keys + 5 task/root echoes — at ≈4.8 B/char of checkout
+# depth). This is a GATE-ENVIRONMENT bug, not a product one: --partition's id= keys are not yet relativized
+# against the corpus root the way --grep's <f p=…> grouping is (that relativization is the harvest board's
+# own root-relative-paths item — a wide output-contract change belonging to its own capture-regen sweep, out
+# of scope here). The fix here, like packtaskcheck's, is to run the CEILING-SENSITIVE bundle from INSIDE
+# "$SRC" with a relative "." root — same relative-spelling win the peer measured directly (2040-token core:
+# 5258 B relative vs 5717-5785 B absolute, comfortably under the 5536 B ceiling either way once the absolute
+# root stops leaking in). Structural assertions elsewhere in this file (shape counts, determinism, coverage,
+# disjointness, refusals, the token-budget=12000 RELATIVE comparison where the same path-byte constant
+# cancels on both sides) are unaffected and deliberately left on the absolute "$SRC" — only the byte-ceiling
+# comparison in step 5 needs this.
+runRel(){ ( cd "$SRC" && "$BIN" . "$@" ); }
+
 echo "partitioncheck: BIN=$BIN"
 
 attr(){ sed -n "s/.*<ctx-partitions[^>]* $1=\"\([^\"]*\)\".*/\1/p" "$2" | head -1; }
@@ -125,16 +145,19 @@ read -r WORST TOTALROWS < "$TMP/disj"
     || no "bundle ranking windows overlap — worst pairwise intersection = ${WORST:-?} sites"
 
 # ── 5) each bundle under ITS OWN budget (per-AGENT budget split core:partition) ───────────────────────────
-CORE_T="$( attr core_budget_tokens "$TMP/p4" )"
-PART_T="$( attr partition_budget_tokens "$TMP/p4" )"
-AGENT_T="$( attr budget_per_agent_tokens "$TMP/p4" )"
+# Path-independent bundle (see the runRel comment above): the ONLY invocation in this file whose bytes are
+# compared against an absolute ceiling, so it is the only one that needs the relative root.
+runRel --pack-task="$TASK" --partition=4 >"$TMP/p4rel" 2>/dev/null
+CORE_T="$( attr core_budget_tokens "$TMP/p4rel" )"
+PART_T="$( attr partition_budget_tokens "$TMP/p4rel" )"
+AGENT_T="$( attr budget_per_agent_tokens "$TMP/p4rel" )"
 ceiling(){ awk "BEGIN{printf \"%d\", $1 * $KMINBPT * $TOL}"; }
 overs=0
-CORE_B="$( sed -n 's/.*<bundle role="core"[^>]* bytes="\([0-9]*\)".*/\1/p' "$TMP/p4" | head -1 )"
+CORE_B="$( sed -n 's/.*<bundle role="core"[^>]* bytes="\([0-9]*\)".*/\1/p' "$TMP/p4rel" | head -1 )"
 [ "${CORE_B:-0}" -le "$( ceiling "$CORE_T" )" ] || { overs=$(( overs + 1 )); echo "     core $CORE_B B > ceiling $( ceiling "$CORE_T" ) B"; }
 while IFS= read -r b; do
     [ "$b" -le "$( ceiling "$PART_T" )" ] || { overs=$(( overs + 1 )); echo "     partition $b B > ceiling $( ceiling "$PART_T" ) B"; }
-done < <( grep -o '<bundle role="partition"[^>]* bytes="[0-9]*"' "$TMP/p4" | sed 's/.*bytes="\([0-9]*\)"/\1/' )
+done < <( grep -o '<bundle role="partition"[^>]* bytes="[0-9]*"' "$TMP/p4rel" | sed 's/.*bytes="\([0-9]*\)"/\1/' )
 { [ "$overs" -eq 0 ] && [ "$AGENT_T" = "6000" ] && [ "$(( CORE_T + PART_T ))" = "6000" ]; } \
     && ok "every bundle is under its own budget; core($CORE_T) + partition($PART_T) = one agent's $AGENT_T tokens" \
     || no "$overs bundle(s) over budget, or the core/partition split does not sum to the per-agent budget ($CORE_T+$PART_T vs $AGENT_T)"
