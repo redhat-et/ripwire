@@ -314,6 +314,15 @@ composes "mapmod-query-packsigs" "--query=d2" "--pack-signatures"
 composes "mapmod-query-packtopn" "--query=d2" "--pack-top-n=3"
 # --pack-top-n is the one map-modifier --for also honours (it budgets --for's bodies), so it composes there too
 composes "mapmod-for-packtopn"   "--for=parse" "--pack-top-n=3"
+# BOTH serving shapes (2026-08-23 sweep): "--for=parse" routes conceptual on this fixture, so the arm above
+# observes the compose on the COMPACT bundle only — and there the byte difference has thinned to the
+# candidate-pool cap echoed in the relevance-floor note ("kept 0 of 40" -> "kept 0 of 3"). Real, but not the
+# authored fact ("it budgets --for's bodies"). The twin below hosts the modifier on the AUTO shape, where
+# the row/body budgeting actually runs; the presence guard keeps it honest if d2 ever stops anchoring.
+composes "mapmod-for-packtopn-auto" "--for=d2" "--pack-top-n=3"
+"$BIN" "$FIX" --for=d2 2>/dev/null | grep -q 'bundle="auto"' \
+    && pass "mapmod-for-packtopn-auto: presence — the host query serves the AUTO (body-walk) shape" \
+    || fail "mapmod-for-packtopn-auto: presence — --for=d2 no longer routes name-exact; the compose twin observes the wrong shape"
 
 # every report verb that answers first VOIDS them — and says so
 voided "mapmod-lint-expand"        "--lint"        "--expand=d2"
