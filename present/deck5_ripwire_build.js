@@ -38,9 +38,14 @@ function stat(s, big, label, x, y, w, color, opts={}){
   s.addText(big,   { x, y,        w, h: opts.bh||0.95, fontFace: SANS, fontSize: opts.bsize||44, bold: true, color, align: "center", margin: 0 });
   s.addText(label, { x, y: y+(opts.bh||0.95)-0.06, w, h: 0.75, fontFace: SANS, fontSize: opts.lsize||12.5, color: opts.lcolor||MUTED, align: "center", margin: 0 });
 }
-// a compact N-column row band: used by the table-shaped slides (r4, the ten moments, the ledger)
+// a compact N-column row band: used by the table-shaped slides (r4, the ten moments, the ledger).
+// opts.w NARROWS the band. It defaults to the full text column, which is what every full-width table
+// wants — but a slide with cards beside its table needs the band to stop short of them, or the last
+// column renders underneath the card and is clipped. That is one parameter, not a second copy of
+// this function.
 function row(s, y, h, cols, opts={}){
-  card(s, MX, y, W-2*MX, h, opts.fill);
+  const w = opts.w || (W - 2*MX);
+  card(s, MX, y, w, h, opts.fill);
   let x = MX + 0.18;
   for (const c of cols){
     s.addText(c.t, { x, y: y+0.03, w: c.w, h: h-0.06, fontFace: c.mono ? MONO : SANS, fontSize: c.size||11.5,
@@ -67,7 +72,7 @@ function row(s, y, h, cols, opts={}){
     { x: MX+6.45, y: 5.0, w: 5.4, h: 0.4, fontFace: SANS, fontSize: 16, margin: 0 });
   s.addText("Unprovable totals ship labelled as floors. A zero means none found — never none exists.",
     { x: MX+6.45, y: 5.42, w: 5.4, h: 0.65, fontFace: SANS, fontSize: 12.5, color: MUTED, margin: 0 });
-  foot(s, "Apache-2.0  ·  single binary  ·  hermetic build (proven with the network off)  ·  16 vendored tree-sitter grammars");
+  foot(s, "Apache-2.0  ·  single binary  ·  hermetic build (proven with the network off)  ·  21 vendored tree-sitter grammars");
 }
 
 /* ── S2 · the problem ───────────────────────────────────────────────────── */
@@ -96,7 +101,7 @@ function row(s, y, h, cols, opts={}){
   title(s, "Crawl → parse → resolve → rank → emit. Deterministic, end to end.");
   const stages = [
     ["crawl",   "the tree, no VCS needed"],
-    ["parse",   "tree-sitter, 16 vendored grammars"],
+    ["parse",   "tree-sitter, 21 vendored grammars"],
     ["resolve", "references → call graph"],
     ["rank",    "Personalized PageRank"],
     ["emit",    "minified XML, one line"],
@@ -112,15 +117,17 @@ function row(s, y, h, cols, opts={}){
   const props = [
     ["byte-identical", "two runs, same bytes — a gate on every push, not a tendency; warm equals cold"],
     ["zero runtime deps", "CMake + a C++23 compiler; builds with the network off — vendored everything"],
-    ["the languages", "Rust · C++ · ObjC/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript · JavaScript · Java · Ruby · Bash · C# · JSON — Metal and ObjC ride a shared grammar"],
+    ["the languages", "Rust · C++ · ObjC/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript · JavaScript · Java · Ruby · PHP · Lua · Bash · C# · JSON · TOML · YAML · Markdown — 21 vendored grammars; markdown headings are real symbols"],
     ["agent-native", "an MCP server and 156 long flags behind one `--help` that is always the authority"],
   ];
-  let y = 4.15;
+  // Row height carries the LONGEST body (the language line, which wraps to three at this width),
+  // not the shortest — a fixed 0.68 clipped its last line off the bottom of the card.
+  let y = 3.98;
   for (const [h2, b] of props){
-    card(s, MX, y, 12.09, 0.68);
-    s.addText(h2, { x: MX+0.2, y: y+0.05, w: 2.9, h: 0.58, fontFace: MONO, fontSize: 13.5, bold: true, color: AMBER, valign: "middle", margin: 0 });
-    s.addText(b,  { x: MX+3.2, y: y+0.05, w: 8.7, h: 0.58, fontFace: SANS, fontSize: 12, color: TEXT, valign: "middle", margin: 0 });
-    y += 0.78;
+    card(s, MX, y, 12.09, 0.78);
+    s.addText(h2, { x: MX+0.2, y: y+0.05, w: 2.9, h: 0.68, fontFace: MONO, fontSize: 13.5, bold: true, color: AMBER, valign: "middle", margin: 0 });
+    s.addText(b,  { x: MX+3.2, y: y+0.05, w: 8.7, h: 0.68, fontFace: SANS, fontSize: 12, color: TEXT, valign: "middle", margin: 0 });
+    y += 0.86;
   }
 }
 
@@ -131,7 +138,7 @@ function row(s, y, h, cols, opts={}){
   title(s, "Seven families of questions it answers");
   const fams = [
     ["understand cold",  "What is this repo, and what matters in it?",          "--for  --tree  --lego  --exemplar  --recall  --pack-task  --token-budget"],
-    ["navigate",         "Who calls this? Safe to change? Which tests?",        "--callers  --callees  --uses  --impact  --path  --connect  --affected  --situ  --test-gate  --from-trace"],
+    ["navigate",         "Who calls this? Safe to change or delete? Which tests?", "--callers  --callees  --uses  --impact  --path  --connect  --affected  --situ  --test-gate  --from-trace  --pattern  --safe-delete"],
     ["detail ladder",    "Show me more — but only where it pays.",              "--detail  --pack-signatures  --outline  --expand  --compress"],
     ["quality & risk",   "Where is the risk, and did I just add some?",         "--quality-panel  --quality-delta  --dmm  --readability  --ensemble  --context-ratio  --nonlocal-state  --field-affinity  --hotspots  --lint  --clones"],
     ["self-diagnosis",   "Is my setup actually working?",                       "--doctor  --skipped"],
@@ -146,7 +153,7 @@ function row(s, y, h, cols, opts={}){
     s.addText(flags, { x: MX+6.3,  y: y+0.04, w: 5.65, h: 0.58, fontFace: MONO, fontSize: 9, color: CYAN, valign: "middle", margin: 0 });
     y += 0.74;
   }
-  foot(s, "--help is generated from the binary's own flag table — 156 long flags; docs/COMMANDS.md documents 95 with recorded output");
+  foot(s, "--help is generated from the binary's own flag table — 156 long flags; docs/COMMANDS.md carries an entry for every one of them, 94 with a recorded invocation and its output");
 }
 
 /* ── S5 · the moments ───────────────────────────────────────────────────── */
@@ -174,6 +181,40 @@ function row(s, y, h, cols, opts={}){
     i++;
   }
   foot(s, "and --pr-context when you are reviewing someone else's diff — per-file blast radius, tests-to-run, hotspot flags");
+}
+
+/* ── S5b · what shipped since the last deck refresh ─────────────────────── */
+{
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// new since 2026-08-15 — each figure re-derived on the binary that ships", CYAN);
+  title(s, "What the last eight days added", { size: 32 });
+  const shipped = [
+    ["--pattern", "search by code SHAPE, not by node kinds",
+     "foo($X, ...) across 13 grammar objects / 11 languages. On this repo VERIFY($X) finds 101 hits over 625 eligible files, each with its enclosing symbol. A pattern no served grammar resolves REFUSES (exit 1) instead of reporting hits=0.", CYAN],
+    ["--safe-delete", "“can I delete this?” in one call",
+     "callers + transitive radius + every read/write/import site + how much of that radius a test reaches. risk= names what was FOUND — never a go/no-go verdict.", CYAN],
+    ["--impact importers=", "the second, weaker reach",
+     "the files that include/require a file defining SYM, with their own cap pair — NEVER summed into reaches=, because files and symbols are different units. IngestResult: reaches=0, importers=70.", CYAN],
+    ["compact --for bundles", "bodies were 52.7% of every conceptual byte",
+     "the subtoken+body route now ships the ranked map plus one-hop edge context, disclosed as bundle=compact bodies=0. 15-query class B: 184,857 B → 95,256 B, −48.5%, all 11 decisive markers still present. --auto-bodies is a permanent opt-out.", GREEN],
+    ["corroborated callers", "shared= on --pack-task rows",
+     "a neighbour reached by four of the bundle's anchors sorts above one reached by a single anchor — omitted at 1, which is what every 1-hop row satisfies anyway.", CYAN],
+    ["per-rule --lint roll-up", "a capped view stops hiding whole rules",
+     "on this repository 14 of the 31 rules that fired contribute ZERO shown rows — 368 findings whose only evidence is their count=. A rule no corpus language registers carries applicable=0, so its zero is inertness, not a measurement.", AMBER],
+  ];
+  let y = 1.72;
+  for (const [flag, what, detail, c] of shipped){
+    card(s, MX, y, 12.09, 0.79);
+    s.addText(flag,   { x: MX+0.18, y: y+0.05, w: 2.55, h: 0.34, fontFace: MONO, fontSize: 12, bold: true, color: c, margin: 0 });
+    s.addText(what,   { x: MX+0.18, y: y+0.40, w: 2.55, h: 0.34, fontFace: SANS, fontSize: 9,  italic: true, color: MUTED, margin: 0 });
+    s.addText(detail, { x: MX+2.95, y: y+0.05, w: 9.0,  h: 0.69, fontFace: SANS, fontSize: 10.5, color: TEXT, valign: "middle", margin: 0 });
+    y += 0.87;
+  }
+  card(s, MX, 6.95, 12.09, 0.0, CARD2);
+  s.addText([
+    { text: "And two languages: PHP and Lua, ", options: { color: TEXT, bold: true } },
+    { text: "each shipped with its floor stated rather than implied — PHP's run-time dispatch ($fn(), call_user_func, __call) names its callee at run time and is a declared floor; a Lua corpus reports no inheritance edges, because metatable inheritance has no syntax to read.", options: { color: MUTED } },
+  ], { x: MX, y: 6.92, w: 12.09, h: 0.5, fontFace: SANS, fontSize: 10, margin: 0 });
 }
 
 /* ── S6 · head-to-head, round 4 ─────────────────────────────────────────── */
@@ -258,6 +299,92 @@ function row(s, y, h, cols, opts={}){
   foot(s, "bench/headtohead/r9-2026-08-09/RESULTS.md — C++ only, 34 scorable queries, one corpus (this repository)");
 }
 
+/* ── S6d · r10, the graph-database context server ───────────────────────── */
+{
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// 48 paired questions, zero exclusions, both arms exit 0 on all 48", AMBER);
+  title(s, "Against a graph-database context server: 27–7–14", { size: 32 });
+
+  // This slide's table stops at TW so it never runs underneath the cards on its right.
+  const TW = 7.85;
+  const nrow = (ry, h, cols, fill) => { row(s, ry, h, cols, { w: TW, fill }); };
+  const CW = [2.45, 0.45, 0.85, 0.9, 0.55, 1.45];
+  const splits = [
+    ["symbol lookup",         12, 6, 2, 4, "1.35×", AMBER],
+    ["conceptual search",     15, 8, 1, 6, "1.23×", AMBER],
+    ["callers / blast radius",12, 7, 2, 3, "0.39×", GREEN],
+    ["task orientation",       9, 6, 2, 1, "0.06×", GREEN],
+  ];
+  nrow(1.66, 0.34, [
+    { t: "class",      w: CW[0], color: MUTED, size: 9.5, bold: true },
+    { t: "n",          w: CW[1], color: MUTED, size: 9.5, bold: true, align: "right" },
+    { t: "ripwire",    w: CW[2], color: MUTED, size: 9.5, bold: true, align: "right" },
+    { t: "GitNexus",   w: CW[3], color: MUTED, size: 9.5, bold: true, align: "right" },
+    { t: "tie",        w: CW[4], color: MUTED, size: 9.5, bold: true, align: "right" },
+    { t: "bytes ÷ it", w: CW[5], color: MUTED, size: 9.5, bold: true, align: "right" },
+  ], BG);
+  let y = 2.04;
+  for (const [name, n, w, l, tie, ratio, rc] of splits){
+    nrow(y, 0.42, [
+      { t: name,        w: CW[0], color: TEXT,  size: 10.5 },
+      { t: String(n),   w: CW[1], color: MUTED, size: 10.5, mono: true, align: "right" },
+      { t: String(w),   w: CW[2], color: CYAN,  size: 11, mono: true, bold: true, align: "right" },
+      { t: String(l),   w: CW[3], color: TEXT,  size: 11, mono: true, align: "right" },
+      { t: String(tie), w: CW[4], color: MUTED, size: 11, mono: true, align: "right" },
+      { t: ratio,       w: CW[5], color: rc,    size: 11, mono: true, bold: true, align: "right" },
+    ]);
+    y += 0.47;
+  }
+  nrow(y, 0.44, [
+    { t: "all 48",  w: CW[0], color: TEXT,  size: 11, bold: true },
+    { t: "48",      w: CW[1], color: MUTED, size: 11, mono: true, align: "right" },
+    { t: "27",      w: CW[2], color: CYAN,  size: 12.5, mono: true, bold: true, align: "right" },
+    { t: "7",       w: CW[3], color: TEXT,  size: 12.5, mono: true, bold: true, align: "right" },
+    { t: "14",      w: CW[4], color: MUTED, size: 12.5, mono: true, align: "right" },
+    { t: "0.159×",  w: CW[5], color: GREEN, size: 12.5, mono: true, bold: true, align: "right" },
+  ], CARD2);
+
+  card(s, 8.65, 1.66, 3.96, 1.72);
+  s.addText("The cost of the whole sweep", { x: 8.85, y: 1.76, w: 3.6, h: 0.3, fontFace: SANS, fontSize: 12.5, bold: true, color: TEXT, margin: 0 });
+  s.addText([
+    { text: "309,348 B", options: { color: CYAN, bold: true, fontSize: 13 } },
+    { text: " against ", options: { color: MUTED, fontSize: 11 } },
+    { text: "1,945,231 B", options: { color: TEXT, fontSize: 11 } },
+    { text: ". Warm median 197 ms against 1,082 ms. Index 0.25–0.45 s / 6.6–16.5 MB against 23–52 s / 391–623 MB — written into the repository, not $TMPDIR.", options: { color: MUTED, fontSize: 10.5 } },
+  ], { x: 8.85, y: 2.10, w: 3.6, h: 1.2, fontFace: SANS, valign: "top", margin: 0 });
+
+  card(s, 8.65, 3.48, 3.96, 0.88, CARD2);
+  s.addText([
+    { text: "What it does better: ", options: { color: AMBER, bold: true } },
+    { text: "compact one-hop context at 0.7–1.0 KB, a depth-LABELLED blast radius, per-stage timing on every query, and two-command onboarding into eight agents.", options: { color: MUTED } },
+  ], { x: 8.85, y: 3.56, w: 3.6, h: 0.72, fontFace: SANS, fontSize: 9.5, valign: "middle", margin: 0 });
+
+  card(s, 8.65, 4.4, 3.96, 2.3, CARD2);
+  s.addText("Failure modes, both directions", { x: 8.85, y: 4.52, w: 3.6, h: 0.3, fontFace: SANS, fontSize: 12.5, bold: true, color: TEXT, margin: 0 });
+  const fails = [
+    ["needed a 2nd call", "0", "8/48"],
+    ["empty radius, real callers", "0", "1"],
+    ["malformed through a pipe", "0", "7/48"],
+  ];
+  let fy = 4.88;
+  for (const [k, a, b] of fails){
+    s.addText(k, { x: 8.85, y: fy, w: 2.2, h: 0.5, fontFace: SANS, fontSize: 9.5, color: MUTED, valign: "middle", margin: 0 });
+    s.addText(a, { x: 11.1, y: fy, w: 0.45, h: 0.5, fontFace: MONO, fontSize: 11, bold: true, color: CYAN, valign: "middle", align: "right", margin: 0 });
+    s.addText(b, { x: 11.62, y: fy, w: 0.8, h: 0.5, fontFace: MONO, fontSize: 11, color: TEXT, valign: "middle", align: "right", margin: 0 });
+    fy += 0.5;
+  }
+  s.addText("The published numbers use the file-redirected form — the configuration favourable to it.",
+    { x: 8.85, y: 6.32, w: 3.6, h: 0.32, fontFace: SANS, fontSize: 8.5, italic: true, color: MUTED, margin: 0 });
+
+  card(s, MX, 4.4, 7.85, 2.3);
+  s.addText([
+    { text: "Its seven wins are named one by one, and its first-pass numbers do not exist. ", options: { color: AMBER, bold: true } },
+    { text: "Four are cost losses on an answer ripwire gets right — a by-name lookup it serves in ~1 KB where ripwire spends 3× to also hand back the body. Three are ranking misses on webpack, and two of those share one unfixed mechanism: a symbol whose NAME matches the query beats the implementation that carries it in its body. Under the improve-first rule the round's FIRST pass was never published — its product was a loss list, and what is on this slide is the state after that list was worked. One of those fixes met its pre-registered band and was reverted anyway for failing a separate standing requirement; ", options: { color: MUTED } },
+    { text: "the loss it would have fixed is still counted against us above.", options: { color: TEXT, bold: true } },
+  ], { x: MX+0.22, y: 4.52, w: 7.4, h: 2.06, fontFace: SANS, fontSize: 10.5, valign: "middle", margin: 0 });
+  foot(s, "docs/EVALS.md §2 — GitNexus 1.6.9 (npm latest at 2026-08-22) vs ripwire at 7eb638e; django, webpack and this repository, all tree-hash verified clean · ratios are on class TOTALS, the medians form is printed there too because the two disagree");
+}
+
 /* ── S6c · the rounds ledger ────────────────────────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
@@ -272,7 +399,7 @@ function row(s, y, h, cols, opts={}){
     ["r7", "2026-08-08",    "CodeGraph, loss-first — we looked for our losses", "fix REJECTED by its own preregistered band", RED],
     ["r8", "2026-08-08",    "aider again, at equal token budget",               "loss questions traced to one root cause", TEXT],
     ["r9", "2026-08-09",    "Serena / scip-clang oracle",                       "0 silent misses; the fix list it produced", CYAN],
-    ["r10","2026-08-22",    "GitNexus 1.6.9 — a graph-database context server", "27-7-14 AFTER the fix list; first pass unpublished", CYAN],
+    ["r10","2026-08-22",    "GitNexus 1.6.9 — a graph-database context server", "27-7-14 — its own slide, two back", CYAN],
   ];
   let y = 1.68;
   for (const [r, when, what, outcome, c] of rounds){
@@ -441,7 +568,7 @@ function row(s, y, h, cols, opts={}){
   kicker(s, "// the cost lever", CYAN);
   title(s, "Smaller answers that are also better answers");
   card(s, MX, 1.95, 5.9, 2.5);
-  stat(s, "61.0%", "fewer element bytes at top-50 — the --pack-signatures ladder,\nroot-neutralised, re-derived on this repo every run", MX+0.2, 2.25, 5.5, CYAN, { bsize: 52, lsize: 12 });
+  stat(s, "81.4%", "fewer element bytes at top-50 — the --pack-signatures ladder,\nroot-neutralised, re-derived on this repo every run", MX+0.2, 2.25, 5.5, CYAN, { bsize: 52, lsize: 12 });
   card(s, MX, 4.65, 5.9, 1.9);
   s.addText("This figure survived its own audit: three corrections deep, re-derived root-neutrally after the original was shown to depend on how the corpus path was spelled — three spellings of one root read 18.6 points apart before that subtraction. top-50 is the quotable number because the payload is top-50 whatever --top-k says.",
     { x: MX+0.25, y: 4.85, w: 5.4, h: 1.55, fontFace: SANS, fontSize: 12.5, color: MUTED, margin: 0 });
@@ -486,7 +613,7 @@ function row(s, y, h, cols, opts={}){
   card(s, 8.5, 5.25, 4.1, 1.45);
   s.addText([
     { text: "The map grades itself before it answers. ", options: { color: TEXT, bold: true } },
-    { text: "This repository's own src/: files=109 symbols=3233 edges=10132 ambiguous=4768 unresolved=1097.", options: { color: MUTED, fontFace: MONO } },
+    { text: "This repository's own src/: files=116 symbols=4204 edges=11727 ambiguous=5469 unresolved=1295.", options: { color: MUTED, fontFace: MONO } },
   ], { x: 8.68, y: 5.36, w: 3.8, h: 1.24, fontFace: SANS, fontSize: 10, margin: 0 });
   foot(s, "docs/EVALS.md §8 lists the numbers this project refuses to publish, each with its reason");
 }
@@ -531,7 +658,7 @@ function row(s, y, h, cols, opts={}){
   kicker(s, "// how it stays true", AMBER);
   title(s, "Proven, not promised");
   const cards = [
-    ["397 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"],
+    ["451 gate scripts", "the suite runs on every push — plus determinism, cache-transparency and golden contracts; the gate count itself is gated against the runner's own loop"],
     ["byte-identical, always", "two runs over the same tree produce the same bytes; warm equals cold. Enforced in CI, twice — Release AND a plain flavour, because NDEBUG once blinded a whole class of checks"],
     ["differential refactoring", "a refactor must prove it changed nothing observable: two binaries, hundreds of argv vectors, stdout + stderr + exit codes byte-identical"],
     ["held-out labels, authored blind", "eval labels were written by reading source before the ranker ever ran on them — so the eval is allowed to say the ranker is wrong. It has."],
@@ -546,6 +673,38 @@ function row(s, y, h, cols, opts={}){
     s.addText(b,  { x: x+0.18, y: y+0.6, w: cw-0.36, h: 1.5, fontFace: SANS, fontSize: 10.5, color: MUTED, valign: "top", margin: 0 });
     i++;
   }
+}
+
+/* ── S10b · why the claims are worth anything ───────────────────────────── */
+{
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// the reason to believe any number on this deck", AMBER);
+  title(s, "Claims you can trust, because we publish what failed", { size: 32 });
+
+  card(s, MX, 1.72, 3.86, 1.72);
+  stat(s, "451", "gate scripts named by test/regression.sh — and the COUNT itself is gated against the runner's own loop, so it cannot go stale quietly",
+    MX+0.15, 1.86, 3.56, CYAN, { bsize: 42, bh: 0.66, lsize: 9.5 });
+  card(s, 4.68, 1.72, 3.86, 1.72, CARD2);
+  stat(s, "8", "registered NEGATIVES — changes built, gated green, measured against a band written before the code, and reverted rather than tuned",
+    4.83, 1.86, 3.56, RED, { bsize: 42, bh: 0.66, lsize: 9.5 });
+  card(s, 8.76, 1.72, 3.86, 1.72);
+  stat(s, "0", "numbers on this deck without a committed instrument behind them — §8 lists the ones this project refuses to publish at all",
+    8.91, 1.86, 3.56, GREEN, { bsize: 42, bh: 0.66, lsize: 9.5 });
+
+  const arms = [
+    ["the fresh-clone arm", "our own battery only ever ran inside a configured, long-lived worktree — one value of every AMBIENT input. It clones HEAD into a genuinely unconfigured checkout and re-runs the gates whose past failures were exactly that: a developer's git config, a fixture's inherited branch name, the checkout's own path length.", CYAN],
+    ["the merge-conservation gate", "consistency is not conservation. A conflict resolution can drop a gate from the runner's loop while regenerating the pinned count from that SAME damaged list — both sides then agree at a wrong number. On a merge, the loop must equal the UNION of both parents', minus explicit tombstones.", AMBER],
+    ["the eight, by name", "r7's prose-strip fix (predicted 12/22, band 10–14, measured 5/22) · RTA-lite, refuted twice · file-level evidence pooling, +0.00pp held-out · un-guarded query stemming · its IDF-guarded retry, VOIDED by its own verifier · query-term density weighting, both displacement guards tripped · --anchor and --cochange-boost, no confirmed lift · a name-coverage floor that MET its pre-registered band and was reverted anyway for a standing requirement.", RED],
+  ];
+  let y = 3.62;
+  for (const [h2, b, c] of arms){
+    card(s, MX, y, 12.09, 1.06);
+    s.addText(h2, { x: MX+0.2, y: y+0.06, w: 3.0, h: 0.94, fontFace: MONO, fontSize: 12, bold: true, color: c, valign: "middle", margin: 0 });
+    s.addText(b,  { x: MX+3.4, y: y+0.06, w: 8.5, h: 0.94, fontFace: SANS, fontSize: 10.5, color: MUTED, valign: "middle", margin: 0 });
+    y += 1.14;
+  }
+  s.addText("A gate that cannot go red is a gate that proves nothing — which is why every arm on this deck ships with the mutation that makes it fail.",
+    { x: MX, y: 7.0, w: 12.0, h: 0.4, fontFace: SANS, fontSize: 12.5, italic: true, color: AMBER, margin: 0 });
 }
 
 /* ── S11 · where it loses ───────────────────────────────────────────────── */
@@ -618,7 +777,7 @@ function row(s, y, h, cols, opts={}){
   stat(s, "+0.168", "the LARGEST cross-family correlation in the whole 6×6 matrix — widening the panel from four families to six did not raise it",
     MX+0.15, 1.98, 3.56, GREEN, { bsize: 40, bh: 0.72, lsize: 10.5 });
   card(s, 4.68, 1.8, 3.86, 2.15);
-  stat(s, "27,999", "eligible functions, five independent trees — two reported separately and never pooled, because one of them is this repository",
+  stat(s, "27,889", "eligible functions, five independent trees — two reported separately and never pooled, because one of them is this repository",
     4.83, 1.98, 3.56, CYAN, { bsize: 40, bh: 0.72, lsize: 10.5 });
   card(s, 8.76, 1.8, 3.86, 2.15, CARD2);
   stat(s, "4 of 6", "families the strict preset actually counts — TWO were measured and held back from gating",
@@ -703,7 +862,7 @@ function row(s, y, h, cols, opts={}){
     ["What-to-Retrieve · arXiv 2503.20589", "retrieval selection beats retrieval volume for coding agents → the selection-over-dumping thesis"],
     ["LocAgent / Loc-Bench (2025)", "the localization metric (strict Acc@k) and the frozen 560-instance dataset every accuracy number here is scored on"],
     ["scip-clang · Serena / clangd", "the compiler-grade oracle round 9 graded both tools against — an outside referee, not a rival"],
-    ["tree-sitter", "the incremental GLR parsing substrate — 16 grammars vendored, one parser per thread"],
+    ["tree-sitter", "the incremental GLR parsing substrate — 21 grammars vendored, one parser per thread"],
   ];
   y = 2.05;
   for (const [t, d] of modern){
@@ -721,10 +880,10 @@ function row(s, y, h, cols, opts={}){
   kicker(s, "// do not take any of it on trust", AMBER);
   title(s, "Every claim, and the command that re-derives it");
   const claims = [
-    ["156 long flags · 23 slides",        "bash test/deckclaimcheck.sh"],
+    ["156 long flags · 26 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
-    ["67.0% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
-    ["397 gate scripts",                  "bash test/manifestcheck.sh"],
+    ["81.4% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
+    ["451 gate scripts",                  "bash test/manifestcheck.sh"],
     ["34 repos · 54 papers · 221 surveyed","bash test/readmedriftcheck.sh"],
     ["the ten moments, any row",          "ripwire . --callers=SYM | wc -c"],
     ["the head-to-head table",            "bench/headtohead/r4-2026-08-06/"],
