@@ -104,6 +104,18 @@ exclusive = {"editcheckcheck.sh"}
 # cppbenchcheck / regexbombcheck: legitimate ASan-on-a-cold-cache work, not a hang -- ~856 s and ~804 s
 # measured respectively -- so the old flat 300 s cap read a healthy run as a timeout. 1200 s leaves
 # headroom above both measurements without being so loose it stops meaning anything.
+#
+# binoverridecheck / estchargecheck / pagingsweepcheck (2026-08-23): the same story a third time, and the
+# reds were counted as three separate mysteries before anyone lined them up. All three hit rc=124 at
+# exactly 300.0-300.1 s on the ubuntu legs of CI run 32609218692 -- "exactly the budget" is the signature
+# of a cap, not of a hang, and a real hang does not stop at the cap on four legs and finish in under a
+# minute on the fifth. Measured on an idle dev machine against the same commit: 54 s, 26 s and 34 s wall.
+# binoverridecheck is the heaviest because it is a META-gate -- it re-runs a slice of the suite against a
+# sentinel binary, so it pays the suite's own cost while competing for the same -j 3 -- which is why it
+# also overran on macos-14 Release where the other two fit. A 4-vCPU runner at -j 3 is roughly a 6-11x
+# multiplier on these, putting the honest CI numbers well past 300 s and under 900 s; 900 matches what the
+# six *importprecisecheck/*condcheck entries above already use for the same reason. Per the house rule
+# that build and CI cost never gate on wall clock, a budget here is a hang tripwire, not a perf bar.
 DEFAULT_TIMEOUT_SEC = 300
 GATE_BUDGET_SEC = {
     "crossdirincludecheck.sh":    900,
@@ -115,6 +127,11 @@ GATE_BUDGET_SEC = {
     "bodydialectcheck.sh":        900,   # T3 gave --for/--pack-task real body assembly (v0.3.5/6);
                                          # ~160 s CPU -- a plain -O0 CI runner overruns the flat cap
                                          # while a healthy local run takes ~17 s wall.
+    "binoverridecheck.sh":        900,   # meta-gate: re-runs a suite slice against a sentinel binary,
+                                         # so it pays the suite's cost while competing for the same -j.
+                                         # ~54 s idle local; rc=124 at the flat cap on 5 of 6 CI legs.
+    "estchargecheck.sh":          900,   # ~26 s idle local; rc=124 at the flat cap on all ubuntu legs.
+    "pagingsweepcheck.sh":        900,   # ~34 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "cppbenchcheck.sh":          1200,
     "regexbombcheck.sh":         1200,
 }
