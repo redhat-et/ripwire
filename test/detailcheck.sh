@@ -41,7 +41,10 @@ diff -q "$TMP/plain" "$TMP/d0" >/dev/null && ok "--detail=0 byte-identical to no
     || { no "--detail=0 changed the output (must be byte-identical)"; diff "$TMP/plain" "$TMP/d0" | head -4; }
 
 # T3 (contract update, same wave — test/forautobodycheck.sh owns the new default): plain --for is now
-# terminal by default and MAY carry an auto <bodies> block; the signatures-only shape is the OPT-OUT.
+# terminal by default and MAY carry an enrichment section — an auto <bodies> block on a name-exact
+# query, the COMPACT <hops> context on a conceptual one (this gate's TASK routes conceptual, so the
+# plain/d0 pair above compares two compact bundles; 2026-08-23 sweep note). --signatures-only is the
+# OPT-OUT on both shapes.
 "$BIN" src --for="$TASK" --signatures-only --no-cache >"$TMP/sigonly" 2>/dev/null
 grep -q '<bodies [^>]*>' "$TMP/sigonly" && no "--signatures-only --for still emits <bodies> (the opt-out must be signatures-only)" \
     || ok "--signatures-only --for is signatures-only (no <bodies> block)"
