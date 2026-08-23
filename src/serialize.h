@@ -655,7 +655,11 @@ inline constexpr std::size_t kForTailSigBytes        = 160;
 // Each single-entry action re-checks the budget, so the ladder stops at the first fitting state —
 // deterministic, query-independent, and self-announcing (capped="1" on <sigs>). An EXPLICIT
 // --token-budget=N overrides the default (N tokens × the conservative byte rate), so a caller who asks
-// for a bigger (or smaller) bundle beats the default.
+// for a bigger (or smaller) bundle beats the default — but in AUTO-BUNDLE mode the sig side's claim on
+// that wider ceiling is capped at THIS default budget (main.cpp sigSideCeiling; classb-bytes-memo §2's
+// N=8000 trap: an uncapped claim re-inflated the trimmed tail and crowded the auto bodies out), so the
+// excess buys bodies, not sig tail. An explicit --pack-top-n keeps the whole-ceiling sig claim, and
+// --signatures-only / --detail=N / --json (no auto bodies to reserve for) are likewise uncapped.
 inline constexpr std::size_t kForPayloadBudgetBytes = 7500;
 inline constexpr std::size_t kForCapTailSigBytes    = 96;
 
@@ -667,7 +671,11 @@ inline constexpr std::size_t kForCapTailSigBytes    = 96;
 // budget the DEFAULT bundle gains ON TOP of kForPayloadBudgetBytes (~1.6K tokens at kBytesPerTokenBody):
 // the signature budget above is untouched, so the ranked map is byte-identical to the signatures-only
 // run and the bodies ride only on this disclosed extra. An EXPLICIT --token-budget=N is a hard ceiling —
-// no allowance; bodies take only the budget the signature bundle genuinely left over. Disclosure is on
+// no allowance; bodies take the budget the signature bundle left over, where the signature side's claim
+// is capped at kForPayloadBudgetBytes (main.cpp sigSideCeiling — the forbudgetmonotoncheck invariant: a
+// wider ceiling never serves less decisive content; at any ceiling >= kForPayloadBudgetBytes +
+// kForAutoBodyBudgetBytes the sig render equals the default regime's, so the bodies' leftover is
+// provably >= the default's and every body the default serves still fits). Disclosure is on
 // the <ctx> root (bundle="auto" bodies="N", reason="budget" when none fit) plus a legend sentence;
 // --signatures-only opts out byte-identically; --detail=N (the explicit knob) supersedes the automatic
 // selection. Candidate cap: kPackTaskBodyCandidates — the default --for converges on the pack-task shape.

@@ -3006,6 +3006,31 @@ void restrictBodiesToRouteAnchor( const rw::IngestResult& ing, std::vector<rw::N
     candidateIds = std::move( anchorOnly );
 }
 
+// ── the auto bundle's SECTION SPLIT (classb-bytes-memo §2 2026-08-22; gate: forbudgetmonotoncheck) ────
+// The sig side's claim on the --for bundle ceiling. It used to be the WHOLE ceiling in every regime: the
+// sig section had first claim, while the bodies' allowance (kForAutoBodyBudgetBytes) existed only in the
+// default regime — so an explicit --token-budget ABOVE the default re-inflated exactly the tail the
+// default ladder trims (DJ-B1: <sigs> 1,782 B -> 9,483 B, 8 rows -> 40) and crowded the auto body walk
+// from 6 served bodies down to 2: a bundle both BIGGER than the natural default and WORSE on the axis
+// the r10 judging credited (full bodies of the decisive symbols). The invariant now enforced: a wider
+// ceiling never buys less decisive content. In auto-bundle mode with no explicit --pack-top-n, the sig
+// side's claim is capped at the DEFAULT sig budget — a no-op in the default regime (bundleBudget IS
+// kForPayloadBudgetBytes there, so the default bundle stays byte-identical), and at any explicit ceiling
+// >= kForPayloadBudgetBytes + kForAutoBodyBudgetBytes the sig render equals the default regime's byte
+// for byte, so the bodies' leftover is provably >= the default's: every body the default serves still
+// fits, and everything beyond the frozen share flows to bodies. An explicit --pack-top-n is an explicit
+// SIG posture and keeps the legacy whole-ceiling claim — the frozen share would trim the rows the caller
+// literally asked for down to the ladder floor. A free function over runForLens' locals (the
+// ForLensHeaderParts precedent) — runForLens is already one of the largest functions in this file.
+std::size_t forSigSideCeiling( bool autoBundleMode, int packTopN, std::size_t bundleBudget )
+{
+    if( autoBundleMode && packTopN == 0 )
+    {
+        return std::min( bundleBudget, rw::kForPayloadBudgetBytes );
+    }
+    return bundleBudget;
+}
+
 ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
                                         const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                         std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr,
@@ -3628,7 +3653,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         const std::size_t autoLegendBytes = plan.legendBytes;
         const std::size_t fixedBytes = headerStr.size() - adaptiveNote.size() - autoLegendBytes
                                      + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
-        const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;   // ≥1: 0 would mean "no budget"
+        // the auto bundle's SECTION SPLIT — the sig side's claim is capped so an explicit ceiling wider
+        // than the default cannot re-inflate the trimmed sig tail at the bodies' expense (the rule, its
+        // measured defect and the invariant: forSigSideCeiling above; gate: forbudgetmonotoncheck).
+        const std::size_t sigSideCeiling = forSigSideCeiling( autoBundleMode, cfg.packTopN, bundleBudget );
+        const std::size_t sigsBudget = sigSideCeiling > fixedBytes ? sigSideCeiling - fixedBytes : 1;   // ≥1: 0 would mean "no budget"
 
         // The two attributes SPLICED into the header AFTER the ceiling ladder has chosen a rung — est_tokens
         // (" est_tokens=\"NNNNNNNN\"", bounded well under 24 B: 8 digits covers ~100M tokens) and, when the
