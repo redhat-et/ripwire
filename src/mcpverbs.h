@@ -1686,10 +1686,7 @@ inline std::string impactText( const std::string& root, const std::string& symbo
       std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line ); }
     // the import tier's rows, after the symbol rows and under their own tag — a different unit, so a
     // different element (see the CLI arm and kImpactImportTierLegend for why they are never one number).
-    for( std::size_t i = 0; i < imports.shown; ++i )
-    { const std::string_view rp = imSingleRoot ? sarif::rootRelativeUri( ing.files[ imports.files[i] ], imRootPrefix )
-                                               : std::string_view( ing.files[ imports.files[i] ] );
-      std::fprintf( mem, "<f via=\"import\" p=\"%s\"/>", ex( rp ).c_str() ); }
+    emitImportRowsXml( mem, ing, std::span<const std::uint32_t>( imports.files ).first( imports.shown ), imRootPrefix );
     std::fprintf( mem, "</impact>" );
     std::fflush( mem );
     std::fclose( mem );
