@@ -5101,6 +5101,56 @@ inline std::string phpUseTarget( TSNode useNode, std::string_view src )
     return {};
 }
 
+// TS/JS `require("./x")` and dynamic `import("./x")` → the written specifier, or empty when this call
+// expression is not a module load. Its own function for the same reason csharpUsingTarget and phpUseTarget
+// are: one AST shape per language stays a one-line call inside directiveTargetOf, whose grain is one
+// branch per grammar spelling rather than one branch plus one nested scan.
+//
+// THREE conditions, all required, and each is what keeps an ordinary call out of the dependency graph:
+//   * the callee is the BARE identifier `require` or `import` — a member expression
+//     (`require.resolve("./x")`, `foo.import(x)`) has different `function` node text and is not a module
+//     load, so it never matches;
+//   * there is EXACTLY ONE argument — `require(a, b)` is not the CommonJS form;
+//   * that argument is a STRING LITERAL. A computed specifier (`require(name)`, `require("./" + n)`, a
+//     template string) carries no resolvable path, and guessing one would MANUFACTURE a wrong edge — the
+//     one thing buildPreciseIncludeAdj's contract forbids. It is dropped, which reads downstream as an
+//     unresolvable include: a floor, never a wrong answer.
+inline std::string jsModuleLoadTarget( TSNode n, std::string_view src )
+{
+    const TSNode fn = ts_node_child_by_field_name( n, "function",  8 );
+    const TSNode ar = ts_node_child_by_field_name( n, "arguments", 9 );
+    if( ts_node_is_null( fn ) || ts_node_is_null( ar ) )
+    {
+        return {};
+    }
+    const uint32_t fa = ts_node_start_byte( fn ), fb = ts_node_end_byte( fn );
+    if( fa >= fb || fb > src.size() )
+    {
+        return {};
+    }
+    const std::string_view callee = src.substr( fa, fb - fa );
+    if( callee != "require" && callee != "import" )
+    {
+        return {};
+    }
+
+    TSNode   only  = { };
+    uint32_t named = 0;
+    for( uint32_t k = 0, cc = ts_node_child_count( ar ); k < cc; ++k )
+    {
+        if( const TSNode c = ts_node_child( ar, k );  ts_node_is_named( c ) )
+        {
+            only = c;
+            ++named;
+        }
+    }
+    if( named != 1 || std::strcmp( ts_node_type( only ), "string" ) != 0 )
+    {
+        return {};
+    }
+    return importSpecifierText( only, src );   // strips the one quote pair
+}
+
 // The bare header path inside a C-family include spelling: `"dir/x.h"` / `<dir/x.h>` → `dir/x.h`, with
 // isAngleOut set from the delimiter BEFORE it is stripped (angle = external ⇒ path-precise resolution
 // leaves it unresolved). Shared by the two C-family spellings so they can never drift apart:
@@ -5347,44 +5397,7 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
     else if( std::strcmp( t, "call_expression" ) == 0
              && ( lang == Lang::TypeScript || lang == Lang::JavaScript ) )   // TS/JS `require("./x")` / `import("./x")`
     {
-        // CommonJS and the dynamic ESM form are the same node shape: call_expression
-        // function:(identifier) arguments:(arguments "(" (string) ")"). THREE conditions, all required,
-        // and each one is what keeps a real call out of the dependency graph:
-        //   * the callee is the BARE identifier `require` or `import` — a member expression
-        //     (`require.resolve("./x")`, `foo.import(x)`) has a different `function` node text and is not
-        //     a module load, so it never matches;
-        //   * there is EXACTLY ONE argument — `require(a, b)` is not the CommonJS form;
-        //   * that argument is a STRING LITERAL. A computed specifier (`require(name)`,
-        //     `require("./" + n)`, a template string) carries no resolvable path, and guessing one would
-        //     manufacture a wrong edge — the one thing buildPreciseIncludeAdj's contract forbids. It is
-        //     dropped, which reads downstream as an unresolvable include: a floor, never a wrong answer.
-        const TSNode fn = ts_node_child_by_field_name( n, "function",  8 );
-        const TSNode ar = ts_node_child_by_field_name( n, "arguments", 9 );
-        if( !ts_node_is_null( fn ) && !ts_node_is_null( ar ) )
-        {
-            const uint32_t fa = ts_node_start_byte( fn ), fb = ts_node_end_byte( fn );
-            if( fa < fb && fb <= src.size() )
-            {
-                const std::string_view callee = src.substr( fa, fb - fa );
-                if( callee == "require" || callee == "import" )
-                {
-                    TSNode   only  = { };
-                    uint32_t named = 0;
-                    for( uint32_t k = 0, cc = ts_node_child_count( ar ); k < cc; ++k )
-                    {
-                        if( const TSNode c = ts_node_child( ar, k ); ts_node_is_named( c ) )
-                        {
-                            only = c;
-                            ++named;
-                        }
-                    }
-                    if( named == 1 && std::strcmp( ts_node_type( only ), "string" ) == 0 )
-                    {
-                        target = importSpecifierText( only, src );   // strips the one quote pair
-                    }
-                }
-            }
-        }
+        target = jsModuleLoadTarget( n, src );
     }
     else if( std::strcmp( t, "use_declaration" ) == 0 )                  // Rust `use crate::a::b;`
     {

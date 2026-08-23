@@ -7897,11 +7897,8 @@ std::optional<int> runImpact( const MainDispatch& d )
         // two surfaces cannot drift. The two reaches stay separate all the way to the bytes: a separate
         // count (importers=), a separate truncation pair (shown_importers=/importers_capped=, pageview.h
         // rule 6) and a separate row tag.
-        const rw::ImportTier imports = rw::impactImportTier( ing, seeds );
-        const auto           importRowPath = [ & ]( std::uint32_t f ) -> std::string
-        {
-            return ex( imSingleRoot ? rw::sarif::rootRelativeUri( ing.files[f], imRootPrefix ) : std::string_view( ing.files[f] ) );
-        };
+        const rw::ImportTier imports    = rw::impactImportTier( ing, seeds );
+        const std::span      importPage = std::span<const std::uint32_t>( imports.files ).first( imports.shown );
 
         if( !cfg.json )
         { // L2: JSON has no comment-node analogue; the XML-only leading doc comment
@@ -7972,12 +7969,7 @@ std::optional<int> runImpact( const MainDispatch& d )
             // A SECOND array, never rows folded into "impact": the JSON consumer sees the same two-tier
             // shape the XML one does, and cannot sum them by accident.
             std::printf( "],\"import_reach\":[" );
-            for( std::size_t i = 0; i < imports.shown; ++i )
-            {
-                const std::string_view rp = imSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ imports.files[i] ], imRootPrefix )
-                                                         : std::string_view( ing.files[ imports.files[i] ] );
-                std::printf( "%s{\"via\":\"import\",\"p\":\"%s\"}", i ? "," : "", jsonStr( rp ).c_str() );
-            }
+            rw::emitImportRowsJson( stdout, ing, importPage, imRootPrefix );
             std::printf( "]}" );
             return 0;
         }
@@ -7996,10 +7988,7 @@ std::optional<int> runImpact( const MainDispatch& d )
         // LB-H: the import tier, AFTER the symbol rows and under its own tag. A different tag because it is
         // a different unit — an <s> is a symbol that provably names SYM, an <f> is a file that names SYM's
         // FILE — and a reader (or a parser) that counts <s> rows must not pick these up.
-        for( std::size_t i = 0; i < imports.shown; ++i )
-        {
-            std::printf( "<f via=\"import\" p=\"%s\"/>", importRowPath( imports.files[i] ).c_str() );
-        }
+        rw::emitImportRowsXml( stdout, ing, importPage, imRootPrefix );
         std::printf( "</impact>" );
         return 0;
     }
