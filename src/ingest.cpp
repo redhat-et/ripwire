@@ -1499,7 +1499,7 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 70;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 71;           // bump on any grammar/.scm/extraction change
                                                       // 70 = 2026-08-22 test-macro blocks (LB-E, r10 harvest): a known
                                                       //    doctest/Catch2 block-forming test macro (kTestBlockMacroNames)
                                                       //    invoked as `TEST_CASE( "title" ) { … }` — which tree-sitter-cpp
@@ -5179,9 +5179,19 @@ inline bool isPreprocConditional( const char* type ) noexcept
 // our grammars; a shared list would send the walk into every C++/TypeScript/Java function body hunting a
 // directive form those languages do not have there — cost with no recall. Each language therefore names
 // only the containers ITS directives really appear in. Languages absent from the switch below (C-family,
-// TS/JS, Go, Swift, Java, Ruby) get the preprocessor set and nothing else, which is the whole of what
-// their grammars nest: TS/JS ESM `import` is top-level-only (a dynamic `import( … )` is a call
-// expression, not an import_statement), and Go/Java imports are top-level by language rule.
+// Go, Swift, Java, Ruby) get the preprocessor set and nothing else, which is the whole of what their
+// grammars nest: Go/Java imports are top-level by language rule.
+//
+// TS/JS used to be in that "nothing else" list, on the reasoning that ESM `import` is top-level-only and
+// "a dynamic `import( … )` is a call expression, not an import_statement". Both halves were true and the
+// conclusion was still wrong, because CommonJS `require("./x")` is a call expression too — and it is not
+// a corner case, it is how an entire module system spells its dependencies. Measured on webpack: `--deps`
+// over its 695-file CommonJS `lib/` reported files="0", i.e. ZERO file→file edges across the whole
+// subsystem, and every consumer of that graph (--deps, --arch, cycles, the Lakos health verdict,
+// --expand's sibling lift, the SameInclude call-resolution tier, and --impact's import tier) was reading
+// an empty table and reporting the emptiness as a horizontal, cycle-free architecture. The four entries
+// below are exactly the statement forms a top-level `require` is written in; the call node itself is read
+// by directiveTargetOf, which is what keeps every OTHER call expression out.
 //
 // EVERY ENTRY HAS A FIXTURE ARM in test/nestedimportfix — an entry with no arm is an untested claim, and
 // every parent chain below was read off a real parse with `--match`, never predicted from the grammar.
@@ -5211,6 +5221,20 @@ inline constexpr std::array<std::string_view, 19> kRustImportContainers = {
 
 inline constexpr std::array<std::string_view, 2> kCsharpImportContainers = { "namespace_declaration", "declaration_list" };
 
+// TS/JS: the statement forms that wrap a top-level `require("./x")`. Read off real parses, not predicted:
+//   const X = require("./x");            lexical_declaration → variable_declarator → call_expression
+//   const { a } = require("./x");        the same chain (the destructuring is in the declarator's NAME)
+//   var X = require("./x");              variable_declaration → variable_declarator → call_expression
+//   require("./x");                      expression_statement → call_expression
+//   module.exports = require("./x");     expression_statement → assignment_expression → call_expression
+// Three levels at the deepest, far inside kMaxImportContainerDepth. NOT listed: `statement_block` and the
+// function-body kinds — a `require` inside a function body stays uncaptured, exactly as a Python import
+// inside a function body was before its containers were added, and exactly as ESM `import` cannot appear
+// there at all. That is a disclosed floor (counts_floor=), not a silent claim of completeness.
+inline constexpr std::array<std::string_view, 5> kJsImportContainers = {
+    "lexical_declaration", "variable_declaration", "variable_declarator", "expression_statement", "assignment_expression"
+};
+
 inline bool isImportContainer( Lang lang, const char* type ) noexcept
 {
     if( isPreprocConditional( type ) )   // every grammar with a preprocessor: C/C++/ObjC/CUDA/Metal + C#
@@ -5219,10 +5243,12 @@ inline bool isImportContainer( Lang lang, const char* type ) noexcept
     }
     switch( lang )
     {
-        case Lang::Python: return namesNode( kPythonImportContainers, type );
-        case Lang::Rust:   return namesNode( kRustImportContainers, type );
-        case Lang::CSharp: return namesNode( kCsharpImportContainers, type );
-        default:           return false;
+        case Lang::Python:     return namesNode( kPythonImportContainers, type );
+        case Lang::Rust:       return namesNode( kRustImportContainers, type );
+        case Lang::CSharp:     return namesNode( kCsharpImportContainers, type );
+        case Lang::TypeScript:
+        case Lang::JavaScript: return namesNode( kJsImportContainers, type );
+        default:               return false;
     }
 }
 
@@ -5240,15 +5266,20 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // Node types confirmed per grammar: C++ preproc_include (path field, "" local vs <> external); C++
 // preproc_call with directive `#import` (the C/C++ grammar has no #import rule — the objc grammar does,
 // and yields preproc_include there); Python import_statement/import_from_statement; Go/Swift
-// import_declaration; Rust use_declaration + mod_item; C# using_directive. LEVER-B B0: non-C imports
-// capture the CLEAN written specifier via grammar child fields (module path / quoted specifier / use
-// argument), not a sliced clause — the sound resolver input.
+// import_declaration; Rust use_declaration + mod_item; C# using_directive; TS/JS call_expression for the
+// CommonJS `require("./x")` and dynamic `import("./x")` spellings. LEVER-B B0: non-C imports capture the
+// CLEAN written specifier via grammar child fields (module path / quoted specifier / use argument), not a
+// sliced clause — the sound resolver input.
+//
+// `lang` exists for exactly one branch: `call_expression` is a node type in most of our grammars, and a
+// C++ or Rust function that happens to be named `require` must never manufacture a dependency edge. The
+// language gate makes that impossible by construction rather than by relying on where the walk goes.
 //
 // `isAngle` is C/C++/ObjC only: `<x.h>` (external) vs `"x.h"` (quote), returned alongside the target so
 // path-precise resolution can leave angle includes unresolved. Allocates a std::string → not noexcept.
 struct DirectiveTarget { std::string target; bool isAngle; };
 
-DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src )
+DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src, Lang lang )
 {
     std::string target;
     bool        isAngle = false;
@@ -5311,6 +5342,48 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
         if( const TSNode mn = ts_node_child_by_field_name( n, "module_name", 11 );  !ts_node_is_null( mn ) )
         {
             target = importSpecifierText( mn, src );
+        }
+    }
+    else if( std::strcmp( t, "call_expression" ) == 0
+             && ( lang == Lang::TypeScript || lang == Lang::JavaScript ) )   // TS/JS `require("./x")` / `import("./x")`
+    {
+        // CommonJS and the dynamic ESM form are the same node shape: call_expression
+        // function:(identifier) arguments:(arguments "(" (string) ")"). THREE conditions, all required,
+        // and each one is what keeps a real call out of the dependency graph:
+        //   * the callee is the BARE identifier `require` or `import` — a member expression
+        //     (`require.resolve("./x")`, `foo.import(x)`) has a different `function` node text and is not
+        //     a module load, so it never matches;
+        //   * there is EXACTLY ONE argument — `require(a, b)` is not the CommonJS form;
+        //   * that argument is a STRING LITERAL. A computed specifier (`require(name)`,
+        //     `require("./" + n)`, a template string) carries no resolvable path, and guessing one would
+        //     manufacture a wrong edge — the one thing buildPreciseIncludeAdj's contract forbids. It is
+        //     dropped, which reads downstream as an unresolvable include: a floor, never a wrong answer.
+        const TSNode fn = ts_node_child_by_field_name( n, "function",  8 );
+        const TSNode ar = ts_node_child_by_field_name( n, "arguments", 9 );
+        if( !ts_node_is_null( fn ) && !ts_node_is_null( ar ) )
+        {
+            const uint32_t fa = ts_node_start_byte( fn ), fb = ts_node_end_byte( fn );
+            if( fa < fb && fb <= src.size() )
+            {
+                const std::string_view callee = src.substr( fa, fb - fa );
+                if( callee == "require" || callee == "import" )
+                {
+                    TSNode   only  = { };
+                    uint32_t named = 0;
+                    for( uint32_t k = 0, cc = ts_node_child_count( ar ); k < cc; ++k )
+                    {
+                        if( const TSNode c = ts_node_child( ar, k ); ts_node_is_named( c ) )
+                        {
+                            only = c;
+                            ++named;
+                        }
+                    }
+                    if( named == 1 && std::strcmp( ts_node_type( only ), "string" ) == 0 )
+                    {
+                        target = importSpecifierText( only, src );   // strips the one quote pair
+                    }
+                }
+            }
         }
     }
     else if( std::strcmp( t, "use_declaration" ) == 0 )                  // Rust `use crate::a::b;`
@@ -5417,7 +5490,7 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
         // `mod x { … }` is a container whose body holds `use`s. A walk that treated container-ness as a
         // reason to skip the read would silently drop every Rust module-file declaration in the corpus.
         // For every other container the read simply returns empty, so one uniform order covers all of them.
-        auto [ target, isAngle ] = directiveTargetOf( n, t, src );
+        auto [ target, isAngle ] = directiveTargetOf( n, t, src, lang );
 
         if( isImportContainer( lang, t ) )
         {

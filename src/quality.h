@@ -762,7 +762,7 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 13;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 70;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 71;   // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 70 = 2026-08-22 test-macro blocks (LB-E): a known doctest/Catch2
                                                           // block-forming test macro (`TEST_CASE( "title" ) { … }` and kin)
                                                           // extracts as a t="fn" symbol named by its title literal, spanning
