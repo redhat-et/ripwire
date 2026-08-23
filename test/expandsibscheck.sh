@@ -94,13 +94,29 @@ INC_SHOWN="$( printf '%s' "$MTAG" | grep -oE ' inc="[^"]*"' | tr ',' '\n' | grep
 # ── (D) opt-in: every OTHER packBodies caller stays byte-identical (withFileContext defaults false) ─────
 # --for's auto rank-1 body and --pack-task both route through packBodies WITHOUT withFileContext; probing
 # them on this fixture must show NEITHER sibs= nor inc= anywhere in the output.
-FOR_XML="$( "$BIN" "$FIX" --for=compute a value --no-cache 2>/dev/null )"
+#
+# RE-ARMED 2026-08-23 (the --for-family serving-shape sweep). The original probes spelled the task
+# UNQUOTED (--for=compute a value): the shell split it, ripwire refused the nonexistent root 'a' (rc=1,
+# empty stdout), and both negatives grepped an EMPTY string — green while observing nothing. And even
+# quoted, "compute a value" routes CONCEPTUAL, which now serves the COMPACT bundle (zero bodies) — a
+# shape that cannot leak a body attribute in the first place. Both probes are now name-anchored so each
+# serves >= 1 real <b> body — asserted by a presence guard per CONTRIBUTING §2's "a gate that cannot
+# observe what it asserts" rule — and the negatives bind on the body-bearing shape the contract is about.
+# Re-proved red-capable at re-arm: the presence guard fires on a body-free (compact) serving, and the
+# negative's grep detects sibs=/inc= when fed arm (A)'s --expand output.
+FOR_XML="$( "$BIN" "$FIX" --for=alphaFn --no-cache 2>/dev/null )"
+printf '%s' "$FOR_XML" | grep -q '<b t=' \
+    && ok "(D) presence: --for=alphaFn serves a real auto body (the packBodies shape the opt-in is about)" \
+    || no "(D) presence: --for=alphaFn served NO body — the sibs=/inc= negative below would pass on nothing"
 if printf '%s' "$FOR_XML" | grep -qE 'sibs=|inc="'; then
     no "(D) --for's auto-body leaked sibs=/inc= — withFileContext must default false for non-expand callers"
 else
     ok "(D) --for's auto-body carries no sibs=/inc= (opt-in default holds)"
 fi
-PT_XML="$( "$BIN" "$FIX" --pack-task=compute a value --no-cache 2>/dev/null )"
+PT_XML="$( "$BIN" "$FIX" --pack-task=alphaFn --no-cache 2>/dev/null )"
+printf '%s' "$PT_XML" | grep -q '<b t=' \
+    && ok "(D) presence: --pack-task=alphaFn serves a real body" \
+    || no "(D) presence: --pack-task=alphaFn served NO body — the sibs=/inc= negative below would pass on nothing"
 if printf '%s' "$PT_XML" | grep -qE 'sibs=|inc="'; then
     no "(D) --pack-task leaked sibs=/inc= — withFileContext must default false for non-expand callers"
 else
