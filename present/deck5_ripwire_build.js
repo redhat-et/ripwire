@@ -38,9 +38,14 @@ function stat(s, big, label, x, y, w, color, opts={}){
   s.addText(big,   { x, y,        w, h: opts.bh||0.95, fontFace: SANS, fontSize: opts.bsize||44, bold: true, color, align: "center", margin: 0 });
   s.addText(label, { x, y: y+(opts.bh||0.95)-0.06, w, h: 0.75, fontFace: SANS, fontSize: opts.lsize||12.5, color: opts.lcolor||MUTED, align: "center", margin: 0 });
 }
-// a compact N-column row band: used by the table-shaped slides (r4, the ten moments, the ledger)
+// a compact N-column row band: used by the table-shaped slides (r4, the ten moments, the ledger).
+// opts.w NARROWS the band. It defaults to the full text column, which is what every full-width table
+// wants — but a slide with cards beside its table needs the band to stop short of them, or the last
+// column renders underneath the card and is clipped. That is one parameter, not a second copy of
+// this function.
 function row(s, y, h, cols, opts={}){
-  card(s, MX, y, W-2*MX, h, opts.fill);
+  const w = opts.w || (W - 2*MX);
+  card(s, MX, y, w, h, opts.fill);
   let x = MX + 0.18;
   for (const c of cols){
     s.addText(c.t, { x, y: y+0.03, w: c.w, h: h-0.06, fontFace: c.mono ? MONO : SANS, fontSize: c.size||11.5,
@@ -300,19 +305,9 @@ function row(s, y, h, cols, opts={}){
   kicker(s, "// 48 paired questions, zero exclusions, both arms exit 0 on all 48", AMBER);
   title(s, "Against a graph-database context server: 27–7–14", { size: 32 });
 
-  // A NARROW table band. The shared row() helper spans the full text column (W-2*MX), which would
-  // run underneath this slide's right-hand cards and clip the last column; this slide's table stops
-  // at TW so the two halves never overlap.
+  // This slide's table stops at TW so it never runs underneath the cards on its right.
   const TW = 7.85;
-  function nrow(ry, h, cols, fill){
-    card(s, MX, ry, TW, h, fill);
-    let x = MX + 0.16;
-    for (const c of cols){
-      s.addText(c.t, { x, y: ry+0.03, w: c.w, h: h-0.06, fontFace: c.mono ? MONO : SANS, fontSize: c.size||11,
-                       bold: !!c.bold, color: c.color||TEXT, valign: "middle", align: c.align||"left", margin: 0 });
-      x += c.w + 0.1;
-    }
-  }
+  const nrow = (ry, h, cols, fill) => { row(s, ry, h, cols, { w: TW, fill }); };
   const CW = [2.45, 0.45, 0.85, 0.9, 0.55, 1.45];
   const splits = [
     ["symbol lookup",         12, 6, 2, 4, "1.35×", AMBER],
