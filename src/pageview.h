@@ -136,6 +136,15 @@ inline int effectiveRowCap( int pageLimit, int historicCap ) noexcept
 inline constexpr int kCallHierarchyRowCap = 40;
 inline constexpr int kUseSiteRowCap       = 100;
 
+// ── LB-H (r10 GitNexus round) — the display cap on --impact's SECONDARY import tier ──────────────────────
+// Deliberately the SAME 40 as the symbol rows above rather than a third number: it counts a comparable
+// unit (one row per file, one row per symbol) on the same screen, and a second calibration nobody could
+// re-derive is how this family drifted apart the first time. It is NOT raisable by --limit — rule 6 above
+// reserves the paging half for the PRIMARY listing, so a secondary one discloses through
+// shown_importers=/importers_capped= and nothing else. Nothing is hidden by that: importers= on the root
+// is always the full count, and --uses=SYM lists the import SITES under its own, separate cap.
+inline constexpr int kImportReachRowCap   = 40;
+
 // The values pageDisclosure() renders under EVERY PageSyntax (XML attrs and §A3a/§A4c JSON keys) — hoisted
 // so every format's rendering shares the ONE isCapped/hasMore/paging decision instead of re-deriving it
 // (a real duplicate found by --quality-delta when a separate JSON mirror briefly landed next to this: same

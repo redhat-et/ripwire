@@ -1654,8 +1654,10 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     // constants (src/graphlegend.h + src/pageview.h), so this legend is byte-identical to the CLI --impact
     // one. It was NOT before: this copy carried an abridged paging clause with no limit="0" definition —
     // exactly the §B4 echo-site divergence the shared-constant rule exists to stop.
-    std::fprintf( mem, "%s%s. %s%s-->", kImpactLegendOpen, kPageRaiseCapClause, graphCountDisclosure().c_str(),
-                  renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
+    // LB-H: the import tier's clause rides here too — the CLI legend and this one are byte-identical by
+    // rule, and an attribute the MCP root now carries has to be defined where the caller meets it.
+    std::fprintf( mem, "%s%s. %s%s%s-->", kImpactLegendOpen, kPageRaiseCapClause, kImpactImportTierLegend,
+                  graphCountDisclosure().c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
     // "is it safe to change X?" reads as the WHOLE blast radius when it can be 3% of it. Same attributes,
     // same meaning as the CLI --impact — the two surfaces must not diverge on an honesty marker.
@@ -1670,15 +1672,21 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     const bool         imSingleRoot = ing.realPaths.empty();
     const std::string  imRootPrefix = imSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const std::string  imRootAttr   = imSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
-    std::fprintf( mem, "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s%s>",
+    // LB-H: ONE derivation, shared with the CLI arm (graph.h::impactImportTier) — mcpclidiffcheck compares
+    // the two surfaces' attribute sets, and an honesty marker that lands on one of them is the §B4 class.
+    const ImportTier imports = impactImportTier( ing, seeds );
+    std::fprintf( mem, "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s%s%s>",
                   ex( symbol ).c_str(), seeds.size(), reach.size(),
-                  imRootAttr.c_str(),
+                  imports.xmlAttrs.c_str(), imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   kGraphCountFloorAttrXml, renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str() );
     for( std::size_t i = ipw.begin; i < ipw.end; ++i )
     { const Symbol& s = ing.symbols[ show[i] ];
       const std::string_view rp = imSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], imRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
       std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line ); }
+    // the import tier's rows, after the symbol rows and under their own tag — a different unit, so a
+    // different element (see the CLI arm and kImpactImportTierLegend for why they are never one number).
+    emitImportRowsXml( mem, ing, std::span<const std::uint32_t>( imports.files ).first( imports.shown ), imRootPrefix );
     std::fprintf( mem, "</impact>" );
     std::fflush( mem );
     std::fclose( mem );

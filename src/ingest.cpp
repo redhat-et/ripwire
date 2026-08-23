@@ -1499,7 +1499,7 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 70;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 71;           // bump on any grammar/.scm/extraction change
                                                       // 70 = 2026-08-22 test-macro blocks (LB-E, r10 harvest): a known
                                                       //    doctest/Catch2 block-forming test macro (kTestBlockMacroNames)
                                                       //    invoked as `TEST_CASE( "title" ) { … }` — which tree-sitter-cpp
@@ -2960,6 +2960,29 @@ inline bool cc_isNestingOnly( const char* t ) noexcept   // raises nesting, scor
            || std::strcmp( t, "closure_expression" ) == 0;
 }
 
+// A node's source text, or "" when the node is null or its byte range does not lie inside `src`. The
+// null+range guard is the same three lines every extraction helper in this file would otherwise repeat (it
+// is what --quality-delta flagged as a clone when the Rust helpers open-coded it, and again when the
+// preprocessor include readers did), so it lives once, here — hoisted above the first consumer rather
+// than sitting halfway down the file where three helpers ahead of it could not reach it.
+//
+// A FIELD read is the common case: nodeFieldText( n, "operator", 8, src ) is the whole of what most
+// callers want, and ts_node_child_by_field_name's length argument is the one thing easy to get wrong.
+inline std::string_view nodeTextOf( TSNode node, std::string_view src ) noexcept
+{
+    if( ts_node_is_null( node ) )
+    {
+        return {};
+    }
+    const std::uint32_t a = ts_node_start_byte( node ), b = ts_node_end_byte( node );
+    return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
+}
+
+inline std::string_view nodeFieldText( TSNode node, const char* field, std::uint32_t fieldLen, std::string_view src ) noexcept
+{
+    return nodeTextOf( ts_node_child_by_field_name( node, field, fieldLen ), src );
+}
+
 // The written spelling of a node's `operator:` field, or "" when it has none / the span is out of range.
 // ONE derivation, shared by the two consumers below — cc_boolOp (cognitive: does this operator CONTINUE
 // a boolean run?) and cc_isBooleanJoin (cyclomatic: does it count as a decision at all?). They ask
@@ -2967,13 +2990,7 @@ inline bool cc_isNestingOnly( const char* t ) noexcept   // raises nesting, scor
 // hand-copied spans — a duplication --quality-delta scored the moment the second one grew a case.
 inline std::string_view cc_operatorText( TSNode n, std::string_view src ) noexcept
 {
-    const TSNode op = ts_node_child_by_field_name( n, "operator", 8 );
-    if( ts_node_is_null( op ) )
-    {
-        return {};
-    }
-    const std::uint32_t a = ts_node_start_byte( op ), b = ts_node_end_byte( op );
-    return ( b > src.size() || b <= a ) ? std::string_view{} : src.substr( a, b - a );
+    return nodeFieldText( n, "operator", 8, src );
 }
 
 // the boolean-operator spelling of a node, or "" if it isn't one (&&/|| for C-family, and/or for Python)
@@ -5101,6 +5118,50 @@ inline std::string phpUseTarget( TSNode useNode, std::string_view src )
     return {};
 }
 
+// TS/JS `require("./x")` and dynamic `import("./x")` → the written specifier, or empty when this call
+// expression is not a module load. Its own function for the same reason csharpUsingTarget and phpUseTarget
+// are: one AST shape per language stays a one-line call inside directiveTargetOf, whose grain is one
+// branch per grammar spelling rather than one branch plus one nested scan.
+//
+// THREE conditions, all required, and each is what keeps an ordinary call out of the dependency graph:
+//   * the callee is the BARE identifier `require` or `import` — a member expression
+//     (`require.resolve("./x")`, `foo.import(x)`) has different `function` node text and is not a module
+//     load, so it never matches;
+//   * there is EXACTLY ONE argument — `require(a, b)` is not the CommonJS form;
+//   * that argument is a STRING LITERAL. A computed specifier (`require(name)`, `require("./" + n)`, a
+//     template string) carries no resolvable path, and guessing one would MANUFACTURE a wrong edge — the
+//     one thing buildPreciseIncludeAdj's contract forbids. It is dropped, which reads downstream as an
+//     unresolvable include: a floor, never a wrong answer.
+inline std::string jsModuleLoadTarget( TSNode n, std::string_view src )
+{
+    const std::string_view callee = nodeFieldText( n, "function", 8, src );
+    if( callee != "require" && callee != "import" )
+    {
+        return {};
+    }
+    const TSNode ar = ts_node_child_by_field_name( n, "arguments", 9 );
+    if( ts_node_is_null( ar ) )
+    {
+        return {};
+    }
+
+    TSNode   only  = { };
+    uint32_t named = 0;
+    for( uint32_t k = 0, cc = ts_node_child_count( ar ); k < cc; ++k )
+    {
+        if( const TSNode c = ts_node_child( ar, k );  ts_node_is_named( c ) )
+        {
+            only = c;
+            ++named;
+        }
+    }
+    if( named != 1 || std::strcmp( ts_node_type( only ), "string" ) != 0 )
+    {
+        return {};
+    }
+    return importSpecifierText( only, src );   // strips the one quote pair
+}
+
 // The bare header path inside a C-family include spelling: `"dir/x.h"` / `<dir/x.h>` → `dir/x.h`, with
 // isAngleOut set from the delimiter BEFORE it is stripped (angle = external ⇒ path-precise resolution
 // leaves it unresolved). Shared by the two C-family spellings so they can never drift apart:
@@ -5125,6 +5186,34 @@ std::string includePathOf( std::string_view spelling, bool& isAngleOut )
         return std::string( spelling.substr( 1 ) );   // unterminated — degrade to "everything after the opener"
     }
     return std::string( spelling.substr( 1, end - 1 ) );
+}
+
+// C/C++/ObjC `#include "x.h"` / `<x.h>` → the bare path, isAngle set from the delimiter. Its own
+// function for the same reason csharpUsingTarget, phpUseTarget and jsModuleLoadTarget are: one AST shape
+// per language keeps directiveTargetOf's grain at one branch per grammar spelling, instead of one branch
+// plus its own null-and-bounds ladder. Empty when the node carries no readable path field.
+inline std::string preprocIncludeTarget( TSNode n, std::string_view src, bool& isAngleOut )
+{
+    const std::string_view spelling = nodeFieldText( n, "path", 4, src );
+    return spelling.empty() ? std::string{} : includePathOf( spelling, isAngleOut );
+}
+
+// The `#import "x.h"` spelling under the C/C++ grammar. `#import` is `#include` + include-once, so it
+// MUST yield the same Include edge — this is the edge that connects a `.metal` shader to the FX headers
+// it pulls in (10 of the 45 shaders in the measured reference tree use it). Under the objc grammar it
+// already parses as preproc_include; under the C/C++ grammar there is no #import rule, so it lands as the
+// generic preproc_call: directive:(preproc_directive) `#import`, argument:(preproc_arg) `"x.h"` / `<x.h>`.
+// EVERY other preproc_call (`#pragma`, `#error`, `#warning`, an unknown directive) is not a physical
+// dependency — the directive-text check is what keeps them out, so this never widens the include graph
+// beyond #import.
+inline std::string preprocImportTarget( TSNode n, std::string_view src, bool& isAngleOut )
+{
+    if( nodeFieldText( n, "directive", 9, src ) != "#import" )
+    {
+        return {};
+    }
+    const std::string_view spelling = nodeFieldText( n, "argument", 8, src );   // preproc_arg: runs to end-of-line
+    return spelling.empty() ? std::string{} : includePathOf( spelling, isAngleOut );   // the closing delimiter ends the path
 }
 
 // tree-sitter does NOT flatten the preprocessor. `#if` / `#ifdef` / `#ifndef` / `#else` / `#elif` /
@@ -5179,9 +5268,19 @@ inline bool isPreprocConditional( const char* type ) noexcept
 // our grammars; a shared list would send the walk into every C++/TypeScript/Java function body hunting a
 // directive form those languages do not have there — cost with no recall. Each language therefore names
 // only the containers ITS directives really appear in. Languages absent from the switch below (C-family,
-// TS/JS, Go, Swift, Java, Ruby) get the preprocessor set and nothing else, which is the whole of what
-// their grammars nest: TS/JS ESM `import` is top-level-only (a dynamic `import( … )` is a call
-// expression, not an import_statement), and Go/Java imports are top-level by language rule.
+// Go, Swift, Java, Ruby) get the preprocessor set and nothing else, which is the whole of what their
+// grammars nest: Go/Java imports are top-level by language rule.
+//
+// TS/JS used to be in that "nothing else" list, on the reasoning that ESM `import` is top-level-only and
+// "a dynamic `import( … )` is a call expression, not an import_statement". Both halves were true and the
+// conclusion was still wrong, because CommonJS `require("./x")` is a call expression too — and it is not
+// a corner case, it is how an entire module system spells its dependencies. Measured on webpack: `--deps`
+// over its 695-file CommonJS `lib/` reported files="0", i.e. ZERO file→file edges across the whole
+// subsystem, and every consumer of that graph (--deps, --arch, cycles, the Lakos health verdict,
+// --expand's sibling lift, the SameInclude call-resolution tier, and --impact's import tier) was reading
+// an empty table and reporting the emptiness as a horizontal, cycle-free architecture. The four entries
+// below are exactly the statement forms a top-level `require` is written in; the call node itself is read
+// by directiveTargetOf, which is what keeps every OTHER call expression out.
 //
 // EVERY ENTRY HAS A FIXTURE ARM in test/nestedimportfix — an entry with no arm is an untested claim, and
 // every parent chain below was read off a real parse with `--match`, never predicted from the grammar.
@@ -5211,19 +5310,49 @@ inline constexpr std::array<std::string_view, 19> kRustImportContainers = {
 
 inline constexpr std::array<std::string_view, 2> kCsharpImportContainers = { "namespace_declaration", "declaration_list" };
 
+// TS/JS: the statement forms that wrap a top-level `require("./x")`. Read off real parses, not predicted:
+//   const X = require("./x");            lexical_declaration → variable_declarator → call_expression
+//   const { a } = require("./x");        the same chain (the destructuring is in the declarator's NAME)
+//   var X = require("./x");              variable_declaration → variable_declarator → call_expression
+//   require("./x");                      expression_statement → call_expression
+//   module.exports = require("./x");     expression_statement → assignment_expression → call_expression
+// Three levels at the deepest, far inside kMaxImportContainerDepth. NOT listed: `statement_block` and the
+// function-body kinds — a `require` inside a function body stays uncaptured, exactly as a Python import
+// inside a function body was before its containers were added, and exactly as ESM `import` cannot appear
+// there at all. That is a disclosed floor (counts_floor=), not a silent claim of completeness.
+inline constexpr std::array<std::string_view, 5> kJsImportContainers = {
+    "lexical_declaration", "variable_declaration", "variable_declarator", "expression_statement", "assignment_expression"
+};
+
+// ONE TABLE, not a per-language switch. Adding the TS/JS row made this function an 87-token clone of
+// inFileTestScope's dispatch further down — a --quality-delta duplication finding, and a fair one: two
+// hand-maintained per-language switches are two places to forget a language. The table form is also what
+// CONTRIBUTING §3 asks for ("declarative constexpr tables over scattered switch/if"): which containers a
+// language has is DATA, and a language absent from the table simply has none.
+struct LangImportContainers { Lang lang; std::span<const std::string_view> nodes; };
+
+inline constexpr std::array<LangImportContainers, 5> kImportContainersByLang = { {
+    { Lang::Python,     kPythonImportContainers },
+    { Lang::Rust,       kRustImportContainers   },
+    { Lang::CSharp,     kCsharpImportContainers },
+    { Lang::TypeScript, kJsImportContainers     },
+    { Lang::JavaScript, kJsImportContainers     }
+} };
+
 inline bool isImportContainer( Lang lang, const char* type ) noexcept
 {
     if( isPreprocConditional( type ) )   // every grammar with a preprocessor: C/C++/ObjC/CUDA/Metal + C#
     {
         return true;
     }
-    switch( lang )
+    for( const LangImportContainers& e : kImportContainersByLang )
     {
-        case Lang::Python: return namesNode( kPythonImportContainers, type );
-        case Lang::Rust:   return namesNode( kRustImportContainers, type );
-        case Lang::CSharp: return namesNode( kCsharpImportContainers, type );
-        default:           return false;
+        if( e.lang == lang )
+        {
+            return namesNode( e.nodes, type );
+        }
     }
+    return false;
 }
 
 // Nesting bound for the container descent. Real preprocessor guards nest a handful deep (the deepest in
@@ -5240,52 +5369,31 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // Node types confirmed per grammar: C++ preproc_include (path field, "" local vs <> external); C++
 // preproc_call with directive `#import` (the C/C++ grammar has no #import rule — the objc grammar does,
 // and yields preproc_include there); Python import_statement/import_from_statement; Go/Swift
-// import_declaration; Rust use_declaration + mod_item; C# using_directive. LEVER-B B0: non-C imports
-// capture the CLEAN written specifier via grammar child fields (module path / quoted specifier / use
-// argument), not a sliced clause — the sound resolver input.
+// import_declaration; Rust use_declaration + mod_item; C# using_directive; TS/JS call_expression for the
+// CommonJS `require("./x")` and dynamic `import("./x")` spellings. LEVER-B B0: non-C imports capture the
+// CLEAN written specifier via grammar child fields (module path / quoted specifier / use argument), not a
+// sliced clause — the sound resolver input.
+//
+// `lang` exists for exactly one branch: `call_expression` is a node type in most of our grammars, and a
+// C++ or Rust function that happens to be named `require` must never manufacture a dependency edge. The
+// language gate makes that impossible by construction rather than by relying on where the walk goes.
 //
 // `isAngle` is C/C++/ObjC only: `<x.h>` (external) vs `"x.h"` (quote), returned alongside the target so
 // path-precise resolution can leave angle includes unresolved. Allocates a std::string → not noexcept.
 struct DirectiveTarget { std::string target; bool isAngle; };
 
-DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src )
+DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src, Lang lang )
 {
     std::string target;
     bool        isAngle = false;
 
     if( std::strcmp( t, "preproc_include" ) == 0 )                       // C++/C/ObjC: exact file path
     {
-        const TSNode pth = ts_node_child_by_field_name( n, "path", 4 );
-        if( !ts_node_is_null( pth ) )
-        {
-            const uint32_t a = ts_node_start_byte( pth ), b = ts_node_end_byte( pth );
-            if( a < b && b <= src.size() )
-            {
-                target = includePathOf( src.substr( a, b - a ), isAngle );
-            }
-        }
+        target = preprocIncludeTarget( n, src, isAngle );
     }
     else if( std::strcmp( t, "preproc_call" ) == 0 )                     // C++-grammar `#import "x.h"` (ObjC/Metal spelling)
     {
-        // `#import` is `#include` + include-once, so it MUST yield the same Include edge — this is
-        // the edge that connects a `.metal` shader to the FX headers it pulls in (10 of the 45 shaders in
-        // the measured reference tree use the `#import` spelling). Under the objc grammar it already parses
-        // as preproc_include (handled above); under the C/C++ grammar there is no #import rule, so it
-        // lands here as the generic preproc_call: directive:(preproc_directive) `#import`,
-        // argument:(preproc_arg) `"x.h"` / `<x.h>`. EVERY other preproc_call (`#pragma`, `#error`,
-        // `#warning`, an unknown directive) is not a physical dependency — the directive check below
-        // is what keeps them out, so this branch never widens the include graph beyond #import.
-        const TSNode dir = ts_node_child_by_field_name( n, "directive", 9 );
-        const TSNode arg = ts_node_child_by_field_name( n, "argument",  8 );
-        if( !ts_node_is_null( dir ) && !ts_node_is_null( arg ) )
-        {
-            const uint32_t da = ts_node_start_byte( dir ), db = ts_node_end_byte( dir );
-            const uint32_t aa = ts_node_start_byte( arg ), ab = ts_node_end_byte( arg );
-            if( da < db && db <= src.size() && aa < ab && ab <= src.size() && src.substr( da, db - da ) == "#import" )
-            {
-                target = includePathOf( src.substr( aa, ab - aa ), isAngle );   // trailing comment ends at the closing delimiter
-            }
-        }
+        target = preprocImportTarget( n, src, isAngle );
     }
     else if( std::strcmp( t, "import_statement" ) == 0 )                 // Python `import a` / TS `import … from 'x'`
     {
@@ -5312,6 +5420,11 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
         {
             target = importSpecifierText( mn, src );
         }
+    }
+    else if( std::strcmp( t, "call_expression" ) == 0
+             && ( lang == Lang::TypeScript || lang == Lang::JavaScript ) )   // TS/JS `require("./x")` / `import("./x")`
+    {
+        target = jsModuleLoadTarget( n, src );
     }
     else if( std::strcmp( t, "use_declaration" ) == 0 )                  // Rust `use crate::a::b;`
     {
@@ -5417,7 +5530,7 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
         // `mod x { … }` is a container whose body holds `use`s. A walk that treated container-ness as a
         // reason to skip the read would silently drop every Rust module-file declaration in the corpus.
         // For every other container the read simply returns empty, so one uniform order covers all of them.
-        auto [ target, isAngle ] = directiveTargetOf( n, t, src );
+        auto [ target, isAngle ] = directiveTargetOf( n, t, src, lang );
 
         if( isImportContainer( lang, t ) )
         {
@@ -6231,18 +6344,6 @@ inline std::string qualifierOf( TSNode nameNode, std::string_view src )
 // WITH a qualifier (ref side) and a scope (def side); together they key the canonical `qualifier::name` tier
 // that C++ already uses, and idiomatic Rust resolves PRECISELY instead of silently vanishing.
 
-// A node's source text, or "" when the node is null or its byte range does not lie inside `src`. The
-// null+range guard is the same three lines every extraction helper below would otherwise repeat (it is what
-// --quality-delta flagged as a clone when the Rust helpers open-coded it), so it lives once, here.
-inline std::string_view nodeTextOf( TSNode node, std::string_view src ) noexcept
-{
-    if( ts_node_is_null( node ) )
-    {
-        return {};
-    }
-    const std::uint32_t a = ts_node_start_byte( node ), b = ts_node_end_byte( node );
-    return ( a <= b && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view{};
-}
 
 // True when `s` is spelled as a plain Rust identifier. The qualifier is a canonByName KEY half, so a segment
 // that is not an identifier (`<T as Trait>`, a stray `>` from an unbalanced spelling) can only ever produce a

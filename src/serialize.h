@@ -5482,6 +5482,39 @@ inline std::string jsonStr( std::string_view s )
     return jsonesc::escapeMcp( s );
 }
 
+// ── LB-H (r10 GitNexus round) — --impact's IMPORT-TIER rows, one emitter per dialect ─────────────────────
+// The tier itself is MEASURED in graph.h (impactImportTier); these two only RENDER it, which is why they
+// live here and take a plain file-id span rather than the ImportTier struct: serialize.h deliberately
+// never includes graph.h, and rendering is the half three call sites share (the CLI's XML and JSON
+// branches, and the MCP twin's XML). Left at those sites, each carried its own relativize + escape + loop
+// — the clone shape --quality-delta names, and the §B4 drift shape where three copies of one row format
+// end up spelling it two ways.
+//
+// `rootPrefix` empty ⇒ paths stay the raw ing.files spelling (multi-root, or no single root to strip),
+// the same convention every other row emitter in this file follows.
+inline void emitImportRowsXml( std::FILE* out, const IngestResult& ing,
+                               std::span<const std::uint32_t> files, std::string_view rootPrefix )
+{
+    std::vector<char> esc;
+    for( const std::uint32_t f : files )
+    {
+        const std::string_view raw = ing.files[f];
+        const std::string_view rel = rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, rootPrefix );
+        std::fprintf( out, "<f via=\"import\" p=\"%s\"/>", std::string( escapeXml( rel, esc ) ).c_str() );
+    }
+}
+
+inline void emitImportRowsJson( std::FILE* out, const IngestResult& ing,
+                                std::span<const std::uint32_t> files, std::string_view rootPrefix )
+{
+    for( std::size_t i = 0; i < files.size(); ++i )
+    {
+        const std::string_view raw = ing.files[ files[i] ];
+        const std::string_view rel = rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, rootPrefix );
+        std::fprintf( out, "%s{\"via\":\"import\",\"p\":\"%s\"}", i ? "," : "", jsonStr( rel ).c_str() );
+    }
+}
+
 // The `--metrics` run on one JSON map row (loc/params/nest/cbo/lcom4/amp/tested/in/out/cx/ccx/role). Every
 // member is absent-unless-measured — an omitted key means "not measured", NEVER a fabricated 0 that would
 // read as "nobody calls this". Its own function so serializeJson's row loop stays a list of facts rather

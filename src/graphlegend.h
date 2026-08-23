@@ -157,6 +157,40 @@ inline constexpr const char* kUsesLegendOpen =
 inline constexpr const char* kImpactLegendOpen =
     "<!-- ripwire impact: transitive blast radius — symbols that reach SYM via calls (review before changing SYM). ";
 
+// ── LB-H (r10 GitNexus round) — the IMPORT TIER's own definition ─────────────────────────────────────────
+// --impact answered "what breaks if I change this" with CALL reach only. On webpack, --impact=ChunkGraph
+// returned 25 reaching symbols and no trace of the 8 files that require("./ChunkGraph") — not the files
+// and not a count saying they were uncounted, so the omission was invisible at the point of use.
+//
+// The two reaches are reported SIDE BY SIDE AND NEVER SUMMED (CLAUDE.md non-negotiable #3): they are
+// different units (symbols vs files) measured over different evidence (a named call vs a named file), so
+// one merged number would be a quantity nothing in the tool can define. Hence a second count with its own
+// noun-prefixed shown_/capped pair (pageview.h rule 6, the SECONDARY-listing form) and its own row tag,
+// rather than extra rows inside reaches=.
+//
+// legendcoveragecheck's rule: every root attribute a reader meets on the first screen is defined where
+// they meet it — importers=, shown_importers=, importers_capped= and the via= row attribute are all here.
+inline constexpr const char* kImpactImportTierLegend =
+    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, listed as "
+    "<f via=\"import\" p=\"…\"/> rows after the symbol rows. It is not call reach and is never added to reaches= — "
+    "the two count different units (files vs symbols) over different evidence, and an importer may use a "
+    "different symbol from that file, or none at all. It is DIRECT (one hop), never the transitive include cone. "
+    "shown_importers=/importers_capped= disclose that listing's own truncation (importers= stays the full count); "
+    "limit=/offset= window the symbol rows only. ";
+
+// The columnar form re-serializes the SYMBOL rows as parallel arrays and has no row shape for a second
+// listing, so it carries importers= alone. Said in band rather than left as a shape difference a reader
+// has to notice: a count with no rows beside it otherwise reads as a bug.
+//
+// G4: this string is emitted INSIDE an XML comment, so it may not contain a double hyphen. Naming the
+// sibling dialect as "--json" put one there and xmllint caught it on the first run — the flag spelling is
+// written without its dashes here for that reason, not by oversight.
+inline constexpr const char* kImpactImportTierColumnarLegend =
+    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM. It is not "
+    "call reach and is never added to reaches=. Under format=columnar the import-tier rows are not emitted in this "
+    "form (it re-serializes the symbol rows only) — the count is the whole of it here; the default XML form and the "
+    "json dialect carry the per-file rows. ";
+
 // --callers / --callees shipped NO legend at all (0 bytes on both, which is why every one of their root
 // attributes sits in test/legendcoverage_baseline.txt). ONE legend serves both forms: the two verbs are one
 // code path with the edge direction flipped, and giving them two descriptions is precisely the per-verb
