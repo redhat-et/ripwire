@@ -85,65 +85,6 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
 // has real, non-incidental lexical grounding somewhere in the corpus.
 inline constexpr float kWeakLexicalScoreThreshold = 1.0f;
 
-// ─── query-term density weighting ────────────────────────────────────────────────────────────────────
-// Registered + measured: docs/EVALS.md §4 "Query-term density weighting"; gate: test/termdensitycheck.sh.
-//
-// A conceptual query's words are also the NAME and the MESSAGE of a diagnostic class — a *Warning or
-// *Error whose whole document is one sentence, written in the reader's vocabulary, about the failure the
-// real mechanism produces. Such a document is not merely SHORT (a fifteen-line constructor sits at or
-// above the average symbol's weighted length on a JavaScript tree full of one-line arrow functions, and
-// a floor on `dl` measured against that average was swept end to end and moved this bucket by zero).
-// What it is, is a document a large fraction of which IS the query. So the judgement here is a RATIO,
-// not a length: D = (query-term mass) / dl — the share of the document that is query text — and a
-// document above the cap is a restatement of the question rather than an answer to it.
-//
-// Both constants come from BM25's own algebra at this file's k1/b, not from any corpus:
-//   * kDensityCapPercent — a document's weighted mass is name ×3 + callee ×1 + doc ×2 + body ×1. A symbol
-//     whose NAME is entirely query terms already contributes 3 × |name| ≈ 6–12 weighted units of query
-//     mass; for the query to stay under a TENTH of the whole document that symbol needs roughly 60–120
-//     further weighted units — a signature plus a handful of statements, which every real implementation
-//     has and a name-plus-one-sentence document does not.
-//   * kDensityFloorPercent — how much authority a density judgement may have. 1/0.25 = 4× is exactly the
-//     factor b = 0.75 already grants an EMPTY document over an average one (1/(1−b) = 4), so this rule's
-//     maximum authority is the maximum authority BM25's own length normalization already hands a short
-//     document, and no more. A document keeps a quarter of its evidence however much of it is query
-//     text: evidence is REDUCED, NEVER DELETED — the recorded lesson of the two negatives in §7 for this
-//     bucket family (the filler-token strip and the IDF floor), both of which removed query evidence
-//     outright and both of which cut in the direction they were not aimed.
-// RIPWIRE_TERMDENSITY_FLOOR (0..100) overrides the floor for calibration sweeps only; 100 is the rule off
-// by construction (a floor of 1.0 makes the factor identically 1.0 for every document).
-inline constexpr int kDensityCapPercent   = 10;
-inline constexpr int kDensityFloorPercent = 25;
-
-// Returns a value in [floor, 1] — SHRINK-ONLY, which is what keeps the MaxScore impact bound below
-// (derived at tf ≤ T and dl ≥ 0) a valid upper bound, so the pruned and exhaustive branches stay
-// byte-identical to each other. A scored document always has tf ≥ 1 and therefore dl ≥ 1 (a scanned
-// token increments both), so D is defined and finite at every call site; the guard is for the callers
-// that have not checked tf yet.
-inline double queryDensityWeight( int queryMass, int dl, double densityFloor ) noexcept
-{
-    if( dl <= 0 || queryMass <= 0 )
-    {
-        return 1.0;                       // no document, or no query text in it — charge nothing for it
-    }
-    const double density = double( queryMass ) / double( dl );
-    const double cap     = double( kDensityCapPercent ) / 100.0;
-    const double ramp    = density <= cap ? 1.0 : cap / density;
-    return densityFloor + ( 1.0 - densityFloor ) * ramp;
-}
-
-// The floor is resolved ONCE per query, never per document: a getenv inside a scoring loop costs more
-// than the rule it configures, and both scoring branches must see the same value or they diverge.
-inline double resolveDensityFloor() noexcept
-{
-    int percent = kDensityFloorPercent;
-    if( const char* env = std::getenv( "RIPWIRE_TERMDENSITY_FLOOR" ) )
-    {
-        percent = std::clamp( std::atoi( env ), 0, 100 );
-    }
-    return double( percent ) / 100.0;
-}
-
 // BM25 score of `query` against each symbol's doc (name subtokens + callees' names + DOC-COMMENT & BODY
 // text). Returns a per-symbol score vector (size = symbols.size()). Cold path: one query.
 //
@@ -756,10 +697,6 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     constexpr double   k1 = 1.5, b = 0.75;
     std::vector<float> score( S, 0.f );
 
-    // query-term density weighting — resolved ONCE per query and shared by both scoring branches below,
-    // so they cannot disagree about a factor that would otherwise break their byte-identity.
-    const double densityFloor = resolveDensityFloor();
-
     // ── H2 (B0 round 2): MaxScore-style safe pruning — only when the caller opted in AND the env
     //    escape hatch is off. The exhaustive branch below is the pre-H2 code, byte-for-byte.
     const bool pruneActive = pruneTopK > 0 && std::getenv( "RIPWIRE_NO_PRUNE" ) == nullptr;
@@ -801,9 +738,8 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         // In IEEE doubles each side is computed with ≤ 7 rounded ops (relative error ≤ 7·2⁻⁵³ ≈ 8e-16),
         // so the ×(1+1e-9) slack — six orders of magnitude above the worst accumulated rounding, and
         // likewise above the U·2⁻⁵³ summation error of the per-doc bound sum below — makes the COMPUTED
-        // cap strictly ≥ the COMPUTED contribution. The Section ×0.30 down-weight, the §P4 tier
-        // multiplier and the query-term density weight (all (0,1], shrink-only) only shrink a real
-        // score, never the bound.
+        // cap strictly ≥ the COMPUTED contribution. The Section ×0.30 down-weight and the §P4 tier
+        // multiplier (both (0,1], shrink-only) only shrink a real score, never the bound.
         // Hence: bound < θ ⇒ computed score < θ, unconditionally.
         // capOcc folds in the query-occurrence multiplicity (BM25 adds one contribution PER occurrence).
         std::vector<double> capOcc( uniqueCount, 0.0 );
@@ -854,8 +790,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             }
 
             // exact score — the IDENTICAL expressions, in the IDENTICAL order, as the exhaustive branch
-            double sc        = 0;
-            int    queryMass = 0;
+            double sc = 0;
             for( std::size_t qi = 0; qi < qToks.size(); ++qi )
             {
                 const std::size_t u  = uniqueIndexOfQtok[qi];
@@ -868,11 +803,6 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
                 sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
             }
-            for( std::size_t u = 0; u < uniqueCount; ++u )
-            {
-                queryMass += tfRow[u];         // UNIQUE terms once each — the document's query-text mass
-            }
-            sc *= queryDensityWeight( queryMass, dl[i], densityFloor );
             if( ing.symbols[i].kind == SymKind::Section )
             {
                 sc *= 0.30;
@@ -917,8 +847,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 
     for( std::size_t i = 0; i < S; ++i )
     {
-        double sc        = 0;
-        int    queryMass = 0;
+        double sc = 0;
         for( std::size_t qi = 0; qi < qToks.size(); ++qi )
         {
             const std::size_t u  = uniqueIndexOfQtok[qi];
@@ -931,11 +860,6 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
             sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
         }
-        for( std::size_t u = 0; u < uniqueCount; ++u )
-        {
-            queryMass += tfFlat[ i * uniqueCount + u ];   // same mass, same order, as the pruned branch
-        }
-        sc *= queryDensityWeight( queryMass, dl[i], densityFloor );
         // Markdown headings (sec) compete on name-match with code; down-weight so a doc stays FINDABLE but
         // code wins when both match — fixes prose swamping retrieval in doc-heavy repos (review finding #4).
         if( ing.symbols[i].kind == SymKind::Section )
