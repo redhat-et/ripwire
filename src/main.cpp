@@ -7891,13 +7891,28 @@ std::optional<int> runImpact( const MainDispatch& d )
         std::sort( show.begin(), show.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+
+        // ── LB-H (r10 §5): the IMPORT tier — every file that directly imports a file defining SYM. ONE
+        // measurement (graph.h::impactImportTier) feeds all three dialects below AND the MCP twin, so the
+        // two surfaces cannot drift. The two reaches stay separate all the way to the bytes: a separate
+        // count (importers=), a separate truncation pair (shown_importers=/importers_capped=, pageview.h
+        // rule 6) and a separate row tag.
+        const rw::ImportTier imports = rw::impactImportTier( ing, seeds );
+        const auto           importRowPath = [ & ]( std::uint32_t f ) -> std::string
+        {
+            return ex( imSingleRoot ? rw::sarif::rootRelativeUri( ing.files[f], imRootPrefix ) : std::string_view( ing.files[f] ) );
+        };
+
         if( !cfg.json )
         { // L2: JSON has no comment-node analogue; the XML-only leading doc comment
             // §B12.4 in-band (W3FIX): the paging clause comes from pageview.h::kPageRaiseCapClause, which
             // carries the limit="0" definition too — rule 7 existed only in --help and that header before.
             // §H4 §3.4: opener + the shared floor/counting-unit tail, both from src/graphlegend.h so the MCP
             // twin cannot drift from this wording (the §B4 echo-site class).
-            std::printf( "%s%s. %s%s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
+            // LB-H: the import-tier clause is the columnar variant under --format=columnar, because that
+            // form carries the count without the rows and a reader must be told which shape they hold.
+            std::printf( "%s%s. %s%s%s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
+                         cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend,
                          rw::graphCountDisclosure().c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         }
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
@@ -7918,8 +7933,13 @@ std::optional<int> runImpact( const MainDispatch& d )
         if( cfg.columnar )
         {
             std::vector<NodeId> page( show.begin() + ipw.begin, show.begin() + ipw.end );
+            // LB-H: the columnar form has ONE row shape (the symbol arrays), so the import tier is present
+            // here as its COUNT only — never silently absent, and the legend above says which shape this is.
+            // Its shown_/capped pair is omitted with the rows it would describe: rule 3 pairs them, and a
+            // disclosure of a listing that was not emitted is noise, not honesty.
             const std::string attr = "of=\"" + ex( cfg.impactSym ) + "\" defs=\"" + std::to_string( seeds.size() )
                                    + "\" reaches=\"" + std::to_string( reach.size() ) + "\""
+                                   + " importers=\"" + std::to_string( imports.files.size() ) + "\""
                                    + imRootAttr
                                    + pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                                      cfg.pageLimit, cfg.pageOffset, true )
@@ -7938,6 +7958,10 @@ std::optional<int> runImpact( const MainDispatch& d )
         {
             std::printf( "{\"of\":\"%s\",\"defs\":%zu,\"reaches\":%zu",
                          jsonStr( cfg.impactSym ).c_str(), seeds.size(), reach.size() );
+            // LB-H: same keyset as the XML attrs, booleans where the XML says 0/1 — the dialect rule this
+            // element already follows for capped=/counts_floor=.
+            std::printf( ",\"importers\":%zu,\"shown_importers\":%zu,\"importers_capped\":%s",
+                         imports.files.size(), imports.shown, imports.capped ? "true" : "false" );
             if( imSingleRoot ) { std::printf( ",\"root\":\"%s\"", jsonStr( cfg.roots[0] ).c_str() ); }   // R-E
             std::printf( "%s%s%s,\"impact\":[",
                          pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
@@ -7945,12 +7969,21 @@ std::optional<int> runImpact( const MainDispatch& d )
                          rw::kGraphCountFloorAttrJson,             // §H4 §3.4
                          rw::renderDisclosure( prD, rw::DiscloseAs::JsonKeys ).c_str() );  // W2-F: the dialects keep ONE keyset
             printJsonSymbolRows( ing, show, ipw.begin, ipw.end, imRootPrefix );
+            // A SECOND array, never rows folded into "impact": the JSON consumer sees the same two-tier
+            // shape the XML one does, and cannot sum them by accident.
+            std::printf( "],\"import_reach\":[" );
+            for( std::size_t i = 0; i < imports.shown; ++i )
+            {
+                const std::string_view rp = imSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ imports.files[i] ], imRootPrefix )
+                                                         : std::string_view( ing.files[ imports.files[i] ] );
+                std::printf( "%s{\"via\":\"import\",\"p\":\"%s\"}", i ? "," : "", jsonStr( rp ).c_str() );
+            }
             std::printf( "]}" );
             return 0;
         }
 
-        std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s%s>",
-                     ex( cfg.impactSym ).c_str(), seeds.size(), reach.size(), imRootAttr.c_str(),
+        std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s%s%s>",
+                     ex( cfg.impactSym ).c_str(), seeds.size(), reach.size(), imports.xmlAttrs.c_str(), imRootAttr.c_str(),
                      pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
                      rw::kGraphCountFloorAttrXml, rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ).c_str() );
@@ -7959,6 +7992,13 @@ std::optional<int> runImpact( const MainDispatch& d )
             const Symbol&           s  = ing.symbols[ show[i] ];
             const std::string_view  rp = imSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], imRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
             std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
+        }
+        // LB-H: the import tier, AFTER the symbol rows and under its own tag. A different tag because it is
+        // a different unit — an <s> is a symbol that provably names SYM, an <f> is a file that names SYM's
+        // FILE — and a reader (or a parser) that counts <s> rows must not pick these up.
+        for( std::size_t i = 0; i < imports.shown; ++i )
+        {
+            std::printf( "<f via=\"import\" p=\"%s\"/>", importRowPath( imports.files[i] ).c_str() );
         }
         std::printf( "</impact>" );
         return 0;
