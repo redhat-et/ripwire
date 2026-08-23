@@ -2844,6 +2844,24 @@ module (5 → 9), whose gold is the densest document in its own neighbourhood, s
 density can only cost it. The borderline row the audit put 0.3% short did not land, and neither
 unreachable row moved. **+2 where predicted, −1 where predicted, net +1 against a lower edge of +2.**
 
+**The displacement guards are the part that worked, and they are worth naming row by row.** They were
+registered as first-class bars in this round precisely because the previous round's band-met revert was
+caught by a gate fixture rather than by the slice; here they fired on the slice itself, before any gate
+ran. `thin-registration` is where the cost landed:
+
+| Displaced row | Base | With the rule |
+| --- | ---: | ---: |
+| `where is the staticfiles application config defined` | **1** | unranked |
+| `which command prints only the settings that differ from the defaults` | 6 | unranked |
+| `which plugin gives chunks readable names as their ids` | 7 | unranked |
+| `which command sends a test email to verify the mail configuration` | **1** | 5 |
+
+Three rows off depth 10 and one gold lost from the top 5, from a bucket the change was not aimed at —
+and the first of them was a rank-1 answer. `subsystem-directory` and `vendored-asset` each churned two
+rows out and two rows in for a net of zero, which the combined-count bar cannot see and which is why the
+per-bucket depth bar was registered alongside it. A registration that had measured only its own bucket
+would have reported +1 and stopped; these bars are what turn that into a documented cost.
+
 **The mechanism is dead, not mistuned.** Swept across the whole authority range after the verdict was
 taken — a diagnostic, and no verdict is drawn from it:
 
