@@ -1,8 +1,7 @@
 # Stage 2 pre-registration ADDENDUM
 
-**Freeze marker:** `FROZEN: <pending> 2026-08-22` — filled in by the commit that lands this freeze (see
-that commit's own follow-up, which stamps the exact SHA into this line; a document cannot cite its own
-commit hash in the same commit that creates it).
+**Freeze marker:** `FROZEN: b6e1a4a 2026-08-22` — the commit that landed this freeze (stamped here by
+its own immediate follow-up, since a commit cannot cite its own hash).
 
 This document is an ADDENDUM to the Stage 1 pre-registration, not a replacement: the arms (baseline
 vs. ripwire_cli), the seed protocol (K=3, vary only the sampling seed per the Terminal-Bench "vary
@@ -207,7 +206,7 @@ conditions:
 
 ```sh
 # 0. build the pinned binary in its own worktree (mirrors Stage 1's own build worktree pattern)
-git worktree add ~/AppDevelopLocal/project2/rw-eval-t2 <this-addendum's-frozen-commit>
+git worktree add ~/AppDevelopLocal/project2/rw-eval-t2 b6e1a4a
 cd ~/AppDevelopLocal/project2/rw-eval-t2
 cmake -S . -B build && cmake --build build -j
 ./build/ripwire --version   # confirm the built HEAD matches the frozen pin
