@@ -3031,13 +3031,20 @@ verb elides* — count it and the headline becomes a function of how deep your c
 on disk. On one corpus, three spellings of the same root read **18.6 points apart** before the
 subtraction and agreed exactly after it.
 
-**Root-neutralised on this repository (re-derived 2026-08-01):**
+**Root-neutralised on this repository (re-derived 2026-08-23):**
 
-| Result size | Byte reduction |
-| --- | --- |
-| top-10 | 46.7% |
-| **top-50** | **67.0%** |
-| top-100 | 66.2% |
+| Result size | Byte reduction | previous (2026-08-01) |
+| --- | --- | --- |
+| top-10 | 86.5% | 46.7% |
+| **top-50** | **81.4%** | 67.0% |
+| top-100 | 81.6% | 66.2% |
+
+The three figures moved together on 2026-08-15, and the cause is on the *denominator* side, not this
+verb's: `--expand`'s `<b>` bodies now carry `sibs=`/`inc=` file-context attributes, which grows the
+full-body side of the ratio. The verb elides no more than it did. `docs/COMMANDS.md`'s own
+`--pack-signatures` caption is regenerated from a live capture and carries the same triple, and
+`test/showcasecapturecheck.sh` fails if the caption and its own recount drift more than 1.5 points
+apart — at the time of writing that recount reads 86.5 / 81.1 / 81.3.
 
 **Quote the top-50 figure.** The signature payload is top-50 regardless of `--top-k`, so it is what
 the command actually emits. A "~70%" headline is reachable at larger N but overstates the smaller
@@ -3057,7 +3064,8 @@ tolerance (the pre-change binary measured 67.0), so the true binary-to-binary to
 
 **This is gated, not asserted.** `test/showcasecapturecheck.sh` re-derives all three figures from
 this repository on every run, in the same quantity as the caption, and fails if the caption and the
-recount drift more than 1.5 points apart — plus a separate 55–72% regression band at top-50. The
+recount drift more than 1.5 points apart — plus a separate regression band at top-50, derived as the
+caption's own figure ±9 points (72–90% at the caption's current 81.4%). The
 documentation cannot silently diverge from the binary.
 
 See §7 for the case where this verb makes output **larger**.
