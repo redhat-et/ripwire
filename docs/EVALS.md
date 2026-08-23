@@ -192,6 +192,14 @@ published anywhere, per the improve-first rule below; what is published here is 
 | `webpack/webpack` | `a943d69c4` | `4d708c08ef0b0f9ab7afaae0a330e2b31e6434e2` | files=13782 symbols=30429 edges=21859 ambiguous=2491 |
 | this repository (C++) | `4692076` | `249f2bb7caceddcfb705c4bba20ee94adc537c12` | files=1332 symbols=11536 edges=14117 ambiguous=5557 |
 
+**One of those index rows is no longer reproducible with a later binary, and that is disclosed rather
+than rewritten.** The table records what the `7eb638e` binary saw, which is what the round's verdicts
+rest on. The LB-H fix below made CommonJS `require("./x")` an import directive, and on `webpack` that
+moves the index to `edges=23105 ambiguous=2511` (from `21859` / `2491`) — +1246 call edges, because the
+include-based resolution tier finally has data for a CommonJS tree. `django` and the C++ corpus are
+unchanged to the byte: Python and C-family imports were already extracted. The round's own numbers are
+NOT restated against the new binary; the pin stays what it was measured with.
+
 The C++ corpus is this repository, pinned three commits behind the binary on purpose: it is the pin
 the serving rounds registered their bands on, and holding it fixed makes the output-level byte
 comparison that decides which verdicts were carried and which re-judged a comparison of binaries
@@ -339,6 +347,7 @@ commit:
 | the inline body allowance could serve a same-named symbol from another file in place of the queried one | `0c1e171` — the allowance serves the anchor's own body, or nothing, and says so |
 | vendored front-end assets and numbered migrations ranked into a database-backend task bundle | `4e187dd` — both path families join the already-calibrated de-prioritized tier |
 | bodies were 52.7% of every conceptual-query byte, the one class that missed the byte target | `63941c8` — the conceptual route serves a compact map with one-hop edge context instead of bodies |
+| `--impact` on a class reported CALL reach only, so the 8 files that `require("./ChunkGraph")` were neither listed nor counted. Probing refuted the bucket's own premise: CommonJS `require` was not extracted at ALL — `--deps` over webpack's 695-file CommonJS `lib/` reported `files="0"`, zero file-to-file edges, and every consumer of that graph read the emptiness as a fact | `28f1e28` makes `require`/dynamic `import` import directives (kParserVer 71; webpack `lib/` goes 0 → 586 files with an edge, `nccd` 0.12 "horizontal" → 4.56 "tangled"), and `a88d0e3` gives `--impact` a disclosed import tier — `importers=` with its own `shown_importers=`/`importers_capped=` pair and `<f via="import">` rows, never summed into `reaches=` |
 | a webpack query whose gold plugin ripwire never surfaced | `dee6eb0` built a name-coverage floor; it met its pre-registered band and was **reverted** at `15af250` for failing a separate standing requirement. **The loss stands and is counted above.** |
 
 **What this round does NOT show.** Three corpora, one language each in practice, and 48 queries is a
