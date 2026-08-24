@@ -3021,9 +3021,19 @@ inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestRe
 }
 
 // ── LB-H (r10 GitNexus round) — IMPORT REACH, the second and much weaker kind of blast radius ────────────
-// The files that DIRECTLY include/import one of `defFiles`, sorted by file id, each listed once, with the
-// defining files themselves removed (a file is not its own importer, and a mutual include would otherwise
-// put a def file in its own answer).
+// The files that DIRECTLY include/import one of `defFiles`, sorted by file id, each listed once. A file is
+// never its own importer — but "own" means an edge to ITSELF, not membership in `defFiles`: buildPreciseIncludeAdj
+// already drops self-includes at the source (`to == inc.fileId` is skipped there), so scanning every
+// candidate's own edge list — INCLUDING a def file's — can never manufacture a def-file-imports-itself row.
+// What it correctly excludes (barrel-exclusion lane, PLAN_HARVEST_REPORTS_2026-08-20/barrel-exclusion-lane.md):
+// a candidate whose ENTIRE reason for being in `defFiles` is that it defines SYM, with no import edge to any
+// OTHER def file, never gets a row (nothing in its own edge list ever points at itself). What a same-named-
+// symbol-based skip got wrong: a barrel file whose lazy getter is named after what it re-exports (webpack's
+// lib/index.js `get ChunkGraph() { return require("./ChunkGraph"); }`) is BOTH a def file (the getter is a
+// same-named symbol) AND a genuine importer (the getter's own body requires the real definition's file) — a
+// blanket `isDef[f]` skip discarded the second fact along with excluding the first, which is the bug this
+// lane closes: querying `--impact=ChunkGraph` unqualified silently dropped lib/index.js from importers= even
+// though the file textually requires ChunkGraph's own file.
 //
 // It answers a different question from transitiveCallers() and the two must never be summed:
 //
@@ -3038,12 +3048,20 @@ inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestRe
 // lib has a per-file transitive cone of ~100 files) and its far edge carries no information about the
 // symbol at all; one hop is the tier where "you named this file in an import" is still true of every row.
 //
-// One importer candidate's scan over its OWN edge list: does f reach any def file at all, and — only when
-// the caller wants lazy disclosure — is EVERY such edge a function-body (lazy) require/import. Split out of
-// importersOfFiles below (kParserVer 72) so that loop stays the membership scan it always was; this is the
-// one new branch bolted onto it, in its own small function instead of inflating the caller's own branch
-// count. `lazyPairs` is nullptr in the fast membership-only path (mirrors buildPreciseIncludeAdj's own
-// nullptr convention), in which case the scan takes the pre-72 `break`-on-first-hit shortcut.
+// One importer candidate's scan over its OWN edge list: does f reach any OTHER def file at all, and — only
+// when the caller wants lazy disclosure — is EVERY such edge a function-body (lazy) require/import. Split
+// out of importersOfFiles below (kParserVer 72) so that loop stays the membership scan it always was; this
+// is the one new branch bolted onto it, in its own small function instead of inflating the caller's own
+// branch count. `lazyPairs` is nullptr in the fast membership-only path (mirrors buildPreciseIncludeAdj's
+// own nullptr convention), in which case the scan takes the pre-72 `break`-on-first-hit shortcut.
+//
+// `to == f` (barrel-exclusion lane): a candidate is never counted as an importer OF ITSELF. In practice
+// buildPreciseIncludeAdj already drops every self-include at the source, so `toList` cannot literally
+// contain `f` today — this guard is the honest statement of the invariant this function actually relies
+// on, not a load-bearing filter against a case that reaches here. It is deliberately NOT `isDef[f]`: f may
+// be a def file itself (it defines a same-named symbol) and STILL be a genuine importer of a DIFFERENT def
+// file — the barrel-getter shape (a lazy getter named after what it re-exports, e.g. `get ChunkGraph() {
+// return require("./ChunkGraph"); }`) is exactly a def file whose own body imports another def file.
 struct ImporterScan { bool found; bool allLazy; };
 
 inline ImporterScan scanImporterEdges( std::uint32_t f, const std::vector<std::uint32_t>& toList, const std::vector<char>& isDef,
@@ -3052,7 +3070,7 @@ inline ImporterScan scanImporterEdges( std::uint32_t f, const std::vector<std::u
     ImporterScan r{ false, true };   // allLazy is vacuously true until the first def edge is seen
     for( const std::uint32_t to : toList )
     {
-        if( to >= F || !isDef[to] )
+        if( to >= F || to == f || !isDef[to] )
         {
             continue;
         }
@@ -3104,12 +3122,13 @@ inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, con
     // occurrence-count one, so the deduped adjacency is both the right shape and the cheaper scan.
     HashMap<std::uint64_t, char>  lazyPairs;
     const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr );
+    // No `isDef[f]` pre-filter here (barrel-exclusion lane): a def file is not skipped wholesale, because
+    // it may ALSO be a genuine importer of a DIFFERENT def file (the barrel-getter shape — see
+    // scanImporterEdges' own comment). The narrower, correct exclusion — f is never its own importer — is
+    // enforced inside scanImporterEdges via `to == f`, which self-includes make structurally unreachable
+    // (buildPreciseIncludeAdj drops them) but which the scan states honestly rather than relying on that.
     for( std::uint32_t f = 0; f < F && f < adj.size(); ++f )
     {
-        if( isDef[f] )
-        {
-            continue;                       // a def file's own includes are not importers OF it
-        }
         const ImporterScan scan = scanImporterEdges( f, adj[f], isDef, F, lazyOut ? &lazyPairs : nullptr );
         if( scan.found )
         {
