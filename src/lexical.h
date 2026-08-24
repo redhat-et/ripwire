@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -1046,6 +1047,150 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
 inline std::vector<float> lexicalScoresNameExact( const IngestResult& ing, std::string_view query )
 {
     return lexicalScoresNameExactTiered( ing, query, nullptr );
+}
+
+// ─── definition-over-declaration TIEBREAK (name-exact route only) ─────────────────────────────────────
+//
+// THE DEFECT, exactly (docs/EVALS.md §4, "Definition-over-declaration tiebreak on the name-exact route";
+// upstream: the E6 demotion corpus's class-2b rows). The scorer above documents its own document: a
+// symbol's WHOLE NAME, one token. That is the right document for an identifier query, and it is also why
+// a bare `class ClientContext;` forward declaration and the real `class ClientContext { … }` definition
+// are, to this ranker, THE SAME DOCUMENT. They score bit-for-bit identically, so the order between them
+// is decided entirely by the fallback tie-break in sortutil::radixSortByScoreDescId — symbol id ascending,
+// i.e. crawl order, i.e. path order. duckdb forward-declares ClientContext in 85 headers; measured at
+// da61bac, all four ranked rows and the single body slot of `--for="ClientContext"` were bare
+// declarations and the definition never appeared. The agent is handed the name it already typed.
+//
+// WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT. It is a TIEBREAK. It is not a demotion of declarations
+// (a declaration whose name nothing defines is still the best answer to its own name — that is arm (c) of
+// test/defoverdeclcheck.sh), it is not a filter (both declarations survive, in their original order —
+// arm (b)), and it is not a rescoring (all four rows still report ONE score — arm (a)). The registered
+// criterion that outranks the round's own band is that ORDER AMONG NON-TIED ROWS IS BYTE-IDENTICAL, and
+// the four properties below are why that holds by construction rather than by measurement:
+//
+//   1. Only members of an EXACT tie are touched, so no two rows already separated by score can swap.
+//   2. The demoted value is std::nextafter( v, 0 ) — the immediate float predecessor — so nothing can
+//      land BETWEEN it and the group it left; and if that predecessor is already an occupied score
+//      anywhere in the vector the group is REFUSED outright, so nothing can land ON an occupied value
+//      either. The post-state's distinct-value set is the pre-state's plus injectively-new values.
+//   3. Demotion fires only in MIXED groups, in which a body-carrying member keeps `v`. So max(score) is
+//      invariant, and R4's weak-evidence honesty signal (kWeakLexicalScoreThreshold, read from
+//      maxScoreUndoingTier over this vector) cannot move.
+//   4. Within each side of the split, id-ascending order is untouched. The net effect is exactly a
+//      stable partition of the tie group: bodies first, then declarations.
+//
+// WHY IT LIVES HERE AND NOT IN THE SORT. Every consumer of the ranked vector — <sigs>, <bodies>,
+// <compose>, the JSON twin, --format=candidates, --pack-task, the MCP `for`/`explore` verbs — derives its
+// order from this one vector through the same (score desc, id asc) rule. Threading a tie-break key
+// through all of them would let one emitter acquire the fix and another not, and an incoherent bundle
+// (signatures ordered one way, bodies another) is a worse failure than the defect. One seam, one order.
+//
+// The bodyless predicate is the house one, shared verbatim with graph.h's decl/def collapse and arch.h's
+// pure-interface detection: `endByte > sigEndByte`. Deterministic — integer bit patterns, fixed doc
+// order, no float arithmetic beyond one nextafter. Returns the number of rows demoted; 0 means the call
+// was inert and the vector is byte-identical to what the scorer produced.
+inline std::size_t applyDefOverDeclTiebreak( const IngestResult& ing, std::vector<float>& score )
+{
+    const std::size_t S = ing.symbols.size();
+    if( score.size() != S || S == 0 )
+    {
+        return 0;
+    }
+
+    const auto hasBody = [ & ]( std::size_t i ) noexcept { return ing.symbols[i].endByte > ing.symbols[i].sigEndByte; };
+    const auto scored  = [ & ]( std::size_t i ) noexcept { return score[i] > 0.f && std::isfinite( score[i] ); };
+
+    // the distinct POSITIVE scores actually present, ascending. For positive finite floats the IEEE bit
+    // pattern is itself an ascending numeric key, so this is one uint32 sort and no float comparison.
+    std::vector<std::uint32_t> distinct;
+    distinct.reserve( 64 );
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        if( scored( i ) )
+        {
+            distinct.push_back( std::bit_cast<std::uint32_t>( score[i] ) );
+        }
+    }
+    if( distinct.empty() )
+    {
+        return 0;
+    }
+    std::sort( distinct.begin(), distinct.end() );
+    distinct.erase( std::unique( distinct.begin(), distinct.end() ), distinct.end() );
+
+    // which distinct values hold a body-carrying member, and which hold a bodyless one
+    std::vector<std::uint8_t> sawBody( distinct.size(), 0 );
+    std::vector<std::uint8_t> sawDecl( distinct.size(), 0 );
+    const auto slotOf = [ & ]( std::size_t i ) noexcept
+    {
+        const std::uint32_t bits  = std::bit_cast<std::uint32_t>( score[i] );
+        const auto          found = std::lower_bound( distinct.begin(), distinct.end(), bits );
+        return std::size_t( found - distinct.begin() );
+    };
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        if( scored( i ) )
+        {
+            ( hasBody( i ) ? sawBody : sawDecl )[ slotOf( i ) ] = 1;
+        }
+    }
+
+    // decide once per distinct value, from the ORIGINAL set — so two demoting groups can never collide
+    // with each other (nextafter is injective) nor with a value that was already there (the refusal).
+    std::vector<float> demoteTo( distinct.size(), 0.f );
+    bool               anyDemote = false;
+    for( std::size_t u = 0; u < distinct.size(); ++u )
+    {
+        if( !sawBody[u] || !sawDecl[u] )
+        {
+            continue; // a pure-declaration tie has nothing to prefer; a pure-definition tie has nothing to demote
+        }
+        const float value = std::bit_cast<float>( distinct[u] );
+        const float lower = std::nextafter( value, 0.f );
+        if( !( lower > 0.f ) || !std::isfinite( lower ) )
+        {
+            continue; // DEGRADE: no representable room below this score — the group keeps its id order
+        }
+        const std::uint32_t lowerBits = std::bit_cast<std::uint32_t>( lower );
+        if( std::binary_search( distinct.begin(), distinct.end(), lowerBits ) )
+        {
+            continue; // REFUSE: that value is occupied, and moving onto it would reorder rows that were never tied
+        }
+        demoteTo[u] = lower;
+        anyDemote   = true;
+    }
+    if( !anyDemote )
+    {
+        return 0;
+    }
+
+    std::size_t demoted = 0;
+    for( std::size_t i = 0; i < S; ++i )
+    {
+        if( !scored( i ) || hasBody( i ) )
+        {
+            continue;
+        }
+        const std::size_t u = slotOf( i );
+        if( demoteTo[u] > 0.f )
+        {
+            score[i] = demoteTo[u];
+            ++demoted;
+        }
+    }
+    return demoted;
+}
+
+// The name-exact ranker AS THE RETRIEVAL LENS SERVES IT: whole-name BM25 plus the definition-over-
+// declaration tiebreak above. Every --for / --query / --pack-task / MCP retrieval site takes this one;
+// lexicalScoresNameExactTiered and lexicalScoresNameExact stay the raw scorer, so --eval-retrieval and
+// --eval-skills keep measuring the ranker itself and the skill router is provably untouched by this rule.
+inline std::vector<float> lexicalScoresNameExactRanked( const IngestResult& ing, std::string_view query,
+                                                       const std::vector<float>* symbolScoreMul )
+{
+    std::vector<float> score = lexicalScoresNameExactTiered( ing, query, symbolScoreMul );
+    applyDefOverDeclTiebreak( ing, score );
+    return score;
 }
 
 // ─── deterministic, confidence-GATED query-shape router (--route) ─────────────────────────────────────
