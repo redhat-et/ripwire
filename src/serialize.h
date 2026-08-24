@@ -5500,26 +5500,34 @@ inline std::string jsonStr( std::string_view s )
 //
 // `rootPrefix` empty ⇒ paths stay the raw ing.files spelling (multi-root, or no single root to strip),
 // the same convention every other row emitter in this file follows.
+//
+// `lazy` (kParserVer 72, fnbody-require lane): parallel to `files` (same index, same size) — 1 ⇒ every
+// edge this importer has into the def set is a TS/JS function-body require/import (graph.h::ImportTier),
+// never a top-level one. Disclosed per row rather than folded into via= (a THIRD via= value would silently
+// widen a reader's existing `via="import"` match into two different claims); see
+// graphlegend.h::kImpactImportTierLegend for the definition a reader meets first.
 inline void emitImportRowsXml( std::FILE* out, const IngestResult& ing,
-                               std::span<const std::uint32_t> files, std::string_view rootPrefix )
+                               std::span<const std::uint32_t> files, std::string_view rootPrefix, std::span<const char> lazy = {} )
 {
     std::vector<char> esc;
-    for( const std::uint32_t f : files )
+    for( std::size_t i = 0; i < files.size(); ++i )
     {
-        const std::string_view raw = ing.files[f];
+        const std::string_view raw = ing.files[ files[i] ];
         const std::string_view rel = rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, rootPrefix );
-        std::fprintf( out, "<f via=\"import\" p=\"%s\"/>", std::string( escapeXml( rel, esc ) ).c_str() );
+        const bool              isLazy = i < lazy.size() && lazy[i] != 0;
+        std::fprintf( out, "<f via=\"import\" p=\"%s\" lazy=\"%s\"/>", std::string( escapeXml( rel, esc ) ).c_str(), isLazy ? "1" : "0" );
     }
 }
 
 inline void emitImportRowsJson( std::FILE* out, const IngestResult& ing,
-                                std::span<const std::uint32_t> files, std::string_view rootPrefix )
+                                std::span<const std::uint32_t> files, std::string_view rootPrefix, std::span<const char> lazy = {} )
 {
     for( std::size_t i = 0; i < files.size(); ++i )
     {
         const std::string_view raw = ing.files[ files[i] ];
         const std::string_view rel = rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, rootPrefix );
-        std::fprintf( out, "%s{\"via\":\"import\",\"p\":\"%s\"}", i ? "," : "", jsonStr( rel ).c_str() );
+        const bool              isLazy = i < lazy.size() && lazy[i] != 0;
+        std::fprintf( out, "%s{\"via\":\"import\",\"p\":\"%s\",\"lazy\":%s}", i ? "," : "", jsonStr( rel ).c_str(), isLazy ? "true" : "false" );
     }
 }
 

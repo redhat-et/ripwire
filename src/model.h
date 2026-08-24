@@ -449,6 +449,12 @@ struct Include
                                     //   relative-to-includer) OR a non-C import. Path-precise resolution
                                     //   (resolve.h::resolvePreciseInclude) uses this to leave angle
                                     //   includes UNRESOLVED rather than basename-matching them.
+    bool          isLazy   = false; // TS/JS only: true ⇒ this `require("./x")` / `import("./x")` call sits
+                                    //   inside a FUNCTION BODY (kJsFunctionContainers), not at module load
+                                    //   time — the dependency is real (--impact's importer tier must still
+                                    //   name the file) but semantically WEAKER: it fires only if and when
+                                    //   that function runs. false for every other directive kind and for a
+                                    //   top-level TS/JS require/import. See ingest.cpp::captureIncludes.
     std::string   target;           // raw include path ("foo.h", <vector>) or module name
 };
 

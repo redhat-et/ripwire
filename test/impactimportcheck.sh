@@ -18,13 +18,26 @@
 #      two different measurements over two different units and are never summed into one number
 #      (CLAUDE.md non-negotiable #3).
 #
-# FIXTURE test/impactimportfix — lib/Widget.js is imported by FIVE siblings and CALLED by exactly one:
+# FIXTURE test/impactimportfix — lib/Widget.js is imported by SIX siblings and CALLED by exactly one:
 #   alpha.js, beta.js, gamma.js  `require("./Widget")`, never call it   → import tier only
 #   user.js                      `require("./Widget")` + `new Widget()` → BOTH tiers (file vs symbol)
 #   delta.js                     ESM `import Widget from "./Widget.js"` → same tier as the requires
+#   lazyimporter.js              `require("./Widget")` INSIDE a function body, never at top level →
+#                                 import tier, lazy="1" (kParserVer 72, fnbody-require lane)
 #   orphan.js                    imported by nobody                     → the importers="0" witness
-# So the pre-fix binary shows reaches="1" and nothing else, and the post-fix binary must show reaches="1"
-# STILL, plus importers="5".
+# So the pre-71 binary shows reaches="1" and nothing else; kParserVer 71 (top-level require only) shows
+# importers="5" with no lazy="…" attribute at all; the post-72 binary must show reaches="1" STILL, plus
+# importers="6" — the five 71-visible rows at lazy="0", lazyimporter.js at lazy="1".
+#
+# LB-H's own webpack re-check (r10-gitnexus.md §5) measured `--impact=ChunkGraph` returning importers="…"
+# with no trace of lib/index.js — kParserVer 71 fixed the TOP-LEVEL half of that omission (require() as a
+# call expression was invisible at ANY depth) and left the function-body half as a disclosed floor
+# (ingest.cpp's kJsImportContainers comment, pre-72: "a require inside a function body stays uncaptured").
+# webpack's own lib/index.js is a LAZY-GETTER BARREL — every export is `get X() { return require("./X"); }`
+# — which is exactly why the floor mattered: the file the round wanted --impact to name was the one shape
+# kParserVer 71 could not reach. This gate's `lazyimporter.js` arm is the minimal reproduction of that shape
+# (see the file's own header comment for why it avoids the getter's-name == the module's-name collision
+# that keeps the REAL lib/index.js off ChunkGraph's importer tier for an orthogonal, undiagnosed reason).
 #
 # Usage:  bash test/impactimportcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/impactimportcheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
@@ -49,12 +62,21 @@ echo "impactimportcheck: BIN=$BIN  CORPUS=test/impactimportfix"
 # fixture ever loses them the gate would pass by measuring nothing, so assert the fixture first.
 req_n="$( grep -lE 'require\("\./Widget"\)' "$FIX"/lib/*.js 2>/dev/null | wc -l | tr -d ' ' )"
 esm_n="$( grep -lE 'import Widget from "\./Widget\.js"' "$FIX"/lib/*.js 2>/dev/null | wc -l | tr -d ' ' )"
-{ [ "$req_n" = 4 ] && [ "$esm_n" = 1 ]; } \
-    && ok "fixture guard: 4 CommonJS require sites + 1 ESM import site of ./Widget on disk" \
-    || no "fixture guard: expected 4 require + 1 ESM importer of ./Widget, found $req_n + $esm_n"
+{ [ "$req_n" = 5 ] && [ "$esm_n" = 1 ]; } \
+    && ok "fixture guard: 5 CommonJS require sites + 1 ESM import site of ./Widget on disk" \
+    || no "fixture guard: expected 5 require + 1 ESM importer of ./Widget, found $req_n + $esm_n"
 grep -q 'new Widget(' "$FIX/lib/user.js" \
     && ok "fixture guard: user.js is the one importer that also CALLS Widget" \
     || no "fixture guard: user.js no longer constructs Widget — the two-tier case is inert"
+# lazyimporter.js's require sits INSIDE lazyBuild()'s body, never at the top level — the presence guard a
+# gate that "cannot observe what it asserts" needs (CONTRIBUTING §2): assert the require is NOT a top-level
+# statement before trusting any lazy="…" assertion built on it.
+grep -qE '^\s*const\s+Widget\s*=\s*require\("\./Widget"\);' "$FIX/lib/lazyimporter.js" \
+    && no "fixture guard: lazyimporter.js's require is at the TOP LEVEL — the lazy arm below is inert" \
+    || ok "fixture guard: lazyimporter.js's require is not a top-level statement"
+grep -qE '^\s*cachedWidget = require\("\./Widget"\);\s*$' "$FIX/lib/lazyimporter.js" \
+    && ok "fixture guard: lazyimporter.js's require sits on its own line inside lazyBuild()'s body" \
+    || no "fixture guard: lazyimporter.js drifted — the lazy arm below cannot trust its shape"
 
 i(){ perl -e 'alarm 30; exec @ARGV' "$BIN" "$FIX" --impact="$1" --no-cache 2>/dev/null; }
 # The legend now SPELLS the row shape (`<f via="import" p="…"/>`), so a naive grep for a row matches the
@@ -64,30 +86,34 @@ attr(){ printf '%s' "$2" | grep -oE "(^|[^_a-z])$1=\"[^\"]*\"" | head -1 | grep 
 
 OUT_W="$( i Widget )"
 
-# ── #1 EXTRACTION: `require("./x")` is a file→file dependency edge ─────────────────────────────────────
-# The fixture is five importers of one module; pre-fix the whole dependency graph over it was empty.
+# ── #1 EXTRACTION: `require("./x")` is a file→file dependency edge, top-level OR function-body ─────────
+# The fixture is six importers of one module; pre-71 the whole dependency graph over it was empty.
 DEPS="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$FIX" --deps --no-cache 2>/dev/null )"
 DEPS_FILES="$( printf '%s' "$DEPS" | grep -oE '<deps files="[0-9]+"' | grep -oE '[0-9]+' )"
-[ "${DEPS_FILES:-0}" -ge 5 ] \
-    && ok "--deps sees the require() edges: files=$DEPS_FILES (>=5 importers with a dependency edge)" \
+[ "${DEPS_FILES:-0}" -ge 6 ] \
+    && ok "--deps sees the require() edges: files=$DEPS_FILES (>=6 importers with a dependency edge)" \
     || no "--deps files=${DEPS_FILES:-unset} — require(\"./Widget\") is not producing an include edge"
 
 # ── #2 the import tier exists, is complete, and is COUNTED SEPARATELY ─────────────────────────────────
 IMPORTERS="$( attr importers "$OUT_W" )"
 REACHES="$(   attr reaches   "$OUT_W" )"
-[ "$IMPORTERS" = 5 ] \
-    && ok "--impact=Widget: importers=5 (alpha, beta, gamma, user, delta — require AND import, one tier)" \
-    || no "--impact=Widget: importers='$IMPORTERS', expected 5"
+[ "$IMPORTERS" = 6 ] \
+    && ok "--impact=Widget: importers=6 (alpha, beta, gamma, user, delta, lazyimporter — one tier)" \
+    || no "--impact=Widget: importers='$IMPORTERS', expected 6"
 [ "$REACHES" = 1 ] \
     && ok "--impact=Widget: reaches=1 — CALL reach is unchanged, the two reach kinds are never summed" \
     || no "--impact=Widget: reaches='$REACHES', expected 1 (import reach must not leak into it)"
 
 for f in alpha beta gamma user delta; do
-    body "$OUT_W" | grep -qE "<f via=\"import\" p=\"lib/$f\.js\"/>" \
-        && ok "--impact=Widget: import-tier row for lib/$f.js" \
-        || no "--impact=Widget: missing <f via=\"import\" p=\"lib/$f.js\"/>"
+    body "$OUT_W" | grep -qE "<f via=\"import\" p=\"lib/$f\.js\" lazy=\"0\"/>" \
+        && ok "--impact=Widget: import-tier row for lib/$f.js, lazy=\"0\" (top-level require/import)" \
+        || no "--impact=Widget: missing <f via=\"import\" p=\"lib/$f.js\" lazy=\"0\"/>"
 done
-body "$OUT_W" | grep -qE '<f via="import" p="lib/Widget\.js"/>' \
+# ── #2b kParserVer 72: the FUNCTION-BODY require gets its own row, marked lazy="1" ──────────────────────
+body "$OUT_W" | grep -qE '<f via="import" p="lib/lazyimporter\.js" lazy="1"/>' \
+    && ok "--impact=Widget: import-tier row for lib/lazyimporter.js, lazy=\"1\" (function-body require)" \
+    || no "--impact=Widget: missing <f via=\"import\" p=\"lib/lazyimporter.js\" lazy=\"1\"/> — the lazy require was not captured, or not marked lazy"
+body "$OUT_W" | grep -qE '<f via="import" p="lib/Widget\.js"' \
     && no "--impact=Widget: the DEFINING file is listed as its own importer" \
     || ok "--impact=Widget: the defining file is not listed as an importer of itself"
 
@@ -106,9 +132,9 @@ printf '%s' "$OUT_W" | grep -qE '<s t="fn" n="build" p="lib/user\.js:7"/>' \
 # ── #4 pageview.h rule 6: a secondary listing discloses shown_<noun>=/<noun>_capped=, always paired ────
 SI="$( attr shown_importers "$OUT_W" )"
 IC="$( attr importers_capped "$OUT_W" )"
-{ [ "$SI" = 5 ] && [ "$IC" = 0 ]; } \
-    && ok "--impact=Widget: shown_importers=5 importers_capped=0 (complete listing, pair always emitted)" \
-    || no "--impact=Widget: shown_importers='$SI' importers_capped='$IC', expected 5 and 0"
+{ [ "$SI" = 6 ] && [ "$IC" = 0 ]; } \
+    && ok "--impact=Widget: shown_importers=6 importers_capped=0 (complete listing, pair always emitted)" \
+    || no "--impact=Widget: shown_importers='$SI' importers_capped='$IC', expected 6 and 0"
 
 # ── #5 an EMPTY import tier is a measurement, not a missing attribute ─────────────────────────────────
 OUT_O="$( i lonely )"
@@ -130,14 +156,18 @@ body "$OUT_O" | grep -qE '<f via="import"' \
 
 # ── #7 JSON dialect carries the same facts under the same names (§A3a: ONE keyset) ────────────────────
 JS_OUT="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$FIX" --impact=Widget --json --no-cache 2>/dev/null )"
-{ printf '%s' "$JS_OUT" | grep -q '"importers":5' \
-    && printf '%s' "$JS_OUT" | grep -q '"shown_importers":5' \
+{ printf '%s' "$JS_OUT" | grep -q '"importers":6' \
+    && printf '%s' "$JS_OUT" | grep -q '"shown_importers":6' \
     && printf '%s' "$JS_OUT" | grep -q '"importers_capped":false' \
     && printf '%s' "$JS_OUT" | grep -q '"reaches":1' \
     && printf '%s' "$JS_OUT" | grep -q '"import_reach":\[' \
-    && printf '%s' "$JS_OUT" | grep -q '{"via":"import","p":"lib/alpha.js"}'; } \
+    && printf '%s' "$JS_OUT" | grep -q '{"via":"import","p":"lib/alpha.js","lazy":false}'; } \
     && ok "--json: importers/shown_importers/importers_capped/import_reach mirror the XML attrs" \
     || no "--json: the import tier is missing or renamed — got: $( printf '%s' "$JS_OUT" | head -c 400 )"
+# ── #7b kParserVer 72: the JSON dialect's per-row lazy carries JSON booleans, not XML's "0"/"1" ─────────
+printf '%s' "$JS_OUT" | grep -q '{"via":"import","p":"lib/lazyimporter.js","lazy":true}' \
+    && ok "--json: lazyimporter.js's row carries \"lazy\":true" \
+    || no "--json: lazyimporter.js's row missing or not \"lazy\":true — got: $( printf '%s' "$JS_OUT" | grep -oE '\{"via":"import"[^}]*\}' )"
 if command -v python3 >/dev/null 2>&1; then
     printf '%s' "$JS_OUT" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null \
         && ok "--json: parses as JSON" || no "--json: invalid JSON"
@@ -145,8 +175,8 @@ fi
 
 # ── #8 --format=columnar discloses the COUNT (its row form is the symbol table only) ──────────────────
 COL="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$FIX" --impact=Widget --format=columnar --no-cache 2>/dev/null )"
-[ "$( attr importers "$COL" )" = 5 ] \
-    && ok "--format=columnar: importers=5 on the root (count disclosed even where rows are not emitted)" \
+[ "$( attr importers "$COL" )" = 6 ] \
+    && ok "--format=columnar: importers=6 on the root (count disclosed even where rows are not emitted)" \
     || no "--format=columnar: importers= missing from the columnar root"
 printf '%s' "$COL" | grep -q 'import-tier rows are not emitted in this form' \
     && ok "--format=columnar: the legend says the count is there and the rows are not" \
@@ -158,11 +188,12 @@ body "$COL" | grep -q '<f via="import"' \
 # ── #8b the MCP twin carries the tier too (the §B4 echo-site class: a marker landing on one surface) ──
 MCP_OUT="$( printf '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}\n{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"impact","arguments":{"path":"%s","symbol":"Widget"}}}\n' "$FIX" \
             | perl -e 'alarm 60; exec @ARGV' "$BIN" --mcp 2>/dev/null | tail -1 )"
-{ printf '%s' "$MCP_OUT" | grep -q 'importers=\\"5\\"' \
-    && printf '%s' "$MCP_OUT" | grep -q 'shown_importers=\\"5\\"' \
+{ printf '%s' "$MCP_OUT" | grep -q 'importers=\\"6\\"' \
+    && printf '%s' "$MCP_OUT" | grep -q 'shown_importers=\\"6\\"' \
     && printf '%s' "$MCP_OUT" | grep -q 'importers_capped=\\"0\\"' \
-    && printf '%s' "$MCP_OUT" | grep -q 'p=\\"lib/alpha.js\\"'; } \
-    && ok "MCP impact verb: same importers=/shown_importers=/importers_capped= and the same rows" \
+    && printf '%s' "$MCP_OUT" | grep -q 'p=\\"lib/alpha.js\\"' \
+    && printf '%s' "$MCP_OUT" | grep -q 'p=\\"lib/lazyimporter.js\\" lazy=\\"1\\"'; } \
+    && ok "MCP impact verb: same importers=/shown_importers=/importers_capped=/lazy= and the same rows" \
     || no "MCP impact verb diverges from the CLI on the import tier — got: $( printf '%s' "$MCP_OUT" | head -c 400 )"
 
 # ── #9 the cap is a DEFAULT that discloses, measured on this repo (src/model.h has 60+ includers) ─────

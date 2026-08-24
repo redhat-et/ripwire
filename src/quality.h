@@ -762,7 +762,11 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 13;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 71;   // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 72;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 72 = 2026-08-24 (fnbody-require lane): CommonJS require()/dynamic
+                                                          // import() captured inside a TS/JS function body, not just at the
+                                                          // top level — Include gains `bool isLazy`. See ingest.cpp's own
+                                                          // kParserVer note for the per-container detail.
                                                           // 70 = 2026-08-22 test-macro blocks (LB-E): a known doctest/Catch2
                                                           // block-forming test macro (`TEST_CASE( "title" ) { … }` and kin)
                                                           // extracts as a t="fn" symbol named by its title literal, spanning

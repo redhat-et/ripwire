@@ -7959,6 +7959,7 @@ struct ImpactView
     rw::PageWindow                 page;
     const rw::ImportTier&          imports;
     std::span<const std::uint32_t> importPage;
+    std::span<const char>          importLazyPage;   // kParserVer 72: parallel to importPage
     rw::RankDisclosure             prD;
     bool                           singleRoot;
     std::string_view               rootPrefix;
@@ -8018,7 +8019,7 @@ int emitImpactJson( const ImpactView& v )
                  rw::renderDisclosure( v.prD, rw::DiscloseAs::JsonKeys ).c_str() );           // W2-F: ONE keyset
     printJsonSymbolRows( v.ing, v.show, v.page.begin, v.page.end, v.rootPrefix );
     std::printf( "],\"import_reach\":[" );
-    rw::emitImportRowsJson( stdout, v.ing, v.importPage, v.rootPrefix );
+    rw::emitImportRowsJson( stdout, v.ing, v.importPage, v.rootPrefix, v.importLazyPage );
     std::printf( "]}" );
     return 0;
 }
@@ -8046,7 +8047,7 @@ int emitImpactXml( const ImpactView& v )
                                                  : std::string_view( v.ing.files[ s.fileId ] );
         std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
     }
-    rw::emitImportRowsXml( stdout, v.ing, v.importPage, v.rootPrefix );
+    rw::emitImportRowsXml( stdout, v.ing, v.importPage, v.rootPrefix, v.importLazyPage );
     std::printf( "</impact>" );
     return 0;
 }
@@ -8084,8 +8085,9 @@ std::optional<int> runImpact( const MainDispatch& d )
         // surfaces cannot drift. The two reaches stay separate all the way to the bytes: a separate count
         // (importers=), a separate truncation pair (shown_importers=/importers_capped=, pageview.h rule 6)
         // and a separate row tag.
-        const rw::ImportTier imports    = rw::impactImportTier( ing, seeds );
-        const auto           importPage = std::span<const std::uint32_t>( imports.files ).first( imports.shown );
+        const rw::ImportTier imports        = rw::impactImportTier( ing, seeds );
+        const auto           importPage     = std::span<const std::uint32_t>( imports.files ).first( imports.shown );
+        const auto           importLazyPage = std::span<const char>( imports.lazy ).first( imports.shown );
 
         if( !cfg.json )
         { // L2: JSON has no comment-node analogue; the XML-only leading doc comment
@@ -8105,7 +8107,7 @@ std::optional<int> runImpact( const MainDispatch& d )
         // --callers/--callees use, so the family's default lives in one place instead of three literals.
         const ImpactView view{ ing, cfg.impactSym, seeds.size(), reach.size(), show,
                                pageWindow( show.size(), effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ), cfg.pageOffset ),
-                               imports, importPage, prD, imSingleRoot, imRootPrefix, imRootAttr,
+                               imports, importPage, importLazyPage, prD, imSingleRoot, imRootPrefix, imRootAttr,
                                imSingleRoot ? cfg.roots[0] : std::string_view(), cfg.pageLimit, cfg.pageOffset };
 
         if( cfg.columnar ) { return emitImpactColumnar( view ); }

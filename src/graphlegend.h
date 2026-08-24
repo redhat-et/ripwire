@@ -169,12 +169,24 @@ inline constexpr const char* kImpactLegendOpen =
 // rather than extra rows inside reaches=.
 //
 // legendcoveragecheck's rule: every root attribute a reader meets on the first screen is defined where
-// they meet it — importers=, shown_importers=, importers_capped= and the via= row attribute are all here.
+// they meet it — importers=, shown_importers=, importers_capped= and the via=/lazy= row attributes are all
+// here.
+//
+// lazy= (kParserVer 72, fnbody-require lane): a TS/JS `require("./x")` / dynamic `import("./x")` written
+// INSIDE A FUNCTION BODY is still a real dependency — the importer tier must still name the file — but a
+// WEAKER one than a top-level require: it only fires if and when that function actually runs (webpack's
+// own lib/index.js lazy-getter barrel, `get ChunkGraph() { return require("./ChunkGraph"); }`, is the
+// shape that motivated capturing it at all). lazy="1" on a row means EVERY edge from that importer into
+// SYM's def file(s) is one of these function-body calls; lazy="0" means at least one is an ordinary
+// top-level (unconditional) require/import, so the dependency also holds at module-load time.
 inline constexpr const char* kImpactImportTierLegend =
     "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, listed as "
-    "<f via=\"import\" p=\"…\"/> rows after the symbol rows. It is not call reach and is never added to reaches= — "
-    "the two count different units (files vs symbols) over different evidence, and an importer may use a "
+    "<f via=\"import\" p=\"…\" lazy=\"0|1\"/> rows after the symbol rows. It is not call reach and is never added to "
+    "reaches= — the two count different units (files vs symbols) over different evidence, and an importer may use a "
     "different symbol from that file, or none at all. It is DIRECT (one hop), never the transitive include cone. "
+    "lazy=\"1\" (TS/JS only) means every one of that importer's edges into SYM's file is a require()/import() written "
+    "INSIDE A FUNCTION BODY rather than at module load time — still a real dependency, but one that only fires if "
+    "and when that function runs; lazy=\"0\" means at least one edge is an ordinary top-level require/import. "
     "shown_importers=/importers_capped= disclose that listing's own truncation (importers= stays the full count); "
     "limit=/offset= window the symbol rows only. ";
 

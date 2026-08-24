@@ -15,15 +15,25 @@
 #   C#      `using` inside a BLOCK-scoped `namespace Foo { … }` — the pre-2021 house style of most C#
 #           trees. (The file-scoped form `namespace Foo;` does not nest and was never affected: it is
 #           this gate's negative control, test/nestedimportfix/filescoped.cs.)
+#   TS/JS   kParserVer 72 (fnbody-require lane): CommonJS `require( … )` / dynamic `import( … )` written
+#           INSIDE a function body — a getter, an arrow function passed as a call argument, an if-guarded
+#           lazy-init — the shape webpack's own lib/index.js lazy-getter barrel uses. Distinct from the
+#           other three rows above: neither spelling is an `import_statement` at all (both are
+#           call_expression), so this row is gated by src/ingest.cpp's jsModuleLoadTarget, not by a grammar
+#           rule that only fires at the top level.
 #
 # ── WHY THE CONTAINER ALLOWLIST IS KEYED BY LANGUAGE ─────────────────────────────────────────────────
 # `block` and `declaration_list` are node-type names in half a dozen of our grammars. A SHARED list
 # would make the walk descend into every C++/TypeScript/Java function body hunting a directive form
 # those languages do not have there — cost with no recall. So each language names only the containers
-# ITS directives actually appear in, and test/nestedimportfix/scope_control.ts is the control that says
-# so: a TS file whose function body holds a dynamic `import( … )` and a `require( … )` — neither an
-# import_statement — must still report exactly ONE include. The C-family side is pinned independently by
-# test/preproccondcheck.sh's exact per-file counts, which move if C++ ever picks up a body container.
+# ITS directives actually appear in. test/nestedimportfix/scope_control.ts is STILL that control, but its
+# claim flipped at kParserVer 72: through 71 it proved a TS function body holding a dynamic `import( … )`
+# and a `require( … )` reported exactly ONE include (the language was NOT widened); from 72 it proves the
+# OPPOSITE — those two calls (plus a third, guarded one) ARE captured, each lazy="1" on --impact's import
+# tier — while a computed specifier and a member-expression callee inside those SAME function bodies still
+# report NOTHING, because jsModuleLoadTarget's three guards do not relax with depth. The C-family side is
+# pinned independently by test/preproccondcheck.sh's exact per-file counts, which move if C++ ever picks up
+# a body container.
 #
 # ── HOW THE EXPECTED NUMBERS WERE CHOSEN ─────────────────────────────────────────────────────────────
 # Every count below is a LITERAL hand count off the fixture — one distinct module name per arm, counted
@@ -39,8 +49,9 @@
 #   1b. CONTROLS   — top-level imports still captured; a body-LESS Rust `mod x;` still emits `mod:x`
 #                    (the same node kind must be both READ and DESCENDED INTO — a walk that swallowed
 #                    it would silently drop every module-file declaration); the two negative controls.
-#   1c. NO SPRAY   — exact per-file counts, plus an explicit assertion that the TS dynamic-import and
-#                    require specifiers appear NOWHERE in the output.
+#   1c. NO SPRAY   — exact per-file counts, plus an explicit assertion that a COMPUTED TS specifier and a
+#                    member-expression `require` appear NOWHERE in the output (the genuinely-captured
+#                    function-body require/dynamic-import calls are asserted separately in 1e').
 #   2.  USE-SITES  — a function-local import's ref carries the DIRECTIVE's own line, not its container's.
 #   3.  COCHANGE   — end to end: a Python module whose only import of its sibling sits under
 #                    `if TYPE_CHECKING:` must not be reported `surprising="1"`. Positive control in the
@@ -86,7 +97,9 @@ presence guarded.rs 'extern "C"'          'rust extern block arm present'
 presence guarded.rs 'pub mod sibling_decl;' 'rust body-LESS `mod x;` control present'
 presence Nested.cs  'namespace Outer'     'C# block-scoped namespace arm present'
 presence filescoped.cs 'namespace FileScopedNs;' 'C# file-scoped namespace negative control present'
-presence scope_control.ts 'await import(' 'TS dynamic-import negative control present'
+presence scope_control.ts 'await import(' 'TS dynamic-import-in-a-function-body arm present'
+presence scope_control.ts 'dyn_computed'  'TS computed-specifier negative control present'
+presence scope_control.ts 'fakeModule.require' 'TS member-expression negative control present'
 
 # A fixture that does not PARSE drops arms silently. Assert zero ERROR nodes per file before asserting
 # anything about what was extracted from it.
@@ -158,9 +171,16 @@ inc FileScoped.Before 'CONTROL: C# using before a FILE-scoped namespace (does no
 inc FileScoped.After  'CONTROL: C# using after a FILE-scoped namespace (still a compilation-unit child)'
 inc ./mod_toplevel    'CONTROL: TypeScript top-level ESM import'
 
-# 1e. NEGATIVE CONTROLS — the language scoping really is scoped.
-noinc must_not_appear_dynamic 'TS dynamic `import( … )` is a call expression, not an import directive'
-noinc must_not_appear_require 'TS `require( … )` is a call expression, not an import directive'
+# 1e'. kParserVer 72 (fnbody-require lane) — TS/JS function-body require()/dynamic-import() arms.
+inc ./req_in_function 'TS: `require( … )` guarded by an if_statement inside a function body'
+inc ./dyn_in_function 'TS: dynamic `import( … )` under an await_expression inside a function body'
+inc ./mod_in_function 'TS: `require( … )` as a bare return_statement inside a DIFFERENT function'
+
+# 1e. NEGATIVE CONTROLS — the language scoping really is scoped. Widening WHERE the walk looks (kParserVer
+# 72) never widened WHAT counts as a hit — jsModuleLoadTarget's three guards (bare callee, one arg, a
+# string literal) still apply at any depth.
+noinc dyn_computed   'TS: a CONCATENATED require/import specifier is dropped, never guessed, at any depth'
+noinc req_member     'TS: `fakeModule.require( … )` is a member expression, not a bare callee, at any depth'
 
 # 1f. NO SPRAY — exact per-file counts (hand-read; see the header).
 count(){ # count <file> <expected> <label>
@@ -174,7 +194,7 @@ count guarded.py       19 'guarded.py: 18 import + 1 from-import, each captured 
 count guarded.rs       16 'guarded.rs: 15 use + 1 body-less mod, each captured exactly once'
 count Nested.cs         3 'Nested.cs: one compilation-unit using + two namespace-scoped'
 count filescoped.cs     2 'filescoped.cs: UNCHANGED (file-scoped namespace does not nest)'
-count scope_control.ts  1 'scope_control.ts: UNCHANGED (TS was not widened)'
+count scope_control.ts  4 'scope_control.ts: 1 top-level ESM import + 3 function-body require/dynamic-import (kParserVer 72), each captured exactly once — the two computed/member negative controls contribute nothing'
 
 # The <inc> listing serialize.h emits is capped at 40 children per file (the rest disclosed as `+more`),
 # and every `inc`/`noinc` assertion above reads that listing. Assert the cap was not reached, or those
