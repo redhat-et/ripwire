@@ -578,6 +578,34 @@ inline std::string_view relForHash( std::string_view path, std::string_view root
     return path;
 }
 
+// relForHash's read-side twin: does `tail` name the same path as `full`, allowing `full` to carry a leading
+// prefix that `tail` has already had stripped? Equal, or `full` ends with `tail` cut on a whole-path-COMPONENT
+// boundary. Never a realpath and no I/O — the same determinism contract relForHash keeps, and for the same
+// reason: the prefix in question is a checkout location, which must never decide an answer.
+//
+// TWO CALLERS, one rule (they were written independently and --quality-delta reported the clone):
+//   * crossref.h::sameTreePath — a git tree path ("src/graph.h") against an index path relativised to the
+//     ingest root ("graph.h" when the tree was ingested as `ripwire src`)
+//   * graph.h::canonicalIdMatches — a STORED canonical id against the ROOT-RELATIVE spelling now emitted in
+//     id=, so an id a consumer copied out of a bundle still resolves
+// Both are "the same path, one of them missing a root prefix", which is exactly one question.
+//
+// The component boundary is not optional: without it "h.h::A::b" matches "src/oh.h::A::b", and "graph.h"
+// matches "src/subgraph.h". A bare suffix test is the bug this signature exists to prevent.
+inline bool samePathTail( std::string_view full, std::string_view tail ) noexcept
+{
+    if( full == tail )
+    {
+        return true;
+    }
+    if( tail.empty() || full.size() <= tail.size() )
+    {
+        return false;
+    }
+    return full.compare( full.size() - tail.size(), tail.size(), tail ) == 0
+        && full[ full.size() - tail.size() - 1 ] == '/';
+}
+
 // Stable hash for one arch violation. rule_label = "FROM->TO" (the layer names, not the file paths).
 inline std::uint64_t archViolHash( std::string_view srcFile,
                                    std::string_view dstFile,
