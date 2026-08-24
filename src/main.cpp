@@ -2372,7 +2372,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     std::vector<float>& lensRank = out.rank;
     if( routeOn )
     {
-        lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactTiered( ing, task, &tierMul )
+        lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul );
         out.routeNote  = " [routed: " + rc.reason + "]";
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
@@ -13448,7 +13448,7 @@ int runDefaultMap( const MainDispatch& d )
         if( !cfg.noRoute )
         {
             const RouteChoice rc = chooseForRanker( ing, cfg.query );
-            rank = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactTiered( ing, cfg.query, &tierMul )
+            rank = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, cfg.query, &tierMul )
                                                       : lexicalScoresTiered( ing, g.outOff, g.outTargets, cfg.query, 0, nullptr, &tierMul );
             // §B4 (capture-audit-4) — the SEVENTH comment-echo site, and the only one W3FIX M3 missed. It
             // hand-rolled the std::unique dash collapse that xmlCommentText's header names as the pattern it
