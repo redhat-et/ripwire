@@ -3284,8 +3284,9 @@ control was backwards: the corpus, not the binary, was the variable. Re-run corr
 two binaries — all nine are byte-identical. The tell was the map: **when a control that the change cannot
 reach reports a difference, the control is wrong, not the change.**
 
-`--quality-delta` against `da61bac`: `gating="0"`, exit 0. Every row is `origin="new-symbol"` (the new
-helper and the fixture's own symbols) or ambient short-horizon churn. `applyDefOverDeclTiebreak` measures
+`--quality-delta=da61bac..bae00d7` (the ref-pair form, two committed trees): `gating="0"`,
+`preexisting-worse="0"`, all twelve rows `origin="new-symbol"` — the new helper and the fixture's own
+symbols. Nothing that existed got worse. `applyDefOverDeclTiebreak` measures
 `cx=21 ccx=29 loc=91 nest=3`, with `ev=10 ev_why="guard-return:3,loop-escape:4"` — the count is dominated
 by early-exit guards and refusals, which is the shape §6's readability work says not to refactor away, and
 it sits below both of its immediate neighbours in the same file (`chooseForRanker` 34,
