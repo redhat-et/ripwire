@@ -1067,7 +1067,32 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
 //     weakest-link cutrefs metric (serialize.h: occurrence count = "how load-bearing is this dependency")
 //     and afferent counts stay byte-identical to the pre-precise behavior. Downstream reachability walks
 //     (sccCycles/dependencyHealth/dsmPropagationCost) are bitset-based → dedup-safe either way.
-inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const IngestResult& ing, bool dedup = true )
+//
+// One accepted (from,to) edge's contribution to the lazy-pair map — split out of buildPreciseIncludeAdj's
+// main loop (kParserVer 72) so the bolted-on branch does not inflate that loop's own complexity. A pair
+// starts true (lazy) on its first occurrence and is clobbered to false the moment ANY occurrence is a
+// top-level (non-lazy) require — one strong edge is enough to make the whole (from,to) pair NOT lazy, since
+// the file provably also depends on the target unconditionally.
+inline void recordLazyPair( HashMap<std::uint64_t, char>& lazyPairs, std::uint32_t from, std::uint32_t to, bool isLazy )
+{
+    const std::uint64_t key = ( std::uint64_t( from ) << 32 ) | std::uint64_t( to );
+    if( const auto it = lazyPairs.find( key ); it == lazyPairs.end() )
+    {
+        lazyPairs.emplace( key, isLazy ? 1 : 0 );
+    }
+    else if( !isLazy )
+    {
+        it->second = 0;
+    }
+}
+
+// `lazyPairsOut` (kParserVer 72, fnbody-require lane): optional, default nullptr — purely additive, every
+// existing call site is unaffected. When non-null, keyed by (fromFileId<<32 | toFileId), value = "every
+// Include occurrence resolving to this edge so far was lazy" (Include::isLazy) — see recordLazyPair above.
+// Independent of `dedup`: keyed by file-id PAIR, not by adj's post-sort indices, so it stays correct
+// whichever adjacency shape the caller asked for.
+inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const IngestResult& ing, bool dedup = true,
+                                                                       HashMap<std::uint64_t, char>* lazyPairsOut = nullptr )
 {
     const std::uint32_t F = std::uint32_t( ing.files.size() );
     std::vector<std::vector<std::uint32_t>> adj( F );
@@ -1201,6 +1226,10 @@ inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const Ing
             continue; // unresolved or self-include → contributes nothing
         }
         adj[ inc.fileId ].push_back( to );
+        if( lazyPairsOut != nullptr )
+        {
+            recordLazyPair( *lazyPairsOut, inc.fileId, to, inc.isLazy );
+        }
     }
     if( dedup )
     {

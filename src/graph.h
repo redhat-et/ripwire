@@ -3020,9 +3020,54 @@ inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestRe
 // DIRECT, not transitive, on purpose. The transitive closure of an include graph is enormous (webpack's
 // lib has a per-file transitive cone of ~100 files) and its far edge carries no information about the
 // symbol at all; one hop is the tier where "you named this file in an import" is still true of every row.
-inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, const std::vector<std::uint32_t>& defFiles )
+//
+// One importer candidate's scan over its OWN edge list: does f reach any def file at all, and — only when
+// the caller wants lazy disclosure — is EVERY such edge a function-body (lazy) require/import. Split out of
+// importersOfFiles below (kParserVer 72) so that loop stays the membership scan it always was; this is the
+// one new branch bolted onto it, in its own small function instead of inflating the caller's own branch
+// count. `lazyPairs` is nullptr in the fast membership-only path (mirrors buildPreciseIncludeAdj's own
+// nullptr convention), in which case the scan takes the pre-72 `break`-on-first-hit shortcut.
+struct ImporterScan { bool found; bool allLazy; };
+
+inline ImporterScan scanImporterEdges( std::uint32_t f, const std::vector<std::uint32_t>& toList, const std::vector<char>& isDef,
+                                       std::uint32_t F, const HashMap<std::uint64_t, char>* lazyPairs ) noexcept
+{
+    ImporterScan r{ false, true };   // allLazy is vacuously true until the first def edge is seen
+    for( const std::uint32_t to : toList )
+    {
+        if( to >= F || !isDef[to] )
+        {
+            continue;
+        }
+        r.found = true;
+        if( lazyPairs == nullptr )
+        {
+            return r;               // membership only — one row per FILE is all that matters
+        }
+        const std::uint64_t key = ( std::uint64_t( f ) << 32 ) | std::uint64_t( to );
+        const auto          it  = lazyPairs->find( key );
+        if( it == lazyPairs->end() || it->second == 0 )
+        {
+            r.allLazy = false;      // this edge (or an untracked one) is not lazy → the row is not
+        }
+    }
+    return r;
+}
+
+// `lazyOut` (kParserVer 72, fnbody-require lane): optional, default nullptr, purely additive. When
+// non-null, filled PARALLEL to the returned vector (same order, same size): 1 ⇒ every edge from this
+// importer to a def file was a function-body (lazy) require/import — the file's ONLY path to the symbol's
+// file runs conditionally; 0 ⇒ at least one edge is a top-level (unconditional) directive. Omitting it
+// skips the per-pair bookkeeping entirely (the pre-72 fast `break`-on-first-hit path), so a caller that
+// only wants membership pays nothing extra.
+inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, const std::vector<std::uint32_t>& defFiles,
+                                                     std::vector<char>* lazyOut = nullptr )
 {
     std::vector<std::uint32_t> importers;
+    if( lazyOut != nullptr )
+    {
+        lazyOut->clear();
+    }
     if( defFiles.empty() || ing.includes.empty() )
     {
         return importers;
@@ -3040,19 +3085,21 @@ inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, con
 
     // dedup=true: this is a MEMBERSHIP question ("does this file import a def file"), not an
     // occurrence-count one, so the deduped adjacency is both the right shape and the cheaper scan.
-    const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true );
+    HashMap<std::uint64_t, char>  lazyPairs;
+    const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr );
     for( std::uint32_t f = 0; f < F && f < adj.size(); ++f )
     {
         if( isDef[f] )
         {
             continue;                       // a def file's own includes are not importers OF it
         }
-        for( const std::uint32_t to : adj[f] )
+        const ImporterScan scan = scanImporterEdges( f, adj[f], isDef, F, lazyOut ? &lazyPairs : nullptr );
+        if( scan.found )
         {
-            if( to < F && isDef[to] )
+            importers.push_back( f );
+            if( lazyOut != nullptr )
             {
-                importers.push_back( f );
-                break;                      // one row per FILE, however many of the defs it imports
+                lazyOut->push_back( scan.allLazy ? 1 : 0 );
             }
         }
     }
@@ -3072,6 +3119,8 @@ inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, con
 struct ImportTier
 {
     std::vector<std::uint32_t> files;
+    std::vector<char>          lazy;    // kParserVer 72: parallel to `files` — 1 ⇒ every edge into the def
+                                        //   set from this importer is a function-body require/import
     std::size_t                shown  = 0;
     bool                       capped = false;
     std::string                xmlAttrs;   // " importers= shown_importers= importers_capped=" — pure digits, nothing to escape
@@ -3089,10 +3138,25 @@ inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<N
     defFiles.erase( std::unique( defFiles.begin(), defFiles.end() ), defFiles.end() );
 
     ImportTier t;
-    t.files = importersOfFiles( ing, defFiles );
+    std::vector<char> lazyByFileOrder;   // importersOfFiles' own order (ascending file id) — see below
+    t.files = importersOfFiles( ing, defFiles, &lazyByFileOrder );
+
+    // t.files is about to be RESORTED into tier/path order; lazyByFileOrder must move WITH each entry, not
+    // stay behind at its ascending-file-id slot — sort an index permutation, then rebuild both in lockstep.
     const std::vector<std::uint8_t> tierOfFile = rw::pathTierIndexOver( ing, t.files, [ ]( std::uint32_t f ) { return f; } );
-    std::sort( t.files.begin(), t.files.end(),
-               [ & ]( std::uint32_t a, std::uint32_t b ) { return rw::compareTierThenPath( ing, tierOfFile, a, b ) < 0; } );
+    std::vector<std::uint32_t> order( t.files.size() );
+    for( std::size_t i = 0; i < order.size(); ++i ) { order[i] = std::uint32_t( i ); }
+    std::sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
+               { return rw::compareTierThenPath( ing, tierOfFile, t.files[a], t.files[b] ) < 0; } );
+    std::vector<std::uint32_t> sortedFiles( t.files.size() );
+    std::vector<char>          sortedLazy( t.files.size() );
+    for( std::size_t i = 0; i < order.size(); ++i )
+    {
+        sortedFiles[i] = t.files[ order[i] ];
+        sortedLazy[i]  = lazyByFileOrder[ order[i] ];
+    }
+    t.files = std::move( sortedFiles );
+    t.lazy  = std::move( sortedLazy );
 
     t.shown  = std::min( t.files.size(), std::size_t( rw::kImportReachRowCap ) );
     t.capped = t.shown < t.files.size();

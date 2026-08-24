@@ -1499,7 +1499,25 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 71;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 72;           // bump on any grammar/.scm/extraction change
+                                                      // 72 = 2026-08-24 (fnbody-require lane): CommonJS `require("./x")` /
+                                                      //    dynamic `import("./x")` captured INSIDE a function body — kJsImportContainers
+                                                      //    grows past the 71 top-level-only set (statement_block, return_statement,
+                                                      //    the six function-body node kinds, control-flow clauses, and the
+                                                      //    object/pair/arguments/call_expression/parenthesized_expression chain
+                                                      //    needed to reach a `get X() { return require(…); }` getter sitting
+                                                      //    inside an object literal passed as a call argument — webpack's
+                                                      //    lib/index.js lazy-getter barrel, read off a real parse). Same three
+                                                      //    guards as top-level (bare require/import callee, one arg, string
+                                                      //    literal) — SAME jsModuleLoadTarget, called from a deeper set of
+                                                      //    containers. Include gains `bool isLazy` (a FORMAT change → reject v71
+                                                      //    blobs): true when the call sits inside a function-body container,
+                                                      //    disclosed on --impact's import tier as `lazy=` (graph.h::impactImportTier,
+                                                      //    graphlegend.h::kImpactImportTierLegend) — a lazy require is a real
+                                                      //    dependency (the importer tier must still name the file) but a WEAKER
+                                                      //    one: it only fires if and when the function runs. See
+                                                      //    test/impactimportcheck.sh's lazy fixture arm and
+                                                      //    test/nestedimportfix/scope_control.ts.
                                                       // 70 = 2026-08-22 test-macro blocks (LB-E, r10 harvest): a known
                                                       //    doctest/Catch2 block-forming test macro (kTestBlockMacroNames)
                                                       //    invoked as `TEST_CASE( "title" ) { … }` — which tree-sitter-cpp
@@ -2419,7 +2437,7 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     // (B0.2) a RICH def record additionally carries at least dlWeighted + tokenCount (2×u32) — the pair
     // arrays themselves are bounded per record inside readDef.
     const std::size_t kMinDefRecordBytes  = minDefRecordBytes( captureValueUses );   // F8: named + tripwire-pinned above
-    constexpr std::size_t kMinIncRecordBytes  =  5;   // 1×u8 (isAngle) + 1×str(len u32, empty)
+    constexpr std::size_t kMinIncRecordBytes  =  6;   // 2×u8 (isAngle,isLazy) + 1×str(len u32, empty)
     constexpr std::size_t kMinBindRecordBytes = 13;   // 1×u32 + 1×u8 + 2×str(len u32, empty)
     constexpr std::size_t kMinFfiRecordBytes  = 14;   // 2×u8 (kind,lowConf) + 3×str(len u32, empty)
     constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (line) + 1×u8 (method) + 2×str(len u32, empty)
@@ -2521,7 +2539,8 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
             for( std::uint32_t j = 0; j < ni && r.ok; ++j )
             {
                 const bool isAngle = r.u8() != 0;
-                ff.incs.push_back( Include { 0, isAngle, r.str() } );
+                const bool isLazy  = r.u8() != 0;   // kParserVer 72: TS/JS function-body require/import marker
+                ff.incs.push_back( Include { 0, isAngle, isLazy, r.str() } );
             }
             const std::uint32_t nb = r.u32();
             if( !countFits( nb, kMinBindRecordBytes ) )
@@ -2786,6 +2805,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             for( std::uint32_t i : iIdx[f] )
             {
                 w.u8( incs[i].isAngle ? 1 : 0 );
+                w.u8( incs[i].isLazy  ? 1 : 0 );
                 w.str( incs[i].target );
             }
             w.u32( std::uint32_t( bIdx[f].size() ) );
@@ -5310,18 +5330,69 @@ inline constexpr std::array<std::string_view, 19> kRustImportContainers = {
 
 inline constexpr std::array<std::string_view, 2> kCsharpImportContainers = { "namespace_declaration", "declaration_list" };
 
-// TS/JS: the statement forms that wrap a top-level `require("./x")`. Read off real parses, not predicted:
+// The FUNCTION-BODY node kinds — read off real parses, not predicted. Entering ANY one of these means
+// everything inside it is written INSIDE a function's body, so a require()/import() found there only runs
+// when and if that function runs: a real dependency (kParserVer 72's whole point — the importer tier must
+// still name the file), but a WEAKER one than a top-level require, hence Include::isLazy. Kept as its own
+// table, separate from kJsImportContainers below, because captureIncludes' walk tests membership in exactly
+// this list — independently of the container-descent test — to flip `insideFn` for every descendant.
+inline constexpr std::array<std::string_view, 6> kJsFunctionContainers = {
+    "function_declaration", "function_expression", "generator_function", "generator_function_declaration",
+    "arrow_function", "method_definition"
+};
+
+inline bool isJsFunctionLike( Lang lang, const char* type ) noexcept
+{
+    return ( lang == Lang::TypeScript || lang == Lang::JavaScript ) && namesNode( kJsFunctionContainers, type );
+}
+
+// TS/JS: every container a `require("./x")` / `import("./x")` call can legitimately sit under.
+//
+// The first five are the statement forms that wrap a TOP-LEVEL require, kParserVer 71's set — read off
+// real parses, not predicted:
 //   const X = require("./x");            lexical_declaration → variable_declarator → call_expression
 //   const { a } = require("./x");        the same chain (the destructuring is in the declarator's NAME)
 //   var X = require("./x");              variable_declaration → variable_declarator → call_expression
 //   require("./x");                      expression_statement → call_expression
 //   module.exports = require("./x");     expression_statement → assignment_expression → call_expression
-// Three levels at the deepest, far inside kMaxImportContainerDepth. NOT listed: `statement_block` and the
-// function-body kinds — a `require` inside a function body stays uncaptured, exactly as a Python import
-// inside a function body was before its containers were added, and exactly as ESM `import` cannot appear
-// there at all. That is a disclosed floor (counts_floor=), not a silent claim of completeness.
-inline constexpr std::array<std::string_view, 5> kJsImportContainers = {
-    "lexical_declaration", "variable_declaration", "variable_declarator", "expression_statement", "assignment_expression"
+//
+// kParserVer 72 (fnbody-require lane) adds the rest: a top-level-only walk missed the real shape CommonJS
+// LAZY loading takes — read off webpack's own lib/index.js, which the LB-H round (71) had already measured
+// and left as a disclosed floor:
+//   get ChunkGraph() { return require("./ChunkGraph"); }    — a getter (method_definition) inside an
+//                                                               OBJECT LITERAL passed as a call argument
+//   const fn = lazyFunction(() => require("./webpack"));    — an arrow_function's CONCISE body, itself a
+//                                                               call argument
+// Neither is a "function body" in isolation — reaching either one needs the WHOLE chain from the top-level
+// statement down: call_expression (so `arguments` is visited) → arguments → object → method_definition
+// (or → arrow_function directly) → its body. `statement_block` and `return_statement` cover the ordinary
+// `function f() { return require("./x"); }` shape; the control-flow clauses (if/try/for/while/switch) are
+// the direct analogue of Python's own body-container list two lanes up, added for the same reason: a
+// `require` guarded by a runtime check (`if (!cached) { cached = require("./x"); }`) is still lazy-loaded,
+// still a real dependency, and was never reachable through the pre-72 five-entry table either.
+// `export_statement` earns its own entry for the same reason: `export function f() { … }` / `export class
+// C { … }` / `export default function() { … }` wrap the function-body kinds in TypeScript source (probed
+// against test/nestedimportfix/scope_control.ts — its `export async function loader()` body was invisible
+// until this entry landed, exactly the pre-72 gap the file exists to prove). `await_expression` earns its
+// own entry for the SAME probe: `const dyn = await import("./x")` puts an await_expression BETWEEN the
+// variable_declarator and the call_expression, so the dynamic-import half of that same fixture line stayed
+// invisible even after export_statement was added — read off the actual match (`--match='(call_expression
+// function: (_) @f)'` returns a real `function:` field of text "import" here, so the earlier miss was the
+// missing container, never a grammar shape jsModuleLoadTarget could not read).
+// EVERY ENTRY still needs the SAME three jsModuleLoadTarget guards (bare require/import callee, one arg, a
+// string literal) — this table only widens WHERE the walk looks, never what counts as a hit.
+inline constexpr std::array<std::string_view, 34> kJsImportContainers = {
+    "lexical_declaration", "variable_declaration", "variable_declarator", "expression_statement", "assignment_expression",
+    "statement_block", "return_statement", "labeled_statement", "export_statement",
+    "if_statement", "else_clause",
+    "try_statement", "catch_clause", "finally_clause",
+    "for_statement", "for_in_statement", "while_statement", "do_statement",
+    "switch_statement", "switch_case", "switch_default",
+    "class_body", "object", "pair", "arguments", "call_expression", "parenthesized_expression", "await_expression",
+    // the six function-body KINDS themselves (== kJsFunctionContainers) — a container must also be entered
+    // to reach ITS OWN body
+    "function_declaration", "function_expression", "generator_function", "generator_function_declaration",
+    "arrow_function", "method_definition"
 };
 
 // ONE TABLE, not a per-language switch. Adding the TS/JS row made this function an 87-token clone of
@@ -5379,13 +5450,18 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // language gate makes that impossible by construction rather than by relying on where the walk goes.
 //
 // `isAngle` is C/C++/ObjC only: `<x.h>` (external) vs `"x.h"` (quote), returned alongside the target so
-// path-precise resolution can leave angle includes unresolved. Allocates a std::string → not noexcept.
-struct DirectiveTarget { std::string target; bool isAngle; };
+// path-precise resolution can leave angle includes unresolved. `isLazy` is TS/JS only (kParserVer 72):
+// true when `insideFn` says this call sits inside a function-body container — see kJsFunctionContainers
+// and captureIncludes' `insideFn` propagation below. Allocates a std::string → not noexcept.
+struct DirectiveTarget { std::string target; bool isAngle; bool isLazy; };
 
-DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src, Lang lang )
+// `insideFn` exists for exactly the same one branch `lang` does: whether the call_expression being read
+// sits inside a TS/JS function body, per captureIncludes' walk — meaningless (and ignored) everywhere else.
+DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src, Lang lang, bool insideFn )
 {
     std::string target;
     bool        isAngle = false;
+    bool        isLazy  = false;
 
     if( std::strcmp( t, "preproc_include" ) == 0 )                       // C++/C/ObjC: exact file path
     {
@@ -5425,6 +5501,7 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
              && ( lang == Lang::TypeScript || lang == Lang::JavaScript ) )   // TS/JS `require("./x")` / `import("./x")`
     {
         target = jsModuleLoadTarget( n, src );
+        isLazy = insideFn && !target.empty();   // kParserVer 72: a hit found inside a function body is LAZY
     }
     else if( std::strcmp( t, "use_declaration" ) == 0 )                  // Rust `use crate::a::b;`
     {
@@ -5484,13 +5561,19 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
         // read), so there is no sound string→fileId rule to write, and a wrong narrow is worse than none.
         target = phpUseTarget( n, src );                                 // see phpUseTarget for the shape rationale
     }
-    return { std::move( target ), isAngle };
+    return { std::move( target ), isAngle, isLazy };
 }
 
 // Capture #include / import directives (physical dependencies) by walking the file's top-level nodes —
 // and the bodies of anything that WRAPS a directive, which tree-sitter does not flatten: preprocessor
-// conditionals in the C family and C#, and ordinary language constructs in Python / Rust / C# (see
-// isImportContainer). Each node is read by directiveTargetOf above.
+// conditionals in the C family and C#, and ordinary language constructs in Python / Rust / C# / TS / JS
+// (see isImportContainer). Each node is read by directiveTargetOf above.
+// kParserVer 72 cost note: TS/JS's kJsImportContainers now includes call_expression/object/arguments —
+// containers a require() sits under with no other purpose — so the walk over a TS/JS file approaches full
+// AST size rather than "top-level statements only". Bounded per-node (each node is visited once) and still
+// depth-capped by kMaxImportContainerDepth; no perf gate exists in this tree to budget against (see
+// CLAUDE.md's "best tool first, then fast" note), and CommonJS's own weight — an entire module system's
+// worth of edges was previously invisible (kParserVer 71's LB-H measurement) — is the justification.
 // ABS-3: each directive ALSO emits an import-role RawRef (name = the importable final segment) so the
 // use-site index reports import sites. The ref is file-scope (fromSymbol=kNoNode) — that is correct for
 // a directive at any container depth, and it NEVER enters the call graph (role != Call → skipped in
@@ -5507,13 +5590,17 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
     // the same choice for the same reason. Children are pushed in REVERSE so pops preserve left-to-right
     // order, which keeps `incs`/`refs` in SOURCE order: the determinism contract is byte-identity, and an
     // order that depended on the walk shape would break it. Only ALLOWLISTED containers are entered, so a
-    // language whose imports are top-level by rule (TS/JS, Go, Java) still costs exactly the old scan.
-    struct IncFrame { TSNode node; std::uint16_t depth; };
+    // language whose imports are top-level by rule (Go, Java) still costs exactly the old scan.
+    // `insideFn` (kParserVer 72, TS/JS only): true once the walk has descended through a function-body
+    // container (kJsFunctionContainers) — sticky for every descendant, never cleared, exactly like `depth`
+    // is monotonic. It rides the frame rather than being recomputed from ancestry because the walk never
+    // keeps the ancestor chain around: this is the one bit of it a lazy-require call needs.
+    struct IncFrame { TSNode node; std::uint16_t depth; bool insideFn; };
     std::vector<IncFrame> stack;
     stack.reserve( 64 );
     for( std::size_t i = kids.size(); i > 0; --i )
     {
-        stack.push_back( { kids[i - 1], 0 } );
+        stack.push_back( { kids[i - 1], 0, false } );   // nothing is inside a function at the file root
     }
 
     while( !stack.empty() )
@@ -5530,7 +5617,7 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
         // `mod x { … }` is a container whose body holds `use`s. A walk that treated container-ness as a
         // reason to skip the read would silently drop every Rust module-file declaration in the corpus.
         // For every other container the read simply returns empty, so one uniform order covers all of them.
-        auto [ target, isAngle ] = directiveTargetOf( n, t, src, lang );
+        auto [ target, isAngle, isLazy ] = directiveTargetOf( n, t, src, lang, frame.insideFn );
 
         if( isImportContainer( lang, t ) )
         {
@@ -5543,10 +5630,13 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
             }
             else
             {
+                // kParserVer 72: crossing a function-body KIND flips `insideFn` for every descendant of n —
+                // sticky, so a nested closure inside an already-lazy function stays lazy, never resets.
+                const bool childInsideFn = frame.insideFn || isJsFunctionLike( lang, t );
                 collectChildren( n, cursor.cur, kids );   // safe: the seed iteration above is finished
                 for( std::size_t i = kids.size(); i > 0; --i )
                 {
-                    stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ) } );
+                    stack.push_back( { kids[i - 1], static_cast<std::uint16_t>( frame.depth + 1 ), childInsideFn } );
                 }
             }
         }
@@ -5565,7 +5655,7 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
                 r.name      = std::move( nm );
                 refs.push_back( std::move( r ) );
             }
-            incs.push_back( { fileId, isAngle, std::move( target ) } );
+            incs.push_back( { fileId, isAngle, isLazy, std::move( target ) } );
         }
     }
 }
