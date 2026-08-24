@@ -2590,14 +2590,7 @@ inline std::vector<std::uint32_t> fanInFromInEdges( const IngestResult& ing, con
 // accepted, so an id copied from ANY spelling of the run still resolves.
 inline bool canonicalIdMatches( std::string_view canonAbs, std::string_view spec ) noexcept
 {
-    if( canonAbs == spec )
-    {
-        return true;
-    }
-    const bool relIsSuffix = canonAbs.size() > spec.size() + 1
-                          && canonAbs.compare( canonAbs.size() - spec.size(), spec.size(), spec ) == 0
-                          && canonAbs[ canonAbs.size() - spec.size() - 1 ] == '/';
-    return relIsSuffix;
+    return samePathTail( canonAbs, spec );   // the rule lives ONCE, in arch.h (crossref.h::sameTreePath is its twin)
 }
 
 // A canonical id (path::scope::name) resolves by RECOMPUTING each symbol's id with the very canonicalId()
