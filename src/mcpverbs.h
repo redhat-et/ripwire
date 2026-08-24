@@ -1178,7 +1178,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // §P4 tier de-prioritization — same multiplier, same order (before the mention anchor) as the CLI --for.
     const std::vector<float> tierMul = rankTierSymbolMultipliers( ing );
     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
-                                       ? lexicalScoresNameExactTiered( ing, task, &tierMul )
+                                       ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                        : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, std::size_t( forTopN ), &ifaceExact, &tierMul );
 
     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /
@@ -2684,7 +2684,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     }
     // §P4 tier de-prioritization — same multiplier, same order (before the mention anchor) as CLI --pack-task.
     const std::vector<float> tierMul = rankTierSymbolMultipliers( ing );
-    lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactTiered( ing, task, &tierMul )
+    lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                        : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul );
     lr.routeNote = " [routed: " + rc.reason + "]";
 

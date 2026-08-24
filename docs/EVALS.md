@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 451 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 452 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -3051,6 +3051,255 @@ shipped behaviour; the gate count returns to 446. The rule's commit and this rev
 record rather than rebased away: a negative is only reproducible while the code that produced it is still
 readable.
 
+### Definition-over-declaration tiebreak on the name-exact route — PRE-REGISTERED 2026-08-24 (before any fix code)
+
+**What this registers.** One mechanism, one route, one band. The E6 demotion-corpus work closed with a
+single named, mechanically-understood defect and an armed kill tripwire for it: **name-exact BM25 has no
+definition-over-declaration tiebreak**. A bare `class X;` forward declaration and the real `class X { … }`
+definition are, to whole-name BM25, the *same document* — one token, equal to the query. They therefore
+score bit-for-bit identically, the tie breaks on symbol id (crawl/path order), and a corpus that forward-
+declares a type in eighty-five headers spends every ranked row and every body slot on eighty-five copies
+of the name the caller already typed. The agent is sent to a signature when the body exists elsewhere in
+the same tree. This registers the fix as a testable rule before any code exists.
+
+**The mechanism, stated so it can be wrong.** The claim under test is *not* that declarations are
+worthless — a query that asks for forward declarations must still get them, and the kill tripwire below
+exists to hold that. The claim is narrower: **when two candidates are exactly as name-exact as each
+other, the one that carries a body is the better answer.** If that is false, the change will show up as
+displacement on the frozen ranking/recall lanes, or as a routing-floor regression, and is reverted.
+
+**The rule.** On the **name-exact route only**, after `lexicalScoresNameExactTiered` has produced its
+score vector and before any anchor / mention / co-change reshaping:
+
+```
+for each EXACT-tie group of equal scores v > 0 that contains BOTH a body-carrying symbol
+    and a bodyless one (the house predicate, graph.h / arch.h: endByte > sigEndByte):
+        vLow = nextafter( v, 0 )
+        if vLow is already an occupied score anywhere in the vector:  skip this group   # refuse
+        else: every bodyless member of the group takes vLow;  body-carrying members keep v
+```
+
+Four properties are structural, not asserted, and each is why this is a **tiebreak and not a score
+change**: (i) only members of an *exact* tie are touched, so no two rows that were already ordered by
+score can swap; (ii) the demoted value is the immediate float predecessor, so nothing can land *between*
+it and the group it left, and the refusal clause means it can never land *on* an occupied value — the
+post-state's distinct-value set is the pre-state's plus injectively-new values; (iii) demotion only fires
+in **mixed** groups, in which a body-carrying member retains `v`, so `max(rank)` is invariant and the R4
+weak-evidence honesty signal (`kWeakLexicalScoreThreshold`) cannot move; (iv) within each side of the
+split the id-ascending order is untouched, so the net effect is exactly a stable partition of the tie
+group. The subtoken+body ranker (`lexicalScoresTiered`) is a separate entry point and is **not touched**,
+so no conceptual query can move through this rule's code at all.
+
+**The registered invariance criterion, which outranks the band.** *Order among non-tied rows must be
+byte-identical.* Registered as a first-class bar, not a hope: the controls below are byte-compared, and a
+single differing byte on a conceptual route or a no-tie name-exact route is a REVERT regardless of the
+primary metric.
+
+**The probe set, and how it was chosen — mechanically, to make cherry-picking impossible.** The E6
+corpus's class-2b rows are pinned by SHA, but only some are name-bearing; the conceptual ones (`G18`,
+`G20`) route subtoken+body and this rule is deliberately blind to them, so they serve here as *negative*
+controls rather than as scored rows. `Q27` (memgraph) is **excluded and disclosed**: its query text is
+not recorded verbatim anywhere in the E6 ledger and is therefore not replayable. The scored set is:
+
+* **(P-a)** every name-bearing 2b query recorded verbatim in the E6/growth/D4 ledgers whose corpus is
+  re-clonable at its pinned SHA — `ClientContext` (H18), `DatabaseInstance` (H31), `Serializer` (H20),
+  `ColumnFamilyData` (H22);
+* **(P-b)** a mechanical extension with no human choice in it: for each corpus, the class names with the
+  most **bare** forward declarations (lines matching `^\s*class\s+NAME\s*;\s*$` under `*.h *.hpp *.cc
+  *.cpp`), taken in count-descending then name-ascending order, top three per corpus, minus any name
+  already in (P-a). ugrep offers only two such names and contributes both.
+
+Corpora re-cloned blob-filtered (`git clone` with a `blob:none` filter, the D4 freeze's own recipe) at
+the D4-pinned SHAs and **verified by revision count against the D4 freeze**: duckdb `19864453` (48632 revs), rocksdb `0e2801ac` (12938), ugrep `550599a6` (985) — all
+three match to the digit. The forward-declaration census reproduces the D4 report exactly (ClientContext
+85, DatabaseInstance 38, Serializer 24), and every gold resolves to a unique definition site identical to
+the one the ledger names.
+
+| id | corpus | `--for=` | gold definition | in E6 |
+| --- | --- | --- | --- | --- |
+| N01 | DD | `ClientContext` | `src/include/duckdb/main/client_context.hpp:65` | H18 (CLEAN) |
+| N02 | DD | `DatabaseInstance` | `src/include/duckdb/main/database.hpp:40` | H31 (CLEAN) |
+| N03 | DD | `Serializer` | `src/include/duckdb/common/serializer/serializer.hpp:35` | H20 (AMBIGUOUS) |
+| N04 | DD | `TableCatalogEntry` | `…/catalog/catalog_entry/table_catalog_entry.hpp:50` | new (P-b) |
+| N05 | DD | `Deserializer` | `…/common/serializer/deserializer.hpp:22` | new (P-b) |
+| N06 | DD | `Catalog` | `src/include/duckdb/catalog/catalog.hpp:75` | new (P-b) |
+| N07 | RD | `ColumnFamilyData` | `db/column_family.h:294` | H22 (AMBIGUOUS) |
+| N08 | RD | `Slice` | `include/rocksdb/slice.h:32` | new (P-b) |
+| N09 | RD | `SystemClock` | `include/rocksdb/system_clock.h:30` | new (P-b) |
+| N10 | RD | `Logger` | `include/rocksdb/env.h:1217` | new (P-b) |
+| N11 | UG | `dos_streambuf` | `include/reflex/input.h:865` or `:1120` | G18 lineage, name form |
+| N12 | UG | `streambuf` | `include/reflex/input.h:822` or `:1087` | G18 lineage, name form |
+
+**Primary metric.** `SERVED` = the number of probes whose **gold definition is actually emitted** by a
+plain `ripwire <corpus> --for="<Name>"` — present in a `<d>` row or in a `<bodies>` slot. That is the
+thing the defect costs the agent, so it is the thing measured; the candidates-export rank is reported
+alongside as a diagnostic and no verdict is drawn from it.
+
+**Baseline, measured in this lane at `da61bac` before any fix code existed.** All twelve probes route
+name-exact (verified per row from the `route=` disclosure), so all twelve are in the rule's scope.
+
+| id | route | gold served | gold rank in `--format=candidates --top-k=500` | rows tied at top | gold tied at top |
+| --- | --- | :---: | ---: | ---: | :---: |
+| N01 | name-exact | no | 40 | 89 | yes |
+| N02 | name-exact | no | 11 | 42 | yes |
+| N03 | name-exact | no | 10 | 32 | yes |
+| N04 | name-exact | no | 5 | 29 | yes |
+| N05 | name-exact | no | 9 | 34 | yes |
+| N06 | name-exact | **yes** | 2 | 25 | yes |
+| N07 | name-exact | **yes** | 3 | 14 | yes |
+| N08 | name-exact | no | 29 | 7 | **no** |
+| N09 | name-exact | no | 19 | 31 | yes |
+| N10 | name-exact | no | 13 | 4 | **no** |
+| N11 | name-exact | no | absent from top-500 | 5 | **no** |
+| N12 | name-exact | no | absent from top-500 | 2 | **no** |
+
+**`SERVED` baseline = 2 / 12.**
+
+**A pre-code feasibility ceiling, because this shape can be bounded from above before it is built.**
+A tiebreak can only move a row that is *in* a tie. Eight of the twelve golds share the top score exactly
+(N01–N07, N09); two of those eight are already served (N06, N07). **The rule can therefore flip at most
+six rows, and `SERVED` can reach at most 8 / 12.** The four unreachable rows are named now rather than
+explained afterwards: `Slice` and `Logger` have golds that score strictly *below* their top group (a
+scoped `Slice::Slice` / `Logger::Logger` member matches the query's whole name twice), and ugrep's two
+nested `BufferedInput::streambuf` definitions do not rank in the top 500 at all — a separate defect
+(qualified out-of-class nested definitions) this rule neither addresses nor is credited for.
+
+**Registered band: `SERVED` ≥ 6 / 12, i.e. `[+4, +6]` against the baseline of 2** — three units wide,
+with its upper edge at the audited ceiling. Below `+4` is a REJECT and the code is reverted. A result of
+`+5` or `+6` is the mechanism working as modelled; `+4` is the floor at which it is worth its risk. A
+result **above** `+6` would mean the audit mismodelled the mechanism and the change must be re-read
+before it may ship, not celebrated.
+
+**Registered controls — byte-compared, base vs head, and any difference is a REVERT.**
+
+| control | command | why |
+| --- | --- | --- |
+| **C13** (the armed kill tripwire) | UG `--for="forward declared nested stream buffer classes"` | growth's class-2b kill control: a query that explicitly asks for forward declarations must keep them in its body slots. The rule is route-scoped precisely so this cannot move. |
+| G18 | UG `--for="dos line ending stream buffer for buffered input"` | the CLEAN 2b row on the conceptual route — must not move |
+| G20 | UG `--pack-task="implement a new stream buffer over reflex Input" --token-budget=6000` | the body-selector 2b row, conceptual route — must not move |
+| H19 | DD `--for="per connection state that holds the active transaction and query"` | H18's conceptual twin over the same gold |
+| no-tie name-exact ×2 | this repo, `--for="computeLensRanking"` / `--for="lexicalScoresNameExactTiered"` | name-exact route, no mixed tie — the invariance criterion's own fixture |
+| default map | this repo, flagless | the whole-corpus PageRank map takes no lexical score at all |
+| conceptual | this repo, `--for="how does the ranker route a query"` | ordinary subtoken+body traffic |
+
+`RD --for="Slice"` is registered as a **mixed control**: its top group is a tie that the rule may legally
+reorder while its gold is not in that tie, so it is expected to change *and* to leave `SERVED` untouched.
+It is recorded, not byte-pinned.
+
+**Registered guards, re-run after the change; any regression is a REVERT regardless of the band.**
+Values are this lane's own measurement at `da61bac`, and every one of them reproduces the last recorded
+baseline to the digit — which is the instrument check.
+
+| Guard | Floor / ceiling | At `da61bac` |
+| --- | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% |
+| `bench/recalleval/run_r3diff.py` base-vs-head, ranking + recall sets | near-all ties | — |
+| determinism (two runs byte-identical) + `xmllint` well-formedness | contract | — |
+| full gate battery (`test/regression.sh`) | all green | — |
+| G1 — ASan/UBSan/integer/LSan over the new path | no report | — |
+
+The r3diff bar deserves its own sentence, because it is the one that can catch a mis-scoped rule that
+every floor above would pass: these frozen sets are natural-language queries that route subtoken+body,
+so a **wide** diff is a red flag that the change leaked off the name-exact route, not a win.
+
+**KILL conditions, registered before the result.** Any one of: C13's body slots losing a forward
+declaration; any byte-compared control differing; any floor above going red; a non-tied row changing
+order on any probe; `SERVED` below `+4`.
+
+#### The result: SHIP, at the audited ceiling
+
+| Registered metric | Baseline | Measured | Band / bar | Verdict |
+| --- | ---: | ---: | --- | --- |
+| `SERVED` — gold definition emitted, n=12 | 2 / 12 | **8 / 12 (+6)** | [+4, +6] | **in band, at the ceiling** |
+| Non-tied order, byte-compared controls (8) | — | **8 / 8 identical** | any difference kills | held |
+| `run_r3diff.py`, frozen ranking set | — | **32 ties, 0 wins, 0 losses** | near-all ties | held |
+| `run_r3diff.py`, frozen recall set | — | **42 ties, 0 wins, 0 losses** | near-all ties | held |
+
+**The feasibility audit predicted the outcome row for row, which is the useful part.** It named six
+reachable rows and four unreachable ones before the code existed. **All six flipped; none of the four
+did.** Every flipped row's gold went to `p=1` or `p=2`.
+
+| id | gold rank, base | gold rank, with the rule | served, base → head | audit said |
+| --- | ---: | ---: | :---: | --- |
+| N01 `ClientContext` | 40 | **1** | no → **yes** | reachable |
+| N02 `DatabaseInstance` | 11 | **1** | no → **yes** | reachable |
+| N03 `Serializer` | 10 | **1** | no → **yes** | reachable |
+| N04 `TableCatalogEntry` | 5 | **2** | no → **yes** | reachable |
+| N05 `Deserializer` | 9 | **1** | no → **yes** | reachable |
+| N06 `Catalog` | 2 | 2 | yes → yes | already served |
+| N07 `ColumnFamilyData` | 3 | 2 | yes → yes | already served |
+| N08 `Slice` | 29 | 8 | no → no | **unreachable** — gold below its top group |
+| N09 `SystemClock` | 19 | **1** | no → **yes** | reachable |
+| N10 `Logger` | 13 | 5 | no → no | **unreachable** — gold below its top group |
+| N11 `dos_streambuf` | absent | absent | no → no | **unreachable** — gold unranked at all |
+| N12 `streambuf` | absent | absent | no → no | **unreachable** — gold unranked at all |
+
+`Slice` 29 → 8 and `Logger` 13 → 5 are the rule working *around* a gold it cannot lift: bodyless rows
+in the tie groups **above** those golds were demoted past them. Neither reaches the emitted bundle, so
+neither is counted, and neither is claimed.
+
+**H18, the strongest 2b row in the merged E6 corpus, is closed.** `--for="ClientContext"` on duckdb went
+from four ranked rows that were all bare `class ClientContext;` declarations, with the definition absent
+from the whole bundle, to the definition at `p=1`. H31 and H22 likewise.
+
+**Where the wins landed, stated exactly, because the metric allowed two places and only one delivered.**
+`SERVED` was registered as "in a `<d>` row **or** a `<bodies>` slot". Every one of the six flips landed
+in the `<d>` rows; **not one landed in `<bodies>`** — `b=0` on all twelve probes, before and after.
+
+**That is this round's named residual, and it is a second site of the same defect.** The body that rides
+on a name-exact `--for` is not chosen from the ranking at all: it comes from the ROUTER's anchor, and
+`lexical.h`'s `NameAnchor::fileId` is documented as *"the FIRST definition of this name in NodeId order"* —
+path order, so it resolves to a forward declaration for exactly the reason the ranking used to. The D4
+report already saw this without naming the mechanism: *"the ANCHOR ripwire chose for the type name is
+itself a forward declaration."* **It was not registered this round and is not fixed here.** Extending the
+change to reach it after seeing the measurement is precisely what pre-registration exists to prevent, so
+it is recorded as the next round's item instead, and `test/defoverdeclcheck.sh` arm (f2) PINS the current
+behaviour so that fixing it goes red and is acknowledged rather than absorbed silently.
+
+**Every guard is not merely green but IDENTICAL, to the digit, on both sides.**
+
+| Guard | Floor / ceiling | At `da61bac` | With the rule in |
+| --- | ---: | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% | 2.4% / 0.0% / 0.0% |
+
+Zero displacement is the expected shape here and not a surprise: these lanes' queries are natural
+language, they route subtoken+body, and this rule cannot execute on that route. The r3diff readouts say
+the same thing per query — 74 of 74 ties across both sets — and the registration flagged in advance that a
+WIDE diff would have been the red flag, not a win.
+
+**A measurement error worth recording, because it is the wave's own named failure class.** The first pass
+at the byte-compared controls ran the base binary before this lane's commits and the head binary after —
+on `.`, this repository, whose tree those commits had changed. Four of nine "differed", including the
+flagless map, which consumes no lexical score at all and therefore could not possibly have moved. The
+control was backwards: the corpus, not the binary, was the variable. Re-run correctly — the same tree,
+two binaries — all nine are byte-identical. The tell was the map: **when a control that the change cannot
+reach reports a difference, the control is wrong, not the change.**
+
+`--quality-delta=da61bac..bae00d7` (the ref-pair form, two committed trees): `gating="0"`,
+`preexisting-worse="0"`, all twelve rows `origin="new-symbol"` — the new helper and the fixture's own
+symbols. Nothing that existed got worse. `applyDefOverDeclTiebreak` measures
+`cx=21 ccx=29 loc=91 nest=3`, with `ev=10 ev_why="guard-return:3,loop-escape:4"` — the count is dominated
+by early-exit guards and refusals, which is the shape §6's readability work says not to refactor away, and
+it sits below both of its immediate neighbours in the same file (`chooseForRanker` 34,
+`lexicalScoresNameExactTiered` 61). Left as written, deliberately, rather than split into a single-use
+helper to lower a number.
+
+G1: the `asan/` build (ASan + UBSan + integer + LSan with the committed suppressions) runs the new path
+clean, exit 0 with empty stderr, on duckdb's `--for="ClientContext"`, the fixture's `--for=Widget` and a
+whole-repo map; `test/defoverdeclcheck.sh` passes against `asan/ripwire` as well as `build/ripwire`.
+
+Gate count 451 → **452** (`test/defoverdeclcheck.sh`).
+
 ---
 
 ## 5. Token and output economy
@@ -3406,7 +3655,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **451 gate scripts**, all of which exist on disk.
+naming **452 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -4214,7 +4463,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 451. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 452. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
