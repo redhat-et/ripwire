@@ -1095,6 +1095,24 @@ inline const McpIndex& getIndex( const std::string& root )
 
 // ─── T4: handle helpers over a live McpIndex ─────────────────────────────────────────────────────
 //
+// R-R (root-relative emission): the handle's two identity inputs, made root-relative. A content handle must
+// name the same symbol in the same commit no matter WHERE the repo is checked out — before this, the canonId
+// and path folded into sym#<idHash> carried the absolute checkout prefix, so two clones of ONE commit handed
+// an agent different handles for the same symbol (and a handle minted under one checkout resolved to nothing
+// under another). makeHandle and resolveHandle BOTH derive from this one function, so the round-trip stays
+// closed by construction: change the spelling here and both sides move together, which is the property that
+// makes a handle safe to mint at all. Empty root ⇒ multi-root, where ing.files already carry a label-relative
+// identity and there is nothing to strip.
+inline void handleIdentity( const McpIndex& ix, NodeId id, std::string& canonOut, std::string& pathOut )
+{
+    const Symbol&          s       = ix.ing.symbols[ id ];
+    const std::string_view rootArg = ix.ing.realPaths.empty() ? std::string_view( ix.root ) : std::string_view();
+    canonOut = ( id < ix.g.canonId.size() ) ? canonicalIdForEmit( ix.ing, s, rootArg ) : s.name;
+    pathOut  = rootArg.empty()
+             ? ix.ing.files[ s.fileId ]
+             : std::string( rw::sarif::rootRelativeUri( ix.ing.files[ s.fileId ], rw::sarif::rootPrefixOf( rootArg ) ) );
+}
+
 // handleFor(ix, id) — the stable content-handle for symbol `id`, from the STABLE canonId + the file's byte
 // fingerprint (both already on the index). The READ verbs attach this so an agent knows what to ask for.
 inline std::string handleFor( const McpIndex& ix, NodeId id )
@@ -1104,8 +1122,8 @@ inline std::string handleFor( const McpIndex& ix, NodeId id )
         return {};
     }
     const Symbol&       s      = ix.ing.symbols[id];
-    const std::string&  canon  = ( id < ix.g.canonId.size() ) ? ix.g.canonId[id] : ix.ing.symbols[id].name;
-    const std::string&  path   = ix.ing.files[ s.fileId ];
+    std::string         canon, path;
+    handleIdentity( ix, id, canon, path );                                  // R-R: root-relative identity
     const std::uint64_t chash  = ( s.fileId < ix.fileByteHash.size() ) ? ix.fileByteHash[ s.fileId ] : 0;
     return mcpdetail::makeHandle( canon, path, s.name, chash );
 }
@@ -1125,8 +1143,8 @@ inline NodeId resolveHandleAll( const McpIndex& ix, std::uint64_t idHash, std::v
     for( NodeId id = 0; id < NodeId( ing.symbols.size() ); ++id )
     {
         const Symbol&      s     = ing.symbols[id];
-        const std::string& canon = ( id < ix.g.canonId.size() ) ? ix.g.canonId[id] : s.name;
-        const std::string& path  = ing.files[ s.fileId ];
+        std::string        canon, path;
+        handleIdentity( ix, id, canon, path );                              // R-R: same identity makeHandle minted
         if( mcpdetail::str64( mcpdetail::stableHandleId( canon, path, s.name ) ) == idHash )
         {
             if( best == kNoNode )

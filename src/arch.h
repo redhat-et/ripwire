@@ -527,9 +527,16 @@ inline std::uint64_t fnv1a64( std::string_view s ) noexcept
 // root-relative key for both spellings. Every use is a root-spelling NORMALIZATION of exactly this shape:
 // the baseline hash paths, and — W3FIX — the --dead-code `./`-anchored path filter, whose "position 0 is the
 // repo root" rule holds only for a root-relative path and so silently matched nothing under an absolute root
-// spelling. It never touches `canonId`, the emitted `id=` attribute, resolution, or the default map (see the
-// S2 trap: canonId is load-bearing far beyond the baseline), and it is never an emitted VALUE — only ever a
-// comparison key. Determinism: pure function of (path, root); no I/O, no state.
+// spelling. It never touches `g.canonId`, resolution, or any storage key (see the S2 trap: canonId is
+// load-bearing far beyond the baseline). Determinism: pure function of (path, root); no I/O, no state.
+//
+// R-R (root-relative emission) AMENDED THE LAST CLAUSE. This used to add "and it is never an emitted VALUE
+// — only ever a comparison key". That is no longer true, deliberately: resolve.h::canonicalIdForEmit runs
+// the path segment of every EMITTED `id=` (and the MCP handle that hashes it) through this same strip, so
+// the emitted identity and the committed baseline key finally spell a file the same way. What the S2 trap
+// actually protects is unchanged and still absolute: g.canonId — the in-memory identity that resolution,
+// overload-set grouping and Regression::key depend on — is never rewritten. Emission is a VIEW of that
+// identity; the identity itself does not move.
 //
 // The strip is: remove a leading `root` prefix (with an optional trailing '/'), then normalize any residual
 // leading `./` and leading `/`. A path that does not start with `root` (shouldn't happen — every file is

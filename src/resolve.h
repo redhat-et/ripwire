@@ -1285,6 +1285,28 @@ inline std::string canonicalIdRelTo( const IngestResult& ing, const Symbol& s, s
     return canonicalId( relForHash( ing.files[ s.fileId ], root ), s.scope, s.name );
 }
 
+// R-R (root-relative emission): the EMITTED canonical id — the `id=` attribute, its JSON twin, and the MCP
+// content handle all key on this. Same rule as canonicalIdRelTo above, plus the empty-root degrade every
+// emitter's `pathRel` lambda already applies to `p=`, so the two attributes of one row can never disagree
+// about how a file is spelled.
+//
+// WHY THE DEGRADE IS NOT OPTIONAL. `root` is empty on exactly one path — a MULTI-ROOT run, where ing.files
+// already hold the labeled `<label>/<root-relative-path>` identity and there is no single root to strip.
+// Handing relForHash an empty root there would be actively wrong for an ABSOLUTE spelling: its residual
+// leading-'/' normalization turns "/abs/x.h" into "abs/x.h", a path that resolves to nothing. So empty root
+// ⇒ emit the stored spelling verbatim, which is already relative in the only case that reaches it.
+//
+// This is the emission side ONLY. It must never displace g.canonId (resolution, overload-set identity),
+// quality's Regression::key, or any pathQualifiedKey — those are storage, and storage does not move here.
+// It costs nothing on a relative-root run (relForHash strips a leading "./" the emitter would strip anyway)
+// and, on an absolute-root run, removes the checkout prefix that every ranked row was paying per-row for a
+// fact the envelope states once.
+inline std::string canonicalIdForEmit( const IngestResult& ing, const Symbol& s, std::string_view root )
+{
+    return root.empty() ? canonicalId( ing.files[ s.fileId ], s.scope, s.name )
+                        : canonicalIdRelTo( ing, s, root );
+}
+
 // Shared-locality score of two canonical ids — counted in characters, but ONLY over WHOLE matching SEGMENTS.
 // A canonical id is `path/to/file.ext::scope::name`, so its real structural boundaries are the `/` (directory)
 // and `::` (scope/name) delimiters. The resolution tie-break wants "nearer" = same file > same class/scope >

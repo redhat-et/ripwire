@@ -384,6 +384,10 @@ struct FromTraceInputs
     // sigs budget exactly like the header's). Empty (the default, every existing caller) ⇒ byte-identical
     // output — the G5 inertness contract.
     std::string_view                   preludeXml;
+    // R-R (2026-08-24): the run's root argument, so this bundle's <sigs><f p=…> rows are root-relative like
+    // every other lens's. Empty ⇒ multi-root (or a caller that has no single root), where ing.files already
+    // carry the labeled identity — the same degrade every pathRel applies.
+    std::string_view                   rootArg;
 };
 
 struct FromTraceResult
@@ -542,11 +546,14 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
                             in.fanIn, in.impure, in.redact,
                             nullptr, nullptr, in.tested, in.amp,     // Q3: tested/amp folded on; churn/clone omitted (no git walk here)
                             /*rankAdaptivePayload=*/true, sigsBudget,
-                            in.notes );                              // L3: field-notes surfacing (inert when null)
+                            in.notes,                                // L3: field-notes surfacing (inert when null)
+                            in.rootArg );                            // R-R: root-relative <f p=…>
 
             const std::vector<NodeId> bodyIds{ part.suspects[0].symbolId };
             packBodies( m, ing, bodyIds, in.bodyBudgetBytes, g.outOff, g.outTargets, in.compress, in.redact,
-                        /*ranges=*/nullptr, in.notes );               // L3: the rank-1 body surfaces notes too
+                        /*ranges=*/nullptr, in.notes,                 // L3: the rank-1 body surfaces notes too
+                        /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true, /*withFileContext=*/false,
+                        in.rootArg );                                 // R-R: root-relative <b p=…>
             std::fflush( m );  std::fclose( m );
             if( buf ) { whole.append( buf, sz );  std::free( buf ); }
         }
