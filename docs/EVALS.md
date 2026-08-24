@@ -3051,6 +3051,165 @@ shipped behaviour; the gate count returns to 446. The rule's commit and this rev
 record rather than rebased away: a negative is only reproducible while the code that produced it is still
 readable.
 
+### Definition-over-declaration tiebreak on the name-exact route — PRE-REGISTERED 2026-08-24 (before any fix code)
+
+**What this registers.** One mechanism, one route, one band. The E6 demotion-corpus work closed with a
+single named, mechanically-understood defect and an armed kill tripwire for it: **name-exact BM25 has no
+definition-over-declaration tiebreak**. A bare `class X;` forward declaration and the real `class X { … }`
+definition are, to whole-name BM25, the *same document* — one token, equal to the query. They therefore
+score bit-for-bit identically, the tie breaks on symbol id (crawl/path order), and a corpus that forward-
+declares a type in eighty-five headers spends every ranked row and every body slot on eighty-five copies
+of the name the caller already typed. The agent is sent to a signature when the body exists elsewhere in
+the same tree. This registers the fix as a testable rule before any code exists.
+
+**The mechanism, stated so it can be wrong.** The claim under test is *not* that declarations are
+worthless — a query that asks for forward declarations must still get them, and the kill tripwire below
+exists to hold that. The claim is narrower: **when two candidates are exactly as name-exact as each
+other, the one that carries a body is the better answer.** If that is false, the change will show up as
+displacement on the frozen ranking/recall lanes, or as a routing-floor regression, and is reverted.
+
+**The rule.** On the **name-exact route only**, after `lexicalScoresNameExactTiered` has produced its
+score vector and before any anchor / mention / co-change reshaping:
+
+```
+for each EXACT-tie group of equal scores v > 0 that contains BOTH a body-carrying symbol
+    and a bodyless one (the house predicate, graph.h / arch.h: endByte > sigEndByte):
+        vLow = nextafter( v, 0 )
+        if vLow is already an occupied score anywhere in the vector:  skip this group   # refuse
+        else: every bodyless member of the group takes vLow;  body-carrying members keep v
+```
+
+Four properties are structural, not asserted, and each is why this is a **tiebreak and not a score
+change**: (i) only members of an *exact* tie are touched, so no two rows that were already ordered by
+score can swap; (ii) the demoted value is the immediate float predecessor, so nothing can land *between*
+it and the group it left, and the refusal clause means it can never land *on* an occupied value — the
+post-state's distinct-value set is the pre-state's plus injectively-new values; (iii) demotion only fires
+in **mixed** groups, in which a body-carrying member retains `v`, so `max(rank)` is invariant and the R4
+weak-evidence honesty signal (`kWeakLexicalScoreThreshold`) cannot move; (iv) within each side of the
+split the id-ascending order is untouched, so the net effect is exactly a stable partition of the tie
+group. The subtoken+body ranker (`lexicalScoresTiered`) is a separate entry point and is **not touched**,
+so no conceptual query can move through this rule's code at all.
+
+**The registered invariance criterion, which outranks the band.** *Order among non-tied rows must be
+byte-identical.* Registered as a first-class bar, not a hope: the controls below are byte-compared, and a
+single differing byte on a conceptual route or a no-tie name-exact route is a REVERT regardless of the
+primary metric.
+
+**The probe set, and how it was chosen — mechanically, to make cherry-picking impossible.** The E6
+corpus's class-2b rows are pinned by SHA, but only some are name-bearing; the conceptual ones (`G18`,
+`G20`) route subtoken+body and this rule is deliberately blind to them, so they serve here as *negative*
+controls rather than as scored rows. `Q27` (memgraph) is **excluded and disclosed**: its query text is
+not recorded verbatim anywhere in the E6 ledger and is therefore not replayable. The scored set is:
+
+* **(P-a)** every name-bearing 2b query recorded verbatim in the E6/growth/D4 ledgers whose corpus is
+  re-clonable at its pinned SHA — `ClientContext` (H18), `DatabaseInstance` (H31), `Serializer` (H20),
+  `ColumnFamilyData` (H22);
+* **(P-b)** a mechanical extension with no human choice in it: for each corpus, the class names with the
+  most **bare** forward declarations (lines matching `^\s*class\s+NAME\s*;\s*$` under `*.h *.hpp *.cc
+  *.cpp`), taken in count-descending then name-ascending order, top three per corpus, minus any name
+  already in (P-a). ugrep offers only two such names and contributes both.
+
+Corpora re-cloned `--filter=blob:none` at the D4-pinned SHAs and **verified by revision count against the
+D4 freeze**: duckdb `19864453` (48632 revs), rocksdb `0e2801ac` (12938), ugrep `550599a6` (985) — all
+three match to the digit. The forward-declaration census reproduces the D4 report exactly (ClientContext
+85, DatabaseInstance 38, Serializer 24), and every gold resolves to a unique definition site identical to
+the one the ledger names.
+
+| id | corpus | `--for=` | gold definition | in E6 |
+| --- | --- | --- | --- | --- |
+| N01 | DD | `ClientContext` | `src/include/duckdb/main/client_context.hpp:65` | H18 (CLEAN) |
+| N02 | DD | `DatabaseInstance` | `src/include/duckdb/main/database.hpp:40` | H31 (CLEAN) |
+| N03 | DD | `Serializer` | `src/include/duckdb/common/serializer/serializer.hpp:35` | H20 (AMBIGUOUS) |
+| N04 | DD | `TableCatalogEntry` | `…/catalog/catalog_entry/table_catalog_entry.hpp:50` | new (P-b) |
+| N05 | DD | `Deserializer` | `…/common/serializer/deserializer.hpp:22` | new (P-b) |
+| N06 | DD | `Catalog` | `src/include/duckdb/catalog/catalog.hpp:75` | new (P-b) |
+| N07 | RD | `ColumnFamilyData` | `db/column_family.h:294` | H22 (AMBIGUOUS) |
+| N08 | RD | `Slice` | `include/rocksdb/slice.h:32` | new (P-b) |
+| N09 | RD | `SystemClock` | `include/rocksdb/system_clock.h:30` | new (P-b) |
+| N10 | RD | `Logger` | `include/rocksdb/env.h:1217` | new (P-b) |
+| N11 | UG | `dos_streambuf` | `include/reflex/input.h:865` or `:1120` | G18 lineage, name form |
+| N12 | UG | `streambuf` | `include/reflex/input.h:822` or `:1087` | G18 lineage, name form |
+
+**Primary metric.** `SERVED` = the number of probes whose **gold definition is actually emitted** by a
+plain `ripwire <corpus> --for="<Name>"` — present in a `<d>` row or in a `<bodies>` slot. That is the
+thing the defect costs the agent, so it is the thing measured; the candidates-export rank is reported
+alongside as a diagnostic and no verdict is drawn from it.
+
+**Baseline, measured in this lane at `da61bac` before any fix code existed.** All twelve probes route
+name-exact (verified per row from the `route=` disclosure), so all twelve are in the rule's scope.
+
+| id | route | gold served | gold rank in `--format=candidates --top-k=500` | rows tied at top | gold tied at top |
+| --- | --- | :---: | ---: | ---: | :---: |
+| N01 | name-exact | no | 40 | 89 | yes |
+| N02 | name-exact | no | 11 | 42 | yes |
+| N03 | name-exact | no | 10 | 32 | yes |
+| N04 | name-exact | no | 5 | 29 | yes |
+| N05 | name-exact | no | 9 | 34 | yes |
+| N06 | name-exact | **yes** | 2 | 25 | yes |
+| N07 | name-exact | **yes** | 3 | 14 | yes |
+| N08 | name-exact | no | 29 | 7 | **no** |
+| N09 | name-exact | no | 19 | 31 | yes |
+| N10 | name-exact | no | 13 | 4 | **no** |
+| N11 | name-exact | no | absent from top-500 | 5 | **no** |
+| N12 | name-exact | no | absent from top-500 | 2 | **no** |
+
+**`SERVED` baseline = 2 / 12.**
+
+**A pre-code feasibility ceiling, because this shape can be bounded from above before it is built.**
+A tiebreak can only move a row that is *in* a tie. Eight of the twelve golds share the top score exactly
+(N01–N07, N09); two of those eight are already served (N06, N07). **The rule can therefore flip at most
+six rows, and `SERVED` can reach at most 8 / 12.** The four unreachable rows are named now rather than
+explained afterwards: `Slice` and `Logger` have golds that score strictly *below* their top group (a
+scoped `Slice::Slice` / `Logger::Logger` member matches the query's whole name twice), and ugrep's two
+nested `BufferedInput::streambuf` definitions do not rank in the top 500 at all — a separate defect
+(qualified out-of-class nested definitions) this rule neither addresses nor is credited for.
+
+**Registered band: `SERVED` ≥ 6 / 12, i.e. `[+4, +6]` against the baseline of 2** — three units wide,
+with its upper edge at the audited ceiling. Below `+4` is a REJECT and the code is reverted. A result of
+`+5` or `+6` is the mechanism working as modelled; `+4` is the floor at which it is worth its risk. A
+result **above** `+6` would mean the audit mismodelled the mechanism and the change must be re-read
+before it may ship, not celebrated.
+
+**Registered controls — byte-compared, base vs head, and any difference is a REVERT.**
+
+| control | command | why |
+| --- | --- | --- |
+| **C13** (the armed kill tripwire) | UG `--for="forward declared nested stream buffer classes"` | growth's class-2b kill control: a query that explicitly asks for forward declarations must keep them in its body slots. The rule is route-scoped precisely so this cannot move. |
+| G18 | UG `--for="dos line ending stream buffer for buffered input"` | the CLEAN 2b row on the conceptual route — must not move |
+| G20 | UG `--pack-task="implement a new stream buffer over reflex Input" --token-budget=6000` | the body-selector 2b row, conceptual route — must not move |
+| H19 | DD `--for="per connection state that holds the active transaction and query"` | H18's conceptual twin over the same gold |
+| no-tie name-exact ×2 | this repo, `--for="computeLensRanking"` / `--for="lexicalScoresNameExactTiered"` | name-exact route, no mixed tie — the invariance criterion's own fixture |
+| default map | this repo, flagless | the whole-corpus PageRank map takes no lexical score at all |
+| conceptual | this repo, `--for="how does the ranker route a query"` | ordinary subtoken+body traffic |
+
+`RD --for="Slice"` is registered as a **mixed control**: its top group is a tie that the rule may legally
+reorder while its gold is not in that tie, so it is expected to change *and* to leave `SERVED` untouched.
+It is recorded, not byte-pinned.
+
+**Registered guards, re-run after the change; any regression is a REVERT regardless of the band.**
+Values are this lane's own measurement at `da61bac`, and every one of them reproduces the last recorded
+baseline to the digit — which is the instrument check.
+
+| Guard | Floor / ceiling | At `da61bac` |
+| --- | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% |
+| `bench/recalleval/run_r3diff.py` base-vs-head, ranking + recall sets | near-all ties | — |
+| determinism (two runs byte-identical) + `xmllint` well-formedness | contract | — |
+| full gate battery (`test/regression.sh`) | all green | — |
+
+The r3diff bar deserves its own sentence, because it is the one that can catch a mis-scoped rule that
+every floor above would pass: these frozen sets are natural-language queries that route subtoken+body,
+so a **wide** diff is a red flag that the change leaked off the name-exact route, not a win.
+
+**KILL conditions, registered before the result.** Any one of: C13's body slots losing a forward
+declaration; any byte-compared control differing; any floor above going red; a non-tied row changing
+order on any probe; `SERVED` below `+4`.
+
 ---
 
 ## 5. Token and output economy
