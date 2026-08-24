@@ -665,7 +665,8 @@ inline void writeColorPayload( std::FILE* out, const std::vector<std::uint32_t>&
 //   Modules: one Louvain community (graph.h communities()) per selected-node group that has ≥2
 //   members, sorted (member count desc, id asc) — mirrors --communities' "a lone symbol is not a
 //   module" rule so the wiki and the text verb agree.
-inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank, const Graph& g, int topK, const HtmlColorExtras& color )
+inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank, const Graph& g, int topK, const HtmlColorExtras& color,
+                       std::string_view rootArg = {} )   // R-R: the root FILES[] entries are relative to
 {
     const std::vector<std::uint32_t>& outOff     = g.outOff;
     const std::vector<NodeId>&        outTargets = g.outTargets;
@@ -919,11 +920,20 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     }
     std::fprintf( out, "];\n" );
 
-    // emit FILES array — one path string per distinct selected-symbol file, first-seen order
+    // R-R: the corpus root, stated ONCE — the page's own envelope anchor, so a reader can still resolve
+    // the relative FILES[] entries below back to a checkout. Empty on a multi-root run, where each path
+    // already carries its own root label.
+    const std::string htmlRootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    std::fprintf( out, "const ROOT = \"%s\";\n", jsonEscape( htmlRootPrefix ).c_str() );
+
+    // emit FILES array — one path string per distinct selected-symbol file, first-seen order (R-R: each
+    // relative to ROOT above, so the page no longer repeats the checkout prefix once per file)
     std::fprintf( out, "const FILES = [\n" );
     for( std::size_t i = 0; i < fileList.size(); ++i )
     {
-        std::fprintf( out, "  \"%s\"", jsonEscape( ing.files[ fileList[i] ] ).c_str() );
+        const std::string_view hp = rootArg.empty() ? std::string_view( ing.files[ fileList[i] ] )
+                                                    : rw::sarif::rootRelativeUri( ing.files[ fileList[i] ], htmlRootPrefix );
+        std::fprintf( out, "  \"%s\"", jsonEscape( std::string( hp ) ).c_str() );
         if( i + 1 < fileList.size() )
         {
             std::fprintf( out, "," );

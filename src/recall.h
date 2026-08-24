@@ -813,8 +813,12 @@ inline std::optional<std::pair<std::string, std::string>> buildSectionGranularBo
 // applies to it exactly. nullptr = --no-redact, spelled deliberately. The one caller already passed it.
 inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<float>& scores,
                                  std::string_view task, int k, std::size_t maxBytes, bool docsOnly,
-                                 RedactCounts* redact )
+                                 RedactCounts* redact,
+                                 std::string_view rootArg = {} )   // R-R: the separator line's path root
 {
+    // R-R: same convention every other lens's pathRel uses — the "━━ <path>" separator is a DISPLAY path and
+    // was the last CLI surface still printing the checkout prefix once per recalled doc.
+    const std::string recallRootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const RecallSelection        selected = recallTopFiles( ing, scores, k, docsOnly );
     const std::vector<Recalled>& top      = selected.files;
 
@@ -856,7 +860,9 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         std::string body = std::move( *loaded );
 
         const std::string demotedNote = formatDemotedNote( r.generated ) + sectionNote;
-        const std::string sep         = formatRecallSeparator( ing.files[ r.fileId ], r.score, demotedNote );
+        const std::string_view sepPath = rootArg.empty() ? std::string_view( ing.files[ r.fileId ] )
+                                                         : rw::sarif::rootRelativeUri( ing.files[ r.fileId ], recallRootPrefix );
+        const std::string sep         = formatRecallSeparator( sepPath, r.score, demotedNote );
         const std::size_t sepBytes    = sep.size();
 
         // the budget decision for THIS doc: full, sliced, or not at all. `used` is the payload so far.
@@ -1047,9 +1053,9 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
 // buildRecall — this is the "render it and hand it over" form for callers that do not gate on the shape.
 inline void writeRecall( std::FILE* out, const IngestResult& ing, const std::vector<float>& scores,
                          std::string_view task, int k, std::size_t maxBytes, bool docsOnly,
-                         RedactCounts* redact = nullptr )
+                         RedactCounts* redact = nullptr, std::string_view rootArg = {} )   // R-R
 {
-    const RecallBundle bundle = buildRecall( ing, scores, task, k, maxBytes, docsOnly, redact );
+    const RecallBundle bundle = buildRecall( ing, scores, task, k, maxBytes, docsOnly, redact, rootArg );
     std::fwrite( bundle.text.data(), 1, bundle.text.size(), out );
 }
 

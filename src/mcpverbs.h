@@ -907,7 +907,8 @@ inline std::string recallText( const std::string& root, const std::string& task,
     {
         return {};
     }
-    writeRecall( mem, ix.ing, scores, task, k, maxBytes, true, redact );   // docs (markdown) only
+    writeRecall( mem, ix.ing, scores, task, k, maxBytes, true, redact,
+                 ix.ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );   // docs (markdown) only; R-R root-relative separators
     std::fflush( mem );
     std::fclose( mem );
     std::string out = buf ? std::string( buf, sz ) : std::string{};
@@ -1369,7 +1370,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     std::fflush( mem );
     if( buf && sz > headerStr.size() && !legoStr.empty() && narrowLegoToRenderedSigs( ing, legoScoped, std::string_view( buf + headerStr.size(), sz - headerStr.size() ) ) )
     {
-        legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true ); } );
+        legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true, flRootArg ); } );   // R-R: the re-render dropped the root its first render (above) passed
     }
     std::fwrite( legoStr.data(), 1, legoStr.size(), mem );
     std::fwrite( composeStr.data(), 1, composeStr.size(), mem );
@@ -1415,7 +1416,8 @@ inline std::string legoText( const std::string& root, const std::string& type, R
         return {};
     }
     std::fprintf( mem, "<ctx>" );
-    packLego( mem, ing, ix.g.implementors, flat, 1, redact, &impure, focus, /*withPaths=*/true );
+    packLego( mem, ing, ix.g.implementors, flat, 1, redact, &impure, focus, /*withPaths=*/true,
+              ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );   // R-R: root-relative <iface p=>
     std::fprintf( mem, "</ctx>" );
     std::fflush( mem );
     std::fclose( mem );
@@ -1824,7 +1826,8 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
         if( r.fromSymbol != kNoNode && r.fromSymbol < ing.symbols.size() )
         {
             const Symbol& fs = ing.symbols[ r.fromSymbol ];
-            in = canonicalId( ing.files[ fs.fileId ], fs.scope, fs.name );
+            // R-R: same root the <u p=…> beside it strips, so in_id= and p= agree on the spelling
+            in = canonicalIdForEmit( ing, fs, ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );
         }
         sites.push_back( { r.fileId, r.line, r.role, std::move( in ) } );
     }
@@ -2783,6 +2786,7 @@ inline std::string fromTraceText( const std::string& root, const std::string& tr
     in.impure = &impure;
     in.redact = redact;
     in.notes  = notesPtr;
+    in.rootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();   // R-R
 
     const FromTraceResult res = fromTraceBundleText( ing, g, trace, "mcp trace input", in );
     return res.ok ? res.xml : std::string();
