@@ -2122,7 +2122,11 @@ inline constexpr ViewFlag kViewFlags[] =
     // an OPTIONAL narrowing filter. Recorded rather than silently accepted (that distinction is the column).
     { "--cochange=",       &Config::cochangeFile    , EmptyValue::Meaningful, nullptr, nullptr, &Config::cochange },
     { "--situ=",           &Config::situFiles       , EmptyValue::Meaningful, nullptr, nullptr, &Config::situ },
-    { "--test-gate=",      &Config::testGateFiles   , EmptyValue::Meaningful, nullptr, nullptr, &Config::testGate },
+    // `--test-gate=` left the Meaningful block above on 2026-08-24: "" ≡ the bare git-diff form meant an
+    // unset shell variable silently gated a DIFFERENT question, on a verb whose exit code gates a merge —
+    // the same ruling --dmm=/--quality-delta= below carry for their half-typed ranges. (The unparseable-
+    // FILES refusal itself is per-item, in main's --test-gate arm; gate: testgaterefusecheck.sh.)
+    { "--test-gate=",      &Config::testGateFiles   , EmptyValue::Refuse, "changed files, F1,F2", "--test-gate=src/cli.h", &Config::testGate },
     { "--scan-skills=",    &Config::scanSkillsDir   , EmptyValue::Meaningful, nullptr, nullptr, &Config::scanSkills },
     { "--dead-code=",      &Config::deadCodeDir     , EmptyValue::Meaningful, nullptr, nullptr, &Config::deadCode },
     { "--pr-context=",     &Config::prContextBase   , EmptyValue::Meaningful, nullptr, nullptr, &Config::prContext },
