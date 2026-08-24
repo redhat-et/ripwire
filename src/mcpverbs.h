@@ -900,20 +900,11 @@ inline std::string recallText( const std::string& root, const std::string& task,
 {
     const McpIndex&          ix     = getIndex( root );
     const std::vector<float> scores = lexicalScores( ix.ing, ix.g.outOff, ix.g.outTargets, task );
-    char*       buf = nullptr;
-    std::size_t sz  = 0;
-    std::FILE*  mem = open_memstream( &buf, &sz );
-    if( !mem )
+    return captureXml( [ & ]( std::FILE* mem )
     {
-        return {};
-    }
-    writeRecall( mem, ix.ing, scores, task, k, maxBytes, true, redact,
-                 ix.ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );   // docs (markdown) only; R-R root-relative separators
-    std::fflush( mem );
-    std::fclose( mem );
-    std::string out = buf ? std::string( buf, sz ) : std::string{};
-    std::free( buf );
-    return out;
+        writeRecall( mem, ix.ing, scores, task, k, maxBytes, true, redact,
+                     ix.ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );   // docs (markdown) only; R-R root-relative separators
+    } );
 }
 
 // `situational_awareness(diff)` verb (S5-D): for a DIFF — an explicit changed-file list in `diff`/`files`, OR
@@ -1307,21 +1298,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // so byte-consistency between the two dialects (this file's own standing contract) still holds. See that
     // function's own comment for why a shorter wording, not the shared 18-verb kRootRelPathsLegend, closes
     // this gap: this lens's ceiling is the one place the full 159 B clause measurably does not fit.
-    const auto renderToString = [ ]( auto&& emitFn ) -> std::string
-    {
-        char*       buf2 = nullptr;
-        std::size_t sz2  = 0;
-        std::FILE*  m2   = open_memstream( &buf2, &sz2 );
-        if( !m2 )
-        {
-            return {};
-        }
-        emitFn( m2 );
-        std::fflush( m2 );  std::fclose( m2 );
-        std::string s = buf2 ? std::string( buf2, sz2 ) : std::string{};
-        std::free( buf2 );
-        return s;
-    };
+    const auto renderToString = [ ]( auto&& emitFn ) -> std::string { return captureXml( emitFn ); };
     // THE BUNDLE'S RESOLVED SURFACE (top-N by lensRank — the set <sigs> selects), shared by the compose
     // view, the B6.3 route view and (§P3) the <lego> scope filter. Same order the CLI --for uses.
     std::vector<NodeId> lensSurfaceIds( S );
@@ -1408,22 +1385,13 @@ inline std::string legoText( const std::string& root, const std::string& type, R
     const std::vector<char> impure = computeImpure( ing, ix.g );
     const std::vector<float> flat( ing.symbols.size(), 0.f );
 
-    char*       buf = nullptr;
-    std::size_t sz  = 0;
-    std::FILE*  mem = open_memstream( &buf, &sz );
-    if( !mem )
+    return captureXml( [ & ]( std::FILE* mem )
     {
-        return {};
-    }
-    std::fprintf( mem, "<ctx>" );
-    packLego( mem, ing, ix.g.implementors, flat, 1, redact, &impure, focus, /*withPaths=*/true,
-              ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );   // R-R: root-relative <iface p=>
-    std::fprintf( mem, "</ctx>" );
-    std::fflush( mem );
-    std::fclose( mem );
-    std::string out = buf ? std::string( buf, sz ) : std::string{};
-    std::free( buf );
-    return out;
+        std::fprintf( mem, "<ctx>" );
+        packLego( mem, ing, ix.g.implementors, flat, 1, redact, &impure, focus, /*withPaths=*/true,
+                  ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );   // R-R: root-relative <iface p=>
+        std::fprintf( mem, "</ctx>" );
+    } );
 }
 
 // `owners` verb: bus-factor analysis — recency-weighted author ownership per file (or per the file
