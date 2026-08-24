@@ -3210,6 +3210,90 @@ so a **wide** diff is a red flag that the change leaked off the name-exact route
 declaration; any byte-compared control differing; any floor above going red; a non-tied row changing
 order on any probe; `SERVED` below `+4`.
 
+#### The result: SHIP, at the audited ceiling
+
+| Registered metric | Baseline | Measured | Band / bar | Verdict |
+| --- | ---: | ---: | --- | --- |
+| `SERVED` — gold definition emitted, n=12 | 2 / 12 | **8 / 12 (+6)** | [+4, +6] | **in band, at the ceiling** |
+| Non-tied order, byte-compared controls (8) | — | **8 / 8 identical** | any difference kills | held |
+| `run_r3diff.py`, frozen ranking set | — | **32 ties, 0 wins, 0 losses** | near-all ties | held |
+| `run_r3diff.py`, frozen recall set | — | **42 ties, 0 wins, 0 losses** | near-all ties | held |
+
+**The feasibility audit predicted the outcome row for row, which is the useful part.** It named six
+reachable rows and four unreachable ones before the code existed. **All six flipped; none of the four
+did.** Every flipped row's gold went to `p=1` or `p=2`.
+
+| id | gold rank, base | gold rank, with the rule | served, base → head | audit said |
+| --- | ---: | ---: | :---: | --- |
+| N01 `ClientContext` | 40 | **1** | no → **yes** | reachable |
+| N02 `DatabaseInstance` | 11 | **1** | no → **yes** | reachable |
+| N03 `Serializer` | 10 | **1** | no → **yes** | reachable |
+| N04 `TableCatalogEntry` | 5 | **2** | no → **yes** | reachable |
+| N05 `Deserializer` | 9 | **1** | no → **yes** | reachable |
+| N06 `Catalog` | 2 | 2 | yes → yes | already served |
+| N07 `ColumnFamilyData` | 3 | 2 | yes → yes | already served |
+| N08 `Slice` | 29 | 8 | no → no | **unreachable** — gold below its top group |
+| N09 `SystemClock` | 19 | **1** | no → **yes** | reachable |
+| N10 `Logger` | 13 | 5 | no → no | **unreachable** — gold below its top group |
+| N11 `dos_streambuf` | absent | absent | no → no | **unreachable** — gold unranked at all |
+| N12 `streambuf` | absent | absent | no → no | **unreachable** — gold unranked at all |
+
+`Slice` 29 → 8 and `Logger` 13 → 5 are the rule working *around* a gold it cannot lift: bodyless rows
+in the tie groups **above** those golds were demoted past them. Neither reaches the emitted bundle, so
+neither is counted, and neither is claimed.
+
+**H18, the strongest 2b row in the merged E6 corpus, is closed.** `--for="ClientContext"` on duckdb went
+from four ranked rows that were all bare `class ClientContext;` declarations, with the definition absent
+from the whole bundle, to the definition at `p=1`. H31 and H22 likewise.
+
+**Where the wins landed, stated exactly, because the metric allowed two places and only one delivered.**
+`SERVED` was registered as "in a `<d>` row **or** a `<bodies>` slot". Every one of the six flips landed
+in the `<d>` rows; **not one landed in `<bodies>`** — `b=0` on all twelve probes, before and after.
+
+**That is this round's named residual, and it is a second site of the same defect.** The body that rides
+on a name-exact `--for` is not chosen from the ranking at all: it comes from the ROUTER's anchor, and
+`lexical.h`'s `NameAnchor::fileId` is documented as *"the FIRST definition of this name in NodeId order"* —
+path order, so it resolves to a forward declaration for exactly the reason the ranking used to. The D4
+report already saw this without naming the mechanism: *"the ANCHOR ripwire chose for the type name is
+itself a forward declaration."* **It was not registered this round and is not fixed here.** Extending the
+change to reach it after seeing the measurement is precisely what pre-registration exists to prevent, so
+it is recorded as the next round's item instead, and `test/defoverdeclcheck.sh` arm (f2) PINS the current
+behaviour so that fixing it goes red and is acknowledged rather than absorbed silently.
+
+**Every guard is not merely green but IDENTICAL, to the digit, on both sides.**
+
+| Guard | Floor / ceiling | At `da61bac` | With the rule in |
+| --- | ---: | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% | 2.4% / 0.0% / 0.0% |
+
+Zero displacement is the expected shape here and not a surprise: these lanes' queries are natural
+language, they route subtoken+body, and this rule cannot execute on that route. The r3diff readouts say
+the same thing per query — 74 of 74 ties across both sets — and the registration flagged in advance that a
+WIDE diff would have been the red flag, not a win.
+
+**A measurement error worth recording, because it is the wave's own named failure class.** The first pass
+at the byte-compared controls ran the base binary before this lane's commits and the head binary after —
+on `.`, this repository, whose tree those commits had changed. Four of nine "differed", including the
+flagless map, which consumes no lexical score at all and therefore could not possibly have moved. The
+control was backwards: the corpus, not the binary, was the variable. Re-run correctly — the same tree,
+two binaries — all nine are byte-identical. The tell was the map: **when a control that the change cannot
+reach reports a difference, the control is wrong, not the change.**
+
+`--quality-delta` against `da61bac`: `gating="0"`, exit 0. Every row is `origin="new-symbol"` (the new
+helper and the fixture's own symbols) or ambient short-horizon churn. `applyDefOverDeclTiebreak` measures
+`cx=21 ccx=29 loc=91 nest=3`, with `ev=10 ev_why="guard-return:3,loop-escape:4"` — the count is dominated
+by early-exit guards and refusals, which is the shape §6's readability work says not to refactor away, and
+it sits below both of its immediate neighbours in the same file (`chooseForRanker` 34,
+`lexicalScoresNameExactTiered` 61). Left as written, deliberately, rather than split into a single-use
+helper to lower a number.
+
+Gate count 451 → **452** (`test/defoverdeclcheck.sh`).
+
 ---
 
 ## 5. Token and output economy
