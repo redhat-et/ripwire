@@ -3201,6 +3201,7 @@ baseline to the digit — which is the instrument check.
 | `bench/recalleval/run_r3diff.py` base-vs-head, ranking + recall sets | near-all ties | — |
 | determinism (two runs byte-identical) + `xmllint` well-formedness | contract | — |
 | full gate battery (`test/regression.sh`) | all green | — |
+| G1 — ASan/UBSan/integer/LSan over the new path | no report | — |
 
 The r3diff bar deserves its own sentence, because it is the one that can catch a mis-scoped rule that
 every floor above would pass: these frozen sets are natural-language queries that route subtoken+body,
@@ -3292,6 +3293,10 @@ by early-exit guards and refusals, which is the shape §6's readability work say
 it sits below both of its immediate neighbours in the same file (`chooseForRanker` 34,
 `lexicalScoresNameExactTiered` 61). Left as written, deliberately, rather than split into a single-use
 helper to lower a number.
+
+G1: the `asan/` build (ASan + UBSan + integer + LSan with the committed suppressions) runs the new path
+clean, exit 0 with empty stderr, on duckdb's `--for="ClientContext"`, the fixture's `--for=Widget` and a
+whole-repo map; `test/defoverdeclcheck.sh` passes against `asan/ripwire` as well as `build/ripwire`.
 
 Gate count 451 → **452** (`test/defoverdeclcheck.sh`).
 
