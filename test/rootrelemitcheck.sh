@@ -206,6 +206,20 @@ print(total - anchors, total, anchors)
 
 echo "rootrelemitcheck — corpus at depths ${#SHORT} and ${#DEEP} chars (delta ${DEPTH_DELTA})"
 
+# ── LIVENESS, before any per-verb arm ────────────────────────────────────────────────────────────────────
+# Every arm below treats "this verb emitted nothing" as "no path contract to check" and passes. That is
+# right per verb and catastrophic in aggregate: a binary that emits NOTHING AT ALL would sail through every
+# arm green. test/binoverridecheck.sh exists to catch exactly that false-green (it points RIPWIRE_BIN at a
+# stub that fails on every invocation and requires each gate to notice), and it caught this one. So: the
+# plain default map on a real corpus must produce output, or this gate refuses to report on anything.
+if [ -z "$( run_at "$SHORT" "" )" ]; then
+  no "LIVENESS: the default map emitted NOTHING on the fixture — the binary under test is broken, so every"
+  no "           per-verb arm below would be a false green. Refusing to report. (BIN=$BIN)"
+  echo "rootrelemitcheck: SOME FAILED"
+  exit 1
+fi
+ok "liveness: the binary under test emits a non-empty default map"
+
 # ── ARM 1 + ARM 2 + ARM 4 ───────────────────────────────────────────────────────────────────────────────
 for entry in "${VERBS_XML[@]}"; do
   name="${entry%%:*}"; spec="${entry#*:}"
