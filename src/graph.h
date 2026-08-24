@@ -2577,16 +2577,40 @@ inline std::vector<std::uint32_t> fanInFromInEdges( const IngestResult& ing, con
     return fanIn;
 }
 
+// R-R: does the STORED canonical id `canonAbs` name the same symbol the caller spelled as `spec`?
+//
+// Emission is root-relative (resolve.h::canonicalIdForEmit) while the stored id keeps whatever spelling the
+// run's root argument produced, so on an absolute-root run the id a consumer READ BACK is the stored id
+// MINUS the root prefix. Accepting only string equality would break the chain contract below — the exact
+// regression test/chainidcheck.sh exists to catch, and did.
+//
+// The relative form is accepted as a whole-path-COMPONENT suffix, never a bare substring: without the '/'
+// boundary test, "h.h::A::b" would match "src/oh.h::A::b". No root argument is needed (and none is available
+// here), because "the stored id minus its root prefix" is a purely lexical relationship. Both directions are
+// accepted, so an id copied from ANY spelling of the run still resolves.
+inline bool canonicalIdMatches( std::string_view canonAbs, std::string_view spec ) noexcept
+{
+    if( canonAbs == spec )
+    {
+        return true;
+    }
+    const bool relIsSuffix = canonAbs.size() > spec.size() + 1
+                          && canonAbs.compare( canonAbs.size() - spec.size(), spec.size(), spec ) == 0
+                          && canonAbs[ canonAbs.size() - spec.size() - 1 ] == '/';
+    return relIsSuffix;
+}
+
 // A canonical id (path::scope::name) resolves by RECOMPUTING each symbol's id with the very canonicalId()
 // that emitted it, so producer and consumer cannot drift: whatever --for/--pack-task/the default map printed
-// in id= is exactly what this accepts. Overloads share one canonical id by construction, so this returns
+// in id= is exactly what this accepts — including the ROOT-RELATIVE spelling every lens now emits (see
+// canonicalIdMatches above). Overloads share one canonical id by construction, so this returns
 // EVERY match — the caller decides (--expand shows all, --around picks one), same as the bare-name path.
 inline std::vector<NodeId> resolveAllByCanonicalId( const IngestResult& ing, std::string_view spec )
 {
     std::vector<NodeId> out;
     for( const Symbol& s : ing.symbols )
     {
-        if( canonicalId( ing.files[s.fileId], s.scope, s.name ) == spec )
+        if( canonicalIdMatches( canonicalId( ing.files[s.fileId], s.scope, s.name ), spec ) )
         {
             out.push_back( s.id );
         }
