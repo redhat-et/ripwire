@@ -29,8 +29,11 @@
 #       touched, and the two declarations keep their id-ascending order.
 #   (e) ROUTE SCOPE — all three name queries actually take the name-exact route, so the arms above are
 #       measuring the route the rule is scoped to.
-#   (f) THE THING THE DEFECT COSTS — the plain --for=Widget bundle's body slot holds the DEFINITION.
-#       Before the fix its entire content is the bodyless `class Widget` from a_headers.hpp.
+#   (f1) THE THING THE DEFECT COSTS — the plain --for=Widget bundle SERVES the definition in its ranked
+#       rows, where before the fix all it served was two copies of the name.
+#   (f2) HONEST RESIDUAL, PINNED — the auto-body slot is fed by the ROUTER's anchor, not by the ranking,
+#       so it is a second site of the same defect that this round did not register a fix for. Pinned as
+#       it stands so that fixing it goes red here and is acknowledged rather than absorbed silently.
 #   (g) C13 ANALOGUE / OFF-ROUTE INVARIANCE — a CONCEPTUAL query that explicitly asks for forward
 #       declarations still gets them, in the exact subtoken+body order it had before the rule existed.
 #       This is the local form of growth's C13, the armed kill tripwire the E6 round left behind for
@@ -109,13 +112,32 @@ for q in Widget Gadget Sprocket; do
         || no "--for=$q no longer routes name-exact — the arms above are measuring the wrong ranker"
 done
 
-# ── (f) THE THING THE DEFECT COSTS: the body slot holds the definition ────────────────────────────
+# ── (f1) THE THING THE DEFECT COSTS: the definition is actually SERVED ────────────────────────────
 "$BIN" defoverdeclfix --for=Widget >"$TMP/lens" 2>/dev/null
-body="$( tr '>' '\n' <"$TMP/lens" | sed -n 's/.*<b t="[^"]*" l="\([0-9]*\)" p="\([^"]*\)".*/\2:\1/p' | head -1 )"
+# The assertion is on the FIRST ranked row, not on mere presence. This fixture is small enough that
+# every Widget row fits in the bundle either way, so a presence check would be inert here — and an
+# inert arm in a gate written for a ranking change is the failure mode this suite has been bitten by
+# twice. The first row is also the one that survives every budget: it is what the defect actually
+# costs on a corpus where 85 declarations push the definition off the end.
+first="$( tr '>' '\n' <"$TMP/lens" | sed -n 's/.*<d l="\([0-9]*\)" n="Widget" id="\([^"]*\)".*/\2:\1/p' | sed 's#defoverdeclfix/##' | head -1 )"
+[ "$first" = "z_widget.hpp::Widget::Widget:10" ] \
+    && ok "the FIRST ranked row is the definition (z_widget.hpp:10) — the row that survives any budget" \
+    || no "the first ranked row is $first, not the definition z_widget.hpp::Widget::Widget:10"
+
+# ── (f2) HONEST RESIDUAL, PINNED — the auto-body slot is a SECOND site of the same defect, and this
+#    round did not register a fix for it. The body that rides on a name-exact --for is chosen from the
+#    ROUTER's anchor, not from the ranking: lexical.h's NameAnchor::fileId is documented as "the FIRST
+#    definition of this name in NodeId order", i.e. path order, so it resolves to a forward declaration
+#    for exactly the same reason the ranking used to. Registering and fixing that is a separate round
+#    (docs/EVALS.md §4 records it as this round's named residual). It is pinned rather than left
+#    unstated so that the day it IS fixed this arm goes red and someone updates it deliberately —
+#    a silent improvement past a gate is how a "green but inert" gate is born.
+body="$( tr '>' '\n' <"$TMP/lens" | sed -n 's/.*<b t="[^"]*" l="\([0-9]*\)" p="\([^"]*\)".*/\2:\1/p' | head -1 | sed 's#defoverdeclfix/##' )"
 case "$body" in
-    defoverdeclfix/z_widget.hpp:*|z_widget.hpp:*) ok "the emitted body is the DEFINITION ($body)" ;;
-    "") no "no body was emitted at all for --for=Widget" ;;
-    *)  no "the emitted body is a bodyless declaration ($body) — the class-2b defect, verbatim" ;;
+    a_headers.hpp:12) ok "residual pinned: the auto-body slot still follows the ROUTER's anchor ($body), not the ranking" ;;
+    z_widget.hpp:*)   no "the auto-body slot now serves the definition ($body) — the anchor-side defect was fixed; re-register this arm and retire the residual" ;;
+    "")               no "no body was emitted at all for --for=Widget" ;;
+    *)                no "the auto-body slot moved to an unexpected symbol ($body)" ;;
 esac
 
 # ── (g) C13 ANALOGUE / OFF-ROUTE INVARIANCE ───────────────────────────────────────────────────────
