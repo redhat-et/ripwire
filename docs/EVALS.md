@@ -429,7 +429,7 @@ recommendation is not to fund another Lite-stratum *outcome* round: this tranche
 that it cannot discriminate there.
 
 **Where the effect shows is cost.** Median output tokens **9,782 vs 10,770 (-9.2%)** for the
-ripwire arm, recorded cost $19.35 vs $20.07, localization hit 23/24 vs 21/24 — slightly cheaper at
+ripwire arm, localization hit 23/24 vs 21/24 — slightly cheaper at
 equal outcome quality. Stage 2 (design frozen in `PREREG-stage2.md`, unfunded at this writing)
 re-aims the primary endpoint accordingly: output tokens per resolved task, paired.
 
