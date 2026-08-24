@@ -1514,16 +1514,7 @@ inline std::vector<RawRow> lsTree( const std::string& root, const std::string& r
 // boundary. Never a realpath (determinism, same reasoning as arch.h::relForHash).
 inline bool sameTreePath( std::string_view gitPath, std::string_view indexRelPath ) noexcept
 {
-    if( gitPath == indexRelPath )
-    {
-        return true;
-    }
-    if( indexRelPath.empty() || gitPath.size() <= indexRelPath.size() )
-    {
-        return false;
-    }
-    return gitPath.compare( gitPath.size() - indexRelPath.size(), indexRelPath.size(), indexRelPath ) == 0
-        && gitPath[ gitPath.size() - indexRelPath.size() - 1 ] == '/';
+    return rw::samePathTail( gitPath, indexRelPath );   // the rule lives ONCE, in arch.h
 }
 
 // §A7 — HEAD rows are documented as the PARSED answer, so stop guessing on them: the index knows where SYM is

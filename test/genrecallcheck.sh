@@ -105,11 +105,17 @@ done
 } >"$R/apidump_marker.md"
 
 run(){ perl -e 'alarm 30; exec @ARGV' "$BIN" "$R" --recall="$1" --no-cache 2>/dev/null; }
-top_doc(){ printf '%s' "$1" | grep -F '━━' | head -1 | grep -oE '/[^ ]*\.md' | sed 's#.*/##'; }
+# R-R (2026-08-24): the separator carries the doc path ROOT-RELATIVE now (the root is stated once in the
+# header, not once per doc), so a leading '/' is no longer there to anchor on. Match the path token
+# either way and take its basename, which is all this helper ever wanted.
+top_doc(){ printf '%s' "$1" | grep -F '━━' | head -1 | grep -oE '[^ ]+\.md' | head -1 | sed 's#.*/##'; }
 hdr(){ local whole="$1"; printf '%s' "${whole%%$'\n'*}"; }   # first line, without a pipe (no SIGPIPE noise)
 tally(){ hdr "$1" | grep -oE 'generated_demoted=[0-9]+'; }
 # the demotion note emitted on ONE doc's separator line, or "" when that doc carries none
-note_for(){ printf '%s' "$1" | grep -F '━━' | grep -F "/$2 " | grep -oE '\[generated_demoted: [a-z+]+\]'; }
+# R-R (2026-08-24): root-relative separators mean a doc AT the corpus root has no leading '/' before its
+# name — it is preceded by the separator's own space. Accept both anchors; still fixed-string, so a
+# filename's dots stay literal.
+note_for(){ printf '%s' "$1" | grep -F '━━' | grep -F -e "/$2 " -e " $2 " | grep -oE '\[generated_demoted: [a-z+]+\]'; }
 
 CACHE="$( run "cache eviction policy ttl expiry" )"
 WIDGET="$( run "widget config schema field validation" )"

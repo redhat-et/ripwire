@@ -371,7 +371,7 @@ CAND="$TMP/cand.xml"
 #      a test/chafix stub held rank 1). Rank of pageRankDouble strictly above the best test/ or present/ row.
 "$BIN" . --for="pagerank power iteration" --format=candidates --top-k=10 >"$CAND" 2>/dev/null
 PRRANK="$( tr '<' '\n' <"$CAND" | sed -n 's/^cand r="\([0-9]*\)" [^>]*n="pageRankDouble".*/\1/p' | head -1 )"
-FIXRANK="$( tr '<' '\n' <"$CAND" | grep -E '^cand ' | grep -E 'p="\./(test|present)/' | sed -n 's/^cand r="\([0-9]*\)".*/\1/p' | sort -n | head -1 )"
+FIXRANK="$( tr '<' '\n' <"$CAND" | grep -E '^cand ' | grep -E 'p="(\./)?(test|present)/' | sed -n 's/^cand r="\([0-9]*\)".*/\1/p' | sort -n | head -1 )"
 if [ -n "$PRRANK" ] && { [ -z "$FIXRANK" ] || [ "$PRRANK" -lt "$FIXRANK" ]; }; then
     ok "cited query ranks pageRankDouble (r=$PRRANK) above any test/present row (best fixture r=${FIXRANK:-none in top-10})"
 else
@@ -381,14 +381,14 @@ fi
 # 6b — mention anchor beats the tier penalty: a fixture file literally NAMED in the task still surfaces
 #      in the top 5 (de-prioritized is not unanchorable).
 "$BIN" . --for="fix the virtual dispatch in test/chafix/cha.cpp" --format=candidates --top-k=5 >"$CAND" 2>/dev/null
-tr '<' '\n' <"$CAND" | grep -E '^cand ' | grep -q 'p="\./test/chafix/cha\.cpp"' \
+tr '<' '\n' <"$CAND" | grep -E '^cand ' | grep -q 'p="\(\./\)\?test/chafix/cha\.cpp"' \
     && ok "mention anchor survives the penalty: task naming test/chafix/cha.cpp surfaces it in the top 5" \
     || no "mention anchor lost to the tier penalty: test/chafix/cha.cpp absent from its own task's top 5"
 
 # 6c — name-exact route beats the tier penalty: a fixture symbol queried by its EXACT name is still rank 1
 #      (its competitors score 0 — shrinking the only hit must not bury it).
 "$BIN" . --for="Robot" --format=candidates --top-k=1 >"$CAND" 2>/dev/null
-tr '<' '\n' <"$CAND" | grep -E '^cand r="1" ' | grep 'n="Robot"' | grep -q 'p="\./test/chafix/cha\.cpp"' \
+tr '<' '\n' <"$CAND" | grep -E '^cand r="1" ' | grep 'n="Robot"' | grep -q 'p="\(\./\)\?test/chafix/cha\.cpp"' \
     && ok "name-exact survives the penalty: --for=Robot still lands the fixture class at rank 1" \
     || no "name-exact buried by the tier penalty: --for=Robot no longer lands test/chafix Robot at rank 1"
 

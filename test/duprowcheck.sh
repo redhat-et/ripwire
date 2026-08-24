@@ -30,13 +30,13 @@ OUT="$( "$BIN" test/duprowfix --no-cache 2>/dev/null )"
 [ -n "$OUT" ] || { echo "no output — binary or fixture broken"; exit 2; }
 
 # ── 1) exactly one row carries id="...Box::data" — the const/non-const pair is collapsed ──────────────
-n_rows="$( printf '%s' "$OUT" | grep -o 'id="test/duprowfix/box.h::Box::data"' | wc -l | tr -d ' ' )"
+n_rows="$( printf '%s' "$OUT" | grep -o 'id="box.h::Box::data"' | wc -l | tr -d ' ' )"
 [ "$n_rows" = 1 ] \
     && ok "the Box::data overload pair collapses to exactly one <s> row (was 2, byte-identical, pre-fix)" \
     || no "expected exactly 1 row for id=\"...Box::data\", got $n_rows"
 
 # ── 2) the surviving row discloses the multiplicity via overloads="2" ──────────────────────────────────
-printf '%s' "$OUT" | grep -q 'id="test/duprowfix/box.h::Box::data"[^>]*overloads="2"' \
+printf '%s' "$OUT" | grep -q 'id="box.h::Box::data"[^>]*overloads="2"' \
     && ok "the collapsed row carries overloads=\"2\" (the id is the same, so 2 rows carried zero extra info)" \
     || no "collapsed row is missing overloads=\"2\": $( printf '%s' "$OUT" | grep -o '<s[^>]*Box::data[^>]*>' )"
 
