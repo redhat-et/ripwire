@@ -404,6 +404,42 @@ first lines.
 
 ---
 
+## 3b. Agent outcome — does the tool change whether the task gets solved (Stage 1)
+
+**Source:** `bench/agentloop/` (`run_agentloop.py`, `tasks.lock`, `analyze.py`),
+`bench/agentloop/PREREG-stage2.md` (the frozen follow-up design); Stage-1 pre-registration frozen by
+sha256 `e4e51ecc00fa6ddfa20dcab1e6150d814a17bb1c74353998eb128492e0d76571` before any run was funded.
+
+**Design.** 8 held-out instances x 2 arms x 3 seeds = **48 runs**, 2026-08-21. One runner
+(`claude -p`, Sonnet), binary pinned at the then-current head, per-run isolated agent environment,
+tool use in the treatment arm observed by a PATH shim rather than transcript reading. All 48 runs
+`status=ok`; **zero errors, zero contamination exclusions** — the baseline arm made **zero** ripwire
+calls across all 24 of its runs, the first clean control this harness has produced. Scoring by the
+official `swebench` harness (5.0.2), resolved/unresolved per its report files.
+
+**Result: parity, and parity is the finding.** Resolved **15/24 vs 15/24 (62.5% both arms)**.
+The decision-driving number is **discordance = 0.083** — only 2 of 24 paired instance-seed
+outcomes differed at all (5 instances resolved by both arms on every seed, 2 by neither; the two
+discordant pairs split 1-1). A 10-point arm effect is arithmetically impossible under 8.3%
+discordance, and the pre-registration had assumed 3.6x more of it. On this population -
+single-repo SWE-bench-Lite instances under a strong agent - resolution outcome has almost no room
+to discriminate between *any* two context tools, this one included. Eight instances is a pilot,
+not a verdict; the design was recorded as underpowered before it was funded, and the standing
+recommendation is not to fund another Lite-stratum *outcome* round: this tranche is the evidence
+that it cannot discriminate there.
+
+**Where the effect shows is cost.** Median output tokens **9,782 vs 10,770 (-9.2%)** for the
+ripwire arm, recorded cost $19.35 vs $20.07, localization hit 23/24 vs 21/24 — slightly cheaper at
+equal outcome quality. Stage 2 (design frozen in `PREREG-stage2.md`, unfunded at this writing)
+re-aims the primary endpoint accordingly: output tokens per resolved task, paired.
+
+**Retirement of two earlier figures, on the record.** Overhead numbers of +80% and +135%
+circulated from a 2026-08-04 six-run pilot. That pilot ran through a different agent harness
+driving a different vendor's model, on instances later found to overlap the localization training
+split, with an unbudgeted treatment arm and an unisolated baseline. Both figures are **retired as
+non-comparable**: they measured a different configuration badly, and nothing here "corrects" them —
+this section is simply the first measurement of *this* configuration under a design worth trusting.
+
 ## 4. Ranking changes, measured
 
 ### Query-shape routing
