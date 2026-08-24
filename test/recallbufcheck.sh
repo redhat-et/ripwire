@@ -79,6 +79,11 @@ PY
 pathline(){ grep -E "/r$1 " "$TMP/paths.txt"; }
 rootof(){ pathline "$1" | cut -d' ' -f1; }
 docof(){  pathline "$1" | cut -d' ' -f2; }
+# R-R (2026-08-24): the separator now carries the doc path RELATIVE to the corpus root (the root is stated
+# once in the header instead of once per recalled doc). This gate's SUBJECT is unchanged — the deep path is
+# built INSIDE the corpus, so the relative spelling is still ~700+ bytes and still overflows any fixed
+# stack buffer it is composed into. Only the spelling this gate greps for moved, not the length under test.
+relof(){  local r d; r="$( rootof "$1" )"; d="$( docof "$1" )"; printf '%s' "${d#"$r"/}"; }
 
 # byte hygiene: a leaked stack byte shows up as a control byte (NUL and friends) in the payload. \n and \t
 # are the only sub-0x20 bytes the recall bundle legitimately emits.
@@ -100,13 +105,13 @@ recall(){ # recall <root> <outfile> [extra flags…]
 # ─── (a) deep-path CLI recall: no overflow, no truncation, no leak ────────────────────────────────
 echo
 echo "=== (a) --recall with a 756-byte doc path — full path emitted, no stack bytes ==="
-A_ROOT="$( rootof 756 )"; A_DOC="$( docof 756 )"
-echo "  doc path length: ${#A_DOC} bytes"
+A_ROOT="$( rootof 756 )"; A_DOC="$( docof 756 )"; A_REL="$( relof 756 )"
+echo "  doc path length: ${#A_DOC} bytes absolute, ${#A_REL} bytes as emitted (root-relative)"
 recall "$A_ROOT" "$TMP/a.out"; a_exit=$?
 [ "$a_exit" -eq 0 ] && ok "exit 0 (base: 134 under ASan — stack-buffer-overflow in buildRecall)" \
                     || no "exit $a_exit (expected 0); stderr: $( head -c 300 "$TMP/a.out.err" )"
-grep -aqF "$A_DOC" "$TMP/a.out" \
-    && ok "separator line carries the FULL ${#A_DOC}-byte path" \
+grep -aqF "$A_REL" "$TMP/a.out" \
+    && ok "separator line carries the FULL ${#A_REL}-byte path" \
     || no "FULL path absent — the separator was truncated or garbled: $( grep -aF '━━' "$TMP/a.out" | head -1 | cat -v | head -c 200 )"
 A_CTRL="$( clean_bytes "$TMP/a.out" )"
 [ "${A_CTRL%% *}" = "0" ] && ok "zero control bytes in the payload" \
@@ -126,7 +131,7 @@ CALL='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_rec
 printf '%s\n%s\n' "$INIT" "$CALL" | perl -e 'alarm 60; exec @ARGV' "$BIN" --mcp >"$TMP/b.out" 2>"$TMP/b.err"; b_exit=$?
 [ "$b_exit" -eq 0 ] && ok "server exited 0 (base: killed by ASan on the ONE request)" \
                     || no "server exit $b_exit (expected 0); stderr: $( head -c 300 "$TMP/b.err" )"
-python3 - "$TMP/b.out" "$A_DOC" <<'PY' >"$TMP/b.verdict" 2>&1
+python3 - "$TMP/b.out" "$A_REL" <<'PY' >"$TMP/b.verdict" 2>&1
 import sys, json
 raw = open( sys.argv[1], "rb" ).read()
 docPath = sys.argv[2]
@@ -162,7 +167,7 @@ fi
 echo
 echo "=== (c) bisect boundary — 600 / 700 / 900 / ~1000-byte paths clean and deterministic ==="
 for t in 600 700 900 1000; do
-    r="$( rootof "$t" )"; d="$( docof "$t" )"
+    r="$( rootof "$t" )"; d="$( relof "$t" )"
     recall "$r" "$TMP/c_${t}_a"; e1=$?
     recall "$r" "$TMP/c_${t}_b"; e2=$?
     if [ "$e1" -ne 0 ] || [ "$e2" -ne 0 ]; then
