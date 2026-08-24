@@ -181,9 +181,15 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # a candidate file's bytes to test --and=/--not= terms — a THIRD search.h call site alongside grepEnrich's.
 # 10 -> 11 2026-08-17 (§R-J, Wave-2 harvest): grepCollectAux (search.h) reads each unsupported-ext/
 # text-looking candidate's bytes to scan it for the pattern — a FOURTH search.h call site.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 11 ] \
-    && ok "repo: --uses=readWholeFile count=11 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 11"
+# 11 -> 13 2026-08-24 (R1 identity round): TWO hand-rolled copies of this read retired in one lane.
+# quality.h's per-file body walk was extracted to forEachSymbolBody (the R1 content-id index had copied it,
+# and --quality-delta flagged the pair as a 495-token clone on the very run that added it), and
+# mergescout.h's injectFileLevelFallback had a third copy of the same fopen/fseek/fread/fclose block. Both
+# now call the canonical helper; both were re-read first to confirm the degrade is byte-identical (short
+# read or ftell failure -> cleared buffer -> the file contributes nothing, silently).
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 13 ] \
+    && ok "repo: --uses=readWholeFile count=13 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 13"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"
