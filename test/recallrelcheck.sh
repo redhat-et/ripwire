@@ -57,7 +57,10 @@ EOF
 
 run(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" --recall="$1" --no-cache 2>/dev/null; }
 # basename of the FIRST result-block header ("━━ <path> (relevance X) ━━")
-top_doc(){ printf '%s' "$1" | grep -F '━━' | head -1 | grep -oE '/[^ ]*\.md' | sed 's#.*/##'; }
+# R-R (2026-08-24): the separator carries the doc path ROOT-RELATIVE now (the root is stated once in the
+# header, not once per doc), so a leading '/' is no longer there to anchor on. Match the path token
+# either way and take its basename, which is all this helper ever wanted.
+top_doc(){ printf '%s' "$1" | grep -F '━━' | head -1 | grep -oE '[^ ]+\.md' | head -1 | sed 's#.*/##'; }
 relevant_n(){ printf '%s' "$1" | grep -oE '[0-9]+ relevant of' | grep -oE '^[0-9]+'; }
 
 # ── 1) kafka query → kafka.md ranked #1 ──────────────────────────────────────────────────────────────

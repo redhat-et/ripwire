@@ -1765,7 +1765,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             // i.e. it differs from the bare name (the symbol has an enclosing scope). For a free function the
             // canonical id equals the name, so it is skipped — no token cost, no golden churn for scope-less
             // symbols. Two same-named methods on different classes thus carry DISTINCT ids here.
-            const std::string canon = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+            // R-R: relativized against the SAME rootArg the <f p=…> above stripped, so one row's p= and id=
+            // can never disagree about how this file is spelled.
+            const std::string canon = canonicalIdForEmit( ing, s, rootArg );
             if( canon != s.name ) { w.write( " id=\"" );  w.write( escapeXml( canon, esc ) );  w.write( "\"" ); }
 
             w.write( overloadsAttr( rows.overloads[i] ) );   // see overloadsAttr() above — empty in the common case
@@ -2547,10 +2549,14 @@ inline void appendJsonMetricFields( std::string& out, const Symbol& s, NodeId id
 // canonical id IS its bare name, so repeating it would cost tokens and disambiguate nothing. "" ⇒ emit no
 // id= / "id" at all. ONE definition of the rule, shared by the XML and JSON signature-row writers below and
 // matching the default map's <s id="…"> convention exactly.
-inline std::string scopedCanonicalId( const IngestResult& ing, const Symbol& s )
+// R-R: `root` is the run's root argument (empty on a multi-root run — see canonicalIdForEmit). It is
+// REQUIRED rather than defaulted on purpose: a defaulted root is exactly how the four emitters below came
+// to disagree about whether their id= carried the checkout prefix, and a missing argument should be a
+// compile error, not a silently absolute row.
+inline std::string scopedCanonicalId( const IngestResult& ing, const Symbol& s, std::string_view root )
 {
     VERIFY( s.fileId < ing.files.size() );
-    std::string canon = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+    std::string canon = canonicalIdForEmit( ing, s, root );
     return canon == s.name ? std::string{} : canon;
 }
 
@@ -2576,7 +2582,8 @@ struct SigRowFacts
 // P2.4 — in= is emitted ONLY when a fan-in vector was actually supplied. A bundle assembled without one used
 // to print in="0", which reads as "nobody calls this" — a FALSE ZERO. An absent attribute means "not
 // measured"; in="0" now means, and only means, a measured zero.
-inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowFacts& facts, std::vector<char>& esc )
+inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowFacts& facts, std::vector<char>& esc,
+                               std::string_view rootArg )   // R-R: the root this row's id= is relative to
 {
     VERIFY( id < ing.symbols.size() );
     const Symbol& s = ing.symbols[ id ];
@@ -2588,7 +2595,7 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
     std::string head = lineAttr;
     head += escapeXml( s.name, esc );          // escapeXml returns a view INTO esc — copy before the next call
     head += "\"";
-    if( const std::string canon = scopedCanonicalId( ing, s ); !canon.empty() )
+    if( const std::string canon = scopedCanonicalId( ing, s, rootArg ); !canon.empty() )
     { head += " id=\"";  head += escapeXml( canon, esc );  head += "\""; }
 
     // descriptive facts — cx/ccx/in only under metrics; the Q3 lens + pure ride along either way
@@ -2988,7 +2995,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                     }
                 }
 
-                std::string head = sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure }, esc );
+                std::string head = sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure }, esc, rootArg );
 
                 std::string doc = docCommentBefore( src, a );
                 redactInPlace( doc, redact );
@@ -3205,7 +3212,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             }
 
             // identity (n=/id=) + descriptive facts (cx=complexity, ccx=cognitive, in=reuse-count, Q3 lens, pure)
-            w.write( sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure }, esc ) );
+            w.write( sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure }, esc, rootArg ) );
             std::string doc = docCommentBefore( src, a );   // L2: the human-written intent, if any
             redactInPlace( doc, redact );                    // a doc-comment body can hold a pasted secret
             if( rankAdaptivePayload )                        // B0.3: tail entries carry a trimmed excerpt / no doc
@@ -3280,9 +3287,20 @@ inline std::string candidatesRootTag( std::size_t keep, std::size_t corpusCount,
 
 inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank, int cap,
                             RedactCounts* redact,                 // §B0/W3-N1: REQUIRED — <sig> is emitted text (nullptr = --no-redact)
-                            CandidateProvenance prov = {} )
+                            CandidateProvenance prov = {},
+                            std::string_view rootArg = {} )       // R-R (2026-08-24): same single-root-only root
+                                                                  // argument serialize() takes — see its comment.
+                                                                  // This lens emitted BOTH a raw p= and a raw id=
+                                                                  // and was the densest absolute-path surface of
+                                                                  // any verb (17 occurrences on the 6-file fixture).
 {
     const std::size_t S = ing.symbols.size();
+    // R-R: same convention serialize()'s pathRel uses.
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto        pathRel    = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
 
     std::vector<NodeId> order( S );
     for( NodeId i = 0; i < S; ++i )
@@ -3344,13 +3362,13 @@ inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::
         {
             sig = cleanSig( src.data(), s.sigStartByte, s.sigEndByte, redact );
         }
-        const std::string canon = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+        const std::string canon = canonicalIdForEmit( ing, s, rootArg );   // R-R
 
         char hb[ 96 ];  std::snprintf( hb, sizeof( hb ), "<cand r=\"%zu\" s=\"%.6g\" n=\"", r + 1, double( rank[id] ) );
         w.write( hb );  w.write( escapeXml( s.name, esc ) );
         w.write( "\" id=\"" );  w.write( escapeXml( canon, esc ) );
         w.write( "\" k=\"" );   w.write( symTag( s.kind ) );
-        w.write( "\" p=\"" );   w.write( escapeXml( ing.files[ s.fileId ], esc ) );
+        w.write( "\" p=\"" );   w.write( escapeXml( pathRel( s.fileId ), esc ) );   // R-R
         char lb[ 24 ];  std::snprintf( lb, sizeof( lb ), "\" l=\"%u\">", s.line );
         w.write( lb );
         w.write( "<sig>" );  w.write( escapeXml( sig, esc ) );  w.write( "</sig></cand>" );
@@ -4315,9 +4333,16 @@ struct WholeFileRender
 
 inline WholeFileRender renderWholeFiles( const IngestResult& ing, const std::vector<NodeId>& nodes,
                                          RedactCounts* redact, const notes::NoteIndex* noteIndex,
-                                         bool compress )
+                                         bool compress,
+                                         std::string_view rootArg = {} )   // R-R: the <src p=…> + anchor id= root
 {
     WholeFileRender r;
+    // R-R: same convention serialize()'s pathRel uses.
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const auto        pathRel    = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
+    };
     std::vector<std::uint32_t> fileOrder;
     for( NodeId id : nodes )
     {
@@ -4391,7 +4416,7 @@ inline WholeFileRender renderWholeFiles( const IngestResult& ing, const std::vec
             anchors += s.name;
             anchors += ':';
             anchors += std::to_string( s.line );
-            const std::string canon = canonicalId( ing.files[f], s.scope, s.name );
+            const std::string canon = canonicalIdForEmit( ing, s, rootArg );   // R-R
             if( canon != s.name )
             {
                 anchorRows += "<s n=\"";
@@ -4411,7 +4436,7 @@ inline WholeFileRender renderWholeFiles( const IngestResult& ing, const std::vec
         appendCdataSafe( body, safe );          // split ]]>, scrub C0 controls (G4) + invalid UTF-8
 
         r.xml += "<src p=\"";
-        r.xml += escapeXml( ing.files[f], esc );
+        r.xml += escapeXml( pathRel( f ), esc );   // R-R
         r.xml += "\" sym=\"";
         r.xml += escapeXml( anchors, esc );
         r.xml += "\">";
@@ -6006,7 +6031,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
             w.write( "{\"t\":" );  writeJsonStr( w, symTag( s.kind ), esc );
             w.write( ",\"n\":" );  writeJsonStr( w, s.name, esc );
 
-            const std::string canon = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+            const std::string canon = canonicalIdForEmit( ing, s, rootArg );   // R-R: matches the XML sibling
             if( canon != s.name ) { w.write( ",\"id\":" );  writeJsonStr( w, canon, esc ); }
 
             if( rows.overloads[ rowIndex ] > 1 )
@@ -6195,7 +6220,8 @@ struct JsonSigLens
 // One row's `{"l":…` opening through its flag fields — everything EXCEPT doc/sig, which the ladder mutates
 // and phase 2 appends. Mirrors sigRowHead()'s role on the XML side.
 inline std::string jsonSigRowHead( const IngestResult& ing, NodeId id, std::uint32_t fileId,
-                                   const JsonSigLens& lens, bool pureSig )
+                                   const JsonSigLens& lens, bool pureSig,
+                                   std::string_view rootArg )   // R-R: same root the XML sibling relativizes against
 {
     const Symbol& s = ing.symbols[id];
     char          num[ 64 ];
@@ -6206,7 +6232,7 @@ inline std::string jsonSigRowHead( const IngestResult& ing, NodeId id, std::uint
     // P2.3: the chain key — "n" always, "id" only when the canonical form adds an enclosing scope
     // (the XML sibling's rule, scopedCanonicalId above), so a JSON consumer can chain onward too.
     appendJsonStrField( head, ",\"n\":", s.name );
-    if( const std::string canon = scopedCanonicalId( ing, s ); !canon.empty() )
+    if( const std::string canon = scopedCanonicalId( ing, s, rootArg ); !canon.empty() )
     {
         appendJsonStrField( head, ",\"id\":", canon );
     }
@@ -6409,7 +6435,7 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
 
             JsonSigEntry e;
             e.globalRank = globalRank;
-            e.head       = jsonSigRowHead( ing, id, f, lens, pureSig );
+            e.head       = jsonSigRowHead( ing, id, f, lens, pureSig, rootArg );
             e.doc        = std::move( doc );
             e.sig        = std::move( sig );
             e.noteCount  = appendJsonNoteArray( e.notes, lens.noteIndex, symbolNoteTarget( lens.noteIndex, ing, s ) );   // §B1.3

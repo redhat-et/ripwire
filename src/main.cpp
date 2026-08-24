@@ -2518,7 +2518,8 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
 inline void emitCandidates( std::FILE* out, const rw::IngestResult& ing, const std::vector<float>& rank,
                              int topK, bool adaptive, bool scanFullDistribution,
                              rw::CandidateProvenance prov,   // §A4f: route/anchored/weak — the caller owns which ranker ran
-                             rw::RedactCounts* redact )      // §B0/W3-N1: REQUIRED — <sig> is emitted text
+                             rw::RedactCounts* redact,       // §B0/W3-N1: REQUIRED — <sig> is emitted text
+                             std::string_view candRootArg )  // R-R: the single-root root its p=/id= are relative to
 {
     int capN = topK;
     if( adaptive )
@@ -2548,7 +2549,7 @@ inline void emitCandidates( std::FILE* out, const rw::IngestResult& ing, const s
         std::fputs( nb, out );
         capN = int( ac.kept );
     }
-    packCandidates( out, ing, rank, capN, redact, prov );
+    packCandidates( out, ing, rank, capN, redact, prov, candRootArg );   // R-R: root-relative p= + id=
 }
 
 // ── §A4a — the --for --json bundle, budgeted ────────────────────────────────────────────────────────────
@@ -2588,6 +2589,10 @@ struct ForLensJsonInputs
     std::size_t                       legoTotal;
     std::size_t                       composeTotal;
     std::size_t                       routesTotal;
+    // R-R (2026-08-24): the run's root, so this bundle's "p"/"id" are root-relative like the XML twin's.
+    // The R-E harvest reached the XML --for bundle but left this JSON sibling's packSignaturesJson call
+    // spelling `/*rootArg=*/{}` — the two dialects of ONE question disagreed about the spelling of a path.
+    std::string_view                  rootArg;
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -2829,7 +2834,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     JsonSigNoteCounts noteCounts;
     const auto packSigs = [ & ]( std::FILE* dst, std::size_t budget, bool* outCapped )
     { packSignaturesJson( dst, in.ing, in.rank, in.topN, lens, in.redact, in.packBudgetBytes, budget, outCapped, &noteCounts,
-                          /*rootArg=*/{}, /*hasRelevanceFloor=*/true ); };   // LB-A: same admission rule as the XML twin
+                          in.rootArg, /*hasRelevanceFloor=*/true ); };   // LB-A: same admission rule as the XML twin (R-R: root-relative p/id)
 
     // §B1.4: built once, used on both the degrade path below and the normal return — these three are plain
     // size_t values already computed by the caller (no rendering, no redaction seam), so unlike est_tokens
@@ -3405,7 +3410,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // anchors moved it, and (the signal that used to be XML-comment-only) whether the whole ranking
             // rests on evidence too thin to trust.
             emitCandidates( stdout, ing, lensRank, cfg.topK, cfg.adaptive, /*scanFullDistribution=*/true,
-                            CandidateProvenance{ lr.routeTag, lr.anchorLifts, forWeak }, redactPtr );
+                            CandidateProvenance{ lr.routeTag, lr.anchorLifts, forWeak }, redactPtr, flRootArg );
             reportRedactions( stderr, redactCounts );    // W3-N1: <sig> is now a redacting seam — this export must disclose its own tally
             return 0;
         }
@@ -3607,7 +3612,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                 ForLensJsonInputs{ ing, lensRank, forTopN, fanInPtr, impurePtr, &forChurn,
                                                                    &forClone, testedPtr, ampPtr, redactPtr,
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
-                                                                   legoTotal, composeTotal, routesTotal } );
+                                                                   legoTotal, composeTotal, routesTotal, flRootArg } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -4155,7 +4160,10 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // §B2: --top-k=N now actually SHAPES how many docs recall emits (was accept-and-ignore — --help and
         // the --limit refusal both already promised this). Default stays 8 when the user never passed the flag.
         const int                 recallK = cfg.topKExplicit ? cfg.topK : 8;
-        const RecallBundle       bundle = buildRecall( ing, rscore, cfg.recall, recallK, budget, true, redactPtr );   // docs (markdown) only — notes/plans/designs, not code
+        const RecallBundle       bundle = buildRecall( ing, rscore, cfg.recall, recallK, budget, true, redactPtr,
+                                                       ( ing.realPaths.empty() && cfg.roots.size() == 1 ) ? std::string_view( cfg.roots[0] )
+                                                                                                          : std::string_view() );   // docs (markdown) only — notes/plans/designs, not code; R-R
+
         const int                rc     = emitRecallBudgeted( stdout, bundle, cfg.tokenBudget );
         reportRedactions( stderr, redactCounts );
         return rc;
@@ -8808,6 +8816,8 @@ std::optional<int> runFromTrace( const MainDispatch& d )
     in.amp      = d.ampPtr;
     in.redact   = d.redactPtr;
     in.notes    = d.notesPtr;
+    in.rootArg  = ( ing.realPaths.empty() && cfg.roots.size() == 1 ) ? std::string_view( cfg.roots[0] )
+                                                                    : std::string_view();   // R-R
 
     const FromTraceResult res = fromTraceBundleText( ing, g, text, src == "-" ? "<stdin>" : src, in );
     if( !res.ok )
@@ -9252,6 +9262,8 @@ std::optional<int> runRunTrace( const MainDispatch& d )
     in.amp      = d.ampPtr;
     in.redact   = d.redactPtr;
     in.notes    = d.notesPtr;
+    in.rootArg  = ( d.ing.realPaths.empty() && cfg.roots.size() == 1 ) ? std::string_view( cfg.roots[0] )
+                                                                      : std::string_view();   // R-R
 
     std::string prelude = runTraceLegendComment( cmd, RunTraceDocKind::Bundle );
     prelude += renderRunTraceRecord( cap, timeoutSec, lines.size(), /*isFrameless=*/false );
@@ -13620,7 +13632,7 @@ int runDefaultMap( const MainDispatch& d )
         // graph rank, so route= names THAT and anchored= is 0 by construction (the §B8 mention anchor is a
         // --for-lens stage). Naming it explicitly beats leaving a reranker to assume the --for scale.
         emitCandidates( stdout, ing, rank, cfg.topK, cfg.adaptive, /*scanFullDistribution=*/false,
-                        CandidateProvenance{ "query-personalized", 0, false }, redactPtr );
+                        CandidateProvenance{ "query-personalized", 0, false }, redactPtr, mapRootArg );
         reportRedactions( stderr, d.redactCounts );      // W3-N1: same seam, same disclosure, on the --query arm
         return 0;
     }
@@ -13856,7 +13868,7 @@ int runDefaultMap( const MainDispatch& d )
                 return 1;
             }
         }
-        writeHtml( htmlOut, ing, rank, g, mapTopK, HtmlColorExtras{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy } );
+        writeHtml( htmlOut, ing, rank, g, mapTopK, HtmlColorExtras{ testedPtr, &htmlChurn, htmlChurnOk, cfg.colorBy }, mapRootArg );   // R-R
         if( htmlOut != stdout )
         {
             std::fclose( htmlOut );
@@ -14095,7 +14107,7 @@ int runDefaultMap( const MainDispatch& d )
         const std::size_t bundleBytes = ( sizeof( "<ctx>" ) - 1 ) + ctxRootBytesWhenNoMap
                                       + ( mapTopK > 0 ? measureEmittedMapBytes( mapTopK, payloadTokens ) : 0 )
                                       + bodiesSection.xml.size() + ( sizeof( "</ctx>" ) - 1 );
-        wholeFile = rw::renderWholeFiles( ing, expandNodes, redactPtr, d.notesPtr, cfg.compress );   // D2: shaped candidate
+        wholeFile = rw::renderWholeFiles( ing, expandNodes, redactPtr, d.notesPtr, cfg.compress, mapRootArg );   // D2: shaped candidate (R-R: root-relative <src p=>)
         ExpandServeChoice choice = chooseExpandServe( bundleBytes, wholeFile, cfg.packBudgetBytes );
         serveWholeFile = choice.serveWholeFile;
         ctxOpenStr     = std::move( choice.ctxOpen );

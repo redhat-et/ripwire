@@ -47,7 +47,15 @@ echo "fillordercheck: BIN=$BIN"
 order_of(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'order="?[a-zA-Z_:().-]+"?' | head -1 | sed -E 's/order="?//; s/"?$//'; }
 est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | grep -oE '[0-9]+'; }
 
-# ── #1: GOLDEN NEUTRAL — test/fixture (est_tokens=785) stays important-first, no auto-flip ─────────────
+# ── #1: GOLDEN NEUTRAL — test/fixture (est_tokens=769) stays important-first, no auto-flip ─────────────
+# RE-PINNED 785 → 769 (R-R, 2026-08-24: root-relative EMISSION for ALL verbs): the companion to the
+# 2026-08-17 re-pin four paragraphs down. That landing relativized the per-row `p=`; this one finishes the
+# job on the per-row `id=`, which still carried the crawl root's own prefix ("test/fixture/" on each of the
+# three scoped rows) even on a RELATIVE root — the same F6 repeat-the-root pattern, in the one attribute
+# the earlier sweep did not reach. -39 emitted bytes (1962 -> 1923 = wc -c test/golden.xml, regenerated in
+# the same commit) at the same language-weighted rate: 1923/769 = 2.5007 B/tok, inside the calibrated
+# 2.36-2.59 band. Emission only: no row, symbol or edge moved (still 6/14/5), no rank VALUE moved, and
+# `important-first` is unchanged — which is the whole point of this arm.
 # RE-PINNED 745 → 785 (R-E CORRECTION, 2026-08-19): the map legend gained the ONE clause that DEFINES
 # root= — `r:root=crawl-root-every-p=-is-relative-to(...)`, in this legend's own key=meaning dialect. The
 # 2026-08-17 landing added the attribute to <r> and defined it nowhere, which is what
@@ -95,7 +103,7 @@ est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | 
 # expectation is unchanged. The threshold (16000) is >25x this number either way.
 EFIX="$( est_of test/fixture )"
 OFIX="$( order_of test/fixture )"
-{ [ "$EFIX" = "785" ] && [ "$OFIX" = "important-first" ]; } \
+{ [ "$EFIX" = "769" ] && [ "$OFIX" = "important-first" ]; } \
     && ok "test/fixture (est_tokens=$EFIX) does NOT auto-flip — order=$OFIX (golden neutral)" \
     || no "test/fixture unexpectedly changed order or est_tokens (est=$EFIX order=$OFIX)"
 

@@ -13,7 +13,9 @@ run(){ "$BIN" "$FIX" "$1" --format=candidates --top-k=20 --no-cache >"$2" 2>/dev
 
 run '--for=server request timeout config' "$TMP/path.xml"
 first="$( sed -n 's/.*<cand r="1"[^>]* p="\([^"]*\)".*/\1/p' "$TMP/path.xml" )"
-[[ "$first" == *'/server/config.py' ]] && ok 'duplicate basename resolved by semantic evidence; evaluator keeps exact path identity' \
+# R-R (2026-08-24): root-relative emission drops the leading "./" (and any root prefix), so a path AT the
+# top of the corpus no longer has a '/' in front of it. Accept the bare spelling too.
+[[ "$first" == *'/server/config.py' || "$first" == 'server/config.py' ]] && ok 'duplicate basename resolved by semantic evidence; evaluator keeps exact path identity' \
     || no "server/config.py not first ($first)"
 
 run '--for=protocol adapter' "$TMP/gen-control.xml"
@@ -22,7 +24,9 @@ if grep -q 'generated/client.py' "$TMP/gen.xml" && ! grep -q 'noise_pb2.py' "$TM
 import sys, xml.etree.ElementTree as ET
 def rank(path):
     for c in ET.parse(path).getroot().findall('cand'):
-        if c.attrib.get('p','').endswith('/generated/client.py'): return int(c.attrib['r'])
+        # R-R: root-relative emission means a path at the corpus root has no leading '/'
+        pp = c.attrib.get('p','')
+        if pp.endswith('/generated/client.py') or pp == 'generated/client.py': return int(c.attrib['r'])
     return 10**9
 assert rank(sys.argv[2]) < rank(sys.argv[1]), (rank(sys.argv[1]),rank(sys.argv[2]))
 PY
