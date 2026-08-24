@@ -64,9 +64,23 @@ inline std::pair<std::vector<char>, bool> gitDiffChangedMask( const std::string&
 // --clones/--grep/--lint/--quality-delta emit as their PRIMARY row spelling can be pasted straight into
 // --situ/--test-gate (and the MCP situational_awareness verb) — the same strip --affected applies. A bare
 // path is returned untouched, so every argument shape that already worked is byte-identical.
-inline std::vector<char> changedMaskFromList( const IngestResult& ing, std::string_view csv )
+// TWO surfaces over ONE parse (2026-08-24, the --test-gate silent-zero fix): the checked form additionally
+// reports the FIRST item that resolved to no indexed file, plus how many items the list held at all, so a
+// verb whose exit code is a gate can REFUSE an unparseable list instead of reading it as an all-zero mask —
+// `--test-gate=da61bac..HEAD` used to report changed="0" at exit 0, which a caller reads as "your change
+// touches nothing" (non-negotiable #3). The lenient form keeps the historic silently-skipping contract for
+// --situ and the MCP situational_awareness verb by DELEGATING — one loop, so the two surfaces cannot drift.
+struct ChangedList
 {
-    std::vector<char> mask( ing.files.size(), 0 );
+    std::vector<char> mask;          // parallel to ing.files, exactly the mask this function always built
+    std::string       badItem;       // FIRST item resolving to no indexed file — empty = every item resolved
+    std::size_t       itemCount = 0; // non-empty items parsed (0 = the list names no files at all)
+};
+
+inline ChangedList changedMaskFromListChecked( const IngestResult& ing, std::string_view csv )
+{
+    ChangedList result;
+    result.mask.assign( ing.files.size(), 0 );
     for( std::size_t start = 0; start < csv.size(); )
     {
         std::size_t c = csv.find( ',', start );
@@ -76,15 +90,62 @@ inline std::vector<char> changedMaskFromList( const IngestResult& ing, std::stri
         }
         if( c > start )
         {
-            const std::uint32_t f = resolveFileSuffix( ing, stripLineLocator( csv.substr( start, c - start ) ) );
+            ++result.itemCount;
+            const std::string_view item = csv.substr( start, c - start );
+            const std::uint32_t    f    = resolveFileSuffix( ing, stripLineLocator( item ) );
             if( f != UINT32_MAX )
             {
-                mask[f] = 1;
+                result.mask[f] = 1;
+            }
+            else if( result.badItem.empty() )
+            {
+                result.badItem = std::string( item );
             }
         }
         start = c + 1;
     }
-    return mask;
+    return result;
+}
+
+inline std::vector<char> changedMaskFromList( const IngestResult& ing, std::string_view csv )
+{
+    return changedMaskFromListChecked( ing, csv ).mask;
+}
+
+// The --test-gate FILES refusal (def-over-decl lane, 2026-08-24): `--test-gate=da61bac..HEAD` — a ref range
+// the verb has no grammar for — used to fall through resolveFileSuffix item by item into an all-zero mask
+// and report changed="0" at exit 0, which a caller reads as "your change touches nothing" and skips every
+// test. Non-negotiable #3: that zero meant "cannot parse", not "none found". House standard is
+// --quality-delta's refusal (qdrefpaircheck arms (C)): exit 1, the offending token NAMED verbatim, an
+// adjacent probe offered. Per-token, so a mixed list cannot hide one bad item behind a good one — the
+// silent-drop variant of the same zero. Returns true when the list was refused (message already on stderr;
+// the caller exits 1). Gate: testgaterefusecheck.sh.
+inline bool testGateRefusesFileList( const std::string& root, std::string_view csv, const ChangedList& list )
+{
+    if( list.itemCount == 0 )
+    {
+        std::fprintf( stderr, "ripwire: --test-gate=%.*s names no files — it needs changed files, e.g. --test-gate=src/cli.h\n",
+                      int( csv.size() ), csv.data() );
+        return true;
+    }
+    if( list.badItem.empty() )
+    {
+        return false;
+    }
+    if( list.badItem.find( ".." ) != std::string::npos )
+    {
+        // The found shape: a git ref range (A..B or A...B). The adjacent probe expands the range into the
+        // FILES this verb actually takes; echoed verbatim, so both spellings paste back into a working command.
+        std::fprintf( stderr, "ripwire: --test-gate: '%s' matches no indexed file — --test-gate takes FILES (F1,F2), never a git ref range; "
+                              "to gate a COMMITTED range, expand it into its changed files: "
+                              "--test-gate=\"$(git -C %s diff --name-only %s | paste -sd, -)\"\n",
+                      list.badItem.c_str(), root.c_str(), list.badItem.c_str() );
+        return true;
+    }
+    std::fprintf( stderr, "ripwire: --test-gate: '%s' matches no indexed file — FILES are path substrings over the indexed tree; "
+                          "files the ingest skipped are not searchable (the --skipped verb lists exactly which, with reasons)\n",
+                  list.badItem.c_str() );
+    return true;
 }
 
 // --situ is a fixed report, so each of its three sections has its own hard row cap. §B12.1 gave section [1]

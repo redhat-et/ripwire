@@ -8488,7 +8488,15 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         std::vector<char> changed;
         if( !cfg.testGateFiles.empty() )
         {
-            changed = rw::changedMaskFromList( ing, cfg.testGateFiles );
+            // An unparseable FILES list REFUSES rather than reading as an all-zero mask ("your change
+            // touches nothing") — the silent-zero defect and the refusal's whole argument live on
+            // testGateRefusesFileList in situ.h. Gate: testgaterefusecheck.sh.
+            rw::ChangedList list = rw::changedMaskFromListChecked( ing, cfg.testGateFiles );
+            if( rw::testGateRefusesFileList( root, cfg.testGateFiles, list ) )
+            {
+                return 1;
+            }
+            changed = std::move( list.mask );
         }
         else
         {
