@@ -22,6 +22,7 @@
 #include "lintrules.h"          // findErrorMasking — the built-in error-masking rule table (GitClear +47% kind)
 #include "arch.h"               // fnv1a64
 #include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
+#include "docparse.h"           // docparse::detail::readWholeFile — THE canonical whole-file byte read (commentcoherence.h names it that); reused rather than re-rolled, see forEachSymbolBody
 #include "filter.h"             // B10.1a: isTestPath — the general test-dir convention behind isTestScriptPath
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — the degrade path when git archive/ingest fails (no-op under NDEBUG; a gate-visible degrade line needs its own fprintf)
 #include "infra/jsonesc.h"      // L2 — rw::jsonesc::escapeMcp for staleAcksJsonArray's kind= field (the same posture serialize.h's jsonStr uses)
@@ -399,39 +400,31 @@ inline std::uint64_t pathQualifiedKey( std::string_view relPath, std::string_vie
 // only ever compared to each other, and a one-sided qualification makes every symbol read as rewritten
 // (the trap the 1722-line comment used to pin). The churn loop in computeDelta derives its per-node lookup
 // key through the same helper, so the join's surfaces cannot drift independently.
-inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const IngestResult& ing, std::string_view root )
+// THE per-file body-bytes walk, owned once. Every symbol with a real body, visited with a view of its
+// [sigStartByte, endByte) span, reading each FILE exactly once (the findClones shape) and degrading
+// identically on a file that will not read or a span that does not fit: it contributes nothing, silently,
+// because a truncated read is not evidence of anything.
+//
+// Extracted when --quality-delta flagged this lane against itself. The R1 content-id index needed the same
+// walk and copied it, and the reuse-decline kind reported a 495-token clone of a helper that already had
+// three call sites — which is precisely the finding that kind exists to catch, on the run that was adding
+// it. Two copies of "read each file once and hand me each body" is two places for the degrade rules to
+// drift, and those rules are the honesty contract here, not an implementation detail.
+template<class Fn>
+inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
 {
     // per-file def ids with a real body (see errorMaskCountsBySym above on `symbols[i].id == i`).
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
-    gtl::btree_map<std::uint64_t, std::vector<std::uint64_t>> perId;   // pathQualifiedKey → its symbols' raw-body hashes
-    std::string bytes;
+    std::string         bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         if( byFile[f].empty() )
         {
             continue;
         }
-        std::FILE* fp = std::fopen( ing.files[f].c_str(), "rb" );
-        if( !fp )
+        if( !docparse::detail::readWholeFile( ing.files[f], bytes ) || bytes.empty() )
         {
-            continue;
-        }
-        std::fseek( fp, 0, SEEK_END );
-        const long sz = std::ftell( fp );
-        std::fseek( fp, 0, SEEK_SET );
-        bytes.clear();
-        if( sz > 0 )
-        {
-            bytes.resize( std::size_t( sz ) );
-            if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
-            {
-                bytes.clear();
-            }
-        }
-        std::fclose( fp );
-        if( bytes.empty() )
-        {
-            continue;
+            continue;   // unreadable or empty — contributes nothing, silently: a partial read is evidence of nothing
         }
         for( NodeId i : byFile[f] )
         {
@@ -440,10 +433,20 @@ inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const Inges
             {
                 continue;
             }
-            const std::uint64_t key = pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s.scope, s.name );
-            perId[ key ].push_back( fnv1a64( std::string_view( bytes.data() + s.sigStartByte, s.endByte - s.sigStartByte ) ) );
+            visit( i, s, std::string_view( bytes.data() + s.sigStartByte, s.endByte - s.sigStartByte ) );
         }
     }
+}
+
+inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const IngestResult& ing, std::string_view root )
+{
+    gtl::btree_map<std::uint64_t, std::vector<std::uint64_t>> perId;   // pathQualifiedKey → its symbols' raw-body hashes
+    forEachSymbolBody( ing,
+                       [ & ]( NodeId, const Symbol& s, std::string_view body )
+                       {
+                           const std::uint64_t key = pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s.scope, s.name );
+                           perId[ key ].push_back( fnv1a64( body ) );
+                       } );
     gtl::btree_map<std::uint64_t, std::uint64_t> out;
     for( auto& [ key, hs ] : perId )
     {
@@ -452,6 +455,164 @@ inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const Inges
         for( std::uint64_t h : hs ) { char b[ 17 ]; std::snprintf( b, sizeof( b ), "%016llx", static_cast<unsigned long long>( h ) ); joined += b; }
         out[ key ] = fnv1a64( joined );
     }
+    return out;
+}
+
+// ─── R1 IDENTITY: the SCRUBBED content hash ────────────────────────────────────────────────────────────
+//
+// WHY A SECOND BODY HASH EXISTS AT ALL. bodyHashesBySym above hashes RAW bytes, because its job is CHANGE
+// DETECTION — it must notice `return 2` becoming `return 3`, so it may not normalize anything. This hash has
+// the opposite job: IDENTITY across a move. A symbol that was relocated is the same finding; a symbol that
+// was rewritten is not. The two cannot share one function, and merging them would break whichever caller
+// lost the argument.
+//
+// WHAT IS SCRUBBED, AND WHY EACH — each decided by a replay over this repo's own rename history, run
+// before any of this was written rather than justified after it:
+//   * WHITESPACE. Every run of spaces/tabs collapses to one space; leading/trailing per-line whitespace and
+//     blank lines are dropped entirely. This is the load-bearing one. A move that wraps a body in a
+//     namespace or class RE-INDENTS it, and re-indentation is the single most common companion of a real
+//     move. Measured on this repo's own 0eacce7 (ten pure header moves, 59 symbols): raw-byte body-hash
+//     equality survives 100% of the byte-identical move and only 37.3% once the moved body is re-indented
+//     by four spaces. A content identity that dies on indentation is not a content identity.
+//   * THE SYMBOL'S OWN NAME, replaced by a fixed sentinel byte, so a rename of the symbol ITSELF keeps the
+//     identity the brief asks it to keep. HONESTY, measured: this one is nearly inert — the same probe put
+//     raw-hash survival at 96.6% under a symbol rename, because a body mentions its own name once or twice
+//     at most. It costs one substitution and it is what the brief specifies, so it is here; it is NOT
+//     claimed as a win, and the report records it as inert rather than dressing it up.
+//   * `// ripwire-ack:` COMMENT LINES. An in-source ack comment must not change the hash of the very symbol
+//     it annotates, or writing the ack would immediately destroy the identity the ack was written against
+//     (a self-invalidating fixed point). The in-source ack surface itself is NOT part of this round — this
+//     is only the hash-side precondition that makes it landable later without a second scrub revision.
+//
+// WHAT IS DELIBERATELY *NOT* SCRUBBED: anything semantic. No comment stripping beyond the ack line, no
+// literal normalization, no token normalization (clones.h owns that, for a different question). The moment
+// this hash starts erasing meaning it starts calling a REWRITE the same finding, which is precisely the
+// blank check the ack contract forbids — see test/identitycheck.sh claim (C).
+//
+// Deterministic: a pure function of (body bytes, name). No map, no state, no locale.
+inline constexpr std::string_view kInSourceAckMarker = "ripwire-ack:";
+
+inline std::string scrubbedBody( std::string_view body, std::string_view name )
+{
+    std::string out;
+    out.reserve( body.size() );
+    std::size_t lineStart = 0;
+    while( lineStart <= body.size() )
+    {
+        const std::size_t      nl   = body.find( '\n', lineStart );
+        const std::string_view line = body.substr( lineStart, ( nl == std::string_view::npos ? body.size() : nl ) - lineStart );
+
+        // collapse: drop leading/trailing blanks, squeeze interior runs to one space
+        std::string squeezed;
+        squeezed.reserve( line.size() );
+        bool pendingSpace = false;
+        for( char c : line )
+        {
+            if( c == ' ' || c == '\t' || c == '\r' )
+            {
+                pendingSpace = !squeezed.empty();   // never emit a LEADING space
+                continue;
+            }
+            if( pendingSpace )
+            {
+                squeezed.push_back( ' ' );
+                pendingSpace = false;
+            }
+            squeezed.push_back( c );
+        }
+        if( !squeezed.empty() && squeezed.find( kInSourceAckMarker ) == std::string::npos )
+        {
+            out += squeezed;
+            out.push_back( '\n' );                  // one canonical separator; blank lines contribute nothing
+        }
+        if( nl == std::string_view::npos )
+        {
+            break;
+        }
+        lineStart = nl + 1;
+    }
+
+    // the symbol's own name → a fixed sentinel. Whole-token only: replacing a bare substring would rewrite
+    // `computeX` while scrubbing `compute` and make two unrelated symbols collide.
+    if( !name.empty() )
+    {
+        const auto wordByte = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+        std::string swapped;
+        swapped.reserve( out.size() );
+        std::size_t at = 0;
+        while( at < out.size() )
+        {
+            const std::size_t hit = out.find( name, at );
+            if( hit == std::string::npos )
+            {
+                swapped.append( out, at, std::string::npos );
+                break;
+            }
+            const bool whole = ( ( hit == 0 ) || !wordByte( out[ hit - 1 ] ) )
+                            && ( ( hit + name.size() >= out.size() ) || !wordByte( out[ hit + name.size() ] ) );
+            swapped.append( out, at, hit - at );
+            swapped.push_back( whole ? '\x01' : out[ hit ] );
+            at = hit + ( whole ? name.size() : 1 );
+        }
+        out.swap( swapped );
+    }
+    return out;
+}
+
+inline std::uint64_t scrubbedBodyHash( std::string_view body, std::string_view name )
+{
+    return fnv1a64( scrubbedBody( body, name ) );
+}
+
+// The corpus-wide content-id index: every symbol's scrubbed body hash, reachable from EITHER key space a
+// finding can carry, plus the multiplicity that decides whether a content match is allowed to resolve.
+//
+// TWO KEY SPACES, ONE INDEX — and this is the point of the round. A Regression's `key` is a canonId hash for
+// eight kinds and a pathQualifiedKey for short-horizon-churn (see Regression::key). Building a THIRD keying
+// for content would fork the key space the d593de3 churn-keying fix spent a whole round unifying, so the
+// index is instead keyed by BOTH of the existing spaces at once: each symbol inserts its cid under its
+// canonId hash AND under its pathQualifiedKey. The two are different hash spaces over different strings, so a
+// lookup by either finds the same cid and no consumer needs to know which space it holds.
+//
+// `symbolsPerCid` counts SYMBOLS, not keys (each symbol contributes one, regardless of being indexed twice),
+// because it answers exactly one question: is this scrubbed body unique in the tree? A cid shared by two
+// symbols is a genuine clone pair, and letting one ack rescue a finding on either of them would suppress a
+// finding nobody accepted. Ambiguity refuses to resolve — floors, not guesses.
+struct ContentIdIndex
+{
+    gtl::btree_map<std::uint64_t, std::uint64_t> cidByKey;      // canonId hash OR pathQualifiedKey → scrubbed body hash
+    gtl::btree_map<std::uint64_t, std::uint64_t> keyByCid;      // scrubbed body hash → the canonId hash of its ONE symbol (only meaningful when unique)
+    gtl::btree_map<std::uint64_t, std::uint32_t> symbolsPerCid; // scrubbed body hash → how many symbols carry it (>1 ⇒ refuses to resolve)
+
+    bool isUnique( std::uint64_t cid ) const
+    {
+        const auto it = symbolsPerCid.find( cid );
+        return it != symbolsPerCid.end() && it->second == 1;
+    }
+};
+
+// One pass over the corpus, same per-file read shape as bodyHashesBySym (and the same degrade: a file that
+// will not read contributes nothing). Deliberately NOT folded into bodyHashesBySym: that function runs on
+// EVERY --quality-delta for the churn kind, while this one is paid for only when the ledger can actually use
+// it (see the callers, which skip it entirely for a cid-less ledger).
+inline ContentIdIndex contentIdsBySym( const IngestResult& ing, const Graph& g, std::string_view root )
+{
+    ContentIdIndex out;
+    forEachSymbolBody( ing,
+                       [ & ]( NodeId i, const Symbol& s, std::string_view body )
+                       {
+                           const std::string   rel{ relForHash( ing.files[ s.fileId ], root ) };
+                           const std::uint64_t cid      = scrubbedBodyHash( body, s.name );
+                           const bool          hasCanon = ( i < g.canonId.size() && !g.canonId[i].empty() );
+                           out.symbolsPerCid[ cid ] += 1;              // per SYMBOL — the uniqueness question
+                           if( hasCanon )
+                           {
+                               const std::uint64_t canonKey = fnv1a64( canonicalId( rel, s.scope, s.name ) );
+                               out.cidByKey[ canonKey ] = cid;
+                               out.keyByCid[ cid ]      = canonKey;    // only read when symbolsPerCid[cid] == 1
+                           }
+                           out.cidByKey[ pathQualifiedKey( rel, s.scope, s.name ) ] = cid;
+                       } );
     return out;
 }
 
@@ -531,6 +692,160 @@ inline std::string popenTrimmed( const std::string& cmd )
 inline std::string gitOneLine( const std::string& root, const std::string& tail )
 {
     return popenTrimmed( "git -c core.quotepath=false -C " + shSingleQuote( root ) + " " + tail );
+}
+
+// ─── R1 IDENTITY: the GIT-RECORDED RENAME MAP ──────────────────────────────────────────────────────────
+//
+// computeDelta's own origin-axis comment states the rule this obeys: "There is no rename detection here and
+// adding one would make the classification non-deterministic (a similarity heuristic), which the determinism
+// law forbids." That objection is exactly right about a similarity heuristic WE compute, and exactly why
+// this reads a rename git ALREADY RECORDED instead of inferring one. The distinction is the whole design:
+//   * The detection options are PINNED IN THE COMMAND — `-c diff.renames=true -M50%` — never inherited from
+//     the user's config. A repo with `diff.renames=false`, or a different `diff.renameLimit`, must not make
+//     a --quality-delta report different from the same tree elsewhere; that is the same reason the crawl
+//     refuses `core.excludesFile`.
+//   * The window is a FIXED COMMIT COUNT from HEAD, not a date. `git log -n K` from a fixed HEAD is a pure
+//     function of the history; "since 30 days ago" is a function of the wall clock, which the determinism
+//     law forbids everywhere else in this file too (see the churn window's HEAD-committer-epoch basis).
+//   * Truncation is DISCLOSED, never silent: both hitting the commit window and hitting the pair cap are
+//     reported on the root, so "your ack did not follow that rename" is answerable rather than mysterious.
+constexpr std::uint32_t kRenameWindowCommits = 400;   // commits back from HEAD scanned for recorded renames
+constexpr std::size_t   kRenameMaxPairs      = 4000;  // hard cap on recorded pairs (disclosed when hit)
+constexpr std::size_t   kRenameMaxChain      = 8;     // a→b→c… chain depth followed from one current path (disclosed)
+
+struct RenameMap
+{
+    // new-relative-path → the path it had immediately before that rename. Chains are followed by
+    // ancestorsOf, not flattened here, so an ack recorded at ANY intermediate spelling still resolves.
+    gtl::btree_map<std::string, std::string> previousOf;
+    std::uint32_t commitsScanned  = 0;
+    std::size_t   pairsRecorded   = 0;
+    bool          truncatedPairs  = false;   // kRenameMaxPairs hit — some renames are NOT in this map
+    bool          truncatedWindow = false;   // history is deeper than kRenameWindowCommits — older renames unseen
+    bool          available       = false;   // git answered at all (a non-git root leaves this false)
+
+    // Every path this one is known to have had, oldest-last, capped at kRenameMaxChain. Empty when the path
+    // was never renamed — the overwhelmingly common case, and the one that must cost nothing.
+    std::vector<std::string> ancestorsOf( const std::string& rel ) const
+    {
+        std::vector<std::string> out;
+        std::string              cur = rel;
+        while( out.size() < kRenameMaxChain )
+        {
+            const auto it = previousOf.find( cur );
+            if( it == previousOf.end() )
+            {
+                break;
+            }
+            cur = it->second;
+            if( std::find( out.begin(), out.end(), cur ) != out.end() )
+            {
+                break;   // a rename cycle (A→B then B→A across two commits) — stop rather than loop
+            }
+            out.push_back( cur );
+        }
+        return out;
+    }
+};
+
+// Both halves of "what has been renamed since the ack was written": the UNCOMMITTED half (a `git mv` staged
+// in the working tree — the moment an agent is most likely to run --quality-delta) and the COMMITTED half
+// (the durable case, `git log -M50%` over the window). Read in that order so a path renamed twice — once in
+// history and again in the working tree — chains correctly through both.
+//
+// A pure function of (HEAD, index, working tree) for a fixed window. `--name-status -z` is NOT used: the
+// tab-separated porcelain here is stable, and quotepath=false is already pinned by gitOneLine's shape, so a
+// path with a space or a UTF-8 byte arrives intact. A path containing a literal TAB would mis-split; that is
+// recorded as a known floor rather than papered over, and it cannot corrupt anything — the worst case is a
+// pair that does not resolve, i.e. today's behavior.
+// `span` empty (the working-tree form) = the uncommitted `git mv` PLUS the last kRenameWindowCommits
+// commits. `span` set (the ref-pair form, "A..B") = exactly that range and nothing else, read against the
+// REAL repo — the two trees a ref-pair delta compares are materialized into temp dirs outside the repo, so
+// asking THEM about renames would answer "not a git repo" and silently lose every rename in the wave being
+// measured. The span is the honest scope there: the comparison IS that range.
+inline RenameMap gitRenameMap( const std::string& root, const std::string& span = {} )
+{
+    RenameMap rm;
+    // One probe that answers BOTH questions — is this a git repo with a resolvable HEAD, and how deep is its
+    // history (which decides whether the fixed window truncated). A non-git root answers "" and this returns
+    // an empty, unavailable map: degrade, never guess.
+    const std::string depth = gitOneLine( root, "rev-list --count HEAD 2>/dev/null" );
+    if( depth.empty() )
+    {
+        return rm;
+    }
+    rm.available                 = true;
+    const unsigned long long tot = std::strtoull( depth.c_str(), nullptr, 10 );
+    rm.commitsScanned            = std::uint32_t( tot < kRenameWindowCommits ? tot : kRenameWindowCommits );
+    rm.truncatedWindow           = tot > kRenameWindowCommits;
+
+    const auto absorb = [ & ]( const std::string& raw )
+    {
+        std::size_t at = 0;
+        while( at <= raw.size() )
+        {
+            const std::size_t nl   = raw.find( '\n', at );
+            const std::string line = raw.substr( at, ( nl == std::string::npos ? raw.size() : nl ) - at );
+            at = ( nl == std::string::npos ) ? raw.size() + 1 : nl + 1;
+            if( line.empty() || line[0] != 'R' )
+            {
+                continue;   // only rename rows; the R-score suffix (R100/R089) is part of the status token
+            }
+            const std::size_t t1 = line.find( '\t' );
+            if( t1 == std::string::npos )
+            {
+                continue;
+            }
+            const std::size_t t2 = line.find( '\t', t1 + 1 );
+            if( t2 == std::string::npos )
+            {
+                continue;
+            }
+            const std::string oldPath = line.substr( t1 + 1, t2 - t1 - 1 );
+            const std::string newPath = line.substr( t2 + 1 );
+            if( oldPath.empty() || newPath.empty() || oldPath == newPath )
+            {
+                continue;
+            }
+            if( rm.previousOf.size() >= kRenameMaxPairs )
+            {
+                rm.truncatedPairs = true;
+                return;
+            }
+            // FIRST writer wins: the log is walked newest-first, so the first row for a path is its most
+            // recent rename, and ancestorsOf walks backwards from there one link at a time.
+            rm.previousOf.emplace( newPath, oldPath );
+            rm.pairsRecorded = rm.previousOf.size();
+        }
+    };
+
+    const std::string pinned = "git -c core.quotepath=false -c diff.renames=true -C " + shSingleQuote( root ) + " ";
+    if( span.empty() )
+    {
+        // Uncommitted first (a staged `git mv` is the single moment an agent is most likely to run this),
+        // then history — in that order so a path renamed in history AND again in the working tree chains
+        // through both.
+        //
+        // BOTH uncommitted queries are needed, and this is not belt-and-braces. Measured while building
+        // test/identitycheck.sh arm (2): after a plain `git mv`, `git diff -M50% --name-status HEAD` reports
+        // `A src/core/lib.h` + `D src/lib.h` — no rename row at all — while `git diff --cached` over the
+        // IDENTICAL state reports `R100 src/lib.h src/core/lib.h`. Rename detection did not fail; the
+        // index-vs-HEAD diff is simply the one that sees the pair. Querying only the worktree form would have
+        // silently dropped the most common rename an agent ever makes — and the gate would still have passed,
+        // because the content route rescues that same ack by a different mechanism. That near-miss is why the
+        // gate asserts the ROUTE (acked_by_rename) and not merely the outcome.
+        absorb( popenTrimmed( pinned + "diff -M50% --diff-filter=R --name-status --cached 2>/dev/null" ) );
+        absorb( popenTrimmed( pinned + "diff -M50% --diff-filter=R --name-status HEAD 2>/dev/null" ) );
+        absorb( popenTrimmed( pinned + "log -M50% --diff-filter=R --name-status --format= -n "
+                              + std::to_string( kRenameWindowCommits ) + " 2>/dev/null" ) );
+    }
+    else
+    {
+        rm.truncatedWindow = false;   // the range IS the scope; nothing outside it was in question
+        rm.commitsScanned  = 0;
+        absorb( popenTrimmed( pinned + "log -M50% --diff-filter=R --name-status --format= " + shSingleQuote( span ) + " 2>/dev/null" ) );
+    }
+    return rm;
 }
 
 // The current HEAD commit sha (full, trimmed), or "" if `root` is not a git repo with a resolvable HEAD.
@@ -2886,6 +3201,11 @@ struct AckRecord
     std::string   kind;
     std::uint64_t key    = 0;
     std::uint32_t ackNow = 0;     // the magnitude the finding was accepted at (the ratchet floor)
+    // R1 IDENTITY — the SCRUBBED CONTENT ID of the symbol this ack was recorded against, or 0 when none was
+    // available (a clone-group ack has no single body; a row written by a pre-R1 binary has no cid at all).
+    // Serialized as an OPTIONAL `cid=<16hex>` token between ackNow and the reason — see readAckRecords for
+    // why that spelling, and why the 443 rows already committed to this repo need no migration.
+    std::uint64_t cid    = 0;
     std::string   reason;
 };
 
@@ -2971,6 +3291,46 @@ inline std::string normalizeLegacyAckKind( const std::string& kind, std::uint32_
 // reappears as a fresh regression because a stray "acked at 1" line follows it). The floor may only ever go
 // up via a duplicate, so keep the max — same MAX-not-last discipline computeSnapshot already uses for
 // per-symbol metrics (see the comment there). The reason string travels with whichever record wins the max.
+// R1 IDENTITY — take the OPTIONAL leading `cid=<16hex>` token off an ack line's reason field, returning the
+// content id (0 when there is none) and leaving `reason` as the human text alone.
+//
+// WHY THIS SPELLING, rather than a new record type or a positional field:
+//   * The reason runs to end of line, so a new field can only go BEFORE it. A POSITIONAL one would make
+//     every pre-R1 line malformed — 443 already-committed rows in this repo alone, each carrying a
+//     hand-written justification that is the whole point of the ledger.
+//   * A separate `cid <kind> <key> <hash>` RECORD line would instead trip readAckRecords' own "malformed ack
+//     line skipped" degrade on every older binary — 443 alerts on a file it should simply read. The baseline
+//     sidecar can rename a tag (`body`->`bodyq`) because nothing hand-edits it; this file is committed and
+//     reviewed by people.
+//   * As a NAMED token it round-trips through an older binary untouched: that binary reads `cid=...` as the
+//     first word of the reason and writes it straight back out, so a mixed-version team does not silently
+//     strip content identity. test/identitycheck.sh arm (8c) pins the round trip.
+//
+// A malformed hash degrades to "no cid" and is LEFT IN the reason rather than guessed at or discarded — the
+// damage stays visible in a file a human reviews, which is the only place it can be fixed.
+inline std::uint64_t takeAckCidPrefix( std::string& reason )
+{
+    if( reason.rfind( "cid=", 0 ) != 0 )
+    {
+        return 0;
+    }
+    const std::size_t end  = reason.find( ' ' );
+    const std::string hex  = reason.substr( 4, ( end == std::string::npos ? reason.size() : end ) - 4 );
+    char*             stop = nullptr;
+    const auto        v    = std::strtoull( hex.c_str(), &stop, 16 );
+    if( hex.empty() || stop == nullptr || *stop != '\0' )
+    {
+        DEGRADED_PATH_ALERT( "quality: unparseable cid= on an ack line — kept as reason text, content identity unavailable for that row" );
+        return 0;
+    }
+    reason = ( end == std::string::npos ) ? std::string{} : reason.substr( end + 1 );
+    while( !reason.empty() && reason.front() == ' ' )
+    {
+        reason.erase( reason.begin() );
+    }
+    return v;
+}
+
 inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string& path )
 {
     gtl::btree_map<std::string, AckRecord> out;
@@ -3003,6 +3363,8 @@ inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string&
         {
             reason.erase( reason.begin() );
         }
+
+        const std::uint64_t cid = takeAckCidPrefix( reason );   // R1 IDENTITY — the optional cid= field; see takeAckCidPrefix
         while( !reason.empty() && reason.back() == '\r' )
         {
             reason.pop_back(); // CRLF tolerance on the trailing field too
@@ -3012,7 +3374,7 @@ inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string&
         const auto        it     = out.find( mapKey );
         if( it == out.end() || ackNow > it->second.ackNow )
         { // D2: max(ackNow) wins, not last-line
-            out[ mapKey ] = AckRecord{ kind, key, ackNow, reason };
+            out[ mapKey ] = AckRecord{ kind, key, ackNow, cid, reason };
         }
     }
     return out;
@@ -3023,14 +3385,409 @@ inline bool writeAckRecords( const std::string& path, const gtl::btree_map<std::
     std::ofstream f( path, std::ios::trunc );
     if( !f ) { DEGRADED_PATH_ALERT( "quality: cannot write acks file" ); return false; }
     f << "# ripwire quality acks v1 — written by --quality-ack; a finding stays suppressed until it worsens past its acked magnitude\n";
-    f << "# format: ack <kind> <16-hex-key> <ackNow> <reason to end of line> — one per line, kept SORTED by (kind,key) on every write (merge-friendly)\n";
+    f << "# format: ack <kind> <16-hex-key> <ackNow> [cid=<16-hex-content-id>] <reason to end of line> — one per line, kept SORTED by (kind,key) on every write (merge-friendly)\n";
     for( const auto& [ mapKey, r ] : acks )                       // btree order → byte-stable, always-sorted file (the merge-friendly guarantee)
     {
         char hex[ 20 ];
         std::snprintf( hex, sizeof( hex ), "%016llx", static_cast<unsigned long long>( r.key ) );
-        f << "ack " << r.kind << ' ' << hex << ' ' << r.ackNow << ' ' << ( r.reason.empty() ? "(no reason given)" : r.reason ) << '\n';
+        f << "ack " << r.kind << ' ' << hex << ' ' << r.ackNow << ' ';
+        // R1: cid= is OMITTED entirely when unavailable rather than written as a zero — a row that never had
+        // a content identity must not be indistinguishable from one whose body hashed to 0, and a repo that
+        // never acks under an R1 binary keeps a byte-identical ledger to the one it has today.
+        if( r.cid != 0 )
+        {
+            char cidHex[ 20 ];
+            std::snprintf( cidHex, sizeof( cidHex ), "%016llx", static_cast<unsigned long long>( r.cid ) );
+            f << "cid=" << cidHex << ' ';
+        }
+        f << ( r.reason.empty() ? "(no reason given)" : r.reason ) << '\n';
     }
     return true;
+}
+
+// ─── R1 IDENTITY: ONE KEY SPACE, HEALED FORWARD ────────────────────────────────────────────────────────
+//
+// THE SHAPE OF THIS FIX, and why it is a pre-pass rather than a change to every lookup.
+//
+// A finding's identity is `hash(path::scope::name)` (canonId hash) for eight kinds and `pathQualifiedKey`
+// for short-horizon-churn. Both are path-qualified, so `git mv` destroys them: measured on this repo's own
+// 0eacce7 — ten headers moved into src/infra/, not one byte of code changed — survival is 0 of 59 canonId
+// identities, 0 of 59 pathQualifiedKeys, 0 of 4 clone groups. Every ack recorded against those symbols died,
+// along with the reason someone wrote for accepting each one.
+//
+// The obvious repair — teach every baseline lookup and the ack ratchet to try an alias — means touching nine
+// call sites inside computeDelta plus applyAckRatchet, each an independent chance to get the direction
+// backwards. The repair actually taken is the opposite: leave every consumer alone and REKEY THE TWO
+// SIDECARS FORWARD into the identity the current tree uses, once, before anything reads them. The baseline
+// snapshot and the ack ledger are the only two things that carry a stale identity; heal those and
+// computeDelta, applyAckRatchet, computeStaleAcks and the --quality-ack writer are all rename-aware with no
+// edit at all.
+//
+// THIS IS AN EXTENSION OF pathQualifiedKey, NOT A SECOND KEY SPACE — the binding constraint from the
+// d593de3 churn-keying round ("pathQualifiedKey is THE one key space"). Nothing here invents a key. An alias
+// is the SAME rule (`relPath \0 scope \0 name`, or canonicalId) evaluated at a path the file provably used
+// to have, and the result is written back into the one space every consumer already reads. After the
+// pre-pass there is exactly one live identity per symbol, the current one.
+//
+// SELF-HEALING, which is what keeps this from being a permanent crutch: --quality-ack writes the rekeyed
+// ledger back out, so an ack rescued through a rename is stored at the CURRENT key and no longer depends on
+// the rename window surviving. The mechanism pays for itself once and then gets out of the way — the same
+// posture normalizeLegacyAckKind's migration takes.
+//
+// WHAT IS NOT REMAPPED, stated rather than quietly skipped: the two CLONE kinds. Their key is a hash over
+// the whole member SET's canonical ids (cloneGroupHash), so re-deriving it at ancestor paths needs the
+// current groups' membership, which lives inside computeDelta and not in either sidecar. A clone ack still
+// dies on a rename. Measured cost of that floor on the pre-experiment's five rename commits: 5 clone groups
+// in total, against 187 per-symbol identities. Recorded as a known floor, not fixed by guessing.
+struct IdentityAliases
+{
+    // ancestor-derived key → the key the same symbol has NOW. Holds BOTH key spaces at once: they hash
+    // different strings, so one map serves canonId-hash and pathQualifiedKey lookups without either knowing.
+    gtl::btree_map<std::uint64_t, std::uint64_t> toCurrent;
+    std::size_t                                  ambiguousDropped = 0;  // an ancestor key two current symbols both claim — refused, never guessed
+};
+
+// Derive every alias the rename map licenses for the CURRENT tree. Costs nothing when nothing was renamed:
+// `ancestorsOf` is a single btree miss per FILE (memoized below), and the overwhelmingly common answer is
+// "no ancestors", which skips the symbol loop entirely.
+inline IdentityAliases identityAliases( const IngestResult& ing, const Graph& g, std::string_view root, const RenameMap& renames )
+{
+    IdentityAliases al;
+    if( !renames.available || renames.previousOf.empty() )
+    {
+        return al;
+    }
+    // per-FILE memo: ancestorsOf walks a chain, and a file with 200 symbols must not walk it 200 times.
+    std::vector<std::vector<std::string>> ancByFile( ing.files.size() );
+    std::vector<std::uint8_t>             ancKnown( ing.files.size(), 0 );
+
+    const auto link = [ & ]( std::uint64_t from, std::uint64_t to )
+    {
+        if( from == to || from == 0 || to == 0 )
+        {
+            return;   // a scope-less canonId degrades to the bare name and is already path-independent
+        }
+        const auto [ it, inserted ] = al.toCurrent.emplace( from, to );
+        if( !inserted && it->second != to )
+        {
+            // Two current symbols both claim one ancestor identity (a rename chain that forked, or a file
+            // renamed away and a new one put back at the old path). Which one owns the ack is unknowable
+            // from the rename record alone, so NEITHER does.
+            it->second = 0;
+            ++al.ambiguousDropped;
+        }
+    };
+
+    for( NodeId i = 0; i < ing.symbols.size(); ++i )
+    {
+        const Symbol& s = ing.symbols[i];
+        if( s.fileId >= ing.files.size() )
+        {
+            continue;
+        }
+        const std::string rel{ relForHash( ing.files[ s.fileId ], root ) };
+        if( !ancKnown[ s.fileId ] )
+        {
+            ancByFile[ s.fileId ] = renames.ancestorsOf( rel );
+            ancKnown[ s.fileId ]  = 1;
+        }
+        if( ancByFile[ s.fileId ].empty() )
+        {
+            continue;
+        }
+        const bool          hasCanon = ( i < g.canonId.size() && !g.canonId[i].empty() );
+        const std::uint64_t curCanon = hasCanon ? fnv1a64( canonicalId( rel, s.scope, s.name ) ) : 0;
+        const std::uint64_t curPath  = pathQualifiedKey( rel, s.scope, s.name );
+        for( const std::string& anc : ancByFile[ s.fileId ] )
+        {
+            if( hasCanon )
+            {
+                link( fnv1a64( canonicalId( anc, s.scope, s.name ) ), curCanon );
+            }
+            link( pathQualifiedKey( anc, s.scope, s.name ), curPath );
+        }
+    }
+    // drop the entries poisoned by ambiguity above, so no consumer has to know about the 0 sentinel
+    for( auto it = al.toCurrent.begin(); it != al.toCurrent.end(); )
+    {
+        it = ( it->second == 0 ) ? al.toCurrent.erase( it ) : std::next( it );
+    }
+    return al;
+}
+
+// Heal a BASELINE snapshot forward: an entry recorded under a pre-rename identity is re-filed under the
+// identity the current tree uses, so computeDelta's `was` lookups, its origin oracle and its churn join all
+// find it without a single edit to any of them.
+//
+// ADD, NEVER OVERWRITE. A current key that the baseline ALREADY holds is left exactly as it is: that is a
+// symbol which genuinely exists at this identity on both sides, and letting a rename alias overwrite it
+// would substitute one symbol's history for another's. The alias only ever fills a HOLE.
+inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases& al )
+{
+    if( al.toCurrent.empty() )
+    {
+        return 0;
+    }
+    std::size_t moved = 0;
+    const auto  healMap = [ & ]( auto& m )
+    {
+        for( const auto& [ from, to ] : al.toCurrent )
+        {
+            const auto src = m.find( from );
+            if( src != m.end() && m.find( to ) == m.end() )
+            {
+                m[ to ] = src->second;
+                ++moved;
+            }
+        }
+    };
+    healMap( base.ccxBySym );
+    healMap( base.locBySym );
+    healMap( base.nestBySym );
+    healMap( base.paramsBySym );
+    healMap( base.defsBySym );
+    healMap( base.maskBySym );
+    healMap( base.bodyHashBySym );
+
+    // the two SORTED SETS — same add-never-overwrite rule, then restore the sorted invariant every
+    // std::binary_search consumer depends on.
+    const auto healSet = [ & ]( std::vector<std::uint64_t>& v )
+    {
+        std::vector<std::uint64_t> add;
+        for( const auto& [ from, to ] : al.toCurrent )
+        {
+            if( std::binary_search( v.begin(), v.end(), from ) && !std::binary_search( v.begin(), v.end(), to ) )
+            {
+                add.push_back( to );
+                ++moved;
+            }
+        }
+        if( !add.empty() )
+        {
+            v.insert( v.end(), add.begin(), add.end() );
+            std::sort( v.begin(), v.end() );
+            v.erase( std::unique( v.begin(), v.end() ), v.end() );
+        }
+    };
+    healSet( base.dead );
+    healSet( base.publicApi );
+    // base.cloneGroups is deliberately untouched — see the WHAT IS NOT REMAPPED note above.
+    return moved;
+}
+
+// Which mechanism rescued a given ack row. Kept per-row (not just as a total) so the report can disclose the
+// ROUTE — "your ack survived because git recorded the rename" and "because the body is byte-for-byte the
+// same after scrubbing" are different claims with different trust, and collapsing them would hide which one
+// the tool actually relied on.
+enum class AckRescueRoute : std::uint8_t { Rename = 1, Content = 2 };
+
+struct AckRemap
+{
+    gtl::btree_map<std::string, AckRescueRoute> routeOf;   // the REKEYED ack's new mapKey → how it got there
+    std::size_t renameRekeyed  = 0;
+    std::size_t contentRekeyed = 0;
+};
+
+// Heal the ACK LEDGER forward, by the same add-never-overwrite rule, through two routes in strict priority:
+//
+//   1. RENAME (exact). git recorded the move; the alias is the same identity rule at a path the file
+//      provably had. 100% recovery on all four structural rename commits in this repo's history.
+//   2. CONTENT (exact equality on a scrubbed body, and only when nothing else can answer). This is the case
+//      git records NO rename for at all — a symbol relocated between two files that both merely "changed",
+//      which produces no `R` row for route 1 to read. THREE conditions, all required:
+//        (a) the ack's own key names no symbol in the current tree — a LIVE ack is never second-guessed;
+//        (b) the ack carries a cid, i.e. it was written by a binary that records one (see AckRecord::cid —
+//            this route can never rescue the 443 rows already committed here, and the report says so);
+//        (c) the cid is unique in the tree. A body shared by two symbols is a clone pair, and letting one
+//            ack cover either of them would suppress a finding nobody accepted. Ambiguity refuses to
+//            resolve — the same floors-not-guesses rule computeStaleAcks applies to a clone-group key.
+//
+// What neither route does is match a body that CHANGED. The scrub erases whitespace and the symbol's own
+// name and nothing else (see scrubbedBody), so a rewritten body has a different cid and is a different
+// finding. Identity that follows a rename must not become identity that follows a rewrite; that is the blank
+// check the ack contract forbids, and test/identitycheck.sh arms (4) and (7) hold the line.
+inline AckRemap remapAckIdentity( gtl::btree_map<std::string, AckRecord>& acks, const IdentityAliases& al, const ContentIdIndex* cids )
+{
+    AckRemap out;
+    if( acks.empty() )
+    {
+        return out;
+    }
+    // Collect first, mutate after: rekeying erases and inserts, and doing that under an iterator over the
+    // same btree is exactly the shape that turns a correct rule into an intermittent one.
+    struct Move { std::string fromMapKey; std::uint64_t toKey; AckRescueRoute route; };
+    std::vector<Move> moves;
+    for( const auto& [ mapKey, rec ] : acks )
+    {
+        const auto alias = al.toCurrent.find( rec.key );
+        if( alias != al.toCurrent.end() )
+        {
+            moves.push_back( { mapKey, alias->second, AckRescueRoute::Rename } );
+            continue;
+        }
+        if( rec.cid == 0 || cids == nullptr )
+        {
+            continue;
+        }
+        if( cids->cidByKey.find( rec.key ) != cids->cidByKey.end() )
+        {
+            continue;   // (a) the ack's target is alive at its own key — nothing to rescue
+        }
+        if( !cids->isUnique( rec.cid ) )
+        {
+            continue;   // (c) two symbols share this scrubbed body — refuse to pick one
+        }
+        const auto byCid = cids->keyByCid.find( rec.cid );
+        if( byCid != cids->keyByCid.end() && byCid->second != rec.key )
+        {
+            moves.push_back( { mapKey, byCid->second, AckRescueRoute::Content } );
+        }
+    }
+
+    for( const Move& m : moves )
+    {
+        const auto src = acks.find( m.fromMapKey );
+        if( src == acks.end() )
+        {
+            continue;
+        }
+        AckRecord        rec      = src->second;
+        const std::string newKey  = ackMapKey( rec.kind, m.toKey );
+        if( newKey == m.fromMapKey )
+        {
+            continue;
+        }
+        const auto dst = acks.find( newKey );
+        if( dst != acks.end() )
+        {
+            // A row already sits at the destination — the same D2 rule readAckRecords applies to a duplicate:
+            // the ratchet floor may only ever go UP, so keep the max and leave the surviving reason with it.
+            if( rec.ackNow > dst->second.ackNow )
+            {
+                dst->second.ackNow = rec.ackNow;
+                dst->second.reason = rec.reason;
+            }
+            acks.erase( src );
+            continue;
+        }
+        rec.key = m.toKey;
+        acks.erase( src );
+        acks.emplace( newKey, rec );
+        out.routeOf[ newKey ] = m.route;
+        ( m.route == AckRescueRoute::Rename ? out.renameRekeyed : out.contentRekeyed ) += 1;
+    }
+    return out;
+}
+
+// How many findings a rekeyed ack ACTUALLY suppressed, split by route. Counted BEFORE applyAckRatchet erases
+// them — the honest denominator for the disclosure is the suppression, not the rekey: an ack can be healed
+// forward and still not hide anything (the finding may have worsened past its floor, or stopped firing).
+inline void countAckRescues( const std::vector<Regression>& regs, const gtl::btree_map<std::string, AckRecord>& acks,
+                             const AckRemap& remap, std::size_t& byRename, std::size_t& byContent )
+{
+    byRename = byContent = 0;
+    if( remap.routeOf.empty() )
+    {
+        return;
+    }
+    for( const Regression& r : regs )
+    {
+        const std::string mapKey = ackMapKey( ackKindToken( r ), r.key );
+        const auto        ack    = acks.find( mapKey );
+        if( ack == acks.end() || r.now > ack->second.ackNow )
+        {
+            continue;   // not suppressed — the ratchet still fires on it
+        }
+        const auto route = remap.routeOf.find( mapKey );
+        if( route != remap.routeOf.end() )
+        {
+            ( route->second == AckRescueRoute::Rename ? byRename : byContent ) += 1;
+        }
+    }
+}
+
+// ─── R1 IDENTITY: the ONE entry point both --quality-delta surfaces call ───────────────────────────────
+//
+// The CLI arm and the MCP quality_delta verb are two surfaces over one computation, and the §B6/R3 lesson
+// from the baseline-staleness split is that the moment each carries its OWN copy of a rule they answer the
+// same question differently in the same second. So the whole identity pre-pass is one call, and neither
+// surface gets to decide any part of it.
+//
+// COST, and why it is not paid by default: `renames` costs two short git spawns and is skipped entirely for
+// an empty ledger (nothing to heal). `cids` costs one pass over the corpus's file bytes and is skipped
+// unless the ledger can actually USE it — i.e. some row carries a cid, or we are about to WRITE cids under
+// --quality-ack. A repo that has never acked under an R1 binary therefore pays nothing at all, and one that
+// has pays the pass once per delta. That gating is the reason contentIdsBySym is not folded into
+// bodyHashesBySym, which the churn kind runs unconditionally.
+struct IdentityHealing
+{
+    RenameMap       renames;
+    ContentIdIndex  cids;
+    IdentityAliases aliases;
+    AckRemap        ackRemap;
+    bool            cidsComputed      = false;
+    std::size_t     baselineKeysMoved = 0;
+    std::size_t     ackedByRename     = 0;   // filled by countAckRescues, AFTER computeDelta
+    std::size_t     ackedByContent    = 0;
+};
+
+// TWO ROOTS, deliberately not one. `corpusRoot` is the tree being JUDGED — every key is spelled relative to
+// it (the S2 root-relative rule), and its bytes are what contentIdsBySym reads. `gitRoot` is where the rename
+// RECORD lives. They are the same directory in the working-tree form and different in the ref-pair form,
+// where the judged tree is a materialized temp dir with no git history at all: passing one root there would
+// silently lose every rename in the very wave being measured, which is the failure mode this round exists to
+// end. Collapsing them into one parameter is therefore a bug waiting for the next ref-pair caller.
+inline IdentityHealing healIdentity( Snapshot& base, gtl::btree_map<std::string, AckRecord>& acks,
+                                     const IngestResult& ing, const Graph& g, const std::string& corpusRoot,
+                                     const std::string& gitRoot, bool wantContentIds, const std::string& span = {} )
+{
+    IdentityHealing h;
+    if( acks.empty() && !wantContentIds )
+    {
+        return h;   // nothing to heal and nothing to write — do not spawn git, do not read the corpus
+    }
+    h.renames           = gitRenameMap( gitRoot, span );
+    h.aliases           = identityAliases( ing, g, corpusRoot, h.renames );
+    h.baselineKeysMoved = remapSnapshotIdentity( base, h.aliases );
+
+    const bool ledgerHasCid = std::any_of( acks.begin(), acks.end(),
+                                           []( const auto& kv ) { return kv.second.cid != 0; } );
+    if( wantContentIds || ledgerHasCid )
+    {
+        h.cids         = contentIdsBySym( ing, g, corpusRoot );
+        h.cidsComputed = true;
+    }
+    h.ackRemap = remapAckIdentity( acks, h.aliases, h.cidsComputed ? &h.cids : nullptr );
+    return h;
+}
+
+// The identity disclosure, as an {XML attrs, JSON attrs} pair. ONE definition for both emitters: an
+// attribute that exists on one --quality-delta surface and not the other is the §B6 M5 divergence this
+// codebase has already paid for once, and a report about IDENTITY is the last place to reintroduce it.
+//
+// Every attribute is absent entirely when git could not be read at all, and the three TRUNCATION attrs are
+// absent unless true — the same optional-attribute convention the rest of this root follows, spelled out in
+// the legend so an absent one is never read as a silent "no".
+inline std::pair<std::string, std::string> identityDisclosure( const IdentityHealing& h )
+{
+    std::string attrs, json;
+    if( !h.renames.available )
+    {
+        return { attrs, json };
+    }
+    const auto add = [ & ]( const char* name, unsigned long long v )
+    {
+        attrs += " " + std::string( name ) + "=\"" + std::to_string( v ) + "\"";
+        json  += ",\"" + std::string( name ) + "\":" + std::to_string( v );
+    };
+    add( "renames", h.renames.pairsRecorded );
+    add( "rename_window_commits", h.renames.commitsScanned );
+    add( "acked_by_rename", h.ackedByRename );
+    add( "acked_by_content", h.cidsComputed ? h.ackedByContent : 0 );
+    if( h.renames.truncatedWindow )   { add( "renames_window_truncated", 1 ); }
+    if( h.renames.truncatedPairs )    { add( "renames_truncated", 1 ); }
+    if( h.aliases.ambiguousDropped )  { add( "renames_ambiguous", h.aliases.ambiguousDropped ); }
+    return { attrs, json };
 }
 
 // Drop every regression already acked at a magnitude ≥ its current `now`; return how many were suppressed

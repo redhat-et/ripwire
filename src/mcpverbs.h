@@ -2412,6 +2412,13 @@ struct QualityDeltaOutcome
     std::vector<rw::quality::Regression> regs;
     std::size_t                       ackedCount = 0;// findings suppressed by the .ripwire_quality_acks ratchet (honest suppression)
     std::vector<rw::quality::StaleAck> staleAcks;     // L2 — acks whose target no longer applies to this working tree (see quality::computeStaleAcks)
+    // R1 IDENTITY — the same disclosure the CLI root carries, so an MCP-only agent is told what an ack's
+    // survival across a rename rested on. It has no CLI to re-ask from; a fact that exists on one surface and
+    // not the other is the §B6 M5 divergence this file has paid for once already.
+    bool                              renamesAvailable = false;
+    std::size_t                       renamesRecorded  = 0;
+    std::size_t                       ackedByRename    = 0;
+    std::size_t                       ackedByContent   = 0;
 };
 
 // §B6 M10 — a CORRUPT sidecar used to read as "no sidecar". readBaseline reports a file that yields no header,
@@ -2488,11 +2495,20 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
         baseSel.snapshot = std::move( headSnap );
     }
 
+    // R1 IDENTITY: the SAME healing pre-pass the CLI runs, through the one entry point, and BEFORE
+    // computeDelta reads the baseline. §B6 M5 / R3 is the standing lesson — the moment this arm carries its
+    // own copy of a rule the two surfaces answer one question differently in the same second. This verb is
+    // read-only, so it never WRITES content ids (wantContentIds=false); it still uses the ones a row carries.
+    auto       acks = rw::quality::readAckRecords( qualityAcksPath( root ) );
+    const auto heal = rw::quality::healIdentity( baseSel.snapshot, acks, ing, g, root, root, /*wantContentIds=*/false );
+
     oc.regs       = rw::quality::computeDelta( ing, g, baseSel.snapshot, root );
 
     // signal-to-noise round: honor the per-finding ack ratchet exactly like the CLI — the acks sidecar is
     // root-qualified (same SIDECAR LOCATION discipline as the baseline), suppression is reported via `acked`.
-    const auto acks = rw::quality::readAckRecords( qualityAcksPath( root ) );
+    rw::quality::countAckRescues( oc.regs, acks, heal.ackRemap, oc.ackedByRename, oc.ackedByContent );
+    oc.renamesAvailable = heal.renames.available;
+    oc.renamesRecorded  = heal.renames.pairsRecorded;
     oc.ackedCount   = rw::quality::applyAckRatchet( oc.regs, acks );
 
     // L2 — same stale-ack disclosure the CLI's --quality-delta reports (see quality.h's computeStaleAcks):
@@ -2558,6 +2574,12 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
                     + ",\"preexisting-worse\":" + std::to_string( oc.regs.size() - newSymbolCount )
                     + ",\"new-symbol\":" + std::to_string( newSymbolCount )
                     + ",\"gating\":" + std::to_string( gatingCount )
+                    // R1 IDENTITY — the CLI root's identity disclosure, spelled in JSON. Present only when
+                    // git could be read at all, exactly like the CLI arm (absent ≠ zero — see the legend).
+                    + ( oc.renamesAvailable ? ( ",\"renames\":" + std::to_string( oc.renamesRecorded )
+                                              + ",\"acked_by_rename\":" + std::to_string( oc.ackedByRename )
+                                              + ",\"acked_by_content\":" + std::to_string( oc.ackedByContent ) )
+                                            : std::string{} )
                     + ",\"at\":" + atJson + ",\"r\":[";
     bool first = true;
     for( const rw::quality::Regression& r : oc.regs )
