@@ -3109,8 +3109,8 @@ not recorded verbatim anywhere in the E6 ledger and is therefore not replayable.
   *.cpp`), taken in count-descending then name-ascending order, top three per corpus, minus any name
   already in (P-a). ugrep offers only two such names and contributes both.
 
-Corpora re-cloned `--filter=blob:none` at the D4-pinned SHAs and **verified by revision count against the
-D4 freeze**: duckdb `19864453` (48632 revs), rocksdb `0e2801ac` (12938), ugrep `550599a6` (985) — all
+Corpora re-cloned blob-filtered (`git clone` with a `blob:none` filter, the D4 freeze's own recipe) at
+the D4-pinned SHAs and **verified by revision count against the D4 freeze**: duckdb `19864453` (48632 revs), rocksdb `0e2801ac` (12938), ugrep `550599a6` (985) — all
 three match to the digit. The forward-declaration census reproduces the D4 report exactly (ClientContext
 85, DatabaseInstance 38, Serializer 24), and every gold resolves to a unique definition site identical to
 the one the ledger names.
