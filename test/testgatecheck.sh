@@ -20,7 +20,11 @@
 # Hand-computed expectations:
 #   --test-gate=src/covered.cpp   → tests={test_covered.cpp}, untested={} → exit 4 (there is a test to run)
 #   --test-gate=src/uncovered.cpp → tests={}, untested={user} → exit 4 (a non-test impacted symbol no test covers)
-#   --test-gate=<no such file>    → changed=0, exit 0 (no change = no obligations)
+#   --test-gate=<no such file>    → REFUSED, exit 1 (2026-08-24: this used to be changed=0 at exit 0 — a
+#                                   silent zero on an unparseable input, the non-negotiable-#3 breach the
+#                                   def-over-decl lane found via --test-gate=da61bac..HEAD; the full refusal
+#                                   surface is testgaterefusecheck.sh's)
+#   bare --test-gate, CLEAN git tree → changed=0, exit 0 (the one honest zero: git ran, found no change)
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/testgatecheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure. Does NOT edit regression.sh.
@@ -76,11 +80,30 @@ C="$( run --test-gate=src/uncovered.cpp )"; CEC="$( rc --test-gate=src/uncovered
     && ok "(c') distinguishes obligations: covered→a test, uncovered→an untested symbol (not a constant)" \
     || no "(c') the two changes produced indistinguishable obligations"
 
-# ── (d) no changes → exit 0 with <test-gate changed="0" ...> ─────────────────────────────────────────
+# ── (d) an unparseable FILES token → REFUSED (exit 1, nothing on stdout) ─────────────────────────────
+# The pre-2026-08-24 contract here — changed="0" at exit 0 — was the defect: "none found" spelled where
+# "cannot parse" was true. Wording/probe arms live in testgaterefusecheck.sh; this pins the flip itself.
 D="$( run --test-gate=zz_no_such_file_xyz.zzz )"; DEC="$( rc --test-gate=zz_no_such_file_xyz.zzz )"
-{ [ "$DEC" = 0 ] && [ "$( attr "$D" changed )" = 0 ] && [ "$( attr "$D" tests )" = 0 ] && [ "$( attr "$D" untested )" = 0 ]; } \
-    && ok '(d) no changes: <test-gate changed="0" tests="0" untested="0">, exit 0' \
-    || no "(d) no-change wrong (exit=$DEC changed=$( attr "$D" changed ) tests=$( attr "$D" tests ) untested=$( attr "$D" untested ))"
+{ [ "$DEC" = 1 ] && [ -z "$D" ]; } \
+    && ok "(d) a no-such-file token REFUSES: exit 1, no report body (never a silent changed=\"0\")" \
+    || no "(d) no-such-file not refused (exit=$DEC, stdout ${#D} bytes) — the silent-zero defect is back"
+
+# ── (d2) the one HONEST zero: a clean git tree under the bare form → changed="0", exit 0 ─────────────
+# "No change = no obligations" needs a vehicle that can still truthfully produce it: git ran and reported
+# zero changed files. (The synthetic corpus above stays git-less on purpose; this arm builds its own repo.)
+if command -v git >/dev/null 2>&1; then
+    G="$TMP/gitrepo"; mkdir -p "$G/src"
+    printf 'int lone() { return 3; }\n' > "$G/src/lone.cpp"
+    git -C "$G" init -q . && git -C "$G" -c user.email=t@t -c user.name=t add src/lone.cpp \
+        && git -C "$G" -c user.email=t@t -c user.name=t commit -qm base
+    D2="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$G" --test-gate --no-cache 2>/dev/null )"
+    D2EC="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$G" --test-gate --no-cache >/dev/null 2>&1; echo $? )"
+    { [ "$D2EC" = 0 ] && [ "$( attr "$D2" changed )" = 0 ] && [ "$( attr "$D2" tests )" = 0 ] && [ "$( attr "$D2" untested )" = 0 ]; } \
+        && ok '(d2) clean tree: <test-gate changed="0" tests="0" untested="0">, exit 0 (the honest zero)' \
+        || no "(d2) clean-tree wrong (exit=$D2EC changed=$( attr "$D2" changed ) tests=$( attr "$D2" tests ) untested=$( attr "$D2" untested ))"
+else
+    printf '  SKIP  (d2) clean-tree honest zero (no git)\n'; D2=""
+fi
 
 # ── (e) determinism (two runs byte-identical) ────────────────────────────────────────────────────────
 [ "$( run --test-gate=src/covered.cpp,src/uncovered.cpp )" = "$( run --test-gate=src/covered.cpp,src/uncovered.cpp )" ] \
@@ -89,7 +112,10 @@ D="$( run --test-gate=zz_no_such_file_xyz.zzz )"; DEC="$( rc --test-gate=zz_no_s
 # ── (f) xml well-formed (every emitted variant) ──────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
     xok=1
-    for X in "$A" "$C" "$D" "$( run --test-gate=src/covered.cpp,src/uncovered.cpp )"; do
+    # "$D" left this list when arm (d) became a refusal (empty stdout is not a document); "$D2" may be
+    # empty only when git is absent, in which case there is nothing to lint.
+    for X in "$A" "$C" "$D2" "$( run --test-gate=src/covered.cpp,src/uncovered.cpp )"; do
+        [ -n "$X" ] || continue
         printf '%s' "$X" | xmllint --noout - 2>/dev/null || xok=0
     done
     [ "$xok" = 1 ] && ok "(f) xml well-formed (all variants)" || no "(f) xml malformed"
