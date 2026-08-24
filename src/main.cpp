@@ -5456,6 +5456,9 @@ struct RefPairDelta
     std::string           attrs;                     // XML:  ` base_ref="…" target_ref="…" churn="unavailable"`
     std::string           jsonAttrs;                 // JSON: the SAME three facts — built beside attrs so the
                                                      // two emitters cannot disclose different things
+    std::string           rangeSpan;                 // R1: "<baseSha>..<targetSha>" — the range the rename
+                                                     // record is read over, against the REAL repo (both trees
+                                                     // here are temp dirs with no history of their own)
 
     const rw::quality::RefTree& target() const noexcept { return sameRef ? baseTree : targetTree; }
 };
@@ -5522,6 +5525,10 @@ std::optional<int> loadRefPairDelta( const std::string& root, std::string_view s
     // reasoning gitstamp::atAttr states for its own hex value.
     out.attrs     = " base_ref=\"" + ref.baseSha + "\" target_ref=\"" + ref.targetSha + "\" churn=\"unavailable\"";
     out.jsonAttrs = ",\"base_ref\":\"" + ref.baseSha + "\",\"target_ref\":\"" + ref.targetSha + "\",\"churn\":\"unavailable\"";
+    // R1: the same two resolved shas as a range, for the rename record. Empty when the target IS the working
+    // tree — `A..` is not a range git will walk, and the working-tree form's own uncommitted+window query is
+    // the right scope there anyway.
+    out.rangeSpan = ref.targetSha.empty() ? std::string{} : ( ref.baseSha + ".." + ref.targetSha );
     return std::nullopt;
 }
 
@@ -5542,6 +5549,12 @@ struct DeltaBasis
     rw::quality::BaselineSelection       baseSel;
     std::vector<rw::quality::Regression> regs;
     std::string                          deltaRoot;   // see above — NOT interchangeable with the repo root
+    // R1 IDENTITY — the ack ledger, plus the healing pre-pass that re-files BOTH sidecars into the identity
+    // the current tree uses (quality::healIdentity). The ledger is read HERE, before computeDelta, because
+    // the healing needs both sidecars at once and has to run before anything reads either: heal the baseline
+    // after the delta is computed and the delta has already been taken against the stale identity.
+    gtl::btree_map<std::string, rw::quality::AckRecord> acks;
+    rw::quality::IdentityHealing                        healing;
 };
 
 // Returns an EXIT CODE when there is nothing to compare against (already reported), nullopt when `out` holds
@@ -5568,8 +5581,16 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
         out.baseSel.snapshot = quality::computeSnapshot( refs.baseTree.ing, refs.baseTree.g, refs.baseTree.root );
         out.baseSel.marker   = "ref-pair";
         out.deltaRoot        = refs.target().root;
-        out.regs             = quality::computeDelta( refs.target().ing, refs.target().g, out.baseSel.snapshot,
-                                                      out.deltaRoot, cfg.excludes, cfg.maxFileBytes );
+        // R1 IDENTITY. The SPAN is what makes this honest here: both trees are materialized OUT of the repo
+        // into temp dirs, so asking them about renames answers "not a git repo" — the renames are recorded in
+        // the REAL repo, over exactly the range this comparison is about. `root` (the repo) supplies the
+        // record; `refs.rangeSpan` scopes it to the pair. Everything else is identical to the working-tree
+        // form, which is the point of having one healIdentity.
+        out.acks    = quality::readAckRecords( quality::acksPath( root ) );
+        out.healing = quality::healIdentity( out.baseSel.snapshot, out.acks, refs.target().ing, refs.target().g,
+                                             out.deltaRoot, root, cfg.qualityAck, refs.rangeSpan );
+        out.regs    = quality::computeDelta( refs.target().ing, refs.target().g, out.baseSel.snapshot,
+                                             out.deltaRoot, cfg.excludes, cfg.maxFileBytes );
         return std::nullopt;
     }
 
@@ -5617,6 +5638,11 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
                           baselineFile.c_str() );
         }
     }
+    // R1 IDENTITY — heal both sidecars into the current tree's identity BEFORE the delta is taken against
+    // them. One root here: the judged tree and the git record are the same directory in this form.
+    out.acks    = quality::readAckRecords( quality::acksPath( root ) );
+    out.healing = quality::healIdentity( out.baseSel.snapshot, out.acks, d.ing, d.g,
+                                         std::string( cfg.rootPath ), root, cfg.qualityAck );
     out.regs = quality::computeDelta( d.ing, d.g, out.baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes );
     return std::nullopt;
 }
@@ -5696,7 +5722,12 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // magnitude survives the filter and reappears. --quality-ack merges the currently-VISIBLE findings
         // into that file instead of printing the report (accepting what previous acks already hid would be
         // a silent blanket ack — only what the agent can see right now is what it can accept).
-        gtl::btree_map<std::string, quality::AckRecord> acks = quality::readAckRecords( acksFile );
+        // R1 IDENTITY: the ledger was read and HEALED inside resolveDeltaBasis (it had to be — the baseline
+        // half of the same healing has to precede computeDelta), so this arm takes the already-current map
+        // rather than re-reading the file and undoing it.
+        gtl::btree_map<std::string, quality::AckRecord>& acks = basis.acks;
+        quality::countAckRescues( regs, acks, basis.healing.ackRemap,
+                                  basis.healing.ackedByRename, basis.healing.ackedByContent );
         const std::size_t ackedCount = quality::applyAckRatchet( regs, acks );
         if( cfg.qualityAck )
         {
@@ -5743,7 +5774,14 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 // new-symbol row can no longer blank-check the gating contract-change row on the same symbol.
                 const std::string   ackKind = quality::ackKindToken( r );
                 quality::AckRecord& rec     = acks[ quality::ackMapKey( ackKind, r.key ) ];
-                rec = quality::AckRecord{ ackKind, r.key, std::max( rec.ackNow, r.now ),
+                // R1 IDENTITY: stamp the finding's SCRUBBED CONTENT ID alongside the key, so this ack can
+                // still be found after a move git records no rename for. Absent (0) for the two clone kinds —
+                // their key is a member-SET hash with no single body behind it — and the row is then written
+                // exactly as it is today. A REFRESH, not a preserve: re-acking a finding re-reads the body, so
+                // the stored cid always describes the code as accepted, never as it was two edits ago.
+                const auto          cidIt   = basis.healing.cids.cidByKey.find( r.key );
+                const std::uint64_t cid     = ( cidIt == basis.healing.cids.cidByKey.end() ) ? 0u : cidIt->second;
+                rec = quality::AckRecord{ ackKind, r.key, std::max( rec.ackNow, r.now ), cid,
                                           cfg.qualityAckReason.empty() ? rec.reason : std::string( cfg.qualityAckReason ) };
             }
             if( ackWritten == 0 && !cfg.qualityAckOnly.empty() )
@@ -5806,6 +5844,12 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         }
         const std::size_t preexistingCount = regs.size() - newSymbolCount;
 
+        // R1 IDENTITY — the disclosure, built ONCE for both emitters (quality::identityDisclosure). An ack
+        // that follows a rename is a claim about identity, and a claim is only honest if the reader can see
+        // what it rested on; building the XML and JSON halves in one place is what keeps the two surfaces
+        // from disclosing different things about the same run.
+        const auto [ identityAttrs, identityJson ] = quality::identityDisclosure( basis.healing );
+
         // P2.5 — one stderr line NAMING the gating finding, in --token-budget's style ("ripwire: --token-budget
         // exceeded: est_tokens=… > budget=…"). stdout is the machine artifact and a caller that only checks
         // `$?` gets a number with no subject; this puts the WHICH on the channel a human reads, without
@@ -5844,9 +5888,10 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             // R-I: the same two shas + the same unmeasurable-kind disclosure the XML root carries, spelled in
             // JSON. Empty for the bare form, so that object stays byte-identical to before.
             std::printf( "{\"baseline\":\"%s\",\"regressions\":%zu,\"minor\":%zu,\"acked\":%zu,\"stale\":%zu,"
-                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"at\":%s%s,\"r\":[",
+                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"at\":%s%s%s,\"r\":[",
                          jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount, staleAcks.size(),
-                         preexistingCount, newSymbolCount, gatingCount, atJsonJ.c_str(), refs.jsonAttrs.c_str() );
+                         preexistingCount, newSymbolCount, gatingCount, atJsonJ.c_str(), refs.jsonAttrs.c_str(),
+                         identityJson.c_str() );
             bool firstR = true;
             for( const quality::Regression& r : regs )
             {
@@ -5942,9 +5987,33 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                      "gating=\"N\" above; new-symbol rows never gate. Clone kinds classify by their member set (a "
                      "group is new-symbol only if EVERY member is new); short-horizon-churn is preexisting by "
                      "construction. exit 0 is NOT a verdict on the new-symbol rows — nothing that existed got "
-                     "worse, but the new debt is yours: read them. LIMIT: origin is canonId identity "
-                     "(path::scope::name), so a RENAMED or MOVED symbol reads as new — a regression carried in "
-                     "with a move classifies new-symbol and will not gate. Descriptive: weigh + fix the real "
+                     "worse, but the new debt is yours: read them. IDENTITY across a rename or a move: a "
+                     "finding is keyed by path::scope::name, which a rename would otherwise destroy, so both "
+                     "the baseline and the .ripwire_quality_acks ledger are re-filed into the CURRENT tree's "
+                     "identity before either is read. Two mechanisms, both exact, neither a similarity "
+                     "heuristic: the rename record git itself kept (read with rename detection and the "
+                     "similarity threshold PINNED in the command, never inherited from the repo's config, and "
+                     "over a fixed COMMIT window rather than a wall-clock one, so the answer is the same "
+                     "everywhere), and equality of a body hash scrubbed of whitespace and of the symbol's own "
+                     "name for a move git recorded no rename for. A body that CHANGED is a different finding "
+                     "and is not matched by either. The header discloses what that rested on, and the names "
+                     "here carry no example value on purpose (the counters are grep-parsed by several gates, "
+                     "so a quoted number in this sentence would be matched ahead of the real one): renames= is "
+                     "how many rename pairs were read, rename_window_commits= how deep the commit window went, "
+                     "acked_by_rename= and acked_by_content= how many of the acked= suppressions each of the "
+                     "two mechanisms is responsible for. Three more appear ONLY when they are true, so an "
+                     "absent one is not a silent no: renames_window_truncated= (history is deeper than the "
+                     "window, older renames were not read), renames_truncated= (the pair cap was hit) and "
+                     "renames_ambiguous= (an ancestor identity two current symbols both claim — refused rather "
+                     "than guessed). All of them are absent entirely when git could not be read at all. "
+                     "ORIGIN reads the re-filed baseline too, so a symbol whose file git recorded a "
+                     "rename for keeps its history and a regression carried in with that rename is judged "
+                     "preexisting-worse and GATES, where it used to slip through as new-symbol. FLOORS, "
+                     "stated because a silence here would read as a guarantee: the two clone kinds key on a "
+                     "member-SET hash and are NOT re-filed, so a clone ack still dies on a rename; a content "
+                     "match needs a content id, which only rows acked by a version that records one carry, and "
+                     "the baseline stores none at all, so ORIGIN follows the rename record but never content; "
+                     "and a move git recorded no rename for still reads as new-symbol. Descriptive: weigh + fix the real "
                      "ones, do not game the number (a wrong abstraction beats a low score). "
                      "stale=\"N\" is a SEPARATE axis, never gating, over the .ripwire_quality_acks ledger: an "
                      "ack whose target no longer applies. Each sa row's why is target-gone (the key names no "
@@ -5972,13 +6041,13 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                      "first.) -->" );
         const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
         // at= anchors this regression list to the commit (+dirty state) it was computed against.
-        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\"%s%s>",
+        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\"%s%s%s>",
                      baseMarker, regs.size(), minorCount, ackedCount, staleAcks.size(), preexistingCount, newSymbolCount, gatingCount,
                      // R-I: at= is OMITTED for the ref-pair form rather than stamped with the working tree's
                      // sha, which would anchor the list to a commit it was not computed from. base_ref= and
                      // target_ref= are the anchor there, and they carry FULL shas because a wave measurement
                      // gets quoted into handoffs where a 9-char prefix is one collision from unverifiable.
-                     refPair ? "" : gitstamp::atAttr( root ).c_str(), refs.attrs.c_str() );
+                     refPair ? "" : gitstamp::atAttr( root ).c_str(), refs.attrs.c_str(), identityAttrs.c_str() );
         for( const quality::Regression& r : regs )
         {
             // duplication carries a member LIST (members=) + token count; the per-symbol was/now kinds

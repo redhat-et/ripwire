@@ -160,27 +160,14 @@ inline void injectFileLevelFallback( SymTreeIndex& out, const IngestResult& ing,
         {
             continue;   // this file already has symbol-level coverage — bodyHashesBySym owns it
         }
-        std::FILE* fp = std::fopen( ing.files[f].c_str(), "rb" );
-        if( !fp )
+        // The SAME canonical whole-file read quality.h's forEachSymbolBody uses (docparse::detail::
+        // readWholeFile) — this used to be a hand-rolled copy of it, and the R1 identity lane's own
+        // --quality-delta reported the two as a 320-token clone the moment the quality-side copy was
+        // extracted. Unreadable or empty degrades the same way in both: contributes nothing, never crashes,
+        // and nothing is hidden because there is no content to hide.
+        if( !docparse::detail::readWholeFile( ing.files[f], bytes ) || bytes.empty() )
         {
-            continue;   // unreadable — degrade, never crash (mirrors quality.h's own fopen degrade)
-        }
-        std::fseek( fp, 0, SEEK_END );
-        const long sz = std::ftell( fp );
-        std::fseek( fp, 0, SEEK_SET );
-        bytes.clear();
-        if( sz > 0 )
-        {
-            bytes.resize( std::size_t( sz ) );
-            if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
-            {
-                bytes.clear();
-            }
-        }
-        std::fclose( fp );
-        if( bytes.empty() )
-        {
-            continue;   // empty or unreadable — nothing to diff, nothing hidden (there is no content)
+            continue;
         }
         const std::string    relFile( relForHash( ing.files[f], root ) );
         const std::uint64_t  key = fnv1a64( relFile );   // file-level key space — see ChangedSym::fileLevel
