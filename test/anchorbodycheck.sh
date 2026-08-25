@@ -40,6 +40,15 @@
 #       --auto-bodies (which is where the body walk lives on that route since the compact round) it still escalates to
 #       several bodies. This is the arm that keeps the rule scoped to what the memo measured.
 #   (6) determinism x3 + xmllint-clean (G4) on every shape above.
+#   (7) THE ANCHOR-RESOLVED ALLOWANCE (docs/EVALS.md, the T3 body-budget round, 2026-08-25). When the
+#       route resolved an anchor, there is no explicit --token-budget, and the candidate set is exactly
+#       ONE definition, that one body is funded at kForAnchorBodyBudgetBytes (22,800 B) instead of the
+#       fixed six-candidate pool. (7)/(7b) prove the mid-sized anchor is now served, alone, from its own
+#       file; (7b2) proves the RAISE did not reopen substitution, which matters because a larger
+#       allowance is exactly the condition under which the original defect fired; (7c) proves an explicit
+#       --token-budget is still a hard ceiling; (7d) proves the raise is BOUNDED (the 36 KB anchor still
+#       refuses, so whole-body-or-nothing survives); (7e) proves a MULTI-candidate anchored bundle gets
+#       no raise at all — the guard that stops this becoming a general per-item budget increase.
 #
 # MUTATION EVIDENCE (red-first, recorded 2026-08-22): against the lane's base binary (origin/main
 # 3702693, pre-fix) arms (1)(1b)(2)(3b) FAIL — that binary answers the oversized-anchor query with the
@@ -47,6 +56,18 @@
 # anchor plus its namesake). (0), (3), (4), (5) and (6) are green on both binaries by construction:
 # (0) is the presence guard, and (3)/(4)/(5)/(6) are the no-regression arms. Reproduce with:
 #     bash test/anchorbodycheck.sh /path/to/base/build/ripwire
+#
+# MUTATION EVIDENCE for the (7) arms (red-first, recorded 2026-08-25): against this lane's base binary
+# (518fe0d, pre-rule) arms (7) and (7b) FAIL — that binary answers --for=widgetMidProbe with
+# bodies="0" reason="budget", because the mid-sized body (~17.1 KB) is above the fixed pool's hard
+# maximum of 13,500 B. (7pre), (7b2), (7c), (7d) and (7e) are green on BOTH binaries by construction:
+# (7pre) is the presence guard and the other three are the bounds, which a pre-rule binary satisfies
+# trivially by never raising anything. That is the point of stating it here rather than leaving the
+# reader to assume five red arms — an arm that cannot fail on the base binary is not evidence the rule
+# works, it is evidence the rule did not overreach, and the two are different claims.
+#   (7e) additionally carries MUTATION evidence against the rule's most likely mis-implementation:
+# with the size()==1 guard removed (candidate set of 2 allowed to take the raise), the first twin body
+# fits 22,800 B and the bundle reports bodies="1" — verified red, then restored.
 #
 # Usage:
 #   bash test/anchorbodycheck.sh                       # uses build/ripwire
@@ -91,6 +112,35 @@ with open( os.path.join( d, "a_src", "small.py" ), "w" ) as fh:
     fh.write( '    """The anchor. Its own body fits the allowance easily."""\n' )
     fh.write( "    return ( n * 3 ) % 97\n" )
 
+# (b2) the MID-SIZED anchor (docs/EVALS.md, the T3 body-budget round): ABOVE the fixed pool a
+#      six-candidate allowance can ever offer (kForPayloadBudgetBytes 7500 + kForAutoBodyBudgetBytes
+#      6000 = 13,500 B even with a zero-byte signature side) and BELOW kForAnchorBodyBudgetBytes
+#      (22,800 B). ~17.1 KB, so ~3.6 KB of clearance under the old ceiling and ~5.7 KB under the new
+#      one — neither margin is close enough for a path-length or corpus-stats wobble to flip it.
+#      This is the ONLY shape that can observe the anchor-resolved allowance; big.py (36,163 B) is
+#      deliberately above BOTH ceilings, which is why arms (0)/(1)/(2) stay green and stay meaningful.
+with open( os.path.join( d, "a_src", "mid.py" ), "w" ) as fh:
+    fh.write( "def widgetMidProbe( n ):\n" )
+    fh.write( '    """The anchor. Larger than the fixed pool, smaller than the anchor-resolved allowance."""\n' )
+    fh.write( "    total = 0\n" )
+    for i in range( 200 ):
+        fh.write( "    total += ( n * %d ) %% 97          # a line of the mid-sized anchor body, row %03d\n" % ( i, i ) )
+    fh.write( "    return total\n" )
+
+# (b3) TWO mid-sized definitions sharing ONE name in ONE file — the multi-candidate anchor. Both
+#      survive restrictBodiesToRouteAnchor (same name, same defining file), so the candidate set is 2
+#      and the anchor-resolved raise must NOT apply: an anchored bundle serving a SET is funded by the
+#      fixed pool, which holds neither of these. An implementation that relaxed the size()==1 guard
+#      would raise the allowance to 22,800 B, the first body (~17.1 KB) would fit, and arm (7e) goes red.
+with open( os.path.join( d, "a_src", "twin.py" ), "w" ) as fh:
+    for which in ( "first", "second" ):
+        fh.write( "def widgetTwinProbe( n ):\n" )
+        fh.write( '    """The %s of two same-named mid-sized definitions in one file."""\n' % which )
+        fh.write( "    total = 0\n" )
+        for i in range( 200 ):
+            fh.write( "    total += ( n * %d ) %% 97          # the %s twin body, row %03d\n" % ( i, which, i ) )
+        fh.write( "    return total\n\n" )
+
 # (c) an anchor with NO namesake anywhere — the inertness arm.
 with open( os.path.join( d, "a_src", "solo.py" ), "w" ) as fh:
     fh.write( "def widgetSoloProbe( n ):\n" )
@@ -117,7 +167,12 @@ with open( os.path.join( d, "z_notes.md" ), "w" ) as fh:
               "ZZBYSTANDERPROSE — a short note that merely MENTIONS the anchor's name.\n"
               "It is not the code the query asked for.\n\n"
               "## widgetFitProbe\n\n"
-              "ZZBYSTANDERPROSE — the same shape, beside an anchor that DOES fit.\n" )
+              "ZZBYSTANDERPROSE — the same shape, beside an anchor that DOES fit.\n\n"
+              "## widgetMidProbe\n\n"
+              "ZZBYSTANDERPROSE — the same shape again, beside the anchor whose body the "
+              "anchor-resolved allowance newly funds. A RAISED allowance is exactly the "
+              "condition under which the old substitution defect used to fire, so this "
+              "bystander is what arm (7b) proves is still refused.\n" )
 PY
 
 rw(){ "$BIN" "$SB" --no-cache "$@" 2>/dev/null; }
@@ -127,6 +182,9 @@ rootbodies(){ printf '%s' "$1" | grep -o 'bundle="auto" bodies="[0-9]*"' | head 
 BIG="$( rw --for=widgetAnchorProbe )"
 FIT="$( rw --for=widgetFitProbe )"
 SOLO="$( rw --for=widgetSoloProbe )"
+MID="$( rw --for=widgetMidProbe )"                        # the anchor-resolved allowance's own shape
+MIDCAP="$( rw --for=widgetMidProbe --token-budget=6000 )" # …with an explicit ceiling: stays hard
+TWIN="$( rw --for=widgetTwinProbe )"                      # multi-candidate anchor: no raise
 # COMPACT conceptual serving (docs/EVALS.md, the T3 route-narrowing round) moved the rank-first BODY
 # walk on this route behind --auto-bodies. That flag is where arm (5b)'s claim now lives: this gate is
 # about the anchor-only rule not LEAKING past name-exact routes, and the walk it must not have shrunk is
@@ -204,10 +262,39 @@ printf '%s' "$CONC" | grep -q 'anchors: ' \
     || no "(5b) the conceptual bundle collapsed to $( bodycount "$CONC" ) body — the rule leaked past name-exact routes"
 
 # ═══════════════════════════════════════════════════════════════════════════
+echo "=== (7) the ANCHOR-RESOLVED allowance: one certain answer is funded at a one-body rate ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# Registered in docs/EVALS.md, "The anchor-resolved body allowance — T3 body-budget round".
+# (7) and (7b) are RED on any binary built before that rule; (7c), (7d) and (7e) are the bounds
+# that keep the raise from becoming a general budget increase, and (7e) is red under the one
+# implementation mistake the rule is most likely to be written with.
+printf '%s' "$MID" | grep -q 'anchors: widgetMidProbe(' \
+    && ok "(7pre) presence: the mid-sized query routes name-exact and names its anchor" \
+    || no "(7pre) no anchors: clause — the rule is out of scope for this query, so (7)..(7c) prove nothing"
+printf '%s' "$MID" | grep -q '<b t="fn" [^>]*p="a_src/mid\.py" n="widgetMidProbe"><!\[CDATA\[' \
+    && ok "(7) the mid-sized anchor's own body is served whole, from its own file" \
+    || no "(7) the mid-sized anchor is still dropped over budget — the anchor-resolved allowance is not in effect"
+{ [ "$( bodycount "$MID" )" = "1" ] && [ "$( rootbodies "$MID" )" = "1" ]; } \
+    && ok "(7b) exactly one body, the anchor's — the raise funded the answer, not a set" \
+    || no "(7b) expected 1 body, got $( bodycount "$MID" ) (root says bodies=\"$( rootbodies "$MID" )\")"
+printf '%s' "$MID" | grep -q 'ZZBYSTANDERPROSE' \
+    && no "(7b2) the bystander's prose rode in on the RAISED allowance — substitution reopened at the new ceiling" \
+    || ok "(7b2) no bystander prose in the newly-funded bundle"
+printf '%s' "$MIDCAP" | grep -q 'bundle="auto" bodies="0" reason="budget"' \
+    && ok "(7c) an explicit --token-budget stays a HARD ceiling — the raise does not apply to it" \
+    || no "(7c) the raise leaked into the explicit --token-budget regime (root: $( rootbodies "$MIDCAP" ) bodies)"
+{ [ "$( bodycount "$BIG" )" = "0" ] && printf '%s' "$BIG" | grep -q '<!-- body omitted (over budget): widgetAnchorProbe -->'; } \
+    && ok "(7d) the oversized anchor STILL refuses at the raised ceiling — whole-body-or-nothing survives, bounded" \
+    || no "(7d) the raise is unbounded: the 36 KB anchor now fits, so the allowance is no longer a ceiling"
+{ [ "$( bodycount "$TWIN" )" = "0" ] && printf '%s' "$TWIN" | grep -q 'bundle="auto" bodies="0" reason="budget"'; } \
+    && ok "(7e) a MULTI-candidate anchor gets no raise — an anchored SET is still funded by the fixed pool" \
+    || no "(7e) the raise reached a $( rootbodies "$TWIN" )-body multi-candidate bundle — the size()==1 guard is missing or relaxed"
+
+# ═══════════════════════════════════════════════════════════════════════════
 echo "=== (6) determinism x3 and well-formedness on every shape above ==="
 # ═══════════════════════════════════════════════════════════════════════════
 det=1
-for Q in widgetAnchorProbe widgetFitProbe widgetSoloProbe; do
+for Q in widgetAnchorProbe widgetFitProbe widgetSoloProbe widgetMidProbe widgetTwinProbe; do
     rw --for="$Q" >"$TMP/d1"; rw --for="$Q" >"$TMP/d2"; rw --for="$Q" >"$TMP/d3"
     { diff -q "$TMP/d1" "$TMP/d2" >/dev/null && diff -q "$TMP/d2" "$TMP/d3" >/dev/null; } || { echo "    nondeterministic: $Q"; det=0; }
 done
@@ -215,7 +302,7 @@ done
 
 if command -v xmllint >/dev/null 2>&1; then
     lint=1
-    for V in BIG FIT SOLO CONC; do
+    for V in BIG FIT SOLO CONC MID MIDCAP TWIN; do
         eval "printf '%s' \"\$$V\"" >"$TMP/lint.xml"
         xmllint --noout "$TMP/lint.xml" 2>/dev/null || { echo "    malformed: $V"; lint=0; }
     done
