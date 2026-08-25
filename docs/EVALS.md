@@ -3671,6 +3671,97 @@ differently, under a comment claiming they "share `lexicalScores`". That is its 
 own eval; it is out of this round's one-mechanism scope, and it is why MCP `memory_recall` appears above as
 an invariance CONTROL rather than as a subject.
 
+### The result — EXACT invariance, at the registered target (2026-08-25)
+
+**Verdict: SHIP.** The registered band was EXACT invariance, and exact invariance is what the fix reaches —
+all three absolute-root comparisons go to `0 / 0 / 0`, with the relative-root oracle unmoved throughout.
+
+| comparison | order | top-K | score |
+| --- | ---: | ---: | ---: |
+| **A vs B** — absolute root, neutral +90-char depth | 5 → **0** / 42 | 0 → **0** / 42 | 42 → **0** / 42 |
+| **A vs P** — absolute root, adversarial +68-char depth | 11 → **0** / 42 | 5 → **0** / 42 | 42 → **0** / 42 |
+| **A vs C** — absolute vs relative spelling | 3 → **0** / 42 | 1 → **0** / 42 | 42 → **0** / 42 |
+| **C vs D** — the oracle's own flatness control | 0 → 0 / 42 | 0 → 0 / 42 | 0 → 0 / 42 |
+
+`test/recallrankdepthcheck.sh`: **15 of 21 arms FAIL** against a clean build of `518fe0d` (ARMs 1, 2 and 3
+red; ARM 0 liveness and all four ARM 4 path-field tripwires green — the exact shape the registration
+predicts of a pre-fix binary), **21 of 21 PASS** at this head, and ALL PASS again under `asan/ripwire`.
+
+**Every registered guard is unmoved, and most of them by a stronger statement than "in band".**
+
+| Guard | Floor / ceiling | At `518fe0d` | At head |
+| --- | ---: | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% | 2.4% / 0.0% / 0.0% |
+| `run_r3diff.py` ranking (n=32) | near-all ties | — | **32 ties, 0 wins, 0 losses, net +0** |
+| `run_r3diff.py` recall (n=42) | near-all ties | — | **42 ties, 0 wins, 0 losses, net +0** |
+
+The whole `--eval-skills` report is **byte-identical** base vs head, which subsumes all four routing numbers
+and both judged-only arms — a stronger claim than the digits agreeing. The recall and ranking lanes are
+digit-identical for the registered reason: `run_recalleval.py` invokes `ripwire .` with `cwd` = the corpus
+root, so the scored string never contained a checkout prefix to remove.
+
+**The registered controls, byte-compared base vs head at an ABSOLUTE root** — the only spelling under which
+a leak could show — with the sizes recorded so no row is an empty-vs-empty pass:
+
+| control | bytes | verdict |
+| --- | ---: | --- |
+| default map | 21998 | identical |
+| `--for` conceptual / candidates / name-exact | 8391 / 2922 / 13387 | identical |
+| `--pack-task` / `--exemplar` / `--pack-signatures` | 9591 / 1650 / 30668 | identical |
+| `--json` / `--metrics` / `--handoff` | 22794 / 45215 / 1445 | identical |
+| MCP `memory_recall` / MCP `for` | 685 / 668 | identical |
+| `--recall` at an absolute root | 690405 | **DIFFERS — the subject** |
+
+Twelve of thirteen identical and exactly one changed, and the one that changed is the verb under test. MCP
+`memory_recall` being byte-identical is also the positive evidence for the divergence recorded above: it
+never ran the pass that moved.
+
+**Quality.** `--quality-delta=518fe0d..HEAD`: **7 findings, 4 gating → gating="0", acked="4"**, three
+non-gating rows left visible. Acked with `--ack-only=gating`, never bare `--quality-ack`. All four ARE the
+change: 2 × api-surface contract-change (the `+1` root parameter on `lexicalScores` /
+`lexicalScoresTiered` — the scorer cannot relativize against a root it was never told) and 2 × verbosity
+(that parameter's rationale in comments, already tightened once *because* the tool flagged them).
+
+**One finding was NOT acked, because the tool was right and the fix was cheap.** The first run reported
+`complexity runTargetedViews 42 → 44`, from a ternary guarding `rootPrefixOf` against an empty root. But
+`rootPrefixOf("")` already returns `""` — its trailing-slash loop needs `size() > 1` — so the branch could
+not change an outcome. Removed; the finding is gone rather than acked. The three surviving non-gating rows
+are two `params` minors (the same `+1`, counted on the other axis) and one `dead-code` on the new
+instrument's `Cmp.__init__`, a Python constructor no caller names — a resolver artifact, `origin="new-symbol"`,
+never gating, and recorded rather than suppressed.
+
+**Gate battery**, on a FROZEN tree: `gates=464 pass=461 skip=2 fail=1 wall=480.6s`. Gate count 455 → **456**
+(`test/recallrankdepthcheck.sh`), all three `docs/EVALS.md` pins moved together. The two skips are the
+tree's standing ones (`namingcalibrationcheck`, live judgement withheld by design; `argvdiffcheck`, no
+`RIPWIRE_BASE`).
+
+**The one failure is `editcheckcheck`'s 100 ms warm timing budget, and it is environmental.** Two
+independent reasons, the structural one first: `--edit-check` never executes the changed code at all — pass
+1.5 runs only when `pathFieldDefaultW > 0`, and `--recall` is its only nonzero caller — so no control-flow
+path connects this change to that measurement. And the A/B says the same: a clean `518fe0d` build misses the
+same budget on this machine (111/110 ms, then 139/209 ms), while this head measured **85 ms and PASSED**
+when the machine was quiet and 136/149 ms when it was not. The spread on ONE binary is 85–310 ms, which
+swamps any difference between the two. This matches the standing note on this gate across several lanes.
+
+**One re-derivation, kept as its own commit.** The fix added 11 lines to `src/main.cpp` above two rows the
+README pins verbatim, so `churnRankedGraph` moved `13388 → 13399` and `runDefaultMap` `13503 → 13514`.
+`readmeexamplecheck.sh` caught it; the numbers were re-derived from this tree's own binary rather than
+hand-adjusted.
+
+`--test-gate` on the changed files names one test (`test/adaptivecutshapecheck.sh` — ALL PASS) and a
+20-symbol untested blast radius. Those 20 are the `lexicalScores` consumers, and every one of them is
+covered empirically above rather than by the call graph: they are the byte-identical control rows, the two
+frozen `r3diff` sets and the two eval harnesses.
+
+G1: the `asan/` build (ASan + UBSan + integer + LSan with the committed suppressions) is clean — `rc=0`,
+empty stderr — on `--recall` at an absolute root, on `--for`, on a whole-repo map, and across the whole of
+`test/recallrankdepthcheck.sh`. Determinism ×3 byte-identical (21940 B) and `xmllint --noout` clean.
+
 ---
 
 ## 5. Token and output economy
