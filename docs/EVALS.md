@@ -6338,3 +6338,92 @@ N11/N12 carry the bare in-class declarations at `input.h:335`/`:333` (which is w
 line-pinned triple). N04, N06 and N07 remain unserved for the three reasons already recorded — an
 already-body-carrying out-of-line constructor, a markdown-section claimant, and an out-of-line constructor
 respectively — and none of them is a budget or a candidate-head question.
+
+## The scope-less quality-key fold (2026-08-25) — PRE-REGISTERED, before any fix code
+
+**What this registers.** The 2026-08-24 identity round (`6cd5ba5`) closed the rename/move case and filed
+one residual it deliberately did not absorb: *"canonicalId degrades to a BARE NAME for scope-less symbols,
+so the canonId key space is not path-qualified for them and folds them across files — the same class of
+bug W1-S2 fixed for churn's key space, still open for the other seven kinds."* This section registers the
+fix for that residual, and corrects two things about how it has been described.
+
+**Correction 1 — "seven kinds" is seven QUALITY kinds, not seven symbol kinds.** There is ONE defect:
+`resolve.h`'s `canonicalId` returns the bare name when `scope` is empty. Seven of `--quality-delta`'s ten
+finding kinds inherit it because seven key spaces derive from it — `ccx` (complexity), `loc` (verbosity),
+`nest` (nesting), `params`, `mask` (error-masking), `dead` (dead-code), `api` (api-surface). The other
+three are already elsewhere: short-horizon-churn moved to `pathQualifiedKey` in `d593de3` (W1-S2), and the
+two clone kinds key on a member-set hash. 7 + 1 + 2 = 10, and `--quality-baseline` emits exactly those
+spaces (`defs` is an eighth canonId-keyed space, but it is internal overload cardinality, never a
+reported kind).
+
+**Correction 2 — the affected ack count is 270, not "~300".** Measured at this lane's base `7a42a67`
+against the merged 476-row ledger, not carried from the pre-merge investigation.
+
+**The mechanism, stated so it can be wrong.** `quality.h`'s `computeSnapshot` and `computeDelta` both key
+on `fnv1a64( baselineCanonId( ing, i, root ) )`. For a scope-less symbol `baselineCanonId` is the bare
+name, so the key is `fnv1a64(name)` — **path-independent**. Every scope-less `ok()` in the tree is one
+identity, and `perSymbolKind` aggregates the fold with `max()`, so the reported magnitude belongs to
+whichever file's symbol is largest.
+
+Measured at `7a42a67` (1,368 files, 11,811 symbols), via the default map's `id=` attribute, which
+`serialize.h:1771` emits under exactly `if( canon != s.name )` — so absent `id=` is an exact scope-less
+discriminator, not a heuristic:
+
+| | rows | distinct canonIds | identities lost to the fold |
+| --- | --- | --- | --- |
+| scope-less | 6,418 (56.4%) | 3,845 | **2,573** |
+| scoped | 4,953 | 4,898 | 55 (legitimate same-file overloads) |
+| total | 11,371 | **8,743** | |
+
+Method validation: that 8,743 is derived out-of-band (a parse of the shipped binary's own map) and equals
+the binary's own `ccx` key-space cardinality exactly. The path-qualified space (`bodyq`) holds 11,311.
+
+**What the fix is — and what it deliberately is NOT.** It does **not** touch `canonicalId`. Path-qualifying
+`canonicalId` itself was measured and rejected: it inflates the default map by **+293,886 bytes (+26.4%,
+~73K tokens)** on this repo, because `id=` is currently omitted for all 6,418 scope-less rows — a direct
+G4 breach — and `canonicalId` has 67 call sites across 11 files (resolver identity, selector grammar, MCP
+handle source, notes key, merge-scout key). It would also SPLIT 21 correct folds: in `src/` there are 23
+colliding scope-less names, and 21 are `extern "C" tree_sitter_X` declarations of the *same* C function
+declared in both `ingest.cpp` and `main.cpp`. Of the remaining two, `it` is a local variable declaration
+mis-extracted as a function via the most-vexing-parse ambiguity, and `main` (main.cpp vs tsprobe.cpp) is
+the single true collision in shipping source.
+
+The fix instead moves the seven kinds' key space onto the **`pathQualifiedKey` that already exists**
+(`quality.h:381`), finishing the pattern `d593de3` started for churn and `mcpindex::stableHandleId`
+started for MCP handles, rather than opening a third scheme. `canonicalId` answers *"which entity is
+this?"* — and for the 21 declarations "one entity" is the correct answer, which is why that fold must
+survive. The quality key must answer *"which piece of source is this?"*. The bug is that quality borrowed
+the entity key to ask a source question.
+
+**The migration, which is the actual risk.** All 270 canonId-keyed acks change key, because
+`fnv1a64("p::s::n")` ≠ `pathQualifiedKey("p\0s\0n")` — different bytes. That is more rows than the 79
+that would move under a naive path-qualification, and it is nonetheless the cheaper migration, because
+the rule is computable exactly: for every symbol in the tree, both the old key and the new key are pure
+functions of `(path, scope, name)`. The replay reuses the identity round's existing alias machinery
+(`IdentityAliases` / `remapAckIdentity`) rather than adding a parallel mechanism — a scheme migration is
+an old-key → new-key map, which is exactly what that machinery already consumes.
+
+The one genuine hazard is disclosed rather than papered over: **the old side is many-to-one.** A folded
+scope-less name has one old key and N new keys, so the replay cannot know which file's symbol the ack
+meant. Those refuse and are counted, never guessed — the same floors-not-guesses rule the rename route's
+ambiguous-ancestor refusal already applies.
+
+**REGISTERED BAND.** Measured at `7a42a67`, on this repo's own 476-row ledger:
+
+| metric | band | why this number |
+| --- | --- | --- |
+| `ACKS-PRESERVED` (re-filed by replay) | **exactly 257** | 184 scoped (always 1:1) + 73 unambiguous scope-less |
+| `ACKS-AMBIGUOUS` (refused, each named) | **exactly 6** | `complexity main`, `verbosity main`, `dead-code it`, `dead-code any10`, `dead-code strict10`, `params run_one` |
+| `ACKS-ORPHANED` (already stale, each named) | **exactly 7** | complexity 3 + verbosity 4; dead before this round, resolve rate 97.4% |
+| `ACKS-SILENTLY-DROPPED` | **0 — hard gate** | the failure mode this round exists to prevent |
+| default-map bytes vs `7a42a67` | **0, byte-identical — hard gate** | proves `canonicalId` was not touched; the G4 protection |
+| `FOLD-ELIMINATED` (scope-less quality identities) | **3,845 → 6,418 (+2,573)** | deterministic, not statistical — a different number means the key rule is wrong |
+| guard lattice (routing, recall, ranking, pollution, r3diff) | **all unchanged** | the change cannot reach retrieval; the byte-identical map gate proves the confinement mechanically |
+
+257 + 6 + 7 = 270. Any row unaccounted for by those three buckets is a silent drop and fails the gate.
+
+**Out of scope, stated rather than quietly skipped.** The two CLONE kinds keep their member-set hash, and
+their member ids keep using `baselineCanonId` — so a clone group over scope-less members still folds. That
+is the same floor the identity round recorded for clone acks, unchanged here and not fixed by guessing.
+The `it` extraction defect (a local variable indexed as a function) is an extraction question, not a
+keying one, and is untouched.
