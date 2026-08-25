@@ -2985,10 +2985,18 @@ struct ForAutoBodiesResult
 // one-line stub, a re-export shim, a changelog entry that merely mentions the class). FILE alone is not
 // enough either: an unrelated symbol in the anchor's own file is not what the query asked for.
 //
-// The file matched is NameAnchor::fileId — the FIRST definition of that name in NodeId order, which is
-// exactly the definition routeAnchorEvidence prints the path of. So the rule follows the header's own
-// disclosed choice rather than inventing a second one; when a name has several definitions the reason
-// already says so with its "+N".
+// The file matched is NameAnchor::fileId — where the name is DEFINED, which is exactly the definition
+// routeAnchorEvidence prints the path of. So the rule follows the header's own disclosed choice rather
+// than inventing a second one; when a name has several definitions the reason already says so with its
+// "+N".
+//
+// WHICH definition that is, is decided by lexical.h's noteWholeNameDef, and this narrowing is the reason
+// the answer matters. It was "the first in NodeId order", i.e. path order, and on a header-heavy C++ tree
+// that is a forward declaration — so this function faithfully restricted the bodies to the DECLARATION's
+// file, filtered out the definition the ranking had just put at p=1, and served the caller the text of
+// `class X;`. Since 2026-08-25 the claim goes to the first BODY-CARRYING definition, and the two halves of
+// a name-exact bundle finally name the same symbol. Nothing here changed to achieve that: the narrowing
+// was never the defect, the choice it narrows TO was.
 bool isRouteAnchorSymbol( const rw::IngestResult& ing, rw::NodeId sid, const std::vector<rw::RouteAnchorDef>& anchorDefs )
 {
     const rw::Symbol& s     = ing.symbols[sid];

@@ -1237,8 +1237,9 @@ enum class LexMode { SubtokenBody, NameExact };
 struct RouteAnchorDef
 {
     std::string   lowerName;          // routeLower of the anchoring word == routeLower of the symbol's name
-    std::uint32_t fileId    = 0;      // NameAnchor::fileId — the FIRST definition of that name in NodeId order,
-                                      // i.e. the same one routeAnchorEvidence prints the path of
+    std::uint32_t fileId    = 0;      // NameAnchor::fileId — where the name is DEFINED (the first body-carrying
+                                      // definition in NodeId order; see noteWholeNameDef), i.e. the same one
+                                      // routeAnchorEvidence prints the path of
     std::uint32_t extraDefs = 0;      // further definitions sharing the name — the "+N" the reason discloses
 };
 
@@ -1283,13 +1284,22 @@ inline bool isRouteStopword( std::string_view w ) noexcept
 // DISCLOSURE ONLY: not one byte of the decision moved, and test/routecheck.sh (f3) pins that as a battery.
 struct NameAnchor
 {
-    std::uint32_t fileId    = 0;     // the FIRST definition of this name in NodeId order (deterministic)
-    std::uint32_t extraDefs = 0;     // how many further definitions share it — the anchor's ambiguity, disclosed
+    std::uint32_t fileId    = 0;     // where this name is DEFINED — the first BODY-CARRYING definition in NodeId
+                                     // order, falling back to the first definition of any kind when no definition
+                                     // of the name carries a body (see noteWholeNameDef for why, and for the
+                                     // measured defect the preference closes). Deterministic either way.
+    std::uint32_t extraDefs = 0;     // how many further definitions share it — the anchor's ambiguity, disclosed.
+                                     // A COUNT, not a choice: it is the same number whichever definition holds
+                                     // fileId, and the definition-preference above must never move it.
     std::uint32_t carriers  = 0;     // symbols whose NAME contains this token as a SUBTOKEN — the token's corpus
                                      // commonness ("split" carries in SplitChunksPlugin, splitChunks, …), measured
                                      // from THIS corpus rather than guessed from a per-language stdlib list
     bool          wholeName = false; // some symbol's whole lowercased name equals this key; carrier-only entries
                                      // (a subtoken that names nothing) must NOT satisfy the whole-name membership test
+    bool          bodyDef   = false; // does the symbol currently holding fileId carry a body? Private to the claim
+                                     // rule below — nothing outside noteWholeNameDef reads it. It exists so the
+                                     // walk can stay ONE pass: without it, "prefer a definition" would need either
+                                     // a second pass or a re-lookup of the incumbent symbol.
 };
 
 // One anchor's path, shortened for a header that rides on every routed run. The leading "./" goes, and a
@@ -1420,14 +1430,43 @@ inline std::string routeLower( std::string_view w )
 // corpus contain the token ("split" in webpack carries in SplitChunksPlugin, splitChunks, …). Entries a
 // subtoken creates that no whole name ever claims stay wholeName=false, and both membership probes (the
 // route loop and routeAnchorEvidence) test that flag — a carrier-only entry must never read as "this word
-// names a symbol". Counts are order-independent sums and fileId still binds to the FIRST definition in
-// NodeId order, so the index stays a deterministic pure function of the corpus.
-// one symbol's WHOLE lowercased name enters (or upgrades) its entry: first definition claims fileId (NodeId
-// order — deterministic), later definitions count into extraDefs, and a carrier-only entry created earlier
-// by some other name's subtoken is upgraded rather than shadowed.
+// names a symbol". Counts are order-independent sums, so the index stays a deterministic pure function of
+// the corpus.
+//
+// ── DEFINITION OVER DECLARATION, AT THE ANCHOR (registered docs/EVALS.md §4, 2026-08-25) ──────────────
+//
+// `fileId` used to bind to the FIRST definition of the name in NodeId order, full stop — and NodeId order
+// is path order, so on a header-heavy C++ tree it bound to whichever forward declaration happened to sort
+// first. That is the SAME defect applyDefOverDeclTiebreak fixes on the ranked side, at a second site, and
+// it cost the whole of that round's win: six golds moved to p=1 in the `<d>` rows and NOT ONE reached
+// `<bodies>`, because the auto-body allowance narrows its candidates to the anchor's file
+// (main.cpp restrictBodiesToRouteAnchor, which is correct and is the T3 substitution round's own fix). The
+// declaration's file was the anchor, so the definition — ranked first, sitting right there — was filtered
+// out and the caller was served the declaration's own text under the heading of an answer. Measured on
+// duckdb: `--for="ClientContext"` ranked src/include/duckdb/main/client_context.hpp:65 first and served
+// the body of `class ClientContext;` in extension/parquet/include/geo_parquet.hpp.
+//
+// So the claim passes to the first BODY-CARRYING definition in NodeId order, using the house bodyless
+// predicate shared with graph.h's decl/def collapse, arch.h's pure-interface detection and the ranked-side
+// tiebreak: `endByte > sigEndByte`. Three things about the shape are load-bearing:
+//
+//   1. it is a PREFERENCE, not a filter. A name no definition gives a body to — a type this corpus only
+//      ever forward-declares — keeps the first-in-NodeId anchor it always had. There is no case in which
+//      this rule leaves a name without an anchor.
+//   2. it writes `fileId` and `bodyDef` and NOTHING ELSE. `wholeName`, `extraDefs` and `carriers` are
+//      untouched, and those three are the entire input to the ROUTE decision and to the anchor-plausibility
+//      bounds. No query can change route through this code, and no plausibility verdict can move — which
+//      is a stronger statement than "the routing floors held" and is checkable by reading the diff.
+//   3. ties inside the preference break on NodeId order exactly as before, so the choice stays a
+//      deterministic pure function of the corpus and the one-pass walk stays one pass.
+//
+// one symbol's WHOLE lowercased name enters (or upgrades) its entry: the first definition claims fileId,
+// the first body-carrying one TAKES it, later definitions count into extraDefs either way, and a
+// carrier-only entry created earlier by some other name's subtoken is upgraded rather than shadowed.
 inline void noteWholeNameDef( HashMap<std::string, NameAnchor>& names, const Symbol& s )
 {
-    const auto [ at, inserted ] = names.try_emplace( routeLower( s.name ), NameAnchor{ s.fileId, 0u, 0u, true } );
+    const bool hasBody          = s.endByte > s.sigEndByte;
+    const auto [ at, inserted ] = names.try_emplace( routeLower( s.name ), NameAnchor{ s.fileId, 0u, 0u, true, hasBody } );
     if( inserted )
     {
         return;
@@ -1436,10 +1475,14 @@ inline void noteWholeNameDef( HashMap<std::string, NameAnchor>& names, const Sym
     {
         at->second.wholeName = true;                   // a carrier-only entry meets its first DEFINITION — claim it
         at->second.fileId    = s.fileId;
+        at->second.bodyDef   = hasBody;
+        return;
     }
-    else
+    ++at->second.extraDefs;                            // the ambiguity count is the same whoever holds the claim
+    if( hasBody && !at->second.bodyDef )
     {
-        ++at->second.extraDefs;
+        at->second.fileId  = s.fileId;                 // the first body-carrying definition takes the claim from a
+        at->second.bodyDef = true;                     // bodyless incumbent, and only ever from a bodyless one
     }
 }
 
