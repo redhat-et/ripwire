@@ -5670,3 +5670,87 @@ lattice as both rounds above: skill routing (split=test/dev), judged routing, re
 pollution, `run_r3diff.py` on the two frozen sets, determinism, `xmllint`, the full gate battery, G1. This
 diff touches `main.cpp` only (no `kParserVer` bump — it is not an extraction change), so the blast radius
 is smaller in kind than item B's, but the SAME lattice is re-run rather than assumed clean.
+
+---
+
+**Verdict: SHIP.** N08 flips **NO → YES** — rocksdb's `--for="Slice"` now serves `include/rocksdb/slice.h`'s
+own class definition (and five more anchor-file candidates) where it served nothing before. The reorder
+is **not N08-specific**, exactly the open question this registration named rather than pre-answered: N02,
+N06, N10 and N12 also gain served bodies from the same crowding pattern, at varying severity. Every
+registered invariance guarantee holds without exception on the full twelve-probe set: `<sigs>` byte-
+identical on all twelve, every disclosed anchor byte-identical on all twelve, and every newly-served body
+on every moved probe belongs to that probe's own, already-correctly-resolved anchor file — confirmed by
+inspecting content, not assumed from the count. Every registered floor reproduces to the digit, both
+frozen `r3diff` sets are 74/74 ties, and G1 is clean including the exact N08 path and three of the other
+four probes that moved.
+
+**Provenance.** Branch `lane/candhead-ugrep`, same worktree, stacked on item B's already-landed
+`3715ca8`. Commits: `8e21380` (registration, result-free) → `8885183` (red gate, verified RED against a
+binary built from `3715ca8` — item B alone, item A absent) → `86d7956` (the fix) → `c3a7d64` (a
+complexity-reducing refactor `--quality-delta` itself called for — `computeAutoBodyCandidateIds` extracted
+out of `buildForAutoBodies`, no behavior change) → `6f16b83` (a fixture rename: the gate's original
+`Widget` symbol collided with this repo's own dozen pre-existing, unrelated `Widget` fixtures on
+`--quality-delta`'s documented bare-name api-surface key — traced to `src/quality.h`'s §P13.4 note, not a
+real regression, fixed by renaming to `Frobnicator` rather than suppressing with an ack) → `8a46946` (a
+`README.md` `--callers` example re-pin the first full battery run on this diff caught, the same drift
+class the anchor-body round hit for the same reason — new lines above `churnRankedGraph`/`runDefaultMap`
+shifted both by 40).
+
+**Result — the twelve-probe set, base (a binary built from `3715ca8`, item B landed, item A absent) vs.
+this lane's final head.**
+
+| id | corpus | query | `<sigs>` | anchor | bodies served, base → head |
+|---|---|---|---|---|---:|
+| N01 | DD | `ClientContext` | byte-identical | unchanged | 0 → 0 (unreachable — T3 budget miss, as registered) |
+| N02 | DD | `DatabaseInstance` | byte-identical | unchanged | **1 → 3** |
+| N03 | DD | `Serializer` | byte-identical | unchanged | 1 → 1 |
+| N04 | DD | `TableCatalogEntry` | byte-identical | unchanged | 1 → 1 (inert-branch control, as registered) |
+| N05 | DD | `Deserializer` | byte-identical | unchanged | 0 → 0 (unreachable — T3 budget miss, as registered) |
+| N06 | DD | `Catalog` | byte-identical | unchanged | **0 → 1** |
+| N07 | RD | `ColumnFamilyData` | byte-identical | unchanged | 1 → 1 (inert-branch control, as registered) |
+| N08 | RD | `Slice` | byte-identical | unchanged | **0 → 6 — THE TARGET** |
+| N09 | RD | `SystemClock` | byte-identical | unchanged | 1 → 1 |
+| N10 | RD | `Logger` | byte-identical | unchanged | **2 → 4** |
+| N11 | UG | `dos_streambuf` | byte-identical | unchanged | 6 → 6 (already at the cap via item B alone) |
+| N12 | UG | `streambuf` | byte-identical | unchanged | **4 → 6** |
+
+**Every moved body traced to its content, not just its count.** N02 (`DatabaseInstance`) gains a second
+constructor from `database.hpp`, the SAME anchor file. N06 (`Catalog`) gains a `sec` body from
+`src/README.md`, the SAME anchor file (a markdown section is what this anchor always was). N10 (`Logger`)
+gains a second `cls` definition (a second, genuinely different `Logger` declaration inside
+`include/rocksdb/env.h`) and a third constructor — all `env.h`, the SAME anchor file; one of the four is
+itself a bare forward declaration (`class Logger;`), a pre-existing, disclosed characteristic named below,
+not a defect this round introduces. N12 gains a `cls` definition from `include/reflex/input.h`, the SAME
+anchor file. **No probe, on any corpus, ever serves a body from a file other than its own already-
+resolved anchor** — checked by reading every new `<b p=…>` path, not inferred from the shown-count delta.
+
+**Guards — green, and identical to the digit.**
+
+| Guard | Floor / ceiling | base (`3715ca8`) | with item A |
+|---|---:|---:|---:|
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% | 2.4% / 0.0% / 0.0% |
+| `run_r3diff.py` ranking (n=32) | near-all ties | — | **32 ties, net +0** |
+| `run_r3diff.py` recall (n=42) | near-all ties | — | **42 ties, net +0** |
+| determinism (map, `--for`) + `xmllint` | contract | — | byte-identical, well-formed |
+| G1 — ASan/UBSan/integer/LSan, self + the exact N08/N02/N12 paths + the gate | no report | — | **clean, exit 0, empty stderr** |
+| `--quality-delta=518fe0d..HEAD` | no gating regression | — | `gating="0"` (12 `sev="minor" origin="new-symbol"` rows, all fixture classes) |
+| full gate battery, frozen tree | all green | — | **`gates=465 pass=463 skip=2 fail=0`** |
+
+**Findings for the next round.** (1) N10's newly-served bodies include one bare forward declaration
+(`class Logger;` at `env.h:53`) riding alongside three real definitions — the candidate-head-bound fix
+correctly restricts to the anchor's own file and correctly orders body-carrying candidates ahead of
+bodyless ones (the def-over-decl tiebreak, untouched here), but the cap still has room left over on this
+particular probe and fills it with whatever ranks next, bodyless or not. Not a regression this round
+introduces — the SAME thing already happens on any probe whose anchor file holds more candidates than fit
+under the K=6 cap, with or without this fix — but worth a future round asking whether the auto-body
+candidate selection should prefer body-carrying candidates WITHIN a file the way the ranking and anchor
+selection already do. (2) The registered open question is answered: the reorder is not N08-specific. Any
+future probe set drawn from a header-heavy, cross-language, or multi-definition corpus should expect the
+same shape whenever an anchor's own file holds real definitions crowded out by unrelated same-named rows
+elsewhere — worth naming as an expected consequence rather than a surprise in future audits of this class
+of fix.
