@@ -3076,20 +3076,49 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     const std::string_view fabRootArg    = fabSingleRoot ? cfg.roots[0] : std::string_view();
 
     // candidates: the positive-score head of the ranked surface — the same "top heads with a positive
-    // score" rule packTaskBundleText applies, on the same (score desc, id asc) order sigs selected with
+    // score" rule packTaskBundleText applies, on the same (score desc, id asc) order sigs selected with.
+    //
+    // ANCHOR-ONLY ROUTES RESTRICT *BEFORE* TAKING THE HEAD (N08, candidate-head bound, 2026-08-25). When
+    // the route named an anchor, restrictBodiesToRouteAnchor narrows the candidate set to the anchor's own
+    // file (see the function below for the rule and for why it is a no-op on every other route) — and that
+    // narrowing has to run on the FULL positive-score surface, not on the six rows already chosen from it.
+    // Restricting AFTER the top-K cut lets a same-named symbol in a completely unrelated file crowd the
+    // anchor's own definition out of the head before restriction ever gets a look at it: on rocksdb,
+    // `Slice`'s anchor resolves correctly to include/rocksdb/slice.h, but seven `Slice`-named rows in the
+    // unrelated java/ bindings outscore it (BM25's length-normalization term favours their unscoped, single-
+    // token whole-name match), so the pre-restriction head was seven Java rows and zero rocksdb ones — the
+    // anchor's own definition was never even a candidate. Restricting first makes the anchor's own
+    // definitions the ONLY things the top-K walk can select from, so the gold is served whenever anything in
+    // its own file is on the positive-score surface at all, regardless of how many unrelated namesakes
+    // outrank it elsewhere. A no-anchor route (anchorDefs empty) takes the unrestricted head exactly as
+    // before — restrictBodiesToRouteAnchor's own empty-input no-op guard is what used to make this order
+    // irrelevant there, and it still does.
     std::vector<rw::NodeId> autoBodyIds;
-    for( rw::NodeId sid : lensSurfaceIds )
     {
-        if( autoBodyIds.size() >= rw::kPackTaskBodyCandidates || lensRank[sid] <= 0.0f )
+        std::vector<rw::NodeId> candidateSurface;
+        if( !anchorDefs.empty() )
         {
-            break;
+            candidateSurface.reserve( lensSurfaceIds.size() );
+            for( rw::NodeId sid : lensSurfaceIds )
+            {
+                if( lensRank[sid] <= 0.0f )
+                {
+                    break;
+                }
+                candidateSurface.push_back( sid );
+            }
+            restrictBodiesToRouteAnchor( ing, candidateSurface, anchorDefs );
         }
-        autoBodyIds.push_back( sid );
+        const std::vector<rw::NodeId>& headSource = anchorDefs.empty() ? lensSurfaceIds : candidateSurface;
+        for( rw::NodeId sid : headSource )
+        {
+            if( autoBodyIds.size() >= rw::kPackTaskBodyCandidates || lensRank[sid] <= 0.0f )
+            {
+                break;
+            }
+            autoBodyIds.push_back( sid );
+        }
     }
-
-    // ANCHOR-ONLY: when the route named an anchor, the candidate set IS the anchor (see the function above
-    // for the rule and for why it is a no-op on every other route).
-    restrictBodiesToRouteAnchor( ing, autoBodyIds, anchorDefs );
 
     std::size_t leftBytes = bundleBudget > committedBytes ? bundleBudget - committedBytes : 0;
     if( cfg.tokenBudget == 0 )
