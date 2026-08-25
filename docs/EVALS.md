@@ -3834,6 +3834,10 @@ binary). A third, `editcheckcheck`'s 100 ms warm budget, measured 144/147 ms ins
 ~30 and **75 ms re-run solo**: environmental, the false-positive class this campaign hits constantly, and
 nothing was `pkill`-ed to get that measurement.
 
+The final battery ran on a FROZEN tree after the result commit: **`gates=463 pass=461 skip=2 fail=0`**
+(wall 387.5s, `-j 6`), the two skips being `namingcalibrationcheck` (live judgement withheld by design) and
+`argvdiffcheck` (no `RIPWIRE_BASE`).
+
 ---
 
 ## 5. Token and output economy
