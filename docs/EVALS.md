@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 455 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 457 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -3905,7 +3905,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **455 gate scripts**, all of which exist on disk.
+naming **457 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -4713,7 +4713,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 455. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 457. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -5428,3 +5428,330 @@ routing judged 98/152 bm25-desc / 90/152 for-routed, split=test 73.1%; frozen ra
 cache-provenance matrix). The E6 demotion corpus stands at 16 CLEAN (strict 15) against the
 ≥25 bar — the three queued ranking lanes remain deliberately unbuilt, and the pre-registered
 band remains banked, unregistered, and untuned.
+
+### N11/N12 — the ugrep EXTRACTION gap — PRE-REGISTERED 2026-08-25 (before any fix code)
+
+**What this registers.** Both the anchor-body round and the def-over-decl round named the same residual
+and disclaimed it rather than fix it: *"a qualified out-of-class nested definition (`class
+BufferedInput::dos_streambuf : …`) is not extracted as a symbol for its own bare name."* This is an
+EXTRACTION gap, not a ranking or routing one — neither round's diff touched a tags query or `kParserVer` —
+and it is the one item this lane is scoped to fix.
+
+**The mechanism, stated so it can be wrong.** `queries/cpp/tags.scm`'s `class_specifier`/`struct_specifier`
+patterns bind `name: (type_identifier)` — a BARE, unqualified class name. A nested type DEFINED OUT OF
+LINE with its qualifier written out — `class Outer::Inner : Base { … };`, the Pimpl idiom rocksdb's own
+tree uses ~29 times (`BlockBasedTable::IndexReaderCommon`, `AutoHyperClockTable::ChainRewriteLock`,
+`VersionBuilder::Rep`, `CompressionContextCache::Rep`, …) — writes its OWN name as a `qualified_identifier`
+instead, so neither pattern matches and the class itself is dropped at extraction: no symbol, no
+`--skipped` row, no floor. Its MEMBERS still extract fine and still scope correctly to `Outer::Inner` —
+`ingest.cpp`'s `enclosingScopeOf` walk is structural (it reads the `class_specifier`'s own `name:` field AS
+WRITTEN, whether or not the tags query captured that node as a symbol) — so a constructor inside the class
+body was never the problem. Only the class's OWN bare name resolves to nothing.
+
+Measured at base (`518fe0d`), ugrep `include/reflex/input.h`: `--for="dos_streambuf"` ranks the
+CONSTRUCTOR (`fn`, a real def — a constructor's own name is the class name too) and the bodyless in-class
+forward declaration `class dos_streambuf;` (extracted, but — a second, narrower defect this lane's fix
+also happens to expose rather than cause, see the finding below — two DIFFERENT enclosing classes'
+forward declarations of the same bare nested name collide into ONE self-scoped id) but never the real
+`class BufferedInput::dos_streambuf : public std::streambuf { … }` definition itself: absent from the
+candidate list entirely, not merely low-ranked.
+
+**The claim under test.** The out-of-line METHOD pattern two lines above in the same file already handles
+this exact grammar shape (`function_declarator declarator: (qualified_identifier name: (identifier))`,
+extended to `name: (qualified_identifier)` for 2+ segments — the C1/memgraph round, 2026-08-yy) via two
+pieces of machinery that are already GENERIC over every C++ definition capture, not method-specific:
+`cppDefNameReseat` (descends a qualified `@name` capture to its innermost identifier for the bare NAME)
+and the canonical-scope rule (`qualifierOf` first, `enclosingScopeOf` only when that is empty, for the
+SCOPE — "out-of-line `A::b` → `A`"). The claim: adding the class/struct-level twin of the existing
+qualified-method pattern needs no new C++ code, only two new query lines plus the `kParserVer` bump every
+extraction change carries.
+
+**The fix (stated before it is written).** Two new lines in `queries/cpp/tags.scm`:
+```
+(class_specifier name: (qualified_identifier) @name body:(_)) @definition.class
+(struct_specifier name: (qualified_identifier) @name body:(_)) @definition.class
+```
+`body:(_)` mirrors the upstream `struct_specifier` pattern's own requirement (only a real out-of-line
+DEFINITION carries a body; ISO C++ has no syntax for a qualified out-of-line FORWARD declaration of a
+nested class, so the bodyless case is not a live shape this drops on purpose). `kParserVer` 72 → 73.
+
+**Primary metric: `GOLD-EXTRACTED`** = of the two named probes (N11 `dos_streambuf`, N12 `streambuf`,
+both on ugrep `include/reflex/input.h`), does `--format=candidates` for a plain `--for="<name>"` include a
+`cls` candidate whose id is the QUALIFIED name (`Input::dos_streambuf` / `BufferedInput::dos_streambuf`,
+etc.) at the definition's real line — i.e. is the gold class itself extracted and locatable by its bare
+name, not merely its constructor. **Baseline, measured at `518fe0d`: 0 / 2** (confirmed above). Both
+`dos_streambuf` and `streambuf` name TWO out-of-line definitions each (`Input::X` and `BufferedInput::X`),
+so the metric is a strict 0-of-2 rather than a partial credit scale — the mechanism is a grammar-level,
+unconditional extraction rule, not a score-dependent tiebreak, so there is no plausible PARTIAL outcome
+the way a ranking round has: either the pattern matches the shape and both flip, or it does not and
+neither does. **Registered band: `GOLD-EXTRACTED` = 2 / 2, a single point, not a range** — anything less
+is a REJECT (the mechanism does not do what it claims) and anything else does not exist for this metric.
+
+**Registered invariance criterion, which outranks the band.** *Every symbol that already extracted
+correctly — every already-passing row of the twelve-probe anchor-body set (N01–N10), every member's own
+scope (the constructor's id, unchanged) — must be untouched.* This is a structural claim from the fix's
+own shape (two new, disjoint query patterns; `cppDefNameReseat`/`qualifierOf` are read-only over the AST,
+not rewritten): a query pattern either matches a node or it does not, and nothing is removed or reordered
+for the shapes that already matched. Checkable two ways: (i) the fixture-level constructor-id control
+(`test/nestedqualfix`, arm (e)); (ii) `<sigs>` byte-compared across the SAME twelve real-corpus probes the
+anchor-body round pinned, base vs. this lane's head, on duckdb/rocksdb/ugrep.
+
+**Registered controls.**
+
+| control | why |
+| --- | --- |
+| `test/nestedqualfix`'s Decoy (arm (d)) | a same-named nested forward declaration in an UNRELATED enclosing class must never be attributed the real definition — proves the fix reads the qualifier at the DEFINITION site, not a name-only merge |
+| the constructor's own id, unchanged (arm (e)) | this fix ADDS a symbol; it must not touch a member scope that already worked |
+| N01–N10, `<sigs>` byte-compared | ten already-passing rows this extraction change has no business reaching |
+| duckdb `third_party/re2` (8 real instances of the shape, e.g. `RE2::Set`, `DFA::Workq`) | vendored/excluded from the crawl already, base and head alike — the predicted EXPLANATION for why duckdb's total symbol count does not move at all, checked rather than assumed |
+| rocksdb symbol-count delta, spot-checked | the ~29 new rocksdb symbols this fix is expected to mint (real Pimpl-idiom classes) must be exactly that shape, not a false-positive flood — `IndexReaderCommon`, spot-checked, resolves correctly |
+
+**Registered guards, re-run after the change; any regression is a REVERT regardless of the band.** Same
+lattice as the round above: skill routing (split=test/dev), judged routing, recall lane, ranking lane,
+pollution, `run_r3diff.py` on the two frozen sets, determinism, `xmllint`, the full gate battery, G1.
+**One extraction-specific expectation, stated in advance rather than discovered after:** raw BM25 scores
+on UNRELATED queries may shift in the LOW DIGITS of a floating value (adding symbols anywhere changes
+corpus-wide document-frequency/length statistics for every query, not just the ones this fix targets) —
+this is expected and is not itself a regression; what MUST hold is that `<sigs>`/ranked ROW ORDER and
+every disclosed anchor are byte-identical on every probe this fix does not target. A WIDE `r3diff` on
+either frozen set, or any `<sigs>` byte movement on N01–N10, is the actual kill condition.
+
+---
+
+**Verdict: SHIP.** `GOLD-EXTRACTED` **0/2 → 2/2**, the single-point band, hit exactly. Both N11
+(`dos_streambuf`) and N12 (`streambuf`) now extract their real out-of-line class definitions as their
+own `cls` symbols, findable by bare name, on the real ugrep corpus. Every registered guard reproduces
+its last recorded value to the digit, the two frozen `r3diff` sets are 74/74 ties, the twelve-probe
+`<sigs>` sections are byte-identical on N01–N10, and G1 is clean on the new parser path including the
+one real-world instance spot-checked outside the fixture (`rocksdb`'s `BlockBasedTable::IndexReaderCommon`).
+
+**Provenance.** Branch `lane/candhead-ugrep`, worktree `~/AppDevelopLocal/project2/ripwire-wt-candhead`,
+off `518fe0d`. Commits: `bcd91a9` (registration, result-free) → `d4947a6` (red gate, verified RED against
+`518fe0d`) → `4a2b784` (the fix: two `queries/cpp/tags.scm` patterns, `kParserVer` 72 → 73) → `120d99b`
+(a `test/qschemetripcheck.sh` re-pin the first full battery run caught — an EXTRACTION-not-SEMANTICS
+change, so `kQSnapCacheScheme` correctly stayed put, matching every prior `kParserVer`-only re-pin logged
+in that gate's own history). Corpora: the same pinned duckdb/rocksdb/ugrep checkouts the anchor-body
+round re-cloned (`rw-lane-ab2-corpora/`), reused rather than re-cloned since only reads happen here.
+
+**Result — the twelve-probe set, base (`518fe0d`) vs. this lane's head, isolated from item A (a
+separately-stashed, separately-committed change — this measurement carries none of it).**
+
+| id | corpus | query | `<sigs>` | anchor | note |
+|---|---|---|---|---|---|
+| N01–N09 | DD/RD | (all seven not shown below) | byte-identical | unchanged | untouched, as registered |
+| N10 | RD | `Logger` | byte-identical | unchanged | untouched, as registered |
+| N11 | UG | `dos_streambuf` | **moved** | `input.h+4` → `input.h+6` | anchor now the real CLASS, not its constructor |
+| N12 | UG | `streambuf` | **moved** | `input.h+6` → `input.h+8` | same shift, same reason |
+
+N11/N12's anchor byte-offset moving is not a defect — it is the anchor-body round's own "first
+BODY-CARRYING definition in NodeId order" rule reaching a BETTER candidate than it had before: with the
+class itself now extracted (and, in NodeId/crawl order, the class declaration line always precedes its
+own constructor), the anchor shifts from a constructor to the class it constructs. Bodies served for N11
+went from `{fn:867, fn:1122, fn:1128, cls:335, cls:951}` (a constructor-heavy set, plus a bodyless
+in-class forward declaration that used to fill a leftover slot) to `{cls:865, fn:867, cls:1120, fn:1122,
+fn:1128, cls:335}` — the real `Input::dos_streambuf` and `BufferedInput::dos_streambuf` definitions now
+present, one bodyless forward-decl slot displaced by them. N12 is the same shape.
+
+**Symbol-count blast radius, measured rather than assumed.**
+
+| corpus | base | head | Δ | explanation |
+|---|---:|---:|---:|---|
+| duckdb | 61178 | 61178 | 0 | the shape's 8 real duckdb instances (`RE2::Set`, `DFA::Workq`, …) sit entirely in `third_party/re2/`, excluded from the crawl already — confirmed, not assumed: none of the 8 paths appear in `--for="RE2"`'s candidate list on either binary |
+| rocksdb | 53590 | 53619 | **+29** | real Pimpl-idiom classes; spot-checked `BlockBasedTable::IndexReaderCommon` (`table/block_based/index_reader_common.h:19`) resolves correctly by bare name, scope `BlockBasedTable` |
+| ugrep | 3622 | 3626 | **+4** | exactly the two N11/N12 golds' two out-of-line definitions each |
+| ripwire's own `src/` | 11731 | 11731 | 0 | zero instances of the shape in this repo (consistent with the C1/memgraph round's own note) |
+
+**Fixture-level gate, `test/nestedqualcheck.sh`, all nine arms.** (a)/(b) the gold class/struct extract
+at their real defining lines; (c) the class's own body rides in `<bodies>`, not just the constructor;
+(d) the Decoy control — a same-named nested forward declaration in an unrelated enclosing class is never
+attributed the real definition; (e) the constructor's own scope (`Outer::Inner::Inner`) is untouched;
+(f) route scope sanity; (g) symbol count is exactly +2; (h) determinism. Verified RED on `518fe0d`
+(arms a/b/c/g fail exactly as predicted, d/e/f/h already pass as controls) and GREEN on both `build/`
+and `asan/` binaries.
+
+**Guards — green, and identical to the digit.**
+
+| Guard | Floor / ceiling | `518fe0d` | with the fix |
+|---|---:|---:|---:|
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% | 2.4% / 0.0% / 0.0% |
+| `run_r3diff.py` ranking (n=32) | near-all ties | — | **32 ties, net +0** |
+| `run_r3diff.py` recall (n=42) | near-all ties | — | **42 ties, net +0** |
+| determinism (map, `--for`) + `xmllint` | contract | — | byte-identical, well-formed |
+| G1 — ASan/UBSan/integer/LSan, all four corpora + the new parser path + the real rocksdb instance | no report | — | **clean, exit 0, empty stderr** |
+| `--quality-delta=518fe0d..HEAD` | no gating regression | — | `gating="0"` (9 `sev="minor" origin="new-symbol"` rows, all the fixture's own new classes) |
+| full gate battery, frozen tree | all green | — | **`gates=464 pass=462 skip=2 fail=0`** (the two skips are the standing `namingcalibrationcheck`/`argvdiffcheck`) |
+
+**Findings for the next round.** (1) The bodyless-forward-declaration collision this lane's own base
+measurement exposed — two DIFFERENT enclosing classes' in-class `class Name;` forward declarations
+collapse into one self-scoped id (`outer.hpp::Inner::Inner` for both `Outer::Inner`'s and `Decoy::Inner`'s
+forward declarations in the fixture) — is a separate, narrower defect this lane did not fix: it predates
+this change, this change does not make it worse (the Decoy control proves the real DEFINITION still
+resolves to the right scope regardless), and it was not named by the task. (2) Templated out-of-line
+nested definitions (`template <class T> class Foo<T>::Bar { ... }`) are a documented remaining gap: the
+new pattern's `name: (qualified_identifier)` does not match a `template_type`/`dependent_type` name node,
+and duckdb's `third_party/re2` instances happen not to exercise this because they are vendor-excluded,
+not because they are templated — an untested, disclosed edge.
+
+### N08 — the candidate-head bound — PRE-REGISTERED 2026-08-25 (before any fix code, on top of the
+### extraction round immediately above)
+
+**What this registers.** Both the anchor-body round and the def-over-decl round named this residual too:
+*"`Slice`'s anchor is now correct and its gold sits at rank 8, one past `kPackTaskBodyCandidates` = 6,
+behind seven higher-scoring `Slice.java` rows … Whether the head should be taken AFTER the anchor
+restriction rather than BEFORE is a small, well-understood question with a clean fixture available."*
+
+**The mechanism, read from the code rather than assumed.** `main.cpp`'s `buildForAutoBodies` takes the
+top-`kPackTaskBodyCandidates` (6) positive-score rows of `lensSurfaceIds` (the WHOLE ranked surface, not
+scoped to any one file) FIRST, and only THEN calls `restrictBodiesToRouteAnchor` to narrow that already-
+capped six down to the anchor's own file. Confirmed directly on rocksdb: `--for="Slice"` resolves the
+anchor correctly to `include/rocksdb/slice.h` (the def-over-decl/anchor-body rounds' own fix), but the
+pre-restriction top-6 is seven `Slice`-named rows in `java/src/main/java/org/rocksdb/Slice.java` — a
+different LANGUAGE, an unrelated file — scoring higher (`8.37869` vs. slice.h's `6.35078`) because of
+BM25's length-normalization term: a symbol WITH a written scope (`s.scope` non-empty, e.g. a C++
+constructor `Slice::Slice`) counts as a two-token "document" against the whole-name scorer, while an
+unscoped Java method scores as one token and wins the length penalty. Restriction runs on a set that
+already has zero anchor-file members, so it produces the empty set: `bodies="0" reason="no_candidates"`.
+
+**The claim under test.** Restricting the FULL positive-score surface to the anchor's own file BEFORE
+taking the top-6, rather than after, makes the anchor's own definitions the only pool the cap draws from
+— so the gold is served whenever anything in its own file is on the positive-score surface at all,
+regardless of how many unrelated same-named symbols elsewhere outscore it. This is a REORDERING of an
+existing two-step pipeline, not a new rule: no scoring, no anchor selection, and no ranked-row content
+changes, by construction — `restrictBodiesToRouteAnchor` and `isRouteAnchorSymbol` are reused verbatim,
+only the ORDER of two already-existing calls moves.
+
+**Primary metric: does N08 flip.** On rocksdb `--for="Slice"`, is the gold class definition
+(`include/rocksdb/slice.h`'s `class Slice`) present in `<bodies>`. **Baseline, measured at this lane's own
+head-with-item-B (item B lands first in this branch; N08 is untouched by it — confirmed, `<sigs>` and
+`bodies="0"` both unmoved from `518fe0d`): NO.** **Registered band: YES** — a single boolean, not a range;
+the mechanism is an unconditional reordering, so there is no partial outcome for the one probe it directly
+targets.
+
+**The open question this lane's own brief poses, registered rather than pre-answered: does the reorder
+touch ONLY N08, or does the same crowding pattern reach other probes in the twelve-probe set too?** The
+mechanism gives no reason to expect N08 is unique — ANY probe whose anchor file holds more real
+definitions than fit under a pre-restriction top-6 crowded by unrelated same-named rows has the identical
+shape. This is registered as an OPEN MEASUREMENT, not assumed either way, and is not itself part of the
+pass/fail band: whatever the twelve-probe set shows is reported as data. **What DOES gate, regardless of
+how many probes move, is the invariance criterion below** — it is what makes "more than N08 moved" a
+FINDING rather than a defect.
+
+**Registered invariance criterion, which outranks the band.** Three structural guarantees, checkable by
+reading the diff (`restrictBodiesToRouteAnchor`/`isRouteAnchorSymbol` untouched; only the caller's control
+flow reorders two existing calls) and confirmed by measurement on ALL twelve probes: (i) `<sigs>` — the
+RANKED rows — are byte-identical, base vs. head, on every probe (this touches body SELECTION only, never
+ranking); (ii) every probe's disclosed `anchors:` line is byte-identical (the anchor computation is not
+in this diff's reach at all); (iii) any body that newly appears on ANY probe belongs to that probe's
+ALREADY-resolved anchor file — no cross-file, no wrong-symbol serving is possible by construction, since
+restriction still runs, just earlier.
+
+**Registered controls.**
+
+| control | why |
+| --- | --- |
+| `<sigs>` byte-compared on all twelve probes | the invariance criterion's own primary check |
+| every probe's `anchors:` line byte-compared | this diff cannot reach anchor selection |
+| N01, N05 (the T3 budget misses) | registered UNREACHABLE by the anchor-body round's own audit — a bare
+`class X;` forward declaration crowding out a HUNDREDS-of-lines real definition is a byte-BUDGET question,
+not a candidate-HEAD question; this reorder does not change which candidates are large, only which ones
+are considered, so these two must stay `reason="budget"` |
+| N04, N07 (the inert-branch controls) | the anchor-body round's own byte-pinned rows — a claimant that
+already carries a body has nothing for either rule to prefer; must stay byte-identical |
+| N11, N12 (ugrep) | item B already lands first in this branch; this reorder's effect on them, if any, is
+measured on a corpus where the extraction gap is ALREADY closed, not the pre-item-B state |
+
+**Registered guards, re-run after the change; any regression is a REVERT regardless of the band.** Same
+lattice as both rounds above: skill routing (split=test/dev), judged routing, recall lane, ranking lane,
+pollution, `run_r3diff.py` on the two frozen sets, determinism, `xmllint`, the full gate battery, G1. This
+diff touches `main.cpp` only (no `kParserVer` bump — it is not an extraction change), so the blast radius
+is smaller in kind than item B's, but the SAME lattice is re-run rather than assumed clean.
+
+---
+
+**Verdict: SHIP.** N08 flips **NO → YES** — rocksdb's `--for="Slice"` now serves `include/rocksdb/slice.h`'s
+own class definition (and five more anchor-file candidates) where it served nothing before. The reorder
+is **not N08-specific**, exactly the open question this registration named rather than pre-answered: N02,
+N06, N10 and N12 also gain served bodies from the same crowding pattern, at varying severity. Every
+registered invariance guarantee holds without exception on the full twelve-probe set: `<sigs>` byte-
+identical on all twelve, every disclosed anchor byte-identical on all twelve, and every newly-served body
+on every moved probe belongs to that probe's own, already-correctly-resolved anchor file — confirmed by
+inspecting content, not assumed from the count. Every registered floor reproduces to the digit, both
+frozen `r3diff` sets are 74/74 ties, and G1 is clean including the exact N08 path and three of the other
+four probes that moved.
+
+**Provenance.** Branch `lane/candhead-ugrep`, same worktree, stacked on item B's already-landed
+`3715ca8`. Commits: `8e21380` (registration, result-free) → `8885183` (red gate, verified RED against a
+binary built from `3715ca8` — item B alone, item A absent) → `86d7956` (the fix) → `c3a7d64` (a
+complexity-reducing refactor `--quality-delta` itself called for — `computeAutoBodyCandidateIds` extracted
+out of `buildForAutoBodies`, no behavior change) → `6f16b83` (a fixture rename: the gate's original
+`Widget` symbol collided with this repo's own dozen pre-existing, unrelated `Widget` fixtures on
+`--quality-delta`'s documented bare-name api-surface key — traced to `src/quality.h`'s own canonical-id
+note on that mechanism, not a real regression, fixed by renaming to `Frobnicator` rather than suppressing
+with an ack) → `8a46946` (a
+`README.md` `--callers` example re-pin the first full battery run on this diff caught, the same drift
+class the anchor-body round hit for the same reason — new lines above `churnRankedGraph`/`runDefaultMap`
+shifted both by 40).
+
+**Result — the twelve-probe set, base (a binary built from `3715ca8`, item B landed, item A absent) vs.
+this lane's final head.**
+
+| id | corpus | query | `<sigs>` | anchor | bodies served, base → head |
+|---|---|---|---|---|---:|
+| N01 | DD | `ClientContext` | byte-identical | unchanged | 0 → 0 (unreachable — T3 budget miss, as registered) |
+| N02 | DD | `DatabaseInstance` | byte-identical | unchanged | **1 → 3** |
+| N03 | DD | `Serializer` | byte-identical | unchanged | 1 → 1 |
+| N04 | DD | `TableCatalogEntry` | byte-identical | unchanged | 1 → 1 (inert-branch control, as registered) |
+| N05 | DD | `Deserializer` | byte-identical | unchanged | 0 → 0 (unreachable — T3 budget miss, as registered) |
+| N06 | DD | `Catalog` | byte-identical | unchanged | **0 → 1** |
+| N07 | RD | `ColumnFamilyData` | byte-identical | unchanged | 1 → 1 (inert-branch control, as registered) |
+| N08 | RD | `Slice` | byte-identical | unchanged | **0 → 6 — THE TARGET** |
+| N09 | RD | `SystemClock` | byte-identical | unchanged | 1 → 1 |
+| N10 | RD | `Logger` | byte-identical | unchanged | **2 → 4** |
+| N11 | UG | `dos_streambuf` | byte-identical | unchanged | 6 → 6 (already at the cap via item B alone) |
+| N12 | UG | `streambuf` | byte-identical | unchanged | **4 → 6** |
+
+**Every moved body traced to its content, not just its count.** N02 (`DatabaseInstance`) gains a second
+constructor from `database.hpp`, the SAME anchor file. N06 (`Catalog`) gains a `sec` body from
+`src/README.md`, the SAME anchor file (a markdown section is what this anchor always was). N10 (`Logger`)
+gains a second `cls` definition (a second, genuinely different `Logger` declaration inside
+`include/rocksdb/env.h`) and a third constructor — all `env.h`, the SAME anchor file; one of the four is
+itself a bare forward declaration (`class Logger;`), a pre-existing, disclosed characteristic named below,
+not a defect this round introduces. N12 gains a `cls` definition from `include/reflex/input.h`, the SAME
+anchor file. **No probe, on any corpus, ever serves a body from a file other than its own already-
+resolved anchor** — checked by reading every new `<b p=…>` path, not inferred from the shown-count delta.
+
+**Guards — green, and identical to the digit.**
+
+| Guard | Floor / ceiling | base (`3715ca8`) | with item A |
+|---|---:|---:|---:|
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% | 2.4% / 0.0% / 0.0% |
+| `run_r3diff.py` ranking (n=32) | near-all ties | — | **32 ties, net +0** |
+| `run_r3diff.py` recall (n=42) | near-all ties | — | **42 ties, net +0** |
+| determinism (map, `--for`) + `xmllint` | contract | — | byte-identical, well-formed |
+| G1 — ASan/UBSan/integer/LSan, self + the exact N08/N02/N12 paths + the gate | no report | — | **clean, exit 0, empty stderr** |
+| `--quality-delta=518fe0d..HEAD` | no gating regression | — | `gating="0"` (12 `sev="minor" origin="new-symbol"` rows, all fixture classes) |
+| full gate battery, frozen tree | all green | — | **`gates=465 pass=463 skip=2 fail=0`** |
+
+**Findings for the next round.** (1) N10's newly-served bodies include one bare forward declaration
+(`class Logger;` at `env.h:53`) riding alongside three real definitions — the candidate-head-bound fix
+correctly restricts to the anchor's own file and correctly orders body-carrying candidates ahead of
+bodyless ones (the def-over-decl tiebreak, untouched here), but the cap still has room left over on this
+particular probe and fills it with whatever ranks next, bodyless or not. Not a regression this round
+introduces — the SAME thing already happens on any probe whose anchor file holds more candidates than fit
+under the K=6 cap, with or without this fix — but worth a future round asking whether the auto-body
+candidate selection should prefer body-carrying candidates WITHIN a file the way the ranking and anchor
+selection already do. (2) The registered open question is answered: the reorder is not N08-specific. Any
+future probe set drawn from a header-heavy, cross-language, or multi-definition corpus should expect the
+same shape whenever an anchor's own file holds real definitions crowded out by unrelated same-named rows
+elsewhere — worth naming as an expected consequence rather than a surprise in future audits of this class
+of fix.

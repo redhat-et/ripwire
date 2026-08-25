@@ -34,6 +34,15 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-25, NESTED QUALIFIED CLASS/STRUCT EXTRACTION (test/nestedqualcheck.sh, candhead-ugrep lane,
+#   N11/N12): kParserVer 72 -> 73 and the quality.h mirror with it, in the same diff. queries/cpp/
+#   tags.scm gains a class_specifier/struct_specifier `name: (qualified_identifier)` pattern — the
+#   class-level twin of the out-of-line METHOD pattern already there — so an out-of-line, qualified
+#   nested class definition (`class Outer::Inner : Base { ... };`) now mints its own symbol instead of
+#   being silently dropped at extraction. The extracted SET grows on any C++ tree using the Pimpl
+#   idiom, so v72 blobs must be rejected. An EXTRACTION change, not a Snapshot-SEMANTICS change (none
+#   of isDeadCandidate/isFixturePath/isTestScriptPath/serializeSnapshot/deserializeSnapshot/
+#   computeSnapshot's logic moved), so kQSnapCacheScheme deliberately did NOT move.
 # 2026-08-12, MARKDOWN SECTION TIER (test/mdsectioncheck.sh): kParserVer 62 -> 63 and the quality.h
 #   mirror with it, in the same diff. .md/.markdown now parse with the vendored tree-sitter-markdown
 #   block grammar: headings (ATX + setext) become sections with REAL SPANS (heading -> next same-or-

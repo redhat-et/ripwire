@@ -68,6 +68,41 @@
 
 (class_specifier name: (type_identifier) @name) @definition.class
 
+; ---- out-of-line NESTED CLASS/STRUCT definitions (ripwire addition — N08/N11/N12 candidate-head-bound
+; and ugrep-extraction-gap lane, 2026-08-25) ----
+; The two patterns above bind `name: (type_identifier)`, which matches only a BARE (unqualified) class
+; name. A nested class DEFINED OUT OF LINE — the class-level twin of the out-of-line METHOD idiom the
+; qualified_identifier method pattern above already handles — writes its own name as a qualified_identifier
+; instead (`class Outer::Inner : Base { … };`), so neither upstream pattern matches and the class itself is
+; silently dropped at EXTRACTION: no symbol, no --skipped row, no floor, invisible to `--for`/ranking/the
+; call graph. Measured on ugrep's reflex/input.h: `class BufferedInput::dos_streambuf : public
+; std::streambuf { … }` (and its sibling `class Input::dos_streambuf : … { … }`) never became a `cls`
+; symbol, so a bare `--for="dos_streambuf"` could rank the CONSTRUCTOR (a real `fn` def, since a
+; constructor's own name is the class name too) and the unrelated IN-CLASS forward declaration
+; (`class dos_streambuf;`, captured by the plain pattern above with no qualifier at all — and, being
+; unqualified, colliding across every enclosing class that forward-declares the same nested name) but never
+; the gold definition itself.
+;
+; Members already scope correctly to "Outer::Inner" without this pattern — ingest.cpp's `enclosingScopeOf`
+; walk is structural (it reads the class_specifier's own `name:` field AS WRITTEN, whether or not the tags
+; query captured that node as a symbol), so a constructor inside the class body was never the problem. Only
+; the CLASS's own bare name resolved to nothing, because nothing ever minted it as a symbol.
+;
+; Same fix, same shape as the out-of-line method pattern above: capture the qualified_identifier itself as
+; @name. ingest.cpp's `cppDefNameReseat` (language-generic over every C++ definition capture, not method-
+; specific) descends it to the innermost identifier for the symbol's bare NAME ("dos_streambuf"), and the
+; canonical-scope rule two calls later (`qualifierOf` first, `enclosingScopeOf` only when that is empty)
+; reads the immediate qualifier off the untouched parent for the SCOPE ("BufferedInput") — the same
+; "out-of-line `A::b` -> 'A'" convention already in force for methods, so the class's own scope names its
+; ENCLOSING container while its members' scope (unchanged) names the class itself, exactly as a normal
+; (non-qualified) class/member pair already does. `body:(_)` on both patterns mirrors the upstream
+; struct_specifier requirement above: only a real out-of-line DEFINITION carries a body — ISO C++ has no
+; syntax for a qualified out-of-line FORWARD declaration of a nested class (`class Outer::Inner;` outside
+; the class body is unqualified-only), so the bodyless case is not a live shape this drops on purpose.
+(class_specifier name: (qualified_identifier) @name body:(_)) @definition.class
+
+(struct_specifier name: (qualified_identifier) @name body:(_)) @definition.class
+
 ; ---- module-level settings constants (ripwire addition — r3 q10) ----
 ; Same rationale and --match-verified declarator shapes as queries/c/tags.scm (the C++ grammar
 ; extends tree-sitter-c): file-scope `static const char* DEFAULT_HOSTS[] = { … }` tables and

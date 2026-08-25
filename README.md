@@ -900,8 +900,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="src/graph.h:2177"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:2513"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:13388"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:13503"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:13428"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:13543"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:950"/>
 </callers>
 ```
