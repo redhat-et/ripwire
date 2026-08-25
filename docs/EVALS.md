@@ -3550,6 +3550,294 @@ Gate count 452 → **452** — `test/defoverdeclcheck.sh` grew four arms and fli
 final battery ran on a FROZEN tree after the last commit: `gates=463 pass=461 skip=2 fail=0`, the two skips
 being `namingcalibrationcheck` (live judgement withheld by design) and `argvdiffcheck` (no `RIPWIRE_BASE`).
 
+### The anchor-resolved body allowance — T3 body-budget round, PRE-REGISTERED 2026-08-25 (before any fix code)
+
+**Scope guard, first.** This is **not** a KEEP/REJECT on T3, whose registered primary metric is the
+transcript-mined map-then-read rate above and whose readout still waits on ≥ 30 post-deploy `--for`
+episodes. Nor does it repeal the anchor-only round: **no body other than the anchor's own may ever be
+served in the anchor's place, and when the anchor's own body does not fit, the honest zero stands.** This
+round changes only *how many bytes the anchor's own body is allowed to cost*, on the one route where the
+tool is most certain what the caller asked for. Every "which body" question is settled upstream and stays
+settled.
+
+**The named residual this closes, and nothing else.** The round immediately above moved the anchor to the
+first body-carrying definition and landed `BODY-SERVED` at 4/12 — at the FLOOR of its band, because two of
+the six rows whose anchor it correctly fixed (**N01** `ClientContext`, **N05** `Deserializer`, both duckdb)
+then lost the body to the BYTE BUDGET and emit `bodies="0" reason="budget"`. Its own §7 item 1 names the
+question: *"whether the default auto-body allowance should scale with the confidence the route has in its
+anchor — a name-exact query with a resolved anchor is the most certain the tool ever is about what the
+caller wants, and it is currently funded at the same fixed rate as everything else."* That round declined
+to widen a constant after a measurement and left it to be registered on its own. This is that registration.
+
+**The mechanism, stated so it can be wrong.** `buildForAutoBodies` computes ONE scalar allowance —
+`leftBytes` = the bundle's leftover, plus `kForAutoBodyBudgetBytes` when there is no explicit
+`--token-budget` — and hands it to `packBodies` with `truncateOversizedFirst=false`. That allowance is a
+POOL sized for up to `kPackTaskBodyCandidates` = 6 bodies. But `restrictBodiesToRouteAnchor` runs first, and
+on a name-exact route with a resolved anchor it frequently collapses the candidate set to **exactly one**:
+the anchor's own definition. The bundle is then rationing a six-body pool against a one-body answer, and on
+a large class it refuses. Default `bundleBudget` is `kForPayloadBudgetBytes` = 7,500 B, so today's allowance
+cannot exceed 7,500 + 6,000 = **13,500 B** even with a zero-byte signature side — while duckdb's
+`class Deserializer` body is 14,875 B. **The claim under test: when the candidate set IS one
+anchor-resolved definition, that one body should be funded at a rate set by what one body is worth, not by
+a pool sized for six.**
+
+**The rule.** In `buildForAutoBodies`, after `restrictBodiesToRouteAnchor` and after the existing
+`leftBytes` arithmetic, and only when all three hold:
+
+```
+  cfg.tokenBudget == 0        an explicit --token-budget stays a HARD ceiling (T3's own registration)
+  !anchorDefs.empty()         the route went name-exact AND resolved an anchor to a definition
+  autoBodyIds.size() == 1     the candidate set IS one definition — the anchor's own
+raise:
+  leftBytes = max( leftBytes, kForAnchorBodyBudgetBytes )
+```
+
+Nothing downstream changes: `autoBodyBudget = max( 1, min( leftBytes, cfg.packBudgetBytes ) )` as before,
+`truncateOversizedFirst=false` as before, the same three disclosure branches as before.
+
+**The constant, derived before the probes were consulted and not from them.**
+`kForAnchorBodyBudgetBytes` = **22,800 B** = `kPackTaskDefaultTokens` (6,000) × `kBytesPerTokenBody` (3.80),
+i.e. **one anchor-resolved body may cost at most what one whole default `--pack-task` bundle costs.** Both
+terms are pre-existing registered constants of this tool; neither is a probe measurement. The identity is
+machine-checked by a tolerance-band `static_assert` rather than left as a comment, so the number cannot
+drift away from its own rationale. Its cost is disclosed where it is incurred: `est_tokens` already charges
+bodies at `kBytesPerTokenBody`.
+
+**Four properties keep this out of the general budget, and three of them are structural rather than
+asserted.** (i) `autoBodyIds.size() == 1` makes *"funds at most one body"* a fact about the input, not an
+accounting argument — `packBodies` is handed a one-element list and can emit at most one body; there is no
+second item for the raised allowance to spend on. (ii) `cfg.tokenBudget == 0` keeps every explicit-ceiling
+caller byte-identical, and lives in the same regime as the existing allowance that T3 registered as
+*"without an explicit budget, the default bundle gains a fixed body allowance"*. (iii) `kForAutoBodyBudgetBytes`
+itself is **not touched**, and neither is `packBodies`, so `--pack-task`, `--expand`, `--detail=N`,
+`--exemplar`, `--from-trace`, the MCP verbs and the compact conceptual `<hops>` builder are byte-identical
+by construction — the raise exists only inside the one `--for` auto-body branch. (iv) `truncateOversizedFirst`
+stays `false`: whole-body-or-nothing survives, so a definition larger than the raised allowance is still
+DROPPED and disclosed. **The honest zero does not go away; it moves.**
+
+**What this deliberately does NOT fund.** An anchored bundle whose candidate set is 2 or more — several
+same-named definitions inside the anchor's own file — keeps today's fixed pool exactly. At that point the
+bundle is serving a SET, not "the answer", and a pool is the right funding for a set. This is the boundary
+that stops the raise from becoming a general per-item budget increase, and it is the one an implementation
+is most likely to get wrong by relaxing.
+
+**The probe set is the twelve probes of the two rounds above, frozen and unchanged.** Corpora re-verified
+in this lane by revision count: duckdb `19864453` (48632 revs), rocksdb `0e2801ac` (12938), ugrep
+`550599a6` (985) — all three matching the D4 freeze to the digit.
+
+**Primary metric: `BODY-SERVED`**, the round above's, re-used verbatim — of the twelve probes, how many have
+the **gold definition's own body** emitted in `<bodies>` by a plain `ripwire <corpus> --for="<Name>"`.
+
+**Baseline, re-measured in this lane at `518fe0d` before any code: `BODY-SERVED` = 4 / 12** — served on
+N02, N03, N09, N10, reproducing the round above's result row for row. **A scoring correction that the round
+above's own table implies but never had to state:** the gold must be pinned as a `(name, path, LINE)`
+triple, not a path. Scored on path alone the baseline reads **6/12**, because ugrep's `include/reflex/input.h`
+— the gold's own file for N11/N12 — also contains the bare in-class declarations `class dos_streambuf;`
+(:335, :951) and `class streambuf;` (:333), which the allowance does emit as bodies. Those are same-named
+text in the right file and are exactly the *"reads like an answer and is not one"* shape the anchor-only
+round refuses; counting them would inflate this metric by two rows on both sides of the A/B. The triple is
+what the round above's table already meant (its N11/N12 rows read "five constructor bodies … gold body? no").
+
+**The feasibility ceiling, audited on all THREE gates this time — the round above's own lesson, applied to
+the round that IS the third gate.** A body reaches `<bodies>` only through the anchor, the candidate head,
+and the budget. This rule moves the budget alone, so a probe can move only if it is *already* through the
+first two and stopped by the third: it must currently read `bodies="0" reason="budget"`, its single
+candidate must be the gold, and the gold must fit 22,800 B. The candidate-set size is directly observable
+as `<bodies total="N">`, so this audit is read off the base run rather than reasoned toward:
+
+| id | `total=` | state at `518fe0d` | can this rule move it? |
+| --- | :---: | --- | --- |
+| **N01** | 1 | `reason="budget"`, candidate IS the gold, body **12,691 B** | **YES — the rule's whole target** |
+| **N05** | 1 | `reason="budget"`, candidate IS the gold, body **14,875 B** | **YES — the rule's whole target** |
+| N02, N03, N09 | 1 | already serving the gold | no — one candidate already emitted; a larger pool buys nothing |
+| N04, N07 | 1 | already serving (a non-gold out-of-line constructor) | no — same; and the rule cannot change WHICH body |
+| N06, N08 | 0 | `reason="no_candidates"` | no — that branch returns **before** the allowance is computed |
+| N10 | 2 | serving 2 | no — `size() != 1`, the rule is not applied |
+| N11, N12 | 5 / 4 | serving 5 / 4 | no — `size() != 1`, the rule is not applied |
+
+**Registered band: `BODY-SERVED` = 6 / 12, i.e. `[+2, +2]` against the baseline of 4.** The ceiling is +2
+because **N01 and N05 are the only two rows this rule can possibly move**, and the table above says so from
+an observable rather than from a mechanism story. The floor is also +2 because both golds are measured, both
+are single-candidate, and both sit under 22,800 B with ≥ 7.9 KB of headroom — there is no third outcome that
+is not a bug. **Below +2 is a REJECT and the code is reverted. Above +2 is impossible under the audit, so it
+means the audit is wrong and the change must be re-read before it may ship, not celebrated.**
+
+**The prior round's invariance criterion does NOT carry over, and saying so is the point.** That round
+registered *"a query whose name has a UNIQUE definition must produce a byte-identical bundle"* — valid
+there, because a unique name has no second claimant for an anchor rule to choose between. It is **not**
+valid here: a unique-definition name whose body exceeds the allowance is precisely what this round funds.
+Applying it unchanged would be registering a criterion the round is designed to violate. This is the round
+above's own finding #3 — *guard the half of a prior metric the current round does not touch* — so the
+invariance criterion is restated for what this rule actually cannot reach:
+
+> **A bundle is byte-identical unless it is a name-exact, anchor-resolved, no-explicit-budget bundle whose
+> candidate set is exactly one definition that does not currently fit.** Every other bundle — every
+> conceptual route, every explicit `--token-budget`, every multi-candidate anchor, every already-serving
+> single candidate, and every other verb — must not differ by one byte.
+
+`--for="computeLensRanking"` and `--for="lexicalScoresNameExactTiered"` are still byte-pinned below, but for
+a different reason than last round: they already serve their single candidate (`total="1" shown="1"`), so
+the raise buys them nothing. Their names being unique is now a coincidence, not the argument.
+
+**Registered controls — byte-compared, base vs head, same tree and same corpus; any difference is a
+REVERT.** CTL01–CTL13 are the round above's registered set re-used unchanged; CTL14–CTL20 are new and are
+the surfaces this rule could plausibly reach. The repo-root controls run against a FROZEN `518fe0d`
+checkout, never the lane worktree, whose own sources change when the rule lands.
+
+| control | command | why it cannot move |
+| --- | --- | --- |
+| CTL01 (C13) | UG `--for="forward declared nested stream buffer classes"` | compact conceptual route — a different builder |
+| CTL02 (G18) | UG `--for="dos line ending stream buffer for buffered input"` | compact conceptual route |
+| CTL03 (G20) | UG `--pack-task="implement a new stream buffer over reflex Input" --token-budget=6000` | `--pack-task` does not use this allowance |
+| CTL04, CTL05 | frozen repo, `--for="computeLensRanking"` / `--for="lexicalScoresNameExactTiered"` | anchored, `total="1"`, **already serving** |
+| CTL06, CTL07 | frozen repo, flagless map / `--for="how does the ranker route a query"` | no anchor at all |
+| CTL08, CTL09 (N04, N07) | DD `--for="TableCatalogEntry"` / RD `--for="ColumnFamilyData"` | anchored, `total="1"`, already serving |
+| CTL10, CTL11 (N11, N12) | UG `--for="dos_streambuf"` / `--for="streambuf"` | anchored, `total="5"`/`"4"` — `size() != 1` |
+| CTL12, CTL13 (N06, N08) | DD `--for="Catalog"` / RD `--for="Slice"` | `total="0"` — returns before the allowance |
+| **CTL14, CTL15** | **DD `--for="ClientContext" --token-budget=6000` / `--for="Deserializer" --token-budget=6000`** | **the hard-ceiling tripwire: the two rows the rule DOES move, with an explicit budget. An implementation that forgot `cfg.tokenBudget == 0` serves a body here and this control goes red.** |
+| CTL16 | frozen repo, `--for="how does the ranker route a query" --auto-bodies` | the conceptual rank-first body walk — no anchor |
+| CTL17 | DD `--pack-task="add a new serializer format" --token-budget=6000` | separate builder |
+| CTL18 | DD `--expand=ClientContext` | separate verb, `truncateOversizedFirst=true` |
+| CTL19 | DD `--for="ClientContext" --signatures-only` | the registered opt-out |
+| CTL20 | DD `--for="ClientContext" --detail=1` | the explicit body knob; `autoBundleMode` requires `cfg.detail == 0` |
+
+**Registered guards, re-run after the change; any regression is a REVERT regardless of the band.** Every
+value below is this lane's OWN re-measurement at `518fe0d`, and every one reproduces the last recorded
+baseline to the digit — the instrument check, done before any result was believed. All of them are expected
+identical **by construction**: this rule changes a byte allowance downstream of ranking and cannot move a
+`<d>` row, a candidate order or a route decision.
+
+| Guard | Floor / ceiling | At `518fe0d`, measured in this lane |
+| --- | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% |
+| recall / ranking frozen corpus pins | contract | `7a7f7989203479` files=113 · `7a3194b51ac6` files=1422 |
+| `run_r3diff.py` ranking (n=32) + recall (n=42) | near-all ties | — |
+| the round above's `BODY-SERVED` rows N02/N03/N09/N10 | **must stay served** | 4 / 4 |
+| determinism (two runs byte-identical) + `xmllint` | contract | — |
+| full gate battery | all green | — |
+| G1 — ASan/UBSan/integer/LSan over the new path | no report | — |
+
+**The gate, registered before it is written.** Four new arms on `test/anchorbodycheck.sh`, which already
+owns this contract. A new mid-sized fixture symbol is needed because the existing oversized one
+(`widgetAnchorProbe`, **36,163 B**) is far above the raised allowance and therefore cannot observe it —
+that is deliberate and it is why arms (0)/(1)/(2) stay green and stay meaningful.
+
+* **(7)** RED-FIRST. A MID-SIZED anchor — above today's ≤ 13,500 B allowance, below 22,800 B — is served
+  whole. On the base binary this is `bodies="0" reason="budget"`; with the rule it is `bodies="1"`.
+* **(7b)** …and served ALONE, from its own file, with no bystander prose. The raise must not re-open
+  substitution: a bigger allowance is exactly the condition under which the old defect used to fire.
+* **(7c)** The raise does NOT apply under an explicit `--token-budget`: the same query with a stated
+  ceiling still refuses and still discloses. Green on both binaries, and the fixture form of CTL14/CTL15.
+* **(7d)** The OVERSIZED anchor still refuses at the raised allowance — whole-body-or-nothing survives and
+  the raise is BOUNDED. This is arm (1)/(2) restated at the new ceiling.
+* **(7e)** A MULTI-candidate anchored bundle does not get the raise: two same-named mid-sized definitions in
+  ONE file stay at `bodies="0"`. An implementation that dropped the `size() == 1` guard serves one of them
+  and goes red here. This is the leak tripwire, and it is verified by mutation, not by inspection.
+
+**KILL conditions, registered before the result.** Any one of: `BODY-SERVED` not exactly 6/12; any of the
+twenty byte-compared controls differing; **any of N02/N03/N09/N10 losing a body it already served**; a
+`<d>` row section changing on any of the twelve probes; any guard floor above going red; a route decision
+changing on any probe; or a body served that is neither the gold nor what base served.
+
+#### The result: SHIP, in band, and the audit was right this time
+
+| Registered metric | Baseline | Measured | Band / bar | Verdict |
+| --- | ---: | ---: | --- | --- |
+| `BODY-SERVED` — gold definition's own body emitted, n=12 | 4 / 12 | **6 / 12 (+2)** | [+2, +2] | **in band** |
+| Byte-compared controls (20) | — | **20 / 20 identical** | any difference kills | held |
+| `<d>` row sections, all twelve probes | — | **12 / 12 byte-identical** | must not move | held |
+| Whole bundles, all twelve probes | — | **10 / 12 byte-identical** | only N01/N05 may move | held, stronger than registered |
+| N02/N03/N09/N10 still served | 4 / 4 | **4 / 4** | must not lose one | held |
+| `run_r3diff.py`, ranking (n=32) + recall (n=42) | — | **74 ties, 0 wins, 0 losses** | near-all ties | held |
+
+**The two rows the audit named, and nothing else.**
+
+| id | corpus | body served: base → head | gold body B | `BODY-SERVED` | audit said |
+| --- | --- | --- | ---: | :---: | --- |
+| **N01** | DD | none, `reason="budget"` → **the gold**, `client_context.hpp:65` | 12,691 | **yes** | reachable |
+| **N05** | DD | none, `reason="budget"` → **the gold**, `deserializer.hpp:22` | 14,875 | **yes** | reachable |
+| N02, N03, N09, N10 | DD/RD | unchanged — still the gold | — | **yes** ×4 | already serving |
+| N04, N06, N07, N08, N11, N12 | — | **byte-identical bundles** | — | no ×6 | unreachable, each for its named reason |
+
+**The feasibility ceiling was exactly right, which is the first time in this sequence.** The round above
+audited two of the three gates a body passes and was row-for-row correct about the mechanism but wrong about
+the ceiling by two. This registration audited all three, predicted `+2` and named N01 and N05 in advance,
+and got `+2` on N01 and N05. The thing that made it checkable rather than merely careful was reading the
+candidate-set size off `<bodies total="N">` in the base run instead of reasoning toward it — **a feasibility
+ceiling built from observables is auditable before the result; one built from a mechanism story is only
+auditable after.**
+
+**The cost, stated plainly, because this round makes two calls more expensive.** `est_tokens` on the two
+moved probes goes 3,798 → **7,144** (N01) and 962 → **4,886** (N05). That is the trade: those two callers
+were being told the answer existed and did not fit, and are now handed it. The bodies themselves cost 3,340
+and 3,914 tokens against the registered 6,000-token ceiling, i.e. the constant is a real bound and the two
+bodies it bought landed at 56% and 65% of it — it is not a number tuned so that the probes just squeeze in.
+The other ten probes cost exactly what they cost before, to the byte.
+
+**An honest correction to the intuition the derivation could be mistaken for.** It is tempting to justify a
+body allowance as "cheaper than the whole-file read it replaces". On these two probes that is **not** true
+in bytes: `class ClientContext` is 12,691 B of a 14,995 B header (85%) and `class Deserializer` is 14,875 B
+of 15,956 B (93%) — a large class in a dedicated header essentially IS its file. The win this round buys is
+therefore not a byte saving over the read; it is that the answer arrives inside the call the agent already
+made, ranked, with the quality lens on it, instead of as a second round trip. The registered derivation is
+`kPackTaskDefaultTokens × kBytesPerTokenBody` and rests on nothing else, and the byte-saving story is
+recorded here as refuted rather than left available to be repeated.
+
+**Every guard is identical, and the strongest of them is stronger than registered:** the whole
+`--eval-skills` report — every arm, every split, the judged-only line — is **byte-identical** between the
+two binaries, not merely equal on the four pinned numbers.
+
+| Guard | Floor / ceiling | At `518fe0d` | With the rule in |
+| --- | ---: | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% | 2.4% / 0.0% / 0.0% |
+
+That is what the structural argument predicted: the rule changes a byte allowance strictly downstream of
+ranking, so it cannot move a `<d>` row, a candidate order or a route decision. The `anchors:` clause and its
+`+N` ambiguity count are identical on both moved probes (88 and 36) — the only thing that changed on either
+root is `bodies="0" reason="budget"` becoming `bodies="1"`, which is the disclosure doing its job.
+
+**The gate, and the mutation that proves its most important arm is not inert.** `test/anchorbodycheck.sh`
+grew six arms and two fixtures, verified **RED at `518fe0d` on exactly (7) and (7b)** with all twenty other
+arms green, and ALL PASS at head under both `build/ripwire` and `asan/ripwire`. Arm **(7e)** — the
+`size() == 1` leak tripwire — was additionally proved by MUTATION: with that conjunct removed and the binary
+rebuilt, the first of two same-named mid-sized twins fits the raised allowance and the bundle reports
+`bodies="1"`, so (7e) fails **and only (7e) fails**. A tripwire that fires on exactly the mistake it names,
+and on nothing else, is worth more than one that merely happens to be green.
+
+G1: the `asan/` build (ASan + UBSan + integer + LSan with the committed suppressions) is clean — exit 0,
+empty stderr — on both newly-served probes, on the explicit-`--token-budget` shape, the multi-candidate
+shape, the `no_candidates` shape, all three corpus maps and the self-map, and `test/anchorbodycheck.sh`
+passes against `asan/ripwire`.
+
+`--quality-delta=518fe0d..HEAD` (ref-pair): `gating="0"` `preexisting-worse="0"` after acking exactly two
+findings, both on `buildForAutoBodies` and both the change's own shape — complexity `ccx` 16 → 19 (the `if`
+and its `&&`) and verbosity 107 → 128. `--ack-only=gating`, so the never-gating `api-surface` row for
+`kForAnchorBodyBudgetBytes` stays visible and unacked. The duplicated half of the call-site comment was
+removed first, on its own merits: the mechanism and the derivation now live once, beside the constant.
+
+Gate count **463 → 463** — six arms and two fixtures on an existing gate, no new gate file.
+
+Two reds in the first battery were real and both were mine: `g1freshcheck` (the `asan/` tree predated the
+comment de-duplication — rebuilt, and the gate is worth believing exactly as `CLAUDE.md` says) and
+`readmeexamplecheck` (the rule's lines shifted `churnRankedGraph`/`runDefaultMap` by 28 — re-pinned from the
+binary). A third, `editcheckcheck`'s 100 ms warm budget, measured 144/147 ms inside a `-j 6` battery at load
+~30 and **75 ms re-run solo**: environmental, the false-positive class this campaign hits constantly, and
+nothing was `pkill`-ed to get that measurement.
+
+The final battery ran on a FROZEN tree after the result commit: **`gates=463 pass=461 skip=2 fail=0`**
+(wall 387.5s, `-j 6`), the two skips being `namingcalibrationcheck` (live judgement withheld by design) and
+`argvdiffcheck` (no `RIPWIRE_BASE`).
+
 ---
 
 ## 5. Token and output economy

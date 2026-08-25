@@ -679,7 +679,43 @@ inline constexpr std::size_t kForCapTailSigBytes    = 96;
 // the <ctx> root (bundle="auto" bodies="N", reason="budget" when none fit) plus a legend sentence;
 // --signatures-only opts out byte-identically; --detail=N (the explicit knob) supersedes the automatic
 // selection. Candidate cap: kPackTaskBodyCandidates — the default --for converges on the pack-task shape.
+// This is the SIX-CANDIDATE pool; when the route's anchor restriction leaves exactly one candidate it is
+// superseded by kForAnchorBodyBudgetBytes just below. Nothing else supersedes it.
 inline constexpr std::size_t kForAutoBodyBudgetBytes = 6000;
+
+// ── THE ANCHOR-RESOLVED BODY ALLOWANCE (pre-registered: docs/EVALS.md, the T3 body-budget round) ──────
+// The allowance above is a POOL sized for up to kPackTaskBodyCandidates = 6 bodies. But on a name-exact
+// route restrictBodiesToRouteAnchor (main.cpp) runs first and frequently collapses the candidate set to
+// EXACTLY ONE — the anchor's own definition — and the bundle then rations a six-body pool against a
+// one-body answer. On a large class it refuses: default bundleBudget is kForPayloadBudgetBytes, so the
+// allowance cannot exceed 7500 + 6000 = 13,500 B even with a zero-byte signature side, while duckdb's
+// `class Deserializer` body is 14,875 B. Measured: the anchor-body round moved six golds to the right
+// anchor and two of them (ClientContext, Deserializer) then emitted bodies="0" reason="budget" —
+// the right answer not fitting where the WRONG one-line forward declaration always had.
+//
+// So when the route is at its MOST certain about what the caller wants — a name-exact query whose anchor
+// resolved to a definition, and a candidate set of exactly one — that one body is funded at a one-body
+// rate instead of a six-body pool's share. The three conditions are all checked at the one call site
+// (main.cpp buildForAutoBodies); this constant is only the rate.
+//
+// THE NUMBER IS DERIVED FROM THIS TOOL'S OWN REGISTERED CONSTANTS, not from the probe set that measured
+// the defect: it is what kPackTaskDefaultTokens buys at kBytesPerTokenBody, i.e. ONE ANCHOR-RESOLVED BODY
+// MAY COST AT MOST WHAT ONE WHOLE DEFAULT --pack-task BUNDLE COSTS. That identity is machine-checked by a
+// tolerance-band static_assert in packtask.h (where both terms are visible) rather than left as a comment,
+// so the value cannot drift away from its own rationale. Cost stays disclosed where it is incurred:
+// est_tokens already charges bodies at kBytesPerTokenBody.
+//
+// WHAT IT IS NOT, and the three bounds that keep it that way (gate: anchorbodycheck arms 7c/7d/7e):
+//   • not a general budget increase — kForAutoBodyBudgetBytes above is untouched, packBodies is untouched,
+//     and every other verb (--pack-task, --expand, --detail=N, --exemplar, --from-trace, MCP, the compact
+//     <hops> builder) is byte-identical by construction;
+//   • not a licence to serve a SET — the candidate set must be exactly 1, so "funds at most one body" is a
+//     fact about the input rather than an accounting argument; an anchored bundle with 2+ same-named
+//     definitions in the anchor's file keeps the fixed pool;
+//   • not a repeal of whole-body-or-nothing — truncateOversizedFirst stays false, so a definition larger
+//     than THIS ceiling is still dropped and disclosed. The honest zero does not go away; it moves.
+// An explicit --token-budget=N stays a hard ceiling and never sees this constant, exactly as T3 registered.
+inline constexpr std::size_t kForAnchorBodyBudgetBytes = 22800;
 
 // ── COMPACT CONCEPTUAL SERVING (pre-registered: docs/EVALS.md, the T3 route-narrowing round) ──────────
 // On the CONCEPTUAL route — the subtoken+body ranker, the route that names no anchor — the allowance
