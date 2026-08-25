@@ -2731,7 +2731,10 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
         }
         if( baselineHeaderIsForeign( line ) )   // pre-pathQualifiedKey sidecar — refused, see above
         {
-            DEGRADED_PATH_ALERT( "quality: baseline sidecar predates the pathQualifiedKey scheme — refused, re-pin with --quality-baseline" );
+            // The refusal is a USER-FACING disclosure, so it must survive NDEBUG: behind only a
+            // DEGRADED_PATH_ALERT a Release binary refuses SILENTLY and the caller reads "no baseline
+            // found" — a refusal that hides its reason misleads exactly like the misread it prevents.
+            std::fprintf( stderr, "ripwire: quality: baseline sidecar predates the pathQualifiedKey scheme — refused, re-pin with --quality-baseline\n" );
             out = Snapshot{};
             return false;
         }
