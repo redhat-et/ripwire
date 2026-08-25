@@ -3542,7 +3542,13 @@ about HOW MANY there are.
 existed got worse, and the rule added no production symbol at all — it is nine lines inside an existing
 one-pass walk.
 
-Gate count 452 → **452** — `test/defoverdeclcheck.sh` grew four arms and flipped one; no new gate file.
+G1: the `asan/` build (ASan + UBSan + integer + LSan with the committed suppressions) runs the new path
+clean — exit 0, empty stderr — on `--for` over all three corpora and on a whole-repo map, and
+`test/defoverdeclcheck.sh` passes against `asan/ripwire` as well as `build/ripwire`.
+
+Gate count 452 → **452** — `test/defoverdeclcheck.sh` grew four arms and flipped one; no new gate file. The
+final battery ran on a FROZEN tree after the last commit: `gates=463 pass=461 skip=2 fail=0`, the two skips
+being `namingcalibrationcheck` (live judgement withheld by design) and `argvdiffcheck` (no `RIPWIRE_BASE`).
 
 ---
 
