@@ -6344,14 +6344,14 @@ respectively — and none of them is a budget or a candidate-head question.
 **What this registers.** The 2026-08-24 identity round (`6cd5ba5`) closed the rename/move case and filed
 one residual it deliberately did not absorb: *"canonicalId degrades to a BARE NAME for scope-less symbols,
 so the canonId key space is not path-qualified for them and folds them across files — the same class of
-bug W1-S2 fixed for churn's key space, still open for the other seven kinds."* This section registers the
+bug already fixed for churn's key space, still open for the other seven kinds."* This section registers the
 fix for that residual, and corrects two things about how it has been described.
 
 **Correction 1 — "seven kinds" is seven QUALITY kinds, not seven symbol kinds.** There is ONE defect:
 `resolve.h`'s `canonicalId` returns the bare name when `scope` is empty. Seven of `--quality-delta`'s ten
 finding kinds inherit it because seven key spaces derive from it — `ccx` (complexity), `loc` (verbosity),
 `nest` (nesting), `params`, `mask` (error-masking), `dead` (dead-code), `api` (api-surface). The other
-three are already elsewhere: short-horizon-churn moved to `pathQualifiedKey` in `d593de3` (W1-S2), and the
+three are already elsewhere: short-horizon-churn moved to `pathQualifiedKey` in `d593de3`, and the
 two clone kinds key on a member-set hash. 7 + 1 + 2 = 10, and `--quality-baseline` emits exactly those
 spaces (`defs` is an eighth canonId-keyed space, but it is internal overload cardinality, never a
 reported kind).
@@ -6444,7 +6444,7 @@ keying one, and is untouched.
 184 scoped + 73 unambiguous scope-less. The replay moved 260. The extra three are `short-horizon-churn`
 rows still keyed in the *canonId* space — acks written BEFORE `d593de3` moved churn to
 `pathQualifiedKey`, which nothing has healed since. The pre-registration classified all churn acks as
-already-path-qualified, which is true of every row written after W1-S2 and false for those three. They
+already-path-qualified, which is true of every row written after `d593de3` and false for those three. They
 are a bonus heal of long-dead legacy rows, and the same three explain the orphan count landing at 8
 rather than 7.
 

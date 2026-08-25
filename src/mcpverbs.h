@@ -2391,6 +2391,8 @@ struct QualityDeltaOutcome
     std::size_t                       renamesRecorded  = 0;
     std::size_t                       ackedByRename    = 0;
     std::size_t                       ackedByContent   = 0;
+    std::size_t                       schemeRekeyed    = 0;   // the git-INDEPENDENT key-scheme replay
+    std::size_t                       schemeAmbiguous  = 0;
 };
 
 // §B6 M10 — a CORRUPT sidecar used to read as "no sidecar". readBaseline reports a file that yields no header,
@@ -2481,6 +2483,8 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     rw::quality::countAckRescues( oc.regs, acks, heal.ackRemap, oc.ackedByRename, oc.ackedByContent );
     oc.renamesAvailable = heal.renames.available;
     oc.renamesRecorded  = heal.renames.pairsRecorded;
+    oc.schemeRekeyed    = heal.ackRemap.schemeRekeyed;
+    oc.schemeAmbiguous  = heal.schemeAmbiguousAcks;
     oc.ackedCount   = rw::quality::applyAckRatchet( oc.regs, acks );
 
     // L2 — same stale-ack disclosure the CLI's --quality-delta reports (see quality.h's computeStaleAcks):
@@ -2548,6 +2552,8 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
                     + ",\"gating\":" + std::to_string( gatingCount )
                     // R1 IDENTITY — the CLI root's identity disclosure, spelled in JSON. Present only when
                     // git could be read at all, exactly like the CLI arm (absent ≠ zero — see the legend).
+                    + ( oc.schemeRekeyed ? ",\"acks_rekeyed_by_scheme\":" + std::to_string( oc.schemeRekeyed ) : std::string{} )
+                    + ( oc.schemeAmbiguous ? ",\"scheme_ambiguous\":" + std::to_string( oc.schemeAmbiguous ) : std::string{} )
                     + ( oc.renamesAvailable ? ( ",\"renames\":" + std::to_string( oc.renamesRecorded )
                                               + ",\"acked_by_rename\":" + std::to_string( oc.ackedByRename )
                                               + ",\"acked_by_content\":" + std::to_string( oc.ackedByContent ) )

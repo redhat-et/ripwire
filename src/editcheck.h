@@ -185,13 +185,15 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
     res.status  = "unchanged";
     // COUNTED UNDER THE BASELINE'S OWN KEY, not over `overloadNodes`, and the difference is the §A6a trap
     // recorded on editCheckOverloadSet — measured, on 118 of 953 sampled symbols of this repo, before it was
-    // fixed. computeSnapshot buckets by hash(baselineCanonId) and baselineCanonId is g.canonId with the path
-    // segment made root-relative, so equal g.canonId ⇔ equal baseline key. `overloadNodes` is that bucket
-    // INTERSECTED with the focus's file, because a CONTRACT is per definition site. Comparing a file-scoped
-    // count against a canonId-scoped one is comparing two different questions and reports a phantom whenever a
-    // scope-less name (which canonicalId degrades to a BARE NAME) also exists in another file. Both sides are
-    // canonId-scoped here, so on an unedited tree they are equal by construction — the property that makes
-    // this signal safe to put in the headline at all.
+    // fixed. THE KEY MUST BE THE ONE computeSnapshot ACTUALLY STORED: since 2026-08-25 that is
+    // quality::qualityKey (pathQualifiedKey), NOT hash(baselineCanonId). Deriving it independently here is
+    // exactly how the two drifted — for the window between the key-space change and this line, every lookup
+    // missed and --edit-check reported `new-symbol` for every symbol on a clean tree.
+    //
+    // `overloadNodes` is that bucket INTERSECTED with the focus's file, because a CONTRACT is per definition
+    // site. The two sides are now BOTH path-qualified, which makes them equal by construction on an unedited
+    // tree — and strictly more so than before: the old canonId key degraded a scope-less name to a bare name,
+    // so the bucket silently spanned files while `overloadNodes` never did.
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         if( i < g.canonId.size() && !g.canonId[i].empty() && g.canonId[i] == g.canonId[focus] )
@@ -219,7 +221,7 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
 
     // HEAD baseline — the warm path MUST hit computeHeadSnapshot's own qsnap cache (the ≤100ms budget).
     auto [ base, baselineOk ] = quality::computeHeadSnapshot( root, nullptr, maxFileBytes, excludes );
-    const std::uint64_t key   = fnv1a64( quality::baselineCanonId( ing, focus, root ) );
+    const std::uint64_t key   = quality::qualityKey( ing, focus, root );   // the key computeSnapshot stored
     if( !baselineOk || base.locBySym.find( key ) == base.locBySym.end() )
     {
         res.status = "new-symbol";
