@@ -31,9 +31,19 @@
 #       measuring the route the rule is scoped to.
 #   (f1) THE THING THE DEFECT COSTS — the plain --for=Widget bundle SERVES the definition in its ranked
 #       rows, where before the fix all it served was two copies of the name.
-#   (f2) HONEST RESIDUAL, PINNED — the auto-body slot is fed by the ROUTER's anchor, not by the ranking,
-#       so it is a second site of the same defect that this round did not register a fix for. Pinned as
-#       it stands so that fixing it goes red here and is acknowledged rather than absorbed silently.
+#   (f2) THE ANCHOR-SIDE HALF — the auto-body slot is fed by the ROUTER's anchor, not by the ranking, so
+#       it was a second site of the same defect. Closed by the anchor-body round (2026-08-25): this arm
+#       was FLIPPED, deliberately and inside that round's registration, from pinning the declaration to
+#       pinning the definition. It is the tripwire the def-over-decl round left armed for exactly this.
+#   (f3) THE ANCHOR, AND WHAT MUST NOT MOVE WITH IT — the disclosed anchor path follows the definition
+#       while the "+N" ambiguity count stays put. The rule writes fileId and nothing else.
+#   (f4) INERT-BRANCH CONTROL — --for=Cog: the first definition in NodeId order already carries a body,
+#       so there is nothing to prefer and nothing may move. The fixture twin of the registration's
+#       unreachable N04/N07 rows, where an out-of-line constructor holds the claim.
+#   (f5) NO-BODY-ANYWHERE CONTROL — --for=Sprocket: nothing defines it, so the first-in-NodeId anchor
+#       stands exactly as before. A rule that demoted bodyless claimants unconditionally empties this.
+#   (f6) UNIQUE-DEFINITION INVARIANCE — --for=Gadget: one definition, no second claimant, byte-stable
+#       anchor. This is the registered criterion that outranks the round's own band.
 #   (g) C13 ANALOGUE / OFF-ROUTE INVARIANCE — a CONCEPTUAL query that explicitly asks for forward
 #       declarations still gets them, in the exact subtoken+body order it had before the rule existed.
 #       This is the local form of growth's C13, the armed kill tripwire the E6 round left behind for
@@ -124,35 +134,90 @@ first="$( tr '>' '\n' <"$TMP/lens" | sed -n 's/.*<d l="\([0-9]*\)" n="Widget" id
     && ok "the FIRST ranked row is the definition (z_widget.hpp:10) — the row that survives any budget" \
     || no "the first ranked row is $first, not the definition z_widget.hpp::Widget::Widget:10"
 
-# ── (f2) HONEST RESIDUAL, PINNED — the auto-body slot is a SECOND site of the same defect, and this
-#    round did not register a fix for it. The body that rides on a name-exact --for is chosen from the
-#    ROUTER's anchor, not from the ranking: lexical.h's NameAnchor::fileId is documented as "the FIRST
-#    definition of this name in NodeId order", i.e. path order, so it resolves to a forward declaration
-#    for exactly the same reason the ranking used to. Registering and fixing that is a separate round
-#    (docs/EVALS.md §4 records it as this round's named residual). It is pinned rather than left
-#    unstated so that the day it IS fixed this arm goes red and someone updates it deliberately —
-#    a silent improvement past a gate is how a "green but inert" gate is born.
+# ── (f2) THE ANCHOR-SIDE HALF, pinned to the FIXED behaviour (registered 2026-08-25) ──────────────
+#    This arm used to pin the OPPOSITE, and the flip is deliberate. The def-over-decl round moved six
+#    golds into the ranked rows and not one into <bodies>, because the body that rides on a name-exact
+#    --for is chosen from the ROUTER's anchor and not from the ranking: NameAnchor::fileId was "the
+#    FIRST definition of this name in NodeId order", i.e. path order, so it landed on a forward
+#    declaration for exactly the reason the ranking used to. That round declined to fix a second site
+#    it had not registered, and left this arm asserting `a_headers.hpp:12` so that fixing it would go
+#    RED and be acknowledged rather than absorbed. The anchor-body round (docs/EVALS.md §4) is that
+#    acknowledgement: the anchor is claimed by the first BODY-CARRYING definition, so the body served
+#    is the real one and the ranked rows and the bodies finally name the same symbol.
 body="$( tr '>' '\n' <"$TMP/lens" | sed -n 's/.*<b t="[^"]*" l="\([0-9]*\)" p="\([^"]*\)".*/\2:\1/p' | head -1 | sed 's#defoverdeclfix/##' )"
 case "$body" in
-    a_headers.hpp:12) ok "residual pinned: the auto-body slot still follows the ROUTER's anchor ($body), not the ranking" ;;
-    z_widget.hpp:*)   no "the auto-body slot now serves the definition ($body) — the anchor-side defect was fixed; re-register this arm and retire the residual" ;;
+    z_widget.hpp:10)  ok "the auto-body slot serves the DEFINITION ($body) — ranked rows and bodies agree" ;;
+    a_headers.hpp:12) no "the auto-body slot is back on the declaration ($body) — the anchor-side rule is not in effect" ;;
     "")               no "no body was emitted at all for --for=Widget" ;;
     *)                no "the auto-body slot moved to an unexpected symbol ($body)" ;;
 esac
 
+# ── (f3) THE ANCHOR ITSELF, and the count that must NOT move with it ──────────────────────────────
+# The rule writes NameAnchor::fileId and nothing else, so the disclosed path moves to the definition
+# while the "+N" ambiguity count — extraDefs, four Widget definitions minus the claimant — stays 3.
+# A "+N" that moved would mean the rule had rewritten the anchor's own disclosure, not just its choice.
+anchor="$( sed -n 's/.*anchors: Widget(\([^)]*\)).*/\1/p' "$TMP/lens" | head -1 )"
+[ "$anchor" = "defoverdeclfix/z_widget.hpp+3" ] \
+    && ok "the disclosed anchor is the definition, ambiguity count intact (anchors: Widget($anchor))" \
+    || no "anchors: Widget($anchor) — expected defoverdeclfix/z_widget.hpp+3"
+
+# ── (f4) INERT-BRANCH CONTROL: a claimant that ALREADY carries a body keeps the anchor ─────────────
+# zy_cog.hpp DEFINES Cog and sorts before zz_cog_fwd.hpp, which re-declares it. The first definition
+# in NodeId order is therefore already body-carrying and the rule has nothing to prefer. This is the
+# fixture form of the registration's unreachable rows N04/N07, where an out-of-line constructor in a
+# .cpp sorts ahead of the class in the header and already holds the claim — those two bundles are
+# byte-pinned on the real corpora and this arm is their local twin. An implementation that prefers the
+# LAST definition, or the highest-RANKED one, or a `cls` over a `method`, goes red here.
+"$BIN" defoverdeclfix --for=Cog >"$TMP/cog" 2>/dev/null
+cogan="$( sed -n 's/.*anchors: Cog(\([^)]*\)).*/\1/p' "$TMP/cog" | head -1 )"
+cogbody="$( tr '>' '\n' <"$TMP/cog" | sed -n 's/.*<b t="[^"]*" l="\([0-9]*\)" p="\([^"]*\)".*/\2:\1/p' | head -1 | sed 's#defoverdeclfix/##' )"
+[ "$cogan" = "defoverdeclfix/zy_cog.hpp+2" ] && [ "$cogbody" = "zy_cog.hpp:14" ] \
+    && ok "a first-in-NodeId claimant that already carries a body keeps the anchor (Cog: $cogan, body $cogbody)" \
+    || no "--for=Cog moved: anchor=$cogan body=$cogbody — expected defoverdeclfix/zy_cog.hpp+2 and zy_cog.hpp:14"
+
+# ── (f5) NO-BODY-ANYWHERE CONTROL: the fallback is the OLD behaviour, unchanged ────────────────────
+# Sprocket is declared twice and defined nowhere, so no claimant carries a body and the rule must
+# leave the first-in-NodeId choice exactly as it was. A rule that demoted bodyless claimants
+# unconditionally would leave this query with no anchor and no body at all.
+"$BIN" defoverdeclfix --for=Sprocket >"$TMP/spr" 2>/dev/null
+spran="$( sed -n 's/.*anchors: Sprocket(\([^)]*\)).*/\1/p' "$TMP/spr" | head -1 )"
+sprbody="$( tr '>' '\n' <"$TMP/spr" | sed -n 's/.*<b t="[^"]*" l="\([0-9]*\)" p="\([^"]*\)".*/\2:\1/p' | head -1 | sed 's#defoverdeclfix/##' )"
+[ "$spran" = "defoverdeclfix/a_headers.hpp+1" ] && [ "$sprbody" = "a_headers.hpp:21" ] \
+    && ok "a name no definition gives a body to keeps its first-in-NodeId anchor (Sprocket: $spran)" \
+    || no "--for=Sprocket moved: anchor=$spran body=$sprbody — expected defoverdeclfix/a_headers.hpp+1 and a_headers.hpp:21"
+
+# ── (f6) UNIQUE-DEFINITION INVARIANCE — the registered criterion that outranks the band ────────────
+# Gadget is declared once and nowhere else. There is no second claimant, so nothing about this query
+# can reach the rule and its anchor must be identical to what the pre-rule binary printed, "+N" and
+# all — Gadget has no "+N" at all, one definition and no disclosed ambiguity.
+"$BIN" defoverdeclfix --for=Gadget >"$TMP/gad" 2>/dev/null
+gadan="$( sed -n 's/.*anchors: Gadget(\([^)]*\)).*/\1/p' "$TMP/gad" | head -1 )"
+gadbody="$( tr '>' '\n' <"$TMP/gad" | sed -n 's/.*<b t="[^"]*" l="\([0-9]*\)" p="\([^"]*\)".*/\2:\1/p' | head -1 | sed 's#defoverdeclfix/##' )"
+[ "$gadan" = "defoverdeclfix/a_headers.hpp" ] && [ "$gadbody" = "a_headers.hpp:17" ] \
+    && ok "a UNIQUE definition anchors exactly where it did (Gadget: $gadan, body $gadbody)" \
+    || no "--for=Gadget moved: anchor=$gadan body=$gadbody — expected defoverdeclfix/a_headers.hpp and a_headers.hpp:17"
+
 # ── (g) C13 ANALOGUE / OFF-ROUTE INVARIANCE ───────────────────────────────────────────────────────
 # Growth's C13 in local form. The conceptual route is a different entry point (lexicalScoresTiered)
-# and this rule must not reach it, so the order below is pinned exactly as the pre-rule binary emits
-# it. Scores are distinct here, so nothing in this arm is a tie: any movement means the rule leaked.
+# and neither the ranking rule nor the anchor rule must reach it, so the order below is pinned exactly
+# as the PRE-rule binary emits it. Scores are distinct here, so nothing in this arm is a tie: any
+# movement means a rule leaked.
+#
+# RE-DERIVED 2026-08-25, and the reason is worth stating rather than hiding in a diff. The anchor-body
+# round added zy_cog.hpp / zz_cog_fwd.hpp for arm (f4). Two more documents change BM25's corpus
+# statistics for every query over this fixture, and `Gadget` moved from position 3 to position 5 —
+# ON THE PRE-RULE BINARY, before a line of the anchor rule existed. So the order below was re-taken
+# from that same pre-rule binary against the GROWN fixture and then verified invariant across the
+# rule. A pin re-derived on the binary under test would be worthless; this one was not.
 CQ="forward declared widget and sprocket types"
 "$BIN" defoverdeclfix --for="$CQ" 2>/dev/null | grep -q 'routed: subtoken+body' \
     && ok "the declaration-seeking conceptual query still routes subtoken+body" \
     || no "the declaration-seeking conceptual query changed route"
 want='a_headers.hpp::Sprocket::Sprocket
 m_more.hpp::Sprocket::Sprocket
-a_headers.hpp::Gadget::Gadget
 m_more.hpp::Widget::Widget
-a_headers.hpp::Widget::Widget'
+a_headers.hpp::Widget::Widget
+a_headers.hpp::Gadget::Gadget'
 got="$( cands "$CQ" 5 | awk '{print $2}' )"
 if [ "$got" = "$want" ]; then
     ok "C13 analogue: a query that asks for forward declarations still gets all five, in the pre-rule order"
