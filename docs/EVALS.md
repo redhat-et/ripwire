@@ -3300,6 +3300,156 @@ whole-repo map; `test/defoverdeclcheck.sh` passes against `asan/ripwire` as well
 
 Gate count 451 → **452** (`test/defoverdeclcheck.sh`).
 
+### Definition-over-declaration at the ANCHOR — PRE-REGISTERED 2026-08-25 (before any fix code)
+
+**What this registers.** The named residual of the round immediately above, and nothing else. That round
+gave the name-exact ranking a definition-over-declaration tiebreak and moved six golds to `p=1`/`p=2` — but
+**every one of those wins landed in a `<d>` row and not one landed in `<bodies>`**, because the body that
+rides on a name-exact `--for` is not drawn from the ranking at all. It is drawn from the ROUTER's anchor,
+and `lexical.h`'s `NameAnchor::fileId` is *"the FIRST definition of this name in NodeId order"* — path
+order, so on a header-heavy C++ tree it resolves to a forward declaration for exactly the reason the
+ranking used to. **The same defect at a second site.** This registers the fix for that site before any
+code exists.
+
+**The mechanism, stated so it can be wrong.** `buildLowerNameIndex` walks symbols in NodeId order and the
+first symbol whose whole lowercased name equals the key claims `fileId`. Every later same-named definition
+only increments `extraDefs`. So a bare `class ClientContext;` in `extension/parquet/include/geo_parquet.hpp`
+claims the anchor for `ClientContext` on duckdb, and `restrictBodiesToRouteAnchor` — which is *correct*, and
+is the T3 substitution round's own fix — then narrows the auto-body candidates to symbols in **that** file.
+The definition, ranked first since the round above, is filtered out, and the caller is served the
+declaration's own text under the heading of an answer. The claim under test is the same one that round made,
+transplanted: **when several definitions share a name, the one that carries a body is the better anchor.**
+
+**The rule.** In `noteWholeNameDef`, using the house bodyless predicate shared with `graph.h`, `arch.h` and
+`applyDefOverDeclTiebreak` (`endByte > sigEndByte`):
+
+```
+the anchor is claimed by the first BODY-CARRYING definition of the name in NodeId order;
+a bodyless definition claims it only while no body-carrying one has been seen;
+when a body-carrying definition arrives after a bodyless claim, it TAKES the claim.
+If no definition of the name carries a body, the first one keeps it — exactly as today.
+```
+
+**Three properties are structural rather than asserted, and they are why this cannot reach the router.**
+(i) The rule writes `fileId` and one new private flag and **nothing else**: `wholeName`, `extraDefs` and
+`carriers` are untouched, byte for byte. (ii) Every input to the route DECISION is one of those three —
+whole-name membership (`wholeName`), the anchor-plausibility bounds (`extraDefs`, `carriers`) and the query
+words. **No query can therefore change route, and no plausibility verdict can change,** which is a stronger
+statement than "the floors did not move" and is checkable by reading the diff. (iii) Neither lexical scorer
+is touched, so the ranked order — every `<d>` row, every `--format=candidates` rank, the prior round's whole
+`SERVED` result — is invariant by construction. What may legitimately move is exactly two things: the path
+printed in the `anchors:` clause, and which body the T3 allowance serves.
+
+**The probe set is the twelve probes of the round above, frozen and unchanged** (their selection is
+recorded there: (P-a) every name-bearing class-2b query recorded verbatim and re-clonable, (P-b) a
+mechanical top-three-by-bare-declaration-count extension per corpus). Re-using them rather than choosing
+new ones is deliberate — the residual was measured on this set, so the fix is measured on this set.
+Corpora re-cloned blob-filtered at the same pinned SHAs and re-verified by revision count: duckdb
+`19864453` (48632 revs), rocksdb `0e2801ac` (12938), ugrep `550599a6` (985), all three matching the D4
+freeze to the digit, and the duckdb forward-declaration census reproducing it exactly as well
+(`ClientContext` 85, `DatabaseInstance` 38, `Serializer` 24).
+
+**Primary metric: `BODY-SERVED`** = of the twelve probes, how many have the **gold definition's own body**
+emitted in the `<bodies>` section of a plain `ripwire <corpus> --for="<Name>"`. Not "a body"; not "a body of
+something with the right name" — the gold definition's. That is precisely the distinction the T3
+substitution round drew and it is the distinction the defect erases.
+
+**Baseline, measured in this lane at `8312d8f` before any fix code existed: `BODY-SERVED` = 0 / 12.** All
+twelve route name-exact. Eight of the twelve have the gold in a `<d>` row (the round above's `SERVED` 8/12,
+reproduced here to the row) and **none of the eight gets its body**. What the eight get instead is the
+finding restated as data:
+
+| id | corpus | `--for=` | anchor at base | body served at base | gold body? |
+| --- | --- | --- | --- | --- | :---: |
+| N01 | DD | `ClientContext` | `extension/…/geo_parquet.hpp` | `geo_parquet.hpp:77` — a bare declaration | no |
+| N02 | DD | `DatabaseInstance` | `…/catalog/catalog.hpp` | `catalog.hpp:57` — a bare declaration | no |
+| N03 | DD | `Serializer` | `extension/json/…/json_serializer.hpp` | `json_serializer.hpp:37` — a bare declaration | no |
+| N04 | DD | `TableCatalogEntry` | `src/catalog/…/table_catalog_entry.cpp` | `table_catalog_entry.cpp:22` — the out-of-line constructor | no |
+| N05 | DD | `Deserializer` | `extension/json/…/json_serialize_sql.cpp` | `json_serialize_sql.cpp:198` | no |
+| N06 | DD | `Catalog` | `src/README.md` | none (`bodies="0" reason="no_candidates"`) | no |
+| N07 | RD | `ColumnFamilyData` | `db/column_family.cc` | `column_family.cc:526` — the out-of-line constructor | no |
+| N08 | RD | `Slice` | `db/blob/blob_fetcher.h` | none (`bodies="0" reason="no_candidates"`) | no |
+| N09 | RD | `SystemClock` | `db/blob/blob_file_builder.h` | `blob_file_builder.h:24` — a bare declaration | no |
+| N10 | RD | `Logger` | `include/rocksdb/env.h` | none | no |
+| N11 | UG | `dos_streambuf` | `include/reflex/input.h` | five constructor bodies | no |
+| N12 | UG | `streambuf` | `include/reflex/input.h` | four constructor bodies | no |
+
+**A pre-code feasibility ceiling, bounded from above before the code exists — the round above's own
+discipline, and the part of it that earned its keep.** The rule can only reach a probe when (a) the anchor's
+current claimant is bodyless AND a body-carrying same-named definition exists, (b) that first body-carrying
+definition in NodeId order IS the gold, and (c) the gold survives the auto-body candidate head, which is the
+top `kPackTaskBodyCandidates` = 6 positive-scoring ranks. Audited per probe against the candidates export:
+
+* **Reachable (6): N01, N02, N03, N05, N09, N10.** In each, every same-named symbol sorting before the gold
+  by path is a bare declaration, and the gold is at rank 1 (N01, N02, N03, N05, N09) or rank 5 (N10).
+* **Unreachable (6), each for a named and different reason.** **N04** and **N07**: the first body-carrying
+  definition in NodeId order is the class's own **out-of-line constructor** in the `.cpp`/`.cc`, which sorts
+  before the header — the anchor is already body-carrying, so the rule is inert and the bundle must not move.
+  **N06**: the claimant is a markdown section (`# Catalog` in `src/README.md`), which carries a body, so it
+  keeps the claim and this probe must not move either. **N08**: the anchor does move to `include/rocksdb/slice.h`,
+  but the six-candidate head is filled entirely by higher-scoring `Slice.java` rows and the gold sits at rank
+  8 — a candidate-head bound, not an anchor bound. **N11**/**N12**: every definition is in one file, so the
+  anchor cannot move at all, and the gold (`class Input::dos_streambuf : … {`, a qualified out-of-class
+  nested definition) is not extracted as a symbol — the separate extraction gap the round above named and
+  disclaimed.
+
+**Registered band: `BODY-SERVED` ≥ 4 / 12, i.e. `[+4, +6]` against the baseline of 0** — three units wide,
+upper edge at the audited ceiling. Below `+4` is a REJECT and the code is reverted. **Above `+6` the audit
+mismodelled the mechanism and the change must be re-read before it may ship, not celebrated.**
+
+**Registered invariance criterion, which outranks the band, and is (d) of this lane's brief.** *A query
+whose name has a UNIQUE definition must produce a byte-identical bundle.* Nothing about such a query can
+touch this rule — there is no second claimant — so a single differing byte means the rule is doing something
+other than what it says.
+
+**Registered controls — byte-compared, base vs head on the same tree and the same corpus; any difference is
+a REVERT.** The first four are the round above's own control set, re-used unchanged; the last three are new
+and are the ones this rule could plausibly break.
+
+| control | command | why |
+| --- | --- | --- |
+| **C13** (the armed kill tripwire) | UG `--for="forward declared nested stream buffer classes"` | a query that explicitly asks for forward declarations must keep them |
+| G18 | UG `--for="dos line ending stream buffer for buffered input"` | conceptual route — anchors nothing, so must not move |
+| G20 | UG `--pack-task="implement a new stream buffer over reflex Input" --token-budget=6000` | the body-selector row on the conceptual route |
+| unique-definition name-exact ×2 | this repo, `--for="computeLensRanking"` / `--for="lexicalScoresNameExactTiered"` | the invariance criterion's own fixture |
+| default map + conceptual | this repo, flagless / `--for="how does the ranker route a query"` | surfaces that consume no anchor at all |
+| **N04, N07** | DD `--for="TableCatalogEntry"` / RD `--for="ColumnFamilyData"` | **the audit's own prediction, byte-pinned:** a many-definition name whose first claimant already carries a body must not move one byte |
+| **N11, N12** | UG `--for="dos_streambuf"` / `--for="streambuf"` | every definition in one file — the anchor is structurally immovable |
+
+`N06` (`Catalog`, the markdown-section claimant) and `N08` (`Slice`, the candidate-head bound) are
+**recorded, not byte-pinned**: the audit predicts N06 unchanged and N08 changed in its `anchors:` clause but
+not in its zero bodies, and a prediction that names its own uncertainty should not be enforced as a control.
+
+**Registered guards, re-run after the change; any regression is a REVERT regardless of the band.** Every
+value below is this lane's own re-measurement at `8312d8f`, and every one reproduces the last recorded
+baseline to the digit — that is the instrument check, done before any result was believed.
+
+| Guard | Floor / ceiling | At `8312d8f` |
+| --- | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% |
+| `bench/recalleval/run_r3diff.py` base-vs-head, ranking + recall sets | near-all ties | — |
+| the round above's `SERVED`, re-measured | **8 / 12, unmoved** | 8 / 12 |
+| determinism (two runs byte-identical) + `xmllint` well-formedness | contract | — |
+| full gate battery (`test/regression.sh`) | all green | — |
+| G1 — ASan/UBSan/integer/LSan over the new path | no report | — |
+
+**The gate arm that is flipped on purpose.** `test/defoverdeclcheck.sh` arm (f2) PINS the pre-fix behaviour —
+it asserts the auto-body slot still serves `a_headers.hpp:12`, the declaration, and it fails loudly with
+*"the anchor-side defect was fixed; re-register this arm and retire the residual"* the moment it is not.
+That is this round, so **arm (f2) is rewritten to pin the new behaviour as part of this registration**,
+together with a new fixture name whose declaration and definition are in different files and whose ranked
+rows were never the issue. Flipping a tripwire silently is how a green-but-inert gate is born; flipping it
+inside the registration that predicted it is the opposite.
+
+**KILL conditions, registered before the result.** Any one of: `BODY-SERVED` below `+4`; any byte-compared
+control differing; the round above's `SERVED` moving off 8/12; any floor above going red; a route decision
+changing on any probe; a body served that is neither the gold nor what base served.
+
 ---
 
 ## 5. Token and output economy
