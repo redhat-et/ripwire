@@ -2700,6 +2700,20 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
 // that would classify EVERY finding new-symbol and gate nothing, silently. A file that yields no comment
 // header, no `head` stamp and no record line is not an empty baseline — it is a broken one; report it absent
 // (alerting), and the caller falls back to the git-HEAD auto-baseline, which is the correct floor.
+//
+// THE VERSION REFUSAL (2026-08-25, the scope-less fold round). Every other unknown record in this format is
+// skipped gracefully so forward/backward versions never crash, and for a KEY-SPACE change that posture would
+// be actively wrong. A v3 sidecar's per-symbol keys are `fnv1a64(baselineCanonId)` while this binary computes
+// pathQualifiedKey (see qualityKey), so reading one yields a baseline in which no current symbol exists: every
+// function in the tree reports as brand-new debt, with nothing to indicate anything went wrong. Refusing is
+// the honest degrade — an unrecognizable baseline makes the caller fall back to git HEAD, and that fallback is
+// already named on every report through `baseline=`. The sidecar is generated and gitignored, so the whole
+// cost of refusing is one `--quality-baseline` re-pin.
+inline bool baselineHeaderIsForeign( const std::string& line ) noexcept
+{
+    return line.rfind( "# ripwire quality baseline v", 0 ) == 0 && line.find( " v4 " ) == std::string::npos;
+}
+
 inline bool readBaseline( const std::string& path, Snapshot& out )
 {
     std::ifstream f( path );
@@ -2715,14 +2729,7 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
         {
             continue;
         }
-        // THE VERSION REFUSAL (2026-08-25). Every other unknown record in this format is skipped gracefully,
-        // and for a KEY-SPACE change that posture would be actively wrong: a v3 sidecar's per-symbol keys are
-        // `fnv1a64(baselineCanonId)` while this binary computes pathQualifiedKey, so reading one produces a
-        // baseline in which no current symbol exists — every function in the tree reports as brand-new debt,
-        // with no indication anything went wrong. Refusing is the honest degrade: an unrecognizable baseline
-        // makes the caller fall back to git HEAD, and that fallback is already named on every report through
-        // `baseline=`. The sidecar is generated and gitignored, so the cost of refusing is one re-pin.
-        if( line.rfind( "# ripwire quality baseline v", 0 ) == 0 && line.find( " v4 " ) == std::string::npos )
+        if( baselineHeaderIsForeign( line ) )   // pre-pathQualifiedKey sidecar — refused, see above
         {
             DEGRADED_PATH_ALERT( "quality: baseline sidecar predates the pathQualifiedKey scheme — refused, re-pin with --quality-baseline" );
             out = Snapshot{};
@@ -3521,18 +3528,12 @@ struct IdentityAliases
     // 2026-08-25 SCHEME MIGRATION (the scope-less fold round). Alias sources contributed by addSchemeAliases
     // rather than by the rename record, kept separate ONLY so the disclosure can say which mechanism moved an
     // ack — "git recorded a rename" and "the key rule itself changed" are different claims and collapsing them
-    // would hide which one the tool relied on. Both are sorted; membership is a binary_search.
+    // would hide which one the tool relied on. Both are kept SORTED by addSchemeAliases, and membership is a
+    // plain std::binary_search at the two call sites (one each) — deliberately NOT wrapped in a predicate
+    // member, because a single-use three-line binary_search wrapper is structurally indistinguishable from
+    // every other one in the tree, and --quality-delta correctly reports it as a new clone of a reused helper.
     std::vector<std::uint64_t>                   schemeKeys;            // old-scheme key → new-scheme key, unambiguously
     std::vector<std::uint64_t>                   schemeAmbiguousKeys;   // old-scheme identity that FOLDED across files — refused
-
-    bool isSchemeKey( std::uint64_t k ) const
-    {
-        return std::binary_search( schemeKeys.begin(), schemeKeys.end(), k );
-    }
-    bool isSchemeAmbiguous( std::uint64_t k ) const
-    {
-        return std::binary_search( schemeAmbiguousKeys.begin(), schemeAmbiguousKeys.end(), k );
-    }
 };
 
 // Derive every alias the rename map licenses for the CURRENT tree. Costs nothing when nothing was renamed:
@@ -3781,8 +3782,9 @@ inline AckRemap remapAckIdentity( gtl::btree_map<std::string, AckRecord>& acks, 
         if( alias != al.toCurrent.end() )
         {
             // Same map, two mechanisms — report which one actually moved this row (see IdentityAliases).
+            const bool byScheme = std::binary_search( al.schemeKeys.begin(), al.schemeKeys.end(), rec.key );
             moves.push_back( { mapKey, alias->second,
-                               al.isSchemeKey( rec.key ) ? AckRescueRoute::Scheme : AckRescueRoute::Rename } );
+                               byScheme ? AckRescueRoute::Scheme : AckRescueRoute::Rename } );
             continue;
         }
         if( rec.cid == 0 || cids == nullptr )
@@ -3923,10 +3925,11 @@ inline IdentityHealing healIdentity( Snapshot& base, gtl::btree_map<std::string,
     // Ack rows whose old identity FOLDED across files — countable only here, where both the ledger and the
     // poisoned set are in scope. Disclosed, never silently dropped: they stay in the ledger at their old key
     // and surface through stale= as well, so nothing vanishes without a row saying so.
+    const auto& amb = h.aliases.schemeAmbiguousKeys;
     for( const auto& [ mapKey, rec ] : acks )
     {
         (void) mapKey;
-        if( h.aliases.isSchemeAmbiguous( rec.key ) )
+        if( std::binary_search( amb.begin(), amb.end(), rec.key ) )
         {
             ++h.schemeAmbiguousAcks;
         }
