@@ -5596,3 +5596,77 @@ nested definitions (`template <class T> class Foo<T>::Bar { ... }`) are a docume
 new pattern's `name: (qualified_identifier)` does not match a `template_type`/`dependent_type` name node,
 and duckdb's `third_party/re2` instances happen not to exercise this because they are vendor-excluded,
 not because they are templated — an untested, disclosed edge.
+
+### N08 — the candidate-head bound — PRE-REGISTERED 2026-08-25 (before any fix code, on top of the
+### extraction round immediately above)
+
+**What this registers.** Both the anchor-body round and the def-over-decl round named this residual too:
+*"`Slice`'s anchor is now correct and its gold sits at rank 8, one past `kPackTaskBodyCandidates` = 6,
+behind seven higher-scoring `Slice.java` rows … Whether the head should be taken AFTER the anchor
+restriction rather than BEFORE is a small, well-understood question with a clean fixture available."*
+
+**The mechanism, read from the code rather than assumed.** `main.cpp`'s `buildForAutoBodies` takes the
+top-`kPackTaskBodyCandidates` (6) positive-score rows of `lensSurfaceIds` (the WHOLE ranked surface, not
+scoped to any one file) FIRST, and only THEN calls `restrictBodiesToRouteAnchor` to narrow that already-
+capped six down to the anchor's own file. Confirmed directly on rocksdb: `--for="Slice"` resolves the
+anchor correctly to `include/rocksdb/slice.h` (the def-over-decl/anchor-body rounds' own fix), but the
+pre-restriction top-6 is seven `Slice`-named rows in `java/src/main/java/org/rocksdb/Slice.java` — a
+different LANGUAGE, an unrelated file — scoring higher (`8.37869` vs. slice.h's `6.35078`) because of
+BM25's length-normalization term: a symbol WITH a written scope (`s.scope` non-empty, e.g. a C++
+constructor `Slice::Slice`) counts as a two-token "document" against the whole-name scorer, while an
+unscoped Java method scores as one token and wins the length penalty. Restriction runs on a set that
+already has zero anchor-file members, so it produces the empty set: `bodies="0" reason="no_candidates"`.
+
+**The claim under test.** Restricting the FULL positive-score surface to the anchor's own file BEFORE
+taking the top-6, rather than after, makes the anchor's own definitions the only pool the cap draws from
+— so the gold is served whenever anything in its own file is on the positive-score surface at all,
+regardless of how many unrelated same-named symbols elsewhere outscore it. This is a REORDERING of an
+existing two-step pipeline, not a new rule: no scoring, no anchor selection, and no ranked-row content
+changes, by construction — `restrictBodiesToRouteAnchor` and `isRouteAnchorSymbol` are reused verbatim,
+only the ORDER of two already-existing calls moves.
+
+**Primary metric: does N08 flip.** On rocksdb `--for="Slice"`, is the gold class definition
+(`include/rocksdb/slice.h`'s `class Slice`) present in `<bodies>`. **Baseline, measured at this lane's own
+head-with-item-B (item B lands first in this branch; N08 is untouched by it — confirmed, `<sigs>` and
+`bodies="0"` both unmoved from `518fe0d`): NO.** **Registered band: YES** — a single boolean, not a range;
+the mechanism is an unconditional reordering, so there is no partial outcome for the one probe it directly
+targets.
+
+**The open question this lane's own brief poses, registered rather than pre-answered: does the reorder
+touch ONLY N08, or does the same crowding pattern reach other probes in the twelve-probe set too?** The
+mechanism gives no reason to expect N08 is unique — ANY probe whose anchor file holds more real
+definitions than fit under a pre-restriction top-6 crowded by unrelated same-named rows has the identical
+shape. This is registered as an OPEN MEASUREMENT, not assumed either way, and is not itself part of the
+pass/fail band: whatever the twelve-probe set shows is reported as data. **What DOES gate, regardless of
+how many probes move, is the invariance criterion below** — it is what makes "more than N08 moved" a
+FINDING rather than a defect.
+
+**Registered invariance criterion, which outranks the band.** Three structural guarantees, checkable by
+reading the diff (`restrictBodiesToRouteAnchor`/`isRouteAnchorSymbol` untouched; only the caller's control
+flow reorders two existing calls) and confirmed by measurement on ALL twelve probes: (i) `<sigs>` — the
+RANKED rows — are byte-identical, base vs. head, on every probe (this touches body SELECTION only, never
+ranking); (ii) every probe's disclosed `anchors:` line is byte-identical (the anchor computation is not
+in this diff's reach at all); (iii) any body that newly appears on ANY probe belongs to that probe's
+ALREADY-resolved anchor file — no cross-file, no wrong-symbol serving is possible by construction, since
+restriction still runs, just earlier.
+
+**Registered controls.**
+
+| control | why |
+| --- | --- |
+| `<sigs>` byte-compared on all twelve probes | the invariance criterion's own primary check |
+| every probe's `anchors:` line byte-compared | this diff cannot reach anchor selection |
+| N01, N05 (the T3 budget misses) | registered UNREACHABLE by the anchor-body round's own audit — a bare
+`class X;` forward declaration crowding out a HUNDREDS-of-lines real definition is a byte-BUDGET question,
+not a candidate-HEAD question; this reorder does not change which candidates are large, only which ones
+are considered, so these two must stay `reason="budget"` |
+| N04, N07 (the inert-branch controls) | the anchor-body round's own byte-pinned rows — a claimant that
+already carries a body has nothing for either rule to prefer; must stay byte-identical |
+| N11, N12 (ugrep) | item B already lands first in this branch; this reorder's effect on them, if any, is
+measured on a corpus where the extraction gap is ALREADY closed, not the pre-item-B state |
+
+**Registered guards, re-run after the change; any regression is a REVERT regardless of the band.** Same
+lattice as both rounds above: skill routing (split=test/dev), judged routing, recall lane, ranking lane,
+pollution, `run_r3diff.py` on the two frozen sets, determinism, `xmllint`, the full gate battery, G1. This
+diff touches `main.cpp` only (no `kParserVer` bump — it is not an extraction change), so the blast radius
+is smaller in kind than item B's, but the SAME lattice is re-run rather than assumed clean.
