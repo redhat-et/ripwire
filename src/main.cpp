@@ -4229,16 +4229,27 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // §P2 — the two budget flags obey the documented two-personality rule (D10): --max-tokens SHAPES (byte
         // ceiling at the map family's densest rate × headroom — the old ×4 B/tok overshot ~85×), --token-budget
         // GATES inside emitRecallBudgeted (exit 3, header line only — never the artifact it rejected).
+        // R-R: the run's own root, derived ONCE and spent twice — the ranker relativizes the path tokens it
+        // scores against it, and buildRecall relativizes the separator line it prints against it. Two
+        // consumers of one fact, because a bundle whose ranking and whose display disagreed about the
+        // spelling of a file is exactly the drift the root-relative emission lane spent a round removing.
+        // Empty for multi-root, where ing.files already hold the labelled root-relative spelling.
+        const std::string_view   recallRootArg = ( ing.realPaths.empty() && cfg.roots.size() == 1 )
+                                                     ? std::string_view( cfg.roots[0] ) : std::string_view();
         // pathFieldDefaultW=1: the recall lens ranks DOCS, where the filename often IS the answer's name
         // ("readme", "report", "paired_table") — measured by bench/recalleval (gate: recallevalcheck.sh).
-        const std::vector<float> rscore = lexicalScores( ing, g.outOff, g.outTargets, cfg.recall, 0, nullptr, 1 );
+        // The path it scores is root-relative, so the ranking does not depend on how deep the corpus is
+        // checked out (registered + measured in docs/EVALS.md; gate: test/recallrankdepthcheck.sh).
+        // Unguarded: rootPrefixOf("") is "" (its trailing-slash loop needs size() > 1), and
+        // rootRelativeUri(p, "") returns p bar a leading "./" — so the multi-root path needs no branch.
+        const std::string        recallRootPrefix = rw::sarif::rootPrefixOf( recallRootArg );
+        const std::vector<float> rscore = lexicalScores( ing, g.outOff, g.outTargets, cfg.recall, 0, nullptr, 1, recallRootPrefix );
         const std::size_t        budget = cfg.maxTokens > 0 ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom ) : 0;
         // §B2: --top-k=N now actually SHAPES how many docs recall emits (was accept-and-ignore — --help and
         // the --limit refusal both already promised this). Default stays 8 when the user never passed the flag.
         const int                 recallK = cfg.topKExplicit ? cfg.topK : 8;
         const RecallBundle       bundle = buildRecall( ing, rscore, cfg.recall, recallK, budget, true, redactPtr,
-                                                       ( ing.realPaths.empty() && cfg.roots.size() == 1 ) ? std::string_view( cfg.roots[0] )
-                                                                                                          : std::string_view() );   // docs (markdown) only — notes/plans/designs, not code; R-R
+                                                       recallRootArg );   // docs (markdown) only — notes/plans/designs, not code; R-R
 
         const int                rc     = emitRecallBudgeted( stdout, bundle, cfg.tokenBudget );
         reportRedactions( stderr, redactCounts );
