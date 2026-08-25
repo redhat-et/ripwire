@@ -34,6 +34,19 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest.cpp"
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-08-25, THE SCOPE-LESS QUALITY-KEY FOLD (test/qualitykeycheck.sh, scopeless-fold lane): the KEY
+#   SPACE of every per-symbol map in a Snapshot moved. ccx/loc/nest/params/defs/mask/dead/api were keyed
+#   by `fnv1a64( baselineCanonId(...) )`, which inherits resolve.h::canonicalId's bare-name degrade and
+#   therefore folded every scope-less symbol across files into ONE identity (measured on this repo:
+#   6,418 scope-less rows collapsing to 3,845 identities, and a ccx 1->18 regression reported as
+#   nothing). They key on pathQualifiedKey now, via the new quality.h::qualityKey. This IS a
+#   Snapshot-SEMANTICS change of the purest kind — a v6 blob's keys are computed from a different byte
+#   string, so serving one to this binary makes every symbol read as absent from the baseline and the
+#   whole tree report as new debt — so kQSnapCacheScheme DID move, 6 -> 7, in the same diff, and the
+#   .ripwire_quality_baseline header moved v3 -> v4 with a READ-SIDE REFUSAL of anything older.
+#   computeSnapshot's text changed (one line, the key derivation); errorMaskCountsBySym moved above
+#   pathQualifiedKey's new position so it can call it. No extraction change: kParserVer and the
+#   quality.h mirrors deliberately did NOT move.
 # 2026-08-25, NESTED QUALIFIED CLASS/STRUCT EXTRACTION (test/nestedqualcheck.sh, candhead-ugrep lane,
 #   N11/N12): kParserVer 72 -> 73 and the quality.h mirror with it, in the same diff. queries/cpp/
 #   tags.scm gains a class_specifier/struct_specifier `name: (qualified_identifier)` pattern — the
