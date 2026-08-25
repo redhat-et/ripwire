@@ -5428,3 +5428,90 @@ routing judged 98/152 bm25-desc / 90/152 for-routed, split=test 73.1%; frozen ra
 cache-provenance matrix). The E6 demotion corpus stands at 16 CLEAN (strict 15) against the
 ≥25 bar — the three queued ranking lanes remain deliberately unbuilt, and the pre-registered
 band remains banked, unregistered, and untuned.
+
+### N11/N12 — the ugrep EXTRACTION gap — PRE-REGISTERED 2026-08-25 (before any fix code)
+
+**What this registers.** Both the anchor-body round and the def-over-decl round named the same residual
+and disclaimed it rather than fix it: *"a qualified out-of-class nested definition (`class
+BufferedInput::dos_streambuf : …`) is not extracted as a symbol for its own bare name."* This is an
+EXTRACTION gap, not a ranking or routing one — neither round's diff touched a tags query or `kParserVer` —
+and it is the one item this lane is scoped to fix.
+
+**The mechanism, stated so it can be wrong.** `queries/cpp/tags.scm`'s `class_specifier`/`struct_specifier`
+patterns bind `name: (type_identifier)` — a BARE, unqualified class name. A nested type DEFINED OUT OF
+LINE with its qualifier written out — `class Outer::Inner : Base { … };`, the Pimpl idiom rocksdb's own
+tree uses ~29 times (`BlockBasedTable::IndexReaderCommon`, `AutoHyperClockTable::ChainRewriteLock`,
+`VersionBuilder::Rep`, `CompressionContextCache::Rep`, …) — writes its OWN name as a `qualified_identifier`
+instead, so neither pattern matches and the class itself is dropped at extraction: no symbol, no
+`--skipped` row, no floor. Its MEMBERS still extract fine and still scope correctly to `Outer::Inner` —
+`ingest.cpp`'s `enclosingScopeOf` walk is structural (it reads the `class_specifier`'s own `name:` field AS
+WRITTEN, whether or not the tags query captured that node as a symbol) — so a constructor inside the class
+body was never the problem. Only the class's OWN bare name resolves to nothing.
+
+Measured at base (`518fe0d`), ugrep `include/reflex/input.h`: `--for="dos_streambuf"` ranks the
+CONSTRUCTOR (`fn`, a real def — a constructor's own name is the class name too) and the bodyless in-class
+forward declaration `class dos_streambuf;` (extracted, but — a second, narrower defect this lane's fix
+also happens to expose rather than cause, see the finding below — two DIFFERENT enclosing classes'
+forward declarations of the same bare nested name collide into ONE self-scoped id) but never the real
+`class BufferedInput::dos_streambuf : public std::streambuf { … }` definition itself: absent from the
+candidate list entirely, not merely low-ranked.
+
+**The claim under test.** The out-of-line METHOD pattern two lines above in the same file already handles
+this exact grammar shape (`function_declarator declarator: (qualified_identifier name: (identifier))`,
+extended to `name: (qualified_identifier)` for 2+ segments — the C1/memgraph round, 2026-08-yy) via two
+pieces of machinery that are already GENERIC over every C++ definition capture, not method-specific:
+`cppDefNameReseat` (descends a qualified `@name` capture to its innermost identifier for the bare NAME)
+and the canonical-scope rule (`qualifierOf` first, `enclosingScopeOf` only when that is empty, for the
+SCOPE — "out-of-line `A::b` → `A`"). The claim: adding the class/struct-level twin of the existing
+qualified-method pattern needs no new C++ code, only two new query lines plus the `kParserVer` bump every
+extraction change carries.
+
+**The fix (stated before it is written).** Two new lines in `queries/cpp/tags.scm`:
+```
+(class_specifier name: (qualified_identifier) @name body:(_)) @definition.class
+(struct_specifier name: (qualified_identifier) @name body:(_)) @definition.class
+```
+`body:(_)` mirrors the upstream `struct_specifier` pattern's own requirement (only a real out-of-line
+DEFINITION carries a body; ISO C++ has no syntax for a qualified out-of-line FORWARD declaration of a
+nested class, so the bodyless case is not a live shape this drops on purpose). `kParserVer` 72 → 73.
+
+**Primary metric: `GOLD-EXTRACTED`** = of the two named probes (N11 `dos_streambuf`, N12 `streambuf`,
+both on ugrep `include/reflex/input.h`), does `--format=candidates` for a plain `--for="<name>"` include a
+`cls` candidate whose id is the QUALIFIED name (`Input::dos_streambuf` / `BufferedInput::dos_streambuf`,
+etc.) at the definition's real line — i.e. is the gold class itself extracted and locatable by its bare
+name, not merely its constructor. **Baseline, measured at `518fe0d`: 0 / 2** (confirmed above). Both
+`dos_streambuf` and `streambuf` name TWO out-of-line definitions each (`Input::X` and `BufferedInput::X`),
+so the metric is a strict 0-of-2 rather than a partial credit scale — the mechanism is a grammar-level,
+unconditional extraction rule, not a score-dependent tiebreak, so there is no plausible PARTIAL outcome
+the way a ranking round has: either the pattern matches the shape and both flip, or it does not and
+neither does. **Registered band: `GOLD-EXTRACTED` = 2 / 2, a single point, not a range** — anything less
+is a REJECT (the mechanism does not do what it claims) and anything else does not exist for this metric.
+
+**Registered invariance criterion, which outranks the band.** *Every symbol that already extracted
+correctly — every already-passing row of the twelve-probe anchor-body set (N01–N10), every member's own
+scope (the constructor's id, unchanged) — must be untouched.* This is a structural claim from the fix's
+own shape (two new, disjoint query patterns; `cppDefNameReseat`/`qualifierOf` are read-only over the AST,
+not rewritten): a query pattern either matches a node or it does not, and nothing is removed or reordered
+for the shapes that already matched. Checkable two ways: (i) the fixture-level constructor-id control
+(`test/nestedqualfix`, arm (e)); (ii) `<sigs>` byte-compared across the SAME twelve real-corpus probes the
+anchor-body round pinned, base vs. this lane's head, on duckdb/rocksdb/ugrep.
+
+**Registered controls.**
+
+| control | why |
+| --- | --- |
+| `test/nestedqualfix`'s Decoy (arm (d)) | a same-named nested forward declaration in an UNRELATED enclosing class must never be attributed the real definition — proves the fix reads the qualifier at the DEFINITION site, not a name-only merge |
+| the constructor's own id, unchanged (arm (e)) | this fix ADDS a symbol; it must not touch a member scope that already worked |
+| N01–N10, `<sigs>` byte-compared | ten already-passing rows this extraction change has no business reaching |
+| duckdb `third_party/re2` (8 real instances of the shape, e.g. `RE2::Set`, `DFA::Workq`) | vendored/excluded from the crawl already, base and head alike — the predicted EXPLANATION for why duckdb's total symbol count does not move at all, checked rather than assumed |
+| rocksdb symbol-count delta, spot-checked | the ~29 new rocksdb symbols this fix is expected to mint (real Pimpl-idiom classes) must be exactly that shape, not a false-positive flood — `IndexReaderCommon`, spot-checked, resolves correctly |
+
+**Registered guards, re-run after the change; any regression is a REVERT regardless of the band.** Same
+lattice as the round above: skill routing (split=test/dev), judged routing, recall lane, ranking lane,
+pollution, `run_r3diff.py` on the two frozen sets, determinism, `xmllint`, the full gate battery, G1.
+**One extraction-specific expectation, stated in advance rather than discovered after:** raw BM25 scores
+on UNRELATED queries may shift in the LOW DIGITS of a floating value (adding symbols anywhere changes
+corpus-wide document-frequency/length statistics for every query, not just the ones this fix targets) —
+this is expected and is not itself a regression; what MUST hold is that `<sigs>`/ranked ROW ORDER and
+every disclosed anchor are byte-identical on every probe this fix does not target. A WIDE `r3diff` on
+either frozen set, or any `<sigs>` byte movement on N01–N10, is the actual kill condition.
