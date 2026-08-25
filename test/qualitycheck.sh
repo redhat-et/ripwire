@@ -127,13 +127,40 @@ OVOUT="$( cd "$OV" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
 rm -f .ripwire_quality_baseline
 [ "$( ec )" = 1 ] && ok "no baseline → exit 1 (tells you to run --quality-baseline first)" || no "missing baseline should exit 1"
 
-# ── 6) baseline-format compatibility: an old v1 baseline (no loc/nest/params/api lines) must not crash ─
-#       reading it — the new kinds count against baseline 0 (intended re-baseline prompt), never a parse error.
+# ── 6) baseline-format compatibility: a PRE-v4 baseline is REFUSED, never silently misread ─────────────
+#       This arm used to assert only "does not crash", and until 2026-08-25 that was the whole contract: an
+#       old sidecar simply contributed no lines for kinds it predated. The scope-less fold round made the
+#       question sharper, because it changed the per-symbol KEY SPACE (fnv1a64(baselineCanonId) ->
+#       pathQualifiedKey). A v1/v2/v3 sidecar's keys are now computed from a different byte string, so
+#       reading one yields a baseline in which NO current symbol exists — every function in the tree reports
+#       as brand-new debt, with nothing to say anything went wrong. "Does not crash" would pass on exactly
+#       that outcome, which is why the arm now pins the REFUSAL and its two honest landings.
 V1="$WORK/v1"; mkdir -p "$V1/src"
 printf 'int f(){ return 0; }\nint g(){ return f(); }\n' > "$V1/src/a.cpp"
 printf '# ripwire quality baseline v1 — regenerate with --quality-baseline; do not hand-edit\n' > "$V1/.ripwire_quality_baseline"
-V1EC="$( cd "$V1" && "$BIN" . --quality-delta --no-cache >/dev/null 2>&1; echo $? )"
-[ "$V1EC" = 0 ] || [ "$V1EC" = 2 ] && ok "v1 baseline (no new-kind lines) read without crash (exit $V1EC)" || no "v1 baseline read crashed (exit $V1EC)"
+V1OUT="$( cd "$V1" && "$BIN" . --quality-delta --no-cache 2>&1 )"; V1EC=$?
+# (a) NO git history and no usable sidecar => the documented exit-1 degrade with an actionable message.
+#     Not a crash: the refusal names itself on the degrade channel first.
+case "$V1EC" in
+    0|1|2) ok "pre-v4 baseline read without crashing (exit $V1EC)" ;;
+    *)     no "pre-v4 baseline crashed (exit $V1EC)" ;;
+esac
+case "$V1OUT" in
+    *"predates the pathQualifiedKey scheme"*) ok "the pre-v4 sidecar is REFUSED by name, not silently misread" ;;
+    *) no "a pre-v4 sidecar was consumed without a refusal — every symbol would read as new debt: $( printf '%s' "$V1OUT" | head -c 160 )" ;;
+esac
+# (b) WITH git history the refusal must land on the disclosed git-HEAD fallback rather than on nothing.
+if command -v git >/dev/null 2>&1; then
+    V1G="$WORK/v1git"; mkdir -p "$V1G/src"
+    printf 'int f(){ return 0; }\nint g(){ return f(); }\n' > "$V1G/src/a.cpp"
+    ( cd "$V1G" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init ) >/dev/null 2>&1
+    printf '# ripwire quality baseline v1 — regenerate with --quality-baseline; do not hand-edit\n' > "$V1G/.ripwire_quality_baseline"
+    V1GB="$( cd "$V1G" && "$BIN" . --quality-delta --no-cache 2>/dev/null | sed -n 's/.*<quality-delta [^>]*baseline="\([^"]*\)".*/\1/p' | head -1 )"
+    case "$V1GB" in
+        git-HEAD*) ok "a refused pre-v4 sidecar falls back to the disclosed floor (baseline=\"$V1GB\")" ;;
+        *)         no "a refused pre-v4 sidecar did not land on the git-HEAD floor (baseline=\"$V1GB\")" ;;
+    esac
+fi
 
 # ── 7) T0.1 — AUTO-BASELINE vs git HEAD when NO sidecar exists ─────────────────────────────────────────
 #       In a synthetic git repo: commit a clean tree, then edit a function to add LOC+nesting (a real
