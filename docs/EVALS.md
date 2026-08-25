@@ -6427,3 +6427,42 @@ their member ids keep using `baselineCanonId` — so a clone group over scope-le
 is the same floor the identity round recorded for clone acks, unchanged here and not fixed by guessing.
 The `it` extraction defect (a local variable indexed as a function) is an extraction question, not a
 keying one, and is untouched.
+
+### RESULT — measured at `a26ae61`/`93d7173`, against the band registered above
+
+| metric | registered | measured | verdict |
+| --- | --- | --- | --- |
+| `ACKS-PRESERVED` | exactly 257 | **260 rows moved** (259 counted + 1 merged) | **band missed by +3, in the honest direction** — see below |
+| `ACKS-AMBIGUOUS` (named) | exactly 6 | **6**, each named | **met exactly** |
+| `ACKS-SILENTLY-DROPPED` | 0 — hard gate | **0** — 95 distinct hand-written reasons before, 96 after (the one added is this lane's own ack), none lost | **met** |
+| default-map bytes | 0, byte-identical — hard gate | **1,128,344 = 1,128,344**, identical file/symbol/edge counts | **met** |
+| `FOLD-ELIMINATED` | 3,845 → 6,418 (+2,573) | **8,743 → 11,312 canonId-space identities (+2,569)** | **met, 4 short, fully explained** |
+| `ACKS-ORPHANED` (named) | exactly 7 | **8 target-gone pre-existing** (7 + one legacy churn row) | +1, same cause as the +3 |
+| guard lattice | unchanged | unchanged — the byte-identical map proves the confinement | **met** |
+
+**Why `ACKS-PRESERVED` missed by 3, recorded rather than rounded away.** Registration predicted 257 =
+184 scoped + 73 unambiguous scope-less. The replay moved 260. The extra three are `short-horizon-churn`
+rows still keyed in the *canonId* space — acks written BEFORE `d593de3` moved churn to
+`pathQualifiedKey`, which nothing has healed since. The pre-registration classified all churn acks as
+already-path-qualified, which is true of every row written after W1-S2 and false for those three. They
+are a bonus heal of long-dead legacy rows, and the same three explain the orphan count landing at 8
+rather than 7.
+
+**Why `FOLD-ELIMINATED` landed 4 short of the registered figure.** The registered +2,573 was counted in
+map ROWS; the key space counts IDENTITIES, and `pathQualifiedKey(relPath, scope, name)` does not include
+the symbol KIND. Four same-file/same-name pairs carrying two different kinds — `Widget` as both a `cls`
+and a `method` in `bench/h4fixtures/java/Main.java`, `csharp/Main.cs` and `test/swiftshapefix/
+ProtocolSurface.swift` — therefore share one identity. 8,743 + (6,414 − 3,845) = 11,312, exactly the
+measured value. This is a pre-existing property of `pathQualifiedKey` that short-horizon-churn has had
+since `d593de3`; it is inherited here, not introduced, and is recorded as a floor rather than fixed by
+adding a kind byte to a key space three other subsystems already share.
+
+**The convergence that says the fix landed.** On the identical tree, `ccx`/`loc`/`nest`/`params`/`defs`
+now all hold 11,312 identities and `bodyq` (churn, path-qualified since `d593de3`) holds 11,311. The
+seven kinds and churn occupy one key space again, which was the entire point.
+
+**The behavioural proof, not just the counting one.** `test/qualitykeycheck.sh` arm (A): a function
+going ccx 1 → 18 beside a same-named scope-less neighbour at ccx 23 reported `regressions="0"` before
+this change and is reported and located at the right file after it. Arm (F) pins that `canonicalId` did
+not move — scope-less symbols still emit no `id=` — which is what keeps the +26.4% map inflation off the
+table.
