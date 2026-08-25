@@ -3103,16 +3103,11 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     {
         leftBytes += rw::kForAutoBodyBudgetBytes;   // the default bundle's body allowance (see serialize.h)
 
-        // THE ANCHOR-RESOLVED ALLOWANCE (pre-registered: docs/EVALS.md, the T3 body-budget round). The
-        // allowance just added is a pool sized for kPackTaskBodyCandidates bodies, but the restriction
-        // above has left exactly ONE candidate: the anchor's own definition, on a route that resolved an
-        // anchor from a name-exact query. That is the most certain this tool ever is about which symbol
-        // the caller meant, and it was funded at the same per-body rate as a six-way split — so a large
-        // class did not fit where its own one-line forward declaration always had. Fund the one body at a
-        // one-body rate. Rationale, derivation and the bounds: serialize.h beside the constant.
-        //
-        // Each conjunct is load-bearing and each has its own gate arm (anchorbodycheck 7c/7e, and the
-        // conceptual arm 5b), so none of them may be relaxed as a simplification:
+        // THE ANCHOR-RESOLVED ALLOWANCE: when the restriction above has left exactly ONE candidate, fund
+        // that one body at a one-body rate instead of a six-candidate pool's share. Why, the derivation of
+        // the number, and the bounds all live ONCE, beside the constant in serialize.h. What belongs here
+        // is only what is true of this call site: each conjunct is load-bearing, each has its own gate arm
+        // (anchorbodycheck 7c/7e and the conceptual arm 5b), and none may be relaxed as a simplification.
         //   • the enclosing cfg.tokenBudget == 0 — an explicit --token-budget is a HARD ceiling and never
         //     sees this constant. T3's own registration binds that, and it is the one condition whose
         //     absence would be invisible in the default output that everybody looks at.
