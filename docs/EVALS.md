@@ -5515,3 +5515,84 @@ corpus-wide document-frequency/length statistics for every query, not just the o
 this is expected and is not itself a regression; what MUST hold is that `<sigs>`/ranked ROW ORDER and
 every disclosed anchor are byte-identical on every probe this fix does not target. A WIDE `r3diff` on
 either frozen set, or any `<sigs>` byte movement on N01–N10, is the actual kill condition.
+
+---
+
+**Verdict: SHIP.** `GOLD-EXTRACTED` **0/2 → 2/2**, the single-point band, hit exactly. Both N11
+(`dos_streambuf`) and N12 (`streambuf`) now extract their real out-of-line class definitions as their
+own `cls` symbols, findable by bare name, on the real ugrep corpus. Every registered guard reproduces
+its last recorded value to the digit, the two frozen `r3diff` sets are 74/74 ties, the twelve-probe
+`<sigs>` sections are byte-identical on N01–N10, and G1 is clean on the new parser path including the
+one real-world instance spot-checked outside the fixture (`rocksdb`'s `BlockBasedTable::IndexReaderCommon`).
+
+**Provenance.** Branch `lane/candhead-ugrep`, worktree `~/AppDevelopLocal/project2/ripwire-wt-candhead`,
+off `518fe0d`. Commits: `bcd91a9` (registration, result-free) → `d4947a6` (red gate, verified RED against
+`518fe0d`) → `4a2b784` (the fix: two `queries/cpp/tags.scm` patterns, `kParserVer` 72 → 73) → `120d99b`
+(a `test/qschemetripcheck.sh` re-pin the first full battery run caught — an EXTRACTION-not-SEMANTICS
+change, so `kQSnapCacheScheme` correctly stayed put, matching every prior `kParserVer`-only re-pin logged
+in that gate's own history). Corpora: the same pinned duckdb/rocksdb/ugrep checkouts the anchor-body
+round re-cloned (`rw-lane-ab2-corpora/`), reused rather than re-cloned since only reads happen here.
+
+**Result — the twelve-probe set, base (`518fe0d`) vs. this lane's head, isolated from item A (a
+separately-stashed, separately-committed change — this measurement carries none of it).**
+
+| id | corpus | query | `<sigs>` | anchor | note |
+|---|---|---|---|---|---|
+| N01–N09 | DD/RD | (all seven not shown below) | byte-identical | unchanged | untouched, as registered |
+| N10 | RD | `Logger` | byte-identical | unchanged | untouched, as registered |
+| N11 | UG | `dos_streambuf` | **moved** | `input.h+4` → `input.h+6` | anchor now the real CLASS, not its constructor |
+| N12 | UG | `streambuf` | **moved** | `input.h+6` → `input.h+8` | same shift, same reason |
+
+N11/N12's anchor byte-offset moving is not a defect — it is the anchor-body round's own "first
+BODY-CARRYING definition in NodeId order" rule reaching a BETTER candidate than it had before: with the
+class itself now extracted (and, in NodeId/crawl order, the class declaration line always precedes its
+own constructor), the anchor shifts from a constructor to the class it constructs. Bodies served for N11
+went from `{fn:867, fn:1122, fn:1128, cls:335, cls:951}` (a constructor-heavy set, plus a bodyless
+in-class forward declaration that used to fill a leftover slot) to `{cls:865, fn:867, cls:1120, fn:1122,
+fn:1128, cls:335}` — the real `Input::dos_streambuf` and `BufferedInput::dos_streambuf` definitions now
+present, one bodyless forward-decl slot displaced by them. N12 is the same shape.
+
+**Symbol-count blast radius, measured rather than assumed.**
+
+| corpus | base | head | Δ | explanation |
+|---|---:|---:|---:|---|
+| duckdb | 61178 | 61178 | 0 | the shape's 8 real duckdb instances (`RE2::Set`, `DFA::Workq`, …) sit entirely in `third_party/re2/`, excluded from the crawl already — confirmed, not assumed: none of the 8 paths appear in `--for="RE2"`'s candidate list on either binary |
+| rocksdb | 53590 | 53619 | **+29** | real Pimpl-idiom classes; spot-checked `BlockBasedTable::IndexReaderCommon` (`table/block_based/index_reader_common.h:19`) resolves correctly by bare name, scope `BlockBasedTable` |
+| ugrep | 3622 | 3626 | **+4** | exactly the two N11/N12 golds' two out-of-line definitions each |
+| ripwire's own `src/` | 11731 | 11731 | 0 | zero instances of the shape in this repo (consistent with the C1/memgraph round's own note) |
+
+**Fixture-level gate, `test/nestedqualcheck.sh`, all nine arms.** (a)/(b) the gold class/struct extract
+at their real defining lines; (c) the class's own body rides in `<bodies>`, not just the constructor;
+(d) the Decoy control — a same-named nested forward declaration in an unrelated enclosing class is never
+attributed the real definition; (e) the constructor's own scope (`Outer::Inner::Inner`) is untouched;
+(f) route scope sanity; (g) symbol count is exactly +2; (h) determinism. Verified RED on `518fe0d`
+(arms a/b/c/g fail exactly as predicted, d/e/f/h already pass as controls) and GREEN on both `build/`
+and `asan/` binaries.
+
+**Guards — green, and identical to the digit.**
+
+| Guard | Floor / ceiling | `518fe0d` | with the fix |
+|---|---:|---:|---:|
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% | 2.4% / 0.0% / 0.0% |
+| `run_r3diff.py` ranking (n=32) | near-all ties | — | **32 ties, net +0** |
+| `run_r3diff.py` recall (n=42) | near-all ties | — | **42 ties, net +0** |
+| determinism (map, `--for`) + `xmllint` | contract | — | byte-identical, well-formed |
+| G1 — ASan/UBSan/integer/LSan, all four corpora + the new parser path + the real rocksdb instance | no report | — | **clean, exit 0, empty stderr** |
+| `--quality-delta=518fe0d..HEAD` | no gating regression | — | `gating="0"` (9 `sev="minor" origin="new-symbol"` rows, all the fixture's own new classes) |
+| full gate battery, frozen tree | all green | — | **`gates=464 pass=462 skip=2 fail=0`** (the two skips are the standing `namingcalibrationcheck`/`argvdiffcheck`) |
+
+**Findings for the next round.** (1) The bodyless-forward-declaration collision this lane's own base
+measurement exposed — two DIFFERENT enclosing classes' in-class `class Name;` forward declarations
+collapse into one self-scoped id (`outer.hpp::Inner::Inner` for both `Outer::Inner`'s and `Decoy::Inner`'s
+forward declarations in the fixture) — is a separate, narrower defect this lane did not fix: it predates
+this change, this change does not make it worse (the Decoy control proves the real DEFINITION still
+resolves to the right scope regardless), and it was not named by the task. (2) Templated out-of-line
+nested definitions (`template <class T> class Foo<T>::Bar { ... }`) are a documented remaining gap: the
+new pattern's `name: (qualified_identifier)` does not match a `template_type`/`dependent_type` name node,
+and duckdb's `third_party/re2` instances happen not to exercise this because they are vendor-excluded,
+not because they are templated — an untested, disclosed edge.
