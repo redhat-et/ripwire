@@ -77,6 +77,23 @@ inline constexpr std::size_t kPackTaskHeaderReserve  = 1024;   // the <ctx><!-- 
 inline constexpr std::size_t kPackTaskWrapReserve     = 80;    // <notes>/<tests>/<far>: open tag + close tag
 inline constexpr std::size_t kPackTaskWrapReserveWide = 112;   // <callers>: the same plus its of_top= attribute
 
+// The anchor-resolved body allowance's DERIVATION, checked by the compiler instead of asserted in prose:
+// serialize.h's kForAnchorBodyBudgetBytes is "what one whole default --pack-task bundle costs", i.e. what
+// kPackTaskDefaultTokens buys at kBytesPerTokenBody. This is the only translation unit where all three are
+// visible, which is why the check lives here and not beside the constant it pins.
+//
+// A tolerance BAND, not equality (CONTRIBUTING §3): kBytesPerTokenBody is 3.80, which has no exact binary
+// representation, so 6000 * 3.80 lands a hair either side of 22800 depending on how the compiler contracts
+// the multiply — an == here would be a build that fails on some hosts and passes on others. +/- 1 B is far
+// tighter than any drift worth catching (the failure this guards is somebody editing 22800 to 30000, or
+// re-pricing kBytesPerTokenBody, and forgetting the other half of the sentence).
+static_assert( double( kForAnchorBodyBudgetBytes ) >= double( kPackTaskDefaultTokens ) * kBytesPerTokenBody - 1.0
+            && double( kForAnchorBodyBudgetBytes ) <= double( kPackTaskDefaultTokens ) * kBytesPerTokenBody + 1.0,
+               "kForAnchorBodyBudgetBytes must stay equal to kPackTaskDefaultTokens * kBytesPerTokenBody — "
+               "one anchor-resolved body may cost at most what one whole default --pack-task bundle costs. "
+               "Changing either term without the other silently repeals the registered derivation "
+               "(docs/EVALS.md, the T3 body-budget round)." );
+
 // F1 (graphrag harvest 2026-08-15): FIXED proportional quotas over the post-header remaining budget, computed
 // UP FRONT — one per section, sum to 1.0 — instead of the old `min( remaining, bundleBudget * frac )` per
 // section. That old form let an early section (ranking) swallow the WHOLE remaining budget whenever remaining

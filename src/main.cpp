@@ -3017,6 +3017,13 @@ bool isRouteAnchorSymbol( const rw::IngestResult& ing, rw::NodeId sid, const std
 // over-budget comment naming what was dropped. That is strictly more informative than a smaller namesake's
 // body, which reads like an answer and is not one.
 //
+// Since the T3 body-budget round this narrowing also decides the RATE the surviving body is funded at:
+// when it leaves exactly one candidate, the caller raises the allowance to kForAnchorBodyBudgetBytes (the
+// anchor-resolved allowance, serialize.h). So this function no longer only chooses WHICH body may be
+// served — collapsing the set to one is itself the signal that the tool is certain, and the caller reads
+// it as such. It still never widens anything by itself, and the honest zero above is unchanged: it now
+// arrives at a higher ceiling.
+//
 // A NO-OP when `anchorDefs` is empty, and it must stay one. Two different routes arrive that way and both
 // keep the rank-first walk: a subtoken+body (conceptual) query, which nothing anchored; and a camel/snake
 // query whose token names no symbol at all, which the route's own reason already marks `syntax`. There is no
@@ -3095,6 +3102,32 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     if( cfg.tokenBudget == 0 )
     {
         leftBytes += rw::kForAutoBodyBudgetBytes;   // the default bundle's body allowance (see serialize.h)
+
+        // THE ANCHOR-RESOLVED ALLOWANCE (pre-registered: docs/EVALS.md, the T3 body-budget round). The
+        // allowance just added is a pool sized for kPackTaskBodyCandidates bodies, but the restriction
+        // above has left exactly ONE candidate: the anchor's own definition, on a route that resolved an
+        // anchor from a name-exact query. That is the most certain this tool ever is about which symbol
+        // the caller meant, and it was funded at the same per-body rate as a six-way split — so a large
+        // class did not fit where its own one-line forward declaration always had. Fund the one body at a
+        // one-body rate. Rationale, derivation and the bounds: serialize.h beside the constant.
+        //
+        // Each conjunct is load-bearing and each has its own gate arm (anchorbodycheck 7c/7e, and the
+        // conceptual arm 5b), so none of them may be relaxed as a simplification:
+        //   • the enclosing cfg.tokenBudget == 0 — an explicit --token-budget is a HARD ceiling and never
+        //     sees this constant. T3's own registration binds that, and it is the one condition whose
+        //     absence would be invisible in the default output that everybody looks at.
+        //   • !anchorDefs.empty() — the conceptual/subtoken+body and --no-route paths anchor nothing, and
+        //     a route that resolved no anchor has no "the symbol the caller meant" to be certain about.
+        //   • size() == 1 — this is what makes "at most one body" a fact about the INPUT rather than an
+        //     accounting argument: packBodies is handed a one-element list, so there is no second item for
+        //     the raise to spend on. With 2+ same-named definitions in the anchor's own file the bundle is
+        //     serving a SET, not the answer, and a pool is the right funding for a set.
+        // max(), not +=: the ceiling is this rate, never this rate plus whatever the bundle had left, so a
+        // long root path or a short signature side cannot push a single body past the registered number.
+        if( !anchorDefs.empty() && autoBodyIds.size() == 1 )
+        {
+            leftBytes = std::max( leftBytes, rw::kForAnchorBodyBudgetBytes );
+        }
     }
 
     // Exhausted explicit ceiling (the signature bundle consumed every byte): the disclosure survives,
