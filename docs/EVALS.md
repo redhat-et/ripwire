@@ -3744,6 +3744,96 @@ twenty byte-compared controls differing; **any of N02/N03/N09/N10 losing a body 
 `<d>` row section changing on any of the twelve probes; any guard floor above going red; a route decision
 changing on any probe; or a body served that is neither the gold nor what base served.
 
+#### The result: SHIP, in band, and the audit was right this time
+
+| Registered metric | Baseline | Measured | Band / bar | Verdict |
+| --- | ---: | ---: | --- | --- |
+| `BODY-SERVED` — gold definition's own body emitted, n=12 | 4 / 12 | **6 / 12 (+2)** | [+2, +2] | **in band** |
+| Byte-compared controls (20) | — | **20 / 20 identical** | any difference kills | held |
+| `<d>` row sections, all twelve probes | — | **12 / 12 byte-identical** | must not move | held |
+| Whole bundles, all twelve probes | — | **10 / 12 byte-identical** | only N01/N05 may move | held, stronger than registered |
+| N02/N03/N09/N10 still served | 4 / 4 | **4 / 4** | must not lose one | held |
+| `run_r3diff.py`, ranking (n=32) + recall (n=42) | — | **74 ties, 0 wins, 0 losses** | near-all ties | held |
+
+**The two rows the audit named, and nothing else.**
+
+| id | corpus | body served: base → head | gold body B | `BODY-SERVED` | audit said |
+| --- | --- | --- | ---: | :---: | --- |
+| **N01** | DD | none, `reason="budget"` → **the gold**, `client_context.hpp:65` | 12,691 | **yes** | reachable |
+| **N05** | DD | none, `reason="budget"` → **the gold**, `deserializer.hpp:22` | 14,875 | **yes** | reachable |
+| N02, N03, N09, N10 | DD/RD | unchanged — still the gold | — | **yes** ×4 | already serving |
+| N04, N06, N07, N08, N11, N12 | — | **byte-identical bundles** | — | no ×6 | unreachable, each for its named reason |
+
+**The feasibility ceiling was exactly right, which is the first time in this sequence.** The round above
+audited two of the three gates a body passes and was row-for-row correct about the mechanism but wrong about
+the ceiling by two. This registration audited all three, predicted `+2` and named N01 and N05 in advance,
+and got `+2` on N01 and N05. The thing that made it checkable rather than merely careful was reading the
+candidate-set size off `<bodies total="N">` in the base run instead of reasoning toward it — **a feasibility
+ceiling built from observables is auditable before the result; one built from a mechanism story is only
+auditable after.**
+
+**The cost, stated plainly, because this round makes two calls more expensive.** `est_tokens` on the two
+moved probes goes 3,798 → **7,144** (N01) and 962 → **4,886** (N05). That is the trade: those two callers
+were being told the answer existed and did not fit, and are now handed it. The bodies themselves cost 3,340
+and 3,914 tokens against the registered 6,000-token ceiling, i.e. the constant is a real bound and the two
+bodies it bought landed at 56% and 65% of it — it is not a number tuned so that the probes just squeeze in.
+The other ten probes cost exactly what they cost before, to the byte.
+
+**An honest correction to the intuition the derivation could be mistaken for.** It is tempting to justify a
+body allowance as "cheaper than the whole-file read it replaces". On these two probes that is **not** true
+in bytes: `class ClientContext` is 12,691 B of a 14,995 B header (85%) and `class Deserializer` is 14,875 B
+of 15,956 B (93%) — a large class in a dedicated header essentially IS its file. The win this round buys is
+therefore not a byte saving over the read; it is that the answer arrives inside the call the agent already
+made, ranked, with the quality lens on it, instead of as a second round trip. The registered derivation is
+`kPackTaskDefaultTokens × kBytesPerTokenBody` and rests on nothing else, and the byte-saving story is
+recorded here as refuted rather than left available to be repeated.
+
+**Every guard is identical, and the strongest of them is stronger than registered:** the whole
+`--eval-skills` report — every arm, every split, the judged-only line — is **byte-identical** between the
+two binaries, not merely equal on the four pinned numbers.
+
+| Guard | Floor / ceiling | At `518fe0d` | With the rule in |
+| --- | ---: | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% | 2.4% / 0.0% / 0.0% |
+
+That is what the structural argument predicted: the rule changes a byte allowance strictly downstream of
+ranking, so it cannot move a `<d>` row, a candidate order or a route decision. The `anchors:` clause and its
+`+N` ambiguity count are identical on both moved probes (88 and 36) — the only thing that changed on either
+root is `bodies="0" reason="budget"` becoming `bodies="1"`, which is the disclosure doing its job.
+
+**The gate, and the mutation that proves its most important arm is not inert.** `test/anchorbodycheck.sh`
+grew six arms and two fixtures, verified **RED at `518fe0d` on exactly (7) and (7b)** with all twenty other
+arms green, and ALL PASS at head under both `build/ripwire` and `asan/ripwire`. Arm **(7e)** — the
+`size() == 1` leak tripwire — was additionally proved by MUTATION: with that conjunct removed and the binary
+rebuilt, the first of two same-named mid-sized twins fits the raised allowance and the bundle reports
+`bodies="1"`, so (7e) fails **and only (7e) fails**. A tripwire that fires on exactly the mistake it names,
+and on nothing else, is worth more than one that merely happens to be green.
+
+G1: the `asan/` build (ASan + UBSan + integer + LSan with the committed suppressions) is clean — exit 0,
+empty stderr — on both newly-served probes, on the explicit-`--token-budget` shape, the multi-candidate
+shape, the `no_candidates` shape, all three corpus maps and the self-map, and `test/anchorbodycheck.sh`
+passes against `asan/ripwire`.
+
+`--quality-delta=518fe0d..HEAD` (ref-pair): `gating="0"` `preexisting-worse="0"` after acking exactly two
+findings, both on `buildForAutoBodies` and both the change's own shape — complexity `ccx` 16 → 19 (the `if`
+and its `&&`) and verbosity 107 → 128. `--ack-only=gating`, so the never-gating `api-surface` row for
+`kForAnchorBodyBudgetBytes` stays visible and unacked. The duplicated half of the call-site comment was
+removed first, on its own merits: the mechanism and the derivation now live once, beside the constant.
+
+Gate count **463 → 463** — six arms and two fixtures on an existing gate, no new gate file.
+
+Two reds in the first battery were real and both were mine: `g1freshcheck` (the `asan/` tree predated the
+comment de-duplication — rebuilt, and the gate is worth believing exactly as `CLAUDE.md` says) and
+`readmeexamplecheck` (the rule's lines shifted `churnRankedGraph`/`runDefaultMap` by 28 — re-pinned from the
+binary). A third, `editcheckcheck`'s 100 ms warm budget, measured 144/147 ms inside a `-j 6` battery at load
+~30 and **75 ms re-run solo**: environmental, the false-positive class this campaign hits constantly, and
+nothing was `pkill`-ed to get that measurement.
+
 ---
 
 ## 5. Token and output economy
