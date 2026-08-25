@@ -4172,8 +4172,9 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // ("readme", "report", "paired_table") — measured by bench/recalleval (gate: recallevalcheck.sh).
         // The path it scores is root-relative, so the ranking does not depend on how deep the corpus is
         // checked out (registered + measured in docs/EVALS.md; gate: test/recallrankdepthcheck.sh).
-        const std::string        recallRootPrefix = recallRootArg.empty() ? std::string()
-                                                                         : rw::sarif::rootPrefixOf( recallRootArg );
+        // Unguarded: rootPrefixOf("") is "" (its trailing-slash loop needs size() > 1), and
+        // rootRelativeUri(p, "") returns p bar a leading "./" — so the multi-root path needs no branch.
+        const std::string        recallRootPrefix = rw::sarif::rootPrefixOf( recallRootArg );
         const std::vector<float> rscore = lexicalScores( ing, g.outOff, g.outTargets, cfg.recall, 0, nullptr, 1, recallRootPrefix );
         const std::size_t        budget = cfg.maxTokens > 0 ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom ) : 0;
         // §B2: --top-k=N now actually SHAPES how many docs recall emits (was accept-and-ignore — --help and

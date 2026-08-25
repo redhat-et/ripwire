@@ -8,11 +8,10 @@
 
 #include "model.h"
 #include "lexindex.h"            // B0: the ONE subtoken state machine + docCommentStart + persisted-stats types
-#include "sarif.h"               // rootRelativeUri — the ONE root-relative path view. Included here (not
-                                 // reached transitively, the way recall.h reaches it through serialize.h)
-                                 // because pass 1.5 SCORES the same string recall.h PRINTS: one helper, so
-                                 // the scored and printed spelling of a file cannot drift apart. Despite
-                                 // the header's name it is a pure path helper over model.h — no cycle.
+#include "sarif.h"               // rootRelativeUri — the ONE root-relative path view, included directly
+                                 // rather than reached transitively (recall.h gets it via serialize.h)
+                                 // because pass 1.5 SCORES the string recall.h PRINTS. A pure path helper
+                                 // over model.h despite the header's name: no cycle.
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "infra/sortutil.h"      // deterministic sanitizer-clean score sorting for adaptive cuts
 
@@ -335,23 +334,19 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // runs identically over the scan and persisted-stats paths — postings parity holds by construction and
     // the cache format is untouched.
     //
-    // R-R RANKING (2026-08-25): what is scanned is the ROOT-RELATIVE view, not ing.files[f] itself. The
-    // stored spelling is absolute whenever the run's root argument was (the root-relative EMISSION lane
-    // proved it must stay that way — g.canonId, Regression::key, every pathQualifiedKey and the ingest
-    // cache's reAbsolutize all key off it), so scanning it verbatim indexed every directory ABOVE the
-    // corpus as corpus vocabulary. That had two effects, and the second is the one that reordered answers:
-    // every symbol gained the same root tokens, so dl and avgdl grew by different proportions and length
-    // normalization shifted; and a directory that happened to spell a query word ("…/ripwire/docs/recall/…")
-    // matched EVERY document, collapsing that word's idf. Two clones of ONE commit at different checkout
-    // depths therefore ranked --recall differently — measured at 11 of 42 frozen queries reordered and 5
-    // returning a different SET of documents (docs/EVALS.md, gate: test/recallrankdepthcheck.sh).
+    // R-R RANKING (2026-08-25): the scanned string is the ROOT-RELATIVE VIEW, never ing.files[f] itself,
+    // which stays absolute because the emission lane proved it must (g.canonId, Regression::key, every
+    // pathQualifiedKey and the ingest cache's reAbsolutize all key off it). Scanning it verbatim indexed
+    // every directory ABOVE the corpus as corpus vocabulary — and a directory that spelled a query word
+    // then matched EVERY document and collapsed that word's idf — so two clones of ONE commit at different
+    // checkout depths ranked --recall differently: 11 of 42 frozen queries reordered, 5 of them returning a
+    // different SET of documents (registered + measured in docs/EVALS.md; test/recallrankdepthcheck.sh).
     //
-    // The cure is a VIEW, not a move: rootRelativeUri is the same helper recall.h uses to PRINT the
-    // separator line's path, so the scored and printed spelling of a file cannot disagree. pathRootPrefix
-    // defaults to empty, and rootRelativeUri(p, "") strips a leading "./" and otherwise returns p — which
-    // is exactly what a relative-root run already scanned. That is why this is a convergence rather than a
-    // new ranking opinion: `ripwire .` was ALREADY depth-invariant and is the oracle the absolute spelling
-    // now reproduces byte for byte. Multi-root needs no prefix — ing.files already hold "<label>/<rel>".
+    // A VIEW, not a move — and the same helper recall.h PRINTS the separator path with, so the scored and
+    // the printed spelling of a file cannot disagree. rootRelativeUri(p, "") returns p bar a leading "./",
+    // exactly what a relative-root run already scanned, which is why this is a CONVERGENCE onto the
+    // already-invariant `ripwire .` rather than a new ranking opinion. Multi-root passes no prefix:
+    // ing.files already hold "<label>/<root-relative>".
     {
         int kwPath = pathFieldDefaultW;
         if( const char* pathTokEnv = std::getenv( "RIPWIRE_PATHTOK_W" ) )
