@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 457 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 458 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -3840,6 +3840,218 @@ The final battery ran on a FROZEN tree after the result commit: **`gates=463 pas
 
 ---
 
+### `--recall` ranks by where the repo sits on disk — PRE-REGISTERED 2026-08-25 (before any fix code)
+
+**What this registers.** The single disclosed residual of the root-relative lane, and nothing else. That
+lane made every EMITTED path relative to the corpus root, so the document a consumer receives no longer
+depends on where the repo happens to sit on disk — and it closed by naming what it had deliberately *not*
+fixed (its report, §6): `--recall`'s relevance SCORES still move with checkout depth, because curing that
+means changing what the RANKER indexes, and a ranking change owes an eval. **This is that eval, registered
+before any fix code exists.**
+
+**The mechanism, stated so it can be wrong.** `lexical.h` pass 1.5 scans each symbol's file path through the
+same BM25 subtoken state machine as its name, doc-comment and body, at weight `pathFieldDefaultW`. Exactly
+one caller passes a nonzero weight: the `--recall` lens passes 1, because documents are ranked partly BY
+their filename — a query naming "readme" or "paired table" should reach the doc whose PATH says exactly that
+(measured at +0.03 lenient MRR, gate `test/recallevalcheck.sh`). The string it scans is `ing.files[fileId]`,
+the STORED spelling, which the root-relative lane proved must stay absolute (`g.canonId`, `Regression::key`,
+every `pathQualifiedKey`, and the ingest cache's `reAbsolutize` all key off it). So every directory ABOVE the
+corpus root is indexed as corpus vocabulary, with two distinct consequences:
+
+* every symbol gains the SAME root tokens, so each document's BM25 length `dl` and the corpus `avgdl` grow by
+  different proportions, length normalization shifts, and **every** score moves; and
+* if any directory above the root spells a query word (`…/ripwire/docs/recall/…`), that word now matches
+  EVERY document, its idf collapses, and whatever else the documents happen to share decides the order.
+
+The second is the one that reorders answers. The claim under test: **the scorer should index the path the
+emitter now prints — the root-relative one — because nothing above the root is corpus text.**
+
+**The oracle is not invented, which is why the target is an equality and not a tolerance.** A RELATIVE root
+already stores `./docs/x.md`, whose only path tokens are corpus-internal, so `ripwire . --recall=Q` is
+already depth-invariant and already shipping. The correct ranking therefore exists today, and absolute-root
+runs simply disagree with it. `rootrelemitcheck.sh` ARM 3 established for emission that *an absolute root is
+a SPELLING, not a content change*. This registers the ranking twin of that sentence.
+
+**The rule.** In pass 1.5 — and in its inert basename sibling pass 1.6, so the two path passes cannot drift
+apart — scan `rw::sarif::rootRelativeUri( ing.files[f], pathRootPrefix )` instead of `ing.files[f]`. That is
+the identical helper `recall.h` already uses to print the separator line's path, so the SCORED string and the
+PRINTED string cannot disagree about a file. `pathRootPrefix` is a new defaulted parameter, empty for every
+existing caller; only the `--recall` call site passes one, derived from the same single-root expression that
+already feeds `buildRecall`. **No stored spelling moves.**
+
+**Three properties are structural rather than asserted, and they are why this cannot reach the other
+lenses.** (i) Pass 1.5 does not execute at all unless `pathFieldDefaultW > 0`, and `--recall` is the *only*
+caller passing a nonzero weight — so `--for` and its whole family, `--exemplar`, `--handoff` and both eval
+harnesses are byte-identical **by control flow, not by measurement**. (ii) The new parameter defaults to
+empty, and `rootRelativeUri(p, "")` strips a leading `./` and otherwise returns `p` unchanged — which is
+exactly today's behaviour for relative roots. (iii) MCP `memory_recall` calls `lexicalScores` with no weight
+argument at all and is therefore already immune; see the finding below.
+
+**The probe set** is the recall lane's frozen corpus — every tracked `*.md` at the commit pinned in
+`snapshot.lock` (113 docs @ `7a7f798`) — and its 42 held-out queries from `labels_recall.tsv`. The LABELS are
+deliberately unused: this measures INVARIANCE, not correctness, and whether an answer is *right* is
+`run_recalleval.py`'s job. Instrument: `bench/recalleval/run_depthinvariance.py`, committed with this
+registration.
+
+**Primary metric: `ORDER-MOVED`** = of the 42 queries, how many return a different ranked list of documents
+when the identical corpus is addressed at a different checkout depth. Reported beside it: `TOPK-MOVED` (a
+different SET of documents — the harm a user actually sees) and `SCORE-MOVED` (the finest signal, first to
+move and last to settle).
+
+**Baseline, measured in this lane at `518fe0d` before any fix code existed:**
+
+| comparison | what differs between the two runs | order | top-K | score |
+| --- | --- | ---: | ---: | ---: |
+| **A vs B** | absolute root, NEUTRAL depth delta (+90 chars, segments sharing no vocabulary) | **5 / 42** | 0 / 42 | **42 / 42** |
+| **A vs P** | absolute root, ADVERSARIAL depth delta (+68 chars, every segment corpus vocabulary) | **11 / 42** | **5 / 42** | **42 / 42** |
+| **C vs D** | relative root at both depths — the oracle's own flatness control | 0 / 42 | 0 / 42 | 0 / 42 |
+| **A vs C** | absolute vs relative spelling of the same corpus at the same depth | 3 / 42 | 1 / 42 | 42 / 42 |
+
+Two rows carry the argument. **A vs P is worse than A vs B at a SHORTER delta** — 11 reorderings and five
+changed answer SETS, against 5 and none — so the defect is driven by vocabulary, not length, and any
+measurement testing only neutral depth would under-report the thing it exists to catch. **C vs D is flat at
+0 / 0 / 0**, which is what makes the fix a convergence onto an already-correct shipped behaviour rather than
+a new ranking opinion.
+
+**Registered band: EXACT invariance — A vs B, A vs P and A vs C must all reach 0 / 0 / 0.** Not "a large
+reduction toward invariance": the oracle row proves 0 is attainable, and the mechanism predicts the scanned
+string becomes byte-identical to the relative-root one, so anything above 0 means the mechanism is not what
+this registration says it is. **A nonzero residual on any of the three is a REJECT and the code is
+reverted** — a partial cure would mean some other path-derived quantity is *also* depth-dependent, which is
+a different finding owing its own round, not a win to bank.
+
+**Registered kill tripwire, which outranks the band.** Invariance is trivially achievable by scoring no path
+tokens at all, which would silently delete a measured retrieval feature. `test/recallrankdepthcheck.sh`
+ARM 4 therefore retrieves a document whose BODY never contains the query word and whose PATH does, at all
+three roots and under the relative spelling. **If ARMs 1-3 go green while ARM 4 goes red, the change
+disabled the feature instead of relativizing it, and it is reverted regardless of every other number.**
+
+**Registered controls — byte-compared, base vs head; any difference is a REVERT.**
+
+| control | why |
+| --- | --- |
+| recall lane lenient recall@5 / MRR on the frozen corpus | `run_recalleval.py` addresses the corpus RELATIVELY (`ripwire .`, cwd = root), so the scored string does not change and these must be **digit-identical**, not merely in-band |
+| `--for`, `--format=candidates`, `--pack-task`, `--exemplar` on any corpus | pass 1.5 never runs at these lenses — byte-identical by control flow |
+| `run_r3diff.py` on both frozen sets | the wide-diff detector: a change confined to `--recall`'s path field must leave the **ranking** set at all-ties |
+| MCP `memory_recall` | passes no path weight, so it must be byte-identical — and it is the control proving the CLI/MCP divergence below is pre-existing rather than introduced here |
+
+**Registered guards, re-run after the change; any regression is a REVERT regardless of the band.** Every
+value below is this lane's own re-measurement at `518fe0d`, and every one reproduces the last recorded
+baseline to the digit — that is the instrument check, done before any result was believed.
+
+| Guard | Floor / ceiling | At `518fe0d` |
+| --- | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% |
+| `run_r3diff.py` ranking (n=32) / recall (n=42) | near-all ties | — |
+| determinism (two runs byte-identical) + `xmllint` well-formedness | contract | — |
+| full gate battery (`test/pargates.py`) | all green | — |
+| G1 — ASan/UBSan/integer/LSan over the changed path | no report | — |
+
+**A pre-existing divergence this registration does not fix, recorded so the next reader need not re-find
+it.** `mcpverbs.h::recallText` calls `lexicalScores( ix.ing, …, task )` with no `pathFieldDefaultW`, i.e. 0,
+while the CLI `--recall` passes 1 — so MCP `memory_recall` and CLI `--recall` already rank the same query
+differently, under a comment claiming they "share `lexicalScores`". That is its own ranking change owing its
+own eval; it is out of this round's one-mechanism scope, and it is why MCP `memory_recall` appears above as
+an invariance CONTROL rather than as a subject.
+
+### The result — EXACT invariance, at the registered target (2026-08-25)
+
+**Verdict: SHIP.** The registered band was EXACT invariance, and exact invariance is what the fix reaches —
+all three absolute-root comparisons go to `0 / 0 / 0`, with the relative-root oracle unmoved throughout.
+
+| comparison | order | top-K | score |
+| --- | ---: | ---: | ---: |
+| **A vs B** — absolute root, neutral +90-char depth | 5 → **0** / 42 | 0 → **0** / 42 | 42 → **0** / 42 |
+| **A vs P** — absolute root, adversarial +68-char depth | 11 → **0** / 42 | 5 → **0** / 42 | 42 → **0** / 42 |
+| **A vs C** — absolute vs relative spelling | 3 → **0** / 42 | 1 → **0** / 42 | 42 → **0** / 42 |
+| **C vs D** — the oracle's own flatness control | 0 → 0 / 42 | 0 → 0 / 42 | 0 → 0 / 42 |
+
+`test/recallrankdepthcheck.sh`: **15 of 21 arms FAIL** against a clean build of `518fe0d` (ARMs 1, 2 and 3
+red; ARM 0 liveness and all four ARM 4 path-field tripwires green — the exact shape the registration
+predicts of a pre-fix binary), **21 of 21 PASS** at this head, and ALL PASS again under `asan/ripwire`.
+
+**Every registered guard is unmoved, and most of them by a stronger statement than "in band".**
+
+| Guard | Floor / ceiling | At `518fe0d` | At head |
+| --- | ---: | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% | 2.4% / 0.0% / 0.0% |
+| `run_r3diff.py` ranking (n=32) | near-all ties | — | **32 ties, 0 wins, 0 losses, net +0** |
+| `run_r3diff.py` recall (n=42) | near-all ties | — | **42 ties, 0 wins, 0 losses, net +0** |
+
+The whole `--eval-skills` report is **byte-identical** base vs head, which subsumes all four routing numbers
+and both judged-only arms — a stronger claim than the digits agreeing. The recall and ranking lanes are
+digit-identical for the registered reason: `run_recalleval.py` invokes `ripwire .` with `cwd` = the corpus
+root, so the scored string never contained a checkout prefix to remove.
+
+**The registered controls, byte-compared base vs head at an ABSOLUTE root** — the only spelling under which
+a leak could show — with the sizes recorded so no row is an empty-vs-empty pass:
+
+| control | bytes | verdict |
+| --- | ---: | --- |
+| default map | 21998 | identical |
+| `--for` conceptual / candidates / name-exact | 8391 / 2922 / 13387 | identical |
+| `--pack-task` / `--exemplar` / `--pack-signatures` | 9591 / 1650 / 30668 | identical |
+| `--json` / `--metrics` / `--handoff` | 22794 / 45215 / 1445 | identical |
+| MCP `memory_recall` / MCP `for` | 685 / 668 | identical |
+| `--recall` at an absolute root | 690405 | **DIFFERS — the subject** |
+
+Twelve of thirteen identical and exactly one changed, and the one that changed is the verb under test. MCP
+`memory_recall` being byte-identical is also the positive evidence for the divergence recorded above: it
+never ran the pass that moved.
+
+**Quality.** `--quality-delta=518fe0d..HEAD`: **7 findings, 4 gating → gating="0", acked="4"**, three
+non-gating rows left visible. Acked with `--ack-only=gating`, never bare `--quality-ack`. All four ARE the
+change: 2 × api-surface contract-change (the `+1` root parameter on `lexicalScores` /
+`lexicalScoresTiered` — the scorer cannot relativize against a root it was never told) and 2 × verbosity
+(that parameter's rationale in comments, already tightened once *because* the tool flagged them).
+
+**One finding was NOT acked, because the tool was right and the fix was cheap.** The first run reported
+`complexity runTargetedViews 42 → 44`, from a ternary guarding `rootPrefixOf` against an empty root. But
+`rootPrefixOf("")` already returns `""` — its trailing-slash loop needs `size() > 1` — so the branch could
+not change an outcome. Removed; the finding is gone rather than acked. The three surviving non-gating rows
+are two `params` minors (the same `+1`, counted on the other axis) and one `dead-code` on the new
+instrument's `Cmp.__init__`, a Python constructor no caller names — a resolver artifact, `origin="new-symbol"`,
+never gating, and recorded rather than suppressed.
+
+**Gate battery**, on a FROZEN tree: `gates=464 pass=461 skip=2 fail=1 wall=480.6s`. Gate count 455 → **456**
+(`test/recallrankdepthcheck.sh`), all three `docs/EVALS.md` pins moved together. The two skips are the
+tree's standing ones (`namingcalibrationcheck`, live judgement withheld by design; `argvdiffcheck`, no
+`RIPWIRE_BASE`).
+
+**The one failure is `editcheckcheck`'s 100 ms warm timing budget, and it is environmental.** Two
+independent reasons, the structural one first: `--edit-check` never executes the changed code at all — pass
+1.5 runs only when `pathFieldDefaultW > 0`, and `--recall` is its only nonzero caller — so no control-flow
+path connects this change to that measurement. And the A/B says the same: a clean `518fe0d` build misses the
+same budget on this machine (111/110 ms, then 139/209 ms), while this head measured **85 ms and PASSED**
+when the machine was quiet and 136/149 ms when it was not. The spread on ONE binary is 85–310 ms, which
+swamps any difference between the two. This matches the standing note on this gate across several lanes.
+
+**One re-derivation, kept as its own commit.** The fix added 11 lines to `src/main.cpp` above two rows the
+README pins verbatim, so `churnRankedGraph` moved `13388 → 13399` and `runDefaultMap` `13503 → 13514`.
+`readmeexamplecheck.sh` caught it; the numbers were re-derived from this tree's own binary rather than
+hand-adjusted.
+
+`--test-gate` on the changed files names one test (`test/adaptivecutshapecheck.sh` — ALL PASS) and a
+20-symbol untested blast radius. Those 20 are the `lexicalScores` consumers, and every one of them is
+covered empirically above rather than by the call graph: they are the byte-identical control rows, the two
+frozen `r3diff` sets and the two eval harnesses.
+
+G1: the `asan/` build (ASan + UBSan + integer + LSan with the committed suppressions) is clean — `rc=0`,
+empty stderr — on `--recall` at an absolute root, on `--for`, on a whole-repo map, and across the whole of
+`test/recallrankdepthcheck.sh`. Determinism ×3 byte-identical (21940 B) and `xmllint --noout` clean.
+
+---
+
 ## 5. Token and output economy
 
 ### `--pack-signatures`
@@ -4193,7 +4405,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **457 gate scripts**, all of which exist on disk.
+naming **458 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5001,7 +5213,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 457. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 458. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
