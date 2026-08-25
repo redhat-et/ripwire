@@ -8,6 +8,11 @@
 
 #include "model.h"
 #include "lexindex.h"            // B0: the ONE subtoken state machine + docCommentStart + persisted-stats types
+#include "sarif.h"               // rootRelativeUri — the ONE root-relative path view. Included here (not
+                                 // reached transitively, the way recall.h reaches it through serialize.h)
+                                 // because pass 1.5 SCORES the same string recall.h PRINTS: one helper, so
+                                 // the scored and printed spelling of a file cannot drift apart. Despite
+                                 // the header's name it is a pure path helper over model.h — no cycle.
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "infra/sortutil.h"      // deterministic sanitizer-clean score sorting for adaptive cuts
 
@@ -118,7 +123,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                                                const std::vector<NodeId>& outTargets, std::string_view query,
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
                                                const std::vector<float>* symbolScoreMul, int pathFieldDefaultW = 0,
-                                               int basenameFieldDefaultW = 0 )
+                                               int basenameFieldDefaultW = 0, std::string_view pathRootPrefix = {} )
 {
     PROFILE_SCOPE_DESCRIBE( "lexical: lexicalScores (BM25 over symbols)" );
     const std::size_t S = ing.symbols.size();
@@ -329,6 +334,24 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // for calibration sweeps only. Paths need no file text, so the pass sits before the branch below and
     // runs identically over the scan and persisted-stats paths — postings parity holds by construction and
     // the cache format is untouched.
+    //
+    // R-R RANKING (2026-08-25): what is scanned is the ROOT-RELATIVE view, not ing.files[f] itself. The
+    // stored spelling is absolute whenever the run's root argument was (the root-relative EMISSION lane
+    // proved it must stay that way — g.canonId, Regression::key, every pathQualifiedKey and the ingest
+    // cache's reAbsolutize all key off it), so scanning it verbatim indexed every directory ABOVE the
+    // corpus as corpus vocabulary. That had two effects, and the second is the one that reordered answers:
+    // every symbol gained the same root tokens, so dl and avgdl grew by different proportions and length
+    // normalization shifted; and a directory that happened to spell a query word ("…/ripwire/docs/recall/…")
+    // matched EVERY document, collapsing that word's idf. Two clones of ONE commit at different checkout
+    // depths therefore ranked --recall differently — measured at 11 of 42 frozen queries reordered and 5
+    // returning a different SET of documents (docs/EVALS.md, gate: test/recallrankdepthcheck.sh).
+    //
+    // The cure is a VIEW, not a move: rootRelativeUri is the same helper recall.h uses to PRINT the
+    // separator line's path, so the scored and printed spelling of a file cannot disagree. pathRootPrefix
+    // defaults to empty, and rootRelativeUri(p, "") strips a leading "./" and otherwise returns p — which
+    // is exactly what a relative-root run already scanned. That is why this is a convergence rather than a
+    // new ranking opinion: `ripwire .` was ALREADY depth-invariant and is the oracle the absolute spelling
+    // now reproduces byte for byte. Multi-root needs no prefix — ing.files already hold "<label>/<rel>".
     {
         int kwPath = pathFieldDefaultW;
         if( const char* pathTokEnv = std::getenv( "RIPWIRE_PATHTOK_W" ) )
@@ -341,7 +364,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             {
                 if( const std::uint32_t f = ing.symbols[i].fileId; f < ing.files.size() )
                 {
-                    scanField( i, ing.files[f], kwPath );
+                    scanField( i, rw::sarif::rootRelativeUri( ing.files[f], pathRootPrefix ), kwPath );
                 }
             }
         }
@@ -354,6 +377,11 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // first". Needs no file text → runs before the pass-2 branch split; parity and the cache format
     // untouched. RIPWIRE_BASENAME_W (0..8) overrides basenameFieldDefaultW; a nonzero shipped default
     // requires the LB-3 acceptance verdict (gate: test/lb3namecheck.sh).
+    //
+    // R-R: takes the same root-relative view as pass 1.5. PROVABLY a no-op here — the basename is whatever
+    // follows the last '/', which the root prefix cannot change — and applied anyway so the two path passes
+    // cannot drift apart. One reading of ing.files[f], one rule; a future reader who changes one pass finds
+    // the other already agreeing rather than discovering half the path tokenization was still absolute.
     {
         int kwBase = basenameFieldDefaultW;
         if( const char* baseEnv = std::getenv( "RIPWIRE_BASENAME_W" ) )
@@ -367,7 +395,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             std::vector<int>  fileWt( fileCount, 0 );
             for( std::size_t f = 0; f < fileCount; ++f )
             {
-                const std::string_view path = ing.files[f];
+                const std::string_view path = rw::sarif::rootRelativeUri( ing.files[f], pathRootPrefix );
                 const std::size_t      cut  = path.find_last_of( '/' );
                 const std::string_view base = cut == std::string_view::npos ? path : path.substr( cut + 1 );
                 scanTextInto( fileTf.data() + f * matchCount, fileWt[f], base, kwBase );
@@ -881,9 +909,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 inline std::vector<float> lexicalScores( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                          const std::vector<NodeId>& outTargets, std::string_view query,
                                          std::size_t pruneTopK = 0, const std::vector<char>* alwaysExact = nullptr,
-                                         int pathFieldDefaultW = 0 )
+                                         int pathFieldDefaultW = 0, std::string_view pathRootPrefix = {} )
 {
-    return lexicalScoresTiered( ing, outOff, outTargets, query, pruneTopK, alwaysExact, nullptr, pathFieldDefaultW );
+    return lexicalScoresTiered( ing, outOff, outTargets, query, pruneTopK, alwaysExact, nullptr, pathFieldDefaultW,
+                                /*basenameFieldDefaultW=*/0, pathRootPrefix );
 }
 
 // ─── whole-name / name-exact BM25 (EXPERIMENTAL, --route's identifier-query ranker) ──────────────────
