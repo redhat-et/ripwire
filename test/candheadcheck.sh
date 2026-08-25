@@ -16,11 +16,11 @@
 # nothing: bodies="0" reason="no_candidates", even though the caller's own anchor was resolved correctly.
 #
 # THE SCORE GAP, reproduced deliberately rather than assumed: BM25's length-normalization term counts a
-# symbol WITH a written scope (a class's own constructor, "Widget::Widget") as a two-token "document"
-# against the whole-name scorer, while an UNSCOPED free function ("Widget") scores as one token and wins
+# symbol WITH a written scope (a class's own constructor, "Frobnicator::Frobnicator") as a two-token "document"
+# against the whole-name scorer, while an UNSCOPED free function ("Frobnicator") scores as one token and wins
 # the length penalty — real and measured, not a synthetic tie. test/candheadfix/b_pollutants.hpp is
-# seven overloads of a free function Widget(), each unscoped and each outscoring a_gold.hpp's class
-# Widget (whose constructor carries the written scope "Widget"); seven is one past
+# seven overloads of a free function Frobnicator(), each unscoped and each outscoring a_gold.hpp's class
+# Frobnicator (whose constructor carries the written scope "Frobnicator"); seven is one past
 # kPackTaskBodyCandidates = 6, so the pollutants fill the WHOLE pre-restriction head.
 #
 # THE FIX: main.cpp's buildForAutoBodies restricts the FULL positive-score surface to the anchor's own
@@ -29,17 +29,17 @@
 # change. A no-anchor route (anchorDefs empty) takes the unrestricted head exactly as before.
 #
 # ARMS
-#   (a) RED-FIRST — --for=Widget: the anchor resolves to a_gold.hpp (rank 8/9 in the raw candidate
+#   (a) RED-FIRST — --for=Frobnicator: the anchor resolves to a_gold.hpp (rank 8/9 in the raw candidate
 #       list, past the 6-cap) but bodies="0" before the fix; the fix serves the gold's own cls+fn.
-#   (b) THE POLLUTANTS SURVIVE IN <sigs> — the seven unscoped Widget overloads are still ranked ahead
+#   (b) THE POLLUTANTS SURVIVE IN <sigs> — the seven unscoped Frobnicator overloads are still ranked ahead
 #       of the gold in the SIGNATURE rows; this fix touches body SELECTION only, never ranking.
-#   (c) THE ANCHOR ITSELF DOES NOT MOVE — anchors: Widget(.../a_gold.hpp+8) is byte-identical before
+#   (c) THE ANCHOR ITSELF DOES NOT MOVE — anchors: Frobnicator(.../a_gold.hpp+8) is byte-identical before
 #       and after. A rule that changed anchor selection to "fix" this would be the wrong mechanism.
 #   (d) NO-ANCHOR CONTROL — a query naming no symbol at all (routes subtoken+body, anchorDefs empty)
 #       is untouched: this fix's restrict-then-cap branch never executes there.
 #   (e) UNIQUE-DEFINITION INVARIANCE — Gadget, declared once, nothing competing for its anchor or its
 #       candidate head: byte-identical bundle before and after. The registered invariance criterion.
-#   (f) ROUTE SCOPE — --for=Widget takes the name-exact route (sanity for the arms above).
+#   (f) ROUTE SCOPE — --for=Frobnicator takes the name-exact route (sanity for the arms above).
 #   (g) determinism — two runs byte-identical.
 #
 # The fixture is copied to a tmp dir OUTSIDE any git repo and scanned via a RELATIVE path, so no churn
@@ -63,15 +63,15 @@ cp "$ROOT"/test/candheadfix/*.hpp "$TMP/candheadfix/"
 cd "$TMP"
 
 # ── (a) RED-FIRST: the anchor is correct but the gold's body is served ──────────────────────────────
-"$BIN" candheadfix --for=Widget >"$TMP/lens" 2>/dev/null
-anchor="$( sed -n 's/.*anchors: Widget(\([^)]*\)).*/\1/p' "$TMP/lens" | head -1 )"
+"$BIN" candheadfix --for=Frobnicator >"$TMP/lens" 2>/dev/null
+anchor="$( sed -n 's/.*anchors: Frobnicator(\([^)]*\)).*/\1/p' "$TMP/lens" | head -1 )"
 [ "$anchor" = "candheadfix/a_gold.hpp+8" ] \
-    && ok "the anchor resolves to a_gold.hpp (anchors: Widget($anchor))" \
-    || no "anchors: Widget($anchor) — expected candheadfix/a_gold.hpp+8"
+    && ok "the anchor resolves to a_gold.hpp (anchors: Frobnicator($anchor))" \
+    || no "anchors: Frobnicator($anchor) — expected candheadfix/a_gold.hpp+8"
 
 bodykinds="$( tr '>' '\n' <"$TMP/lens" | sed -n 's/.*<b t="\([^"]*\)" l="\([0-9]*\)" p="\([^"]*\)".*/\1:\2:\3/p' | sed 's#candheadfix/##' | sort )"
-want='cls:20:a_gold.hpp
-fn:23:a_gold.hpp'
+want='cls:28:a_gold.hpp
+fn:31:a_gold.hpp'
 if [ "$bodykinds" = "$want" ]; then
     ok "the gold's own class + constructor are served in <bodies>"
 else
@@ -81,12 +81,12 @@ fi
 
 # ── (b) THE POLLUTANTS SURVIVE IN <sigs> — reorder, not filter ──────────────────────────────────────
 # 9 = the seven pollutant overloads plus the gold's own class + constructor rows; the file-grouping <f
-# p="…"> wrapper prints its path ONCE per file, so counting <d n="Widget"> rows (not p="…" occurrences)
+# p="…"> wrapper prints its path ONCE per file, so counting <d n="Frobnicator"> rows (not p="…" occurrences)
 # is what actually counts ranked ROWS.
-widgetrows="$( tr '>' '\n' <"$TMP/lens" | grep -c '<d l="[0-9]*" n="Widget"' )"
-[ "$widgetrows" = "9" ] \
-    && ok "all nine Widget rows (7 pollutants + the gold's cls+fn) still appear ranked — reorder, not a filter" \
-    || no "expected 9 Widget rows in <sigs>, got $widgetrows"
+rowcount="$( tr '>' '\n' <"$TMP/lens" | grep -c '<d l="[0-9]*" n="Frobnicator"' )"
+[ "$rowcount" = "9" ] \
+    && ok "all nine Frobnicator rows (7 pollutants + the gold's cls+fn) still appear ranked — reorder, not a filter" \
+    || no "expected 9 Frobnicator rows in <sigs>, got $rowcount"
 
 # ── (c) THE ANCHOR ITSELF DOES NOT MOVE — checked again as its own arm, byte-value pinned ───────────
 [ "$anchor" = "candheadfix/a_gold.hpp+8" ] \
@@ -109,8 +109,8 @@ fi
 "$BIN" candheadfix --for=Gadget >"$TMP/gad" 2>/dev/null
 gadan="$( sed -n 's/.*anchors: Gadget(\([^)]*\)).*/\1/p' "$TMP/gad" | head -1 )"
 gadbody="$( tr '>' '\n' <"$TMP/gad" | sed -n 's/.*<b t="\([^"]*\)" l="\([0-9]*\)" p="\([^"]*\)".*/\1:\2/p' | sed 's#candheadfix/##' | sort )"
-gadwant='cls:29
-fn:32'
+gadwant='cls:37
+fn:40'
 if [ "$gadan" = "candheadfix/a_gold.hpp+1" ] && [ "$gadbody" = "$gadwant" ]; then
     ok "a unique definition's anchor and both bodies are byte-stable (Gadget: $gadan)"
 else
@@ -120,15 +120,15 @@ fi
 
 # ── (f) ROUTE SCOPE ───────────────────────────────────────────────────────────────────────────────────
 grep -q 'routed: name-exact' "$TMP/lens" \
-    && ok "--for=Widget takes the name-exact route (the route this fix's arms measure)" \
-    || no "--for=Widget no longer routes name-exact"
+    && ok "--for=Frobnicator takes the name-exact route (the route this fix's arms measure)" \
+    || no "--for=Frobnicator no longer routes name-exact"
 
 # ── (g) determinism ───────────────────────────────────────────────────────────────────────────────────
-"$BIN" candheadfix --for=Widget >"$TMP/d1" 2>/dev/null
-"$BIN" candheadfix --for=Widget >"$TMP/d2" 2>/dev/null
+"$BIN" candheadfix --for=Frobnicator >"$TMP/d1" 2>/dev/null
+"$BIN" candheadfix --for=Frobnicator >"$TMP/d2" 2>/dev/null
 cmp -s "$TMP/d1" "$TMP/d2" \
-    && ok "deterministic: two --for=Widget runs byte-identical" \
-    || no "two --for=Widget runs differ"
+    && ok "deterministic: two --for=Frobnicator runs byte-identical" \
+    || no "two --for=Frobnicator runs differ"
 
 [ "$fail" -eq 0 ] && echo "candheadcheck: ALL PASS" || echo "candheadcheck: FAILURES"
 exit "$fail"
