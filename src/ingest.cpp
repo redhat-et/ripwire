@@ -1499,7 +1499,14 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 72;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 73;           // bump on any grammar/.scm/extraction change
+                                                      // 73 = 2026-08-25 (candhead-ugrep lane): C++ out-of-line
+                                                      //    NESTED CLASS/STRUCT definitions (`class Outer::Inner :
+                                                      //    Base { … };`) — queries/cpp/tags.scm gains a
+                                                      //    qualified_identifier name: pattern for class_specifier/
+                                                      //    struct_specifier, mirroring the out-of-line METHOD
+                                                      //    pattern already there. Previously dropped at extraction
+                                                      //    with no symbol minted at all (N11/N12).
                                                       // 72 = 2026-08-24 (fnbody-require lane): CommonJS `require("./x")` /
                                                       //    dynamic `import("./x")` captured INSIDE a function body — kJsImportContainers
                                                       //    grows past the 71 top-level-only set (statement_block, return_statement,
