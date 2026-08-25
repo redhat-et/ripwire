@@ -324,6 +324,24 @@ inline std::uint64_t cloneGroupHash( const CloneGroup& cg, const IngestResult& i
     return fnv1a64( joined );
 }
 
+// The ONE body-hash identity rule: fnv1a64( path \0 scope \0 name ), path root-relative (relForHash).
+// PATH-QUALIFIED ALWAYS, including when scope is empty. canonicalId() DEGRADES to the bare name when a
+// symbol has no scope (resolve.h) — fine for display, catastrophic as a comparison key: every scope-less
+// `ok()` in a tree folds to ONE identity. --merge-scout hit it first (laneA adds a.sh::ok, laneB adds
+// b.sh::ok -> conflicts="1"), then --quality-delta's short-horizon-churn (W1-S2 repro, 2026-08-11: a NEW
+// shell fn rows() in one test script flagged churn against the same-named rows() in a file the change never
+// touched — gates 2+3 judged a cross-file FOLD, not a symbol). mergescout::buildTreeIndex and lanes.h claims
+// key byte-for-byte the same way — one key space, pinned by test/scoutkeycheck.sh, never a third scheme.
+inline std::uint64_t pathQualifiedKey( std::string_view relPath, std::string_view scope, std::string_view name )
+{
+    std::string idText;
+    idText.reserve( relPath.size() + scope.size() + name.size() + 2 );
+    idText.append( relPath ).push_back( '\0' );
+    idText.append( scope ).push_back( '\0' );
+    idText.append( name );
+    return fnv1a64( idText );
+}
+
 // §D#4 error-masking — attribute each error-masking hit (findErrorMasking) to its ENCLOSING symbol by byte-span
 // containment, then COUNT hits per baseline canonId. A symbol contains a hit iff the hit's start byte lies in
 // the symbol's full def span [sigStartByte, endByte) in the same file. Overloads sharing a canonId SUM (the
@@ -366,28 +384,47 @@ inline gtl::btree_map<std::uint64_t, std::uint32_t> errorMaskCountsBySym( const 
         }
         if( owner != kNoNode )
         {
-            ++counts[fnv1a64( canonicalId( relForHash( ing.files[ing.symbols[owner].fileId], root ), ing.symbols[owner].scope, ing.symbols[owner].name ) )];
+            // pathQualifiedKey, via the SAME rule maskBySym is stored under (see qualityKey). These counts are
+            // compared against that map key-for-key, so a scheme that differs by one byte silently reports every
+            // masking construct as new.
+            ++counts[ pathQualifiedKey( relForHash( ing.files[ing.symbols[owner].fileId], root ),
+                                        ing.symbols[owner].scope, ing.symbols[owner].name ) ];
         }
     }
     return counts;
 }
 
-// The ONE body-hash identity rule: fnv1a64( path \0 scope \0 name ), path root-relative (relForHash).
-// PATH-QUALIFIED ALWAYS, including when scope is empty. canonicalId() DEGRADES to the bare name when a
-// symbol has no scope (resolve.h) — fine for display, catastrophic as a comparison key: every scope-less
-// `ok()` in a tree folds to ONE identity. --merge-scout hit it first (laneA adds a.sh::ok, laneB adds
-// b.sh::ok -> conflicts="1"), then --quality-delta's short-horizon-churn (W1-S2 repro, 2026-08-11: a NEW
-// shell fn rows() in one test script flagged churn against the same-named rows() in a file the change never
-// touched — gates 2+3 judged a cross-file FOLD, not a symbol). mergescout::buildTreeIndex and lanes.h claims
-// key byte-for-byte the same way — one key space, pinned by test/scoutkeycheck.sh, never a third scheme.
-inline std::uint64_t pathQualifiedKey( std::string_view relPath, std::string_view scope, std::string_view name )
+
+// THE quality key, for a symbol in the CURRENT tree — the one rule computeSnapshot and computeDelta must
+// agree on, living ONCE so they cannot drift (the §B1.3 discipline baselineCanonId above follows for the
+// display id).
+//
+// WHY THIS IS NOT `fnv1a64( baselineCanonId(...) )` ANY MORE (2026-08-25, the scope-less fold round). It was,
+// for all seven canonId-keyed kinds — ccx/loc/nest/params/mask/dead/api — and that inherited canonicalId's
+// bare-name degrade wholesale: a scope-less symbol's key was `fnv1a64(name)`, PATH-INDEPENDENT, so every
+// scope-less `helper()` in the tree was one identity and perSymbolKind's max() reported whichever file's was
+// largest. That is not a cosmetic id problem, it SILENTLY HIDES REGRESSIONS: a function going ccx 1 -> 18
+// under a same-named ccx-23 neighbour moves no max at all and is reported as nothing (test/qualitykeycheck.sh
+// arm (A) is exactly that fixture). Measured on this repo: 6,418 scope-less rows collapsing into 3,845
+// identities — 2,573 identities lost.
+//
+// WHY THE FIX IS HERE AND NOT IN canonicalId. Path-qualifying canonicalId itself was measured and REJECTED:
+// the default map omits id= whenever it would equal the bare name, so qualifying it grows an attribute on all
+// 6,418 rows — +293,886 bytes, +26.4%, a straight G4 breach — and canonicalId is the resolver's identity, the
+// selector grammar, the MCP handle source, the notes key and merge-scout's key across 67 call sites. It would
+// also SPLIT 21 CORRECT folds in src/ alone: the `extern "C" tree_sitter_X` grammar entry points are declared
+// in BOTH ingest.cpp and main.cpp and are ONE C function, which the bare-name fold correctly unifies.
+// canonicalId answers "which ENTITY is this?" and must keep answering it; the quality key has to answer
+// "which piece of SOURCE is this?", and those are different questions. The bug was that quality borrowed the
+// entity key to ask a source question.
+//
+// So this is pathQualifiedKey — NOT A THIRD SCHEME, the SAME key d593de3 gave short-horizon-churn for this
+// exact reason ("pathQualifiedKey is THE one key space"), now extended to the other seven kinds. The two
+// CLONE kinds keep their member-set hash and are deliberately untouched; that floor is recorded in EVALS.
+inline std::uint64_t qualityKey( const IngestResult& ing, NodeId i, std::string_view root )
 {
-    std::string idText;
-    idText.reserve( relPath.size() + scope.size() + name.size() + 2 );
-    idText.append( relPath ).push_back( '\0' );
-    idText.append( scope ).push_back( '\0' );
-    idText.append( name );
-    return fnv1a64( idText );
+    const Symbol& s = ing.symbols[i];
+    return pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s.scope, s.name );
 }
 
 // §D#4 short-horizon-churn — a per-identity hash of the symbols' RAW body bytes, for CHANGE detection that
@@ -605,13 +642,18 @@ inline ContentIdIndex contentIdsBySym( const IngestResult& ing, const Graph& g, 
                            const std::uint64_t cid      = scrubbedBodyHash( body, s.name );
                            const bool          hasCanon = ( i < g.canonId.size() && !g.canonId[i].empty() );
                            out.symbolsPerCid[ cid ] += 1;              // per SYMBOL — the uniqueness question
+                           const std::uint64_t pqKey = pathQualifiedKey( rel, s.scope, s.name );
                            if( hasCanon )
                            {
-                               const std::uint64_t canonKey = fnv1a64( canonicalId( rel, s.scope, s.name ) );
-                               out.cidByKey[ canonKey ] = cid;
-                               out.keyByCid[ cid ]      = canonKey;    // only read when symbolsPerCid[cid] == 1
+                               // The canonId-space key is still INDEXED (an ack written by a pre-2026-08-25
+                               // binary is spelled that way, and the "is this ack's target alive?" test must
+                               // recognize it), but it is no longer what a rescue RESOLVES TO: every quality key
+                               // space is pathQualifiedKey now, so handing back a canonId hash would re-file the
+                               // ack into a space nothing reads.
+                               out.cidByKey[ fnv1a64( canonicalId( rel, s.scope, s.name ) ) ] = cid;
                            }
-                           out.cidByKey[ pathQualifiedKey( rel, s.scope, s.name ) ] = cid;
+                           out.cidByKey[ pqKey ] = cid;
+                           out.keyByCid[ cid ]   = pqKey;              // only read when symbolsPerCid[cid] == 1
                        } );
     return out;
 }
@@ -1609,7 +1651,14 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // without the exemption) served to this binary would resurrect the exact false positives the fix retires.
 // No extraction change (the file-scope references were always captured — buildGraph just never turned them
 // into edges), so kParserVer/the mirrors deliberately did NOT move.
-constexpr std::uint32_t kQSnapCacheScheme = 6;
+// v7 (2026-08-25, the scope-less fold round) — the KEY SPACE of every per-symbol map in a Snapshot changed.
+// ccx/loc/nest/params/defs/mask/dead/api were keyed by `fnv1a64( baselineCanonId(...) )`, which inherits
+// canonicalId's bare-name degrade and folds every scope-less symbol across files; they are keyed by
+// pathQualifiedKey now (see qualityKey). This is the purest possible case of "the semantics of what a cached
+// Snapshot MEANS changed": a v6 blob's keys are computed from a different byte string, so served to this
+// binary EVERY symbol reads as absent from the baseline and the whole tree reports as new. Bumped 6 -> 7 to
+// retire every blob written before the fix.
+constexpr std::uint32_t kQSnapCacheScheme = 7;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -2522,7 +2571,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         {
             continue;
         }
-        const std::uint64_t key = fnv1a64( baselineCanonId( ing, i, root ) );
+        const std::uint64_t key = qualityKey( ing, i, root );   // path-qualified ALWAYS — see qualityKey
         const Symbol&       s   = ing.symbols[i];
         // overloads share a canonical id (scope+name) → keep the MAX of each per-symbol metric per id, not
         // last-writer-wins; otherwise a low-metric overload written last makes every later delta report a
@@ -2586,7 +2635,10 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     // `body` record. The TAG is renamed with the keying so the two key spaces can never mix: an old
     // baseline's `body` lines are skipped as unknown here (churn quietly reports nothing until the next
     // re-baseline — precision-first, same degrade as no-git), and an old binary skips `bodyq` symmetrically.
-    f << "# ripwire quality baseline v3 — regenerate with --quality-baseline; do not hand-edit\n";
+    // v4 (2026-08-25): every per-symbol key is pathQualifiedKey, not fnv1a64(baselineCanonId). readBaseline
+    // REFUSES v3 and older rather than reading it — see there for why a silent read would be the dishonest
+    // option here.
+    f << "# ripwire quality baseline v4 — regenerate with --quality-baseline; do not hand-edit\n";
     // STALENESS STAMP: the HEAD commit the baseline was pinned at. --quality-delta compares this to the
     // current HEAD and, if they differ (a baseline left by an abandoned/parallel session, or from before a
     // commit), IGNORES the sidecar and falls back to the git-HEAD auto-baseline instead of reporting a wall
@@ -2662,6 +2714,19 @@ inline bool readBaseline( const std::string& path, Snapshot& out )
         if( line.empty() )
         {
             continue;
+        }
+        // THE VERSION REFUSAL (2026-08-25). Every other unknown record in this format is skipped gracefully,
+        // and for a KEY-SPACE change that posture would be actively wrong: a v3 sidecar's per-symbol keys are
+        // `fnv1a64(baselineCanonId)` while this binary computes pathQualifiedKey, so reading one produces a
+        // baseline in which no current symbol exists — every function in the tree reports as brand-new debt,
+        // with no indication anything went wrong. Refusing is the honest degrade: an unrecognizable baseline
+        // makes the caller fall back to git HEAD, and that fallback is already named on every report through
+        // `baseline=`. The sidecar is generated and gitignored, so the cost of refusing is one re-pin.
+        if( line.rfind( "# ripwire quality baseline v", 0 ) == 0 && line.find( " v4 " ) == std::string::npos )
+        {
+            DEGRADED_PATH_ALERT( "quality: baseline sidecar predates the pathQualifiedKey scheme — refused, re-pin with --quality-baseline" );
+            out = Snapshot{};
+            return false;
         }
         if( line[0] == '#' ) { ++recognizedLineCount; continue; }     // the format's own header comment counts as structure
         std::istringstream is( line );
@@ -3452,6 +3517,22 @@ struct IdentityAliases
     // different strings, so one map serves canonId-hash and pathQualifiedKey lookups without either knowing.
     gtl::btree_map<std::uint64_t, std::uint64_t> toCurrent;
     std::size_t                                  ambiguousDropped = 0;  // an ancestor key two current symbols both claim — refused, never guessed
+
+    // 2026-08-25 SCHEME MIGRATION (the scope-less fold round). Alias sources contributed by addSchemeAliases
+    // rather than by the rename record, kept separate ONLY so the disclosure can say which mechanism moved an
+    // ack — "git recorded a rename" and "the key rule itself changed" are different claims and collapsing them
+    // would hide which one the tool relied on. Both are sorted; membership is a binary_search.
+    std::vector<std::uint64_t>                   schemeKeys;            // old-scheme key → new-scheme key, unambiguously
+    std::vector<std::uint64_t>                   schemeAmbiguousKeys;   // old-scheme identity that FOLDED across files — refused
+
+    bool isSchemeKey( std::uint64_t k ) const
+    {
+        return std::binary_search( schemeKeys.begin(), schemeKeys.end(), k );
+    }
+    bool isSchemeAmbiguous( std::uint64_t k ) const
+    {
+        return std::binary_search( schemeAmbiguousKeys.begin(), schemeAmbiguousKeys.end(), k );
+    }
 };
 
 // Derive every alias the rename map licenses for the CURRENT tree. Costs nothing when nothing was renamed:
@@ -3522,6 +3603,75 @@ inline IdentityAliases identityAliases( const IngestResult& ing, const Graph& g,
     return al;
 }
 
+// THE SCHEME MIGRATION (2026-08-25, the scope-less fold round) — the second alias source, and the reason the
+// key-space fix does not cost 270 hand-written ack reasons.
+//
+// Every quality kind that used to key on `fnv1a64( canonicalId(...) )` now keys on pathQualifiedKey (see
+// qualityKey). Those hash DIFFERENT strings — `p::s::n` versus `p\0s\0n` — so every committed ack row in this
+// repo's ledger names a key nothing computes any more. Rather than invalidate them, we REPLAY: for each symbol
+// in the current tree both keys are pure functions of the same (path, scope, name), so the old→new map is
+// derivable exactly, with no git history, no similarity threshold and no heuristic. It is fed into the SAME
+// `toCurrent` map the rename route uses, so remapSnapshotIdentity / remapAckIdentity / computeStaleAcks need
+// no edit at all — a migration is an old-key → new-key map, which is precisely what that machinery consumes.
+//
+// IDEMPOTENT BY CONSTRUCTION, which is what makes it safe to run unconditionally and forever: an ack ALREADY
+// at its new key is not an alias SOURCE (no symbol's old key equals another's new key — they hash different
+// byte strings), so a migrated ledger passes through untouched. No ledger version flag, no transition window,
+// and --quality-ack writes the healed rows back so a rescued ack stops depending on the replay at all.
+//
+// WHERE IT REFUSES, and why that is the honest answer. The OLD side is MANY-TO-ONE exactly where this round's
+// defect was: a scope-less name folded across N files has ONE old key and N new keys, so the ledger cannot say
+// which file's symbol the human accepted. Those identities are poisoned and recorded in schemeAmbiguousKeys —
+// never fanned out to all N (that would claim the human acked N findings when they acked one) and never
+// assigned to an arbitrary one. Measured on this repo at 7a42a67: 6 ack rows land here, and they are NAMED in
+// the report rather than folded into a total.
+//
+// A poisoned identity is counted ONCE, not once per extra claimant — 74 files defining `main` is one
+// unknowable ack target, not 73 of them.
+inline void addSchemeAliases( IdentityAliases& al, const IngestResult& ing, const Graph& g, std::string_view root )
+{
+    gtl::btree_map<std::uint64_t, std::uint64_t> mig;
+    for( NodeId i = 0; i < ing.symbols.size(); ++i )
+    {
+        const Symbol& s = ing.symbols[i];
+        if( s.fileId >= ing.files.size() || i >= g.canonId.size() || g.canonId[i].empty() )
+        {
+            continue;
+        }
+        const std::string   rel{ relForHash( ing.files[ s.fileId ], root ) };
+        const std::uint64_t oldKey = fnv1a64( canonicalId( rel, s.scope, s.name ) );
+        const std::uint64_t newKey = pathQualifiedKey( rel, s.scope, s.name );
+        if( oldKey == newKey || oldKey == 0 || newKey == 0 )
+        {
+            continue;
+        }
+        const auto [ it, inserted ] = mig.emplace( oldKey, newKey );
+        if( !inserted && it->second != newKey )
+        {
+            if( it->second != 0 )
+            {
+                al.schemeAmbiguousKeys.push_back( oldKey );   // first time this identity forked — record it once
+            }
+            it->second = 0;
+        }
+    }
+    for( const auto& [ from, to ] : mig )
+    {
+        if( to == 0 )
+        {
+            continue;   // poisoned above — refused, never guessed
+        }
+        // ADD, NEVER OVERWRITE: a rename alias already claiming this source is the more specific statement
+        // (git recorded an actual move) and keeps precedence.
+        if( al.toCurrent.emplace( from, to ).second )
+        {
+            al.schemeKeys.push_back( from );
+        }
+    }
+    std::sort( al.schemeKeys.begin(), al.schemeKeys.end() );
+    std::sort( al.schemeAmbiguousKeys.begin(), al.schemeAmbiguousKeys.end() );
+}
+
 // Heal a BASELINE snapshot forward: an entry recorded under a pre-rename identity is re-filed under the
 // identity the current tree uses, so computeDelta's `was` lookups, its origin oracle and its churn join all
 // find it without a single edit to any of them.
@@ -3586,13 +3736,14 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
 // ROUTE — "your ack survived because git recorded the rename" and "because the body is byte-for-byte the
 // same after scrubbing" are different claims with different trust, and collapsing them would hide which one
 // the tool actually relied on.
-enum class AckRescueRoute : std::uint8_t { Rename = 1, Content = 2 };
+enum class AckRescueRoute : std::uint8_t { Rename = 1, Content = 2, Scheme = 3 };
 
 struct AckRemap
 {
     gtl::btree_map<std::string, AckRescueRoute> routeOf;   // the REKEYED ack's new mapKey → how it got there
     std::size_t renameRekeyed  = 0;
     std::size_t contentRekeyed = 0;
+    std::size_t schemeRekeyed  = 0;   // 2026-08-25: re-filed from the pre-fold-fix canonId key space
 };
 
 // Heal the ACK LEDGER forward, by the same add-never-overwrite rule, through two routes in strict priority:
@@ -3629,7 +3780,9 @@ inline AckRemap remapAckIdentity( gtl::btree_map<std::string, AckRecord>& acks, 
         const auto alias = al.toCurrent.find( rec.key );
         if( alias != al.toCurrent.end() )
         {
-            moves.push_back( { mapKey, alias->second, AckRescueRoute::Rename } );
+            // Same map, two mechanisms — report which one actually moved this row (see IdentityAliases).
+            moves.push_back( { mapKey, alias->second,
+                               al.isSchemeKey( rec.key ) ? AckRescueRoute::Scheme : AckRescueRoute::Rename } );
             continue;
         }
         if( rec.cid == 0 || cids == nullptr )
@@ -3681,7 +3834,12 @@ inline AckRemap remapAckIdentity( gtl::btree_map<std::string, AckRecord>& acks, 
         acks.erase( src );
         acks.emplace( newKey, rec );
         out.routeOf[ newKey ] = m.route;
-        ( m.route == AckRescueRoute::Rename ? out.renameRekeyed : out.contentRekeyed ) += 1;
+        switch( m.route )
+        {
+            case AckRescueRoute::Rename:  out.renameRekeyed  += 1; break;
+            case AckRescueRoute::Content: out.contentRekeyed += 1; break;
+            case AckRescueRoute::Scheme:  out.schemeRekeyed  += 1; break;
+        }
     }
     return out;
 }
@@ -3732,10 +3890,11 @@ struct IdentityHealing
     ContentIdIndex  cids;
     IdentityAliases aliases;
     AckRemap        ackRemap;
-    bool            cidsComputed      = false;
-    std::size_t     baselineKeysMoved = 0;
-    std::size_t     ackedByRename     = 0;   // filled by countAckRescues, AFTER computeDelta
-    std::size_t     ackedByContent    = 0;
+    bool            cidsComputed        = false;
+    std::size_t     baselineKeysMoved   = 0;
+    std::size_t     ackedByRename       = 0;   // filled by countAckRescues, AFTER computeDelta
+    std::size_t     ackedByContent      = 0;
+    std::size_t     schemeAmbiguousAcks = 0;   // 2026-08-25: ack rows whose pre-fix identity folded across files
 };
 
 // TWO ROOTS, deliberately not one. `corpusRoot` is the tree being JUDGED — every key is spelled relative to
@@ -3755,7 +3914,23 @@ inline IdentityHealing healIdentity( Snapshot& base, gtl::btree_map<std::string,
     }
     h.renames           = gitRenameMap( gitRoot, span );
     h.aliases           = identityAliases( ing, g, corpusRoot, h.renames );
+    // The SCHEME migration is not gated on git: the key rule changed in the binary, not in the history, so a
+    // repo with no rename record at all still needs its committed acks re-filed. Runs after the rename pass so
+    // a git-recorded move keeps precedence over the mechanical rekey (add-never-overwrite).
+    addSchemeAliases( h.aliases, ing, g, corpusRoot );
     h.baselineKeysMoved = remapSnapshotIdentity( base, h.aliases );
+
+    // Ack rows whose old identity FOLDED across files — countable only here, where both the ledger and the
+    // poisoned set are in scope. Disclosed, never silently dropped: they stay in the ledger at their old key
+    // and surface through stale= as well, so nothing vanishes without a row saying so.
+    for( const auto& [ mapKey, rec ] : acks )
+    {
+        (void) mapKey;
+        if( h.aliases.isSchemeAmbiguous( rec.key ) )
+        {
+            ++h.schemeAmbiguousAcks;
+        }
+    }
 
     const bool ledgerHasCid = std::any_of( acks.begin(), acks.end(),
                                            []( const auto& kv ) { return kv.second.cid != 0; } );
@@ -3778,15 +3953,21 @@ inline IdentityHealing healIdentity( Snapshot& base, gtl::btree_map<std::string,
 inline std::pair<std::string, std::string> identityDisclosure( const IdentityHealing& h )
 {
     std::string attrs, json;
-    if( !h.renames.available )
-    {
-        return { attrs, json };
-    }
     const auto add = [ & ]( const char* name, unsigned long long v )
     {
         attrs += " " + std::string( name ) + "=\"" + std::to_string( v ) + "\"";
         json  += ",\"" + std::string( name ) + "\":" + std::to_string( v );
     };
+    // The SCHEME attrs come FIRST and are NOT gated on the git rename record: the 2026-08-25 key-space change
+    // is a fact about this binary, not about this repo's history, so a tree git cannot be read in still had its
+    // acks re-filed and still deserves to be told. Both are absent unless non-zero (the optional-attribute
+    // convention of this root), so an absent one is never a silent "no".
+    if( h.ackRemap.schemeRekeyed )   { add( "acks_rekeyed_by_scheme", h.ackRemap.schemeRekeyed ); }
+    if( h.schemeAmbiguousAcks )      { add( "scheme_ambiguous", h.schemeAmbiguousAcks ); }
+    if( !h.renames.available )
+    {
+        return { attrs, json };
+    }
     add( "renames", h.renames.pairsRecorded );
     add( "rename_window_commits", h.renames.commitsScanned );
     add( "acked_by_rename", h.ackedByRename );
@@ -4060,17 +4241,20 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
 {
     std::vector<Regression> regs;
 
-    // A4-P10 — HOIST the per-symbol baseline key. `fnv1a64( baselineCanonId(...) )` materializes a canonical-id
-    // string + hashes it; the passes below (4 metric kinds × 2 loops each, dead, api-surface, error-masking,
-    // short-horizon-churn) each recomputed it per symbol → ~8× redundant string builds per symbol per call.
-    // Compute it ONCE here (0 for a symbol with no canonId — those are skipped by every pass anyway) and let the
-    // passes index `keyByNode[i]`. Byte-identical output: same hash values, just computed once instead of eight.
+    // A4-P10 — HOIST the per-symbol quality key. It materializes a path-qualified string + hashes it; the
+    // passes below (4 metric kinds × 2 loops each, dead, api-surface, error-masking, short-horizon-churn) each
+    // recomputed it per symbol → ~8× redundant string builds per symbol per call. Compute it ONCE here (0 for a
+    // symbol with no canonId — those are skipped by every pass anyway) and let the passes index `keyByNode[i]`.
+    //
+    // qualityKey, NOT fnv1a64(baselineCanonId) — it must be byte-identical to what computeSnapshot stored, and
+    // the two now share one rule so they cannot drift. The canonId presence test below is retained deliberately:
+    // it is the "is this an indexed definition at all" gate every pass depends on, NOT the key derivation.
     std::vector<std::uint64_t> keyByNode( ing.symbols.size(), 0 );
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         if( i < g.canonId.size() && !g.canonId[i].empty() )
         {
-            keyByNode[i] = fnv1a64( baselineCanonId( ing, i, root ) );
+            keyByNode[i] = qualityKey( ing, i, root );
         }
     }
 
