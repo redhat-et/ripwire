@@ -6255,3 +6255,86 @@ future probe set drawn from a header-heavy, cross-language, or multi-definition 
 same shape whenever an anchor's own file holds real definitions crowded out by unrelated same-named rows
 elsewhere — worth naming as an expected consequence rather than a surprise in future audits of this class
 of fix.
+
+---
+
+## Merge recompute (2026-08-25) — the twelve-probe `BODY-SERVED` set at the merged head
+
+**This section is a RECOMPUTE, not a registration.** It records nothing anyone predicted in advance and
+grades nobody's band. Three lanes off `518fe0d` — `lane/candhead-ugrep`, `lane/t3-body-budget` and
+`lane/recall-rootrel-rank` — each measured this probe set against its own head, and two of them changed
+`buildForAutoBodies`. A number measured with one lane's fix in and the other's out is not the number the
+merged tree produces, so the set was re-measured at the merge. **Each lane's own recorded in-band result
+above stands exactly as that lane recorded it; nothing here overwrites or re-grades it.**
+
+`BODY-SERVED` is unchanged in definition: the gold DEFINITION's own body emitted in `<bodies>` by a plain
+`--for="<Name>"`, gold pinned as the `(name, path, LINE)` triple (the T3 round's scoring correction —
+a path-only predicate inflates N11/N12 by counting the bare in-class declarations at `input.h:333/:335`).
+
+Corpora are the pinned checkouts, rev-counts re-verified at recompute time: duckdb `19864453` (48,632),
+rocksdb `0e2801ac` (12,938), ugrep `550599a6` (985). All four binaries measured with the same script.
+
+**Instrument check first: the `518fe0d` binary reproduces `4 / 12` row for row, and every `total=` matches
+the T3 round's recorded table to the digit.** No result below was believed before that agreed.
+
+| id | corpus | query | base `518fe0d` | candhead `522a295` | t3 `6203024` | **MERGED `d7276d6`** |
+|---|---|---|:---:|:---:|:---:|:---:|
+| N01 | DD | `ClientContext` | no — `budget` | no — `budget` | **YES** | **YES** |
+| N02 | DD | `DatabaseInstance` | YES | YES | YES | **YES** |
+| N03 | DD | `Serializer` | YES | YES | YES | **YES** |
+| N04 | DD | `TableCatalogEntry` | no | no | no | no |
+| N05 | DD | `Deserializer` | no — `budget` | no — `budget` | **YES** | **YES** |
+| N06 | DD | `Catalog` | no — `no_candidates` | no | no — `no_candidates` | no |
+| N07 | RD | `ColumnFamilyData` | no | no | no | no |
+| N08 | RD | `Slice` | no — `no_candidates` | **YES** | no — `no_candidates` | **YES** |
+| N09 | RD | `SystemClock` | YES | YES | YES | **YES** |
+| N10 | RD | `Logger` | YES | YES | YES | **YES** |
+| N11 | UG | `dos_streambuf` | no | **YES** | no | **YES** |
+| N12 | UG | `streambuf` | no | **YES** | no | **YES** |
+| | | **`BODY-SERVED`** | **4 / 12** | **7 / 12** | **6 / 12** | **9 / 12** |
+
+**The merged set is the exact UNION of the two lanes' gains, and nothing more.** candhead gains
+`{N08, N11, N12}`, t3 gains `{N01, N05}`, base holds `{N02, N03, N09, N10}`: 4 + 3 + 2 = 9. Checked in
+both directions rather than by adding up — **no probe is served at the merged head that neither lane
+served alone (no super-additive row), and no probe served at a lane head is lost at the merge.**
+
+### The predicted interaction is REFUTED, and the mechanism runs the other way
+
+The merge was expected to be super-additive: restricting to the anchor BEFORE the top-K cut should make
+the one-candidate case fire more often, so T3's `autoBodyIds.size() == 1` allowance should reach probes it
+could not reach alone, and the merged number should exceed the union. **It does not, and the candidate-set
+sizes say why.** Every probe whose candidate-set size moves under the candhead reorder moves **UP**:
+
+| probe | `<bodies total=>` base → candhead |
+|---|---|
+| N02 | 1 → 3 |
+| N06 | 0 → 1 |
+| N08 | 0 → 6 |
+| N10 | 2 → 4 |
+| N11 | 5 → 6 |
+| N12 | 4 → 6 |
+
+That is the fix working as designed, not a surprise: taking the head AFTER the restriction means the
+anchor's own rows are no longer displaced out of the K=6 window by unrelated same-named rows elsewhere, so
+**more** of the anchor's own definitions survive into the candidate list. Restrict-before-cut therefore
+pushes candidate sets **away from** `size() == 1`, not toward it.
+
+The population `size() == 1` can fire on is **7 probes before the reorder and 7 after** — not a growth but
+a swap: N02 leaves it (1 → 3) and N06 joins it (0 → 1). N06 gains nothing from the raise, because its one
+surviving candidate is the `src/README.md:15` markdown-section claimant and not the gold, so the raise
+funds a body that was never the answer and `BODY-SERVED` correctly stays `no`.
+
+**The two rules are therefore orthogonal on this probe set**: T3's allowance fires on N01 and N05, both of
+which sit at `total="1"` in all four arms, and the candhead reorder never touches either. The reason the
+merged number beats both lanes is simply that each lane's rows are disjoint.
+
+### What did not move
+
+Every served body at the merged head belongs to its own probe's anchor file — checked by reading each
+emitted `<b p=…>` path, not inferred from the count. The two shapes prior rounds disclosed are still
+present and still disclosed, neither introduced nor worsened here: N10 carries the bare `class Logger;`
+forward declaration at `env.h:53` alongside three real definitions (the K=6 cap filling leftover room), and
+N11/N12 carry the bare in-class declarations at `input.h:335`/`:333` (which is why the gold is scored as a
+line-pinned triple). N04, N06 and N07 remain unserved for the three reasons already recorded — an
+already-body-carrying out-of-line constructor, a markdown-section claimant, and an out-of-line constructor
+respectively — and none of them is a budget or a candidate-head question.
