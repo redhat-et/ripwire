@@ -3370,9 +3370,18 @@ finding restated as data:
 | N07 | RD | `ColumnFamilyData` | `db/column_family.cc` | `column_family.cc:526` — the out-of-line constructor | no |
 | N08 | RD | `Slice` | `db/blob/blob_fetcher.h` | none (`bodies="0" reason="no_candidates"`) | no |
 | N09 | RD | `SystemClock` | `db/blob/blob_file_builder.h` | `blob_file_builder.h:24` — a bare declaration | no |
-| N10 | RD | `Logger` | `include/rocksdb/env.h` | none | no |
+| N10 | RD | `Logger` | `db/log_reader.h` ‡ | none | no |
 | N11 | UG | `dos_streambuf` | `include/reflex/input.h` | five constructor bodies | no |
 | N12 | UG | `streambuf` | `include/reflex/input.h` | four constructor bodies | no |
+
+‡ **A correction to this table, made after the fact and marked rather than rewritten.** N10's base-anchor
+cell first read `include/rocksdb/env.h`. That was carried over from the reachability reasoning below
+instead of read off the run, and it is wrong: the measured base anchor is `db/log_reader.h`, a bare
+`class Logger;`. Nothing else moves with it — the row's *served body* (none), its `BODY-SERVED` (no) and
+its reachability verdict (reachable, because the claimant is bodyless and the first body-carrying
+definition in path order is the gold in `env.h`) are all unchanged, and had the cell been right the first
+time the audit would have read the same. It is corrected in place, with this note, because a baseline
+table quietly edited after a result is a baseline nobody can trust.
 
 **A pre-code feasibility ceiling, bounded from above before the code exists — the round above's own
 discipline, and the part of it that earned its keep.** The rule can only reach a probe when (a) the anchor's
@@ -3449,6 +3458,91 @@ inside the registration that predicted it is the opposite.
 **KILL conditions, registered before the result.** Any one of: `BODY-SERVED` below `+4`; any byte-compared
 control differing; the round above's `SERVED` moving off 8/12; any floor above going red; a route decision
 changing on any probe; a body served that is neither the gold nor what base served.
+
+#### The result: SHIP, at the FLOOR of the band, and the audit missed a bound
+
+| Registered metric | Baseline | Measured | Band / bar | Verdict |
+| --- | ---: | ---: | --- | --- |
+| `BODY-SERVED` — gold definition's own body emitted, n=12 | 0 / 12 | **4 / 12 (+4)** | [+4, +6] | **in band, at the floor** |
+| Byte-compared controls (12: the 8 registered + N04, N07, N11, N12) | — | **12 / 12 identical** | any difference kills | held |
+| The round above's `<d>` rows, all twelve probes | — | **12 / 12 byte-identical** | ranked side must not move | held, stronger than registered |
+| `run_r3diff.py`, frozen ranking (n=32) + recall (n=42) | — | **74 ties, 0 wins, 0 losses** | near-all ties | held |
+
+**Where the four landed, and where the two that did not went instead.**
+
+| id | corpus | anchor: base → head | body served: base → head | `BODY-SERVED` | audit said |
+| --- | --- | --- | --- | :---: | --- |
+| N01 | DD | `geo_parquet.hpp` → **`client_context.hpp`** | a declaration's text → **none, `reason="budget"`** | no | reachable — **missed** |
+| N02 | DD | `catalog.hpp` → **`database.hpp`** | a declaration's text → **the gold** | **yes** | reachable |
+| N03 | DD | `json_serializer.hpp` → **`serializer.hpp`** | a declaration's text → **the gold** | **yes** | reachable |
+| N04 | DD | unchanged (`table_catalog_entry.cpp`) | unchanged | no | unreachable — inert branch |
+| N05 | DD | `json_serialize_sql.cpp` → **`deserializer.hpp`** | a namesake → **none, `reason="budget"`** | no | reachable — **missed** |
+| N06 | DD | unchanged (`src/README.md`) | unchanged (none) | no | unreachable — body-carrying claimant |
+| N07 | RD | unchanged (`column_family.cc`) | unchanged | no | unreachable — inert branch |
+| N08 | RD | `blob_fetcher.h` → **`slice.h`** | none → none | no | unreachable — candidate-head bound |
+| N09 | RD | `blob_file_builder.h` → **`system_clock.h`** | a declaration's text → **the gold** | **yes** | reachable |
+| N10 | RD | `log_reader.h` → **`env.h`** | none → **the gold** | **yes** | reachable |
+| N11 | UG | unchanged (`input.h`) | unchanged | no | unreachable — one file, extraction gap |
+| N12 | UG | unchanged (`input.h`) | unchanged | no | unreachable — one file, extraction gap |
+
+**The anchor moved on all six rows the audit called reachable, and on none of the six it called
+unreachable.** The mechanism did exactly what it was registered to do. What the audit got wrong is
+narrower and more interesting than a mis-modelled mechanism: **it modelled the anchor and the six-row
+candidate head, and forgot the BYTE BUDGET.**
+
+**N01 and N05 are the two misses, and they are the defect's own economics showing up on the other side.**
+A bare `class ClientContext;` is one line; `class ClientContext { … }` in duckdb is hundreds. The T3
+allowance is whole-body-or-nothing by design (`truncateOversizedFirst=false` — a rank-1 definition larger
+than the body budget is DROPPED and disclosed, never cut mid-definition), so the correct answer does not
+fit where the wrong one always did. Both rows now emit `bodies="0" reason="budget"` plus the per-item
+`<!-- body omitted (over budget): ClientContext -->`. **That is the T3 substitution round's registered
+posture reached at last, not a new failure:** its rule was that when the anchor's own body does not fit,
+the honest zero is strictly more informative than a smaller namesake's body, "which reads like an answer
+and is not one". Before this change those two callers were served a forward declaration's text under the
+heading of an answer; now they are told, in the disclosure the header already carries, that the answer
+exists and did not fit. It does not count toward the band and it is not claimed as a win — but it is not a
+loss either, and pretending the row is unchanged would be the dishonest reading.
+
+**The audit's real lesson, for the next round that bounds itself from above:** a feasibility ceiling on a
+BODY metric has three gates, not two — the anchor, the candidate head, and the budget — and this one
+audited two. Had it audited three it would have registered a ceiling of `+4` and named N01/N05 in advance,
+which is exactly the sharper prediction the discipline is for.
+
+**A registered kill condition that fired on its wording and not on its intent, disclosed rather than
+reinterpreted quietly.** The kill list says *"the round above's `SERVED` moving off 8/12"*. Re-measured,
+`SERVED` is **9 / 12**: N10 `Logger` gained it. That is a GAIN, and it arrives through `SERVED`'s own
+definition — "present in a `<d>` row **or** in a `<bodies>` slot" — whose second clause is precisely this
+round's metric, so the two measures overlap and the guard could only ever have been one-sided. The thing
+that kill was written to protect is the RANKED side, and it is verified here more strictly than it was
+registered: **the `<d>` row sections are byte-identical between the two binaries on all twelve probes**, so
+not one ranked row moved and `SERVED`-via-`<d>` stands at exactly 8/12. N10 is counted once, in
+`BODY-SERVED`, and not again. **No revert.** The wording was wrong, the mechanism was not, and the fix for
+the next registration is to guard the ranked half of a metric when the round's own metric is the other half.
+
+**Every guard is identical to the digit on both sides**, which is what the structural argument predicted:
+the rule writes `fileId` and one private flag, and `wholeName` / `extraDefs` / `carriers` — the whole input
+to the route decision and the plausibility bounds — are untouched, so no query can change route through
+this code. All twelve probes route name-exact on both sides.
+
+| Guard | Floor / ceiling | At `8312d8f` | With the rule in |
+| --- | ---: | ---: | ---: |
+| skill routing split=test `bm25-desc` hit@1 / sep-auc | ≥ 60.0% / ≥ 0.89 | 73.1% / 0.957 | 73.1% / 0.957 |
+| skill routing split=dev hit@1 / sep-auc | ≥ 46.0% / ≥ 0.75 | 69.1% / 0.887 | 69.1% / 0.887 |
+| judged-only `bm25-desc` / `for-routed` hit@1 | ≥ 50% / ≥ 50% | 98/152 / 92/152 | 98/152 / 92/152 |
+| recall lane lenient recall@5 / MRR | ≥ 71% / ≥ 0.57 | 88.1% / 0.643 | 88.1% / 0.643 |
+| ranking lane lenient recall@5 / MRR | ≥ 70% / ≥ 0.55 | 71.9% / 0.639 | 71.9% / 0.639 |
+| LIVE / ranking / adversarial pollution@5 | ≤ 16% / ≤ 5% / ≤ 8% | 2.4% / 0.0% / 0.0% | 2.4% / 0.0% / 0.0% |
+
+The `+N` ambiguity counts are identical on every probe whose anchor moved — 88, 41, 34, 36, 60, 30, 32 —
+which is the disclosure half of the rule holding: the anchor changed its mind about WHICH definition, never
+about HOW MANY there are.
+
+`--quality-delta=8312d8f..5c434ff` (the ref-pair form): `gating="0"`, `preexisting-worse="0"`, three
+`origin="new-symbol"` minor api-surface rows, all three being the `Cog` FIXTURE's own symbols. Nothing that
+existed got worse, and the rule added no production symbol at all — it is nine lines inside an existing
+one-pass walk.
+
+Gate count 452 → **452** — `test/defoverdeclcheck.sh` grew four arms and flipped one; no new gate file.
 
 ---
 
