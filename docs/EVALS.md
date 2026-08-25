@@ -5690,8 +5690,9 @@ binary built from `3715ca8` — item B alone, item A absent) → `86d7956` (the 
 complexity-reducing refactor `--quality-delta` itself called for — `computeAutoBodyCandidateIds` extracted
 out of `buildForAutoBodies`, no behavior change) → `6f16b83` (a fixture rename: the gate's original
 `Widget` symbol collided with this repo's own dozen pre-existing, unrelated `Widget` fixtures on
-`--quality-delta`'s documented bare-name api-surface key — traced to `src/quality.h`'s §P13.4 note, not a
-real regression, fixed by renaming to `Frobnicator` rather than suppressing with an ack) → `8a46946` (a
+`--quality-delta`'s documented bare-name api-surface key — traced to `src/quality.h`'s own canonical-id
+note on that mechanism, not a real regression, fixed by renaming to `Frobnicator` rather than suppressing
+with an ack) → `8a46946` (a
 `README.md` `--callers` example re-pin the first full battery run on this diff caught, the same drift
 class the anchor-body round hit for the same reason — new lines above `churnRankedGraph`/`runDefaultMap`
 shifted both by 40).
