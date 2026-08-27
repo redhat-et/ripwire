@@ -40,17 +40,17 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **understand a codebase cold** — [`--top-k`](#top-k-n) · [`--max-tokens`](#max-tokens-n) · [`--token-budget`](#token-budget-n-k-m-g) · [`--help-task`](#help-task-task) · [`--for`](#for-task) · [`--signatures-only`](#signatures-only) · [`--auto-bodies`](#auto-bodies) · [`--no-route`](#no-route) · [`--adaptive`](#adaptive) · [`--no-mention-boost`](#no-mention-boost) · [`--no-doc-mention`](#no-doc-mention) · [`--lego`](#lego-type) · [`--exemplar`](#exemplar-task-kind) · [`--recall`](#recall-task) · [`--tree`](#tree) · [`--html`](#html-file) · [`--color-by`](#color-by-mode) · [`--order`](#order-mode) · [`--no-stable`](#no-stable)
 
-**navigate / answer a question** — [`--around`](#around-sym) · [`--callers`](#callers-sym) · [`--callees`](#callees-sym) · [`--uses`](#uses-sym) · [`--graph-query`](#graph-query-expr) · [`--external-surface`](#external-surface) · [`--path`](#path-src-dst) · [`--connect`](#connect-a-b-c) · [`--impact`](#impact-sym) · [`--verify`](#verify-claim) · [`--mentions`](#mentions-sym) · [`--affected`](#affected-f1-f2-sym) · [`--exercises`](#exercises-testfile) · [`--situ`](#situ-f1-f2) · [`--handoff`](#handoff) · [`--test-gate`](#test-gate-f1-f2) · [`--grep`](#grep-str-regex-pat) · [`--grep-scope`](#grep-scope-line-file) · [`--grep-in`](#grep-in-code-any) · [`--match`](#match-query) · [`--pattern`](#pattern-pat) · [`--query`](#query-terms)
+**navigate / answer a question** — [`--around`](#around-sym) · [`--callers`](#callers-sym) · [`--callees`](#callees-sym) · [`--uses`](#uses-sym) · [`--graph-query`](#graph-query-expr) · [`--external-surface`](#external-surface) · [`--path`](#path-src-dst) · [`--connect`](#connect-a-b-c) · [`--impact`](#impact-sym) · [`--verify`](#verify-claim) · [`--mentions`](#mentions-sym) · [`--affected`](#affected-f1-f2-sym) · [`--exercises`](#exercises-testfile) · [`--situ`](#situ-f1-f2) · [`--handoff`](#handoff) · [`--test-gate`](#test-gate-f1-f2) · [`--grep`](#grep-str-regex-pat) · [`--handles`](#handles) · [`--grep-scope`](#grep-scope-line-file) · [`--grep-in`](#grep-in-code-any) · [`--match`](#match-query) · [`--pattern`](#pattern-pat) · [`--query`](#query-terms)
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-sym) · [`--insert-after-symbol`](#insert-after-symbol-sym) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--safe-delete`](#safe-delete-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--safe-delete`](#safe-delete-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor) · [`--skipped`](#skipped)
 
 **security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,** — [`--scan-skill`](#scan-skill-file) · [`--scan-skills`](#scan-skills-dir) · [`--force`](#force)
 
-**knobs / modes** — [`--rank-by`](#rank-by-pagerank-authority-hub-rrf-churn-churn-decay) · [`--format`](#format-candidates) · [`--json`](#json) · [`--exclude`](#exclude-substr) · [`--map-diff`](#map-diff) · [`--cache`](#cache-path) · [`--index-out`](#index-out-base) · [`--no-cache`](#no-cache) · [`--max-file-size`](#max-file-size-n-k-m-g) · [`--refetch`](#refetch) · [`--scip`](#scip-index-scip) · [`--mcp`](#mcp) · [`--listen`](#listen-host-port) · [`--mcp-token`](#mcp-token-t) · [`--allow-remote-edits`](#allow-remote-edits) · [`--eval-stray`](#eval-stray-file) · [`--eval`](#eval) · [`--eval-retrieval`](#eval-retrieval) · [`--eval-mined`](#eval-mined-file) · [`--eval-skills`](#eval-skills-file)
+**knobs / modes** — [`--rank-by`](#rank-by-pagerank-authority-hub-rrf-churn-churn-decay) · [`--format`](#format-candidates) · [`--legend`](#legend-full-compact) · [`--json`](#json) · [`--exclude`](#exclude-substr) · [`--map-diff`](#map-diff) · [`--cache`](#cache-path) · [`--index-out`](#index-out-base) · [`--no-cache`](#no-cache) · [`--max-file-size`](#max-file-size-n-k-m-g) · [`--refetch`](#refetch) · [`--scip`](#scip-index-scip) · [`--mcp`](#mcp) · [`--listen`](#listen-host-port) · [`--mcp-token`](#mcp-token-t) · [`--allow-remote-edits`](#allow-remote-edits) · [`--eval-stray`](#eval-stray-file) · [`--eval`](#eval) · [`--eval-retrieval`](#eval-retrieval) · [`--eval-mined`](#eval-mined-file) · [`--eval-skills`](#eval-skills-file)
 
 ---
 
@@ -946,7 +946,7 @@ $ ./build/ripwire . --test-gate
 
 **Answers:** literal / regex search + enclosing symbol + the matched line.
 
-SPAN-TIERED by default (see --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering. For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance). --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex) --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)
+SPAN-TIERED by default (see --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering. For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).
 
 **Try it**
 
@@ -971,7 +971,20 @@ $ ./build/ripwire . --regex='fnv1a\w+'
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--affected`, `--grep-scope`, `--expand`, `--no-redact`, `--json`
+**Shaped by:** `--affected`, `--handles`, `--grep-scope`, `--expand`, `--no-redact`, `--insert-after-symbol`, `--legend`, `--json`
+
+### `--handles`
+
+**Answers:** add h= to each unique editable enclosing-symbol row: a stable identity plus the file-content hash pinned when grep ran.
+
+Ambiguous or document-only rows get no handle; a later edit must refuse after any file change rather than retarget stale coordinates. --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex) --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)
+
+**Shaped by:** `--insert-after-symbol`
+
+**Caveats (stated by the binary):**
+
+- Ambiguous or document-only rows get no handle;
+- a later edit must refuse after any file change rather than retarget stale coordinates.
 
 ### `--grep-scope=line|file`
 
@@ -2125,13 +2138,13 @@ $ ./build/ripwire . --edit-check=rankGraphTeleport
 
 - A contract is PER DEFINITION, so a SYM matching several definition sites REFUSES (exit 1) and lists the file:name spellings that pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=.
 
-### `--replace-symbol-body=SYM`
+### `--replace-symbol-body=TARGET`
 
-**Answers:** atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|- --insert-before-symbol=SYM atomically insert the payload immediately before one uniquely-resolved definition
+**Answers:** atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|- --insert-before-symbol=TARGET atomically insert the payload immediately before one uniquely-resolved definition
 
-### `--insert-after-symbol=SYM`
+### `--insert-after-symbol=TARGET`
 
-**Answers:** atomically insert the payload immediately after one uniquely-resolved definition
+**Answers:** atomically insert the payload immediately after one uniquely-resolved definition TARGET is a symbol name, or a freshness-pinned sym# handle emitted by --grep --handles.
 
 ### `--edit-payload=FILE|-`
 
@@ -2821,6 +2834,16 @@ $ ./build/ripwire . --callers=rankGraphTeleport --format=bogus
 ```
 
 **Shaped by:** `--top-k`, `--pack-signatures`, `--rank-by`, `--json`
+
+### `--legend=full|compact`
+
+**Answers:** output legend posture for --for and --grep/--regex only.
+
+full is byte-identical to the default; compact keeps every data/completeness attribute, adds a versioned schema id, and shortens repeated explanatory prose. Unsupported verbs refuse.
+
+**Caveats (stated by the binary):**
+
+- Unsupported verbs refuse.
 
 ### `--json`
 
