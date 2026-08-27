@@ -96,6 +96,7 @@ struct Config
                                                              // used to silently overwrite the first (the pattern a caller reaches for when they
                                                              // MEAN "and"); refused instead, naming the real AND spelling. See kViewFlags' dupGuardFlag.
     bool             grepRegex = false;                    // --regex=PAT: like --grep but the pattern is an ECMAScript regex
+    bool             grepHandles = false;                  // --handles: mint freshness-pinned handles on unique editable <enc> rows
     bool             noPrefilter = false;                  // --no-prefilter: (debug) skip the regex→trigram prefilter, full-scan every file — the soundness oracle for --regex
     int              grepBefore = 0;                       // --grep-before=N (ripgrep -B): N source lines emitted before each --grep/--regex hit (0 = off, unchanged output)
     int              grepAfter  = 0;                       // --grep-after=N  (ripgrep -A): N source lines emitted after each hit
@@ -963,6 +964,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses\n"
         "                               what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering.\n"
         "                               For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).\n"
+        "      --handles                add h= to each unique editable enclosing-symbol row: a stable identity plus the\n"
+        "                               file-content hash pinned when grep ran. Ambiguous or document-only rows get no handle;\n"
+        "                               a later edit must refuse after any file change rather than retarget stale coordinates.\n"
         "      --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit\n"
         "      --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex)\n"
         "      --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)\n"
@@ -1324,9 +1328,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               provably incompatible with the NEW arity flagged. A contract is PER DEFINITION, so a SYM\n"
         "                               matching several definition sites REFUSES (exit 1) and lists the file:name spellings that\n"
         "                               pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=.\n"
-        "    --replace-symbol-body=SYM  atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|-\n"
-        "    --insert-before-symbol=SYM atomically insert the payload immediately before one uniquely-resolved definition\n"
-        "    --insert-after-symbol=SYM  atomically insert the payload immediately after one uniquely-resolved definition\n"
+        "    --replace-symbol-body=TARGET  atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|-\n"
+        "    --insert-before-symbol=TARGET atomically insert the payload immediately before one uniquely-resolved definition\n"
+        "    --insert-after-symbol=TARGET  atomically insert the payload immediately after one uniquely-resolved definition\n"
+        "                               TARGET is a symbol name, or a freshness-pinned sym# handle emitted by --grep --handles.\n"
         "      --edit-payload=FILE|-    required exact byte payload ('-' reads stdin); empty payloads refuse, never imply deletion\n"
         "      --edit-target-file=PATH  optional file-path substring to disambiguate a same-named definition. These three CLI verbs\n"
         "                               reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation\n"
@@ -1987,6 +1992,7 @@ inline constexpr BoolFlag kBoolFlags[] =
 
     // search
     { "--no-prefilter",       &Config::noPrefilter        },
+    { "--handles",           &Config::grepHandles        },
     { "--lint",               &Config::lint               },
     { "--lint-catalog",       &Config::lintCatalog        },   // the built-in rule registry — src/lintcatalog.h
     { "--sarif",              &Config::sarif              },   // (with --lint / --lint-rules) SARIF 2.1.0 instead of native XML
@@ -2314,7 +2320,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 191;  // +5 CLI edit bridge: three verbs + payload + target-file disambiguator
+inline constexpr std::size_t kTotalFlagArms = 192;  // +5 CLI edit bridge; +1 grep-to-edit content handles
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -3022,6 +3028,15 @@ inline void validateModifierGuards( Config& c ) noexcept
     if( c.noPrefilter && c.grep.empty() )
     {
         std::fprintf( stderr, "ripwire: --no-prefilter modifies --grep=STR or --regex=PAT — pass one (e.g. ripwire <dir> --grep=STR --no-prefilter)\n" );
+        c.ok = false;
+    }
+
+    // --handles mints a freshness-pinned symbol target only for an enclosing definition surfaced by grep.
+    // Alone it would be an inert promise of an edit target, so refuse rather than silently emit the default map.
+    if( c.grepHandles && c.grep.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --handles modifies --grep=STR or --regex=PAT — pass one too "
+                              "(e.g. ripwire <dir> --grep=stale --handles)\n" );
         c.ok = false;
     }
 

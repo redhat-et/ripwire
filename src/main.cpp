@@ -11751,14 +11751,85 @@ std::optional<int> runStructureText( const MainDispatch& d )
 // window/disclosure logic, the enrichment block is its own concern). Row semantics live in search.h's
 // grepEnclosingRows; this is pure serialization. amp/tested follow serialize.h's lean lens grammar:
 // only when the vector exists AND the value is worth a token, max/any over the row's name group.
+struct GrepEncOptions
+{
+    const std::vector<std::uint32_t>* amp;
+    const std::vector<std::uint8_t>*  tested;
+    bool                              handles;
+    std::string_view                  root;
+    std::vector<char>&                esc;
+};
+
+class GrepHandleAttrs
+{
+public:
+    GrepHandleAttrs( const rw::IngestResult& ing, const rw::Graph& g, bool enabled, std::string_view root )
+        : ing_( ing ), g_( g ), enabled_( enabled ), root_( root ) {}
+
+    std::string forRow( const rw::GrepEncRow& row )
+    {
+        if( !enabled_ )
+        {
+            return {};
+        }
+        if( row.defCount != 1 || row.ids.size() != 1 )
+        {
+            return " handle_omitted=\"ambiguous\"";
+        }
+        const rw::NodeId id = row.ids.front();
+        const rw::Symbol& s = ing_.symbols[id];
+        if( s.kind == rw::SymKind::Section )
+        {
+            return " handle_omitted=\"non-code\"";
+        }
+        const std::uint64_t contentHash = hashFor( s.fileId );
+        const std::string handle = rw::sourceHandleFor( ing_, g_, root_, id, contentHash );
+        return handle.empty() ? " handle_omitted=\"unreadable\"" : " h=\"" + handle + "\"";
+    }
+
+private:
+    std::uint64_t hashFor( std::uint32_t fileId )
+    {
+        const auto cached = fileHashes_.find( fileId );
+        if( cached != fileHashes_.end() )
+        {
+            return cached->second;
+        }
+        bool readOk = false;
+        const std::string bytes = rw::mcpdetail::readFileBytes( rw::diskPath( ing_, fileId ), readOk );
+        const std::uint64_t hash = readOk ? rw::mcpdetail::byteHash( bytes.data(), bytes.size() ) : 0;
+        fileHashes_.emplace( fileId, hash );
+        return hash;
+    }
+
+    const rw::IngestResult& ing_;
+    const rw::Graph&        g_;
+    bool                    enabled_;
+    std::string_view        root_;
+    rw::HashMap<std::uint32_t, std::uint64_t> fileHashes_;
+};
+
+void emitGrepHandleLegend( bool enabled )
+{
+    if( !enabled )
+    {
+        return;
+    }
+    std::printf( "<!-- ripwire grep handles: h= is sym#<stable-identity-hash>@<whole-file-content-hash>; "
+                 "the content half pins the exact file bytes scanned, so an edit after any file change refuses as stale. "
+                 "Only one editable enclosing definition receives h=. handle_omitted=ambiguous means the name grouped "
+                 "several definitions; non-code means a document/data section has no safe definition span; unreadable "
+                 "means no content hash could be proven. -->" );
+}
+
 void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::GrepHit> hits,
-                      const std::vector<std::uint32_t>* amp, const std::vector<std::uint8_t>* tested,
-                      std::vector<char>& esc )
+                      const GrepEncOptions& opt )
 {
     using namespace rw;
+    GrepHandleAttrs handleAttrs( ing, g, opt.handles, opt.root );
     for( const GrepEncRow& row : grepEnclosingRows( ing, g, hits ) )
     {
-        const auto en = rw::escapeXml( row.chain, esc );
+        const auto en = rw::escapeXml( row.chain, opt.esc );
         std::printf( "<enc n=\"%.*s\" callers=\"%u\"", int( en.size() ), en.data(), row.callerCount );
         if( row.defCount > 1 )
         {
@@ -11771,11 +11842,11 @@ void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span
         std::uint32_t ampMax = 0;  bool anyTested = false;
         for( const NodeId id : row.ids )
         {
-            if( amp && id < amp->size() )
+            if( opt.amp && id < opt.amp->size() )
             {
-                ampMax = std::max( ampMax, (*amp)[id] );
+                ampMax = std::max( ampMax, (*opt.amp)[id] );
             }
-            if( tested && id < tested->size() && (*tested)[id] )
+            if( opt.tested && id < opt.tested->size() && (*opt.tested)[id] )
             {
                 anyTested = true;
             }
@@ -11788,6 +11859,7 @@ void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span
         {
             std::printf( " tested=\"1\"" );
         }
+        std::fputs( handleAttrs.forRow( row ).c_str(), stdout );
         std::printf( "/>" );
     }
 }
@@ -12169,6 +12241,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "otherwise-empty answer alone cannot: not in this repo, or in a file that was never scanned — the skipped "
                  "verb itemizes the rows behind either count. "
                  "%s -->", rw::kPageRaiseCapClause );
+    emitGrepHandleLegend( cfg.grepHandles );
     // G3: terms=/scope=/suppressed= — only when AND/NOT was actually given, so a plain --grep answer
     // stays byte-identical to before G3 landed (the "purely additive" rule every ripwire flag follows).
     std::string termsAttr;
@@ -12275,7 +12348,9 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     emitGrepUnindexed( aux.hits, singleRoot, rootPrefix, esc );
 
     // ── R1b: the <enc> block — the map's context on the answer, no second call (helper above) ──────
-    emitGrepEncRows( ing, g, std::span<const GrepHit>( hits ), amp, tested, esc );
+    const GrepEncOptions encOpt{ amp, tested, cfg.grepHandles,
+                                cfg.roots.size() == 1 ? cfg.roots[0] : std::string_view(), esc };
+    emitGrepEncRows( ing, g, std::span<const GrepHit>( hits ), encOpt );
 
     // ── R1a: the zero-hit follow-up — suggestions, labeled as such, never matches (helper above) ───
     // §R-J: also suppressed when the AUX block found the pattern — a real hit in queries/cpp/tags.scm is not

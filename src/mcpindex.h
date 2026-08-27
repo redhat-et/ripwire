@@ -1113,6 +1113,25 @@ inline void handleIdentity( const McpIndex& ix, NodeId id, std::string& canonOut
              : std::string( rw::sarif::rootRelativeUri( ix.ing.files[ s.fileId ], rw::sarif::rootPrefixOf( rootArg ) ) );
 }
 
+// CLI read verbs already own an IngestResult + Graph and must not build a second MCP index merely to mint
+// the same handle. The caller supplies the freshly-read file hash so one file can be read once and shared by
+// every enclosing row it contains. Identity and spelling stay exactly the MCP contract above.
+inline std::string sourceHandleFor( const IngestResult& ing, const Graph& g, std::string_view root, NodeId id,
+                                    std::uint64_t contentHash )
+{
+    if( id >= ing.symbols.size() || contentHash == 0 )
+    {
+        return {};
+    }
+    const Symbol& s = ing.symbols[id];
+    const std::string_view rootArg = ing.realPaths.empty() ? root : std::string_view();
+    const std::string canon = ( id < g.canonId.size() ) ? canonicalIdForEmit( ing, s, rootArg ) : s.name;
+    const std::string path = rootArg.empty()
+                           ? ing.files[s.fileId]
+                           : std::string( rw::sarif::rootRelativeUri( ing.files[s.fileId], rw::sarif::rootPrefixOf( rootArg ) ) );
+    return mcpdetail::makeHandle( canon, path, s.name, contentHash );
+}
+
 // handleFor(ix, id) — the stable content-handle for symbol `id`, from the STABLE canonId + the file's byte
 // fingerprint (both already on the index). The READ verbs attach this so an agent knows what to ask for.
 inline std::string handleFor( const McpIndex& ix, NodeId id )
