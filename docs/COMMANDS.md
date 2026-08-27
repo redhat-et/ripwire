@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--safe-delete`](#safe-delete-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-sym) · [`--insert-after-symbol`](#insert-after-symbol-sym) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--safe-delete`](#safe-delete-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor) · [`--skipped`](#skipped)
 
@@ -412,7 +412,7 @@ $ ./build/ripwire . --exemplar="format byte sizes for humans"
 
 **Answers:** recall the most relevant DOCS — memory/plans/designs, full bodies (md, .ipynb/.html/.csv, plus Office/PDF via the optional markitdown bridge).
 
-This is the tool's LARGEST output: its header reports est_tokens + total=/shown=/capped=, where total= is the TRUE relevant count (score > 0) and shown= is what this run actually emitted. The header's "of N document files" denominator counts every file the index carries as a DOCUMENT — .md plus the docparse'd .ipynb/.html/.csv — so it is a SUPERSET of --doc-drift's docs=, which is an extension test (markdown only). Two populations, two names, deliberately. --top-k=N shapes HOW MANY docs are emitted (default 8, not the general --top-k default of 200); --max-tokens=N shapes it to fit a byte budget (disclosing each cut) and --token-budget=N gates it (exit 3, nothing streamed). GENERATED documents rank LAST by default — a doc that declares itself generated in its first lines, or is BOTH >=5x the median doc's size AND mostly ```-fenced quoted output (a capture/API dump quotes every term, so BM25 hands it every query). Never dropped: it still wins when nothing else matches. Each one says [generated_demoted: marker|size+fences] on its own line and the header tallies generated_demoted=N
+This is the tool's LARGEST output: its header reports est_tokens + total=/shown=/capped=, where total= is the TRUE relevant count (score > 0) and shown= is what this run actually emitted. The header's "of N document files" denominator counts every file the index carries as a DOCUMENT — .md plus the docparse'd .ipynb/.html/.csv — so it is a SUPERSET of --doc-drift's docs=, which is an extension test (markdown only). Two populations, two names, deliberately. --top-k=N shapes HOW MANY docs are emitted (default 8, not the general --top-k default of 200). Recall defaults to an 8000-token body ceiling; --max-tokens=N overrides it and shapes to fit (disclosing each cut), while --token-budget=N gates the finished artifact (exit 3, nothing streamed). GENERATED documents rank LAST by default — a doc that declares itself generated in its first lines, or is BOTH >=5x the median doc's size AND mostly ```-fenced quoted output (a capture/API dump quotes every term, so BM25 hands it every query). Never dropped: it still wins when nothing else matches. Each one says [generated_demoted: marker|size+fences] on its own line and the header tallies generated_demoted=N
 
 **Try it**
 
@@ -857,7 +857,7 @@ $ ./build/ripwire . --affected=src/graph.h
 </affected>
 ```
 
-**Shaped by:** `--mentions`, `--exercises`, `--test-gate`
+**Shaped by:** `--mentions`, `--exercises`, `--test-gate`, `--edit-target-file`
 
 **Caveats (stated by the binary):**
 
@@ -2119,11 +2119,41 @@ $ ./build/ripwire . --edit-check=rankGraphTeleport
 </edit-check>
 ```
 
-**Shaped by:** `--impact`
+**Shaped by:** `--impact`, `--edit-target-file`
 
 **Caveats (stated by the binary):**
 
 - A contract is PER DEFINITION, so a SYM matching several definition sites REFUSES (exit 1) and lists the file:name spellings that pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=.
+
+### `--replace-symbol-body=SYM`
+
+**Answers:** atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|- --insert-before-symbol=SYM atomically insert the payload immediately before one uniquely-resolved definition
+
+### `--insert-after-symbol=SYM`
+
+**Answers:** atomically insert the payload immediately after one uniquely-resolved definition
+
+### `--edit-payload=FILE|-`
+
+**Answers:** required exact byte payload ('-' reads stdin);
+
+empty payloads refuse, never imply deletion
+
+**Shaped by:** `--replace-symbol-body`
+
+**Caveats (stated by the binary):**
+
+- empty payloads refuse, never imply deletion
+
+### `--edit-target-file=PATH`
+
+**Answers:** optional file-path substring to disambiguate a same-named definition.
+
+These three CLI verbs reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON receipt; follow with --edit-check=SYM and --affected=FILE. Single-root only.
+
+**Caveats (stated by the binary):**
+
+- optional file-path substring to disambiguate a same-named definition.
 
 ### `--safe-delete=SYM`
 

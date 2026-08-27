@@ -12,6 +12,7 @@
 #   (3) --version needs no positional root argument (it must exit before the ingest pipeline —
 #       same "first instinct must not error" contract as --help).
 #   (4) determinism: two runs print byte-identical output.
+#   (5) source-build provenance: a git checkout prints its short HEAD and a dirty checkout says so.
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/versioncheck.sh   |   RIPWIRE_BIN=asan/ripwire bash …
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
@@ -59,6 +60,25 @@ OUT2="$( "$BIN" --version 2>&1 )"
 [ "$OUT_LONG" = "$OUT2" ] \
     && ok "--version deterministic (byte-identical run-to-run)" \
     || no "--version non-deterministic across re-runs"
+
+# ── source revision provenance. Release archives may be built from an exported tree with no .git,
+# where the honest value is "unknown"; a binary built in THIS checkout has no such excuse. The stamp
+# must name the configured checkout's HEAD and disclose whether tracked source differed at build time.
+EXPECTED_SHA="$( git -C "$ROOT" rev-parse --short=9 HEAD 2>/dev/null || true )"
+if [ -n "$EXPECTED_SHA" ]; then
+    printf '%s' "$OUT_LONG" | grep -q "git $EXPECTED_SHA" \
+        && ok "--version names source revision $EXPECTED_SHA" \
+        || no "--version omits source revision $EXPECTED_SHA: $OUT_LONG"
+
+    if git -C "$ROOT" diff --quiet --ignore-submodules -- 2>/dev/null; then
+        case "$OUT_LONG" in *"git $EXPECTED_SHA+dirty"*) no "clean checkout falsely stamped dirty";;
+                            *) ok "clean checkout is not falsely stamped dirty";; esac
+    else
+        printf '%s' "$OUT_LONG" | grep -q "git $EXPECTED_SHA+dirty" \
+            && ok "dirty checkout is disclosed in --version" \
+            || no "dirty checkout is not disclosed in --version: $OUT_LONG"
+    fi
+fi
 
 # ── #5 (§P6.10, 2026-07-28 output audit): the build-type parenthetical must never say "unspecified" — it
 # is the first thing a bug report pastes, and "unspecified" tells the reader nothing about what they ran.

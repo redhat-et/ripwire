@@ -202,12 +202,39 @@ else
     bash "$ROOT/test/releaseinstallcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
 fi
 
+# Source-build delivery is a separate contract from release archives: the binary, skills and hooks
+# installed by one component must be the same revision, so an update cannot leave stale agent routing.
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/sourceinstallcheck.sh" >/dev/null 2>&1; then
+    ok "source install gate (test/sourceinstallcheck.sh)"
+else
+    no "source install gate (test/sourceinstallcheck.sh failed)"
+    RIPWIRE_BIN="$BIN" bash "$ROOT/test/sourceinstallcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
+fi
+
 # Task router is a standalone contract gate and must run under the binary selected for this suite.
 if RIPWIRE_BIN="$BIN" bash "$ROOT/test/taskroutecheck.sh" >/dev/null 2>&1; then
     ok "task router gate (test/taskroutecheck.sh)"
 else
     no "task router gate (test/taskroutecheck.sh failed)"
     RIPWIRE_BIN="$BIN" bash "$ROOT/test/taskroutecheck.sh" 2>&1 | grep -E 'FAIL|FAILURES' | head -8
+fi
+
+# Prompt routing runs before the first retrieval decision; confidence-gated context and privacy-safe
+# telemetry are independent of the binary's held-out taskroute evaluator.
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/codexpromptroutecheck.sh" >/dev/null 2>&1; then
+    ok "Codex prompt route gate (test/codexpromptroutecheck.sh)"
+else
+    no "Codex prompt route gate (test/codexpromptroutecheck.sh failed)"
+    RIPWIRE_BIN="$BIN" bash "$ROOT/test/codexpromptroutecheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
+fi
+
+# CLI edit delivery is a first-class gate: the preferred surface must share the MCP edit engine's
+# refusal/atomicity guarantees rather than leaving safe writes available only through MCP.
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/clieditcheck.sh" >/dev/null 2>&1; then
+    ok "CLI edit gate (test/clieditcheck.sh)"
+else
+    no "CLI edit gate (test/clieditcheck.sh failed)"
+    RIPWIRE_BIN="$BIN" bash "$ROOT/test/clieditcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
 fi
 
 # 3n) absorb gates (P3-B arch layer(), S6-A lint completion, S6-B swift purity, S5-C owners) — each a

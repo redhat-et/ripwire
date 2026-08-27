@@ -174,6 +174,26 @@ inline std::string commandWithValue( const std::string& root, const char* flag, 
     return "ripwire " + shSingleQuote( root ) + " " + flag + shSingleQuote( std::string( value ) );
 }
 
+// A literal-search route needs a literal the user actually supplied, never one inferred from prose.
+// Accept the first balanced single- or double-quoted span; an unmatched/empty quote abstains.
+inline std::string firstQuotedLiteral( std::string_view task )
+{
+    for( std::size_t i = 0; i < task.size(); ++i )
+    {
+        const char quote = task[i];
+        if( quote != '\'' && quote != '"' )
+        {
+            continue;
+        }
+        const std::size_t end = task.find( quote, i + 1 );
+        if( end != std::string_view::npos && end > i + 1 )
+        {
+            return std::string( task.substr( i + 1, end - i - 1 ) );
+        }
+    }
+    return {};
+}
+
 inline std::string commaSymbols( const std::vector<std::string>& symbols )
 {
     std::string out;
@@ -192,6 +212,31 @@ inline void addLexical( std::vector<RouteChoice>& choices, const char* id, const
     {
         choices.push_back( { id, skill, reason, std::move( command ), score, priority } );
     }
+}
+
+// High-confidence additions that need more than the generic phrase scorer, kept out of classify so the
+// central routing ladder stays readable as instrumented intents grow.
+inline std::optional<RouteChoice> directTaskChoice( std::string_view task, std::string_view lower,
+                                                    const std::string& root, const std::vector<std::string>& symbols )
+{
+    const bool exactSearch = has( lower, "exact occurrence" ) || has( lower, "exact literal" )
+                          || has( lower, "find every" ) || has( lower, "search for" );
+    const std::string quoted = exactSearch ? firstQuotedLiteral( task ) : std::string();
+    if( !quoted.empty() )
+    {
+        return RouteChoice{ "exact-grep", "ripwire-navigate", "quoted literal plus exact-search wording",
+                            commandWithValue( root, "--grep=", quoted ) + " --grep-context=2 --limit=40", 100, 85 };
+    }
+    const bool postEdit = has( lower, "just edited" ) || has( lower, "my edit to" )
+                       || has( lower, "changed its signature" ) || has( lower, "changed its contract" )
+                       || has( lower, "did i change" );
+    if( symbols.size() == 1 && postEdit )
+    {
+        return RouteChoice{ "edit-contract", "ripwire-change-check",
+                            "one exact indexed symbol plus post-edit contract wording",
+                            commandWithValue( root, "--edit-check=", symbols[0] ), 100, 82 };
+    }
+    return std::nullopt;
 }
 
 inline TaskRouteResult classify( std::string_view task, const std::string& root, const IngestResult& ing, bool git, bool dirty )
@@ -219,6 +264,13 @@ inline TaskRouteResult classify( std::string_view task, const std::string& root,
         result.score  = result.margin = 100;
         result.choices.push_back( { "trace-debug", "ripwire-find-bug", "stack-trace shape; pass the trace on stdin",
                                     "ripwire " + shSingleQuote( root ) + " --from-trace=-", 100, 90 } );
+        return result;
+    }
+    if( std::optional<RouteChoice> direct = directTaskChoice( task, lower, root, result.facts.resolvedSymbols ) )
+    {
+        result.status = RouteStatus::Recommend;
+        result.score  = result.margin = 100;
+        result.choices.push_back( std::move( *direct ) );
         return result;
     }
     if( result.facts.resolvedSymbols.size() >= 3 )

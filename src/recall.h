@@ -277,6 +277,7 @@ struct RecallShape
     bool        isOverCeiling  = false;   // W3FIX M1: the finished artifact exceeds the --max-tokens byte budget
                                           // it was shaped against — only reachable when the header floor alone
                                           // (kRecallHeaderReserveBytes + the verbatim task echo) is over it.
+    std::size_t maxTokens       = 0;       // disclosed when the effective ceiling is the common 8K policy
 };
 
 struct RecallBundle
@@ -290,6 +291,7 @@ struct RecallBundle
 inline constexpr std::size_t kRecallHeaderReserveBytes = 320;
 inline constexpr std::size_t kRecallTruncNoteBytes     = 128;
 inline constexpr std::size_t kRecallMinBodyBytes       = 240;
+inline constexpr std::size_t kDefaultRecallMaxTokens   = 8000;
 
 // A recalled body is raw markdown, and the budget cut lands wherever the byte count says — including
 // INSIDE a ```fenced code block. The emitted doc then ends with an OPENED fence nothing ever closes: the
@@ -562,6 +564,9 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     {
         overCeilingAttr = " over_ceiling=1";
     }
+    const std::string maxTokensAttr = shape.maxTokens > 0
+        ? " max_tokens=" + std::to_string( shape.maxTokens )
+        : std::string();
     std::string truncAttr;
     std::string linesNote;   // §L4.3 — see the header comment for why it is conditional and why it trails
     if( shape.truncatedCount > 0 )
@@ -587,7 +592,8 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     // §B9.2: "document files" is docFileMask()'s population and says so — it is a SUPERSET of
     // --doc-drift's docs= (markdown by extension), and the two must not share a noun.
     std::string line;
-    line.reserve( 160 + task.size() + truncAttr.size() + demotedAttr.size() + overCeilingAttr.size() + linesNote.size() );
+    line.reserve( 160 + task.size() + truncAttr.size() + demotedAttr.size() + overCeilingAttr.size()
+                  + maxTokensAttr.size() + linesNote.size() );
     line += "ripwire recall — \"";
     line += task;
     line += "\" — ";
@@ -603,6 +609,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     line += truncAttr;
     line += demotedAttr;
     line += overCeilingAttr;
+    line += maxTokensAttr;
     line += " est_tokens=";
     line += std::to_string( estTokens );
     line += linesNote;
@@ -835,6 +842,9 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
     shape.matchedCount  = selected.matchedCount;  // §B2: TRUE relevant count, pre-top-k
     shape.selectedCount = top.size();             // post-top-k, pre-budget (bookkeeping for the capped note)
     shape.demotedCount  = selected.demotedMatchCount;
+    const std::size_t defaultMaxBytes = std::size_t( double( kDefaultRecallMaxTokens ) * kMinBytesPerToken
+                                                     * kBudgetHeadroom );
+    shape.maxTokens = maxBytes == defaultMaxBytes ? kDefaultRecallMaxTokens : 0;
 
     for( const Recalled& r : top )
     {

@@ -15,12 +15,12 @@
 #   1. --max-tokens=N SHAPES to fit N (bytes <= N * 2.5 B/tok * 1.5 slack) and DISCLOSES every cut
 #   2. --token-budget=N GATES: exit 3, stderr names actual vs budget, and stdout does NOT carry the
 #      artifact it just rejected (§P6.8's lesson — a CI log must not receive the 116 KB it failed on)
-#   3. a budget far above the artifact is inert: exit 0, byte-identical to the unbudgeted run
+#   3. a budget far above the artifact is inert: exit 0, byte-identical to an explicit full-budget run
 #   4. the header carries an honest est_tokens covering the WHOLE payload (§P9.3), within 2x of bytes/2.5
 #   5. budgeted runs are deterministic (byte-identical run to run)
-#   6. an UNFLAGGED run is unchanged: same selection, same full bodies, no cut markers, legacy header
-#      prefix intact. With RIPWIRE_BASE_BIN set to a pre-change binary, the body payload (everything
-#      after the header line) is asserted BYTE-IDENTICAL to that binary's.
+#   6. an UNFLAGGED run has the documented 8K-token ceiling, discloses its cut, and an explicit high
+#      --max-tokens restores the full selected bodies. With RIPWIRE_BASE_BIN set to a pre-change binary,
+#      the explicit-full body payload is asserted BYTE-IDENTICAL to that binary's unflagged payload.
 #
 #   RIPWIRE_BIN=build/ripwire bash test/recallbudgetcheck.sh
 #   RIPWIRE_BIN=build_base/ripwire bash test/recallbudgetcheck.sh    # must FAIL (pre-fix binary)
@@ -69,12 +69,12 @@ R="$TMP/repo"; mkdir -p "$R"
 Q="quality delta gating exit codes"
 run(){ perl -e 'alarm 60; exec @ARGV' "$BIN" "$R" --recall="$Q" --no-cache "$@" 2>"$TMP/err"; }
 
-# ── baseline: the unbudgeted artifact ────────────────────────────────────────────────────────────────
-run > "$TMP/plain.out"; PLAIN_RC=$?
+# ── baseline: the explicit-full artifact; default is intentionally bounded ──────────────────────────
+run --max-tokens=1000000 > "$TMP/plain.out"; PLAIN_RC=$?
 PLAIN_B=$( wc -c < "$TMP/plain.out" | tr -d ' ' )
 [ "$PLAIN_RC" = 0 ] && [ "$PLAIN_B" -gt 100000 ] \
-    && ok "baseline: unbudgeted --recall emits $PLAIN_B bytes, exit 0 (the artifact under test)" \
-    || no "baseline: unbudgeted --recall exit=$PLAIN_RC bytes=$PLAIN_B (expected exit 0, >100 KB)"
+    && ok "baseline: explicit-full --recall emits $PLAIN_B bytes, exit 0 (the artifact under test)" \
+    || no "baseline: explicit-full --recall exit=$PLAIN_RC bytes=$PLAIN_B (expected exit 0, >100 KB)"
 
 # ── 1. --max-tokens=2000 SHAPES to fit, and DISCLOSES the cut ────────────────────────────────────────
 # ceiling = 2000 tok * 2.5 B/tok * 1.5 slack. The tool sizes its own budget at the denser conservative
@@ -99,7 +99,7 @@ run --max-tokens=1 > "$TMP/tiny.out"; TINY_RC=$?
     || no "--max-tokens=1 (exit $TINY_RC): $( sed -n '3p' "$TMP/tiny.out" ) — a starved budget must not read as 'no relevant documents'"
 
 # ── 2. --token-budget=2000 GATES, and does NOT stream the artifact it rejected ───────────────────────
-run --token-budget=2000 > "$TMP/tb.out"; TB_RC=$?
+run --max-tokens=1000000 --token-budget=2000 > "$TMP/tb.out"; TB_RC=$?
 TB_B=$( wc -c < "$TMP/tb.out" | tr -d ' ' )
 [ "$TB_RC" = 3 ] && ok "--token-budget=2000: exit 3 (the map family's over-budget code)" \
                  || no "--token-budget=2000: exit $TB_RC (expected 3) — the gate personality did not fire"
@@ -140,10 +140,10 @@ WITHHELD_EST="$( grep -oE 'withheld_est_tokens=[0-9]+' "$TMP/tb.out" | grep -oE 
     || no "N3: withheld_est_tokens=$WITHHELD_EST vs emitted est_tokens=$TB_EST — the two numbers are not distinguished"
 
 # ── 3. a budget above the artifact is INERT ─────────────────────────────────────────────────────────
-run --token-budget=1000000 > "$TMP/tbbig.out"; TBB_RC=$?
+run --max-tokens=1000000 --token-budget=1000000 > "$TMP/tbbig.out"; TBB_RC=$?
 [ "$TBB_RC" = 0 ] && cmp -s "$TMP/tbbig.out" "$TMP/plain.out" \
-    && ok "--token-budget=1000000: exit 0, byte-identical to the unbudgeted run (inert when within budget)" \
-    || no "--token-budget=1000000: exit=$TBB_RC / output differs from the unbudgeted run"
+    && ok "--token-budget=1000000: exit 0, byte-identical to the explicit-full run (inert when within budget)" \
+    || no "--token-budget=1000000: exit=$TBB_RC / output differs from the explicit-full run"
 
 # ── 4. est_tokens is present and honest over the WHOLE payload ──────────────────────────────────────
 est_of(){ head -1 "$1" | grep -oE 'est_tokens=[0-9]+' | grep -oE '[0-9]+'; }
@@ -167,29 +167,37 @@ cmp -s "$TMP/mt.out" "$TMP/mt2.out" \
     && ok "--max-tokens=2000 deterministic (byte-identical run to run)" \
     || no "--max-tokens=2000 non-deterministic"
 
-# ── 6. the UNFLAGGED run is unchanged — no default behavior change ──────────────────────────────────
+# ── 6. the UNFLAGGED run is bounded by default; explicit high --max-tokens restores full bodies ─────
+run > "$TMP/default.out"; DEFAULT_RC=$?
+DEFAULT_B=$( wc -c < "$TMP/default.out" | tr -d ' ' )
 # §B9.2 PIN UPDATE: the denominator's noun moved from "docs" (which --doc-drift's docs= also claims, over a
-# DIFFERENT predicate) to "document files", which is what docFileMask actually counts. Shape unchanged.
-head -1 "$TMP/plain.out" | grep -qE "^ripwire recall — \"$Q\" — [0-9]+ relevant of [0-9]+ document files, best-first" \
+# DIFFERENT predicate) to "document files", which is what docFileMask actually counts.
+head -1 "$TMP/default.out" | grep -qE "^ripwire recall — \"$Q\" — [0-9]+ relevant of [0-9]+ document files, best-first" \
     && ok "unflagged: header prefix ('K relevant of N document files, best-first') intact" \
-    || no "unflagged: header prefix changed: $( head -c 160 "$TMP/plain.out" )"
-grep -qE 'truncated|capped=1|omitted' "$TMP/plain.out" \
-    && no "unflagged: output carries a cut marker — the default path must not cut" \
-    || ok "unflagged: no cut markers (the default path emits full bodies)"
+    || no "unflagged: header prefix changed: $( head -c 160 "$TMP/default.out" )"
+[ "$DEFAULT_RC" = 0 ] && [ "$DEFAULT_B" -le 30000 ] \
+    && ok "unflagged: default 8K-token ceiling bounds output to $DEFAULT_B bytes" \
+    || no "unflagged: exit=$DEFAULT_RC bytes=$DEFAULT_B (expected exit 0 and <= 30000)"
+grep -qE 'truncated|capped=1|omitted' "$TMP/default.out" \
+    && ok "unflagged: default ceiling's cut is disclosed" \
+    || no "unflagged: default ceiling cut has no disclosure"
+grep -q 'max_tokens=8000' "$TMP/default.out" \
+    && ok "unflagged: header discloses the effective max_tokens=8000 policy" \
+    || no "unflagged: header does not disclose max_tokens=8000"
 MISSING=""
 for s in SENTINEL_TAIL_BIG SENTINEL_TAIL_EXIT SENTINEL_TAIL_QD; do
     grep -q "$s" "$TMP/plain.out" || MISSING="$MISSING $s"
 done
-[ -z "$MISSING" ] && ok "unflagged: every selected doc's FULL body is present (tail sentinels)" \
-                  || no "unflagged: missing doc tails:$MISSING"
+[ -z "$MISSING" ] && ok "explicit-full: every selected doc's FULL body is present (tail sentinels)" \
+                  || no "explicit-full: missing doc tails:$MISSING"
 
 if [ -n "$BASE_BIN" ] && [ -x "$BASE_BIN" ]; then
     perl -e 'alarm 60; exec @ARGV' "$BASE_BIN" "$R" --recall="$Q" --no-cache > "$TMP/base.out" 2>/dev/null
     tail -n +2 "$TMP/base.out"  > "$TMP/base.body"
     tail -n +2 "$TMP/plain.out" > "$TMP/plain.body"
     cmp -s "$TMP/base.body" "$TMP/plain.body" \
-        && ok "unflagged: body payload BYTE-IDENTICAL to the pre-change binary ($BASE_BIN)" \
-        || no "unflagged: body payload differs from the pre-change binary ($BASE_BIN)"
+        && ok "explicit-full: body payload BYTE-IDENTICAL to the pre-change binary ($BASE_BIN)" \
+        || no "explicit-full: body payload differs from the pre-change binary ($BASE_BIN)"
 else
     echo "  SKIP  pre-change byte-identity (set RIPWIRE_BASE_BIN=<pre-change ripwire> to enable)"
 fi

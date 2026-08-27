@@ -3,8 +3,8 @@ name: ripwire-mcp
 description: >
   Wire ripwire into a coding agent as an MCP server — "ripwire wrap <agent>". Covers the 30 MCP verbs (15
   read incl. fetch_body/flags + 12 flagship-reflex verbs incl. connect/explore/from_trace/edit_check and the
-  cross-branch pair whereis/stray_content + 3 edit verbs) and when each beats the CLI form or a native editor tool, the lazy-body handle posture, the edit
-  verbs' safety contract, and the server's staleness/ rebuild behavior. Use when setting up ripwire for
+  cross-branch pair whereis/stray_content + 3 edit verbs) and when the persistent server beats the preferred CLI form, the lazy-body handle posture, the shared edit
+  safety contract, and the server's staleness/rebuild behavior. Use when setting up ripwire for
   Claude Code / Cursor / Codex / Windsurf / Gemini / opencode / aider, when deciding which ripwire MCP verb to call
   mid-task, or when wondering whether the server's index is stale. Also the tool-health moment: a symbol
   you EXPECTED is missing from the ranked output, results look stale or wrong, "is my ripwire setup
@@ -145,11 +145,13 @@ the kit-style default-lean posture (measured ~90% cut on comparable extract-symb
   copied out of a prior session or a doc is almost certainly stale — call `find_symbol`/
   `find_referencing_symbols` fresh each session and read the `handle` it hands back.
 
-## The 3 edit verbs — span-addressed writes, no read-then-diff
+## The 3 MCP edit verbs — the warm-server counterpart to the preferred CLI
 
 `replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` — the last 3 of the 30 (see above),
-ripwire's WRITE verbs. Each locates a symbol's definition in the already-parsed index and splices text at
-its byte span: `replace_symbol_body`
+ripwire's MCP WRITE verbs. The preferred shell front door is
+`ripwire ROOT --replace-symbol-body=SYM --edit-payload=FILE|-` (or the matching insert flag); use MCP when
+the server is already warm or a client has no shell. Both fronts call the same safety engine. Each locates
+a symbol's definition in the parsed index and splices text at its byte span: `replace_symbol_body`
 swaps signature-through-closing-brace verbatim, `insert_before_symbol`/`insert_after_symbol` splice text at
 the def's first/final byte (auto-adding the separating newline so you don't have to guess).
 
@@ -159,8 +161,9 @@ atomic-write guarantee) or when you need server internals (`--mcp` implies `--st
 stamps, warm content-hash rebuilds, working-set PageRank personalization, the background `qsnap` HEAD-warm on
 large workspaces). Short version: every edit-verb failure leaves the file byte-for-byte unchanged, writes are
 atomic (`tmp` + `rename(2)`), and the server never goes stale silently — it rebuilds warm from mtime checks
-before every verb call. **Lead with this when the body already came from `fetch_body`/`--expand` this
-session**: splice it in with one of these 3 instead of a native Edit. Several harnesses' native Edit tool
+before every verb call. **Lead with this MCP form when the body already came from `fetch_body` this
+session**; after a CLI `--expand`, keep the zero-standing-schema CLI path and use `--edit-payload=-`.
+Several harnesses' native Edit tool
 needs a fresh Read of the file immediately before the edit, even when you already have the body from
 elsewhere in the session — these verbs check their own staleness hash instead of requiring one, so under any
 harness the file gets read at most once, never twice.

@@ -56,11 +56,12 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/
 # one match) added ONE new read site each — a single predicate line reading both cfg.topKExplicit and
 # cfg.maxTokens to decide whether the auto-default applies. --expand already honours both flags in
 # kShapingVerbs (the pre-existing M6 bundle-vs-whole-file logic already read them), so this is a re-pin, not
-# a column change: 16->17 / 12->13.
+# a column change: 16->17 / 12->13. CLI recall's bounded default adds one more maxTokens policy read:
+# 17->18; the verb already honored explicit --max-tokens, so its table column remains unchanged.
 MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
-[ "$MAXSITES" = 17 ] && ok "(A) --max-tokens has 17 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/mcpserver.h)" \
-                     || no "(A) --max-tokens read sites moved 17 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
+[ "$MAXSITES" = 18 ] && ok "(A) --max-tokens has 18 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/mcpserver.h)" \
+                     || no "(A) --max-tokens read sites moved 18 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
 [ "$TOPSITES" = 13 ] && ok "(A) --top-k has 13 read sites outside cli.h" \
                      || no "(A) --top-k read sites moved 13 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
 # no OTHER file may read them: a third file would be a verb family this table has never heard of

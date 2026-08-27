@@ -36,7 +36,9 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "recalltotalcheck: BIN=$BIN  TARGET=$ROOT (self-scan, broad query \"the\")"
 
-run(){ perl -e 'alarm 60; exec @ARGV' "$BIN" "$ROOT" --recall="the" --no-cache "$@" 2>/dev/null; }
+# Pin an explicit high body budget: this gate isolates --top-k accounting from recall's default 8K-token
+# body ceiling, which has its own contract in recallbudgetcheck.sh.
+run(){ perl -e 'alarm 60; exec @ARGV' "$BIN" "$ROOT" --recall="the" --no-cache --max-tokens=1000000 "$@" 2>/dev/null; }
 header_of(){ printf '%s' "$1" | head -1; }
 total_of(){ header_of "$1" | grep -oE ' total=[0-9]+' | grep -oE '[0-9]+'; }
 shown_of(){ header_of "$1" | grep -oE ' shown=[0-9]+' | grep -oE '[0-9]+'; }
@@ -123,7 +125,7 @@ fi
     && ok "--top-k=20: doc separator blocks printed ($( sep_count "$K20" )) match header shown=$K20_SHOWN" \
     || no "--top-k=20: printed $( sep_count "$K20" ) doc blocks, header said shown=$K20_SHOWN — disclosure inconsistent with the real payload"
 
-# ── 4) the DEFAULT (no --top-k passed) still emits exactly 8 — no default behavior change ─────────────
+# ── 4) no explicit --top-k still emits exactly 8 (under the explicit high body budget above) ─────────
 [ "$DEFAULT_SHOWN" = "8" ] \
     && ok "default (no --top-k): shown=8 (default cap unchanged)" \
     || no "default (no --top-k): shown=$DEFAULT_SHOWN (expected 8 — the default must stay 8)"

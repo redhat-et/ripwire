@@ -96,3 +96,7 @@ test	clean	abstain	handwritten-digD	draft a friendly standup note about what shi
 test	dirty	abstain	handwritten-digD	write up the release notes for this sprint while the build runs
 dev	clean	abstain	handwritten-digD-4	kick off the asan build and keep an eye on it until it finishes
 test	clean	abstain	handwritten-digD-5	which branch still has the columnar formatter work stranded on it?
+test	clean	exact-grep	instrumented-cli	Find every exact occurrence of "return alphaNode()" with nearby context
+test	clean	exact-grep	instrumented-cli	Search for the exact literal "route fixture" and show the surrounding lines
+test	clean	edit-contract	instrumented-cli	I just edited targetSymbol; did I change its contract?
+test	dirty	edit-contract	instrumented-cli	Check whether my edit to CacheNode changed its signature

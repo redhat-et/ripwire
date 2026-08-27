@@ -4244,12 +4244,18 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // rootRelativeUri(p, "") returns p bar a leading "./" — so the multi-root path needs no branch.
         const std::string        recallRootPrefix = rw::sarif::rootPrefixOf( recallRootArg );
         const std::vector<float> rscore = lexicalScores( ing, g.outOff, g.outTargets, cfg.recall, 0, nullptr, 1, recallRootPrefix );
-        const std::size_t        budget = cfg.maxTokens > 0 ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom ) : 0;
+        // Recall is uniquely body-heavy: an unset ceiling used to let a broad docs query stream hundreds of
+        // thousands of tokens. Keep explicit --max-tokens authoritative, but make the common agent path safe.
+        const bool               defaultRecallBudget = cfg.maxTokens == 0;
+        const std::size_t        recallMaxTokens = defaultRecallBudget ? rw::kDefaultRecallMaxTokens
+                                                                       : std::size_t( cfg.maxTokens );
+        const std::size_t        budget = std::size_t( double( recallMaxTokens ) * rw::kMinBytesPerToken
+                                                       * rw::kBudgetHeadroom );
         // §B2: --top-k=N now actually SHAPES how many docs recall emits (was accept-and-ignore — --help and
         // the --limit refusal both already promised this). Default stays 8 when the user never passed the flag.
         const int                 recallK = cfg.topKExplicit ? cfg.topK : 8;
         const RecallBundle       bundle = buildRecall( ing, rscore, cfg.recall, recallK, budget, true, redactPtr,
-                                                       recallRootArg );   // docs (markdown) only — notes/plans/designs, not code; R-R
+                                                       recallRootArg );   // docs only; R-R
 
         const int                rc     = emitRecallBudgeted( stdout, bundle, cfg.tokenBudget );
         reportRedactions( stderr, redactCounts );
@@ -15023,6 +15029,99 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
     return 0;
 }
 
+std::optional<int> runCliEdit( const rw::Config& cfg )
+{
+    const int editCount = int( !cfg.replaceSymbolBody.empty() ) + int( !cfg.insertBeforeSymbol.empty() )
+                        + int( !cfg.insertAfterSymbol.empty() );
+    const bool hasModifier = !cfg.editPayload.empty() || !cfg.editTargetFile.empty();
+    if( editCount == 0 && !hasModifier )
+    {
+        return std::nullopt;
+    }
+    if( editCount == 0 )
+    {
+        std::fprintf( stderr, "ripwire: --edit-payload/--edit-target-file requires one of --replace-symbol-body, "
+                              "--insert-before-symbol or --insert-after-symbol\n" );
+        return 1;
+    }
+    if( editCount != 1 )
+    {
+        std::fprintf( stderr, "ripwire: pass exactly one CLI edit verb per invocation\n" );
+        return 1;
+    }
+    if( cfg.roots.size() != 1 )
+    {
+        std::fprintf( stderr, "ripwire: CLI edit verbs are single-root only; pass one <dir>\n" );
+        return 1;
+    }
+    if( cfg.editPayload.empty() )
+    {
+        std::fprintf( stderr, "ripwire: a CLI edit requires --edit-payload=FILE (or --edit-payload=- for stdin); "
+                              "an absent payload never means delete\n" );
+        return 1;
+    }
+
+    std::string payload;
+    if( cfg.editPayload == "-" )
+    {
+        std::array<char, 8192> buf{};
+        for( ;; )
+        {
+            const std::size_t n = std::fread( buf.data(), 1, buf.size(), stdin );
+            payload.append( buf.data(), n );
+            if( n < buf.size() )
+            {
+                if( std::ferror( stdin ) )
+                {
+                    std::fprintf( stderr, "ripwire: could not read --edit-payload=- from stdin\n" );
+                    return 1;
+                }
+                break;
+            }
+        }
+    }
+    else
+    {
+        bool readOk = false;
+        payload = rw::mcpdetail::readFileBytes( std::string( cfg.editPayload ), readOk );
+        if( !readOk )
+        {
+            std::fprintf( stderr, "ripwire: could not read edit payload '%.*s'\n", int( cfg.editPayload.size() ), cfg.editPayload.data() );
+            return 1;
+        }
+    }
+    if( payload.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --edit-payload is empty; empty never means delete\n" );
+        return 1;
+    }
+    if( payload.size() > cfg.maxFileBytes )
+    {
+        std::fprintf( stderr, "ripwire: edit payload is %zu bytes, over the --max-file-size ceiling of %zu bytes\n",
+                      payload.size(), cfg.maxFileBytes );
+        return 1;
+    }
+
+    const rw::mcpedit::Op op = !cfg.replaceSymbolBody.empty() ? rw::mcpedit::Op::ReplaceBody
+                                 : !cfg.insertBeforeSymbol.empty() ? rw::mcpedit::Op::InsertBefore
+                                                                  : rw::mcpedit::Op::InsertAfter;
+    const std::string_view sym = !cfg.replaceSymbolBody.empty() ? cfg.replaceSymbolBody
+                                 : !cfg.insertBeforeSymbol.empty() ? cfg.insertBeforeSymbol : cfg.insertAfterSymbol;
+    const rw::mcpedit::Outcome outcome = rw::runEditVerb( std::string( cfg.rootPath ), op, std::string( sym ),
+                                                          std::string( cfg.editTargetFile ), payload );
+    if( !outcome.ok )
+    {
+        std::fprintf( stderr, "ripwire edit: %s\n", outcome.message.c_str() );
+        return 1;
+    }
+
+    std::fputs( outcome.resultJson.c_str(), stdout );
+    std::fputc( '\n', stdout );
+    std::fprintf( stderr, "ripwire edit: applied atomically; verify with --edit-check=%.*s, then run --affected on the receipt's file\n",
+                  int( sym.size() ), sym.data() );
+    return 0;
+}
+
 }   // namespace
 
 int main( int argc, char** argv )
@@ -15038,6 +15137,13 @@ int main( int argc, char** argv )
     if( !cfg.ok )
     {
         return 1;
+    }
+
+    // CLI-first edit verbs reuse the MCP transaction engine and therefore own their own indexed pass.
+    // Dispatch before the ordinary ingest pipeline so the preferred CLI path never parses the tree twice.
+    if( std::optional<int> edited = runCliEdit( cfg ) )
+    {
+        return *edited;
     }
 
     // §B11.4's table is SCANNED here and printed further down, because X9(c) below needs the winner too. The
