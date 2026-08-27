@@ -160,7 +160,9 @@ def run_binary(bin_path, root, args):
 
 def ranked_recall(bin_path, root, query):
     """[(path, name=None), ...] best-first from --recall's separator lines (depth = the verb's own k=8)."""
-    out = run_binary(bin_path, root, ["--recall=%s" % query])
+    # The eval measures RANKING at depth 5, not the CLI's output-size policy. Pin an explicit high
+    # ceiling so the default agent-safety budget cannot turn a rank-5 hit into an emission cut.
+    out = run_binary(bin_path, root, ["--recall=%s" % query, "--max-tokens=1000000"])
     return [(m.group(1), None) for m in RECALL_SEP_RE.finditer(out)]
 
 

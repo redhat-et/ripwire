@@ -565,7 +565,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 ## What it answers
 
-Around the core sit 156 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 161 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 Not sure which of them fits the task in front of you? `ripwire . --help-task="<task in words>"`
 recommends ONE executable command with the evidence behind the pick — advice only, it never runs
@@ -645,8 +645,10 @@ Parses **C/C++, Objective-C/C++, Python, TypeScript, JavaScript, Java, Ruby, PHP
 Rust, Swift, C#** — plus JSON/TOML/YAML config keys, markdown sections, Metal, and CUDA (`<<<>>>`
 launches are call edges).
 
-To put it on `PATH`, `./install.sh` builds and installs into a detected prefix (Homebrew's if
-present, `~/.local` otherwise; override with `RIPWIRE_INSTALL_PREFIX`).
+To put it on `PATH`, `./install.sh` builds and atomically installs the binary plus the matching
+`skills/` and `hooks/` assets into a detected prefix (Homebrew's if present, `~/.local` otherwise;
+override with `RIPWIRE_INSTALL_PREFIX`). Set `RIPWIRE_ACTIVATE_CODEX=1` to also refresh Codex's skill
+links and advisory hooks from that same staged version; activation is otherwise explicit.
 
 </details>
 
@@ -900,8 +902,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="src/graph.h:2177"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:2513"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:13479"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:13594"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:13485"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:13600"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:950"/>
 </callers>
 ```
@@ -1434,7 +1436,15 @@ the skills (step 2 below), which teach the agent *when* to reach for which verb.
 
 The MCP server is the **optional** second interface, for what a shell pipe can't give you: clients
 without shell access, lazy body *handles* (fetch a symbol's source only when actually needed), and
-the span-addressed edit verbs with their staleness/ambiguity refusal contract. That convenience has a
+the same span-addressed edit operations against an already-warm index. The CLI exposes those edits too,
+with the same staleness/ambiguity refusal and atomic-write contract:
+
+```bash
+ripwire . --replace-symbol-body=SYM --edit-payload=definition.txt
+printf '%s' "$BLOCK" | ripwire . --insert-before-symbol=SYM --edit-payload=-
+```
+
+That MCP convenience has a
 cost the CLI doesn't carry — the verb schemas sit in the agent's context every session — so register
 it when you want those verbs, not as a default.
 
@@ -1465,7 +1475,8 @@ flagship-reflex verbs, and 3 span-addressed edit verbs. Read verbs mirror the CL
 `grep`, `cochange`, `fetch_body`, `lego`, `mentions`, `owners`, `memory_recall`,
 `situational_awareness`, `batch`, …); `find_symbol` and `find_referencing_symbols` attach a stable
 `handle` instead of a body, so the agent fetches source only when it actually needs it. The edit verbs
-enforce a safety contract — staleness refusal, ambiguity refusal, atomic writes. Full reference:
+mirror the CLI flags and enforce the shared safety contract — staleness refusal, ambiguity refusal,
+mode preservation and atomic writes. Full reference:
 [`skills/ripwire-mcp/`](skills/ripwire-mcp/).
 
 Before printing, `wrap` security-scans `./skills` and `.agents/skills` with the same engine as
@@ -1498,7 +1509,7 @@ immediately:
 ```bash
 skills/install.sh                 # → ~/.claude/skills
 skills/install.sh --codex         # → ${AGENTS_HOME:-~/.agents}/skills (canonical Codex/agent path)
-skills/install.sh --codex --hook  # → also install Codex's advisory CLI nudge + session primer
+skills/install.sh --codex --hook  # → also install Codex's task router, CLI nudge + session primer
 skills/install.sh --codex-legacy  # → ${CODEX_HOME:-~/.codex}/skills (older Codex installs)
 skills/install.sh /some/path      # → an explicit destination
 ripwire --scan-skills=skills      # read the security scanner's verdict first, if you would rather

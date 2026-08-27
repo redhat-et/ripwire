@@ -93,11 +93,12 @@ install_codex_hook()
     settings="${CODEX_HOME:-$HOME/.codex}/hooks.json"
     hookScript="$( dirname "$src" )/hooks/ripwire-codex-nudge.sh"
     sharedHook="$( dirname "$src" )/hooks/ripwire-nudge.sh"
-    [ -f "$hookScript" ] && [ -f "$sharedHook" ] || {
+    routeScript="$( dirname "$src" )/hooks/ripwire-codex-route.sh"
+    [ -f "$hookScript" ] && [ -f "$sharedHook" ] && [ -f "$routeScript" ] || {
         echo "skills/install.sh: bundled Codex hooks are missing beside $src" >&2
         exit 1
     }
-    chmod +x "$hookScript" "$sharedHook" 2>/dev/null || true
+    chmod +x "$hookScript" "$sharedHook" "$routeScript" 2>/dev/null || true
 
     if ! command -v jq >/dev/null 2>&1; then
         echo "skills/install.sh --codex --hook needs jq on PATH to safely merge $settings (not found)." >&2
@@ -109,10 +110,11 @@ install_codex_hook()
 
     echo "skills/install.sh --codex --hook will add or refresh advisory-only entries in $settings."
     tmp="$( mktemp )"
-    jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" --arg m "$codexHookMatcher" '
+    jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" --arg rcmd "$routeScript" --arg m "$codexHookMatcher" '
         .hooks //= {} |
         .hooks.PreToolUse //= [] |
         .hooks.SessionStart //= [] |
+        .hooks.UserPromptSubmit //= [] |
         if any(.hooks.PreToolUse[]?.hooks[]?; .command == $cmd) then
             .hooks.PreToolUse |= map(if any(.hooks[]?; .command == $cmd) then .matcher = $m else . end)
         else
@@ -125,9 +127,16 @@ install_codex_hook()
             .hooks.SessionStart += [{ matcher: "^(startup|resume|clear|compact)$", hooks: [{ type: "command",
                 command: $scmd, timeout: 3, statusMessage: "Loading Ripwire CLI-first guidance",
                 additionalContextLimit: 2000 }] }]
+        end |
+        if any(.hooks.UserPromptSubmit[]?.hooks[]?; .command == $rcmd) then
+            .hooks.UserPromptSubmit |= map(if any(.hooks[]?; .command == $rcmd) then .matcher = ".*" else . end)
+        else
+            .hooks.UserPromptSubmit += [{ matcher: ".*", hooks: [{ type: "command", command: $rcmd,
+                timeout: 3, statusMessage: "Selecting a focused Ripwire CLI route",
+                additionalContextLimit: 3000 }] }]
         end
     ' "$settings" >"$tmp" && mv "$tmp" "$settings"
-    echo "done. Registered Ripwire's Codex PreToolUse nudge + SessionStart primer in $settings."
+    echo "done. Registered Ripwire's Codex prompt router + PreToolUse nudge + SessionStart primer in $settings."
     echo "Open /hooks in Codex to review and trust the installed command hooks."
 }
 

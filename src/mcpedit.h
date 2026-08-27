@@ -1,6 +1,6 @@
 #pragma once
 
-// mcpedit.h — the symbol-addressed EDIT verbs for --mcp: replace_symbol_body /
+// mcpedit.h — the shared symbol-addressed EDIT engine for CLI and MCP: replace_symbol_body /
 // insert_before_symbol / insert_after_symbol. The mcpedit namespace (resolve → per-file advisory
 // lock → freshness byte-hash gate → in-memory splice → atomic temp-rename write) plus the
 // runEditVerb() driver. The safety contract IS the feature: every refusal leaves the file

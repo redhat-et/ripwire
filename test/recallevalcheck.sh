@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # recallevalcheck.sh — gate for the held-out recall/ranking eval (bench/recalleval/,
 # The measuring instrument that must precede §P2b and
-# §P4's ranking half). Asserts the INSTRUMENT works — labels load clean, both lanes computable with
+# §P4's ranking half). The harness pins an explicit high --max-tokens for recall so this measures rank
+# quality independently of the CLI's bounded-by-default emission policy. Asserts the INSTRUMENT works — labels load clean, both lanes computable with
 # zero skipped queries, two runs byte-identical — and pins only FLOORS/CEILINGS loose enough to
 # survive intentional improvement (§P7 philosophy: never pin exact scores; a ranking fix should move
 # pollution@5 DOWN and must not trip this gate by improving).

@@ -307,16 +307,16 @@ The schema is terse by design — a legend comment once at the top, then `<r>` r
 The argument parser is hand-rolled and table-driven. A flagless run emits the core map; every flag is
 additive and gated by a `Config` field.
 
-The MCP server exposes 30 verbs. **Twenty-seven of them** are a thin front door onto **the same
+The MCP server exposes 30 verbs. **All of them** are a thin front door onto **the same
 computation and the same renderer** as a CLI sibling — one output shape, two surfaces. That is a
 deliberate constraint: a verb that rendered differently over MCP would be a second implementation to
 keep honest.
 
-**Three have no CLI sibling at all**, and they are the write verbs: `replace_symbol_body`,
-`insert_before_symbol` and `insert_after_symbol` (`src/mcpedit.h`). There is no CLI flag that edits
-your source, so there is nothing for them to mirror — they are the one place where the MCP surface is
-genuinely larger than the command line rather than a second door onto it, and they carry their own
-safety contract instead of a shared renderer.
+The three write verbs — `replace_symbol_body`, `insert_before_symbol` and `insert_after_symbol`
+(`src/mcpedit.h`) — also have CLI siblings (`--replace-symbol-body`, `--insert-before-symbol`,
+`--insert-after-symbol`, with `--edit-payload`). Both front doors share the same ambiguity refusal,
+staleness hash, symlink refusal, mode preservation and atomic-write transaction. CLI is the preferred
+zero-standing-schema path; MCP is the warm-index alternative.
 
 ---
 

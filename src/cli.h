@@ -300,6 +300,11 @@ struct Config
                                                             // covers, and --dead-code's own high-confidence shape at defs=1. FACTS only:
                                                             // risk= names what was found (none-found/uses-exist/untested-radius), never a
                                                             // go/no-go verdict. file:name disambiguates like --around/--lego.
+    std::string_view replaceSymbolBody;                    // CLI-first write surface: the same transaction-safe engine as MCP
+    std::string_view insertBeforeSymbol;
+    std::string_view insertAfterSymbol;
+    std::string_view editPayload;                          // --edit-payload=FILE|-: exact bytes; required for a CLI edit
+    std::string_view editTargetFile;                       // --edit-target-file=SUBSTR: disambiguate same-named definitions
     bool             prContext       = false;              // --pr-context[=BASEREF]: no-LLM review-evidence bundle for the diff (Wave-4)
     std::string_view prContextBase;                        // --pr-context=BASEREF: diff vs this ref (else the working-tree diff)
     bool             mergeScoutFlag  = false;               // --merge-scout was given at all (tracked separately from the CSV value so a bare
@@ -837,8 +842,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               files\" denominator counts every file the index carries as a DOCUMENT — .md plus the\n"
         "                               docparse'd .ipynb/.html/.csv — so it is a SUPERSET of --doc-drift's docs=, which is an\n"
         "                               extension test (markdown only). Two populations, two names, deliberately. --top-k=N shapes HOW MANY\n"
-        "                               docs are emitted (default 8, not the general --top-k default of 200); --max-tokens=N shapes\n"
-        "                               it to fit a byte budget (disclosing each cut) and --token-budget=N gates it (exit 3, nothing streamed).\n"
+        "                               docs are emitted (default 8, not the general --top-k default of 200). Recall defaults to an\n"
+        "                               8000-token body ceiling; --max-tokens=N overrides it and shapes to fit (disclosing each cut),\n"
+        "                               while --token-budget=N gates the finished artifact (exit 3, nothing streamed).\n"
         "                               GENERATED documents rank LAST by default — a doc that declares itself generated in\n"
         "                               its first lines, or is BOTH >=5x the median doc's size AND mostly ```-fenced quoted\n"
         "                               output (a capture/API dump quotes every term, so BM25 hands it every query). Never\n"
@@ -1318,6 +1324,14 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               provably incompatible with the NEW arity flagged. A contract is PER DEFINITION, so a SYM\n"
         "                               matching several definition sites REFUSES (exit 1) and lists the file:name spellings that\n"
         "                               pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=.\n"
+        "    --replace-symbol-body=SYM  atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|-\n"
+        "    --insert-before-symbol=SYM atomically insert the payload immediately before one uniquely-resolved definition\n"
+        "    --insert-after-symbol=SYM  atomically insert the payload immediately after one uniquely-resolved definition\n"
+        "      --edit-payload=FILE|-    required exact byte payload ('-' reads stdin); empty payloads refuse, never imply deletion\n"
+        "      --edit-target-file=PATH  optional file-path substring to disambiguate a same-named definition. These three CLI verbs\n"
+        "                               reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation\n"
+        "                               and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON\n"
+        "                               receipt; follow with --edit-check=SYM and --affected=FILE. Single-root only.\n"
         "    --safe-delete=SYM          \"can I delete this?\" — ONE call composing signals the tool already computes for one\n"
         "                               already-resolved SYM: 1-hop callers=, the transitive --impact blast radius (impact_reaches=),\n"
         "                               every --uses read/write/import/call/extends site (uses=), how much of the blast radius the\n"
@@ -2082,6 +2096,11 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--batch=",       &Config::batchFile       , EmptyValue::Refuse, "a batch file path, or - for stdin",      "--batch=queries.txt" },
     { "--edit-check=",  &Config::editCheckSym    , EmptyValue::Refuse, "a symbol name (file:name disambiguates)", "--edit-check=parseArgs" },
     { "--safe-delete=", &Config::safeDeleteSym   , EmptyValue::Refuse, "a symbol name (file:name disambiguates)", "--safe-delete=parseArgs" },
+    { "--replace-symbol-body=", &Config::replaceSymbolBody, EmptyValue::Refuse, "a symbol name", "--replace-symbol-body=parseArgs" },
+    { "--insert-before-symbol=", &Config::insertBeforeSymbol, EmptyValue::Refuse, "a symbol name", "--insert-before-symbol=parseArgs" },
+    { "--insert-after-symbol=",  &Config::insertAfterSymbol,  EmptyValue::Refuse, "a symbol name", "--insert-after-symbol=parseArgs" },
+    { "--edit-payload=",         &Config::editPayload,        EmptyValue::Refuse, "a payload file path, or - for stdin", "--edit-payload=replacement.cpp" },
+    { "--edit-target-file=",     &Config::editTargetFile,     EmptyValue::Refuse, "a target file-path substring", "--edit-target-file=src/cli.h" },
     { "--eval-stray=",  &Config::evalStray       , EmptyValue::Refuse, "a labelled TSV file path",               "--eval-stray=bench/strayverdicts.tsv" },
     { "--from-trace=",  &Config::fromTrace       , EmptyValue::Refuse, "a trace file path, or - for stdin",      "--from-trace=crash.txt" },
     { "--run-trace=",   &Config::runTrace        , EmptyValue::Refuse, "a shell command line to execute",        "--run-trace=\"make -j\"" },
@@ -2295,7 +2314,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 186;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out)
+inline constexpr std::size_t kTotalFlagArms = 191;  // +5 CLI edit bridge: three verbs + payload + target-file disambiguator
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -3381,7 +3400,8 @@ inline Config parseArgs( int argc, char** argv ) noexcept
         // in CMakeLists.txt), so this can never drift from the CMake version test/versioncheck.sh checks.
         if( a == "--version" || a == "-v" )
         {
-            std::printf( "ripwire %s (%s, %s %s)\n", kRipwireVersion, kRipwireBuildType, kRipwireCompilerId, kRipwireCompilerVer );
+            std::printf( "ripwire %s (%s, %s %s, git %s)\n", kRipwireVersion, kRipwireBuildType,
+                         kRipwireCompilerId, kRipwireCompilerVer, kRipwireGitStamp );
             std::exit( 0 );
         }
 

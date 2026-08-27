@@ -13,6 +13,8 @@
 #   1) RIPWIRE_INSTALL_PREFIX env override, for anyone who wants a specific location
 #   2) `brew --prefix` if brew is on PATH (covers both Apple Silicon /opt/homebrew and Intel /usr/local)
 #   3) ~/.local as the no-brew fallback (no sudo needed, commonly already on PATH)
+# RIPWIRE_ACTIVATE_CODEX=1 additionally activates the just-installed skills + advisory hooks. It is
+# explicit because it writes agent configuration outside the install prefix; staging is always atomic.
 set -eu
 dir="$( cd "$( dirname "$0" )" && pwd )"
 cd "$dir"
@@ -30,9 +32,14 @@ cmake -S . -B build-install -DCMAKE_BUILD_TYPE=Release -DRIPWIRE_NATIVE=ON
 cmake --build build-install -j
 cmake --install build-install --prefix "$prefix" --component ripwire
 
+if [ "${RIPWIRE_ACTIVATE_CODEX:-0}" = "1" ]; then
+    bash "$prefix/share/ripwire/skills/install.sh" --codex --hook
+fi
+
 case ":$PATH:" in
     *":$prefix/bin:"*) ;;
     *) echo "install.sh: $prefix/bin is not on PATH — add it, e.g. export PATH=\"$prefix/bin:\$PATH\"" ;;
 esac
 
 echo "installed: $(command -v ripwire || echo "$prefix/bin/ripwire (not yet on PATH)")"
+echo "agent assets: $prefix/share/ripwire/{skills,hooks}"

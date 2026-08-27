@@ -33,6 +33,10 @@ C="$( route 'How do alphaNode, betaNode, and gammaNode connect?' )"
 case "$C" in *'status="recommend"'*'intent="connect-symbols"'*'--connect='*'alphaNode,betaNode,gammaNode'*) ok "three resolved symbols -> --connect";; *) no "three-symbol route wrong: $C";; esac
 U="$( route 'Help me understand the implementation of targetSymbol' )"
 case "$U" in *'status="recommend"'*'intent="understand-symbol"'*'--expand='*'targetSymbol'*) ok "one resolved symbol -> --expand";; *) no "one-symbol route wrong: $U";; esac
+XG="$( route 'Find every exact occurrence of "return alphaNode()" with nearby context' )"
+case "$XG" in *'status="recommend"'*'intent="exact-grep"'*'--grep='*'--grep-context=2'*) ok "quoted exact literal -> context-aware --grep";; *) no "exact grep route wrong: $XG";; esac
+EC="$( route 'I just edited targetSymbol; did I change its contract?' )"
+case "$EC" in *'status="recommend"'*'intent="edit-contract"'*'--edit-check='*'targetSymbol'*) ok "post-edit exact symbol -> --edit-check";; *) no "edit contract route wrong: $EC";; esac
 T="$( route $'AddressSanitizer: heap-use-after-free\n#0 0x123 in targetSymbol router.cpp:4' )"
 case "$T" in *'status="recommend"'*'intent="trace-debug"'*'--from-trace=-'*) ok "trace shape -> --from-trace=-";; *) no "trace route wrong: $T";; esac
 
@@ -67,7 +71,7 @@ if command -v xmllint >/dev/null 2>&1; then xmllint --noout "$TMP/q1" 2>/dev/nul
 [ "$rc" -ne 0 ] && grep -qi 'json' "$TMP/json.err" && ok "unsupported --json combination refuses" || no "--json combination did not refuse"
 "$BIN" "$REPO" "$ROOT/test/fixture" --help-task='plan a feature' >/dev/null 2>"$TMP/multi.err"; rc=$?
 [ "$rc" -ne 0 ] && grep -qi 'single-root' "$TMP/multi.err" && ok "multi-root routing refuses" || no "multi-root routing did not refuse"
-for f in --verify --connect --expand --from-trace --situ --pack-task --exemplar --for; do "$BIN" --help 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
+for f in --verify --connect --expand --grep --grep-context --edit-check --from-trace --situ --pack-task --exemplar --for; do "$BIN" --help 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
 
 # ── byte-compat: the verify-claim template must emit the SHIPPED --verify grammar byte-exactly ─────────
 # (PLAN 2026-08-13 addendum: gate against the real verb's PARSER, never a copy of its syntax.)
