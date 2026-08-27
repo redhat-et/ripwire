@@ -353,6 +353,64 @@ namespace mcpedit
         if( std::rename( tmp.c_str(), path.c_str() ) != 0 ) { ::unlink( tmp.c_str() ); return false; }
         return true;
     }
+
+    struct EditTarget
+    {
+        NodeId      id = kNoNode;
+        bool        byHandle = false;
+        std::string error;
+    };
+
+    inline EditTarget resolveTarget( const McpIndex& ix, const std::string& target, const std::string& pathHint )
+    {
+        EditTarget out;
+        std::uint64_t handleId = 0, handleContent = 0;
+        out.byHandle = mcpdetail::parseHandle( target, handleId, handleContent );
+        if( !out.byHandle )
+        {
+            if( target.rfind( "sym#", 0 ) == 0 )
+            {
+                out.error = "malformed edit handle '" + target + "' (expected sym#<16hex>@<16hex>)";
+                return out;
+            }
+            out.id = resolveOneForEdit( ix.ing, target, pathHint, out.error );
+            return out;
+        }
+        if( !pathHint.empty() )
+        {
+            out.error = "--edit-target-file cannot modify a content handle: the handle already identifies one file";
+            return out;
+        }
+
+        std::vector<NodeId> matches;
+        out.id = resolveHandleAll( ix, handleId, matches );
+        if( out.id == kNoNode )
+        {
+            out.error = "edit handle '" + target + "' no longer resolves; rerun --grep --handles";
+            return out;
+        }
+        if( matches.size() != 1 )
+        {
+            out.id = kNoNode;
+            out.error = "edit handle '" + target + "' is ambiguous across " + std::to_string( matches.size() )
+                      + " definitions; refresh with --grep --handles and target a unique enclosing definition";
+            return out;
+        }
+        const Symbol& s = ix.ing.symbols[out.id];
+        const std::uint64_t builtHash = ( s.fileId < ix.fileByteHash.size() ) ? ix.fileByteHash[s.fileId] : 0;
+        if( handleContent == 0 || handleContent != builtHash )
+        {
+            out.id = kNoNode;
+            out.error = "stale edit handle '" + target + "': file '" + ix.ing.files[s.fileId]
+                      + "' changed after grep minted it; rerun --grep --handles and use the new handle";
+        }
+        return out;
+    }
+
+    inline std::string handleReceiptField( bool byHandle, const std::string& target )
+    {
+        return byHandle ? "\",\"resolved_from_handle\":\"" + mcpdetail::jsonEscape( target ) : std::string();
+    }
 }   // namespace mcpedit
 
 // perform an edit verb end-to-end (resolve → verify freshness → splice → atomic write → invalidate index).
@@ -367,13 +425,13 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
 
-    // 1. resolve to exactly one def (0 → nearest-names hint; >1 → candidate file:line list; both refuse)
-    std::string resolveErr;
-    const NodeId f = mcpedit::resolveOneForEdit( ing, symbol, pathHint, resolveErr );
+    // 1. resolve either a plain name or a grep-issued, freshness-pinned handle to exactly one definition.
+    const mcpedit::EditTarget target = mcpedit::resolveTarget( ix, symbol, pathHint );
+    const NodeId f = target.id;
     if( f == kNoNode || f >= ing.symbols.size() )
     {
         oc.ok = false; oc.errCode = -32602;
-        oc.message = resolveErr.empty() ? ( "symbol '" + symbol + "' not found" ) : resolveErr;
+        oc.message = target.error.empty() ? ( "symbol '" + symbol + "' not found" ) : target.error;
         return oc;
     }
 
@@ -385,6 +443,7 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     // Multi-root writes land in the correct root's file even though the index identity is `<label>/<rel>`.
     const std::string& disk   = diskPath( ing, fileId );
 
+    const std::uint64_t builtHash = ( fileId < ix.fileByteHash.size() ) ? ix.fileByteHash[ fileId ] : 0;
     // A4-F14: refuse to edit through a symlink. atomicWrite's temp-then-rename lands the new bytes at
     // `disk` by swapping the inode the LAST path component names — for a symlink that REPLACES the link
     // entry with a plain file, leaving the real target file completely untouched (a silent, data-losing
@@ -418,7 +477,6 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
         return oc;
     }
     const std::uint64_t freshHash = mcpdetail::byteHash( src.data(), src.size() );
-    const std::uint64_t builtHash = ( fileId < ix.fileByteHash.size() ) ? ix.fileByteHash[ fileId ] : 0;
     if( freshHash != builtHash || builtHash == 0 )
     {
         oc.ok = false; oc.errCode = -32602;
@@ -483,7 +541,8 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
                        : "insert_after_symbol";
     oc.ok = true;
     oc.resultJson = std::string( "{\"applied\":\"" ) + opName
-                  + "\",\"symbol\":\"" + mcpdetail::jsonEscape( symbol )
+                  + "\",\"symbol\":\"" + mcpdetail::jsonEscape( s.name )
+                  + mcpedit::handleReceiptField( target.byHandle, symbol )
                   + "\",\"file\":\"" + mcpdetail::jsonEscape( path )
                   + "\",\"span\":{\"start\":" + std::to_string( newStart ) + ",\"end\":" + std::to_string( newEnd ) + "}"
                   + ",\"old_file_bytes\":" + std::to_string( src.size() )
