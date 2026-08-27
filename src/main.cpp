@@ -2624,10 +2624,40 @@ struct ForLensHeaderParts
     bool             anchor     = false;   // --anchor's EXPERIMENTAL caveat paragraph
     bool             autoBundle = false;   // T3: auto mode is on (cfg.detail==0, no --signatures-only) — appends the bundle=auto legend
     bool             compactBundle = false;   // COMPACT conceptual serving: appends the bundle=compact legend INSTEAD of the auto one — never both, because only one of the two sections can be emitted
+    bool             compactLegend = false;  // --legend=compact: versioned, shorter explanatory dialect
     std::string_view rootArg;              // R-E (2026-08-17): the single-root run's own root= — the ladder's
                                             // route-dropped rebuild below calls ctxRootOpen a second time and
                                             // must carry the SAME root as the pre-built rootOpenStr did.
 };
+
+inline std::string rootOpenWithSchema( std::string rootOpen, std::string_view schema )
+{
+    if( schema.empty() )
+    {
+        return rootOpen;
+    }
+    const std::size_t end = rootOpen.find( '>' );
+    if( end != std::string::npos )
+    {
+        rootOpen.insert( end, " schema=\"" + std::string( schema ) + "\"" );
+    }
+    return rootOpen;
+}
+
+inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p, std::string_view extraNotes )
+{
+    h += "<!-- ripwire for ripwire.for/v1: task/route/root and bundle/bodies/reason are root facts; "
+         "sigs and hops use total/requested, shown/printed and capped=1 for truncation; cx/ccx/in/churn/amp/clone/tested "
+         "are the quality/reuse lens; calls are resolved callees and counts remain floors where stated";
+    h.append( p.adaptiveNote );
+    h.append( p.mentionNote );
+    h.append( p.boostNote );
+    h.append( p.docMentionNote );
+    h.append( p.floorNote );
+    h.append( extraNotes );
+    h += " -->";
+    h += rw::forRootRelPathsLegendShort( !p.rootArg.empty() );
+}
 
 // T3 — the legend sentence for the terminal-by-default bundle, a named constant so the sigs-budget
 // exemption below (the D2 adaptiveNote precedent) subtracts EXACTLY the bytes the legend adds. No "--"
@@ -2669,7 +2699,13 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     std::string h;
     h.reserve( 640 + std::max( kForAutoBundleLegend.size(), kForCompactBundleLegend.size() ) + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
                + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + p.floorNote.size() + extraNotes.size() );
-    h += withRouteAttr ? std::string( p.rootOpenStr ) : rw::ctxRootOpen( p.task, {}, p.rootArg );
+    h += rootOpenWithSchema( withRouteAttr ? std::string( p.rootOpenStr ) : rw::ctxRootOpen( p.task, {}, p.rootArg ),
+                             p.compactLegend ? "ripwire.for/v1" : std::string_view() );
+    if( p.compactLegend )
+    {
+        appendCompactForLegend( h, p, extraNotes );
+        return h;
+    }
     h += "<!-- ripwire lens for ";
     if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
     else
@@ -3574,7 +3610,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // turns the disclosure off on EITHER serving shape — test/fordisclosurecheck.sh.
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
                                         mentionNote, boostNote, docMentionNote, floorNote, cfg.anchor,
-                                        plan.autoBodies, plan.compact, flRootArg };
+                                        plan.autoBodies, plan.compact, cfg.legend == "compact", flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -12001,6 +12037,23 @@ std::string grepTierAttrs( const rw::GrepTierReport& tier )
     return attrs;
 }
 
+std::vector<rw::GrepTerm> makeGrepTerms( const rw::Config& cfg )
+{
+    std::vector<rw::GrepTerm> terms;
+    terms.reserve( cfg.grepAnd.size() + cfg.grepNot.size() );
+    for( const std::string_view t : cfg.grepAnd ) { terms.push_back( rw::GrepTerm{ std::string( t ), false } ); }
+    for( const std::string_view t : cfg.grepNot ) { terms.push_back( rw::GrepTerm{ std::string( t ), true } ); }
+    return terms;
+}
+
+void emitCompactGrepLegend()
+{
+    std::printf( "<!-- ripwire grep ripwire.grep/v1: files group source-ordered hits; l=line, m=matched text, "
+                 "in=enclosing name when known. shown/capped disclose the printed window; hits_capped=1 makes hits a floor; "
+                 "complete=1 only for an exhaustive literal scan whose whole unfiltered window printed. root anchors relative p; "
+                 "enc callers remain a call-graph floor; tier/suppressed and unindexed/corpus attrs disclose excluded populations. -->" );
+}
+
 // R1 (the 2026-08-12 usage mine) widened the signature beyond (cfg, ing): `g` feeds the <enc> rows'
 // callers= (in-edge CSR — data the graph already holds, zero new analysis), and amp/tested ride along
 // ONLY when a co-run (--metrics) already computed them — grep itself never triggers the qmetrics pass
@@ -12040,10 +12093,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // G3 (2026-08-15 harvest, report-ugrep §F2): boolean AND/NOT as a post-filter over the collected raw
     // hits — literal-only, already refused together with --regex in validateConfig. Built here (not in
     // Config) so the CLI value strings (string_views into argv) become owned std::strings exactly once.
-    std::vector<GrepTerm> grepTerms;
-    grepTerms.reserve( cfg.grepAnd.size() + cfg.grepNot.size() );
-    for( const std::string_view t : cfg.grepAnd ) { grepTerms.push_back( GrepTerm{ std::string( t ), false } ); }
-    for( const std::string_view t : cfg.grepNot ) { grepTerms.push_back( GrepTerm{ std::string( t ), true } ); }
+    std::vector<GrepTerm> grepTerms = makeGrepTerms( cfg );
     const GrepScope    grepScopeVal    = ( cfg.grepScope == "file" ) ? GrepScope::File : GrepScope::Line;
     std::uint32_t      termsSuppressed = 0;
     if( !grepTerms.empty() )
@@ -12157,6 +12207,12 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // states its ordering in full and grep's said nothing.
     // §B12.4 in-band (W3FIX): same shared clause as --impact, so limit="0" is DEFINED on the first screen of
     // the two verbs an agent walks most, not only in --help and pageview.h.
+    if( cfg.legend == "compact" )
+    {
+        emitCompactGrepLegend();
+    }
+    else
+    {
     std::printf( "<!-- ripwire grep: parallel literal/regex scan; hits GROUP by file under <f p=\"…\">, each <hit> carrying its LINE "
                  "(l=), matched text (m) and enclosing symbol (in=, a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar; "
                  "ABSENT (never an empty in= value) when no symbol encloses the hit, which is NOT the same claim as file scope). "
@@ -12241,6 +12297,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "otherwise-empty answer alone cannot: not in this repo, or in a file that was never scanned — the skipped "
                  "verb itemizes the rows behind either count. "
                  "%s -->", rw::kPageRaiseCapClause );
+    }
     emitGrepHandleLegend( cfg.grepHandles );
     // G3: terms=/scope=/suppressed= — only when AND/NOT was actually given, so a plain --grep answer
     // stays byte-identical to before G3 landed (the "purely additive" rule every ripwire flag follows).
@@ -12273,8 +12330,9 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     const std::string tierAttr = grepTierAttrs( tierReport );
     // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= (helper above).
     const std::string auxAttr = grepUnindexedAttrs( aux );
-    std::printf( "<grep pattern=\"%s\"%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s%s%s>",
-                 ex( pat ).c_str(), rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
+    const char* schemaAttr = cfg.legend == "compact" ? " schema=\"ripwire.grep/v1\"" : "";
+    std::printf( "<grep pattern=\"%s\"%s%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s%s%s>",
+                 ex( pat ).c_str(), schemaAttr, rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
                                  cfg.pageLimit, cfg.pageOffset, true ),
                  hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str() );
