@@ -54,6 +54,7 @@ struct Config
     bool             json            = false;              // --json (L2): the SAME content as the XML, machine-parseable, for the
                                                            // CORE verbs ONLY (default map, --for, --pack-task, --callers/--callees/
                                                            // --impact, --quality-delta, --test-gate). Keys mirror the XML attr names
+    std::string_view legend;                               // --legend=full|compact: opt-in schema prose posture for --for/--grep
                                                            // 1:1. Every other verb refuses loudly (stderr + exit 1) rather than
                                                            // silently emitting XML — see main.cpp's jsonUnsupportedVerb().
     int              detail          = 0;                  // --detail=N (RESEARCH lever 3): with --for, emit FULL bodies for the
@@ -1753,6 +1754,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --format=candidates        (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
+        "    --legend=full|compact     output legend posture for --for and --grep/--regex only. full is byte-identical to the\n"
+        "                               default; compact keeps every data/completeness attribute, adds a versioned schema id,\n"
+        "                               and shortens repeated explanatory prose. Unsupported verbs refuse.\n"
         "    --json                     machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr\n"
         "                               names 1:1 — supported for the default map, --for, --pack-task, --callers/--callees/\n"
         "                               --impact, --quality-delta, --test-gate (the CI/scripting verbs). Every other verb\n"
@@ -2078,6 +2082,7 @@ inline constexpr ViewFlag kViewFlags[] =
 
     // search and the --for lens
     { "--query=",       &Config::query           , EmptyValue::Refuse, "search terms",                           "--query=\"teleport pagerank\"" },
+    { "--legend=",      &Config::legend          , EmptyValue::Refuse, "full or compact",                        "--legend=compact" },
     { "--grep=",        &Config::grep            , EmptyValue::Refuse, "a literal string to search for",         "--grep=parseArgs",
       nullptr, nullptr, &Config::grepGiven, kGrepDupMessage },
     { "--match=",       &Config::match           , EmptyValue::Refuse, "a tree-sitter s-expression pattern",     "--match='(call_expression)'" },
@@ -2320,7 +2325,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 192;  // +5 CLI edit bridge; +1 grep-to-edit content handles
+inline constexpr std::size_t kTotalFlagArms = 193;  // +5 CLI edit bridge; +1 grep handles; +1 legend posture
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2950,6 +2955,26 @@ inline void validateLintSelectionModifierGuards( Config& c ) noexcept
     }
 }
 
+static inline void validateLegendModifier( Config& c ) noexcept
+{
+    if( c.legend.empty() )
+    {
+        return;
+    }
+    if( c.legend != "full" && c.legend != "compact" )
+    {
+        std::fprintf( stderr, "ripwire: --legend needs full or compact — got '%.*s', e.g. --legend=compact\n",
+                      int( c.legend.size() ), c.legend.data() );
+        c.ok = false;
+    }
+    if( c.forTask.empty() && c.grep.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --legend=%.*s is supported by --for, --grep and --regex only — pass one of those verbs\n",
+                      int( c.legend.size() ), c.legend.data() );
+        c.ok = false;
+    }
+}
+
 inline void validateModifierGuards( Config& c ) noexcept
 {
     validatePagingHonored( c );      // §P8/G2: --limit/--offset on a verb that windows nothing (see its header)
@@ -2957,6 +2982,8 @@ inline void validateModifierGuards( Config& c ) noexcept
     validateShapingFlagsHonored( c ); // §B9 + §H4/M-4: --top-k / --max-tokens / --token-budget on a report/
                                       // paging verb that shapes with none of them (one guard, three rows)
     noticeShapingFlagIgnored( c );   // §B9.2:  the same two flags OUTSIDE that family — a NOTICE, never c.ok
+
+    validateLegendModifier( c );
 
     // --mcp-token/--allow-remote-edits are read ONLY inside the --listen HTTP branch (main.cpp's
     // McpHttpConfig assembly) — the stdio --mcp path never touches either member, so bare `--mcp --mcp-token=…`
