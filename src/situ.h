@@ -500,6 +500,7 @@ struct TestGateResult
     std::uint32_t              changedFiles    = 0;   // # changed files (the <test-gate changed=> header)
     std::size_t                impactedSymbols = 0;   // blast-radius symbol count, non-changed files (impacted=)
     std::vector<std::uint32_t> tests;                 // test files to run (path asc) — the --affected answer
+    ShellGateIndex             shellGates;            // registered shell gates with exact dependency evidence
     std::vector<NodeId>        untested;              // impacted symbols reached by NO test (ccx desc, file asc, name asc)
     bool                       hasObligations  = false; // !tests.empty() || !untested.empty()
 };
@@ -612,7 +613,10 @@ inline TestGateResult computeTestGate( const IngestResult& ing, const Graph& g, 
         }
     }
 
-    return computeTestGateFor( ing, g, changedSyms, isChangedSym, changedFileCount, nullptr );
+    TestGateResult result = computeTestGateFor( ing, g, changedSyms, isChangedSym, changedFileCount, nullptr );
+    result.shellGates = buildShellGateIndex( ing, changedFile );
+    result.hasObligations = result.hasObligations || !result.shellGates.obligations.empty();
+    return result;
 }
 
 // The changed-SYMBOL form (§7.4a). `changedSyms` need not be sorted or unique; the mask is
@@ -684,9 +688,12 @@ inline constexpr const char* kTestGateLegend =
     "(a single shown= could only ever have described one of them). The <t> rows are the COMPLETE obligation "
     "and are never windowed, so they REPEAT VERBATIM on every page — a walker that concatenates pages must "
     "take them from one page only; offset=/limit= window the <u> rows alone. The <u> listing shows 25 rows "
-    "by default: raise the default cap with limit=N (offset=M pages). script_gates_unmodelled= counts "
-    "test/*.sh runners in the corpus (a path count; not every one invokes the binary) - script-to-binary "
-    "edges are NOT modelled, so those gates are invisible to this walk and never counted in tests=. "
+    "by default: raise the default cap with limit=N (offset=M pages). script_gates_unmodelled= is the legacy "
+    "test/*.sh corpus path count. script_gates_registered= counts suite members; script_gates_mapped= counts those "
+    "with exact dependency evidence; script_gates_unresolved_dynamic= is the registered remainder, disclosed rather "
+    "than guessed. Shell <t> rows join tests= only when executable script text contains the changed path "
+    "(evidence=script_literal) or RIPWIRE_TEST_DEPS metadata declares it (evidence=manifest_declared). counts_floor=1 "
+    "keeps these static evidence counts honest about shell expansion and generated paths they cannot resolve. "
     // §B12.5 — the cross-verb UNIT collision, disclosed on each verb that spells it. Each legend was
     // locally honest and the three numbers are not comparable, which is exactly how a reader gets it wrong.
     "UNIT: untested= here counts impacted SYMBOLS. The seams verb spells untested= over cross-directory "
@@ -714,12 +721,15 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     char              uab[ kPageDisclosureCap ];
     // r26-stamp Task A: anchor tests/untested to the commit (+dirty state) the change set was diffed against
     // — "" (omitted) when the caller passes no root (root="" ⇒ non-git-style skip, same convention as gitstamp.h).
+    const std::size_t testRows = r.tests.size() + r.shellGates.obligations.size();
     std::fprintf( out, "<test-gate changed=\"%u\" impacted=\"%zu\" tests=\"%zu\" untested=\"%zu\""
                        " shown_tests=\"%zu\" tests_capped=\"0\" shown_untested=\"%zu\" untested_capped=\"%d\""
-                       " script_gates_unmodelled=\"%zu\"%s%s>",
-                  r.changedFiles, r.impactedSymbols, r.tests.size(), r.untested.size(),
-                  r.tests.size(), shownRows, shownRows < r.untested.size() ? 1 : 0,
+                       " script_gates_unmodelled=\"%zu\" script_gates_registered=\"%zu\" script_gates_mapped=\"%zu\""
+                       " script_gates_unresolved_dynamic=\"%zu\" counts_floor=\"1\"%s%s>",
+                  r.changedFiles, r.impactedSymbols, testRows, r.untested.size(),
+                  testRows, shownRows, shownRows < r.untested.size() ? 1 : 0,
                   scriptGatesUnmodelledCount( ing ),
+                  r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic,
                   pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
                   gitstamp::atAttr( root ).c_str() );
     // §P11.4: this gate EXITS 4 on the obligation, so its rows carry the command that discharges it — where
@@ -728,6 +738,11 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     for( std::uint32_t f : r.tests )
     {
         std::fprintf( out, "<t p=\"%s\"%s/>", ex( ing.files[f] ).c_str(), runAttr( gateRunners, f, ex ).c_str() );
+    }
+    for( const ShellGateObligation& gate : r.shellGates.obligations )
+    {
+        std::fprintf( out, "<t p=\"%s\" evidence=\"%s\" run=\"%s\"/>", ex( ing.files[gate.fileId] ).c_str(), gate.evidence,
+                      ex( gateRunners.commandForScript( gate.fileId ) ).c_str() );
     }
     walkUntestedRows( ing, r, uw, [ & ]( std::size_t, const Symbol& s, const std::string& path )
     {
@@ -759,18 +774,28 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     char pageJson[ kPageDisclosureCap ];
     pagingDisclosure( pageJson, sizeof( pageJson ), r.untested.size(), uw.end, pageLimit, pageOffset, kJsonPageSyntax );
 
+    const std::size_t testRows = r.tests.size() + r.shellGates.obligations.size();
     std::fprintf( out, "{\"changed\":%u,\"impacted\":%zu,\"tests\":%zu,\"untested\":%zu"
                        ",\"shown_tests\":%zu,\"tests_capped\":false,\"shown_untested\":%zu,\"untested_capped\":%s"
-                       ",\"script_gates_unmodelled\":%zu%s,\"at\":%s,\"tests_to_run\":[",
-                 r.changedFiles, r.impactedSymbols, r.tests.size(), r.untested.size(),
-                 r.tests.size(), shownRows, shownRows < r.untested.size() ? "true" : "false",
-                 scriptGatesUnmodelledCount( ing ), pageJson, atJson.c_str() );
+                       ",\"script_gates_unmodelled\":%zu,\"script_gates_registered\":%zu,\"script_gates_mapped\":%zu"
+                       ",\"script_gates_unresolved_dynamic\":%zu,\"counts_floor\":true%s,\"at\":%s,\"tests_to_run\":[",
+                 r.changedFiles, r.impactedSymbols, testRows, r.untested.size(),
+                 testRows, shownRows, shownRows < r.untested.size() ? "true" : "false",
+                 scriptGatesUnmodelledCount( ing ), r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic,
+                 pageJson, atJson.c_str() );
     const TestRunnerIndex gateRunners( ing );                       // §P11.4, the JSON sibling of the XML run=
     const auto            jesc = []( std::string_view s ) { return jsonStr( s ); };
     for( std::size_t i = 0; i < r.tests.size(); ++i )
     {
         std::fprintf( out, "%s{\"p\":\"%s\"%s}", i == 0 ? "" : ",", jsonStr( ing.files[ r.tests[i] ] ).c_str(),
                       runFieldJson( gateRunners, r.tests[i], jesc ).c_str() );
+    }
+    for( std::size_t i = 0; i < r.shellGates.obligations.size(); ++i )
+    {
+        const ShellGateObligation& gate = r.shellGates.obligations[i];
+        std::fprintf( out, "%s{\"p\":\"%s\",\"evidence\":\"%s\",\"run\":\"%s\"}",
+                      r.tests.empty() && i == 0 ? "" : ",", jsonStr( ing.files[gate.fileId] ).c_str(), gate.evidence,
+                      jsonStr( gateRunners.commandForScript( gate.fileId ) ).c_str() );
     }
     std::fprintf( out, "],\"untested_blast_radius\":[" );
     walkUntestedRows( ing, r, uw, [ & ]( std::size_t i, const Symbol& s, const std::string& path )

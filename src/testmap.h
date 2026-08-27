@@ -25,6 +25,7 @@
 #include "filter.h"       // isTestPath — the ONE test-path convention the whole tool shares
 #include "docparse.h"     // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
 #include "mention.h"      // mention_detail::baseNameOf + stripExt — the ONE basename/stem pair binstale.h/gitmine.h reuse
+#include "infra/namesplit.h" // namesplit::isIdentChar — the canonical ASCII identifier-byte predicate
 
 #include <algorithm>
 #include <string>
@@ -223,6 +224,9 @@ public:
         return cache_.emplace( fileId, derive( fileId ) ).first->second;
     }
 
+    std::string commandForScript( std::uint32_t fileId ) const
+    { return fileId < ing_->files.size() && runnerVerb( ing_->files[fileId] ) != nullptr ? spell( fileId ) : std::string(); }
+
 private:
     // A runner is a script we know how to invoke. A TABLE, not a switch (house style): extension → verb.
     static const char* runnerVerb( std::string_view path ) noexcept
@@ -368,6 +372,206 @@ inline std::size_t scriptGatesUnmodelledCount( const IngestResult& ing )
         }
     }
     return gateCount;
+}
+
+struct ShellGateObligation
+{
+    std::uint32_t fileId = 0;
+    const char*   evidence = nullptr;
+};
+
+struct ShellGateIndex
+{
+    std::vector<ShellGateObligation> obligations;
+    std::size_t                      registered = 0;
+    std::size_t                      mapped = 0;
+    std::size_t                      unresolvedDynamic = 0;
+};
+
+namespace testmap_detail
+{
+
+inline std::string executableShellText( std::string_view source )
+{
+    std::string executable;
+    bool comment = false;
+    for( const char c : source )
+    {
+        if( c == '\n' )
+        {
+            comment = false;
+            executable.push_back( c );
+        }
+        else if( c == '#' )
+        {
+            comment = true;
+        }
+        else if( !comment ) { executable.push_back( c ); }
+    }
+    return executable;
+}
+
+inline std::string_view trimShellSpace( std::string_view value ) noexcept
+{
+    const std::size_t first = value.find_first_not_of( " \t\r" );
+    if( first == std::string_view::npos ) { return {}; }
+    return value.substr( first, value.find_last_not_of( " \t\r" ) - first + 1 );
+}
+
+inline void appendManifestDependencies( std::string_view line, std::vector<std::string>& deps )
+{
+    constexpr std::string_view kMarker = "# RIPWIRE_TEST_DEPS:";
+    line = trimShellSpace( line );
+    if( line.rfind( kMarker, 0 ) != 0 ) { return; }
+    line.remove_prefix( kMarker.size() );
+    for( std::size_t begin = 0; begin <= line.size(); )
+    {
+        const std::size_t comma = line.find( ',', begin );
+        const std::string_view dep = trimShellSpace( line.substr( begin, comma == std::string_view::npos ? line.size() - begin : comma - begin ) );
+        if( !dep.empty() ) { deps.emplace_back( dep ); }
+        if( comma == std::string_view::npos ) { return; }
+        begin = comma + 1;
+    }
+}
+
+inline std::vector<std::string> manifestDependencies( std::string_view source )
+{
+    std::vector<std::string> deps;
+    for( std::size_t begin = 0; begin < source.size(); )
+    {
+        const std::size_t end = source.find( '\n', begin );
+        appendManifestDependencies( source.substr( begin, end == std::string_view::npos ? source.size() - begin : end - begin ), deps );
+        if( end == std::string_view::npos ) { break; }
+        begin = end + 1;
+    }
+    return deps;
+}
+
+inline bool pathLiteralMatches( std::string_view indexedPath, std::string_view literal ) noexcept
+{
+    while( indexedPath.rfind( "./", 0 ) == 0 ) { indexedPath.remove_prefix( 2 ); }
+    while( literal.rfind( "./", 0 ) == 0 ) { literal.remove_prefix( 2 ); }
+    if( literal.find( '/' ) == std::string_view::npos )
+    {
+        return false; // a basename alone is not exact path evidence
+    }
+    if( indexedPath == literal )
+    {
+        return true;
+    }
+    return indexedPath.size() > literal.size() && indexedPath.ends_with( literal ) && indexedPath[indexedPath.size() - literal.size() - 1] == '/';
+}
+
+inline std::vector<std::string> shellTokens( std::string_view executable )
+{
+    std::vector<std::string> tokens;
+    for( std::size_t begin = 0; begin < executable.size(); )
+    {
+        while( begin < executable.size() && executable[begin] != '/' && executable[begin] != '.' && !namesplit::isIdentChar( executable[begin] ) ) { ++begin; }
+        std::size_t end = begin;
+        while( end < executable.size() )
+        {
+            const char c = executable[end];
+            if( c != '/' && c != '.' && c != '-' && !namesplit::isIdentChar( c ) ) { break; }
+            ++end;
+        }
+        if( end > begin ) { tokens.emplace_back( executable.substr( begin, end - begin ) ); }
+        begin = end == begin ? begin + 1 : end;
+    }
+    return tokens;
+}
+
+inline std::vector<std::string> shellPathTokens( std::string_view executable )
+{
+    std::vector<std::string> paths = shellTokens( executable );
+    paths.erase( std::remove_if( paths.begin(), paths.end(), []( const std::string& token ) { return token.find( '/' ) == std::string::npos; } ), paths.end() );
+    return paths;
+}
+
+inline bool dependenciesMatchChanged( const IngestResult& ing, const std::vector<char>& changedFiles,
+                                      const std::vector<std::string>& dependencies ) noexcept
+{
+    for( std::uint32_t f = 0; f < std::uint32_t( ing.files.size() ) && f < changedFiles.size(); ++f )
+    {
+        if( !changedFiles[f] ) { continue; }
+        for( const std::string& dependency : dependencies )
+        {
+            if( pathLiteralMatches( ing.files[f], dependency ) ) { return true; }
+        }
+    }
+    return false;
+}
+
+inline bool dependenciesMapCorpus( const IngestResult& ing, const std::vector<std::string>& dependencies ) noexcept
+{
+    for( const std::string& file : ing.files )
+    {
+        for( const std::string& dependency : dependencies )
+        {
+            if( pathLiteralMatches( file, dependency ) ) { return true; }
+        }
+    }
+    return false;
+}
+
+inline std::vector<std::string> registeredShellTokens( const IngestResult& ing )
+{
+    std::string manifest;
+    for( std::uint32_t f = 0; f < std::uint32_t( ing.files.size() ); ++f )
+    {
+        if( mention_detail::baseNameOf( ing.files[f] ) == "regression.sh" && isTestPath( ing.files[f] ) )
+        {
+            docparse::detail::readWholeFile( diskPath( ing, f ), manifest );
+            break;
+        }
+    }
+    return shellTokens( executableShellText( manifest ) );
+}
+
+inline void addRegisteredShellGate( const IngestResult& ing, const std::vector<char>& changedFiles, std::uint32_t fileId, ShellGateIndex& index )
+{
+    ++index.registered;
+    std::string source;
+    if( !docparse::detail::readWholeFile( diskPath( ing, fileId ), source ) ) { return; }
+    const std::vector<std::string> manifestDeps = manifestDependencies( source );
+    const std::vector<std::string> literalDeps  = shellPathTokens( executableShellText( source ) );
+    const bool manifestMapped = dependenciesMapCorpus( ing, manifestDeps );
+    const bool literalMapped  = dependenciesMapCorpus( ing, literalDeps );
+    if( manifestMapped || literalMapped ) { ++index.mapped; }
+    if( manifestMapped && dependenciesMatchChanged( ing, changedFiles, manifestDeps ) )
+    {
+        index.obligations.push_back( ShellGateObligation{ fileId, "manifest_declared" } );
+    }
+    else if( literalMapped && dependenciesMatchChanged( ing, changedFiles, literalDeps ) )
+    {
+        index.obligations.push_back( ShellGateObligation{ fileId, "script_literal" } );
+    }
+}
+
+} // namespace testmap_detail
+
+inline ShellGateIndex buildShellGateIndex( const IngestResult& ing, const std::vector<char>& changedFiles )
+{
+    using namespace testmap_detail;
+    ShellGateIndex index;
+    const std::vector<std::string> registeredTokens = registeredShellTokens( ing );
+    if( registeredTokens.empty() )
+    {
+        return index;
+    }
+
+    for( std::uint32_t f = 0; f < std::uint32_t( ing.files.size() ); ++f )
+    {
+        const std::string_view path = ing.files[f];
+        if( !isTestPath( path ) || !path.ends_with( ".sh" ) || mention_detail::baseNameOf( path ) == "regression.sh" ) { continue; }
+        const std::string_view stem = mention_detail::stripExt( mention_detail::baseNameOf( path ) );
+        if( std::find( registeredTokens.begin(), registeredTokens.end(), stem ) == registeredTokens.end() ) { continue; }
+        addRegisteredShellGate( ing, changedFiles, f, index );
+    }
+    index.unresolvedDynamic = index.registered - index.mapped;
+    std::sort( index.obligations.begin(), index.obligations.end(), [ & ]( const ShellGateObligation& a, const ShellGateObligation& b )
+               { return ing.files[a.fileId] < ing.files[b.fileId]; } );
+    return index;
 }
 
 }   // namespace rw
