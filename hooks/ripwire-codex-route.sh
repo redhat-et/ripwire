@@ -15,6 +15,9 @@ meter_home()
     [ -n "$meterHome" ] || return 1
     mkdir -p "$meterHome/routing-pending" 2>/dev/null || return 1
     routingLog="$meterHome/routing.jsonl"
+    # A session that ends before two Ripwire calls leaves its pending file behind; expire the strays so
+    # routing-pending/ never accumulates unboundedly. Best-effort, like everything else in the meter.
+    find "$meterHome/routing-pending" -type f -name '*.json' -mtime +7 -delete 2>/dev/null || true
 }
 
 hash_text()
@@ -56,6 +59,9 @@ if [ "${1:-}" = "--observe" ]; then
     adopted=0
     if [ "$tool" = Bash ]; then
         printf '%s' "$command" | grep -Eq -- "(^|[[:space:]])${recommended}(=|[[:space:]]|$)" && adopted=1
+        # observed= must name the verb the adoption verdict was decided on, not whichever modifier flag
+        # happened to come first in the command line (--no-cache before --for read as observed=--no-cache).
+        [ "$adopted" = 1 ] && observed="$recommended"
     elif [ "$observed" = "$recommended" ]; then
         adopted=1
     fi
@@ -118,6 +124,8 @@ if meter_home; then
 fi
 
 [ "$status" = recommend ] || exit 0
-context="Ripwire produced a confidence-gated CLI recommendation before tool selection. Prefer it when it answers the task; continue beyond it when implementation or verification still needs more evidence.\n$route"
+# printf, not an inline \n: inside double quotes the shell keeps \n as two literal characters, and the
+# injected context then carries a visible backslash-n instead of a line break.
+context="$( printf '%s\n%s' 'Ripwire produced a confidence-gated CLI recommendation before tool selection. Prefer it when it answers the task; continue beyond it when implementation or verification still needs more evidence.' "$route" )"
 jq -cn --arg context "$context" \
     '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$context}}' 2>/dev/null || exit 0

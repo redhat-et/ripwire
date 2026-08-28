@@ -36,6 +36,11 @@ printf '%s' "$OUT" | jq -e '.hookSpecificOutput.additionalContext | contains("ta
 printf '%s' "$OUT" | jq -e '.hookSpecificOutput.permissionDecision == null' >/dev/null 2>&1 \
     && ok "prompt router never grants/denies permission" \
     || no "prompt router emitted a permission decision"
+# The preamble/route seam must be a REAL newline. A \n written inside shell double quotes stays two
+# literal characters and Codex renders "...evidence.\n<task-route" — assert the break, refuse the literal.
+printf '%s' "$OUT" | jq -e '.hookSpecificOutput.additionalContext | contains("evidence.\n<task-route") and (contains("\\n") | not)' >/dev/null 2>&1 \
+    && ok "injected context separates preamble and route with a real newline" \
+    || no "injected context carries a literal backslash-n instead of a newline"
 
 QUIET="$( printf '%s\n' "{\"prompt\":\"please abstain\",\"cwd\":\"$TMP/repo\"}" | \
     PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/meter" "$HOOK" )"
@@ -65,7 +70,7 @@ grep -R -q 'SECRET_PROMPT_TEXT' "$TMP/meter/routing-pending" 2>/dev/null \
 for command in 'ripwire . --grep=SECRET_COMMAND_TEXT' 'ripwire . --for=alpha'; do
     payload="$( jq -cn --arg cwd "$TMP/repo" --arg command "$command" \
         '{session_id:"route-test",cwd:$cwd,tool_name:"Bash",tool_input:{command:$command}}' )"
-    printf '%s' "$payload" | PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/meter" RIPWIRE_METER_FIXTURE=1 "$ADAPTER" >/dev/null
+    printf '%s' "$payload" | PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/meter" "$ADAPTER" >/dev/null
 done
 jq -e -s 'any(.[]; .event == "RouteObservation" and .outcome == "continued" and .position == 1 and .observed == "--grep") and
           any(.[]; .event == "RouteObservation" and .outcome == "adopted" and .position == 2 and
@@ -86,7 +91,7 @@ printf '%s\n' "{\"prompt\":\"$PROMPT\",\"cwd\":\"$TMP/repo\",\"session_id\":\"ro
 for command in 'ripwire . --grep=needle' 'ripwire . --impact=alpha'; do
     payload="$( jq -cn --arg cwd "$TMP/repo" --arg command "$command" \
         '{session_id:"route-miss",cwd:$cwd,tool_name:"Bash",tool_input:{command:$command}}' )"
-    printf '%s' "$payload" | PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/meter" RIPWIRE_METER_FIXTURE=1 "$ADAPTER" >/dev/null
+    printf '%s' "$payload" | PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/meter" "$ADAPTER" >/dev/null
 done
 REPORT="$( python3 "$ROOT/bench/routing_report.py" "$LOG" --json 2>/dev/null )"; RRC=$?
 printf '%s' "$REPORT" | jq -e '.schema == "ripwire.routing-feedback/v1" and .decisions == 3 and
@@ -95,6 +100,17 @@ printf '%s' "$REPORT" | jq -e '.schema == "ripwire.routing-feedback/v1" and .dec
     (.intents[] | select(.intent == "understand-symbol") | .completed == 2 and .adopted == 1)' >/dev/null 2>&1 \
     && [ "$RRC" = 0 ] && ok "routing report exposes honest aggregate and per-intent feedback" \
     || no "routing report is missing or misstates the adoption evidence: $REPORT"
+
+# observed= must name the verb the adoption verdict was decided on. A modifier flag ahead of the
+# recommended verb (--no-cache before --for) must not become the observed verb on an adopted row.
+printf '%s\n' "{\"prompt\":\"$PROMPT\",\"cwd\":\"$TMP/repo\",\"session_id\":\"route-mod\"}" | \
+    PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/meter" "$HOOK" >/dev/null
+payload="$( jq -cn --arg cwd "$TMP/repo" --arg command 'ripwire . --no-cache --for=alpha' \
+    '{session_id:"route-mod",cwd:$cwd,tool_name:"Bash",tool_input:{command:$command}}' )"
+printf '%s' "$payload" | PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/meter" "$ADAPTER" >/dev/null
+jq -e -s 'any(.[]; .event == "RouteObservation" and .outcome == "adopted" and .position == 1 and .observed == "--for")' "$LOG" >/dev/null 2>&1 \
+    && ok "adopted rows record the recommended verb as observed, not a leading modifier flag" \
+    || no "adopted row recorded a modifier flag as the observed verb"
 
 OFF="$( printf '%s\n' "{\"prompt\":\"$PROMPT\",\"cwd\":\"$TMP/repo\",\"session_id\":\"route-off\"}" | \
     PATH="$TMP/bin:$PATH" RIPWIRE_HOME="$TMP/off" RIPWIRE_ROUTE_METER=0 "$HOOK" )"

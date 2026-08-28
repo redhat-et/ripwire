@@ -132,7 +132,7 @@ install_codex_hook()
             .hooks.UserPromptSubmit |= map(if any(.hooks[]?; .command == $rcmd) then .matcher = ".*" else . end)
         else
             .hooks.UserPromptSubmit += [{ matcher: ".*", hooks: [{ type: "command", command: $rcmd,
-                timeout: 3, statusMessage: "Selecting a focused Ripwire CLI route",
+                timeout: 6, statusMessage: "Selecting a focused Ripwire CLI route",
                 additionalContextLimit: 3000 }] }]
         end
     ' "$settings" >"$tmp" && mv "$tmp" "$settings"
