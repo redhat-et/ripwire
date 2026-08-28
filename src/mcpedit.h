@@ -53,6 +53,16 @@ namespace mcpedit
         int         errCode = -32602;
         std::string message;      // on error
         std::string resultJson;   // on success (a JSON object: applied span + old index stamp + refresh note)
+
+        // A4: the RESOLVED identity of what was edited, so a caller can print advice that actually runs.
+        // The CLI used to echo the caller's own `sym` argument back into "verify with --edit-check=<sym>",
+        // which is wrong twice: --edit-check does not accept a sym# handle at all (so the printed command
+        // always failed after a handle-addressed edit), and a bare name disambiguated by --edit-target-file
+        // would send --edit-check to a DIFFERENT same-named definition. These two fields are what the engine
+        // actually wrote to; they are already inside resultJson, and are surfaced here so no caller has to
+        // parse its own receipt back out to say something true.
+        std::string symbol;       // on success — the resolved definition name
+        std::string file;         // on success — the indexed identity of the file that was written
     };
 
     // the K symbol names closest to `name` by a cheap edit-distance-ish score, for the "0 matches" hint. We
@@ -664,7 +674,9 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     const char* opName = ( op == mcpedit::Op::ReplaceBody ) ? "replace_symbol_body"
                        : ( op == mcpedit::Op::InsertBefore ) ? "insert_before_symbol"
                        : "insert_after_symbol";
-    oc.ok = true;
+    oc.ok     = true;
+    oc.symbol = s.name;
+    oc.file   = path;
     oc.resultJson = std::string( "{\"applied\":\"" ) + opName
                   + "\",\"symbol\":\"" + mcpdetail::jsonEscape( s.name )
                   + mcpedit::handleReceiptField( target.byHandle, symbol )
