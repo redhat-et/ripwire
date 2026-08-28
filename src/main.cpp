@@ -35,6 +35,7 @@
                                    //   BEFORE mcp.h so mcpverbs.h's explore verb can reach packTaskPartitionText (same rule packtask.h follows).
 #include "tracelocus.h"            // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
 #include "editcheck.h"             // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
+#include "slice.h"                 // lane/paper-slice: --slice=SYM[:VAR] — the ARISE-motivated def-use slice core (sliceBundleText)
 #include "mcp.h"
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
 #include "editplan.h"              // CLI-first versioned multi-edit transactions
@@ -7580,6 +7581,150 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     return 0;
 }
 
+// ── lane/paper-slice: --slice=SYM[:VAR] — statement-level def-use rows as a queryable primitive ─────────
+//
+// MOTIVATION: ARISE (arXiv:2605.03117) measured statement-level definition-use edges exposed as a
+// queryable agent primitive at +17pp Function Recall@1 on SWE-bench Lite; this is the bounded v1
+// (NAME-BASED, intra-procedural, one uniquely-resolved definition — src/slice.h owns the contract and
+// its stated limits).
+//
+// SPEC GRAMMAR — two-phase, deterministic: the WHOLE spec is tried as a symbol selector first (bare
+// --slice=SYM inventory; this is also what lets a canonical id containing "::" through unsplit), and
+// only when that matches nothing is the tail after the LAST ':' read as VAR with the head as the
+// selector (--slice=SYM:VAR / --slice=file:SYM:VAR). The refusal for a total miss names BOTH readings,
+// because either half can be the fault.
+//
+// §A6a like --edit-check: a selector matching more than ONE definition is REFUSED with the spellings
+// that pick one — a slice of "some overload" is an answer about a body the caller may never have meant,
+// worse than no answer. editCheckGroups supplies the spellings so the two verbs cannot drift.
+std::optional<int> runSlice( const MainDispatch& d )
+{
+    using namespace rw;
+    const Config&       cfg = d.cfg;
+    const IngestResult& ing = d.ing;
+
+    if( cfg.sliceSpec.empty() )
+    {
+        return std::nullopt;
+    }
+    if( d.multiRoot )
+    {
+        std::fprintf( stderr, "ripwire: --slice is single-root only (it re-parses the definition's on-disk file, which a merged "
+                              "multi-root graph cannot address unambiguously) — run it per root\n" );
+        return 1;
+    }
+
+    // ── the two-phase spec split ───────────────────────────────────────────────────────────────────────
+    std::string_view    selector = cfg.sliceSpec;
+    std::string_view    varName;
+    std::vector<NodeId> matches  = resolveAllByNameQualified( ing, selector );
+    if( matches.empty() )
+    {
+        const std::size_t lastColon = cfg.sliceSpec.rfind( ':' );
+        if( lastColon != std::string_view::npos && lastColon > 0 && lastColon + 1 < cfg.sliceSpec.size() )
+        {
+            selector = cfg.sliceSpec.substr( 0, lastColon );
+            varName  = cfg.sliceSpec.substr( lastColon + 1 );
+            matches  = resolveAllByNameQualified( ing, selector );
+        }
+    }
+    if( matches.empty() )
+    {
+        // both readings missed — refuse in the --expand compose shape, naming the grammar so the caller
+        // knows the VAR half was tried too (the shared clause diagnoses the selector's own fault line)
+        std::fprintf( stderr, "ripwire: --slice=%s matched no symbol (tried the whole spec as a selector, then HEAD:VAR)%s\n",
+                      std::string( cfg.sliceSpec ).c_str(), rw::selectorFaultClause( ing, selector, "--slice=" ).c_str() );
+        return 1;
+    }
+
+    // ── §A6a ambiguity refusal ─────────────────────────────────────────────────────────────────────────
+    if( matches.size() > 1 )
+    {
+        const std::vector<EditCheckGroup> groups = editCheckGroups( ing, d.g, matches );
+        std::string spellings;
+        const std::size_t shownCount = std::min<std::size_t>( groups.size(), kEditCheckSpellingsShown );
+        for( std::size_t groupIndex = 0; groupIndex < shownCount; ++groupIndex )
+        {
+            spellings += ( groupIndex ? ", " : "" ) + groups[ groupIndex ].spelling;
+        }
+        if( groups.size() > shownCount )
+        {
+            spellings += " (+" + std::to_string( groups.size() - shownCount ) + " more)";
+        }
+        const std::string varSuffix = varName.empty() ? std::string() : ( ":" + std::string( varName ) );
+        std::fprintf( stderr, "ripwire: --slice: '%s' matches %zu definitions — a slice reads exactly ONE body, so an ambiguous "
+                              "selector is refused, never silently narrowed. Qualify one: %s — e.g. --slice=%s%s%s\n",
+                      std::string( selector ).c_str(), matches.size(), spellings.c_str(), groups[0].spelling.c_str(), varSuffix.c_str(),
+                      groups.size() == 1 ? " (same-spelling overloads cannot be separated yet)" : "" );
+        return 1;
+    }
+
+    const NodeId  focus = matches[0];
+    const Symbol& sym   = ing.symbols[ focus ];
+
+    // ── served-language gate — an honest refusal, never an empty success ───────────────────────────────
+    const slicev::SliceFam fam = slicev::sliceFamilyOf( sym.lang );
+    if( fam == slicev::SliceFam::None )
+    {
+        std::fprintf( stderr, "ripwire: --slice: slice not served for %s yet (served: %s) — the def-use classification is a "
+                              "verified per-grammar parent-kind read, and %s's has not been built\n",
+                      langTag( sym.lang ), slicev::kSliceServedList, langTag( sym.lang ) );
+        return 1;
+    }
+
+    // ── read + re-parse the ONE file holding the definition ────────────────────────────────────────────
+    const std::string& path = diskPath( ing, sym.fileId );
+    std::string        src;
+    if( std::FILE* in = std::fopen( path.c_str(), "rb" ) )
+    {
+        char        buf[ 4096 ];
+        std::size_t n = 0;
+        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+        {
+            src.append( buf, n );
+        }
+        std::fclose( in );
+    }
+    else
+    {
+        DEGRADED_PATH_ALERT( "slice: definition file unreadable" );
+        std::fprintf( stderr, "ripwire: --slice: cannot read %s — the slice re-parses the definition's file and has nothing to walk\n", path.c_str() );
+        return 1;
+    }
+
+    const ::TSLanguage*     grammar = sliceGrammarForFile( path );
+    const slicev::SliceScan scan    = slicev::sliceScanDefinition( src, sym, fam, grammar, varName );
+    if( !scan.parseOk )
+    {
+        DEGRADED_PATH_ALERT( "slice: definition re-parse failed" );
+        std::fprintf( stderr, "ripwire: --slice: could not re-parse %s (grammar missing, or the indexed span no longer fits the "
+                              "file — a stale index; re-run without --no-reindex or check --doctor)\n", path.c_str() );
+        return 1;
+    }
+
+    // ── unknown-var refusal, offering the sliceable locals ─────────────────────────────────────────────
+    if( !varName.empty() && scan.occ.empty() )
+    {
+        std::string locals;
+        std::vector<slicev::SliceLocal> ordered = scan.locals;
+        std::sort( ordered.begin(), ordered.end(), []( const slicev::SliceLocal& a, const slicev::SliceLocal& b )
+                   { return a.line != b.line ? a.line < b.line : a.name < b.name; } );
+        for( std::size_t localIndex = 0; localIndex < ordered.size(); ++localIndex )
+        {
+            locals += ( localIndex ? ", " : "" ) + ordered[ localIndex ].name;
+        }
+        std::fprintf( stderr, "ripwire: --slice: no occurrence of '%s' in %s — sliceable locals: %s (bare --slice=%s lists them "
+                              "with first-def lines)\n",
+                      std::string( varName ).c_str(), sym.name.c_str(), locals.empty() ? "(none found)" : locals.c_str(),
+                      std::string( selector ).c_str() );
+        return 1;
+    }
+
+    const std::string xml = slicev::sliceBundleText( ing, d.root, focus, varName, scan, src, d.redactPtr );
+    std::fwrite( xml.data(), 1, xml.size(), stdout );
+    return 0;
+}
+
 // ── G4 VERIFY-A-CLAIM: --verify="CLAIM" — one structured claim, a three-valued verdict, evidence inline ──
 //
 // The claim grammar and the verdict/limit vocabularies live in src/verify.h; test/verifycheck.sh pins the
@@ -14689,6 +14834,7 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
         { "--naming-calibration", c.namingCalibration     }, { "--naming-consistency", c.namingConsistency },
         { "--dead-code",         c.deadCode               },   // the row order IS the dispatch order (test/dispatchordercheck.sh pins every pair) — never re-pair for layout
         { "--edit-check",       !c.editCheckSym.empty()   }, { "--safe-delete",  !c.safeDeleteSym.empty()  },
+        { "--slice",            !c.sliceSpec.empty()      },   // lane/paper-slice: dispatches right after --safe-delete (runSlice)
         { "--eval",              c.eval                   },
         { "--eval-retrieval",    c.evalRetrieval          }, { "--eval-skills",  !c.evalSkills.empty()    },
         { "--callers",          !c.callers.empty()        }, { "--callees",      !c.callees.empty()       },
@@ -16318,6 +16464,13 @@ int main( int argc, char** argv )
     // lane/safe-delete: dispatches right after --edit-check — the same "one already-resolved SYM, one
     // composed answer" family, outside the pinned nine navigate verbs (test/dispatchordercheck.sh).
     if( std::optional<int> handled = runSafeDelete( dsp ) )
+    {
+        return *handled;
+    }
+
+    // lane/paper-slice: same family, right after --safe-delete — the row order in scanReportVerbPrecedence
+    // mirrors this seam (test/dispatchordercheck.sh pins pairs by that table).
+    if( std::optional<int> handled = runSlice( dsp ) )
     {
         return *handled;
     }

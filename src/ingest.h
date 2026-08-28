@@ -21,6 +21,13 @@
 #include <span>          // spanTiersOfFiles takes a VIEW of paths — the caller owns the storage
 #include <string_view>
 
+// GLOBAL-scope forward declaration, deliberately OUTSIDE namespace rw — the hazard the pattern-surface
+// note below records is a `struct TSLanguage;` INSIDE namespace rw (it would declare rw::TSLanguage and
+// shadow the real global one for every later include). At global scope it is the same incomplete type
+// tree_sitter/api.h completes, so sliceGrammarForFile below can hand a grammar pointer out of
+// kLangTable without this header growing a tree-sitter include.
+struct TSLanguage;
+
 namespace rw
 {
 
@@ -338,6 +345,13 @@ namespace pattern { struct PatternProgramSet; struct GrammarRow; }
 // Built in ingest.cpp rather than in pattern.h because the extension-to-grammar mapping is ingest's
 // fact, and a second copy of it is exactly the drift CONTRIBUTING's declarative-table rule prevents.
 std::vector<pattern::GrammarRow> supportedPatternGrammars();
+
+// --slice (lane/paper-slice): the grammar object for ONE file path (extension-mapped, the crawl's own
+// lowerExtensionOf + kLangTable rule), for a verb-time re-parse of a single definition. Same "ingest owns
+// the extension→grammar fact" rationale as supportedPatternGrammars above — slice.h must never grow a
+// second copy of kLangTable. nullptr when the extension has no grammar (the caller refuses, never
+// guesses). The ::TSLanguage spelling rides the global-scope forward declaration at the top of this header.
+const ::TSLanguage* sliceGrammarForFile( std::string_view path );
 
 // §L3 applicability, in the pattern surface's own terms, counted per grammar OBJECT — the same
 // extension-based (never content-sniffed) convention computeGrammarDisclosure uses for --match, so
