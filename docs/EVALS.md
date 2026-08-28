@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 462 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 463 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4416,7 +4416,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **462 gate scripts**, all of which exist on disk.
+naming **463 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5224,7 +5224,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 462. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 463. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -6477,3 +6477,24 @@ going ccx 1 → 18 beside a same-named scope-less neighbour at ccx 23 reported `
 this change and is reported and located at the right file after it. Arm (F) pins that `canonicalId` did
 not move — scope-less symbols still emit no `id=` — which is what keeps the +26.4% map inflation off the
 table.
+
+## The paper-shape lane (2026-08-28) — motivation note, result-free
+
+Two changes landed on `lane/paper-shape`, both surfacing, neither measured here (no result is claimed
+and no band was registered — this note records only WHY the shapes exist, so a later round can measure
+against the right question).
+
+**`--compress` composes with the body-serving bundles.** arXiv 2607.09691 (July 2026) measured that,
+once localization is fixed, compressed SOURCE matches whole files for ACTING at roughly a third of the
+tokens — and that signatures/summaries add nothing to acting quality. Read through this tool's serving
+shapes, that says the tokens that matter are the ones spent on SERVED BODIES — `--for`'s terminal
+auto/anchor bundle and `--pack-task`'s bodies section — not on the signature head. So the same
+`compressBody` pass `--expand` already had now composes with bare `--for` (the guard previously
+admitted only `--detail>0`), and every `<bodies>` element discloses the mode as `compress="1"`.
+Flagless output is byte-identical by gate (`test/forcompresscheck.sh`, red-first against `1dc7b01`).
+
+**Ranking-confidence disclosure on `--for`.** arXiv 2607.24882 (Agent Retrieval Bench, July 2026)
+names abstention/confidence as the unsolved retrieval axis: retrievers cannot tell the caller when the
+ranking is not trustworthy. `--for` already computes the relevance-cliff gap statistic (`adaptiveCut`,
+the `--adaptive` lever); the header now states what that statistic already knows — `confidence=` /
+`margin_pct=` as facts with a legend sentence — with no behavior change and no new scorer.
