@@ -4,9 +4,11 @@
 set -u
 
 dir="$( cd "$( dirname "$0" )" && pwd )"
-out="$( "$dir/ripwire-nudge.sh" "$@" )"
+input="$( cat )" || exit 0
+out="$( printf '%s' "$input" | "$dir/ripwire-nudge.sh" "$@" )"
 rc=$?
 [ "$rc" -eq 0 ] || exit "$rc"
+[ "${1:-}" = "--session-start" ] || printf '%s' "$input" | "$dir/ripwire-codex-route.sh" --observe >/dev/null 2>&1 || true
 [ -n "$out" ] || exit 0
 
 if command -v jq >/dev/null 2>&1; then
