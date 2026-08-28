@@ -58,7 +58,11 @@ the table below is what you reach for *instead*.
   `--insert-before-symbol` / `--insert-after-symbol`). It uses ripwire's ambiguity, freshness, symlink,
   mode-preservation and atomic-rename checks, so no preparatory whole-file Read is needed. Add
   `--edit-target-file=PATH` only to disambiguate. If an MCP session is already warm, its same-named edit
-  verbs use the same engine; see ripwire-mcp.
+  verbs use the same engine; see ripwire-mcp. For several edits, put 1–64 operations in one JSON manifest
+  and preflight the whole transaction with `--edit-plan=FILE --dry-run`; use the same plan with `--apply`
+  only after the receipt is right. Every target and payload is checked before the first per-file atomic
+  write, same-file spans may not overlap, and the receipt explicitly discloses that a crash between files
+  is not multi-file atomic.
 - **Do NOT fan reads across several files to learn one thing.** `--pack-task="<task>"` answers in ONE
   budgeted call.
 - **Do NOT hand-translate a stack trace into a search query.** `--from-trace=FILE` takes it verbatim.
@@ -80,12 +84,13 @@ only the files it surfaces.
 | recall what's already known | `ripwire <dir> --recall="<task>"` (docs/plans/memory, full bodies) |
 | who calls / what it calls | `--callers=SYM` · `--callees=SYM` |
 | the recorded uses of a name (read/write/import; a floor — see counts_floor=) | `--uses=SYM` |
-| a literal / regex / code-shape | `--grep=STR` · `--regex=PAT` · `--pattern='foo($X, ...)'` (shape as CODE) · `--match='(<tree-sitter>)'` |
+| a literal / regex / code-shape | `--grep=STR` · `--regex=PAT` · `--pattern='foo($X, ...)'` (shape as CODE) · `--match='(<tree-sitter>)'`. Add `--handles` to grep/regex when the next action is a safe CLI edit: each unambiguous enclosing symbol gets a content-addressed target accepted directly by the edit verbs; ambiguous/uneditable rows say why and mint no unsafe handle. |
 | you HAVE a stack trace / sanitizer report / compiler error | `--from-trace=FILE` (`-`=stdin) — pipe the raw text in, don't hand-translate frames into a query |
 | a question the fixed verbs don't have | `--graph-query='and(callers(name("X"),2),kind(all,fn))'` |
 | ONE symbol in full | `--expand=SYM` (body + inline callee sigs) — not its whole file. Add `--compress` for ~20-35% off the body |
 | signatures only | `--pack-signatures` (bodies already elided — `--compress` is a no-op here; it only affects `--expand`/`--outline`) |
 | a FLAT-LIST verb's output, cheaper | `--format=columnar` on `--callers`/`--callees`/`--uses`/`--impact`/`--pr-context` — a `<paths>` table + parallel name/line/kind arrays instead of repeated per-row markup, ~50%+ fewer tokens, same data. The map itself is unaffected — this only reshapes the flat-list verbs. |
+| `--for`/grep/regex schema prose is already known | `--legend=compact` — keep the evidence rows and emit a versioned schema id instead of repeating the full legend. Default/`--legend=full` remains byte-compatible; compact is for a consumer that already knows that schema version. |
 | `--for`/`--query` returning more than you need | `--adaptive` — cuts the ranked result at the relevance CLIFF (largest relative score gap) instead of a fixed top-k; a sharp query returns few, a flat/broad one still hits the ceiling. Prints `[adaptive: kept K of N ...]` so you can see the cut. |
 | readable bodies for ONLY the relevant head of `--for` | `--detail=N` — full bodies for the top-N ranked symbols + signatures for the rest, in ONE call (measured +63% tokens for the 3 relevant heads vs +355% for all-bodies). Spend body detail on the head the rank identifies; composes with `--max-tokens` (bounds the bodies) and `--adaptive`. |
 | SEVERAL lookups a task needs at once, in one shot | `--batch=FILE` (`-`=stdin): newline `verb:arg` sub-queries (`for`/`grep`/`impact`/`uses`/`callers`/`callees`/`mentions`/…) answered in ONE deduped `<batch>` — the deterministic one-turn context sweep. Identical payloads collapse to `<dup-of q="i"/>` so a symbol surfaced by two sub-queries is emitted once. The MCP `batch` verb is the round-trip-saving form for agents. |

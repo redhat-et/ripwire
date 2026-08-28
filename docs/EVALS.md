@@ -1372,6 +1372,17 @@ the existing mining-pass window instrument, never a bespoke grader. Episodes whe
 abstained are counted separately (an abstention adopted-as-stop is a different outcome from a
 recommendation ignored) and do not enter the adoption denominator.
 
+**Operational feedback instrument, shipped 2026-08-28.** The Codex `UserPromptSubmit` hook now
+keeps a short-lived pending recommendation keyed by a checksum of the session id; its existing
+`PreToolUse` adapter records only the next two Ripwire verb names and closes the row as `adopted` or
+`missed`. `~/.ripwire/routing.jsonl` stores prompt/session checksums, prompt byte count, intent,
+recommended verb, observed verb, ordinal and outcome — never prompt text or a full shell command.
+`python3 bench/routing_report.py [LOG] [--json]` reports the same completed-route denominator overall
+and by intent, and labels fewer than 30 completed routes `underpowered`. This is a local, faster
+readout of the pre-registered metric, not a replacement definition or a task-success claim. Setting
+`RIPWIRE_ROUTE_METER=0` disables both the durable rows and the short-lived pending state without
+disabling advisory routing.
+
 **Band, pre-registered.** Band SHAPE is public; LEVELS resolve in the operator-local registration
 ledger, recorded there before the post-deploy half is read (the telemetry rule: this document
 carries the mechanism and the band shape only). Minimum data: ≥ 30 post-deploy episodes containing
