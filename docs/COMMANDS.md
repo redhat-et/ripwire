@@ -2182,11 +2182,11 @@ RELATIVE (matched against the indexed spelling) or ABSOLUTE (matched against the
 
 **Answers:** the plan's explicit mode: --dry-run preflights and prints the receipt without writing, --apply commits;
 
-exactly one of the two is required. Payload paths are relative to the plan file. Every target/payload/span is preflighted before any write; overlaps refuse. Apply holds sorted per-file locks, rechecks freshness, and atomically renames each file. Prior files roll back on an ordinary later write failure; a crash between file renames remains a disclosed limit.
+exactly one of the two is required. Payload paths are relative to the plan file. Every target/payload/span is preflighted before any write; overlaps refuse. Apply holds sorted per-file locks and atomically renames each file, re-verifying EACH file's bytes immediately before ITS OWN write (recheck_before_each_write in the receipt) so a non-cooperating external writer is detected rather than clobbered. Prior files roll back on a later write failure or such a detection; the message says which happened and how many files it restored. A crash between file renames remains a disclosed limit.
 
 **Caveats (stated by the binary):**
 
-- a crash between file renames remains a disclosed limit.
+- A crash between file renames remains a disclosed limit.
 
 ### `--safe-delete=SYM`
 
