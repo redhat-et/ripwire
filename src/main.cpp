@@ -15304,6 +15304,15 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
                       payload.size(), cfg.maxFileBytes );
         return 1;
     }
+    // A1: the THIRD arm of the payload gate, beside empty and oversize. The engine refuses this too
+    // (mcpedit::kBinaryPayloadRefusal, which is what covers MCP), but the CLI arm names the FLAG the bytes
+    // arrived through — the agent's next move is to fix that file or that pipe, not the edit engine.
+    if( rw::looksBinary( payload ) )
+    {
+        std::fprintf( stderr, "ripwire: --edit-payload %.*s\n",
+                      int( rw::mcpedit::kBinaryPayloadRefusal.size() ), rw::mcpedit::kBinaryPayloadRefusal.data() );
+        return 1;
+    }
 
     const rw::mcpedit::Op op = !cfg.replaceSymbolBody.empty() ? rw::mcpedit::Op::ReplaceBody
                                  : !cfg.insertBeforeSymbol.empty() ? rw::mcpedit::Op::InsertBefore
@@ -15320,8 +15329,12 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
 
     std::fputs( outcome.resultJson.c_str(), stdout );
     std::fputc( '\n', stdout );
-    std::fprintf( stderr, "ripwire edit: applied atomically; verify with --edit-check=%.*s, then run --affected on the receipt's file\n",
-                  int( sym.size() ), sym.data() );
+    // A4: print the RESOLVED file:symbol, never the caller's own argument. `sym` may be a sym# handle, which
+    // --edit-check does not accept — so the printed command used to fail every time after a handle-addressed
+    // edit — and a bare name narrowed by --edit-target-file would point --edit-check at a different
+    // same-named definition. Both follow-ups are now spelled out concretely enough to paste.
+    std::fprintf( stderr, "ripwire edit: applied atomically; verify with --edit-check=%s:%s, then --affected=%s\n",
+                  outcome.file.c_str(), outcome.symbol.c_str(), outcome.file.c_str() );
     return 0;
 }
 
