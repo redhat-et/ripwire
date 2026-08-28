@@ -26,6 +26,11 @@
 #       built from a capture (and a generator variant) that were never committed — (B) compares flag
 #       NAME sets, not content — so the next honest regen silently deleted sample content. Content
 #       that cannot be reproduced from the committed tree is content that is already lost
+#   (H) ENTRY-RECOGNITION CONTRACT — the one thing (A)-(G) structurally cannot see. A flag whose
+#       --help line parse_help fails to recognize vanishes from BOTH sides of arm (B)'s comparison at
+#       once (both derive from parse_help), so the sets stay equal and (B) stays green while the flag
+#       is absent from the shipped document. This arm imports parse_help and judges it directly,
+#       against a pinned ledger of the losses that already exist plus synthetic seam fixtures
 #
 # Usage:  bash test/docscommandscheck.sh      [RIPWIRE_BIN=path/to/binary]
 # Exit:   0 = clean · 1 = at least one arm failed · 2 = usage / missing prerequisite
@@ -220,6 +225,122 @@ else
     no "(G) docs/COMMANDS.md does NOT match a regeneration from the newest capture in the tree — the doc was built from a capture or generator that is not committed, or moved without a regen. First differing lines:"
     diff "$DOC" "$TMP/regen.md" | head -12 | sed 's/^/          /'
 fi
+
+# ── (H) ENTRY-RECOGNITION CONTRACT — the generator's glue, unit-tested against parse_help itself ──
+# The failure this arm exists to catch SHIPPED ONCE ALREADY, and was hand-patched one commit before
+# this arm was written (658c440, which fixed the offending seams in src/cli.h and regenerated
+# docs/COMMANDS.md but touched neither the generator nor this gate — so nothing stops the next one).
+#
+# docs_commands_build.parse_help recognizes a flag entry only at "flag + TWO OR MORE spaces" (or
+# end-of-line). A line whose flag is separated from its prose by a SINGLE space does not match; it then
+# falls through and is appended as continuation prose onto the PREVIOUS entry, or — if it is the first
+# entry in its section — is dropped outright. Either way the flag vanishes from `sections`: silently,
+# no error, exit 0.
+#
+# Arms (A)-(G) cannot see this. Arm (B) is the drift check, and BOTH sides of its comparison derive
+# from parse_help: `binary_flags()` reads the parsed sections, and `documented_flags()` reads the
+# `### ` headings of a document that parse_help itself wrote. A flag the parser loses disappears from
+# both sides at once, so the sets stay equal and (B) is green. Verified at 1dc7b01: parse_help yields
+# 142 flags, COMMANDS.md's headings yield the same 142, and twelve real flags are in NEITHER.
+#
+# THE LEDGER. Twelve flags are lost by the parser at 1dc7b01 — including the flagship verbs
+# --merge-scout, --note-add and --plan-lanes, and -h/-v themselves. Fixing that is a parser redesign
+# (the shapes involved are not one bug: a single-space seam, a space INSIDE the value spec
+# --note-add="TARGET: text", and two flags sharing one line --limit=N --offset=M), and it rewrites
+# docs/COMMANDS.md by ~13 entries. So this arm does what --arch --baseline does with layering debt: it
+# PINS the known loss set and gates every change to it. A THIRTEENTH loss — the 658c440 bug happening
+# again — is red immediately. A loss that gets FIXED is also red, so the ledger can only shrink
+# deliberately, in the same commit as the fix, and can never quietly outlive the defect it records.
+# The lost flags are printed on every run rather than merely counted: a number nobody can read is not
+# a disclosure.
+cat > "$TMP/entryarm.py" <<'PY'
+import os, re, subprocess, sys
+
+ROOT, BIN = sys.argv[1], sys.argv[2]
+sys.path.insert( 0, os.path.join( ROOT, 'docs' ) )
+import docs_commands_build as gen
+
+bad = 0
+def ok( m ): print( "  PASS  %s" % m )
+def no( m ):
+    global bad; bad = 1; print( "  FAIL  %s" % m )
+
+# KNOWN-LOST at 1dc7b01. Shrink this — never grow it — and only in the commit that fixes the parser.
+LEDGER = [ '--ack-only', '--and', '--grep-context', '--limit', '--lint-ignore', '--lint-select',
+           '--merge-scout', '--not', '--note-add', '--plan-lanes', '-h', '-v' ]
+
+# Identify CANDIDATE entry lines independently of the contract under test. This grabs only the leading
+# dash token so a candidate can be named; it deliberately does NOT restate parse_help's own entry
+# pattern (arm (E)'s precedent: a gate that re-spells its subject's regex tests its own copy).
+LEAD = re.compile( r'^ {4,6}(-\S*)' )
+
+def lost_flags( helpText ):
+    """Flags that appear at entry indent in helpText but never reach parse_help's flag set."""
+    _pre, sections = gen.parse_help( helpText )
+    known = gen.binary_flags( sections )
+    out = []
+    for line in helpText.split( '\n' ):
+        m = LEAD.match( line )
+        if not m:
+            continue
+        flags = gen.normalize_flags( m.group( 1 ) )
+        if flags and flags[ 0 ] not in known and flags[ 0 ] not in out:
+            out.append( flags[ 0 ] )
+    return out
+
+# ── (H1) the ledger, against the real binary ──────────────────────────────────────────────────────
+helpText = subprocess.run( [ BIN, '--help' ], capture_output = True, text = True, timeout = 120 ).stdout
+live = sorted( lost_flags( helpText ) )
+pinned = sorted( LEDGER )
+newLoss = [ f for f in live if f not in pinned ]
+rescued = [ f for f in pinned if f not in live ]
+if newLoss:
+    no( "(H1) %d flag(s) newly vanish inside docs_commands_build.parse_help and will be ABSENT from "
+        "docs/COMMANDS.md with no error and exit 0: %s" % ( len( newLoss ), ", ".join( newLoss ) ) )
+    print( "          the flag's --help line separates it from its prose by a single space, or puts a "
+           "space inside its value spec, or shares the line with a second flag." )
+    print( "          Fix the seam in src/cli.h (two or more spaces before the prose) and regenerate, "
+           "as 658c440 did — do NOT add it to this gate's LEDGER." )
+if rescued:
+    no( "(H1) %d ledger entr%s no longer lost — the parser was fixed but the ledger was not shrunk in "
+        "the same commit: %s" % ( len( rescued ), "y is" if len( rescued ) == 1 else "ies are",
+        ", ".join( rescued ) ) )
+if not newLoss and not rescued:
+    ok( "(H1) parse_help's known loss set is exactly the pinned ledger (%d): %s" % ( len( live ), ", ".join( live ) ) )
+
+# ── (H2) mutation control — prove the detector above can still see a loss, and a non-loss ─────────
+# Positive: a single-space seam must be reported lost. Negative: a well-formed two-space entry must
+# survive as its OWN entry, with its own prose, not glued onto a neighbour. If a future parser fix
+# rescues the single-space shape, THIS ARM GOES RED TOO, in the same run as (H1)'s `rescued` failure —
+# both messages then point at the same commit, which is where the fixture and the ledger get updated.
+FIXTURE = ( "usage: tool <dir>\n"
+            "\n"
+            "  Section\n"
+            "    --foo=X single-space text\n"
+            "    --bar=Y  two-space ok\n" )
+_pre, secs = gen.parse_help( FIXTURE )
+entries = [ e for _t, es in secs for e in es ]
+specs = [ e[ 'spec' ] for e in entries ]
+fixtureLost = lost_flags( FIXTURE )
+
+if '--foo' in fixtureLost:
+    ok( "(H2) mutation control — the single-space seam is detected as a loss (the detector in (H1) is live, not inert)" )
+else:
+    no( "(H2) mutation control — a single-space seam was NOT reported lost. Either the detector stopped "
+        "detecting (arm (H1)'s PASS means nothing), or parse_help now handles the seam — in which case "
+        "shrink the LEDGER to [] and replace this fixture with a shape the parser still cannot read. "
+        "parse_help returned entries: %s" % specs )
+
+barEntry = [ e for e in entries if '--bar' in e[ 'flags' ] ]
+if len( barEntry ) == 1 and barEntry[ 0 ][ 'text' ] == 'two-space ok':
+    ok( "(H2) negative control — a well-formed two-space entry survives as its own entry with its own prose" )
+else:
+    no( "(H2) negative control — a well-formed two-space entry did NOT survive intact; parse_help is "
+        "broken for the shape the whole document depends on. entries: %s" % [ ( e[ 'spec' ], e[ 'text' ] ) for e in entries ] )
+
+sys.exit( bad )
+PY
+if python3 "$TMP/entryarm.py" "$ROOT" "$BIN" 2>&1; then :; else fail=1; fi
 
 if [ "$fail" = 0 ]; then printf 'ALL PASS\n'; else printf 'FAILURES ABOVE\n'; fi
 exit "$fail"
