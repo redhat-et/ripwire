@@ -78,7 +78,12 @@ install_claude_hook()
     echo "  hooks.PreToolUse  += [{ matcher: \"$hookMatcher\", hooks: [{ type: \"command\", command: \"$hookScript\" }] }]"
     echo "  hooks.SessionStart += [{ matcher: \"startup|resume|clear\", hooks: [{ type: \"command\", command: \"$hookScript --session-start\" }] }]"
     echo "  behavior: never blocks/denies/rewrites a tool call; at most one suggestion per session per pattern."
-    echo "  counting: appends one JSONL row per observed call to ~/.ripwire/substitution.jsonl (RIPWIRE_METER=0 opts out)."
+    echo "  counting: appends one JSONL row per observed call to ~/.ripwire/substitution.jsonl, and that row"
+    echo "            carries the RAW file path (Read), RAW grep/glob pattern, or the first 200 B of the RAW"
+    echo "            command (Bash) you just ran, plus the absolute repo path and session id — in cleartext."
+    echo "            Local-only: this file is never transmitted anywhere, but it has no automatic retention"
+    echo "            limit and grows for as long as counting stays on. RIPWIRE_METER=0 opts out of counting"
+    echo "            (the nudge itself keeps working). Details: docs/SUBSTITUTION_METER.md."
     echo "  remove:   delete those two entries from $settings (or re-run with the entries already absent)."
 
     tmp="$( mktemp )"
