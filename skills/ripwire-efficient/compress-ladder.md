@@ -20,9 +20,11 @@ handoff/briefing artifact, never for browsing.
 
 ## --compress — the modifier, and its exact scope
 
-`--compress` strips `//` and `/* */` comments and collapses blank runs **in body output from
-`--expand` and `--outline` — nothing else**. It is a no-op on the map, on `--pack-signatures`
-(already body-elided), and on `--pack-top-n` (whole-file packing ignores it). Typical saving:
+`--compress` strips `//` and `/* */` comments and collapses blank runs **in SERVED BODIES**: the
+body output of `--expand`/`--outline`, `--for`'s auto/anchor bundle and `--detail=N` top-N bodies,
+`--pack-task`, `--from-trace`, and `--exemplar` — disclosed per bundle as `compress="1"` on the
+`<bodies>` element. It is a no-op on the map, on `--pack-signatures` (already body-elided), and on
+`--for`'s compact (conceptual) route, which serves no bodies to strip. Typical saving:
 **20–35%** of the body tokens.
 
 ```
