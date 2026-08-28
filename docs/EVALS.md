@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 462 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 464 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4405,6 +4405,60 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
   still **4,087 B** (fixed text, unchanged in size), against a **17,967 B** total on this repo's
   current (smaller) ranked set — the comment-vs-payload ratio the fix targeted still holds.
 
+### `--callers` / `--impact` / `--uses` shared legend, and `--test-gate`'s, terse by contract (lane/fa-legend, 2026-08-28)
+
+**C1 — the three near-duplicate graph-count essays.** Measured on `rootRelPathsLegend`, a real,
+unambiguous, well-connected symbol in `src/graphlegend.h` (**not** `main`, which has 76 in-corpus
+definitions in this tree and collapses the payload). Root cause: `kCallHierarchyLegendOpen`,
+`kImpactLegendOpen`/`kImpactImportTierLegend` and `kUsesLegendOpen` (`src/graphlegend.h`) each carry
+their own hand-written prose, and every one of them pays in full for the shared
+`graphCountDisclosure()` essay (`kGraphCountFloorLegend` + `kCallCountUnitLegend`) — the same ~2.3 KB
+floor-and-unit clause is reused **verbatim across seven call sites** (`--callers`/`--callees`,
+`--uses`, `--impact`, `--edit-check`, `--graph-query`, `--pr-context`), so `CLAUDE.md`'s own
+`--impact` + `--uses` blast-radius pairing pays for it twice back to back.
+
+| argv | total B (before → after) | legend B (before → after) | payload B | legend % (before → after) |
+| --- | ---: | ---: | ---: | ---: |
+| `--callers=rootRelPathsLegend` | 4,474 → 3,643 | 3,179 → 2,348 | 1,295 (unchanged) | 71.1% → 64.5% |
+| `--impact=rootRelPathsLegend` | 6,510 → 5,605 | 3,683 → 2,778 | 2,827 (unchanged) | 56.6% → 49.6% |
+| `--uses=rootRelPathsLegend` | 6,330 → 5,327 | 4,303 → 3,300 | 2,027 (unchanged) | 68.0% → 61.9% |
+
+Every payload byte (the document minus its leading comment run) is **byte-identical before and
+after** — verified by diffing `<callers>…</callers>` / `<impact>…</impact>` / `<uses>…</uses>` (and,
+as collateral verification on the same shared constants, `--callees`, `--graph-query` and `--verify`)
+captured from the pre-fix and post-fix binaries on this repository; only explanatory prose moved,
+never a fact or a row. Two verbs this change also improves as a side effect, not separately audited
+here: `--edit-check` and `--pr-context` (the latter's own legend fell from 91.3% to well under that on
+a representative `--pr-context=HEAD~1` capture).
+
+**Shape chosen: compact the DEFAULT** (the `--quality-panel` shape), not an opt-in `--legend=compact`
+flag — these seven verbs have no compact-legend flag today, and `CLAUDE.md`'s own guidance is to
+prefer compacting the default over adding a flag surface across seven verbs for one fix.
+`test/graphlegendbudgetcheck.sh` red-first-verified against the 1dc7b01 binary (`--callers` 3,179 B >
+2,700 B budget, `--impact` 3,683 B > 3,100 B, `--uses` 4,303 B > 3,600 B — all FAIL) and green at this
+head; `test/legendcoveragecheck.sh` and `test/floormarkcheck.sh` (the exact cross-verb anchors —
+`is a FLOOR, never a total`, `most-vexing-parse`, `COUNTING UNIT`, `graph-query and pr-context counts
+are DISTINCT SYMBOLS`, `pr-context's dependents=`, `map header's edges= is a unit again different —
+distinct (caller,callee) PAIRS`, `not call reach`) both ALL PASS unchanged.
+
+**C2 — `--test-gate`'s legend on an empty diff.** Measured with `--test-gate` on a clean working tree
+(the honest zero case, where the payload is near-zero *by construction*): **1,689 B legend against a
+299 B payload (84.7%)**, root cause `kTestGateLegend` (`src/situ.h:682`). A relative `legend<=payload`
+invariant is the WRONG ratchet here (unlike C1's real row content, an empty diff's payload cannot grow
+to meet it), so `test/testgatelegendbudgetcheck.sh` ratchets the **absolute legend byte count**
+instead, on a fixed `--test-gate=src/model.h` fixture (stable across the caller's own working-tree
+dirtiness): pre-fix **1,689 B**, post-fix **1,332 B** (**−21.1%**, −357 B), payload byte-identical
+(299 B on the empty-diff case; 3,848 B on the `src/model.h` fixture, both before and after). Red-first
+verified against the 1dc7b01 binary (1,689 B > 1,500 B budget — FAIL) and green at this head.
+`test/testgatecheck.sh` arm (g) — the exact §B12.5 cross-verb unit-collision phrases (`UNIT: untested=
+here counts impacted SYMBOLS`, `call EDGES`, `defs a gate lights`) shared with `--seams` and
+`--flip` — ALL PASS unchanged.
+
+**Declined, spec'd as follow-ups (both live in `src/main.cpp`, outside this lane's file scope):**
+`--quality-delta` (7,143 B legend / 2,497 B payload / 74.1%, `src/main.cpp:6129`) and `--safe-delete`
+(4,885 B / 332 B / 93.6%, `src/main.cpp:7528`). The MCP `tools/list` schema (37,925 B/session,
+descriptions 21,172 B, `src/mcp.h`) is larger and riskier and is spec-only, not attempted.
+
 ---
 
 ## 6. Correctness and quality instruments
@@ -4416,7 +4470,7 @@ Two more density-wave fixes, cited by their merge commits, each re-verified at t
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **462 gate scripts**, all of which exist on disk.
+naming **464 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5224,7 +5278,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 462. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 464. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a

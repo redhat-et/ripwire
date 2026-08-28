@@ -679,26 +679,32 @@ inline void walkUntestedRows( const IngestResult& ing, const TestGateResult& r, 
 // limit=N is offered (§A10.1's raise clause, missed on the one verb that CREATES an exit-4 obligation), and
 // script_gates_unmodelled= says what the walk is blind to — verbatim the sentence --affected already prints,
 // because the number and the blindness are the same on both verbs.
+// C2 density fix (lane/fa-legend, 2026-08-28): rewritten from full sentences to terse defined-clauses; no
+// fact was dropped — see test/testgatelegendbudgetcheck.sh's honesty-marker arm. Byte ratchet is ABSOLUTE
+// (never legend<=payload): an empty diff's payload is near-zero by construction, so a relative ratchet would
+// be unsatisfiable on the exact case this verb exists for. The citation/marketing sentence (TDAD-parity,
+// arXiv, the -70% figure) is trimmed to a parenthetical — it motivates the verb, it does not define an
+// attribute, so it carries none of the honesty weight test/legendcoveragecheck.sh checks for. Exact phrases
+// that MUST survive verbatim (test/testgatecheck.sh arm (g)): "UNIT: untested= here counts impacted
+// SYMBOLS", "call EDGES", "defs a gate lights" — the §B12.5 cross-verb unit-collision disclosure this verb
+// shares with --seams and --flip. docs/EVALS.md §5 has the measured before/after byte table.
 inline constexpr const char* kTestGateLegend =
-    "ripwire test-gate (TDAD-parity, arXiv 2603.17973): the tests to run for this change + the "
-    "UNTESTED blast radius. A queryable call-graph+test map cut agent-caused regressions -70% "
-    "(6.08%->1.82%); this gate names the obligations, the agent runs the tests then relies on green. "
-    "exit 4 if tests OR untested is non-empty. TWO INDEPENDENT LISTINGS, each with its own row count: "
-    "shown_tests= counts the <t> tests-to-run rows and shown_untested= counts the <u> blast-radius rows "
-    "(a single shown= could only ever have described one of them). The <t> rows are the COMPLETE obligation "
-    "and are never windowed, so they REPEAT VERBATIM on every page — a walker that concatenates pages must "
-    "take them from one page only; offset=/limit= window the <u> rows alone. The <u> listing shows 25 rows "
-    "by default: raise the default cap with limit=N (offset=M pages). script_gates_unmodelled= is the legacy "
-    "test/*.sh corpus path count. script_gates_registered= counts suite members; script_gates_mapped= counts those "
-    "with exact dependency evidence; script_gates_unresolved_dynamic= is the registered remainder, disclosed rather "
-    "than guessed. Shell <t> rows join tests= only when executable script text contains the changed path "
-    "(evidence=script_literal) or RIPWIRE_TEST_DEPS metadata declares it (evidence=manifest_declared). counts_floor=1 "
-    "keeps these static evidence counts honest about shell expansion and generated paths they cannot resolve. "
+    "ripwire test-gate (TDAD-parity, arXiv 2603.17973, -70% agent-caused regressions): tests to run for this "
+    "change + the UNTESTED blast radius; exit 4 if tests OR untested is non-empty, else run them and rely on "
+    "green. shown_tests=/shown_untested= are TWO INDEPENDENT row counts: the <t> tests-to-run rows and the "
+    "<u> blast-radius rows. The <t> rows are the COMPLETE obligation, never windowed, so they REPEAT "
+    "VERBATIM on every page (concatenate from one page only); offset=/limit= window the <u> rows alone, "
+    "default 25 (raise with limit=N, offset=M pages). script_gates_unmodelled= is the legacy test/*.sh "
+    "corpus path count; script_gates_registered= counts suite members; script_gates_mapped= those with exact "
+    "dependency evidence; script_gates_unresolved_dynamic= is the registered remainder, disclosed rather "
+    "than guessed. Shell <t> rows join tests= only via evidence=script_literal (script text contains the "
+    "changed path) or evidence=manifest_declared (RIPWIRE_TEST_DEPS metadata). counts_floor=1 keeps these "
+    "static evidence counts honest about shell expansion and generated paths they cannot resolve. "
     // §B12.5 — the cross-verb UNIT collision, disclosed on each verb that spells it. Each legend was
     // locally honest and the three numbers are not comparable, which is exactly how a reader gets it wrong.
     "UNIT: untested= here counts impacted SYMBOLS. The seams verb spells untested= over cross-directory "
-    "call EDGES and the flip verb over the defs a gate lights, so the three numbers count three different "
-    "things and must never be compared or summed across verbs. -->";
+    "call EDGES and the flip verb over the defs a gate lights — three different things, never compared or "
+    "summed across verbs. -->";
 
 // Emit the --test-gate report as minified XML (house shape) for an ALREADY-COMPUTED gate result. Deterministic
 // + xmllint-clean; the header counts are always full. §A3a: the <u> untested-row list joins pageview.h's
