@@ -40,3 +40,7 @@ __pycache__/
 # bench/multiswe: downloaded raw Multi-SWE-bench per-repo JSONL (CC0, cachable, but not committed —
 # see bench/multiswe/README.md; dataset.lock is the committed, derived, reproducible artifact)
 /bench/multiswe/.raw-cache/
+
+# external benchmark data (SWE-Explore lane, docs/EVALS.md registration): CC-BY-NC-ND dataset +
+# cloned repo snapshots — local-only, never committed or redistributed
+/bench/external/
