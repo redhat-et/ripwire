@@ -21,6 +21,9 @@ int alphaNode() { return 1; }
 int betaNode() { return alphaNode(); }
 int gammaNode() { return betaNode(); }
 int targetSymbol() { return gammaNode(); }
+int classify() { return targetSymbol(); }
+int report() { return classify(); }
+int summary() { return report(); }
 SRC
 git -C "$REPO" add router.cpp
 git -C "$REPO" commit -qm base
@@ -44,6 +47,28 @@ AQ="$( route "Search for the exact literal 'flag_name' somewhere in the user's c
 case "$AQ" in *'status="recommend"'*'intent="exact-grep"'*'--grep='*'flag_name'*) ok "real quoted literal survives surrounding apostrophes";; *) no "quoted literal lost among apostrophes: $AQ";; esac
 EC="$( route 'I just edited targetSymbol; did I change its contract?' )"
 case "$EC" in *'status="recommend"'*'intent="edit-contract"'*'--edit-check='*'targetSymbol'*) ok "post-edit exact symbol -> --edit-check";; *) no "edit contract route wrong: $EC";; esac
+# ── all-lowercase symbol names are reachable, but only from a symbol SLOT ──────────────────────────────
+# An indexed name with no capital and no separator (`classify`) used to be discarded by a casing filter,
+# so NO symbol-gated route could ever reach it. Casing was a proxy for "is this a symbol mention or just a
+# word"; sentence POSITION is the real discriminator, so these arms assert both directions of it. The two
+# recall arms are red against a pre-fix binary (both abstained, resolved_symbols="0"); the four precision
+# arms are the guard that the relaxation did not buy recall with prose false-positives.
+LW="$( route 'How does classify work?' )"
+case "$LW" in *'status="recommend"'*'intent="understand-symbol"'*'--expand='*'classify'*) ok "lowercase name in an understand slot -> --expand";; *) no "lowercase understand route wrong: $LW";; esac
+LE="$( route 'I just edited classify; did I change its contract?' )"
+case "$LE" in *'status="recommend"'*'intent="edit-contract"'*'--edit-check='*'classify'*) ok "lowercase name in a post-edit slot -> --edit-check";; *) no "lowercase edit-contract route wrong: $LE";; esac
+# Same words, no slot: an ordinary noun phrase must stay unresolved even though `report` IS indexed here.
+LN="$( route 'did I change the report that goes out on Friday?' )"
+case "$LN" in *'--edit-check='*) no "a determiner-led noun phrase minted a symbol route: $LN";; *) ok "prose noun phrase resolves no lowercase symbol";; esac
+LN2="$( route 'how does the report look this quarter?' )"
+case "$LN2" in *'--expand='*) no "a determiner-led noun phrase minted an --expand route: $LN2";; *) ok "prose noun phrase mints no --expand";; esac
+# The stop list keeps the router from arguing with itself: `summary` is indexed, but the router's own
+# intent vocabulary must never double as a symbol mention.
+LS="$( route 'How does classify work? I just edited classify and report and summary too' )"
+case "$LS" in *'--connect='*) no "several lowercase words minted a --connect route: $LS";; *) ok "several lowercase words never mint --connect";; esac
+LC="$( route 'how do classify, report and summary connect?' )"
+case "$LC" in *'--connect='*) no "three lowercase words minted a --connect route: $LC";; *) ok "three lowercase words never satisfy the three-symbol --connect";; esac
+
 T="$( route $'AddressSanitizer: heap-use-after-free\n#0 0x123 in targetSymbol router.cpp:4' )"
 case "$T" in *'status="recommend"'*'intent="trace-debug"'*'--from-trace=-'*) ok "trace shape -> --from-trace=-";; *) no "trace route wrong: $T";; esac
 
