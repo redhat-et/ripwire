@@ -79,8 +79,11 @@ inline Check binaryCheck( const std::string& selfPath )
     const bool haveActive = !active.empty() && ::stat( active.c_str(), &activeSt ) == 0;
     const bool same = haveSelf && haveActive && selfSt.st_dev == activeSt.st_dev && selfSt.st_ino == activeSt.st_ino;
     const bool copied = haveSelf && haveActive && selfSt.st_mtime == activeSt.st_mtime && selfSt.st_size == activeSt.st_size;
+    // `copied` is a HEURISTIC pass (mtime+size equality, the cp -p install shape) — it cannot prove byte
+    // identity, so the row discloses which of the two predicates it passed on rather than folding them.
     Check out{ "codex-binary", haveActive && ( !haveSelf || same || copied ),
-               "on_path=\"" + std::string( haveActive ? "1" : "0" ) + "\" same_file=\"" + ( same ? "1" : "0" ) + "\"" };
+               "on_path=\"" + std::string( haveActive ? "1" : "0" ) + "\" same_file=\"" + ( same ? "1" : "0" )
+               + "\" copied_heuristic=\"" + ( same ? "0" : copied ? "1" : "0" ) + "\"" };
     if( !out.ok ) { out.attrs += " hint=\"reinstall the current build so Codex shell calls and this doctor resolve the same ripwire binary\""; }
     return out;
 }

@@ -59,6 +59,17 @@ PY
     && ok "stdin payload is inserted with the documented newline seam" \
     || no "stdin payload/newline seam is wrong"
 
+W2b="$TMP/after"; cp -R "$TMP/template" "$W2b"
+printf '// tail marker' | "$BIN" "$W2b" --insert-after-symbol=alpha --edit-payload=- >"$TMP/after.out" 2>"$TMP/after.err"
+python3 - "$W2b/a.cpp" <<'PY' >"$TMP/after.check"
+import sys
+s = open(sys.argv[1], encoding="utf-8").read()
+print("OK" if "\n// tail marker" in s and s.index("// tail marker") < s.index("int beta") else "BAD")
+PY
+[ "$( cat "$TMP/after.check" )" = OK ] \
+    && ok "insert-after lands between alpha and beta with the newline seam" \
+    || no "insert-after placement/seam is wrong"
+
 W3="$TMP/amb"; mkdir -p "$W3"
 printf 'int twin(){ return 1; }\n' >"$W3/a.cpp"
 printf 'int twin(){ return 2; }\n' >"$W3/b.cpp"
@@ -75,6 +86,14 @@ grep -q 'ambiguous' "$TMP/amb.err" \
 [ "$BEFORE" = "$( hashcorpus "$W3" )" ] \
     && ok "ambiguity refusal leaves the corpus byte-identical" \
     || no "ambiguity refusal modified the corpus"
+if "$BIN" "$W3" --replace-symbol-body=twin --edit-target-file=b.cpp --edit-payload="$TMP/twin" >"$TMP/amb2.out" 2>"$TMP/amb2.err"; then
+    ok "--edit-target-file resolves the same-named ambiguity"
+else
+    no "--edit-target-file disambiguation failed: $( head -1 "$TMP/amb2.err" )"
+fi
+grep -q 'return 3;' "$W3/b.cpp" && grep -q 'return 1;' "$W3/a.cpp" \
+    && ok "disambiguated edit lands in b.cpp only" \
+    || no "disambiguated edit touched the wrong file"
 
 W4="$TMP/missing"; cp -R "$TMP/template" "$W4"; BEFORE="$( hashcorpus "$W4" )"
 if "$BIN" "$W4" --replace-symbol-body=alpha >"$TMP/missing.out" 2>"$TMP/missing.err"; then
