@@ -209,7 +209,11 @@ inline std::string receipt( const std::vector<Edit>& edits, const std::vector<Fi
     out += apply ? "apply" : "dry-run";
     out += "\",\"edits\":" + std::to_string( edits.size() ) + ",\"files\":" + std::to_string( files.size() );
     if( apply ) { out += ",\"applied\":" + std::to_string( edits.size() ) + ",\"atomic_files\":" + std::to_string( files.size() ); }
-    out += ",\"atomic_scope\":\"per-file\",\"rollback_on_write_error\":true,\"multifile_crash_atomic\":false";
+    // recheck_before_each_write: every file's indexed byte-hash is re-verified immediately before ITS OWN
+    // write, not once for all files up front (A6). It is the observable half of a contract whose race a
+    // deterministic gate cannot stage, so the receipt states it and a gate asserts the statement.
+    out += ",\"atomic_scope\":\"per-file\",\"rollback_on_write_error\":true,\"recheck_before_each_write\":true"
+           ",\"multifile_crash_atomic\":false";
     out += ",\"operations\":[";
     for( std::size_t i = 0; i < edits.size(); ++i )
     {
@@ -234,7 +238,7 @@ inline std::string receipt( const std::vector<Edit>& edits, const std::vector<Fi
 //   failedAt > 0, rolled ok  → N prior files restored, N named as a number, not left to inference.
 //   rollback failed          → the loud one, unchanged: the tree is in a state only a human can judge.
 // `files` is in disk-path order (sorted just above), so failedAt indexes the file that failed.
-inline std::string rollbackMessage( const std::vector<FileStage>& files, std::size_t failedAt )
+inline std::string rollbackMessage( const std::vector<FileStage>& files, std::size_t failedAt, std::string_view cause )
 {
     bool        rollbackOk = true;
     std::size_t undone     = failedAt;
@@ -245,14 +249,14 @@ inline std::string rollbackMessage( const std::vector<FileStage>& files, std::si
     }
     if( !rollbackOk )
     {
-        return "edit-plan commit and rollback failed; inspect files immediately";
+        return std::string( cause ) + " and rollback failed; inspect files immediately";
     }
     const std::string at = failedAt < files.size() ? files[failedAt].identity : std::string( "?" );
     if( failedAt == 0 )
     {
-        return "edit-plan commit failed on the first file ('" + at + "'); no files were written";
+        return std::string( cause ) + " on the first file ('" + at + "'); no files were written";
     }
-    return "edit-plan commit failed at '" + at + "'; " + std::to_string( failedAt ) + " prior file"
+    return std::string( cause ) + " at '" + at + "'; " + std::to_string( failedAt ) + " prior file"
          + ( failedAt == 1 ? "" : "s" ) + " rolled back";
 }
 
@@ -276,9 +280,28 @@ inline Outcome run( const std::string& root, const std::string& planPath, bool a
     std::size_t written = 0;
     for( ; written < files.size(); ++written )
     {
+        // A6: re-hash THIS file immediately before ITS OWN write. The loop above checks every file up front,
+        // which is the clean fast path (nothing is written at all when a plan is already stale) — but on a
+        // K-file plan it left the LAST file's stale-detection window spanning the fsync of every earlier
+        // write. The single-edit path deliberately does the opposite: mcpedit.h re-hashes immediately before
+        // its rename, "collapsing the lost-update window to the tiny gap between this re-hash and the
+        // rename". The plan surface, written later, reintroduced that residual and made it wider. Both
+        // checks now stand: the up-front one to fail clean, this one to close the window.
+        //
+        // WHO THIS IS FOR: not another ripwire process — the advisory EditLocks above already serialize a
+        // cooperating writer. It is the NON-cooperating external writer (an editor or formatter saving
+        // mid-commit) that takes no lock, which is the same residual mcpedit.h names in its own comment.
+        bool              stillFresh = false;
+        const std::string current    = mcpdetail::readFileBytes( files[written].disk, stillFresh );
+        if( !stillFresh || mcpdetail::byteHash( current.data(), current.size() ) != files[written].baseHash )
+        {
+            out.ok      = false;
+            out.message = rollbackMessage( files, written, "edit-plan commit aborted (a concurrent write was detected)" );
+            return out;
+        }
         if( mcpedit::atomicWrite( files[written].disk, files[written].edited ) ) { continue; }
         out.ok      = false;
-        out.message = rollbackMessage( files, written );
+        out.message = rollbackMessage( files, written, "edit-plan commit failed" );
         return out;
     }
     invalidateMcpIndex();
