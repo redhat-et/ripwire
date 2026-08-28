@@ -1334,6 +1334,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               provably incompatible with the NEW arity flagged. A contract is PER DEFINITION, so a SYM\n"
         "                               matching several definition sites REFUSES (exit 1) and lists the file:name spellings that\n"
         "                               pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=.\n"
+        "                               A .ripwire_notes entry targeting SYM (or its file) rides along as a <note> child, the\n"
+        "                               same row shape --for/--expand surface.\n"
         "    --replace-symbol-body=TARGET   atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|-\n"
         "    --insert-before-symbol=TARGET  atomically insert the payload immediately before one uniquely-resolved definition\n"
         "    --insert-after-symbol=TARGET   atomically insert the payload immediately after one uniquely-resolved definition.\n"

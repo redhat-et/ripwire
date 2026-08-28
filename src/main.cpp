@@ -6707,7 +6707,10 @@ std::optional<int> runQualityViews( const MainDispatch& d )
 // editCheckIncompatibleFlags / editCheckCallers / the whole <edit-check> XML assembler) now lives in
 // editcheck.h (L4) as editCheckBundleText() — shared verbatim with the MCP edit_check verb (mcpverbs.h's
 // editCheckText()). This handler only resolves the CLI's symbol spec (the shared resolver + the did-you-mean
-// refusal message + the §A6a ambiguity refusal) and hands the resolved node to that ONE assembler.
+// refusal message + the §A6a ambiguity refusal) and hands the resolved node to that ONE assembler, this round
+// also passing d.notesPtr so a note targeting SYM (or its file) surfaces as a <note> child, the same row
+// grammar --for/--expand already use (editCheckBundleText's `ni` parameter defaults to nullptr, so the MCP
+// call site is untouched and stays notes-inert for now).
 //
 // §A6a — an AMBIGUOUS bare name is REFUSED, not silently narrowed. resolveFocus() answers "the lowest-id
 // definition with this name", which is the right answer for --around's ego graph and the WRONG one here: this
@@ -6748,7 +6751,7 @@ std::optional<int> runEditCheck( const MainDispatch& d )
     }
     const NodeId focus = groups[0].lowestNode;
 
-    const std::string xml = editCheckBundleText( ing, d.g, d.root, cfg.maxFileBytes, cfg.excludes, focus );
+    const std::string xml = editCheckBundleText( ing, d.g, d.root, cfg.maxFileBytes, cfg.excludes, focus, d.notesPtr );
     std::fwrite( xml.data(), 1, xml.size(), stdout );
     return 0;
 }
