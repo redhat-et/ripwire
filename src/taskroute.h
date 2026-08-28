@@ -175,21 +175,34 @@ inline std::string commandWithValue( const std::string& root, const char* flag, 
 }
 
 // A literal-search route needs a literal the user actually supplied, never one inferred from prose.
-// Accept the first balanced single- or double-quoted span; an unmatched/empty quote abstains.
+// Accept the first balanced single-, double- or backtick-quoted span; an unmatched/empty quote abstains.
+// A single quote counts only at a word boundary on BOTH ends — a prose apostrophe ("the user's config
+// and the team's settings") sits inside identifier characters and must never mint a grep literal.
 inline std::string firstQuotedLiteral( std::string_view task )
 {
+    const auto isWordByte = []( char c ) noexcept
+    { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
     for( std::size_t i = 0; i < task.size(); ++i )
     {
         const char quote = task[i];
-        if( quote != '\'' && quote != '"' )
+        if( quote != '\'' && quote != '"' && quote != '`' )
         {
             continue;
         }
-        const std::size_t end = task.find( quote, i + 1 );
-        if( end != std::string_view::npos && end > i + 1 )
+        if( quote == '\'' && i > 0 && isWordByte( task[i - 1] ) )
         {
-            return std::string( task.substr( i + 1, end - i - 1 ) );
+            continue;   // word-internal apostrophe (possessive/contraction), not an opening quote
         }
+        const std::size_t end = task.find( quote, i + 1 );
+        if( end == std::string_view::npos || end == i + 1 )
+        {
+            continue;
+        }
+        if( quote == '\'' && end + 1 < task.size() && isWordByte( task[end + 1] ) )
+        {
+            continue;   // the closing candidate is itself word-internal — same apostrophe class
+        }
+        return std::string( task.substr( i + 1, end - i - 1 ) );
     }
     return {};
 }

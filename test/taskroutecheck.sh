@@ -35,6 +35,13 @@ U="$( route 'Help me understand the implementation of targetSymbol' )"
 case "$U" in *'status="recommend"'*'intent="understand-symbol"'*'--expand='*'targetSymbol'*) ok "one resolved symbol -> --expand";; *) no "one-symbol route wrong: $U";; esac
 XG="$( route 'Find every exact occurrence of "return alphaNode()" with nearby context' )"
 case "$XG" in *'status="recommend"'*'intent="exact-grep"'*'--grep='*'--grep-context=2'*) ok "quoted exact literal -> context-aware --grep";; *) no "exact grep route wrong: $XG";; esac
+# Prose apostrophes are NOT quotes: possessives must never mint a grep literal out of the words between
+# them ("s config and the team" was the pre-fix extraction here), while a REAL quoted literal in the same
+# apostrophe-laden sentence still routes. The mangled-literal assertion is the red-first arm vs a pre-fix binary.
+AP="$( route "Search for the user's config and the team's settings for the flag" )"
+case "$AP" in *'--grep='*'s config'*) no "possessive apostrophes minted a bogus grep literal: $AP";; *) ok "possessive apostrophes mint no grep literal";; esac
+AQ="$( route "Search for the exact literal 'flag_name' somewhere in the user's config handling" )"
+case "$AQ" in *'status="recommend"'*'intent="exact-grep"'*'--grep='*'flag_name'*) ok "real quoted literal survives surrounding apostrophes";; *) no "quoted literal lost among apostrophes: $AQ";; esac
 EC="$( route 'I just edited targetSymbol; did I change its contract?' )"
 case "$EC" in *'status="recommend"'*'intent="edit-contract"'*'--edit-check='*'targetSymbol'*) ok "post-edit exact symbol -> --edit-check";; *) no "edit contract route wrong: $EC";; esac
 T="$( route $'AddressSanitizer: heap-use-after-free\n#0 0x123 in targetSymbol router.cpp:4' )"
