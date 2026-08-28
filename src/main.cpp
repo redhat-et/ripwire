@@ -15329,8 +15329,12 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
 
     std::fputs( outcome.resultJson.c_str(), stdout );
     std::fputc( '\n', stdout );
-    std::fprintf( stderr, "ripwire edit: applied atomically; verify with --edit-check=%.*s, then run --affected on the receipt's file\n",
-                  int( sym.size() ), sym.data() );
+    // A4: print the RESOLVED file:symbol, never the caller's own argument. `sym` may be a sym# handle, which
+    // --edit-check does not accept — so the printed command used to fail every time after a handle-addressed
+    // edit — and a bare name narrowed by --edit-target-file would point --edit-check at a different
+    // same-named definition. Both follow-ups are now spelled out concretely enough to paste.
+    std::fprintf( stderr, "ripwire edit: applied atomically; verify with --edit-check=%s:%s, then --affected=%s\n",
+                  outcome.file.c_str(), outcome.symbol.c_str(), outcome.file.c_str() );
     return 0;
 }
 
