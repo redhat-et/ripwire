@@ -11,6 +11,18 @@ Both jobs ship in one script, are registered by one command, and are opt-in toge
 bash skills/install.sh --hook
 ```
 
+The installer's own banner (printed before it writes anything) discloses this in the same terms as
+this document: `detail` carries a raw file path, raw grep/glob pattern, or the first 200 B of a raw
+Bash command in cleartext, the file stays local and is never transmitted, and there is no automatic
+retention limit — the log grows for as long as counting stays on (`RIPWIRE_METER=0` opts out of
+counting only; the nudge itself keeps working either way). That is a disclosure, not a behavior
+change: nothing about what the meter captures changed here, only what the installer says about it
+up front. An operator who wants less identifying detail in the log today has one option, opt out
+entirely (`RIPWIRE_METER=0`); a `RIPWIRE_METER_REDACT=1` mode — hash `session`/`repo`, and reduce
+`detail` to a basename/verb rather than the full raw value — is a real idea but an **owner decision**,
+not implemented here: it would change the schema and the report scripts that read it, and an active
+measurement window is running against the current schema right now.
+
 ## Why the unit is a tool call
 
 The obvious instrument — run agents on tasks, score task success with and without ripwire — is dead,
