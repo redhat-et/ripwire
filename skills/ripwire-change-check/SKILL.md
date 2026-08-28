@@ -188,7 +188,8 @@ emits a flat `<cand r= s= n= id= k= p= l=>` top-K — identity + score + signatu
     someone depends on" without waiting for a full diff. Reports exactly one of `status="unchanged"` /
     `"new-symbol"` / `"contract-change"` (with `params_was`/`params_now`/`public_was`/`public_now` on the
     latter) vs git HEAD, plus SYM's 1-hop callers with any call-site whose argument count is now provably
-    incompatible flagged `incompatible="1"`. Warm (cache-hit) on ripwire's own tree.
+    incompatible flagged `incompatible="1"`. Warm (cache-hit) on ripwire's own tree. A `.ripwire_notes` entry
+    on SYM (or its file) rides along as a `<note>` child, the same row `--for`/`--expand` surface.
 
 11. **"Can I delete this?" for one symbol** — `ripwire <dir> --safe-delete=SYM` (file:name disambiguates,
     same grammar as `--edit-check`/`--around`/`--lego`). The removal-side sibling of step 10: composes
