@@ -46,7 +46,9 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+TMP="$( mktemp -d )"
+CLEAN=""
+trap 'rm -rf "$TMP" ${CLEAN:+"$CLEAN"}' EXIT
 fail=0
 
 ok(){ printf '  PASS  %s\n' "$*"; }
@@ -55,14 +57,54 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required for the attribute-aware oracle"; exit 2; }
 command -v xmllint >/dev/null 2>&1 || { echo "xmllint required (G4 well-formedness)"; exit 2; }
+command -v git >/dev/null 2>&1 || { echo "git required (the corpus is a clean clone of HEAD)"; exit 2; }
 
 # CORPUS: the ripwire repo itself, invoked with its ABSOLUTE path — the exact shape the defect needs
 # (a relative root, e.g. "ripwire ." or "ripwire test/fixture", already emits "./"-relative paths and
-# never repeats an absolute prefix; only an absolute root argument can leak one). Same corpus every
-# git-dependent gate in this suite uses (ownerscheck.sh, hotspotsincecheck.sh, …) for the same reason:
-# it is the one guaranteed git repo on hand.
-CORPUS="$ROOT"
-echo "rootrelcheck: BIN=$BIN  CORPUS(absolute)=$CORPUS"
+# never repeats an absolute prefix; only an absolute root argument can leak one). It must be a real git
+# repository WITH HISTORY: --owners, --cochange, --map-diff, --pr-context and --situ are all git-backed,
+# which is why this gate (like ownerscheck.sh and hotspotsincecheck.sh) uses this repo rather than a
+# synthetic fixture.
+#
+# BUT NOT THE LIVE WORKING TREE (2026-08-28, gate-suite health round). $ROOT carries whatever the
+# developer has lying around — on this project, 106 untracked PLAN_*/DESIGN_*/report scratch files at the
+# time of writing — and ripwire correctly indexes all of it. Two ways that turned this gate red on a
+# binary with nothing wrong with it:
+#
+#   - `--owners=main` resolves `main` to whichever file holds the first definition of that name. An
+#     untracked scratch script defining main() won it, and --owners then refused the whole row —
+#     "git unavailable / no history (need a git repo with commits)" — because an UNTRACKED file has no
+#     history. The gate's presence guard did its job and reported "produced NO output", which is a true
+#     statement about a corpus nobody intended to test.
+#   - the absolute-root oracle counts occurrences of the corpus root anywhere in a path-shaped
+#     attribute. An untracked scratch .py whose argv fallback hardcodes this machine's checkout path is
+#     indexed, and the tool honestly echoes what it read. The oracle cannot tell a defect in the emitter
+#     from a string that was in the source all along.
+#
+# Both are green on a clean checkout of the same commit with the same binary. So the corpus is now a
+# clean detached clone of HEAD. `git clone --local --shared` shares the object store instead of copying
+# it (~1s here), so the clone is cheap and carries the FULL history every git-backed verb above needs —
+# which is why `git archive HEAD` is NOT used here, though it is the right tool in recalltotalcheck.sh,
+# whose verb needs no history at all.
+#
+# This gate's subject is the BINARY's path relativization. The corpus is fuel, not subject: it needs to
+# be a large, real, git-backed tree, and it needs to be the SAME one on every machine and every run.
+# Uncommitted work is the one thing guaranteed to differ between a developer's tree and CI's, so
+# including it can only add verdicts that are not about the subject.
+HEADSHA="$( git -C "$ROOT" rev-parse HEAD 2>/dev/null )" || true
+[ -n "$HEADSHA" ] || { echo "rootrelcheck: $ROOT is not a git repo with commits — the corpus cannot be built"; exit 2; }
+CLEAN="$( mktemp -d )"
+# pwd -P: the oracle matches the corpus prefix LITERALLY, and macOS hands out /var/folders/… temp paths
+# that resolve to /private/var/folders/…. A root spelled one way and emitted the other would read as
+# "0 leaks, root disclosed 0 times" — a vacuous pass dressed as a clean one.
+CLEAN="$( cd "$CLEAN" && pwd -P )"
+git clone --local --shared --no-checkout --quiet "$ROOT" "$CLEAN/corpus" 2>/dev/null \
+    || { echo "rootrelcheck: could not clone $ROOT — the corpus cannot be built"; exit 2; }
+git -C "$CLEAN/corpus" checkout -q --detach "$HEADSHA" 2>/dev/null \
+    || { echo "rootrelcheck: could not check out $HEADSHA in the clone — the corpus cannot be built"; exit 2; }
+CORPUS="$CLEAN/corpus"
+[ -f "$CORPUS/README.md" ] || { echo "rootrelcheck: the clean clone looks empty (no README.md) — the corpus cannot be built"; exit 2; }
+echo "rootrelcheck: BIN=$BIN  CORPUS(absolute)=$CORPUS  (clean detached clone of $HEADSHA from $ROOT)"
 
 # ── the attribute-aware oracle ──────────────────────────────────────────────────────────────────────────
 # A blind `grep -c` of the absolute prefix over the WHOLE document is not the right instrument: it would
