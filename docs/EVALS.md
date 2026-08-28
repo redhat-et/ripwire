@@ -4450,7 +4450,7 @@ instead, on a fixed `--test-gate=src/model.h` fixture (stable across the caller'
 dirtiness): pre-fix **1,689 B**, post-fix **1,332 B** (**−21.1%**, −357 B), payload byte-identical
 (299 B on the empty-diff case; 3,848 B on the `src/model.h` fixture, both before and after). Red-first
 verified against the 1dc7b01 binary (1,689 B > 1,500 B budget — FAIL) and green at this head.
-`test/testgatecheck.sh` arm (g) — the exact §B12.5 cross-verb unit-collision phrases (`UNIT: untested=
+`test/testgatecheck.sh` arm (g) — the exact cross-verb unit-collision phrases (`UNIT: untested=
 here counts impacted SYMBOLS`, `call EDGES`, `defs a gate lights`) shared with `--seams` and
 `--flip` — ALL PASS unchanged.
 
