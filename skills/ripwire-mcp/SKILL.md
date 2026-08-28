@@ -1,7 +1,7 @@
 ---
 name: ripwire-mcp
 description: >
-  Wire ripwire into a coding agent as an MCP server — "ripwire wrap <agent>". Covers the 30 MCP verbs (15
+  Wire ripwire into a coding agent as an MCP server — "ripwire wrap AGENT". Covers the 30 MCP verbs (15
   read incl. fetch_body/flags + 12 flagship-reflex verbs incl. connect/explore/from_trace/edit_check and the
   cross-branch pair whereis/stray_content + 3 edit verbs) and when the persistent server beats the preferred CLI form, the lazy-body handle posture, the shared edit
   safety contract, and the server's staleness/rebuild behavior. Use when setting up ripwire for
@@ -54,6 +54,16 @@ ripwire wrap --all       # → auto-detect installed agents, emit each one's con
 `wrap` never edits config itself — it prints; you review and run. Before printing it security-scans
 `./skills` and `.agents/skills`: a CRITICAL finding blocks the recipe (exit 1) unless you pass
 `--force`; WARNs print and continue. Bare `ripwire wrap` lists the supported agents.
+
+### Audit the active Codex surface
+
+Run `ripwire <repo> --doctor --agent=codex` after install/update or when Codex appears to be using a stale
+binary, missing a skill, skipping the advisory CLI-first hooks, or starting the wrong MCP executable. This
+extends the ordinary six-check doctor with four read-only checks over the LIVE environment: PATH binary
+agreement, exact parity between the installed skills and `.ripwire-manifest-v1`, executability of all three
+Codex hook roles, and the configured `mcp_servers.ripwire` command plus `--mcp` argument. Failing rows give
+the exact installer/wrap repair command. The report deliberately emits no config contents or full shell
+commands, so it is safe to paste for diagnosis; `--agent=codex` alone refuses because it modifies doctor.
 
 ## The read verbs + fetch_body (and when each beats the CLI form)
 

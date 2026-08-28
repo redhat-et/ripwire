@@ -460,6 +460,7 @@ struct Config
     bool             doctor           = false;              // --doctor: self-diagnosis (binary/PATH staleness, grammar load, cache-dir
                                                              // health, git reachability, tree-sitter version) — a DIAGNOSTIC verb, not
                                                              // the deterministic map; environment-dependent lines are its whole point.
+    std::string_view agent;                                 // --agent=codex: extend --doctor over Codex's LIVE binary/skills/hooks/MCP surface
     bool             skippedList      = false;              // --skipped (§P0.5d, §L1): WHY the index does not contain a file, and
                                                              // which files it DOES contain but cannot vouch for — one <f p= why=/> row
                                                              // per drop (oversize/excluded/unsupported-ext) plus <h p= why=/> rows for
@@ -1708,6 +1709,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               row (ok=\"0\") also carries hint=, the derived verdict (which of self=/which=\n"
         "                               is stale and the fix, which grammar(s) failed to compile, why the cache dir\n"
         "                               isn't writable, ...) — a passing row never carries hint=.\n"
+        "    --agent=codex              (with --doctor) also inspect Codex's LIVE CLI-first integration: PATH binary, exact\n"
+        "                               installed-skill manifest parity, advisory hook executability, and the secondary\n"
+        "                               mcp_servers.ripwire command/--mcp args. Read-only; emits fixed repair commands and\n"
+        "                               never prints config contents or shell command lines. Other values refuse.\n"
         "    --skipped                  WHY the index does not contain a file, and which files it DOES contain but cannot\n"
         "                               vouch for. <f p= why= bytes=/> per DROPPED file: why=oversize (limit= names the ceiling\n"
         "                               — --max-file-size, or the fixed .json/.yaml config ceilings it does not raise),\n"
@@ -1866,7 +1871,7 @@ inline void usage() noexcept { printUsage( stderr ); }
 // ── the flag tables — the 91 arms that are exactly "set one member" ─────────────────────────────────
 // House style is declarative tables over scattered switch/if (CLAUDE.md), and this is that rule applied
 // to the two shapes that make up most of the argv surface: `--x` sets one bool, `--x=V` sets one view.
-// Config is 71 bool + 53 string_view, so a pointer-to-member is constexpr and well-defined here — no
+// Config is 71 bool + 54 string_view, so a pointer-to-member is constexpr and well-defined here — no
 // offsetof, which would be UB on a non-standard-layout type.
 //
 // ORDER. The tables are scanned in DECLARATION ORDER, exacts before prefixes, ahead of the hand-written
@@ -2071,6 +2076,7 @@ inline constexpr ViewFlag kViewFlags[] =
 {
     // server + self-eval inputs
     { "--mcp-token=",   &Config::mcpToken        , EmptyValue::Refuse, "a shared bearer token",                  "--mcp-token=$RIPWIRE_MCP_TOKEN" },
+    { "--agent=",      &Config::agent           , EmptyValue::Refuse, "codex",                                 "--agent=codex" },
     { "--eval-mined=",  &Config::evalMined       , EmptyValue::Refuse, "a minedpair.jsonl file path",            "--eval-mined=bench/minedpair.jsonl" },
     { "--eval-skills=", &Config::evalSkills      , EmptyValue::Refuse, "a labelled TSV file path",               "--eval-skills=bench/skillroute.tsv" },
 
@@ -2336,7 +2342,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 196;  // +5 CLI edit bridge; +1 grep handles; +1 legend; +3 edit-plan
+inline constexpr std::size_t kTotalFlagArms = 197;  // +5 CLI edit bridge; +1 grep handles; +1 legend; +3 edit-plan; +1 doctor agent
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -3219,6 +3225,20 @@ inline void refuseAutoBodiesMisuse( Config& c )
     }
 }
 
+inline void validateAgent( Config& c ) noexcept
+{
+    if( !c.agent.empty() && !c.doctor )
+    {
+        std::fprintf( stderr, "ripwire: --agent=codex modifies --doctor — pass both (e.g. ripwire <dir> --doctor --agent=codex)\n" );
+        c.ok = false;
+    }
+    if( !c.agent.empty() && c.agent != "codex" )
+    {
+        std::fprintf( stderr, "ripwire: unsupported --agent value '%.*s' (supported: codex)\n", int( c.agent.size() ), c.agent.data() );
+        c.ok = false;
+    }
+}
+
 inline void validateConfig( Config& c ) noexcept
 {
     if( c.rootPath.empty() && !c.mcp && !c.scanSkills && c.scanSkillFile.empty() )   // scan / --mcp may run without a path
@@ -3234,6 +3254,8 @@ inline void validateConfig( Config& c ) noexcept
         std::fprintf( stderr, "ripwire: --listen serves ONE workspace fixed at startup — pass the repo root (e.g. ripwire . --listen=127.0.0.1:8765)\n" );
         c.ok = false;
     }
+
+    validateAgent( c );
 
     validateModifierGuards( c );   // §P8: the eleven new "(with X)" companion guards, split out above (see its header)
 

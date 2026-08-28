@@ -50,6 +50,7 @@
 #include "gitstamp.h"              // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
                                    // --hotspots / --quality-delta / --doctor below (each verb's own file pulls it too)
 #include "binstale.h"              // --doctor's tracked-binary-staleness check (git-order, not mtime)
+#include "codexdoctor.h"           // --doctor --agent=codex: live binary/skills/hooks/MCP surface parity
 #include "crossref.h"              // --stray-content / --whereis — the cross-branch content index
 #include "darkflags.h"             // --flags — the dark-content (compile/cmake/env gate) dashboard
 #include "flipimpact.h"            // --flags --flip=NAME: the blast radius of turning ONE of those gates ON
@@ -1375,6 +1376,30 @@ inline std::string doctorTrackedBinariesHint( bool ok, std::size_t staleCount )
            "rebuild the binary from that newer source and recommit it\"";
 }
 
+struct DoctorAgentRows
+{
+    int checks = 0;
+    int passed = 0;
+    std::string rows;
+    std::string rootAttr;
+};
+
+inline DoctorAgentRows doctorAgentRows( const rw::Config& cfg, const char* argv0 )
+{
+    DoctorAgentRows out;
+    if( cfg.agent != "codex" ) { return out; }
+    out.rootAttr = " agent=\"codex\"";
+    for( const rw::codexdoctor::Check& check : rw::codexdoctor::inspect( selfExecutablePath( argv0 ) ) )
+    {
+        ++out.checks;
+        if( check.ok ) { ++out.passed; }
+        out.rows += "<c n=\"" + std::string( check.name ) + "\" ok=\"" + ( check.ok ? "1" : "0" ) + "\"";
+        if( !check.attrs.empty() ) { out.rows += " " + check.attrs; }
+        out.rows += "/>";
+    }
+    return out;
+}
+
 int runDoctor( const rw::Config& cfg, const char* argv0 )
 {
     using namespace rw;
@@ -1551,6 +1576,11 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
         row( "tracked-binaries", ok, attrs );
     }
 
+    const DoctorAgentRows agentRows = doctorAgentRows( cfg, argv0 );
+    checks += agentRows.checks;
+    okCount += agentRows.passed;
+    rows += agentRows.rows;
+
     // r26-stamp Task A: anchor this diagnostic to the commit (+dirty state) it ran against — cheap here
     // (check 4 above already paid for a git rev-parse/status probe on this same root; two more subprocess
     // calls are noise next to that), and omitted entirely on a non-git root rather than printed as a placeholder.
@@ -1559,7 +1589,7 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
     // BOOL `ok=` — two meanings on adjacent lines of one document. Renamed per the index-vs-count rule;
     // `passed=` pairs with the `checks=` denominator beside it. The count had ZERO parsers (doctorcheck.sh's
     // 8 assertions all read the CHILD bool), so the half with readers keeps its name.
-    std::string out = "<doctor checks=\"" + std::to_string( checks ) + "\" passed=\"" + std::to_string( okCount ) + "\"" + doctorAt + ">";
+    std::string out = "<doctor checks=\"" + std::to_string( checks ) + "\" passed=\"" + std::to_string( okCount ) + "\"" + agentRows.rootAttr + doctorAt + ">";
     out += rows;
     out += "</doctor>";
     std::fputs( out.c_str(), stdout );

@@ -192,6 +192,18 @@ for d in "$src"/ripwire-*/; do
     echo "installed $name -> $dst/$name"
     count=$(( count + 1 ))
 done
+
+# The active skill directory is an agent-facing API surface, not a bag of best-effort links. Record the
+# exact shipped set only after every link succeeds so `ripwire --doctor --agent=codex` can distinguish a
+# complete install from a stale/missing/extra skill without trusting the checkout it came from.
+manifestTmp="$( mktemp "$dst/.ripwire-manifest-v1.tmp.XXXXXX" )"
+{
+    echo 'version=1'
+    for d in "$src"/ripwire-*/; do
+        echo "skill=$( basename "$d" )"
+    done
+} >"$manifestTmp"
+mv "$manifestTmp" "$dst/.ripwire-manifest-v1"
 echo "done. $count ripwire skills active in every session (${pruned} stale pruned) — every ripwire-* above."
 
 if [ "$wantHook" -eq 1 ]; then
