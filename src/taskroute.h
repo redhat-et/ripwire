@@ -123,37 +123,135 @@ inline bool looksLikeClosedClaim( std::string_view task )
     return true;
 }
 
+// Words the router itself reads as INTENT. A bare lowercase occurrence of one of these is evidence about
+// what the user WANTS, never evidence that they named a symbol — resolving them would let the router argue
+// with itself ("did I change its contract?" would resolve `contract` and then fail the one-symbol
+// precondition of the very route that phrase exists to trigger). Open-class content words (`check`,
+// `render`, `config`) are deliberately absent: they are legitimate symbol names, and the slot rule below
+// is what keeps them from hijacking prose. A floor on what must never resolve, not a completeness claim.
+inline constexpr std::string_view kWeakSymbolStopWords[] = {
+    "before", "building", "change", "changed", "changes", "class", "classes", "contract", "contracts",
+    "crash", "crashes", "current", "edited", "every", "feature", "features", "function", "functions",
+    "helper", "helpers", "implementation", "literal", "locate", "merge", "multi", "occurrence",
+    "occurrences", "output", "pushing", "ready", "recent", "responsible", "review", "scope", "search",
+    "signature", "signatures", "stack", "symbol", "symbols", "symptom", "symptoms", "tests", "trace",
+    "traceback", "understand", "which", "write", "wrong",
+};
+
+// Cue words that place the word AFTER them in a symbol slot. This is the whole discriminator: "how does
+// classify work" and "I just edited classify" name a symbol, while "how does the license affect what we
+// ship" and "did I change the report" do not — and the only difference is the word in front. Casing was
+// the old proxy for this and it was the wrong one; it discarded `classify` to protect against `report`,
+// when the position in the sentence separates them exactly.
+inline constexpr std::string_view kWeakSymbolCues[] = {
+    "called", "class", "does", "edit", "edited", "editing", "function", "helper", "method", "modified",
+    "modifying", "named", "of", "symbol", "understand", "understanding",
+};
+
+inline constexpr std::size_t kMinWeakSymbolLen = 5;
+
+// True when the word immediately before `pos` is a symbol-slot cue. `lowerTask` is the lowercased task,
+// so the comparison is a plain equality. Opening quotes and backticks between the cue and the name are
+// stepped over — they are themselves symbol evidence, never separators.
+inline bool precededBySymbolCue( std::string_view lowerTask, std::size_t pos ) noexcept
+{
+    std::size_t end = pos;
+    while( end > 0 && ( lowerTask[end - 1] == ' ' || lowerTask[end - 1] == '`'
+                     || lowerTask[end - 1] == '\'' || lowerTask[end - 1] == '"' ) )
+    {
+        --end;
+    }
+    std::size_t begin = end;
+    while( begin > 0 && wordByte( lowerTask[begin - 1] ) )
+    {
+        --begin;
+    }
+    const std::string_view word = lowerTask.substr( begin, end - begin );
+    return std::any_of( std::begin( kWeakSymbolCues ), std::end( kWeakSymbolCues ),
+                        [word]( const std::string_view cue ) { return cue == word; } );
+}
+
+// A name with no identifier punctuation and no capital is a WEAK match: it might be a symbol mention, or
+// it might just be a word. Length plus the stop list above is what separates the two cheaply.
+inline bool weakSymbolCandidate( std::string_view name ) noexcept
+{
+    if( name.size() < kMinWeakSymbolLen )
+    {
+        return false;
+    }
+    return std::none_of( std::begin( kWeakSymbolStopWords ), std::end( kWeakSymbolStopWords ),
+                         [name]( const std::string_view stop ) { return stop == name; } );
+}
+
+// The first word-bounded occurrence of an all-lowercase `name` that sits in a symbol slot, or npos when
+// no occurrence does. A later mention can be the one in a slot ("classify is slow — how does classify
+// work?"), so every occurrence is tried, not just the first.
+inline std::size_t findInSymbolSlot( std::string_view lowerTask, std::string_view name ) noexcept
+{
+    std::size_t pos = boundedFind( lowerTask, name );
+    while( pos != std::string_view::npos && !precededBySymbolCue( lowerTask, pos ) )
+    {
+        pos = boundedFind( lowerTask, name, pos + 1 );
+    }
+    return pos;
+}
+
+// Where, and how strongly, one indexed name is mentioned in the task. Identifier shape
+// (camel/Pascal/snake/scoped) is a STRONG mention and counts wherever it appears. An all-lowercase name is
+// no longer discarded outright — a word-bounded exact hit on the real symbol table beats casing as
+// evidence — but it counts only from a symbol slot, and only as a WEAK mention.
+struct SymbolMention
+{
+    bool        matched = false;
+    bool        strong  = false;
+    std::size_t pos     = 0;
+};
+
+inline SymbolMention symbolMention( std::string_view task, std::string_view lowerTask, std::string_view name )
+{
+    const bool strong = std::any_of( name.begin(), name.end(), []( const unsigned char c )
+    {
+        return std::isupper( c ) || c == '_' || c == ':' || c == '$';
+    } );
+    if( !strong && !weakSymbolCandidate( name ) )
+    {
+        return {};
+    }
+    const std::size_t pos = strong ? boundedFind( task, name ) : findInSymbolSlot( lowerTask, name );
+    if( pos == std::string_view::npos )
+    {
+        return {};
+    }
+    return { true, strong, pos };
+}
+
 inline std::vector<std::string> resolveTaskSymbols( std::string_view task, const IngestResult& ing )
 {
     struct At { std::size_t pos; std::string name; };
-    std::vector<At> found;
+    std::vector<At>   found;
+    std::vector<At>   weak;
+    const std::string lowerTask = lowerAscii( task );
     for( const Symbol& sym : ing.symbols )
     {
-        if( sym.name.empty() )
+        const SymbolMention at = symbolMention( task, lowerTask, sym.name );
+        if( !at.matched )
         {
             continue;
         }
-        // A lowercase dictionary word that happens to be a symbol is not strong enough evidence for an
-        // automatic graph route. Require identifier shape (camel/Pascal/snake/scoped); simple names remain
-        // reachable through --for, but cannot accidentally turn ordinary prose into a 3-symbol --connect.
-        const bool identifierShape = std::any_of( sym.name.begin(), sym.name.end(), []( const unsigned char c )
-        {
-            return std::isupper( c ) || c == '_' || c == ':' || c == '$';
-        } );
-        if( !identifierShape )
-        {
-            continue;
-        }
-        const std::size_t pos = boundedFind( task, sym.name );
-        if( pos == std::string_view::npos )
-        {
-            continue;
-        }
-        const bool duplicate = std::any_of( found.begin(), found.end(), [&]( const At& at ) { return at.name == sym.name; } );
+        std::vector<At>& bucket = at.strong ? found : weak;
+        const bool duplicate = std::any_of( bucket.begin(), bucket.end(), [&]( const At& s ) { return s.name == sym.name; } );
         if( !duplicate )
         {
-            found.push_back( { pos, sym.name } );
+            bucket.push_back( { at.pos, sym.name } );
         }
+    }
+    // The weak tier is consulted only when it is the ONLY reading available: no strong mention anywhere in
+    // the task, and exactly one distinct weak name. The original ambiguity worry then holds STRUCTURALLY
+    // rather than by heuristic — a single resolved symbol can never satisfy the three-symbol --connect
+    // precondition, so ordinary prose still cannot mint a graph route out of dictionary words.
+    if( found.empty() && weak.size() == 1 )
+    {
+        found = std::move( weak );
     }
     std::sort( found.begin(), found.end(), []( const At& a, const At& b )
     {
@@ -227,23 +325,124 @@ inline void addLexical( std::vector<RouteChoice>& choices, const char* id, const
     }
 }
 
+// A plan path the user actually WROTE. The router never invents one: --edit-plan refuses a file that is
+// not there, and recommending a command the verb refuses is a prerequisite violation, not a suggestion.
+inline std::string firstJsonPathToken( std::string_view task )
+{
+    constexpr std::string_view kBreaks = " \t\n\r\"'`(),;";
+    for( std::size_t i = 0; i < task.size(); )
+    {
+        const std::size_t begin = task.find_first_not_of( kBreaks, i );
+        if( begin == std::string_view::npos )
+        {
+            break;
+        }
+        std::size_t end = task.find_first_of( kBreaks, begin );
+        if( end == std::string_view::npos )
+        {
+            end = task.size();
+        }
+        const std::string_view token = task.substr( begin, end - begin );
+        if( token.ends_with( ".json" ) || token.ends_with( ".ndjson" ) )
+        {
+            return std::string( token );
+        }
+        i = end + 1;
+    }
+    return {};
+}
+
+// Routes for surfaces whose trigger is a NAME rather than a phrase-scoring shape: the flag is asked for by
+// something close to its own vocabulary, so a weighted score would only add noise. Each requires
+// conjunctive evidence — the surface word AND an intent word — so a passing mention never routes. The two
+// that carry a user-supplied value (a plan path, a grep literal) fire only when the task supplies it;
+// substituting a placeholder would emit a command the verb refuses, which the contract forbids outright.
+inline std::optional<RouteChoice> instrumentedTaskChoice( std::string_view task, std::string_view lower, const std::string& root )
+{
+    const std::string ripRoot = "ripwire " + shSingleQuote( root ) + " ";
+    if( ( has( lower, "edit plan" ) || has( lower, "edit-plan" ) || has( lower, "multi-edit" ) || has( lower, "multi edit" ) )
+     && ( has( lower, "apply" ) || has( lower, "transaction" ) || has( lower, "preflight" ) || has( lower, "dry run" ) || has( lower, "dry-run" ) ) )
+    {
+        const std::string plan = firstJsonPathToken( task );
+        if( !plan.empty() )
+        {
+            return RouteChoice{ "apply-edit-plan", "ripwire-mcp", "multi-edit transaction wording plus a named plan file",
+                                commandWithValue( root, "--edit-plan=", plan ) + " --dry-run", 100, 89 };
+        }
+    }
+    // "handle" must be word-bounded: an existing fixture asks to search "the user's config handling", and
+    // a substring match there would steal a plain exact-grep away from its own route.
+    if( ( boundedFind( lower, "handle" ) != std::string_view::npos || boundedFind( lower, "handles" ) != std::string_view::npos )
+     && ( has( lower, "edit" ) || has( lower, "grep" ) || has( lower, "search" ) || has( lower, "occurrence" ) ) )
+    {
+        const std::string quoted = firstQuotedLiteral( task );
+        if( !quoted.empty() )
+        {
+            return RouteChoice{ "grep-handles", "ripwire-mcp", "safe-edit handle wording plus a quoted literal to anchor them",
+                                commandWithValue( root, "--grep=", quoted ) + " --handles", 100, 88 };
+        }
+    }
+    if( has( lower, "compact legend" ) || ( has( lower, "legend" ) && has( lower, "compact" ) ) )
+    {
+        return RouteChoice{ "compact-legend", "ripwire-efficient", "compact-legend wording; the posture applies to --for and --grep",
+                            commandWithValue( root, "--for=", task ) + " --legend=compact", 100, 87 };
+    }
+    if( has( lower, "codex" )
+     && ( has( lower, "doctor" ) || has( lower, "integration" ) || has( lower, "wired" ) || has( lower, "set up" ) || has( lower, "setup" ) ) )
+    {
+        return RouteChoice{ "codex-doctor", "ripwire-mcp", "codex plus integration/health wording",
+                            ripRoot + "--doctor --agent=codex", 100, 86 };
+    }
+    if( ( has( lower, "shell gate" ) || has( lower, "test gate" ) || has( lower, "test-gate" ) )
+     && ( has( lower, "evidence" ) || has( lower, "why" ) || has( lower, "which" ) || has( lower, "picked" ) || has( lower, "chose" ) ) )
+    {
+        return RouteChoice{ "gate-evidence", "ripwire-change-check", "shell-gate selection asked for by its evidence",
+                            ripRoot + "--test-gate", 100, 85 };
+    }
+    return std::nullopt;
+}
+
 // High-confidence additions that need more than the generic phrase scorer, kept out of classify so the
 // central routing ladder stays readable as instrumented intents grow.
 inline std::optional<RouteChoice> directTaskChoice( std::string_view task, std::string_view lower,
                                                     const std::string& root, const std::vector<std::string>& symbols )
 {
-    const bool exactSearch = has( lower, "exact occurrence" ) || has( lower, "exact literal" )
-                          || has( lower, "find every" ) || has( lower, "search for" );
-    const std::string quoted = exactSearch ? firstQuotedLiteral( task ) : std::string();
+    // The instrumented surfaces are asked for BY NAME, so they outrank the generic literal/post-edit
+    // shapes: "find every occurrence of 'X' and give me safe-edit handles" is a handles request that
+    // happens to contain a grep, not the other way round.
+    if( std::optional<RouteChoice> named = instrumentedTaskChoice( task, lower, root ) )
+    {
+        return named;
+    }
+    // Both of these were fixed OR-chains of four or five literal phrases, which meant they recognised the
+    // wording they were written against and nothing else: "did X's contract change after my patch" is not
+    // "did i change", and "just finished editing X" is not "just edited". They now use the same weighted
+    // phraseScore + floor the four generic categories use, so paraphrases accumulate evidence instead of
+    // having to match one blessed spelling. Neither floor is the whole gate: exact-grep still needs a
+    // literal the user actually quoted, and edit-contract still needs exactly one resolved symbol, so the
+    // widened vocabulary can only choose BETWEEN routes, never invent one out of prose.
+    const int exactScore = phraseScore( lower, { { "exact occurrence", 9 }, { "exact literal", 9 },
+                                                 { "every occurrence", 8 }, { "occurrences of", 8 }, { "verbatim", 8 },
+                                                 { "find every", 7 }, { "every place", 7 }, { "search for", 7 },
+                                                 { "look for", 6 }, { "grep", 6 }, { "the string", 5 },
+                                                 { "where does", 5 }, { "exactly", 4 }, { "literal", 4 },
+                                                 { "show up", 4 }, { "across the repo", 4 }, { "in the codebase", 3 } } );
+    const std::string quoted = exactScore >= 6 ? firstQuotedLiteral( task ) : std::string();
     if( !quoted.empty() )
     {
         return RouteChoice{ "exact-grep", "ripwire-navigate", "quoted literal plus exact-search wording",
                             commandWithValue( root, "--grep=", quoted ) + " --grep-context=2 --limit=40", 100, 85 };
     }
-    const bool postEdit = has( lower, "just edited" ) || has( lower, "my edit to" )
-                       || has( lower, "changed its signature" ) || has( lower, "changed its contract" )
-                       || has( lower, "did i change" );
-    if( symbols.size() == 1 && postEdit )
+    const int postEditScore = phraseScore( lower, { { "just edited", 9 }, { "just finished editing", 9 },
+                                                    { "my edit to", 9 }, { "changed its signature", 9 },
+                                                    { "changed its contract", 9 }, { "compatible with callers", 8 },
+                                                    { "break its callers", 8 }, { "break any caller", 8 },
+                                                    { "did i change", 8 }, { "i edited", 8 }, { "i modified", 8 },
+                                                    { "i just changed", 8 }, { "after my patch", 7 },
+                                                    { "after my change", 7 }, { "since my edit", 7 },
+                                                    { "contract change", 7 }, { "still compatible", 7 },
+                                                    { "break anyone", 7 } } );
+    if( symbols.size() == 1 && postEditScore >= 7 )
     {
         return RouteChoice{ "edit-contract", "ripwire-change-check",
                             "one exact indexed symbol plus post-edit contract wording",
