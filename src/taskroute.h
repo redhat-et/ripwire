@@ -123,37 +123,135 @@ inline bool looksLikeClosedClaim( std::string_view task )
     return true;
 }
 
+// Words the router itself reads as INTENT. A bare lowercase occurrence of one of these is evidence about
+// what the user WANTS, never evidence that they named a symbol — resolving them would let the router argue
+// with itself ("did I change its contract?" would resolve `contract` and then fail the one-symbol
+// precondition of the very route that phrase exists to trigger). Open-class content words (`check`,
+// `render`, `config`) are deliberately absent: they are legitimate symbol names, and the slot rule below
+// is what keeps them from hijacking prose. A floor on what must never resolve, not a completeness claim.
+inline constexpr std::string_view kWeakSymbolStopWords[] = {
+    "before", "building", "change", "changed", "changes", "class", "classes", "contract", "contracts",
+    "crash", "crashes", "current", "edited", "every", "feature", "features", "function", "functions",
+    "helper", "helpers", "implementation", "literal", "locate", "merge", "multi", "occurrence",
+    "occurrences", "output", "pushing", "ready", "recent", "responsible", "review", "scope", "search",
+    "signature", "signatures", "stack", "symbol", "symbols", "symptom", "symptoms", "tests", "trace",
+    "traceback", "understand", "which", "write", "wrong",
+};
+
+// Cue words that place the word AFTER them in a symbol slot. This is the whole discriminator: "how does
+// classify work" and "I just edited classify" name a symbol, while "how does the license affect what we
+// ship" and "did I change the report" do not — and the only difference is the word in front. Casing was
+// the old proxy for this and it was the wrong one; it discarded `classify` to protect against `report`,
+// when the position in the sentence separates them exactly.
+inline constexpr std::string_view kWeakSymbolCues[] = {
+    "called", "class", "does", "edit", "edited", "editing", "function", "helper", "method", "modified",
+    "modifying", "named", "of", "symbol", "understand", "understanding",
+};
+
+inline constexpr std::size_t kMinWeakSymbolLen = 5;
+
+// True when the word immediately before `pos` is a symbol-slot cue. `lowerTask` is the lowercased task,
+// so the comparison is a plain equality. Opening quotes and backticks between the cue and the name are
+// stepped over — they are themselves symbol evidence, never separators.
+inline bool precededBySymbolCue( std::string_view lowerTask, std::size_t pos ) noexcept
+{
+    std::size_t end = pos;
+    while( end > 0 && ( lowerTask[end - 1] == ' ' || lowerTask[end - 1] == '`'
+                     || lowerTask[end - 1] == '\'' || lowerTask[end - 1] == '"' ) )
+    {
+        --end;
+    }
+    std::size_t begin = end;
+    while( begin > 0 && wordByte( lowerTask[begin - 1] ) )
+    {
+        --begin;
+    }
+    const std::string_view word = lowerTask.substr( begin, end - begin );
+    return std::any_of( std::begin( kWeakSymbolCues ), std::end( kWeakSymbolCues ),
+                        [word]( const std::string_view cue ) { return cue == word; } );
+}
+
+// A name with no identifier punctuation and no capital is a WEAK match: it might be a symbol mention, or
+// it might just be a word. Length plus the stop list above is what separates the two cheaply.
+inline bool weakSymbolCandidate( std::string_view name ) noexcept
+{
+    if( name.size() < kMinWeakSymbolLen )
+    {
+        return false;
+    }
+    return std::none_of( std::begin( kWeakSymbolStopWords ), std::end( kWeakSymbolStopWords ),
+                         [name]( const std::string_view stop ) { return stop == name; } );
+}
+
+// The first word-bounded occurrence of an all-lowercase `name` that sits in a symbol slot, or npos when
+// no occurrence does. A later mention can be the one in a slot ("classify is slow — how does classify
+// work?"), so every occurrence is tried, not just the first.
+inline std::size_t findInSymbolSlot( std::string_view lowerTask, std::string_view name ) noexcept
+{
+    std::size_t pos = boundedFind( lowerTask, name );
+    while( pos != std::string_view::npos && !precededBySymbolCue( lowerTask, pos ) )
+    {
+        pos = boundedFind( lowerTask, name, pos + 1 );
+    }
+    return pos;
+}
+
+// Where, and how strongly, one indexed name is mentioned in the task. Identifier shape
+// (camel/Pascal/snake/scoped) is a STRONG mention and counts wherever it appears. An all-lowercase name is
+// no longer discarded outright — a word-bounded exact hit on the real symbol table beats casing as
+// evidence — but it counts only from a symbol slot, and only as a WEAK mention.
+struct SymbolMention
+{
+    bool        matched = false;
+    bool        strong  = false;
+    std::size_t pos     = 0;
+};
+
+inline SymbolMention symbolMention( std::string_view task, std::string_view lowerTask, std::string_view name )
+{
+    const bool strong = std::any_of( name.begin(), name.end(), []( const unsigned char c )
+    {
+        return std::isupper( c ) || c == '_' || c == ':' || c == '$';
+    } );
+    if( !strong && !weakSymbolCandidate( name ) )
+    {
+        return {};
+    }
+    const std::size_t pos = strong ? boundedFind( task, name ) : findInSymbolSlot( lowerTask, name );
+    if( pos == std::string_view::npos )
+    {
+        return {};
+    }
+    return { true, strong, pos };
+}
+
 inline std::vector<std::string> resolveTaskSymbols( std::string_view task, const IngestResult& ing )
 {
     struct At { std::size_t pos; std::string name; };
-    std::vector<At> found;
+    std::vector<At>   found;
+    std::vector<At>   weak;
+    const std::string lowerTask = lowerAscii( task );
     for( const Symbol& sym : ing.symbols )
     {
-        if( sym.name.empty() )
+        const SymbolMention at = symbolMention( task, lowerTask, sym.name );
+        if( !at.matched )
         {
             continue;
         }
-        // A lowercase dictionary word that happens to be a symbol is not strong enough evidence for an
-        // automatic graph route. Require identifier shape (camel/Pascal/snake/scoped); simple names remain
-        // reachable through --for, but cannot accidentally turn ordinary prose into a 3-symbol --connect.
-        const bool identifierShape = std::any_of( sym.name.begin(), sym.name.end(), []( const unsigned char c )
-        {
-            return std::isupper( c ) || c == '_' || c == ':' || c == '$';
-        } );
-        if( !identifierShape )
-        {
-            continue;
-        }
-        const std::size_t pos = boundedFind( task, sym.name );
-        if( pos == std::string_view::npos )
-        {
-            continue;
-        }
-        const bool duplicate = std::any_of( found.begin(), found.end(), [&]( const At& at ) { return at.name == sym.name; } );
+        std::vector<At>& bucket = at.strong ? found : weak;
+        const bool duplicate = std::any_of( bucket.begin(), bucket.end(), [&]( const At& s ) { return s.name == sym.name; } );
         if( !duplicate )
         {
-            found.push_back( { pos, sym.name } );
+            bucket.push_back( { at.pos, sym.name } );
         }
+    }
+    // The weak tier is consulted only when it is the ONLY reading available: no strong mention anywhere in
+    // the task, and exactly one distinct weak name. The original ambiguity worry then holds STRUCTURALLY
+    // rather than by heuristic — a single resolved symbol can never satisfy the three-symbol --connect
+    // precondition, so ordinary prose still cannot mint a graph route out of dictionary words.
+    if( found.empty() && weak.size() == 1 )
+    {
+        found = std::move( weak );
     }
     std::sort( found.begin(), found.end(), []( const At& a, const At& b )
     {
