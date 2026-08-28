@@ -901,7 +901,7 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "find_referencing_symbols", "path paths symbol" },
     { "grep",                     "path paths pattern in limit offset" },
     { "cochange",                 "path file" },
-    { "memory_recall",            "path task top_k" },
+    { "memory_recall",            "path task top_k budget_tokens" },
     { "situational_awareness",    "path diff files" },
     { "mentions",                 "path paths symbol" },
     { "for",                      "path paths task" },

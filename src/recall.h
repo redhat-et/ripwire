@@ -277,7 +277,9 @@ struct RecallShape
     bool        isOverCeiling  = false;   // W3FIX M1: the finished artifact exceeds the --max-tokens byte budget
                                           // it was shaped against — only reachable when the header floor alone
                                           // (kRecallHeaderReserveBytes + the verbatim task echo) is over it.
-    std::size_t maxTokens       = 0;       // disclosed when the effective ceiling is the common 8K policy
+    std::size_t maxTokens       = 0;       // disclosed when the effective ceiling EQUALS the 8K default policy — an
+                                          // explicit --max-tokens=8000 is byte-indistinguishable here, and the
+                                          // disclosure is equally true of it (effective ceiling, not flag provenance)
 };
 
 struct RecallBundle

@@ -202,5 +202,31 @@ else
     echo "  SKIP  pre-change byte-identity (set RIPWIRE_BASE_BIN=<pre-change ripwire> to enable)"
 fi
 
+# ── 7. MCP parity: memory_recall is bounded by the SAME default ceiling, budget_tokens raises it ────
+# The CLI's 8K default landed alone in the first round and left the MCP front door unbounded — the same
+# broad docs query could stream hundreds of KB through one tools/call. Both doors, one policy, disclosed.
+INIT='{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+DCALL='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_recall","arguments":{"path":"'"$R"'","task":"quality delta gating exit codes"}}}'
+FCALL='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_recall","arguments":{"path":"'"$R"'","task":"quality delta gating exit codes","budget_tokens":1000000}}}'
+printf '%s\n%s\n%s\n' "$INIT" "$DCALL" "$FCALL" | perl -e 'alarm 60; exec @ARGV' "$BIN" --mcp >"$TMP/mcp.out" 2>/dev/null
+MCP_DEF="$( grep '"id":2' "$TMP/mcp.out" )"
+MCP_FULL="$( grep '"id":3' "$TMP/mcp.out" )"
+MCP_DEF_B="$( printf '%s' "$MCP_DEF" | wc -c | tr -d ' ' )"
+case "$MCP_DEF" in
+    *max_tokens=8000*) ok "MCP default: header discloses the effective max_tokens=8000 policy" ;;
+    *) no "MCP default: no max_tokens=8000 disclosure in the reply" ;;
+esac
+[ -n "$MCP_DEF" ] && [ "$MCP_DEF_B" -le 60000 ] \
+    && ok "MCP default: reply bounded to $MCP_DEF_B bytes (JSON-escaped ~8K-token body)" \
+    || no "MCP default: reply is $MCP_DEF_B bytes (expected <= 60000) — the ceiling is not applied over MCP"
+case "$MCP_DEF" in
+    *SENTINEL_TAIL_BIG*) no "MCP default: the huge doc's tail survived — no cut happened" ;;
+    *) ok "MCP default: the huge doc is cut under the ceiling" ;;
+esac
+case "$MCP_FULL" in
+    *SENTINEL_TAIL_BIG*) ok "MCP budget_tokens=1000000: full bodies restored (tail sentinel present)" ;;
+    *) no "MCP budget_tokens=1000000: tail sentinel missing — explicit budget did not lift the ceiling" ;;
+esac
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
