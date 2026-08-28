@@ -12085,6 +12085,34 @@ void emitCompactGrepLegend()
                  "enc callers remain a call-graph floor; tier/suppressed and unindexed/corpus attrs disclose excluded populations. -->" );
 }
 
+std::string grepTermsAttrs( std::string_view pattern, std::span<const rw::GrepTerm> terms, rw::GrepScope scope,
+                            std::uint32_t suppressed, std::vector<char>& esc )
+{
+    if( terms.empty() ) { return {}; }
+    std::string termsList( rw::escapeXml( pattern, esc ) );
+    for( const rw::GrepTerm& term : terms )
+    {
+        termsList += term.negated ? " -" : " +";
+        termsList += rw::escapeXml( term.term, esc );
+    }
+    return " terms=\"" + termsList + "\" scope=\"" + ( scope == rw::GrepScope::File ? "file" : "line" )
+         + "\" terms_suppressed=\"" + std::to_string( suppressed ) + "\"";
+}
+
+std::string grepCorpusAttrs( const rw::IngestResult& ing )
+{
+    std::string attrs;
+    if( ing.crawlSkips.excludedFiles > 0 )
+    {
+        attrs += " corpus_excluded=\"" + std::to_string( ing.crawlSkips.excludedFiles ) + "\"";
+    }
+    if( !ing.skippedOversize.empty() )
+    {
+        attrs += " corpus_oversize=\"" + std::to_string( ing.skippedOversize.size() ) + "\"";
+    }
+    return attrs;
+}
+
 // R1 (the 2026-08-12 usage mine) widened the signature beyond (cfg, ing): `g` feeds the <enc> rows'
 // callers= (in-edge CSR — data the graph already holds, zero new analysis), and amp/tested ride along
 // ONLY when a co-run (--metrics) already computed them — grep itself never triggers the qmetrics pass
@@ -12332,31 +12360,12 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     emitGrepHandleLegend( cfg.grepHandles );
     // G3: terms=/scope=/suppressed= — only when AND/NOT was actually given, so a plain --grep answer
     // stays byte-identical to before G3 landed (the "purely additive" rule every ripwire flag follows).
-    std::string termsAttr;
-    if( !grepTerms.empty() )
-    {
-        std::string termsList = ex( pat );
-        for( const GrepTerm& t : grepTerms )
-        {
-            termsList += t.negated ? " -" : " +";
-            termsList += ex( t.term );
-        }
-        termsAttr = " terms=\"" + termsList + "\" scope=\"" + ( grepScopeVal == GrepScope::File ? "file" : "line" ) + "\""
-                  + " terms_suppressed=\"" + std::to_string( termsSuppressed ) + "\"";
-    }
+    const std::string termsAttr = grepTermsAttrs( pat, grepTerms, grepScopeVal, termsSuppressed, esc );
     // G4 (2026-08-15 harvest, report-ugrep §F6): corpus_excluded=/corpus_oversize= — so hits="0" can
     // distinguish "not in this repo" from "in a file the crawl never scanned" (an --exclude= match, or a
     // file past --max-file-size). Absent when zero, matching skippedOversize's own "absent means nothing
     // was skipped" convention (model.h) — never a re-run hint (--skipped already itemizes the rows).
-    std::string corpusAttr;
-    if( ing.crawlSkips.excludedFiles > 0 )
-    {
-        corpusAttr += " corpus_excluded=\"" + std::to_string( ing.crawlSkips.excludedFiles ) + "\"";
-    }
-    if( !ing.skippedOversize.empty() )
-    {
-        corpusAttr += " corpus_oversize=\"" + std::to_string( ing.skippedOversize.size() ) + "\"";
-    }
+    const std::string corpusAttr = grepCorpusAttrs( ing );
     // R-H: the tier disclosure (helper above) — empty when nothing was held back.
     const std::string tierAttr = grepTierAttrs( tierReport );
     // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= (helper above).

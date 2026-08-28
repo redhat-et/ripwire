@@ -969,10 +969,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses\n"
         "                               what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering.\n"
         "                               For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).\n"
-        "      --handles                add h= to each unique editable enclosing-symbol row: a stable identity plus the\n"
-        "                               file-content hash pinned when grep ran. Ambiguous or document-only rows get no handle;\n"
-        "                               a later edit must refuse after any file change rather than retarget stale coordinates.\n"
-        "      --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit\n"
+        "      --handles                add h= to each unique editable enclosing-symbol row: a stable identity plus the\n" "                               file-content hash pinned when grep ran. Ambiguous or document-only rows get no handle;\n"
+        "                               a later edit must refuse after any file change rather than retarget stale coordinates.\n" "      --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit\n"
         "      --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex)\n"
         "      --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)\n"
         "      --grep-scope=line|file   modifies --and=/--not=: line (default) requires the SAME matched line; file requires\n"
@@ -1335,17 +1333,14 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=.\n"
         "    --replace-symbol-body=TARGET  atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|-\n"
         "    --insert-before-symbol=TARGET atomically insert the payload immediately before one uniquely-resolved definition\n"
-        "    --insert-after-symbol=TARGET  atomically insert the payload immediately after one uniquely-resolved definition\n"
-        "                               TARGET is a symbol name, or a freshness-pinned sym# handle emitted by --grep --handles.\n"
+        "    --insert-after-symbol=TARGET  atomically insert the payload immediately after one uniquely-resolved definition\n" "                               TARGET is a symbol name, or a freshness-pinned sym# handle emitted by --grep --handles.\n"
         "      --edit-payload=FILE|-    required exact byte payload ('-' reads stdin); empty payloads refuse, never imply deletion\n"
         "      --edit-target-file=PATH  optional file-path substring to disambiguate a same-named definition. These three CLI verbs\n"
         "                               reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation\n"
         "                               and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON\n"
         "                               receipt; follow with --edit-check=SYM and --affected=FILE. Single-root only.\n"
-        "    --edit-plan=FILE          versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]}\n"
-        "      --dry-run | --apply     exactly one explicit mode is required. Payload paths are relative to the plan file. Every\n"
-        "                               target/payload/span is preflighted before any write; overlaps refuse. Apply holds sorted\n"
-        "                               per-file locks, rechecks freshness, and atomically renames each file. Prior files roll back\n"
+        "    --edit-plan=FILE          versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]}\n" "      --dry-run | --apply     exactly one explicit mode is required. Payload paths are relative to the plan file. Every\n"
+        "                               target/payload/span is preflighted before any write; overlaps refuse. Apply holds sorted\n" "                               per-file locks, rechecks freshness, and atomically renames each file. Prior files roll back\n"
         "                               on an ordinary later write failure; a crash between file renames remains a disclosed limit.\n"
         "    --safe-delete=SYM          \"can I delete this?\" — ONE call composing signals the tool already computes for one\n"
         "                               already-resolved SYM: 1-hop callers=, the transitive --impact blast radius (impact_reaches=),\n"
@@ -1709,8 +1704,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               row (ok=\"0\") also carries hint=, the derived verdict (which of self=/which=\n"
         "                               is stale and the fix, which grammar(s) failed to compile, why the cache dir\n"
         "                               isn't writable, ...) — a passing row never carries hint=.\n"
-        "    --agent=codex              (with --doctor) also inspect Codex's LIVE CLI-first integration: PATH binary, exact\n"
-        "                               installed-skill manifest parity, advisory hook executability, and the secondary\n"
+        "    --agent=codex              (with --doctor) also inspect Codex's LIVE CLI-first integration: PATH binary, exact\n" "                               installed-skill manifest parity, advisory hook executability, and the secondary\n"
         "                               mcp_servers.ripwire command/--mcp args. Read-only; emits fixed repair commands and\n"
         "                               never prints config contents or shell command lines. Other values refuse.\n"
         "    --skipped                  WHY the index does not contain a file, and which files it DOES contain but cannot\n"
@@ -1767,8 +1761,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --format=candidates        (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
-        "    --legend=full|compact     output legend posture for --for and --grep/--regex only. full is byte-identical to the\n"
-        "                               default; compact keeps every data/completeness attribute, adds a versioned schema id,\n"
+        "    --legend=full|compact     output legend posture for --for and --grep/--regex only. full is byte-identical to the\n" "                               default; compact keeps every data/completeness attribute, adds a versioned schema id,\n"
         "                               and shortens repeated explanatory prose. Unsupported verbs refuse.\n"
         "    --json                     machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr\n"
         "                               names 1:1 — supported for the default map, --for, --pack-task, --callers/--callees/\n"
@@ -2992,6 +2985,16 @@ static inline void validateLegendModifier( Config& c ) noexcept
     }
 }
 
+static inline void validateGrepHandleModifier( Config& c ) noexcept
+{
+    if( c.grepHandles && c.grep.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --handles modifies --grep=STR or --regex=PAT — pass one too "
+                              "(e.g. ripwire <dir> --grep=stale --handles)\n" );
+        c.ok = false;
+    }
+}
+
 inline void validateModifierGuards( Config& c ) noexcept
 {
     validatePagingHonored( c );      // §P8/G2: --limit/--offset on a verb that windows nothing (see its header)
@@ -3001,6 +3004,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     noticeShapingFlagIgnored( c );   // §B9.2:  the same two flags OUTSIDE that family — a NOTICE, never c.ok
 
     validateLegendModifier( c );
+    validateGrepHandleModifier( c );
 
     // --mcp-token/--allow-remote-edits are read ONLY inside the --listen HTTP branch (main.cpp's
     // McpHttpConfig assembly) — the stdio --mcp path never touches either member, so bare `--mcp --mcp-token=…`
@@ -3072,15 +3076,6 @@ inline void validateModifierGuards( Config& c ) noexcept
     if( c.noPrefilter && c.grep.empty() )
     {
         std::fprintf( stderr, "ripwire: --no-prefilter modifies --grep=STR or --regex=PAT — pass one (e.g. ripwire <dir> --grep=STR --no-prefilter)\n" );
-        c.ok = false;
-    }
-
-    // --handles mints a freshness-pinned symbol target only for an enclosing definition surfaced by grep.
-    // Alone it would be an inert promise of an edit target, so refuse rather than silently emit the default map.
-    if( c.grepHandles && c.grep.empty() )
-    {
-        std::fprintf( stderr, "ripwire: --handles modifies --grep=STR or --regex=PAT — pass one too "
-                              "(e.g. ripwire <dir> --grep=stale --handles)\n" );
         c.ok = false;
     }
 
