@@ -122,3 +122,13 @@ test	clean	abstain	instrumented-cli	the edit plan meeting got moved to Thursday 
 dev	clean	abstain	instrumented-cli	can you handle the release notes for this sprint?
 test	clean	abstain	instrumented-cli	codex is a nice name, should we use it for the new project?
 test	clean	abstain	instrumented-cli	the legend on that chart is unreadable, pick better colors
+test	clean	exact-grep	instrumented-cli	I need every place that says "targetSymbol" verbatim
+dev	clean	exact-grep	instrumented-cli	look for occurrences of "cacheValue" across the repo
+test	clean	exact-grep	instrumented-cli	where does the string "renderXmlRow" show up in the codebase
+dev	clean	exact-grep	instrumented-cli	grep the tree for the literal "alphaNode" please
+test	dirty	edit-contract	instrumented-cli	did parseConfigValue's contract change after my patch
+dev	dirty	edit-contract	instrumented-cli	I modified sendRequest - is it still compatible with callers
+test	dirty	edit-contract	instrumented-cli	just finished editing StorageDriver, could this break anyone
+dev	dirty	edit-contract	instrumented-cli	i edited HttpClient earlier; did i change its contract at all
+test	clean	abstain	instrumented-cli	where does the team stand on the quarterly plan
+dev	clean	abstain	instrumented-cli	i modified the slide deck after my patch of the agenda
