@@ -2182,10 +2182,11 @@ RELATIVE (matched against the indexed spelling) or ABSOLUTE (matched against the
 
 **Answers:** the plan's explicit mode: --dry-run preflights and prints the receipt without writing, --apply commits;
 
-exactly one of the two is required. Payload paths are relative to the plan file. Every target/payload/span is preflighted before any write; overlaps refuse. Apply holds sorted per-file locks and atomically renames each file, re-verifying EACH file's bytes immediately before ITS OWN write (recheck_before_each_write in the receipt) so a non-cooperating external writer is detected rather than clobbered. Prior files roll back on a later write failure or such a detection; the message says which happened and how many files it restored. A crash between file renames remains a disclosed limit.
+exactly one of the two is required. Payload paths are relative to the plan file and CONFINED to its directory: a path resolving outside it (an absolute path, a '..' escape, or a symlink pointing out) refuses, naming the path it resolved to, and the receipt's payload_path shows what each op will READ. Every target/payload/span is preflighted before any write; overlaps refuse. Apply holds sorted per-file locks and atomically renames each file, re-verifying EACH file's bytes immediately before ITS OWN write (recheck_before_each_write in the receipt) so a non-cooperating external writer is detected rather than clobbered. Prior files roll back on a later write failure or such a detection; the message says which happened and how many files it restored. A crash between file renames remains a disclosed limit.
 
 **Caveats (stated by the binary):**
 
+- Payload paths are relative to the plan file and CONFINED to its directory: a path resolving outside it (an absolute path, a '..' escape, or a symlink pointing out) refuses, naming the path it resolved to, and the receipt's payload_path shows what each op will READ.
 - A crash between file renames remains a disclosed limit.
 
 ### `--safe-delete=SYM`
