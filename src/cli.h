@@ -302,6 +302,10 @@ struct Config
                                                             // covers, and --dead-code's own high-confidence shape at defs=1. FACTS only:
                                                             // risk= names what was found (none-found/uses-exist/untested-radius), never a
                                                             // go/no-go verdict. file:name disambiguates like --around/--lego.
+    std::string_view sliceSpec;                            // --slice=SYM[:VAR] (lane/paper-slice): NAME-BASED intra-procedural def-use
+                                                            // slice of VAR inside the ONE uniquely-resolved definition SYM (multiple defs
+                                                            // refuse, listing spellings — the --edit-check §A6a rule). Bare --slice=SYM
+                                                            // lists the sliceable locals. file:name disambiguates like --edit-check.
     std::string_view replaceSymbolBody;                    // CLI-first write surface: the same transaction-safe engine as MCP
     std::string_view insertBeforeSymbol;
     std::string_view insertAfterSymbol;
@@ -1359,6 +1363,16 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               proven-wrong edges. FACTS only: risk= names what was found — none-found (zero callers AND\n"
         "                               zero uses), untested-radius (a radius exists and none of it is test-covered), or\n"
         "                               uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict.\n"
+        "    --slice=SYM[:VAR]          NAME-BASED intra-procedural def-use slice of variable VAR inside the ONE uniquely-resolved\n"
+        "                               definition SYM (statement-level def-use edges as a queryable primitive — the ARISE result,\n"
+        "                               arXiv:2605.03117). One <s l= k= t=> row per line touching VAR, source order: k=def|use|both,\n"
+        "                               t=param|decl|assign|call-arg|read (strongest role on the line), CDATA = the trimmed source\n"
+        "                               line; defs=/uses= count occurrences. Bare --slice=SYM lists the sliceable locals (<v n= l=\n"
+        "                               t=/> rows) so a caller can pick VAR. LIMITS in the legend, not implied: no alias analysis,\n"
+        "                               no flow sensitivity, nested-scope shadowing may over-include. SYM matching several\n"
+        "                               definition sites REFUSES (exit 1) listing the file:name spellings that pick one, like\n"
+        "                               --edit-check. Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — other\n"
+        "                               indexed languages refuse loudly (never an empty success). Single-root only.\n"
         "    --pr-context[=BASEREF]     no-LLM review-evidence bundle for the diff (working-tree, or vs BASEREF): per changed file,\n"
         "                               its symbols + callers + blast radius + affected tests + co-change partners + owners.\n"
         "                               With --max-tokens=N the bundle degrades to fit: per-file structural counts survive for\n"
@@ -2124,6 +2138,7 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--batch=",       &Config::batchFile       , EmptyValue::Refuse, "a batch file path, or - for stdin",      "--batch=queries.txt" },
     { "--edit-check=",  &Config::editCheckSym    , EmptyValue::Refuse, "a symbol name (file:name disambiguates)", "--edit-check=parseArgs" },
     { "--safe-delete=", &Config::safeDeleteSym   , EmptyValue::Refuse, "a symbol name (file:name disambiguates)", "--safe-delete=parseArgs" },
+    { "--slice=",       &Config::sliceSpec       , EmptyValue::Refuse, "SYM (list its locals) or SYM:VAR (slice VAR; file:name:VAR disambiguates)", "--slice=parseArgs:argIndex" },
     { "--replace-symbol-body=", &Config::replaceSymbolBody, EmptyValue::Refuse, "a symbol name", "--replace-symbol-body=parseArgs" },
     { "--insert-before-symbol=", &Config::insertBeforeSymbol, EmptyValue::Refuse, "a symbol name", "--insert-before-symbol=parseArgs" },
     { "--insert-after-symbol=",  &Config::insertAfterSymbol,  EmptyValue::Refuse, "a symbol name", "--insert-after-symbol=parseArgs" },
@@ -2343,7 +2358,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 197;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface)
+inline constexpr std::size_t kTotalFlagArms = 198;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2832,6 +2847,7 @@ inline constexpr ShapingVerb kShapingVerbs[] = {
     { "--lego",         nullptr, &Config::legoType     },
     { "--report",       &Config::report,       nullptr },
     { "--edit-check",   nullptr, &Config::editCheckSym },
+    { "--slice",        nullptr, &Config::sliceSpec    },
     { "--situ",         &Config::situ,         nullptr },
     { "--handoff",      &Config::handoff,      nullptr, false, false, true },   // writeHandoffPacket takes the budget
     { "--scan-skills",  &Config::scanSkills,   nullptr },

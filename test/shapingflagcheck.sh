@@ -98,6 +98,7 @@ argvFor()
         --lego)        printf '%s\0' --lego=Config ;;
         --report)      printf '%s\0' --report ;;
         --edit-check)  printf '%s\0' --edit-check=parseArgs ;;
+        --slice)       printf '%s\0' --slice=parseArgs:c ;;
         --situ)        printf '%s\0' --situ ;;
         --handoff)     printf '%s\0' --handoff ;;
         --scan-skills) printf '%s\0' --scan-skills ;;
