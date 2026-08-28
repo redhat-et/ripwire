@@ -2638,6 +2638,11 @@ struct ForLensNotes
     const std::string& docMention;
     const std::string& adaptive;
     const std::string& floor;       // LB-A: the relevance floor's shrink note, "" when it did not fire
+    // the confidence disclosure is the exception to absent-unless-present: it is a FACT of every ranking
+    // (the §A4e `weak` precedent — a root fact must be legible from either dialect, so the XML attrs get
+    // real keys here rather than a string spliced somewhere JSON cannot reach).
+    const char*        confidence;  // "high" | "low"
+    int                marginPct;   // the whole-percent relative drop the confidence derives from (0 = none)
     bool               weak;
 };
 
@@ -2652,6 +2657,13 @@ struct ForLensHeaderParts
     std::string_view taskNote;         // the comment's scrubbed echo of `task` (xmlCommentText)
     std::string_view adaptiveNote, mentionNote, boostNote, docMentionNote;
     std::string_view floorNote;        // LB-A: present only when the relevance floor actually shrank the quota
+    // Ranking-confidence disclosure (paper-shape lane; arXiv 2607.24882 names abstention/confidence as the
+    // unsolved retrieval axis). ALWAYS present — facts derived from the SAME adaptiveCut gap statistic
+    // --adaptive cuts at, no new scorer, no behavior change. The attrs live HERE rather than in the
+    // pre-built rootOpenStr because the ceiling ladder's route-dropped rung rebuilds the root open from
+    // scratch (ctxRootOpen below) and would silently shed a fact spliced into the pre-built string.
+    std::string_view confidenceAttrs;  // e.g. ` confidence="high" margin_pct="34"` — root facts, every ladder rung
+    std::string_view confidenceNote;   // the legend sentence defining the two attributes (legend-coverage contract)
     bool             anchor     = false;   // --anchor's EXPERIMENTAL caveat paragraph
     bool             autoBundle = false;   // T3: auto mode is on (cfg.detail==0, no --signatures-only) — appends the bundle=auto legend
     bool             compactBundle = false;   // COMPACT conceptual serving: appends the bundle=compact legend INSTEAD of the auto one — never both, because only one of the two sections can be emitted
@@ -2661,18 +2673,68 @@ struct ForLensHeaderParts
                                             // must carry the SAME root as the pre-built rootOpenStr did.
 };
 
-inline std::string rootOpenWithSchema( std::string rootOpen, std::string_view schema )
+// insert pre-formatted attributes (leading space, already attribute-safe — every caller's values come
+// from a fixed enum + an int or a versioned schema id, never corpus text) before the root open tag's '>'.
+inline std::string rootOpenWithExtraAttrs( std::string rootOpen, std::string_view attrs )
 {
-    if( schema.empty() )
+    if( attrs.empty() )
     {
         return rootOpen;
     }
     const std::size_t end = rootOpen.find( '>' );
     if( end != std::string::npos )
     {
-        rootOpen.insert( end, " schema=\"" + std::string( schema ) + "\"" );
+        rootOpen.insert( end, attrs );
     }
     return rootOpen;
+}
+
+inline std::string rootOpenWithSchema( std::string rootOpen, std::string_view schema )
+{
+    if( schema.empty() )
+    {
+        return rootOpen;
+    }
+    return rootOpenWithExtraAttrs( std::move( rootOpen ), " schema=\"" + std::string( schema ) + "\"" );
+}
+
+// ── Ranking-confidence disclosure for --for (paper-shape lane; arXiv 2607.24882 names abstention/
+// confidence as the unsolved retrieval axis) ─────────────────────────────────────────────────────────
+// The MAPPING, from facts adaptiveCut already computed — pure, deterministic, and stated in the legend
+// sentence it also builds. high on either of two grounds: a MATERIAL cliff inside the served window
+// (!hitCeiling — the sharp-query shape, margin_pct= is that drop), or the served head already contains
+// EVERY positive match (nothing beyond it for a cut to get wrong; the caller passes the FINAL head size,
+// after the relevance floor trimmed the zero-score tail). Everything else is low: a flat head with a
+// longer positive tail — the shape where a fixed head is a guess — including the zero-hit query
+// (positiveHits==0 fails the completeness ground's >0 guard deliberately: a ranking of nothing is not a
+// trustworthy ranking). margin_pct reports the IN-WINDOW drop only (0 under hitCeiling): a material drop
+// far beyond the served head cannot justify trust in the head, and quoting it here would claim exactly
+// that. A free function over the cut rather than more lines in runForLens, which is already one of the
+// largest functions in this file (the forLensHeaderText precedent).
+struct ForConfidence
+{
+    std::string attrs;      // ` confidence="high|low" margin_pct="N"` — root facts, every ladder rung
+    std::string note;       // the legend clause defining both (legend-coverage contract)
+    const char* level = ""; // "high" | "low" — the JSON dialect's key value
+    int         marginPct = 0;
+};
+
+inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN )
+{
+    ForConfidence out;
+    const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
+    out.level     = ( !cut.hitCeiling || servedComplete ) ? "high" : "low";
+    out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;
+    char attrBuf[ 48 ];
+    std::snprintf( attrBuf, sizeof( attrBuf ), " confidence=\"%s\" margin_pct=\"%d\"", out.level, out.marginPct );
+    out.attrs = attrBuf;
+    // no "--" anywhere (rides inside an XML comment, where "--" is ill-formed — G4). TERSE on purpose:
+    // this rides EVERY --for header and its bytes are charged under an explicit budget, so each word
+    // competes with a sig row (the W3-S short-spelling precedent). The full mapping: the --for help text.
+    out.note = " [confidence= derives from the ranked head's largest relative score drop (margin_pct=, whole "
+               "percent, 0 = none; the same gap the adaptive flag cuts at). low = flat ranking: treat the set "
+               "as a starting point, not an answer]";
+    return out;
 }
 
 inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p, std::string_view extraNotes )
@@ -2685,6 +2747,7 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     h.append( p.boostNote );
     h.append( p.docMentionNote );
     h.append( p.floorNote );
+    h.append( p.confidenceNote );   // the compact dialect's reader meets the same two root facts
     h.append( extraNotes );
     h += " -->";
     h += rw::forRootRelPathsLegendShort( !p.rootArg.empty() );
@@ -2729,8 +2792,11 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
 {
     std::string h;
     h.reserve( 640 + std::max( kForAutoBundleLegend.size(), kForCompactBundleLegend.size() ) + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
-               + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + p.floorNote.size() + extraNotes.size() );
-    h += rootOpenWithSchema( withRouteAttr ? std::string( p.rootOpenStr ) : rw::ctxRootOpen( p.task, {}, p.rootArg ),
+               + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + p.floorNote.size()
+               + p.confidenceAttrs.size() + p.confidenceNote.size() + extraNotes.size() );
+    h += rootOpenWithSchema( rootOpenWithExtraAttrs( withRouteAttr ? std::string( p.rootOpenStr )
+                                                                   : rw::ctxRootOpen( p.task, {}, p.rootArg ),
+                                                     p.confidenceAttrs ),
                              p.compactLegend ? "ripwire.for/v1" : std::string_view() );
     if( p.compactLegend )
     {
@@ -2752,6 +2818,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     h.append( p.boostNote );        // B3: present only when the co-change prior actually promoted something
     h.append( p.docMentionNote );   // R5: present only when a resolved symbol's mentioning docs surfaced
     h.append( p.floorNote );        // LB-A: present only when the relevance floor shrank the quota (else "")
+    h.append( p.confidenceNote );   // ALWAYS present — defines the confidence=/margin_pct= root facts
     if( p.anchor )
     {
         h += " [anchored, EXPERIMENTAL: lexical + graph-expanded rank; honest numbers: on the 80-commit co-change "
@@ -2832,6 +2899,10 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
     {
         h += ",\"relevance_floor\":\"" + jsonStr( notes.floor ) + "\"";
     }
+    // ranking-confidence facts — always present (a fact of every ranking, mirroring the XML root attrs).
+    h += ",\"confidence\":\"";
+    h += notes.confidence;
+    h += "\",\"margin_pct\":" + std::to_string( notes.marginPct );
     if( notes.weak )
     {
         h += ",\"weak\":true";
@@ -3568,6 +3639,15 @@ std::optional<int> runForLens( const MainDispatch& d )
         const std::string taskNote = xmlCommentText( cfg.forTask );
         int forTopN = cfg.packTopN > 0 ? cfg.packTopN : 40;
 
+        // Ranking-confidence disclosure (paper-shape lane; arXiv 2607.24882 — abstention/confidence is the
+        // unsolved retrieval axis: a retriever must be able to tell the caller when its own ranking is not
+        // trustworthy). DERIVED, NEVER SCORED: this is the SAME adaptiveCut gap statistic --adaptive cuts
+        // at, computed once here (the --adaptive block below reuses it — one call, identical parameters, so
+        // the disclosure and the cut cannot disagree). Disclosure only: nothing below reads `forCut` to
+        // change what is served. The mapping to high/low happens after the relevance floor, where the final
+        // served head size is known.
+        const AdaptiveCut forCut = adaptiveCut( lensRank, 5, std::size_t( forTopN ), /*scanFullDistribution=*/true );
+
         // --adaptive (lever 2): cut the returned set at the relevance CLIFF — the largest
         // relative score gap in [floor, ceiling] (Adaptive-k). A sharp query keeps few; a flat/broad query
         // (no knee) hits the ceiling and is kept as-is (cap-and-note). floor=5, ceiling=forTopN. The cut
@@ -3583,7 +3663,9 @@ std::optional<int> runForLens( const MainDispatch& d )
             // (the recorded "inert on --for"). Scan the RAW lexical (BM25) distribution BEFORE the cap so the
             // true cliff is seen, then clamp kept into [floor, ceiling]. lensRank IS the raw lexical score here
             // (subtoken+body or name-exact; --anchor's blend is opt-in and handled by keeping this the same call).
-            const AdaptiveCut ac   = adaptiveCut( lensRank, 5, std::size_t( forTopN ), /*scanFullDistribution=*/true );
+            // `forCut` above is exactly this call (same scores, floor, ceiling, full-distribution scan),
+            // hoisted so the confidence disclosure derives from the statistic --adaptive acts on.
+            const AdaptiveCut& ac = forCut;
             forTopN = int( ac.kept );
             char nb[ 200 ];
             if( !ac.hitCeiling && ac.cliffRank < ac.kept )
@@ -3617,6 +3699,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         auto [ flooredTopN, floorNote ] = relevanceFloorCut( lensRank, forTopN );
         forTopN = flooredTopN;
 
+        // the mapping, the two derived strings, and the reasoning behind both live ONCE in
+        // deriveForConfidence (above runForLens) — forTopN is final here (floor cut applied), which is
+        // what the completeness ground needs.
+        const ForConfidence forConf = deriveForConfidence( forCut, forTopN );
+
         // H1 (B0 r2): the bundle is emitted under a GLOBAL payload budget (serialize.h kForPayloadBudgetBytes; an
         // EXPLICIT --token-budget=N overrides it at the same conservative byte rate the --max-tokens fitter uses).
         // Trimming happens inside <sigs> only, so the header is built as a string and the sibling blocks (lego,
@@ -3640,7 +3727,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         // root ATTRIBUTE is kept, paid for out of its own reserve). A tight explicit budget no longer
         // turns the disclosure off on EITHER serving shape — test/fordisclosurecheck.sh.
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
-                                        mentionNote, boostNote, docMentionNote, floorNote, cfg.anchor,
+                                        mentionNote, boostNote, docMentionNote, floorNote,
+                                        forConf.attrs, forConf.note, cfg.anchor,
                                         plan.autoBodies, plan.compact, cfg.legend == "compact", flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
@@ -3751,7 +3839,9 @@ std::optional<int> runForLens( const MainDispatch& d )
 
             const int jsonRc = emitForLensJson( stdout,
                                                 forLensJsonHeader( cfg.forTask, ForLensNotes{ routeNoteRaw, mentionNote, boostNote,
-                                                                                              docMentionNote, adaptiveNote, floorNote, forWeak } ),
+                                                                                              docMentionNote, adaptiveNote, floorNote,
+                                                                                              forConf.level,
+                                                                                              forConf.marginPct, forWeak } ),
                                                 ForLensJsonInputs{ ing, lensRank, forTopN, fanInPtr, impurePtr, &forChurn,
                                                                    &forClone, testedPtr, ampPtr, redactPtr,
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
@@ -3849,7 +3939,22 @@ std::optional<int> runForLens( const MainDispatch& d )
         // contract "the ranked map is byte-identical with and without the enrichment" has to hold for the
         // compact shape too, or the round would be changing signatures while claiming to change only bodies.
         const std::size_t autoLegendBytes = plan.legendBytes;
+        // CONFIDENCE: the same exemption a third time, for the same reason as D2's adaptiveNote — the
+        // disclosure's contract is DISCLOSURE ONLY, and charging its bytes made the default-budget compact
+        // bundle drop a tail <d> row (measured on this repo's own src, the "rank symbols by pagerank"
+        // fixture query: one row gone at the trim boundary). DEFAULT REGIME ONLY, and this split is the
+        // point where this exemption differs from its two precedents: an explicit --token-budget is a HARD
+        // est_tokens<=N promise in both dialects (fornotesbudgetcheck measured the exempted shape at 7%
+        // past an 850 ceiling — the exact W3-S "a disclosure has BYTES" trap), and ~240 B does not fit
+        // inside the ceiling's conversion slack the way D2's ~110 B note does. So under an explicit ceiling
+        // the bytes are charged and the honest price is a sig row; under the default budget nothing is
+        // promised to the byte, neutrality wins, and the overshoot is at most the two strings (~240 B,
+        // ~3% of kForPayloadBudgetBytes), disclosed here. est_tokens measures the emitted header in both
+        // regimes, so nothing under-reports either way.
+        const std::size_t confidenceExemptBytes = cfg.tokenBudget == 0
+            ? forConf.attrs.size() + forConf.note.size() : 0;
         const std::size_t fixedBytes = headerStr.size() - adaptiveNote.size() - autoLegendBytes
+                                     - confidenceExemptBytes
                                      + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
         // the auto bundle's SECTION SPLIT — the sig side's claim is capped so an explicit ceiling wider
         // than the default cannot re-inflate the trimmed sig tail at the bodies' expense (the rule, its
@@ -4012,11 +4117,25 @@ std::optional<int> runForLens( const MainDispatch& d )
             // §F1: the ladder prices what will actually be EMITTED, so the two sections charged above are in
             // this sum. headerSpliceReserve covers the est_tokens (and weak="1") attributes spliced in below —
             // see its definition for why a reserve rather than a measurement.
-            headerStr = rw::climbCeilingLadder( buildForHeader, headerStr,
-                                                 sigsStr.size() + legoStr.size() + composeStr.size() + routeStr.size()
-                                                     + detailSection.xml.size() + autoSection.xml.size() + graphSection.xml.size()
-                                                     + autoAttr.size() + 6 + headerSpliceReserve,   // + "</ctx>" + the header splices below (autoAttr exact-counted)
-                                                 rw::ceilingAllowanceBytes( cfg.tokenBudget ),
+            const std::size_t ladderPayloadBytes = sigsStr.size() + legoStr.size() + composeStr.size() + routeStr.size()
+                                                 + detailSection.xml.size() + autoSection.xml.size() + graphSection.xml.size()
+                                                 + autoAttr.size() + 6 + headerSpliceReserve;   // + "</ctx>" + the header splices below (autoAttr exact-counted)
+            const std::size_t ladderCeiling      = rw::ceilingAllowanceBytes( cfg.tokenBudget );
+            // RUNG ZERO — the confidence LEGEND clause, before any of the ladder's own rungs: it is the one
+            // header string whose loss costs NO unique information (confidence=/margin_pct= stay on the root
+            // as facts; only their explanation goes), so it must fall before the verbatim task echo does —
+            // the L1 "first rung that costs unique information" ordering. Same silent-legend-drop shape as
+            // the enrichment legendOff above (the ATTRIBUTE is the disclosure that survives a spent
+            // ceiling). Cleared on headerParts itself so every later ladder rebuild stays note-free.
+            // Measured need: fornotesbudgetcheck's 850-ceiling fixture holds 35 tokens of headroom and the
+            // clause is ~55 — charged-not-exempt (the explicit-regime split above) still cannot fit it,
+            // because the floor there is notes + first-entry-whole, neither of which may trim.
+            if( headerStr.size() + ladderPayloadBytes > ladderCeiling && !headerParts.confidenceNote.empty() )
+            {
+                headerParts.confidenceNote = {};
+                headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
+            }
+            headerStr = rw::climbCeilingLadder( buildForHeader, headerStr, ladderPayloadBytes, ladderCeiling,
                                                  /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
         }
 

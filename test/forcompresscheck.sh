@@ -113,6 +113,49 @@ else
     ok "xmllint not installed — well-formedness arms skipped"
 fi
 
+# ── arms 8-10: ranking-confidence disclosure on --for (arXiv 2607.24882 — abstention/confidence is the
+# unsolved retrieval axis; a retriever must be able to say when its own ranking is not trustworthy).
+# DISCLOSURE ONLY, derived from the SAME adaptiveCut gap statistic --adaptive cuts at — no new scorer,
+# no behavior change: the ranked set with and without the attribute is the same set.
+
+# arm 8: the attributes ride the <ctx> root as facts, and the legend DEFINES both (the house convention:
+# every first-screen attribute is defined by the emitting verb's legend — legendcoveragecheck's contract).
+grep -q '<ctx [^>]*confidence="[a-z]*"' "$TMP/for_p.xml" \
+    && ok '--for root carries confidence= as a fact' \
+    || no '--for root is missing the confidence= attribute'
+grep -q '<ctx [^>]*margin_pct="[0-9]*"' "$TMP/for_p.xml" \
+    && ok '--for root carries margin_pct= as a fact' \
+    || no '--for root is missing the margin_pct= attribute'
+# the house `defined` shape is the attribute name immediately followed by `=` (legendcoveragecheck's
+# arm-B predicate); [^"] keeps the ROOT ATTRIBUTES themselves (confidence="high") from satisfying it.
+grep -Eq 'confidence=[^"]' "$TMP/for_p.xml" && grep -Eq 'margin_pct=[^"]' "$TMP/for_p.xml" \
+    && ok "the legend defines confidence=/margin_pct= (name-followed-by-= house shape)" \
+    || no "the legend does not define confidence=/margin_pct="
+grep -q 'starting point, not an answer' "$TMP/for_p.xml" \
+    && ok "the legend says what LOW means (flat ranking, starting point not answer)" \
+    || no "the legend is missing the low-confidence honesty sentence"
+
+# arm 9: the two poles are reachable — a name-exact query on a one-function fixture is complete/sharp
+# (high); a query matching nothing has no trustworthy ranking (low, margin 0).
+grep -q 'confidence="high"' "$TMP/for_p.xml" \
+    && ok "name-exact query on the fixture reads confidence=high" \
+    || no "name-exact query on the fixture is not high (mapping broken?)"
+"$BIN" "$CORPUS" --for="zzz qqq nothing here matches" --no-cache >"$TMP/for_low.xml" 2>/dev/null
+grep -q 'confidence="low" margin_pct="0"' "$TMP/for_low.xml" \
+    && ok "no-match query reads confidence=low margin_pct=0" \
+    || no "no-match query did not read low/0 (got: $( grep -o 'confidence="[a-z]*" margin_pct="[0-9]*"' "$TMP/for_low.xml" | head -1 ))"
+
+# arm 10: dialect parity (the task_scrubbed precedent: a root fact must be legible from EITHER dialect)
+# + --adaptive still composes (its note and the confidence facts coexist; the cut stays --adaptive's).
+"$BIN" "$CORPUS" --for=computeArea --json --no-cache >"$TMP/for_j.json" 2>/dev/null
+grep -q '"confidence":"' "$TMP/for_j.json" && grep -q '"margin_pct":' "$TMP/for_j.json" \
+    && ok "--for --json carries confidence/margin_pct keys" \
+    || no "--for --json is missing the confidence/margin_pct keys"
+"$BIN" "$CORPUS" --for=computeArea --adaptive --no-cache >"$TMP/for_a.xml" 2>/dev/null
+grep -q 'adaptive: kept' "$TMP/for_a.xml" && grep -q 'confidence="' "$TMP/for_a.xml" \
+    && ok "--adaptive note and confidence facts coexist" \
+    || no "--adaptive and the confidence disclosure interfere"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "ALL PASS"
