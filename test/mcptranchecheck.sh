@@ -328,7 +328,10 @@ PY
     && ok "M14/M15: the exclusion count agrees with tools/list arithmetic; aliases documented; top_k declared" \
     || no "M14/M15: $( cat "$TMP/m14.res" )"
 # and top_k must actually SHAPE the answer, not just be declared (the accept-and-ignore class).
-R8="$( mcp_text "$( call memory_recall '{"path":"'"$ROOT"'","task":"mcp server refusal wording","top_k":2}' )" | head -c 400 )"
+# This arm measures top_k DOC-COUNT shaping, not the body-budget policy: pin an explicit high
+# budget_tokens so memory_recall's default 8K-token ceiling (recallbudgetcheck.sh owns that contract)
+# cannot cut the emission below the requested doc count on a large self-scan corpus.
+R8="$( mcp_text "$( call memory_recall '{"path":"'"$ROOT"'","task":"mcp server refusal wording","top_k":2,"budget_tokens":1000000}' )" | head -c 400 )"
 case "$R8" in *'shown=2'*) ok "M15: top_k=2 actually shapes the recall (shown=2, not the hardcoded 8)";;
               *)           no "M15: top_k is declared but ignored — $( printf '%s' "$R8" | head -c 200 )";; esac
 

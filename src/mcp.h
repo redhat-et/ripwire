@@ -673,7 +673,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // §B6 M15 / verifier N5: top_k is the budget knob this verb's own est_tokens disclosure implies. It
                    // was hardcoded to 8 with no way to ask for less, on the one MCP verb that can return ~180 KB,
                    // while the CLI --recall began honoring --top-k in this round's Wave 1.
-                   "{\"name\":\"memory_recall\",\"description\":\"Most relevant memory notes / docs for a task, full text — the few that matter, not the whole corpus. path = docs/memory dir; task = what you're working on; top_k = how many docs to return, an integer in 1..1000 (default 8) — a value outside that band is refused, never silently clamped. This verb emits FULL bodies and reports est_tokens, so lower it when the answer is bigger than the budget you have.\","
+                   "{\"name\":\"memory_recall\",\"description\":\"Most relevant memory notes / docs for a task, full text — the few that matter, not the whole corpus. path = docs/memory dir; task = what you're working on; top_k = how many docs to return, an integer in 1..1000 (default 8) — a value outside that band is refused, never silently clamped. budget_tokens = the body ceiling in tokens (default 8000, the SAME bounded-by-default policy as the CLI --recall; the header discloses max_tokens= and every cut when it bites) — raise it explicitly when you want the full bodies. This verb emits FULL bodies within that ceiling and reports est_tokens.\","
                    + mcprefuse::toolMetadataFor( "memory_recall", pathIsRequired ) + "},"
                    "{\"name\":\"situational_awareness\",\"description\":\"The 5 things to know about a diff, as JSON: blast_radius, tests_to_run, forgotten (usual co-change partners missing from this diff), hotspot_alert, modules_touched. diff/files optional — defaults to 'git diff HEAD'. files is a STRING of comma-separated paths (files=\\\"src/a.cpp,src/b.h\\\"), not an array; an array is refused rather than read as absent, which would answer about the working tree instead of the files you named.\","
                    + mcprefuse::toolMetadataFor( "situational_awareness", pathIsRequired ) + "},"
@@ -1277,7 +1277,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 {
                     // §B6 M15: `top_k` (default 8, the historic hardcode) — the budget lever the in-band
                     // est_tokens disclosure has always implied, and the CLI's --recall now honors.
-                    resp = textResult( recallText( path, task, recallTopK, 0, redactPtr ) );
+                    // Body ceiling parity with the CLI: recall is bounded by default on BOTH front doors
+                    // (kDefaultRecallMaxTokens, header-disclosed) — `budget_tokens` raises it explicitly,
+                    // the same shaping knob explore/from_trace already declare. 0 (unbounded) is no longer
+                    // reachable by omission, only by an explicit large value.
+                    const std::size_t recallTokens = budgetArg.isPresent ? std::size_t( budgetArg.value )
+                                                                         : kDefaultRecallMaxTokens;
+                    const std::size_t recallBytes  = std::size_t( double( recallTokens ) * kMinBytesPerToken
+                                                                  * kBudgetHeadroom );
+                    resp = textResult( recallText( path, task, recallTopK, recallBytes, redactPtr ) );
                 }
                 else if( name == "situational_awareness" && !path.empty() )
                 {
