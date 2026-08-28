@@ -37,6 +37,7 @@
 #include "editcheck.h"             // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
 #include "mcp.h"
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
+#include "editplan.h"              // CLI-first versioned multi-edit transactions
 #include "wrap.h"
 #include "infra/profileScope.h"    // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "arch.h"
@@ -15162,6 +15163,36 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
     return 0;
 }
 
+std::optional<int> runCliEditPlan( const rw::Config& cfg )
+{
+    const bool hasMode = cfg.editPlanDryRun || cfg.editPlanApply;
+    if( cfg.editPlan.empty() && !hasMode ) { return std::nullopt; }
+    if( cfg.editPlan.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --dry-run/--apply requires --edit-plan=FILE\n" );
+        return 1;
+    }
+    if( cfg.editPlanDryRun == cfg.editPlanApply )
+    {
+        std::fprintf( stderr, "ripwire: --edit-plan requires exactly one of --dry-run or --apply\n" );
+        return 1;
+    }
+    if( cfg.roots.size() != 1 )
+    {
+        std::fprintf( stderr, "ripwire: --edit-plan is single-root only; pass one <dir>\n" );
+        return 1;
+    }
+    const rw::editplan::Outcome outcome = rw::editplan::run( std::string( cfg.rootPath ), std::string( cfg.editPlan ),
+                                                             cfg.editPlanApply, cfg.maxFileBytes );
+    if( !outcome.ok )
+    {
+        std::fprintf( stderr, "ripwire edit-plan: %s\n", outcome.message.c_str() );
+        return 1;
+    }
+    std::puts( outcome.receipt.c_str() );
+    return 0;
+}
+
 std::optional<int> runCliEdit( const rw::Config& cfg )
 {
     const int editCount = int( !cfg.replaceSymbolBody.empty() ) + int( !cfg.insertBeforeSymbol.empty() )
@@ -15274,6 +15305,10 @@ int main( int argc, char** argv )
 
     // CLI-first edit verbs reuse the MCP transaction engine and therefore own their own indexed pass.
     // Dispatch before the ordinary ingest pipeline so the preferred CLI path never parses the tree twice.
+    if( std::optional<int> planned = runCliEditPlan( cfg ) )
+    {
+        return *planned;
+    }
     if( std::optional<int> edited = runCliEdit( cfg ) )
     {
         return *edited;

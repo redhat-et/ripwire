@@ -307,6 +307,9 @@ struct Config
     std::string_view insertAfterSymbol;
     std::string_view editPayload;                          // --edit-payload=FILE|-: exact bytes; required for a CLI edit
     std::string_view editTargetFile;                       // --edit-target-file=SUBSTR: disambiguate same-named definitions
+    std::string_view editPlan;                             // --edit-plan=FILE: versioned multi-edit JSON plan
+    bool             editPlanDryRun = false;               // --dry-run: validate/preview without writes
+    bool             editPlanApply = false;                // --apply: preflight all, then commit per-file atomically
     bool             prContext       = false;              // --pr-context[=BASEREF]: no-LLM review-evidence bundle for the diff (Wave-4)
     std::string_view prContextBase;                        // --pr-context=BASEREF: diff vs this ref (else the working-tree diff)
     bool             mergeScoutFlag  = false;               // --merge-scout was given at all (tracked separately from the CSV value so a bare
@@ -1338,6 +1341,11 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation\n"
         "                               and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON\n"
         "                               receipt; follow with --edit-check=SYM and --affected=FILE. Single-root only.\n"
+        "    --edit-plan=FILE          versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]}\n"
+        "      --dry-run | --apply     exactly one explicit mode is required. Payload paths are relative to the plan file. Every\n"
+        "                               target/payload/span is preflighted before any write; overlaps refuse. Apply holds sorted\n"
+        "                               per-file locks, rechecks freshness, and atomically renames each file. Prior files roll back\n"
+        "                               on an ordinary later write failure; a crash between file renames remains a disclosed limit.\n"
         "    --safe-delete=SYM          \"can I delete this?\" — ONE call composing signals the tool already computes for one\n"
         "                               already-resolved SYM: 1-hop callers=, the transitive --impact blast radius (impact_reaches=),\n"
         "                               every --uses read/write/import/call/extends site (uses=), how much of the blast radius the\n"
@@ -1993,6 +2001,8 @@ inline constexpr BoolFlag kBoolFlags[] =
 
     // output shape
     { "--json",               &Config::json               },   // L2: JSON output for the core/CI verbs (see Config::json)
+    { "--dry-run",            &Config::editPlanDryRun     },
+    { "--apply",              &Config::editPlanApply      },
 
     // search
     { "--no-prefilter",       &Config::noPrefilter        },
@@ -2112,6 +2122,7 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--insert-after-symbol=",  &Config::insertAfterSymbol,  EmptyValue::Refuse, "a symbol name", "--insert-after-symbol=parseArgs" },
     { "--edit-payload=",         &Config::editPayload,        EmptyValue::Refuse, "a payload file path, or - for stdin", "--edit-payload=replacement.cpp" },
     { "--edit-target-file=",     &Config::editTargetFile,     EmptyValue::Refuse, "a target file-path substring", "--edit-target-file=src/cli.h" },
+    { "--edit-plan=",            &Config::editPlan,           EmptyValue::Refuse, "a versioned edit plan JSON file", "--edit-plan=plan.json" },
     { "--eval-stray=",  &Config::evalStray       , EmptyValue::Refuse, "a labelled TSV file path",               "--eval-stray=bench/strayverdicts.tsv" },
     { "--from-trace=",  &Config::fromTrace       , EmptyValue::Refuse, "a trace file path, or - for stdin",      "--from-trace=crash.txt" },
     { "--run-trace=",   &Config::runTrace        , EmptyValue::Refuse, "a shell command line to execute",        "--run-trace=\"make -j\"" },
@@ -2325,7 +2336,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 193;  // +5 CLI edit bridge; +1 grep handles; +1 legend posture
+inline constexpr std::size_t kTotalFlagArms = 196;  // +5 CLI edit bridge; +1 grep handles; +1 legend; +3 edit-plan
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
