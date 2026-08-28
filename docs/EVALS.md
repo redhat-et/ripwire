@@ -6477,3 +6477,30 @@ going ccx 1 → 18 beside a same-named scope-less neighbour at ccx 23 reported `
 this change and is reported and located at the right file after it. Arm (F) pins that `canonicalId` did
 not move — scope-less symbols still emit no `id=` — which is what keeps the +26.4% map inflation off the
 table.
+
+## The `--slice` def-use primitive (2026-08-28) — REGISTERED CONTRACT, no numbers yet
+
+**Motivation.** ARISE (arXiv:2605.03117) measured statement-level definition-use edges exposed as a
+queryable agent primitive at +17pp Function Recall@1 on SWE-bench Lite. ripwire's graph stops at symbol
+granularity; `--slice=SYM[:VAR]` is the bounded v1 of that primitive and this paragraph registers what
+it CLAIMS, before any accuracy number is published for it.
+
+**The claimed contract (all of it gate-pinned in `test/slicecheck.sh`, none of it a measured accuracy
+claim).** One `<s l= k= t=>` row per source line touching VAR inside the ONE uniquely-resolved
+definition SYM, source order; `k=` def/use/both per line, `t=` the strongest role
+(param > decl > assign > call-arg > read), `defs=`/`uses=` occurrence counts; bare `--slice=SYM` lists
+the sliceable locals. NAME-BASED and intra-procedural by declaration: no alias analysis, no flow
+sensitivity, nested-scope shadowing may over-include — all three limits are in the emitted legend, and
+the not-served languages (everything outside C/C++/ObjC(+CUDA/Metal), Python, JS/TS, Go, Java, Rust)
+refuse at exit 1 rather than empty-succeed. Ambiguous selectors refuse with the qualifying spellings
+(the `--edit-check` §A6a rule, same `editCheckGroups` machinery).
+
+**The eval this registers for a later round — a LINE-RECALL shape, not run yet.** Mine fix commits whose
+diff touches exactly one function (the `--affected`/co-change harness already isolates these); for each,
+take the variables named on the changed lines and ask whether `--slice=fn:var` surfaces those changed
+lines among its rows (hit = every changed line touching `var` appears; report line-recall and the
+over-inclusion ratio rows-emitted / lines-relevant, per language family). Baseline arm: the whole
+function body via `--expand` (the primitive's value claim is fewer tokens for the same lines, so both
+recall AND the token ratio must be reported together, per the §5 discipline). No number from this shape
+is published until that round runs to completion under its own pre-registration — this paragraph is the
+registration, not the result.
