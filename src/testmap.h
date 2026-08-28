@@ -514,6 +514,43 @@ inline bool dependenciesMapCorpus( const IngestResult& ing, const std::vector<st
     return false;
 }
 
+// The word list of every `for <var> in <members…>; do` in the token stream, one token of lookahead state.
+inline void appendForListStems( const std::vector<std::string>& tokens, std::vector<std::string>& stems )
+{
+    enum class Loop : std::uint8_t { Scan, Var, ExpectIn, List };
+    Loop state = Loop::Scan;
+    for( const std::string& token : tokens )
+    {
+        if( token.find( '/' ) != std::string::npos )
+        {
+            continue;   // a path token is never a shell keyword or a bare list member
+        }
+        switch( state )
+        {
+            case Loop::Scan:     if( token == "for" ) { state = Loop::Var; }  break;
+            case Loop::Var:      state = Loop::ExpectIn;  break;   // the loop variable name
+            case Loop::ExpectIn: state = token == "in" ? Loop::List : Loop::Scan;  break;
+            case Loop::List:
+                if( token == "do" ) { state = Loop::Scan; }
+                else                { stems.push_back( token ); }
+                break;
+        }
+    }
+}
+
+inline std::vector<std::string> suiteMemberStems( const std::vector<std::string>& tokens )
+{
+    std::vector<std::string> stems;
+    for( const std::string& token : tokens )
+    {
+        if( token.find( '/' ) == std::string::npos ) { continue; }
+        const std::string_view stem = mention_detail::stripExt( mention_detail::baseNameOf( token ) );
+        if( !stem.empty() ) { stems.emplace_back( stem ); }
+    }
+    appendForListStems( tokens, stems );
+    return stems;
+}
+
 inline std::vector<std::string> registeredShellTokens( const IngestResult& ing )
 {
     std::string manifest;
@@ -525,7 +562,11 @@ inline std::vector<std::string> registeredShellTokens( const IngestResult& ing )
             break;
         }
     }
-    return shellTokens( executableShellText( manifest ) );
+    // A stem is REGISTERED only where regression.sh names it as a suite member: as a path-shaped token
+    // (a direct `bash test/<stem>.sh` invocation), or as a word inside a `for … in <list>; do` word list
+    // (the absorb loop). A bare word elsewhere in the manifest — an echo, a variable, a status label —
+    // must never register a coincidentally-named script; that inflated registered/unresolved_dynamic.
+    return suiteMemberStems( shellTokens( executableShellText( manifest ) ) );
 }
 
 inline void addRegisteredShellGate( const IngestResult& ing, const std::vector<char>& changedFiles, std::uint32_t fileId, ShellGateIndex& index )
