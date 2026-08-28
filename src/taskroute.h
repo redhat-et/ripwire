@@ -325,11 +325,95 @@ inline void addLexical( std::vector<RouteChoice>& choices, const char* id, const
     }
 }
 
+// A plan path the user actually WROTE. The router never invents one: --edit-plan refuses a file that is
+// not there, and recommending a command the verb refuses is a prerequisite violation, not a suggestion.
+inline std::string firstJsonPathToken( std::string_view task )
+{
+    constexpr std::string_view kBreaks = " \t\n\r\"'`(),;";
+    for( std::size_t i = 0; i < task.size(); )
+    {
+        const std::size_t begin = task.find_first_not_of( kBreaks, i );
+        if( begin == std::string_view::npos )
+        {
+            break;
+        }
+        std::size_t end = task.find_first_of( kBreaks, begin );
+        if( end == std::string_view::npos )
+        {
+            end = task.size();
+        }
+        const std::string_view token = task.substr( begin, end - begin );
+        if( token.ends_with( ".json" ) || token.ends_with( ".ndjson" ) )
+        {
+            return std::string( token );
+        }
+        i = end + 1;
+    }
+    return {};
+}
+
+// Routes for surfaces whose trigger is a NAME rather than a phrase-scoring shape: the flag is asked for by
+// something close to its own vocabulary, so a weighted score would only add noise. Each requires
+// conjunctive evidence — the surface word AND an intent word — so a passing mention never routes. The two
+// that carry a user-supplied value (a plan path, a grep literal) fire only when the task supplies it;
+// substituting a placeholder would emit a command the verb refuses, which the contract forbids outright.
+inline std::optional<RouteChoice> instrumentedTaskChoice( std::string_view task, std::string_view lower, const std::string& root )
+{
+    const std::string ripRoot = "ripwire " + shSingleQuote( root ) + " ";
+    if( ( has( lower, "edit plan" ) || has( lower, "edit-plan" ) || has( lower, "multi-edit" ) || has( lower, "multi edit" ) )
+     && ( has( lower, "apply" ) || has( lower, "transaction" ) || has( lower, "preflight" ) || has( lower, "dry run" ) || has( lower, "dry-run" ) ) )
+    {
+        const std::string plan = firstJsonPathToken( task );
+        if( !plan.empty() )
+        {
+            return RouteChoice{ "apply-edit-plan", "ripwire-mcp", "multi-edit transaction wording plus a named plan file",
+                                commandWithValue( root, "--edit-plan=", plan ) + " --dry-run", 100, 89 };
+        }
+    }
+    // "handle" must be word-bounded: an existing fixture asks to search "the user's config handling", and
+    // a substring match there would steal a plain exact-grep away from its own route.
+    if( ( boundedFind( lower, "handle" ) != std::string_view::npos || boundedFind( lower, "handles" ) != std::string_view::npos )
+     && ( has( lower, "edit" ) || has( lower, "grep" ) || has( lower, "search" ) || has( lower, "occurrence" ) ) )
+    {
+        const std::string quoted = firstQuotedLiteral( task );
+        if( !quoted.empty() )
+        {
+            return RouteChoice{ "grep-handles", "ripwire-mcp", "safe-edit handle wording plus a quoted literal to anchor them",
+                                commandWithValue( root, "--grep=", quoted ) + " --handles", 100, 88 };
+        }
+    }
+    if( has( lower, "compact legend" ) || ( has( lower, "legend" ) && has( lower, "compact" ) ) )
+    {
+        return RouteChoice{ "compact-legend", "ripwire-efficient", "compact-legend wording; the posture applies to --for and --grep",
+                            commandWithValue( root, "--for=", task ) + " --legend=compact", 100, 87 };
+    }
+    if( has( lower, "codex" )
+     && ( has( lower, "doctor" ) || has( lower, "integration" ) || has( lower, "wired" ) || has( lower, "set up" ) || has( lower, "setup" ) ) )
+    {
+        return RouteChoice{ "codex-doctor", "ripwire-mcp", "codex plus integration/health wording",
+                            ripRoot + "--doctor --agent=codex", 100, 86 };
+    }
+    if( ( has( lower, "shell gate" ) || has( lower, "test gate" ) || has( lower, "test-gate" ) )
+     && ( has( lower, "evidence" ) || has( lower, "why" ) || has( lower, "which" ) || has( lower, "picked" ) || has( lower, "chose" ) ) )
+    {
+        return RouteChoice{ "gate-evidence", "ripwire-change-check", "shell-gate selection asked for by its evidence",
+                            ripRoot + "--test-gate", 100, 85 };
+    }
+    return std::nullopt;
+}
+
 // High-confidence additions that need more than the generic phrase scorer, kept out of classify so the
 // central routing ladder stays readable as instrumented intents grow.
 inline std::optional<RouteChoice> directTaskChoice( std::string_view task, std::string_view lower,
                                                     const std::string& root, const std::vector<std::string>& symbols )
 {
+    // The instrumented surfaces are asked for BY NAME, so they outrank the generic literal/post-edit
+    // shapes: "find every occurrence of 'X' and give me safe-edit handles" is a handles request that
+    // happens to contain a grep, not the other way round.
+    if( std::optional<RouteChoice> named = instrumentedTaskChoice( task, lower, root ) )
+    {
+        return named;
+    }
     const bool exactSearch = has( lower, "exact occurrence" ) || has( lower, "exact literal" )
                           || has( lower, "find every" ) || has( lower, "search for" );
     const std::string quoted = exactSearch ? firstQuotedLiteral( task ) : std::string();

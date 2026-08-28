@@ -102,3 +102,23 @@ test	clean	edit-contract	instrumented-cli	I just edited targetSymbol; did I chan
 test	dirty	edit-contract	instrumented-cli	Check whether my edit to CacheNode changed its signature
 test	clean	exact-grep	instrumented-cli	Search for the exact literal 'flag_name' somewhere in the user's config handling
 test	clean	abstain	instrumented-cli	Search for the user's config and the team's settings for the flag
+test	clean	apply-edit-plan	instrumented-cli	Apply the edits in refactor.json as a multi-edit transaction
+dev	clean	apply-edit-plan	instrumented-cli	preflight my edit plan at plans/rename.json before it writes anything
+test	clean	apply-edit-plan	instrumented-cli	i have an edit-plan ready at edits.json — apply it, dry run first
+dev	clean	apply-edit-plan	instrumented-cli	run tools/multi-edit.json as a transaction and show me the receipt
+test	clean	grep-handles	instrumented-cli	Find every occurrence of "targetSymbol" and give me safe-edit handles
+dev	clean	grep-handles	instrumented-cli	grep for 'alphaNode' and attach the edit handles to each hit
+test	clean	grep-handles	instrumented-cli	search for "cacheValue" — i want stable handles i can edit against
+test	clean	compact-legend	instrumented-cli	I want the compact legend on this map
+dev	clean	compact-legend	instrumented-cli	give me a compact legend instead of the full one
+test	clean	compact-legend	instrumented-cli	trim the legend down to the compact form, i am tight on context
+test	clean	codex-doctor	instrumented-cli	set up the codex integration and tell me if it is wired correctly
+dev	clean	codex-doctor	instrumented-cli	is my codex setup healthy? run the doctor over it
+test	clean	codex-doctor	instrumented-cli	check the codex integration — which parts of it are misconfigured?
+test	clean	gate-evidence	instrumented-cli	why did the test-gate pick those shell gates - show me the evidence
+dev	clean	gate-evidence	instrumented-cli	which shell gates cover this change, and on what evidence?
+test	clean	gate-evidence	instrumented-cli	show me why each shell gate was chosen for my change
+test	clean	abstain	instrumented-cli	the edit plan meeting got moved to Thursday afternoon
+dev	clean	abstain	instrumented-cli	can you handle the release notes for this sprint?
+test	clean	abstain	instrumented-cli	codex is a nice name, should we use it for the new project?
+test	clean	abstain	instrumented-cli	the legend on that chart is unreadable, pick better colors
