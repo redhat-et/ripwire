@@ -222,6 +222,40 @@ inline std::string receipt( const std::vector<Edit>& edits, const std::vector<Fi
     return out + "]}";
 }
 
+// A3: roll the prefix [0, failedAt) back and say what ACTUALLY happened. The old message was
+// unconditional — "edit-plan commit failed; prior files rolled back" — but the rollback loop is
+// `while( written > 0 )`, a no-op when the failure is on the FIRST file. The commonest plan failure
+// therefore claimed a rollback that never ran, over files that were never written. An agent reading it
+// has to go and check the tree by hand to find out which of the two worlds it is in, which is exactly
+// what a refusal message exists to spare it.
+//
+// Three outcomes, three sentences, and the count is stated rather than implied:
+//   failedAt == 0            → nothing was written; there is nothing to roll back.
+//   failedAt > 0, rolled ok  → N prior files restored, N named as a number, not left to inference.
+//   rollback failed          → the loud one, unchanged: the tree is in a state only a human can judge.
+// `files` is in disk-path order (sorted just above), so failedAt indexes the file that failed.
+inline std::string rollbackMessage( const std::vector<FileStage>& files, std::size_t failedAt )
+{
+    bool        rollbackOk = true;
+    std::size_t undone     = failedAt;
+    while( undone > 0 )
+    {
+        --undone;
+        rollbackOk = mcpedit::atomicWrite( files[undone].disk, files[undone].original ) && rollbackOk;
+    }
+    if( !rollbackOk )
+    {
+        return "edit-plan commit and rollback failed; inspect files immediately";
+    }
+    const std::string at = failedAt < files.size() ? files[failedAt].identity : std::string( "?" );
+    if( failedAt == 0 )
+    {
+        return "edit-plan commit failed on the first file ('" + at + "'); no files were written";
+    }
+    return "edit-plan commit failed at '" + at + "'; " + std::to_string( failedAt ) + " prior file"
+         + ( failedAt == 1 ? "" : "s" ) + " rolled back";
+}
+
 inline Outcome run( const std::string& root, const std::string& planPath, bool apply, std::size_t maxBytes )
 {
     std::vector<Edit> edits;
@@ -243,10 +277,8 @@ inline Outcome run( const std::string& root, const std::string& planPath, bool a
     for( ; written < files.size(); ++written )
     {
         if( mcpedit::atomicWrite( files[written].disk, files[written].edited ) ) { continue; }
-        bool rollbackOk = true;
-        while( written > 0 ) { --written; rollbackOk = mcpedit::atomicWrite( files[written].disk, files[written].original ) && rollbackOk; }
-        out.ok = false;
-        out.message = rollbackOk ? "edit-plan commit failed; prior files rolled back" : "edit-plan commit and rollback failed; inspect files immediately";
+        out.ok      = false;
+        out.message = rollbackMessage( files, written );
         return out;
     }
     invalidateMcpIndex();
