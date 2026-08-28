@@ -46,7 +46,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--edit-plan`](#edit-plan-file) · [`--dry-run`](#dry-run-apply) · [`--safe-delete`](#safe-delete-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
-**self-diagnosis** — [`--doctor`](#doctor) · [`--skipped`](#skipped)
+**self-diagnosis** — [`--doctor`](#doctor) · [`--agent`](#agent-codex) · [`--skipped`](#skipped)
 
 **security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,** — [`--scan-skill`](#scan-skill-file) · [`--scan-skills`](#scan-skills-dir) · [`--force`](#force)
 
@@ -2734,10 +2734,22 @@ $ ./build/ripwire . --doctor
 </doctor>
 ```
 
+**Shaped by:** `--agent`
+
 **Caveats (stated by the binary):**
 
 - "Dependent source" is a NAMING heuristic (same dir, same filename stem, e.g.
 - A FAILING row (ok="0") also carries hint=, the derived verdict (which of self=/which= is stale and the fix, which grammar(s) failed to compile, why the cache dir isn't writable, ...) — a passing row never carries hint=.
+
+### `--agent=codex`
+
+**Answers:** (with --doctor) also inspect Codex's LIVE CLI-first integration: PATH binary, exact installed-skill manifest parity, advisory hook executability, and the secondary mcp_servers.ripwire command/--mcp args.
+
+Read-only; emits fixed repair commands and never prints config contents or shell command lines. Other values refuse.
+
+**Caveats (stated by the binary):**
+
+- emits fixed repair commands and never prints config contents or shell command lines.
 
 ### `--skipped`
 
@@ -3084,7 +3096,7 @@ $ ./build/ripwire . --scip=does_not_exist.scip --callers=rankGraphTeleport
 
 **Answers:** persistent index server (parse once, many warm queries) over stdio
 
-**Shaped by:** `--no-stable`, `--listen`
+**Shaped by:** `--no-stable`, `--agent`, `--listen`
 
 ### `--listen=HOST:PORT`
 
