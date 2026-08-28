@@ -85,6 +85,34 @@ case "$E" in *'status="recommend"'*'intent="reuse-one-symbol"'*'--exemplar='*) o
 F="$( route 'Find the code responsible for this retry timeout bug' )"
 case "$F" in *'status="recommend"'*'intent="locate-task"'*'--for='*) ok "locate/debug symptom -> --for";; *) no "locate route wrong: $F";; esac
 
+# ── the five surfaces that shipped without any routing coverage ────────────────────────────────────────
+# Each is asked for close to its own vocabulary, so each needs conjunctive evidence (the surface word AND
+# an intent word) and the two that carry a user-supplied value fire only when the task supplies it — the
+# router may not substitute a placeholder, because --edit-plan/--grep would then refuse the command it was
+# handed. All ten arms are red against a pre-fix binary: every one of these abstained with score="0".
+EP="$( route 'Apply the edits in refactor.json as a multi-edit transaction' )"
+case "$EP" in *'status="recommend"'*'intent="apply-edit-plan"'*'--edit-plan='*'refactor.json'*'--dry-run'*) ok "edit-plan wording + named plan -> --edit-plan --dry-run";; *) no "edit-plan route wrong: $EP";; esac
+EP0="$( route 'how do I run a transactional multi-edit against this repo?' )"
+case "$EP0" in *'--edit-plan='*) no "edit-plan route invented a plan file the task never named: $EP0";; *) ok "edit-plan abstains rather than invent a plan path";; esac
+HD="$( route 'Find every occurrence of "targetSymbol" and give me safe-edit handles' )"
+case "$HD" in *'status="recommend"'*'intent="grep-handles"'*'--grep='*'--handles'*) ok "handle wording + quoted literal -> --grep --handles";; *) no "grep-handles route wrong: $HD";; esac
+# --handles is a MODIFIER on --grep/--regex; without a literal to anchor it there is no command to make.
+HD0="$( route 'give me safe-edit handles for the grep hits' )"
+case "$HD0" in *'--handles'*) no "grep-handles emitted a --handles with no literal to anchor it: $HD0";; *) ok "grep-handles abstains without a quoted literal";; esac
+# The word-bounded arm: "config handling" is NOT a handles request, and must leave exact-grep alone.
+HD1="$( route "Search for the exact literal 'flag_name' somewhere in the user's config handling" )"
+case "$HD1" in *'intent="exact-grep"'*) ok "'handling' does not steal exact-grep from its own route";; *) no "substring 'handle' hijacked exact-grep: $HD1";; esac
+CL="$( route 'I want the compact legend on this map' )"
+case "$CL" in *'status="recommend"'*'intent="compact-legend"'*'--legend=compact'*) ok "compact-legend wording -> --legend=compact";; *) no "compact-legend route wrong: $CL";; esac
+CX="$( route 'set up the codex integration and tell me if it is wired correctly' )"
+case "$CX" in *'status="recommend"'*'intent="codex-doctor"'*'--doctor --agent=codex'*) ok "codex + integration wording -> --doctor --agent=codex";; *) no "codex-doctor route wrong: $CX";; esac
+CX0="$( route 'codex is a nice name, should we use it for the new project?' )"
+case "$CX0" in *'--agent=codex'*) no "a passing mention of codex minted a doctor route: $CX0";; *) ok "codex alone never mints a doctor route";; esac
+TG="$( route 'why did the test-gate pick those shell gates - show me the evidence' )"
+case "$TG" in *'status="recommend"'*'intent="gate-evidence"'*'--test-gate'*) ok "shell-gate evidence wording -> --test-gate";; *) no "gate-evidence route wrong: $TG";; esac
+TG0="$( route 'i want a sanity pass over my diff — which tests do i even need here?' )"
+case "$TG0" in *'intent="gate-evidence"'*) no "'which tests' alone minted a gate-evidence route: $TG0";; *) ok "'which tests' alone is not a shell-gate evidence request";; esac
+
 N="$( route 'Write a cheerful release announcement' )"
 case "$N" in *'status="abstain"'*) ok "off-topic prompt abstains";; *) no "off-topic prompt did not abstain: $N";; esac
 [ "$( printf '%s' "$N" | grep -o '<run>' | wc -l | tr -d ' ' )" = 0 ] && ok "abstention emits zero commands" || no "abstention emitted a command"
@@ -103,7 +131,8 @@ if command -v xmllint >/dev/null 2>&1; then xmllint --noout "$TMP/q1" 2>/dev/nul
 [ "$rc" -ne 0 ] && grep -qi 'json' "$TMP/json.err" && ok "unsupported --json combination refuses" || no "--json combination did not refuse"
 "$BIN" "$REPO" "$ROOT/test/fixture" --help-task='plan a feature' >/dev/null 2>"$TMP/multi.err"; rc=$?
 [ "$rc" -ne 0 ] && grep -qi 'single-root' "$TMP/multi.err" && ok "multi-root routing refuses" || no "multi-root routing did not refuse"
-for f in --verify --connect --expand --grep --grep-context --edit-check --from-trace --situ --pack-task --exemplar --for; do "$BIN" --help 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
+for f in --verify --connect --expand --grep --grep-context --edit-check --from-trace --situ --pack-task --exemplar --for \
+         --edit-plan --dry-run --handles --legend --doctor --agent=codex --test-gate; do "$BIN" --help 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
 
 # ── byte-compat: the verify-claim template must emit the SHIPPED --verify grammar byte-exactly ─────────
 # (PLAN 2026-08-13 addendum: gate against the real verb's PARSER, never a copy of its syntax.)
