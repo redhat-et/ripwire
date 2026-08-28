@@ -28,9 +28,11 @@ printf 'int unresolved_subject() { return 3; }\n' > "$R/src/unresolved.cpp"
 printf 'int samebasename_subject() { return 4; }\n' > "$R/src/samebasename.cpp"
 
 # Four registered gates: two mapped, two honestly unresolved. The manifest itself is literal evidence that
-# these scripts are suite members; the unregistered script below must never become an obligation.
+# these scripts are suite members; the unregistered script below must never become an obligation. The
+# trailing `echo done` line is the word-coincidence control: test/echo.sh exists beside it, and a bare
+# manifest WORD outside a for-list / path token must not register it (registered stays 4, never 5).
 printf '%s\n' '#!/usr/bin/env bash' 'for _g in literalcheck dynamiccheck unresolvedcheck samebasename; do' \
-       '    bash "test/${_g}.sh"' 'done' > "$R/test/regression.sh"
+       '    bash "test/${_g}.sh"' 'done' 'echo done' > "$R/test/regression.sh"
 printf '%s\n' '#!/usr/bin/env bash' 'ripwire . --affected=src/literal.cpp' > "$R/test/literalcheck.sh"
 printf '%s\n' '#!/usr/bin/env bash' '# RIPWIRE_TEST_DEPS: src/dynamic.cpp' \
        'target="$CHANGED_FILE"' 'ripwire . --affected="$target"' > "$R/test/dynamiccheck.sh"
@@ -39,6 +41,7 @@ printf '%s\n' '#!/usr/bin/env bash' 'target="$CHANGED_FILE"' \
 printf '%s\n' '#!/usr/bin/env bash' '# src/samebasename.cpp is commentary, not executable evidence' \
        'echo samebasename' > "$R/test/samebasename.sh"
 printf '%s\n' '#!/usr/bin/env bash' 'ripwire . --affected=src/literal.cpp' > "$R/test/unregisteredcheck.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'ripwire . --affected=src/literal.cpp' > "$R/test/echo.sh"
 
 run(){ perl -e 'alarm 25; exec @ARGV' "$BIN" "$R" "$@" --no-cache 2>/dev/null; }
 rc(){ perl -e 'alarm 25; exec @ARGV' "$BIN" "$R" "$@" --no-cache >/dev/null 2>&1; printf '%s' "$?"; }
@@ -53,6 +56,10 @@ esac
 case "$L" in
     *unregisteredcheck.sh*) no 'unregistered script leaked into tests-to-run' ;;
     *) ok 'unregistered script is excluded even when it names the changed path' ;;
+esac
+case "$L" in
+    *'test/echo.sh'*) no 'word-coincidence script (echo) leaked into tests-to-run' ;;
+    *) ok 'a bare manifest word never registers a coincidentally-named script' ;;
 esac
 
 D="$( run --test-gate=src/dynamic.cpp )"; DJ="$( run --test-gate=src/dynamic.cpp --json )"
