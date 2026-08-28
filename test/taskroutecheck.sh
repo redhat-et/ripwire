@@ -69,6 +69,28 @@ case "$LS" in *'--connect='*) no "several lowercase words minted a --connect rou
 LC="$( route 'how do classify, report and summary connect?' )"
 case "$LC" in *'--connect='*) no "three lowercase words minted a --connect route: $LC";; *) ok "three lowercase words never satisfy the three-symbol --connect";; esac
 
+# ── paraphrase tolerance: neither intent may recognise only the wording it was written against ─────────
+# exact-grep and edit-contract shipped as fixed OR-chains of four or five literal phrases. These six are
+# the realistic paraphrases that missed; all six abstained against a pre-fix binary. The two guard arms
+# below are why widening the vocabulary is safe: the floor is never the whole gate — exact-grep still
+# needs a literal the user QUOTED, and edit-contract still needs exactly one resolved symbol.
+for P in 'I need every place that says "targetSymbol" verbatim' \
+         'look for occurrences of "cacheValue" across the repo' \
+         'where does the string "alphaNode" show up in the codebase'; do
+    G="$( route "$P" )"
+    case "$G" in *'status="recommend"'*'intent="exact-grep"'*'--grep='*) ok "exact-grep paraphrase routes: ${P:0:44}";; *) no "exact-grep paraphrase missed [$P]: $G";; esac
+done
+for P in "did targetSymbol's contract change after my patch" \
+         'I modified targetSymbol - is it still compatible with callers' \
+         'just finished editing targetSymbol, could this break anyone'; do
+    E="$( route "$P" )"
+    case "$E" in *'status="recommend"'*'intent="edit-contract"'*'--edit-check='*'targetSymbol'*) ok "edit-contract paraphrase routes: ${P:0:44}";; *) no "edit-contract paraphrase missed [$P]: $E";; esac
+done
+XW="$( route 'where does the team stand on the quarterly plan and every place it slipped' )"
+case "$XW" in *'--grep='*) no "exact-search wording alone minted a grep with no quoted literal: $XW";; *) ok "widened exact-grep wording still needs a quoted literal";; esac
+EW="$( route 'i modified the slide deck after my patch of the agenda, did i change anything' )"
+case "$EW" in *'--edit-check='*) no "post-edit wording alone minted an --edit-check with no resolved symbol: $EW";; *) ok "widened post-edit wording still needs one resolved symbol";; esac
+
 T="$( route $'AddressSanitizer: heap-use-after-free\n#0 0x123 in targetSymbol router.cpp:4' )"
 case "$T" in *'status="recommend"'*'intent="trace-debug"'*'--from-trace=-'*) ok "trace shape -> --from-trace=-";; *) no "trace route wrong: $T";; esac
 

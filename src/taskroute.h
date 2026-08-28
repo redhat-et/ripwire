@@ -414,18 +414,35 @@ inline std::optional<RouteChoice> directTaskChoice( std::string_view task, std::
     {
         return named;
     }
-    const bool exactSearch = has( lower, "exact occurrence" ) || has( lower, "exact literal" )
-                          || has( lower, "find every" ) || has( lower, "search for" );
-    const std::string quoted = exactSearch ? firstQuotedLiteral( task ) : std::string();
+    // Both of these were fixed OR-chains of four or five literal phrases, which meant they recognised the
+    // wording they were written against and nothing else: "did X's contract change after my patch" is not
+    // "did i change", and "just finished editing X" is not "just edited". They now use the same weighted
+    // phraseScore + floor the four generic categories use, so paraphrases accumulate evidence instead of
+    // having to match one blessed spelling. Neither floor is the whole gate: exact-grep still needs a
+    // literal the user actually quoted, and edit-contract still needs exactly one resolved symbol, so the
+    // widened vocabulary can only choose BETWEEN routes, never invent one out of prose.
+    const int exactScore = phraseScore( lower, { { "exact occurrence", 9 }, { "exact literal", 9 },
+                                                 { "every occurrence", 8 }, { "occurrences of", 8 }, { "verbatim", 8 },
+                                                 { "find every", 7 }, { "every place", 7 }, { "search for", 7 },
+                                                 { "look for", 6 }, { "grep", 6 }, { "the string", 5 },
+                                                 { "where does", 5 }, { "exactly", 4 }, { "literal", 4 },
+                                                 { "show up", 4 }, { "across the repo", 4 }, { "in the codebase", 3 } } );
+    const std::string quoted = exactScore >= 6 ? firstQuotedLiteral( task ) : std::string();
     if( !quoted.empty() )
     {
         return RouteChoice{ "exact-grep", "ripwire-navigate", "quoted literal plus exact-search wording",
                             commandWithValue( root, "--grep=", quoted ) + " --grep-context=2 --limit=40", 100, 85 };
     }
-    const bool postEdit = has( lower, "just edited" ) || has( lower, "my edit to" )
-                       || has( lower, "changed its signature" ) || has( lower, "changed its contract" )
-                       || has( lower, "did i change" );
-    if( symbols.size() == 1 && postEdit )
+    const int postEditScore = phraseScore( lower, { { "just edited", 9 }, { "just finished editing", 9 },
+                                                    { "my edit to", 9 }, { "changed its signature", 9 },
+                                                    { "changed its contract", 9 }, { "compatible with callers", 8 },
+                                                    { "break its callers", 8 }, { "break any caller", 8 },
+                                                    { "did i change", 8 }, { "i edited", 8 }, { "i modified", 8 },
+                                                    { "i just changed", 8 }, { "after my patch", 7 },
+                                                    { "after my change", 7 }, { "since my edit", 7 },
+                                                    { "contract change", 7 }, { "still compatible", 7 },
+                                                    { "break anyone", 7 } } );
+    if( symbols.size() == 1 && postEditScore >= 7 )
     {
         return RouteChoice{ "edit-contract", "ripwire-change-check",
                             "one exact indexed symbol plus post-edit contract wording",
