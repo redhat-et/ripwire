@@ -117,6 +117,9 @@ inline bool parseEdit( const McpIndex& ix, const std::string& object, const std:
     edit.payload = mcpdetail::readFileBytes( payloadPath, payloadOk );
     if( !payloadOk || edit.payload.empty() ) { error = "cannot read non-empty payload '" + payloadPath + "'"; return false; }
     if( edit.payload.size() > maxBytes ) { error = "payload '" + payloadPath + "' exceeds --max-file-size"; return false; }
+    // A1: the plan path does not route through runEditVerb, so it carries the same third payload arm itself.
+    // Preflight, like every other plan refusal — no file in the plan is written when any one edit is bad.
+    if( looksBinary( edit.payload ) ) { error = "payload '" + payloadPath + "' " + std::string( mcpedit::kBinaryPayloadRefusal ); return false; }
     const mcpedit::EditTarget target = mcpedit::resolveTarget( ix, edit.target, edit.fileHint );
     if( target.id == kNoNode || target.id >= ix.ing.symbols.size() ) { error = target.error; return false; }
     edit.node = target.id;
