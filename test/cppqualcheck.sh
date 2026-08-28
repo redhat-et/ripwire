@@ -187,9 +187,11 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # mergescout.h's injectFileLevelFallback had a third copy of the same fopen/fseek/fread/fclose block. Both
 # now call the canonical helper; both were re-read first to confirm the degrade is byte-identical (short
 # read or ftell failure -> cleared buffer -> the file contributes nothing, silently).
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 13 ] \
-    && ok "repo: --uses=readWholeFile count=13 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 13"
+# 13 -> 15 2026-08-28: the registered shell-gate index reads regression.sh and each registered gate through
+# the same bounded helper, adding one site in registeredShellTokens and one in addRegisteredShellGate.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 15 ] \
+    && ok "repo: --uses=readWholeFile count=15 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 15"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"

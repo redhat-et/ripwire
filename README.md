@@ -565,7 +565,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 ## What it answers
 
-Around the core sit 161 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 167 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 Not sure which of them fits the task in front of you? `ripwire . --help-task="<task in words>"`
 recommends ONE executable command with the evidence behind the pick — advice only, it never runs
@@ -575,7 +575,7 @@ the recommendation — and abstains honestly when the evidence is too thin to na
 <summary>Which surface is the authority — <code>--help</code> vs <code>docs/COMMANDS.md</code> — and the four reflex verbs worth memorising</summary>
 
 `./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
-[`docs/COMMANDS.md`](docs/COMMANDS.md) documents every one of the 131 advertised flags — 94 of them
+[`docs/COMMANDS.md`](docs/COMMANDS.md) documents every one of the 141 documented flags — 94 of them
 with a real invocation and its recorded output (counts re-derived 2026-08-23; `test/docscommandscheck.sh`
 fails if that documented set and the binary's own flag table ever disagree). Each family below links there.
 
@@ -902,8 +902,8 @@ $ ripwire . --callers=rankGraphTeleport
 <s t="fn" n="runEval" p="src/eval.h:168"/>
 <s t="fn" n="rankGraph" p="src/graph.h:2177"/>
 <s t="fn" n="anchoredLexicalRank" p="src/graph.h:2513"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:13485"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:13600"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:13649"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:13764"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:950"/>
 </callers>
 ```
