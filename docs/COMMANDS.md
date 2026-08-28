@@ -2166,13 +2166,13 @@ empty payloads refuse, never imply deletion
 
 ### `--edit-target-file=PATH`
 
-**Answers:** optional file-path substring to disambiguate a same-named definition.
+**Answers:** optional file-path substring disambiguating a same-named definition.
 
-These three CLI verbs reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON receipt; follow with --edit-check=SYM and --affected=FILE. Single-root only.
+RELATIVE (matched against the indexed spelling) or ABSOLUTE (matched against the file's resolved on-disk path), so the path a receipt or a trace hands you works verbatim. These three CLI verbs reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON receipt; follow with --edit-check=SYM and --affected=FILE. Single-root only.
 
 **Caveats (stated by the binary):**
 
-- optional file-path substring to disambiguate a same-named definition.
+- optional file-path substring disambiguating a same-named definition.
 
 ### `--edit-plan=FILE`
 

@@ -10,6 +10,8 @@
 #include "mcpindex.h"
 #include "infra/hashutil.h"   // sanitizer-clean modulo-2^64 FNV multiplication
 
+#include <climits>            // PATH_MAX — the AbsHintFrame realpath/getcwd buffers (A2)
+
 namespace rw
 {
 
@@ -96,6 +98,53 @@ namespace mcpedit
         return out;
     }
 
+    // A2: an ABSOLUTE path hint — the spelling an agent pastes back from a receipt, a stack trace or its own
+    // shell, and the most natural thing to type — could never substring-match `ing.files`' root-relative
+    // identities ("corpus/a.py"). So `--edit-target-file=/abs/.../a.py` refused with "symbol 'alpha' not
+    // found under path '/abs/.../a.py'" about a file that DEFINES alpha: a false statement about the tree.
+    // The fix is not a second path vocabulary — it lifts the indexed FILE into the absolute frame the hint
+    // is already in, and runs the same substring rule there. Built once per resolve, and empty (so free) for
+    // the ordinary relative hint, which keeps the existing fast path byte-for-byte.
+    //
+    // realpath() on the hint so a symlinked prefix (/tmp vs /private/tmp on macOS) lands in the same frame
+    // getcwd() reports; a hint naming nothing on disk keeps its literal spelling rather than being dropped.
+    struct AbsHintFrame
+    {
+        std::string hint;   // canonical absolute hint — empty when the hint is relative (nothing to do)
+        std::string cwd;    // getcwd, to absolutize a relative on-disk spelling; empty ⇒ degrade to no match
+
+        explicit AbsHintFrame( const std::string& pathHint )
+        {
+            if( pathHint.empty() || pathHint.front() != '/' )
+            {
+                return;
+            }
+            char buf[ PATH_MAX ];
+            hint = ::realpath( pathHint.c_str(), buf ) != nullptr ? std::string( buf ) : pathHint;
+            cwd  = ::getcwd( buf, sizeof( buf ) ) != nullptr ? std::string( buf ) : std::string();
+        }
+
+        bool matches( const IngestResult& ing, std::uint32_t fileId ) const
+        {
+            if( hint.empty() || cwd.empty() )
+            {
+                return false;
+            }
+            const std::string& disk = diskPath( ing, fileId );   // the on-disk spelling, never the label
+            const std::string  abs  = !disk.empty() && disk.front() == '/' ? disk : cwd + "/" + disk;
+            return abs.find( hint ) != std::string::npos;
+        }
+    };
+
+    // The ONE "does this indexed file satisfy the caller's path hint" predicate, so the symbol scan and the
+    // never-parsed disclosure below cannot disagree about which files a hint names. Relative substring test
+    // first — unchanged, and the only test a relative hint ever runs.
+    inline bool editHintMatches( const IngestResult& ing, std::uint32_t fileId,
+                                 const std::string& pathHint, const AbsHintFrame& frame )
+    {
+        return filePathContains( ing.files[ fileId ], pathHint ) || frame.matches( ing, fileId );
+    }
+
     // A1 (secondary): "symbol 'X' not found under path 'F'" is a TRUE statement with a misleading cause when
     // F is indexed but was never PARSED — the ingest's not-measured sentinel (fileHealth.fileBytes == 0: a
     // binary sniff, a read failure, or a doc-format file the doc pass extracted instead). Such a file has no
@@ -103,12 +152,12 @@ namespace mcpedit
     // noise. Say which file, and why, instead of letting the agent hunt for a name that is there.
     // Returns "" when the hint names nothing indexed, or names anything that WAS measured (then the plain
     // not-found is the honest answer). Names at most 3 files — this is a hint, not a report.
-    inline std::string unmeasuredHintNote( const IngestResult& ing, const std::string& pathHint )
+    inline std::string unmeasuredHintNote( const IngestResult& ing, const std::string& pathHint, const AbsHintFrame& frame )
     {
         std::vector<std::string> unmeasured;
         for( std::size_t f = 0; f < ing.files.size(); ++f )
         {
-            if( !filePathContains( ing.files[f], pathHint ) )
+            if( !editHintMatches( ing, std::uint32_t( f ), pathHint, frame ) )
             {
                 continue;
             }
@@ -146,6 +195,7 @@ namespace mcpedit
     inline NodeId resolveOneForEdit( const IngestResult& ing, const std::string& symbol,
                                      const std::string& pathHint, std::string& err )
     {
+        const AbsHintFrame  frame( pathHint );   // A2: absolute-hint frame; inert for a relative hint
         std::vector<NodeId> matches;
         for( const Symbol& s : ing.symbols )
         {
@@ -153,9 +203,9 @@ namespace mcpedit
             {
                 continue;
             }
-            if( !pathHint.empty() && !filePathContains( ing.files[s.fileId], pathHint ) )
+            if( !pathHint.empty() && !editHintMatches( ing, s.fileId, pathHint, frame ) )
             {
-                continue; // `<label>/./<rel>`-tolerant
+                continue; // `<label>/./<rel>`-tolerant, and absolute-spelling-tolerant
             }
             matches.push_back( s.id );
         }
@@ -186,9 +236,14 @@ namespace mcpedit
             if( !pathHint.empty() )
             {
                 m += " under path '" + pathHint + "'";
-                m += unmeasuredHintNote( ing, pathHint );
+                m += unmeasuredHintNote( ing, pathHint, frame );
             }
-            const std::vector<std::string> near = nearestNames( ing, symbol, 5 );
+            // A2: ask for one extra and drop any suggestion EQUAL to the name requested. This branch is
+            // reached only when no definition of `symbol` survived the filter, so leading the did-you-mean
+            // list with `symbol` itself ("not found ...; nearest: alpha") reads as a bug in the tool.
+            std::vector<std::string> near = nearestNames( ing, symbol, 6 );
+            near.erase( std::remove( near.begin(), near.end(), symbol ), near.end() );
+            if( near.size() > 5 ) { near.resize( 5 ); }
             if( !near.empty() )
             {
                 m += "; nearest: ";
