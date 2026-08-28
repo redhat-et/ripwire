@@ -31,22 +31,21 @@ namespace rw
 // The floor sentence. Shared verbatim by all five verbs on every surface that can carry prose. Written with
 // NO "--" digraph anywhere: this string is spliced into an XML comment, where "--" is a well-formedness
 // error (G4), which is why the verbs are named bare here ("the uses verb") rather than with their flags.
+//
+// C1 density fix (lane/fa-legend, 2026-08-28): every fact below survived a rewrite from full sentences to
+// terse defined-clauses — none was cut, see test/graphlegendbudgetcheck.sh's honesty-marker arm and
+// test/floormarkcheck.sh's exact-phrase anchors ('is a FLOOR, never a total', 'most-vexing-parse'), both of
+// which this string must keep matching verbatim. docs/EVALS.md §5 has the measured before/after byte table.
 inline constexpr const char* kGraphCountFloorLegend =
-    "counts_floor=\"1\" means every count on this element is a FLOOR, never a total. Call edges are extracted "
-    "from source text by NAME, so a call that reaches its target through dynamic dispatch (a virtual, interface "
-    "or duck-typed receiver), or a declaration "
-    "that parses without a call expression (C++ most-vexing-parse) contributes no edge and is missing here. "
-    "A call through a function pointer or callback resolves only when ONE function is bound to that variable in "
-    "scope (C-family; a reassigned, table-indexed, lambda-bound or escaped pointer — its address taken or "
-    "reference-bound — still contributes no edge). A binding written as a plain name rather than an address-of "
-    "(fp = handler, not fp = &handler) is read as a function only when the variable is PROVEN able to hold one: "
-    "a function-pointer declarator, or a function-pointer typedef declared in the SAME FILE, or a type the "
-    "parse cannot pin down at all (auto, a template type). Under any other concrete written type it is a value "
-    "copy and contributes no edge, so a variable whose function-pointer typedef lives in a HEADER is missed. "
-    "A macro-generated call site contributes a role=\"macro\" edge when its name uniquely names an indexed "
-    "function-like #define (C-family, t=\"macro\"); a name shared with any non-macro definition stays a plain "
-    "call for the resolver, and an unindexed macro's call site contributes no edge. "
-    "Read a zero as \"none found\", never as \"none exists\". ";
+    "counts_floor=\"1\" means every count here is a FLOOR, never a total: edges are extracted from source TEXT "
+    "by NAME. Missing: dynamic dispatch (virtual/interface/duck-typed), a most-vexing-parse declaration with no "
+    "call expression, a function-pointer/callback bound to more than one function in scope (reassigned, "
+    "table-indexed, lambda-bound, or address-taken/reference-bound), and a plain-name binding (fp=handler) "
+    "whose variable type is not PROVABLY a function pointer (a same-file typedef/declarator; a HEADER typedef "
+    "is missed; auto/template types are read as unpinned, so KEPT). A macro-generated call site is "
+    "role=\"macro\" only when its name uniquely names an indexed function-like #define (C-family, t=\"macro\"); "
+    "a shared name stays a plain call, an unindexed macro is no edge. Read a zero as \"none found\", never as "
+    "\"none exists\". ";
 
 // The COUNTING-UNIT clause (the L-CS routing item).
 //
@@ -72,15 +71,13 @@ inline constexpr const char* kGraphCountFloorLegend =
 // is exactly the reader this clause exists for — but the sentence now says outright that the map carries
 // neither this marker nor this clause, so no one can read the disclosure as covering that document.
 inline constexpr const char* kCallCountUnitLegend =
-    "COUNTING UNIT, and it differs by verb — which is why two of them report different numbers for one symbol. "
-    "The callers, callees, edit-check, graph-query and pr-context counts are DISTINCT SYMBOLS: repeated calls "
-    "from one caller, and calls to two overloads of one name, collapse into ONE row, their multiplicity "
-    "surviving only in the call graph's edge weight. The reach counts (impact's reaches=, pr-context's "
-    "dependents=) are the size of a transitive reach SET, each symbol counted once — not a count of calls or "
-    "edges. The uses verb counts call SITES, one row per occurrence, so "
-    "a larger count= there for the same symbol is these units agreeing, not disagreeing. The map header's "
-    "edges= is a unit again different — distinct (caller,callee) PAIRS — and that document carries neither "
-    "this marker nor this clause, so its numbers answer a different question. ";
+    "COUNTING UNIT differs by verb: callers, callees, edit-check, graph-query and pr-context counts are "
+    "DISTINCT SYMBOLS (repeated calls from one caller, and calls to two overloads, collapse into ONE row; "
+    "multiplicity survives only in the call graph's edge weight). The reach counts (impact's reaches=, "
+    "pr-context's dependents=) are the size of a transitive reach SET, each symbol counted once. The uses verb "
+    "counts call SITES, one row per occurrence — a larger count there for the same symbol is these units "
+    "agreeing, not disagreeing. The map header's edges= is a unit again different — distinct (caller,callee) "
+    "PAIRS — and that document carries neither this marker nor this clause. ";
 
 // The two clauses in the order every legend prints them, so a caller that just wants "the shared tail" cannot
 // get the order wrong. Returned by value (std::string) because the two constants cannot be concatenated at
@@ -141,17 +138,15 @@ inline const char* forRootRelPathsLegendShort( bool on ) noexcept { return on ? 
 // widening round proved false and which no extractor can make true — the sentence promised exhaustiveness
 // over a name-based, statically-extracted reference index. Restated as what IS true.
 inline constexpr const char* kUsesLegendOpen =
-    "<!-- ripwire uses: the STATICALLY RESOLVABLE use-sites of SYM (role=call|macro|read|write|import|extends|type; "
-    "p=file:line) — a floor, see counts_floor below. That role list is the whole vocabulary. role=\"type\" is a bare TYPE "
-    "mention — SYM named as a type in a signature, a declaration or a template argument — and it carries no call edge: "
-    "a type dependency is real, but it is not an invocation, so it never reaches the call graph, PageRank or the ranked "
-    "map. It is captured for C/C++/ObjC only, and only where the type is spelled as a plain leaf name, so a mention "
-    "written through a qualified or aliased spelling still contributes no row. A base clause is role=\"extends\" rather "
-    "than role=\"type\" (that relation is modelled separately), and a type\'s own DEFINITION is never a use of itself. "
-    "role=\"macro\" is the call-shaped invocation of a name "
-    "that uniquely names an indexed function-like #define — never labelled role=\"call\", because an expansion "
-    "is not a plain call; a name shared with a non-macro definition stays role=\"call\" for the resolver. "
-    "Rows are ordered SOURCE first, then test/bench, then docs, and by path within a tier. "; // LB-G
+    "<!-- ripwire uses: STATICALLY RESOLVABLE use-sites of SYM (role=call|macro|read|write|import|extends|type; "
+    "p=file:line) — a floor, see counts_floor below; that role list is the whole vocabulary. role=\"type\" is a bare "
+    "TYPE mention (a signature, declaration or template argument) with NO call edge — real but not an invocation, so "
+    "it never reaches the call graph, PageRank or the ranked map; captured C/C++/ObjC only, and only a plain leaf "
+    "spelling (a qualified or aliased spelling contributes no row). A base clause is role=\"extends\", never "
+    "role=\"type\"; a type's own DEFINITION is never a use of itself. role=\"macro\" is the call-shaped invocation of "
+    "a name uniquely naming an indexed function-like #define — never role=\"call\" (an expansion is not a plain "
+    "call); a name shared with a non-macro definition stays role=\"call\". Rows are ordered SOURCE first, then "
+    "test/bench, then docs, by path within a tier. "; // LB-G
 
 // --impact's opener, identical on both surfaces before this header.
 inline constexpr const char* kImpactLegendOpen =
@@ -180,13 +175,13 @@ inline constexpr const char* kImpactLegendOpen =
 // SYM's def file(s) is one of these function-body calls; lazy="0" means at least one is an ordinary
 // top-level (unconditional) require/import, so the dependency also holds at module-load time.
 inline constexpr const char* kImpactImportTierLegend =
-    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, listed as "
-    "<f via=\"import\" p=\"…\" lazy=\"0|1\"/> rows after the symbol rows. It is not call reach and is never added to "
-    "reaches= — the two count different units (files vs symbols) over different evidence, and an importer may use a "
-    "different symbol from that file, or none at all. It is DIRECT (one hop), never the transitive include cone. "
-    "lazy=\"1\" (TS/JS only) means every one of that importer's edges into SYM's file is a require()/import() written "
-    "INSIDE A FUNCTION BODY rather than at module load time — still a real dependency, but one that only fires if "
-    "and when that function runs; lazy=\"0\" means at least one edge is an ordinary top-level require/import. "
+    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, as "
+    "<f via=\"import\" p=\"…\" lazy=\"0|1\"/> rows after the symbol rows — not call reach, never added to reaches= "
+    "(different units, files vs symbols; an importer may use a different symbol from that file, or none at all). "
+    "DIRECT (one hop), "
+    "never the transitive include cone. lazy=\"1\" (TS/JS only) means every one of that importer's edges into SYM's "
+    "file is a require()/import() written INSIDE A FUNCTION BODY, firing only if and when that function runs; "
+    "lazy=\"0\" means at least one edge is an ordinary top-level require/import (module-load time too). "
     "shown_importers=/importers_capped= disclose that listing's own truncation (importers= stays the full count); "
     "limit=/offset= window the symbol rows only. ";
 
@@ -208,13 +203,13 @@ inline constexpr const char* kImpactImportTierColumnarLegend =
 // code path with the edge direction flipped, and giving them two descriptions is precisely the per-verb
 // vocabulary §3.4 forbids.
 inline constexpr const char* kCallHierarchyLegendOpen =
-    "<!-- ripwire callers/callees: the 1-hop call hierarchy read straight off the call graph. The callers form "
-    "lists the symbols that CALL of=; the callees form lists the symbols of= itself calls. of= is the selector "
-    "you passed, defs= how many DEFINITIONS that name resolved to (the rows UNION every def's neighbours), and "
-    "count= the number of DISTINCT neighbour symbols (a floor, per counts_floor=), which the rows window with limit= and offset=. "
-    "A neighbour that is an indexed function-like #define is a macro row (t=\"macro\", role=\"macro\" on the XML row): "
-    "the edge crosses a macro expansion, not a plain call — rows carry no role= otherwise. "
-    "Rows are ordered SOURCE first, then test/bench, then docs, and by path within a tier. "; // LB-G
+    "<!-- ripwire callers/callees: the 1-hop call hierarchy read off the call graph — the callers form lists "
+    "symbols that CALL of=; the callees form lists symbols of= itself calls. of= is the selector you passed, "
+    "defs= how many DEFINITIONS it resolved to (rows UNION every def's neighbours), count= the DISTINCT "
+    "neighbour symbols (a floor, per counts_floor=), windowed by limit= and offset=. A neighbour that is an "
+    "indexed function-like #define is a macro row (t=\"macro\", role=\"macro\" on the XML row): the edge "
+    "crosses a macro expansion, not a plain call — rows carry no role= otherwise. Rows are ordered SOURCE "
+    "first, then test/bench, then docs, by path within a tier. "; // LB-G
 
 // V1 fix (verifier finding 3, 2026-08-15): bodyless_defs= is a CALLEES-only attribute — main.cpp's emitter
 // gates it behind `!wantCallers`, so a --callers document can never carry it. It used to sit inside
@@ -223,8 +218,8 @@ inline constexpr const char* kCallHierarchyLegendOpen =
 // still appears verbatim wherever the attribute CAN appear — legendcoveragecheck's callees-side coverage is
 // unaffected; only the callers-side dead weight is gone.
 inline constexpr const char* kCallHierarchyLegendCalleesOnly =
-    "When emitted by callees, bodyless_defs= (when present) counts how many of the defs= are declarations with no body (header-only or forward-declared); "
-    "zero callees may mean no body to read callees from rather than truly no dependencies. ";
+    "callees-only: bodyless_defs= (when present) counts defs= that are bodyless declarations (header-only or "
+    "forward-declared); zero callees may mean no body to read callees from, not truly no dependencies. ";
 
 // The composed opener, one call for the caller — keeps the wantCallers/callees branch out of
 // runCallHierarchy (already this file's largest dispatcher) rather than adding a ternary at the call site.
