@@ -575,7 +575,7 @@ the recommendation — and abstains honestly when the evidence is too thin to na
 <summary>Which surface is the authority — <code>--help</code> vs <code>docs/COMMANDS.md</code> — and the four reflex verbs worth memorising</summary>
 
 `./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
-[`docs/COMMANDS.md`](docs/COMMANDS.md) documents every one of the 141 documented flags — 94 of them
+[`docs/COMMANDS.md`](docs/COMMANDS.md) documents every one of the 142 documented flags — 94 of them
 with a real invocation and its recorded output (counts re-derived 2026-08-23; `test/docscommandscheck.sh`
 fails if that documented set and the binary's own flag table ever disagree). Each family below links there.
 

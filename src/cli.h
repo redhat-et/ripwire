@@ -969,8 +969,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses\n"
         "                               what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering.\n"
         "                               For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).\n"
-        "      --handles                add h= to each unique editable enclosing-symbol row: a stable identity plus the\n" "                               file-content hash pinned when grep ran. Ambiguous or document-only rows get no handle;\n"
-        "                               a later edit must refuse after any file change rather than retarget stale coordinates.\n" "      --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit\n"
+        "      --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit\n"
         "      --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex)\n"
         "      --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)\n"
         "      --grep-scope=line|file   modifies --and=/--not=: line (default) requires the SAME matched line; file requires\n"
@@ -983,6 +982,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               tiering off entirely -- the exhaustive view. Hit files are parsed on\n"
         "                               demand under a fixed budget; tier_budget= says so when it stops, and hits it never\n"
         "                               classified are emitted, never suppressed.\n"
+        "    --handles                  (with --grep/--regex) add h= to each unique editable enclosing-symbol row: a stable\n"
+        "                               identity plus the file-content hash pinned when grep ran. Ambiguous or document-only\n"
+        "                               rows get no handle; a later edit must refuse after any file change rather than\n"
+        "                               retarget stale coordinates.\n"
         "    --match=QUERY              tree-sitter structural (shape) query\n"
         "    --pattern=PAT              structural search written in CODE, not in node kinds: --pattern='foo($X, ...)'. $NAME binds one\n"
         "                               node (repeat it and both sites must match structurally); $_ binds nothing; ... (or $$$) is an\n"
@@ -1331,17 +1334,22 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               provably incompatible with the NEW arity flagged. A contract is PER DEFINITION, so a SYM\n"
         "                               matching several definition sites REFUSES (exit 1) and lists the file:name spellings that\n"
         "                               pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=.\n"
-        "    --replace-symbol-body=TARGET  atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|-\n"
-        "    --insert-before-symbol=TARGET atomically insert the payload immediately before one uniquely-resolved definition\n"
-        "    --insert-after-symbol=TARGET  atomically insert the payload immediately after one uniquely-resolved definition\n" "                               TARGET is a symbol name, or a freshness-pinned sym# handle emitted by --grep --handles.\n"
+        "    --replace-symbol-body=TARGET   atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|-\n"
+        "    --insert-before-symbol=TARGET  atomically insert the payload immediately before one uniquely-resolved definition\n"
+        "    --insert-after-symbol=TARGET   atomically insert the payload immediately after one uniquely-resolved definition.\n"
+        "                               TARGET is a symbol name, or a freshness-pinned sym# handle emitted by --grep --handles.\n"
         "      --edit-payload=FILE|-    required exact byte payload ('-' reads stdin); empty payloads refuse, never imply deletion\n"
         "      --edit-target-file=PATH  optional file-path substring to disambiguate a same-named definition. These three CLI verbs\n"
         "                               reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation\n"
         "                               and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON\n"
         "                               receipt; follow with --edit-check=SYM and --affected=FILE. Single-root only.\n"
-        "    --edit-plan=FILE          versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]}\n" "      --dry-run | --apply     exactly one explicit mode is required. Payload paths are relative to the plan file. Every\n"
-        "                               target/payload/span is preflighted before any write; overlaps refuse. Apply holds sorted\n" "                               per-file locks, rechecks freshness, and atomically renames each file. Prior files roll back\n"
-        "                               on an ordinary later write failure; a crash between file renames remains a disclosed limit.\n"
+        "    --edit-plan=FILE           versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]}\n"
+        "      --dry-run | --apply      the plan's explicit mode: --dry-run preflights and prints the receipt without writing,\n"
+        "                               --apply commits; exactly one of the two is required. Payload paths are relative to the\n"
+        "                               plan file. Every target/payload/span is preflighted before any write; overlaps refuse.\n"
+        "                               Apply holds sorted per-file locks, rechecks freshness, and atomically renames each file.\n"
+        "                               Prior files roll back on an ordinary later write failure; a crash between file renames\n"
+        "                               remains a disclosed limit.\n"
         "    --safe-delete=SYM          \"can I delete this?\" — ONE call composing signals the tool already computes for one\n"
         "                               already-resolved SYM: 1-hop callers=, the transitive --impact blast radius (impact_reaches=),\n"
         "                               every --uses read/write/import/call/extends site (uses=), how much of the blast radius the\n"
@@ -2004,7 +2012,7 @@ inline constexpr BoolFlag kBoolFlags[] =
 
     // search
     { "--no-prefilter",       &Config::noPrefilter        },
-    { "--handles",           &Config::grepHandles        },
+    { "--handles",            &Config::grepHandles        },
     { "--lint",               &Config::lint               },
     { "--lint-catalog",       &Config::lintCatalog        },   // the built-in rule registry — src/lintcatalog.h
     { "--sarif",              &Config::sarif              },   // (with --lint / --lint-rules) SARIF 2.1.0 instead of native XML
@@ -2335,7 +2343,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 197;  // +5 CLI edit bridge; +1 grep handles; +1 legend; +3 edit-plan; +1 doctor agent
+inline constexpr std::size_t kTotalFlagArms = 197;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
