@@ -341,6 +341,71 @@ else
     ok "(E8) all $path_count repo-relative paths cited by docs/LINEAGE.md exist in the tree"
 fi
 
+# ── (F) the GATE-SCRIPT count — README's third advertised number, and the only one nothing checked ──
+# README.md's "In the tests" section states `test/regression.sh` names **N gate scripts**. That is an
+# advertised count of an enumerated thing, exactly like the flag count in (B) and the lineage counts in
+# (E), and this gate — whose whole job is "README's advertised counts must not drift" — did not cover
+# it. It had drifted to 451 while the loop held 462: eleven gates landed and the README never moved,
+# because nothing was watching. docs/EVALS.md's identical claims did NOT drift over the same period,
+# for the obvious reason that manifestcheck.sh's §8 arm and its sibling arm re-derive them from the
+# loop on every run. This arm is that same technique pointed at README.md.
+#
+# DERIVATION, not transcription: the loop is the single `for _g in NAME NAME ...; do` line in
+# test/regression.sh, and its length is recomputed here on every run. The gates invoked individually
+# above the loop (g1freshcheck, skillscan, htmlexport, compresscheck) are NOT part of it and are
+# excluded, matching what manifestcheck.sh counts and what the README's own sentence refers to — the
+# two numbers have to mean the same thing or "the authoritative list" is not one list.
+REGRESSION="$ROOT/test/regression.sh"
+if [ ! -f "$REGRESSION" ]; then
+    no "(F) missing $REGRESSION — the README's gate-script count has no ground truth to check against"
+else
+    loopNames="$( python3 -c "
+import re, sys
+text = open( sys.argv[ 1 ] ).read()
+m = re.search( r'for _g in (.*?); do', text, re.S )
+sys.exit( 'no loop found' ) if not m else print( len( m.group( 1 ).split() ) )
+" "$REGRESSION" 2>/dev/null )"
+    readmeGates="$( grep -oE '\*\*[0-9]+ gate scripts\*\*' "$README" | head -1 | grep -oE '[0-9]+' )"
+
+    # (F1) the derivation itself must be sane — a scrape that broke and yielded 0 or 3 would make every
+    #      comparison below vacuous, and a vacuous PASS is the failure mode this whole lane is treating.
+    if [ -z "$loopNames" ]; then
+        no "(F1) could not derive the loop length from test/regression.sh — the 'for _g in ...; do' line is missing or its shape changed"
+    elif [ "$loopNames" -lt 100 ]; then
+        no "(F1) derived only $loopNames loop entries from test/regression.sh — implausibly few; the scrape has probably broken"
+    else
+        ok "(F1) derived $loopNames gate scripts from test/regression.sh's absorb loop"
+    fi
+
+    # (F2) the drift arm
+    if [ -z "$readmeGates" ]; then
+        no "(F2) could not find a '**N gate scripts**' sentence in README.md to check"
+    elif [ -z "$loopNames" ]; then
+        : # (F1) already reported the derivation failure; do not report the same fact twice
+    elif [ "$readmeGates" = "$loopNames" ]; then
+        ok "(F2) README.md states $readmeGates gate scripts, matching test/regression.sh's loop length"
+    else
+        no "(F2) README.md states $readmeGates gate scripts but test/regression.sh's loop names $loopNames — update the 'In the tests' sentence in README.md"
+    fi
+
+    # (F3) MUTATION CONTROL for (F2) — same discipline as (C) is for (B). A comparison that stopped
+    #      comparing would read as a permanent PASS; prove a fabricated count is still seen as wrong.
+    if [ -n "$loopNames" ]; then
+        FTMP="$( mktemp -d )"
+        wrongGates=$(( loopNames + 11 ))
+        sed -E "s/\*\*[0-9]+ gate scripts\*\*/**${wrongGates} gate scripts**/" "$README" > "$FTMP/README_bad.md"
+        badGates="$( grep -oE '\*\*[0-9]+ gate scripts\*\*' "$FTMP/README_bad.md" | head -1 | grep -oE '[0-9]+' )"
+        if [ -z "$badGates" ]; then
+            no "(F3) mutation control: could not parse the injected wrong gate count at all"
+        elif [ "$badGates" = "$loopNames" ]; then
+            no "(F3) mutation control: injected count ($badGates) was not actually different from the derived $loopNames — control is vacuous"
+        else
+            ok "(F3) mutation control: a fabricated gate count ($badGates) is correctly seen as disagreeing with the derived $loopNames"
+        fi
+        rm -rf "$FTMP"
+    fi
+fi
+
 if [ "$fail" -eq 0 ]; then
     echo "ALL PASS"
 else
