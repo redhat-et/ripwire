@@ -21,6 +21,27 @@
 # exactly the bug: the pre-fix binary reports total=8 no matter what --top-k is, so the two numbers a fixed
 # binary must agree on (small-k total= vs huge-k shown=) simply never agree pre-fix.
 #
+# THE CORPUS IS A CLEAN EXTRACTION OF HEAD, NOT THE LIVE TREE (2026-08-28, gate-suite health round).
+# This gate used to self-scan $ROOT. $ROOT is a developer's working tree, and on this project it carries
+# scratch — 106 untracked PLAN_*/DESIGN_*/report markdown files at the time of writing. Markdown is
+# exactly what --recall retrieves, so the litter went straight into the measured corpus and roughly
+# DOUBLED it: 232 relevant of 246 document files instead of the committed tree's 126 of 139. At that
+# size the pinned --max-tokens=1000000 stopped being generous and became the binding constraint, so the
+# --top-k=9999 run — whose whole job here is to be UNCAPPED, making its shown= the true relevant count by
+# construction — came back total=232 shown=77 capped=1 truncated=1. The gate then went red on its own
+# premise, with a message blaming --top-k, on a binary with nothing wrong with it. Same commit, same
+# binary, clean checkout: ALL PASS. The gate was measuring the developer's scratch files.
+#
+# A gate's verdict must depend on its SUBJECT (here: --recall's total=/shown=/capped= accounting) and on
+# nothing else. `git archive HEAD` is the right scoping precisely because this gate needs no git history
+# and no uncommitted work — it needs a corpus of documents that is the same on every machine, in every
+# checkout, on every run. Testing uncommitted work would be the wrong goal here: uncommitted work is the
+# one thing guaranteed to differ between the developer's tree and CI's.
+#
+# The premise itself is now ASSERTED rather than assumed: the --top-k=9999 run must come back capped=0
+# with no truncated= marker. If a future corpus outgrows the pinned budget again, this gate says so in
+# one line instead of failing an unrelated arm.
+#
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/recalltotalcheck.sh
 #         RIPWIRE_BIN=build_base/ripwire bash test/recalltotalcheck.sh   # must FAIL (pre-fix binary, RED)
 # Exits non-zero on any failure. Does NOT edit regression.sh.
@@ -34,15 +55,27 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
-echo "recalltotalcheck: BIN=$BIN  TARGET=$ROOT (self-scan, broad query \"the\")"
+command -v git >/dev/null 2>&1 || { echo "recalltotalcheck: git missing (the corpus is a clean extraction of HEAD)"; exit 2; }
+
+# A missing prerequisite must never read as a clean tree: name it and exit 2, never 0.
+CORPUS="$( mktemp -d )"
+trap 'rm -rf "$CORPUS"' EXIT
+git -C "$ROOT" archive HEAD 2>/dev/null | tar -x -C "$CORPUS" || { echo "recalltotalcheck: could not extract HEAD ($ROOT) — gate cannot run"; exit 2; }
+[ -f "$CORPUS/README.md" ] || { echo "recalltotalcheck: HEAD extraction looks empty (no README.md) — gate cannot run"; exit 2; }
+echo "recalltotalcheck: BIN=$BIN  TARGET=$CORPUS (clean extraction of HEAD from $ROOT, broad query \"the\")"
 
 # Pin an explicit high body budget: this gate isolates --top-k accounting from recall's default 8K-token
 # body ceiling, which has its own contract in recallbudgetcheck.sh.
-run(){ perl -e 'alarm 60; exec @ARGV' "$BIN" "$ROOT" --recall="the" --no-cache --max-tokens=1000000 "$@" 2>/dev/null; }
-header_of(){ printf '%s' "$1" | head -1; }
+run(){ perl -e 'alarm 60; exec @ARGV' "$BIN" "$CORPUS" --recall="the" --no-cache --max-tokens=1000000 "$@" 2>/dev/null; }
+# Pure parameter expansion, not `printf | head -1`: an uncapped --top-k=9999 run on the clean corpus is a
+# multi-megabyte payload, and `head` closing the pipe after one line makes bash's printf report
+# "write error: Broken pipe" on stderr nine times per run. Harmless to the verdict, but a gate that
+# prints errors while passing teaches readers to ignore its stderr.
+header_of(){ printf '%s' "${1%%$'\n'*}"; }
 total_of(){ header_of "$1" | grep -oE ' total=[0-9]+' | grep -oE '[0-9]+'; }
 shown_of(){ header_of "$1" | grep -oE ' shown=[0-9]+' | grep -oE '[0-9]+'; }
 capped_of(){ header_of "$1" | grep -oE ' capped=[0-9]+' | grep -oE '[0-9]+$'; }
+trunc_of(){ header_of "$1" | grep -oE ' truncated=[0-9]+' | grep -oE '[0-9]+$'; }
 # each recalled doc opens its own separator line "━━ path ... ━━..." — an independent per-doc-block count
 # straight from the payload, not from the header's own numeric field.
 sep_count(){ printf '%s\n' "$1" | grep -c '^━━ '; }
@@ -73,15 +106,31 @@ done
 # ── 1) independent derivation: a --top-k=9999 run cannot be cut by --top-k (no repo has that many relevant
 #    docs), so its shown= IS the true relevant count. total= must equal it AT EVERY --top-k value — the
 #    true count does not depend on how many docs get emitted.
+# ── 0) THE PREMISE, ASSERTED. Everything below reads --top-k=9999's shown= as "the true relevant count",
+#    which holds only while that run is genuinely uncapped. It is cut by the TOKEN BUDGET as readily as by
+#    --top-k, and when that happens every downstream arm fails while blaming --top-k. Check it first and
+#    say which constraint bound, so a corpus that outgrew the pinned budget is one honest line and not a
+#    misdiagnosis. (This is what a doubled corpus of untracked scratch did to this gate before it was
+#    scoped to a clean HEAD extraction: total=232 shown=77 capped=1 truncated=1 on a correct binary.)
+BIG_CAPPED="$( capped_of "$BIG" )"; BIG_TRUNC="$( trunc_of "$BIG" )"
+if [ "${BIG_CAPPED:-0}" = "0" ] && [ -z "${BIG_TRUNC:-}" ]; then
+    ok "--top-k=9999 is genuinely uncapped (capped=0, no truncated= marker) — its shown= is the true relevant count"
+else
+    no "--top-k=9999 came back capped=${BIG_CAPPED:-?}${BIG_TRUNC:+ truncated=$BIG_TRUNC} — the run this gate uses as its UNCAPPED reference was cut, so its shown= is not the true relevant count and every arm below is unsound. The cut is the pinned --max-tokens=1000000 (total=$BIG_TOTAL of a corpus this budget can no longer hold), not --top-k: raise the budget here rather than 'fixing' the arms it breaks."
+fi
+
 if [ -n "$BIG_TOTAL" ] && [ -n "$BIG_SHOWN" ]; then
     [ "$BIG_TOTAL" = "$BIG_SHOWN" ] \
         && ok "--top-k=9999: total=$BIG_TOTAL == shown=$BIG_SHOWN (nothing left to cut at this k — the true count)" \
-        || no "--top-k=9999: total=$BIG_TOTAL != shown=$BIG_SHOWN — even an uncapped run doesn't emit everything it counted"
+        || no "--top-k=9999: total=$BIG_TOTAL != shown=$BIG_SHOWN — even an uncapped run doesn't emit everything it counted (see the premise arm above: if capped=1 there, the token budget cut this run and THAT is the finding)"
 fi
 if [ -n "$DEFAULT_TOTAL" ] && [ -n "$BIG_SHOWN" ]; then
+    # NOT "total= moves with --top-k". That message was wrong: total= is stable across --top-k 2/8/20/9999
+    # (the arms below prove it on the same run), so a mismatch here means the k=9999 side is not the true
+    # count — the premise arm above names why.
     [ "$DEFAULT_TOTAL" = "$BIG_SHOWN" ] \
         && ok "independent check: default run's total=$DEFAULT_TOTAL == --top-k=9999's shown=$BIG_SHOWN (true relevant count, --top-k-independent)" \
-        || no "independent check: default run's total=$DEFAULT_TOTAL != --top-k=9999's true count $BIG_SHOWN — total= moves with --top-k (the bug)"
+        || no "independent check: default run's total=$DEFAULT_TOTAL != --top-k=9999's shown=$BIG_SHOWN — the two numbers a correct binary must agree on disagree. Either total= is the post-cut count dressed as the true count (the original bug), or the k=9999 run was itself cut and is not the true count (the premise arm above says which)"
 fi
 if [ -n "$K2_TOTAL" ] && [ -n "$DEFAULT_TOTAL" ]; then
     [ "$K2_TOTAL" = "$DEFAULT_TOTAL" ] \
