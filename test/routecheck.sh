@@ -83,6 +83,12 @@ CONCEPT="how does resolution work"
 # "root= on this element is undocumented" gap. 2850 -> 2976 B (+126 B), est_tokens="1063" -> "1113" (+50
 # tok). Every ranking and body byte is identical; the only moving bytes are the new trailing comment and
 # est_tokens re-measuring itself.
+# RE-PIN 2026-08-28 (paper-shape lane): --for's <ctx> root now always carries the ranking-confidence facts
+# confidence=/margin_pct= plus their legend clause (derived from the SAME adaptiveCut gap statistic the
+# adaptive flag cuts at; arXiv 2607.24882's abstention axis, disclosure only). 2603 -> 2860 B (+257 B),
+# est_tokens re-measures itself. Verified before re-pinning: with the two attrs, the legend clause and
+# est_tokens normalized out, old and new documents are byte-identical — no ranking, body or route byte
+# moved (route-neutrality, this golden's purpose, untouched; gate: test/forcompresscheck.sh arms 8-10).
 "$BIN" routefix --no-cache --for="$CONCEPT" --no-route >"$TMP/concept_noroute.xml" 2>/dev/null
 diff -q "$TMP/concept_noroute.xml" "$ROOT/test/routefix/golden_for.xml" >/dev/null \
     && ok "safe fallback: conceptual --for --no-route byte-identical to the pre-routing golden" \
