@@ -26,6 +26,7 @@ struct Edit
     std::string target;
     std::string fileHint;
     std::string payload;
+    std::string payloadPath;   // A5: the RESOLVED path the bytes were read from — surfaced in the receipt
     NodeId node = kNoNode;
     std::uint32_t fileId = 0;
     std::size_t a = 0;
@@ -49,6 +50,70 @@ inline std::string siblingPath( std::string_view planPath, std::string_view payl
     if( payload.empty() || payload.front() == '/' ) { return std::string( payload ); }
     const std::size_t slash = planPath.find_last_of( '/' );
     return slash == std::string_view::npos ? std::string( payload ) : std::string( planPath.substr( 0, slash + 1 ) ) + std::string( payload );
+}
+
+// The directory a plan's payloads must live in: the plan file's own, canonicalized. "" when it cannot be
+// resolved, which the confinement check below treats as "cannot prove containment" and therefore refuses.
+inline std::string planDirAbs( const std::string& planPath )
+{
+    const std::size_t slash = planPath.find_last_of( '/' );
+    const std::string dir   = slash == std::string::npos ? std::string( "." ) : planPath.substr( 0, slash );
+    char              buf[ PATH_MAX ];
+    return ::realpath( dir.empty() ? "/" : dir.c_str(), buf ) != nullptr ? std::string( buf ) : std::string();
+}
+
+// A5: a plan's `payload` names a file whose BYTES are spliced into a source file, so an unconfined payload
+// path is a READ primitive: "payload":"../../../../etc/hosts" — or any absolute path — inlines that file's
+// contents into a tracked source file. No write ever lands outside the crawl root, which is why this is a
+// low-severity finding and not a write escape; but a plan arriving from a shared repo, a PR, or another
+// agent could quietly bake a secret into a file the next commit publishes.
+//
+// Payloads must live beside the plan. Both checks run, because each catches what the other cannot: the
+// LEXICAL pass judges a path that does not exist (realpath would simply fail and the refusal would be a
+// misleading "cannot read"), and REALPATH catches a symlink that sits inside the plan directory and points
+// out of it. `resolved` is filled either way, so the refusal can name the path it actually judged rather
+// than the spelling the plan wrote.
+inline bool payloadWithinPlanDir( const std::string& planPath, const std::string& payloadPath, std::string& resolved )
+{
+    const std::string dir = planDirAbs( planPath );
+    if( dir.empty() )
+    {
+        resolved = payloadPath;
+        return false;
+    }
+    // `payloadPath` is siblingPath's output: already joined to the plan file's own spelling, and therefore
+    // relative to the CWD (not to `dir` — joining it to `dir` a second time would silently un-escape a
+    // "../" payload, which is the exact bug this function exists to catch).
+    char cwdBuf[ PATH_MAX ];
+    const std::string cwd = ::getcwd( cwdBuf, sizeof( cwdBuf ) ) != nullptr ? std::string( cwdBuf ) : std::string();
+    if( cwd.empty() && payloadPath.front() != '/' )
+    {
+        resolved = payloadPath;
+        return false;   // cannot place a relative path in any frame ⇒ cannot prove containment ⇒ refuse
+    }
+    // rw::lexicalNormalize (resolve.h) is the house's segment-stack `.`/`..` folder — the SAME primitive the
+    // include resolver keys every path index through. It returns "" for a relative `..` that escapes above
+    // its own base, which is already the answer this check wants.
+    const std::string lexical = lexicalNormalize( payloadPath.front() == '/' ? payloadPath : cwd + "/" + payloadPath );
+    if( lexical.empty() )
+    {
+        resolved = payloadPath;
+        return false;
+    }
+
+    // realpath is the AUTHORITY when the payload exists: `dir` is canonical, so only a canonical candidate
+    // is comparable to it (a symlinked prefix such as /tmp -> /private/tmp otherwise reads as an escape),
+    // and it is what catches a symlink sitting INSIDE the plan directory that points out of it.
+    char buf[ PATH_MAX ];
+    if( ::realpath( lexical.c_str(), buf ) != nullptr )
+    {
+        resolved = std::string( buf );
+        return pathIsUnder( resolved, dir );
+    }
+    // The payload does not exist. realpath cannot speak, so judge it lexically: "../../../../etc/nope" must
+    // still read as an escape rather than as a merely unreadable payload.
+    resolved = lexical;
+    return pathIsUnder( lexical, dir );
 }
 
 inline bool hasOnlyKeys( const std::string& object, std::initializer_list<std::string_view> allowed )
@@ -113,10 +178,19 @@ inline bool parseEdit( const McpIndex& ix, const std::string& object, const std:
     if( !parseOp( edit.opName, edit.op ) ) { error = "unknown edit-plan op '" + edit.opName + "'"; return false; }
     if( edit.target.empty() || payloadName.empty() ) { error = "every edit needs string target and payload fields"; return false; }
     const std::string payloadPath = siblingPath( planPath, payloadName );
+    if( !payloadWithinPlanDir( planPath, payloadPath, edit.payloadPath ) )
+    {
+        error = "payload '" + payloadName + "' resolves to '" + edit.payloadPath + "', outside the plan's own "
+                "directory; an edit plan may only read payloads that sit beside it";
+        return false;
+    }
     bool payloadOk = false;
     edit.payload = mcpdetail::readFileBytes( payloadPath, payloadOk );
     if( !payloadOk || edit.payload.empty() ) { error = "cannot read non-empty payload '" + payloadPath + "'"; return false; }
     if( edit.payload.size() > maxBytes ) { error = "payload '" + payloadPath + "' exceeds --max-file-size"; return false; }
+    // A1: the plan path does not route through runEditVerb, so it carries the same third payload arm itself.
+    // Preflight, like every other plan refusal — no file in the plan is written when any one edit is bad.
+    if( looksBinary( edit.payload ) ) { error = "payload '" + payloadPath + "' " + std::string( mcpedit::kBinaryPayloadRefusal ); return false; }
     const mcpedit::EditTarget target = mcpedit::resolveTarget( ix, edit.target, edit.fileHint );
     if( target.id == kNoNode || target.id >= ix.ing.symbols.size() ) { error = target.error; return false; }
     edit.node = target.id;
@@ -178,7 +252,10 @@ inline Outcome prepare( const std::string& root, const std::string& planPath, st
     if( mcpdetail::checkFrame( plan ).shape != mcpdetail::FrameShape::Object ) { out.message = "edit plan is not one complete JSON object"; return out; }
     if( !hasOnlyKeys( plan, { "version", "edits" } ) ) { out.message = "edit plan has an unknown or duplicate root field"; return out; }
     const mcpdetail::RawValue version = mcpdetail::findRawValue( plan, "version" );
-    if( !version.isPresent || version.text != "1" ) { out.message = "edit plan needs numeric version 1"; return out; }
+    // A7: findRawValue strips the quotes and sets isQuoted, so `1` and `"1"` both arrive as text=="1". The
+    // spec and this very message say NUMERIC 1, so the string form has to be rejected here or the refusal
+    // is describing a rule the code does not enforce. (`1.0` was already refused — only `"1"` slipped past.)
+    if( !version.isPresent || version.isQuoted || version.text != "1" ) { out.message = "edit plan needs numeric version 1"; return out; }
     const std::string editArray = mcpdetail::findArray( plan, "edits" );
     const std::vector<std::string> objects = mcpdetail::arrayObjects( editArray );
     if( objects.empty() || objects.size() > 64 || !objectOnlyArray( editArray, objects ) ) { out.message = "edit plan needs 1..64 edit objects and no other array values"; return out; }
@@ -206,17 +283,58 @@ inline std::string receipt( const std::vector<Edit>& edits, const std::vector<Fi
     out += apply ? "apply" : "dry-run";
     out += "\",\"edits\":" + std::to_string( edits.size() ) + ",\"files\":" + std::to_string( files.size() );
     if( apply ) { out += ",\"applied\":" + std::to_string( edits.size() ) + ",\"atomic_files\":" + std::to_string( files.size() ); }
-    out += ",\"atomic_scope\":\"per-file\",\"rollback_on_write_error\":true,\"multifile_crash_atomic\":false";
+    // recheck_before_each_write: every file's indexed byte-hash is re-verified immediately before ITS OWN
+    // write, not once for all files up front (A6). It is the observable half of a contract whose race a
+    // deterministic gate cannot stage, so the receipt states it and a gate asserts the statement.
+    out += ",\"atomic_scope\":\"per-file\",\"rollback_on_write_error\":true,\"recheck_before_each_write\":true"
+           ",\"multifile_crash_atomic\":false";
     out += ",\"operations\":[";
     for( std::size_t i = 0; i < edits.size(); ++i )
     {
         if( i ) { out += ','; }
         const auto staged = std::find_if( files.begin(), files.end(), [ & ]( const FileStage& file ) { return file.fileId == edits[i].fileId; } );
         const FileStage* file = staged == files.end() ? nullptr : &*staged;
+        // A5: the resolved payload path, so a human reviewing a --dry-run before --apply can see which bytes
+        // each operation will READ. The plan names a spelling; this is what that spelling resolved to.
         out += "{\"op\":\"" + mcpdetail::jsonEscape( edits[i].opName ) + "\",\"target\":\"" + mcpdetail::jsonEscape( edits[i].target )
-             + "\",\"file\":\"" + mcpdetail::jsonEscape( file == nullptr ? std::string() : file->identity ) + "\"}";
+             + "\",\"file\":\"" + mcpdetail::jsonEscape( file == nullptr ? std::string() : file->identity )
+             + "\",\"payload_path\":\"" + mcpdetail::jsonEscape( edits[i].payloadPath ) + "\"}";
     }
     return out + "]}";
+}
+
+// A3: roll the prefix [0, failedAt) back and say what ACTUALLY happened. The old message was
+// unconditional — "edit-plan commit failed; prior files rolled back" — but the rollback loop is
+// `while( written > 0 )`, a no-op when the failure is on the FIRST file. The commonest plan failure
+// therefore claimed a rollback that never ran, over files that were never written. An agent reading it
+// has to go and check the tree by hand to find out which of the two worlds it is in, which is exactly
+// what a refusal message exists to spare it.
+//
+// Three outcomes, three sentences, and the count is stated rather than implied:
+//   failedAt == 0            → nothing was written; there is nothing to roll back.
+//   failedAt > 0, rolled ok  → N prior files restored, N named as a number, not left to inference.
+//   rollback failed          → the loud one, unchanged: the tree is in a state only a human can judge.
+// `files` is in disk-path order (sorted just above), so failedAt indexes the file that failed.
+inline std::string rollbackMessage( const std::vector<FileStage>& files, std::size_t failedAt, std::string_view cause )
+{
+    bool        rollbackOk = true;
+    std::size_t undone     = failedAt;
+    while( undone > 0 )
+    {
+        --undone;
+        rollbackOk = mcpedit::atomicWrite( files[undone].disk, files[undone].original ) && rollbackOk;
+    }
+    if( !rollbackOk )
+    {
+        return std::string( cause ) + " and rollback failed; inspect files immediately";
+    }
+    const std::string at = failedAt < files.size() ? files[failedAt].identity : std::string( "?" );
+    if( failedAt == 0 )
+    {
+        return std::string( cause ) + " on the first file ('" + at + "'); no files were written";
+    }
+    return std::string( cause ) + " at '" + at + "'; " + std::to_string( failedAt ) + " prior file"
+         + ( failedAt == 1 ? "" : "s" ) + " rolled back";
 }
 
 inline Outcome run( const std::string& root, const std::string& planPath, bool apply, std::size_t maxBytes )
@@ -239,11 +357,28 @@ inline Outcome run( const std::string& root, const std::string& planPath, bool a
     std::size_t written = 0;
     for( ; written < files.size(); ++written )
     {
+        // A6: re-hash THIS file immediately before ITS OWN write. The loop above checks every file up front,
+        // which is the clean fast path (nothing is written at all when a plan is already stale) — but on a
+        // K-file plan it left the LAST file's stale-detection window spanning the fsync of every earlier
+        // write. The single-edit path deliberately does the opposite: mcpedit.h re-hashes immediately before
+        // its rename, "collapsing the lost-update window to the tiny gap between this re-hash and the
+        // rename". The plan surface, written later, reintroduced that residual and made it wider. Both
+        // checks now stand: the up-front one to fail clean, this one to close the window.
+        //
+        // WHO THIS IS FOR: not another ripwire process — the advisory EditLocks above already serialize a
+        // cooperating writer. It is the NON-cooperating external writer (an editor or formatter saving
+        // mid-commit) that takes no lock, which is the same residual mcpedit.h names in its own comment.
+        bool              stillFresh = false;
+        const std::string current    = mcpdetail::readFileBytes( files[written].disk, stillFresh );
+        if( !stillFresh || mcpdetail::byteHash( current.data(), current.size() ) != files[written].baseHash )
+        {
+            out.ok      = false;
+            out.message = rollbackMessage( files, written, "edit-plan commit aborted (a concurrent write was detected)" );
+            return out;
+        }
         if( mcpedit::atomicWrite( files[written].disk, files[written].edited ) ) { continue; }
-        bool rollbackOk = true;
-        while( written > 0 ) { --written; rollbackOk = mcpedit::atomicWrite( files[written].disk, files[written].original ) && rollbackOk; }
-        out.ok = false;
-        out.message = rollbackOk ? "edit-plan commit failed; prior files rolled back" : "edit-plan commit and rollback failed; inspect files immediately";
+        out.ok      = false;
+        out.message = rollbackMessage( files, written, "edit-plan commit failed" );
         return out;
     }
     invalidateMcpIndex();

@@ -2166,13 +2166,13 @@ empty payloads refuse, never imply deletion
 
 ### `--edit-target-file=PATH`
 
-**Answers:** optional file-path substring to disambiguate a same-named definition.
+**Answers:** optional file-path substring disambiguating a same-named definition.
 
-These three CLI verbs reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON receipt; follow with --edit-check=SYM and --affected=FILE. Single-root only.
+RELATIVE (matched against the indexed spelling) or ABSOLUTE (matched against the file's resolved on-disk path), so the path a receipt or a trace hands you works verbatim. These three CLI verbs reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON receipt; follow with --edit-check=SYM and --affected=FILE. Single-root only.
 
 **Caveats (stated by the binary):**
 
-- optional file-path substring to disambiguate a same-named definition.
+- optional file-path substring disambiguating a same-named definition.
 
 ### `--edit-plan=FILE`
 
@@ -2182,11 +2182,12 @@ These three CLI verbs reuse the MCP edit engine: freshness hash, lock, pre-renam
 
 **Answers:** the plan's explicit mode: --dry-run preflights and prints the receipt without writing, --apply commits;
 
-exactly one of the two is required. Payload paths are relative to the plan file. Every target/payload/span is preflighted before any write; overlaps refuse. Apply holds sorted per-file locks, rechecks freshness, and atomically renames each file. Prior files roll back on an ordinary later write failure; a crash between file renames remains a disclosed limit.
+exactly one of the two is required. Payload paths are relative to the plan file and CONFINED to its directory: a path resolving outside it (an absolute path, a '..' escape, or a symlink pointing out) refuses, naming the path it resolved to, and the receipt's payload_path shows what each op will READ. Every target/payload/span is preflighted before any write; overlaps refuse. Apply holds sorted per-file locks and atomically renames each file, re-verifying EACH file's bytes immediately before ITS OWN write (recheck_before_each_write in the receipt) so a non-cooperating external writer is detected rather than clobbered. Prior files roll back on a later write failure or such a detection; the message says which happened and how many files it restored. A crash between file renames remains a disclosed limit.
 
 **Caveats (stated by the binary):**
 
-- a crash between file renames remains a disclosed limit.
+- Payload paths are relative to the plan file and CONFINED to its directory: a path resolving outside it (an absolute path, a '..' escape, or a symlink pointing out) refuses, naming the path it resolved to, and the receipt's payload_path shows what each op will READ.
+- A crash between file renames remains a disclosed limit.
 
 ### `--safe-delete=SYM`
 
