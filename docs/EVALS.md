@@ -666,6 +666,14 @@ corpus growth) lives in the bodies' *common* connective phrasing that BM25 b=0.7
 to add — closing it likely needs a ranker-side change (e.g. scoring desc+body with a length-aware
 mix), which is out of scope for a description-content round and would need its own registration.
 
+**External corroboration (2026-08 survey).** "Do Context Files Help Coding Agents?" —
+arXiv:2607.27250 — ran a 288-run ablation and found AGENTS.md/CLAUDE.md-style context files did not
+measurably move task correctness (bounded ≤10-15pp); the failures it did find traced to
+implementation skill, not missing context. Consistent with the Scope guard above: this instrument
+measures a routing PROXY, not task success, and the skills program's own success metric stays tool
+ADOPTION plus token cost (the substitution-meter log) — never a correctness claim this eval was
+never built to support.
+
 ### Skill-routing consensus content gaps — PRE-REGISTERED 2026-08-11 (before any skill edit)
 
 **Evidence base.** The S1 ceiling check (blind two-rater protocol, sealed key, raters saw only the
@@ -5189,6 +5197,29 @@ mint references (a parser-version bump with its own vocab updates); QUALIFIED-na
 instantiated set so evidence in one namespace can never arm a filter over another's cone; and an
 explicit disclosure attribute on every RTA-narrowed call (narrowed-by-evidence is weaker than
 proof, and the map must say so) with legend coverage and a red-first gate for each.
+
+### External corroboration — three 2026 papers (citations only, no benchmark numbers of our own)
+
+**"What Context Does a Coding Agent Actually Need to Act?" — arXiv:2607.09691.** With localization
+held constant, adding class skeletons/signatures produced no editing-accuracy benefit over the
+located source alone; NL summaries scored ~9% on behavioral probes against ~60% for source;
+compressed source matched whole-file context at roughly 1/3 the tokens (19.3K vs 93.7K per resolved
+issue). Implication for this tool: the signature map earns its tokens at FINDING time, not ACTING
+time — corroborates the anchor-body/T3 direction (rank first, then serve full bodies of the few
+right symbols) and the `--compress` lever, and is a caution against any future signature-heavier
+serving shape.
+
+**"Is Grep All You Need?" — arXiv:2605.15184.** Grep-based retrieval beat vector retrieval across
+three agent harnesses (Claude Code, Codex CLI, Gemini CLI), and the harness mattered more to the
+outcome than the retrieval method did. Implication: corroborates both the no-embeddings design bet
+(`docs/LINEAGE.md` §2, *Keyword search is all you need*) and the harness-conditional posture already
+written into the skills (e.g. the grep-still-wins guidance in ripwire-efficient).
+
+**"ARISE" — arXiv:2605.03117.** Statement-level def-use edges and data-flow slicing, exposed as a
+queryable agent primitive, beat SWE-agent on SWE-bench Lite by +17pp Function Recall@1 and +15pp
+Line Recall@1. Implication: names a real ceiling in this tool's granularity — the call graph is
+symbol-level, with no intra-procedural slice verb. Recorded here as a candidate future round, not a
+commitment.
 
 ---
 
