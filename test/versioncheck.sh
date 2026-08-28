@@ -70,7 +70,12 @@ if [ -n "$EXPECTED_SHA" ]; then
         && ok "--version names source revision $EXPECTED_SHA" \
         || no "--version omits source revision $EXPECTED_SHA: $OUT_LONG"
 
-    if git -C "$ROOT" diff --quiet --ignore-submodules -- 2>/dev/null; then
+    # The clean/dirty split must use the SAME predicate as cmake/version_stamp.cmake: worktree AND index.
+    # A staged-but-uncommitted change stamps +dirty; a gate reading only the worktree would then call an
+    # honest stamp a false positive. (Residual: a tree dirtied AFTER the build still disagrees — inherent
+    # to a build-time stamp, and the ordinary build-then-gate flow never hits it.)
+    if git -C "$ROOT" diff --quiet --ignore-submodules -- 2>/dev/null \
+        && git -C "$ROOT" diff --cached --quiet --ignore-submodules -- 2>/dev/null; then
         case "$OUT_LONG" in *"git $EXPECTED_SHA+dirty"*) no "clean checkout falsely stamped dirty";;
                             *) ok "clean checkout is not falsely stamped dirty";; esac
     else
