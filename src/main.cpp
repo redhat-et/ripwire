@@ -15304,6 +15304,15 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
                       payload.size(), cfg.maxFileBytes );
         return 1;
     }
+    // A1: the THIRD arm of the payload gate, beside empty and oversize. The engine refuses this too
+    // (mcpedit::kBinaryPayloadRefusal, which is what covers MCP), but the CLI arm names the FLAG the bytes
+    // arrived through — the agent's next move is to fix that file or that pipe, not the edit engine.
+    if( rw::looksBinary( payload ) )
+    {
+        std::fprintf( stderr, "ripwire: --edit-payload %.*s\n",
+                      int( rw::mcpedit::kBinaryPayloadRefusal.size() ), rw::mcpedit::kBinaryPayloadRefusal.data() );
+        return 1;
+    }
 
     const rw::mcpedit::Op op = !cfg.replaceSymbolBody.empty() ? rw::mcpedit::Op::ReplaceBody
                                  : !cfg.insertBeforeSymbol.empty() ? rw::mcpedit::Op::InsertBefore

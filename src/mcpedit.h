@@ -28,6 +28,22 @@ namespace mcpedit
 {
     enum class Op { ReplaceBody, InsertBefore, InsertAfter };
 
+    // A1: the ONE wording for the binary-payload refusal, shared by the CLI arm (which names the flag),
+    // the engine arm (which also covers MCP) and the edit-plan arm — three call sites, one sentence, so a
+    // reader who has seen it once recognizes it everywhere and no copy can drift from the others.
+    //
+    // WHY this is a refusal and not a warning: a payload carrying a NUL byte writes fine and reports
+    // success, but on the NEXT run ingest's own binary sniff (rw::looksBinary) drops the file from the
+    // index entirely. Its whole symbol table vanishes, so every later edit to ANY symbol in that file
+    // refuses with "symbol 'X' not found" — a statement about the tree that is simply false. The gate uses
+    // rw::looksBinary itself rather than a second NUL rule, so the refusal's claim ("would drop it from the
+    // index") is EXACTLY the condition that would cause the drop: same 4096-byte window, same predicate.
+    // A NUL past that window is honestly not refused, because it honestly would not drop the file.
+    // The constant is the PREDICATE TAIL only ("contains a NUL byte; ..."); each site supplies the subject it
+    // wants in front of it ("--edit-payload", "payload", "payload '<path>'"), so no site reads doubled.
+    inline constexpr std::string_view kBinaryPayloadRefusal =
+        "contains a NUL byte; writing it would make the target unparseable and drop it from the index";
+
     // the outcome of an edit attempt: either a success JSON payload, or a JSON-RPC error {code,message}.
     struct Outcome
     {
@@ -80,6 +96,50 @@ namespace mcpedit
         return out;
     }
 
+    // A1 (secondary): "symbol 'X' not found under path 'F'" is a TRUE statement with a misleading cause when
+    // F is indexed but was never PARSED — the ingest's not-measured sentinel (fileHealth.fileBytes == 0: a
+    // binary sniff, a read failure, or a doc-format file the doc pass extracted instead). Such a file has no
+    // symbol table at all, so EVERY name in it reports as absent and the nearest-names list below is pure
+    // noise. Say which file, and why, instead of letting the agent hunt for a name that is there.
+    // Returns "" when the hint names nothing indexed, or names anything that WAS measured (then the plain
+    // not-found is the honest answer). Names at most 3 files — this is a hint, not a report.
+    inline std::string unmeasuredHintNote( const IngestResult& ing, const std::string& pathHint )
+    {
+        std::vector<std::string> unmeasured;
+        for( std::size_t f = 0; f < ing.files.size(); ++f )
+        {
+            if( !filePathContains( ing.files[f], pathHint ) )
+            {
+                continue;
+            }
+            if( f < ing.fileHealth.size() && ing.fileHealth[f].fileBytes == 0 )
+            {
+                unmeasured.push_back( ing.files[f] );
+                continue;
+            }
+            return std::string();   // a measured file matches the hint — the plain not-found stands
+        }
+        if( unmeasured.empty() )
+        {
+            return std::string();
+        }
+        std::string note = " — that path is indexed but was never parsed (binary content, an unreadable file, "
+                           "or a doc-format extraction), so it contributes NO symbols and no name in it resolves: ";
+        for( std::size_t i = 0; i < unmeasured.size() && i < 3; ++i )
+        {
+            if( i )
+            {
+                note += ", ";
+            }
+            note += unmeasured[i];
+        }
+        if( unmeasured.size() > 3 )
+        {
+            note += " (+" + std::to_string( unmeasured.size() - 3 ) + " more)";
+        }
+        return note;
+    }
+
     // resolve `symbol` to exactly one def, optionally narrowed by `pathHint` (a substring match on the file
     // path, mirroring resolveFocus's "file:name" file filter). Returns kNoNode and fills `err` with a ready
     // JSON-RPC message on any non-unique outcome (0 → nearest-names hint; >1 → candidate file:line list).
@@ -126,6 +186,7 @@ namespace mcpedit
             if( !pathHint.empty() )
             {
                 m += " under path '" + pathHint + "'";
+                m += unmeasuredHintNote( ing, pathHint );
             }
             const std::vector<std::string> near = nearestNames( ing, symbol, 5 );
             if( !near.empty() )
@@ -421,6 +482,15 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
                                      const std::string& pathHint, const std::string& text )
 {
     mcpedit::Outcome oc;
+
+    // A1: the ENGINE-level payload text gate (kBinaryPayloadRefusal above carries the why), before the index
+    // is touched. Here and not only in the CLI arm: an MCP string carries an escaped NUL as easily as a file.
+    if( looksBinary( text ) )
+    {
+        oc.ok = false; oc.errCode = -32602;
+        oc.message = "payload " + std::string( mcpedit::kBinaryPayloadRefusal );
+        return oc;
+    }
 
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
