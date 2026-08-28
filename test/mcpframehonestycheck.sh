@@ -913,12 +913,35 @@ for verb, field in WRITE_VERBS:
 
     # MIX: an in-set code point next to an out-of-set one is CONTENT. Sampled across the table rather than
     # exhaustive — the pairing is what is under test, and one sample per decade of the table proves it.
+    #
+    # U+0000 IS EXCLUDED FROM THIS ARM, deliberately, and the original rule above still stands for every
+    # other code point in the table. The blank-payload contract asks "is this payload only whitespace, or
+    # does it carry content?" — and by that question alone a NUL beside a real definition IS content, which
+    # is why this arm was written to expect it to APPLY. The full-audit round of 2026-08-28 established a
+    # SECOND, independent reason to refuse that is not about blankness at all: a payload containing a NUL
+    # byte, however much real code sits beside it, makes the target file binary-sniffed on the next crawl,
+    # so its entire symbol table silently vanishes from the index and every later edit to ANY symbol in
+    # that file fails with a false `symbol not found`. That was reproduced end to end before it was fixed
+    # (mcpedit.h's payload guard, shared by all three write verbs and by --edit-plan). Refusing it is the
+    # stronger contract and it wins here; the blankness rule is not weakened, it is simply not the only
+    # rule a payload must satisfy. The `looksBinary` predicate is the authority, so this exclusion is
+    # exactly one code point wide — every other in-set point still has to APPLY beside real content.
     mixMissed = []
-    for cp in inSet[ ::6 ]:
+    for cp in [ c for c in inSet[ ::6 ] if c != 0 ]:
         corpus = freshCorpus()
         r = srv.send( editFrame( verb, field, chr( cp ) + "int alpha( int x ) { return 5; }" + chr( cp ), corpus, 4 ) )
         if "error" in r: mixMissed.append( ( cp, r[ "error" ].get( "message", "" ) ) )
         shutil.rmtree( corpus )
+
+    # The other half of that exclusion: U+0000 beside real content must be REFUSED, and the refusal must
+    # say why. Dropping the case from the loop above without asserting the replacement rule here would
+    # leave a hole exactly where the round found a real defect, so the code point stays covered — the
+    # expectation is inverted, not removed.
+    corpus = freshCorpus()
+    nulMix = srv.send( editFrame( verb, field, "\x00int alpha( int x ) { return 5; }\x00", corpus, 5 ) )
+    nulRefused = "error" in nulMix
+    nulNamesReason = nulRefused and "NUL" in nulMix[ "error" ].get( "message", "" )
+    shutil.rmtree( corpus )
     srv.close()
 
     for cp in missedRefusal[ :6 ]:
@@ -952,7 +975,10 @@ for verb, field in WRITE_VERBS:
     check( not overReached,   "(K1) %-20s all %d range NEIGHBOURS still APPLY (%d over-reached)"
                               % ( verb, len( outSet ), len( overReached ) ) )
     check( not mixMissed,     "(K1) %-20s all %d MIX payloads (blank + real definition) APPLY (%d refused)"
-                              % ( verb, len( inSet[ ::6 ] ), len( mixMissed ) ) )
+                              % ( verb, len( [ c for c in inSet[ ::6 ] if c != 0 ] ), len( mixMissed ) ) )
+    check( nulRefused,        "(K1) %-20s U+0000 beside a real definition is REFUSED — a NUL would un-index the file"
+                              % verb )
+    check( nulNamesReason,    "(K1) %-20s the U+0000 refusal names the NUL byte as the reason" % verb )
 
 # ═══ (K2) stdio ≡ HTTP with --allow-remote-edits, byte-for-byte ════════════════════════════════════════════
 # One workspace, two servers, `path` OMITTED so both resolve their pinned root: identical request bytes must

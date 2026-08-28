@@ -71,6 +71,8 @@ gates = [ g for g in gates if g not in ( "regression.sh", SELF ) ]
 #    RIPWIRE_BIN cannot make them fail. Each reason was verified by reading the gate, not guessed from its
 #    name. Committed and counted (this file's own header + (2b) below assert the count out loud).
 EXEMPT = {
+    "codexinstallhonestycheck.sh": "exercises skills/install.sh's jq/mv merge honesty inside hermetic temp HOMEs; the subject is the shell installer, so BIN is bound for interface uniformity and never executed (verified by reading the gate)",
+    "meterdisclosurecheck.sh":   "runs skills/install.sh's --hook banner and asserts what it discloses about the substitution meter; the subject is banner TEXT, so BIN is bound for interface uniformity and never executed (verified by reading the gate)",
     "adaptivecutshapecheck.sh":  "compiles an isolated $CXX probe .cpp; never invokes build/ripwire",
     "aiderbytescheck.sh":        "pure-python test of bench/headtohead/r4-2026-08-06/r4_worker.py's aider byte-count wiring; no ripwire binary invocation",
     "argvdiffcheck.sh":          "sanctioned skip fires BEFORE the RIPWIRE_BIN guard, gated on a second env var (RIPWIRE_BASE) neither pargates.py nor regression.sh ever sets; independent of RIPWIRE_BIN/broken-binary state, and already asserted intentional by gateexitcheck.sh arm (D)",
@@ -124,7 +126,13 @@ else:
 #                          that this file's own reason string explains fires first, every real run.
 #      nulbytecheck.sh  — the file's own header says BIN is bound-but-unused in so many words; grepping
 #                          "$BIN" finds that header sentence, not an invocation.
-STATICALLY_UNREACHABLE = { "argvdiffcheck.sh", "nulbytecheck.sh" }
+#      codexinstallhonestycheck.sh, meterdisclosurecheck.sh — same shape as nulbytecheck.sh. Both test
+#                          skills/install.sh (a shell installer and its banner text), so they need no
+#                          ripwire binary at all. Verified by reading every BIN occurrence in each file:
+#                          a usage comment, the shared BIN= convention line, and a `: "$BIN"` no-op whose
+#                          trailing comment says it is unused. There is no invocation to find.
+STATICALLY_UNREACHABLE = { "argvdiffcheck.sh", "nulbytecheck.sh",
+                           "codexinstallhonestycheck.sh", "meterdisclosurecheck.sh" }
 grown = []
 for g in sorted( EXEMPT ):
     if g in STATICALLY_UNREACHABLE:
