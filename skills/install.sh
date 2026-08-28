@@ -29,10 +29,15 @@ refresh_hook_matcher()
         return 0
     fi
     tmp="$( mktemp )"
-    jq --arg cmd "$2" --arg m "$3" \
+    if jq --arg cmd "$2" --arg m "$3" \
         '.hooks.PreToolUse |= map( if any(.hooks[]?; .command == $cmd) then .matcher = $m else . end )' \
-        "$1" >"$tmp" && mv "$tmp" "$1"
-    echo "ripwire PreToolUse hook already registered in $1 — refreshed its matcher to \"$3\"."
+        "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
+        echo "ripwire PreToolUse hook already registered in $1 — refreshed its matcher to \"$3\"."
+    else
+        rm -f "$tmp"
+        echo "skills/install.sh: could not refresh the matcher in $1 (is it valid JSON?); nothing changed." >&2
+        return 1
+    fi
 }
 
 # ── --hook: register hooks/ripwire-nudge.sh as a PreToolUse hook in ~/.claude/settings.json ──
@@ -59,7 +64,7 @@ install_claude_hook()
         'any((.hooks.PreToolUse // [])[]?.hooks[]?; .command == $cmd)' \
         "$settings" >/dev/null 2>&1; then
         refresh_hook_matcher "$settings" "$hookScript" "$hookMatcher"
-        return 0
+        return $?
     fi
 
     # Read and Glob are in the matcher deliberately: the whole-file read is the largest token sink in
@@ -73,19 +78,28 @@ install_claude_hook()
     echo "  hooks.PreToolUse  += [{ matcher: \"$hookMatcher\", hooks: [{ type: \"command\", command: \"$hookScript\" }] }]"
     echo "  hooks.SessionStart += [{ matcher: \"startup|resume|clear\", hooks: [{ type: \"command\", command: \"$hookScript --session-start\" }] }]"
     echo "  behavior: never blocks/denies/rewrites a tool call; at most one suggestion per session per pattern."
-    echo "  counting: appends one JSONL row per observed call to ~/.ripwire/substitution.jsonl (RIPWIRE_METER=0 opts out)."
+    echo "  counting: appends one JSONL row per observed call to ~/.ripwire/substitution.jsonl, and that row"
+    echo "            carries the RAW file path (Read), RAW grep/glob pattern, or the first 200 B of the RAW"
+    echo "            command (Bash) you just ran, plus the absolute repo path and session id — in cleartext."
+    echo "            Local-only: this file is never transmitted anywhere, but it has no automatic retention"
+    echo "            limit and grows for as long as counting stays on. RIPWIRE_METER=0 opts out of counting"
+    echo "            (the nudge itself keeps working). Details: docs/SUBSTITUTION_METER.md."
     echo "  remove:   delete those two entries from $settings (or re-run with the entries already absent)."
 
     tmp="$( mktemp )"
-    jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" --arg m "$hookMatcher" '
+    if jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" --arg m "$hookMatcher" '
         .hooks //= {} |
         .hooks.PreToolUse //= [] |
         .hooks.PreToolUse += [{ matcher: $m, hooks: [{ type: "command", command: $cmd }] }] |
         .hooks.SessionStart //= [] |
         .hooks.SessionStart += [{ matcher: "startup|resume|clear", hooks: [{ type: "command", command: $scmd }] }]
-    ' "$settings" >"$tmp" && mv "$tmp" "$settings"
-
-    echo "done. Registered ripwire's PreToolUse nudge + SessionStart primer hooks in $settings."
+    ' "$settings" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$settings"; then
+        echo "done. Registered ripwire's PreToolUse nudge + SessionStart primer hooks in $settings."
+    else
+        rm -f "$tmp"
+        echo "skills/install.sh: could not merge $settings (is it valid JSON?); nothing changed." >&2
+        exit 1
+    fi
 }
 
 install_codex_hook()
@@ -110,7 +124,7 @@ install_codex_hook()
 
     echo "skills/install.sh --codex --hook will add or refresh advisory-only entries in $settings."
     tmp="$( mktemp )"
-    jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" --arg rcmd "$routeScript" --arg m "$codexHookMatcher" '
+    if jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" --arg rcmd "$routeScript" --arg m "$codexHookMatcher" '
         .hooks //= {} |
         .hooks.PreToolUse //= [] |
         .hooks.SessionStart //= [] |
@@ -135,9 +149,14 @@ install_codex_hook()
                 timeout: 6, statusMessage: "Selecting a focused Ripwire CLI route",
                 additionalContextLimit: 3000 }] }]
         end
-    ' "$settings" >"$tmp" && mv "$tmp" "$settings"
-    echo "done. Registered Ripwire's Codex prompt router + PreToolUse nudge + SessionStart primer in $settings."
-    echo "Open /hooks in Codex to review and trust the installed command hooks."
+    ' "$settings" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$settings"; then
+        echo "done. Registered Ripwire's Codex prompt router + PreToolUse nudge + SessionStart primer in $settings."
+        echo "Open /hooks in Codex to review and trust the installed command hooks."
+    else
+        rm -f "$tmp"
+        echo "skills/install.sh: could not merge $settings (is it valid JSON?); nothing changed." >&2
+        exit 1
+    fi
 }
 
 mode="claude"
