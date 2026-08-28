@@ -100,3 +100,5 @@ test	clean	exact-grep	instrumented-cli	Find every exact occurrence of "return al
 test	clean	exact-grep	instrumented-cli	Search for the exact literal "route fixture" and show the surrounding lines
 test	clean	edit-contract	instrumented-cli	I just edited targetSymbol; did I change its contract?
 test	dirty	edit-contract	instrumented-cli	Check whether my edit to CacheNode changed its signature
+test	clean	exact-grep	instrumented-cli	Search for the exact literal 'flag_name' somewhere in the user's config handling
+test	clean	abstain	instrumented-cli	Search for the user's config and the team's settings for the flag
