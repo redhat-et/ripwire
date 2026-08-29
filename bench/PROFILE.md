@@ -596,3 +596,22 @@ lint-family set plus `unreachablecheck`, `deadcheck`, `deadfiltercheck`, `deadpr
 lambdas, and they now also carry near-identical pre-read guards. Consolidating them into one shared
 type would delete a real clone, but it is a refactor of pre-existing code rather than part of this
 fold, so it was left alone deliberately.
+
+---
+
+## 2026-08-29 — main.cpp verb-family split: build-time ledger row (not a gate)
+
+The split moved 13,258 lines of main.cpp into eight `src/verbs_*.h` sections of the same translation
+unit (16,901 → 3,643 lines in main.cpp itself; RIPWIRE_MAIN_TU-guarded, unnamed-namespace-reopening
+includes), so the compiler still sees one TU and the cost was expected to hold still. It did:
+
+| build | cold `cmake --build build --clean-first -j` wall | machine |
+| --- | --- | --- |
+| before (28f82b1) | 43.68 s | this Apple Silicon dev box, AppleClang 21, dev build (no build type) |
+| after (the split) | 42.56 s | same box, same session |
+
+Ledger row only, per the no-perf-budget house rule: the numbers are recorded so drift is visible,
+never asserted by CI. Behavior over the whole flag surface is pinned instead by test/argvdiffcheck.sh
+against the pre-split binary (byte-identical stdout/stderr/exit on every vector; the only reported
+diffs are the two disclosed non-deterministic surfaces — the `--version` sha stamp and `--run-trace`'s
+measured `duration_ms`).
