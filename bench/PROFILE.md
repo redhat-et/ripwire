@@ -615,3 +615,24 @@ never asserted by CI. Behavior over the whole flag surface is pinned instead by 
 against the pre-split binary (byte-identical stdout/stderr/exit on every vector; the only reported
 diffs are the two disclosed non-deterministic surfaces — the `--version` sha stamp and `--run-trace`'s
 measured `duration_ms`).
+
+---
+
+## 2026-08-29 — ingest.cpp section split: build-time ledger row (not a gate)
+
+The follow-on to the main.cpp row above, same mechanism: 11,730 lines of ingest.cpp moved into nine
+`src/ingest_*.h` sections of the same translation unit (13,799 → 2,069 lines in ingest.cpp itself;
+RIPWIRE_INGEST_TU-guarded — eight sections reopen the unnamed namespace, the --match/--lint tail
+reopens `namespace rw` alone), so the compiler still sees one TU and the cost was expected to hold
+still. It did:
+
+| build | cold `cmake --build build --clean-first -j 6` wall | machine |
+| --- | --- | --- |
+| before (c267a4b) | 45.74 s | this Apple Silicon dev box, AppleClang 21, dev build (no build type) |
+| after (the split) | 43.82 s | same box, same session |
+
+Ledger row only, per the no-perf-budget house rule. Behavior is pinned the same way as the main.cpp
+split: test/argvdiffcheck.sh against the pre-split c267a4b binary, byte-identical on every vector
+except the two disclosed non-deterministic surfaces (`--version` sha stamp, `--run-trace`
+`duration_ms`), plus the index-side proofs the main.cpp split never needed — self-map determinism,
+warm-vs-`--no-cache` byte equality, and xmllint, all run after every one of the nine stages.
