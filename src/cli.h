@@ -284,6 +284,9 @@ struct Config
     bool             qualityAck      = false;              // --quality-ack[=REASON]: accept the current findings into .ripwire_quality_acks (per-finding ratchet); shares qualityDelta's baseline resolution
     std::string_view qualityAckReason;                     // the reason recorded next to each acked finding
     std::string_view qualityAckOnly;                       // --ack-only=SUBSTR[,SUBSTR]: ack only findings whose kind or canonical id contains one of these (default: all)
+    std::string_view qualityScope;                         // P1 --scope=GLOB[,GLOB...]: the OWNERSHIP partition for a shared working tree —
+                                                            // findings outside it are printed but never gate, and --quality-ack refuses to write them.
+                                                            // Grammar + floors: rw::quality's SCOPE block. Only with --quality-delta/--quality-ack (refused elsewhere)
     bool             dmm             = false;              // --dmm[=REV|A..B]: the Delta Maintainability Model scalar (di Biase/Rastogi/
                                                             // Bruntink/van Deursen, TechDebt 2019) — ONE trendable number in [0,1] for a
                                                             // change: the share of moved volume that made the code healthier. The
@@ -1350,6 +1353,31 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               the facet: --ack-only=contract-change acks the deliberate arity changes WITHOUT the\n"
         "                               never-gating api-surface new-symbol rows. Matching nothing refuses (exit 1) rather\n"
         "                               than falling back to acking everything. Whatever you leave unacked stays visible.\n"
+        "      --scope=GLOB[,GLOB...]   (with --quality-delta/--quality-ack) OWNERSHIP partition for a working tree that has\n"
+        "                               MORE THAN ONE WRITER in it — N agent sessions sharing one checkout. The delta compares\n"
+        "                               the working tree against HEAD, so every concurrent writer's uncommitted rows land in\n"
+        "                               YOUR report; this files each finding by its p= path. Rows in scope gate as usual; rows\n"
+        "                               outside it are STILL PRINTED, under an out-of-scope element with a do-not-ack banner,\n"
+        "                               and never gate. The header carries scope=, scoped-out= and scoped-out-gating= (how many\n"
+        "                               disclosed rows WOULD have gated — do not read a green exit as a clean tree).\n"
+        "                               THE POINT IS THE ACK: bare --quality-ack in a dirty shared tree accepts the WHOLE\n"
+        "                               report, which silently absorbs a sibling session's debt into a committed ledger under\n"
+        "                               your reason string — that is how a ratchet becomes a rubber stamp. Under --scope, an\n"
+        "                               out-of-scope row is never written, and an --ack-only that NAMES one refuses (exit 1,\n"
+        "                               naming the rows, writing nothing). Each row written under a scope records by=<scope>,\n"
+        "                               and a later run flags an ack whose by= does not cover what it suppresses\n"
+        "                               (foreign-acks= plus an sa row with why=\"foreign-scope\").\n"
+        "                               THE GLOB, EXACTLY (a pattern that silently fails to match is worse than a documented\n"
+        "                               prefix): each comma-separated pattern is matched against the ROOT-RELATIVE path p=\n"
+        "                               prints, and the list is an OR. NO wildcard = a ROOT-ANCHORED path prefix ending on a /\n"
+        "                               boundary (scope=alpha matches alpha/lib.h, never alphabet/lib.h and never a nested\n"
+        "                               src/alpha/ — stricter than the dead-code directory filter, on purpose). With * or ? =\n"
+        "                               matched against the WHOLE path, * spanning / and ? exactly one character. NOT SUPPORTED:\n"
+        "                               ** (it is two stars, and one already spans /), character classes, brace expansion, negation;\n"
+        "                               whitespace and XML metacharacters in a pattern are REFUSED, not mangled. FLOORS: a\n"
+        "                               clone group is in scope iff ANY member matches; a finding with no locator at all is\n"
+        "                               filed OUT of scope (not provably yours); a scope naming nothing indexed REFUSES\n"
+        "                               (exit 1) rather than reporting a clean zero.\n"
         "    --edit-check=SYM           fast per-symbol post-edit contract check: SYM's param count + publicness NOW vs git HEAD\n"
         "                               (unchanged/new-symbol/contract-change with was/now), plus its 1-hop callers with any call-site\n"
         "                               provably incompatible with the NEW arity flagged. A contract is PER DEFINITION, so a SYM\n"
@@ -2209,6 +2237,10 @@ inline constexpr ViewFlag kViewFlags[] =
     // §B5 FIX - was byte-identical to the DEFAULT MAP: a caller asked which findings to ack and got an atlas.
     // `--ack-only=gating` alone already exits 1, so the empty form was the only unguarded spelling.
     { "--ack-only=",       &Config::qualityAckOnly  , EmptyValue::Refuse, "one or more kind/id substrings, comma-separated",  "--ack-only=complexity" },
+    // P1 — same ruling as --ack-only= one line up, for the same reason: an EMPTY scope is the one spelling
+    // that reads as "everything is mine", which is the exact belief this flag exists to stop an agent
+    // holding in a shared tree. `--scope=` (an unset shell variable) must never expand to a blanket ack.
+    { "--scope=",          &Config::qualityScope    , EmptyValue::Refuse, "one or more path globs, comma-separated",          "--scope=src/quality.h" },
     // --regex= sets the pattern AND the regex-mode bool; it already called refuseEmptyValue directly and the
     // table prints the SAME sentence, so this row is byte-identical to the arm it replaces.
     { "--regex=",          &Config::grep            , EmptyValue::Refuse, "a regular expression",                             "--regex='parse[A-Z]'",
@@ -2391,7 +2423,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 198;  // +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice)
+inline constexpr std::size_t kTotalFlagArms = 199;  // +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -3481,6 +3513,19 @@ inline void validateConfig( Config& c ) noexcept
     if( !c.qualityAckOnly.empty() && !c.qualityAck )
     {
         std::fprintf( stderr, "ripwire: --ack-only=SUBSTR narrows --quality-ack — pass both (e.g. ripwire <dir> --quality-delta --ack-only=contract-change --quality-ack=\"reason\")\n" );
+        c.ok = false;
+    }
+
+    // P1 — --scope=GLOB partitions --quality-delta's findings by ownership, and NOTHING else in the tool
+    // reads it. Alone it would silently no-op on the plain map (exit 0, the ordinary atlas, stderr empty),
+    // which on THIS flag is the worst available failure: the caller's belief is "my report is scoped to my
+    // subtree", and what they got is scoped to nothing at all. Refuse loudly, naming both flags — the same
+    // ruling --ack-only carries immediately above, for the same class of mistake. (The scope's own GRAMMAR
+    // is validated in the verb handler, not here: cli.h is a leaf that includes only ingest.h, and the
+    // vocabulary belongs to quality.h — the same line --quality-panel=PRESET's refusal draws.)
+    if( !c.qualityScope.empty() && !c.qualityDelta )
+    {
+        std::fprintf( stderr, "ripwire: --scope=GLOB partitions --quality-delta by ownership — pass both (e.g. ripwire <dir> --quality-delta --scope=src/quality.h)\n" );
         c.ok = false;
     }
 
