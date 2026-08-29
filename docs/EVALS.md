@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 476 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 479 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4478,7 +4478,7 @@ descriptions 21,172 B, `src/mcp.h`) is larger and riskier and is spec-only, not 
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **476 gate scripts**, all of which exist on disk.
+naming **479 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5309,7 +5309,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 476. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 479. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -6751,6 +6751,19 @@ is no unanswerable-query class to calibrate against. A pseudo-split manufactured
 instances (an instance where the explorer's arm found none of the core lines) would conflate "hard but
 answerable" with "should abstain" — a different failure mode — so no abstention calibration is run on
 SWE-Explore; this is recorded as a coverage boundary of that benchmark, not a gap in this round.
+
+**MEASURED OUTCOME (2026-08-29, base binary of this round): the registered bands were NOT met — this
+is a recorded negative.** `confidence="low"` fires at ~85–87% on the natural split *regardless of
+answerability* (no-gold 85.1% vs answerable 87.0%), so the declared-operating-point false-abstain rate
+lands at 80–87% against the registered 0.10 ceiling, and rank-based AUROC over the combined
+confidence/margin score is indistinguishable from chance (0.48 balanced, 0.51 natural). One F1 cell on
+the balanced split crossed its band numerically but is a degenerate always-abstain artifact of that
+split's class balance — it is not reported as a pass. **No operating point is recommended.** The
+conclusion the numbers force: the shipped disclosure is honest about *ranking shape*, but ranking
+shape and *query answerability* are close to independent on this benchmark's query mix — so threshold
+tuning over `confidence=`/`margin_pct=` alone is CLOSED as a fix shape for the abstention loss bucket.
+A future round needs a new fact surfaced from the ranker (the adaptive cut's kept-vs-scored and
+positive-hit counts are not emitted on any surface today) rather than a recalibration of these two.
 
 ## SWE-Explore exploration lane (2026-08-28) — PRE-REGISTERED, loss-first, before any measurement
 
