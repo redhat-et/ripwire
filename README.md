@@ -575,7 +575,7 @@ the recommendation — and abstains honestly when the evidence is too thin to na
 <summary>Which surface is the authority — <code>--help</code> vs <code>docs/COMMANDS.md</code> — and the four reflex verbs worth memorising</summary>
 
 `./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
-[`docs/COMMANDS.md`](docs/COMMANDS.md) documents every one of the 142 documented flags — 94 of them
+[`docs/COMMANDS.md`](docs/COMMANDS.md) documents every one of the 143 documented flags — 94 of them
 with a real invocation and its recorded output (counts re-derived 2026-08-23; `test/docscommandscheck.sh`
 fails if that documented set and the binary's own flag table ever disagree). Each family below links there.
 
@@ -1295,7 +1295,7 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**34 repositories and 54 papers** into one deterministic executable, alongside a labelled
+**34 repositories and 58 papers** into one deterministic executable, alongside a labelled
 survey of 221 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
@@ -1415,7 +1415,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **472 gate scripts** and is the authoritative list;
+`test/regression.sh` names **475 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
