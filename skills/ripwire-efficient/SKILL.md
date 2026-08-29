@@ -30,7 +30,9 @@ a deterministic, PageRank-ranked map. The discipline is one line: **map before y
 
 This is the load-bearing fact, not a nice-to-have: **less context is more accurate, not just cheaper.**
 - Code-repair accuracy **collapses with context size**: Claude 3.5 Sonnet went **29% → 3%** on LongSWE-Bench
-  as context grew 32K → 256K tokens (LongCodeBench, arXiv:2505.07897).
+  as context grew 32K → 256K tokens (LongCodeBench, arXiv:2505.07897). A newer, independent result agrees:
+  with localization held constant, compressed source reached the same editing accuracy at roughly 3.7×
+  fewer tokens than whole-file context (arXiv:2607.09691).
 - A **~300-token** focused prompt **beat** a **~113K-token** full-file dump on the same task (Chroma
   context-rot study, 2025) — more context didn't just cost more, it made the model worse.
 - Position matters: actionable content at the END of a long input measured **up to +30%** (Anthropic) — the
