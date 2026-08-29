@@ -64,12 +64,20 @@ def run_binary(bin_path, snapshot, args, timeout=600):
 def flatten_ranked(file_groups):
     """[{p, symbols:[{l,n,id?...}]}] -> [(p, n, l, id_or_None)] in document order."""
     out = []
+    ranks = []
     for grp in file_groups or []:
         p = grp.get("p")
         for s in grp.get("symbols") or []:
             if p is None or "l" not in s or "n" not in s:
                 continue
             out.append((p, s["n"], int(s["l"]), s.get("id")))
+            ranks.append(s["r"] if isinstance(s.get("r"), int) else None)
+    # instrument v2 (2026-08-29): rows now carry the per-symbol rank fact "r" — a budgeted
+    # consumer keeps the ranker's true order by sorting on it (stable; unranked rows keep
+    # document order after the ranked ones). Registered in EVALS before re-measure.
+    if any(r is not None for r in ranks):
+        order = sorted(range(len(out)), key=lambda i: (ranks[i] is None, ranks[i] if ranks[i] is not None else i))
+        out = [out[i] for i in order]
     return out
 
 
