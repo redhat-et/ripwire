@@ -1,0 +1,83 @@
+ripwire recall — "**Describe the bug**
+A clear and concise description of what the bug is: the flush drops a pinned page.
+
+**Steps to reproduce**
+Steps to reproduce the behavior:
+1. Go to the page and open it
+2. See the error
+
+**Expected behavior**
+A clear and concise description of what you expected to happen.
+
+**Screenshots**
+If applicable, add screenshots to help explain your problem.
+
+**Additional context**
+Add any other context about the problem here, including the version and the platform." — 6 relevant of 6 document files, best-first — total=6 shown=6 capped=0 max_tokens=8000 est_tokens=1292
+
+━━ .github/ISSUE_TEMPLATE/bug_report.md  (relevance 27.358) ━━  [sections: 1 of 1, section-granular; whole doc 588 B; lines="1-21"]
+# Bug report
+
+**Describe the bug**
+A clear and concise description of what the bug is.
+
+**Steps to reproduce**
+Steps to reproduce the behavior:
+1. Go to the page and open it
+2. Pin a page and flush the cache
+3. See the error
+
+**Expected behavior**
+A clear and concise description of what you expected to happen.
+
+**Screenshots**
+If applicable, add screenshots to help explain your problem.
+
+**Additional context**
+Add any other context about the problem here, including the version and the
+platform. A pinned page, an eviction, or a flush of the page cache is worth
+describing precisely.
+
+
+━━ CONTRIBUTING.md  (relevance 6.889) ━━  [sections: 1 of 1, section-granular; whole doc 239 B; lines="1-5"]
+# Contributing
+
+Thanks for reporting a bug. Please describe the bug, list the steps to
+reproduce it, and state the expected behavior before opening a pull request
+about the page cache, its eviction policy, or a pinned page during a flush.
+
+
+━━ notes/tier_probe.md  (relevance 5.796) ━━  [sections: 1 of 1, section-granular; whole doc 261 B; lines="1-6"]
+# Tier probe
+
+A pinned page, an eviction, and a flush of the page cache described in exactly
+the same words twice, so two documents differing only in where they live can be
+compared directly. Describe the bug, the steps to reproduce, and the expected
+behavior.
+
+
+━━ .github/ISSUE_TEMPLATE/tier_probe.md  (relevance 5.713) ━━  [sections: 1 of 1, section-granular; whole doc 261 B; lines="1-6"]
+# Tier probe
+
+A pinned page, an eviction, and a flush of the page cache described in exactly
+the same words twice, so two documents differing only in where they live can be
+compared directly. Describe the bug, the steps to reproduce, and the expected
+behavior.
+
+
+━━ notes/paging_design.md  (relevance 2.337) ━━  [sections: 1 of 1, section-granular; whole doc 238 B; lines="1-5"]
+# Paging design
+
+The page cache holds a fixed number of pages. A pinned page is one the reader
+still holds; the evictor must skip it and choose another victim. A flush walks
+every dirty page and writes it back before the cache is reused.
+
+
+━━ CHANGELOG.md  (relevance 1.965) ━━  [sections: 1 of 2, section-granular; whole doc 322 B; lines="3-8"]
+## Unreleased
+
+- Fixed the RuntimeError raised during eviction of a pinned page in the page
+  cache during flush. The traceback pointed at runpy and at the exec of
+  run_globals in _run_module_as_main, so the failure read as a startup fault
+  rather than as an eviction of a pinned page during a cache flush.
+

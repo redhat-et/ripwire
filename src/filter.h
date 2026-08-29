@@ -4,7 +4,8 @@
 // window is packed with production logic. Post-ingest, densifies symbol ids.
 
 #include "model.h"
-#include "docparse.h"    // lowerExtOf / isDocExtension — the single source of truth for "this file is a DOCUMENT"
+#include "docparse.h"     // lowerExtOf / isDocExtension — the single source of truth for "this file is a DOCUMENT"
+#include "queryshape.h"   // the QUERY half of the shape-conditional document demotion below
 
 #include <algorithm>
 #include <cstdint>
@@ -291,14 +292,157 @@ inline float rankTierMultiplierOf( std::string_view p ) noexcept
 // than once per file, so cost is O(symbols), not O(files × symbols).
 inline constexpr std::uint32_t kVendoredBundleLineBytes = 2000;
 
+// ── the SHAPE-CONDITIONAL document tier (the path half; queryshape.h is the query half) ─────────────────
+// The tiers above are query-INDEPENDENT: a fixture is a fixture whatever was asked. This one is not. It
+// fires only when the query itself says the answer cannot be prose — a pasted stack trace, sanitizer
+// report or compiler diagnostic, or a pasted issue-template form. The mechanism is deliberately the tier
+// multiplier and NOT a scoring change, a length floor, or a re-rank: the same shrink-only factor, folded
+// into the same loop, with the same MaxScore-bound argument, and the same "de-prioritized is not absent"
+// contract — those files stay indexed, still score, still surface when nothing else matches, and the
+// query-mention anchor (which runs AFTER this) still lifts a document the query literally names.
+//
+// REPOSITORY META-PROSE takes the factor TWICE. A repository's documents ABOUT ITSELF — its issue and
+// pull-request templates, its contributing / conduct / security / support policies, its changelog — are
+// written in exactly the vocabulary a pasted bug report carries, and no failure ever lives in one. Twice
+// the SAME factor, not a second constant: nothing new was calibrated here, the file is simply disqualified
+// on two independent counts. Extend the stem table below rather than starting a third component list.
+//
+// The disclosure is not optional and not paraphrased — shapeDemotionNote() below is the one spelling, it
+// rides in route= verbatim, and the callers gate the whole mechanism on the routed path precisely because
+// route= is the only place it can be said.
+inline constexpr int   kShapeDocMulPct = 35;                             // the calibrated tier factor, as a percent
+inline constexpr float kShapeDocMul    = float( kShapeDocMulPct ) / 100.f;
+static_assert( kShapeDocMul == kRankTierDemoMul,
+               "the shape demotion REUSES the calibrated tier factor — it must never introduce a second one" );
+static_assert( kShapeDocMulPct >= 10 && kShapeDocMulPct <= 99,
+               "shapeFactorText() below prints exactly two decimals" );
+
+// Basename stems, extension stripped and lowercased. `.github/` and `.gitlab/` are covered by the
+// directory rule instead, so a template that keeps its upstream name is caught either way.
+inline constexpr std::string_view kRepoMetaDocStems[] = {
+    "contributing", "code_of_conduct", "code-of-conduct", "changelog", "changes", "history",
+    "security", "support", "governance", "maintainers", "codeowners", "issue_template",
+    "pull_request_template", "bug_report", "feature_request" };
+
+// Only ever NARROWS the document tier: a source file is never repository meta-prose, whatever it is called.
+inline bool isRepoMetaDocPath( std::string_view p ) noexcept
+{
+    if( pathTierOf( p ) != PathTier::Doc )
+    {
+        return false;
+    }
+    for( std::string_view seg : { std::string_view( ".github/" ), std::string_view( ".gitlab/" ) } )
+    {
+        if( hasDirSegment( p, seg ) )
+        {
+            return true;
+        }
+    }
+
+    const std::size_t      slashPos = p.rfind( '/' );
+    const std::string_view fileName = ( slashPos == std::string_view::npos ) ? p : p.substr( slashPos + 1 );
+    const std::size_t      dotPos   = fileName.rfind( '.' );
+    const std::string_view stem     = ( dotPos == std::string_view::npos ) ? fileName : fileName.substr( 0, dotPos );
+
+    std::string lowerStem;
+    lowerStem.reserve( stem.size() );
+    for( const char ch : stem )   // EXPLICIT narrowing, as elsewhere in this tree
+    {
+        const unsigned char c = static_cast<unsigned char>( ch );
+        lowerStem.push_back( ( c >= 'A' && c <= 'Z' ) ? char( c - 'A' + 'a' ) : char( c ) );
+    }
+    for( std::string_view knownStem : kRepoMetaDocStems )
+    {
+        if( lowerStem == knownStem )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// the shape factor for one path — 1.0 for anything that is not a document
+inline float shapeDocMultiplierOf( std::string_view p ) noexcept
+{
+    if( pathTierOf( p ) != PathTier::Doc )
+    {
+        return 1.0f;
+    }
+    return isRepoMetaDocPath( p ) ? kShapeDocMul * kShapeDocMul : kShapeDocMul;
+}
+
+// "0.35" from the integer percent, so the disclosure below cannot drift from the constant above and no
+// float formatting (hence no locale) is involved in an emitted byte.
+inline std::string shapeFactorText( int pct )
+{
+    std::string out = "0.";
+    out.push_back( char( '0' + pct / 10 ) );
+    out.push_back( char( '0' + pct % 10 ) );
+    return out;
+}
+
+// The ONE spelling of what happened, appended to the routed reason so it lands in route= (and its JSON
+// twin) verbatim. Empty when no shape fired — silence means nothing happened, the same convention route=
+// and over_ceiling already use.
+inline std::string shapeDemotionNote( const queryshape::Verdict& shape )
+{
+    if( !shape.fires() )
+    {
+        return {};
+    }
+    const std::string factor = shapeFactorText( kShapeDocMulPct );
+
+    std::string note = "; doc tier demoted (query is ";
+    if( shape.trace )
+    {
+        note += "trace-shaped: " + std::to_string( shape.frameCount ) + " " + shape.frameFormat + " frame";
+        note += shape.frameCount == 1 ? "" : "s";
+    }
+    if( shape.trace && shape.bugReport )
+    {
+        note += "; ";
+    }
+    if( shape.bugReport )
+    {
+        note += "bug-report-form-shaped: " + std::to_string( shape.formFamilies ) + " template label";
+        note += shape.formFamilies == 1 ? "" : "s";
+    }
+    note += ") — documents x" + factor + ", repo meta-docs x" + factor + " twice";
+    return note;
+}
+
+// The machine form of the same fact, for surfaces that carry attributes rather than prose (the candidates
+// export's doc_tier=). nullptr ⇒ attribute absent ⇒ nothing happened, the same silence convention route=
+// and weak= use. Static strings: an attribute value must not allocate on a per-row emit path.
+inline const char* shapeDocTierTag( const queryshape::Verdict& shape ) noexcept
+{
+    // one row per (trace, bugReport) bit pair — the declarative-table rule, and it keeps the four cases
+    // impossible to spell inconsistently with shapeDemotionNote above
+    static constexpr const char* kDocTierTags[ 4 ] = { nullptr, "demoted:trace", "demoted:bug-report",
+                                                       "demoted:trace+bug-report" };
+    return kDocTierTags[ ( shape.trace ? 1u : 0u ) | ( shape.bugReport ? 2u : 0u ) ];
+}
+
 // tier factors fanned out per def, via each def's file (every entry in (0,1] — shrink-only keeps the
-// MaxScore bound in lexical.h safe, same argument as its Section down-weight)
-inline std::vector<float> rankTierSymbolMultipliers( const IngestResult& ing )
+// MaxScore bound in lexical.h safe, same argument as its Section down-weight).
+// demoteDocTier: the shape-conditional document factor above, folded into the SAME per-file pass rather
+// than a second multiplier vector the callers would have to remember to combine. A SEPARATE entry point
+// rather than a defaulted parameter, exactly as lexicalScoresTiered is separate from lexicalScores: the
+// query-independent contract every existing consumer holds does not change arity, so a caller that never
+// heard of query shapes cannot accidentally acquire an opinion about it.
+inline std::vector<float> rankTierSymbolMultipliersShaped( const IngestResult& ing, bool demoteDocTier )
 {
     std::vector<float> fileMul( ing.files.size(), 1.f );
     for( std::size_t f = 0; f < ing.files.size(); ++f )
     {
         fileMul[f] = rankTierMultiplierOf( ing.files[f] );
+        // min(), not assignment or a product: a file already down-weighted for being a deck or a fixture
+        // must never be LIFTED by this line, and two independent de-prioritizations are one claim about
+        // one file, not a compounding penalty.
+        if( demoteDocTier )
+        {
+            fileMul[f] = std::min( fileMul[f], shapeDocMultiplierOf( ing.files[f] ) );
+        }
     }
 
     // then the EVIDENCE tier above: any def whose own span trips the bundle floor demotes its whole file.
@@ -332,6 +476,13 @@ inline std::vector<float> rankTierSymbolMultipliers( const IngestResult& ing )
         }
     }
     return mul;
+}
+
+// the query-INDEPENDENT contract every pre-shape caller keeps (--query, and any lens that ranks without
+// a query shape to read): same arity as always, byte-identical multipliers.
+inline std::vector<float> rankTierSymbolMultipliers( const IngestResult& ing )
+{
+    return rankTierSymbolMultipliersShaped( ing, /*demoteDocTier=*/false );
 }
 
 // the tier's own inverse, for the weak-evidence honesty signal (R4 weak=): the strongest score with the
