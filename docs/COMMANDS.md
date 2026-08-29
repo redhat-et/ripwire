@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-before-symbol`](#insert-before-symbol-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--edit-plan`](#edit-plan-file) · [`--dry-run`](#dry-run-apply) · [`--safe-delete`](#safe-delete-sym) · [`--slice`](#slice-sym-var) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--scope`](#scope-glob-glob) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-before-symbol`](#insert-before-symbol-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--edit-plan`](#edit-plan-file) · [`--dry-run`](#dry-run-apply) · [`--safe-delete`](#safe-delete-sym) · [`--slice`](#slice-sym-var) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor) · [`--agent`](#agent-codex) · [`--skipped`](#skipped)
 
@@ -2043,7 +2043,7 @@ $ ./build/ripwire . --quality-delta
 ... [6 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--affected`, `--test-gate`, `--dmm`, `--json`
+**Shaped by:** `--affected`, `--test-gate`, `--dmm`, `--scope`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -2080,7 +2080,7 @@ $ ./build/ripwire . --quality-delta
 ... [6 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--affected`, `--test-gate`, `--dmm`, `--json`
+**Shaped by:** `--affected`, `--test-gate`, `--dmm`, `--scope`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -2116,10 +2116,24 @@ $ ./build/ripwire . --quality-delta --quality-ack --ack-only=zzznope
 (empty)
 ```
 
+**Shaped by:** `--scope`
+
 **Caveats (stated by the binary):**
 
 - Prefer the facet: --ack-only=contract-change acks the deliberate arity changes WITHOUT the never-gating api-surface new-symbol rows.
 - Matching nothing refuses (exit 1) rather than falling back to acking everything.
+
+### `--scope=GLOB[,GLOB...]`
+
+**Answers:** (with --quality-delta/--quality-ack) OWNERSHIP partition for a working tree that has MORE THAN ONE WRITER in it — N agent sessions sharing one checkout.
+
+The delta compares the working tree against HEAD, so every concurrent writer's uncommitted rows land in YOUR report; this files each finding by its p= path. Rows in scope gate as usual; rows outside it are STILL PRINTED, under an out-of-scope element with a do-not-ack banner, and never gate. The header carries scope=, scoped-out= and scoped-out-gating= (how many disclosed rows WOULD have gated — do not read a green exit as a clean tree). THE POINT IS THE ACK: bare --quality-ack in a dirty shared tree accepts the WHOLE report, which silently absorbs a sibling session's debt into a committed ledger under your reason string — that is how a ratchet becomes a rubber stamp. Under --scope, an out-of-scope row is never written, and an --ack-only that NAMES one refuses (exit 1, naming the rows, writing nothing). Each row written under a scope records by=<scope>, and a later run flags an ack whose by= does not cover what it suppresses (foreign-acks= plus an sa row with why="foreign-scope"). THE GLOB, EXACTLY (a pattern that silently fails to match is worse than a documented prefix): each comma-separated pattern is matched against the ROOT-RELATIVE path p= prints, and the list is an OR. NO wildcard = a ROOT-ANCHORED path prefix ending on a / boundary (scope=alpha matches alpha/lib.h, never alphabet/lib.h and never a nested src/alpha/ — stricter than the dead-code directory filter, on purpose). With * or ? = matched against the WHOLE path, * spanning / and ? exactly one character. NOT SUPPORTED: ** (it is two stars, and one already spans /), character classes, brace expansion, negation; whitespace and XML metacharacters in a pattern are REFUSED, not mangled. FLOORS: a clone group is in scope iff ANY member matches; a finding with no locator at all is filed OUT of scope (not provably yours); a scope naming nothing indexed REFUSES (exit 1) rather than reporting a clean zero.
+
+**Caveats (stated by the binary):**
+
+- rows outside it are STILL PRINTED, under an out-of-scope element with a do-not-ack banner, and never gate.
+- Under --scope, an out-of-scope row is never written, and an --ack-only that NAMES one refuses (exit 1, naming the rows, writing nothing).
+- NO wildcard = a ROOT-ANCHORED path prefix ending on a / boundary (scope=alpha matches alpha/lib.h, never alphabet/lib.h and never a nested src/alpha/ — stricter than the dead-code directory filter, on purpose).
 
 ### `--edit-check=SYM`
 
