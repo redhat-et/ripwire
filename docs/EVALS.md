@@ -6609,3 +6609,55 @@ function body via `--expand` (the primitive's value claim is fewer tokens for th
 recall AND the token ratio must be reported together, per the §5 discipline). No number from this shape
 is published until that round runs to completion under its own pre-registration — this paragraph is the
 registration, not the result.
+## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
+
+**The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*
+(arXiv 2607.24882, July 2026). 427 samples across 25 repositories (13 Python, 3 Go, 3 Rust,
+3 TypeScript, 2 Java, 1 JavaScript), four retrieval tasks plus an abstention set. Artifacts verified
+public before this registration was written: evaluator and metadata MIT-licensed
+(github.com/eyuansu62/agent-retrieval-bench), dataset ungated on HuggingFace
+(datasets/eyuansu71/agent_retrieval_bench) with the repository snapshots included — corpus source
+files retain their upstream licences, which is why the data lives **pinned, not committed**, in the
+untracked `bench/external/arb/` (same posture as the extcorpus slice above and `bench/multiswe/`'s
+raw cache).
+
+**Why this benchmark.** Its four tasks are the four questions ripwire's verb catalog claims to
+answer, so it scores the *mapped verb*, not a generic ranker shim. The paper's own finding — a
+vectorless RepoMap family winning trace2code (MRR 0.274 vs 0.083 for the best embedding) — is the
+family ripwire belongs to; this lane measures whether ripwire is that family's strongest instance,
+loss-first.
+
+**Task → verb mapping, registered before any adapter run:**
+
+| Benchmark task | n | The signal | ripwire verb |
+| --- | ---: | --- | --- |
+| `code2test` | 106 | PR intent → related tests | `--affected` (changed files → reaching tests), `--test-gate` posture |
+| `comment2context` | 80 | review comment + file → additional context files | `--for` (anchored: the reviewed file is pasted verbatim into the query) |
+| `trace2code` | 101 | reproduced failure output → root-cause files | `--from-trace` (the trace is pasted, never hand-translated) |
+| `edit2ripple` | 58 | anchored code change → additionally affected files | `--impact` (transitive) seeded from the changed symbols |
+
+Symbol→file projection: ripwire ranks symbols with `p="file:line"`; the benchmark ranks files. The
+adapter (`bench/arb/run_arb.py`) dedupes to file rank by **best symbol rank per file** — registered
+here so the projection cannot be tuned after seeing scores.
+
+**Metrics, exactly as the paper defines them:** MRR (first ranked gold file), Recall@20 (fraction of
+gold files in the top 20 unique files), and BCY@8k (Budgeted Context Yield at an 8k-token budget,
+τ=1 canonical). Scored with the benchmark's own scorer where it runs; any local reimplementation is
+diffed against the shipped scorer on at least one task before being trusted.
+
+**The abstention arm.** The 50 natural no-gold samples (maintainer evidence attributes the fix to an
+upstream dependency) and the 32 counterfactual wrong-repository controls are scored as
+*refusal-quality*, not skipped: honesty in output is this tool's stated feature (§ Non-negotiables),
+so "returns confident garbage on an unanswerable query" is a first-class loss bucket, and the
+abstention rate is reported next to the retrieval metrics, never instead of them.
+
+**Decision rule — this is a LOSS-FIRST round (the improve-first house rule).** The deliverable is a
+loss-bucket list: every sample where ripwire under-performs the difficulty implied by the paper's
+published RepoMap/Qwen3 numbers, classified by failure mechanism (missing edge type, tokenizer miss,
+doc-vs-code confusion, multi-root layout, abstention miss, …), written to a LOCAL `PLAN_*` report.
+**No comparative number from this lane is published in EVALS or README until a fix round completes
+and re-measures.** Fix rounds register their own bands per bucket, per the extcorpus template above.
+
+**Determinism gate before any sweep is trusted:** one sample per task run twice, rankings
+byte-identical, or the sweep does not run. Subsetting, if the full 25-repo corpus is not swept, is
+**disclosed in the report** (stratified: all four tasks, ≥3 languages) — never silent.
