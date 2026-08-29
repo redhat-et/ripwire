@@ -91,8 +91,11 @@ is_valid_json()
 echo "hookcheck: HOOK=$HOOK"
 
 # ── (1) Grep case: fires, valid JSON, allow-never-deny, names --grep ───────────────────────────────
+# Pattern is an OR-chain (P4.2, 2026-08-29): the base tier no longer fires on a short single literal
+# (see §CEDE in the hook and section (14) below) — this case exercises the base tier's ordinary path,
+# which now REQUIRES a multi-pattern/OR signal to be eligible at all.
 T1="$TMP/t1"; mkdir -p "$T1"
-GREP_JSON='{"session_id":"grepcase","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"needle","path":"."}}'
+GREP_JSON='{"session_id":"grepcase","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"foo|bar","path":"."}}'
 OUT1="$( run_hook "$GREP_JSON" "$WITH_RIPWIRE" "$T1" )"; RC1=$?
 echo "-- Grep case output --"; echo "$OUT1"; echo "(exit=$RC1)"
 
@@ -113,8 +116,9 @@ echo "-- Grep case, 2nd invocation (dedup) --"; echo "[$OUT1B]"; echo "(exit=$RC
 [ -z "$OUT1B" ] && ok "Grep dedup: silent on 2nd call (no spam)" || no "Grep dedup: 2nd call was not silent: $OUT1B"
 
 # ── (3) Bash-grep case (recursive): fires, names --grep or --for ───────────────────────────────────
+# OR-chain pattern (P4.2) — see the note at case (1).
 T3="$TMP/t3"; mkdir -p "$T3"
-BASHGREP_JSON='{"session_id":"bashcase","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"grep -rn needle ."}}'
+BASHGREP_JSON='{"session_id":"bashcase","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"grep -rn '\''needle|other'\'' ."}}'
 OUT3="$( run_hook "$BASHGREP_JSON" "$WITH_RIPWIRE" "$T3" )"; RC3=$?
 echo "-- Bash-grep case output --"; echo "$OUT3"; echo "(exit=$RC3)"
 
@@ -126,9 +130,9 @@ printf '%s' "$OUT3" | grep -q '"permissionDecision"[[:space:]]*:[[:space:]]*"all
 printf '%s' "$OUT3" | grep -qE -- '--grep|--for' \
     && ok "Bash-grep case: suggestion names --grep/--for" || no "Bash-grep case: suggestion missing a verb"
 
-# ripgrep spelling also counts
+# ripgrep spelling also counts (OR-chain pattern, P4.2 — see the note at case (1))
 T3B="$TMP/t3b"; mkdir -p "$T3B"
-RG_JSON='{"session_id":"rgcase","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"rg needle ."}}'
+RG_JSON='{"session_id":"rgcase","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"rg '\''needle|other'\'' ."}}'
 OUT3B="$( run_hook "$RG_JSON" "$WITH_RIPWIRE" "$T3B" )"; RC3B=$?
 [ "$RC3B" -eq 0 ] && [ -n "$OUT3B" ] && ok "Bash rg case: fires (exit 0, non-empty)" \
     || no "Bash rg case: did not fire as expected (exit=$RC3B out=[$OUT3B])"
@@ -203,8 +207,9 @@ OUT3F2="$( run_hook "$READ_JSON" "$WITH_RIPWIRE" "$T3F" )"; RC3F2=$?
 [ "$RC3F2" -eq 0 ] && [ -z "$OUT3F2" ] && ok "Read dedup: silent on 2nd call" \
     || no "Read dedup: 2nd call was not silent: $OUT3F2"
 
-# a Grep in the SAME session still fires: read and grep are different habits, deduped separately
-GREP_SAME='{"session_id":"readcase","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"x"}}'
+# a Grep in the SAME session still fires: read and grep are different habits, deduped separately.
+# OR-chain pattern (P4.2, 2026-08-29) — see the note at case (1).
+GREP_SAME='{"session_id":"readcase","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"x|y"}}'
 OUT3F3="$( run_hook "$GREP_SAME" "$WITH_RIPWIRE" "$T3F" )"; RC3F3=$?
 [ "$RC3F3" -eq 0 ] && [ -n "$OUT3F3" ] \
     && ok "Read and Grep dedup independently (different habits, one nudge each)" \
@@ -331,8 +336,9 @@ OUT6="$( run_hook "$NOCTX_JSON" "$NO_RIPWIRE" "$T6" )"; RC6=$?
 [ "$RC6" -eq 0 ] && [ -z "$OUT6" ] && ok "ripwire missing: silent" || no "ripwire missing: exit=$RC6 out=[$OUT6], expected silent"
 
 # ── (7) Different session ids each get their own one-time nudge (dedup is per-session, not global) ─
+# OR-chain pattern (P4.2) — see the note at case (1).
 T7="$TMP/t7"; mkdir -p "$T7"
-GREP_JSON_S2='{"session_id":"grepcase2","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"needle"}}'
+GREP_JSON_S2='{"session_id":"grepcase2","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"foo|bar"}}'
 OUT7="$( run_hook "$GREP_JSON_S2" "$WITH_RIPWIRE" "$T7" )"; RC7=$?
 [ "$RC7" -eq 0 ] && [ -n "$OUT7" ] && ok "New session id: fires independently of case (1)'s dedup marker" \
     || no "New session id: exit=$RC7 out=[$OUT7], expected a fresh nudge"
@@ -466,8 +472,11 @@ done
     || no "M3 meter: Grep tool classified as [$( meterrowget "$DEFAULT_LOG" 1 class )/$( meterrowget "$DEFAULT_LOG" 1 family )]"
 
 # ── M4-M7: the nudge and the count are separable — nudged, dedup, seq, post_nudge ───────────────────
+# OR-chain pattern (P4.2, 2026-08-29): a single literal no longer reaches the dedup mechanics at all
+# (category is demoted to "" before this block, so the row logs nudge=none, not nudge=fired/dedup) —
+# see the note at case (1). This arm is about the dedup/seq/post_nudge MACHINERY, not the grep gate.
 TM4="$TMP/tm4"; mkdir -p "$TM4"; L4="$TMP/m4.jsonl"
-M4_JSON='{"session_id":"meter4","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"n"}}'
+M4_JSON='{"session_id":"meter4","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"n|m"}}'
 OUTM4="$( run_meter "$L4" "$M4_JSON" "$TM4" )"
 [ "$( meterrowget "$L4" 1 nudged )" = "1" ] && [ "$( meterrowget "$L4" 1 nudge )" = "fired" ] && [ -n "$OUTM4" ] \
     && ok "M4 meter: the call the nudge fired on is logged nudged=1 nudge=fired" \
@@ -571,29 +580,34 @@ LASTROW="$( meterrows "$DEFAULT_LOG" )"
     || no "M18 meter: global log has $LASTROW row(s), tags [$( meterrowget "$DEFAULT_LOG" 1 tag )/$( meterrowget "$DEFAULT_LOG" 2 tag )]"
 
 # ── M19-M20: the dormant A/B toggle. Ships built, ships OFF; the arm is on every row ────────────────
+# OR-chain pattern (P4.2, 2026-08-29) — these arms are about arm plumbing, not the grep gate; see the
+# note at case (1). A literal `grep -rn needle .` would demote category to "" before the arm is ever
+# consulted, which would make M19/M20 pass for the wrong reason (nudge=none, not nudge=control/fired).
 TM19="$TMP/tm19"; mkdir -p "$TM19"; L19="$TMP/m19.jsonl"
-OUTM19="$( run_meter "$L19" "$( bashjson meter19 'grep -rn needle .' )" "$TM19" RIPWIRE_METER_ARM=control )"
+OUTM19="$( run_meter "$L19" "$( bashjson meter19 "grep -rn 'needle|other' ." )" "$TM19" RIPWIRE_METER_ARM=control )"
 [ "$( meterrowget "$L19" 1 arm )" = "control" ] && [ "$( meterrowget "$L19" 1 nudged )" = "0" ] \
     && [ "$( meterrowget "$L19" 1 nudge )" = "control" ] && [ -z "$OUTM19" ] \
     && ok "M19 meter: control arm counts the call and suppresses the nudge, and says so on the row" \
     || no "M19 meter: arm=[$( meterrowget "$L19" 1 arm )] nudged=[$( meterrowget "$L19" 1 nudged )] nudge=[$( meterrowget "$L19" 1 nudge )] out=[$OUTM19]"
 TM20="$TMP/tm20"; mkdir -p "$TM20"; L20="$TMP/m20.jsonl"
-OUTM20="$( run_meter "$L20" "$( bashjson meter20 'grep -rn needle .' )" "$TM20" )"
+OUTM20="$( run_meter "$L20" "$( bashjson meter20 "grep -rn 'needle|other' ." )" "$TM20" )"
 [ "$( meterrowget "$L20" 1 arm )" = "treatment" ] && [ -n "$OUTM20" ] \
     && ok "M20 meter: DEFAULT arm is treatment — observation is always on, alternation is not" \
     || no "M20 meter: default arm=[$( meterrowget "$L20" 1 arm )] out=[${OUTM20:+set}]"
 
 # ── M21-M23: the meter is subordinate to the call it observes ───────────────────────────────────────
+# OR-chain pattern (P4.2) — same reason as M19/M20: these arms are about the meter's failure-tolerance,
+# not the grep gate, and need a nudge-eligible call to prove the nudge survives that failure.
 TM21="$TMP/tm21"; mkdir -p "$TM21"
 UNWRITABLE="$TMP/unwritable"; mkdir -p "$UNWRITABLE"; chmod 500 "$UNWRITABLE"
-OUTM21="$( printf '%s' "$( bashjson meter21 'grep -rn needle .' )" \
+OUTM21="$( printf '%s' "$( bashjson meter21 "grep -rn 'needle|other' ." )" \
     | env HOME="$UNWRITABLE" PATH="$WITH_RIPWIRE" TMPDIR="$TM21" bash "$HOOK" )"; RCM21=$?
 chmod 700 "$UNWRITABLE"
 [ "$RCM21" -eq 0 ] && [ -n "$OUTM21" ] && printf '%s' "$OUTM21" | is_valid_json \
     && ok "M21 meter: an unwritable log costs the hooked command nothing (exit 0, nudge still emitted)" \
     || no "M21 meter: unwritable log broke the hook: exit=$RCM21 out=[$OUTM21]"
 TM22="$TMP/tm22"; mkdir -p "$TM22"; L22="$TMP/m22.jsonl"
-OUTM22="$( run_meter "$L22" "$( bashjson meter22 'grep -rn needle .' )" "$TM22" RIPWIRE_METER=0 )"
+OUTM22="$( run_meter "$L22" "$( bashjson meter22 "grep -rn 'needle|other' ." )" "$TM22" RIPWIRE_METER=0 )"
 [ "$( meterrows "$L22" )" = "0" ] && [ -n "$OUTM22" ] \
     && ok "M22 meter: RIPWIRE_METER=0 opts out of counting only — the nudge still works" \
     || no "M22 meter: opt-out left $( meterrows "$L22" ) row(s), out=[${OUTM22:+set}]"
@@ -856,7 +870,11 @@ grepjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Grep","tool_inpu
 readjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Read","tool_input":{"file_path":"%s"}}' "$1" "$REPO" "$2"; }
 globjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Glob","tool_input":{"pattern":"%s"}}' "$1" "$REPO" "$2"; }
 
-# ── S1-S6: the grep sweep. Three calls, one escalation, on the third, carrying the observed patterns
+# ── S1-S6: the grep sweep. Three calls, one escalation, on the third, carrying the observed patterns.
+#    Patterns are single literals on purpose (P4.2, 2026-08-29): this is the real-world "same-class
+#    sweep of known-literal greps" shape the escalation was measured against, and it must still
+#    escalate at the 3rd call even though NONE of the three would individually pass the base tier's
+#    new OR-chain/multi-pattern gate (§CEDE in the hook) — see S1's updated assertion below.
 TS1="$TMP/ts1"; mkdir -p "$TS1"; LS1="$TMP/s1.jsonl"
 SW1="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep alpha )" )"
 SW2="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep beta )" )"
@@ -864,8 +882,12 @@ SW3="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep gamma )" )"; RCS3=$?
 SW4="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep delta )" )"
 echo "-- sweep escalation (grep, 3rd call) --"; echo "$SW3"
 
-[ -n "$SW1" ] && printf '%s' "$SW1" | grep -Fq 'ripwire tip: ' && ok "S1 sweep: call 1 is the ordinary one-time tip" \
-    || no "S1 sweep: call 1 was not the base nudge: [$SW1]"
+# P4.2 (2026-08-29): call 1's pattern ("alpha") is a short single literal, so the base tier's own
+# gate (§CEDE) now demotes it silently — the ordinary one-time tip no longer fires here. Only the
+# ESCALATION (S2, below) still applies to a same-class sweep of literal patterns; see the section
+# header's rationale.
+[ -z "$SW1" ] && ok "S1 sweep: call 1 (a single literal) is silent — the base tier cedes it to rg" \
+    || no "S1 sweep: call 1 unexpectedly fired: [$SW1]"
 [ -z "$SW2" ] && ok "S3 sweep: call 2 does NOT escalate (two same-class calls are not a sweep)" \
     || no "S3 sweep: call 2 fired something: [$SW2]"
 [ "$RCS3" -eq 0 ] && [ -n "$SW3" ] && printf '%s' "$SW3" | grep -Fq 'SWEEP' \
@@ -941,9 +963,11 @@ printf '%s' "$SW10" | grep -Fq -- '--pack-task' \
     || no "S10 sweep: read sweep did not escalate after a grep sweep: [$SW10]"
 
 # ── S11: NON-SWEEP BEHAVIOUR IS BYTE-UNCHANGED. The feature is additive or it is not shipped. ───────
-# Same inputs, escalation off vs on: calls 1 and 2 of every category must match byte for byte.
+# Same inputs, escalation off vs on: calls 1 and 2 of every category must match byte for byte. The
+# grep pattern is an OR-chain (P4.2, 2026-08-29) so calls 1-2 actually deliver non-empty tip text to
+# compare — a single literal would make both sides trivially empty and prove nothing about bytes.
 S11BAD=""
-for spec in "grep|$( grepjson X alpha )|$( grepjson X beta )" \
+for spec in "grep|$( grepjson X 'alpha|two' )|$( grepjson X 'beta|two' )" \
             "read|$( readjson X /w/p/a.c )|$( readjson X /w/p/b.c )" \
             "glob|$( globjson X '**/*.c' )|$( globjson X '**/*.h' )" \
             "gitdiff|$( bashjson X 'git diff HEAD' )|$( bashjson X 'git diff --stat' )"; do
@@ -959,9 +983,13 @@ done
     || no "S11 sweep: pre-sweep output differs with the feature on, for:$S11BAD"
 
 # ── S12: the two off-switches. RIPWIRE_SWEEP=0 is what a null EVALS §4 readout ships. ───────────────
+# OR-chain patterns (P4.2, 2026-08-29): this arm is about the BASE tier's own dedup/cooldown machinery
+# continuing to run with the escalation off, which requires calls that are actually nudge-eligible —
+# see the note at case (1). A literal pattern would never reach the dedup block at all (nudge=none on
+# every call), which would make the row 3 assertion below fail for an unrelated reason.
 TS12="$TMP/ts12"; mkdir -p "$TS12"; LS12="$TMP/s12.jsonl"
-for p in a b; do sweep_run "$LS12" "$TS12" "$( grepjson sweepoff "$p" )" RIPWIRE_SWEEP=0 >/dev/null; done
-SW12="$( sweep_run "$LS12" "$TS12" "$( grepjson sweepoff c )" RIPWIRE_SWEEP=0 )"
+for p in "a|z" "b|z"; do sweep_run "$LS12" "$TS12" "$( grepjson sweepoff "$p" )" RIPWIRE_SWEEP=0 >/dev/null; done
+SW12="$( sweep_run "$LS12" "$TS12" "$( grepjson sweepoff 'c|z' )" RIPWIRE_SWEEP=0 )"
 [ -z "$SW12" ] && [ "$( meterrowget "$LS12" 3 nudge )" = "dedup" ] \
     && ok "S12 sweep: RIPWIRE_SWEEP=0 disables the escalation and leaves counting intact" \
     || no "S12 sweep: with RIPWIRE_SWEEP=0 the 3rd call gave out=[$SW12] nudge=[$( meterrowget "$LS12" 3 nudge )]"
@@ -970,9 +998,11 @@ for p in a b c; do sweep_run "$LS12B" "$TS12B" "$( grepjson sweepctl "$p" )" RIP
 [ "$( meterrowget "$LS12B" 3 nudge )" = "control" ] \
     && ok "S12b sweep: the control arm never escalates (the A/B stays clean)" \
     || no "S12b sweep: control-arm 3rd call logged nudge=[$( meterrowget "$LS12B" 3 nudge )]"
+# OR-chain patterns (P4.2) — row 3's "dedup" assertion needs the base tier's dedup block actually
+# entered; see the note at S12 above.
 TS12C="$TMP/ts12c"; mkdir -p "$TS12C"; LS12C="$TMP/s12c.jsonl"
-for p in a b c; do sweep_run "$LS12C" "$TS12C" "$( grepjson sweepn4 "$p" )" RIPWIRE_SWEEP_N=4 >/dev/null; done
-SW12C="$( sweep_run "$LS12C" "$TS12C" "$( grepjson sweepn4 d )" RIPWIRE_SWEEP_N=4 )"
+for p in "a|z" "b|z" "c|z"; do sweep_run "$LS12C" "$TS12C" "$( grepjson sweepn4 "$p" )" RIPWIRE_SWEEP_N=4 >/dev/null; done
+SW12C="$( sweep_run "$LS12C" "$TS12C" "$( grepjson sweepn4 'd|z' )" RIPWIRE_SWEEP_N=4 )"
 [ "$( meterrowget "$LS12C" 3 nudge )" = "dedup" ] && printf '%s' "$SW12C" | grep -Fq 'SWEEP' \
     && [ "$( meterrowget "$LS12C" 4 nudge )" = "sweep4" ] \
     && ok "S12c sweep: RIPWIRE_SWEEP_N=4 moves the threshold, and the row says sweep4" \
@@ -1007,6 +1037,76 @@ echo "-- sweep escalation (mixed Bash-grep + Grep tool) --"; echo "$SW14"
 printf '%s' "$SW14" | grep -Fq -- '--for=\"needleone needletwo needlethree\"' \
     && ok "S14 sweep: Bash grep/rg and the Grep tool count as ONE sweep, patterns from both" \
     || no "S14 sweep: mixed grep sweep gave [$SW14]"
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (12c) §CEDE — THE LITERAL-GREP CEDE (P4.2, 2026-08-29)
+#
+# Agents correctly drop to `rg`/`grep` for a known-literal hunt (our own docs concede the case), and
+# the base one-time nudge used to fire on that FIRST call regardless — nagging about a comparison the
+# tool loses. This section pins the acceptance criterion directly: the base tier is now silent on a
+# short single-literal `rg "exact string"` one-shot, in BOTH tool shapes (Grep tool and Bash rg/grep),
+# while an OR-chain / multi-`-e` pattern (where the bundle genuinely wins) still fires — and a
+# grep-then-read CHAIN still gets a nudge, via the read half, with no new tracking code (P1-P8 below).
+# The sweep-still-escalates direction is pinned separately, in S1-S6 and S14 above.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+# P1: Grep tool, single literal pattern -> silent, but still counted (class=grep, nudge=none)
+TP1="$TMP/tp1"; mkdir -p "$TP1"; LP1="$TMP/p1.jsonl"
+OUTP1="$( sweep_run "$LP1" "$TP1" "$( grepjson cedegrep needle )" )"
+[ -z "$OUTP1" ] && [ "$( meterrowget "$LP1" 1 class )" = "grep" ] && [ "$( meterrowget "$LP1" 1 nudge )" = "none" ] \
+    && ok "P1 cede: Grep tool, single literal pattern is silent but still counted (class=grep, nudge=none)" \
+    || no "P1 cede: out=[$OUTP1] class=[$( meterrowget "$LP1" 1 class )] nudge=[$( meterrowget "$LP1" 1 nudge )]"
+
+# P2: Bash `grep -rn STR .`, single literal -> silent, still counted
+TP2="$TMP/tp2"; mkdir -p "$TP2"; LP2="$TMP/p2.jsonl"
+OUTP2="$( sweep_run "$LP2" "$TP2" "$( bashjson cedebash 'grep -rn needle .' )" )"
+[ -z "$OUTP2" ] && [ "$( meterrowget "$LP2" 1 class )" = "grep" ] && [ "$( meterrowget "$LP2" 1 nudge )" = "none" ] \
+    && ok "P2 cede: Bash 'grep -rn STR .', single literal is silent but still counted" \
+    || no "P2 cede: out=[$OUTP2] class=[$( meterrowget "$LP2" 1 class )] nudge=[$( meterrowget "$LP2" 1 nudge )]"
+
+# P3: Bash `rg STR .`, single literal -> silent (the acceptance criterion's exact example). The
+# embedded double quotes are pre-escaped (\") since bashjson() does not escape its $2 for JSON.
+TP3="$TMP/tp3"; mkdir -p "$TP3"; LP3="$TMP/p3.jsonl"
+OUTP3="$( sweep_run "$LP3" "$TP3" "$( bashjson cederg 'rg \"exact string\" .' )" )"
+[ -z "$OUTP3" ] \
+    && ok "P3 cede: Bash rg \"exact string\" .  — the acceptance criterion's literal example is silent" \
+    || no "P3 cede: rg \"exact string\" fired: [$OUTP3]"
+
+# P4: Grep tool, OR-chain pattern -> still fires (the bundle genuinely wins here)
+TP4="$TMP/tp4"; mkdir -p "$TP4"; LP4="$TMP/p4.jsonl"
+OUTP4="$( sweep_run "$LP4" "$TP4" "$( grepjson cedeor 'TODO|FIXME' )" )"
+[ -n "$OUTP4" ] && printf '%s' "$OUTP4" | grep -q -- '--grep' \
+    && ok "P4 cede: Grep tool, OR-chain pattern still fires (multi-pattern search, bundle wins)" \
+    || no "P4 cede: OR-chain pattern did not fire: [$OUTP4]"
+
+# P5: Bash `rg 'A|B' .` -> still fires
+TP5="$TMP/tp5"; mkdir -p "$TP5"; LP5="$TMP/p5.jsonl"
+OUTP5="$( sweep_run "$LP5" "$TP5" "$( bashjson cedeorbash "rg 'foo|bar' ." )" )"
+[ -n "$OUTP5" ] \
+    && ok "P5 cede: Bash rg with an OR-chain pattern still fires" \
+    || no "P5 cede: OR-chain Bash rg did not fire: [$OUTP5]"
+
+# P6: Bash `rg -e foo -e bar .` (two -e flags, no pipe) -> still fires
+TP6="$TMP/tp6"; mkdir -p "$TP6"; LP6="$TMP/p6.jsonl"
+OUTP6="$( sweep_run "$LP6" "$TP6" "$( bashjson cedemultie 'rg -e foo -e bar .' )" )"
+[ -n "$OUTP6" ] \
+    && ok "P6 cede: Bash rg with two -e pattern flags still fires (multi-pattern, no OR-pipe needed)" \
+    || no "P6 cede: multi -e Bash rg did not fire: [$OUTP6]"
+
+# P7: a SINGLE -e flag does not count as multi-pattern -> stays silent
+TP7="$TMP/tp7"; mkdir -p "$TP7"; LP7="$TMP/p7.jsonl"
+OUTP7="$( sweep_run "$LP7" "$TP7" "$( bashjson cedeonee 'rg -e needle .' )" )"
+[ -z "$OUTP7" ] \
+    && ok "P7 cede: Bash rg with exactly one -e flag is still a single pattern — stays silent" \
+    || no "P7 cede: single -e Bash rg unexpectedly fired: [$OUTP7]"
+
+# P8: the CHAIN case needs no new code — grep(literal, silent) then Read(fires), same session
+TP8="$TMP/tp8"; mkdir -p "$TP8"; LP8="$TMP/p8.jsonl"
+OUTP8G="$( sweep_run "$LP8" "$TP8" "$( grepjson cedechain needle )" )"
+OUTP8R="$( sweep_run "$LP8" "$TP8" "$( readjson cedechain src/foo.cpp )" )"
+[ -z "$OUTP8G" ] && [ -n "$OUTP8R" ] && printf '%s' "$OUTP8R" | grep -q -- '--expand' \
+    && ok "P8 cede: grep-then-read CHAIN still nudges, via the unmodified read tier (no new mechanism)" \
+    || no "P8 cede: chain gave grep=[$OUTP8G] read=[$OUTP8R]"
 
 # ── C1: the `cd`-prefix strip. 816 of the live log's 927 unclassified rows began with `cd <path> &&`
 #        — the worktree idiom — and stripping it is what took `unclassified` from 42.9% to 7.4%. ─────
@@ -1275,9 +1375,12 @@ done
 # A1 and A3 are the two live bugs. A1 asserts the ONE configuration a real control arm runs in — the
 # arm named, the fixture guard on, no destination named — because that is exactly the configuration
 # in which it silently did the opposite of the documented thing.
+# OR-chain patterns throughout (P4.2, 2026-08-29): A1/A2/A4 depend on the TREATMENT side actually
+# being nudge-eligible to prove the control side's silence is the ARM speaking, not a single-literal
+# pattern that would be silent either way — see the note at case (1).
 TA1="$TMP/ta1"; mkdir -p "$TA1"
 ARMHOME="$TMP/armhome"; mkdir -p "$ARMHOME"
-OUTA1="$( printf '%s' "$( grepjson armcase needle )" \
+OUTA1="$( printf '%s' "$( grepjson armcase 'needle|other' )" \
     | env -u RIPWIRE_METER_LOG -u RIPWIRE_HOME HOME="$ARMHOME" RIPWIRE_METER_FIXTURE=1 \
         RIPWIRE_METER_ARM=control PATH="$WITH_RIPWIRE" TMPDIR="$TA1" bash "$HOOK" )"; RCA1=$?
 [ "$RCA1" -eq 0 ] && [ -z "$OUTA1" ] \
@@ -1285,9 +1388,9 @@ OUTA1="$( printf '%s' "$( grepjson armcase needle )" \
     || no "A1 arm: control arm emitted ${#OUTA1} byte(s), exit=$RCA1 — meter_init resolved the arm too late"
 
 TA2="$TMP/ta2"; mkdir -p "$TA2"; LA2="$TMP/a2.jsonl"
-OUTA2="$( sweep_run "$LA2" "$TA2" "$( grepjson armlog needle )" RIPWIRE_METER_ARM=control )"
+OUTA2="$( sweep_run "$LA2" "$TA2" "$( grepjson armlog 'needle|other' )" RIPWIRE_METER_ARM=control )"
 TA2B="$TMP/ta2b"; mkdir -p "$TA2B"; LA2B="$TMP/a2b.jsonl"
-OUTA2B="$( sweep_run "$LA2B" "$TA2B" "$( grepjson armlogt needle )" )"
+OUTA2B="$( sweep_run "$LA2B" "$TA2B" "$( grepjson armlogt 'needle|other' )" )"
 [ -z "$OUTA2" ] && [ "$( meterrowget "$LA2" 1 arm )" = "control" ] && [ -n "$OUTA2B" ] \
     && [ "$( meterrowget "$LA2B" 1 arm )" = "treatment" ] \
     && ok "A2 arm: with a log named, control counts+records+stays silent and treatment still speaks" \
@@ -1363,9 +1466,10 @@ GS_ROWS="$( meterrows "$GATE_SINK" )"
     || no "I1 isolation: gate sink holds $GS_ROWS row(s) — isolation must redirect the rows, not drop them"
 
 # ── I3: the L2 guard. A harness that names no destination writes NO row, and still nudges ───────────
+# OR-chain pattern (P4.2, 2026-08-29) — needs to actually be nudge-eligible; see the note at case (1).
 TI3="$TMP/ti3"; mkdir -p "$TI3"
 GUARDHOME="$TMP/guardhome"; mkdir -p "$GUARDHOME"
-OUTI3="$( printf '%s' "$( grepjson guardcase needle )" \
+OUTI3="$( printf '%s' "$( grepjson guardcase 'needle|other' )" \
     | env -u RIPWIRE_METER_LOG -u RIPWIRE_HOME HOME="$GUARDHOME" RIPWIRE_METER_FIXTURE=1 \
         PATH="$WITH_RIPWIRE" TMPDIR="$TI3" bash "$HOOK" )"; RCI3=$?
 [ "$RCI3" -eq 0 ] && [ -n "$OUTI3" ] && [ ! -f "$GUARDHOME/.ripwire/substitution.jsonl" ] \

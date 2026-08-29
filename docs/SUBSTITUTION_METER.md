@@ -193,6 +193,27 @@ measure the hook talking to itself. Rather than correct for that, the meter reco
 
 Read those groups apart. Averaging them produces a number that means nothing.
 
+## The literal-grep cede (P4.2, 2026-08-29)
+
+Agents correctly drop to `rg`/`grep` for a known-literal hunt — our own docs concede the case (see
+the `ripwire-efficient`/`ripwire-orient`/`ripwire-navigate` skills) — and the base one-time nudge used
+to fire on that first call regardless of what the pattern looked like, nagging about a comparison it
+loses. The base tier's `grep`/`bash-grep` categories are now gated: `category` is demoted back to `""`
+(the identical "observed, no nudge pattern applies" verdict a single-file, non-recursive grep already
+gets) unless the pattern shows one of two narrow, purely syntactic signals —
+
+- a literal `|` (alternation) in the pattern, or
+- two or more standalone `-e` pattern flags on the Bash command line (`grep -e foo -e bar`).
+
+A short single literal (`rg "exact string"`) shows neither, so the row logs `class":"grep"` (still
+counted; the meter's denominator is unaffected) with `nudge":"none"` — the base tip simply never fires.
+This is a gate on the EXISTING base tier, not a new tracking mechanism: `mclass` (what the sweep
+counters below key on) is untouched, so three single-literal greps in a row still escalate at the
+sweep threshold exactly as before, and a grep-then-read *chain* still gets a nudge — via the
+(unmodified) read category's own base tier, the moment the agent opens the file the grep pointed at —
+with no new code. The heuristic is syntactic on purpose (a `-e`/`|` inside an unrelated argument can
+misfire in either direction); the accepted failure mode is silence, never a wrong or noisy nudge.
+
 ## The sweep escalation
 
 The base nudges say the verb; the **sweep escalation** fires at the **Nth** call of a class (default
