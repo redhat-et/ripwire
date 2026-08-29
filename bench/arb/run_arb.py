@@ -76,6 +76,7 @@ error (no binary, no data, no mirror), 3 determinism-check failure.
 """
 
 import argparse
+import collections
 import json
 import os
 import re
@@ -212,17 +213,43 @@ def norm_path(path, snap):
     return path.split(":", 1)[0] if re.search(r":\d+(-\d+)?$", path) else path
 
 
-def for_files(bin_path, snap, query):
-    """--for --json: files in sigs order (ripwire's own best-symbol file grouping)."""
-    code, out, _err = run_bin(bin_path, snap, ["--for=%s" % query[:QUERY_CAP], "--json",
-                                              "--token-budget=%d" % FOR_TOKEN_BUDGET])
-    if code != 0 or not out:
-        return []
+def run_bin_or_none(bin_path, snap, cli_args, stdin_text=None):
+    """The one guard every parser below repeats: run the binary, and hand back its stdout only
+    on a clean exit with non-empty output — None on a crash, a timeout, or silence, so a missing
+    signal reads as missing rather than as an empty ranking."""
+    code, out, _err = run_bin(bin_path, snap, cli_args, stdin_text=stdin_text)
+    return out if code == 0 and out else None
+
+
+def for_json(bin_path, snap, query):
+    """--for --json, parsed once. The single source of both the file ranking AND the
+    confidence=/margin_pct= root facts (arXiv 2607.24882's abstention axis) — one call serves
+    both so the calibration lane below spends no extra invocation over the parent lane's tiers."""
+    out = run_bin_or_none(bin_path, snap, ["--for=%s" % query[:QUERY_CAP], "--json",
+                                           "--token-budget=%d" % FOR_TOKEN_BUDGET])
+    if out is None:
+        return None
     try:
-        doc = json.loads(out)
+        return json.loads(out)
     except ValueError:
+        return None
+
+
+def for_files_from_doc(doc, snap):
+    """files in sigs order (ripwire's own best-symbol file grouping) from an already-parsed doc."""
+    if doc is None:
         return []
     return [norm_path(f.get("p", ""), snap) for f in doc.get("sigs", []) if f.get("p")]
+
+
+def for_confidence_from_doc(doc):
+    """The two facts deriveForConfidence ships on every --for --json root: confidence is
+    "high"/"low", margin_pct an int 0-100 (always 0 when confidence=="low" — see the EVALS
+    abstention-calibration registration). None/None when the call failed or returned no doc,
+    recorded as signal_missing by callers rather than silently coerced to a value."""
+    if doc is None:
+        return {"confidence": None, "margin_pct": None}
+    return {"confidence": doc.get("confidence"), "margin_pct": doc.get("margin_pct")}
 
 
 FILE_GROUP_RE = re.compile(r'<f p="([^"]+)"')
@@ -230,10 +257,8 @@ FILE_GROUP_RE = re.compile(r'<f p="([^"]+)"')
 
 def query_files(bin_path, snap, query, top_k=200):
     """--query (plain BM25 map, XML): file groups in document order = important-first."""
-    code, out, _err = run_bin(bin_path, snap, ["--query=%s" % query[:QUERY_CAP], "--top-k=%d" % top_k])
-    if code != 0 or not out:
-        return []
-    return [norm_path(m, snap) for m in FILE_GROUP_RE.findall(out)]
+    out = run_bin_or_none(bin_path, snap, ["--query=%s" % query[:QUERY_CAP], "--top-k=%d" % top_k])
+    return [norm_path(m, snap) for m in FILE_GROUP_RE.findall(out)] if out is not None else []
 
 
 FRAME_RE = re.compile(r'<frame[^>]*? p="([^"]+)"')
@@ -244,10 +269,10 @@ def trace_files(bin_path, snap, trace_text):
         tmp.write(trace_text)
         tmp_path = tmp.name
     try:
-        code, out, _err = run_bin(bin_path, snap, ["--from-trace=%s" % tmp_path])
+        out = run_bin_or_none(bin_path, snap, ["--from-trace=%s" % tmp_path])
     finally:
         os.unlink(tmp_path)
-    if code != 0 or not out:
+    if out is None:
         return []
     ranked = [norm_path(m, snap) for m in FRAME_RE.findall(out)]
     ranked += [norm_path(m, snap) for m in FILE_GROUP_RE.findall(out)]
@@ -258,18 +283,16 @@ TEST_RE = re.compile(r'<test p="([^"]+)"')
 
 
 def affected_tests(bin_path, snap, changed_file):
-    code, out, _err = run_bin(bin_path, snap, ["--affected=%s" % changed_file])
-    if code != 0 or not out:
-        return []
-    return [norm_path(m, snap) for m in TEST_RE.findall(out)]
+    out = run_bin_or_none(bin_path, snap, ["--affected=%s" % changed_file])
+    return [norm_path(m, snap) for m in TEST_RE.findall(out)] if out is not None else []
 
 
 def impact_files(bin_path, snap, seeds):
     """Best rank per file across --impact runs of each seed symbol."""
     best = {}
     for seed in seeds:
-        code, out, _err = run_bin(bin_path, snap, ["--impact=%s" % seed, "--json", "--limit=200"])
-        if code != 0 or not out:
+        out = run_bin_or_none(bin_path, snap, ["--impact=%s" % seed, "--json", "--limit=200"])
+        if out is None:
             continue
         try:
             doc = json.loads(out)
@@ -312,41 +335,55 @@ def merge_tiers(*tiers):
 
 
 def compose_ranking(task, sample, bin_path, snap):
+    """Returns (ranked_files, tier_provenance, confidence_facts). confidence_facts is
+    for_confidence_from_doc's dict, read from the SAME --for --json call already made as one of
+    the task's tiers — no extra invocation per sample, and the abstention-calibration lane below
+    reuses it verbatim for every task, not just the abstention task."""
     query_obj = sample.get("query") or {}
     if task == "trace2code":
         trace_text = "%s\n%s" % (query_obj.get("command", ""), query_obj.get("failure_excerpt", ""))
         lens_query = one_line(query_obj.get("failure_excerpt", ""))
-        return merge_tiers(("from-trace", trace_files(bin_path, snap, trace_text)),
-                           ("for", for_files(bin_path, snap, lens_query)),
-                           ("query", query_files(bin_path, snap, lens_query)))
+        doc = for_json(bin_path, snap, lens_query)
+        ranked, provenance = merge_tiers(("from-trace", trace_files(bin_path, snap, trace_text)),
+                                         ("for", for_files_from_doc(doc, snap)),
+                                         ("query", query_files(bin_path, snap, lens_query)))
+        return ranked, provenance, for_confidence_from_doc(doc)
     if task == "comment2context":
         lens_query = one_line(" ".join(str(query_obj.get(k, "")) for k in
                                        ("pr_title", "path", "review_comment", "diff_hunk_context")))
-        return merge_tiers(("for", for_files(bin_path, snap, lens_query)),
-                           ("query", query_files(bin_path, snap, lens_query)))
+        doc = for_json(bin_path, snap, lens_query)
+        ranked, provenance = merge_tiers(("for", for_files_from_doc(doc, snap)),
+                                         ("query", query_files(bin_path, snap, lens_query)))
+        return ranked, provenance, for_confidence_from_doc(doc)
     if task == "code2test":
         changed = changed_files(query_obj)
         lens_query = one_line("%s %s %s" % (query_obj.get("pr_title", ""), " ".join(changed),
                                             query_obj.get("pr_body", "")))
         tests = affected_tests(bin_path, snap, ",".join(changed)) if changed else []
-        lens = for_files(bin_path, snap, lens_query)
+        doc = for_json(bin_path, snap, lens_query)
+        lens = for_files_from_doc(doc, snap)
         wide = query_files(bin_path, snap, lens_query)
-        return merge_tiers(("affected", ordered_by_lens(tests, lens, wide)),
-                           ("for", lens), ("query", wide))
+        ranked, provenance = merge_tiers(("affected", ordered_by_lens(tests, lens, wide)),
+                                         ("for", lens), ("query", wide))
+        return ranked, provenance, for_confidence_from_doc(doc)
     if task == "edit2ripple":
         anchor = query_obj.get("anchor_file", "")
         seeds = diff_seed_symbols(query_obj.get("anchor_diff", ""), anchor)
         lens_query = one_line("%s %s" % (query_obj.get("intent", ""), anchor))
-        lens = for_files(bin_path, snap, lens_query)
+        doc = for_json(bin_path, snap, lens_query)
+        lens = for_files_from_doc(doc, snap)
         wide = query_files(bin_path, snap, lens_query)
         tests = affected_tests(bin_path, snap, anchor) if anchor else []
-        return merge_tiers(("impact", impact_files(bin_path, snap, seeds)),
-                           ("affected", ordered_by_lens(tests, lens, wide)),
-                           ("for", lens), ("query", wide))
+        ranked, provenance = merge_tiers(("impact", impact_files(bin_path, snap, seeds)),
+                                         ("affected", ordered_by_lens(tests, lens, wide)),
+                                         ("for", lens), ("query", wide))
+        return ranked, provenance, for_confidence_from_doc(doc)
     # abstention
     lens_query = one_line(str(query_obj.get("text", "")))
-    return merge_tiers(("for", for_files(bin_path, snap, lens_query)),
-                       ("query", query_files(bin_path, snap, lens_query)))
+    doc = for_json(bin_path, snap, lens_query)
+    ranked, provenance = merge_tiers(("for", for_files_from_doc(doc, snap)),
+                                     ("query", query_files(bin_path, snap, lens_query)))
+    return ranked, provenance, for_confidence_from_doc(doc)
 
 
 def one_line(text):
@@ -395,11 +432,35 @@ def score_sample(gold_files, ranked_files, chunk_texts):
 
 # ---------------------------------------------------------------- driver
 
-def sweep(args, bin_path, data_dir, task, samples):
+# task_of(sample) resolves the per-sample verb-mapping key: a constant for a plain TASKS sweep
+# (every sample already IS that task), sample["task_type"] for a selective split (each row keeps
+# its own source task). It doubles as the chunk-corpus subdir (chunk_text_index's own "task" arg)
+# because the two are the same string in both cases.
+#
+# extra_fields(sample) supplies the two dataset families' different ground-truth annotation: plain
+# tasks carry gold.no_gold/reason; the selective splits (registered below) carry
+# metadata.selective_label in {"positive", "no_gold"} instead.
+
+def plain_task_extra_fields(sample):
+    gold = sample.get("gold") or {}
+    return {"no_gold": gold.get("no_gold", False), "abstention_reason": gold.get("reason")}
+
+
+def selective_extra_fields(sample):
+    return {"selective_label": (sample.get("metadata") or {}).get("selective_label")}
+
+
+# Bundles the two things that differ between a plain-task sweep and a selective-split sweep, so
+# sweep()/determinism_check() take one extra argument instead of two.
+RunSpec = collections.namedtuple("RunSpec", ["task_of", "extra_fields"])
+
+
+def sweep(args, bin_path, data_dir, name, samples, spec):
     details_dir = os.path.join(data_dir, "runs")
     os.makedirs(details_dir, exist_ok=True)
-    details_path = os.path.join(details_dir, "%s_details.jsonl" % task)
+    details_path = os.path.join(details_dir, "%s_details.jsonl" % name)
     aggregates, evaluated, skipped_snapshots = {}, 0, 0
+    chunk_cache = {}
 
     by_snapshot = {}
     for sample in samples:
@@ -414,20 +475,22 @@ def sweep(args, bin_path, data_dir, task, samples):
                     out.write(json.dumps({"sample_id": sample["id"], "repo": repo,
                                           "base_commit": sha, "skipped": "commit_not_in_mirror"}) + "\n")
                 continue
-            chunks = chunk_text_index(data_dir, task, repo, sha)
             for sample in group:
-                ranked, provenance = compose_ranking(task, sample, bin_path, snap)
+                task = spec.task_of(sample)
+                cache_key = (task, repo, sha)
+                if cache_key not in chunk_cache:
+                    chunk_cache[cache_key] = chunk_text_index(data_dir, task, repo, sha)
+                ranked, provenance, confidence = compose_ranking(task, sample, bin_path, snap)
                 gold = target_gold_files(sample)
-                metrics = score_sample(gold, ranked, chunks)
+                metrics = score_sample(gold, ranked, chunk_cache[cache_key])
                 ranks = {g: (ranked.index(g) + 1 if g in ranked else None) for g in gold}
-                row = {"sample_id": sample["id"], "repo": repo, "base_commit": sha,
-                       "task_type": sample.get("task_type"), "gold_files": gold,
-                       "gold_ranks": ranks,
+                row = {"sample_id": sample["id"], "repo": repo, "base_commit": sha, "task_type": task,
+                       "gold_files": gold, "gold_ranks": ranks,
                        "gold_tiers": {g: provenance.get(g) for g in gold if g in provenance},
-                       "no_gold": (sample.get("gold") or {}).get("no_gold", False),
-                       "abstention_reason": (sample.get("gold") or {}).get("reason"),
                        "ranked_files": ranked[:60], "ranked_total": len(ranked),
+                       "confidence": confidence["confidence"], "margin_pct": confidence["margin_pct"],
                        "metrics": metrics}
+                row.update(spec.extra_fields(sample))
                 out.write(json.dumps(row, sort_keys=True) + "\n")
                 evaluated += 1
                 for key, value in metrics.items():
@@ -435,29 +498,75 @@ def sweep(args, bin_path, data_dir, task, samples):
             if not args.keep_snapshots:
                 drop_snapshot(data_dir, repo, sha)
 
-    print("ARB\t%s\tevaluated\t%d" % (task, evaluated))
-    print("ARB\t%s\tskipped_snapshots\t%d" % (task, skipped_snapshots))
+    print("ARB\t%s\tevaluated\t%d" % (name, evaluated))
+    print("ARB\t%s\tskipped_snapshots\t%d" % (name, skipped_snapshots))
     for key in sorted(aggregates):
         values = aggregates[key]
-        print("ARB\t%s\t%s\t%.4f" % (task, key, sum(values) / len(values)))
-    print("ARB\t%s\tdetails\t%s" % (task, os.path.relpath(details_path, REPO)))
+        print("ARB\t%s\t%s\t%.4f" % (name, key, sum(values) / len(values)))
+    print("ARB\t%s\tdetails\t%s" % (name, os.path.relpath(details_path, REPO)))
 
 
-def determinism_check(args, bin_path, data_dir, task, samples):
+def determinism_check(args, bin_path, data_dir, name, samples, task_of):
     if not samples:
         return True
     sample = samples[0]
     snap = materialize(data_dir, sample["repo"], sample["base_commit"])
     if snap is None:
-        print("ARB\t%s\tdeterminism\tSKIP (first sample's commit not in mirror)" % task)
+        print("ARB\t%s\tdeterminism\tSKIP (first sample's commit not in mirror)" % name)
         return True
-    first, _ = compose_ranking(task, sample, bin_path, snap)
-    second, _ = compose_ranking(task, sample, bin_path, snap)
+    task = task_of(sample)
+    first, _, first_conf = compose_ranking(task, sample, bin_path, snap)
+    second, _, second_conf = compose_ranking(task, sample, bin_path, snap)
     if not args.keep_snapshots:
         drop_snapshot(data_dir, sample["repo"], sample["base_commit"])
-    same = json.dumps(first) == json.dumps(second)
-    print("ARB\t%s\tdeterminism\t%s" % (task, "OK" if same else "FAIL"))
+    same = (json.dumps(first) == json.dumps(second)
+            and json.dumps(first_conf, sort_keys=True) == json.dumps(second_conf, sort_keys=True))
+    print("ARB\t%s\tdeterminism\t%s" % (name, "OK" if same else "FAIL"))
     return same
+
+
+# ---------------------------------------------------------------- selective splits (abstention calibration)
+#
+# The docs/EVALS.md "Agent Retrieval Bench — abstention calibration round" registration governs this
+# section: it names the verdict rule, the datasets/n, the metrics and the bands BEFORE any row here
+# was scored. v2_selective_retrieval_{natural,balanced} mix the four positive tasks' own rows with
+# the no_gold rows (task_type=="abstention") into one samples.jsonl per split — same path shape as
+# load_samples's TASKS ("extracted/benchmark/v2_<name>/samples.jsonl"), so no separate loader is
+# needed. compose_ranking already reads a --for --json doc as one of every task's tiers, so the
+# confidence facts the calibration score reuses come from that SAME call — no query invented here.
+
+SELECTIVE_SPLITS = ("selective_retrieval_natural", "selective_retrieval_balanced")
+
+
+def parse_names(raw, valid, label):
+    """--task/--split's shared shape: comma-separated, validated against a fixed vocabulary."""
+    names = [n.strip() for n in raw.split(",") if n.strip()]
+    for name in names:
+        if name not in valid:
+            fail("unknown %s %r — expected one of %s" % (label, name, ", ".join(valid)))
+    return names
+
+
+def build_runs(tasks, splits):
+    """(name, loader, RunSpec) per requested task/split. A plain task is fixed-task-for-every-row;
+    a selective split resolves its task per-row from the sample's own task_type. Both use the same
+    loader (load_samples: the two bundle families share one path shape) and the same sweep/
+    determinism_check — only the RunSpec differs."""
+    runs = [(task, load_samples, RunSpec((lambda t: (lambda s: t))(task), plain_task_extra_fields))
+            for task in tasks]
+    runs += [(split, load_samples, RunSpec(lambda s: s.get("task_type"), selective_extra_fields))
+             for split in splits]
+    return runs
+
+
+def filter_samples(args, samples, repo_filter):
+    if repo_filter is not None:
+        samples = [s for s in samples if s["repo"] in repo_filter]
+    if args.sample_id:
+        samples = [s for s in samples if s["id"] == args.sample_id]
+    if args.limit:
+        samples = samples[:args.limit]
+    return samples
 
 
 def main():
@@ -467,6 +576,9 @@ def main():
                                                          os.path.join(REPO, "bench", "external", "arb")))
     parser.add_argument("--task", default=",".join(TASKS),
                         help="comma-separated subset of: %s" % ", ".join(TASKS))
+    parser.add_argument("--split", default="",
+                        help="comma-separated selective splits to also/instead run: %s "
+                             "(abstention-calibration lane; empty = none)" % ", ".join(SELECTIVE_SPLITS))
     parser.add_argument("--repos", default=",".join(SUBSET_REPOS),
                         help="comma-separated repo filter (the disclosed default subset)")
     parser.add_argument("--all-repos", action="store_true", help="lift the repo filter entirely")
@@ -484,28 +596,21 @@ def main():
     if not os.path.isdir(args.data):
         fail("data dir not found: %s (download the bundles first — see the EVALS registration)" % args.data)
 
-    tasks = [t.strip() for t in args.task.split(",") if t.strip()]
-    for task in tasks:
-        if task not in TASKS:
-            fail("unknown task %r — expected one of %s" % (task, ", ".join(TASKS)))
-
+    tasks = parse_names(args.task, TASKS, "task")
+    splits = parse_names(args.split, SELECTIVE_SPLITS, "split")
     repo_filter = None if args.all_repos else {r.strip() for r in args.repos.split(",") if r.strip()}
+
     ok = True
-    for task in tasks:
-        samples = load_samples(args.data, task)
+    for name, loader, spec in build_runs(tasks, splits):
+        samples = loader(args.data, name)
         total = len(samples)
-        if repo_filter is not None:
-            samples = [s for s in samples if s["repo"] in repo_filter]
-        if args.sample_id:
-            samples = [s for s in samples if s["id"] == args.sample_id]
-        if args.limit:
-            samples = samples[:args.limit]
-        print("ARB\t%s\tsamples\t%d of %d%s" % (task, len(samples), total,
+        samples = filter_samples(args, samples, repo_filter)
+        print("ARB\t%s\tsamples\t%d of %d%s" % (name, len(samples), total,
                                                 "" if repo_filter is None else " (repo subset)"))
         if args.determinism_check:
-            ok = determinism_check(args, bin_path, args.data, task, samples) and ok
+            ok = determinism_check(args, bin_path, args.data, name, samples, spec.task_of) and ok
         else:
-            sweep(args, bin_path, args.data, task, samples)
+            sweep(args, bin_path, args.data, name, samples, spec)
     if not ok:
         sys.exit(3)
 

@@ -6661,6 +6661,97 @@ and re-measures.** Fix rounds register their own bands per bucket, per the extco
 **Determinism gate before any sweep is trusted:** one sample per task run twice, rankings
 byte-identical, or the sweep does not run. Subsetting, if the full 25-repo corpus is not swept, is
 **disclosed in the report** (stratified: all four tasks, ≥3 languages) — never silent.
+
+## Agent Retrieval Bench — abstention calibration round, PRE-REGISTERED 2026-08-29 (before any
+selective-split measurement)
+
+**Why this round.** The loss-first lane above found LB-E: the abstention task's 47/47 unanswerable
+subset all got a confident-looking ranking, because the ranking-confidence disclosure landed for
+`--for` (`confidence="high|low"`, `margin_pct=`) but nothing in the ARB adapter scored it. That
+disclosure ships the exact two facts this round calibrates against. This registration is written
+against the selective-split bundles' **schema and row counts only** — no per-sample content or label
+distribution was read before this text was committed, per the house discipline that a registration
+must precede the measurement it governs.
+
+**The two shipped facts (source: `deriveForConfidence`, the `--for --json` root).** `confidence` is
+binary (`"high"`/`"low"`). `margin_pct` is an integer 0–100, but it is **not independent of
+confidence**: `confidence="low"` always ships `margin_pct="0"` (the derivation's `hitCeiling`-and-not-
+`servedComplete` branch forces it), so margin only varies *within* `confidence="high"` rows. A third
+fact the adaptive-cut statistic computes internally — `kept` / `positiveHits` (the window size and how
+many symbols actually scored, i.e. "N") — is **not surfaced** on any `--for` output, JSON or XML. This
+round therefore evaluates confidence/margin only; it does not attempt a kept/N sweep, and if the bands
+below are not met, surfacing kept/positiveHits as new facts is the natural next-round fix, out of
+scope here.
+
+**The verdict rule under test.** `predicted_abstain = (confidence == "low")` is the **default
+operating point (DOP)** — threshold-free, exactly what a caller reading the header would do. Because
+margin only varies inside `confidence="high"`, the only meaningful sweep is a combined ordinal score
+that lets a weak-margin "high" sample be pulled into "abstain":
+
+```
+score(sample) = 0.0                          if confidence == "low"
+              = 1.0 + margin_pct / 100.0      if confidence == "high"
+```
+
+`score` is monotone in the tool's own stated confidence ordering (every "low" ranks below every
+"high", and within "high" a smaller margin ranks lower). The threshold sweep tries `abstain if score <
+θ` at every distinct value of `score` present in the data, plus the DOP (`θ` such that only
+`score == 0` abstains). No per-sample value is read before this rule and sweep are committed.
+
+**Datasets and n (from bundle manifests / row counts, not per-row content):**
+
+| dataset | rows (9-repo mirror subset) | no_gold | positive | usable metrics |
+| --- | ---: | ---: | ---: | --- |
+| `v2_abstention` (the original LB-E subset) | 47 | 47 | 0 | recall only — single-class, no AUROC/precision/false-abstain-rate |
+| `v2_selective_retrieval_balanced` | 108 | 47 | 61 | full confusion matrix + AUROC + threshold sweep (primary — near-balanced) |
+| `v2_selective_retrieval_natural` | 300 | 47 | 253 | full confusion matrix + AUROC + threshold sweep (secondary — realistic no-gold prior) |
+
+The subset filter is the same 9-repo mirror set already disclosed above (`SUBSET_REPOS` in
+`bench/arb/run_arb.py`); rows outside those repos are excluded because no bare mirror is held for
+them, exactly as the parent lane does — never silently, the adapter prints the kept-of-total count.
+`positive` rows use whichever verb the sample's own `task_type` maps to (the table in the parent
+section); the `confidence`/`margin_pct` used for the abstention verdict is read from that same
+`--for` call already made as one of the tiers in `compose_ranking` — no extra invocation, no
+cherry-picked query.
+
+**Metrics.** Per dataset (where the class mix allows it): abstention recall (sensitivity,
+TP/(TP+FN)), false-abstain rate (FP/(FP+TN), i.e. positive samples wrongly abstained on), precision
+and F1 of the DOP; AUROC of `score` against the no_gold/positive label via the rank-based
+Mann-Whitney identity (ties averaged) — a single ROC point from a mostly-binary feature is not
+informative on its own, which is why AUROC is computed over `score`, not over raw `confidence`; and
+the F1-maximizing threshold from the sweep above, reported with its own confusion matrix. Every
+metric is computed per dataset — no pooling across datasets with different class balance.
+
+**Bands — set now, before any row is scored:**
+
+- **AUROC** (balanced and natural splits): ≥ 0.65 → *meets* (confidence carries real separating
+  signal beyond chance); 0.55–0.65 → *weak* (marginal, not worth shipping as a gate); < 0.55 → *does
+  not meet* (no meaningful separability from this signal).
+- **DOP safety** (both selective splits): false-abstain rate ≤ 0.10 **and** abstention recall ≥ 0.20
+  → *DOP meets floor* (safe to treat `confidence="low"` as an abstain signal as-is). Recall on the
+  single-class `v2_abstention` subset is reported the same way (≥ 0.20 against the same floor) but
+  cannot confirm false-abstain rate by itself.
+- **Best-F1 threshold** (both selective splits): F1 ≥ 0.35 → *meets* (the signal is calibratable to a
+  usable gate even if the DOP alone is not); F1 < 0.35 → *does not meet* (confidence/margin_pct alone
+  cannot support a usable abstention gate; the fix is a new emitted fact, not a threshold).
+
+**Decision rule.** This is a calibration round, not a fix round: it reports whether the shipped
+disclosure is *already* usable as an abstention signal and, if so, at what operating point — it does
+not change `--for`'s behavior. Per the improve-first house rule, the measured numbers stay local (the
+lane's own `LANE_REPORT.md`, never committed); this section may record only whether the pre-registered
+bands were met, not the numbers themselves, mirroring how the parent lane's numbers stay out of this
+file until a fix round re-measures.
+
+**Determinism gate before any sweep is trusted:** the same one-sample-run-twice gate as the parent
+lane, extended to the selective-split composition.
+
+**SWE-Explore side-by-side (registered here, scored separately below).** SWE-Explore's own bench file
+ships no natural no-gold/abstention split — every instance derives from a real accepted fix, so there
+is no unanswerable-query class to calibrate against. A pseudo-split manufactured from zero-recall
+instances (an instance where the explorer's arm found none of the core lines) would conflate "hard but
+answerable" with "should abstain" — a different failure mode — so no abstention calibration is run on
+SWE-Explore; this is recorded as a coverage boundary of that benchmark, not a gap in this round.
+
 ## SWE-Explore exploration lane (2026-08-28) — PRE-REGISTERED, loss-first, before any measurement
 
 **What this registers.** An external-benchmark evaluation lane on *SWE-Explore: Benchmarking How Coding
