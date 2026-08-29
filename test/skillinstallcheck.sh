@@ -81,7 +81,10 @@ CODEX_ADAPTER="$ROOT/hooks/ripwire-codex-nudge.sh"
 ADAPTER_TMP="$TMP/adapter"; mkdir -p "$ADAPTER_TMP"
 ADAPTER_BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${ADAPTER_BIN#/}" = "$ADAPTER_BIN" ] && ADAPTER_BIN="$ROOT/$ADAPTER_BIN"
-ADAPTER_JSON='{"session_id":"codex-adapter","cwd":"'"$ROOT"'","tool_name":"Grep","tool_input":{"pattern":"releaseTag","path":"."}}'
+# OR-chain pattern (P4.2, 2026-08-29): the shared hook's base tier no longer fires on a short single
+# literal (see hooks/ripwire-nudge.sh's §CEDE) — this fixture only exercises the ADAPTER's own
+# reshaping of whatever ripwire-nudge.sh emits, so it needs a nudge-eligible call underneath it.
+ADAPTER_JSON='{"session_id":"codex-adapter","cwd":"'"$ROOT"'","tool_name":"Grep","tool_input":{"pattern":"releaseTag|buildTag","path":"."}}'
 ADAPTER_OUT="$( printf '%s' "$ADAPTER_JSON" | PATH="$( dirname "$ADAPTER_BIN" ):$PATH" TMPDIR="$ADAPTER_TMP" \
     RIPWIRE_HOME="$ADAPTER_TMP" RIPWIRE_METER_FIXTURE=1 bash "$CODEX_ADAPTER" )"
 printf '%s' "$ADAPTER_OUT" | jq -e '.hookSpecificOutput.additionalContext | length > 0' >/dev/null \
