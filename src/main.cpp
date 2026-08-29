@@ -48,6 +48,7 @@
 #include "verify.h"                // G4 verify-a-claim: the --verify closed claim grammar + verdict/limit vocabularies (runVerify below)
 #include "taskroute.h"             // --help-task: deterministic task -> one safe CLI recommendation or abstention
 #include "quality.h"
+#include "cloneidiom.h"          // idiom-class demotion for clone findings — the closed 3-idiom shape classifier both --clones and the quality-delta duplication kind annotate rows with
 #include "gitstamp.h"              // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor, shared by
                                    // --hotspots / --quality-delta / --doctor below (each verb's own file pulls it too)
 #include "binstale.h"              // --doctor's tracked-binary-staleness check (git-order, not mtime)

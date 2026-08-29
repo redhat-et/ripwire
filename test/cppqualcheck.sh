@@ -189,9 +189,12 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # read or ftell failure -> cleared buffer -> the file contributes nothing, silently).
 # 13 -> 15 2026-08-28: the registered shell-gate index reads regression.sh and each registered gate through
 # the same bounded helper, adding one site in registeredShellTokens and one in addRegisteredShellGate.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 15 ] \
-    && ok "repo: --uses=readWholeFile count=15 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 15"
+# 15 -> 16 2026-08-29: cloneidiom.h's classifyCloneGroupIdioms reads each clone MEMBER's file through the
+# same helper rather than re-rolling the fopen/fseek/fread block findClones carries — the fourth copy this
+# arm exists to keep from being written.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 16 ] \
+    && ok "repo: --uses=readWholeFile count=16 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 16"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"
