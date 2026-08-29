@@ -37,7 +37,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 QSRC="$ROOT/src/quality.h"
-ISRC="$ROOT/src/ingest.cpp"
+ISRC="$ROOT/src/ingest_cache.h"   # the extraction-identity constants moved here in the 2026-08-29 ingest.cpp section split
 fail=0
 ok(){ echo "  PASS  $1"; }
 no(){ echo "  FAIL  $1"; fail=1; }
@@ -61,11 +61,11 @@ if [ -z "$ING_CACHE" ] || [ -z "$ING_PARSER" ] || [ -z "$Q_CACHE" ] || [ -z "$Q_
     no "could not read all four constants (ingest kCacheVersion='$ING_CACHE' kParserVer='$ING_PARSER'; quality mirror='$Q_CACHE'/'$Q_PARSER') — a declaration was renamed/reshaped"
 else
     [ "$ING_CACHE" = "$Q_CACHE" ] \
-        && ok "kIngestCacheVersionMirror ($Q_CACHE) == ingest.cpp kCacheVersion ($ING_CACHE)" \
-        || no "MIRROR DRIFT: quality.h kIngestCacheVersionMirror=$Q_CACHE but ingest.cpp kCacheVersion=$ING_CACHE — update src/quality.h in the SAME diff (a stale qsnap blob would be re-served)"
+        && ok "kIngestCacheVersionMirror ($Q_CACHE) == ingest_cache.h kCacheVersion ($ING_CACHE)" \
+        || no "MIRROR DRIFT: quality.h kIngestCacheVersionMirror=$Q_CACHE but ingest_cache.h kCacheVersion=$ING_CACHE — update src/quality.h in the SAME diff (a stale qsnap blob would be re-served)"
     [ "$ING_PARSER" = "$Q_PARSER" ] \
-        && ok "kIngestParserVerMirror ($Q_PARSER) == ingest.cpp kParserVer ($ING_PARSER)" \
-        || no "MIRROR DRIFT: quality.h kIngestParserVerMirror=$Q_PARSER but ingest.cpp kParserVer=$ING_PARSER — update src/quality.h in the SAME diff (this is exactly the 28c7d32 failure)"
+        && ok "kIngestParserVerMirror ($Q_PARSER) == ingest_cache.h kParserVer ($ING_PARSER)" \
+        || no "MIRROR DRIFT: quality.h kIngestParserVerMirror=$Q_PARSER but ingest_cache.h kParserVer=$ING_PARSER — update src/quality.h in the SAME diff (this is exactly the 28c7d32 failure)"
 fi
 
 # ── (b) the FILENAME key folds extraction identity + maxFileBytes ──────────────────────────────────────────
