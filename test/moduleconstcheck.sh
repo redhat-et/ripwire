@@ -111,7 +111,7 @@ grep -q 'role="read" p="[^"]*cfg\.cpp:' "$USES_OUT" \
 # ── 10. [RED] the live repro, pinned: the repo's own version constants resolve on src/ ─────────
 SRC_USES="$TMP/src_uses.xml"
 $BIN "$ROOT/src" --no-cache --uses=kParserVer >"$SRC_USES" 2>/dev/null
-grep -q 'defs="1"' "$SRC_USES" && ok "src/: --uses=kParserVer sees the ingest.cpp def" || no "src/: --uses=kParserVer defs != 1 (the live gap)"
+grep -q 'defs="1"' "$SRC_USES" && ok "src/: --uses=kParserVer sees the ingest_cache.h def" || no "src/: --uses=kParserVer defs != 1 (the live gap)"
 $BIN "$ROOT/src" --no-cache --uses=kIngestParserVerMirror >"$TMP/src_uses2.xml" 2>/dev/null
 grep -q 'defs="1"' "$TMP/src_uses2.xml" && ok "src/: --uses=kIngestParserVerMirror sees the quality.h def" || no "src/: --uses=kIngestParserVerMirror defs != 1"
 $BIN "$ROOT/src" --no-cache --for="kParserVer" >"$TMP/src_for.xml" 2>/dev/null

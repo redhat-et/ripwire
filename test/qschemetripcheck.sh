@@ -31,7 +31,7 @@
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 SRC="$ROOT/src/quality.h"
-ING="$ROOT/src/ingest.cpp"
+ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
 # 2026-08-25, THE SCOPE-LESS QUALITY-KEY FOLD (test/qualitykeycheck.sh, scopeless-fold lane): the KEY
@@ -226,9 +226,9 @@ extract_decl(){ sed -n "s/^\(constexpr[ \t][^=]*[ \t]$1[ \t]*=[ \t]*[0-9][0-9]*;
 EXTRACT_DECLS="$( extract_decl kCacheVersion; extract_decl kParserVer )"
 EXTRACT_N="$( printf '%s\n' "$EXTRACT_DECLS" | grep -c . )"
 if [ "$EXTRACT_N" -eq 2 ]; then
-    ok "ingest.cpp extraction-identity declarations extracted (kCacheVersion + kParserVer)"
+    ok "ingest_cache.h extraction-identity declarations extracted (kCacheVersion + kParserVer)"
 else
-    no "expected 2 extraction-identity declarations in src/ingest.cpp, found $EXTRACT_N — the constant shape moved; fix the sed pattern"
+    no "expected 2 extraction-identity declarations in src/ingest_cache.h, found $EXTRACT_N — the constant shape moved; fix the sed pattern"
 fi
 CONCAT="$CONCAT### ingest.cpp extraction identity
 $EXTRACT_DECLS
@@ -272,7 +272,7 @@ else
         Did the SEMANTICS of what a cached Snapshot represents change (what counts as dead, a clone group's
         identity, the on-disk blob shape)?
           -> bump kQSnapCacheScheme in src/quality.h, THEN re-pin: UPDATE_GOLDEN=1 test/qschemetripcheck.sh
-        Did ingest.cpp's kCacheVersion / kParserVer move (an EXTRACTION change — every cached canonId, metric,
+        Did ingest_cache.h's kCacheVersion / kParserVer move (an EXTRACTION change — every cached canonId, metric,
         body hash, clone group and dead-set entry is a function of it)?
           -> mirror the new value into src/quality.h's kIngestCacheVersionMirror / kIngestParserVerMirror in
              the SAME diff (test/qextractionkeycheck.sh asserts the equality), THEN re-pin.

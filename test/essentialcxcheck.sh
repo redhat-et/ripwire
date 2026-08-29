@@ -781,12 +781,14 @@ else
     no "no-ranking: the structural family's why= on smallTangledLoop does not carry ev=5 — the annotation is missing"
 fi
 # (b) source-level: ev is read nowhere outside the emitters + the single gated annotation line.
-EVREADS="$( git -C "$ROOT" grep -n '\.ev\b' -- 'src/*.h' 'src/*.cpp' | grep -vE '^src/(serialize\.h|model\.h|ingest\.cpp):' || true )"
+# ingest.cpp's TU spans its ingest_*.h sections since the 2026-08-29 split, so the extraction-side
+# reads live under both spellings; the allowed set is the ingest TU, not one file name.
+EVREADS="$( git -C "$ROOT" grep -n '\.ev\b' -- 'src/*.h' 'src/*.cpp' | grep -vE '^src/(serialize\.h|model\.h|ingest\.cpp|ingest_[a-z]+\.h):' || true )"
 EXTRA="$( printf '%s\n' "$EVREADS" | grep -v '^$' | grep -v '^src/ensemble\.h:' || true )"
 if [ -n "$EXTRA" ]; then
     no "no-ranking: .ev is read outside the allowed emitters — $EXTRA"
 else
-    ok "no-ranking: .ev reads confined to serialize.h/model.h/ingest.cpp/ensemble.h"
+    ok "no-ranking: .ev reads confined to serialize.h/model.h/the ingest TU/ensemble.h"
 fi
 ENS="$( printf '%s\n' "$EVREADS" | grep '^src/ensemble\.h:' || true )"
 if [ -z "$ENS" ]; then

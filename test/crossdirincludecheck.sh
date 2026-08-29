@@ -119,8 +119,10 @@ monotonic_check()
     # straight from the two source trees the binaries were built from. Self-healing the same way: once the
     # bump is COMMITTED, HEAD's constant equals the working tree's and the comparison arms again.
     local pvo pvn
-    pvo="$( grep -oE 'kParserVer *= *[0-9]+' "$WT/src/ingest.cpp"   | head -1 | grep -oE '[0-9]+$' )"
-    pvn="$( grep -oE 'kParserVer *= *[0-9]+' "$ROOT/src/ingest.cpp" | head -1 | grep -oE '[0-9]+$' )"
+    # kParserVer lived in src/ingest.cpp until the 2026-08-29 section split moved it to
+    # src/ingest_cache.h; read whichever file the tree carries so the guard spans both epochs.
+    pvo="$( cat "$WT/src/ingest.cpp" "$WT/src/ingest_cache.h" 2>/dev/null | grep -oE 'kParserVer *= *[0-9]+' | head -1 | grep -oE '[0-9]+$' )"
+    pvn="$( cat "$ROOT/src/ingest.cpp" "$ROOT/src/ingest_cache.h" 2>/dev/null | grep -oE 'kParserVer *= *[0-9]+' | head -1 | grep -oE '[0-9]+$' )"
     if [ -n "$pvo" ] && [ -n "$pvn" ] && [ "$pvo" != "$pvn" ]; then
         skip "monotonicity: extraction differs between binaries (kParserVer=$pvo vs $pvn — uncommitted parser change); ambiguous= incomparable, fixture arms above are the gate"
         return
