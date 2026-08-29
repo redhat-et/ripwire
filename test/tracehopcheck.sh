@@ -143,7 +143,9 @@ else no "(H2a) a runner-mediated test pairs its source by basename"; fi
 if grep -q '<hop [^>]*n="render_widget"' "$WORK/out.basename"; then ok "(H2b) the basename-paired source symbol is served"
 else no "(H2b) the basename-paired source symbol is served"; fi
 
-if grep -q 'via="callee"' "$WORK/out.basename"; then no "(H2c) no callee row is invented where no call edge exists"
+# anchored at the ROW, not the document: the legend explains both mechanisms on every hop bundle, so a
+# bare grep for via="callee" here would fail on the legend and prove nothing about the rows.
+if grep -q '<hop [^>]*via="callee"' "$WORK/out.basename"; then no "(H2c) no callee row is invented where no call edge exists"
 else ok "(H2c) no callee row is invented where no call edge exists"; fi
 
 # ── (H3) disclosure ────────────────────────────────────────────────────────────────────────────────
