@@ -56,6 +56,8 @@ struct LensRanking
     // into, so it needs the tag and the count themselves.
     const char*        routeTag    = "no-route";   // "name-exact" | "subtoken+body" | "no-route" (--no-route)
     std::uint32_t      anchorLifts = 0;            // §B8 mention-anchor lifts folded into `rank` (0 = the anchor moved nothing)
+    const char*        docTierTag  = nullptr;      // the query-SHAPE document demotion, machine form (filter.h
+                                                    // shapeDocTierTag); nullptr = no shape fired, nothing demoted
     // The route's own anchors, RESOLVED to definitions (lexical.h RouteAnchorDef) — the machine form of the
     // `anchors:` clause routeNote already carries as prose. Non-empty on the name-exact route only, and only
     // for words that named something. The T3 auto-body allowance reads it so the bundle serves the anchor's
