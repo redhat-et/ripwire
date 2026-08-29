@@ -3945,15 +3945,15 @@ std::optional<int> runForLens( const MainDispatch& d )
         // bundle drop a tail <d> row (measured on this repo's own src, the "rank symbols by pagerank"
         // fixture query: one row gone at the trim boundary). DEFAULT REGIME ONLY, and this split is the
         // point where this exemption differs from its two precedents: an explicit --token-budget is a HARD
-        // est_tokens<=N promise in both dialects (fornotesbudgetcheck measured the exempted shape at 7%
-        // past an 850 ceiling — the exact W3-S "a disclosure has BYTES" trap), and ~240 B does not fit
-        // inside the ceiling's conversion slack the way D2's ~110 B note does. So under an explicit ceiling
-        // the bytes are charged and the honest price is a sig row; under the default budget nothing is
-        // promised to the byte, neutrality wins, and the overshoot is at most the two strings (~240 B,
-        // ~3% of kForPayloadBudgetBytes), disclosed here. est_tokens measures the emitted header in both
-        // regimes, so nothing under-reports either way.
-        const std::size_t confidenceExemptBytes = cfg.tokenBudget == 0
-            ? forConf.attrs.size() + forConf.note.size() : 0;
+        // The disclosure is exempt from the SIG-TRIM allowance in BOTH regimes. Charging it under an
+        // explicit ceiling (the first cut of this change) shrank the sig section BELOW the default
+        // regime's — an explicit ceiling wider than the default re-trimming sigs is exactly the
+        // inversion forSigSideCeiling exists to forbid (gate: forbudgetmonotoncheck, which caught it).
+        // The est_tokens<=N promise is kept by the BODY side, not by this trim: committedBytes below
+        // counts the emitted header verbatim, so leftBytes hands the bodies ~240 B less and the bundle
+        // total never crosses the ceiling — charging the sig side as well was double-counting one cost.
+        // est_tokens measures the emitted header in both regimes, so nothing under-reports either way.
+        const std::size_t confidenceExemptBytes = forConf.attrs.size() + forConf.note.size();
         const std::size_t fixedBytes = headerStr.size() - adaptiveNote.size() - autoLegendBytes
                                      - confidenceExemptBytes
                                      + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"

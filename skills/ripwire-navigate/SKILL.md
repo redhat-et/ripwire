@@ -40,6 +40,10 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   gives depth (the call chain), `--uses` gives breadth (kinds of reference). `--callers` alone is the wrong
   tool for this question; reach for it only when you already know the change is local.
 - **"Who calls this, one hop"** (quick sanity check, not a safety judgment) → `--callers=SYM`.
+- **"Where is this VARIABLE defined and used inside one function"** → `--slice=SYM:VAR` — per-line
+  def/use rows (declaration/assignment/param vs read) inside the one resolved definition; bare
+  `--slice=SYM` lists the sliceable locals first. Name-based and intra-procedural — the legend states
+  the limits — so it answers "what touches this variable here" without reading the whole body.
 - **"Trace a FLOW: how does A reach B"** → `--path=A,B` (shortest call-path) or `--around=SYM
   [--around-depth=2]` (bounded neighborhood). Not `--for` — `--for` returns a ranked *set* of relevant
   signatures for a task, it does not trace a path between two named points.

@@ -6598,7 +6598,7 @@ the sliceable locals. NAME-BASED and intra-procedural by declaration: no alias a
 sensitivity, nested-scope shadowing may over-include — all three limits are in the emitted legend, and
 the not-served languages (everything outside C/C++/ObjC(+CUDA/Metal), Python, JS/TS, Go, Java, Rust)
 refuse at exit 1 rather than empty-succeed. Ambiguous selectors refuse with the qualifying spellings
-(the `--edit-check` §A6a rule, same `editCheckGroups` machinery).
+(the same ambiguity-refusal rule and `editCheckGroups` machinery `--edit-check` uses).
 
 **The eval this registers for a later round — a LINE-RECALL shape, not run yet.** Mine fix commits whose
 diff touches exactly one function (the `--affected`/co-change harness already isolates these); for each,
@@ -6722,7 +6722,7 @@ composition is recorded in the run report before scoring.
 the lane stops.
 
 **Decision rule — LOSS-FIRST (the improve-first house rule).** The deliverable of this lane is a
-loss-bucket analysis (local `PLAN_SWEX_REPORT_2026-08-28.md`, untracked): where core-line coverage
+loss-bucket analysis (an operator-local report, never committed): where core-line coverage
 misses concentrate (language, dispatch-heavy edges, docs-vs-code, issue-vocabulary vs
 identifier-vocabulary), whether PACK beats FOR at equal budget, and the largest fixable shapes. **No
 comparative number from this lane is published — in this file, the README, or anywhere public — until a
