@@ -135,6 +135,15 @@ using rw::quality::gitRepoHasHistory;
 using rw::quality::computeHeadSnapshot;
 using rw::quality::resolveCacheBlobPath;   // Y4: shard-aware blob path — see quality.h
 
+// 2026-08-29 main.cpp split: the cross-family helpers promoted to their domain headers, re-exported so
+// every existing call site below (and in the verb-family sections this file includes) is byte-unchanged.
+using rw::gitChangedFiles;                 // situ.h — the working-tree changed-file mask, one mask builder for CLI + MCP
+using rw::gitChurnCounts;                  // gitmine.h — per-file commit counts over a window
+using rw::mineChurnPerFile;                // gitmine.h — THE shared per-file churn miner (single- and multi-root)
+using rw::quality::isHeaderPath;           // quality.h — the --dead-code eligibility trio, shared with --safe-delete
+using rw::quality::sourceHasStaticToken;
+using rw::quality::deadCodeEligibleKind;
+
 // Warm-by-default cache location: a per-root file keyed by the root's ABSOLUTE path (FNV-1a 64), under
 // the hardened cacheDirLadder(), so repeated invocations on the same tree re-parse only changed files.
 // Absolute path so two different dirs both invoked as "." don't collide (a collision would only ever
@@ -162,42 +171,6 @@ std::string defaultCachePath( const std::string& root, bool captureValueUses )
     std::snprintf( tail, sizeof( tail ), "ripwire-%016llx-%s.bin",
                    static_cast<unsigned long long>( h ), captureValueUses ? "rich" : "lean" );
     return resolveCacheBlobPath( cacheDirLadder(), tail );
-}
-
-// Mark ing.files that the working-tree diff against git HEAD reports as changed. false ⇒ git unavailable
-// (an EMPTY diff at status 0 is a CLEAN TREE, not a failure, and returns true with nothing marked).
-// onlyRoot (multi-root): != UINT32_MAX ⇒ mark ONLY files of that root — one repo's
-// diff must never suffix-match a same-named file in another root. Default = all files (single-root, unchanged).
-//
-// THE MASK IS NOT BUILT HERE. It comes from situ.h's gitDiffChangedMask — the same call mcpindex.h and
-// mcpverbs.h make — which delegates to prcontext.h's gitDiffChangedMaskNumstat. Until this delegation, the
-// CLI and the MCP form of ONE verb disagreed about a mass chmod: situ.h's builder is `--numstat`-based and
-// drops a content-identical entry (git reports "0<TAB>0<TAB>path" for a pure mode flip), while this function
-// ran `--name-only`, which cannot tell a mode flip from a real edit. So `--situ` and `--test-gate` from the
-// CLI inflated their change set with the exact 272-file chmod incident that situ.h's own header records as
-// fixed, and the MCP verb of the same name did not. One helper, both arms — the alternative is two
-// implementations that agree today.
-//
-// Union, never overwrite: --map-diff's multi-root teleport seed calls this once per root with the SAME
-// accumulator, so the per-root masks must OR together (each root's call is already narrowed by onlyRoot).
-bool gitChangedFiles( const std::string& root, const rw::IngestResult& ing, std::vector<char>& out,
-                      std::uint32_t onlyRoot = UINT32_MAX )
-{
-    const auto [ mask, isGitOk ] = rw::gitDiffChangedMask( root, ing, onlyRoot );
-    if( !isGitOk )
-    {
-        return false;
-    }
-
-    const std::size_t markCount = std::min( out.size(), mask.size() );
-    for( std::size_t fileIndex = 0; fileIndex < markCount; ++fileIndex )
-    {
-        if( mask[fileIndex] )
-        {
-            out[fileIndex] = 1;
-        }
-    }
-    return true;
 }
 
 // computeHeadSnapshot / gitHeadSha / gitRepoHasHistory / cacheDirLadder now live in quality.h (the
@@ -233,45 +206,6 @@ void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>&
     }
 }
 
-// Per-file commit count over a recent window (`git log -c --since=... --name-only`; the `-c` is
-// gitmine.h::kMergeDiffArgs — a merge commit's own content is mined, and merged-branch work is not
-// double-counted. Without it this walk was silent about every merge, and a file whose only history is a
-// merge commit read churn=0 with nothing disclosing it). Churn is the
-// orthogonal-to-complexity axis: hotspot = complexity × churn (CodeScene's key insight — complex code
-// that never changes costs nothing; complex code that changes constantly is where bugs live).
-// `scope`: nullptr (default) reproduces the pre-flag `--since=<since>` window byte-for-byte; a non-null
-// active scope (CLI --since=REV|DATE, see gitmine.h resolveSinceScope) overrides it with the resolved
-// window — REV form as a deterministic `REV..` range, date form as `--since=DATE` (wall-clock-relative).
-bool gitChurnCounts( const std::string& root, const rw::IngestResult& ing, std::vector<std::uint32_t>& out, const char* since, const rw::SinceScope* scope = nullptr,
-                     std::uint32_t onlyRoot = UINT32_MAX )   // multi-root §5: count ONLY files of that root
-{
-    const std::string windowArgs = scope ? rw::sinceLogArgs( *scope, since ) : ( "--since=" + shSingleQuote( since ) + " " );
-    const rw::GitCommandLines touched = rw::gitCommandLines(
-        "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log " + rw::kMergeDiffArgs + windowArgs + "--name-only --format= 2>/dev/null" );
-    if( !touched.isStarted )
-    {
-        return false;
-    }
-
-    rw::HashMap<std::string, std::uint32_t> counts;   // repo-relative path → # commits touching it
-    for( const std::string& p : touched.lines )
-    {
-        ++counts[p];
-    }
-    if( counts.empty() )
-    {
-        return false;   // no in-window commit touched anything — the caller's "empty churn" case, NOT an error (see --hotspots' two causes)
-    }
-
-    // Map the per-path tally onto ingested fileIds through THE ONE specificity-ordered mapper (§H6,
-    // gitmine.h::mapChurnCountsOntoFiles). This loop used to be spelled here AND in gitmine.h's
-    // resolveCommitStream, both ending in "first match in the bucket wins" — so a root-level file's count
-    // silently overwrote a subdirectory file's with the same basename, on --hotspots and on --for's churn=
-    // lens alike. The shared mapper prefers an EXACT repo-relative match, otherwise the least-unexplained
-    // prefix, and refuses (disclosing it) on a tie.
-    rw::mapChurnCountsOntoFiles( counts, ing, out, onlyRoot );
-    return true;
-}
 
 // gitRepoHasHistory / gitHeadSha moved to quality.h (re-exported via the `using` aliases above) so the CLI
 // --quality-* paths and the MCP quality_delta/quality_baseline verbs share ONE copy of the HEAD probes.
@@ -560,56 +494,6 @@ CommunityPresentation communityPresentation( const rw::IngestResult& ing, const 
     return out;
 }
 
-bool isHeaderPath( std::string_view path ) noexcept
-{
-    const std::size_t dot = path.rfind( '.' );
-    if( dot == std::string_view::npos )
-    {
-        return false;
-    }
-    const std::string_view extension = path.substr( dot + 1 );
-    return extension == "h" || extension == "hpp" || extension == "hh" || extension == "hxx";
-}
-
-// lane/safe-delete: the whole-word "static" token scan behind the --dead-code high-confidence detector's
-// internal-linkage check, factored to a PURE function (source text + a signature byte range in, bool out)
-// so a single-symbol check (--safe-delete's dead_code_candidate=) can ask the identical question without
-// re-deriving it. The --dead-code block below keeps only what is its own — the per-file sourceFor() cache
-// that amortizes this scan across every candidate in the tree; a single-symbol check has nothing to
-// amortize, so it calls this directly on its own one-off read.
-inline bool sourceHasStaticToken( std::string_view source, std::size_t sigStartByte, std::size_t sigEndByte ) noexcept
-{
-    const std::size_t begin = std::min( sigStartByte, source.size() );
-    const std::size_t end   = std::min( sigEndByte, source.size() );
-    if( begin >= end )
-    {
-        return false;
-    }
-    constexpr std::string_view token = "static";
-    std::size_t position = begin;
-    while( ( position = source.find( token, position ) ) != std::string_view::npos && position + token.size() <= end )
-    {
-        const auto isIdentifier = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
-        const bool leftBoundary  = position == begin || !isIdentifier( source[ position - 1 ] );
-        const bool rightBoundary = position + token.size() == end || !isIdentifier( source[ position + token.size() ] );
-        if( leftBoundary && rightBoundary )
-        {
-            return true;
-        }
-        position += token.size();
-    }
-    return false;
-}
-
-// lane/safe-delete: the --dead-code high-confidence PRECONDITIONS on symbol KIND/PLACEMENT alone — a
-// source free function with a body, living outside a header. Deliberately excludes in-degree (the
-// --dead-code block tests the corpus-wide in-edge CSR; --safe-delete already has its own 1-hop caller
-// list for one already-resolved definition and reuses that instead of recomputing it here) and internal
-// linkage (sourceHasStaticToken above — a separate question, needing the file's bytes).
-inline bool deadCodeEligibleKind( const rw::IngestResult& ing, const rw::Symbol& s ) noexcept
-{
-    return s.kind == rw::SymKind::Function && s.sigEndByte < s.endByte && !isHeaderPath( ing.files[ s.fileId ] );
-}
 
 struct IsolateStats
 {
@@ -5063,40 +4947,6 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     return 0;
 }
 
-// THE per-file churn mining every churn-consuming verb shares: one window, one multi-root merge rule, one
-// definition of "git could not be mined at all" (false ⇒ every caller must report UNAVAILABLE rather than
-// treat an all-zero vector as "nothing changed"). Extracted from the --hotspots block when --ensemble became
-// its second caller — a second copy of a 20-line per-root merge loop is exactly the clone --quality-delta
-// flags, and it is also how the two verbs' windows would silently diverge one round from now.
-// `since`/`rootScope`: the single-root path uses the caller's ALREADY-RESOLVED scope (so --hotspots does not
-// resolve it twice); the multi-root path resolves per root, because a revision is only meaningful inside the
-// repository that contains it. An empty `since` means "the default window", exactly as before.
-bool mineChurnPerFile( const rw::IngestResult& ing, const std::string& root, bool multiRoot,
-                       const std::vector<rw::WorkspaceRoot>& ws, std::string_view since,
-                       const rw::SinceScope& rootScope, const char* defaultWindow, std::vector<std::uint32_t>& churn )
-{
-    if( !multiRoot )
-    {
-        return gitChurnCounts( root, ing, churn, defaultWindow, since.empty() ? nullptr : &rootScope );
-    }
-    // §5: churn mined per root against that root's files only; merged into one labeled list below.
-    bool churnOk = false;
-    for( std::uint32_t r = 0; r < ws.size(); ++r )
-    {
-        const rw::SinceScope       perRootScope = rw::resolveSinceScope( ws[r].arg, since );
-        std::vector<std::uint32_t> rootChurn( ing.files.size(), 0 );
-        if( !gitChurnCounts( ws[r].arg, ing, rootChurn, defaultWindow, since.empty() ? nullptr : &perRootScope, r ) )
-        {
-            continue;
-        }
-        churnOk = true;
-        for( std::size_t f = 0; f < churn.size(); ++f )
-        {
-            churn[f] += rootChurn[f];
-        }
-    }
-    return churnOk;
-}
 
 // §P11.3: the worst-function lookup for one --hotspots row, isolated so the row-emission loop inside the
 // already-oversized runMaintenanceViews dispatcher gains a function CALL, not another decision point.

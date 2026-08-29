@@ -107,6 +107,46 @@ inline ChangedList changedMaskFromListChecked( const IngestResult& ing, std::str
     return result;
 }
 
+// Promoted from main.cpp (2026-08-29 main.cpp split): shared by the CLI change verbs (--situ/--affected/
+// --test-gate), --eval, and runDefaultMap's --map-diff seed — a cross-family helper, so it lives in the
+// domain header of the mask it delegates to (gitDiffChangedMask above), not in any one verb family file.
+
+// Mark ing.files that the working-tree diff against git HEAD reports as changed. false ⇒ git unavailable
+// (an EMPTY diff at status 0 is a CLEAN TREE, not a failure, and returns true with nothing marked).
+// onlyRoot (multi-root): != UINT32_MAX ⇒ mark ONLY files of that root — one repo's
+// diff must never suffix-match a same-named file in another root. Default = all files (single-root, unchanged).
+//
+// THE MASK IS NOT BUILT HERE. It comes from situ.h's gitDiffChangedMask — the same call mcpindex.h and
+// mcpverbs.h make — which delegates to prcontext.h's gitDiffChangedMaskNumstat. Until this delegation, the
+// CLI and the MCP form of ONE verb disagreed about a mass chmod: situ.h's builder is `--numstat`-based and
+// drops a content-identical entry (git reports "0<TAB>0<TAB>path" for a pure mode flip), while this function
+// ran `--name-only`, which cannot tell a mode flip from a real edit. So `--situ` and `--test-gate` from the
+// CLI inflated their change set with the exact 272-file chmod incident that situ.h's own header records as
+// fixed, and the MCP verb of the same name did not. One helper, both arms — the alternative is two
+// implementations that agree today.
+//
+// Union, never overwrite: --map-diff's multi-root teleport seed calls this once per root with the SAME
+// accumulator, so the per-root masks must OR together (each root's call is already narrowed by onlyRoot).
+inline bool gitChangedFiles( const std::string& root, const rw::IngestResult& ing, std::vector<char>& out,
+                      std::uint32_t onlyRoot = UINT32_MAX )
+{
+    const auto [ mask, isGitOk ] = rw::gitDiffChangedMask( root, ing, onlyRoot );
+    if( !isGitOk )
+    {
+        return false;
+    }
+
+    const std::size_t markCount = std::min( out.size(), mask.size() );
+    for( std::size_t fileIndex = 0; fileIndex < markCount; ++fileIndex )
+    {
+        if( mask[fileIndex] )
+        {
+            out[fileIndex] = 1;
+        }
+    }
+    return true;
+}
+
 inline std::vector<char> changedMaskFromList( const IngestResult& ing, std::string_view csv )
 {
     return changedMaskFromListChecked( ing, csv ).mask;

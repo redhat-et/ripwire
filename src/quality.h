@@ -4846,5 +4846,59 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     return regs;
 }
 
+
+// Promoted from main.cpp (2026-08-29 main.cpp split): the --dead-code eligibility trio is asked by TWO verb
+// families — --dead-code (runQualityViews) and --safe-delete (the navigate family) — and by the communities'
+// isolate stats, so the shared contract lives in the quality domain header both consult.
+inline bool isHeaderPath( std::string_view path ) noexcept
+{
+    const std::size_t dot = path.rfind( '.' );
+    if( dot == std::string_view::npos )
+    {
+        return false;
+    }
+    const std::string_view extension = path.substr( dot + 1 );
+    return extension == "h" || extension == "hpp" || extension == "hh" || extension == "hxx";
+}
+
+// lane/safe-delete: the whole-word "static" token scan behind the --dead-code high-confidence detector's
+// internal-linkage check, factored to a PURE function (source text + a signature byte range in, bool out)
+// so a single-symbol check (--safe-delete's dead_code_candidate=) can ask the identical question without
+// re-deriving it. The --dead-code block below keeps only what is its own — the per-file sourceFor() cache
+// that amortizes this scan across every candidate in the tree; a single-symbol check has nothing to
+// amortize, so it calls this directly on its own one-off read.
+inline bool sourceHasStaticToken( std::string_view source, std::size_t sigStartByte, std::size_t sigEndByte ) noexcept
+{
+    const std::size_t begin = std::min( sigStartByte, source.size() );
+    const std::size_t end   = std::min( sigEndByte, source.size() );
+    if( begin >= end )
+    {
+        return false;
+    }
+    constexpr std::string_view token = "static";
+    std::size_t position = begin;
+    while( ( position = source.find( token, position ) ) != std::string_view::npos && position + token.size() <= end )
+    {
+        const auto isIdentifier = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
+        const bool leftBoundary  = position == begin || !isIdentifier( source[ position - 1 ] );
+        const bool rightBoundary = position + token.size() == end || !isIdentifier( source[ position + token.size() ] );
+        if( leftBoundary && rightBoundary )
+        {
+            return true;
+        }
+        position += token.size();
+    }
+    return false;
+}
+
+// lane/safe-delete: the --dead-code high-confidence PRECONDITIONS on symbol KIND/PLACEMENT alone — a
+// source free function with a body, living outside a header. Deliberately excludes in-degree (the
+// --dead-code block tests the corpus-wide in-edge CSR; --safe-delete already has its own 1-hop caller
+// list for one already-resolved definition and reuses that instead of recomputing it here) and internal
+// linkage (sourceHasStaticToken above — a separate question, needing the file's bytes).
+inline bool deadCodeEligibleKind( const rw::IngestResult& ing, const rw::Symbol& s ) noexcept
+{
+    return s.kind == rw::SymKind::Function && s.sigEndByte < s.endByte && !isHeaderPath( ing.files[ s.fileId ] );
+}
 }   // namespace quality
 }   // namespace rw

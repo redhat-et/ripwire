@@ -160,7 +160,7 @@ except Exception as e:
 #    carried its own anchored-then-suffix join: the anchored pass only fires when the root IS the repo
 #    toplevel, and "./util.h" is not a boundary-suffix of git's "src/util.h", so the verb reported
 #    changed_files=[] with the note "0 changed files — working tree is clean" on a tree that was not clean.
-#    (The CLI --situ takes a DIFFERENT builder — main.cpp's gitChangedFiles, git diff --name-only — which has
+#    (The CLI --situ takes a DIFFERENT builder — gitChangedFiles (now in situ.h), git diff --name-only — which has
 #    been on the shared join since §H6; this arm covers the MCP half, which is the one that inherited §H6b.)
 SUBREPO="$TMP/subrepo"
 mkdir -p "$SUBREPO/src"

@@ -7,6 +7,7 @@
 #include "graph.h"               // resolveIncludeAdj — for the "surprising" (changes together, no transitive static dep) flag
 #include "mention.h"             // mention_detail::baseNameOf — the SAME "basename of a path" primitive binstale.h/docdrift.h reuse
 #include "lintrules.h"           // §A9.3: langOfPath / dependencyCapable — the SAME predicate <health dep_files=> uses
+#include "workspace.h"          // WorkspaceRoot — mineChurnPerFile's per-root merge (promoted from main.cpp, 2026-08-29 split)
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — graceful-degrade on a bad/unresolvable --since value
 #include "infra/stdinline.h"     // readByteSafeLine — THE line reader (R4); no fixed buffer to split a long path on
@@ -2643,4 +2644,81 @@ inline bool applyCoChangeBoost( const IngestResult& ing, const std::vector<std::
     return boostedSymbolCount > 0;
 }
 
+
+// Promoted from main.cpp (2026-08-29 main.cpp split): the per-file churn miners are consumed by four verb
+// families (--hotspots/--ensemble, --quality-panel, --cochange's change views, --plan-lanes, --html) — the
+// cross-family class, so they live here with the git mining they drive rather than in any one family file.
+// Per-file commit count over a recent window (`git log -c --since=... --name-only`; the `-c` is
+// gitmine.h::kMergeDiffArgs — a merge commit's own content is mined, and merged-branch work is not
+// double-counted. Without it this walk was silent about every merge, and a file whose only history is a
+// merge commit read churn=0 with nothing disclosing it). Churn is the
+// orthogonal-to-complexity axis: hotspot = complexity × churn (CodeScene's key insight — complex code
+// that never changes costs nothing; complex code that changes constantly is where bugs live).
+// `scope`: nullptr (default) reproduces the pre-flag `--since=<since>` window byte-for-byte; a non-null
+// active scope (CLI --since=REV|DATE, see gitmine.h resolveSinceScope) overrides it with the resolved
+// window — REV form as a deterministic `REV..` range, date form as `--since=DATE` (wall-clock-relative).
+inline bool gitChurnCounts( const std::string& root, const rw::IngestResult& ing, std::vector<std::uint32_t>& out, const char* since, const rw::SinceScope* scope = nullptr,
+                     std::uint32_t onlyRoot = UINT32_MAX )   // multi-root §5: count ONLY files of that root
+{
+    const std::string windowArgs = scope ? rw::sinceLogArgs( *scope, since ) : ( "--since=" + shSingleQuote( since ) + " " );
+    const rw::GitCommandLines touched = rw::gitCommandLines(
+        "git -c core.quotepath=false -C " + shSingleQuote( root ) + " log " + rw::kMergeDiffArgs + windowArgs + "--name-only --format= 2>/dev/null" );
+    if( !touched.isStarted )
+    {
+        return false;
+    }
+
+    rw::HashMap<std::string, std::uint32_t> counts;   // repo-relative path → # commits touching it
+    for( const std::string& p : touched.lines )
+    {
+        ++counts[p];
+    }
+    if( counts.empty() )
+    {
+        return false;   // no in-window commit touched anything — the caller's "empty churn" case, NOT an error (see --hotspots' two causes)
+    }
+
+    // Map the per-path tally onto ingested fileIds through THE ONE specificity-ordered mapper (§H6,
+    // gitmine.h::mapChurnCountsOntoFiles). This loop used to be spelled here AND in gitmine.h's
+    // resolveCommitStream, both ending in "first match in the bucket wins" — so a root-level file's count
+    // silently overwrote a subdirectory file's with the same basename, on --hotspots and on --for's churn=
+    // lens alike. The shared mapper prefers an EXACT repo-relative match, otherwise the least-unexplained
+    // prefix, and refuses (disclosing it) on a tie.
+    rw::mapChurnCountsOntoFiles( counts, ing, out, onlyRoot );
+    return true;
+}
+// THE per-file churn mining every churn-consuming verb shares: one window, one multi-root merge rule, one
+// definition of "git could not be mined at all" (false ⇒ every caller must report UNAVAILABLE rather than
+// treat an all-zero vector as "nothing changed"). Extracted from the --hotspots block when --ensemble became
+// its second caller — a second copy of a 20-line per-root merge loop is exactly the clone --quality-delta
+// flags, and it is also how the two verbs' windows would silently diverge one round from now.
+// `since`/`rootScope`: the single-root path uses the caller's ALREADY-RESOLVED scope (so --hotspots does not
+// resolve it twice); the multi-root path resolves per root, because a revision is only meaningful inside the
+// repository that contains it. An empty `since` means "the default window", exactly as before.
+inline bool mineChurnPerFile( const rw::IngestResult& ing, const std::string& root, bool multiRoot,
+                       const std::vector<rw::WorkspaceRoot>& ws, std::string_view since,
+                       const rw::SinceScope& rootScope, const char* defaultWindow, std::vector<std::uint32_t>& churn )
+{
+    if( !multiRoot )
+    {
+        return gitChurnCounts( root, ing, churn, defaultWindow, since.empty() ? nullptr : &rootScope );
+    }
+    // §5: churn mined per root against that root's files only; merged into one labeled list below.
+    bool churnOk = false;
+    for( std::uint32_t r = 0; r < ws.size(); ++r )
+    {
+        const rw::SinceScope       perRootScope = rw::resolveSinceScope( ws[r].arg, since );
+        std::vector<std::uint32_t> rootChurn( ing.files.size(), 0 );
+        if( !gitChurnCounts( ws[r].arg, ing, rootChurn, defaultWindow, since.empty() ? nullptr : &perRootScope, r ) )
+        {
+            continue;
+        }
+        churnOk = true;
+        for( std::size_t f = 0; f < churn.size(); ++f )
+        {
+            churn[f] += rootChurn[f];
+        }
+    }
+    return churnOk;
+}
 }   // namespace rw
