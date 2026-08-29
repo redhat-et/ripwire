@@ -41,6 +41,7 @@ __pycache__/
 # see bench/multiswe/README.md; dataset.lock is the committed, derived, reproducible artifact)
 /bench/multiswe/.raw-cache/
 
-# bench/external: downloaded third-party benchmark data (Agent Retrieval Bench et al.) —
-# corpus files keep their upstream licences, so pinned + fetched, never committed
+# bench/external: downloaded third-party benchmark data (Agent Retrieval Bench, SWE-Explore) —
+# corpus files keep their upstream licences (SWE-Explore's dataset is CC-BY-NC-ND), so pinned +
+# fetched locally, never committed or redistributed
 /bench/external/

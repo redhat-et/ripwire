@@ -6661,3 +6661,69 @@ and re-measures.** Fix rounds register their own bands per bucket, per the extco
 **Determinism gate before any sweep is trusted:** one sample per task run twice, rankings
 byte-identical, or the sweep does not run. Subsetting, if the full 25-repo corpus is not swept, is
 **disclosed in the report** (stratified: all four tasks, ≥3 languages) — never silent.
+## SWE-Explore exploration lane (2026-08-28) — PRE-REGISTERED, loss-first, before any measurement
+
+**What this registers.** An external-benchmark evaluation lane on *SWE-Explore: Benchmarking How Coding
+Agents Explore Repositories* (arXiv 2606.07297). SWE-Explore scores repository EXPLORATION in isolation:
+given an issue and a repository snapshot, an explorer returns a RANKED list of code regions
+`(path, start_line, end_line)` under a fixed line budget; ground truth is line-level, distilled from
+independent successful repair trajectories (848 instances, 10 languages, 203 repos). This section is
+written and committed BEFORE the harness has scored a single instance. No number appears here.
+
+**Artifacts and licenses.** Code: `github.com/Qiushao-E/SWE-Explore-Bench` (MIT), whose `eval.py`
+`ExploreEvaluator` is the scorer of record for this lane — imported and used unmodified, never
+reimplemented. Dataset: Hugging Face `SWE-Explore-Bench/SWE-Explore-Bench`, single file
+`bench.final.public.jsonl` (848 rows), license **CC-BY-NC-ND-4.0** — therefore the data, the benchmark
+clone, and every repository snapshot live in the untracked, gitignored `bench/external/swex/` and are
+never committed or redistributed from this repository. Issue text and base commits are NOT in the bench
+rows; they are joined from the upstream datasets the bench derives from, keyed by `instance_id`:
+`princeton-nlp/SWE-bench_Verified` (rows tagged `dataset="verified"`) and
+`SWE-bench/SWE-bench_Multilingual` (rows tagged `dataset="multilingual"`).
+
+**The two arms.** Both are one-invocation uses of the shipped binary on the repository snapshot checked
+out at the instance's `base_commit`, given the verbatim issue text (title + problem statement, pasted
+unparaphrased — the anchoring contract says paths/symbols in the issue must reach the query literally):
+
+- **Arm FOR** — `ripwire <snapshot> --for="<issue>"`: the ranked signature rows, in emitted order.
+- **Arm PACK** — `ripwire <snapshot> --pack-task="<issue>"`: the task bundle's ranking-section rows, in
+  emitted order (the bundle's own body/caller sections are not extra predictions; the ranking order is
+  the arm's ranking).
+
+**Symbol → region mapping.** A ranked row gives `p=` (path, root-relative) and `l=` (1-based start
+line). The end line comes from the symbol's own body extent: per instance, ONE follow-up
+`--expand=sel1,sel2,…` call per arm (selectors are the rows' canonical `id=` when present, else
+`FILE:NAME`), and `end = l + (CDATA newline count of the <b> body)`. A row whose expand returns no body
+(declaration-only, macro, expand miss) becomes the single-line region `(p, l, l)` — counted and
+disclosed in the run report, never silently dropped. Regions are deduplicated (first, i.e. highest,
+rank wins) and emitted in rank order.
+
+**Line budget.** The ranked region list is cut at the paper's main budget **B = 500 cumulative lines**
+(a region straddling the cut is kept whole, matching the scorer's own budget semantics). The scorer's
+`recall_at_{100,300,500}` and `ndcg_at_{100,300,500}` truncate further internally, giving the paper's
+B ∈ {100, 300, 500} ladder from the same prediction file.
+
+**Metrics (theirs, verbatim).** Coverage = line-level `precision` / `recall` / `f1_score` against core
+regions, plus `hit_file_rate`; Ranking = `ndcg_at_{100,300,500}` (main-file lines ×1.5, density-ideal
+normalization) and `first_useful_hit`; Context-efficiency = `context_efficiency`
+(pred ∩ (core ∪ optional) / pred) plus `noise_file_rate` as a diagnostic. `file_line_counts` (needed to
+resolve `end=-1` ground-truth regions) are computed from the snapshot at `base_commit`.
+
+**Subset (tonight's run is a subset, disclosed as such).** The full 848×203 corpus is out of scope for
+one session. The run uses a stratified subset with the deterministic rule: an instance's language is the
+majority file extension of its ground-truth `modified_core_files`; within each language, instances sort
+by `instance_id` and the first N are taken. Floors: ≥ 5 languages ripwire parses, ≥ 60 instances,
+drawing Python from `verified` and the rest from `multilingual`. Exclusions, registered up front:
+`dataset="pro"` rows (215) — third upstream join, out of tonight's scope; PHP rows — ripwire has no PHP
+grammar, so the arm cannot rank PHP symbols (a known coverage boundary of the tool, not of the
+benchmark); instances whose snapshot cannot be fetched at `base_commit` — counted in the report. Subset
+composition is recorded in the run report before scoring.
+
+**Determinism gate.** One instance, both arms, run twice end-to-end: prediction files byte-identical, or
+the lane stops.
+
+**Decision rule — LOSS-FIRST (the improve-first house rule).** The deliverable of this lane is a
+loss-bucket analysis (local `PLAN_SWEX_REPORT_2026-08-28.md`, untracked): where core-line coverage
+misses concentrate (language, dispatch-heavy edges, docs-vs-code, issue-vocabulary vs
+identifier-vocabulary), whether PACK beats FOR at equal budget, and the largest fixable shapes. **No
+comparative number from this lane is published — in this file, the README, or anywhere public — until a
+fix round has re-measured.** Local numbers exist only to rank the loss buckets.
