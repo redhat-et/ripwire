@@ -259,7 +259,7 @@ Inert on the name-exact route, where the allowance already runs. Contradicts --s
 
 **Answers:** (with --for/--query) force plain subtoken+body BM25.
 
-Routing is now the DEFAULT: a deterministic, confidence-gated query-shape router picks name-exact BM25 when the query NAMES a symbol (identifier syntax, or every content word is a symbol name) else subtoken+body, and prints which/why in the header. It only routes with a query (the plain map is unaffected). --no-route restores the old behavior. A name-exact header also names its EVIDENCE: anchors: word(defining/file) per anchoring word, +N when N further definitions share that name, or word(syntax) when the word routed on camel/snake SHAPE and names nothing. Paths deeper than two segments print top/.../basename. Discount a one-use test helper yourself.
+Routing is now the DEFAULT: a deterministic, confidence-gated query-shape router picks name-exact BM25 when the query NAMES a symbol (identifier syntax, or every content word is a symbol name) else subtoken+body, and prints which/why in the header. It only routes with a query (the plain map is unaffected). --no-route restores the old behavior. A name-exact header also names its EVIDENCE: anchors: word(defining/file) per anchoring word, +N when N further definitions share that name, or word(syntax) when the word routed on camel/snake SHAPE and names nothing. Paths deeper than two segments print top/.../basename. Discount a one-use test helper yourself. Routing also carries the QUERY-SHAPE document demotion: when the task text parses as a stack trace, sanitizer report or compiler diagnostic, or as a pasted issue-template form, the DOCUMENT tier scores down (repo meta-prose - issue templates, CONTRIBUTING, changelogs - twice as hard) and route= names the shape, its evidence and both factors. Demotion, never exclusion, and the mention anchor still lifts a document the task NAMES. --no-route has no route= to disclose it in, so it does not demote either.
 
 **Try it**
 
@@ -283,6 +283,10 @@ $ ./build/ripwire . --for="rankGraphTeleport" --no-route
 <doc>uniform-teleport PageRank (the default</doc>inline RankedGraph rankGraph( const Graph&amp; g, float alpha = 0.85f )</d>
 ... [17 more line(s); run it to see the whole thing]
 ```
+
+**Caveats (stated by the binary):**
+
+- Demotion, never exclusion, and the mention anchor still lifts a document the task NAMES.
 
 ### `--adaptive`
 
