@@ -2395,10 +2395,15 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     }
     const std::vector<char>* ifaceExactPtr = ifaceExact.empty() ? nullptr : &ifaceExact;
 
+    // Query SHAPE (queryshape.h): a pasted trace / sanitizer report / compiler diagnostic, or a pasted
+    // issue-template form. ROUTED PATH ONLY — route= is the one place this can be disclosed, so under
+    // --no-route the classifier is not even asked and the ranking is byte-identical to what it always was.
+    const queryshape::Verdict shape = routeOn ? queryshape::classify( task ) : queryshape::Verdict{};
+
     // §P4 tier de-prioritization (filter.h): fixtures / present/ decks / generated captures score down,
     // folded INTO BM25 scoring (pruning-bound-safe) and BEFORE the B8 mention anchor — a fixture the task
-    // literally NAMES is still lifted near the top.
-    const std::vector<float> tierMul = rankTierSymbolMultipliers( ing );
+    // literally NAMES is still lifted near the top. Plus, when a shape fired, the document tier.
+    const std::vector<float> tierMul = rankTierSymbolMultipliersShaped( ing, shape.fires() );
 
     LensRanking out;
     std::vector<float>& lensRank = out.rank;
@@ -2406,7 +2411,8 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul );
-        out.routeNote  = " [routed: " + rc.reason + "]";
+        out.routeNote  = " [routed: " + rc.reason + shapeDemotionNote( shape ) + "]";
+        out.docTierTag = shapeDocTierTag( shape );   // §A4f: the machine form of the same fact, for --format=candidates
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
         out.anchorDefs = std::move( const_cast<RouteChoice&>( rc ).anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
     }
@@ -3625,7 +3631,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // anchors moved it, and (the signal that used to be XML-comment-only) whether the whole ranking
             // rests on evidence too thin to trust.
             emitCandidates( stdout, ing, lensRank, cfg.topK, cfg.adaptive, /*scanFullDistribution=*/true,
-                            CandidateProvenance{ lr.routeTag, lr.anchorLifts, forWeak }, redactPtr, flRootArg );
+                            CandidateProvenance{ lr.routeTag, lr.anchorLifts, forWeak, lr.docTierTag }, redactPtr, flRootArg );
             reportRedactions( stderr, redactCounts );    // W3-N1: <sig> is now a redacting seam — this export must disclose its own tally
             return 0;
         }

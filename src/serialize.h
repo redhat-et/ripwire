@@ -3295,12 +3295,16 @@ struct CandidateProvenance
     const char*   route    = nullptr;   // which ranker ran ("name-exact" / "subtoken+body" / "no-route" / "query"); nullptr ⇒ attribute absent
     std::uint32_t anchored = 0;         // §B8 mention-anchor lifts folded into this rank (0 is a real, emitted value)
     bool          weak     = false;     // §P5: the top raw lexical score is below the confidence threshold
+    const char*   docTier  = nullptr;   // the QUERY-SHAPE document demotion (filter.h shapeDocTierTag); nullptr ⇒ absent
 };
 
 // The root element's opening tag. §A4f — what each attribute means, once:
 //   count=/total=/capped=  the §P8 shown/total pair: `keep` rows exported out of `corpusCount` ranked
 //             candidates, capped="1" ⇔ the top-k cut dropped some. The §P17 path-tier penalty is
 //             query-independent and needs no per-run attribute.
+//   doc_tier= the one tier that is NOT query-independent, which is exactly why it earns an attribute the
+//             §P17 penalty does not: the query's own shape (a pasted trace, a pasted bug-report form)
+//             scored the DOCUMENT tier down for this run only. Absent ⇒ no demotion happened.
 //   route=    which ranker produced these scores. name-exact and subtoken+body BM25 do NOT share a score
 //             scale (6.66 vs 29.95 on the same corpus), so comparing s= is only meaningful within one route.
 //   anchored= how many query-mention anchor lifts (§B8) reshaped this rank. 0 is EMITTED, not omitted:
@@ -3318,6 +3322,7 @@ inline std::string candidatesRootTag( std::size_t keep, std::size_t corpusCount,
     {
         tag += " weak=\"1\"";
     }
+    if( prov.docTier ) { tag += " doc_tier=\"";  tag += prov.docTier;  tag += "\""; }
     return tag + ">";
 }
 
@@ -3385,7 +3390,9 @@ inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::
              "symbols (total is the corpus size, never a match count), capped=\"1\" means the top-k cut dropped "
              "some; route= names the ranker (s= is comparable only within one route); anchored= counts "
              "query-mention lifts (0 = the anchor ran and moved nothing); weak=\"1\" means the top raw lexical "
-             "score is below the confidence bar, so these rows rest on thin textual evidence. -->" );
+             "score is below the confidence bar, so these rows rest on thin textual evidence; doc_tier= names "
+             "the query SHAPE (a pasted trace, a pasted bug-report form) that scored documents down for this "
+             "run, absent when none did. -->" );
     w.write( candidatesRootTag( keep, S, prov ) );
     for( std::size_t r = 0; r < keep; ++r )
     {

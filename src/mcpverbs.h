@@ -1167,8 +1167,11 @@ inline std::string forTaskText( const std::string& root, const std::string& task
             ifaceExact[i] = 1;
         }
     }
-    // §P4 tier de-prioritization — same multiplier, same order (before the mention anchor) as the CLI --for.
-    const std::vector<float> tierMul = rankTierSymbolMultipliers( ing );
+    // Query SHAPE + §P4 tier de-prioritization — same classifier, same multiplier, same order (before the
+    // mention anchor) as the CLI --for. This dialect always routes, so the shape is always asked for and
+    // the disclosure always has a route= to ride in.
+    const queryshape::Verdict shape   = queryshape::classify( task );
+    const std::vector<float>  tierMul = rankTierSymbolMultipliersShaped( ing, shape.fires() );
     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
                                        ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                        : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, std::size_t( forTopN ), &ifaceExact, &tierMul );
@@ -1283,7 +1286,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // reserved for the caller-CHOSEN opt-out (--signatures-only, pre-T3 byte-identical by registration);
     // a posture the TOOL chose for the caller must be disclosed, or an MCP agent reading this bundle
     // cannot tell "no bodies exist for this task" from "this dialect never serves them".
-    std::string rootOpenStr = ctxRootOpen( task, " [routed: " + rc.reason + "]", flRootArg );   // §B1.7: same root attrs as the CLI twin
+    std::string rootOpenStr = ctxRootOpen( task, " [routed: " + rc.reason + shapeDemotionNote( shape ) + "]", flRootArg );   // §B1.7: same root attrs as the CLI twin
     if( !rootOpenStr.empty() && rootOpenStr.back() == '>' )
     {
         rootOpenStr.insert( rootOpenStr.size() - 1, " bundle=\"sigs\"" );
@@ -2681,11 +2684,13 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
             ifaceExact[i] = 1;
         }
     }
-    // §P4 tier de-prioritization — same multiplier, same order (before the mention anchor) as CLI --pack-task.
-    const std::vector<float> tierMul = rankTierSymbolMultipliers( ing );
+    // Query SHAPE + §P4 tier de-prioritization — same classifier, same multiplier, same order (before the
+    // mention anchor) as CLI --pack-task.
+    const queryshape::Verdict shape   = queryshape::classify( task );
+    const std::vector<float>  tierMul = rankTierSymbolMultipliersShaped( ing, shape.fires() );
     lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                        : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul );
-    lr.routeNote = " [routed: " + rc.reason + "]";
+    lr.routeNote = " [routed: " + rc.reason + shapeDemotionNote( shape ) + "]";
 
     if( !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
