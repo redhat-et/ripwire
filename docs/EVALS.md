@@ -6671,6 +6671,34 @@ Each is a faithful reading of what the binary now serves and discloses — no me
 no change to the scorer or to any metric definition. The re-measure runs this adapter version, and
 its determinism gate re-ran clean after these edits.
 
+**RE-MEASURED 2026-08-29 — the fix round completed, so per this registration's own rule these
+numbers are now published.** Same 9-repo stratified subset as the loss-first sweep (disclosed
+above; trace2code is the FULL task, no subsetting), same scorer definitions, determinism gate OK
+on all tasks before the sweep, binary = the merged fix-round head. Pre-fix values are the
+loss-first sweep's, on the identical subset and adapter task composition (instrument v2 splices
+surfaces the pre-fix binary never emitted, so its pre-fix numbers are unchanged by it):
+
+| task | ripwire pre-fix MRR / R@20 | ripwire post-fix MRR / R@20 | paper RepoMap (full task) | best-in-paper |
+| --- | --- | --- | --- | --- |
+| trace2code (full, n=101) | 0.158 / 0.627 | **0.283 / 0.797** | 0.274 / 0.837 | RepoMap 0.274 / 0.837 |
+| code2test (n=71 of 106) | 0.388 / 0.617 | 0.388 / 0.624 | 0.236 / 0.604 | Qwen3-4B 0.323 / 0.660 |
+| comment2context (n=35 of 80) | 0.253 / 0.510 | 0.255 / 0.495 | 0.215 / 0.588 | Jina 0.304 MRR / Qwen3-8B 0.688 R@20 |
+| edit2ripple (n=46 of 58) | 0.341 / 0.496 | 0.341 / 0.496 | 0.207 / 0.655 | Qwen3-4B 0.288 / 0.711 |
+
+The registration's stated question — is ripwire the RepoMap family's strongest instance on the
+family's own task — flips from NO to YES on MRR: trace2code 0.283 vs the paper's RepoMap 0.274,
+carried by the `--from-trace` test→source hop (87/101 traces frame only test files) plus the
+trace-shaped document-tier demotion (docs in the top-5 fell 53→27 of 101; a doc at rank 1 fell
+15→10). Recall@20 closes most of its gap (0.627→0.797 vs 0.837) but stays below — the file-grain
+tail extends composed depth (median 30→35 files) without reaching RepoMap's 20-deep coverage.
+Gold-at-rank-1 is 0/101 BY DESIGN: the innermost test frame keeps rank 1 (the hop discloses, never
+rewrites the frame partition), so gold rides rank 2–4 — MRR reflects exactly that. The three other
+tasks were already wins and moved little: their pre-fix numbers stand re-confirmed post-fix.
+Subset caveat applies to every row but trace2code; the same-46-sample edit2ripple comparison
+against shipped repomap_details stands at MRR 0.341 vs 0.235. The paper's BCY@8k column remains
+NOT reproduced here (≠ shipped `gold_coverage@8k`, ~9× apart) and is never approximated. The
+abstention arm's calibration outcome is the recorded NEGATIVE in the next section.
+
 ## Agent Retrieval Bench — abstention calibration round, PRE-REGISTERED 2026-08-29 (before any
 selective-split measurement)
 
@@ -6847,6 +6875,30 @@ fix round has re-measured.** Local numbers exist only to rank the loss buckets.
 the original registration disclosed is thereby retired on binaries that serve `r=`. The file-grain
 `tail` surface is NOT consumed here (regions are symbol-grained under the 500-line budget); that is
 an unconsumed surface of this harness, recorded rather than silently absorbed.
+
+**RE-MEASURED 2026-08-29 — the fix round completed; per this registration's rule the numbers
+publish, and the result is MIXED, reported with its decomposition rather than rounded to a win.**
+Same 68-instance subset, same scorer of record, determinism byte-identical. Three-way A/B on the
+FOR arm separates the binary's effect from the serving-order instrument's (the v1 harness reads
+document order; v2 reads the rank fact `r=`):
+
+| FOR arm, B=500 | line recall | hit_file_rate | nDCG@500 | noise_file_rate |
+| --- | --- | --- | --- | --- |
+| pre-fix binary × v1 harness | 0.135 | 0.260 | 0.357 | 0.728 |
+| post-fix binary × v1 harness | 0.123 | 0.281 | 0.378 | 0.716 |
+| post-fix binary × v2 harness | 0.109 | 0.311 | 0.361 | 0.742 |
+
+The BINARY improved file-level retrieval — hit_file_rate +2.1pp, nDCG +2.1pp, noise −1.2pp,
+zero-recall instances 32→30 of 68 (the meta-doc demotion and vendored-bundle tier working as
+registered) — at a −1.2pp line-recall cost: demoting prose changed which regions fill the 500-line
+budget, and the replacing code regions are not always gold lines. The INSTRUMENT's rank-order
+serving then trades a further −1.4pp line recall for +3.0pp hit_file_rate: this benchmark's
+line-grain scoring rewards depth-per-file, and true-rank-order serving spreads the budget across
+files. That trade-off is now a measured fact of serving shape, not a ranking defect — the natural
+follow-up (rank-ordered file SELECTION with file-grouped bodies) is a candidate for a future
+round, not retrofitted here. PACK arm moved the same directions (nDCG 0.348→0.368, hit_file
+0.263→0.285). All numbers remain subset-local (n=68, python stratum all-astropy, disclosed above);
+the CC-BY-NC-ND data itself stays untracked.
 
 ## Shape-conditional documentation-tier demotion (2026-08-29) — PRE-REGISTERED, before any measurement
 
