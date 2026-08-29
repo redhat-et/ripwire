@@ -239,7 +239,23 @@ def for_files_from_doc(doc, snap):
     """files in sigs order (ripwire's own best-symbol file grouping) from an already-parsed doc."""
     if doc is None:
         return []
-    return [norm_path(f.get("p", ""), snap) for f in doc.get("sigs", []) if f.get("p")]
+    # instrument v2 (2026-08-29): sigs rows now carry the per-symbol rank fact "r"; file order is
+    # best-symbol rank when present (document order untouched otherwise), and the file-grain
+    # "tail" extends the depth after the head — both surfaces registered in EVALS before re-measure.
+    groups = [g for g in doc.get("sigs", []) if g.get("p")]
+    def best_rank(g):
+        ranks = [s_["r"] for s_ in g.get("symbols") or [] if isinstance(s_.get("r"), int)]
+        return min(ranks) if ranks else float("inf")
+    if any(best_rank(g) != float("inf") for g in groups):
+        groups = sorted(groups, key=best_rank)
+    ranked = [norm_path(g.get("p", ""), snap) for g in groups]
+    seen = set(ranked)
+    for t in (doc.get("tail") or {}).get("files") or []:
+        tp = norm_path(t, snap)
+        if tp not in seen:
+            seen.add(tp)
+            ranked.append(tp)
+    return ranked
 
 
 def for_confidence_from_doc(doc):
@@ -262,6 +278,7 @@ def query_files(bin_path, snap, query, top_k=200):
 
 
 FRAME_RE = re.compile(r'<frame[^>]*? p="([^"]+)"')
+HOP_RE = re.compile(r'<hop [^>]*?p="([^"]+)"')
 
 
 def trace_files(bin_path, snap, trace_text):
@@ -274,7 +291,12 @@ def trace_files(bin_path, snap, trace_text):
         os.unlink(tmp_path)
     if out is None:
         return []
-    ranked = [norm_path(m, snap) for m in FRAME_RE.findall(out)]
+    frames = [norm_path(m, snap) for m in FRAME_RE.findall(out)]
+    # instrument v2 (2026-08-29): the binary's test-to-source hop rows are served beside the
+    # innermost frame (the emitted legend states the served order), so the composition splices
+    # them after frame 1 — faithful reading of the disclosed serving, registered in EVALS.
+    hops = [norm_path(m, snap) for m in HOP_RE.findall(out)]
+    ranked = frames[:1] + hops + frames[1:]
     ranked += [norm_path(m, snap) for m in FILE_GROUP_RE.findall(out)]
     return ranked
 

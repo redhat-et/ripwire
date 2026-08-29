@@ -6662,6 +6662,15 @@ and re-measures.** Fix rounds register their own bands per bucket, per the extco
 byte-identical, or the sweep does not run. Subsetting, if the full 25-repo corpus is not swept, is
 **disclosed in the report** (stratified: all four tasks, ≥3 languages) — never silent.
 
+**Instrument v2 (2026-08-29, registered before the fix-round re-measure).** The adapter now consumes
+three output surfaces that did not exist at the original registration: `--from-trace`'s disclosed
+test→source hop rows are spliced into the composition after the innermost frame (the emitted legend
+states that served order); `--for --json` file order follows the per-symbol rank fact `r=` (best
+symbol per file) where present; and the file-grain `tail` extends the composed depth after the head.
+Each is a faithful reading of what the binary now serves and discloses — no metric-side re-ranking,
+no change to the scorer or to any metric definition. The re-measure runs this adapter version, and
+its determinism gate re-ran clean after these edits.
+
 ## Agent Retrieval Bench — abstention calibration round, PRE-REGISTERED 2026-08-29 (before any
 selective-split measurement)
 
@@ -6831,6 +6840,13 @@ misses concentrate (language, dispatch-heavy edges, docs-vs-code, issue-vocabula
 identifier-vocabulary), whether PACK beats FOR at equal budget, and the largest fixable shapes. **No
 comparative number from this lane is published — in this file, the README, or anywhere public — until a
 fix round has re-measured.** Local numbers exist only to rank the loss buckets.
+
+**Instrument v2 (2026-08-29, registered before the fix-round re-measure).** The harness's
+`flatten_ranked` now sorts served rows by the per-symbol rank fact `r=` where the binary emits it
+(stable; unranked rows keep document order after the ranked ones) — the document-order approximation
+the original registration disclosed is thereby retired on binaries that serve `r=`. The file-grain
+`tail` surface is NOT consumed here (regions are symbol-grained under the 500-line budget); that is
+an unconsumed surface of this harness, recorded rather than silently absorbed.
 
 ## Shape-conditional documentation-tier demotion (2026-08-29) — PRE-REGISTERED, before any measurement
 
