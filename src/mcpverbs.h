@@ -2617,9 +2617,7 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
         }
         if( !r.facet.empty() )
         {
-            const char* facetName = ( r.kind == "short-horizon-churn" ) ? "churn"
-                                   : ( r.kind == "api-surface" )        ? "surface"
-                                   : nullptr;
+            const char* facetName = rw::quality::facetAttrName( r.kind );   // ONE kind→name table (quality.h)
             if( facetName )
             {
                 out += ",\"" + std::string( facetName ) + "\":\"" + mcpdetail::jsonEscape( r.facet ) + "\"";

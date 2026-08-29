@@ -527,9 +527,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 }
                 if( !r.facet.empty() )
                 {
-                    const char* facetName = ( r.kind == "short-horizon-churn" ) ? "churn"
-                                           : ( r.kind == "api-surface" )        ? "surface"
-                                           : nullptr;
+                    const char* facetName = quality::facetAttrName( r.kind );   // ONE kind→name table (quality.h)
                     if( facetName )
                     {
                         std::printf( ",\"%s\":\"%s\"", facetName, jsonStr( r.facet ).c_str() );
@@ -643,7 +641,15 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                      // downward-only ratchet with no line added for it.
                      "except duplication rows, which name the whole clone group rather than one symbol: members= "
                      "is the group's member list and tokens= its shared normalized-token count (the same per-group "
-                     "pair the clones verb reports) — plus "
+                     "pair the clones verb reports) — a duplication row may also carry idiom=, which names the "
+                     "RECOGNIZED BODY SHAPE every member of the group spells, out of a closed set of three "
+                     "(threshold-ladder, switch-name-table, builder-chain). idiom= alone changes nothing; a group "
+                     "that ALSO shares no non-keyword identifier between any two members, sits in pairwise-distinct "
+                     "enclosing contexts, and stays under 80 normalized tokens is an idiom COLLISION rather than a "
+                     "copy, and is reported minor instead of gating. Break any one of those and it gates as before, "
+                     "idiom= and all: two bucketing ladders over the SAME enum are a copy. The shape is read off the "
+                     "body's token stream and not a parse tree, so a macro-assembled body classifies as whatever its "
+                     "raw tokens spell — the name is printed so the call can be overruled by reading. — plus "
                      "p=\"path:line\" (root-relative; the first-sorting member for the clone kinds; omitted, "
                      "never faked, when no locator resolves), and every row the header's gating= counter "
                      "counts also carries a gating attribute set to 1 — those are the rows the exit code fires "
@@ -668,13 +674,13 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             const char* sev = r.isMinor ? " sev=\"minor\"" : "";
             // B10.2 — the optional classification facet: attribute NAME is chosen by kind (churn=
             // short-horizon-churn's self/ambient split; surface= api-surface's new-symbol/contract-change
-            // tier); r.facet carries only the VALUE, so main.cpp is the one place that maps kind → attr name.
+            // tier; idiom= the duplication kind's recognized clone-body shape); r.facet carries only the
+            // VALUE, and quality::facetAttrName is the ONE table that maps kind → attribute name for all
+            // three emitters (this one, the --json twin above, and the MCP one).
             std::string facetAttr;
             if( !r.facet.empty() )
             {
-                const char* facetName = ( r.kind == "short-horizon-churn" ) ? "churn"
-                                       : ( r.kind == "api-surface" )        ? "surface"
-                                       : nullptr;
+                const char* facetName = quality::facetAttrName( r.kind );
                 if( facetName )
                 {
                     facetAttr = std::string( " " ) + facetName + "=\"" + r.facet + "\"";
