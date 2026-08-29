@@ -263,8 +263,14 @@ while IFS= read -r v; do
     # position artifact, not a behaviour change — the alert's MESSAGE and the function it names are the
     # signal, so normalise the ":NNNN" and keep everything else byte-exact. Without this the harness
     # reports a false positive on every future extraction and gets ignored, which is worse than noisy.
-    sed -E 's/\.(cpp|h):[0-9]+,/.\1:LINE,/g' "$TMP/e.base" > "$TMP/e.base.n"
-    sed -E 's/\.(cpp|h):[0-9]+,/.\1:LINE,/g' "$TMP/e.new"  > "$TMP/e.new.n"
+    # 2026-08-29 main.cpp split: the verb families moved into src/verbs_*.h SECTIONS of main.cpp's own
+    # TU, so an alert in moved code changed its __FILE__ spelling from main.cpp to its section — the
+    # same position-artifact class as the line shift. Fold the ONE TU's spellings (main.cpp and its
+    # RIPWIRE_MAIN_TU-guarded verbs_*.h sections) to a common token before the line normalisation;
+    # every other file's name stays byte-exact, so a message genuinely moving to a different subsystem
+    # still diffs.
+    sed -E 's/\((main\.cpp|verbs_[a-z]+\.h):[0-9]+,/(MAINTU:LINE,/g; s/\.(cpp|h):[0-9]+,/.\1:LINE,/g' "$TMP/e.base" > "$TMP/e.base.n"
+    sed -E 's/\((main\.cpp|verbs_[a-z]+\.h):[0-9]+,/(MAINTU:LINE,/g; s/\.(cpp|h):[0-9]+,/.\1:LINE,/g' "$TMP/e.new"  > "$TMP/e.new.n"
     if [ "$rcb" != "$rcn" ] || ! cmp -s "$TMP/o.base" "$TMP/o.new" || ! cmp -s "$TMP/e.base.n" "$TMP/e.new.n"; then
         diffs=$(( diffs + 1 ))
         # The default 5 keeps a normal run terse. A FIX ROUND must classify EVERY diff, and capping the list
