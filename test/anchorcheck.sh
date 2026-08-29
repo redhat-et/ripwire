@@ -83,6 +83,14 @@ QUERY="frobnicate widget cache"
 # Verified before re-pinning: with the two attrs, the legend clause and est_tokens normalized out, old
 # and new documents are byte-identical — every ranking and body byte is unmoved, which is the
 # anchor-neutrality property this golden exists for.
+# RE-PIN 2026-08-29 (deep-tail lane): 2622 -> 3046 B (+424 B), est_tokens="979" -> "1149".
+# CAUSE: the two deep-tail default surfaces (docs/EVALS.md "Deep-tail serving"; gate test/deeptailcheck.sh):
+# every ranked <d> row now carries its 1-based lens rank r=, the bundle ends its signature-shaped sections
+# with the file-grain <tail> element (total="0" here — this one-directory fixture's head covers every file,
+# and the zero is emitted, not omitted), and the legend gains the clause defining both. Verified before
+# re-pinning: with r=, the <tail> element, the tail legend clause and est_tokens normalized out, old and
+# new documents are byte-identical — every ranking and body byte is unmoved, which is the anchor-neutrality
+# property this golden exists for.
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route >"$TMP/plain_full.xml" 2>/dev/null
 diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \
     && ok "golden-neutral: plain --for --no-route byte-identical to the pre---anchor golden" \

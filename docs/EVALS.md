@@ -6873,3 +6873,32 @@ harnesses, the same disclosed subsets, the same binary discipline, determinism g
 
 If any of the three fails, the change is reverted rather than re-tuned and the negative is recorded in
 §7. No number from this lane is published anywhere until that re-measure has completed.
+## Deep-tail serving (2026-08-29) — REGISTERED CONTRACT, judged by the standing external lanes
+
+**Motivation.** The two pre-registered external retrieval lanes above (Agent Retrieval Bench; the
+SWE-Explore exploration lane) both measured the same serving-shape pair of losses, independent of
+ranking quality: (1) the ranked bundle groups symbols by file and sorts by line inside the group, so a
+budget-truncating consumer reads document order and the ranker's true per-symbol order is
+unrecoverable; (2) the lens serves ranked symbol heads concentrated in few files while file-grain
+consumers score recall 20+ deep, so the composed ranking runs out of files long before that depth even
+on task families where its head already wins.
+
+**The claimed contract (gate-pinned in `test/deeptailcheck.sh`, none of it an accuracy claim).** Every
+lens-ranked signature row (`--for` and `--pack-task`, XML and JSON, CLI and MCP `for`) carries its
+1-based global rank in that bundle's lens ranking (` r="N"` / `"r":N`), rank-consistent with the flat
+`--format=candidates` export; ranks are assigned before the byte-trim ladder, so a trimmed row leaves a
+visible gap rather than a renumbered fake-contiguous head. After the signature-shaped sections, `--for`
+serves a FILE-GRAIN TAIL — the remaining candidate files with a positive lens score, paths only, in the
+best-symbol projection of the same ranking — disclosed as `total=`/`shown=`/`capped=` and labelled in
+the legend as weaker evidence than the head; the JSON dialect carries the same object always
+(`"tail"`), and 0 means genuinely none remain. The tail is a projection of the existing ranking, never
+a re-rank; serving it makes the lens a full-distribution consumer, so the bundle path scores
+exhaustively (the `--adaptive` rule) and `total=` is a real count, not a pruning artifact. Byte cost is
+measured and disclosed through `est_tokens`; under an explicit `--token-budget` the tail is funded last
+and trims to its empty shell rather than breaching the ceiling.
+
+**What judges it.** No new eval: the already-registered ARB and SWE-Explore re-measures are the
+judges — the adapters consume the rank facts and the file tail instead of their document-order and
+head-only approximations, and the pre-registered metrics (file MRR / Recall@20 there; nDCG@500 /
+recall@100 there) move or they do not. Publication stays gated on those re-measures per the
+improve-first rule.

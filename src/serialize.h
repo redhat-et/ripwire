@@ -717,6 +717,146 @@ inline constexpr std::size_t kForAutoBodyBudgetBytes = 6000;
 // An explicit --token-budget=N stays a hard ceiling and never sees this constant, exactly as T3 registered.
 inline constexpr std::size_t kForAnchorBodyBudgetBytes = 22800;
 
+// ── DEEP-TAIL d2: the FILE-GRAIN TAIL of the --for bundle (registered: docs/EVALS.md, deep-tail round) ──
+// The lens serves ranked SYMBOL heads concentrated in few files; a consumer that needs file-grain recall
+// 20+ deep (external re-measure: the pre-registered retrieval lanes score exactly that) runs out of files
+// long before that depth — measured externally as the ENTIRE recall gap on the one task family where the
+// head's MRR already wins. The tail is the cheapest honest widening: the REMAINING candidate files (a
+// positive lens score, not already in the served head's file set) as PATHS ONLY, in the deterministic
+// best-symbol projection of the same (score desc, id asc) order the head selected with — a projection of
+// the existing ranking, never a re-rank. Zero-score files are NOT served (the LB-A relevance-floor
+// reasoning at file grain: a file whose symbols matched nothing has no evidence to stand on). total=
+// counts every candidate file; shown= what this bundle printed; capped="1" when they differ. The legend
+// labels it file-grain, weaker evidence than the ranked rows above it.
+//   • DEFAULT regime: rows cap at kForFileTailShownCap; the bytes ride ON TOP of the sig/body budgets
+//     (the kForAutoBodyBudgetBytes precedent) and are measured into est_tokens — the ranked head and the
+//     bodies stay byte-identical to a tail-less bundle by construction.
+//   • EXPLICIT --token-budget: the ceiling stays hard — the tail is funded LAST (weakest evidence pays
+//     first): rows fit into the residual the rendered bundle actually left, trimming down to the honest
+//     empty shell. kForFileTailShellReserve rides inside the committed bytes handed to the body walk so
+//     that shell always fits — the kAutoAttrReserve pattern, sized for `<tail total="NNNNN" shown="0"
+//     capped="1"></tail>`.
+inline constexpr std::size_t kForFileTailShownCap     = 24;
+inline constexpr std::size_t kForFileTailShellReserve = 48;
+
+// The candidate walk, shared by the XML and JSON dialects (and the MCP `for` twin) so the three surfaces
+// cannot select differently. `headIds` is THE BUNDLE'S RESOLVED SURFACE (the exact set <sigs> selects);
+// paths are root-relativized exactly as every emitted p= is (R-R). paths.size() <= kForFileTailShownCap;
+// `total` keeps counting past the cap so the disclosure pair is honest.
+struct FileTail
+{
+    std::vector<std::string> paths;      // first kForFileTailShownCap tail files, ranker order, display form
+    std::size_t              total = 0;  // every remaining candidate file with a positive lens score
+};
+
+inline FileTail computeFileTail( const IngestResult& ing, const std::vector<float>& rank,
+                                 const std::vector<NodeId>& headIds, std::string_view rootArg )
+{
+    FileTail out;
+    std::vector<char> inHead( ing.files.size(), 0 );
+    for( NodeId sid : headIds )
+    {
+        if( sid < ing.symbols.size() && ing.symbols[ sid ].fileId < inHead.size() )
+        {
+            inHead[ ing.symbols[ sid ].fileId ] = 1;
+        }
+    }
+
+    const std::size_t   S = ing.symbols.size();
+    std::vector<NodeId> order( S );
+    for( NodeId i = 0; i < S; ++i )
+    {
+        order[i] = i;
+    }
+    sortutil::radixSortByScoreDescId( order, rank );
+
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    std::vector<char> seen( ing.files.size(), 0 );
+    for( std::size_t k = 0; k < S; ++k )
+    {
+        const NodeId id = order[k];
+        if( id >= rank.size() || !( rank[id] > 0.0f ) )
+        {
+            break;                                   // (score desc) order: the zero-score tail is contiguous
+        }
+        const std::uint32_t f = ing.symbols[id].fileId;
+        if( f >= seen.size() || seen[f] || inHead[f] )
+        {
+            continue;
+        }
+        seen[f] = 1;
+        ++out.total;
+        if( out.paths.size() < kForFileTailShownCap )
+        {
+            out.paths.emplace_back( rootArg.empty() ? std::string( ing.files[f] )
+                                                    : std::string( rw::sarif::rootRelativeUri( ing.files[f], rootPrefix ) ) );
+        }
+    }
+    return out;
+}
+
+// The XML shape: `<tail total="T" shown="K" capped="0|1"><t p="…"/>…</tail>` — §P8 vocabulary, always
+// emitted (a total of 0 means genuinely none remain, never not-computed — the B1.4 rule for elements).
+// `shownCap` lets the explicit-budget caller trim rows below the collected count; the JSON twin below
+// renders the SAME decision so the dialects cannot diverge on what was served.
+inline std::string renderFileTailXml( const FileTail& t, std::size_t shownCap, std::vector<char>& esc )
+{
+    const std::size_t shown = std::min( shownCap, t.paths.size() );
+    std::string x = "<tail total=\"" + std::to_string( t.total )
+                  + "\" shown=\"" + std::to_string( shown )
+                  + "\" capped=\"" + ( shown < t.total ? "1" : "0" ) + "\">";
+    for( std::size_t i = 0; i < shown; ++i )
+    {
+        x += "<t p=\"";  x += escapeXml( t.paths[i], esc );  x += "\"/>";
+    }
+    x += "</tail>";
+    return x;
+}
+
+// The JSON twin: `"tail":{"total":T,"shown":K,"files":[…]}` (the caller supplies the leading comma).
+inline std::string renderFileTailJson( const FileTail& t, std::size_t shownCap )
+{
+    const std::size_t shown = std::min( shownCap, t.paths.size() );
+    std::string j = "\"tail\":{\"total\":" + std::to_string( t.total )
+                  + ",\"shown\":" + std::to_string( shown ) + ",\"files\":[";
+    for( std::size_t i = 0; i < shown; ++i )
+    {
+        if( i > 0 )
+        {
+            j += ",";
+        }
+        j += '"';
+        jsonesc::escapeInto( t.paths[i], j, false, true, false );   // same core appendJsonStrField uses
+        j += '"';
+    }
+    j += "]}";
+    return j;
+}
+
+// The legend clause defining BOTH deep-tail surfaces (the r= rank fact and the <tail> element) — a named
+// constant, shared by the CLI --for header and the MCP `for` twin, so the sigs-budget exemption in each
+// dialect subtracts EXACTLY the bytes the clause adds (the kForAutoBundleLegend pattern). No "--" anywhere:
+// it rides inside an XML comment where "--" is ill-formed (G4).
+inline constexpr std::string_view kForFileTailLegend =
+    "; tail: file-grain tail, WEAKER evidence than the ranked rows (paths only): the remaining candidate "
+    "files with a positive score, best-symbol rank order; rows are t p=file; total=candidate files, "
+    "shown=printed, capped=1 when they differ. r= on a ranked row is its 1-based rank in this lens ranking "
+    "(sort by r= for true ranker order; a gap = a budget-trimmed row)";
+
+// Explicit-budget row fit: the largest shown count whose rendered XML fits `budgetBytes` (0 rows always
+// "fits" — the shell is reserved by the caller). Walks down from the collected count; deterministic.
+inline std::size_t fileTailShownForBudget( const FileTail& t, std::size_t budgetBytes, std::vector<char>& esc )
+{
+    for( std::size_t shown = t.paths.size(); shown > 0; --shown )
+    {
+        if( renderFileTailXml( t, shown, esc ).size() <= budgetBytes )
+        {
+            return shown;
+        }
+    }
+    return 0;
+}
+
 // ── COMPACT CONCEPTUAL SERVING (pre-registered: docs/EVALS.md, the T3 route-narrowing round) ──────────
 // On the CONCEPTUAL route — the subtoken+body ranker, the route that names no anchor — the allowance
 // above is where this tool's bytes actually go and where they cost it the standing head-to-head: class B
@@ -2605,6 +2745,13 @@ struct SigRowFacts
     const std::vector<std::uint32_t>* fanIn   = nullptr;   // nullptr / short ⇒ in= is OMITTED, never printed as 0
     const char*                       lens    = "";
     const char*                       pure    = "";
+    std::uint32_t                     rank    = 0;         // deep-tail d1: 1-based GLOBAL rank in the lens ranking (the
+                                                           //   (score desc, id asc) order this section selected with);
+                                                           //   0 ⇒ attribute absent (non-lens serving stays byte-
+                                                           //   identical). Emitted LAST in the attribute run so the
+                                                           //   "<d l=" opening and every existing attribute adjacency
+                                                           //   stay byte-stable. Same r= spelling AND meaning as the
+                                                           //   <cand r=> flat export — one rank vocabulary, two shapes.
 };
 
 // P2.3/P2.4 — the exact "<d …>" opening tag of ONE signature row, defined once so the two-phase (globally
@@ -2634,8 +2781,14 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
     if( const std::string canon = scopedCanonicalId( ing, s, rootArg ); !canon.empty() )
     { head += " id=\"";  head += escapeXml( canon, esc );  head += "\""; }
 
-    // descriptive facts — cx/ccx/in only under metrics; the Q3 lens + pure ride along either way
-    char tail[ 192 ];
+    // descriptive facts — cx/ccx/in only under metrics; the Q3 lens + pure ride along either way.
+    // deep-tail d1: r= (the row's 1-based global lens rank) closes the run — see SigRowFacts::rank.
+    char rankAttr[ 24 ];  rankAttr[ 0 ] = '\0';
+    if( facts.rank > 0 )
+    {
+        std::snprintf( rankAttr, sizeof( rankAttr ), " r=\"%u\"", facts.rank );
+    }
+    char tail[ 224 ];
     if( facts.metrics )
     {
         char inAttr[ 24 ];  inAttr[ 0 ] = '\0';
@@ -2643,11 +2796,11 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
         {
             std::snprintf( inAttr, sizeof( inAttr ), " in=\"%u\"", ( *facts.fanIn )[ id ] );
         }
-        std::snprintf( tail, sizeof( tail ), " cx=\"%u\" ccx=\"%u\"%s%s%s>", s.cx, s.ccx, inAttr, facts.lens, facts.pure );
+        std::snprintf( tail, sizeof( tail ), " cx=\"%u\" ccx=\"%u\"%s%s%s%s>", s.cx, s.ccx, inAttr, facts.lens, facts.pure, rankAttr );
     }
     else
     {
-        std::snprintf( tail, sizeof( tail ), "%s%s>", facts.lens, facts.pure );
+        std::snprintf( tail, sizeof( tail ), "%s%s%s>", facts.lens, facts.pure, rankAttr );
     }
     head += tail;
     return head;
@@ -3031,7 +3184,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                     }
                 }
 
-                std::string head = sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure }, esc, rootArg );
+                std::string head = sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure, globalRank }, esc, rootArg );   // d1: rank fact (ladder path)
 
                 std::string doc = docCommentBefore( src, a );
                 redactInPlace( doc, redact );
@@ -3248,7 +3401,8 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             }
 
             // identity (n=/id=) + descriptive facts (cx=complexity, ccx=cognitive, in=reuse-count, Q3 lens, pure)
-            w.write( sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure }, esc, rootArg ) );
+            // d1: globalRank is 0 when !rankAdaptivePayload (non-lens serving) — r= absent there by contract.
+            w.write( sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure, globalRank }, esc, rootArg ) );
             std::string doc = docCommentBefore( src, a );   // L2: the human-written intent, if any
             redactInPlace( doc, redact );                    // a doc-comment body can hold a pasted secret
             if( rankAdaptivePayload )                        // B0.3: tail entries carry a trimmed excerpt / no doc
@@ -6269,7 +6423,9 @@ struct JsonSigLens
 // and phase 2 appends. Mirrors sigRowHead()'s role on the XML side.
 inline std::string jsonSigRowHead( const IngestResult& ing, NodeId id, std::uint32_t fileId,
                                    const JsonSigLens& lens, bool pureSig,
-                                   std::string_view rootArg )   // R-R: same root the XML sibling relativizes against
+                                   std::string_view rootArg,      // R-R: same root the XML sibling relativizes against
+                                   std::uint32_t globalRank = 0 ) // d1: 1-based lens rank; 0 ⇒ key absent (the XML
+                                                                  //   sibling's SigRowFacts::rank contract, verbatim)
 {
     const Symbol& s = ing.symbols[id];
     char          num[ 64 ];
@@ -6303,6 +6459,13 @@ inline std::string jsonSigRowHead( const IngestResult& ing, NodeId id, std::uint
     if( pureSig )
     {
         head += ",\"pure\":true";
+    }
+    // d1: the rank fact closes the head (after pure), mirroring the XML row where r= closes the attribute
+    // run — appended last so every existing key adjacency a text-grep consumer relies on stays byte-stable.
+    if( globalRank > 0 )
+    {
+        std::snprintf( num, sizeof( num ), ",\"r\":%u", globalRank );
+        head += num;
     }
     return head;
 }
@@ -6483,7 +6646,7 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
 
             JsonSigEntry e;
             e.globalRank = globalRank;
-            e.head       = jsonSigRowHead( ing, id, f, lens, pureSig, rootArg );
+            e.head       = jsonSigRowHead( ing, id, f, lens, pureSig, rootArg, globalRank );   // d1: rank fact rides the row
             e.doc        = std::move( doc );
             e.sig        = std::move( sig );
             e.noteCount  = appendJsonNoteArray( e.notes, lens.noteIndex, symbolNoteTarget( lens.noteIndex, ing, s ) );   // §B1.3
