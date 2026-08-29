@@ -89,6 +89,13 @@ CONCEPT="how does resolution work"
 # est_tokens re-measures itself. Verified before re-pinning: with the two attrs, the legend clause and
 # est_tokens normalized out, old and new documents are byte-identical — no ranking, body or route byte
 # moved (route-neutrality, this golden's purpose, untouched; gate: test/forcompresscheck.sh arms 8-10).
+# RE-PIN 2026-08-29 (deep-tail lane): same cause as anchorcheck's re-pin of the same date — every ranked
+# <d> row carries its 1-based lens rank r=, the bundle gains the file-grain <tail> element (total="0" on
+# this one-directory fixture — emitted, never omitted) and the legend clause defining both (docs/EVALS.md
+# "Deep-tail serving"; gate test/deeptailcheck.sh). 2860 -> 3283 B (+423 B), est_tokens="1070" -> "1239".
+# Verified before re-pinning: with r=, the <tail> element, the tail legend clause and est_tokens
+# normalized out, old and new documents are byte-identical — no ranking, body or route byte moved
+# (route-neutrality, this golden's purpose, untouched).
 "$BIN" routefix --no-cache --for="$CONCEPT" --no-route >"$TMP/concept_noroute.xml" 2>/dev/null
 diff -q "$TMP/concept_noroute.xml" "$ROOT/test/routefix/golden_for.xml" >/dev/null \
     && ok "safe fallback: conceptual --for --no-route byte-identical to the pre-routing golden" \

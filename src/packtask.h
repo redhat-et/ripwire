@@ -191,8 +191,11 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
          // bundle at token-budget=800, which must stay conformant for that arm to mean anything) from 2072 B
          // to 2338 B against a 2171 B allowance. The headroom that existed was 99 B and this form is +85 B,
          // measured, not estimated. Every key is still named; the prose around them is what went.
+         // deep-tail d1 (2026-08-29): r= joins the explicit dictionary — same trap-#8 terseness, one key
+         // (the full deep-tail contract lives in the --for legend's own clause, docs/EVALS.md registration).
          "Row keys: n=name (chain it), id=canonical(when scoped), in=reuse-count (absent = not measured, never a false 0)"
-         ", l=line, p=path, t=kind, cx=cyclomatic, ccx=cognitive, rel=caller|callee; far=ranked but over 1 hop out; "
+         ", l=line, p=path, t=kind, cx=cyclomatic, ccx=cognitive, rel=caller|callee, r=rank in this ranking "
+         "(sort by r= for true ranker order); far=ranked but over 1 hop out; "
          "of_top denominator is per-section. "
          // graphrag-recon.md idea #1 (2026-08-20, S-effort harvest pick): callers corroborated by SEVERAL
          // top-K anchors outrank one tied to a single anchor — a pure re-sort of the SAME d1 edges, no new
