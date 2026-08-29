@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-before-symbol`](#insert-before-symbol-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--edit-plan`](#edit-plan-file) · [`--dry-run`](#dry-run-apply) · [`--safe-delete`](#safe-delete-sym) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-before-symbol`](#insert-before-symbol-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--edit-plan`](#edit-plan-file) · [`--dry-run`](#dry-run-apply) · [`--safe-delete`](#safe-delete-sym) · [`--slice`](#slice-sym-var) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor) · [`--agent`](#agent-codex) · [`--skipped`](#skipped)
 
@@ -2140,7 +2140,7 @@ $ ./build/ripwire . --edit-check=rankGraphTeleport
 </edit-check>
 ```
 
-**Shaped by:** `--impact`, `--edit-target-file`
+**Shaped by:** `--impact`, `--edit-target-file`, `--slice`
 
 **Caveats (stated by the binary):**
 
@@ -2209,6 +2209,18 @@ ambiguous_callers= names callers whose own calls include an ambiguously-resolved
 
 - ambiguous_callers= names callers whose own calls include an ambiguously-resolved one (g.ambOut) — a caveat, not a count of proven-wrong edges.
 - FACTS only: risk= names what was found — none-found (zero callers AND zero uses), untested-radius (a radius exists and none of it is test-covered), or uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict.
+
+### `--slice=SYM[:VAR]`
+
+**Answers:** NAME-BASED intra-procedural def-use slice of variable VAR inside the ONE uniquely-resolved definition SYM (statement-level def-use edges as a queryable primitive — the ARISE result, arXiv:2605.03117).
+
+One <s l= k= t=> row per line touching VAR, source order: k=def|use|both, t=param|decl|assign|call-arg|read (strongest role on the line), CDATA = the trimmed source line; defs=/uses= count occurrences. Bare --slice=SYM lists the sliceable locals (<v n= l= t=/> rows) so a caller can pick VAR. LIMITS in the legend, not implied: no alias analysis, no flow sensitivity, nested-scope shadowing may over-include. SYM matching several definition sites REFUSES (exit 1) listing the file:name spellings that pick one, like --edit-check. Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — other indexed languages refuse loudly (never an empty success). Single-root only.
+
+**Caveats (stated by the binary):**
+
+- LIMITS in the legend, not implied: no alias analysis, no flow sensitivity, nested-scope shadowing may over-include.
+- SYM matching several definition sites REFUSES (exit 1) listing the file:name spellings that pick one, like --edit-check.
+- Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — other indexed languages refuse loudly (never an empty success).
 
 ### `--pr-context[=BASEREF]`
 
