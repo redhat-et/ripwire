@@ -1204,7 +1204,7 @@ $ ./build/ripwire . --top-k=0 --expand=rankGraphTeleport
 ... [18 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--for`, `--pack-signatures`, `--outline`, `--compress`, `--hotspots`, `--run-timeout`, `--notes`
+**Shaped by:** `--top-k`, `--for`, `--pack-signatures`, `--outline`, `--compress`, `--hotspots`, `--edit-check`, `--run-timeout`
 
 **Caveats (stated by the binary):**
 
@@ -2113,7 +2113,7 @@ $ ./build/ripwire . --quality-delta --quality-ack --ack-only=zzznope
 
 **Answers:** fast per-symbol post-edit contract check: SYM's param count + publicness NOW vs git HEAD (unchanged/new-symbol/contract-change with was/now), plus its 1-hop callers with any call-site provably incompatible with the NEW arity flagged.
 
-A contract is PER DEFINITION, so a SYM matching several definition sites REFUSES (exit 1) and lists the file:name spellings that pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=.
+A contract is PER DEFINITION, so a SYM matching several definition sites REFUSES (exit 1) and lists the file:name spellings that pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=. A .ripwire_notes entry targeting SYM (or its file) rides along as a <note> child, the same row shape --for/--expand surface.
 
 **Try it**
 
