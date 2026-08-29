@@ -803,7 +803,16 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               it flows to the enrichment — at any ceiling at or above the default's effective total the\n"
         "                               <sigs> block is byte-identical to the default run's, so every body (or hop row) the default\n"
         "                               serves still fits. An explicit --pack-top-n is an explicit SIG posture and keeps the\n"
-        "                               whole-ceiling sig claim\n"
+        "                               whole-ceiling sig claim. --compress composes: the served bodies (auto/anchor and\n"
+        "                               --detail=N alike) go through the same comment-strip --expand uses, disclosed as\n"
+        "                               compress=\"1\" on the <bodies> element (nothing to strip on the compact route).\n"
+        "                               RANKING CONFIDENCE, disclosed not scored: the <ctx> root always carries\n"
+        "                               confidence=\"high|low\" margin_pct=\"N\" — derived from the SAME relevance-cliff gap\n"
+        "                               statistic --adaptive cuts at (no new scorer, no behavior change; the --json dialect\n"
+        "                               carries the same two keys). low means the ranking is FLAT (no material score cliff\n"
+        "                               and more positive matches than the head shows) — treat the set as a starting point,\n"
+        "                               not an answer; high means a material cliff inside the served head (margin_pct= is\n"
+        "                               that drop as a whole percent) or every positive match already shown\n"
         "    --signatures-only          (with --for) opt out of the terminal-by-default bundle: no auto bodies, no bundle=\"auto\"\n"
         "                               attribute — the signatures-only lens exactly as before. Contradicts --detail=N (refused\n"
         "                               together); --detail=N remains the explicit body knob and supersedes the automatic pick\n"
@@ -1040,7 +1049,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               BOTH the exact-name default and mode= auto-selection and keeps the classic undecorated shape; a\n"
         "                               SYM:START-END slice opts out of mode= auto-selection only (serving the whole file would invert\n"
         "                               an explicit narrowing) but still gets the exact-name top-k=0 default when it applies.\n"
-        "    --compress                 strip comments + collapse blank runs from --expand/--outline body output (~20-35%% token cut)\n"
+        "    --compress                 strip comments + collapse blank runs from SERVED BODIES (~20-35%% token cut): --expand/\n"
+        "                               --outline, --for's auto/anchor and --detail=N bodies, --pack-task, --from-trace and\n"
+        "                               --exemplar. Disclosed per bundle as compress=\"1\" on the <bodies> element; without the\n"
+        "                               flag, output is byte-identical. String literals survive; the ranked SET never changes.\n"
         "    --pack-top-n=N             pack the N top symbols' bodies  [--pack-budget-bytes=B]\n"
         "    --no-redact                emit source/doc text VERBATIM, redacting nothing\n"
         "                               REDACTED by default (high-confidence credential SHAPES only, precision over recall):\n"
@@ -3189,15 +3201,19 @@ inline void validateModifierGuards( Config& c ) noexcept
     }
 
     // --compress strips comments from body output — every call site is a body emitter: --expand/--outline
-    // (serialize.h packBodies/packOutline), --exemplar and --detail's top-N bodies (both inside the --for
-    // branch), --pack-task, and --from-trace (main.cpp PackTaskInputs/FromTraceInputs). Alone (none of those)
-    // it silently no-ops — verified: `ripwire <dir> --compress` is byte-identical to the plain map. Refuse
-    // loudly rather than let a caller believe they compressed something.
+    // (serialize.h packBodies/packOutline), --for's SERVED bodies (the T3 auto/anchor bundle and --detail's
+    // top-N, both inside the --for branch), --exemplar, --pack-task, and --from-trace (main.cpp
+    // PackTaskInputs/FromTraceInputs). Alone (none of those) it silently no-ops — verified: `ripwire <dir>
+    // --compress` is byte-identical to the plain map. Refuse loudly rather than let a caller believe they
+    // compressed something. Bare --for is admitted whole, not only --detail>0 (paper-shape lane, arXiv
+    // 2607.09691: served bodies are the tokens worth compressing): which route serves bodies is a RUN-time
+    // fact, so on the compact (conceptual) route the flag has nothing to strip and no-ops, disclosed by the
+    // absent compress= attribute (gate: test/forcompresscheck.sh, the stated residual).
     if( c.compress && c.expand.empty() && c.outline.empty() && !c.packTaskFlag && c.fromTrace.empty()
-        && c.exemplar.empty() && !( c.detail > 0 && !c.forTask.empty() ) )
+        && c.exemplar.empty() && c.forTask.empty() )
     {
-        std::fprintf( stderr, "ripwire: --compress strips comments from --expand/--outline body output — pass one "
-                              "(e.g. ripwire <dir> --expand=SYM --compress)\n" );
+        std::fprintf( stderr, "ripwire: --compress strips comments from served-body output (expand/outline/for/"
+                              "pack-task/from-trace/exemplar) — pass one (e.g. ripwire <dir> --expand=SYM --compress)\n" );
         c.ok = false;
     }
 

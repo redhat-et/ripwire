@@ -31,7 +31,8 @@
 #
 # ── CEILING MARGIN, RE-ANCHORED 2026-08-22 (T3 disclosure-gap fix), RE-MEASURED 2026-08-23 AT LANDING ──
 # ── READ THIS BEFORE DEBUGGING A RED ──
-# The tight XML arm runs at --token-budget=850 with **est_tokens=815: 35 tokens of headroom.**
+# The tight XML arm ran at --token-budget=850 with **est_tokens=815: 35 tokens of headroom** (superseded
+# by the 2026-08-28 re-anchor below).
 #
 #   · baseline binary at adb0831 (wave-2 close):    est_tokens=747 of 800 — 53 tokens of headroom
 #   · wave-3 head (P5-4 recorded, not re-anchored): est_tokens=798 of 800 —  2 tokens of headroom
@@ -56,6 +57,18 @@
 # so 850 still buys real headroom rather than a different selection. And 800 is now 15 tokens SHORT
 # (est_tokens 815 > 800), which is the re-anchor earning its keep rather than an argument against it.
 # The corpus is a generated temp fixture, not the live tree, so the number does NOT move with repo growth.
+#
+# ── RE-ANCHORED 2026-08-28 (paper-shape lane): 850 → 950. ──
+# The tight XML arm now runs at --token-budget=950 with **est_tokens=917: 33 tokens of headroom.**
+# ONE identified change, per this gate's own instruction below: --for's <ctx> root now always carries the
+# ranking-confidence facts confidence=/margin_pct= plus their terse legend clause (~250 B on every --for,
+# derived from the SAME adaptiveCut gap statistic the adaptive flag cuts at — arXiv 2607.24882's
+# abstention axis; gate test/forcompresscheck.sh arms 8-10). The re-anchor is its own commit immediately
+# preceding that change: at 950 the pre-change binary's 815 still passes, so the history is green at
+# every step — the same discipline as the 800→850 move recorded above. Charged, not exempted, in the
+# explicit-budget regime (the exemption is default-regime only, main.cpp confidenceExemptBytes), and the
+# note is additionally a ladder rung zero there — neither could rescue 850 because this fixture's floor
+# is notes + first-entry-whole, neither of which may trim.
 #
 # CONSEQUENCE FOR THE NEXT LANE: **any** addition to --for's legend or header, of any size, turns this arm
 # red — and it will read as YOUR regression when it is a ratchet. If you added a clause to --for and this
@@ -122,8 +135,8 @@ jsonRows(){ "$BIN" "$CORPUS" --for="$TASK" --token-budget="$1" --json 2>/dev/nul
             | python3 -c 'import sys,json; d=json.load(sys.stdin); print(sum(len(f["symbols"]) for f in d["sigs"]))' 2>/dev/null; }
 
 # ── arm 1: est_tokens must fit the ceiling the user asked for, in BOTH dialects ────────────────────
-# (tight budget 850, re-anchored 2026-08-22 — see the CEILING MARGIN block above for the arithmetic)
-for tb in 850 1500 3000; do
+# (tight budget 950, re-anchored 2026-08-28 — see the CEILING MARGIN block above for the arithmetic)
+for tb in 950 1500 3000; do
   xe="$( xmlEst "$tb" )"; je="$( jsonEst "$tb" )"
   if [ -z "$xe" ] || [ -z "$je" ]; then no "budget=$tb: could not read est_tokens from one of the dialects (xml='$xe' json='$je')"; continue; fi
   if [ "$xe" -le "$tb" ]; then ok "budget=$tb: XML est_tokens=$xe fits the ceiling"
@@ -134,7 +147,7 @@ done
 
 # ── arm 2: the two dialects select COMPARABLE row counts (they need not be equal) ──────────────────
 # Before the fix the XML lens bought 2-2.4x the rows with the same budget, because notes were free.
-for tb in 850 1500 3000; do
+for tb in 950 1500 3000; do
   xr="$( xmlRows "$tb" )"; jr="$( jsonRows "$tb" )"
   if [ -z "$jr" ] || [ "$jr" -eq 0 ]; then no "budget=$tb: JSON selected no rows — the comparison has no denominator"; continue; fi
   if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge $(( jr * 7 / 10 )) ]; then

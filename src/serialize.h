@@ -4181,9 +4181,14 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     // capped= the bit that always rides with shown=. `total` counts the ids the CALLER handed in (invalid ids
     // excluded — they were never a request this function could answer), so capped="1" covers every reason a
     // requested body is absent: the byte budget, an unreadable span, a file that vanished.
-    char open[ 96 ];
-    std::snprintf( open, sizeof( open ), "<bodies shown=\"%zu\" total=\"%zu\" capped=\"%d\">",
-                   shownCount, requestedCount, shownCount < requestedCount ? 1 : 0 );
+    // compress="1" (paper-shape lane): the per-bundle disclosure that the bodies above went through the
+    // compressBody pass — a MODE fact, so it rides the flag on every emitter (shown="0" included), and its
+    // absence is the flagless byte-identity contract (test/forcompresscheck.sh arm 6). The two hand-formatted
+    // <bodies> wrappers in packtask.h restate it for the same reason they restate shown=/total=.
+    char open[ 112 ];
+    std::snprintf( open, sizeof( open ), "<bodies shown=\"%zu\" total=\"%zu\" capped=\"%d\"%s>",
+                   shownCount, requestedCount, shownCount < requestedCount ? 1 : 0,
+                   compress ? " compress=\"1\"" : "" );
     w.write( open );
     w.write( children );
     w.write( "</bodies>" );

@@ -61,7 +61,7 @@ guard()
 
 # ── (A) RED — broken combos, each refuses naming both flags ──────────────────────────────────────────────
 guard "--with-history alone"          '--with-history modifies --doc-drift or --whereis=SYM'         "$NOROOT" --with-history
-guard "--compress alone"              '--compress strips comments from --expand/--outline'            "$NOROOT" --compress
+guard "--compress alone"              '--compress strips comments from served-body output'            "$NOROOT" --compress
 guard "--grep-context alone"          '--grep-context=N (or --grep-before/--grep-after) modifies'     "$NOROOT" --grep-context=3
 guard "--grep-before alone"           '--grep-context=N (or --grep-before/--grep-after) modifies'     "$NOROOT" --grep-before=2
 guard "--grep-after alone"            '--grep-context=N (or --grep-before/--grep-after) modifies'     "$NOROOT" --grep-after=2
