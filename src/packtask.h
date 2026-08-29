@@ -863,7 +863,8 @@ inline std::uint32_t bodyMaskRankScore( std::uint32_t mask, std::size_t n )
 // was shown — the common case once the budget clears the whole set.
 template<class EscFn>
 inline std::string restatePackTaskBodiesWrapper( const IngestResult& ing, const std::string& bodiesXml,
-                                                  const std::vector<NodeId>& bodyIds, EmittedBodies& emitted, EscFn&& ex )
+                                                  const std::vector<NodeId>& bodyIds, EmittedBodies& emitted, EscFn&& ex,
+                                                  bool compress = false )
 {
     if( bodiesXml.empty() || emitted.kept.size() >= bodyIds.size() )
     {
@@ -895,8 +896,12 @@ inline std::string restatePackTaskBodiesWrapper( const IngestResult& ing, const 
         DEGRADED_PATH_ALERT( "pack-task: <bodies> did not have the expected open/close shape — restated omissions dropped" );
         return bodiesXml;
     }
-    char open[ 96 ];
-    std::snprintf( open, sizeof( open ), "<bodies shown=\"%zu\" total=\"%zu\" capped=\"1\">", emitted.kept.size(), bodyIds.size() );
+    // compress="1" restated with shown=/total=: this wrapper REPLACES packBodies' own open tag, so the
+    // per-bundle compression disclosure (serialize.h packBodies) must survive the rewrite or the restated
+    // bundle would silently claim uncompressed bodies (test/forcompresscheck.sh arm 5).
+    char open[ 112 ];
+    std::snprintf( open, sizeof( open ), "<bodies shown=\"%zu\" total=\"%zu\" capped=\"1\"%s>", emitted.kept.size(), bodyIds.size(),
+                   compress ? " compress=\"1\"" : "" );
     std::string out = open;
     out += bodiesXml.substr( openEnd + 1, bodiesXml.size() - 9 - ( openEnd + 1 ) );
     out += markers;
@@ -1329,7 +1334,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         bodiesKept = emittedBodies.kept.size();
         // §W2-K: restate total=/capped= and splice in omission markers for whatever OUR pre-selection
         // dropped that packBodies itself never saw — see restatePackTaskBodiesWrapper's own comment.
-        bodiesStr  = restatePackTaskBodiesWrapper( ing, bodiesStr, bodyIds, emittedBodies, ex );
+        bodiesStr  = restatePackTaskBodiesWrapper( ing, bodiesStr, bodyIds, emittedBodies, ex, in.compress );
     }
     else
     {
@@ -1348,9 +1353,9 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // back 5692 B against a 5428 B allowance). The bare wrapper tag is a FIXED, small cost — the
         // same shape restatePackTaskBodiesWrapper hand-formats a few lines below for the same reason
         // (it cannot call packBodies again either) — so it is safe to emit unconditionally here.
-        char tag[ 96 ];
-        std::snprintf( tag, sizeof( tag ), "<bodies shown=\"0\" total=\"%zu\" capped=\"%d\"></bodies>",
-                       bodyIds.size(), bodyIds.empty() ? 0 : 1 );
+        char tag[ 112 ];
+        std::snprintf( tag, sizeof( tag ), "<bodies shown=\"0\" total=\"%zu\" capped=\"%d\"%s></bodies>",
+                       bodyIds.size(), bodyIds.empty() ? 0 : 1, in.compress ? " compress=\"1\"" : "" );
         bodiesStr = tag;
         // bodiesKept stays 0 (its declared default) — matches shown="0" exactly.
     }

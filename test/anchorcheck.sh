@@ -76,6 +76,13 @@ QUERY="frobnicate widget cache"
 # every OTHER root=-carrying verb's legend already closed (R-E, 2026-08-17). Every ranking and body byte
 # is identical; the only moving bytes are this new trailing comment and est_tokens re-measuring itself
 # (2.5 B/tok markup rate x 126 B extra = the +50 tok, consistent with every prior re-pin's arithmetic).
+# RE-PIN 2026-08-28 (paper-shape lane): 2376 -> 2632 B (+256 B), est_tokens="877" -> "979".
+# CAUSE: --for's <ctx> root now always carries the ranking-confidence facts confidence=/margin_pct= plus
+# their terse legend clause (derived from the SAME adaptiveCut gap statistic the adaptive flag cuts at;
+# arXiv 2607.24882's abstention axis, disclosure only — gate test/forcompresscheck.sh arms 8-10).
+# Verified before re-pinning: with the two attrs, the legend clause and est_tokens normalized out, old
+# and new documents are byte-identical — every ranking and body byte is unmoved, which is the
+# anchor-neutrality property this golden exists for.
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route >"$TMP/plain_full.xml" 2>/dev/null
 diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \
     && ok "golden-neutral: plain --for --no-route byte-identical to the pre---anchor golden" \

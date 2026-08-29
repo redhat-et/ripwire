@@ -174,7 +174,7 @@ $ ./build/ripwire . --help-task="write a cheerful release announcement"
 
 **Answers:** the task lens: ranked signatures + metrics framed for reuse.
 
-The bundle enforces a ~7.5KB default payload budget (tail entries trim first; <sigs capped="1"> marks it) — an explicit --token-budget=N overrides the default at the conservative byte rate (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens. TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance — whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6). The <ctx> root discloses it: bundle="auto" bodies="N" (bodies="0" reason="budget" when none fit) — on EVERY auto-mode run: a ceiling the signatures alone exhaust still carries the attribute (legend and empty <bodies> shell dropped there; only the attribute has reserved bytes), and --for --json, which serves no bodies by design, says so with "bundle":"sigs". Only the caller-chosen postures (--signatures-only, --detail=N) are attribute-free. ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own body or NO body — never a same-named doc section, type stub or re-export shim from another file standing in for it. If the anchor's own body does not fit, the bundle serves nothing and says so, and the per-item over-budget comment names what was dropped. COMPACT ON THE CONCEPTUAL ROUTE: a query that anchors nothing (subtoken+body) gets the ranked map plus a <hops> section — the same candidate head's ONE-HOP callee signatures, the <calls> block a body carries — and NO body CDATA, disclosed as bundle="compact" bodies="0" reason="compact-route". Read the map, then --expand=SYM the one you want. --auto-bodies restores the body walk there. That shape discloses on every run too: a ceiling the signatures alone exhaust carries bundle="compact" bodies="0" reason="budget" — three distinct reasons, never collapsed (compact-route = the route chose edges, no_candidates = nothing scored, budget = the ceiling was spent). An explicit --token-budget=N is a hard ceiling, split so a wider ceiling never buys less: the signature side's claim is capped at the DEFAULT ~7.5KB sig budget and every byte beyond it flows to the enrichment — at any ceiling at or above the default's effective total the <sigs> block is byte-identical to the default run's, so every body (or hop row) the default serves still fits. An explicit --pack-top-n is an explicit SIG posture and keeps the whole-ceiling sig claim
+The bundle enforces a ~7.5KB default payload budget (tail entries trim first; <sigs capped="1"> marks it) — an explicit --token-budget=N overrides the default at the conservative byte rate (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens. TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance — whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6). The <ctx> root discloses it: bundle="auto" bodies="N" (bodies="0" reason="budget" when none fit) — on EVERY auto-mode run: a ceiling the signatures alone exhaust still carries the attribute (legend and empty <bodies> shell dropped there; only the attribute has reserved bytes), and --for --json, which serves no bodies by design, says so with "bundle":"sigs". Only the caller-chosen postures (--signatures-only, --detail=N) are attribute-free. ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own body or NO body — never a same-named doc section, type stub or re-export shim from another file standing in for it. If the anchor's own body does not fit, the bundle serves nothing and says so, and the per-item over-budget comment names what was dropped. COMPACT ON THE CONCEPTUAL ROUTE: a query that anchors nothing (subtoken+body) gets the ranked map plus a <hops> section — the same candidate head's ONE-HOP callee signatures, the <calls> block a body carries — and NO body CDATA, disclosed as bundle="compact" bodies="0" reason="compact-route". Read the map, then --expand=SYM the one you want. --auto-bodies restores the body walk there. That shape discloses on every run too: a ceiling the signatures alone exhaust carries bundle="compact" bodies="0" reason="budget" — three distinct reasons, never collapsed (compact-route = the route chose edges, no_candidates = nothing scored, budget = the ceiling was spent). An explicit --token-budget=N is a hard ceiling, split so a wider ceiling never buys less: the signature side's claim is capped at the DEFAULT ~7.5KB sig budget and every byte beyond it flows to the enrichment — at any ceiling at or above the default's effective total the <sigs> block is byte-identical to the default run's, so every body (or hop row) the default serves still fits. An explicit --pack-top-n is an explicit SIG posture and keeps the whole-ceiling sig claim. --compress composes: the served bodies (auto/anchor and --detail=N alike) go through the same comment-strip --expand uses, disclosed as compress="1" on the <bodies> element (nothing to strip on the compact route). RANKING CONFIDENCE, disclosed not scored: the <ctx> root always carries confidence="high|low" margin_pct="N" — derived from the SAME relevance-cliff gap statistic --adaptive cuts at (no new scorer, no behavior change; the --json dialect carries the same two keys). low means the ranking is FLAT (no material score cliff and more positive matches than the head shows) — treat the set as a starting point, not an answer; high means a material cliff inside the served head (margin_pct= is that drop as a whole percent) or every positive match already shown
 
 **Try it**
 
@@ -313,7 +313,7 @@ $ ./build/ripwire . --for="tree-sitter parse of a source file" --adaptive
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--detail`
+**Shaped by:** `--for`, `--detail`
 
 **Caveats (stated by the binary):**
 
@@ -406,7 +406,7 @@ $ ./build/ripwire . --exemplar="format byte sizes for humans"
 </exemplar>
 ```
 
-**Shaped by:** `--metrics`, `--json`, `--index-out`
+**Shaped by:** `--compress`, `--metrics`, `--json`, `--index-out`
 
 ### `--recall=TASK`
 
@@ -1111,7 +1111,7 @@ $ ./build/ripwire . --for="pagerank power iteration" --detail=2
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--for`, `--signatures-only`, `--auto-bodies`, `--owners`, `--plan`, `--abi`, `--flip`, `--from-trace`
+**Shaped by:** `--for`, `--signatures-only`, `--auto-bodies`, `--compress`, `--owners`, `--plan`, `--abi`, `--flip`
 
 ### `--pack-signatures`
 
@@ -1213,7 +1213,9 @@ $ ./build/ripwire . --top-k=0 --expand=rankGraphTeleport
 
 ### `--compress`
 
-**Answers:** strip comments + collapse blank runs from --expand/--outline body output (~20-35% token cut)
+**Answers:** strip comments + collapse blank runs from SERVED BODIES (~20-35% token cut): --expand/ --outline, --for's auto/anchor and --detail=N bodies, --pack-task, --from-trace and --exemplar.
+
+Disclosed per bundle as compress="1" on the <bodies> element; without the flag, output is byte-identical. String literals survive; the ranked SET never changes.
 
 **Try it**
 
@@ -1237,6 +1239,12 @@ $ ./build/ripwire . --expand=compressBody --top-k=0 --compress
     while( i < N )
 ... [17 more line(s); run it to see the whole thing]
 ```
+
+**Shaped by:** `--for`
+
+**Caveats (stated by the binary):**
+
+- the ranked SET never changes.
 
 ### `--pack-top-n=N`
 
@@ -2530,7 +2538,7 @@ AddressSanitizer:DEADLYSIGNAL
 ==41337==ABORTING
 ```
 
-**Shaped by:** `--top-k`, `--token-budget`, `--help-task`, `--run-trace`, `--json`
+**Shaped by:** `--top-k`, `--token-budget`, `--help-task`, `--compress`, `--run-trace`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -2603,7 +2611,7 @@ $ ./build/ripwire . --pack-task="add a new output format flag to the CLI"
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--token-budget`, `--for`, `--test-gate`, `--expand`, `--partition`, `--with-graph`, `--json`
+**Shaped by:** `--top-k`, `--token-budget`, `--for`, `--test-gate`, `--expand`, `--compress`, `--partition`, `--with-graph`
 
 **Caveats (stated by the binary):**
 

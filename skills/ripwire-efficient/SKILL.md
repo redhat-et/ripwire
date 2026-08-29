@@ -90,7 +90,7 @@ only the files it surfaces.
 | you HAVE a stack trace / sanitizer report / compiler error | `--from-trace=FILE` (`-`=stdin) — pipe the raw text in, don't hand-translate frames into a query |
 | a question the fixed verbs don't have | `--graph-query='and(callers(name("X"),2),kind(all,fn))'` |
 | ONE symbol in full | `--expand=SYM` (body + inline callee sigs) — not its whole file. Add `--compress` for ~20-35% off the body |
-| signatures only | `--pack-signatures` (bodies already elided — `--compress` is a no-op here; it only affects `--expand`/`--outline`) |
+| signatures only | `--pack-signatures` (bodies already elided — `--compress` is a no-op here; it affects SERVED BODIES: `--expand`/`--outline`, `--for`'s auto/anchor and `--detail=N` bodies, `--pack-task`, `--from-trace`, `--exemplar` — disclosed as `compress="1"` on the `<bodies>` element) |
 | a FLAT-LIST verb's output, cheaper | `--format=columnar` on `--callers`/`--callees`/`--uses`/`--impact`/`--pr-context` — a `<paths>` table + parallel name/line/kind arrays instead of repeated per-row markup, ~50%+ fewer tokens, same data. The map itself is unaffected — this only reshapes the flat-list verbs. |
 | `--for`/grep/regex schema prose is already known | `--legend=compact` — keep the evidence rows and emit a versioned schema id instead of repeating the full legend. Default/`--legend=full` remains byte-compatible; compact is for a consumer that already knows that schema version. |
 | `--for`/`--query` returning more than you need | `--adaptive` — cuts the ranked result at the relevance CLIFF (largest relative score gap) instead of a fixed top-k; a sharp query returns few, a flat/broad one still hits the ceiling. Prints `[adaptive: kept K of N ...]` so you can see the cut. |
