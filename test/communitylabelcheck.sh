@@ -65,7 +65,7 @@ if any(re.search(r"(?:#|\bcommunity[-_ ]?)\d+$", label, re.I) for label in label
 
 # §P6.2: the anchor symbol (between "::" and "@") must not be a trivial accessor — a getter/setter or an
 # STL-container-op name tells a reader nothing about a 5+-member module ("push_back@svector.h", "empty@notes.h"
-# were the real-repo instances that motivated this). Mirrors main.cpp's isAccessorName() table; kept in sync by
+# were the real-repo instances that motivated this). Mirrors verbs_report.h's isAccessorName() table (moved out of main.cpp in the 2026-08-29 verb-family split); kept in sync by
 # hand since the gate has no way to import the binary's constexpr table. test/zoomfix/core/engine.cpp plants an
 # `empty()` helper with the highest fan-in in its cluster specifically to prove the picker skips it.
 ACCESSOR_NAMES = {
