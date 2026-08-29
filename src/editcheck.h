@@ -444,9 +444,15 @@ editCheckCallers( const IngestResult& ing, const Graph& g, std::span<const NodeI
 // THE bundle assembler for an ALREADY-RESOLVED `focus` symbol: builds the <edit-check>…</edit-check> XML
 // (status + was/now on contract-change + the flagged 1-hop callers) and returns it as a string — never
 // touches stdout. `root`/`maxFileBytes`/`excludes` feed the HEAD-baseline comparison (see
-// editCheckContractVsHead's root-spelling note).
+// editCheckContractVsHead's root-spelling note). `ni` is the L3 field-notes index (notes.h) — the SAME
+// index --for/--expand read, reused verbatim via serialize.h's renderNoteChildren/symbolNoteTarget/
+// fileNoteTarget so the matching + row grammar cannot drift between verbs. Defaults to nullptr, which stays
+// the pre-existing behaviour byte-for-byte (renderNoteChildren is null-safe and emits nothing) — the CLI
+// caller (main.cpp's runEditCheck) passes the loaded index; the MCP edit_check verb (mcpverbs.h) is
+// deliberately left on the nullptr default for this round.
 inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g, const std::string& root,
-                                        std::size_t maxFileBytes, const std::vector<std::string>& excludes, NodeId focus )
+                                        std::size_t maxFileBytes, const std::vector<std::string>& excludes, NodeId focus,
+                                        const notes::NoteIndex* ni = nullptr )
 {
     const Symbol& fsym = ing.symbols[ focus ];
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the ONE
@@ -575,6 +581,13 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // after every pre-existing attribute, so no substring-adjacency assertion in test/ can break).
     if( ecSingleRoot ) { out += " root=\"";  out += ex( root );  out += "\""; }
     out += ">";
+    // L3/D5 note surfacing (paper-noteedit): a note targeting THIS symbol (its canonical id) or the FILE it
+    // is defined in rides as a <note> child of <edit-check>, same shape/order/escaping renderNoteChildren
+    // already gives --for/--expand — reused verbatim, never re-matched here. Symbol notes first (the more
+    // specific target), then file notes. Both calls are null-safe and return "" when `ni` is nullptr, so a
+    // no-notes run (or the MCP call site, which passes no index this round) emits zero new bytes.
+    out += renderNoteChildren( ni, symbolNoteTarget( ni, ing, fsym ), esc );
+    out += renderNoteChildren( ni, fileNoteTarget( ni, ing.files[ fsym.fileId ] ), esc );
     // §B11.3 — one row per FOLDED definition, so the set behind the scalar is nameable. Emitted only above
     // defs="1" (at 1 the row would restate the root's own p=/t=, and params_now already IS its parameter
     // count — a stated rule in the legend, not a silent omission). Order is `overloadNodes`' own ascending
