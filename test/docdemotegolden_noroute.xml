@@ -1,1 +1,80 @@
-<!-- ripwire candidates: flat top K export for an external reranker. r=rank(1 based) s=SCORE n=name id=canonical k=KIND-tag p=path l=line. Note k= is the kind here and the PageRank score in the ranked map; on this row the score is s=. Root: count= rows exported of total= RANKED CORPUS symbols (total is the corpus size, never a match count), capped="1" means the top-k cut dropped some; route= names the ranker (s= is comparable only within one route); anchored= counts query-mention lifts (0 = the anchor ran and moved nothing); weak="1" means the top raw lexical score is below the confidence bar, so these rows rest on thin textual evidence. --><candidates count="19" total="19" capped="0" route="no-route" anchored="0"><cand r="1" s="27.2859" n="Bug report" id="Bug report" k="sec" p=".github/ISSUE_TEMPLATE/bug_report.md" l="1"><sig># Bug report</sig></cand><cand r="2" s="27.2859" n="bug_report" id="bug_report" k="sec" p=".github/ISSUE_TEMPLATE/bug_report.md" l="1"><sig># Bug report **Describe the bug** A clear and concise description of what the bug is. **Steps to reproduce** Steps to reproduce the behavior: 1. Go to the page and open it 2. Pin a page and flush the cache 3. See the error **Expected behavi</sig></cand><cand r="3" s="7.53425" n="PageCache" id="src/pagecache.py::PageCache::PageCache" k="cls" p="src/pagecache.py" l="4"><sig>class PageCache:</sig></cand><cand r="4" s="6.85859" n="CONTRIBUTING" id="CONTRIBUTING" k="sec" p="CONTRIBUTING.md" l="1"><sig># Contributing Thanks for reporting a bug. Please describe the bug, list the steps to reproduce it, and state the expected behavior before opening a pull request about the page cache, its eviction policy, or a pinned page during a flush.</sig></cand><cand r="5" s="6.85859" n="Contributing" id="Contributing" k="sec" p="CONTRIBUTING.md" l="1"><sig># Contributing</sig></cand><cand r="6" s="6.76333" n="pin_page" id="src/pagecache.py::PageCache::pin_page" k="fn" p="src/pagecache.py" l="12"><sig>def pin_page( self, page_id ):</sig></cand><cand r="7" s="5.82997" n="Tier probe" id="Tier probe" k="sec" p=".github/ISSUE_TEMPLATE/tier_probe.md" l="1"><sig># Tier probe</sig></cand><cand r="8" s="5.82997" n="tier_probe" id="tier_probe" k="sec" p=".github/ISSUE_TEMPLATE/tier_probe.md" l="1"><sig># Tier probe A pinned page, an eviction, and a flush of the page cache described in exactly the same words twice, so two documents differing only in where they live can be compared directly. Describe the bug, the steps to reproduce, and the</sig></cand><cand r="9" s="5.82997" n="Tier probe" id="Tier probe" k="sec" p="notes/tier_probe.md" l="1"><sig># Tier probe</sig></cand><cand r="10" s="5.82997" n="tier_probe" id="tier_probe" k="sec" p="notes/tier_probe.md" l="1"><sig># Tier probe A pinned page, an eviction, and a flush of the page cache described in exactly the same words twice, so two documents differing only in where they live can be compared directly. Describe the bug, the steps to reproduce, and the</sig></cand><cand r="11" s="4.45425" n="evict_one" id="evict_one" k="fn" p="src/evictor.py" l="4"><sig>def evict_one( cache ):</sig></cand><cand r="12" s="4.43971" n="flush_cache" id="src/pagecache.py::PageCache::flush_cache" k="fn" p="src/pagecache.py" l="25"><sig>def flush_cache( self ):</sig></cand><cand r="13" s="4.26824" n="request_page" id="src/pagecache.py::PageCache::request_page" k="fn" p="src/pagecache.py" l="16"><sig>def request_page( self, page_id ):</sig></cand><cand r="14" s="2.34859" n="Paging design" id="Paging design" k="sec" p="notes/paging_design.md" l="1"><sig># Paging design</sig></cand><cand r="15" s="2.34859" n="paging_design" id="paging_design" k="sec" p="notes/paging_design.md" l="1"><sig># Paging design The page cache holds a fixed number of pages. A pinned page is one the reader still holds</sig></cand><cand r="16" s="1.94984" n="Unreleased" id="CHANGELOG.md::Changelog::Unreleased" k="sec" p="CHANGELOG.md" l="3"><sig>## Unreleased</sig></cand><cand r="17" s="1.93973" n="CHANGELOG" id="CHANGELOG" k="sec" p="CHANGELOG.md" l="1"><sig># Changelog ## Unreleased - Fixed the RuntimeError raised during eviction of a pinned page in the page cache during flush. The traceback pointed at runpy and at the exec of run_globals in _run_module_as_main, so the failure read as a startu</sig></cand><cand r="18" s="1.93973" n="Changelog" id="Changelog" k="sec" p="CHANGELOG.md" l="1"><sig># Changelog</sig></cand><cand r="19" s="0.115808" n="__init__" id="src/pagecache.py::PageCache::__init__" k="fn" p="src/pagecache.py" l="7"><sig>def __init__( self, capacity ):</sig></cand></candidates>
+<ctx task="**Describe the bug**&#10;A clear and concise description of what the bug is: the flush drops a pinned page.&#10;&#10;**Steps to reproduce**&#10;Steps to reproduce the behavior:&#10;1. Go to the page and open it&#10;2. See the error&#10;&#10;**Expected behavior**&#10;A clear and concise description of what you expected to happen.&#10;&#10;**Screenshots**&#10;If applicable, add screenshots to help explain your problem.&#10;&#10;**Additional context**&#10;Add any other context about the problem here, including the version and the platform." root="docdemotefix" confidence="high" margin_pct="94" bundle="auto" bodies="6"><!-- ripwire lens for "**Describe the bug** A clear and concise description of what the bug is: the flush drops a pinned page.  **Steps to reproduce** Steps to reproduce the behavior: 1. Go to the page and open it 2. See the error  **Expected behavior** A clear and concise description of what you expected to happen.  **Screenshots** If applicable, add screenshots to help explain your problem.  **Additional context** Add any other context about the problem here, including the version and the platform." [relevance floor: kept 19 of 40 - the other 21 scored zero on this query, so the bundle shrank instead of padding] [confidence= derives from the ranked head's largest relative score drop (margin_pct=, whole percent, 0 = none; the same gap the adaptive flag cuts at). low = flat ranking: treat the set as a starting point, not an answer]: reusable building blocks + quality facts for what you're about to touch (cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) — prefer composing/reusing these; watch the high-churn/high-amp/cloned ones; bundle=auto: the top-ranked FULL bodies ride inline after the signatures in a bodies section (bodies=N on this root counts them; bodies=0 reason=budget when none fit the remaining budget whole; the signatures-only flag (no-bodies mode) opts out) — read them here instead of opening the files. The bodies element discloses the house way: total=requested, shown=printed, capped=1 when they differ; each body's calls child lists its callee signatures, total= always, shown=/capped= only when that list is cut --><!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged). est_tokens="3029" --><sigs><f p=".github/ISSUE_TEMPLATE/bug_report.md"><d l="1" n="Bug report" cx="0" ccx="0" in="0"># Bug report</d><d l="1" n="bug_report" cx="0" ccx="0" in="0"># Bug report **Describe the bug** A clear and concise description of what the bug is. **Steps to reproduce** Steps to reproduce the behavior: 1. Go to the page and open it 2. Pin a page and flush the cache 3. See the error **Expected behavi</d></f><f p="src/pagecache.py"><d l="4" n="PageCache" id="src/pagecache.py::PageCache::PageCache" cx="0" ccx="0" in="0">class PageCache:</d><d l="7" n="__init__" id="src/pagecache.py::PageCache::__init__" cx="1" ccx="0" in="0">def __init__( self, capacity ):</d><d l="12" n="pin_page" id="src/pagecache.py::PageCache::pin_page" cx="1" ccx="0" in="0">def pin_page( self, page_id ):</d><d l="16" n="request_page" id="src/pagecache.py::PageCache::request_page" cx="3" ccx="2" in="0">def request_page( self, page_id ):</d><d l="25" n="flush_cache" id="src/pagecache.py::PageCache::flush_cache" cx="3" ccx="3" in="0">def flush_cache( self ):</d></f><f p="CONTRIBUTING.md"><d l="1" n="CONTRIBUTING" cx="0" ccx="0" in="0"># Contributing Thanks for reporting a bug. Please describe the bug, list the steps to reproduce it, and state the expected behavior before opening a pull request about the page cache, its eviction policy, or a pinned page during a flush.</d><d l="1" n="Contributing" cx="0" ccx="0" in="0"># Contributing</d></f><f p=".github/ISSUE_TEMPLATE/tier_probe.md"><d l="1" n="Tier probe" cx="0" ccx="0" in="0"># Tier probe</d><d l="1" n="tier_probe" cx="0" ccx="0" in="0"># Tier probe A pinned page, an eviction, and a flush of the page cache described in exactly the same words twice, so two documents differing only in where they live can be compared directly. Describe the bug, the steps to reproduce, and the</d></f><f p="notes/tier_probe.md"><d l="1" n="Tier probe" cx="0" ccx="0" in="0"># Tier probe</d><d l="1" n="tier_probe" cx="0" ccx="0" in="0"># Tier probe A pinned page, an eviction, and a flush of the page cache described in exactly the same words twice, so two documents differing only in where they live can be compared directly. Describe the bug, the steps to reproduce, and the</d></f><f p="src/evictor.py"><d l="4" n="evict_one" cx="3" ccx="3" in="1" amp="1">def evict_one( cache ):</d></f><f p="notes/paging_design.md"><d l="1" n="Paging design" cx="0" ccx="0" in="0"># Paging design</d><d l="1" n="paging_design" cx="0" ccx="0" in="0"># Paging design The page cache holds a fixed number of pages. A pinned page is one the reader still holds</d></f><f p="CHANGELOG.md"><d l="1" n="CHANGELOG" cx="0" ccx="0" in="0"># Changelog ## Unreleased - Fixed the RuntimeError raised during eviction of a pinned page in the page cache during flush. The traceback pointed at runpy and at the exec of run_globals in _run_module_as_main, so the failure read as a startu</d><d l="1" n="Changelog" cx="0" ccx="0" in="0"># Changelog</d><d l="3" n="Unreleased" id="CHANGELOG.md::Changelog::Unreleased" cx="0" ccx="0" in="0">## Unreleased</d></f></sigs><bodies shown="6" total="6" capped="0"><b t="sec" l="1" p=".github/ISSUE_TEMPLATE/bug_report.md" n="Bug report"><![CDATA[# Bug report
+
+**Describe the bug**
+A clear and concise description of what the bug is.
+
+**Steps to reproduce**
+Steps to reproduce the behavior:
+1. Go to the page and open it
+2. Pin a page and flush the cache
+3. See the error
+
+**Expected behavior**
+A clear and concise description of what you expected to happen.
+
+**Screenshots**
+If applicable, add screenshots to help explain your problem.
+
+**Additional context**
+Add any other context about the problem here, including the version and the
+platform. A pinned page, an eviction, or a flush of the page cache is worth
+describing precisely.
+]]></b><b t="sec" l="1" p=".github/ISSUE_TEMPLATE/bug_report.md" n="bug_report"><![CDATA[# Bug report
+
+**Describe the bug**
+A clear and concise description of what the bug is.
+
+**Steps to reproduce**
+Steps to reproduce the behavior:
+1. Go to the page and open it
+2. Pin a page and flush the cache
+3. See the error
+
+**Expected behavior**
+A clear and concise description of what you expected to happen.
+
+**Screenshots**
+If applicable, add screenshots to help explain your problem.
+
+**Additional context**
+Add any other context about the problem here, including the version and the
+platform. A pinned page, an eviction, or a flush of the page cache is worth
+describing precisely.
+]]></b><b t="cls" l="4" p="src/pagecache.py" n="PageCache"><![CDATA[class PageCache:
+    """A fixed-size cache of pages, with pinning."""
+
+    def __init__( self, capacity ):
+        self.capacity = capacity
+        self.pages = {}
+        self.pinned = set()
+
+    def pin_page( self, page_id ):
+        """Pin a page so the evictor may never choose it as a victim."""
+        self.pinned.add( page_id )
+
+    def request_page( self, page_id ):
+        """Return a page, evicting a victim first when the cache is full."""
+        if page_id in self.pages:
+            return self.pages[page_id]
+        if len( self.pages ) >= self.capacity:
+            evict_one( self )
+        self.pages[page_id] = page_id
+        return self.pages[page_id]
+
+    def flush_cache( self ):
+        """Write every dirty page back and drop the unpinned ones."""
+        for page_id in list( self.pages ):
+            if page_id not in self.pinned:
+                del self.pages[page_id]]]></b><b t="fn" l="12" p="src/pagecache.py" n="pin_page"><![CDATA[def pin_page( self, page_id ):
+        """Pin a page so the evictor may never choose it as a victim."""
+        self.pinned.add( page_id )]]></b><b t="sec" l="1" p="CONTRIBUTING.md" n="CONTRIBUTING"><![CDATA[# Contributing
+
+Thanks for reporting a bug. Please describe the bug, list the steps to
+reproduce it, and state the expected behavior before opening a pull request
+about the page cache, its eviction policy, or a pinned page during a flush.
+]]></b><b t="sec" l="1" p="CONTRIBUTING.md" n="Contributing"><![CDATA[# Contributing
+
+Thanks for reporting a bug. Please describe the bug, list the steps to
+reproduce it, and state the expected behavior before opening a pull request
+about the page cache, its eviction policy, or a pinned page during a flush.
+]]></b></bodies></ctx>

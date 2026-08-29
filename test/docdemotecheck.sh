@@ -90,10 +90,17 @@ print( m.group( 1 ) if m else '' )
 PY
 }
 
-"$BIN" docdemotefix --for="$BUGQ"    --format=candidates --no-cache >"$TMP/bug.xml"     2>/dev/null
-"$BIN" docdemotefix --for="$TRACEQ"  --format=candidates --no-cache >"$TMP/trace.xml"   2>/dev/null
-"$BIN" docdemotefix --for="$CONCEPTQ" --format=candidates --no-cache >"$TMP/concept.xml" 2>/dev/null
+# Two surfaces per query, on purpose. --format=candidates is the FLAT ranked export, so it is the one
+# surface where a rank is readable directly; the default --for bundle is where the route= prose lives.
+# Both must tell the same story, which is why both are asserted rather than whichever is convenient.
+"$BIN" docdemotefix --for="$BUGQ"     --format=candidates --no-cache >"$TMP/bug.xml"      2>/dev/null
+"$BIN" docdemotefix --for="$TRACEQ"   --format=candidates --no-cache >"$TMP/trace.xml"    2>/dev/null
+"$BIN" docdemotefix --for="$CONCEPTQ" --format=candidates --no-cache >"$TMP/conceptc.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
+"$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
+"$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+"$BIN" docdemotefix --for="$CONCEPTQ" --no-cache >"$TMP/concept.xml"   2>/dev/null
+"$BIN" docdemotefix --for="$BUGQ" --no-route --no-cache >"$TMP/noroutefor.xml" 2>/dev/null
 "$BIN" docdemotefix --recall="$BUGQ" --no-cache >"$TMP/recall.xml" 2>/dev/null
 
 # ── (a) presence guard — the documents this gate reasons about exist in the index ────────────────────────
@@ -113,10 +120,13 @@ case "$nr_top" in
 esac
 
 # ── (b) bug-report form — the shape fires, is disclosed, and code takes rank 1 ──────────────────────────
-grep -q 'doc tier demoted' "$TMP/bug.xml" \
-    && grep -q 'bug-report-form-shaped' "$TMP/bug.xml" \
+grep -q 'doc tier demoted' "$TMP/bugfor.xml" \
+    && grep -q 'bug-report-form-shaped' "$TMP/bugfor.xml" \
     && ok "(b) bug-report form: route= discloses the demotion and names the shape" \
     || no "(b) bug-report form: no demotion disclosure in route= for a pasted issue-template query"
+grep -q 'doc_tier="demoted:bug-report"' "$TMP/bug.xml" \
+    && ok "(b) bug-report form: the flat candidates export carries the same fact as doc_tier=" \
+    || no "(b) bug-report form: --format=candidates re-ranked without a doc_tier= attribute to say so"
 bug_top="$( top_path "$TMP/bug.xml" )"
 case "$bug_top" in
     src/*) ok "(b) bug-report form: rank 1 is source ($bug_top), not the issue template";;
@@ -130,10 +140,13 @@ case "$tnr_top" in
     *.md) ok "(c0) red witness: raw lexical rank 1 for a pasted traceback is a document ($tnr_top)";;
     *)    no "(c0) red witness: raw lexical rank 1 is '$tnr_top', not a document — the traceback loss is no longer in the fixture";;
 esac
-grep -q 'doc tier demoted' "$TMP/trace.xml" \
-    && grep -q 'trace-shaped' "$TMP/trace.xml" \
+grep -q 'doc tier demoted' "$TMP/tracefor.xml" \
+    && grep -q 'trace-shaped' "$TMP/tracefor.xml" \
     && ok "(c) traceback: route= discloses the demotion and names the shape" \
     || no "(c) traceback: no demotion disclosure in route= for a pasted traceback"
+grep -q 'doc_tier="demoted:trace"' "$TMP/trace.xml" \
+    && ok "(c) traceback: the flat candidates export carries the same fact as doc_tier=" \
+    || no "(c) traceback: --format=candidates re-ranked without a doc_tier= attribute to say so"
 tr_top="$( top_path "$TMP/trace.xml" )"
 case "$tr_top" in
     src/*) ok "(c) traceback: rank 1 is source ($tr_top), not the changelog";;
@@ -160,6 +173,9 @@ grep -q 'p="[^"]*\.md"' "$TMP/bug.xml" \
 grep -q 'doc tier demoted' "$TMP/concept.xml" \
     && no "(f) conceptual query claimed a demotion: the detector over-fires on ordinary prose" \
     || ok "(f) conceptual query: no demotion claimed"
+grep -q 'doc_tier="' "$TMP/conceptc.xml" \
+    && no "(f) conceptual query emitted a doc_tier= attribute: the detector over-fires on ordinary prose" \
+    || ok "(f) conceptual query: no doc_tier= attribute on the candidates export either"
 diff -q "$TMP/concept.xml" "$ROOT/test/docdemotegolden_for.xml" >/dev/null \
     && ok "(f) conceptual --for byte-identical to the pre-change golden" \
     || no "(f) conceptual --for drifted from test/docdemotegolden_for.xml"
@@ -170,9 +186,12 @@ diff -q "$TMP/recall.xml" "$ROOT/test/docdemotegolden_recall.golden" >/dev/null 
     || no "(g) --recall drifted from test/docdemotegolden_recall.golden — the documents lens must not take the ranking tier"
 
 # ── (h) --no-route untouched ────────────────────────────────────────────────────────────────────────────
-diff -q "$TMP/noroute.xml" "$ROOT/test/docdemotegolden_noroute.xml" >/dev/null \
+diff -q "$TMP/noroutefor.xml" "$ROOT/test/docdemotegolden_noroute.xml" >/dev/null \
     && ok "(h) --no-route byte-identical to the pre-change golden (no route= ⇒ no undisclosed demotion)" \
     || no "(h) --no-route drifted from test/docdemotegolden_noroute.xml"
+grep -q 'doc_tier="' "$TMP/noroute.xml" \
+    && no "(h) --no-route emitted a doc_tier= attribute: the opt-out path must not demote at all" \
+    || ok "(h) --no-route carries no doc_tier= attribute"
 
 # ── (i) --pack-task carries the same verdict and disclosure ─────────────────────────────────────────────
 "$BIN" docdemotefix --pack-task="$BUGQ" --no-cache >"$TMP/pack.xml" 2>/dev/null
