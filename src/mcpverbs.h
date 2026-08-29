@@ -1169,9 +1169,12 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     }
     // §P4 tier de-prioritization — same multiplier, same order (before the mention anchor) as the CLI --for.
     const std::vector<float> tierMul = rankTierSymbolMultipliers( ing );
+    // deep-tail: this bundle now serves the file-grain tail, a full-distribution consumer — the H2
+    // MaxScore prune bound is 0 (exhaustive) here for the same reason the CLI --for passes
+    // fullDistribution (a pruned tail would make total= mode-dependent and its order incomplete).
     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
                                        ? lexicalScoresNameExactRanked( ing, task, &tierMul )
-                                       : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, std::size_t( forTopN ), &ifaceExact, &tierMul );
+                                       : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*topKBound=*/0, &ifaceExact, &tierMul );
 
     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /
     // Scope.symbols literally NAMED in the task text are lifted to just below the top hit (the measured #1
@@ -1291,7 +1294,9 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     std::string headerStr = rootOpenStr
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote + floorNote
                           + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing"
-                            "; bundle=sigs: signatures only in this bundle, no inline bodies — fetch a symbol's full body with the fetch_body verb -->"
+                            "; bundle=sigs: signatures only in this bundle, no inline bodies — fetch a symbol's full body with the fetch_body verb"
+                          + std::string( rw::kForFileTailLegend )   // deep-tail: r= + <tail> definitions, the CLI twin's exact clause (sigs-charge-exempt below)
+                          + " -->"
                           + rw::forRootRelPathsLegendShort( !flRootArg.empty() );   // W3-S item 5: closes the gap this comment used to record
     // W3-S item 5 (2026-08-19): both --for dialects now carry rw::kForRootRelPathsLegendShort (graphlegend.h)
     // — the SAME short spelling, appended here exactly as the CLI twin (forLensHeaderText, main.cpp) does,
@@ -1325,7 +1330,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
         routeStr = renderToString( [ & ]( std::FILE* m2 )
                                    { packRoutes( m2, ing, ix.g.routeEdges, lensSurfaceIds ); } ); // B6.3
     }
-    const std::size_t fixedBytes = headerStr.size() + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
+    // deep-tail: the tail legend's bytes are exempt from the sigs charge, exactly as the CLI twin exempts
+    // them — charging a disclosure against the ranked head is what the D2/confidence precedents forbid.
+    const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size()
+                                 + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = kForPayloadBudgetBytes > fixedBytes ? kForPayloadBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
 
     // L3: field-notes surfacing — parity with the CLI --for lens. loadNoteIndex reads root/.ripwire_notes (a
@@ -1352,6 +1360,15 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     std::fwrite( legoStr.data(), 1, legoStr.size(), mem );
     std::fwrite( composeStr.data(), 1, composeStr.size(), mem );
     std::fwrite( routeStr.data(), 1, routeStr.size(), mem );   // B6.3
+    // DEEP-TAIL d2, MCP twin: the same shared walk + renderer the CLI --for uses (serialize.h), from the
+    // same resolved surface — the fixed default budget regime, so the tail rides on top (default row cap)
+    // and the ranked head above stays byte-identical to a tail-less bundle.
+    {
+        std::vector<char> tailEsc;
+        const std::string tailStr = renderFileTailXml( computeFileTail( ing, lensRank, lensSurfaceIds, flRootArg ),
+                                                       kForFileTailShownCap, tailEsc );
+        std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
+    }
     std::fprintf( mem, "</ctx>" );
     std::fflush( mem );
     std::fclose( mem );

@@ -2355,7 +2355,15 @@ std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, std::vecto
 // which is the gate doing its job: pruning is contracted to be BYTE-NEUTRAL, not nearly so. Measured
 // cost of giving it up on this route: none detectable — 384.7 vs 378.2 ms on django, 283.2 vs 269.8 ms
 // on webpack, 159.3 vs 159.0 ms on this repo, exhaustive at or inside the noise of pruned every time.
-rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task, bool compactCandidate = false )
+rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task, bool compactCandidate = false,
+                                    bool fullDistribution = false )   // deep-tail: the file-grain tail reads the WHOLE
+                                                                      //   positive-score distribution (its total= is a
+                                                                      //   real count, and its order runs far past the
+                                                                      //   head), so the --for bundle path forces
+                                                                      //   exhaustive scoring — the --adaptive/--anchor
+                                                                      //   rule, for the same reason. Callers with no
+                                                                      //   tail (pack-task, candidates) keep the H2
+                                                                      //   MaxScore pruning.
 {
     using namespace rw;
     const Config&                     cfg       = d.cfg;
@@ -2377,7 +2385,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
 
     std::size_t       forPruneK = 0;
     std::vector<char> ifaceExact;
-    if( !cfg.adaptive && !cfg.anchor && !compactRoute )
+    if( !cfg.adaptive && !cfg.anchor && !compactRoute && !fullDistribution )
     {
         forPruneK = cfg.candidates ? ( cfg.topK > 0 ? std::size_t( cfg.topK ) : 0 )
                                    : std::size_t( cfg.packTopN > 0 ? cfg.packTopN : 40 );
@@ -2625,6 +2633,10 @@ struct ForLensJsonInputs
     // The R-E harvest reached the XML --for bundle but left this JSON sibling's packSignaturesJson call
     // spelling `/*rootArg=*/{}` — the two dialects of ONE question disagreed about the spelling of a path.
     std::string_view                  rootArg;
+    // DEEP-TAIL d2: the file-grain tail candidates (computed once, above the dialect split, from the same
+    // resolved surface <sigs> selects). REQUIRED, not defaulted — a defaulted pointer is how a dialect
+    // silently loses a surface its XML twin serves.
+    const rw::FileTail*               fileTail;
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -2669,6 +2681,11 @@ struct ForLensHeaderParts
     bool             autoBundle = false;   // T3: auto mode is on (cfg.detail==0, no --signatures-only) — appends the bundle=auto legend
     bool             compactBundle = false;   // COMPACT conceptual serving: appends the bundle=compact legend INSTEAD of the auto one — never both, because only one of the two sections can be emitted
     bool             compactLegend = false;  // --legend=compact: versioned, shorter explanatory dialect
+    bool             tailLegend    = true;    // deep-tail: the r=/<tail> legend clause. Cleared ONLY by the
+                                              //   ceiling ladder's rung zero (with the confidence clause):
+                                              //   the facts (r= attrs, the <tail> element) survive, only the
+                                              //   explainer goes — the L1 "first rung that costs no unique
+                                              //   information" ordering.
     std::string_view rootArg;              // R-E (2026-08-17): the single-root run's own root= — the ladder's
                                             // route-dropped rebuild below calls ctxRootOpen a second time and
                                             // must carry the SAME root as the pre-built rootOpenStr did.
@@ -2749,6 +2766,10 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     h.append( p.docMentionNote );
     h.append( p.floorNote );
     h.append( p.confidenceNote );   // the compact dialect's reader meets the same two root facts
+    if( p.tailLegend )
+    {
+        h.append( rw::kForFileTailLegend );   // deep-tail: r= + <tail> definitions ride the compact legend too
+    }
     h.append( extraNotes );
     h += " -->";
     h += rw::forRootRelPathsLegendShort( !p.rootArg.empty() );
@@ -2837,6 +2858,10 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     {
         h.append( kForAutoBundleLegend );   // T3: present whenever auto mode is on, whatever the fit outcome — it explains bodies="0" too
     }
+    if( p.tailLegend )
+    {
+        h.append( rw::kForFileTailLegend );   // deep-tail: defines r= and the <tail> element (sigs-charge-exempt, serialize.h)
+    }
     h.append( extraNotes );
     h += " -->";
     // W3-S item 5 (2026-08-19): the --for lens carries root= on its <ctx> with nothing defining it — the
@@ -2924,6 +2949,31 @@ inline std::string forLensNotesStanza( const rw::JsonSigNoteCounts& counts, bool
     return ",\"notes_total\":" + std::to_string( counts.total ) + ",\"notes_kept\":" + std::to_string( counts.kept );
 }
 
+// DEEP-TAIL d2, JSON dialect — the tail stanza and its explicit-regime fit, as a free function over
+// emitForLensJson's locals (the forSigSideCeiling/ForLensHeaderParts precedent: that emitter is already
+// carrying the whole envelope fixpoint). Default regime: the full row cap. Explicit regime: the hard
+// ceiling stays hard — rows trim one by one into whatever the rendered bundle left, down to the honest
+// empty shell (the always-present key is the disclosure; an absent key would read as "no tail exists").
+inline std::string forLensJsonTailStanza( const rw::FileTail& tail, std::size_t tokenBudget,
+                                          std::size_t ceilingAllowance, std::size_t baseNoTailBytes )
+{
+    std::string stanza = "," + rw::renderFileTailJson( tail, rw::kForFileTailShownCap );
+    if( tokenBudget == 0 )
+    {
+        return stanza;
+    }
+    const std::size_t tailAllowed = ceilingAllowance > baseNoTailBytes ? ceilingAllowance - baseNoTailBytes : 0;
+    for( std::size_t shown = tail.paths.size(); ; --shown )
+    {
+        stanza = "," + rw::renderFileTailJson( tail, shown );
+        if( stanza.size() <= tailAllowed || shown == 0 )
+        {
+            break;
+        }
+    }
+    return stanza;
+}
+
 inline int emitForLensJson( std::FILE* out, const std::string& header, const ForLensJsonInputs& in )
 {
     using namespace rw;
@@ -2982,6 +3032,12 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
                                            + ",\"compose_total\":" + std::to_string( in.composeTotal )
                                            + ",\"routes_total\":" + std::to_string( in.routesTotal );
 
+    // DEEP-TAIL d2, JSON dialect: always-present (B1.4: a total of 0 must mean genuinely none). Default
+    // row cap here (the degrade path below needs a stanza before any budget is knowable); the normal path
+    // re-fits it after the sigs render (forLensJsonTailStanza above) — residual-funded, sigs untouched:
+    // the reservation feeding sigsBudget above deliberately does NOT include these bytes.
+    std::string tailStanza = "," + renderFileTailJson( *in.fileTail, kForFileTailShownCap );
+
     bool        sigsCapped = false;
     std::string sigsJson;
     {
@@ -2996,6 +3052,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
             std::fputs( header.c_str(), out );
             std::fwrite( kJsonBundleSigsKey.data(), 1, kJsonBundleSigsKey.size(), out );   // the posture disclosure survives the degrade (a plain constant — nothing here can fail to compute it)
             std::fwrite( surfaceCountsStanza.data(), 1, surfaceCountsStanza.size(), out );
+            std::fwrite( tailStanza.data(), 1, tailStanza.size(), out );                   // the tail survives too (plain strings, nothing to fail)
             std::fputs( ",\"sigs\":", out );
             packSigs( out, 0, nullptr );
             std::fputs( "}", out );
@@ -3024,9 +3081,14 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     // over, and adding its 20 bytes can only keep it over, never bring it back under.
     const std::size_t cappedClauseBytes = sigsCapped ? 14u : 15u;      // ,"capped":true / ,"capped":false
     const std::size_t envelopeTextBytes = cappedClauseBytes + 14u + 8u + 1u + kJsonBundleSigsKey.size();   // + ,"est_tokens": + ,"sigs": + } + ,"bundle":"sigs"
-    const std::size_t bundleBytesBase   = header.size() + sigsJson.size() + notesStanza.size()
-                                        + surfaceCountsStanza.size() + envelopeTextBytes;
     const std::size_t ceilingAllowance  = in.tokenBudget > 0 ? ceilingAllowanceBytes( in.tokenBudget ) : 0;
+
+    // DEEP-TAIL, explicit-regime fit (forLensJsonTailStanza above): residual-funded, sigs untouched.
+    tailStanza = forLensJsonTailStanza( *in.fileTail, in.tokenBudget, ceilingAllowance,
+                                        header.size() + sigsJson.size() + notesStanza.size()
+                                            + surfaceCountsStanza.size() + envelopeTextBytes );
+    const std::size_t bundleBytesBase   = header.size() + sigsJson.size() + notesStanza.size()
+                                        + surfaceCountsStanza.size() + tailStanza.size() + envelopeTextBytes;
 
     std::size_t estTokens   = 0;
     std::size_t bundleBytes = bundleBytesBase;
@@ -3061,6 +3123,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     std::fputs( header.c_str(), out );
     std::fwrite( kJsonBundleSigsKey.data(), 1, kJsonBundleSigsKey.size(), out );
     std::fwrite( surfaceCountsStanza.data(), 1, surfaceCountsStanza.size(), out );
+    std::fwrite( tailStanza.data(), 1, tailStanza.size(), out );
     std::fwrite( notesStanza.data(), 1, notesStanza.size(), out );
     std::fwrite( overCeiling.data(), 1, overCeiling.size(), out );
     std::fprintf( out, ",\"capped\":%s,\"est_tokens\":%zu,\"sigs\":", sigsCapped ? "true" : "false", estTokens );
@@ -3553,6 +3616,24 @@ ForAutoBodiesResult buildForEnrichment( const rw::Config& cfg, const rw::IngestR
     return out;
 }
 
+// DEEP-TAIL d2 — the XML tail render + its explicit-regime fit, a free function over runForLens' locals
+// (that function is already one of the largest in this file — the forSigSideCeiling precedent). Default
+// regime: the full row cap, bytes riding on top (est_tokens measures them). Explicit regime: rows fit the
+// residual the rendered bundle actually left; the shell's bytes were reserved ahead of the body walk
+// (kForFileTailShellReserve inside the enrichment's committed sum), so the disclosure always fits.
+inline std::string renderForFileTailXml( const rw::FileTail& tail, std::size_t tokenBudget,
+                                         std::size_t bundleBudget, std::size_t spentBytes )
+{
+    std::vector<char> esc;
+    if( tokenBudget == 0 )
+    {
+        return rw::renderFileTailXml( tail, rw::kForFileTailShownCap, esc );
+    }
+    const std::size_t tailAllowed = std::max<std::size_t>( bundleBudget > spentBytes ? bundleBudget - spentBytes : 0u,
+                                                           rw::kForFileTailShellReserve );
+    return rw::renderFileTailXml( tail, rw::fileTailShownForBudget( tail, tailAllowed, esc ), esc );
+}
+
 std::optional<int> runForLens( const MainDispatch& d )
 {
     using namespace rw;
@@ -3598,7 +3679,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         // ROUTING + anchoring + the B8 mention anchor + the opt-in B3 co-change prior all live in
         // computeLensRanking (shared with runPackTask so the ranking is defined once). Compose order with
         // --anchor: ROUTE picks the base lens rank, then ANCHOR expands it; mention/co-change run after.
-        LensRanking        lr        = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ) );
+        LensRanking        lr        = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ),
+                                                           /*fullDistribution=*/!cfg.candidates );   // deep-tail: the bundle serves the file-grain tail; candidates has no tail and keeps the H2 pruning
         std::vector<float> lensRank  = std::move( lr.rank );
         const std::string  routeNoteRaw = std::move( lr.routeNote ); // verbatim; lands ONLY in route= (attribute-escaped) + the JSON twin — L1: the comment no longer echoes it
         const std::string  mentionNote( std::move( lr.mentionNote ) );
@@ -3730,7 +3812,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
                                         mentionNote, boostNote, docMentionNote, floorNote,
                                         forConf.attrs, forConf.note, cfg.anchor,
-                                        plan.autoBodies, plan.compact, cfg.legend == "compact", flRootArg };
+                                        plan.autoBodies, plan.compact, cfg.legend == "compact",
+                                        /*tailLegend=*/true, flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -3782,6 +3865,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         // (XML render) and the §B1.4 count (JSON) — this is pure membership bookkeeping, never a redacting
         // seam, so hoisting it above the --json branch changes no dialect's redaction tally.
         std::vector<std::vector<NodeId>> legoScoped = legoImplementorsOnSurface( ing, g.implementors, lensSurfaceIds );
+
+        // DEEP-TAIL d2: the file-grain tail candidates — one shared walk (serialize.h computeFileTail) for
+        // both dialects, computed from the SAME resolved surface <sigs> selects, so the two dialects (and
+        // the MCP twin, which calls the same function) cannot select different tails.
+        const FileTail forFileTail = computeFileTail( ing, lensRank, lensSurfaceIds, flRootArg );
 
         // L2: --json — the ranking ("sigs") bundle, plus (§B1.4) a COUNT of what <lego>/<compose>/<routes>
         // would have held on this same surface. They still stay XML-only — rendering them for real would
@@ -3846,7 +3934,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                 ForLensJsonInputs{ ing, lensRank, forTopN, fanInPtr, impurePtr, &forChurn,
                                                                    &forClone, testedPtr, ampPtr, redactPtr,
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
-                                                                   legoTotal, composeTotal, routesTotal, flRootArg } );
+                                                                   legoTotal, composeTotal, routesTotal, flRootArg,
+                                                                   &forFileTail } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -3954,8 +4043,13 @@ std::optional<int> runForLens( const MainDispatch& d )
         // total never crosses the ceiling — charging the sig side as well was double-counting one cost.
         // est_tokens measures the emitted header in both regimes, so nothing under-reports either way.
         const std::size_t confidenceExemptBytes = forConf.attrs.size() + forConf.note.size();
+        // DEEP-TAIL: the tail legend's bytes are exempt from the sig-trim charge in BOTH regimes, the
+        // confidence-disclosure precedent verbatim — the tail's contract is that the ranked head is
+        // byte-identical with and without it, and charging the clause here would shrink <sigs> to pay for
+        // a disclosure. The bytes stay real everywhere downstream: est_tokens measures the emitted header,
+        // and the explicit regime's tail rows are funded from the RESIDUAL (below), never from the sigs.
         const std::size_t fixedBytes = headerStr.size() - adaptiveNote.size() - autoLegendBytes
-                                     - confidenceExemptBytes
+                                     - confidenceExemptBytes - rw::kForFileTailLegend.size()
                                      + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
         // the auto bundle's SECTION SPLIT — the sig side's claim is capped so an explicit ceiling wider
         // than the default cannot re-inflate the trimmed sig tail at the bodies' expense (the rule, its
@@ -4068,7 +4162,8 @@ std::optional<int> runForLens( const MainDispatch& d )
             if( cfg.tokenBudget > 0 )
             {
                 const std::size_t spentBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
-                                             + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve;
+                                             + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve
+                                             + rw::kForFileTailShellReserve;   // deep-tail: the shell's reserved bytes (explicit regime only — this branch)
                 const std::size_t leftBytes  = bundleBudget > spentBytes ? bundleBudget - spentBytes : 1;
                 detailBodyBudget = std::min( detailBodyBudget, leftBytes );
             }
@@ -4092,7 +4187,12 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             enrich = buildForEnrichment( cfg, ing, g, lensSurfaceIds, lensRank, plan, routeAnchorDefs, redactPtr,
                                           headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
-                                              + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve,
+                                              + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve
+                                              + ( cfg.tokenBudget > 0 ? rw::kForFileTailShellReserve : 0u ),
+                                          // deep-tail: under an explicit ceiling the tail SHELL's bytes are
+                                          // reserved ahead of the body walk (the kAutoAttrReserve pattern) so
+                                          // the disclosure always fits; the DEFAULT regime reserves nothing —
+                                          // the tail rides on top there and the bodies stay byte-identical.
                                           bundleBudget );
             if( enrich.surfaceOff || enrich.legendOff )
             {
@@ -4102,6 +4202,17 @@ std::optional<int> runForLens( const MainDispatch& d )
         }
         const rw::ChargedSection& autoSection = enrich.section;
         const std::string&        autoAttr    = enrich.attr;
+
+        // ── DEEP-TAIL d2: render the file-grain tail, funded LAST (see serialize.h kForFileTailShownCap) ──
+        // Rendered after the bodies decision so the explicit regime spends only the RESIDUAL the rendered
+        // bundle actually left — the sigs and the bodies are byte-identical to a tail-less bundle in the
+        // default regime by construction (nothing above charges these bytes), and under a hard ceiling the
+        // weakest-evidence section is the one that trims. The pre-ladder headerStr sizes the residual (a
+        // ladder rung can only SHRINK the header, so the fit stays conservative and deterministic).
+        const std::string tailStr = renderForFileTailXml( forFileTail, cfg.tokenBudget, bundleBudget,
+                                                           headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
+                                                               + routeStr.size() + graphSection.xml.size() + detailSection.xml.size()
+                                                               + autoSection.xml.size() + autoAttr.size() + 6 + headerSpliceReserve );
 
         // W3FIX H2 — the ceiling ladder (rungs + rationale: serialize.h climbCeilingLadder), same rungs in the
         // same order --pack-task climbs. The header IS charged to the budget above, but charging is not FITTING: at
@@ -4120,6 +4231,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // see its definition for why a reserve rather than a measurement.
             const std::size_t ladderPayloadBytes = sigsStr.size() + legoStr.size() + composeStr.size() + routeStr.size()
                                                  + detailSection.xml.size() + autoSection.xml.size() + graphSection.xml.size()
+                                                 + tailStr.size()                               // deep-tail: the tail is priced like every other section
                                                  + autoAttr.size() + 6 + headerSpliceReserve;   // + "</ctx>" + the header splices below (autoAttr exact-counted)
             const std::size_t ladderCeiling      = rw::ceilingAllowanceBytes( cfg.tokenBudget );
             // RUNG ZERO — the confidence LEGEND clause, before any of the ladder's own rungs: it is the one
@@ -4131,9 +4243,12 @@ std::optional<int> runForLens( const MainDispatch& d )
             // Measured need: fornotesbudgetcheck's 850-ceiling fixture holds 35 tokens of headroom and the
             // clause is ~55 — charged-not-exempt (the explicit-regime split above) still cannot fit it,
             // because the floor there is notes + first-entry-whole, neither of which may trim.
-            if( headerStr.size() + ladderPayloadBytes > ladderCeiling && !headerParts.confidenceNote.empty() )
+            if( headerStr.size() + ladderPayloadBytes > ladderCeiling
+                && ( !headerParts.confidenceNote.empty() || headerParts.tailLegend ) )
             {
                 headerParts.confidenceNote = {};
+                headerParts.tailLegend     = false;   // deep-tail: the explainer falls with the confidence clause —
+                                                      //   the r= attrs and the <tail> element (the facts) survive
                 headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
             }
             headerStr = rw::climbCeilingLadder( buildForHeader, headerStr, ladderPayloadBytes, ladderCeiling,
@@ -4195,7 +4310,8 @@ std::optional<int> runForLens( const MainDispatch& d )
             // enrich.markupBytes is the compact <hops> section, folded in HERE rather than charged
             // separately — one rate, one rounding (see ForEnrichmentPlan for the off-by-one that proves it).
             const std::size_t markupBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
-                                          + routeStr.size() + graphSection.xml.size() + enrich.markupBytes + 6;   // + "</ctx>"
+                                          + routeStr.size() + graphSection.xml.size() + enrich.markupBytes
+                                          + tailStr.size() + 6;   // + "</ctx>" (deep-tail: the tail's bytes are measured at the markup rate)
             // T3: the auto bodies at the body rate — def-body text BPE-merges differently from markup, which
             // is why this sum splits by kind. enrich.bodyTokens is zero on the compact route (markup, above).
             const std::size_t bodyTokens  = detailSection.tokens + enrich.bodyTokens;
@@ -4253,6 +4369,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             packRoutes( stdout, ing, g.routeEdges, lensSurfaceIds );
         }
+
+        // DEEP-TAIL d2: the file-grain tail, BEFORE the body sections — a prefix-budgeted consumer meets
+        // the file-grain recall before the big CDATA. Bytes already charged (ladder + est_tokens above).
+        std::fwrite( tailStr.data(), 1, tailStr.size(), stdout );
 
         // §F1: the last two sections, from the bytes already RENDERED and CHARGED above — so what the header
         // priced and what stdout receives are the same bytes by construction, not by two pieces of code
