@@ -40,7 +40,9 @@ LSAN_OPTIONS=suppressions=lsan_suppressions.txt ./asan/ripwire <dir> >/dev/null
 ripwire builds and passes its suite on Ubuntu 24.04 with gcc 13.3 or clang 18, but a few things
 differ from macOS enough to cost you an afternoon if nobody says them out loud.
 
-**Memory, not cores, sizes `-j`.** `src/main.cpp` is one very large translation unit. Compiling it
+**Memory, not cores, sizes `-j`.** `src/main.cpp` is one very large translation unit (since the
+2026-08-29 split its verb families live in `src/verbs_*.h` sections included into that one TU — the
+compile cost is unchanged, only the editing surface moved). Compiling it
 at `-O2` needs roughly **3 GB of RAM per parallel job under gcc**; clang does the same file inside
 2 GB. A machine with fewer gigabytes than `3 × jobs` does not fail with a diagnostic — it meets the
 OOM killer, and you get a `cc1plus … killed` line with no explanation. On an 8 GB box, use `-j2`
