@@ -460,12 +460,12 @@ done
 # carries a reason here, and a new one reds until someone classifies it.
 CLASSIFIED="cli.h
 lanes.h
-main.cpp
 packtask.h
-partition.h"
+partition.h
+verbs_for.h"
 #   cli.h        — the string appears only in usage/refusal prose, not in an emitted document
 #   lanes.h      — --plan-lanes has no ctxRootOpen XML twin, so there is no XML marker to mirror
-#   main.cpp     — CONVERTED: forLensJsonHeader calls ctxRootJsonScrubKeys
+#   verbs_for.h  — CONVERTED: forLensJsonHeader calls ctxRootJsonScrubKeys (moved out of main.cpp in the 2026-08-29 verb-family split)
 #   packtask.h   — the PINNED RESIDUAL above
 #   partition.h  — a wrapper; the task it echoes is re-emitted by the packtask bundles it nests
 EMITTERS="$( cd "$ROOT" && grep -l '\\"task\\"' src/*.h src/*.cpp 2>/dev/null | sed 's|.*/||' | sort -u )"
@@ -473,9 +473,9 @@ UNCLASSIFIED="$( printf '%s\n' "$EMITTERS" | grep -vxF "$CLASSIFIED" || true )"
 [ -z "$UNCLASSIFIED" ] \
     && ok "(H) all $( printf '%s\n' "$EMITTERS" | wc -l | tr -d ' ' ) JSON task-key emitters are converted or classified" \
     || { no "(H) an unclassified JSON task-key emitter exists — convert it or give it a row"; printf '     %s\n' "$UNCLASSIFIED"; }
-grep -q 'ctxRootJsonScrubKeys' "$ROOT/src/main.cpp" \
+grep -q 'ctxRootJsonScrubKeys' "$ROOT/src/verbs_for.h" \
     && ok "(H) the converted emitter really goes through the one seam (not a hand-rolled copy)" \
-    || no "(H) main.cpp's JSON header no longer calls ctxRootJsonScrubKeys"
+    || no "(H) verbs_for.h's JSON header no longer calls ctxRootJsonScrubKeys"
 
 echo
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "SOME CHECKS FAILED"

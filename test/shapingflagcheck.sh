@@ -58,15 +58,17 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/
 # kShapingVerbs (the pre-existing M6 bundle-vs-whole-file logic already read them), so this is a re-pin, not
 # a column change: 16->17 / 12->13. CLI recall's bounded default adds one more maxTokens policy read:
 # 17->18; the verb already honored explicit --max-tokens, so its table column remains unchanged.
-MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
-TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
-[ "$MAXSITES" = 18 ] && ok "(A) --max-tokens has 18 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/mcpserver.h)" \
+MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
+TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
+[ "$MAXSITES" = 18 ] && ok "(A) --max-tokens has 18 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
                      || no "(A) --max-tokens read sites moved 18 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
 [ "$TOPSITES" = 13 ] && ok "(A) --top-k has 13 read sites outside cli.h" \
                      || no "(A) --top-k read sites moved 13 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
-# no OTHER file may read them: a third file would be a verb family this table has never heard of
-OTHER="$( grep -l 'cfg\.maxTokens\|cfg\.topK' src/*.h src/*.cpp 2>/dev/null | grep -vE 'src/(cli\.h|main\.cpp|mcpserver\.h)$' )"
-[ -z "$OTHER" ] && ok "(A) only main.cpp and mcpserver.h read the two fields" \
+# no OTHER file may read them: a third file would be a verb family this table has never heard of.
+# 2026-08-29 main.cpp split: src/verbs_*.h are SECTIONS of main.cpp's own TU (RIPWIRE_MAIN_TU-guarded),
+# so they count as main.cpp in this derivation — the counts above sweep them, the exclusion below too.
+OTHER="$( grep -l 'cfg\.maxTokens\|cfg\.topK' src/*.h src/*.cpp 2>/dev/null | grep -vE 'src/(cli\.h|main\.cpp|mcpserver\.h|verbs_[a-z]+\.h)$' )"
+[ -z "$OTHER" ] && ok "(A) only main.cpp (with its verbs_*.h sections) and mcpserver.h read the two fields" \
                 || { no "(A) a NEW file reads --top-k/--max-tokens and is not in this gate's derivation:"; printf '%s\n' "$OTHER" | sed 's/^/        /'; }
 
 # ── (B) the TABLE side: every kShapingVerbs row, parsed out of cli.h ───────────────────────────────────
