@@ -6727,3 +6727,58 @@ misses concentrate (language, dispatch-heavy edges, docs-vs-code, issue-vocabula
 identifier-vocabulary), whether PACK beats FOR at equal budget, and the largest fixable shapes. **No
 comparative number from this lane is published — in this file, the README, or anywhere public — until a
 fix round has re-measured.** Local numbers exist only to rank the loss buckets.
+
+## Shape-conditional documentation-tier demotion (2026-08-29) — PRE-REGISTERED, before any measurement
+
+**What changes.** `--for` and `--pack-task` — and their MCP twins — classify the QUERY's SHAPE before
+they rank, and demote the documentation tier when that shape says the answer cannot be prose. Two
+shapes are recognised, from the query text alone:
+
+- **trace-shaped** — the text parses as stack frames, sanitizer output, or a compiler diagnostic. The
+  classifier reuses `--from-trace`'s own frame extractor (`src/tracein.h`); there is no second parser,
+  and its known blind spots are its blind spots here too.
+- **bug-report-form-shaped** — the text is a pasted issue-template form: two or more distinct template
+  field labels (`Describe the bug`, `Steps to reproduce`, `Expected behavior`, …) or markdown task-list
+  checkboxes, each counted only where it is used as a LABEL — at a line start, or behind markdown
+  heading / bullet / emphasis punctuation — never inside a sentence.
+
+When either fires, the document tier is DEMOTED in the ranking lenses: the same shrink-only,
+path-keyed multiplier the fixture-and-generated tier already applies, applied to files that carry a
+document extension, and applied TWICE to repository meta-prose (issue and pull-request templates,
+`CONTRIBUTING`, `CODE_OF_CONDUCT`, `SECURITY`, `SUPPORT`, `GOVERNANCE`, changelogs, anything under
+`.github/`). Demotion, never exclusion — those files stay indexed, still score, still win when nothing
+else matches, and the query-mention anchor still lifts a document the task literally names. The
+demotion is disclosed verbatim in the bundle's `route=` attribute and its JSON twin, so a reader can
+always see that it happened, which shape fired, and on what evidence.
+
+**Why.** Both external retrieval lanes registered above lose head slots to prose that matches a pasted
+failure or a pasted issue form rather than the code the task is about. When the query IS a failure
+artefact the answer is code by construction; when the query IS the repository's own bug form, the
+strongest lexical match in the repository is often that form.
+
+**What is deliberately NOT changed** — each already recorded as a negative or closed by an earlier
+round: no short-document floor, no query-term density weighting, no stemming, no pooling or
+hierarchical retrieval, no edit to the routing decision itself, and no change to any scoring formula.
+This is one tier multiplier conditioned on query shape, and nothing else.
+
+**Invariance contract, gated by `test/docdemotecheck.sh`:**
+
+- `--recall` — the documents-only verb — is byte-identical, on a fixture corpus and on this repository.
+  It does not take the ranking tier and must not start taking it.
+- a conceptual `--for` query (no shape match) is byte-identical to the pre-change binary, on the same
+  fixture and on this repository.
+- `--no-route` is byte-identical: with no `route=` attribute there is nowhere to disclose the
+  demotion, so it does not happen.
+
+**Decision rule at re-measure.** Judged on the two external lanes registered above, on their own
+harnesses, the same disclosed subsets, the same binary discipline, determinism gate first:
+
+- on the trace-to-code task, MRR and Recall@20 must both move UP, and no other task in that lane may
+  lose more than 0.01 MRR;
+- on the exploration lane, mean line recall for the `--for` arm must move UP with `hit_file_rate` not
+  falling, at the same line budget;
+- the share of rank-1..3 slots held by documents must FALL on shape-matched queries and must not move
+  at all on unshaped conceptual queries — the latter is structural, since those runs are byte-identical.
+
+If any of the three fails, the change is reverted rather than re-tuned and the negative is recorded in
+§7. No number from this lane is published anywhere until that re-measure has completed.
