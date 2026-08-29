@@ -13294,6 +13294,18 @@ static std::string patternGrammarLabel( std::string_view querySub, std::string_v
     return std::string( querySub ) + "/" + std::string( bare );
 }
 
+// --slice (lane/paper-slice): path -> grammar object, through the ONE crawl rule (lowerExtensionOf +
+// kLangTable) -- see the ingest.h declaration for why this lives here and not in slice.h.
+const ::TSLanguage* sliceGrammarForFile( std::string_view path )
+{
+    const LangEntry* le = lookupLang( lowerExtensionOf( path ) );
+    if( le == nullptr || le->grammar == nullptr )
+    {
+        return nullptr;
+    }
+    return le->grammar();
+}
+
 std::vector<pattern::GrammarRow> supportedPatternGrammars()
 {
     std::vector<pattern::GrammarRow> rows;

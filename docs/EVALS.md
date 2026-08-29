@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 474 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 475 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4478,7 +4478,7 @@ descriptions 21,172 B, `src/mcp.h`) is larger and riskier and is spec-only, not 
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **474 gate scripts**, all of which exist on disk.
+naming **475 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5309,7 +5309,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 474. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 475. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -6583,3 +6583,29 @@ names abstention/confidence as the unsolved retrieval axis: retrievers cannot te
 ranking is not trustworthy. `--for` already computes the relevance-cliff gap statistic (`adaptiveCut`,
 the `--adaptive` lever); the header now states what that statistic already knows — `confidence=` /
 `margin_pct=` as facts with a legend sentence — with no behavior change and no new scorer.
+## The `--slice` def-use primitive (2026-08-28) — REGISTERED CONTRACT, no numbers yet
+
+**Motivation.** ARISE (arXiv:2605.03117) measured statement-level definition-use edges exposed as a
+queryable agent primitive at +17pp Function Recall@1 on SWE-bench Lite. ripwire's graph stops at symbol
+granularity; `--slice=SYM[:VAR]` is the bounded v1 of that primitive and this paragraph registers what
+it CLAIMS, before any accuracy number is published for it.
+
+**The claimed contract (all of it gate-pinned in `test/slicecheck.sh`, none of it a measured accuracy
+claim).** One `<s l= k= t=>` row per source line touching VAR inside the ONE uniquely-resolved
+definition SYM, source order; `k=` def/use/both per line, `t=` the strongest role
+(param > decl > assign > call-arg > read), `defs=`/`uses=` occurrence counts; bare `--slice=SYM` lists
+the sliceable locals. NAME-BASED and intra-procedural by declaration: no alias analysis, no flow
+sensitivity, nested-scope shadowing may over-include — all three limits are in the emitted legend, and
+the not-served languages (everything outside C/C++/ObjC(+CUDA/Metal), Python, JS/TS, Go, Java, Rust)
+refuse at exit 1 rather than empty-succeed. Ambiguous selectors refuse with the qualifying spellings
+(the `--edit-check` §A6a rule, same `editCheckGroups` machinery).
+
+**The eval this registers for a later round — a LINE-RECALL shape, not run yet.** Mine fix commits whose
+diff touches exactly one function (the `--affected`/co-change harness already isolates these); for each,
+take the variables named on the changed lines and ask whether `--slice=fn:var` surfaces those changed
+lines among its rows (hit = every changed line touching `var` appears; report line-recall and the
+over-inclusion ratio rows-emitted / lines-relevant, per language family). Baseline arm: the whole
+function body via `--expand` (the primitive's value claim is fewer tokens for the same lines, so both
+recall AND the token ratio must be reported together, per the §5 discipline). No number from this shape
+is published until that round runs to completion under its own pre-registration — this paragraph is the
+registration, not the result.
