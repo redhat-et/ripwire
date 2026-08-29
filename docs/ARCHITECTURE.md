@@ -20,9 +20,19 @@ any stage can be tested in isolation and every verb is a different way of readin
 
 ### ingest — crawl and parse
 
-A single-threaded directory crawl (`collectSources`, `src/ingest.cpp`) that produces a sorted file
-list, followed by **parallel** per-file tree-sitter extraction. The crawl is the cheap half and is
-deliberately not parallelized; the parse pool is where the threads are.
+A single-threaded directory crawl (`collectSources`, `src/ingest_crawl.h`) that produces a sorted
+file list, followed by **parallel** per-file tree-sitter extraction. The crawl is the cheap half and
+is deliberately not parallelized; the parse pool is where the threads are.
+
+The stage is one translation unit with `src/ingest.cpp` as its spine (`ingest()` and the document
+post-pass). Since the 2026-08-29 split, the stage's families live in `src/ingest_*.h` sections
+compiled into that one TU — the same section mechanism as `src/main.cpp`'s verb families, guarded by
+`RIPWIRE_INGEST_TU` so no other file can include one: crawl + parse setup (`ingest_crawl.h`), the
+raw-facts model + incremental-cache codec (`ingest_cache.h`), structural metrics
+(`ingest_metrics.h`), cross-symbol relation capture (`ingest_relations.h`), the markdown section
+tier (`ingest_docs.h`), name resolution + capture policy (`ingest_names.h`), local-binding capture
+(`ingest_binds.h`), parse infrastructure + the fused side-capture passes (`ingest_sidecap.h`), and
+the `--match`/`--lint` query tail (`ingest_astquery.h`).
 
 **Crawl order is deterministic, and that is load-bearing.** The walk *collects every candidate path
 first*, sorts them lexicographically by byte, and only then assigns node IDs and parses. Node IDs are
