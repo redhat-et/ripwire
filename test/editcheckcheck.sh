@@ -301,9 +301,9 @@ if [ -d "$ROOT/src" ] && [ -e "$ROOT/.git" ]; then
     # unresolvable pin are three different failures, and 2>/dev/null once collapsed them into the
     # misleading "no longer resolves" message below (CI round 3, asan/x86-64).
     _gerr="$WORK/arm_g_stderr"
-    OUTR="$( cd "$ROOT" && "$BIN" . --edit-check=src/ingest.cpp:find 2>"$_gerr" | sed 's/.*-->//' )"; _grc=$?
+    OUTR="$( cd "$ROOT" && "$BIN" . --edit-check=src/graph.h:find 2>"$_gerr" | sed 's/.*-->//' )"; _grc=$?
     if ! printf '%s' "$OUTR" | grep -q '<edit-check '; then
-        no "(g) the clean-tree pin produced no <edit-check element (rc=$_grc, stdout bytes=${#OUTR}) — crash, refusal, or the pin src/ingest.cpp:find no longer resolves"
+        no "(g) the clean-tree pin produced no <edit-check element (rc=$_grc, stdout bytes=${#OUTR}) — crash, refusal, or the pin src/graph.h:find no longer resolves"
         printf '    [arm-g] stderr follows (first 15 lines):\n'; head -15 "$_gerr" | sed 's/^/    [arm-g] /'
     else
         _ric="$( printf '%s' "$OUTR" | grep -oE '<edit-check [^>]*' | grep -oE 'incompatible="[0-9]+"' | grep -oE '[0-9]+' )"
