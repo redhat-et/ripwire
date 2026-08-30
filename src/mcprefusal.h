@@ -22,6 +22,7 @@
 
 #include "model.h"
 #include "didyoumean.h"    // §B6 M8: the ONE near-miss suggester (lifted out of main.cpp so this is reachable)
+#include "degradedscan.h"  // degradedTextHit — the ONE degraded-parse text scan (selectorrefuse.h words the same facts for the CLI)
 #include "mcpjson.h"       // §H3: mcpdetail::FrameShape — the framing verdict this file words (mcpjson is upstream of everything MCP; no cycle)
 
 #include <algorithm>       // std::find — the declared-field membership tests (M4)
@@ -798,6 +799,28 @@ inline std::string withHandleRootProvenance( std::string message, bool clauseApp
 //
 // `retryHint` is the verb's own "and here is what to do instead" clause, when it has one; omitted otherwise
 // rather than filled with a generic sentence that would be wrong for half the callers.
+//
+// DEGRADED-PARSE routing (mcpdegradedhintcheck, 2026-08-30 — the MCP port of selectorrefuse.h's CLI
+// clause). When the not-found name occurs as a WHOLE WORD in a parse-degraded file's bytes, the refusal
+// says so instead of answering blind: over a shredded parse "not found" is not proof of a rename, and an
+// MCP-only agent has no --skipped habit to fall back on. The FACTS come from degradedscan.h's one shared
+// scan (never a second copy of it); the wording and the retry are this surface's own — the retry names
+// the grep VERB in argument spelling, whose file rows carry parse_degraded="1" for exactly these files.
+// Appended by notFound itself so every verb on BOTH dispatch arms inherits it from the one seam, the
+// same way the near-miss does. Precise, not blanket: an ordinary typo occurs in no file, so a
+// nowhere-name refusal stays plain.
+inline std::string degradedParseNote( const IngestResult& ing, std::string_view spelling )
+{
+    const DegradedTextHit hit = degradedTextHit( ing, spelling );
+    if( !hit.found )
+    {
+        return {};
+    }
+    return " — note: the name occurs textually in " + ing.files[ hit.fileIndex ] + ", whose parse is DEGRADED (err_ratio="
+         + hit.errRatio + "): symbols there may be unextracted, so this miss is not proof of a rename; "
+           "grep pattern=\"" + cappedEcho( spelling ) + "\" shows the textual hits and marks such file rows parse_degraded=\"1\"";
+}
+
 inline std::string notFound( const IngestResult& ing, std::string_view noun, std::string_view spelling,
                              std::string_view retryHint = {} )
 {
@@ -808,6 +831,7 @@ inline std::string notFound( const IngestResult& ing, std::string_view noun, std
         msg += " (did you mean '" + near + "'?)";
     }
     if( !retryHint.empty() ) { msg += " — "; msg += retryHint; }
+    msg += degradedParseNote( ing, spelling );
     return msg;
 }
 
