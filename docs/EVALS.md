@@ -6880,6 +6880,47 @@ met.
 lane, extended so the new facts are part of the compared payload (the harness already compares the
 confidence dict between the two runs; the new keys ride in it).
 
+**MEASURED OUTCOME (2026-08-30, the instrumented binary of this round): the registered band was NOT
+met — this is a second recorded negative on the abstention axis.** Determinism gate OK on both
+selective splits before the sweep. `signal_missing` is 0 on all three datasets: the instrumentation
+reached every scored row, so nothing here is an artifact of a missing fact. The PRIMARY
+`support = scored/corpus` AUROC is **0.434** (balanced, 47 no-gold / 61 positive) and **0.409**
+(natural, 47 / 253) — *does not meet* against the ≥ 0.65 band on both, and short of the 0.55 *weak*
+rung too. Neither reaches the ≤ 0.35 directional-refutation rung either, but both sit BELOW 0.50,
+which is worth stating plainly: to the small extent corpus support separates at all, it separates the
+OPPOSITE way to the registered hypothesis — an unanswerable query on this benchmark's mix grips
+slightly MORE of the corpus, not less. **No operating point exists**, on the primary or on any
+secondary, on either split: no threshold anywhere in either sweep reaches false-abstain ≤ 0.10 at
+recall ≥ 0.20, so the registration's licensing condition is not merely unmet on the AUROC gate, it is
+unreachable behind it.
+
+The secondaries, reported because they were registered as reported and not because any of them is
+being promoted: raw un-normalized `scored` gives 0.428 / 0.404, i.e. the denominator this round
+insisted on is worth about 0.006 of AUROC — repo size was not what was hiding the signal, because
+there was no signal to hide. `kept / scored` gives 0.525 / 0.591; the natural split's 0.591 lands in
+the *weak* rung, and it is named here precisely so that it is on the record as a SECONDARY that the
+registration declared unshippable in advance, rather than reappearing later as this round's finding.
+The joint `confidence == "low" AND support < θ` rule gives 0.491 / 0.435 — grip does not rescue
+shape. As a control, round one's own statistic re-measured on these same rows reproduces its recorded
+result (0.472 balanced / 0.509 natural against the recorded 0.48 / 0.51), so the new negative is a
+property of the signal and not of a changed harness.
+
+**What this closes.** Round one showed the ranking's SHAPE is near-independent of answerability here.
+This round shows the query's GRIP on the corpus is too — and both are functions of the same routed
+lexical score distribution, which is now the thing that has been tested, not any particular
+summary of it. `--for`'s behavior is unchanged, the three counts stay harness-facing on `--for --json`
+(never promoted to the XML root — `test/forcalibfactscheck.sh` fails if they ever are without a
+calibration that earned it), and the axis stays **"disclosed, not acted on."** A future round on this
+axis needs a fact that is NOT derived from the lexical score distribution at all; recalibrating over
+what that distribution already knows is now closed twice.
+
+*Disclosure about this record.* The registration above said this section would report only which band
+was met, with the numbers staying in the lane's local report. It carries the numbers instead, matching
+what round one's own negative published — publishing MORE than registered on a NEGATIVE cannot
+manufacture a favorable result, and EVALS is the measurement record. The numbers stay out of README
+and every other public-facing surface, which is the constraint that actually binds.
+
+
 ## SWE-Explore exploration lane (2026-08-28) — PRE-REGISTERED, loss-first, before any measurement
 
 **What this registers.** An external-benchmark evaluation lane on *SWE-Explore: Benchmarking How Coding
