@@ -137,8 +137,62 @@ inline std::string degradedParseClause( const IngestResult& ing, std::string_vie
 // A canonical id ("path::scope::name") is NOT file-qualified — splitQualifiedSpec would cut it at its last
 // colon and the resulting "file" half is a scope, not a path — so it takes the last branch, exactly as
 // resolveUsesSelector already ruled for --uses.
+// The @FILE:LINE half of the diagnosis — ONE sentence per AtFault value, shared verbatim between the at
+// flag's own refusal and every SYM-taking verb's selector clause, so the same fault is never described two
+// ways. Each sentence states the FACT the resolver established and the retry that acts on it; the resolver
+// itself never guesses (graph.h::resolveAtSeed), so neither does the prose.
+inline std::string atSeedFaultClause( const IngestResult& ing, const AtSeed& seed )
+{
+    switch( seed.fault )
+    {
+        case AtFault::Malformed:
+            return " (the line-seed grammar is FILE:LINE — a path or unique path suffix, a colon, then a 1-based "
+                   "line number, e.g. @src/main.cpp:120 in a selector position)";
+        case AtFault::FileUnmatched:
+            return " (no indexed file matches '" + std::string( seed.fileHalf ) + "' — pass a path the map lists, or a longer suffix)";
+        case AtFault::FileAmbiguous:
+        {
+            const std::size_t shownCount = std::min( seed.fileMatches.size(), kSelectorFilesShown );
+            std::string clause = " ('" + std::string( seed.fileHalf ) + "' matches " + std::to_string( seed.fileMatches.size() )
+                               + " indexed files — ";
+            for( std::size_t matchIndex = 0; matchIndex < shownCount; ++matchIndex )
+            {
+                clause += ( matchIndex ? ", " : "" ) + ing.files[ seed.fileMatches[ matchIndex ] ];
+            }
+            if( seed.fileMatches.size() > shownCount )
+            {
+                clause += " (+" + std::to_string( seed.fileMatches.size() - shownCount ) + " more files)";
+            }
+            return clause + "; qualify more of the path)";
+        }
+        case AtFault::FileUnreadable:
+            return " (" + ing.files[ seed.fileId ] + " is indexed but could not be read from disk — moved or deleted "
+                   "since the crawl? re-run to reindex)";
+        case AtFault::LineOutOfRange:
+            return " (" + ing.files[ seed.fileId ] + " has only " + std::to_string( seed.fileLines )
+                 + " lines — the seed asked for line " + std::to_string( seed.line ) + ")";
+        case AtFault::NoCoverer:
+            return " (no indexed symbol spans line " + std::to_string( seed.line ) + " of " + ing.files[ seed.fileId ]
+                 + " — top-level blank, comment or preprocessor text sits inside no definition; seed a line of a "
+                   "definition instead)";
+        case AtFault::SiblingTie:
+            return " (line " + std::to_string( seed.line ) + " of " + ing.files[ seed.fileId ]
+                 + " touches more than one definition — " + ing.symbols[ seed.chain[ seed.tieAt - 1 ] ].name + ", "
+                 + ing.symbols[ seed.chain[ seed.tieAt ] ].name + "; a line seed cannot pick between them: use the "
+                   "file:line:name selector instead, e.g. " + ing.files[ seed.fileId ] + ":" + std::to_string( seed.line )
+                 + ":" + ing.symbols[ seed.chain[ seed.tieAt - 1 ] ].name + ")";
+        case AtFault::None:
+            return {};
+    }
+    return {};
+}
+
 inline std::string selectorFaultClause( const IngestResult& ing, std::string_view spec, std::string_view retryForm )
 {
+    if( !spec.empty() && spec.front() == '@' )
+    { // a line seed that resolved to nothing — re-run the SAME diagnosis the resolver made and speak it
+        return atSeedFaultClause( ing, resolveAtSeed( ing, spec.substr( 1 ) ) );
+    }
     std::string_view file, bareName;
     splitQualifiedSpec( spec, file, bareName );      // did-you-mean and the site match both want the NAME half only
     const bool fileQualified = spec.find( "::" ) == std::string_view::npos && spec.find( ':' ) != std::string_view::npos;

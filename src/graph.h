@@ -17,6 +17,7 @@
 #include "resolve.h"             // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
 #include "scipoverlay.h"         // SCIP precision overlay (data struct only; parser lives in scip.h)
 #include "infra/sortutil.h"      // radix edge sorting for large integer-key graph edge lists
+#include "docparse.h"            // detail::readWholeFile — resolveAtSeed reads the seed line's byte range off disk
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 
 #include <algorithm>
@@ -2362,6 +2363,132 @@ inline bool scopeSuffixMatches( std::string_view fullScope, std::string_view spe
         && fullScope.substr( fullScope.size() - specScope.size() - 2, 2 ) == "::";
 }
 
+// ─── @FILE:LINE — LINE-SEEDED ADDRESSING (the ARISE get_enclosing_scopes gap, round 2026-08-30) ────────
+//
+// §P8 seam 2 above already accepts `file:line:name`; this is the missing NO-NAME half. An agent holds a
+// FILE:LINE — a compiler error, a diff hunk, a profiler frame — and should not need the definition's name
+// to seed a verb there. The spelling is an explicit leading `@` because a bare `file:line` cannot be told
+// apart from the existing `file:name` form when the name is all digits (JSON config keys are indexed and
+// can be numeric): inferring would be a guess, and an ambiguous selector is refused, never silently
+// narrowed (§A6a's rule).
+//
+// Resolution is BYTE-SPAN containment, the same containment search.h::grepEnrich answers in= with: the seed
+// line's byte range is read off the on-disk file, and a definition covers the seed iff its
+// [sigStartByte, endByte) span intersects that range — so a line that merely TOUCHES a definition (its
+// signature line, its closing brace) resolves to it. The chain is every covering definition, outermost
+// first; the INNERMOST is what a SYM selector position resolves to. Two DISJOINT definitions sharing the
+// seed line (`int a(){…} int b(){…}` on one line) are a real ambiguity and are refused with both names.
+// Faults are FACTS about the spec, one enum value each, so every surface that reports one (the at flag's
+// own refusal, selectorrefuse.h's shared clause) speaks from the same diagnosis instead of re-guessing.
+enum class AtFault : std::uint8_t { None, Malformed, FileUnmatched, FileAmbiguous, FileUnreadable, LineOutOfRange, NoCoverer, SiblingTie };
+
+struct AtSeed
+{
+    AtFault                    fault = AtFault::Malformed;
+    std::string_view           fileHalf;         // the spec's path half (a view into the caller's spec)
+    std::uint32_t              line      = 0;    // the parsed 1-based seed line (0 until parsed)
+    std::uint32_t              fileId    = 0;    // the resolved file (meaningful from LineOutOfRange onward)
+    std::uint32_t              fileLines = 0;    // the file's real line count (the LineOutOfRange message)
+    std::vector<std::uint32_t> fileMatches;      // every matching fileId (the FileAmbiguous message)
+    std::vector<NodeId>        chain;            // covering defs, outermost→innermost; back() is the target;
+                                                 // on SiblingTie the first disjoint pair sits at tieAt-1/tieAt
+    std::size_t                tieAt = 0;        // SiblingTie only: chain[tieAt] is disjoint from chain[tieAt-1]
+    std::vector<std::uint32_t> lineStarts;       // byte offset of each 1-based line's first byte (report derives el=)
+};
+
+// `spec` is the FILE:LINE tail — the caller has already stripped the leading `@` (the at flag never has one).
+inline AtSeed resolveAtSeed( const IngestResult& ing, std::string_view spec )
+{
+    AtSeed r;
+    const std::size_t colon = spec.rfind( ':' );
+    if( colon == std::string_view::npos || colon == 0 || colon + 1 == spec.size() )
+    {
+        return r;   // Malformed — no colon, empty path half, or nothing after the colon
+    }
+    r.fileHalf = spec.substr( 0, colon );
+    std::uint32_t line = 0;
+    for( const char c : spec.substr( colon + 1 ) )
+    {
+        if( c < '0' || c > '9' || line > 100000000u )
+        {
+            return r;   // Malformed — the line half is not a number
+        }
+        line = line * 10u + std::uint32_t( c - '0' );
+    }
+    if( line == 0 )
+    {
+        return r;   // Malformed — lines are 1-based
+    }
+    r.line = line;
+
+    for( std::uint32_t fileId = 0; fileId < std::uint32_t( ing.files.size() ); ++fileId )
+    {
+        if( filePathContains( ing.files[ fileId ], r.fileHalf ) )
+        {
+            r.fileMatches.push_back( fileId );
+        }
+    }
+    if( r.fileMatches.empty() )     { r.fault = AtFault::FileUnmatched;  return r; }
+    if( r.fileMatches.size() > 1 )  { r.fault = AtFault::FileAmbiguous;  return r; }
+    r.fileId = r.fileMatches[0];
+
+    std::string text;
+    if( !docparse::detail::readWholeFile( diskPath( ing, r.fileId ), text ) )
+    {
+        r.fault = AtFault::FileUnreadable;   // indexed but gone from disk — say that, never "0 lines"
+        return r;
+    }
+    r.lineStarts.push_back( 0 );
+    for( std::size_t byteIndex = 0; byteIndex < text.size(); ++byteIndex )
+    {
+        if( text[ byteIndex ] == '\n' )
+        {
+            r.lineStarts.push_back( std::uint32_t( byteIndex + 1 ) );
+        }
+    }
+    const bool endsWithNewline = !text.empty() && r.lineStarts.back() == text.size();
+    r.fileLines = std::uint32_t( r.lineStarts.size() ) - ( endsWithNewline || text.empty() ? 1u : 0u );
+    if( line > r.fileLines )
+    {
+        r.fault = AtFault::LineOutOfRange;
+        return r;
+    }
+    const std::uint32_t lineStart = r.lineStarts[ line - 1 ];
+    const std::uint32_t lineEnd   = ( line < r.lineStarts.size() ) ? r.lineStarts[ line ] : std::uint32_t( text.size() );
+
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.fileId == r.fileId && s.sigStartByte < lineEnd && s.endByte > lineStart )
+        {
+            r.chain.push_back( s.id );
+        }
+    }
+    if( r.chain.empty() )
+    {
+        r.fault = AtFault::NoCoverer;
+        return r;
+    }
+    std::sort( r.chain.begin(), r.chain.end(), [ & ]( NodeId a, NodeId b )
+    {
+        const Symbol& sa = ing.symbols[a];
+        const Symbol& sb = ing.symbols[b];
+        if( sa.sigStartByte != sb.sigStartByte ) { return sa.sigStartByte < sb.sigStartByte; }
+        if( sa.endByte      != sb.endByte      ) { return sa.endByte      > sb.endByte;      }
+        return a < b;
+    } );
+    for( std::size_t chainIndex = 1; chainIndex < r.chain.size(); ++chainIndex )
+    {
+        if( ing.symbols[ r.chain[ chainIndex ] ].sigStartByte >= ing.symbols[ r.chain[ chainIndex - 1 ] ].endByte )
+        {
+            r.fault = AtFault::SiblingTie;   // disjoint spans both touching the seed line — refuse, never pick
+            r.tieAt = chainIndex;
+            return r;
+        }
+    }
+    r.fault = AtFault::None;
+    return r;
+}
+
 inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, std::string_view spec )
 {
     std::vector<NodeId> out;
@@ -2678,6 +2805,17 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
 // additive: no existing unqualified query changes behavior.
 inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, std::string_view spec )
 {
+    if( !spec.empty() && spec.front() == '@' )
+    { // @FILE:LINE line seed — the innermost covering definition (exactly one: a line names one place), or
+      // empty; a verb's own retry logic (--slice's HEAD:VAR split) and the shared refusal clause both rely
+      // on a bad @spec resolving EMPTY here rather than hard-refusing inside the resolver.
+        const AtSeed seed = resolveAtSeed( ing, spec.substr( 1 ) );
+        if( seed.fault == AtFault::None )
+        {
+            return { seed.chain.back() };
+        }
+        return {};
+    }
     // A canonical id first (see resolveAllByName): "path::scope::name" would otherwise be cut at its first
     // ':' by splitQualifiedSpec and refused, which made the id= these very verbs emit unusable as their own
     // input. Falls through to the file:name rule when the spec is not an id, so nothing existing changes.
