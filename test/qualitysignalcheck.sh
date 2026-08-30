@@ -544,5 +544,43 @@ grep -q "^ack complexity $HEXKEY $REALNOW " "$DP/.ripwire_quality_acks" \
     && ok "duplicate acks: collapsed line kept the HIGHER (real) ackNow=$REALNOW, not the lower duplicate" \
     || { no "duplicate acks: collapsed line lost the higher ackNow"; grep "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks"; }
 
+# ── 10b) DUPLICATE ACK LINES: THE LOSER'S REASON IS FOLDED IN, NOT DROPPED ─────────────────────────────
+#   Same duplicate-(kind,key) shape as 10, but judged on the REASON field: a git merge of two lanes' appends
+#   must reconcile the same way a live re-ack does (composeAckReason), never silently discard one lane's
+#   justification. Max-wins on ackNow stands (checked above); the losing line's reason must survive as the
+#   winner's `prior:` segment. The 10-setup already seeded reasons 'seed' (winner) and
+#   'duplicate-lower-should-not-win' (loser) — the collapsed line must carry BOTH, chained.
+COLLAPSED="$( grep "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks" )"
+printf '%s' "$COLLAPSED" | grep -q 'seed | prior: duplicate-lower-should-not-win' \
+    && ok "duplicate reasons: lower duplicate's reason folded in as the winner's prior: segment" \
+    || { no "duplicate reasons: losing line's reason was DROPPED by the reader dedup (clobber, 2nd site)"; printf '%s\n' "$COLLAPSED"; }
+
+# the other direction: the MERGE-APPENDED line wins on ackNow. Its reason becomes the head; the row's prior
+# head ('seed') is kept as the one-hop prior: segment; the older segment falls off (chain cap, same rule as
+# a live re-ack).
+printf 'ack complexity %s %s merge-lane-b-higher\n' "$HEXKEY" "$(( REALNOW + 7 ))" >> "$DP/.ripwire_quality_acks"
+( cd "$DP" && "$BIN" . --quality-ack --no-cache >/dev/null 2>&1 )
+[ "$( grep -c "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks" )" = 1 ] \
+    && ok "duplicate reasons: higher-duplicate round still collapses to a single canonical line" \
+    || no "duplicate reasons: rewrite left more than one line after the higher duplicate"
+COLLAPSED2="$( grep "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks" )"
+printf '%s' "$COLLAPSED2" | grep -q "^ack complexity $HEXKEY $(( REALNOW + 7 )) " \
+    && ok "duplicate reasons: max-wins still holds when the appended line is the higher one" \
+    || { no "duplicate reasons: appended higher ackNow did not win the row"; printf '%s\n' "$COLLAPSED2"; }
+printf '%s' "$COLLAPSED2" | grep -q 'merge-lane-b-higher | prior: seed' \
+    && ok "duplicate reasons: winner's reason is the head, losing row's HEAD kept as prior: (one hop)" \
+    || { no "duplicate reasons: higher-ackNow winner clobbered (or mis-chained) the losing row's reason"; printf '%s\n' "$COLLAPSED2"; }
+[ "$( printf '%s' "$COLLAPSED2" | grep -o 'prior:' | wc -l | tr -d ' ' )" = 1 ] \
+    && ok "duplicate reasons: chain stays capped at exactly ONE prior: hop across the duplicate rounds" \
+    || { no "duplicate reasons: prior: hop count != 1 (no fold, or chain grew past the cap)"; printf '%s\n' "$COLLAPSED2"; }
+
+# a byte-identical duplicated line (the ordinary both-sides-kept git merge artifact) must be a reason NO-OP:
+# no 'X | prior: X' self-chain, no second hop.
+printf '%s\n' "$COLLAPSED2" >> "$DP/.ripwire_quality_acks"
+( cd "$DP" && "$BIN" . --quality-ack --no-cache >/dev/null 2>&1 )
+[ "$( grep "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks" )" = "$COLLAPSED2" ] \
+    && ok "duplicate reasons: byte-identical duplicate line is a no-op (no self-chain, no growth)" \
+    || { no "duplicate reasons: identical duplicate mutated the row"; grep "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks"; }
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
