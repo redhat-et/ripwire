@@ -636,3 +636,83 @@ split: test/argvdiffcheck.sh against the pre-split c267a4b binary, byte-identica
 except the two disclosed non-deterministic surfaces (`--version` sha stamp, `--run-trace`
 `duration_ms`), plus the index-side proofs the main.cpp split never needed — self-map determinism,
 warm-vs-`--no-cache` byte equality, and xmllint, all run after every one of the nine stages.
+
+---
+
+## 2026-08-29 — the `--grep` fast path (P4.1): where a warm literal grep actually spends its time
+
+Ledger row only, per the no-perf-budget house rule: the numbers are recorded so drift is visible, never
+asserted by CI. What IS asserted is the equivalence — `test/grepfastcheck.sh` (13 `--grep` option vectors,
+cold == warm == warm, `--no-cache` parity, two staleness arms, and a byte-compare against a pre-change
+reference binary) plus `test/argvdiffcheck.sh` at `RIPWIRE_BASE=<the d5e7d94 binary>`, which reports
+608 of 610 argv vectors byte-identical (the two diffs are the disclosed `--version` sha stamp).
+
+### The premise that was wrong
+
+The round's plan proposed skipping "ranking / bundle assembly" for a plain literal `--grep`. A phase
+breakdown says `--grep` does neither: it never ranks, and it assembles no bundle. Its cost is the
+pipeline it sits behind plus its own scan. Measured warm on a 4,175-tracked-file mixed C++/ObjC/Metal
+corpus (`-DRIPWIRE_PROFILE=ON`, this Apple Silicon dev box), one hit-bearing literal:
+
+| phase | before | share | what it is |
+| --- | --- | --- | --- |
+| `ingest` (crawl + cache load + doc post-pass + model) | 93 ms | 41% | the index, warm |
+| `buildGraph` | 40 ms | 18% | reference resolution + CSR |
+| `grep/2` span tiers | **49 ms** | **21%** | tree-sitter re-parse of every hit file, to classify comment/string spans |
+| `grep/1` scan | 34 ms | 15% | the parallel literal scan itself |
+| `grep/3` aux + `grep/4` emit | 11 ms | 5% | unindexed-ext scan, window, enrichment, serialization |
+
+The verb's own scan was never the problem. The two costs worth taking were the span-tier re-parse — larger
+than `buildGraph`, and repeated verbatim on every later grep of the same unchanged file — and the fact
+that `buildGraph` and the scan ran back to back although neither reads the other's output.
+
+### The two changes
+
+1. **Span-tier memo** (`src/ingest_astquery.h`). `SpanTierMap` is a pure function of (file bytes, grammar),
+   so it is cached per file under the shared cache-dir ladder, stat-gated by the ingest cache's own
+   `(sizeBytes, mtimeNs)` + racy-mtime rule, with the path stored in the blob so a filename-hash collision
+   cannot alias two files. A hit skips the read as well as the parse. `--no-cache` disables it.
+   A measured size floor (32 KiB) keeps the blob count down: source files at or above it are 12.9% of this
+   corpus's file count but 86.1% of its bytes, so the floor keeps essentially all of the saving.
+2. **Scan/graph overlap** (`src/verbs_grep.h`, `src/main.cpp`). The three scan phases move into
+   `collectGrepScanPhases`, started on one thread while `buildGraph` runs on another, and joined before
+   anything is emitted. Only when the dispatch-precedence table says `--grep` is the verb that will answer.
+
+### Result
+
+Three arms — the pre-change binary, this one, and `rg` — run back to back inside each repetition, so a
+load spike moves all three together and only the ratio survives. 11 repetitions per query, warm cache,
+**medians not bests**, on the 4,175-tracked-file corpus (1,674 source files / 93.3 MB, plus 1,961
+markdown; 116,620 files on disk) at machine load ~7:
+
+| query | hits | before | after | `rg` | before/rg | after/rg |
+| --- | --- | --- | --- | --- | --- | --- |
+| a rare identifier | 54 | 253.8 ms | 169.6 ms | 45.8 ms | 5.55x | 3.71x |
+| a long unique name | 3 | 204.1 ms | 168.8 ms | 45.1 ms | 4.53x | 3.74x |
+| absent identifier | 0 | 205.5 ms | 174.1 ms | 45.3 ms | 4.54x | 3.84x |
+| a bucketing helper | 32 | 238.0 ms | 167.9 ms | 44.1 ms | 5.40x | 3.81x |
+| a common word | 3745 | 260.8 ms | 177.4 ms | 52.6 ms | 4.96x | 3.38x |
+| absent type name | 0 | 205.4 ms | 173.3 ms | 45.8 ms | 4.49x | 3.79x |
+| **median** | | | | | **4.75x** | **3.77x** |
+
+A 1.3x speed-up — not the 2x-of-`rg` the round targeted. The honest reason it stops there is the phase
+table above: after both changes the answer is ~93 ms of `ingest` plus ~47 ms of scan work overlapped with
+a ~40 ms `buildGraph`, and every one of those milliseconds feeds something the answer prints. (An
+intermediate arm with the memo but not the overlap measured 200 ms / 4.4x on the hit-bearing queries.)
+
+**Why `buildGraph` is not simply skipped for `--grep`.** It is needed for exactly one thing — `callers=` on
+the `<enc>` rows — and a targeted "resolve only these few names" shortcut is *not* sound: fn-pointer and
+FFI binding edges resolve through a variable's name, not the target's, so a name-filtered pass would
+under-count callers on precisely the symbols the graph is most useful for. An under-count printed without
+a floor marker is the kind of quiet wrongness this repo treats as worse than being slow, so the graph
+stays, and it is hidden behind the scan instead.
+
+### Reproduce
+
+```sh
+cmake -S . -B build_prof -DRIPWIRE_PROFILE=ON && cmake --build build_prof -j
+build_prof/ripwire <repo> --grep=<literal> >/dev/null      # run twice; the second is warm
+# the grep/1..grep/4 rows in the stderr #PROF_TSV block are the phase split above
+```
+Both arms must be timed alternately against the same warm cache on the same box: the phases are all
+CPU-bound, so a busy machine moves both arms together and only the ratio survives.
