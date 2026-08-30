@@ -692,6 +692,39 @@ std::string cloneUnpagedTotalAttr( bool clonePaging, std::size_t cloneTotal )
     return buf;
 }
 
+// The idiom-class annotation for one row (cloneidiom.h), and the two root counters over every group. Both
+// live out here for the same reason cloneUnpagedTotalAttr does: emitClonesReport is already the longest
+// body in this family, and its own --quality-delta row is what says so.
+std::string cloneIdiomAttrs( const rw::CloneIdiomVerdict& vd )
+{
+    if( vd.idiom == rw::CloneIdiom::None )
+    {
+        return {};
+    }
+    std::string out = " idiom=\"" + std::string( rw::cloneIdiomName( vd.idiom ) ) + "\"";
+    if( vd.demoted )
+    {
+        out += " demoted=\"1\"";
+    }
+    return out;
+}
+
+struct CloneIdiomTally { std::size_t classified = 0; std::size_t demoted = 0; };
+
+CloneIdiomTally tallyCloneIdioms( const std::vector<rw::CloneIdiomVerdict>& exact, const std::vector<rw::CloneIdiomVerdict>& gapped )
+{
+    CloneIdiomTally t;
+    for( const std::vector<rw::CloneIdiomVerdict>* v : { &exact, &gapped } )
+    {
+        for( const rw::CloneIdiomVerdict& d : *v )
+        {
+            t.classified += d.idiom != rw::CloneIdiom::None ? 1u : 0u;
+            t.demoted    += d.demoted ? 1u : 0u;
+        }
+    }
+    return t;
+}
+
 int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
 {
     using namespace rw;
@@ -704,6 +737,11 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     const std::vector<CloneGroup> cg  = findClones( ing, 40 );
     const std::vector<CloneGroup> cg3 = findClonesType3( ing, 40 );   // gapped near-misses (excludes exact = Type-1/2)
     const int                     cap = cfg.packTopN > 0 ? cfg.packTopN : 40;
+
+    // IDIOM CLASS (cloneidiom.h): a read-only pass over the members of the groups already found. It only
+    // ANNOTATES, and it is indexed in lockstep with cg / cg3.
+    const std::vector<CloneIdiomVerdict> vx  = classifyCloneGroupIdioms( ing, cg );
+    const std::vector<CloneIdiomVerdict> vx3 = classifyCloneGroupIdioms( ing, cg3 );
 
     // §P8: the root said groups="36" type3="108" while 76 <group> rows followed — NEITHER attribute was the
     // row count, because each list is capped independently. The emission order (all Type-1/2 rows, then all
@@ -771,6 +809,7 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
             ++exemptGroupCount;
         }
     }
+    const CloneIdiomTally idiomTally = tallyCloneIdioms( vx, vx3 );   // over ALL groups, like exempt_groups=
 
     // §A8.1: total= (new) is ALWAYS the true row total (groups+type3-group-count), unpaged included — see
     // cloneUnpagedTotalAttr() above for why it is skipped when paging is active (pageDisclosure already
@@ -780,10 +819,11 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     // a paging artefact, not a measurement.
     const CloneGrouping grouping = groupClones( ing, cg, cg3 );
 
-    std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\": the Type-3 pair list is capped upstream, so a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. raise the default cap with limit=N (offset=M pages). -->%s", rw::rootRelPathsLegend( clnSingleRoot ) );
-    std::printf( "<clones groups=\"%zu\" type3=\"%zu\"%s exempt_groups=\"%zu\" clone_groups=\"%u\" dup_loc=\"%llu\" total_loc=\"%llu\" dup_pct=\"%.1f\" counts_floor=\"1\"%s%s>",
+    std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. idiom= on a group names the RECOGNIZED SHAPE every one of its members classifies to, from a CLOSED set of three: threshold-ladder (a chain of if-compare-return and nothing else), switch-name-table (a switch whose every arm is a label plus a literal return), builder-chain (a param-struct initializer chain). demoted=\"1\" additionally means the quality-delta verb's duplication kind reports this group as minor rather than gating on it, which happens only when the WHOLE conjunction holds: every member the same recognized idiom, no two members sharing a single non-keyword identifier, no two members sharing an enclosing context (file plus scope), and the group under 80 normalized tokens. Five cross-domain bucketing ladders that share only the idiom are noise; two ladders over the same enum, or two in one namespace, are a copy. The idiom name is printed precisely so a human can overrule the demotion by reading the members: a demoted row is annotated, never removed. idiom_groups= and demoted_groups= count each of those over ALL groups. FLOOR on the classifier, since a silence here would read as coverage: the shape is read off the body's TOKEN stream and not a parse tree, so a macro-assembled body classifies as whatever its raw tokens spell; the table arm models case-labelled switches only; and builder-chain models the field-assignment spelling, not the fluent chained-call one. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\": the Type-3 pair list is capped upstream, so a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. raise the default cap with limit=N (offset=M pages). -->%s", rw::rootRelPathsLegend( clnSingleRoot ) );
+    std::printf( "<clones groups=\"%zu\" type3=\"%zu\"%s exempt_groups=\"%zu\" idiom_groups=\"%zu\" demoted_groups=\"%zu\" clone_groups=\"%u\" dup_loc=\"%llu\" total_loc=\"%llu\" dup_pct=\"%.1f\" counts_floor=\"1\"%s%s>",
                  cg.size(), cg3.size(),
                  cloneUnpagedTotalAttr( clonePaging, cloneTotal ).c_str(), exemptGroupCount,
+                 idiomTally.classified, idiomTally.demoted,
                  grouping.componentCount,
                  static_cast<unsigned long long>( grouping.duplicatedLoc ), static_cast<unsigned long long>( grouping.totalLoc ),
                  cloneDuplicationPercent( grouping ),
@@ -804,13 +844,14 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
             std::snprintf( exemptAttr, sizeof( exemptAttr ), " exempt=\"%s\"", exemptKind );
         }
         const unsigned gid = flat < grouping.gidOfGroup.size() ? grouping.gidOfGroup[ flat ] : 0u;
+        const std::string idiomAttr = cloneIdiomAttrs( isType3 ? vx3[ flat - cg.size() ] : vx[ flat ] );
         if( isType3 )
         {
-            std::printf( "<group type=\"3\" gid=\"%u\" tokens=\"%u\" n=\"%zu\" similarity=\"%.2f\"%s>", gid, gp.tokens, gp.members.size(), gp.similarity, exemptAttr );
+            std::printf( "<group type=\"3\" gid=\"%u\" tokens=\"%u\" n=\"%zu\" similarity=\"%.2f\"%s%s>", gid, gp.tokens, gp.members.size(), gp.similarity, exemptAttr, idiomAttr.c_str() );
         }
         else
         {
-            std::printf( "<group type=\"%u\" gid=\"%u\" tokens=\"%u\" n=\"%zu\"%s>", gp.type, gid, gp.tokens, gp.members.size(), exemptAttr );
+            std::printf( "<group type=\"%u\" gid=\"%u\" tokens=\"%u\" n=\"%zu\"%s%s>", gp.type, gid, gp.tokens, gp.members.size(), exemptAttr, idiomAttr.c_str() );
         }
         for( NodeId id : gp.members )
         {

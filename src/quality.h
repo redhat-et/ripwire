@@ -19,6 +19,7 @@
 #include "ingest.h"             // ingest() — the HEAD-tree snapshot re-ingests the archived commit (computeHeadSnapshot)
 #include "graph.h"
 #include "clones.h"
+#include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findErrorMasking — the built-in error-masking rule table (GitClear +47% kind)
 #include "arch.h"               // fnv1a64
 #include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
@@ -3483,6 +3484,29 @@ struct Regression
     bool isZeroMagnitude() const noexcept { return was == 0 && now == 0; }
 };
 
+// B10.2 — kind → the ATTRIBUTE NAME its facet value is emitted under. `Regression::facet` carries only the
+// VALUE, so exactly one place decides what to call it. That place used to be THREE places (the XML
+// quality-delta emitter, its --json twin, and the MCP quality_delta emitter each held the same conditional
+// chain), which is the shape --quality-delta's own duplication kind exists to name; adding the fourth row
+// below is what made keeping three copies indefensible. nullptr = this kind publishes no facet attribute.
+// A declarative table, not a conditional chain (CONTRIBUTING.md §3). Scanned with find_if rather than a
+// hand-rolled loop: the loop spelling is the single most re-derived body in this tree (serialize.h's
+// bytesPerTokenFor, namingconsistency's groupFor, lanes' findClaimByKey, ingest's lookupLang all carry it)
+// and the duplication kind reported this function as a fifth copy of it the moment it was written that way.
+struct FacetAttr { std::string_view kind; const char* attr; };
+inline constexpr FacetAttr kFacetAttrs[] = {
+    { "short-horizon-churn", "churn"   },   // self / ambient
+    { "api-surface",         "surface" },   // new-symbol / contract-change
+    { "duplication",         "idiom"   },   // the recognized clone-body shape (cloneidiom.h)
+};
+
+inline const char* facetAttrName( std::string_view kind ) noexcept
+{
+    const auto* const end = std::end( kFacetAttrs );
+    const auto* const hit = std::find_if( std::begin( kFacetAttrs ), end, [ kind ]( const FacetAttr& f ) { return f.kind == kind; } );
+    return hit != end ? hit->attr : nullptr;
+}
+
 // §P6.6: `sym` is a canonical id `path::scope::name` (resolve.h::canonicalId) whose PATH segment is
 // `ing.files[...]` AS THE CALLER SPELLED THE ROOT — an absolute root then makes sym= carry a 150+ char
 // absolute prefix, while `path` above is already root-relative (relForHash, the same spelling every other
@@ -4723,12 +4747,19 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // introduces a NEW near-clone (Type-3) is flagged exactly like a new exact copy. `now` carries the
     // group's tokens; the reported set is deduped by the same emitted-hash guard both passes share (an
     // exact and a near group can never share a member-set hash, so no double-report).
+    // IDIOM CLASS (cloneidiom.h) — an idiom COLLISION is reported minor with its shape NAMED, not gated; a
+    // group that classifies but fails the rest of the conjunction gates as before, name and all.
+    const std::vector<CloneIdiomVerdict> exactIdioms = classifyCloneGroupIdioms( ing, exactClones );
+    const std::vector<CloneIdiomVerdict> type3Idioms = classifyCloneGroupIdioms( ing, type3Clones );
+
     gtl::btree_map<std::uint64_t, std::uint8_t> dupSeen;
     const auto reportNewClones =
-        [ & ]( const std::vector<CloneGroup>& cgs )
+        [ & ]( const std::vector<CloneGroup>& cgs, const std::vector<CloneIdiomVerdict>& vx )
     {
-        for( const CloneGroup& cg : cgs )
+        for( std::size_t ci = 0; ci < cgs.size(); ++ci )
         {
+            const CloneGroup&        cg = cgs[ci];
+            const CloneIdiomVerdict& vd = vx[ci];
             const std::uint64_t h = cloneGroupHash( cg, ing, root );
             if( std::binary_search( base.cloneGroups.begin(), base.cloneGroups.end(), h ) )
             {
@@ -4769,12 +4800,14 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                     joined += " | ";
                 }
             }
-            regs.push_back( { "duplication", joined, 0, cg.tokens, h, false, {}, cloneGroupIsNew( cg ) } );   // ack identity = the member-set hash; origin = "no member existed"
+            // isMinor = the demotion; facet = the recognized shape, emitted as idiom= (facetAttrName).
+            regs.push_back( { "duplication", joined, 0, cg.tokens, h, vd.demoted,
+                              std::string( cloneIdiomName( vd.idiom ) ), cloneGroupIsNew( cg ) } );   // ack identity = the member-set hash; origin = "no member existed"
             stampCloneLoc( cg );
         }
     };
-    reportNewClones( exactClones );
-    reportNewClones( type3Clones );
+    reportNewClones( exactClones, exactIdioms );
+    reportNewClones( type3Clones, type3Idioms );
 
     const std::vector<std::uint64_t> topLevelCallees = topLevelCalleeNameHashes( ing );   // W1-S2: dead-kind evidence, built once
     const std::vector<std::string>   macroNames      = registeredMacroNames( root );      // P2.2: built-ins + .ripwire_config

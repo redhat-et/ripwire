@@ -191,6 +191,9 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # the same bounded helper, adding one site in registeredShellTokens and one in addRegisteredShellGate.
 # 15 -> 16 2026-08-29 (P2.2): readRegisterMacrosConfig reads the new .ripwire_config sidecar through the
 # same canonical helper rather than re-rolling its own fopen/fread.
+# 15 -> 16 2026-08-29: cloneidiom.h's classifyCloneGroupIdioms reads each clone MEMBER's file through the
+# same helper rather than re-rolling the fopen/fseek/fread block findClones carries — the fourth copy this
+# arm exists to keep from being written.
 [ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 16 ] \
     && ok "repo: --uses=readWholeFile count=16 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
     || no "repo: --uses=readWholeFile expected 16"
