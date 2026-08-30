@@ -893,18 +893,22 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
 }
 
 // `memory_recall` verb: the most relevant DOCS (memory notes / design docs) for a task, full bodies,
-// budgeted. Shares lexicalScores + writeRecall with the --recall CLI — the memory-as-graph recall (pull
-// the few notes that matter, not the whole corpus). Returns a plain-text bundle. `redact` masks
-// credential shapes in the recalled doc bodies (A3-F3 — same seam contract as the CLI --recall).
+// budgeted. Goes through recall.h's recallFor — the SAME rank-then-build call the CLI --recall verb makes,
+// arguments and all — so the two front doors of one verb cannot rank a query differently. They did until
+// this landed: this call site scored with `lexicalScores( ix.ing, …, task )`, i.e. pathFieldDefaultW 0 and
+// no root prefix, while the CLI passed 1 and the prefix, under the comment "Shares lexicalScores" that used
+// to sit here. A doc found only by its PATH was retrieved by the CLI and reported "no relevant documents"
+// over MCP. Registered in docs/EVALS.md §"--recall ranks by where the repo sits on disk"; gated by
+// test/recallparitycheck.sh. Returns a plain-text bundle. `redact` masks credential shapes in the recalled
+// doc bodies (A3-F3 — same seam contract as the CLI --recall).
 inline std::string recallText( const std::string& root, const std::string& task, int k, std::size_t maxBytes, RedactCounts* redact = nullptr )
 {
-    const McpIndex&          ix     = getIndex( root );
-    const std::vector<float> scores = lexicalScores( ix.ing, ix.g.outOff, ix.g.outTargets, task );
-    return captureXml( [ & ]( std::FILE* mem )
-    {
-        writeRecall( mem, ix.ing, scores, task, k, maxBytes, true, redact,
-                     ix.ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );   // docs (markdown) only; R-R root-relative separators
-    } );
+    const McpIndex& ix = getIndex( root );
+    // docs (markdown) only; R-R root-relative separators AND root-relative path ranking — both from this
+    // one rootArg, exactly as the CLI derives its own. Empty for a multi-root index, whose ing.files
+    // already hold the labelled root-relative spelling.
+    return recallFor( ix.ing, ix.g.outOff, ix.g.outTargets, task, k, maxBytes, redact,
+                      ix.ing.realPaths.empty() ? std::string_view( root ) : std::string_view() ).text;
 }
 
 // `situational_awareness(diff)` verb (S5-D): for a DIFF — an explicit changed-file list in `diff`/`files`, OR

@@ -7,7 +7,7 @@
 # (AKIA + 16 upper-alnum — the fixed AWS shape kRedactRules[0] matches) so a leak names its seam:
 #   1. `for`            — doc comments   (packSignatures <doc> seam)     AKIADOCCOMMENT2AAAAA
 #   2. `exemplar`       — def body       (packBodies CDATA seam)         AKIABODYSECRET2AAAAA
-#   3. `memory_recall`  — doc full body  (writeRecall seam)              AKIAMEMONOTES2AAAAAA
+#   3. `memory_recall`  — doc full body  (recallFor seam)              AKIAMEMONOTES2AAAAAA
 #   4. `fetch_body`     — def body       (raw JSON body seam)            AKIABODYSECRET2AAAAA
 #
 # Asserts, for each seam: the raw key does NOT appear in the MCP response AND the deterministic
@@ -123,7 +123,7 @@ assert_masked "$TMP/ex_a" "exemplar(body)" "$KEY_BODY"
 
 # ─── 3. memory_recall — doc-body seam ─────────────────────────────────────────────────────────────
 echo
-echo "=== 3. memory_recall — recalled note redacted (writeRecall seam) ==="
+echo "=== 3. memory_recall — recalled note redacted (recallFor seam) ==="
 RC_MSGS=( "$INIT" '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_recall","arguments":{"path":"'"$REPO"'","task":"storage bucket credentials rotation memo"}}}' )
 mcp_call "${RC_MSGS[@]}" >"$TMP/rc_a"
 assert_masked "$TMP/rc_a" "memory_recall(note body)" "$KEY_MEMO"
