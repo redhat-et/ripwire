@@ -964,6 +964,37 @@ cmake --build build 2>&1 | ./build/ripwire . --from-trace=-
 ## What's new
 
 <details>
+<summary><b>New (2026-08-30)</b> — each measured, dated, and re-derivable; the losses and caveats stated in place</summary>
+
+- **`--slice-flow=back|fwd|both` — cross-statement data-flow slicing (ARISE rung 2, arXiv:2605.03117).**
+  A bounded BFS from one variable over line-granular reaching-definition edges — backward to the
+  statements whose values feed it, forward to the statements its value reaches — that **stops at
+  function boundaries**, exactly as the paper's own slicer does. `--slice-depth=1..32` bounds it
+  (default 8, always disclosed as `depth=`); a bound that cuts a row says `flow_truncated="1"`;
+  without the new flags the v1 output is byte-identical. Measured on the registered fix-commit
+  protocol over this repository's own history (**7 commits / 38 instances, cpp only — a thin corpus,
+  reported as thin**): flow rows lift function-level added-line recall **0.163 → 0.198**, at a mean
+  4,993 output bytes — **25% of the 20,034-byte `--expand` whole-body baseline** whose recall is 1.0
+  by construction. (`bench/slice/run_slicerecall.py`; protocol, per-instance ledger and caveats in
+  [`docs/EVALS.md`](docs/EVALS.md).)
+- **The `--slice` v1 contract got its first measured numbers** (registered 2026-08-28, no numbers
+  until now): per-variable line-recall **0.726**, hit-all rate 0.632, over-inclusion 3.77×. The
+  misses were inspected one by one and are dominated by the measurement's own relevance oracle — a
+  word-regex that matches short identifiers inside comments and string literals, occurrences the
+  slicer correctly refuses to call variable uses — so 0.726 is a **floor under a noisy oracle**; no
+  inspected instance showed a real occurrence the slice dropped.
+- **`--expand` no longer hangs on minified bundles: the secret-redaction sweep was quadratic in LINE
+  length.** Invisible on ~100-byte source lines, fatal on a 2.9 KB-average-line minified bundle: one
+  selector in babel's 2.1 MB / 768-line yarn bundle **never completed** (killed at 1,343.9 s of user
+  CPU with an empty output file; 196.7 s is the only clean lower bound) and now answers in **0.46 s
+  warm**; the self-contained 20 KB single-line fixture went **23.02 s → 0.017 s (~1350×)**. A pure
+  memoization, so an output no-op — **120/120 invocations byte-identical** across 24 corpora × 5 verb
+  shapes — gated on behaviour only (`test/redactfixcheck.sh`), with the timings a ledger row in
+  [`bench/PROFILE.md`](bench/PROFILE.md), never a red-CI threshold.
+
+</details>
+
+<details>
 <summary><b>New (2026-08-23)</b> — each measured on this tree's binary, with the command that re-derives it</summary>
 
 - **`--pattern` — structural search written in CODE, not in node kinds.** `--pattern='foo($X, ...)'`

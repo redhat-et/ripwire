@@ -6707,8 +6707,9 @@ lifts function-level added-line recall 0.163 → 0.198 (+3.5pp) at 2.4× the v1 
 of the `--expand` bytes** for the whole-body baseline whose recall is 1.0 by construction. On
 fix-commits this granular (median single-function diffs here are small), the flat v1 slice already
 carries most of what flow can add; the ARISE-shaped payoff is expected where the changed lines
-span several variables of one computation, which this thin corpus rarely exhibits. No number here is
-published outside this section (README/deck untouched); a wider-corpus rerun (the SWEX/ARB trees
+span several variables of one computation, which this thin corpus rarely exhibits. Published to the
+README's What's-new (2026-08-30) on an owner pass, caveats carried with the numbers (deck untouched);
+a wider-corpus rerun (the SWEX/ARB trees
 carry no usable per-commit git history for this shape, so an external corpus with history would need
 pinning first) is future-round material, not this registration.
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
