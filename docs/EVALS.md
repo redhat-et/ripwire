@@ -6660,6 +6660,39 @@ whole-body baseline, recall 1.0 by construction, priced in raw output bytes (the
 and cost reported together, bytes not estimated tokens). Harness: `bench/slice/run_slicerecall.py`,
 deterministic given the commit list; the instance cap (newest 40 qualifying commits) is part of this
 registration. Numbers from this protocol land in this section and nowhere public until an owner pass.
+
+**Measured 2026-08-30, first run of the registered protocol** (binary at the rung-2 feature commit;
+"fix-shaped" operationalized in the committed harness as subject containing `fix`, case-insensitive;
+the miner takes every non-merge commit, not first-parent only, because this repository lands work
+through merged lanes). The corpus could speak less than the cap: the ENTIRE history yields **10**
+single-function fix-shaped candidates, of which **7 commits** survive unique resolution and produce
+**38 (commit, function, variable) instances** — cpp family only, and a thin corpus is reported as
+thin rather than padded.
+
+| metric | value |
+| --- | --- |
+| v1 per-variable line-recall (mean) | **0.726** |
+| v1 hit-all rate (every added line naming var among its rows) | **0.632** |
+| v1 over-inclusion (rows emitted / lines relevant, mean) | 3.77× |
+| function-level added-line recall, v1 rows (mean) | 0.163 |
+| function-level added-line recall, v2 `--slice-flow=both` rows (mean) | **0.198** |
+| output bytes, mean: v1 / v2 / `--expand` | 2 043 / 4 993 / 20 034 |
+
+Reading, with the caveat that owns most of the headline: the v1 line-recall misses were inspected
+per instance and are dominated by the RELEVANCE ORACLE, not the slice — the protocol's "changed line
+touching var" is a word-regex over added lines, which matches short identifiers (`s`, `i`, `d`,
+`out`, `ok`) inside **comments and string literals** (e.g. cff49a6d2's added refusal-wording lines),
+occurrences the classifier correctly refuses to call variable occurrences. The measured 0.726 is
+therefore a floor under a noisy oracle; no instance inspected showed a real identifier occurrence
+the slice dropped. The rung-2 delta on this corpus is modest and stated plainly: `--slice-flow=both`
+lifts function-level added-line recall 0.163 → 0.198 (+3.5pp) at 2.4× the v1 bytes — and at **25%
+of the `--expand` bytes** for the whole-body baseline whose recall is 1.0 by construction. On
+fix-commits this granular (median single-function diffs here are small), the flat v1 slice already
+carries most of what flow can add; the ARISE-shaped payoff is expected where the changed lines
+span several variables of one computation, which this thin corpus rarely exhibits. No number here is
+published outside this section (README/deck untouched); a wider-corpus rerun (the SWEX/ARB trees
+carry no usable per-commit git history for this shape, so an external corpus with history would need
+pinning first) is future-round material, not this registration.
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 
 **The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*
