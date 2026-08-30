@@ -6627,6 +6627,90 @@ function body via `--expand` (the primitive's value claim is fewer tokens for th
 recall AND the token ratio must be reported together, per the §5 discipline). No number from this shape
 is published until that round runs to completion under its own pre-registration — this paragraph is the
 registration, not the result.
+## `--slice-flow` — ARISE rung 2, cross-statement data-flow slicing (2026-08-30) — REGISTERED CONTRACT
+
+**The paper's own mechanism, read before this was designed.** ARISE's ablation credits its data-flow
+slicer with the largest single component of the +17pp Function Recall@1 (0.50 → 0.57 of the 0.43 → 0.60
+total; Line Recall@1 0.26 → 0.41 overall), and the paper is specific about what that slicer is: def-use
+edges by the reaching-definition rule ("for each use of variable v at statement s, the last preceding
+definition of v in source order within the same function"), a seed plus a direction (backward, forward
+or both), a bounded BFS over those edges that **stops at function boundaries** — inter-procedural
+expansion belongs to its call-graph ranking tier, not the slicer. Rung 2 lands that mechanism on the v1
+substrate: `--slice=SYM:VAR --slice-flow=back|fwd|both [--slice-depth=N]`.
+
+**The claimed contract (all of it gate-pinned in `test/sliceflowcheck.sh`, red-first against the
+pre-lane binary; none of it an accuracy claim).** Bounded BFS from the seed variable over
+line-granular reaching-definition edges: `back` = statements whose values feed the seed, `fwd` =
+statements the seed's value reaches (a reached line that defines another variable carries the value
+onward), `both` = the union, backward first, deduplicated. Flow rows extend the v1 `<s>` row with
+`v=` (the variable at that step), `d=` (BFS depth; seed rows are depth 0) and `f=` (the line the step
+was reached from), ordered by (d, line, variable) as a stated contract. `depth=` always states the
+bound in force (default 8, `--slice-depth=1..32`); a bound that suppresses a novel row is disclosed as
+`flow_truncated="1"` — bounded-here, never proven-complete. Without the new flags the v1 output is
+byte-identical (verified against the pre-lane binary). Modifier misuse refuses loudly: `--slice-flow`
+alone, on the bare inventory (no seed VAR), an unknown direction, `--slice-depth` without
+`--slice-flow`, depth outside 1..32.
+
+**Deviations from the paper, deliberate and disclosed in the emitted legend:** (1) statement ≈ source
+LINE — rows aggregate per line, so a multi-statement line merges and may over-connect (the paper keys
+on AST statement nodes); (2) name-based and scope-insensitive like v1 — no alias analysis, no lexical
+scope separation (the paper handles global/nonlocal explicitly), shadowing may over-include; (3) the
+seed is the whole variable inside ONE resolved definition (v1's addressing), not the paper's
+(file, line, variable) triple — a line seed is recoverable by reading the d=0 rows. The paper's
+Python-only substrate widens here to v1's six served families, with the classification tables v1
+already grep-verified per vendored grammar.
+
+**The measurement this registers — protocol fixed BEFORE either arm runs.** The v1 paragraph above
+registered a line-recall shape; this round executes it and extends it with a paired v2 arm, on a
+corpus registered here as: fix-shaped commits mined from THIS repository's own history (family: cpp —
+the one family this corpus can speak for, stated rather than averaged away), newest first, a commit
+qualifying when `git diff -U0` against its parent confines every added line to ONE function per git's
+own C/C++ hunk funcnames, that function resolves uniquely in the index at that commit, and at least
+one added line names a sliceable local. Instances are (commit, function, variable) triples: the
+variables named on the added lines that appear in the function's `--slice=fn` inventory. Arms, all
+measured on the SAME instances at the commit's own tree: (a) **v1** `--slice=fn:var` — per-variable
+line-recall (hit = every added line naming var appears among its rows) and rows-emitted /
+lines-relevant over-inclusion, the v1 paragraph's own metrics; (b) **v2** `--slice=fn:var
+--slice-flow=both` — FUNCTION-level added-line recall (|added lines ∩ slice lines| / |added lines|,
+per instance) for the v1 rows vs the v2 rows, the delta being rung 2's whole value claim: flow rows
+recover related changed lines the flat single-variable slice cannot see; (c) **`--expand=fn`** — the
+whole-body baseline, recall 1.0 by construction, priced in raw output bytes (the §5 discipline: recall
+and cost reported together, bytes not estimated tokens). Harness: `bench/slice/run_slicerecall.py`,
+deterministic given the commit list; the instance cap (newest 40 qualifying commits) is part of this
+registration. Numbers from this protocol land in this section and nowhere public until an owner pass.
+
+**Measured 2026-08-30, first run of the registered protocol** (binary at the rung-2 feature commit;
+"fix-shaped" operationalized in the committed harness as subject containing `fix`, case-insensitive;
+the miner takes every non-merge commit, not first-parent only, because this repository lands work
+through merged lanes). The corpus could speak less than the cap: the ENTIRE history yields **10**
+single-function fix-shaped candidates, of which **7 commits** survive unique resolution and produce
+**38 (commit, function, variable) instances** — cpp family only, and a thin corpus is reported as
+thin rather than padded.
+
+| metric | value |
+| --- | --- |
+| v1 per-variable line-recall (mean) | **0.726** |
+| v1 hit-all rate (every added line naming var among its rows) | **0.632** |
+| v1 over-inclusion (rows emitted / lines relevant, mean) | 3.77× |
+| function-level added-line recall, v1 rows (mean) | 0.163 |
+| function-level added-line recall, v2 `--slice-flow=both` rows (mean) | **0.198** |
+| output bytes, mean: v1 / v2 / `--expand` | 2 043 / 4 993 / 20 034 |
+
+Reading, with the caveat that owns most of the headline: the v1 line-recall misses were inspected
+per instance and are dominated by the RELEVANCE ORACLE, not the slice — the protocol's "changed line
+touching var" is a word-regex over added lines, which matches short identifiers (`s`, `i`, `d`,
+`out`, `ok`) inside **comments and string literals** (e.g. cff49a6d2's added refusal-wording lines),
+occurrences the classifier correctly refuses to call variable occurrences. The measured 0.726 is
+therefore a floor under a noisy oracle; no instance inspected showed a real identifier occurrence
+the slice dropped. The rung-2 delta on this corpus is modest and stated plainly: `--slice-flow=both`
+lifts function-level added-line recall 0.163 → 0.198 (+3.5pp) at 2.4× the v1 bytes — and at **25%
+of the `--expand` bytes** for the whole-body baseline whose recall is 1.0 by construction. On
+fix-commits this granular (median single-function diffs here are small), the flat v1 slice already
+carries most of what flow can add; the ARISE-shaped payoff is expected where the changed lines
+span several variables of one computation, which this thin corpus rarely exhibits. No number here is
+published outside this section (README/deck untouched); a wider-corpus rerun (the SWEX/ARB trees
+carry no usable per-commit git history for this shape, so an external corpus with history would need
+pinning first) is future-round material, not this registration.
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 
 **The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*

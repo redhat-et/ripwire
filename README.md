@@ -565,7 +565,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 
 ## What it answers
 
-Around the core sit 170 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 172 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 Not sure which of them fits the task in front of you? `ripwire . --help-task="<task in words>"`
 recommends ONE executable command with the evidence behind the pick — advice only, it never runs
@@ -575,7 +575,7 @@ the recommendation — and abstains honestly when the evidence is too thin to na
 <summary>Which surface is the authority — <code>--help</code> vs <code>docs/COMMANDS.md</code> — and the four reflex verbs worth memorising</summary>
 
 `./build/ripwire --help` is generated from the binary's own flag table and is always the authority;
-[`docs/COMMANDS.md`](docs/COMMANDS.md) documents every one of the 143 documented flags — 94 of them
+[`docs/COMMANDS.md`](docs/COMMANDS.md) documents every one of the 145 documented flags — 94 of them
 with a real invocation and its recorded output (counts re-derived 2026-08-23; `test/docscommandscheck.sh`
 fails if that documented set and the binary's own flag table ever disagree). Each family below links there.
 
