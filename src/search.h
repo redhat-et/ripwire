@@ -2015,7 +2015,8 @@ struct GrepTierReport
 // FIXED CONSTANTS, never derived from the row cap, the page offset or the limit. A "stop once the page is
 // full" budget would be cheaper and would reintroduce exactly the bug §A1 was written for — every page a
 // window into a differently-filtered list.
-inline GrepCollection grepApplySpanTiers( const IngestResult& ing, GrepCollection collected, GrepIn mode, GrepTierReport& report )
+inline GrepCollection grepApplySpanTiers( const IngestResult& ing, GrepCollection collected, GrepIn mode, GrepTierReport& report,
+                                          bool useMemo = true )
 {
     report = GrepTierReport{};
     if( mode == GrepIn::Any || collected.raw.empty() )
@@ -2057,7 +2058,7 @@ inline GrepCollection grepApplySpanTiers( const IngestResult& ing, GrepCollectio
         tierPaths.push_back( diskPath( ing, fileId ) );
     }
 
-    const SpanTierBatch batch = spanTiersOfFiles( std::span<const std::string>( tierPaths ) );
+    const SpanTierBatch batch = spanTiersOfFiles( std::span<const std::string>( tierPaths ), useMemo );
     report.tieredFileCount    = std::uint32_t( tierPaths.size() );
 
     // fileId → index into the parsed batch; UINT32_MAX ⇒ past the budget, i.e. UNCLASSIFIED

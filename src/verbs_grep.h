@@ -330,8 +330,127 @@ std::string grepCorpusAttrs( const rw::IngestResult& ing )
 // callers= (in-edge CSR — data the graph already holds, zero new analysis), and amp/tested ride along
 // ONLY when a co-run (--metrics) already computed them — grep itself never triggers the qmetrics pass
 // or the git popen. Null pointers are the normal case and emit nothing.
+// ─── §P4.1 — the grep SCAN PHASES, liftable ahead of the graph ────────────────────────────────────
+//
+// WHY THIS EXISTS. The three phases below (the parallel literal scan, the boolean post-filter + span
+// tiering it feeds, and the unindexed aux scan) read ONLY `cfg` and `ing`. They do not touch the call
+// graph — the graph enters this verb in exactly one place, the <enc> rows' callers= count. But the
+// pipeline built the graph FIRST and then ran them, so on a warm answer two independent CPU-bound
+// stretches ran back to back: buildGraph on the main thread (~40 ms on the measured corpus) followed by
+// ~47 ms of scan work. Lifting them into a struct lets main() start them on one thread while buildGraph
+// runs on another, so the answer pays max(graph, scan) instead of their sum. See bench/PROFILE.md.
+//
+// IT IS AN OVERLAP, NOT A SHORTCUT. Every phase computes exactly what it computed before, from exactly
+// the same inputs, and the result is consumed after the join in a fixed order — so nothing about the
+// output can depend on which finished first (determinism is a contract, and a concurrency change is
+// precisely where that gets lost). A run whose answering verb is not grep never starts the thread and a
+// prefetch that degrades sets valid=false, which makes this verb recompute inline — in BOTH cases the
+// bytes are the ones the serial path produced, which is what test/grepfastcheck.sh arm (6) pins.
+struct GrepScanPhases
+{
+    rw::GrepCollection        found;
+    rw::GrepTierReport        tier;
+    rw::GrepAuxCollection     aux;
+    std::vector<rw::GrepTerm> terms;                 // owned: argv string_views become owned strings exactly once
+    rw::GrepScope             scope           = rw::GrepScope::Line;
+    std::uint32_t             termsSuppressed = 0;
+    bool                      valid           = false;   // false ⇒ never computed (or degraded) — recompute inline
+};
+
+GrepScanPhases collectGrepScanPhases( const rw::Config& cfg, const rw::IngestResult& ing )
+{
+    using namespace rw;
+    const std::string pat( cfg.grep );
+    GrepScanPhases    phases;
+    {
+        PROFILE_SCOPE_DESCRIBE( "grep/1: grepCollect scan" );
+        phases.found = grepCollect( ing, pat, cfg.grepRegex, cfg.noPrefilter );
+    }
+    // G3 (2026-08-15 harvest, report-ugrep §F2): boolean AND/NOT as a post-filter over the collected raw
+    // hits — literal-only, already refused together with --regex in validateConfig. Built here (not in
+    // Config) so the CLI value strings (string_views into argv) become owned std::strings exactly once.
+    phases.terms = makeGrepTerms( cfg );
+    phases.scope = ( cfg.grepScope == "file" ) ? GrepScope::File : GrepScope::Line;
+    if( !phases.terms.empty() )
+    {
+        phases.found = grepApplyBooleanTerms( ing, std::move( phases.found ), std::span<const GrepTerm>( phases.terms ),
+                                              phases.scope, phases.termsSuppressed );
+    }
+    // R-H (2026-08-15 harvest report-ugrep §F3/§F4, funded by wave-2 E5): SPAN TIERS — classify each
+    // surviving hit by the tree-sitter span it sits in and serve the tightest NON-EMPTY tier. Runs AFTER the
+    // boolean filter on purpose: tiering the survivors is both cheaper and the only reading that matches
+    // what this answer will print. The bounded on-demand parse and its disclosed bail-out live in
+    // search.h::grepApplySpanTiers (which owns the budget), never in astQuery — see its header.
+    {
+        PROFILE_SCOPE_DESCRIBE( "grep/2: span tiers" );
+        phases.found = grepApplySpanTiers( ing, std::move( phases.found ), ( cfg.grepIn == "any" ) ? GrepIn::Any : GrepIn::Code,
+                                           phases.tier, /*useMemo=*/!cfg.noCache );
+    }
+    // §R-J: additive scan over CrawlSkips::unsupported — the "unsupported-ext, text-looking" population the
+    // crawl already computed at ingest time (queries/*/tags.scm and its siblings). Reuses the SAME per-file
+    // ceiling the crawl applies to indexed files, so a huge unsupported-ext file is excluded exactly like an
+    // oversized indexed one would be. See search.h's grepCollectAux for the honesty fields and why this is a
+    // separate hit type rather than a widened GrepRawHit::fileId domain (the lane report has the option write-up).
+    {
+        PROFILE_SCOPE_DESCRIBE( "grep/3: aux unindexed scan" );
+        const std::size_t maxAuxFileBytes = cfg.maxFileBytes == 0 ? kDefaultMaxFileBytes : cfg.maxFileBytes;
+        phases.aux = grepCollectAux( ing.crawlSkips, pat, cfg.grepRegex, maxAuxFileBytes );
+    }
+    phases.valid = true;
+    return phases;
+}
+
+// §P4.1 launch seam — the whole of the overlap, so main()'s pipeline body stays three statements with no
+// branch of its own. The three scan phases read only `cfg` and `ing`; the call graph enters this verb in
+// exactly one place, the <enc> rows' caller counts. Serially that meant a warm answer paid buildGraph and
+// then an equally CPU-bound scan one after the other; started here they overlap, and the answer pays the
+// larger of the two rather than their sum (bench/PROFILE.md has the measured split).
+//
+// WHEN is not re-derived here: the caller hands in §B11.4's precedence-table WINNER — the single source of
+// dispatch order, pinned pair-by-pair by test/dispatchordercheck.sh — so a run some other verb answers
+// starts no thread and pays nothing. Returns a non-joinable thread whenever nothing should run: the
+// caller's join is then a no-op, `out` keeps valid=false, and the verb computes the phases inline, which is
+// the pre-P4.1 control path verbatim. The result is consumed ONLY after the join, in a fixed order, so no
+// byte of the output can depend on which thread finished first — the determinism contract a concurrency
+// change is most likely to break, and the one test/grepfastcheck.sh arm (6) exists to pin.
+std::thread startGrepScanPrefetch( const rw::Config& cfg, const rw::IngestResult& ing, const char* winningVerbFlag, GrepScanPhases& out )
+{
+    // Two narrowing conditions, both here so main() carries neither: grep must be the verb that will ANSWER
+    // (the caller hands in §B11.4's own winner, never a re-derived guess), and a --regex that will be REFUSED
+    // scans nothing — exactly as the serial path refuses before scanning.
+    const bool grepAnswers  = winningVerbFlag != nullptr && std::strcmp( winningVerbFlag, "--grep" ) == 0;
+    const bool regexRefused = cfg.grepRegex && rw::regexCompileError( std::string( cfg.grep ) ).has_value();
+    if( !grepAnswers || regexRefused )
+    {
+        return {};
+    }
+    return std::thread( [ &out, &cfg, &ing ]()
+                        {
+                            try
+                            {
+                                out = collectGrepScanPhases( cfg, ing );
+                            }
+                            catch( ... )   // a throw crossing this thread boundary would be std::terminate
+                            {
+                                out.valid = false;
+                                DEGRADED_PATH_ALERT( "grep: scan prefetch degraded (exception swallowed) — the verb recomputes inline" );
+                            }
+                        } );
+}
+
+// The matching join. A one-line seam rather than an `if` in the pipeline body, so the caller reads as three
+// statements with no branch of its own: a prefetch that never started is simply not joinable.
+void joinGrepScanPrefetch( std::thread& worker )
+{
+    if( worker.joinable() )
+    {
+        worker.join();
+    }
+}
+
 int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
-                    const std::vector<std::uint32_t>* amp, const std::vector<std::uint8_t>* tested )
+                    const std::vector<std::uint32_t>* amp, const std::vector<std::uint8_t>* tested,
+                    const GrepScanPhases* prefetched )
 {
     using namespace rw;
     const std::string          pat( cfg.grep );
@@ -361,31 +480,24 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // grepBefore/grepAfter default to 0 (--grep-context/-before/-after unset) ⇒ GrepHit::before/after
     // stay empty and the <hit> emission below takes the ORIGINAL self-closing path byte-for-byte —
     // this is the byte-identical-when-unset contract.
-    GrepCollection             found    = grepCollect( ing, pat, cfg.grepRegex, cfg.noPrefilter );
-    // G3 (2026-08-15 harvest, report-ugrep §F2): boolean AND/NOT as a post-filter over the collected raw
-    // hits — literal-only, already refused together with --regex in validateConfig. Built here (not in
-    // Config) so the CLI value strings (string_views into argv) become owned std::strings exactly once.
-    std::vector<GrepTerm> grepTerms = makeGrepTerms( cfg );
-    const GrepScope    grepScopeVal    = ( cfg.grepScope == "file" ) ? GrepScope::File : GrepScope::Line;
-    std::uint32_t      termsSuppressed = 0;
-    if( !grepTerms.empty() )
+    //
+    // §P4.1: the scan phases are collectGrepScanPhases()'s (above) — main() may already have run them
+    // alongside buildGraph. `prefetched` is that result when it exists; nullptr, or a degraded prefetch,
+    // recomputes them right here from the same inputs, which is the pre-P4.1 control path verbatim.
+    GrepScanPhases        localPhases;
+    const GrepScanPhases* phases = ( prefetched != nullptr && prefetched->valid ) ? prefetched : nullptr;
+    if( phases == nullptr )
     {
-        found = grepApplyBooleanTerms( ing, std::move( found ), std::span<const GrepTerm>( grepTerms ), grepScopeVal, termsSuppressed );
+        localPhases = collectGrepScanPhases( cfg, ing );
+        phases      = &localPhases;
     }
-    // R-H (2026-08-15 harvest report-ugrep §F3/§F4, funded by wave-2 E5): SPAN TIERS — classify each
-    // surviving hit by the tree-sitter span it sits in and serve the tightest NON-EMPTY tier. Runs AFTER the
-    // boolean filter on purpose: tiering the survivors is both cheaper and the only reading that matches
-    // what this answer will print. The bounded on-demand parse and its disclosed bail-out live in
-    // search.h::grepApplySpanTiers (which owns the budget), never in astQuery — see its header.
-    GrepTierReport tierReport;
-    found = grepApplySpanTiers( ing, std::move( found ), ( cfg.grepIn == "any" ) ? GrepIn::Any : GrepIn::Code, tierReport );
-    // §R-J: additive scan over CrawlSkips::unsupported — the "unsupported-ext, text-looking" population the
-    // crawl already computed at ingest time (queries/*/tags.scm and its siblings). Reuses the SAME per-file
-    // ceiling the crawl applies to indexed files, so a huge unsupported-ext file is excluded exactly like an
-    // oversized indexed one would be. See search.h's grepCollectAux for the honesty fields and why this is a
-    // separate hit type rather than a widened GrepRawHit::fileId domain (the lane report has the option write-up).
-    const std::size_t       maxAuxFileBytes = cfg.maxFileBytes == 0 ? kDefaultMaxFileBytes : cfg.maxFileBytes;
-    const GrepAuxCollection aux             = grepCollectAux( ing.crawlSkips, pat, cfg.grepRegex, maxAuxFileBytes );
+    const GrepCollection&           found           = phases->found;
+    const GrepTierReport&           tierReport      = phases->tier;
+    const GrepAuxCollection&        aux             = phases->aux;
+    const std::vector<GrepTerm>&    grepTerms       = phases->terms;
+    const GrepScope                 grepScopeVal    = phases->scope;
+    const std::uint32_t             termsSuppressed = phases->termsSuppressed;
+    PROFILE_SCOPE_DESCRIBE( "grep/4: window + enrich + emit" );
 
     const std::size_t          hitCount = found.raw.size();
     // files= counts the whole COLLECTED set, never the printed page — it is a property of the search, so it
@@ -683,7 +795,7 @@ std::optional<int> runGrep( const MainDispatch& d )
     }
     // body: emitGrepReport() above. amp/tested are non-null only when a co-run (--metrics) computed
     // them at dispatch build time — grep itself never asks for the analysis (R1's no-new-analysis rule).
-    return emitGrepReport( d.cfg, d.ing, d.g, d.ampPtr, d.testedPtr );
+    return emitGrepReport( d.cfg, d.ing, d.g, d.ampPtr, d.testedPtr, d.grepPhases );
 }
 
 }   // namespace — verbs_grep.h section of main.cpp
