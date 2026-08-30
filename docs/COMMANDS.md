@@ -1988,7 +1988,7 @@ $ ./build/ripwire . --owners
 
 **Answers:** high-confidence internal source functions with no caller in the indexed tree;
 
-=DIR scopes to whole path components (dir or filename) and REFUSES a filter that names nothing indexed. A LEADING ./ anchors DIR at the repo ROOT (=./src matches only the top-level src/ subtree); a bare name (=src) matches that component ANYWHERE in the tree, including nested (test/fixture/src/…)
+=DIR scopes to whole path components (dir or filename) and REFUSES a filter that names nothing indexed. A symbol whose definition is produced by a SELF-REGISTERING test/benchmark macro is never reported: doctest TEST_CASE/ TEST_CASE_FIXTURE/SCENARIO, gtest TEST/TEST_F/TEST_P, Catch2, Google Benchmark — a static initializer registers them, so a name-based call graph cannot see the caller and every one of them would be a false positive. Extend the list for your own framework with `.ripwire_config`'s one key, `register_macros = NAME[, NAME...]` (one directive per line, # comments). The exemption is DISCLOSED, never silent: register-macro-excluded="N" rides the report and prints even at 0. Exempt from dead-code only — such a symbol still participates in clone detection. A LEADING ./ anchors DIR at the repo ROOT (=./src matches only the top-level src/ subtree); a bare name (=src) matches that component ANYWHERE in the tree, including nested (test/fixture/src/…)
 
 **Try it**
 
@@ -2007,6 +2007,7 @@ $ ./build/ripwire . --dead-code=src
 **Caveats (stated by the binary):**
 
 - =DIR scopes to whole path components (dir or filename) and REFUSES a filter that names nothing indexed.
+- The exemption is DISCLOSED, never silent: register-macro-excluded="N" rides the report and prints even at 0.
 
 ### `--quality-baseline`
 
