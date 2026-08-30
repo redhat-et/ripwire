@@ -195,9 +195,11 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # (b) cloneidiom.h's classifyCloneGroupIdioms reads each clone MEMBER's file through the
 # same helper rather than re-rolling the fopen/fseek/fread block findClones carries — the fourth copy this
 # arm exists to keep from being written.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 17 ] \
-    && ok "repo: --uses=readWholeFile count=17 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 17"
+# 17 -> 18 2026-08-30 (lane/at-seed): graph.h's resolveAtSeed reads the seed file's bytes through the
+# same canonical helper to derive the seed line's byte range — the line-seeded selector's one file read.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 18 ] \
+    && ok "repo: --uses=readWholeFile count=18 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 18"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"
