@@ -24,15 +24,19 @@ A single-threaded directory crawl (`collectSources`, `src/ingest_crawl.h`) that 
 file list, followed by **parallel** per-file tree-sitter extraction. The crawl is the cheap half and
 is deliberately not parallelized; the parse pool is where the threads are.
 
-The stage is one translation unit with `src/ingest.cpp` as its spine (`ingest()` and the document
-post-pass). Since the 2026-08-29 split, the stage's families live in `src/ingest_*.h` sections
-compiled into that one TU — the same section mechanism as `src/main.cpp`'s verb families, guarded by
-`RIPWIRE_INGEST_TU` so no other file can include one: crawl + parse setup (`ingest_crawl.h`), the
-raw-facts model + incremental-cache codec (`ingest_cache.h`), structural metrics
-(`ingest_metrics.h`), cross-symbol relation capture (`ingest_relations.h`), the markdown section
-tier (`ingest_docs.h`), name resolution + capture policy (`ingest_names.h`), local-binding capture
-(`ingest_binds.h`), parse infrastructure + the fused side-capture passes (`ingest_sidecap.h`), and
-the `--match`/`--lint` query tail (`ingest_astquery.h`).
+The stage is one translation unit with `src/ingest.cpp` as its spine — `ingest()` itself is now a
+~120-line orchestrator that reads as the pipeline. Since the 2026-08-29 split, the stage's families
+live in `src/ingest_*.h` sections compiled into that one TU — the same section mechanism as
+`src/main.cpp`'s verb families, guarded by `RIPWIRE_INGEST_TU` so no other file can include one:
+crawl + parse setup (`ingest_crawl.h`), the raw-facts model + incremental-cache codec
+(`ingest_cache.h`), structural metrics (`ingest_metrics.h`), cross-symbol relation capture
+(`ingest_relations.h`), the markdown section tier (`ingest_docs.h`), name resolution + capture
+policy (`ingest_names.h`), local-binding capture (`ingest_binds.h`), parse infrastructure + the
+fused side-capture passes (`ingest_sidecap.h`), and the `--match`/`--lint` query tail
+(`ingest_astquery.h`). The 2026-08-30 follow-on decomposed `ingest()`'s own body into four phase
+sections in call order: the lazy tags.scm prewarm (`ingest_prewarm.h`), the parallel parse pool
+(`ingest_parsepool.h`), the document post-pass (`ingest_docpass.h`), and the build-model tail —
+dedup, symbol assignment, span attribution, ordered emit (`ingest_model.h`).
 
 **Crawl order is deterministic, and that is load-bearing.** The walk *collects every candidate path
 first*, sorts them lexicographically by byte, and only then assigns node IDs and parses. Node IDs are
