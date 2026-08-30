@@ -140,6 +140,30 @@ sections your question needs.
    on that repo against a 0.64 s default; the result is memoized per (repo, HEAD sha), so every later
    question on the same commit — including `--whereis --with-history` — is a cache load.
 
+1d. **Did a task in this plan just never get launched?** — `ripwire <dir> --plan-lint=FILE`. Where 1c
+   explicitly does NOT check `§Status` lines, dates or "N of M done" tallies, this is the narrow
+   structural check that closes that one gap — a wave-closer's job, mechanized. It is opt-in per FILE
+   (never a directory sweep) because the house PLAN dialect it recognizes is deliberately narrow: a task
+   card is exactly an H3 heading opening with a task id (`T5`, `T10`, `T7b`), a status ledger is exactly
+   one heading (any level) reading "Status" once a leading section mark is stripped. A file showing
+   neither reports `dialect="0"` and nothing further runs — most plans are exactly that file, and this is
+   not a failing lint for them.
+   ```
+   <plan-lint file="wave.md" dialect="1" cards="6" ledger="1" git="1" stale_commits="20" gating="1">
+     <card id="T5" line="40" status="missing" gating="1"/> …
+   ```
+   Once `dialect="1"`: every card's terminal line (the LAST non-blank line of its own body) must carry a
+   status glyph, else `status="missing"` — the exact shape of the field failure this verb exists to catch
+   (a card that was planned but never updated, silent until a human happened to notice); an hourglass line
+   whose git-blamed commit sits more than `stale_commits=` commits behind HEAD is `stale="1"` (never
+   claimed outside a git repo); a task id named in the ledger with no matching card is a `ledger-orphan`;
+   an owed/OWED mention with no check-mark or cross anywhere LATER in the SAME document is undischarged.
+   **Limits, stated up front:** never semantics — it does not judge whether a card's claims are true (that
+   stays 1c's job); single-document only (a successor plan's discharge of an owed item is invisible here);
+   substring matching on "owed"/"OWED" with no disambiguation (a doc that merely quotes the word reads the
+   same as a real marker). Unlike `--doc-drift`'s always-0 report, this **gates**: exit 2 when `dialect="1"`
+   and any row carries `gating="1"`, exit 0 clean or `dialect="0"`, exit 1 only when FILE could not be read.
+
 2. **Dead code** — `ripwire <dir> --dead-code[=DIR]`
    `<dead-code count="N" confidence="high" evidence="internal-linkage+zero-callers"><d n="orphan" …/>` —
    source-defined free functions with explicit internal linkage and **in-degree 0** in the indexed call
