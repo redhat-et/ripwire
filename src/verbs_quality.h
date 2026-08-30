@@ -624,9 +624,15 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 // run when this run supplies one, PRESERVED otherwise. A later scope-less re-ack therefore
                 // refreshes the magnitude without erasing the record of who accepted the row originally,
                 // which is the only reading under which the foreign-ack sweep means anything.
+                // REASON CLOBBER FIX (round 2026-08-29): a re-ack that supplies a DIFFERENT reason no longer
+                // overwrites the row's existing one outright — composeAckReason folds it in as
+                // "<new> | prior: <old>" (capped at one hop; a no-op when the reason is unchanged), so a
+                // shared row re-acked by unrelated sessions keeps both justifications instead of the last
+                // writer silently erasing the one before it. See quality.h's composeAckReason for the rule.
                 rec = quality::AckRecord{ ackKind, r.key, std::max( rec.ackNow, r.now ), cid,
                                           scope.active() ? scope.spec : rec.by,
-                                          cfg.qualityAckReason.empty() ? rec.reason : std::string( cfg.qualityAckReason ) };
+                                          cfg.qualityAckReason.empty() ? rec.reason
+                                                                       : quality::composeAckReason( rec.reason, std::string( cfg.qualityAckReason ) ) };
             }
             if( ackWritten == 0 && !cfg.qualityAckOnly.empty() )
             {
