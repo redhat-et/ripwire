@@ -1659,7 +1659,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               removed LINE carrying the name, so a name whose last removal was from a doc rather than\n"
         "                               code is reported with that doc as its site. A repo deeper than the walk bound reports\n"
         "                               truncated=\"1\" and answers unknown — never \"never\" — for anything it did not reach.\n"
-        "    --plan-lint=FILE           the house PLAN/DESIGN format's STRUCTURE check (P3.2) — never semantics, that stays\n"
+        "    --plan-lint=FILE           the house PLAN/DESIGN format's STRUCTURE check — never semantics, that stays\n"
         "                               --doc-drift's job. FILE is read directly (like --from-trace's FILE, not through the\n"
         "                               crawled index), so it need not live inside any indexed root. GRAMMAR, narrow and\n"
         "                               opt-in on purpose (this repo's own ~20 plan/design documents do not converge on one\n"
