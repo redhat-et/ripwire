@@ -112,6 +112,18 @@ inline std::string rootQualifiedSidecar( const std::string& root, const char* na
 inline std::string baselinePath( const std::string& root ) { return rootQualifiedSidecar( root, kBaselineFile ); }
 inline std::string acksPath( const std::string& root )     { return rootQualifiedSidecar( root, kAcksFile ); }
 
+// P2.2 (agent-friction round, 2026-08-29) — the FIRST general-purpose `.ripwire_config` sidecar. No
+// config-file parser existed anywhere in this codebase before this (checked: no other `.ripwire_config`
+// reader, no `RIPWIRE_CONFIG` constant). Smallest thing consistent with the two house sidecar
+// conventions already in the tree — `.ripwire_notes` (committed, degrade-don't-throw, absent=inert) and
+// `.ripwire_quality_acks` (root-qualified via rootQualifiedSidecar, never the process CWD): a committed,
+// human-editable key=value text file at the repo root. ONE recognized key today (readRegisterMacrosConfig
+// below); an unrecognized key is skipped rather than refused, so the file can grow new keys later without
+// a binary that predates them choking on it — notes.h's own forward-compat rule, restated here for a new
+// file rather than invented twice.
+inline const char* kConfigFile = ".ripwire_config";
+inline std::string configPath( std::string_view root ) { return rootQualifiedSidecar( std::string( root ), kConfigFile ); }
+
 template<class Value>
 using ScratchMap = stree::dyn::dynamic_map<std::uint64_t, Value, 32>;   // uint64 keys on Apple cache lines; use only when a hard capacity bound is obvious
 
@@ -233,6 +245,180 @@ inline bool isTestScriptPath( std::string_view p ) noexcept
     return ends( ".sh" ) || ends( ".bash" ) || ends( ".zsh" );
 }
 
+// ---- P2.2 (agent-friction round, 2026-08-29): self-registering test/benchmark macros -------------------
+// EVIDENCE (an orchestrated multi-agent authorship wave, agent-friction round 2026-08-29): a doctest/Catch2
+// TEST_CASE (or a GoogleTest TEST/TEST_F/TEST_P, or a Google Benchmark BENCHMARK) registers itself via a
+// STATIC INITIALIZER at file scope — a mechanism the name-based call graph cannot see. Nothing in the
+// indexed tree ever "calls" the test body, so isDeadCandidate's zero-in-edges evidence flagged every one
+// of them, and --quality-delta reported the whole file as a pile of `dead-code origin="new-symbol"` rows
+// the moment an agent added a test — the single most repeated --quality-delta false positive across three
+// separate task gates in that wave.
+//
+// TWO DIFFERENT SHAPES, ONE DETECTABLE SIGNATURE. doctest/Catch2's block-forming macros
+// (kTestBlockMacroNames, ingest_names.h — LB-E) cannot be expanded by tree-sitter and are captured by hand
+// (testMacroBlockPartsOf) as a "testmacroblock" symbol named by its TITLE string — the macro name itself is
+// gone from s.name. GoogleTest's TEST/TEST_F/TEST_P and Google Benchmark's BENCHMARK family take
+// IDENTIFIER (not string) arguments, so tree-sitter-cpp's ordinary function_definition grammar accepts the
+// whole `MACRO( Args ) { … }` shape outright with no custom capture at all — verified empirically
+// (test/registermacrocheck.sh): the resulting symbol's NAME is literally the macro token itself ("TEST",
+// "BENCHMARK", …), never the caller's intended test/benchmark name. Both shapes, though extracted by
+// different ingest code paths, agree on ONE byte fact: `sigStartByte` is `ts_node_start_byte` of the
+// definition node either way (ingest.cpp), unconditionally — so the symbol's OWN signature text, read
+// from that byte, begins with the macro's identifier (`TEST_CASE( "title" )`, `TEST( Suite, Case )`,
+// `BENCHMARK( Name )`, …) immediately (optional whitespace) followed by '('. That single textual fact is
+// checked here, at REPORT time — no ingest change, no kParserVer bump, no new persisted field — and it is
+// exactly as extensible as a text scan can be: a repo's own block-forming macro that happens to take
+// identifier args gets the same free pass a GoogleTest TEST() gets, the moment its name is registered
+// (built in below, or via .ripwire_config's register_macros=, readRegisterMacrosConfig below).
+//
+// PRECISION OVER RECALL (the LB-E discipline, deliberately kept, same as isFixturePath/isTestScriptPath
+// above): matching is a WHOLE-TOKEN compare against a short, named list — never a "looks test-ish" guess,
+// and never testScope (L8's in-file test-scope bit is BROADER than this: for Rust/Python/TS/JS/C# it also
+// fires on a naming/attribute CONVENTION with no macro at all, and folding that in here would be exactly
+// the general "looks like a test, skip it" heuristic the plan calls out as the failure mode NOT to build).
+// The floor this leaves, stated rather than hidden: a hand-written function whose own text happens to
+// start with one of these exact tokens followed by '(' — realistically only a function or macro invocation
+// LITERALLY spelled `TEST(`/`BENCHMARK(`/etc. — is exempted too. That is a MISS (an undetected real
+// dead-code candidate), never a false accusation, the same failure direction the two predicates above
+// already accept.
+inline constexpr std::array<std::string_view, 12> kBuiltinRegisterMacros = {
+    "TEST_CASE", "TEST_CASE_FIXTURE", "TEST_CASE_METHOD", "SCENARIO", "TEST_SUITE",   // doctest + Catch2 (shared macro names)
+    "TEST", "TEST_F", "TEST_P",                                                       // GoogleTest
+    "BENCHMARK", "BENCHMARK_F", "BENCHMARK_TEMPLATE", "BENCHMARK_CAPTURE",            // Google Benchmark
+};
+
+// A macro-name token: a valid C-family identifier ([A-Za-z_][A-Za-z0-9_]*). Degrade-skip anything else
+// (a malformed .ripwire_config line mints NOTHING rather than a token that could accidentally prefix-match
+// real code) — the same "never throws, never guesses" posture notes.h documents for its own sidecar.
+inline bool isValidMacroToken( std::string_view token ) noexcept
+{
+    if( token.empty() || ( !std::isalpha( static_cast<unsigned char>( token[0] ) ) && token[0] != '_' ) )
+    {
+        return false;
+    }
+    for( char c : token )
+    {
+        if( !std::isalnum( static_cast<unsigned char>( c ) ) && c != '_' )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// `.ripwire_config`'s ONE recognized key: `register_macros = NAME[, NAME...]`. Grammar: one directive per
+// line, '#' full-line comments, blank lines ignored; a line whose key is not "register_macros" is skipped
+// (forward-compat — see kConfigFile's comment above), and a malformed/non-identifier token is dropped
+// rather than accepted. Absent/unreadable/empty file yields an empty list — INERTNESS CONTRACT: no config
+// file changes nothing about this run's set of exempted names (kBuiltinRegisterMacros still applies).
+// Sorted + deduped so two hand-edits appending the same name in different positions merge to one.
+inline std::vector<std::string> readRegisterMacrosConfig( std::string_view root )
+{
+    std::vector<std::string> names;
+    std::string               text;
+    if( !docparse::detail::readWholeFile( configPath( root ), text ) || text.empty() )
+    {
+        return names;   // absent/unreadable/empty — inert, never a refusal
+    }
+    std::size_t pos = 0;
+    while( pos <= text.size() )
+    {
+        const std::size_t nl = text.find( '\n', pos );
+        std::string_view  line( text.data() + pos, ( nl == std::string::npos ? text.size() : nl ) - pos );
+        pos = ( nl == std::string::npos ) ? text.size() + 1 : nl + 1;
+        while( !line.empty() && ( line.back() == '\r' || line.back() == ' ' || line.back() == '\t' ) ) { line.remove_suffix( 1 ); }
+        while( !line.empty() && ( line.front() == ' ' || line.front() == '\t' ) ) { line.remove_prefix( 1 ); }
+        if( line.empty() || line.front() == '#' )
+        {
+            continue;
+        }
+        constexpr std::string_view kKey = "register_macros";
+        if( line.size() <= kKey.size() || line.compare( 0, kKey.size(), kKey ) != 0 )
+        {
+            continue;   // unrecognized key — forward-compat skip, not a refusal
+        }
+        std::string_view rest = line.substr( kKey.size() );
+        while( !rest.empty() && ( rest.front() == ' ' || rest.front() == '\t' ) ) { rest.remove_prefix( 1 ); }
+        if( rest.empty() || rest.front() != '=' )
+        {
+            continue;   // "register_macros" with no '=' is not the directive — skip, do not guess
+        }
+        rest.remove_prefix( 1 );
+        std::size_t start = 0;
+        while( start <= rest.size() )
+        {
+            const std::size_t comma = rest.find( ',', start );
+            std::string_view  tok( rest.data() + start, ( comma == std::string_view::npos ? rest.size() : comma ) - start );
+            while( !tok.empty() && ( tok.back() == ' ' || tok.back() == '\t' ) ) { tok.remove_suffix( 1 ); }
+            while( !tok.empty() && ( tok.front() == ' ' || tok.front() == '\t' ) ) { tok.remove_prefix( 1 ); }
+            if( isValidMacroToken( tok ) )
+            {
+                names.emplace_back( tok );
+            }
+            if( comma == std::string_view::npos )
+            {
+                break;
+            }
+            start = comma + 1;
+        }
+    }
+    std::sort( names.begin(), names.end() );
+    names.erase( std::unique( names.begin(), names.end() ), names.end() );
+    return names;
+}
+
+// The combined, sorted, deduped registered-macro name list for ONE run: the built-ins above plus whatever
+// .ripwire_config's register_macros= adds. Sorted so nothing downstream needs its own re-sort.
+inline std::vector<std::string> registeredMacroNames( std::string_view root )
+{
+    std::vector<std::string> names( kBuiltinRegisterMacros.begin(), kBuiltinRegisterMacros.end() );
+    for( std::string& extra : readRegisterMacrosConfig( root ) )
+    {
+        names.push_back( std::move( extra ) );
+    }
+    std::sort( names.begin(), names.end() );
+    names.erase( std::unique( names.begin(), names.end() ), names.end() );
+    return names;
+}
+
+// A registered macro's own call syntax, read starting at the CALLEE's own signature start byte (`region`
+// begins at sigStartByte — either forEachSymbolBody's per-symbol slice below, or a caller's own substr):
+// a leading identifier exactly matching one of `names`, then optional whitespace, then '('. Linear scan
+// over `names` — the list is short (a dozen built-ins plus whatever a repo adds), so a sorted-binary-search
+// would spend more on the comparator than the scan it replaces.
+inline bool startsWithRegisteredMacro( std::string_view region, const std::vector<std::string>& names ) noexcept
+{
+    std::size_t end = 0;
+    while( end < region.size() && ( std::isalnum( static_cast<unsigned char>( region[end] ) ) || region[end] == '_' ) )
+    {
+        ++end;
+    }
+    if( end == 0 )
+    {
+        return false;
+    }
+    const std::string_view token = region.substr( 0, end );
+    bool matched = false;
+    for( const std::string& name : names )
+    {
+        if( token == name )
+        {
+            matched = true;
+            break;
+        }
+    }
+    if( !matched )
+    {
+        return false;
+    }
+    std::size_t p = end;
+    while( p < region.size() && std::isspace( static_cast<unsigned char>( region[p] ) ) )
+    {
+        ++p;
+    }
+    return p < region.size() && region[p] == '(';
+}
+
 // W1-S2 (2026-08-11) — TOP-LEVEL INVOCATION IS A USE: the fnv1a64 name-hash set of every callee invoked from
 // FILE SCOPE (fromSymbol == kNoNode). buildGraph deliberately drops file-scope references from the call-graph
 // CSR (no caller symbol → no edge — correct for PageRank and the ranked map), which starves the dead kind: a
@@ -262,12 +448,23 @@ inline std::vector<std::uint64_t> topLevelCalleeNameHashes( const IngestResult& 
 }
 
 // A "dead deletion-candidate": has a body, no caller in the indexed tree, not invoked from file scope, not
-// header-exported, not a test fixture. A SIMPLE, internally-consistent heuristic — the delta only needs
-// baseline↔current consistency, not parity with the fuller --dead-code verb. `topLevelCallees` is the
-// sorted set topLevelCalleeNameHashes builds — both call sites build it ONCE outside their symbol loop.
+// header-exported, not a test fixture, not produced by a registered self-registering macro. A SIMPLE,
+// internally-consistent heuristic — the delta only needs baseline↔current consistency, not parity with the
+// fuller --dead-code verb. `topLevelCallees` is the sorted set topLevelCalleeNameHashes builds and
+// `registeredMacroIds` the sorted set registeredMacroSymbolIds builds (below, past forEachSymbolBody) —
+// every call site builds both ONCE outside its symbol loop. `exemptedByRegisterMacro`, when non-null, is
+// set true iff this symbol satisfied every OTHER test here and was excluded SOLELY by the macro check —
+// the signal a caller needs to disclose an honest "N excluded" count instead of just applying the rule
+// silently (P2.2's honesty requirement).
 inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
-                             const std::vector<std::uint64_t>& topLevelCallees ) noexcept
+                             const std::vector<std::uint64_t>& topLevelCallees,
+                             const std::vector<NodeId>& registeredMacroIds,
+                             bool* exemptedByRegisterMacro = nullptr ) noexcept
 {
+    if( exemptedByRegisterMacro )
+    {
+        *exemptedByRegisterMacro = false;
+    }
     const Symbol& s = ing.symbols[i];
     if( s.kind == SymKind::Section )
     {
@@ -300,6 +497,14 @@ inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
     if( isTestScriptPath( p ) )
     {
         return false; // B10.1a: shell test-runner helpers — $(...) calls invisible to the parser
+    }
+    if( std::binary_search( registeredMacroIds.begin(), registeredMacroIds.end(), i ) )
+    {
+        if( exemptedByRegisterMacro )
+        {
+            *exemptedByRegisterMacro = true;
+        }
+        return false; // P2.2: self-registers via a static initializer the call graph cannot see
     }
     return true;
 }
@@ -473,6 +678,31 @@ inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
             visit( i, s, std::string_view( bytes.data() + s.sigStartByte, s.endByte - s.sigStartByte ) );
         }
     }
+}
+
+// P2.2 — every symbol in THIS tree whose own signature text is a registered-macro call (built ONCE per
+// computeSnapshot/computeDelta run, exactly like topLevelCallees above), reading each file's bytes once via
+// forEachSymbolBody — whose per-symbol `body` view already starts at sigStartByte, which is precisely where
+// startsWithRegisteredMacro needs to look (see the P2.2 comment block above isFixturePath's neighbours).
+// Sorted for isDeadCandidate's binary_search. Short-circuits to empty when `names` is empty (never true for
+// the built-in call sites — kBuiltinRegisterMacros is never empty — but keeps the function honest for any
+// future caller that passes an empty override).
+inline std::vector<NodeId> registeredMacroSymbolIds( const IngestResult& ing, const std::vector<std::string>& names )
+{
+    std::vector<NodeId> ids;
+    if( names.empty() )
+    {
+        return ids;
+    }
+    forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol&, std::string_view body )
+    {
+        if( startsWithRegisteredMacro( body, names ) )
+        {
+            ids.push_back( i );
+        }
+    } );
+    std::sort( ids.begin(), ids.end() );
+    return ids;
 }
 
 inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const IngestResult& ing, std::string_view root )
@@ -1629,6 +1859,16 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   computeSnapshot            (quality.h) — the dead-set BUILDER (baseline side)
 //   bodyHashesBySym            (quality.h) — the bodyHashBySym KEY semantics (the v6 keying change landed
 //                                             without this line watching it — the exact drift this guards)
+//   readRegisterMacrosConfig   (quality.h) — the .ripwire_config register_macros= parse feeding
+//                                             registeredMacroNames (P2.2)
+//   registeredMacroNames       (quality.h) — the built-in + .ripwire_config name list isDeadCandidate's
+//                                             register-macro exemption is scoped to (P2.2)
+//   startsWithRegisteredMacro  (quality.h) — the macro-call text match registeredMacroSymbolIds calls into
+//   registeredMacroSymbolIds   (quality.h) — the per-symbol exemption SET isDeadCandidate consults (P2.2).
+//                                             NOTE (disclosed limitation): kBuiltinRegisterMacros itself is a
+//                                             constexpr array, not a function, so this manifest mechanism
+//                                             cannot hash IT — a future edit that only changes the built-in
+//                                             NAME LIST (not these functions' text) will not trip this gate.
 // v4 (r27 P0.2) — the blob header gained the EXTRACTION IDENTITY (kIngestCacheVersionMirror +
 // kIngestParserVerMirror; see the long note at their declaration). Everything a Snapshot contains is a
 // function of tree-sitter extraction, so a parserVer bump must retire the blob — it did not, and 28c7d32's
@@ -1658,7 +1898,16 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // Snapshot MEANS changed": a v6 blob's keys are computed from a different byte string, so served to this
 // binary EVERY symbol reads as absent from the baseline and the whole tree reports as new. Bumped 6 -> 7 to
 // retire every blob written before the fix.
-constexpr std::uint32_t kQSnapCacheScheme = 7;
+// v8 (P2.2, agent-friction round, 2026-08-29) — `isDeadCandidate` gained the register-macro exemption: a
+// symbol whose OWN signature text is a registered self-registering test/benchmark macro call (built-in
+// list + .ripwire_config's register_macros=) is no longer a dead-set member. Exactly the v3 shape again
+// (a new isDeadCandidate exemption landing without a bump is the determinism hole v2's comment exists to
+// prevent): a pre-v8 blob's dead set was computed WITHOUT this exemption and would resurrect the exact
+// false positives this round fixes (doctest/Catch2 TEST_CASE, GoogleTest TEST/TEST_F/TEST_P, Google
+// Benchmark BENCHMARK bodies reported as newly-dead the moment an agent added a test). No extraction
+// change — the underlying symbols were always indexed; only the dead-SET predicate narrowed — so
+// kParserVer/the mirrors deliberately did NOT move. Bumped 7 -> 8 to retire every blob written before it.
+constexpr std::uint32_t kQSnapCacheScheme = 8;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -2564,7 +2813,9 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
 inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::string_view root = {} )
 {
     Snapshot snap;
-    const std::vector<std::uint64_t> topLevelCallees = topLevelCalleeNameHashes( ing );   // W1-S2: dead-kind evidence, built once
+    const std::vector<std::uint64_t> topLevelCallees = topLevelCalleeNameHashes( ing );          // W1-S2: dead-kind evidence, built once
+    const std::vector<std::string>   macroNames      = registeredMacroNames( root );             // P2.2: built-ins + .ripwire_config
+    const std::vector<NodeId>        macroIds        = registeredMacroSymbolIds( ing, macroNames );
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
         if( i >= g.canonId.size() || g.canonId[i].empty() )
@@ -2587,7 +2838,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         // (editcheck.h). A COUNT is overload-collision-proof for the opposite reason a MAX is: it is the one
         // number a collision cannot hide. (maskBySym is the other non-MAX kind; it sums for its own reason.)
         { std::uint32_t& slot = snap.defsBySym[ key ];    slot += 1; }
-        if( isDeadCandidate( ing, g, i, topLevelCallees ) )
+        if( isDeadCandidate( ing, g, i, topLevelCallees, macroIds ) )
         {
             snap.dead.push_back( key );
         }
@@ -4243,9 +4494,14 @@ inline std::string staleAcksJsonArray( const std::vector<StaleAck>& staleAcks ) 
 inline std::vector<Regression> computeDelta( const IngestResult& ing, const Graph& g, const Snapshot& base,
                                              std::string_view root = {},
                                              const std::vector<std::string>& excludes = {},
-                                             std::size_t maxFileBytes = kDefaultMaxFileBytes )
+                                             std::size_t maxFileBytes = kDefaultMaxFileBytes,
+                                             std::size_t* registerMacroExcludedOut = nullptr )   // P2.2: honest disclosure count, additive+optional — see isDeadCandidate
 {
     std::vector<Regression> regs;
+    if( registerMacroExcludedOut )
+    {
+        *registerMacroExcludedOut = 0;
+    }
 
     // A4-P10 — HOIST the per-symbol quality key. It materializes a path-qualified string + hashes it; the
     // passes below (4 metric kinds × 2 loops each, dead, api-surface, error-masking, short-horizon-churn) each
@@ -4521,10 +4777,21 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     reportNewClones( type3Clones );
 
     const std::vector<std::uint64_t> topLevelCallees = topLevelCalleeNameHashes( ing );   // W1-S2: dead-kind evidence, built once
+    const std::vector<std::string>   macroNames      = registeredMacroNames( root );      // P2.2: built-ins + .ripwire_config
+    const std::vector<NodeId>        macroIds        = registeredMacroSymbolIds( ing, macroNames );
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
-        if( i >= g.canonId.size() || g.canonId[i].empty() || !isDeadCandidate( ing, g, i, topLevelCallees ) )
+        if( i >= g.canonId.size() || g.canonId[i].empty() )
         {
+            continue;
+        }
+        bool macroExempt = false;
+        if( !isDeadCandidate( ing, g, i, topLevelCallees, macroIds, &macroExempt ) )
+        {
+            if( macroExempt && registerMacroExcludedOut )
+            {
+                ++( *registerMacroExcludedOut );   // P2.2: would be dead-code but for the macro exemption — disclosed count
+            }
             continue;
         }
         if( !std::binary_search( base.dead.begin(), base.dead.end(), keyByNode[i] ) )

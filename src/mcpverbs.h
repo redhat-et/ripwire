@@ -2413,6 +2413,7 @@ struct QualityDeltaOutcome
     std::size_t                       ackedByContent   = 0;
     std::size_t                       schemeRekeyed    = 0;   // the git-INDEPENDENT key-scheme replay
     std::size_t                       schemeAmbiguous  = 0;
+    std::size_t                       registerMacroExcluded = 0;   // P2.2: the CLI's disclosed dead-code exemption count — see quality.h
 };
 
 // §B6 M10 — a CORRUPT sidecar used to read as "no sidecar". readBaseline reports a file that yields no header,
@@ -2496,7 +2497,7 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     auto       acks = rw::quality::readAckRecords( qualityAcksPath( root ) );
     const auto heal = rw::quality::healIdentity( baseSel.snapshot, acks, ing, g, root, root, /*wantContentIds=*/false );
 
-    oc.regs       = rw::quality::computeDelta( ing, g, baseSel.snapshot, root );
+    oc.regs       = rw::quality::computeDelta( ing, g, baseSel.snapshot, root, {}, rw::kDefaultMaxFileBytes, &oc.registerMacroExcluded );
 
     // signal-to-noise round: honor the per-finding ack ratchet exactly like the CLI — the acks sidecar is
     // root-qualified (same SIDECAR LOCATION discipline as the baseline), suppression is reported via `acked`.
@@ -2570,6 +2571,10 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
                     + ",\"preexisting-worse\":" + std::to_string( oc.regs.size() - newSymbolCount )
                     + ",\"new-symbol\":" + std::to_string( newSymbolCount )
                     + ",\"gating\":" + std::to_string( gatingCount )
+                    // P2.2 — the CLI's disclosed dead-code exemption count, ALWAYS present (never omitted at
+                    // zero, unlike the identity fields just below): mcpclidiffcheck.sh's JSON-key-set lens
+                    // diffs this verb against `--quality-delta --json`, and the CLI never omits it either.
+                    + ",\"register-macro-excluded\":" + std::to_string( oc.registerMacroExcluded )
                     // R1 IDENTITY — the CLI root's identity disclosure, spelled in JSON. Present only when
                     // git could be read at all, exactly like the CLI arm (absent ≠ zero — see the legend).
                     + ( oc.schemeRekeyed ? ",\"acks_rekeyed_by_scheme\":" + std::to_string( oc.schemeRekeyed ) : std::string{} )

@@ -155,6 +155,7 @@ struct DeltaBasis
     // after the delta is computed and the delta has already been taken against the stale identity.
     gtl::btree_map<std::string, rw::quality::AckRecord> acks;
     rw::quality::IdentityHealing                        healing;
+    std::size_t                                         registerMacroExcluded = 0;   // P2.2: disclosed dead-code exemption count
 };
 
 // Returns an EXIT CODE when there is nothing to compare against (already reported), nullopt when `out` holds
@@ -190,7 +191,7 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
         out.healing = quality::healIdentity( out.baseSel.snapshot, out.acks, refs.target().ing, refs.target().g,
                                              out.deltaRoot, root, cfg.qualityAck, refs.rangeSpan );
         out.regs    = quality::computeDelta( refs.target().ing, refs.target().g, out.baseSel.snapshot,
-                                             out.deltaRoot, cfg.excludes, cfg.maxFileBytes );
+                                             out.deltaRoot, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded );
         return std::nullopt;
     }
 
@@ -243,7 +244,7 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
     out.acks    = quality::readAckRecords( quality::acksPath( root ) );
     out.healing = quality::healIdentity( out.baseSel.snapshot, out.acks, d.ing, d.g,
                                          std::string( cfg.rootPath ), root, cfg.qualityAck );
-    out.regs = quality::computeDelta( d.ing, d.g, out.baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes );
+    out.regs = quality::computeDelta( d.ing, d.g, out.baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded );
     return std::nullopt;
 }
 
@@ -488,9 +489,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             // R-I: the same two shas + the same unmeasurable-kind disclosure the XML root carries, spelled in
             // JSON. Empty for the bare form, so that object stays byte-identical to before.
             std::printf( "{\"baseline\":\"%s\",\"regressions\":%zu,\"minor\":%zu,\"acked\":%zu,\"stale\":%zu,"
-                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"at\":%s%s%s,\"r\":[",
+                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"register-macro-excluded\":%zu,\"at\":%s%s%s,\"r\":[",
                          jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount, staleAcks.size(),
-                         preexistingCount, newSymbolCount, gatingCount, atJsonJ.c_str(), refs.jsonAttrs.c_str(),
+                         preexistingCount, newSymbolCount, gatingCount, basis.registerMacroExcluded, atJsonJ.c_str(), refs.jsonAttrs.c_str(),
                          identityJson.c_str() );
             bool firstR = true;
             for( const quality::Regression& r : regs )
@@ -648,13 +649,21 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                      "never faked, when no locator resolves), and every row the header's gating= counter "
                      "counts also carries a gating attribute set to 1 — those are the rows the exit code fires "
                      "on, and they are now marked positively rather than by the ABSENCE of sev/origin. "
+                     "register-macro-excluded= is a SEPARATE floor, not a finding: it counts symbols this "
+                     "run excluded from the dead-code kind because their OWN definition is a registered "
+                     "self-registering test/benchmark macro call (doctest/Catch2 TEST_CASE family, GoogleTest "
+                     "TEST/TEST_F/TEST_P, Google Benchmark BENCHMARK family, plus any name a .ripwire_config "
+                     "register_macros= line adds) — such a symbol registers itself through a static initializer "
+                     "the call graph cannot see, so zero in-edges on it is not evidence of anything. Never gates, "
+                     "never counted in regressions=, and printed even when zero (0 means none excluded, not that "
+                     "the check did not run). "
                      "(This sentence deliberately spells no attribute=value literal: the header counters are "
                      "parsed by grep in several gates, and a quoted numeric example here would be matched "
                      "first.) -->" );
         const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
         // at= anchors this regression list to the commit (+dirty state) it was computed against.
-        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\"%s%s%s>",
-                     baseMarker, regs.size(), minorCount, ackedCount, staleAcks.size(), preexistingCount, newSymbolCount, gatingCount,
+        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\" register-macro-excluded=\"%zu\"%s%s%s>",
+                     baseMarker, regs.size(), minorCount, ackedCount, staleAcks.size(), preexistingCount, newSymbolCount, gatingCount, basis.registerMacroExcluded,
                      // R-I: at= is OMITTED for the ref-pair form rather than stamped with the working tree's
                      // sha, which would anchor the list to a commit it was not computed from. base_ref= and
                      // target_ref= are the anchor there, and they carry FULL shas because a wave measurement
@@ -957,6 +966,27 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             return sourceHasStaticToken( sourceFor( symbol.fileId ), symbol.sigStartByte, symbol.sigEndByte );
         };
 
+        // P2.2 (agent-friction round, 2026-08-29): a symbol whose OWN signature text is a registered
+        // self-registering macro call (doctest/Catch2 TEST_CASE family, GoogleTest TEST/TEST_F/TEST_P,
+        // Google Benchmark BENCHMARK family, plus any name a .ripwire_config register_macros= line adds —
+        // see quality::kBuiltinRegisterMacros) is EXEMPT here too, not only from --quality-delta's dead
+        // kind. hasStaticToken alone does not structurally exclude these: it scans [sigStartByte,
+        // sigEndByte), which for a doctest/Catch2 title INCLUDES the title text — a TEST_CASE titled
+        // "handles static config" contains the whole-word token "static" and was reported as high-
+        // confidence dead-code before this fix (test/registermacrocheck.sh pins the repro). Reuses this
+        // block's own sourceFor() cache rather than re-reading files via forEachSymbolBody.
+        const std::vector<std::string> registerMacroNames = quality::registeredMacroNames( d.root );
+        const auto isRegisteredMacroSymbol = [ & ]( const Symbol& symbol ) -> bool
+        {
+            const std::string& src = sourceFor( symbol.fileId );
+            if( symbol.sigStartByte >= src.size() )
+            {
+                return false;
+            }
+            return quality::startsWithRegisteredMacro( std::string_view( src ).substr( symbol.sigStartByte ), registerMacroNames );
+        };
+        std::size_t registerMacroExcluded = 0;   // P2.2: disclosed count — see the header comment below
+
         // Optional path filter (--dead-code=DIR). §P0.3: this was a bare SUFFIX test, so it could only ever
         // match a FILENAME — every directory argument produced count="0" with confidence="high", and a typo'd
         // directory was byte-identical to a real one. It now matches a directory PREFIX, a trailing path
@@ -1029,10 +1059,16 @@ std::optional<int> runQualityViews( const MainDispatch& d )
 
             // in-degree == 0 → no call in the indexed tree reaches this symbol
             const std::uint32_t inDeg = inRo[ s.id + 1 ] - inRo[ s.id ];
-            if( inDeg == 0 )
+            if( inDeg != 0 )
             {
-                candidates.push_back( s.id );
+                continue;
             }
+            if( isRegisteredMacroSymbol( s ) )
+            {
+                ++registerMacroExcluded;   // P2.2: self-registers via a static initializer — never dead-code
+                continue;
+            }
+            candidates.push_back( s.id );
         }
 
         // deterministic order: file path asc, then line asc, then name asc (stable across runs)
@@ -1054,6 +1090,11 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         std::printf( "<!-- ripwire dead-code: high-confidence source functions with internal linkage and no caller in the indexed tree. "
                      "A bare-name filter matches by path COMPONENT: filter=\"src\" keeps any path with a src segment at any depth "
                      "(test/x/src/y.cpp included); anchor with ./ (filter=\"./src\") to pin the root-level directory only. "
+                     "register-macro-excluded= counts symbols excluded because their OWN definition is a registered "
+                     "self-registering test/benchmark macro call (doctest/Catch2 TEST_CASE family, GoogleTest TEST/TEST_F/TEST_P, "
+                     "Google Benchmark BENCHMARK family, plus any name a .ripwire_config register_macros= line adds): such a "
+                     "symbol registers itself through a static initializer the call graph cannot see, so zero in-edges on it is "
+                     "not evidence of anything — never a finding, never gating, absent nothing (0 is printed, not omitted). "
                      "Graph evidence is local to the indexed tree; verify before deleting -->" );
         // §P15/§P16: candidates is already deterministically sorted (path asc, line asc, name asc) and used to
         // print every candidate unconditionally — completeness was the whole contract, matching --uses' shape,
@@ -1069,7 +1110,8 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             std::vector<char> dcFiltEsc;
             dcFilterAttr = " filter=\"" + std::string( escapeXml( cfg.deadCodeDir, dcFiltEsc ) ) + "\"";
         }
-        std::printf( "<dead-code count=\"%zu\" confidence=\"high\" evidence=\"internal-linkage+zero-callers\"%s%s%s>", candidates.size(),
+        std::printf( "<dead-code count=\"%zu\" confidence=\"high\" evidence=\"internal-linkage+zero-callers\" register-macro-excluded=\"%zu\"%s%s%s>",
+                     candidates.size(), registerMacroExcluded,
                      dcFilterAttr.c_str(),
                      pageDisclosure( dcAb, sizeof( dcAb ), dcPw.end - dcPw.begin, candidates.size(), dcPw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),
