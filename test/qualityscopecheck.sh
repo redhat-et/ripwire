@@ -253,5 +253,37 @@ grep -q 'why="foreign-scope"' "$TMP/foreign.xml" && ok "(11) …with a per-row s
 grep -q 'by="zzz-not-my-subtree"' "$TMP/foreign.xml" && ok "(11) …naming the scope that wrote it" || { no "(11) …without naming the writing scope"; grep -o '<sa[^>]*/>' "$TMP/foreign.xml" | head -3; }
 cp "$TMP/acks.scoped" .ripwire_quality_acks
 
+# ── 12) P1.2 — the reserved `diff` token: the changed-files auto-scope ────────────────────────────────
+# Sugar for the SINGLE-writer case, and the fixture is the case it is wrong for, which is the point: both
+# writers edited, so diff covers both and partitions nothing. The arms pin the expansion, its disclosure,
+# and the three refusals — never a silent widening.
+"$BIN" . --quality-delta --scope=diff >"$TMP/diff.xml" 2>/dev/null; rc=$?
+grep -q 'scope="diff"' "$TMP/diff.xml" && ok "(12) --scope=diff names itself on the report, unexpanded" || no "(12) no scope=\"diff\" on the report root"
+grep -qE 'scope-diff-files="[1-9]' "$TMP/diff.xml" \
+    && ok "(12) …and discloses how many indexed files it expanded to ($( grep -oE 'scope-diff-files="[0-9]+"' "$TMP/diff.xml" | head -1 ))" \
+    || { no "(12) the auto-scope does not disclose its expansion size"; grep -o '<quality-delta[^>]*>' "$TMP/diff.xml"; }
+"$BIN" . --quality-delta --scope=alpha,beta >"$TMP/both.xml" 2>/dev/null
+inscope_part "$TMP/diff.xml" >"$TMP/diff.in"; inscope_part "$TMP/both.xml" >"$TMP/both.in"
+[ "$( rowcount "$TMP/diff.in" )" = "$( rowcount "$TMP/both.in" )" ] \
+    && ok "(12) …and covers the same rows as naming both subtrees by hand ($( rowcount "$TMP/diff.in" ))" \
+    || no "(12) diff-scope covered $( rowcount "$TMP/diff.in" ) rows where the hand-named pair covered $( rowcount "$TMP/both.in" )"
+
+# a CLEAN tree: the auto-scope owns nothing, and that must refuse rather than read as a green report
+C="$TMP/clean"; mkdir -p "$C"; cd "$C"; git init -q .; git config user.email t@t; git config user.name t
+printf '#pragma once\ninline int only( int a ) { return a; }\n' > only.h
+git add only.h; git commit -qm base
+"$BIN" . --quality-delta --scope=diff >"$TMP/cleandiff.out" 2>"$TMP/cleandiff.err"; rc=$?
+[ $rc -eq 1 ] && ok "(12) --scope=diff on an UNCHANGED tree refuses (exit 1)" || no "(12) --scope=diff on a clean tree exited $rc (expected 1)"
+[ ! -s "$TMP/cleandiff.out" ] && ok "(12) …printing nothing — an exit 0 there would say nothing about your change" || no "(12) …but printed a report anyway"
+grep -q 'NO changed indexed file' "$TMP/cleandiff.err" && ok "(12) …and says exactly what was empty" || { no "(12) …without explaining"; cat "$TMP/cleandiff.err"; }
+
+# the RANGE form compares two COMMITTED trees, so a working-tree auto-scope is the wrong question there
+cd "$R"; git add -A; git commit -qm "both writers land"
+"$BIN" . --quality-delta=HEAD~1..HEAD --scope=diff >"$TMP/rangediff.out" 2>"$TMP/rangediff.err"; rc=$?
+[ $rc -eq 1 ] && ok "(12) --scope=diff under the A..B range form refuses (exit 1)" || no "(12) --scope=diff with a ref range exited $rc (expected 1)"
+grep -q 'COMMITTED trees' "$TMP/rangediff.err" && ok "(12) …and says why the working tree is not the answer there" || { no "(12) …without saying why"; cat "$TMP/rangediff.err"; }
+"$BIN" . --quality-delta=HEAD~1..HEAD --scope=alpha >/dev/null 2>&1; rc=$?
+[ $rc -ne 1 ] && ok "(12) …while a PATH scope still works on the range form (exit $rc)" || no "(12) a path scope was refused on the range form too"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

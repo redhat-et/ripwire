@@ -3411,6 +3411,23 @@ inline Scope parseScope( std::string_view spec )
     return out;
 }
 
+// P1.2 — the RESERVED token. `--scope=diff` means "the files this working tree changes vs the baseline",
+// expanded by the verb (which is the only place that can read git) into one literal path pattern per changed
+// INDEXED file. It composes with ordinary patterns by union: `--scope=diff,src/quality.h` is the diff set
+// plus that file. It is a reserved WORD, so a directory genuinely called `diff` must be spelled `./diff` or
+// `diff/` — said out loud in the flag's help rather than left to be discovered.
+//
+// Wrong on its own in the tree this whole feature is about, and that is not a defect to hide: in a shared
+// checkout a sibling's edits are "changed" too, so `diff` alone re-admits exactly the rows the scope was
+// meant to file elsewhere. It is sugar for the single-writer case; compose it with your own paths when the
+// tree has more than one writer in it.
+inline constexpr std::string_view kScopeDiffToken = "diff";
+
+inline bool scopeUsesDiffToken( const Scope& sc ) noexcept
+{
+    return std::find( sc.patterns.begin(), sc.patterns.end(), kScopeDiffToken ) != sc.patterns.end();
+}
+
 // Is this finding the caller's? A clone group is a RELATION over a member SET, not a fact about one file, so
 // it is in scope iff ANY member's path matches: the duplicate a sibling just introduced against YOUR helper
 // is yours to answer for too, and filing the group by its first-sorting member alone (which is all p= names)
@@ -4438,7 +4455,16 @@ inline std::vector<StaleAck> computeForeignAcks( const std::vector<Regression>& 
         {
             continue;
         }
-        if( !parseScope( it->second.by ).matchesPath( r.path ) )
+        const Scope by = parseScope( it->second.by );
+        if( scopeUsesDiffToken( by ) )
+        {
+            // THIRD FLOOR (P1.2): an AUTO-scope cannot be re-evaluated later. `diff` meant one file set at
+            // ack time and means another now, so re-expanding it here would judge a past decision against a
+            // present tree and manufacture foreign-ack rows out of ordinary progress. Not checked, and
+            // stated rather than silently skipped.
+            continue;
+        }
+        if( !by.matchesPath( r.path ) )
         {
             out.push_back( { it->second.kind, it->second.key, StaleAckWhy::ForeignScope, it->second.by } );
         }
@@ -4539,7 +4565,8 @@ inline std::vector<std::string> cloneMemberPaths( const CloneGroup& cg, const In
 // that never had this flag. `spec` needs no escaping in either dialect: scopeSpecIsSpellable already
 // excluded whitespace and the XML metacharacters, which is the reason that check exists.
 inline std::pair<std::string, std::string> scopeDisclosure( const Scope& scope, std::size_t scopedOut,
-                                                            std::size_t scopedOutGating, std::size_t foreignAcks )
+                                                            std::size_t scopedOutGating, std::size_t foreignAcks,
+                                                            std::size_t diffFiles )
 {
     std::pair<std::string, std::string> out;
     if( scope.active() )
@@ -4548,6 +4575,13 @@ inline std::pair<std::string, std::string> scopeDisclosure( const Scope& scope, 
                    + "\" scoped-out-gating=\"" + std::to_string( scopedOutGating ) + "\"";
         out.second = ",\"scope\":\"" + scope.spec + "\",\"scoped-out\":" + std::to_string( scopedOut )
                    + ",\"scoped-out-gating\":" + std::to_string( scopedOutGating );
+        // P1.2: `diff` is a token whose MEANING is a moment. scope= alone would let a reader quote a number
+        // without knowing what the auto-scope covered, so the expansion's size travels with it.
+        if( diffFiles != 0 )
+        {
+            out.first  += " scope-diff-files=\"" + std::to_string( diffFiles ) + "\"";
+            out.second += ",\"scope-diff-files\":" + std::to_string( diffFiles );
+        }
     }
     if( foreignAcks != 0 )
     {

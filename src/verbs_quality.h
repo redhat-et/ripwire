@@ -247,6 +247,63 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
     return std::nullopt;
 }
 
+// P1.2 — expand the reserved `diff` token into one literal path pattern per changed INDEXED file. It lives
+// in the verb because reading git is the verb's job and quality::Scope is a pure value; and it runs BEFORE
+// refuseUnusableScope, so the expanded set is what the "names nothing indexed" test sees.
+//
+// THREE refusals, all of the same shape and for the same reason — under a scope, a silent zero reads as
+// "you're clean", which is the most dangerous sentence this verb can say.
+std::optional<int> expandScopeDiff( rw::quality::Scope& scope, bool refPair, const rw::IngestResult& judged,
+                                    const std::string& root, std::string_view deltaRoot, std::size_t& diffFileCount )
+{
+    if( !rw::quality::scopeUsesDiffToken( scope ) || !rw::quality::scopeSpecIsSpellable( scope.spec ) )
+    {
+        return std::nullopt;   // not our token, or a spec refuseUnusableScope is about to refuse anyway
+    }
+    if( refPair )
+    {
+        // The token names the WORKING TREE's changes, and this form compares two committed trees — the
+        // working tree is not part of the comparison at all, so the answer would describe a different tree
+        // than the one being judged.
+        std::fprintf( stderr, "ripwire: --scope=diff scopes to the WORKING TREE's changes, but --quality-delta=A..B compares two COMMITTED trees —\n"
+                              "  spell the scope as paths there (e.g. --scope=src/quality.h), or drop the range to measure the working tree\n" );
+        return 1;
+    }
+    std::vector<char> changed( judged.files.size(), 0 );
+    if( !rw::gitChangedFiles( root, judged, changed ) )
+    {
+        std::fprintf( stderr, "ripwire: --scope=diff needs git to say what changed, and %s is not a readable git repository —\n"
+                              "  name the paths instead (e.g. --scope=src/quality.h,src/verbs_quality.h)\n", root.c_str() );
+        return 1;
+    }
+    std::vector<std::string> expanded;
+    for( const std::string& p : scope.patterns )
+    {
+        if( p != rw::quality::kScopeDiffToken )
+        {
+            expanded.push_back( p );   // the token composes by UNION with any literal patterns beside it
+        }
+    }
+    for( std::size_t fileIndex = 0; fileIndex < changed.size(); ++fileIndex )
+    {
+        if( changed[ fileIndex ] )
+        {
+            expanded.emplace_back( rw::relForHash( judged.files[ fileIndex ], deltaRoot ) );
+            ++diffFileCount;
+        }
+    }
+    if( diffFileCount == 0 )
+    {
+        std::fprintf( stderr, "ripwire: --scope=diff expanded to NO changed indexed file — the working tree matches the baseline (or the edits are in files\n"
+                              "  this index does not carry), so the scope owns nothing and an exit 0 under it would say nothing about your change\n" );
+        return 1;
+    }
+    std::sort( expanded.begin(), expanded.end() );
+    expanded.erase( std::unique( expanded.begin(), expanded.end() ), expanded.end() );
+    scope.patterns.swap( expanded );
+    return std::nullopt;
+}
+
 // P1 — the scope flag's two REFUSALS, in their own symbol. They live in the verb rather than in cli.h for
 // the reason --quality-panel=PRESET's refusal does: the vocabulary belongs to quality.h, and cli.h is a leaf
 // that includes only ingest.h. Returns an exit code (already reported on stderr) or nullopt when the scope
@@ -469,9 +526,15 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         std::vector<quality::Regression>&  regs     = basis.regs;
 
         // ── P1 SCOPE — the OWNERSHIP partition for a working tree with several writers in it ─────────────
-        const quality::Scope             scope = quality::parseScope( cfg.qualityScope );
+        quality::Scope                   scope = quality::parseScope( cfg.qualityScope );
         std::vector<quality::Regression> outOfScope;
-        if( const std::optional<int> refused = refuseUnusableScope( cfg, scope, refPair ? refs.target().ing : ing, deltaRoot ) )
+        std::size_t                      diffFileCount = 0;   // P1.2: 0 = the reserved diff token was not used
+        const IngestResult&              judged        = refPair ? refs.target().ing : ing;
+        if( const std::optional<int> refused = expandScopeDiff( scope, refPair, judged, root, deltaRoot, diffFileCount ) )
+        {
+            return *refused;
+        }
+        if( const std::optional<int> refused = refuseUnusableScope( cfg, scope, judged, deltaRoot ) )
         {
             return *refused;
         }
@@ -647,7 +710,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         const auto [ identityAttrs, identityJson ] = quality::identityDisclosure( basis.healing );
 
         // P1/P1.4 — the scope disclosure, built once for both emitters (quality::scopeDisclosure).
-        const auto [ scopeAttrs, scopeJson ] = quality::scopeDisclosure( scope, outOfScope.size(), scopedOutGating, foreignAcks.size() );
+        const auto [ scopeAttrs, scopeJson ] = quality::scopeDisclosure( scope, outOfScope.size(), scopedOutGating, foreignAcks.size(), diffFileCount );
 
         // P2.5 — one stderr line NAMING the gating finding, in --token-budget's style ("ripwire: --token-budget
         // exceeded: est_tokens=… > budget=…"). stdout is the machine artifact and a caller that only checks
