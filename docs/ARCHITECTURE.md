@@ -351,6 +351,14 @@ extraction change bumps the parser version and costs one cold re-parse. Warm out
 **byte-identical** to cold output by a gate — a cache that changes the answer is a bug, not a
 tradeoff.
 
+A second, much smaller cache sits beside it: the **span-tier memo** (`ingest_astquery.h`), which
+`--grep`'s tier pass uses to skip re-parsing a hit file whose bytes have not changed. It is keyed by
+path + parser version, gated on the same `(sizeBytes, mtimeNs)` stat pair and racy-mtime rule the
+parse cache's warm path uses, and it carries a measured size floor so it writes blobs only for files
+whose parse actually costs something. It obeys the same rules as everything else here: `--no-cache`
+turns it off, a blob that cannot be trusted is ignored rather than repaired, and `test/grepfastcheck.sh`
+pins cold output byte-identical to warm across the whole `--grep` option matrix.
+
 ---
 
 ## 3. The determinism contract
