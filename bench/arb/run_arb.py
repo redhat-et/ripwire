@@ -258,14 +258,27 @@ def for_files_from_doc(doc, snap):
     return ranked
 
 
+CONFIDENCE_FACTS = ("confidence", "margin_pct", "kept", "scored", "corpus")
+
+
 def for_confidence_from_doc(doc):
-    """The two facts deriveForConfidence ships on every --for --json root: confidence is
-    "high"/"low", margin_pct an int 0-100 (always 0 when confidence=="low" — see the EVALS
-    abstention-calibration registration). None/None when the call failed or returned no doc,
-    recorded as signal_missing by callers rather than silently coerced to a value."""
+    """The abstention-axis facts on every --for --json root, both rounds' worth.
+
+    Round one (docs/EVALS.md, "abstention calibration round"): confidence is "high"/"low",
+    margin_pct an int 0-100 (always 0 when confidence=="low"). That round is a recorded NEGATIVE.
+
+    Round two (docs/EVALS.md, "abstention round 2: the adaptive cut's corpus-support facts"):
+    kept / scored / corpus — the adaptive cut's own counts, which no surface emitted when round one
+    ran, which is why round one could not test them. The registered PRIMARY statistic is
+    support = scored / corpus, and abstain_score = 1 - support; this function only READS, it never
+    derives, so the statistic lives in exactly one place (score_abstention_calibration.py).
+
+    All keys None when the call failed or returned no doc — recorded as signal_missing by callers
+    rather than silently coerced to a value, so a crashed invocation can never read as a confident
+    ranking or as a zero-support one."""
     if doc is None:
-        return {"confidence": None, "margin_pct": None}
-    return {"confidence": doc.get("confidence"), "margin_pct": doc.get("margin_pct")}
+        return {k: None for k in CONFIDENCE_FACTS}
+    return {k: doc.get(k) for k in CONFIDENCE_FACTS}
 
 
 FILE_GROUP_RE = re.compile(r'<f p="([^"]+)"')
@@ -510,8 +523,12 @@ def sweep(args, bin_path, data_dir, name, samples, spec):
                        "gold_files": gold, "gold_ranks": ranks,
                        "gold_tiers": {g: provenance.get(g) for g in gold if g in provenance},
                        "ranked_files": ranked[:60], "ranked_total": len(ranked),
-                       "confidence": confidence["confidence"], "margin_pct": confidence["margin_pct"],
                        "metrics": metrics}
+                # both abstention rounds' facts, spread verbatim: the scorer reads these columns and
+                # derives its own statistic, so a new fact reaches it by being emitted, not by being
+                # re-listed here (round one had to hand-list two and round two would have silently
+                # dropped three).
+                row.update({k: confidence.get(k) for k in CONFIDENCE_FACTS})
                 row.update(spec.extra_fields(sample))
                 out.write(json.dumps(row, sort_keys=True) + "\n")
                 evaluated += 1
