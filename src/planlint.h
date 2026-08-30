@@ -8,41 +8,66 @@
 // this verb catches it. It never asks whether a card's CLAIMS are true (that is --doc-drift's job, out of
 // scope here on purpose) — only whether the card's own bookkeeping is complete.
 //
-// ── the grammar, and why it is this narrow ──────────────────────────────────────────────────────────────
-// This repo's own ~20 PLAN_*/DESIGN_*.md files were surveyed before writing this lint (never grep the
-// prompt for a grammar when the corpus can be read instead), and they do NOT converge on one dialect: some
-// use lettered lanes in a table ("W2-G", "R-B"), some use S<N>/T<N> tracks inside a prose board, one uses
-// dated bullets under a bare "## Round record" heading, and exactly ONE (this very plan) writes a real
-// "## Status" heading. Zero files in this repo's own corpus use "### T<N>" task-card headings at all — that
-// convention is the field-evidence source repo's own dialect, not this one's. So the PLAN
-// format is a convention, not a standard, and this lint is deliberately narrow and OPT-IN:
+// ── the grammar, and where it actually came from ─────────────────────────────────────────────────────────────────
+// FIRST DRAFT of this lint was built by surveying this repo's own ~20 PLAN_*/DESIGN_*.md files, which do
+// NOT converge on one dialect (lettered lanes in a table, S<N>/T<N> tracks in a prose board, dated bullets
+// under a bare "## Round record" heading — zero of them use "### T<N>" card headings at all, since that
+// convention belongs to the field-evidence source repo, not this one). Validated against that source
+// repo's own flagship wave plan — the document the whole feature was built to catch a gap on — the first
+// draft's grammar was WRONG in a specific, corpus-provable way: it read a card's status as a glyph on the
+// card's OWN body, and every real card in that plan ends its body in plain prose ("**Effort M.**") — the
+// real house convention writes status into the §Status LEDGER instead. Checked against that document, the
+// first draft gated 23/23 rows on a plan that was, in fact, fully closed: pure cry-wolf, exactly the
+// failure mode --doc-drift's own header exists to avoid. Corrected here, and re-validated against the SAME
+// document down to 0 findings (every card resolves via its ledger entry) — see LANE_REPORT.md for the
+// full before/after and the rest of the corpus this correction was checked against.
+//
+// The corrected grammar, still deliberately narrow and OPT-IN:
 //
 //   * a task card is EXACTLY an H3 heading ("### ") whose text OPENS with a token shaped "T" + 1-4 digits +
 //     0-3 letters ("T5", "T10", "T7b") — a different heading level is not a card, on purpose;
 //   * a status ledger is EXACTLY one heading (any level) whose text, after stripping one leading section
 //     mark ("§") and surrounding whitespace, reads "Status" case-insensitively — "Round record" and
 //     "Status Update" are both deliberately NOT matches, because neither is the evidenced form;
-//   * a file showing NEITHER signal is not "broken" — most of this repo's own plans are exactly that file,
-//     and are reported dialect="0" with nothing further checked, never as a failing lint. This verb is
-//     invoked per file by a caller who is opting a SPECIFIC document into the convention, not swept over a
-//     directory the way --doc-drift is.
+//   * a card's status is satisfied by EITHER a glyph on its own terminal body line (the shape a
+//     ledger-less document can still use) OR a line in the §Status ledger naming its id and carrying a
+//     glyph — the real, evidenced primary path. The card's own body wins when it has one; the ledger is
+//     consulted only when the card itself carries no glyph, so a document that DOES close cards out on the
+//     card reads exactly as the first draft did.
+//   * a ledger mention folds by DIGITS, not exact spelling: a bare card "T7" is satisfied by a ledger line
+//     naming "T7a" or "T7b" — the exact shape the source plan uses when a card's own body names lettered
+//     sub-tasks and the ledger then tracks each one separately. One-directional (a card that is ITSELF
+//     lettered is not satisfied by some other lettered sibling), so it folds real evidence in without
+//     masking a genuine orphan under a differently-shaped document.
+//   * a file showing NEITHER an H3 card NOR a ledger heading is not "broken" — most of this repo's own
+//     plans are exactly that file, and are reported dialect="0" with nothing further checked, never as a
+//     failing lint. This verb is invoked per file by a caller who is opting a SPECIFIC document into the
+//     convention, not swept over a directory the way --doc-drift is.
+//   * KNOWN RESIDUAL GAP, stated rather than hidden: a document that uses "### T<N>" headings as plain
+//     work-item labels with NO status-tracking mechanism at all anywhere — no ledger, no per-card glyph —
+//     still reports every card "missing". Observed for real in the field-evidence corpus (a pre-work
+//     design note using T<N> as section numbers, no ledger, one unrelated glyph mid-paragraph). Not fixed
+//     here: closing it needs a rule for "has this document adopted ANY status convention at all", which
+//     risks inventing a grammar the corpus does not actually evidence — left for a deliberate future call
+//     rather than guessed at inside this round.
 //
-// ── the four checks, only once dialect="1" ──────────────────────────────────────────────────────────────
-//   1. Every card's terminal status: the LAST non-blank line of the card's own body (up to the next H1-H3
-//      heading) must carry one of the three status glyphs. Missing entirely, or present with no glyph on
-//      that last line, are both reported the same way — status="missing" — because both are the same
-//      omission from the reader's chair: nothing there says whether the task ran.
+// ── the four checks, only once dialect="1" ────────────────────────────────────────────────────────────────────────────────
+//   1. Every card's status (see above) resolves to a glyph, or it does not — status="missing", with why=
+//      naming the exact shape: "unlaunched" (a ledger exists and never names this id, or any lettered
+//      sub-task of it — the mid-wave T5 catch this verb exists for), "unresolved" (the ledger DOES name
+//      the id, but no line naming it carries a glyph — recorded, just not to a resolvable state), or
+//      "no-glyph" (no ledger exists in this document at all, so the card's own body was the only possible
+//      source and it carried none — the shape a ledger-less document falls back to).
 //   2. An hourglass (in-progress) terminal line whose blamed commit is more than kStaleCommits commits
 //      behind HEAD: `--doc-drift`'s own §Status/date lane is explicitly out of scope there ("NOT CHECKED AT
 //      ALL: ... Status lines, dates"), so this is the one place that gap is closed, and only for the one
 //      shape that is pure structure (a glyph line's own commit age), never for the PROSE claim beside it.
 //      Never claimed when the file sits outside a git repo, or the line predates the repo's history —
-//      degrade-only, disclosed via git="0" / the card's own missing `since=`.
-//   3. A task id named inside the ledger's own body with no matching card — "the ledger says T9happened,
-//      there is no T9" — the one direction of the "cards vs the ledger" cross-check this lint takes. The
-//      OTHER direction (a card that the ledger never mentions) is NOT checked: a ledger is commonly a
-//      running log, not an index of every card, and asserting the reverse would fail plans that keep a
-//      ledger for a different reason than card tracking.
+//      degrade-only, disclosed via git="0" / the card's own missing `since=`. Blames whichever line the
+//      status actually resolved to — the card's own body, or the ledger line named by src="ledger".
+//   3. A task id named inside the ledger's own body with no matching card (digit-folded, per above) — "the
+//      ledger says T9 happened, there is no T9". The OTHER direction — a card the ledger never mentions —
+//      is check 1's "unlaunched" why=, not a second row on the same fact.
 //   4. Every literal "owed"/"OWED" mention with no check-mark or cross ANYWHERE later in the SAME document.
 //      Single-document only: a mention discharged by a SUCCESSOR plan is invisible here, stated as a limit
 //      rather than attempted — cross-document tracking needs a registry of which doc follows which that
@@ -51,7 +76,7 @@
 //      merely QUOTES the words "owed"/"OWED" while describing this very convention (as this file's own
 //      plan section does) reads identically to a real marker. Stated, not hidden.
 //
-// ── what this is NOT ────────────────────────────────────────────────────────────────────────────────────
+// ── what this is NOT ─────────────────────────────────────────────────────────────────────────────────────────
 // Not a truth-checker (--doc-drift owns citations); not a scan of a directory (one FILE, one report); not
 // a judge of whether a "vacuous" ⏳/threshold SHOULD have been ✅ — that needs the measured distribution
 // behind the claim, which no static tool has (see the plan's own P3.3 "not doing" note).
@@ -59,7 +84,7 @@
 // ── exit code: a GATE, deliberately unlike --doc-drift's always-0 report ───────────────────────────────
 // --doc-drift's findings are citations an author may have DATED on purpose (a record, not rot), so its own
 // header states it is a report a human reads, never a gate. Nothing here has that ambiguity: a card with no
-// terminal line, a stale hourglass, a ledger-orphaned id and an undischarged "owed" are each a plain
+// resolvable status, a stale hourglass, a ledger-orphaned id and an undischarged "owed" are each a plain
 // omission with no legitimate "I meant to leave it that way" reading, and this verb exists specifically to
 // replace the human eyeballing that a wave-closer used to do by hand. So: exit 2 when dialect="1" and any
 // row carries gating="1" (a plain grep for `gating="1"` is even cheaper than reading the exit code); exit 0
@@ -79,9 +104,10 @@
 // function's own short-horizon-churn, net-worse for touching an unrelated, already-shipped file. Acked
 // instead — see .ripwire_quality_acks, key qd-planlint-blameclone.
 //
-// Determinism: one pass over the file's own bytes for structure, one blame + one rev-list per hourglass
-// card for staleness — both pure functions of (file content, repo HEAD), so two runs against an unchanged
-// file and unchanged HEAD are byte-identical.
+// Determinism: one pass over the file's own bytes for structure (plus one more pass over the ledger's own
+// body per card that needs it), one blame + one rev-list per hourglass card for staleness — all pure
+// functions of (file content, repo HEAD), so two runs against an unchanged file and unchanged HEAD are
+// byte-identical.
 
 #include "darkflags.h"    // forEachLine / trimView / identByte / readWhole — the shared lexical + file-read primitives
 #include "gitmine.h"      // gitRepoToplevel
@@ -126,10 +152,32 @@ struct CardRow
     std::string   id;                    // "T5", "T7b" — as spelled in the heading
     std::uint32_t line          = 0;     // the "### T<N>" heading's own line (1-based)
     Glyph         terminal      = Glyph::None;
-    std::uint32_t terminalLine  = 0;     // the card body's last non-blank line; 0 when the body is empty
+    std::uint32_t terminalLine  = 0;     // the line the status was READ FROM — the card's own body, or a
+                                          // ledger line when fromLedger; 0 when neither resolved anything
+    bool          fromLedger    = false; // terminal was resolved from a §Status ledger mention, not the
+                                          // card's own body — the real house dialect's primary path
+    bool          ledgerMentioned = false; // the ledger names this id (or a lettered sub-task of it)
+                                          // SOMEWHERE, independent of whether a glyph resolved — only
+                                          // meaningful when the document has a ledger at all
     bool          staleComputed = false; // true iff a blame+rev-list answer was actually obtained
     std::uint32_t commitsSince  = 0;     // meaningful only when staleComputed
 };
+
+// Why a card's status did not resolve — three distinct, purely structural shapes:
+//   "unlaunched" — the document HAS a ledger, and it never names this card's id at all (or any of its
+//                  lettered sub-tasks) — this is the field-evidence catch: a card the wave never started.
+//   "unresolved" — the ledger names the id, but no line naming it carries a status glyph — recorded, but
+//                  not to a resolvable state.
+//   "no-glyph"   — no ledger exists in this document at all, so the only source of status is the card's
+//                  own body, and its own terminal line carries none.
+inline const char* missingWhy( const CardRow& c, bool hasLedger ) noexcept
+{
+    if( !hasLedger )
+    {
+        return "no-glyph";
+    }
+    return c.ledgerMentioned ? "unresolved" : "unlaunched";
+}
 
 inline bool cardIsStale( const CardRow& c ) noexcept
 {
@@ -233,6 +281,38 @@ inline void forEachTaskToken( std::string_view line, OnToken&& onToken )
         }
         ++i;
     }
+}
+
+// The (digits, letter-suffix) split of a task id already known to match parseCardIdAtStart's shape —
+// "T7" -> ("7", ""), "T7b" -> ("7", "b"). Local struct, not exposed beyond the one comparison it serves.
+struct TaskIdParts { std::string_view digits; std::string_view suffix; };
+inline TaskIdParts splitTaskId( std::string_view id ) noexcept
+{
+    std::size_t i = 1; // id[0] is always 'T'
+    while( i < id.size() && std::isdigit( static_cast<unsigned char>( id[ i ] ) ) ) { ++i; }
+    return { id.substr( 1, i - 1 ), id.substr( i ) };
+}
+
+// Does a ledger mention of `ledgerId` count toward card `cardId`? Exact spelling always counts. The one
+// fold this repo's real field-evidence corpus earns: a BARE numeric card ("T7") is also satisfied by a
+// LETTERED mention of the same digits ("T7a", "T7b") — the exact shape a real house plan uses when a
+// card's own body names lettered sub-tasks and the ledger then tracks each one separately (T7's body
+// literally says "T7a SURVEY... T7b implement..." in the corpus this was derived from). One-directional
+// on purpose: a card that is ITSELF lettered ("T7a", if one existed) is not satisfied by some other
+// lettered sibling ("T7b") — only a suffix-less card folds lettered children in, so this cannot mask a
+// genuine orphan under a differently-shaped document.
+inline bool ledgerMentionMatchesCard( std::string_view ledgerId, std::string_view cardId ) noexcept
+{
+    if( ledgerId == cardId )
+    {
+        return true;
+    }
+    const TaskIdParts card = splitTaskId( cardId );
+    if( !card.suffix.empty() )
+    {
+        return false;
+    }
+    return splitTaskId( ledgerId ).digits == card.digits;
 }
 
 inline Glyph classifyGlyph( std::string_view content ) noexcept
@@ -371,6 +451,58 @@ inline std::uint32_t gatingCount( const LintResult& res ) noexcept
     return gating;
 }
 
+// A card's status as read off the §Status ledger — the real house dialect's primary path (see the file
+// header). Scans [ledgerLine+1, ledgerBodyEnd] for lines mentioning `cardId` (digit-folded via
+// ledgerMentionMatchesCard, so a bare "T7" also matches a lettered "T7a"/"T7b" mention) and keeps the BEST
+// glyph found: a check/cross always outranks an hourglass — a real corpus document was observed leaving a
+// stale "⏳ launched" stub in place well after a fuller "✅ …" entry landed elsewhere in the same ledger,
+// and picking whichever line is physically last would have read a FINISHED task as still in progress.
+// Within one priority tier the LAST (highest line number) mention wins, since a ledger is written forward
+// in time. `mentioned` is true the moment ANY line names the id, independent of whether a glyph resolved —
+// the caller needs that fact on its own to tell "unlaunched" (never named) from "unresolved" (named, but
+// no glyph nearby).
+struct LedgerStatus
+{
+    Glyph         glyph     = Glyph::None;
+    std::uint32_t line      = 0;
+    bool          mentioned = false;
+};
+inline LedgerStatus resolveLedgerStatus( const std::vector<std::string_view>& lines, std::uint32_t ledgerLine,
+                                         std::uint32_t ledgerBodyEnd, std::string_view cardId )
+{
+    LedgerStatus  result;
+    std::uint32_t bestHourLine = 0;
+    Glyph         bestHour     = Glyph::None;
+    for( std::uint32_t ln = ledgerLine + 1; ln <= ledgerBodyEnd; ++ln )
+    {
+        const std::string_view content = lines[ ln - 1 ];
+        bool                    mentioned = false;
+        forEachTaskToken( content, [ & ]( std::string_view tok )
+        {
+            if( ledgerMentionMatchesCard( tok, cardId ) ) { mentioned = true; }
+        } );
+        if( !mentioned )
+        {
+            continue;
+        }
+        result.mentioned = true;
+        const Glyph g = classifyGlyph( content );
+        if( g == Glyph::Check || g == Glyph::Cross )
+        {
+            result.glyph = g; result.line = ln;
+        }
+        else if( g == Glyph::Hourglass )
+        {
+            bestHour = g; bestHourLine = ln;
+        }
+    }
+    if( result.glyph == Glyph::None && bestHour != Glyph::None )
+    {
+        result.glyph = bestHour; result.line = bestHourLine;
+    }
+    return result;
+}
+
 // ── the compute entry point ────────────────────────────────────────────────────────────────────────────
 
 inline LintResult computePlanLint( const std::string& fileArg )
@@ -441,6 +573,24 @@ inline LintResult computePlanLint( const std::string& fileArg )
         }
     }
 
+    // The ledger's own body range — computed once, up front, so both the per-card status lookup below
+    // and the ledger-orphan scan further down read the SAME bound rather than two independently-derived
+    // (and possibly diverging) ones.
+    std::uint32_t ledgerBodyEnd = 0;
+    if( res.hasLedger )
+    {
+        const std::uint32_t ledgerLevel = headings[ ledgerHeadingIndex ].level;
+        ledgerBodyEnd = res.totalLines;
+        for( std::size_t hj = ledgerHeadingIndex + 1; hj < headings.size(); ++hj )
+        {
+            if( headings[ hj ].level <= ledgerLevel )
+            {
+                ledgerBodyEnd = headings[ hj ].line - 1;
+                break;
+            }
+        }
+    }
+
     // ── task cards: exactly H3 headings whose text opens with a task id ────────────────────────────────
     for( std::size_t hi = 0; hi < headings.size(); ++hi )
     {
@@ -478,6 +628,20 @@ inline LintResult computePlanLint( const std::string& fileArg )
             row.terminalLine = ln;
             row.terminal     = classifyGlyph( content );
             break;
+        }
+
+        // The real house dialect's primary path: status lives in the §Status LEDGER, not on the card
+        // (field-evidence corpus survey — see the file header). Only consulted when the card's own body
+        // carried no glyph, so an author who DOES close a card out on the card itself is read exactly as
+        // before.
+        if( row.terminal == Glyph::None && res.hasLedger )
+        {
+            const LedgerStatus ls = resolveLedgerStatus( lines, res.ledgerLine, ledgerBodyEnd, row.id );
+            row.ledgerMentioned = ls.mentioned;
+            if( ls.glyph != Glyph::None )
+            {
+                row.terminal = ls.glyph; row.terminalLine = ls.line; row.fromLedger = true;
+            }
         }
 
         if( row.terminal == Glyph::Hourglass && res.gitAvailable )
@@ -525,22 +689,12 @@ inline LintResult computePlanLint( const std::string& fileArg )
     // ── ledger orphans: a task id inside the ledger's own body with no matching card ───────────────────
     if( res.hasLedger )
     {
-        const std::uint32_t ledgerLevel = headings[ ledgerHeadingIndex ].level;
-        std::uint32_t        ledgerEnd  = res.totalLines;
-        for( std::size_t hj = ledgerHeadingIndex + 1; hj < headings.size(); ++hj )
-        {
-            if( headings[ hj ].level <= ledgerLevel )
-            {
-                ledgerEnd = headings[ hj ].line - 1;
-                break;
-            }
-        }
-        for( std::uint32_t ln = res.ledgerLine + 1; ln <= ledgerEnd; ++ln )
+        for( std::uint32_t ln = res.ledgerLine + 1; ln <= ledgerBodyEnd; ++ln )
         {
             forEachTaskToken( lines[ ln - 1 ], [ & ]( std::string_view tok )
             {
                 const bool known = std::any_of( res.cards.begin(), res.cards.end(),
-                                                [ tok ]( const CardRow& c ) { return c.id == tok; } );
+                                                [ tok ]( const CardRow& c ) { return ledgerMentionMatchesCard( tok, c.id ); } );
                 if( !known )
                 {
                     res.ledgerOrphans.push_back( { ln, std::string( tok ) } );
@@ -556,21 +710,29 @@ inline LintResult computePlanLint( const std::string& fileArg )
 inline constexpr const char* kPlanLintLegend =
     "<!-- ripwire plan-lint: STRUCTURE only, never semantics (the doc-drift lane already owns citation "
     "truth). A card is exactly an H3 heading opening with a task id (\"T\" + digits + up to three "
-    "letters); it is complete when the LAST non-blank line of its own body carries a status glyph. A "
-    "ledger is exactly one heading whose text, stripped of a leading section mark, reads \"Status\" "
-    "case-insensitively. Neither convention is universal even in this house's own plan corpus, so a file "
-    "showing neither is reported dialect=\"0\" and nothing further is checked — this lint is opt-in per "
-    "file, never a directory sweep, and a plan that never adopted the convention is not a failing one. "
-    "Findings, only once dialect=\"1\": a card whose terminal line is missing or carries no glyph "
-    "(status=\"missing\"); an hourglass line whose blamed commit sits more than stale_commits= commits "
-    "behind HEAD (never claimed outside a git repo — disclosed via git=\"0\", or the card's own missing "
-    "since=); a task id named in the ledger's own body with no matching card (ledger-orphan — the reverse "
-    "direction, a card the ledger never mentions, is NOT checked); an owed/OWED mention with no "
-    "check-mark or cross anywhere LATER in this same document (single-document only — a successor plan "
-    "that discharges it is invisible here, a stated limit). Every gating row carries gating=\"1\" and the "
-    "header's own gating= sums them. NOT CHECKED AT ALL: whether any card's claims are true, a heading "
-    "level other than three for a card, a ledger heading spelled any other way, and any discharge outside "
-    "this one document. Exit 2 when dialect=\"1\" and gating is non-zero; exit 0 when clean or "
+    "letters). A ledger is exactly one heading whose text, stripped of a leading section mark, reads "
+    "\"Status\" case-insensitively. A card's status is satisfied EITHER by a glyph on the LAST non-blank "
+    "line of its own body OR by a ledger line naming its id (folded by digits, so a bare card is also "
+    "satisfied by a lettered ledger mention of the same number, e.g. a ledger entry for \"T7a\" answers "
+    "for card \"T7\") that itself carries a glyph — the card's own body wins when it has one, the ledger "
+    "is read only when it does not. Neither convention is universal even in this house's own plan corpus, "
+    "so a file showing neither is reported dialect=\"0\" and nothing further is checked — this lint is "
+    "opt-in per file, never a directory sweep, and a plan that never adopted the convention is not a "
+    "failing one. Findings, only once dialect=\"1\": a card whose status did not resolve "
+    "(status=\"missing\", why=\"unlaunched\" when a ledger exists and never names this id or a lettered "
+    "sub-task of it, why=\"unresolved\" when the ledger names it with no glyph nearby, why=\"no-glyph\" "
+    "when this document carries no ledger at all); an hourglass line whose blamed commit sits more than "
+    "stale_commits= commits behind HEAD (never claimed outside a git repo — disclosed via git=\"0\", or "
+    "the card's own missing since=; blames whichever line the status resolved to, named by src=\"ledger\" "
+    "when that is the ledger rather than the card); a task id named in the ledger's own body with no "
+    "matching card, digit-folded the same way (ledger-orphan); an owed/OWED mention with no check-mark or "
+    "cross anywhere LATER in this same document (single-document only — a successor plan that discharges "
+    "it is invisible here, a stated limit). Every gating row carries gating=\"1\" and the header's own "
+    "gating= sums them. NOT CHECKED AT ALL: whether any card's claims are true, a heading level other "
+    "than three for a card, a ledger heading spelled any other way, any discharge outside this one "
+    "document, and a document that uses card headings as plain labels with no status mechanism anywhere "
+    "(no ledger, no glyph) — every one of its cards reads \"missing\" too, a known, disclosed gap rather "
+    "than a guessed-at fix. Exit 2 when dialect=\"1\" and gating is non-zero; exit 0 when clean or "
     "dialect=\"0\"; exit 1 only when FILE could not be read — a usage error, never a finding. -->";
 
 inline void writePlanLint( std::FILE* out, const LintResult& res )
@@ -601,6 +763,14 @@ inline void writePlanLint( std::FILE* out, const LintResult& res )
         if( c.terminalLine != 0 )
         {
             std::fprintf( out, " tline=\"%u\"", c.terminalLine );
+        }
+        if( c.fromLedger )
+        {
+            std::fprintf( out, " src=\"ledger\"" );
+        }
+        if( c.terminal == Glyph::None )
+        {
+            std::fprintf( out, " why=\"%s\"", missingWhy( c, res.hasLedger ) );
         }
         if( c.staleComputed )
         {

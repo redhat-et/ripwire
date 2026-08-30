@@ -5,14 +5,28 @@
 # and its stated limits; this gate proves the acceptance shape verbatim: on a mid-wave plan, a task card
 # left with no terminal status line is reported — the exact catch a wave-closer used to make by eye.
 #
-# FIXTURE SPLIT, deliberately: test/planlintfix/wave.md is a COMMITTED, git-history-INDEPENDENT fixture
-# — every assertion on it (missing status, ledger-orphan, owed discharge) is a pure function of the
-# file's own bytes, so it stays correct forever regardless of how many more commits this repo's own
-# history accumulates after this lane lands. The ONE check that genuinely needs a controlled commit
-# history — an hourglass line's staleness — is instead built in a throwaway git repo THIS SCRIPT
-# constructs (same shape as test/editchecknotecheck.sh's own temp repo), because asserting "more than 20
-# commits behind HEAD" against this repo's own ever-growing history would silently flip from PASS to
-# FAIL as ordinary commits land after this one — measurement noise wearing a gate's clothes.
+# MODEL CORRECTION (post-review against the field-evidence source repo's own flagship plan, not just this
+# repo's own PLAN_*.md corpus): the FIRST version of this lint read "status" as a glyph on the CARD's own
+# body. Validated against the real 14-task authorship wave the whole feature was built for, that model
+# gated 23/23 rows on a plan that was actually fully closed — every one of its cards ends its own body in
+# prose ("**Effort M.**"), because the real house convention writes status into the §Status LEDGER, not
+# onto the card. arm (9) below reproduces that shape directly: a card closed only in the ledger (T2), a
+# card closed on its own body as before (T1, unbroken), and the genuine T5-unlaunched catch — a card the
+# ledger never mentions at all — which is the acceptance case this verb exists for. It also reproduces a
+# second real-corpus finding: a card described in its OWN body as splitting into lettered sub-tasks
+# ("T7a", "T7b") is tracked under THOSE ids in the ledger, never the bare parent id — folded by digit,
+# one-directional (src/planlint.h's ledgerMentionMatchesCard), so this does not silently mask a genuine
+# orphan under a document shaped some other way.
+#
+# FIXTURE SPLIT, deliberately: test/planlintfix/wave.md and wave_ledger.md are COMMITTED,
+# git-history-INDEPENDENT fixtures — every assertion on them (missing status, ledger-orphan, owed
+# discharge, ledger-satisfied status, sub-id folding) is a pure function of the file's own bytes, so they
+# stay correct forever regardless of how many more commits this repo's own history accumulates after this
+# lane lands. The ONE check that genuinely needs a controlled commit history — an hourglass line's
+# staleness — is instead built in a throwaway git repo THIS SCRIPT constructs (same shape as
+# test/editchecknotecheck.sh's own temp repo), because asserting "more than 20 commits behind HEAD"
+# against this repo's own ever-growing history would silently flip from PASS to FAIL as ordinary commits
+# land after this one — measurement noise wearing a gate's clothes.
 #
 # Usage:  test/planlintcheck.sh
 #         RIPWIRE_BIN=asan/ripwire test/planlintcheck.sh
@@ -23,6 +37,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 FIX="$ROOT/test/planlintfix/wave.md"
+FIX2="$ROOT/test/planlintfix/wave_ledger.md"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -30,6 +45,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 [ -f "$FIX" ] || { echo "missing fixture $FIX"; exit 2; }
+[ -f "$FIX2" ] || { echo "missing fixture $FIX2"; exit 2; }
 
 echo "planlintcheck: BIN=$BIN  FIX=$FIX"
 
@@ -194,6 +210,50 @@ printf '%s' "$STALE_OUT" | grep -qE '<card id="T4"[^/]*stale="1"[^/]*gating="1"'
 [ "$STALE_RC" = "2" ] && ok "(8) exit 2 — the stale hourglass card gates the run" || no "(8) exit $STALE_RC, expected 2"
 
 rm -rf "$WORK"
+
+# ── (9) the real house dialect: status lives in the LEDGER, not the card ───────────────────────────────
+# test/planlintfix/wave_ledger.md reproduces the shape this lint was corrected against: T1 closes out on
+# its own card body (unbroken by the model correction); T2 closes out ONLY in the ledger (the primary
+# real-dialect path); T5 is named by NEITHER — the genuine unlaunched-card catch, mid-wave, this verb
+# exists for; T7's own body names lettered sub-tasks T7a/T7b, and the ledger tracks THOSE ids, never
+# bare "T7" — proving the digit-fold does not require an exact spelling match to read as launched.
+LEDGER_OUT="$( cd "$ROOT" && "$BIN" . --plan-lint=test/planlintfix/wave_ledger.md --no-cache )"; LEDGER_RC=$?
+
+printf '%s' "$LEDGER_OUT" | grep -q 'cards="4"' && ok "(9) cards=\"4\" (T1, T2, T5, T7)" || no "(9) cards=\"4\" missing"
+
+printf '%s' "$LEDGER_OUT" | grep -qE '<card id="T1"[^/]*status="check"[^/]*/>' \
+    && ok "(9) T1 still resolves from its OWN body (✅) — the original path is unbroken" \
+    || { no "(9) T1's card-derived status broke"; printf '%s\n' "$LEDGER_OUT" | tail -c 800; echo; }
+printf '%s' "$LEDGER_OUT" | grep -qE '<card id="T1"[^/]*src="ledger"' \
+    && no "(9) T1 was marked src=\"ledger\" despite resolving from its own card body" \
+    || ok "(9) T1 carries no src=\"ledger\" — card-derived status is not mislabeled"
+
+printf '%s' "$LEDGER_OUT" | grep -qE '<card id="T2"[^/]*status="check"[^/]*src="ledger"' \
+    && ok "(9) T2 resolves to status=\"check\" src=\"ledger\" — closed ONLY in the §Status ledger" \
+    || { no "(9) T2's ledger-derived status is missing or malformed"; printf '%s\n' "$LEDGER_OUT" | tail -c 800; echo; }
+printf '%s' "$LEDGER_OUT" | grep -qE '<card id="T2"[^/]*gating="1"' \
+    && no "(9) T2 was marked gating=\"1\" despite a ledger-recorded ✅" \
+    || ok "(9) T2 carries no gating=\"1\" — a card whose status is recorded in the ledger is not a finding"
+
+printf '%s' "$LEDGER_OUT" | grep -qE '<card id="T5"[^/]*status="missing"[^/]*why="unlaunched"[^/]*gating="1"' \
+    && ok "(9) T5 reports status=\"missing\" why=\"unlaunched\" gating=\"1\" — THE MID-WAVE ACCEPTANCE CASE" \
+    || { no "(9) T5's unlaunched row is missing or malformed"; printf '%s\n' "$LEDGER_OUT" | tail -c 800; echo; }
+
+printf '%s' "$LEDGER_OUT" | grep -qE '<card id="T7"[^/]*status="check"[^/]*src="ledger"' \
+    && ok "(9) T7 resolves via its lettered sub-tasks (T7a/T7b in the ledger, never bare \"T7\")" \
+    || { no "(9) T7's sub-id-folded status is missing or malformed"; printf '%s\n' "$LEDGER_OUT" | tail -c 800; echo; }
+printf '%s' "$LEDGER_OUT" | grep -q 'ledger-orphan id="T7a"' \
+    && no "(9) T7a was reported as a ledger-orphan — it is T7's own named sub-task, not an orphan" \
+    || ok "(9) T7a does NOT spuriously orphan — folded into card T7 by digit"
+printf '%s' "$LEDGER_OUT" | grep -q 'ledger-orphan id="T7b"' \
+    && no "(9) T7b was reported as a ledger-orphan — it is T7's own named sub-task, not an orphan" \
+    || ok "(9) T7b does NOT spuriously orphan — folded into card T7 by digit"
+
+printf '%s' "$LEDGER_OUT" | grep -q 'plan-lint file="test/planlintfix/wave_ledger.md"[^>]*gating="1"' \
+    && ok "(9) header gating=\"1\" — T5 alone; T1/T2/T7 all resolve clean" \
+    || no "(9) header gating= is not 1: $( printf '%s' "$LEDGER_OUT" | grep -oE 'gating="[0-9]+"' | head -1 )"
+
+[ "$LEDGER_RC" = "2" ] && ok "(9) exit 2 — the one unlaunched card gates the run" || no "(9) exit $LEDGER_RC, expected 2"
 
 [ "$fail" = 0 ] && echo "planlintcheck: ALL PASS" || echo "planlintcheck: FAILURES ABOVE"
 exit "$fail"
