@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 484 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 485 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -3978,6 +3978,24 @@ differently, under a comment claiming they "share `lexicalScores`". That is its 
 own eval; it is out of this round's one-mechanism scope, and it is why MCP `memory_recall` appears above as
 an invariance CONTROL rather than as a subject.
 
+**DISCHARGED 2026-08-30 — MCP takes the CLI's ranking, and the argument that let them differ is gone.** The
+divergence was worse than a score shift: on a corpus where a document's *directory* names the query word and
+its body never does, CLI `--recall=telemetry` returns `telemetry/zeta.md` while MCP `memory_recall` returned
+`(no relevant documents — try different terms)`. The CLI is the reference surface, so the CLI's answer is the
+one that stands: `recallText` now ranks with the recall lens (`pathFieldDefaultW=1` and the root prefix) and
+the two doors are byte-identical, header included. The fix is structural rather than a second copy of one
+argument list — the lens decision moved into `recall.h::recallFor`, the single rank-then-build call BOTH doors
+make, and the old `writeRecall( out, ing, scores, … )` wrapper, whose caller-supplied `scores` parameter WAS
+the divergence, is deleted; no argument remains through which a front door can rank recall its own way.
+**CLI `--recall` output is unchanged, byte for byte** (checked against a pre-change binary over this repo,
+`docs/`, and the probe corpus): this round moves the MCP door only. `test/recallparitycheck.sh` gates the
+class — same corpus and task ⇒ same bundle on both doors, plus the shaping knobs (`--top-k` / `top_k`,
+`--max-tokens` / `budget_tokens`) — and carries the same KILL-TRIPWIRE shape as `recallrankdepthcheck.sh`
+ARM 4, because byte-parity is trivially reachable by scoring no path tokens at all: the two path-only
+documents must still be RETRIEVED on both doors, or the "unification" deleted the measured feature and is
+reverted regardless of every other arm. Against a pre-change binary the gate is red on 8 of its 12 arms,
+that tripwire among them.
+
 ### The result — EXACT invariance, at the registered target (2026-08-25)
 
 **Verdict: SHIP.** The registered band was EXACT invariance, and exact invariance is what the fix reaches —
@@ -4478,7 +4496,7 @@ descriptions 21,172 B, `src/mcp.h`) is larger and riskier and is spec-only, not 
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **484 gate scripts**, all of which exist on disk.
+naming **485 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5309,7 +5327,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 484. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 485. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
