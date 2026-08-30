@@ -214,6 +214,42 @@ printf '%s' "$OAK3" | grep -q 'kind="complexity" sym="f"' && [ "$( ecak )" = 2 ]
     || { no "ack ratchet: worsened finding stayed suppressed (exit $( ecak ))"; printf '%s\n' "$OAK3" | tr '>' '\n' | grep '<r '; }
 [ "$OAK3" = "$( dak )" ] && ok "ack ratchet: delta byte-identical run-to-run" || no "ack ratchet: non-deterministic delta"
 
+# ── 3b) ACK REASON CHAIN: RE-ACKING A KNOWN KEY PRESERVES THE PRIOR REASON ────────────────────────────────
+#   Real shape (2026-08-29 fix): a shared row like printUsage's verbosity finding is re-acked by every
+#   unrelated flag addition, and a naive overwrite silently clobbers whichever session's reason got there
+#   first. f()'s finding above has already reappeared (worsened past its acked magnitude, still carrying
+#   reason "known refactor debt"); re-acking it now with a NEW reason must fold the old one in as
+#   "<new> | prior: <old>" rather than erase it. A THIRD re-ack with yet another reason must keep the chain
+#   to ONE hop (only the immediately-preceding reason survives — no unbounded growth). Re-acking with the
+#   SAME reason again must be a no-op (no redundant "| prior:" segment appended).
+( cd "$AK" && "$BIN" . --quality-ack='second refactor pass' --no-cache >/dev/null 2>&1 )
+CHAIN1="$( grep '^ack complexity ' "$AK/.ripwire_quality_acks" )"
+printf '%s' "$CHAIN1" | grep -q 'second refactor pass' \
+    && ok "ack reason chain: re-ack with a new reason records the new reason" \
+    || { no "ack reason chain: new reason not recorded"; printf '%s\n' "$CHAIN1"; }
+printf '%s' "$CHAIN1" | grep -q 'prior: known refactor debt' \
+    && ok "ack reason chain: re-ack preserves the prior reason as \"| prior: ...\" instead of clobbering it" \
+    || { no "ack reason chain: prior reason was clobbered"; printf '%s\n' "$CHAIN1"; }
+
+# a second re-ack (third distinct reason, on a further-worsened magnitude) must not stack a two-hop chain.
+printf 'int f( int a ){ int s=0;%s return s; }\nint usef(){ return f(1); }\n' "$( ifs 40 )" > "$AK/src/c.cpp"
+( cd "$AK" && "$BIN" . --quality-ack='third pass' --no-cache >/dev/null 2>&1 )
+CHAIN2="$( grep '^ack complexity ' "$AK/.ripwire_quality_acks" )"
+printf '%s' "$CHAIN2" | grep -q 'third pass | prior: second refactor pass' \
+    && ok "ack reason chain: chain stays ONE hop deep (keeps only the immediately-prior reason)" \
+    || { no "ack reason chain: chain did not collapse to one hop"; printf '%s\n' "$CHAIN2"; }
+printf '%s' "$CHAIN2" | grep -q 'known refactor debt' \
+    && no "ack reason chain: a reason from TWO re-acks back leaked — the chain is growing unbounded" \
+    || ok "ack reason chain: the two-re-acks-back reason correctly dropped (bounded chain)"
+
+# re-acking again with the IDENTICAL current reason must not append another prior segment.
+( cd "$AK" && "$BIN" . --quality-ack='third pass' --no-cache >/dev/null 2>&1 )
+CHAIN3="$( grep '^ack complexity ' "$AK/.ripwire_quality_acks" )"
+CHAINHOPS="$( printf '%s\n' "$CHAIN3" | grep -o '| prior:' | wc -l | tr -d ' ' )"
+[ "$CHAINHOPS" = 1 ] \
+    && ok "ack reason chain: re-acking with the IDENTICAL reason is a no-op (chain does not grow)" \
+    || { no "ack reason chain: identical re-ack changed the chain unexpectedly (hops=$CHAINHOPS)"; printf '%s\n' "$CHAIN3"; }
+
 # ── 4) MATERIALITY TIERS ────────────────────────────────────────────────────────────────────────────────
 #   g() is committed already OVER the ccx bar. A +1-ccx edit is a regression by the letter but immaterial:
 #   it must be reported sev="minor" and NOT gate exit 2. A +10-ccx edit stays major and exits 2.
