@@ -154,14 +154,16 @@ extern "C"
     const TSLanguage* tree_sitter_lua( void );
 }
 
-// ── the ingest-family sections (2026-08-29 split) ────────────────────────────────────────────────────
+// ── the ingest-family sections (2026-08-29 split; ingest() phases followed 2026-08-30) ──────────────
 // Each ingest_*.h below is a SECTION of this translation unit, not a library header: it reopens
 // `namespace rw` AND the unnamed namespace inside it (one TU, one unnamed namespace), sees every
 // #include and grammar entry point above, and is included exactly once, right here — the same
 // mechanism as main.cpp's verb-family split, with RIPWIRE_INGEST_TU as the enforcement: any other
 // includer is a compile error. Order matters — a later section may call an earlier one (the
 // side-capture section calls the metrics section's complexityOf; everything may call the crawl
-// section's language table). The --match/--lint tail (ingest_astquery.h) is rw-level rather than
+// section's language table; the four PHASE sections at the bottom — prewarm/parsepool/docpass/model,
+// the named stages of ingest() itself — call into everything above them, and parsepool calls
+// prewarm's install helper). The --match/--lint tail (ingest_astquery.h) is rw-level rather than
 // unnamed and is included at the very END of this file, exactly where its content sat before the
 // split.
 #define RIPWIRE_INGEST_TU 1
