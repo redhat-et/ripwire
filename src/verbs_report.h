@@ -1673,7 +1673,7 @@ SkipHealthReport classifySkipHealth( const rw::IngestResult& ing )
         }
         const std::size_t   sample   = h.fileBytes < kHealthWsSampleBytes ? h.fileBytes : kHealthWsSampleBytes;
         const std::uint32_t wsPerMil = sample == 0 ? 1000u : std::uint32_t( ( std::uint64_t( h.wsBytes ) * 1000ull ) / sample );
-        const bool          degraded = h.errNodes > 0;
+        const bool          degraded = rw::fileParseDegraded( ing, f );   // the ONE predicate (model.h) — grep + refusals route through it too
         const bool          minified = h.fileBytes >= kMinifiedMinBytes && wsPerMil < kMinifiedWsPerMille;
         out.degraded += degraded ? 1u : 0u;
         out.minified += minified ? 1u : 0u;

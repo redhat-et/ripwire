@@ -22,6 +22,7 @@
 #include "model.h"
 #include "graph.h"          // splitQualifiedSpec / resolveAllByName — the SAME grammar the callers resolve with
 #include "didyoumean.h"     // §P12.1: the near-miss suggester, for the "the name is wrong too" fallback
+#include "darkflags.h"      // readWhole / identByte — the shared lexical helpers (no second copy), for the degraded-parse scan
 
 #include <algorithm>
 #include <cstddef>
@@ -61,6 +62,61 @@ inline bool indexHasFileMatching( const IngestResult& ing, std::string_view file
 {
     return std::any_of( ing.files.begin(), ing.files.end(),
                         [ file ]( const std::string& path ) { return filePathContains( path, file ); } );
+}
+
+// DEGRADED-PARSE routing (degradedhintcheck, 2026-08-30). The health pass records which indexed files'
+// parses hold ERROR/MISSING nodes, and --skipped discloses them — but a selector refusal never routed the
+// reader there, so a symbol sitting in a shredded file (the looksObjC misroute: src/ingest_model.h,
+// err=190) answered a bare "symbol not found" and sent an agent hunting for a rename that never happened.
+// This clause scans the BYTES of the parse-degraded files for the missing name as a WHOLE WORD — precise
+// by construction: an ordinary typo occurs in no file, so it never fires on misspellings (this repo
+// carries 65 deliberately-degraded fixtures; a blanket "there are degraded files" note would ride on
+// every refusal). Cold path only (the command is already failing), and bounded: at most
+// kDegradedScanFiles files and kDegradedScanBytes total are read; readWhole itself refuses oversized
+// files. A budget hit or unreadable file just means no clause — an ABSENT clause claims nothing, same as
+// the near-miss suggester. First matching file only: --skipped is the itemization, this is the routing.
+inline constexpr std::size_t kDegradedScanFiles = 32;
+inline constexpr std::size_t kDegradedScanBytes = 8u << 20;
+
+inline std::string degradedParseClause( const IngestResult& ing, std::string_view name )
+{
+    if( name.empty() || name.size() > 256 )
+    {
+        return {};
+    }
+    std::size_t scannedFiles = 0, scannedBytes = 0;
+    std::string bytes;
+    for( std::size_t fileIndex = 0; fileIndex < ing.files.size() && fileIndex < ing.fileHealth.size(); ++fileIndex )
+    {
+        if( !fileParseDegraded( ing, fileIndex ) )
+        {
+            continue;                                    // clean, or the ingest never parsed it — not this clause's claim
+        }
+        const FileHealth& h = ing.fileHealth[ fileIndex ];
+        if( ++scannedFiles > kDegradedScanFiles || ( scannedBytes += h.fileBytes ) > kDegradedScanBytes )
+        {
+            return {};                                   // budget — absent claims nothing
+        }
+        if( !darkflags::readWhole( diskPath( ing, std::uint32_t( fileIndex ) ), bytes ) )
+        {
+            continue;
+        }
+        const std::string_view hay( bytes );
+        for( std::size_t at = hay.find( name ); at != std::string_view::npos; at = hay.find( name, at + 1 ) )
+        {
+            const bool leftOk  = at == 0 || !darkflags::identByte( (unsigned char)hay[ at - 1 ] );
+            const bool rightOk = at + name.size() >= hay.size() || !darkflags::identByte( (unsigned char)hay[ at + name.size() ] );
+            if( leftOk && rightOk )
+            {
+                char ratio[ 16 ];
+                std::snprintf( ratio, sizeof( ratio ), "%.3f", double( h.errBytes ) / double( h.fileBytes ) );
+                return " (note: '" + std::string( name ) + "' occurs textually in " + ing.files[ fileIndex ]
+                     + ", whose parse is DEGRADED (err_ratio=" + ratio + ") — symbols there may be unextracted; "
+                       "the skipped verb itemizes)";
+            }
+        }
+    }
+    return {};
 }
 
 // THE DIAGNOSIS — the parenthetical alone, "" when there is nothing honest to add. Separated from the
@@ -112,7 +168,7 @@ inline std::string selectorFaultClause( const IngestResult& ing, std::string_vie
             return clause + " — e.g. " + std::string( retryForm ) + definingFiles[0] + ":" + std::string( bareName ) + ")";
         }
     }
-    return withDidYouMean( ing, bareName, {} );      // "" when no near name exists — the historic behaviour
+    return withDidYouMean( ing, bareName, {} ) + degradedParseClause( ing, bareName );
 }
 
 // The complete stderr line (no trailing newline) for a selector that resolved to nothing.
