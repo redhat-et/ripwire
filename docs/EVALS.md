@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 484 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 485 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4478,7 +4478,7 @@ descriptions 21,172 B, `src/mcp.h`) is larger and riskier and is spec-only, not 
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **484 gate scripts**, all of which exist on disk.
+naming **485 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5309,7 +5309,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 484. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 485. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -6609,6 +6609,57 @@ function body via `--expand` (the primitive's value claim is fewer tokens for th
 recall AND the token ratio must be reported together, per the §5 discipline). No number from this shape
 is published until that round runs to completion under its own pre-registration — this paragraph is the
 registration, not the result.
+## `--slice-flow` — ARISE rung 2, cross-statement data-flow slicing (2026-08-30) — REGISTERED CONTRACT
+
+**The paper's own mechanism, read before this was designed.** ARISE's ablation credits its data-flow
+slicer with the largest single component of the +17pp Function Recall@1 (0.50 → 0.57 of the 0.43 → 0.60
+total; Line Recall@1 0.26 → 0.41 overall), and the paper is specific about what that slicer is: def-use
+edges by the reaching-definition rule ("for each use of variable v at statement s, the last preceding
+definition of v in source order within the same function"), a seed plus a direction (backward, forward
+or both), a bounded BFS over those edges that **stops at function boundaries** — inter-procedural
+expansion belongs to its call-graph ranking tier, not the slicer. Rung 2 lands that mechanism on the v1
+substrate: `--slice=SYM:VAR --slice-flow=back|fwd|both [--slice-depth=N]`.
+
+**The claimed contract (all of it gate-pinned in `test/sliceflowcheck.sh`, red-first against the
+pre-lane binary; none of it an accuracy claim).** Bounded BFS from the seed variable over
+line-granular reaching-definition edges: `back` = statements whose values feed the seed, `fwd` =
+statements the seed's value reaches (a reached line that defines another variable carries the value
+onward), `both` = the union, backward first, deduplicated. Flow rows extend the v1 `<s>` row with
+`v=` (the variable at that step), `d=` (BFS depth; seed rows are depth 0) and `f=` (the line the step
+was reached from), ordered by (d, line, variable) as a stated contract. `depth=` always states the
+bound in force (default 8, `--slice-depth=1..32`); a bound that suppresses a novel row is disclosed as
+`flow_truncated="1"` — bounded-here, never proven-complete. Without the new flags the v1 output is
+byte-identical (verified against the pre-lane binary). Modifier misuse refuses loudly: `--slice-flow`
+alone, on the bare inventory (no seed VAR), an unknown direction, `--slice-depth` without
+`--slice-flow`, depth outside 1..32.
+
+**Deviations from the paper, deliberate and disclosed in the emitted legend:** (1) statement ≈ source
+LINE — rows aggregate per line, so a multi-statement line merges and may over-connect (the paper keys
+on AST statement nodes); (2) name-based and scope-insensitive like v1 — no alias analysis, no lexical
+scope separation (the paper handles global/nonlocal explicitly), shadowing may over-include; (3) the
+seed is the whole variable inside ONE resolved definition (v1's addressing), not the paper's
+(file, line, variable) triple — a line seed is recoverable by reading the d=0 rows. The paper's
+Python-only substrate widens here to v1's six served families, with the classification tables v1
+already grep-verified per vendored grammar.
+
+**The measurement this registers — protocol fixed BEFORE either arm runs.** The v1 paragraph above
+registered a line-recall shape; this round executes it and extends it with a paired v2 arm, on a
+corpus registered here as: fix-shaped commits mined from THIS repository's own history (family: cpp —
+the one family this corpus can speak for, stated rather than averaged away), newest first, a commit
+qualifying when `git diff -U0` against its parent confines every added line to ONE function per git's
+own C/C++ hunk funcnames, that function resolves uniquely in the index at that commit, and at least
+one added line names a sliceable local. Instances are (commit, function, variable) triples: the
+variables named on the added lines that appear in the function's `--slice=fn` inventory. Arms, all
+measured on the SAME instances at the commit's own tree: (a) **v1** `--slice=fn:var` — per-variable
+line-recall (hit = every added line naming var appears among its rows) and rows-emitted /
+lines-relevant over-inclusion, the v1 paragraph's own metrics; (b) **v2** `--slice=fn:var
+--slice-flow=both` — FUNCTION-level added-line recall (|added lines ∩ slice lines| / |added lines|,
+per instance) for the v1 rows vs the v2 rows, the delta being rung 2's whole value claim: flow rows
+recover related changed lines the flat single-variable slice cannot see; (c) **`--expand=fn`** — the
+whole-body baseline, recall 1.0 by construction, priced in raw output bytes (the §5 discipline: recall
+and cost reported together, bytes not estimated tokens). Harness: `bench/slice/run_slicerecall.py`,
+deterministic given the commit list; the instance cap (newest 40 qualifying commits) is part of this
+registration. Numbers from this protocol land in this section and nowhere public until an owner pass.
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 
 **The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*
