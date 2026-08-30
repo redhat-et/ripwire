@@ -1350,10 +1350,11 @@ inline std::string headSnapRepoHex( const std::string& root )
 // FOLLOW-UP for whoever owns ingest.{h,cpp}: promote the two constants into ingest.h and turn the gate into a
 // `static_assert` — this lane's file boundary forbade editing those files.
 constexpr std::uint32_t kIngestCacheVersionMirror = 13;   // MUST equal ingest.cpp's kCacheVersion (gated)
-constexpr std::uint32_t kIngestParserVerMirror    = 73;   // MUST equal ingest.cpp's kParserVer   (gated)
-                                                          // 73 = 2026-08-25 (candhead-ugrep lane): C++ out-of-line nested
-                                                          // class/struct definitions (`class Outer::Inner : Base { … };`)
-                                                          // now mint a symbol. See ingest.cpp's own kParserVer note.
+constexpr std::uint32_t kIngestParserVerMirror    = 74;   // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 74 = 2026-08-30 (objc-sniff lane): looksObjC masks comments
+                                                          // and string literals before testing @interface/@protocol/
+                                                          // @implementation, so a C++ .h that merely MENTIONS them is no
+                                                          // longer rerouted to objc. See ingest_cache.h's kParserVer note.
                                                           // 72 = 2026-08-24 (fnbody-require lane): CommonJS require()/dynamic
                                                           // import() captured inside a TS/JS function body, not just at the
                                                           // top level — Include gains `bool isLazy`. See ingest.cpp's own
