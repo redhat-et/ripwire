@@ -164,7 +164,16 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 73;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 74;           // bump on any grammar/.scm/extraction change
+                                                      // 74 = 2026-08-30 (objc-sniff lane): looksObjC masks
+                                                      //    comments and string/char literals before testing for
+                                                      //    @interface/@protocol/@implementation — a C++ .h whose
+                                                      //    doc comments MENTION those tokens (ingest_model.h's own
+                                                      //    collapseObjCDeclDefs contract) was rerouted wholesale to
+                                                      //    the objc grammar and its C++ symbols (struct DefSweep +
+                                                      //    DefSweep::find, anon namespace) shredded at extraction.
+                                                      //    Language ROUTING changed for such headers → cached facts
+                                                      //    extracted under the wrong grammar must be rejected.
                                                       // 73 = 2026-08-25 (candhead-ugrep lane): C++ out-of-line
                                                       //    NESTED CLASS/STRUCT definitions (`class Outer::Inner :
                                                       //    Base { … };`) — queries/cpp/tags.scm gains a

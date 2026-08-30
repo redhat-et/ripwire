@@ -640,13 +640,98 @@ bool mdNestsTooDeep( std::string_view bytes ) noexcept
 
 // A .h defaults to C++, but an Objective-C header (@interface/@protocol) must use the objc grammar or its
 // class/protocol structure is lost to the C++ parser. Cheap content peek (first 8 KB) for the distinctive
-// '@' declarations. @ is not valid C++ outside a string/comment, so false positives are negligible.
+// '@' declarations. @ is not valid C++ outside a string/comment — and "outside a string/comment" is load-
+// bearing, not negligible (kParserVer 74): a C++ header ABOUT Objective-C handling says "@interface" in a
+// doc comment (src/ingest_model.h's collapseObjCDeclDefs contract did), and the raw substring search this
+// replaces rerouted the whole header to the objc grammar, which cannot parse namespaces/lambdas/noexcept —
+// every C++ symbol in the file was shredded at EXTRACTION with no --skipped row and no floor. So the scan
+// masks // and /* */ comments plus string/char literals (raw strings included) and only counts an '@' that
+// sits in live code. Truncation honesty: a comment/string/raw-delimiter left OPEN at the 8 KB window edge
+// masks the rest of the window — a real @interface past an 8 KB leading comment is missed, exactly as it
+// was under the substring search's window.
+// The two literal-skip helpers, shared shape: given the opening byte's index, return the index of the
+// LAST byte the literal consumed (the caller's ++i steps past it), or npos when the window ends inside
+// the literal (the caller stops scanning — the truncation-honesty case above).
+//
+// Ordinary "…" / '…' with backslash escapes. An unterminated-on-line literal returns the newline's own
+// index, so the scan RESUMES on the next line — a lone quote in broken code must not mask the rest of
+// the window.
+std::size_t sniffSkipQuoted( std::string_view head, std::size_t openIndex, char quote ) noexcept
+{
+    for( std::size_t i = openIndex + 1; i < head.size(); ++i )
+    {
+        if( head[ i ] == '\\' ) { ++i; continue; }                   // skip the escaped char (incl. \")
+        if( head[ i ] == quote || head[ i ] == '\n' ) { return i; }
+    }
+    return std::string_view::npos;
+}
+
+// R"delim( … )delim" — no escapes, so skip to its exact closing sequence, allocation-free (rIndex names
+// the R; the prefix letters u8/u/U/L before it are plain identifier chars to this scan and need no
+// special casing — the R adjacent to the quote is the discriminant).
+std::size_t sniffSkipRawString( std::string_view head, std::size_t rIndex ) noexcept
+{
+    const std::size_t open = head.find( '(', rIndex + 2 );
+    if( open == std::string_view::npos ) { return std::string_view::npos; }
+    const std::string_view delim = head.substr( rIndex + 2, open - ( rIndex + 2 ) );
+    for( std::size_t close = open + 1; ; ++close )
+    {
+        close = head.find( ')', close );
+        if( close == std::string_view::npos ) { return std::string_view::npos; }
+        if( head.compare( close + 1, delim.size(), delim ) == 0
+            && close + 1 + delim.size() < head.size() && head[ close + 1 + delim.size() ] == '"' )
+        {
+            return close + 1 + delim.size();                         // the closing '"'
+        }
+    }
+}
+
+// One masked-region dispatch: does a comment or literal START at index i? Returns the region's last
+// byte (the caller's ++i steps past it), npos when the region is open at the window edge, or i itself
+// when no region starts here (i.e. head[ i ] is live code). Comment notes: line comments end at EOL (a
+// trailing backslash-continuation only matters to a real compiler; the next line re-enters the scan
+// harmlessly). The char-literal guard: a ' whose LEFT neighbor is an identifier/digit char is a C++14
+// digit separator (1'000'000) or a literal-suffix boundary, not a literal opener — treating it as one
+// would swallow real code up to the next stray quote.
+std::size_t sniffSkipMaskedRegion( std::string_view head, std::size_t i ) noexcept
+{
+    const std::size_t npos = std::string_view::npos;
+    const char        c    = head[ i ];
+    const char        next = ( i + 1 < head.size() ) ? head[ i + 1 ] : '\0';
+
+    if( c == '/' && next == '/' ) { return head.find( '\n', i + 2 ); }
+    if( c == '/' && next == '*' ) { const std::size_t close = head.find( "*/", i + 2 ); return ( close == npos ) ? npos : close + 1; }
+    if( c == 'R' && next == '"' ) { return sniffSkipRawString( head, i ); }
+    if( c == '"' )                { return sniffSkipQuoted( head, i, '"' ); }
+    const bool identBefore = i > 0 && ( std::isalnum( static_cast<unsigned char>( head[ i - 1 ] ) ) || head[ i - 1 ] == '_' );
+    if( c == '\'' && !identBefore ) { return sniffSkipQuoted( head, i, '\'' ); }
+    return i;
+}
+
 bool looksObjC( std::string_view bytes ) noexcept
 {
     const std::string_view head = bytes.substr( 0, bytes.size() < 8192 ? bytes.size() : 8192 );
-    return head.find( "@interface" ) != std::string_view::npos
-        || head.find( "@protocol" )  != std::string_view::npos
-        || head.find( "@implementation" ) != std::string_view::npos;
+
+    for( std::size_t i = 0; i < head.size(); ++i )
+    {
+        const std::size_t last = sniffSkipMaskedRegion( head, i );
+        if( last != i )
+        {
+            if( last == std::string_view::npos ) { return false; }   // region open at the window edge
+            i = last;
+            continue;
+        }
+
+        // live code: the three distinctive ObjC declaration keywords, same tokens as the substring era.
+        if( head[ i ] == '@'
+            && (    head.compare( i + 1, 9,  "interface" )      == 0
+                 || head.compare( i + 1, 8,  "protocol" )       == 0
+                 || head.compare( i + 1, 14, "implementation" ) == 0 ) )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // ---- deterministic crawl: collect candidate source paths, then SORT ----
