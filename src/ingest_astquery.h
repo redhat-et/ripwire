@@ -1268,6 +1268,12 @@ static void collectSpanTiers( TSNode root, std::uint32_t byteCount, SpanTierMap&
 // SAFE direction — a blob that cannot be read, parsed or trusted is simply ignored and the file is
 // re-parsed, which is byte-for-byte the pre-memo behaviour.
 //
+// THE ONE RESIDUAL, named rather than implied: a rewrite that lands on the SAME byte size AND the same
+// mtime, and does so at least one mtime tick before the blob was written, is indistinguishable from no
+// rewrite and would be served a stale map. That is not a new exposure — it is precisely the assumption the
+// parse cache's own warm-run stat gate (ingest_cache.h, A4-P7) already makes about every file in the index,
+// and it is why --no-cache exists and why the gate diffs cold against warm rather than trusting either.
+//
 // DISCLOSED LIMIT, stated rather than implied: this memo does not make the tier pass cheaper the FIRST
 // time a file is classified, and a repo whose files change on every run never warms it. It is a warm-path
 // optimization and nothing else; the disclosed tier budgets (kGrepTierFileBudget / kGrepTierByteBudget)
