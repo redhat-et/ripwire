@@ -956,7 +956,32 @@ std::optional<int> runSlice( const MainDispatch& d )
         return 1;
     }
 
-    const std::string xml = slicev::sliceBundleText( ing, d.root, focus, varName, scan, src, d.redactPtr );
+    // ── rung 2 (lane/or-arise): the transitive cross-statement flow, when --slice-flow asks for it ─────
+    // validateConfig already vetted the direction value and the flag pairings; what only THIS point can
+    // know is whether the spec carried a seed VAR — the flow's one hard prerequisite.
+    const bool flowActive = !cfg.sliceFlow.empty();
+    if( flowActive && varName.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --slice-flow needs a seed variable — bare --slice=%s lists the sliceable locals; pick one "
+                              "and re-run as --slice=%s:VAR --slice-flow=%s\n",
+                      std::string( selector ).c_str(), std::string( selector ).c_str(), std::string( cfg.sliceFlow ).c_str() );
+        return 1;
+    }
+
+    slicev::SliceFlowOut  flowOut;
+    slicev::SliceFlowSpec flowSpec;
+    flowSpec.dir   = cfg.sliceFlow == "back" ? slicev::SliceFlowDir::Back
+                   : cfg.sliceFlow == "fwd"  ? slicev::SliceFlowDir::Fwd
+                                             : slicev::SliceFlowDir::Both;
+    flowSpec.bound = cfg.sliceDepth > 0 ? std::uint32_t( cfg.sliceDepth ) : slicev::kSliceFlowDefaultDepth;
+    if( flowActive )
+    {
+        flowOut      = slicev::sliceFlowCompute( scan, varName, flowSpec.dir, flowSpec.bound );
+        flowSpec.out = &flowOut;
+    }
+
+    const std::string xml = slicev::sliceBundleText( ing, d.root, focus, varName, scan, src, d.redactPtr,
+                                                     flowActive ? &flowSpec : nullptr );
     std::fwrite( xml.data(), 1, xml.size(), stdout );
     return 0;
 }

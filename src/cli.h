@@ -309,6 +309,15 @@ struct Config
                                                             // slice of VAR inside the ONE uniquely-resolved definition SYM (multiple defs
                                                             // refuse, listing spellings — the --edit-check §A6a rule). Bare --slice=SYM
                                                             // lists the sliceable locals. file:name disambiguates like --edit-check.
+    std::string_view sliceFlow;                            // --slice-flow=back|fwd|both (lane/or-arise rung 2): transitive cross-statement
+                                                            // data-flow slice — bounded BFS over reaching-definition def-use edges from the
+                                                            // seed variable, the ARISE paper's own slicer semantics (a direction parameter;
+                                                            // stops at the function boundary). Modifies --slice=SYM:VAR only; refused alone
+                                                            // and on the bare inventory (a flow needs a seed variable). Value validated in
+                                                            // validateConfig.
+    int              sliceDepth = 0;                       // --slice-depth=N (1..32): the BFS depth bound for --slice-flow; 0 = unset,
+                                                            // which serves the disclosed default 8 (depth= on the root always states the
+                                                            // bound in force). Refused without --slice-flow — there is nothing to bound.
     std::string_view replaceSymbolBody;                    // CLI-first write surface: the same transaction-safe engine as MCP
     std::string_view insertBeforeSymbol;
     std::string_view insertAfterSymbol;
@@ -1451,6 +1460,20 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               definition sites REFUSES (exit 1) listing the file:name spellings that pick one, like\n"
         "                               --edit-check. Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — other\n"
         "                               indexed languages refuse loudly (never an empty success). Single-root only.\n"
+        "    --slice-flow=back|fwd|both  TRANSITIVE cross-statement data-flow slice (modifies --slice=SYM:VAR; refused alone or on\n"
+        "                               the bare inventory — a flow needs a seed variable). Follows VALUE FLOW over\n"
+        "                               reaching-definition def-use edges — a use of v reaches the last def of v in source order\n"
+        "                               before it — by bounded BFS from the seed variable, the ARISE paper's own slicer semantics\n"
+        "                               (arXiv:2605.03117: seed + direction, bounded BFS, stops at the function boundary; the\n"
+        "                               inter-procedural half stays with --callers/--impact by the paper's own design). back =\n"
+        "                               statements whose values feed the seed; fwd = statements the seed's value reaches; both =\n"
+        "                               the union. Flow rows are <s l= k= t= v= d= f=>: v= the variable at that step, d= BFS\n"
+        "                               depth (seed rows are depth 0), f= the line the step was reached from. steps= counts flow\n"
+        "                               rows; depth= states the bound in force. LIMITS (in the legend too): name-based, no alias\n"
+        "                               analysis, line-granular (a multi-statement line merges), shadowing may over-include.\n"
+        "    --slice-depth=N            the --slice-flow BFS depth bound, 1..32 (default 8, always disclosed as depth= on the\n"
+        "                               root). A bound that cuts a live frontier is disclosed as flow_truncated=\"1\" — a short\n"
+        "                               slice means \"bounded here\", never \"nothing further exists\". Refused without --slice-flow.\n"
         "    --pr-context[=BASEREF]     no-LLM review-evidence bundle for the diff (working-tree, or vs BASEREF): per changed file,\n"
         "                               its symbols + callers + blast radius + affected tests + co-change partners + owners.\n"
         "                               With --max-tokens=N the bundle degrades to fit: per-file structural counts survive for\n"
@@ -2256,6 +2279,7 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--edit-check=",  &Config::editCheckSym    , EmptyValue::Refuse, "a symbol name (file:name disambiguates)", "--edit-check=parseArgs" },
     { "--safe-delete=", &Config::safeDeleteSym   , EmptyValue::Refuse, "a symbol name (file:name disambiguates)", "--safe-delete=parseArgs" },
     { "--slice=",       &Config::sliceSpec       , EmptyValue::Refuse, "SYM (list its locals) or SYM:VAR (slice VAR; file:name:VAR disambiguates)", "--slice=parseArgs:argIndex" },
+    { "--slice-flow=",  &Config::sliceFlow       , EmptyValue::Refuse, "a flow direction: back|fwd|both (modifies --slice=SYM:VAR)", "--slice-flow=back" },
     { "--replace-symbol-body=", &Config::replaceSymbolBody, EmptyValue::Refuse, "a symbol name", "--replace-symbol-body=parseArgs" },
     { "--insert-before-symbol=", &Config::insertBeforeSymbol, EmptyValue::Refuse, "a symbol name", "--insert-before-symbol=parseArgs" },
     { "--insert-after-symbol=",  &Config::insertAfterSymbol,  EmptyValue::Refuse, "a symbol name", "--insert-after-symbol=parseArgs" },
@@ -2437,6 +2461,9 @@ inline constexpr IntFlag kIntFlags[] =
     // the parser accepts any positive integer and the verb reports zero pairs above the ceiling rather than
     // refusing — an empty result under a disclosed min_recur= is a truthful answer, not an error.
     { "--cochange-recur=",   &Config::cochangeRecur, false, kIntFlagMax,       "a positive integer",         "--cochange-recur=2" },
+    // --slice-depth=N (lane/or-arise rung 2): the --slice-flow BFS depth bound. The 1..32 band is a parse-time
+    // domain (`most`), not a cross-flag contract; needing --slice-flow at all IS cross-flag (validateConfig).
+    { "--slice-depth=",      &Config::sliceDepth,    false, 32,                "an integer in 1..32",        "--slice-depth=4" },
 
     // the grep context windows (ripgrep -B/-A/-C)
     { "--grep-before=",      &Config::grepBefore,    true,  kIntFlagMax,       "a non-negative integer",     "--grep-before=3" },
@@ -2482,7 +2509,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 200;  // +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2)
+inline constexpr std::size_t kTotalFlagArms = 202;  // +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -3561,6 +3588,27 @@ inline void validateConfig( Config& c ) noexcept
     if( c.gateabilityFlag && !c.docDrift )
     {
         std::fprintf( stderr, "ripwire: --gateability reports over --doc-drift's own scan — pass both (e.g. ripwire <dir> --doc-drift --gateability)\n" );
+        c.ok = false;
+    }
+
+    // --slice-flow (lane/or-arise rung 2) modifies --slice=SYM:VAR only — alone it would silently no-op on
+    // the plain map. Refuse loudly (mirrors --gateability/--abi immediately above), and refuse an unknown
+    // direction with the closed value set (the --grep-scope= shape). The "needs a seed VAR, not the bare
+    // inventory" half lives in runSlice, after the spec split that discovers whether a VAR was given.
+    if( !c.sliceFlow.empty() && c.sliceFlow != "back" && c.sliceFlow != "fwd" && c.sliceFlow != "both" )
+    {
+        std::fprintf( stderr, "ripwire: --slice-flow=%.*s — unknown direction (supported: back|fwd|both), e.g. --slice-flow=back\n",
+                      int( c.sliceFlow.size() ), c.sliceFlow.data() );
+        c.ok = false;
+    }
+    if( !c.sliceFlow.empty() && c.sliceSpec.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --slice-flow modifies --slice=SYM:VAR — pass both (e.g. ripwire <dir> --slice=parseArgs:argIndex --slice-flow=back)\n" );
+        c.ok = false;
+    }
+    if( c.sliceDepth != 0 && c.sliceFlow.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --slice-depth bounds the --slice-flow BFS — pass both (e.g. ripwire <dir> --slice=parseArgs:argIndex --slice-flow=fwd --slice-depth=4)\n" );
         c.ok = false;
     }
 

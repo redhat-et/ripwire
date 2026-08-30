@@ -44,6 +44,13 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   def/use rows (declaration/assignment/param vs read) inside the one resolved definition; bare
   `--slice=SYM` lists the sliceable locals first. Name-based and intra-procedural — the legend states
   the limits — so it answers "what touches this variable here" without reading the whole body.
+- **"Where did this variable's VALUE come from / what does it flow into"** (still inside one function)
+  → add `--slice-flow=back|fwd|both` — the transitive cross-statement data-flow slice over
+  reaching-definition def-use edges: `back` = the statements whose values feed the seed variable,
+  `fwd` = the statements its value reaches; each flow row carries the variable (`v=`), the BFS depth
+  (`d=`) and the line it was reached from (`f=`). `--slice-depth=N` bounds the walk (default 8; a
+  bound that cuts is disclosed as `flow_truncated="1"`). Stops at the function boundary by design —
+  the inter-procedural half is `--callers`/`--impact`.
 - **"Trace a FLOW: how does A reach B"** → `--path=A,B` (shortest call-path) or `--around=SYM
   [--around-depth=2]` (bounded neighborhood). Not `--for` — `--for` returns a ranked *set* of relevant
   signatures for a task, it does not trace a path between two named points.
