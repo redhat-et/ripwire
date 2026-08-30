@@ -17,7 +17,10 @@
 // except for the shared file-list cap below.
 //
 // Deliberately CLI-side: the MCP arms have their own refusal vocabulary in mcprefusal.h (different surface,
-// different retry syntax, JSON-RPC framing). What the two share is didyoumean.h, which both already call.
+// different retry syntax, JSON-RPC framing). What the two share is didyoumean.h, which both already call —
+// and, since the @FILE:LINE round, atSeedFaultClause below: the at-diagnosis sentences are per-fault FACTS,
+// not surface prose, so mcprefusal.h speaks them verbatim (mcprefuse::atSeedClause) rather than re-wording
+// the same seven faults a second time.
 
 #include "model.h"
 #include "graph.h"          // splitQualifiedSpec / resolveAllByName — the SAME grammar the callers resolve with

@@ -324,6 +324,30 @@ struct UsesSelector { bool fileQualified; std::string_view siteMatchName; std::s
 inline UsesSelector resolveUsesSelector( const rw::IngestResult& ing, std::string_view sym, std::size_t defsCount )
 {
     UsesSelector u;
+    if( !sym.empty() && sym.front() == '@' )
+    {
+        // @FILE:LINE line-seed: the site scan matches NAMES, so the seed must rebind to the innermost
+        // enclosing definition's name — pre-fix the raw @-spec was the match key and every site vanished
+        // into a silent count="0" (atcheck (13b)). fileQualified=true so the call-role sites narrow to the
+        // seed's own def (usesChosenCallers), exactly the file:name semantics the seed is sugar for.
+        const rw::AtSeed seed = rw::resolveAtSeed( ing, sym.substr( 1 ) );
+        if( seed.fault == rw::AtFault::None )
+        {
+            const std::string& seedName = ing.symbols[ seed.chain.back() ].name;
+            u.fileQualified = true;
+            u.siteMatchName = seedName;
+            u.suggestName   = seedName;
+            u.defsOfName    = rw::resolveAllByName( ing, seedName ).size();
+            return u;
+        }
+        // faulted seed: leave the (unmatchable) spec as the key so defs and sites stay empty and the
+        // qualified-refusal arm fires — selectorFaultClause's @-arm speaks the diagnosis. Never external="1".
+        u.fileQualified = true;
+        u.siteMatchName = sym;
+        u.suggestName   = sym;
+        u.defsOfName    = 0;
+        return u;
+    }
     u.fileQualified = sym.find( "::" ) == std::string_view::npos && sym.find( ':' ) != std::string_view::npos;
     std::string_view file;
     if( u.fileQualified )

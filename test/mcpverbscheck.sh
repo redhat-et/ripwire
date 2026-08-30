@@ -14,6 +14,10 @@
 #      `from_trace` maps a fixture trace onto zoomfix's appMain; `edit_check` returns the
 #      contract shape and refuses an unknown symbol; each of explore/pack_task/from_trace/
 #      edit_check gives its own per-verb "missing required field" message (D3 convention).
+#   7. @FILE:LINE line-seeds: the 9 @-capable verbs advertise the spelling in tools/list;
+#      find_symbol/impact/uses resolve a seed; a faulted seed carries the shared at-diagnosis
+#      (selectorrefuse.h::atSeedFaultClause) through the MCP refusal; a scan verb (mentions)
+#      refuses a resolvable seed by naming the definition it resolves to.
 #
 # The owners call needs a real git repo with commit history so gitFileAuthors() has
 # something to mine.  We reuse the same synthetic-repo construction pattern as
@@ -417,6 +421,145 @@ check_missing_arg "explore"    '{"path":"'"$CORPUS"'"}' "task"
 check_missing_arg "pack_task"  '{"path":"'"$CORPUS"'"}' "task"
 check_missing_arg "from_trace" '{"path":"'"$CORPUS"'"}' "trace"
 check_missing_arg "edit_check" '{"path":"'"$CORPUS"'"}' "symbol"
+
+# ─── 7. @FILE:LINE line-seeds on the MCP surface (the CLI contract of test/atcheck.sh, mirrored) ─────
+#
+# The resolver family (resolveFocus / resolveAllByNameQualified) accepts @FILE:LINE, so the MCP verbs on
+# those resolvers must (a) ADVERTISE the spelling in tools/list — an undiscoverable selector does not
+# exist for an MCP agent — (b) resolve it, and (c) refuse a faulted seed with the SAME at-diagnosis the
+# CLI speaks (selectorrefuse.h::atSeedFaultClause), never a bare "symbol not found" or a false
+# external="1". Fixture: the atcheck geo.cpp corpus (line 12 = inside Frame::shift, line 2 = top-level
+# blank, i.e. a no-coverer fault).
+
+echo
+echo "=== 7. @FILE:LINE line-seeds — advertised, resolved, and diagnosed on refusal ==="
+
+ATFIX="$TMP/atfix"
+mkdir -p "$ATFIX/src"
+cat >"$ATFIX/src/geo.cpp" <<'EOF'
+// geometry fixture
+
+namespace geo
+{
+
+struct Frame
+{
+    int origin = 0;
+
+    int shift( int d )
+    {
+        int moved = origin + d;
+        moved = moved * 2;
+        return moved;
+    }
+};
+
+}   // namespace geo
+
+int standalone( int a )
+{
+    return a + 1;
+}
+
+int useAll()
+{
+    geo::Frame f;
+    return f.shift( 2 ) + standalone( 3 );
+}
+EOF
+
+# (7a) tools/list: every @-capable verb's description teaches the spelling
+python3 -c '
+import sys, json
+resp = json.loads(sys.argv[1])
+tools = { t["name"]: json.dumps(t) for t in resp["result"]["tools"] }
+want = [ "find_symbol", "find_referencing_symbols", "impact", "uses", "edit_check",
+         "path_between", "connect", "lego", "fetch_body" ]
+missing = [ v for v in want if "@FILE:LINE" not in tools.get(v, "") ]
+print("OK" if not missing else "MISSING:" + ",".join(missing))
+' "$LIST_OUT" >"$TMP/at_list"
+[ "$( cat "$TMP/at_list" )" = "OK" ] \
+    && ok "@seed (7a): all 9 @-capable verbs advertise @FILE:LINE in tools/list" \
+    || no "@seed (7a): verbs not advertising @FILE:LINE: $( cat "$TMP/at_list" )"
+
+at_call() {
+    mcp_call \
+        '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"'"$1"'","arguments":'"$2"'}}' | tail -1
+}
+
+# (7b) find_symbol resolves the seed to the innermost enclosing definition
+AT_FS="$( at_call find_symbol '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:12"}' )"
+python3 -c '
+import sys, json
+r = json.loads(sys.argv[1])
+txt = r.get("result",{}).get("content",[{}])[0].get("text","")
+body = json.loads(txt) if txt else {}
+print("OK" if body.get("symbol",{}).get("name") == "shift" else "GOT:" + txt[:200])
+' "$AT_FS" >"$TMP/at_fs"
+[ "$( cat "$TMP/at_fs" )" = "OK" ] \
+    && ok "@seed (7b): find_symbol @src/geo.cpp:12 resolves to shift" \
+    || no "@seed (7b): find_symbol did not resolve the seed: $( cat "$TMP/at_fs" )"
+
+# (7c) impact takes the seed's blast radius (useAll reaches shift)
+AT_IM="$( at_call impact '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:12"}' )"
+python3 -c '
+import sys, json
+r = json.loads(sys.argv[1])
+txt = r.get("result",{}).get("content",[{}])[0].get("text","")
+print("OK" if "useAll" in txt and "error" not in r else "GOT:" + txt[:200] + json.dumps(r.get("error",{})))
+' "$AT_IM" >"$TMP/at_im"
+[ "$( cat "$TMP/at_im" )" = "OK" ] \
+    && ok "@seed (7c): impact @src/geo.cpp:12 reaches useAll" \
+    || no "@seed (7c): impact did not serve the seed: $( cat "$TMP/at_im" )"
+
+# (7d) uses serves the RESOLVED definition's sites — never a false external="1" count="0"
+AT_US="$( at_call uses '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:12"}' )"
+python3 -c '
+import sys, json
+r = json.loads(sys.argv[1])
+txt = r.get("result",{}).get("content",[{}])[0].get("text","")
+print("OK" if "in_id=\"useAll\"" in txt and "external=\"0\"" in txt else "GOT:" + txt[:300])
+' "$AT_US" >"$TMP/at_us"
+[ "$( cat "$TMP/at_us" )" = "OK" ] \
+    && ok "@seed (7d): uses @src/geo.cpp:12 serves shift's call site, external=0" \
+    || no "@seed (7d): uses lost the seed's sites: $( cat "$TMP/at_us" )"
+
+# (7e) a FAULTED seed refuses with the shared at-diagnosis, on a resolver verb and on uses
+AT_BADFS="$( at_call find_symbol '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:2"}' )"
+python3 -c '
+import sys, json
+r = json.loads(sys.argv[1])
+msg = r.get("error",{}).get("message","")
+print("OK" if r.get("error",{}).get("code")==-32602 and "no indexed symbol spans line 2" in msg else "GOT:" + json.dumps(r)[:300])
+' "$AT_BADFS" >"$TMP/at_badfs"
+[ "$( cat "$TMP/at_badfs" )" = "OK" ] \
+    && ok "@seed (7e): find_symbol faulted seed -> -32602 carrying the at-diagnosis" \
+    || no "@seed (7e): find_symbol faulted-seed refusal wrong: $( cat "$TMP/at_badfs" )"
+
+AT_BADUS="$( at_call uses '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:2"}' )"
+python3 -c '
+import sys, json
+r = json.loads(sys.argv[1])
+msg = r.get("error",{}).get("message","")
+print("OK" if "no indexed symbol spans line 2" in msg else "GOT:" + json.dumps(r)[:300])
+' "$AT_BADUS" >"$TMP/at_badus"
+[ "$( cat "$TMP/at_badus" )" = "OK" ] \
+    && ok "@seed (7e): uses faulted seed refuses with the at-diagnosis (never external=1)" \
+    || no "@seed (7e): uses faulted-seed refusal wrong: $( cat "$TMP/at_badus" )"
+
+# (7f) a scan verb (mentions) does not resolve seeds — a RESOLVABLE seed refuses by NAMING the
+# definition to pass, so the one-shot retry is in the message, not a guess
+AT_MEN="$( at_call mentions '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:12"}' )"
+python3 -c '
+import sys, json
+r = json.loads(sys.argv[1])
+msg = r.get("error",{}).get("message","")
+print("OK" if "shift" in msg else "GOT:" + json.dumps(r)[:300])
+' "$AT_MEN" >"$TMP/at_men"
+[ "$( cat "$TMP/at_men" )" = "OK" ] \
+    && ok "@seed (7f): mentions refuses a resolvable seed by naming 'shift' as the retry" \
+    || no "@seed (7f): mentions seed refusal does not name the resolved definition: $( cat "$TMP/at_men" )"
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo

@@ -30,6 +30,9 @@
 #   (11) @ in --expand: the resolved body is served
 #   (12) @ in --edit-check: resolves to the definition at the seed
 #   (13) @ in --slice: bare @F:L = inventory of that fn's locals; @F:L:VAR = the VAR slice
+#   (13b) @ in --uses: the seed serves the resolved definition's sites (the name-scan rebinds to the
+#        innermost def's NAME — pre-fix the raw @-spec was the match key and every site vanished into a
+#        silent count="0"); a faulted seed REFUSES with the at-diagnosis, never external="1"
 #   (14) @ refusal THROUGH a verb: the shared clause carries the at-diagnosis, exit 1
 #   (15) determinism (x2, byte-identical bare --at)
 #   (16) xmllint well-formedness (bare --at)
@@ -201,6 +204,19 @@ SVAT="$( "$BIN" "$WORK" --slice=@src/geo.cpp:12:moved --no-cache 2>/dev/null )"
 printf '%s' "$SVAT" | grep -q 'v="moved"\|var="moved"' \
     && ok "(13) slice @seed:VAR: the VAR slice ran on 'moved'" \
     || { no "(13) slice @seed:VAR: no slice rows for 'moved'"; printf '%s\n' "$SVAT" | head -c 300; }
+
+# ── (13b) @ in --uses: sites are the RESOLVED definition's, and a faulted seed refuses honestly ─────
+UAT="$( "$BIN" "$WORK" --uses=@src/geo.cpp:12 --no-cache 2>/dev/null )"
+printf '%s' "$UAT" | grep -q 'in_id="useAll"' \
+    && ok "(13b) uses @seed: shift's call site (in useAll) is served" \
+    || { no "(13b) uses @seed: no use-site rows — the silent count=0 shape"; printf '%s\n' "$UAT" | tail -c 300; }
+printf '%s' "$UAT" | grep -q 'external="0"' \
+    && ok "(13b) uses @seed: external=0 (the seed's definition is in-corpus)" \
+    || no "(13b) uses @seed: external= wrong or missing"
+E13B="$( "$BIN" "$WORK" --uses=@src/geo.cpp:2 --no-cache 2>&1 >/dev/null )"; R13B=$?
+[ "$R13B" = 1 ] && printf '%s' "$E13B" | grep -q 'no indexed symbol spans line 2' \
+    && ok "(13b) uses @faulted-seed: refused with the at-diagnosis, exit 1" \
+    || { no "(13b) uses @faulted-seed: expected exit 1 + the at-diagnosis (got exit $R13B)"; printf '%s\n' "$E13B"; }
 
 # ── (14) @ refusal THROUGH a verb: the shared clause carries the at-diagnosis ───────────────────────
 E14="$( "$BIN" "$WORK" --callers=@src/geo.cpp:2 --no-cache 2>&1 >/dev/null )"; R14=$?
