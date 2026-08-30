@@ -8,6 +8,7 @@
 // included by mcp.h (runMcp dispatches here).
 
 #include "mcpindex.h"
+#include "selectorrefuse.h"   // atSeedFaultClause — the @FILE:LINE at-diagnosis, ONE set of fault sentences on every surface
 #include "infra/hashutil.h"   // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <climits>            // PATH_MAX — the AbsHintFrame realpath/getcwd buffers (A2)
@@ -484,12 +485,54 @@ namespace mcpedit
     {
         NodeId      id = kNoNode;
         bool        byHandle = false;
+        bool        bySeed   = false;   // target was an @FILE:LINE line-seed (receipt discloses the rebind)
         std::string error;
     };
+
+    // @FILE:LINE line-seed target (2026-08-30 decision round): the agent editing from a diff hunk holds
+    // exactly FILE:LINE, so the seed addresses the edit target directly — resolved through the SAME
+    // resolveAtSeed + at-diagnosis every read verb uses; everything downstream of the returned NodeId
+    // (freshness hash, lock, pre-rename recheck, atomic write) is untouched, so the edit-safety contract
+    // is unchanged.
+    inline EditTarget resolveSeedTarget( const McpIndex& ix, const std::string& target, const std::string& pathHint )
+    {
+        EditTarget out;
+        out.bySeed = true;
+        if( !pathHint.empty() )
+        { // mirror the handle arm's posture: the seed already identifies one file (and one line)
+            out.error = "a file hint cannot narrow a line seed: '" + target
+                      + "' already names exactly one file and line — drop the file/--edit-target-file argument";
+            return out;
+        }
+        const AtSeed seed = resolveAtSeed( ix.ing, std::string_view( target ).substr( 1 ) );
+        if( seed.fault != AtFault::None )
+        {
+            out.error = "line seed '" + target + "' does not resolve" + atSeedFaultClause( ix.ing, seed );
+            return out;
+        }
+        const Symbol& s = ix.ing.symbols[ seed.chain.back() ];   // innermost — the SYM-selector pick (atcheck (12))
+        if( s.kind == SymKind::Section )
+        { // the resolveOneForEdit KIND GUARD, replicated verbatim in spirit: a Section's span does not
+          // delimit an editable definition, and for html/csv/ipynb it is extracted-text coordinates —
+          // splicing through one silently corrupts the doc/data file while reporting success.
+            out.error = "line seed '" + target + "' resolves to '" + s.name + "', a document heading/section ("
+                      + ix.ing.files[ s.fileId ] + "), not an editable code definition — refusing to avoid "
+                        "corrupting the doc/data file";
+            return out;
+        }
+        out.id = seed.chain.back();
+        return out;
+    }
 
     inline EditTarget resolveTarget( const McpIndex& ix, const std::string& target, const std::string& pathHint )
     {
         EditTarget out;
+
+        if( !target.empty() && target.front() == '@' )
+        {
+            return resolveSeedTarget( ix, target, pathHint );   // @FILE:LINE line-seed — see its contract above
+        }
+
         std::uint64_t handleId = 0, handleContent = 0;
         out.byHandle = mcpdetail::parseHandle( target, handleId, handleContent );
         if( !out.byHandle )
@@ -533,10 +576,6 @@ namespace mcpedit
         return out;
     }
 
-    inline std::string handleReceiptField( bool byHandle, const std::string& target )
-    {
-        return byHandle ? "\",\"resolved_from_handle\":\"" + mcpdetail::jsonEscape( target ) : std::string();
-    }
 }   // namespace mcpedit
 
 // perform an edit verb end-to-end (resolve → verify freshness → splice → atomic write → invalidate index).
@@ -678,8 +717,12 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     oc.symbol = s.name;
     oc.file   = path;
     oc.resultJson = std::string( "{\"applied\":\"" ) + opName
+                  // resolved_from_handle / resolved_from_seed: "symbol" above reports the RESOLVED name, so an
+                  // indirect target (handle or @FILE:LINE seed) survives as typed for the agent to audit the
+                  // resolution — the of=-echo posture, receipt-side. Absent for a plain-name target.
                   + "\",\"symbol\":\"" + mcpdetail::jsonEscape( s.name )
-                  + mcpedit::handleReceiptField( target.byHandle, symbol )
+                  + ( target.byHandle ? "\",\"resolved_from_handle\":\"" + mcpdetail::jsonEscape( symbol ) : std::string() )
+                  + ( target.bySeed   ? "\",\"resolved_from_seed\":\""   + mcpdetail::jsonEscape( symbol ) : std::string() )
                   + "\",\"file\":\"" + mcpdetail::jsonEscape( path )
                   + "\",\"span\":{\"start\":" + std::to_string( newStart ) + ",\"end\":" + std::to_string( newEnd ) + "}"
                   + ",\"old_file_bytes\":" + std::to_string( src.size() )

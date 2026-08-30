@@ -1086,13 +1086,37 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     return out;
 }
 
+// The @FILE:LINE rebind the NAME-matching scan verbs' payload fns share (2026-08-30 decision round): a
+// resolvable line-seed's ONE innermost enclosing definition — the SEED's own def, exactly the CLI twin's
+// resolveAllByNameQualified @-tier semantics, never the bare-name union (for `owners` the union's
+// lowest-id pick could name the WRONG file). kNoNode when sym is not a seed, or the seed faults — the
+// dispatch guards (qualifiedSelectorRefusal) refuse faulted seeds upstream with the shared at-diagnosis.
+inline NodeId atSeedDefOr( const IngestResult& ing, std::string_view sym )
+{
+    if( sym.empty() || sym.front() != '@' )
+    {
+        return kNoNode;
+    }
+    const AtSeed seed = resolveAtSeed( ing, sym.substr( 1 ) );
+    return seed.fault == AtFault::None ? seed.chain.back() : kNoNode;
+}
+
 // `mentions` verb: which DOCS (markdown plans/designs) name this code symbol in a `backtick` — the doc↔code
 // link (out of the call graph). Shares g.mentions with the --mentions CLI.
+// An @FILE:LINE line-seed REBINDS via atSeedDefOr (its contract above) and the answer discloses the
+// rebound name as "sym" beside the as-typed "symbol" echo.
 inline std::string mentionsJson( const std::string& root, const std::string& symbol )
 {
-    const McpIndex&           ix   = getIndex( root );
-    const IngestResult&       ing  = ix.ing;
-    const std::vector<NodeId> defs = resolveAllByName( ing, symbol );
+    const McpIndex&           ix      = getIndex( root );
+    const IngestResult&       ing     = ix.ing;
+    const NodeId              seedDef = atSeedDefOr( ing, symbol );
+    if( seedDef == kNoNode && !symbol.empty() && symbol.front() == '@' )
+    {
+        return {}; // faulted seed — refused upstream; this arm only defends dispatch drift
+    }
+    const std::string         seedSym = seedDef == kNoNode ? std::string() : ing.symbols[ seedDef ].name;
+    const std::vector<NodeId> defs    = seedDef == kNoNode ? resolveAllByName( ing, symbol )
+                                                           : std::vector<NodeId>{ seedDef };
     if( defs.empty() )
     {
         return {};
@@ -1123,8 +1147,12 @@ inline std::string mentionsJson( const std::string& root, const std::string& sym
     {
         out += "\"root\":\"" + mcpdetail::jsonEscape( root ) + "\",";
     }
-    out += "\"symbol\":\"" + mcpdetail::jsonEscape( symbol )
-         + "\",\"docs\":" + std::to_string( fileRows.size() )
+    out += "\"symbol\":\"" + mcpdetail::jsonEscape( symbol ) + "\",";
+    if( !seedSym.empty() )
+    {
+        out += "\"sym\":\"" + mcpdetail::jsonEscape( seedSym ) + "\","; // the @-seed's rebound definition name
+    }
+    out += "\"docs\":" + std::to_string( fileRows.size() )
          + ",\"sections\":" + std::to_string( docs.size() ) + ",\"files\":[";
     bool first = true;
     for( const MentionFileRow& row : fileRows )
@@ -1435,7 +1463,19 @@ inline std::string ownersText( const std::string& root, const std::string& symbo
     // optional symbol→file restriction (mirrors --owners=SYM CLI logic)
     std::uint32_t onlyFileId  = UINT32_MAX;
     std::size_t   symDefCount = 0;      // §B11.3-class: how many definitions the pick below discarded
-    if( !symbolName.empty() )
+    std::string   seedSym;              // @-seed rebind: the rebound definition's name, disclosed as sym=
+    const NodeId  seedDef     = atSeedDefOr( ing, symbolName );   // the seed's OWN def+file — see its contract
+    if( seedDef != kNoNode )
+    {
+        onlyFileId  = ing.symbols[ seedDef ].fileId;
+        symDefCount = 1;                // the seed names ONE place, so exactly one definition is covered
+        seedSym     = ing.symbols[ seedDef ].name;
+    }
+    else if( !symbolName.empty() && symbolName.front() == '@' )
+    {
+        return {}; // faulted seed — refused upstream; this arm only defends dispatch drift
+    }
+    else if( !symbolName.empty() )
     {
         const std::vector<NodeId> defs = resolveAllByName( ing, symbolName );
         if( defs.empty() )
@@ -1479,14 +1519,20 @@ inline std::string ownersText( const std::string& root, const std::string& symbo
                        "many files were ANALYSED; on the <uniform/> fold it is how many of them collapsed into that one row. "
                        "With a symbol, of= echoes it and defs= is how many DEFINITIONS that name has: this report covers the "
                        "file holding the FIRST of them (lowest node id), so defs= above 1 means the other definitions' files "
-                       "were NOT analysed -->" );
+                       "were NOT analysed. An @FILE:LINE seed rebinds to the innermost definition enclosing that line "
+                       "(sym= names it) and covers exactly that definition's file -->" );
     // §P8: the SAME <owners> element the CLI emits, so it takes the same at=. Stamping only the CLI half
     // would re-create, inside one element name, the two-shapes-one-spelling problem this round removes.
     // §B11.3-class: and the same of=/defs= fold disclosure, for the same reason.
     std::vector<char>  owSymEsc;
-    const std::string  owSymAttr = symbolName.empty()
-                                 ? std::string{}
-                                 : " of=\"" + std::string( escapeXml( symbolName, owSymEsc ) ) + "\" defs=\"" + std::to_string( symDefCount ) + "\"";
+    // the @-seed rebind disclosure sits between of= (the seed as typed) and defs=, the same slot the CLI
+    // --owners twin uses — §P8: one element name, one attribute order, both surfaces.
+    const std::string  owSeedAttr = seedSym.empty() ? std::string{}
+                                                    : " sym=\"" + std::string( escapeXml( seedSym, owSymEsc ) ) + "\"";
+    const std::string  owSymAttr  = symbolName.empty()
+                                  ? std::string{}
+                                  : " of=\"" + std::string( escapeXml( symbolName, owSymEsc ) ) + "\"" + owSeedAttr
+                                  + " defs=\"" + std::to_string( symDefCount ) + "\"";
     // R-E fix (2026-08-19): the same root-relative p= + root= the CLI --owners now emits, in the same slot
     // (root= before at=, so at= stays LAST — the r26 placement rule). The first R-E landing converted the CLI
     // arm alone and left this one spelling absolute paths, which is the divergence the §P8 note above forbids.
@@ -1739,15 +1785,17 @@ inline std::string qualifiedSelectorRefusal( const IngestResult& ing, const std:
     {
         // @FILE:LINE line-seed on a NAME-matching scan verb (owners/mentions — uses intercepts its own
         // @-arm before this helper and rebinds instead). A faulted seed refuses with the shared
-        // at-diagnosis; a resolvable one refuses by NAMING the definition it resolves to, so the one-shot
-        // retry is in the message — the V2-1 posture, with the answer's key handed over instead of guessed.
+        // at-diagnosis; a resolvable one is ANSWERABLE — the 2026-08-30 decision round replaced the
+        // first landing's pass-the-name-yourself refusal (which handed the resolved name back as a
+        // retry) with the rebind itself: the payload fns (mentionsJson/ownersText) resolve the seed to
+        // its ONE enclosing definition and disclose the rebound name, so the one call carries the answer
+        // (one-step-smart-defaults), never a re-run hint.
         const AtSeed seed = resolveAtSeed( ing, std::string_view( symbol ).substr( 1 ) );
         if( seed.fault != AtFault::None )
         {
             return mcprefuse::notFound( ing, "symbol", symbol );
         }
-        return "this verb matches by NAME, so an @FILE:LINE line-seed does not narrow it — the seed resolves to '"
-             + ing.symbols[ seed.chain.back() ].name + "': pass that as symbol";
+        return {};
     }
 
     const std::size_t lastColon = symbol.rfind( ':' );
@@ -1826,12 +1874,8 @@ inline std::string usesSelectorRefusal( const IngestResult& ing, const std::stri
 // passes through unchanged. The returned view aliases either the input or a symbol name owned by `ing`.
 inline std::string_view atSeedNameOr( const IngestResult& ing, std::string_view sym )
 {
-    if( sym.empty() || sym.front() != '@' )
-    {
-        return sym;
-    }
-    const AtSeed seed = resolveAtSeed( ing, sym.substr( 1 ) );
-    return seed.fault == AtFault::None ? std::string_view( ing.symbols[ seed.chain.back() ].name ) : sym;
+    const NodeId seedDef = atSeedDefOr( ing, sym );   // shared with the scan verbs' payload fns
+    return seedDef != kNoNode ? std::string_view( ing.symbols[ seedDef ].name ) : sym;
 }
 
 inline std::string usesText( const std::string& root, const std::string& symbol, McpPageArgs page = {} )

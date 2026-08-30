@@ -428,8 +428,11 @@ check_missing_arg "edit_check" '{"path":"'"$CORPUS"'"}' "symbol"
 # those resolvers must (a) ADVERTISE the spelling in tools/list — an undiscoverable selector does not
 # exist for an MCP agent — (b) resolve it, and (c) refuse a faulted seed with the SAME at-diagnosis the
 # CLI speaks (selectorrefuse.h::atSeedFaultClause), never a bare "symbol not found" or a false
-# external="1". Fixture: the atcheck geo.cpp corpus (line 12 = inside Frame::shift, line 2 = top-level
-# blank, i.e. a no-coverer fault).
+# external="1". The NAME-matching scan verbs (mentions/owners) REBIND a resolvable seed to the innermost
+# enclosing definition and answer with a sym disclosure (7f/7g) — the 2026-08-30 decision round replaced
+# their pass-the-name-yourself refusal with the one-step-smart-defaults answer. Fixture: the atcheck
+# geo.cpp corpus (line 12 = inside Frame::shift, line 2 = top-level blank, i.e. a no-coverer fault),
+# plus notes.md + one git commit as scan-verb fuel.
 
 echo
 echo "=== 7. @FILE:LINE line-seeds — advertised, resolved, and diagnosed on refusal ==="
@@ -468,18 +471,30 @@ int useAll()
 }
 EOF
 
+# mention fuel for the scan-verb rebind arms (7f/7g): a doc that names `shift` in a backtick, and one
+# commit of git history so `owners` has authorship to mine.
+cat >"$ATFIX/notes.md" <<'EOF'
+# Geometry notes
+
+The `shift` helper doubles the shifted origin.
+EOF
+git -C "$ATFIX" init -q
+git -C "$ATFIX" -c user.name=atfix -c user.email=atfix@example.invalid add -A >/dev/null 2>&1
+git -C "$ATFIX" -c user.name=atfix -c user.email=atfix@example.invalid commit -qm seed >/dev/null 2>&1
+
 # (7a) tools/list: every @-capable verb's description teaches the spelling
 python3 -c '
 import sys, json
 resp = json.loads(sys.argv[1])
 tools = { t["name"]: json.dumps(t) for t in resp["result"]["tools"] }
 want = [ "find_symbol", "find_referencing_symbols", "impact", "uses", "edit_check",
-         "path_between", "connect", "lego", "fetch_body" ]
+         "path_between", "connect", "lego", "fetch_body",
+         "mentions", "owners", "replace_symbol_body", "insert_before_symbol", "insert_after_symbol" ]
 missing = [ v for v in want if "@FILE:LINE" not in tools.get(v, "") ]
 print("OK" if not missing else "MISSING:" + ",".join(missing))
 ' "$LIST_OUT" >"$TMP/at_list"
 [ "$( cat "$TMP/at_list" )" = "OK" ] \
-    && ok "@seed (7a): all 9 @-capable verbs advertise @FILE:LINE in tools/list" \
+    && ok "@seed (7a): all 14 @-capable verbs advertise @FILE:LINE in tools/list" \
     || no "@seed (7a): verbs not advertising @FILE:LINE: $( cat "$TMP/at_list" )"
 
 at_call() {
@@ -548,18 +563,48 @@ print("OK" if "no indexed symbol spans line 2" in msg else "GOT:" + json.dumps(r
     && ok "@seed (7e): uses faulted seed refuses with the at-diagnosis (never external=1)" \
     || no "@seed (7e): uses faulted-seed refusal wrong: $( cat "$TMP/at_badus" )"
 
-# (7f) a scan verb (mentions) does not resolve seeds — a RESOLVABLE seed refuses by NAMING the
-# definition to pass, so the one-shot retry is in the message, not a guess
+# (7f) a NAME-matching scan verb (mentions) REBINDS a resolvable seed to the innermost enclosing
+# definition and ANSWERS, disclosing the rebound name as "sym" (one-step-smart-defaults: the answer
+# itself, never a re-run hint) — "symbol" keeps echoing the seed as typed
 AT_MEN="$( at_call mentions '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:12"}' )"
 python3 -c '
 import sys, json
 r = json.loads(sys.argv[1])
-msg = r.get("error",{}).get("message","")
-print("OK" if "shift" in msg else "GOT:" + json.dumps(r)[:300])
+txt = r.get("result",{}).get("content",[{}])[0].get("text","")
+body = json.loads(txt) if txt.startswith("{") else {}
+okv = body.get("sym") == "shift" and body.get("symbol") == "@src/geo.cpp:12" and body.get("docs") == 1
+print("OK" if okv else "GOT:" + json.dumps(r)[:300])
 ' "$AT_MEN" >"$TMP/at_men"
 [ "$( cat "$TMP/at_men" )" = "OK" ] \
-    && ok "@seed (7f): mentions refuses a resolvable seed by naming 'shift' as the retry" \
-    || no "@seed (7f): mentions seed refusal does not name the resolved definition: $( cat "$TMP/at_men" )"
+    && ok "@seed (7f): mentions rebinds the seed to shift, discloses sym, and serves the doc" \
+    || no "@seed (7f): mentions did not rebind+answer the resolvable seed: $( cat "$TMP/at_men" )"
+
+# (7g) owners: the same rebind — of= echoes the seed, sym= names the rebound definition, and the
+# analysed file is the SEED's own (files="1"), never a lowest-id same-named def in another file
+AT_OWN="$( at_call owners '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:12"}' )"
+python3 -c '
+import sys, json
+r = json.loads(sys.argv[1])
+txt = r.get("result",{}).get("content",[{}])[0].get("text","")
+okv = "of=\"@src/geo.cpp:12\"" in txt and "sym=\"shift\"" in txt and "files=\"1\"" in txt
+print("OK" if okv else "GOT:" + (txt[:300] if txt else json.dumps(r)[:300]))
+' "$AT_OWN" >"$TMP/at_own"
+[ "$( cat "$TMP/at_own" )" = "OK" ] \
+    && ok "@seed (7g): owners rebinds the seed, discloses sym=, and analyses the seed's file" \
+    || no "@seed (7g): owners did not rebind+answer the resolvable seed: $( cat "$TMP/at_own" )"
+
+# (7h) a FAULTED seed on a scan verb still refuses with the shared at-diagnosis — rebinding is for
+# resolvable seeds only, a fault is never guessed around
+AT_MENBAD="$( at_call mentions '{"path":"'"$ATFIX"'","symbol":"@src/geo.cpp:2"}' )"
+python3 -c '
+import sys, json
+r = json.loads(sys.argv[1])
+msg = r.get("error",{}).get("message","")
+print("OK" if "no indexed symbol spans line 2" in msg else "GOT:" + json.dumps(r)[:300])
+' "$AT_MENBAD" >"$TMP/at_menbad"
+[ "$( cat "$TMP/at_menbad" )" = "OK" ] \
+    && ok "@seed (7h): mentions faulted seed refuses with the at-diagnosis" \
+    || no "@seed (7h): mentions faulted-seed refusal wrong: $( cat "$TMP/at_menbad" )"
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo

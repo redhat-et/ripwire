@@ -385,6 +385,77 @@ cmp -s "$W8/geometry.cpp" "$TMP/expected8.cpp" \
     && ok "full sequence: final file == the exactly-derived expected file (cmp clean)" \
     || { no "full sequence: final file differs from expected"; diff "$TMP/expected8.cpp" "$W8/geometry.cpp" | head -20; }
 
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== 9. @FILE:LINE line-seeds address the edit verbs (2026-08-30 decision round) ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# The agent editing from a diff hunk holds exactly FILE:LINE — the seed resolves the target through
+# graph.h::resolveAtSeed with the shared at-diagnoses; the safety contract downstream is UNCHANGED.
+W9="$( fresh_copy )"
+cp "$W9/geometry.cpp" "$TMP/geo9.orig"
+
+# (9a) a resolvable seed (line 6 = inside `distance`) edits THAT definition; the receipt discloses
+# the resolved symbol AND resolved_from_seed (the of=-echo posture: the seed as typed)
+NB9='double distance( Point a, Point b )\n{\n    return 9.0;\n}'
+mcp_call \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"replace_symbol_body\",\"arguments\":{\"path\":\"$W9\",\"symbol\":\"@geometry.cpp:6\",\"new_body\":\"$NB9\"}}}" \
+    >"$TMP/r9a"
+R9A="$( inner_or_err "$TMP/r9a" )"
+case "$R9A" in
+    *'"symbol":"distance"'*'"resolved_from_seed":"@geometry.cpp:6"'*) ok "(9a) @seed edit: resolved to distance, receipt discloses resolved_from_seed";;
+    *) no "(9a) @seed edit: receipt wrong: $( echo "$R9A" | head -c 300 )";;
+esac
+grep -q "return 9.0;" "$W9/geometry.cpp" \
+    && ok "(9a) @seed edit: the seed's definition body spliced" \
+    || no "(9a) @seed edit: new body not found in file"
+
+# (9b) a FAULTED seed refuses with the shared at-diagnosis and the file stays byte-identical
+W9B="$( fresh_copy )"
+cp "$W9B/geometry.cpp" "$TMP/geo9b.orig"
+mcp_call \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"replace_symbol_body\",\"arguments\":{\"path\":\"$W9B\",\"symbol\":\"@geometry.cpp:3\",\"new_body\":\"$NB9\"}}}" \
+    >"$TMP/r9b"
+R9B="$( inner_or_err "$TMP/r9b" )"
+case "$R9B" in
+    __ERROR__*'no indexed symbol spans line 3'*) ok "(9b) @faulted-seed: refused with the at-diagnosis";;
+    *) no "(9b) @faulted-seed: expected the at-diagnosis error: $( echo "$R9B" | head -c 300 )";;
+esac
+cmp -s "$W9B/geometry.cpp" "$TMP/geo9b.orig" \
+    && ok "(9b) @faulted-seed: file byte-identical after the refusal" \
+    || no "(9b) @faulted-seed: file changed on a refusal"
+
+# (9c) a `file` hint cannot narrow a seed — the seed already names exactly one file and line
+mcp_call \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"insert_after_symbol\",\"arguments\":{\"path\":\"$W9B\",\"symbol\":\"@geometry.cpp:6\",\"file\":\"geometry.cpp\",\"text\":\"// x\"}}}" \
+    >"$TMP/r9c"
+R9C="$( inner_or_err "$TMP/r9c" )"
+case "$R9C" in
+    __ERROR__*'line seed'*) ok "(9c) @seed + file hint: refused (the seed already names one file)";;
+    *) no "(9c) @seed + file hint: expected the hint-conflict refusal: $( echo "$R9C" | head -c 300 )";;
+esac
+cmp -s "$W9B/geometry.cpp" "$TMP/geo9b.orig" \
+    && ok "(9c) @seed + file hint: file byte-identical after the refusal" \
+    || no "(9c) @seed + file hint: file changed on a refusal"
+
+# (9d) a seed resolving to a markdown heading/Section refuses — the edit-safety kind guard holds for
+# seed-addressed targets exactly as for name-addressed ones (nothing may WRITE through a Section)
+cp "$W9B/notes.md" "$TMP/notes9.orig"
+mcp_call \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"replace_symbol_body\",\"arguments\":{\"path\":\"$W9B\",\"symbol\":\"@notes.md:1\",\"new_body\":\"# nope\"}}}" \
+    >"$TMP/r9d"
+R9D="$( inner_or_err "$TMP/r9d" )"
+case "$R9D" in
+    __ERROR__*'heading/section'*) ok "(9d) @seed on a doc Section: refused by the kind guard";;
+    *) no "(9d) @seed on a doc Section: expected the heading/section refusal: $( echo "$R9D" | head -c 300 )";;
+esac
+cmp -s "$W9B/notes.md" "$TMP/notes9.orig" \
+    && ok "(9d) @seed on a doc Section: doc byte-identical after the refusal" \
+    || no "(9d) @seed on a doc Section: doc changed on a refusal"
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo
 if [ "$fail" -eq 0 ]; then
