@@ -23,6 +23,11 @@
 # suggesting `--expand=<guess>` when the guess is wrong teaches an agent the tool is unreliable, which
 # costs more than the nudge gains. It names the verb and lets the agent supply the argument.
 #
+# 2026-08-29 (P4.2): the grep/rg base nudge no longer fires on a short single-literal pattern (the
+# case our own docs concede to `rg`) — only on a multi-pattern/OR-chain search, where the bundle
+# genuinely wins. See §CEDE, near where `category` is demoted, for the full rationale; the sweep
+# escalation below is untouched and still escalates on a same-class run of literal greps.
+#
 # Design posture (non-negotiable — do not "improve" this into a blocker):
 #   - NEVER blocks, denies, or rewrites the tool call. Always permissionDecision "allow" when it
 #     speaks at all; never "deny"/"ask"; never "updatedInput". Any internal failure (missing jq,
@@ -916,6 +921,30 @@ EOF2
     return 0
 }
 
+# ---- grep_worth_nudging PATTERN [CMDLINE] — true (0) when PATTERN shows the one signal the base
+#      grep/rg nudge is gated on below (§CEDE): an OR-chain / multi-pattern alternation. A literal `|`
+#      in PATTERN is the primary signal; when CMDLINE is also given (the Bash form only — the Grep
+#      tool's `pattern` field has no separate flag syntax to scan), two or more standalone `-e` pattern
+#      flags (`grep -e foo -e bar`) count too, since PATTERN alone is only ever the FIRST operand
+#      (see meter_lead) and cannot see a second `-e`. Anything else — including a single non-trivial
+#      regex with no alternation — returns false: that is exactly the comparison our own docs concede
+#      to `rg` (see the §CEDE block at its call site), so this stays silent rather than nag about it.
+grep_worth_nudging()
+{
+    case "$1" in
+        *'|'*) return 0 ;;
+    esac
+    if [ -n "${2:-}" ]
+    then
+        _gwn_ec="$( printf '%s' "$2" | grep -oE '(^|[[:space:]])-e([[:space:]]|$)' 2>/dev/null | wc -l | tr -d ' ' )"
+        case "${_gwn_ec:-0}" in
+            0|1) ;;
+            *)   return 0 ;;
+        esac
+    fi
+    return 1
+}
+
 if [ "$tool_name" = "Bash" ]
 then
     # `command` doubles as this tool's detail field, so one fetch serves the nudge AND the meter row.
@@ -1008,6 +1037,52 @@ case "$tool_name" in
     *)         fields3 ;;
 esac
 mdetail="$f3_detail"
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §CEDE — DO NOT NAG ABOUT A COMPARISON THE TOOL LOSES (P4.2, 2026-08-29)
+#
+# THE PROBLEM, STATED PLAINLY. Agents correctly drop to `rg`/`grep` for a known-literal hunt — our own
+# docs concede the case (the ripwire-efficient/ripwire-orient/ripwire-navigate skills: "for a broad
+# common-word question, plain `rg` + one read can still win"), and until the `--grep` fast path lands
+# (P4 fix 1, a separate change — not this file) a plain `rg "exact string"` genuinely beats `ripwire
+# --grep` on wall clock. The BASE (one-time) nudge fired on the FIRST eligible grep of a session
+# regardless of what the pattern looked like, so it nagged about exactly the comparison it was
+# conceding — advertising a verb that loses, which trains an agent to discount every OTHER nudge in
+# this file along with it.
+#
+# THE FIX IS A GATE ON THE EXISTING TIER, NOT A NEW MECHANISM. §SWEEP's own header (above) already
+# measured, in the 2026-08-11 first-12-hours readout, that this base one-time tip converts at ~0% and
+# that the dominant behaviour is the SAME-CLASS SWEEP. So this narrows WHEN THE BASE TIER FIRES rather
+# than bolting a second tracking system next to it: `grep_worth_nudging` (above) demotes `category`
+# back to "" — the identical "observed, no nudge pattern applies" verdict a single-file, non-recursive
+# grep already gets — when the pattern shows no evidence of a multi-pattern/OR-chain search, i.e. the
+# one case where the ranked bundle genuinely beats a single `rg` call. Everything downstream of
+# `category` (the §DEDUP bookkeeping, the message text) is untouched by this block.
+#
+# §SWEEP IS DELIBERATELY LEFT ALONE. `mclass` (what the sweep counters key on) is never touched here:
+# three single-literal greps in a row is still real trial-and-error retrieval regardless of any ONE
+# pattern's shape, the escalation already measures its own conversion independently, and its own
+# RIPWIRE_SWEEP=0 is its own kill switch. A grep-then-read CHAIN needs no new code either: the
+# (unmodified) read-category base nudge fires on its own first sighting the moment the agent opens the
+# file the grep pointed at — this gate only ever silences the GREP half of that sequence, never the
+# read half.
+#
+# THE SIGNAL IS DELIBERATELY NARROW AND SYNTACTIC, PER THE PLAN'S OWN INSTRUCTION NOT TO BUILD A
+# SEMANTIC DETECTOR: a literal `|` in the pattern, or two-or-more standalone `-e` pattern flags on the
+# Bash command line. Anything else — including a single non-trivial regex with no alternation — still
+# cedes to `rg` silently. A `-e`/`|` inside an unrelated argument can misfire in either direction; that
+# risk is accepted because the failure mode is silence (a nudge that could have helped does not fire),
+# never a wrong or noisy one.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+if [ "$category" = "grep" ] || [ "$category" = "bash-grep" ]
+then
+    if [ "$tool_name" = "Bash" ]
+    then
+        grep_worth_nudging "$meter_arg1" "$cmdx" || category=""
+    else
+        grep_worth_nudging "$mdetail" || category=""
+    fi
+fi
 
 dir="$f3_cwd"
 [ -n "$dir" ] || dir="$PWD"
