@@ -173,6 +173,7 @@ extern "C"
 #include "ingest_names.h"
 #include "ingest_binds.h"
 #include "ingest_sidecap.h"
+#include "ingest_prewarm.h"
 #include "ingest_docpass.h"
 #include "ingest_model.h"
 
@@ -330,303 +331,22 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // cache and notifies workers while they are already doing parse-side work.
 
     // incremental: load the content-hash cache BEFORE the prewarm. Empty cacheFile ⇒ full parse.
-    // fileHash: pre-sized to nfiles here (0 = not yet hashed); the prewarm miss-detection pass
+    // scan.hash: pre-sized to nfiles here (0 = not yet hashed); the prewarm miss-detection pass
     // populates entries for files it reads; the parse pool fills the rest during normal processing.
     // A4-P7: cacheWriteNs is the loaded blob's write timestamp — the racy-rule reference for the warm-run
     // stat-gate. -1 (no/rejected cache) makes every stat check see a racy entry → always read+hash (safe).
     long long cacheWriteNs = -1;
     HashMap<std::string, FileFacts> cache =
         cacheFile.empty() ? HashMap<std::string, FileFacts>{} : loadCache( std::string( cacheFile ), rootDir, captureValueUses, cacheWriteNs );
-    const std::size_t nfilesEarly = result.files.size();
     const bool needsCacheHash = !cacheFile.empty();
-    std::vector<std::uint64_t> fileHash( nfilesEarly, 0 );
-    // A4-P7 stat-gate: (size,mtime) observed for each file at the run that hashes it — persisted by saveCache
-    // so a future warm run can trust an unchanged file without reading it. -1 ⇒ not captured (never trusted).
-    std::vector<long long> fileStatSize( nfilesEarly, -1 );
-    std::vector<long long> fileStatMtime( nfilesEarly, -1 );
-    std::vector<FileHealth> fileHealth( nfilesEarly );   // §L1: one slot per fileId, one WRITER per slot
-    std::vector<const LangEntry*> fileLang( nfilesEarly, nullptr );
-    {
-        PROFILE_SCOPE_DESCRIBE( "ingest: classify file languages" );
-        for( std::size_t fileId = 0; fileId < nfilesEarly; ++fileId )
-        {
-            const std::string ext = lowerExtensionOf( result.files[ fileId ] );
-            fileLang[ fileId ] = lookupLang( ext );
-        }
-    }
+    // per-fileId scan arrays (language classify + hash/stat-gate + health slots) — ingest_prewarm.h
+    IngestFileScan scan = makeFileScan( result.files );
 
-    std::vector<const LangEntry*> toCompile;
-    std::vector<TSQuery*>         compiledQueries;
-    std::vector<std::thread>      queryCompilePool;
-    std::atomic<bool>             queryPrewarmReady{ true };
-    std::mutex                    queryPrewarmMutex;
-    std::condition_variable       queryPrewarmCv;
-    QueryReadyGate                queryReadyGate{ &queryPrewarmReady, &queryPrewarmMutex, &queryPrewarmCv };
-
-    // pre-warm the per-language tags.scm cache single-threaded; workers then only READ it.
-    // LAZY: compile ONLY grammars needed by changed/uncached files (the miss set).
-    // The grammar set must be a SUPERSET of every grammar any worker will touch:
-    //   - a cache miss → grammar guaranteed needed → mark it
-    //   - a cache hit (hash-match) → worker skips parse → grammar NOT needed (safe to omit)
-    //   - a .h miss that looks Objective-C → marks objc instead of cpp (same looksObjC re-route as parse pool)
-    //   - an unreadable .h miss → conservatively marks both cpp and objc, matching the old safety fallback
-    {
-        PROFILE_SCOPE_DESCRIBE( "ingest: compile queries (tags.scm prewarm)" );
-        std::array<bool, kLangTable.size()> present {};
-        bool anyUnknownHeaderMiss = false;
-
-        // The miss-detection pass reads + FNV-hashes every cache-present code file to decide which grammars a
-        // worker will actually need. That I/O + hashing was serial (~61ms on canyon warm). It is READ-ONLY and
-        // a pure function of each file's bytes, so parallelize it — but keep the RESULT deterministic: every
-        // thread writes ONLY its own per-index slots (fileHash[fi], isMiss[fi]); nothing is
-        // push_back'd from a worker. The grammar-mark reduction that follows is a serial pass over those slots,
-        // so the compiled-grammar set (and thus everything downstream) is independent of thread scheduling.
-        // The 204bb02 constraint still holds: compiledQueryCache() is populated single-threaded after the
-        // async compile join, and workers wait on queryPrewarmReady before reading it. fileHash is pre-filled
-        // so the pool skips the re-read on a cache hit.
-        std::vector<char> isMiss( nfilesEarly, 0 );              // 1 ⇒ this file's grammar is needed (cache miss/new)
-        std::vector<char> isObjCHeaderMiss( nfilesEarly, 0 );    // 1 ⇒ missed .h should reroute to ObjC grammar
-        std::vector<char> isUnknownHeaderMiss( nfilesEarly, 0 ); // 1 ⇒ missed .h could not be sniffed; compile fallback
-
-        if( cache.empty() )
-        {
-            PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: mark no-cache grammars" );
-
-            for( std::size_t fi = 0; fi < nfilesEarly; ++fi )
-            {
-                const LangEntry* le = fileLang[ fi ];
-                if( le == nullptr || le->grammar == nullptr )
-                {
-                    continue;   // doc extensions / markdown — no grammar needed
-                }
-
-                present[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
-                if( le->ext == ".h" )
-                {
-                    // With no cache, every header is a parse miss. Mark ObjC too so a header that reroutes
-                    // after the parse pool's content sniff never blocks on an uncompiled query.
-                    if( const LangEntry* objcLe = lookupLang( ".m" ) )
-                    {
-                        present[ static_cast<std::size_t>( objcLe - kLangTable.data() ) ] = true;
-                    }
-                }
-            }
-        }
-        else
-        {
-            PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: detect cache misses" );
-
-            unsigned hwHash = std::thread::hardware_concurrency();
-            if( hwHash == 0 )
-            {
-                hwHash = 1;
-            }
-            const unsigned nHashThreads = static_cast<unsigned>( std::min<std::size_t>( hwHash, std::max<std::size_t>( nfilesEarly, 1 ) ) );
-            std::atomic<std::size_t> nextIdx{ 0 };
-            std::vector<std::thread> hashPool;
-            hashPool.reserve( nHashThreads );
-
-            for( unsigned t = 0; t < nHashThreads; ++t )
-            {
-                hashPool.emplace_back( [ & ]()
-                {
-                    std::string bytes;
-                    std::string headerPrefix;
-                    for( ;; )
-                    {
-                        const std::size_t fi = nextIdx.fetch_add( 1, std::memory_order_relaxed );
-                        if( fi >= nfilesEarly )
-                        {
-                            break;
-                        }
-                        try   // per-file degrade — a throw escaping a worker thread would std::terminate
-                        {
-                            const std::string& f = result.files[ fi ];
-                            const LangEntry* le = fileLang[ fi ];
-                            if( le == nullptr )
-                            {
-                                continue;   // doc extensions — never cached (the doc post-pass re-extracts)
-                            }
-                            // B0: grammar-less languages (markdown) still flow through the cache stat-gate /
-                            // read+hash below so an UNCHANGED .md warm-hits without any read (previously the
-                            // early grammar skip left fileHash=0 and the parse pool re-read every .md every
-                            // run — the last per-run file-read the postings path had left). They only skip
-                            // the grammar-miss bookkeeping at the bottom (nothing to compile for them).
-
-                            bool hasFullBytes = false;
-
-                            // path absent from cache ⇒ definitely a miss (no read needed). Present ⇒ try the
-                            // A4-P7 stat-gate first, else read+hash.
-                            if( !cache.empty() )
-                            {
-                                const auto cit = cache.find( f );
-                                if( cit != cache.end() )
-                                {
-                                    const FileFacts& ff = cit->second;
-
-                                    // A4-P7 STAT-GATE: trust the cached parse WITHOUT reading/hashing when the
-                                    // current size+mtime still match the cache AND the entry is not racy (its
-                                    // mtime is strictly older than the blob's own write time — a same-granule
-                                    // post-hash edit could otherwise slip through undetected). Content hash stays
-                                    // the authority: any mismatch, an unstatable file, or a racy entry falls
-                                    // through to the read+hash path below.
-                                    const StatInfo si = statSizeMtime( f );
-                                    const bool statMatches = si.mtimeNs >= 0 && ff.mtimeNs >= 0
-                                                          && si.sizeBytes == ff.sizeBytes
-                                                          && si.mtimeNs   == ff.mtimeNs;
-                                    const bool notRacy = cacheWriteNs >= 0 && ff.mtimeNs < cacheWriteNs;
-                                    if( statMatches && notRacy )
-                                    {
-                                        fileHash[ fi ]      = ff.hash;        // parse pool sees a cache hit → never reads
-                                        fileStatSize[ fi ]  = si.sizeBytes;   // carry stat forward into the re-saved blob
-                                        fileStatMtime[ fi ] = si.mtimeNs;
-                                        continue;   // provably unchanged — grammar NOT needed for this file
-                                    }
-
-                                    if( !readFile( f, bytes ) )
-                                    {
-                                        continue;   // unreadable — worker will skip it too (not a miss to compile for)
-                                    }
-                                    hasFullBytes = true;
-                                    const std::uint64_t h = contentHash64( bytes );
-                                    fileHash[ fi ] = h;   // pre-fill so the parse pool can skip the re-read on a cache hit
-                                    // capture the stat observed at hash time so this file stays stat-gate-eligible next run
-                                    fileStatSize[ fi ]  = si.sizeBytes >= 0 ? si.sizeBytes : (long long)bytes.size();
-                                    fileStatMtime[ fi ] = si.mtimeNs;
-                                    if( ff.hash == h )
-                                    {
-                                        continue;   // cache hit — parse skipped → grammar NOT needed for this file
-                                    }
-                                }
-                                // else: path not in cache → miss (fall through)
-                            }
-
-                            if( le->grammar == nullptr )
-                            {
-                                continue;   // markdown: hash prefill only — no grammar to compile, no miss to mark
-                            }
-
-                            if( le->ext == ".h" )
-                            {
-                                std::string_view headerBytes;
-                                if( hasFullBytes )
-                                {
-                                    headerBytes = bytes;
-                                }
-                                else if( readFilePrefix( f, headerPrefix, 8192 ) )
-                                {
-                                    headerBytes = headerPrefix;
-                                }
-                                else
-                                {
-                                    isUnknownHeaderMiss[ fi ] = 1;
-                                }
-                                if( !headerBytes.empty() && looksObjC( headerBytes ) )
-                                {
-                                    isObjCHeaderMiss[ fi ] = 1;
-                                }
-                            }
-                            isMiss[ fi ] = 1;   // cache empty, path-absent, or hash-changed → grammar needed
-                        }
-                        catch( ... )
-                        {
-                            DEGRADED_PATH_ALERT( "ingest: prewarm hash worker exception on a file — treated as no-miss" );
-                        }
-                    }
-                } );
-            }
-            for( std::thread& th : hashPool )
-            {
-                th.join();
-            }
-            // serial grammar-mark reduction over the per-index results (order-independent: pure boolean OR).
-            {
-                PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: reduce grammar set" );
-
-                for( std::size_t fi = 0; fi < nfilesEarly; ++fi )
-                {
-                    if( !isMiss[fi] )
-                    {
-                        continue;
-                    }
-                    const LangEntry* le = fileLang[ fi ];
-                    if( le == nullptr )
-                    {
-                        continue; // defensive (isMiss only set for grammar-bearing files)
-                    }
-                    if( le->ext == ".h" )
-                    {
-                        if( isObjCHeaderMiss[ fi ] )
-                        {
-                            if( const LangEntry* objcLe = lookupLang( ".m" ) )
-                            {
-                                present[ static_cast<std::size_t>( objcLe - kLangTable.data() ) ] = true;
-                            }
-                        }
-                        else
-                        {
-                            present[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
-                            if( isUnknownHeaderMiss[ fi ] )
-                            {
-                                anyUnknownHeaderMiss = true;
-                            }
-                        }
-                        continue;
-                    }
-                    present[ static_cast<std::size_t>( le - kLangTable.data() ) ] = true;
-                }
-                if( anyUnknownHeaderMiss )
-                {
-                    if( const LangEntry* objcLe = lookupLang( ".m" ) )
-                    {
-                        present[ static_cast<std::size_t>( objcLe - kLangTable.data() ) ] = true;
-                    }
-                }
-            }
-        }
-
-        // distinct grammars needed by cache-miss files (several extensions share one grammar)
-        {
-            PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: unique grammars" );
-
-            for( std::size_t i = 0; i < kLangTable.size(); ++i )
-            {
-                const LangEntry& e = kLangTable[ i ];
-                if( e.grammar == nullptr || e.querySub.empty() || !present[ i ] )
-                {
-                    continue;   // querySub "" = markdown: a grammar with NO tags.scm (custom walk) — nothing to compile
-                }
-                const TSLanguage* lang = e.grammar();
-                bool seen = false;
-                for( const LangEntry* c : toCompile )
-                {
-                    if( c->grammar() == lang )
-                    {
-                        seen = true;
-                        break;
-                    }
-                }
-                if( !seen )
-                {
-                    toCompile.push_back( &e );
-                }
-            }
-        }
-
-        // Compile distinct grammars IN PARALLEL (ts_query_new is compute-bound — PMC IPC 4.0) and install
-        // into the shared cache single-threaded after the join. Query sources are immutable embedded views.
-        compiledQueries.assign( toCompile.size(), nullptr );
-        queryCompilePool.reserve( toCompile.size() );
-        queryPrewarmReady.store( toCompile.empty(), std::memory_order_release );
-        {
-            PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: launch ts_query_new async" );
-
-            for( std::size_t i = 0; i < toCompile.size(); ++i )
-            {
-                queryCompilePool.emplace_back( [ &compiledQueries, &toCompile, i ]() { compiledQueries[ i ] = compileQueryStandalone( *toCompile[ i ] ); } );
-            }
-        }
-    }
+    // lazy tags.scm prewarm: detect the cache-miss set (prefilling scan.hash/stat), launch the async
+    // grammar compiles, and hand the compile/ready state to the parse pool via `prewarm` (ingest_prewarm.h).
+    QueryPrewarm   prewarm;
+    QueryReadyGate queryReadyGate{ &prewarm.ready, &prewarm.mutex, &prewarm.cv };
+    prewarmTagsQueries( result.files, cache, cacheWriteNs, scan, prewarm );
 
     // Win 2 (PERF.md P2) — dirty flag: skip saveCache when nothing changed.
     // Set by any worker that re-parses a file (cache miss or new file). On a zero-change run,
@@ -644,10 +364,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     if( nfiles )
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: parse pool (tree-sitter, parallel)" );
-        // fileHash is already pre-sized to nfiles (done before the prewarm block above).
+        // scan.hash is already pre-sized to nfiles (done before the prewarm block above).
         // Entries pre-filled by the prewarm miss-detection pass (cache-present files that were read+hashed
         // there) stay as-is. Workers fill the remaining 0-valued entries for files they process.
-        VERIFY( fileHash.size() == nfiles );
+        VERIFY( scan.hash.size() == nfiles );
         unsigned hw = std::thread::hardware_concurrency();
         if( hw == 0 )
         {
@@ -695,7 +415,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             std::size_t hitDefs = 0, hitRefs = 0, hitIncs = 0, hitBinds = 0;
             for( std::size_t fileId = 0; fileId < nfiles; ++fileId )
             {
-                const std::uint64_t h = fileHash[ fileId ];
+                const std::uint64_t h = scan.hash[ fileId ];
                 const auto it = cache.find( result.files[ fileId ] );
                 if( it == cache.end() )
                 {
@@ -735,7 +455,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: prepare cold reserve" );
 
             ensureFileByteSize();
-            const ColdParseReserve cold = coldParseReserve( fileLang, fileByteSize, nthreads );
+            const ColdParseReserve cold = coldParseReserve( scan.lang, fileByteSize, nthreads );
             for( unsigned t = 0; t < nthreads; ++t )
             {
                 tDefs[ t ].reserve( cold.defs );
@@ -750,7 +470,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         {
             PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: build work order" );
 
-            if( !queryPrewarmReady.load( std::memory_order_acquire ) )
+            if( !prewarm.ready.load( std::memory_order_acquire ) )
             {
                 parseOrder.resize( nfiles );
                 std::iota( parseOrder.begin(), parseOrder.end(), std::size_t( 0 ) );
@@ -759,7 +479,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
                 const auto parsePriority = [ & ]( std::size_t fileId ) noexcept
                 {
-                    const LangEntry* le = fileLang[ fileId ];
+                    const LangEntry* le = scan.lang[ fileId ];
                     if( le == nullptr || le->grammar == nullptr )
                     {
                         return 0;   // docs/markdown and unknowns do not consume the tags-query barrier
@@ -906,7 +626,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 std::string bytes;
                 for( ;; )   // lock-free work-stealing: grab the next file via the atomic counter (balances the big-file tail)
                 {
-                    if( queryPrewarmReady.load( std::memory_order_acquire ) && !pendingParsed.empty() )
+                    if( prewarm.ready.load( std::memory_order_acquire ) && !pendingParsed.empty() )
                     {
                         flushPendingParsed();
                     }
@@ -924,16 +644,16 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                     {
                         const std::string& path = result.files[ fileId ];
 
-                        const LangEntry* le = fileLang[ fileId ];
+                        const LangEntry* le = scan.lang[ fileId ];
                         if( le == nullptr )
                         {
                             continue; // defensive (filtered in crawl)
                         }
 
                         // If the prewarm miss-detection pass already read+hashed this file, the hash
-                        // is already in fileHash[fileId] — skip the re-read for the hash check.
+                        // is already in scan.hash[fileId] — skip the re-read for the hash check.
                         // We still need `bytes` for actual parsing, so the fast path (cache hit) avoids readFile entirely.
-                        std::uint64_t h = fileHash[ fileId ];
+                        std::uint64_t h = scan.hash[ fileId ];
                         bool bytesLoaded = false;
                         if( h == 0 )
                         {
@@ -956,12 +676,12 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                             if( needsCacheHash )
                             {
                                 h = contentHash64( bytes );
-                                fileHash[ fileId ] = h;
+                                scan.hash[ fileId ] = h;
                                 // A4-P7: capture (size,mtime) at hash time so saveCache can persist a stat-gate
                                 // record for this file (cold run / new file / prewarm-skipped path).
                                 const StatInfo si = statSizeMtime( path );
-                                fileStatSize[ fileId ]  = si.sizeBytes >= 0 ? si.sizeBytes : (long long)bytes.size();
-                                fileStatMtime[ fileId ] = si.mtimeNs;
+                                scan.statSize[ fileId ]  = si.sizeBytes >= 0 ? si.sizeBytes : (long long)bytes.size();
+                                scan.statMtime[ fileId ] = si.mtimeNs;
                             }
                             bytesLoaded = true;
                         }
@@ -979,7 +699,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                             }
                             if( hit != nullptr )   // unchanged → reuse cached facts, skip parse
                             {
-                                fileHealth[ fileId ] = hit->health;   // §L1: health is a cached FACT, not a re-derivation
+                                scan.health[ fileId ] = hit->health;   // §L1: health is a cached FACT, not a re-derivation
                                 for( RawDef& d : hit->defs )
                                 {
                                     d.fileId = std::uint32_t( fileId );
@@ -1086,7 +806,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                             {
                                 continue;
                             }
-                            fileHealth[ fileId ] = measureFileHealth( ts_tree_root_node( mdTree.get() ), bytes );
+                            scan.health[ fileId ] = measureFileHealth( ts_tree_root_node( mdTree.get() ), bytes );
                             const std::string stem = fs::path( path ).stem().string();
                             const std::size_t firstNewDefIndex = tDefs[ t ].size();
                             extractMarkdown( static_cast<std::uint32_t>( fileId ), bytes, stem, ts_tree_root_node( mdTree.get() ), tDefs[ t ], tRefs[ t ] );
@@ -1106,10 +826,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                             }
 
                             const TSNode root = ts_tree_root_node( tree.get() );
-                            fileHealth[ fileId ] = measureFileHealth( root, bytes );   // §L1 — before `bytes` can be moved below
+                            scan.health[ fileId ] = measureFileHealth( root, bytes );   // §L1 — before `bytes` can be moved below
                             captureSideFacts( *le, static_cast<std::uint32_t>( fileId ), bytes, root, tRefs[ t ], tIncs[ t ], tBinds[ t ], tFfis[ t ], tRouteDefs[ t ], tRouteUses[ t ], captureValueUses );
 
-                            const bool canQueueParsed = !queryPrewarmReady.load( std::memory_order_acquire )
+                            const bool canQueueParsed = !prewarm.ready.load( std::memory_order_acquire )
                                                      && pendingParsed.size() < kMaxPendingParsedFiles
                                                      && pendingParsedBytes + bytes.size() <= kMaxPendingParsedBytes;
                             if( canQueueParsed )
@@ -1138,37 +858,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             } );
         }
 
-        {
-            PROFILE_SCOPE_DESCRIBE( "ingest/compile-queries: wait/install async" );
-
-            for( std::thread& th : queryCompilePool )
-            {
-                th.join();
-            }
-            // Install compiled queries single-threaded (workers are still gated). Installing TRANSFERS
-            // ownership to CompiledQueryCache, which frees whatever is still resident at process teardown
-            // (N2). A652: on an in-process re-ingest (long-lived MCP server) the same grammar can already
-            // own a cached query, and overwriting drops the only pointer to it — delete the displaced entry
-            // here or it leaks one TSQuery per grammar per re-ingest (A4-F16).
-            HashMap<const TSLanguage*, TSQuery*>& cache = compiledQueryCache();
-            for( std::size_t i = 0; i < toCompile.size(); ++i )
-            {
-                const TSLanguage* grammar = toCompile[ i ]->grammar();
-                if( auto it = cache.find( grammar ); it != cache.end() && it->second != nullptr && it->second != compiledQueries[ i ] )
-                {
-                    ts_query_delete( it->second );
-                }
-                cache[ grammar ] = compiledQueries[ i ];
-            }
-            // A4-F1: publish readiness UNDER queryPrewarmMutex, then notify. Workers wait via
-            // cv.wait(lock, pred); a lock-free store+notify here can slip between a worker's predicate check
-            // and its block → lost wakeup → the worker sleeps forever and the main th.join() hangs.
-            {
-                std::lock_guard<std::mutex> lk( queryPrewarmMutex );
-                queryPrewarmReady.store( true, std::memory_order_release );
-            }
-        }
-        queryPrewarmCv.notify_all();
+        installCompiledQueriesAndOpenGate( prewarm );   // join async compiles, publish, open the gate (ingest_prewarm.h)
 
         for( std::thread& th : pool )
         {
@@ -1246,11 +936,11 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         // Skips the ~11ms / 7 MB serialization+write on a no-change warm run.
         if( !cacheFile.empty() && dirty.load() )
         {
-            saveCache( std::string( cacheFile ), rootDir, result.files, fileHash, fileStatSize, fileStatMtime, fileHealth, rawDefs, rawRefs, rawIncs, rawBinds, rawFfis, rawRouteDefs, rawRouteUses, captureValueUses );
+            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.health, rawDefs, rawRefs, rawIncs, rawBinds, rawFfis, rawRouteDefs, rawRouteUses, captureValueUses );
         }
     }
 
-    result.fileHealth = std::move( fileHealth );   // §L1: after saveCache, before the (unmeasured) doc pass
+    result.fileHealth = std::move( scan.health );   // §L1: after saveCache, before the (unmeasured) doc pass
 
     // ── doc post-pass (P1-B): every collected document file (notebook/html/csv/…) becomes a docText
     //    override + one whole-file Section node — parallel extract, deterministic ascending-fileId merge
