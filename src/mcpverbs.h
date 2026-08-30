@@ -678,6 +678,25 @@ inline std::string grepTierKeys( const GrepTierReport& tier )
     return keys;
 }
 
+// parse_degraded routing (2026-08-30, mcpgrepdegradedcheck — the CLI <f> attribute's JSON twin): the note is
+// this dialect's legend channel (grepSuggestJson's own precedent), and it travels ONLY in an answer that
+// emitted the key — a clean answer stays byte-identical (the same gated-clause rule the CLI legend applies to
+// its parse_degraded sentence). Lifted out for the same reason grepTierKeys/grepUnindexedKeys above were: a
+// payload key fragment is a helper's job, not the verb body's. The predicate is model.h's fileParseDegraded —
+// the ONE rule the CLI emitter and the refusal clause already join, never a forked re-derivation.
+inline std::string grepDegradedNoteJson( const IngestResult& ing, std::span<const GrepHit> hits )
+{
+    const bool anyParseDegraded = std::any_of( hits.begin(), hits.end(), [ & ]( const GrepHit& h ) { return fileParseDegraded( ing, h.fileId ); } );
+    if( !anyParseDegraded )
+    {
+        return {};
+    }
+    return ",\"parse_degraded_note\":\"a hit carrying parse_degraded:true sits in a file whose parse holds ERROR/MISSING nodes"
+           " (the skipped verb itemizes err=/err_ratio=): symbols there may be unextracted, so read an absent in on such a hit as"
+           " UNKNOWN, not as file scope. Unmarked hits parsed clean, except that a file the ingest never parsed at all — doc-format,"
+           " binary-sniffed, unreadable — is also unmarked, the skipped verb's unmeasured class.\"";
+}
+
 inline std::string grepAuxJson( const std::vector<GrepAuxHit>& hits, bool singleRoot, const std::string& rootPrefix )
 {
     if( hits.empty() )
@@ -825,9 +844,17 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
         {
             out += ",\"in\":\"" + mcpdetail::jsonEscape( h.enclosing ) + "\"";
         }
+        // parse_degraded routing (2026-08-30, mcpgrepdegradedcheck — the CLI <f> attribute's JSON twin):
+        // this dialect has no file rows to hang the fact on, so it rides each hit row instead.
+        if( fileParseDegraded( ing, h.fileId ) )
+        {
+            out += ",\"parse_degraded\":true";
+        }
         out += "}";
     }
     out += "]";
+    // parse_degraded's in-band definition (helper above) — "" on a clean answer.
+    out += grepDegradedNoteJson( ing, std::span<const GrepHit>( hits ) );
     // §R-J: the CLI <unindexed> twin (helper above) — appended AFTER "hits" for the same reason the R1
     // block below is: existing key-order-sensitive gates read up through "hits" first.
     out += grepAuxJson( aux.hits, singleRootJ, rootPrefixJ );
