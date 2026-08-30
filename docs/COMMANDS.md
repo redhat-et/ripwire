@@ -2533,13 +2533,13 @@ $ ./build/ripwire . --doc-drift --with-history
 
 ### `--plan-lint=FILE`
 
-**Answers:** the house PLAN/DESIGN format's STRUCTURE check (P3.2) — never semantics, that stays --doc-drift's job.
+**Answers:** the house PLAN/DESIGN format's STRUCTURE check — never semantics, that stays --doc-drift's job.
 
 FILE is read directly (like --from-trace's FILE, not through the crawled index), so it need not live inside any indexed root. GRAMMAR, narrow and opt-in on purpose (this repo's own ~20 plan/design documents do not converge on one dialect): a card is exactly an H3 heading opening with a task id ("T" + 1-4 digits + up to 3 letters, e.g. T5 / T10 / T7b); a status ledger is exactly one heading (any level) whose text, stripped of a leading section mark, reads "Status" case-insensitively. A file showing NEITHER is reported dialect="0" with nothing further checked — not a failing lint, since most of this repo's own plans are exactly that file. Once dialect="1": every card's terminal line (the LAST non-blank line of its own body) must carry a status glyph, else status="missing"; an hourglass terminal line whose git-blamed commit sits more than stale_commits= commits behind HEAD is stale="1" (never claimed outside a git repo — see git=); a task id named in the ledger's own body with no matching card is a ledger-orphan (the REVERSE — a card the ledger never mentions — is not checked); a literal owed/OWED mention with no check-mark or cross anywhere LATER in the SAME document is undischarged (no cross-document tracking — a successor plan's discharge is invisible here, a stated limit, and this is substring matching with no semantic disambiguation: a doc that merely QUOTES the words reads the same as a real marker). Every gating row carries gating="1"; NOT CHECKED AT ALL: whether a card's claims are true, any heading level other than three for a card, a ledger heading spelled any other way. Exit 2 when dialect="1" and gating is non-zero (unlike --doc-drift's always-0 report — nothing here has a legitimate "dated on purpose" reading); exit 0 clean or dialect="0"; exit 1 only when FILE could not be read.
 
 **Caveats (stated by the binary):**
 
-- the house PLAN/DESIGN format's STRUCTURE check (P3.2) — never semantics, that stays --doc-drift's job.
+- the house PLAN/DESIGN format's STRUCTURE check — never semantics, that stays --doc-drift's job.
 - A file showing NEITHER is reported dialect="0" with nothing further checked — not a failing lint, since most of this repo's own plans are exactly that file.
 - an hourglass terminal line whose git-blamed commit sits more than stale_commits= commits behind HEAD is stale="1" (never claimed outside a git repo — see git=);
 
