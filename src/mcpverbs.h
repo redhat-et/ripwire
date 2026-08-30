@@ -1634,7 +1634,9 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     const IngestResult& ing = ix.ing;
     const Graph&        g   = ix.g;
 
-    const std::vector<NodeId> seeds = resolveAllByName( ing, symbol );
+    // resolveAllByNameQualified — the SAME resolver the CLI --impact uses (byte-identical on a bare
+    // name/canonical id), so this twin finally accepts file:name AND the @FILE:LINE line-seed too.
+    const std::vector<NodeId> seeds = resolveAllByNameQualified( ing, symbol );
     if( seeds.empty() )
     {
         return {}; // symbol not found → caller reports not-found
@@ -1733,6 +1735,21 @@ inline std::string impactText( const std::string& root, const std::string& symbo
 // left alone, and a spelling whose tail is not a symbol either falls through to the caller's own not-found.
 inline std::string qualifiedSelectorRefusal( const IngestResult& ing, const std::string& symbol, std::string_view cliFlag )
 {
+    if( !symbol.empty() && symbol.front() == '@' )
+    {
+        // @FILE:LINE line-seed on a NAME-matching scan verb (owners/mentions — uses intercepts its own
+        // @-arm before this helper and rebinds instead). A faulted seed refuses with the shared
+        // at-diagnosis; a resolvable one refuses by NAMING the definition it resolves to, so the one-shot
+        // retry is in the message — the V2-1 posture, with the answer's key handed over instead of guessed.
+        const AtSeed seed = resolveAtSeed( ing, std::string_view( symbol ).substr( 1 ) );
+        if( seed.fault != AtFault::None )
+        {
+            return mcprefuse::notFound( ing, "symbol", symbol );
+        }
+        return "this verb matches by NAME, so an @FILE:LINE line-seed does not narrow it — the seed resolves to '"
+             + ing.symbols[ seed.chain.back() ].name + "': pass that as symbol";
+    }
+
     const std::size_t lastColon = symbol.rfind( ':' );
     if( lastColon == std::string::npos || lastColon + 1 >= symbol.size() )
     {
@@ -1756,6 +1773,19 @@ inline std::string qualifiedSelectorRefusal( const IngestResult& ing, const std:
 
 inline std::string usesSelectorRefusal( const IngestResult& ing, const std::string& symbol )
 {
+    if( !symbol.empty() && symbol.front() == '@' )
+    {
+        // @FILE:LINE: a faulted seed refuses with the shared at-diagnosis (mcprefuse::notFound's @-arm);
+        // a resolvable one is answerable — usesText rebinds it to the seed's definition name and serves
+        // that name's union answer.
+        const AtSeed seed = resolveAtSeed( ing, std::string_view( symbol ).substr( 1 ) );
+        if( seed.fault != AtFault::None )
+        {
+            return mcprefuse::notFound( ing, "symbol", symbol );
+        }
+        return {};
+    }
+
     const std::size_t lastColon = symbol.rfind( ':' );
     if( lastColon != std::string::npos && lastColon + 1 < symbol.size() )
     {
@@ -1790,11 +1820,27 @@ inline std::string usesSelectorRefusal( const IngestResult& ing, const std::stri
                                 "real use-sites are answered with external=\"1\", this one has neither" );
 }
 
+// The @FILE:LINE rebind the name-matching scan verbs serve through: a resolvable line-seed becomes the
+// innermost enclosing definition's NAME (the site scan matches names, so the raw @-spec would silently
+// match nothing); anything else — a plain name, or a faulted seed the dispatch guards already refused —
+// passes through unchanged. The returned view aliases either the input or a symbol name owned by `ing`.
+inline std::string_view atSeedNameOr( const IngestResult& ing, std::string_view sym )
+{
+    if( sym.empty() || sym.front() != '@' )
+    {
+        return sym;
+    }
+    const AtSeed seed = resolveAtSeed( ing, sym.substr( 1 ) );
+    return seed.fault == AtFault::None ? std::string_view( ing.symbols[ seed.chain.back() ].name ) : sym;
+}
+
 inline std::string usesText( const std::string& root, const std::string& symbol, McpPageArgs page = {} )
 {
     const McpIndex&        ix   = getIndex( root );
     const IngestResult&    ing  = ix.ing;
-    const std::string_view sym  = symbol;
+    // @FILE:LINE line-seed (the CLI --uses' @-arm, mirrored): serve the seed's definition NAME's union
+    // answer; of= keeps echoing the seed as typed, and fault cases are refused upstream (usesSelectorRefusal).
+    const std::string_view sym  = atSeedNameOr( ing, symbol );
 
     const std::vector<NodeId> defs     = resolveAllByName( ing, sym );
     const bool                external = defs.empty();
@@ -1875,7 +1921,7 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
     const std::string  usRootPrefix = usSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const std::string  usRootAttr   = usSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
     std::fprintf( mem, "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s%s%s>",
-                  ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), usRootAttr.c_str(), upage, kGraphCountFloorAttrXml );
+                  ex( symbol ).c_str(), defs.size(), external ? 1 : 0, sites.size(), usRootAttr.c_str(), upage, kGraphCountFloorAttrXml );   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
     for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
     {
         const UseSite& u = sites[ siteIndex ];
@@ -1982,8 +2028,12 @@ inline std::string pathEndpointRefusal( const IngestResult& ing, const std::stri
     // already said it once, for both).
     const auto endpoint = [ & ]( std::string_view which, const std::string& spelling ) -> std::string
     {
-        std::string        part = std::string( which ) + "='" + spelling + "'";
-        const std::string  near = didYouMean( ing, spelling );
+        std::string part = std::string( which ) + "='" + spelling + "'";
+        if( !spelling.empty() && spelling.front() == '@' )
+        { // an @FILE:LINE endpoint: the at-diagnosis is the actionable half, a name near-miss is noise
+            return part + mcprefuse::atSeedClause( ing, spelling );
+        }
+        const std::string near = didYouMean( ing, spelling );
         if( !near.empty() && near != spelling )
         {
             part += " (did you mean '" + near + "'?)";
@@ -2350,7 +2400,7 @@ inline std::string connectText( const std::string& root, const std::vector<std::
     for( const std::string& spec : symbolSpecs )
     {
         const NodeId id = resolveFocus( ing, spec );
-        if( id == kNoNode ) { err = "symbol not found: " + spec; return {}; }
+        if( id == kNoNode ) { err = "symbol not found: " + spec + mcprefuse::atSeedClause( ing, spec ); return {}; }   // the @-clause is "" for a plain name
         terminals.push_back( id );
     }
 
@@ -3021,7 +3071,8 @@ inline FetchOutcome fetchBodyByName( const std::string& root, const std::string&
         oc.ok = false; oc.errCode = -32602;
         oc.message = withDidYouMean( nameIx.ing, name,
                                      "'" + name + "' is neither a handle (sym#<16hex>@<16hex>) nor a known symbol name" )
-                   + " — call find_symbol for the handle, or pass the exact definition name (file:name disambiguates)";
+                   + " — call find_symbol for the handle, or pass the exact definition name (file:name disambiguates)"
+                   + mcprefuse::atSeedClause( nameIx.ing, name );   // an @FILE:LINE spelling that faulted carries the at-diagnosis
         return oc;
     }
 
