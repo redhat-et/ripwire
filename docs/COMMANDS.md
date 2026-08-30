@@ -820,7 +820,9 @@ Shapes: calls(A,B) does A transitively call B; uses(SYM) / unused(SYM) is SYM re
 
 ### `--mentions=SYM`
 
-**Answers:** markdown docs (plans/designs) that name SYM in a `backtick` (doc↔code) the pre-PR family — plumbing (--affected) to mid-task report (--situ) to gate (--test-gate):
+**Answers:** markdown docs (plans/designs) that name SYM in a `backtick` (doc↔code).
+
+An @FILE:LINE seed rebinds to the innermost enclosing definition and answers, disclosing sym= the pre-PR family — plumbing (--affected) to mid-task report (--situ) to gate (--test-gate):
 
 **Try it**
 
@@ -836,7 +838,7 @@ $ ./build/ripwire . --mentions=rankGraphTeleport
 </mentions>
 ```
 
-**Shaped by:** `--no-doc-mention`, `--json`
+**Shaped by:** `--no-doc-mention`, `--at`, `--json`
 
 ### `--affected=F1,F2|SYM`
 
@@ -1958,7 +1960,7 @@ flowchart LR
 
 **Answers:** bus-factor: recency-weighted author ownership per file;
 
-bf=1 = one person holds >80% of weighted commits. Files with authors=1 (deterministically bf=1 share=1.00) fold into ONE <uniform files="N"/> summary row instead of N identical rows; --detail=N restores the full listing
+bf=1 = one person holds >80% of weighted commits. Files with authors=1 (deterministically bf=1 share=1.00) fold into ONE <uniform files="N"/> summary row instead of N identical rows; --detail=N restores the full listing. An @FILE:LINE seed rebinds to the innermost enclosing definition (sym= names it) and analyses exactly that definition's file
 
 **Try it**
 
@@ -1983,7 +1985,7 @@ $ ./build/ripwire . --owners
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--json`
+**Shaped by:** `--at`, `--json`
 
 ### `--dead-code[=DIR]`
 
@@ -2170,6 +2172,8 @@ $ ./build/ripwire . --edit-check=rankGraphTeleport
 
 **Answers:** atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|-
 
+**Shaped by:** `--at`
+
 ### `--insert-before-symbol=TARGET`
 
 **Answers:** atomically insert the payload immediately before one uniquely-resolved definition
@@ -2178,7 +2182,11 @@ $ ./build/ripwire . --edit-check=rankGraphTeleport
 
 **Answers:** atomically insert the payload immediately after one uniquely-resolved definition.
 
-TARGET is a symbol name, or a freshness-pinned sym# handle emitted by --grep --handles.
+TARGET is a symbol name, an @FILE:LINE line-seed (edits the innermost definition enclosing that line — paste the location from a diff hunk or error; the receipt discloses resolved_from_seed, a faulted seed refuses with a specific diagnosis, and --edit-target-file may not accompany a seed), or a freshness-pinned sym# handle emitted by --grep --handles.
+
+**Caveats (stated by the binary):**
+
+- the receipt discloses resolved_from_seed, a faulted seed refuses with a specific diagnosis, and --edit-target-file may not accompany a seed), or a freshness-pinned sym# handle emitted by --grep --handles.
 
 ### `--edit-payload=FILE|-`
 
@@ -2198,13 +2206,17 @@ empty payloads refuse, never imply deletion
 
 RELATIVE (matched against the indexed spelling) or ABSOLUTE (matched against the file's resolved on-disk path), so the path a receipt or a trace hands you works verbatim. These three CLI verbs reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON receipt; follow with --edit-check=SYM and --affected=FILE. Single-root only.
 
+**Shaped by:** `--insert-after-symbol`
+
 **Caveats (stated by the binary):**
 
 - optional file-path substring disambiguating a same-named definition.
 
 ### `--edit-plan=FILE`
 
-**Answers:** versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]}
+**Answers:** versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]};
+
+each target takes the same forms as TARGET above (a name, an @FILE:LINE seed, a handle)
 
 ### `--dry-run | --apply`
 
@@ -2272,7 +2284,7 @@ A bound that cuts a live frontier is disclosed as flow_truncated="1" — a short
 
 **Answers:** the ENCLOSING-DEFINITION CHAIN at one location (1-based line), outermost->innermost — for when you hold a compiler error / diff hunk / stack frame, not a name.
 
-<s n= t= l= el=/> rows, indexed definitions only; sym= names the innermost. The SAME seed composes into any SYM selector as @FILE:LINE (--callers=@src/f.cpp:120, --expand=@..., --edit-check=@..., --slice=@FILE:LINE:VAR, ...) and resolves to that innermost definition — the no-name half of the file:line:name grammar. A malformed seed, an ambiguous or unmatched path, a line past EOF, a line inside no indexed definition, or two disjoint definitions sharing the line each REFUSE with a specific diagnosis (exit 1) — never a guess, never an empty chain.
+<s n= t= l= el=/> rows, indexed definitions only; sym= names the innermost. The SAME seed composes into any SYM selector as @FILE:LINE (--callers=@src/f.cpp:120, --expand=@..., --edit-check=@..., --slice=@FILE:LINE:VAR, --replace-symbol-body=@... and the other edit TARGETs, ...) and resolves to that innermost definition — the no-name half of the file:line:name grammar. The NAME-scan verbs --mentions/--owners rebind a seed to that definition's name and answer, disclosing sym=. A malformed seed, an ambiguous or unmatched path, a line past EOF, a line inside no indexed definition, or two disjoint definitions sharing the line each REFUSE with a specific diagnosis (exit 1) — never a guess, never an empty chain.
 
 **Caveats (stated by the binary):**
 

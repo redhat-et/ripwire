@@ -36,6 +36,14 @@
 #   (14) @ refusal THROUGH a verb: the shared clause carries the at-diagnosis, exit 1
 #   (15) determinism (x2, byte-identical bare --at)
 #   (16) xmllint well-formedness (bare --at)
+#   (17) @ in the NAME-scan verbs --mentions/--owners: the seed REBINDS to the innermost enclosing
+#        definition and answers, disclosing sym= (of= echoes the seed as typed); a faulted seed
+#        still refuses with the at-diagnosis
+#   (18) @ in the EDIT verbs (--replace-symbol-body / --edit-plan): the seed resolves the target,
+#        the receipt discloses resolved_from_seed + the resolved symbol; a faulted seed refuses
+#        with the at-diagnosis and leaves the file byte-identical; --edit-target-file cannot
+#        narrow a seed; a seed resolving to a doc heading/Section refuses (edit-safety contract
+#        unchanged). MUTATES the fixture, so it runs LAST.
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/atcheck.sh   |   bash test/atcheck.sh path/to/ripwire
 
@@ -98,6 +106,17 @@ EOF
 cat > "$WORK/dup/geo.cpp" <<'EOF'
 int duplicated() { return 0; }
 EOF
+
+# scan-verb fuel (17): a doc that names `shift` in a backtick (--mentions), and one commit of git
+# history (--owners mines authorship). Line 1 = the heading Section, the edit arm's (18) refusal fuel.
+cat > "$WORK/notes.md" <<'EOF'
+# Geometry notes
+
+The `shift` helper doubles the shifted origin.
+EOF
+git -C "$WORK" init -q
+git -C "$WORK" -c user.name=atfix -c user.email=atfix@example.invalid add -A >/dev/null 2>&1
+git -C "$WORK" -c user.name=atfix -c user.email=atfix@example.invalid commit -qm seed >/dev/null 2>&1
 
 echo "atcheck: BIN=$BIN  (temp corpus $WORK)"
 
@@ -239,6 +258,66 @@ if command -v xmllint >/dev/null 2>&1; then
 else
     ok "(16) xmllint unavailable — skipped (well-formedness still pinned by the suite-wide gate)"
 fi
+
+# ── (17) @ in the NAME-scan verbs: the seed REBINDS to the enclosing definition, disclosed as sym= ──
+MAT="$( "$BIN" "$WORK" --mentions=@src/geo.cpp:12 --no-cache 2>/dev/null )"
+printf '%s' "$MAT" | grep -q 'of="@src/geo.cpp:12"' \
+    && printf '%s' "$MAT" | grep -q 'sym="shift"' \
+    && ok "(17) mentions @seed: of= echoes the seed, sym= discloses the rebound definition" \
+    || { no "(17) mentions @seed: rebind disclosure missing"; printf '%s\n' "$MAT" | head -c 300; }
+printf '%s' "$MAT" | grep -q 'p="notes.md"' \
+    && ok "(17) mentions @seed: the doc naming the rebound definition is served" \
+    || { no "(17) mentions @seed: notes.md row missing"; printf '%s\n' "$MAT" | tail -c 300; }
+E17="$( "$BIN" "$WORK" --mentions=@src/geo.cpp:2 --no-cache 2>&1 >/dev/null )"; R17=$?
+[ "$R17" = 1 ] && printf '%s' "$E17" | grep -q 'no indexed symbol spans line 2' \
+    && ok "(17) mentions @faulted-seed: refused with the at-diagnosis, exit 1" \
+    || { no "(17) mentions @faulted-seed: expected exit 1 + the at-diagnosis (got exit $R17)"; printf '%s\n' "$E17"; }
+OAT="$( "$BIN" "$WORK" --owners=@src/geo.cpp:12 --no-cache 2>/dev/null )"
+printf '%s' "$OAT" | grep -q 'of="@src/geo.cpp:12"' \
+    && printf '%s' "$OAT" | grep -q 'sym="shift"' \
+    && printf '%s' "$OAT" | grep -q 'files="1"' \
+    && ok "(17) owners @seed: rebound with sym= disclosed, the seed's file analysed" \
+    || { no "(17) owners @seed: rebind disclosure missing"; printf '%s\n' "$OAT" | head -c 400; }
+
+# ── (18) @ in the EDIT verbs — runs LAST: it MUTATES the fixture ────────────────────────────────────
+printf 'int standalone( int a )\n{\n    return a + 42;\n}\n' > "$WORK/payload.txt"
+cp "$WORK/src/geo.cpp" "$WORK/geo.orig"
+# a faulted seed refuses with the at-diagnosis and leaves the file byte-identical
+E18="$( "$BIN" "$WORK" --replace-symbol-body=@src/geo.cpp:2 --edit-payload="$WORK/payload.txt" --no-cache 2>&1 >/dev/null )"; R18=$?
+[ "$R18" = 1 ] && printf '%s' "$E18" | grep -q 'no indexed symbol spans line 2' && cmp -s "$WORK/src/geo.cpp" "$WORK/geo.orig" \
+    && ok "(18) edit @faulted-seed: refused with the at-diagnosis, file byte-identical" \
+    || { no "(18) edit @faulted-seed: expected exit 1 + diagnosis + untouched file (got exit $R18)"; printf '%s\n' "$E18"; }
+# --edit-target-file cannot narrow a seed (the seed already names exactly one file and line)
+E18b="$( "$BIN" "$WORK" --replace-symbol-body=@src/geo.cpp:22 --edit-payload="$WORK/payload.txt" --edit-target-file=src --no-cache 2>&1 >/dev/null )"; R18b=$?
+[ "$R18b" = 1 ] && printf '%s' "$E18b" | grep -qi 'line seed' && cmp -s "$WORK/src/geo.cpp" "$WORK/geo.orig" \
+    && ok "(18) edit @seed + --edit-target-file: refused, file byte-identical" \
+    || { no "(18) edit @seed + --edit-target-file: expected a hint-conflict refusal (got exit $R18b)"; printf '%s\n' "$E18b"; }
+# a seed resolving to a doc heading/Section refuses (the edit-safety kind guard, unchanged)
+E18c="$( "$BIN" "$WORK" --replace-symbol-body=@notes.md:1 --edit-payload="$WORK/payload.txt" --no-cache 2>&1 >/dev/null )"; R18c=$?
+[ "$R18c" = 1 ] && printf '%s' "$E18c" | grep -q 'heading/section' \
+    && ok "(18) edit @seed on a doc Section: refused by the kind guard" \
+    || { no "(18) edit @seed on a doc Section: expected the heading/section refusal (got exit $R18c)"; printf '%s\n' "$E18c"; }
+# --edit-plan: a faulted seed target is preflighted through the same resolver and refused
+mkdir -p "$WORK/plans"
+printf 'int standalone( int a )\n{\n    return a + 42;\n}\n' > "$WORK/plans/payload.txt"
+printf '{"version":1,"edits":[{"op":"replace_symbol_body","target":"@src/geo.cpp:2","payload":"payload.txt"}]}\n' > "$WORK/plans/seed.json"
+E18d="$( "$BIN" "$WORK" --edit-plan="$WORK/plans/seed.json" --dry-run --no-cache 2>&1 >/dev/null )"; R18d=$?
+[ "$R18d" != 0 ] && printf '%s' "$E18d" | grep -q 'no indexed symbol spans line 2' \
+    && ok "(18) edit-plan @faulted-seed target: preflight refused with the at-diagnosis" \
+    || { no "(18) edit-plan @faulted-seed target: expected the at-diagnosis (got exit $R18d)"; printf '%s\n' "$E18d"; }
+printf '{"version":1,"edits":[{"op":"replace_symbol_body","target":"@src/geo.cpp:22","payload":"payload.txt"}]}\n' > "$WORK/plans/seedok.json"
+D18="$( "$BIN" "$WORK" --edit-plan="$WORK/plans/seedok.json" --dry-run --no-cache 2>/dev/null )"; R18e=$?
+[ "$R18e" = 0 ] && cmp -s "$WORK/src/geo.cpp" "$WORK/geo.orig" \
+    && ok "(18) edit-plan @seed target: dry-run preflights clean, file untouched" \
+    || { no "(18) edit-plan @seed target: expected exit 0 + untouched file (got exit $R18e)"; printf '%s\n' "$D18" | head -c 300; }
+# the resolvable seed EDITS the definition it resolves to, and the receipt discloses the rebind
+RCPT="$( "$BIN" "$WORK" --replace-symbol-body=@src/geo.cpp:22 --edit-payload="$WORK/payload.txt" --no-cache 2>/dev/null )"; R18f=$?
+[ "$R18f" = 0 ] \
+    && printf '%s' "$RCPT" | grep -q '"symbol":"standalone"' \
+    && printf '%s' "$RCPT" | grep -q '"resolved_from_seed":"@src/geo.cpp:22"' \
+    && grep -q 'return a + 42;' "$WORK/src/geo.cpp" \
+    && ok "(18) edit @seed: the seed's definition replaced, receipt discloses symbol + resolved_from_seed" \
+    || { no "(18) edit @seed: edit or receipt disclosure wrong (exit $R18f)"; printf '%s\n' "$RCPT" | head -c 400; }
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

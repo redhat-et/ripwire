@@ -1477,6 +1477,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         // Resolve an optional symbol name to its file id (--owners=SYM mode)
         std::uint32_t onlyFileId    = UINT32_MAX;
         std::size_t   symDefCount   = 0;              // §B11.3-class: how many definitions the fold below discarded
+        std::string   owSeedSym;                      // @-seed rebind: the rebound definition's name, disclosed as sym=
         if( !cfg.ownersSym.empty() )
         {
             // §B11.1 — this arm resolved with the BARE-NAME resolver and refused in the pre-§B4.2 dialect, so
@@ -1499,6 +1500,13 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // reasonable default (it matches --around/--lego's resolveFocus), but it was invisible.
             onlyFileId  = ing.symbols[ defs[0] ].fileId;
             symDefCount = defs.size();
+            if( cfg.ownersSym.front() == '@' )
+            {
+                // @-seed rebind (2026-08-30): the resolver's @-tier returned the seed's ONE enclosing
+                // definition, so defs[0] IS the seed's own def and file — sym= names the rebind while
+                // of= keeps echoing the seed as typed.
+                owSeedSym = ing.symbols[ defs[0] ].name;
+            }
         }
 
         // multi-root §5: ownership mined per root against its own files; the concatenation stays fileId-sorted
@@ -1546,7 +1554,9 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "many files were ANALYSED; on the <uniform/> fold it is how many of them collapsed into that one row. "
                      "With a SYM, of= echoes it and defs= is how many DEFINITIONS that name has: this report covers the file "
                      "holding the FIRST of them (lowest node id, the same pick around and lego make), so defs= above 1 means "
-                     "the other definitions' files were NOT analysed. Qualify with file:name to choose one -->%s%s",
+                     "the other definitions' files were NOT analysed. Qualify with file:name to choose one. An @FILE:LINE "
+                     "seed rebinds to the innermost definition enclosing that line (sym= names it) and covers exactly that "
+                     "definition's file -->%s%s",
                      rw::kAtStampLegend, rw::rootRelPathsLegend( mvSingleRoot ) );   // sweep: ditto
         // §P8: --limit/--offset used to be accepted and ignored here (757 rows whatever you asked for). They
         // window `printRows`, which is already deterministic (files sorted by path). files= keeps meaning the
@@ -1561,9 +1571,14 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         // the SYM-mode fold disclosure sits between the paging block and at=, so at= stays last (the r26-stamp
         // placement rule) and no existing `files="N"`-adjacency assertion moves on the all-files form.
         std::vector<char> owSymEsc;
-        const std::string owSymAttr = cfg.ownersSym.empty()
-                                    ? std::string{}
-                                    : " of=\"" + std::string( escapeXml( cfg.ownersSym, owSymEsc ) ) + "\" defs=\"" + std::to_string( symDefCount ) + "\"";
+        // the @-seed rebind disclosure sits between of= and defs= — the same slot the MCP owners twin
+        // uses (§P8: one element name, one attribute order, both surfaces).
+        const std::string owSeedAttr = owSeedSym.empty() ? std::string{}
+                                                         : " sym=\"" + std::string( escapeXml( owSeedSym, owSymEsc ) ) + "\"";
+        const std::string owSymAttr  = cfg.ownersSym.empty()
+                                     ? std::string{}
+                                     : " of=\"" + std::string( escapeXml( cfg.ownersSym, owSymEsc ) ) + "\"" + owSeedAttr
+                                     + " defs=\"" + std::to_string( symDefCount ) + "\"";
         std::printf( "<owners files=\"%zu\"%s%s%s%s>", ownerships.size(),
                      pageDisclosure( owab, sizeof( owab ), owpw.end - owpw.begin, printRows.size(), owpw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),

@@ -1914,6 +1914,7 @@ std::optional<int> runMentions( const MainDispatch& d )
         std::printf( "<!-- ripwire mentions: markdown FILES that name this symbol in a `backtick` (doc<->code; NOT a call edge). "
                      "docs= is the row count (distinct files); sections= counts the underlying markdown-section mentions "
                      "before file-collapse (docs <= sections). Each row's mentions= is its own section-mention count. "
+                     "An @FILE:LINE seed rebinds to the innermost definition enclosing that line — sym= names it, of= echoes the seed as typed. "
                      "No line locator: the doc edge is stored at file granularity — a fabricated always-1 l= was removed; absent beats fake -->%s", rw::rootRelPathsLegend( mnSingleRoot ) );
         // §P15/§P16: fileRows is deterministic (file path order) and printed unconditionally, no historic
         // display cap — pageWindow directly on cfg.pageLimit/cfg.pageOffset, discloseCap=false so the
@@ -1921,7 +1922,12 @@ std::optional<int> runMentions( const MainDispatch& d )
         const PageWindow  mentionsPw = pageWindow( fileRows.size(), cfg.pageLimit, cfg.pageOffset );
         char              mentionsAb[ kPageDisclosureCap ];
         const std::string mnRootAttr = mnSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
-        std::printf( "<mentions of=\"%s\" defs=\"%zu\" docs=\"%zu\" sections=\"%zu\"%s%s>", ex( cfg.mentionsSym ).c_str(), defs.size(),
+        // @-seed rebind disclosure: the resolver's @-tier returned the seed's ONE enclosing definition,
+        // so defs[0] IS the rebound target — sym= names it while of= keeps echoing the seed as typed.
+        const std::string mnSymAttr  = ( !cfg.mentionsSym.empty() && cfg.mentionsSym.front() == '@' )
+                                     ? " sym=\"" + ex( ing.symbols[ defs[0] ].name ) + "\""
+                                     : std::string();
+        std::printf( "<mentions of=\"%s\"%s defs=\"%zu\" docs=\"%zu\" sections=\"%zu\"%s%s>", ex( cfg.mentionsSym ).c_str(), mnSymAttr.c_str(), defs.size(),
                      fileRows.size(), sectionCount,
                      pageDisclosure( mentionsAb, sizeof( mentionsAb ), mentionsPw.end - mentionsPw.begin, fileRows.size(), mentionsPw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),
