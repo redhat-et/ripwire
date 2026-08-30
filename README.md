@@ -1186,7 +1186,7 @@ pins it:
 
 | Where the saving comes from | Measured | Pinned by |
 | --- | --- | --- |
-| `--pack-signatures` — body-elided declaration skeletons instead of full bodies | **81.4% fewer element bytes** at top-50 (86.5% at top-10, 81.6% at top-100) — re-derived 2026-08-23 | `test/showcasecapturecheck.sh`, re-derived from this repo every run |
+| `--pack-signatures` — body-elided declaration skeletons instead of full bodies | **80.2% fewer element bytes** at top-50 (84.5% at top-10, 80.6% at top-100) — re-derived 2026-08-30 | `test/showcasecapturecheck.sh`, re-derived from this repo every run |
 | Query-shape routing, on the production token ceiling | **−39.4%** p50, while strict file@10 rose +33.33pp | `bench/locbench/`, [EVALS §3](docs/EVALS.md) |
 | A whole-question bundle against a naive agent read | **96.0% fewer tokens (24.9×)** — 14,758 against 367,192, tiktoken `cl100k_base`, six realistic questions | `bench/BENCHMARK.md` — *historical, private corpus, not reproducible from this tree* |
 
@@ -1455,7 +1455,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **491 gate scripts** and is the authoritative list;
+`test/regression.sh` names **492 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
