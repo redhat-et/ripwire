@@ -6802,6 +6802,84 @@ tuning over `confidence=`/`margin_pct=` alone is CLOSED as a fix shape for the a
 A future round needs a new fact surfaced from the ranker (the adaptive cut's kept-vs-scored and
 positive-hit counts are not emitted on any surface today) rather than a recalibration of these two.
 
+## Agent Retrieval Bench — abstention round 2: the adaptive cut's corpus-support facts,
+PRE-REGISTERED 2026-08-30 (before any measurement)
+
+**Why a second round on the same axis.** The round above is a recorded NEGATIVE: `confidence=` /
+`margin_pct=` separate answerable from unanswerable at chance, and threshold tuning over those two is
+CLOSED. Its own closing sentence names the next candidate: the adaptive cut computes two counts that
+reach no output surface — `kept` (the cliff-clamped head size) and `positiveHits` (how many indexed
+symbols scored above zero for this query). This round surfaces those, plus the denominator they are
+meaningless without, and calibrates ONE pre-designated statistic over them. Written against the same
+selective bundles' schema and row counts as the round above; no per-sample value of any NEW field
+existed when this paragraph was committed, because the binary did not emit one yet.
+
+**The three facts this round adds (`--for --json` root, that dialect only).** `scored` =
+`AdaptiveCut::positiveHits`, the count of indexed symbols whose routed lexical score is > 0 for this
+query, from the SAME `adaptiveCut` call the confidence disclosure already derives from — no second
+scorer, no second pass. `kept` = `AdaptiveCut::kept`, the cliff-clamped head size in [5, 40].
+`corpus` = the length of the lens rank vector, i.e. how many symbols were scored at all — the
+denominator without which `scored` is a repo-size measurement rather than a query measurement. The
+three are HARNESS-FACING and land on nothing but the JSON root. The XML bundle stays byte-identical
+on purpose: its header rides a measured byte ceiling (`fornotesbudgetcheck.sh` fits at exactly
+`est_tokens=800`), and a disclosure this round may well close as a second negative has not earned
+bytes off every ranked answer. Promoting them to root attributes with a legend clause and the
+surface-audit checklist is part of the behavior change a POSITIVE would license, not part of this
+instrumentation.
+
+**Why this is a different signal, not a reparameterization of the last one.** `confidence=` is a
+statement about the ranking's SHAPE — whether a cliff falls inside the served head. `scored/corpus`
+is a statement about the query's GRIP on the corpus — what fraction of the indexed symbols the
+query's terms reach at all. The round above's conclusion was exactly that shape and answerability are
+near-independent on this query mix; grip is the other axis the same statistic already carries and has
+never emitted.
+
+**The statistic under test — designated PRIMARY before any row is read.**
+
+```
+support(sample)       = scored / corpus        # in [0, 1]
+abstain_score(sample) = 1.0 - support          # higher = more likely unanswerable
+```
+
+AUROC of `abstain_score` against the positive class "should abstain" (`selective_label == "no_gold"`),
+by the same rank-based Mann-Whitney identity with averaged ties the round above used, computed per
+dataset with no pooling across datasets. The DIRECTION is part of the registration: the hypothesis is
+that an unanswerable query has THINNER corpus support. Rows where the binary emitted no
+`scored`/`corpus` are `signal_missing`, excluded from the statistic, counted and reported — exactly
+how the round above treats a missing `confidence`.
+
+**Secondary statistics — reported for the record, never deciding the verdict.** (a) raw `scored`,
+unnormalized, to show how much of any separation is repo size rather than query grip; (b)
+`kept / scored`, the served head's share of everything that matched; (c) the joint rule
+`abstain iff confidence == "low" AND support < θ`, best-F1 over the same threshold sweep, to test
+whether grip rescues the shape signal that failed alone. Naming these SECONDARY now is the guard
+against reading the best of four out of the table afterwards and calling it the hypothesis.
+
+**Bands — set now, at the same thresholds as the round above so the two are comparable.**
+
+- **PRIMARY AUROC**, on `v2_selective_retrieval_balanced` AND `v2_selective_retrieval_natural`:
+  ≥ 0.65 → *meets*; 0.55–0.65 → *weak* (marginal, not shipped); < 0.55 → *does not meet*.
+- **Directional refutation, stated now so it cannot be spun into a pass afterwards:** AUROC ≤ 0.35
+  means the signal separates in the OPPOSITE direction to the registered hypothesis. That is recorded
+  as a refutation of the direction, NOT as a pass; acting on it would need its own registration in a
+  later round.
+- **Operating point — reachable only if PRIMARY meets on BOTH splits:** a threshold θ must exist with
+  false-abstain rate ≤ 0.10 AND abstention recall ≥ 0.20 on both splits simultaneously. Only then is
+  an abstention BEHAVIOR licensed.
+
+**What ships on each outcome.** PRIMARY meets and an operating point exists → the facts are promoted
+to `--for`'s XML root with a legend clause under the full surface-audit checklist (legend coverage,
+`--help`, skills), and the abstention behavior is wired with disclosure and gated. Anything else →
+this is a second registered NEGATIVE on the abstention axis: the three JSON keys stay as
+harness-facing instrumentation (they are honest facts and cost the XML bundle nothing), `--for`'s
+behavior is unchanged, and the axis stays **"disclosed, not acted on."** Per the improve-first rule
+the measured numbers stay in the lane's own local report; this section records only which band was
+met.
+
+**Determinism gate before the sweep is trusted:** the same one-sample-run-twice gate as the parent
+lane, extended so the new facts are part of the compared payload (the harness already compares the
+confidence dict between the two runs; the new keys ride in it).
+
 ## SWE-Explore exploration lane (2026-08-28) — PRE-REGISTERED, loss-first, before any measurement
 
 **What this registers.** An external-benchmark evaluation lane on *SWE-Explore: Benchmarking How Coding
