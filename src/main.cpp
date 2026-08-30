@@ -2174,6 +2174,16 @@ const char* jsonUnsupportedVerb( const rw::Config& c )
     {
         return "--edit-check";
     }
+    // lane/safe-delete + lane/paper-slice wired dispatch (right after --edit-check, precedence table order)
+    // but not this chain, so both verbs accepted --json and silently emitted XML at exit 0.
+    if( !c.safeDeleteSym.empty() )
+    {
+        return "--safe-delete";
+    }
+    if( !c.sliceSpec.empty() )
+    {
+        return "--slice";
+    }
     if( c.prContext )
     {
         return "--pr-context";

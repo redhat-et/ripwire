@@ -165,6 +165,11 @@ check_json_refuses "--community=ID"            "$ROOT"                "--communi
 check_json_refuses "--doc-drift"               "$SBX"                 "--doc-drift"     --doc-drift
 check_json_refuses "--flags"                   "$SBX"                 "--flags"         --flags
 check_json_refuses "--layout"                  "$ROOT"                "--layout"        --layout=Config
+# lane/safe-delete + lane/paper-slice: the same forgotten-arm class two lanes later — each lane wired
+# dispatch (right after --edit-check) but not the deny-chain. $SBX reaches real dispatch for both (bare
+# --slice=SYM lists the symbol's locals; --safe-delete resolves beta by name), per this block's rule.
+check_json_refuses "--safe-delete"             "$SBX"                 "--safe-delete"   --safe-delete=beta
+check_json_refuses "--slice"                   "$SBX"                 "--slice"         --slice=alpha
 
 # §B1.2: the supported-set sentence must now mention --metrics, and --metrics itself must still WORK under
 # --json (it was never actually refused — the gap was purely that the refusal never told a caller it existed).
