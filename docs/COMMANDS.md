@@ -2500,7 +2500,7 @@ $ ./build/ripwire . --doc-drift
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--recall`, `--comment-coherence`, `--with-history`, `--json`
+**Shaped by:** `--recall`, `--comment-coherence`, `--with-history`, `--plan-lint`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -2545,6 +2545,18 @@ $ ./build/ripwire . --doc-drift --with-history
 - LIMITS: it walks HEAD's own history, so a name that only ever lived on an unmerged branch reads as never here (use --whereis's tree scan for that);
 - A repo deeper than the walk bound reports truncated="1" and answers unknown — never "never" — for anything it did not reach.
 
+### `--plan-lint=FILE`
+
+**Answers:** the house PLAN/DESIGN format's STRUCTURE check — never semantics, that stays --doc-drift's job.
+
+FILE is read directly (like --from-trace's FILE, not through the crawled index), so it need not live inside any indexed root. GRAMMAR, narrow and opt-in on purpose (real house plans do not converge on one dialect): a card is exactly an H3 heading opening with a task id ("T" + 1-4 digits + up to 3 letters, e.g. T5 / T10 / T7b); a status ledger is exactly one heading (any level) whose text, stripped of a leading section mark, reads "Status" case-insensitively. A card's status is satisfied EITHER by a glyph on the LAST non-blank line of its own body OR by a ledger line naming its id (folded by digits — a bare card "T7" is also answered by a lettered ledger mention "T7a"/"T7b") that itself carries a glyph; the card's own body wins when it has one. A file showing NEITHER an H3 card NOR a ledger heading is reported dialect="0" with nothing further checked — not a failing lint, since most real plans are exactly that file. Once dialect="1": a card whose status did not resolve is status="missing" with why="unlaunched" (a ledger exists and never names this id or a lettered sub-task of it — the mid-wave "this task was never launched" catch), why="unresolved" (the ledger names it with no glyph nearby), or why="no-glyph" (no ledger exists in this document at all); an hourglass line whose git-blamed commit sits more than stale_commits= commits behind HEAD is stale="1" (never claimed outside a git repo — see git=; blames whichever line the status resolved to, named by src="ledger" when that is the ledger); a task id named in the ledger's own body with no matching card (same digit fold) is a ledger-orphan; a literal owed/OWED mention with no check-mark or cross anywhere LATER in the SAME document is undischarged (no cross-document tracking — a successor plan's discharge is invisible here, a stated limit, and this is substring matching with no semantic disambiguation: a doc that merely QUOTES the words reads the same as a real marker). Every gating row carries gating="1"; NOT CHECKED AT ALL: whether a card's claims are true, any heading level other than three for a card, a ledger heading spelled any other way, and a document that uses card headings as plain labels with NO status mechanism anywhere (no ledger, no glyph) — every card there reads "missing" too, a known, disclosed gap. Exit 2 when dialect="1" and gating is non-zero (unlike --doc-drift's always-0 report — nothing here has a legitimate "dated on purpose" reading); exit 0 clean or dialect="0"; exit 1 only when FILE could not be read.
+
+**Caveats (stated by the binary):**
+
+- the house PLAN/DESIGN format's STRUCTURE check — never semantics, that stays --doc-drift's job.
+- A file showing NEITHER an H3 card NOR a ledger heading is reported dialect="0" with nothing further checked — not a failing lint, since most real plans are exactly that file.
+- an hourglass line whose git-blamed commit sits more than stale_commits= commits behind HEAD is stale="1" (never claimed outside a git repo — see git=;
+
 ### `--from-trace=FILE`
 
 **Answers:** map a stack trace / sanitizer report / compiler-error text ('-'=stdin) onto the indexed symbols: table-driven frame extraction (python / asan / node / compiler / generic), ranked INNERMOST-first over in-corpus frames only (out-of-corpus frames are listed and counted, never ranked).
@@ -2568,7 +2580,7 @@ AddressSanitizer:DEADLYSIGNAL
 ==41337==ABORTING
 ```
 
-**Shaped by:** `--top-k`, `--token-budget`, `--help-task`, `--compress`, `--run-trace`, `--json`
+**Shaped by:** `--top-k`, `--token-budget`, `--help-task`, `--compress`, `--plan-lint`, `--run-trace`, `--json`
 
 **Caveats (stated by the binary):**
 

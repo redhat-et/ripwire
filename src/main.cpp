@@ -60,6 +60,8 @@
 #include "fieldaffinity.h"         // --field-affinity — the cache-locality lens (co-access graph vs declared order)
 #include "abicheck.h"              // --stray-content --abi — the cross-branch ABI-BREAK gate (layout x stray-content)
 #include "docdrift.h"              // --doc-drift — the markdown doc-anchor verifier
+#include "planlint.h"              // P3.2: --plan-lint=FILE — the house PLAN format's STRUCTURE check (cards vs the
+                                    // status ledger, terminal glyphs, stale hourglass lines, undischarged owed mentions)
 #include "gitoracle.h"             // --with-history: the shared "was this name ever here" git-history oracle
 #include "mergescout.h"            // L1: --merge-scout=REF[,REF...] — read-only cross-branch overlap + landing order
 #include "landingplan.h"           // --stray-content --plan — composes crossref's sweep with mergescout's overlap oracle
@@ -1850,6 +1852,7 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
         { "--layout",            c.layoutFlag             },
         { "--field-affinity",    c.fieldAffinity          },   // §F1: runFieldAffinity, between --layout and --doc-drift
         { "--doc-drift",         c.docDrift               },
+        { "--plan-lint",        !c.planLintFile.empty()   },   // P3.2: runPlanLint, right after runDocDrift
         { "--from-trace",       !c.fromTrace.empty()      }, { "--run-trace",     !c.runTrace.empty()     },
         { "--note-add",          c.noteAddFlag            },
         { "--notes",             c.notesList              }, { "--skipped",       c.skippedList           },
@@ -2238,6 +2241,10 @@ const char* jsonUnsupportedVerb( const rw::Config& c )
     if( c.docDrift )
     {
         return "--doc-drift";
+    }
+    if( !c.planLintFile.empty() )
+    {
+        return "--plan-lint";
     }
     if( c.darkFlags )
     {
@@ -3587,6 +3594,11 @@ int main( int argc, char** argv )
     }
 
     if( std::optional<int> handled = runDocDrift( dsp ) )
+    {
+        return *handled;
+    }
+
+    if( std::optional<int> handled = runPlanLint( dsp ) )
     {
         return *handled;
     }

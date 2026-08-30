@@ -8,7 +8,7 @@
 // --export=cc.json), runFromTrace + the --run-trace capture machinery, and the cross-branch block —
 // runMergeScout, --plan-lanes (readBriefFile/laneCorpusStats/runPlanLanes — calls the for family's
 // computeLensRanking, which pins this section after verbs_for.h), buildHistoryIndex, runFlip,
-// runAbiCheck, runCrossRef (--whereis/--stray-content) and runDocDrift. Same contract as every
+// runAbiCheck, runCrossRef (--whereis/--stray-content), runDocDrift and runPlanLint. Same contract as every
 // verbs_*.h: reopens main.cpp's unnamed namespace — one TU, one unnamed namespace, internal linkage
 // unchanged, zero new API surface — under the RIPWIRE_MAIN_TU guard.
 
@@ -1497,6 +1497,29 @@ std::optional<int> runDocDrift( const MainDispatch& d )
     docdrift::writeDocDriftPage( stdout, result, d.cfg.detail ? SIZE_MAX : docdrift::kMaxAnchorsShown, d.cfg.gateabilityFlag,
                                  d.cfg.pageLimit, d.cfg.pageOffset );
     return 0;
+}
+
+// P3.2 — --plan-lint=FILE: the house PLAN format's STRUCTURE check (src/planlint.h owns the grammar, the
+// checks and their stated limits in full). Unlike --doc-drift this needs NO index at all — FILE is read
+// directly off disk, exactly like --from-trace's FILE — so it sits right beside --doc-drift in the
+// dispatch chain by THEME, not by a shared dependency on `d.ing`/`d.g`. Exit 2 (a gate, not a report) when
+// the file shows the recognized dialect and carries a gating row; exit 1 only when FILE could not be read.
+std::optional<int> runPlanLint( const MainDispatch& d )
+{
+    using namespace rw;
+    if( d.cfg.planLintFile.empty() )
+    {
+        return std::nullopt;
+    }
+    const std::string       file( d.cfg.planLintFile );
+    const planlint::LintResult res = planlint::computePlanLint( file );
+    if( !res.ok )
+    {
+        std::fprintf( stderr, "ripwire: --plan-lint: cannot open '%s' (or it exceeds the size cap)\n", file.c_str() );
+        return 1;
+    }
+    planlint::writePlanLint( stdout, res );
+    return ( res.dialectDetected && planlint::gatingCount( res ) > 0 ) ? 2 : 0;
 }
 
 

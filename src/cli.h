@@ -375,6 +375,14 @@ struct Config
                                                              // `= N` constants, `[N]` array extents) against the live index and
                                                              // report only the ones that no longer hold.
     std::string_view docDriftFilter;                        // --doc-drift=SUBSTR: only docs whose path contains SUBSTR
+    std::string_view planLintFile;                          // --plan-lint=FILE (P3.2): the house PLAN format's
+                                                             // STRUCTURE check — task cards vs the status ledger, every
+                                                             // card's terminal status glyph, a stale hourglass line, an
+                                                             // undischarged "owed" mention. Opt-in per file (never a
+                                                             // directory sweep); read directly like --from-trace's FILE,
+                                                             // not through the crawled index. Exit 2 when the file shows
+                                                             // the recognized dialect AND carries a gating row — see
+                                                             // src/planlint.h for the full grammar and its stated limits.
     bool             gateabilityFlag = false;               // --doc-drift --gateability (r26-stamp Task B): per-UNDATED-doc
                                                              // "what ONE annotation would make its live rows classifiable" +
                                                              // the projected repo-wide drift= if every listed doc got it.
@@ -1689,6 +1697,38 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               removed LINE carrying the name, so a name whose last removal was from a doc rather than\n"
         "                               code is reported with that doc as its site. A repo deeper than the walk bound reports\n"
         "                               truncated=\"1\" and answers unknown — never \"never\" — for anything it did not reach.\n"
+        "    --plan-lint=FILE           the house PLAN/DESIGN format's STRUCTURE check — never semantics, that stays\n"
+        "                               --doc-drift's job. FILE is read directly (like --from-trace's FILE, not through the\n"
+        "                               crawled index), so it need not live inside any indexed root. GRAMMAR, narrow and\n"
+        "                               opt-in on purpose (real house plans do not converge on one dialect): a card is\n"
+        "                               exactly an H3 heading opening with a task id (\"T\" + 1-4 digits + up to 3 letters,\n"
+        "                               e.g. T5 / T10 / T7b); a status ledger is exactly one heading (any level) whose text,\n"
+        "                               stripped of a leading section mark, reads \"Status\" case-insensitively. A card's\n"
+        "                               status is satisfied EITHER by a glyph on the LAST non-blank line of its own body OR\n"
+        "                               by a ledger line naming its id (folded by digits — a bare card \"T7\" is also answered\n"
+        "                               by a lettered ledger mention \"T7a\"/\"T7b\") that itself carries a glyph; the card's\n"
+        "                               own body wins when it has one. A file showing NEITHER an H3 card NOR a ledger heading\n"
+        "                               is reported dialect=\"0\" with nothing further checked — not a failing lint, since most\n"
+        "                               real plans are exactly that file. Once dialect=\"1\": a card whose status did not\n"
+        "                               resolve is status=\"missing\" with why=\"unlaunched\" (a ledger exists and never names\n"
+        "                               this id or a lettered sub-task of it — the mid-wave \"this task was never launched\"\n"
+        "                               catch), why=\"unresolved\" (the ledger names it with no glyph nearby), or\n"
+        "                               why=\"no-glyph\" (no ledger exists in this document at all); an hourglass line whose\n"
+        "                               git-blamed commit sits more than stale_commits= commits behind HEAD is stale=\"1\"\n"
+        "                               (never claimed outside a git repo — see git=; blames whichever line the status\n"
+        "                               resolved to, named by src=\"ledger\" when that is the ledger); a task id named in the\n"
+        "                               ledger's own body with no matching card (same digit fold) is a ledger-orphan; a\n"
+        "                               literal owed/OWED mention with no check-mark or cross anywhere LATER in the SAME\n"
+        "                               document is undischarged (no cross-document tracking — a successor plan's discharge\n"
+        "                               is invisible here, a stated limit, and this is substring matching with no semantic\n"
+        "                               disambiguation: a doc that merely QUOTES the words reads the same as a real marker).\n"
+        "                               Every gating row carries gating=\"1\"; NOT CHECKED AT ALL: whether a card's claims are\n"
+        "                               true, any heading level other than three for a card, a ledger heading spelled any\n"
+        "                               other way, and a document that uses card headings as plain labels with NO status\n"
+        "                               mechanism anywhere (no ledger, no glyph) — every card there reads \"missing\" too, a\n"
+        "                               known, disclosed gap. Exit 2 when dialect=\"1\" and gating is non-zero (unlike\n"
+        "                               --doc-drift's always-0 report — nothing here has a legitimate \"dated on purpose\"\n"
+        "                               reading); exit 0 clean or dialect=\"0\"; exit 1 only when FILE could not be read.\n"
         "    --from-trace=FILE          map a stack trace / sanitizer report / compiler-error text ('-'=stdin) onto the indexed\n"
         "                               symbols: table-driven frame extraction (python / asan / node / compiler / generic),\n"
         "                               ranked INNERMOST-first over in-corpus frames only (out-of-corpus frames are listed and\n"
@@ -2271,6 +2311,9 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--stray-content=",  &Config::strayFilter     , EmptyValue::Meaningful, nullptr, nullptr, &Config::strayContent },
     { "--flags=",          &Config::darkFlagsFilter , EmptyValue::Meaningful, nullptr, nullptr, &Config::darkFlags },
     { "--doc-drift=",      &Config::docDriftFilter  , EmptyValue::Meaningful, nullptr, nullptr, &Config::docDrift },
+    // P3.2: unlike --doc-drift's SUBSTR filter, a bare value here is a real usage error — "" cannot name a
+    // plan file, so Refuse (not Meaningful) is the right form, same reasoning --from-trace= already carries.
+    { "--plan-lint=",      &Config::planLintFile    , EmptyValue::Refuse, "a plan/design markdown file path", "--plan-lint=wave-plan.md" },
     // `--field-affinity=` is exactly `--field-affinity`: the value is an OPTIONAL narrowing to one struct,
     // and the bare form (the whole-repo ranking) is the primary way to ask.
     { "--field-affinity=", &Config::fieldAffinityStruct, EmptyValue::Meaningful, nullptr, nullptr, &Config::fieldAffinity },
@@ -2433,7 +2476,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 199;  // +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice)
+inline constexpr std::size_t kTotalFlagArms = 200;  // +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2)
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
