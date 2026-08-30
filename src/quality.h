@@ -3477,6 +3477,13 @@ struct Regression
     // with no file, or a degraded lookup) → the attribute is simply omitted, never faked.
     std::string   path;
     std::uint32_t line = 0;
+    // P1 SCOPE — the two CLONE kinds only: the root-relative path of EVERY member of the group, sorted and
+    // deduplicated. `path` above is one member (the first-sorting one), and a clone group is a relation over
+    // the whole set, so the ownership partition needs all of them to answer "does any member live in this
+    // scope". It cannot be recovered from `sym`: a canonId degrades to a BARE NAME for a scope-less free
+    // function, so the members= text carries no path segment for exactly the symbols most likely to clone.
+    // Empty for every other kind (their `path` IS the whole answer) and empty when no member resolved.
+    std::vector<std::string> memberPaths;
 
     // P0.3 (r27) — ZERO MAGNITUDE. A finding with was == now == 0 carries no magnitude at all, so the ack
     // ratchet's `now <= ackNow` test degenerates to `0 <= 0` = "always suppressed" — a permanent blank check,
@@ -3542,6 +3549,182 @@ inline std::string displaySym( const std::string& sym, std::string_view root )
     return out;
 }
 
+// ─── P1 SCOPE — the OWNERSHIP partition, for a working tree with more than one writer in it ─────────────
+//
+// THE PROBLEM, from the field. ~20 agent sessions edit ONE working tree at once. --quality-delta compares
+// that tree against HEAD, so every concurrent writer's uncommitted rows land in every agent's report. The
+// noise costs a manual attribution pass per run — annoying. The DANGER is one bad ack: an agent that acks a
+// sibling's row writes FOREIGN debt into a committed ledger under its own reason string, and the per-finding
+// ratchet quietly becomes a rubber stamp. The scope flag partitions findings by the path each one names, so
+// the exit code — and above all the ack — is about the caller's own subtree.
+//
+// WHAT THE GLOB IS, EXACTLY. Stated here, and in the flag's own --help text, because a pattern language that
+// silently fails to match is worse than a documented prefix match. Each comma-separated pattern is matched
+// against a finding's ROOT-RELATIVE path (the same spelling p= prints), and the list is an OR:
+//   * a pattern with NO wildcard is a ROOT-ANCHORED path prefix ending on a '/' boundary or at the end of
+//     the path: `alpha` matches `alpha/lib.h` and `alpha` itself, never `alphabet/lib.h`, and never a nested
+//     `src/alpha/lib.h`. Deliberately STRICTER than --dead-code=DIR's component-anywhere match: a scope is a
+//     claim of ownership, and "every directory called alpha, anywhere" is not one. A trailing slash is
+//     optional (`alpha/` is `alpha`), and a leading `./` is stripped, as everywhere else in this tree.
+//   * a pattern containing `*` or `?` is matched against the WHOLE root-relative path, where `*` matches any
+//     run of characters INCLUDING '/' and `?` matches exactly one character.
+// NOT SUPPORTED, and said out loud rather than half-honored: `**` (it is two `*`, and one `*` already
+// crosses '/'), character classes `[a-z]`, brace expansion `{a,b}`, and negation. Whitespace and the XML
+// metacharacters are REFUSED in a pattern (scopeSpecIsSpellable) because the spec is recorded verbatim as a
+// single whitespace-delimited `by=` token in the ack ledger and echoed into an XML attribute — a pattern
+// that cannot round-trip through both is refused at the flag rather than mangled at the emitter.
+inline bool scopeGlobMatch( std::string_view s, std::string_view p ) noexcept
+{
+    std::size_t si = 0, pi = 0, starAt = std::string_view::npos, resumeAt = 0;
+    while( si < s.size() )
+    {
+        if( pi < p.size() && ( p[ pi ] == '?' || p[ pi ] == s[ si ] ) )
+        {
+            ++si;
+            ++pi;
+        }
+        else if( pi < p.size() && p[ pi ] == '*' )
+        {
+            starAt   = pi++;      // remember the last `*` and where its tail may resume, so a failed suffix
+            resumeAt = si;        // match backtracks by one character instead of giving up
+        }
+        else if( starAt != std::string_view::npos )
+        {
+            pi = starAt + 1;
+            si = ++resumeAt;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    while( pi < p.size() && p[ pi ] == '*' )
+    {
+        ++pi;                     // trailing stars may still match the empty tail
+    }
+    return pi == p.size();
+}
+
+// The wildcard-free arm: a root-anchored prefix that must end ON a component boundary, so `alpha` can never
+// claim `alphabet/`.
+inline bool scopePrefixMatch( std::string_view path, std::string_view pat ) noexcept
+{
+    while( !pat.empty() && pat.back() == '/' )
+    {
+        pat.remove_suffix( 1 );
+    }
+    if( pat.empty() || pat.size() > path.size() || path.substr( 0, pat.size() ) != pat )
+    {
+        return false;
+    }
+    return pat.size() == path.size() || path[ pat.size() ] == '/';
+}
+
+// Every character a scope spec may contain. The set is closed rather than open because this string is written
+// into a whitespace-delimited ledger token AND into an XML attribute, and both are places where "we will
+// escape it later" has historically meant "we forgot".
+inline bool scopeSpecIsSpellable( std::string_view spec ) noexcept
+{
+    for( const char c : spec )
+    {
+        if( static_cast<unsigned char>( c ) <= ' ' || c == '"' || c == '\'' || c == '<' || c == '>' || c == '&' )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+struct Scope
+{
+    std::vector<std::string> patterns;   // in argv order; matching is an OR over all of them
+    std::string              spec;       // the comma-joined spelling AS GIVEN — echoed as scope= and as by=
+
+    bool active() const noexcept { return !patterns.empty(); }
+
+    bool matchesPath( std::string_view rel ) const noexcept
+    {
+        for( const std::string& p : patterns )
+        {
+            const bool wild = p.find( '*' ) != std::string::npos || p.find( '?' ) != std::string::npos;
+            if( wild ? scopeGlobMatch( rel, p ) : scopePrefixMatch( rel, p ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+inline Scope parseScope( std::string_view spec )
+{
+    Scope out;
+    out.spec = std::string( spec );
+    std::string_view rest = spec;
+    while( !rest.empty() )
+    {
+        const std::size_t comma = rest.find( ',' );
+        std::string_view  tok   = rest.substr( 0, comma );
+        while( tok.size() >= 2 && tok[ 0 ] == '.' && tok[ 1 ] == '/' )
+        {
+            tok.remove_prefix( 2 );
+        }
+        while( !tok.empty() && tok.back() == '/' )
+        {
+            tok.remove_suffix( 1 );
+        }
+        if( !tok.empty() )
+        {
+            out.patterns.emplace_back( tok );
+        }
+        if( comma == std::string_view::npos )
+        {
+            break;
+        }
+        rest = rest.substr( comma + 1 );
+    }
+    return out;
+}
+
+// P1.2 — the RESERVED token. `--scope=diff` means "the files this working tree changes vs the baseline",
+// expanded by the verb (which is the only place that can read git) into one literal path pattern per changed
+// INDEXED file. It composes with ordinary patterns by union: `--scope=diff,src/quality.h` is the diff set
+// plus that file. It is a reserved WORD, so a directory genuinely called `diff` must be spelled `./diff` or
+// `diff/` — said out loud in the flag's help rather than left to be discovered.
+//
+// Wrong on its own in the tree this whole feature is about, and that is not a defect to hide: in a shared
+// checkout a sibling's edits are "changed" too, so `diff` alone re-admits exactly the rows the scope was
+// meant to file elsewhere. It is sugar for the single-writer case; compose it with your own paths when the
+// tree has more than one writer in it.
+inline constexpr std::string_view kScopeDiffToken = "diff";
+
+inline bool scopeUsesDiffToken( const Scope& sc ) noexcept
+{
+    return std::find( sc.patterns.begin(), sc.patterns.end(), kScopeDiffToken ) != sc.patterns.end();
+}
+
+// Is this finding the caller's? A clone group is a RELATION over a member SET, not a fact about one file, so
+// it is in scope iff ANY member's path matches: the duplicate a sibling just introduced against YOUR helper
+// is yours to answer for too, and filing the group by its first-sorting member alone (which is all p= names)
+// would hand it to whichever path happened to sort first. `memberPaths` is what makes that answerable — the
+// members= TEXT cannot, because a scope-less free function's canonId is a bare name with no path in it.
+// Every other kind is filed by its own locator, and carries no memberPaths at all.
+//
+// FLOOR, disclosed rather than papered over: a finding with NO locator at all (an empty `path` — a symbol
+// with no file, or a degraded lookup) is filed OUT of scope. Under a scope, the honest reading of "we cannot
+// say where this is" is "not provably yours", and the ack path names such a row rather than accepting it.
+inline bool scopeCovers( const Scope& sc, const Regression& r )
+{
+    for( const std::string& member : r.memberPaths )   // clone kinds only; empty for every other kind
+    {
+        if( sc.matchesPath( member ) )
+        {
+            return true;
+        }
+    }
+    return !r.path.empty() && sc.matchesPath( r.path );
+}
+
 // ─── Signal-to-noise round: the per-finding ACK RATCHET ────────────────────────────────────────────────
 //
 // `.ripwire_quality_acks` — one line per deliberately-accepted finding:
@@ -3563,6 +3746,12 @@ struct AckRecord
     // Serialized as an OPTIONAL `cid=<16hex>` token between ackNow and the reason — see readAckRecords for
     // why that spelling, and why the 443 rows already committed to this repo need no migration.
     std::uint64_t cid    = 0;
+    // P1.4 ACK PROVENANCE — the scope spec (`--scope`'s value, verbatim) the session that wrote this row was
+    // working under, or empty when it was written without one. Serialized as a second OPTIONAL named token,
+    // `by=<spec>`, for exactly the reasons cid= is one: a positional field would make every pre-existing row
+    // malformed, and a separate record line would fire the reader's own malformed-line degrade on every one
+    // of them. Empty rows are written byte-identically to the way they are written today.
+    std::string   by;
     std::string   reason;
 };
 
@@ -3665,27 +3854,65 @@ inline std::string normalizeLegacyAckKind( const std::string& kind, std::uint32_
 //
 // A malformed hash degrades to "no cid" and is LEFT IN the reason rather than guessed at or discarded — the
 // damage stays visible in a file a human reviews, which is the only place it can be fixed.
-inline std::uint64_t takeAckCidPrefix( std::string& reason )
+// The GRAMMAR half, shared by every named token: if `reason` opens with `name`, split its value off and
+// leave `reason` as the text that follows. Returns false (and touches nothing) when the token is absent.
+// Only the SPLIT lives here — validation belongs to each token's own reader, because each one accepts a
+// different language, and a caller that rejects the value restores `reason` itself.
+inline bool takeAckNamedToken( std::string& reason, std::string_view name, std::string& valueOut )
 {
-    if( reason.rfind( "cid=", 0 ) != 0 )
+    if( reason.size() < name.size() || reason.compare( 0, name.size(), name ) != 0 )
     {
-        return 0;
+        return false;
     }
-    const std::size_t end  = reason.find( ' ' );
-    const std::string hex  = reason.substr( 4, ( end == std::string::npos ? reason.size() : end ) - 4 );
-    char*             stop = nullptr;
-    const auto        v    = std::strtoull( hex.c_str(), &stop, 16 );
-    if( hex.empty() || stop == nullptr || *stop != '\0' )
-    {
-        DEGRADED_PATH_ALERT( "quality: unparseable cid= on an ack line — kept as reason text, content identity unavailable for that row" );
-        return 0;
-    }
-    reason = ( end == std::string::npos ) ? std::string{} : reason.substr( end + 1 );
+    const std::size_t end = reason.find( ' ' );
+    valueOut = reason.substr( name.size(), ( end == std::string::npos ? reason.size() : end ) - name.size() );
+    reason   = ( end == std::string::npos ) ? std::string{} : reason.substr( end + 1 );
     while( !reason.empty() && reason.front() == ' ' )
     {
         reason.erase( reason.begin() );
     }
+    return true;
+}
+
+inline std::uint64_t takeAckCidPrefix( std::string& reason )
+{
+    const std::string untouched = reason;   // the restore point for the degrade below
+    std::string       hex;
+    if( !takeAckNamedToken( reason, "cid=", hex ) )
+    {
+        return 0;
+    }
+    char*      stop = nullptr;
+    const auto v    = std::strtoull( hex.c_str(), &stop, 16 );
+    if( hex.empty() || stop == nullptr || *stop != '\0' )
+    {
+        DEGRADED_PATH_ALERT( "quality: unparseable cid= on an ack line — kept as reason text, content identity unavailable for that row" );
+        reason = untouched;
+        return 0;
+    }
     return v;
+}
+
+// P1.4 — the provenance twin of takeAckCidPrefix: an optional leading `by=<scope spec>` token. Same degrade
+// rule as its sibling, and for the same reason: a value this binary could not have written (whitespace, or
+// an XML metacharacter — see scopeSpecIsSpellable) is LEFT IN the reason rather than guessed at or silently
+// dropped, so the damage stays visible in the file a human reviews. The two share the split above and differ
+// only in the language they accept, which is the whole of what makes them two functions.
+inline std::string takeAckByPrefix( std::string& reason )
+{
+    const std::string untouched = reason;
+    std::string       val;
+    if( !takeAckNamedToken( reason, "by=", val ) )
+    {
+        return {};
+    }
+    if( val.empty() || !scopeSpecIsSpellable( val ) )
+    {
+        DEGRADED_PATH_ALERT( "quality: unspellable by= on an ack line — kept as reason text, provenance unavailable for that row" );
+        reason = untouched;
+        return {};
+    }
+    return val;
 }
 
 inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string& path )
@@ -3721,7 +3948,13 @@ inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string&
             reason.erase( reason.begin() );
         }
 
-        const std::uint64_t cid = takeAckCidPrefix( reason );   // R1 IDENTITY — the optional cid= field; see takeAckCidPrefix
+        std::uint64_t     cid = takeAckCidPrefix( reason );   // R1 IDENTITY — the optional cid= field; see takeAckCidPrefix
+        const std::string by  = takeAckByPrefix( reason );    // P1.4 PROVENANCE — the optional by= field
+        if( cid == 0 )
+        { // the two named tokens are read in EITHER order: this binary always writes cid= first, but the file
+          // is hand-edited and 3-way merged, and a reader that only accepts one order silently loses a field
+            cid = takeAckCidPrefix( reason );
+        }
         while( !reason.empty() && reason.back() == '\r' )
         {
             reason.pop_back(); // CRLF tolerance on the trailing field too
@@ -3731,7 +3964,7 @@ inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string&
         const auto        it     = out.find( mapKey );
         if( it == out.end() || ackNow > it->second.ackNow )
         { // D2: max(ackNow) wins, not last-line
-            out[ mapKey ] = AckRecord{ kind, key, ackNow, cid, reason };
+            out[ mapKey ] = AckRecord{ kind, key, ackNow, cid, by, reason };
         }
     }
     return out;
@@ -3742,7 +3975,7 @@ inline bool writeAckRecords( const std::string& path, const gtl::btree_map<std::
     std::ofstream f( path, std::ios::trunc );
     if( !f ) { DEGRADED_PATH_ALERT( "quality: cannot write acks file" ); return false; }
     f << "# ripwire quality acks v1 — written by --quality-ack; a finding stays suppressed until it worsens past its acked magnitude\n";
-    f << "# format: ack <kind> <16-hex-key> <ackNow> [cid=<16-hex-content-id>] <reason to end of line> — one per line, kept SORTED by (kind,key) on every write (merge-friendly)\n";
+    f << "# format: ack <kind> <16-hex-key> <ackNow> [cid=<16-hex-content-id>] [by=<scope that acked it>] <reason to end of line> — one per line, kept SORTED by (kind,key) on every write (merge-friendly)\n";
     for( const auto& [ mapKey, r ] : acks )                       // btree order → byte-stable, always-sorted file (the merge-friendly guarantee)
     {
         char hex[ 20 ];
@@ -3756,6 +3989,13 @@ inline bool writeAckRecords( const std::string& path, const gtl::btree_map<std::
             char cidHex[ 20 ];
             std::snprintf( cidHex, sizeof( cidHex ), "%016llx", static_cast<unsigned long long>( r.cid ) );
             f << "cid=" << cidHex << ' ';
+        }
+        // P1.4: same OMIT-when-unavailable rule cid= follows, and for the same reason — a repo whose sessions
+        // never pass a scope keeps a ledger byte-identical to the one it has today, and an absent by= is
+        // never confusable with a row written under an empty scope.
+        if( !r.by.empty() )
+        {
+            f << "by=" << r.by << ' ';
         }
         f << ( r.reason.empty() ? "(no reason given)" : r.reason ) << '\n';
     }
@@ -4325,6 +4565,8 @@ enum class StaleAckWhy : std::uint8_t
 {
     TargetGone,   // no symbol/group this key could refer to exists at HEAD/current
     FindingGone,  // the target still exists, but no finding of the acked kind currently fires on it
+    ForeignScope, // P1.4 — the ack applies, but the scope recorded in its by= does not cover the path it is
+                  //   suppressing: a session accepted debt outside what it was working on
 };
 
 struct StaleAck
@@ -4332,7 +4574,15 @@ struct StaleAck
     std::string  kind;          // the RAW ack kind token, including any :new-symbol/:preexisting facet (P0.3)
     std::uint64_t key = 0;
     StaleAckWhy  why  = StaleAckWhy::TargetGone;
+    std::string  by;            // P1.4 — the recorded provenance, on ForeignScope rows only (empty otherwise)
 };
+
+inline const char* staleAckWhyToken( StaleAckWhy why ) noexcept
+{
+    return why == StaleAckWhy::TargetGone  ? "target-gone"
+         : why == StaleAckWhy::FindingGone ? "finding-gone"
+                                            : "foreign-scope";
+}
 
 // One per-kind oracle, each returning nullopt for "not stale" — split out so the dispatcher below reads as
 // a flat kind->oracle table instead of one large branch-and-compute body (that shape was the round's own
@@ -4441,7 +4691,57 @@ inline std::vector<StaleAck> computeStaleAcks( const gtl::btree_map<std::string,
         // guessed — same "degrade, do not fabricate" rule readAckRecords already applies to a malformed line.
         if( why.has_value() )
         {
-            out.push_back( { rec.kind, rec.key, *why } );
+            out.push_back( { rec.kind, rec.key, *why, std::string{} } );
+        }
+    }
+    return out;
+}
+
+// P1.4 — THE PROVENANCE SWEEP, the thing `by=` exists to make answerable: is a row still SUPPRESSING a
+// finding whose path the scope that wrote it does not cover? That is a session having absorbed another
+// session's debt — the failure --scope's ack refusal prevents going forward, reported here for the rows
+// already in the ledger (this repo's own file carries hundreds, written long before provenance existed).
+//
+// Called on the PRE-ratchet finding list, because the question is about acks that are doing work right now:
+// the suppression predicate below is applyAckRatchet's, verbatim in meaning, so a row that has worsened past
+// its floor (and is therefore about to reappear anyway) is not reported.
+//
+// TWO FLOORS, stated because silence here would read as a guarantee. (1) Only acks currently suppressing a
+// finding are checkable — a row whose finding does not fire today has no path to test its provenance
+// against, and is left alone rather than guessed at. (2) A row with NO by= is not checked at all: absence of
+// provenance is not evidence of foreign provenance, and every row written before this feature existed, plus
+// every row written without a scope, is in that class.
+inline std::vector<StaleAck> computeForeignAcks( const std::vector<Regression>& regs,
+                                                 const gtl::btree_map<std::string, AckRecord>& acks )
+{
+    std::vector<StaleAck> out;
+    if( acks.empty() )
+    {
+        return out;
+    }
+    for( const Regression& r : regs )
+    {
+        if( r.path.empty() )
+        {
+            continue;   // no locator ⇒ nothing to test the recorded scope against
+        }
+        const auto it = acks.find( ackMapKey( ackKindToken( r ), r.key ) );
+        if( it == acks.end() || it->second.by.empty() || r.now > it->second.ackNow )
+        {
+            continue;
+        }
+        const Scope by = parseScope( it->second.by );
+        if( scopeUsesDiffToken( by ) )
+        {
+            // THIRD FLOOR (P1.2): an AUTO-scope cannot be re-evaluated later. `diff` meant one file set at
+            // ack time and means another now, so re-expanding it here would judge a past decision against a
+            // present tree and manufacture foreign-ack rows out of ordinary progress. Not checked, and
+            // stated rather than silently skipped.
+            continue;
+        }
+        if( !by.matchesPath( r.path ) )
+        {
+            out.push_back( { it->second.kind, it->second.key, StaleAckWhy::ForeignScope, it->second.by } );
         }
     }
     return out;
@@ -4468,7 +4768,15 @@ inline std::string staleAcksXml( const std::vector<StaleAck>& staleAcks )
         out += "\" key=\"";
         out += hex;
         out += "\" why=\"";
-        out += ( sa.why == StaleAckWhy::TargetGone ? "target-gone" : "finding-gone" );
+        out += staleAckWhyToken( sa.why );
+        // P1.4: by= is UNESCAPED for the same reason kind= is — it is not free text. A scope spec is
+        // character-set-restricted at the flag (scopeSpecIsSpellable) and re-validated on every ledger read,
+        // so a hand-edited line can only make it a different plain token, never markup.
+        if( !sa.by.empty() )
+        {
+            out += "\" by=\"";
+            out += sa.by;
+        }
         out += "\"/>";
     }
     return out;
@@ -4492,10 +4800,69 @@ inline std::string staleAcksJsonArray( const std::vector<StaleAck>& staleAcks ) 
         out += "\",\"key\":\"";
         out += hex;
         out += "\",\"why\":\"";
-        out += ( sa.why == StaleAckWhy::TargetGone ? "target-gone" : "finding-gone" );
+        out += staleAckWhyToken( sa.why );
+        if( !sa.by.empty() )
+        {
+            out += "\",\"by\":\"";
+            out += rw::jsonesc::escapeMcp( sa.by );   // escaped, matching kind='s posture in this emitter
+        }
         out += "\"}";
     }
     out += "]";
+    return out;
+}
+
+// P1 SCOPE — every member's root-relative path, for Regression::memberPaths. A clone row's `path` names only
+// the first-sorting member, and the ownership partition has to ask "does ANY member live in this scope"; the
+// members= TEXT cannot answer that, because a canonId degrades to a BARE NAME for a scope-less free function
+// and carries no path at all (quality::displaySym's own documented case). Sorted and deduplicated, so the
+// field is deterministic and usually one or two entries. A free function rather than a few lines inside
+// computeDelta's stampCloneLoc: that body is already the file's largest, and this is a pure map over a group.
+inline std::vector<std::string> cloneMemberPaths( const CloneGroup& cg, const IngestResult& ing, std::string_view root )
+{
+    std::vector<std::string> paths;
+    paths.reserve( cg.members.size() );
+    for( NodeId m : cg.members )
+    {
+        if( m < ing.symbols.size() && ing.symbols[m].fileId < ing.files.size() )
+        {
+            paths.emplace_back( relForHash( ing.files[ ing.symbols[m].fileId ], root ) );
+        }
+    }
+    std::sort( paths.begin(), paths.end() );
+    paths.erase( std::unique( paths.begin(), paths.end() ), paths.end() );
+    return paths;
+}
+
+// P1 — the SCOPE disclosure, built once for BOTH emitters, exactly as identityDisclosure is: two surfaces
+// that can disclose different things about one run eventually will. Returns { xmlAttrs, jsonFields }, each
+// EMPTY when the corresponding fact is absent, so an unscoped report is byte-identical to one from a binary
+// that never had this flag. `spec` needs no escaping in either dialect: scopeSpecIsSpellable already
+// excluded whitespace and the XML metacharacters, which is the reason that check exists.
+inline std::pair<std::string, std::string> scopeDisclosure( const Scope& scope, std::size_t scopedOut,
+                                                            std::size_t scopedOutGating, std::size_t foreignAcks,
+                                                            std::size_t diffFiles )
+{
+    std::pair<std::string, std::string> out;
+    if( scope.active() )
+    {
+        out.first  = " scope=\"" + scope.spec + "\" scoped-out=\"" + std::to_string( scopedOut )
+                   + "\" scoped-out-gating=\"" + std::to_string( scopedOutGating ) + "\"";
+        out.second = ",\"scope\":\"" + scope.spec + "\",\"scoped-out\":" + std::to_string( scopedOut )
+                   + ",\"scoped-out-gating\":" + std::to_string( scopedOutGating );
+        // P1.2: `diff` is a token whose MEANING is a moment. scope= alone would let a reader quote a number
+        // without knowing what the auto-scope covered, so the expansion's size travels with it.
+        if( diffFiles != 0 )
+        {
+            out.first  += " scope-diff-files=\"" + std::to_string( diffFiles ) + "\"";
+            out.second += ",\"scope-diff-files\":" + std::to_string( diffFiles );
+        }
+    }
+    if( foreignAcks != 0 )
+    {
+        out.first  += " foreign-acks=\"" + std::to_string( foreignAcks ) + "\"";
+        out.second += ",\"foreign-acks\":" + std::to_string( foreignAcks );
+    }
     return out;
 }
 
@@ -4674,6 +5041,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         {
             stampLoc( best );
         }
+        regs.back().memberPaths = cloneMemberPaths( cg, ing, root );   // P1 SCOPE — see cloneMemberPaths
     };
 
     // One per-symbol metric kind: aggregate the CURRENT side to the same per-canonId MAX the snapshot stores

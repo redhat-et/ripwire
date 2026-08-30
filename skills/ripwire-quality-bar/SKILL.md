@@ -196,6 +196,29 @@ something always fires.)
    Whatever you leave unacked stays visible — that is the point; an exit 2 you have explained in a commit
    message is worth more than an exit 0 you bought with a blanket ack.
 
+   **Sharing the working tree with other sessions? Then `--ack-only` is not enough — add `--scope=`.**
+   `--quality-delta` compares the *working tree* against HEAD, so in a checkout several agents are editing
+   at once, every sibling's uncommitted rows land in **your** report. Bare `--quality-ack` there accepts
+   the whole screen, which writes another session's debt into a committed ledger under *your* reason
+   string: that is how the ratchet becomes a rubber stamp, and no amount of care reading the report
+   prevents it. `--scope=GLOB[,GLOB...]` files each finding by its `p=` path:
+
+   ```bash
+   ripwire <dir> --quality-delta --scope=src/render,src/render_gl.h             # gate on MY subtree only
+   ripwire <dir> --quality-delta --scope=src/render --quality-ack="deliberate"  # …and ack only my rows
+   ```
+
+   Rows outside the scope are **still printed**, under an `<out-of-scope>` element with a do-not-ack
+   banner, and never gate; the header's `scoped-out-gating=` says how many of them *would* have gated, so
+   a scoped exit 0 means "nothing of mine is broken", never "the tree is clean". The ack cannot write an
+   out-of-scope row at all, and an `--ack-only=` that names one refuses (exit 1). Each row you write
+   records `by=<scope>`, so a later run can flag an ack that suppressed a path its author never owned
+   (`foreign-acks=`). A pattern with no wildcard is a root-anchored path prefix; `*`/`?` match the whole
+   path, with `*` spanning `/`. A scope that names nothing indexed refuses rather than reporting you clean.
+   One reserved word: `--scope=diff` is whatever the working tree changed vs the baseline, expanded to
+   one path per changed indexed file. It is sugar for the **single-writer** case — in the shared tree
+   this flag exists for, a sibling's edits are "changed" too, so name your own paths there.
+
 5. **Want ONE number instead of a list — `ripwire <dir> --dmm`.** `--quality-delta` says *which* kinds got
    worse; it has no scale, so "is this change better than my last one?" has no answer. `--dmm` is that scale:
    the Delta Maintainability Model (di Biase, Rastogi, Bruntink & van Deursen, TechDebt 2019; thresholds and

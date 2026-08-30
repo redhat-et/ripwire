@@ -248,6 +248,214 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
     return std::nullopt;
 }
 
+// P1.2 — expand the reserved `diff` token into one literal path pattern per changed INDEXED file. It lives
+// in the verb because reading git is the verb's job and quality::Scope is a pure value; and it runs BEFORE
+// refuseUnusableScope, so the expanded set is what the "names nothing indexed" test sees.
+//
+// THREE refusals, all of the same shape and for the same reason — under a scope, a silent zero reads as
+// "you're clean", which is the most dangerous sentence this verb can say.
+std::optional<int> expandScopeDiff( rw::quality::Scope& scope, bool refPair, const rw::IngestResult& judged,
+                                    const std::string& root, std::string_view deltaRoot, std::size_t& diffFileCount )
+{
+    if( !rw::quality::scopeUsesDiffToken( scope ) || !rw::quality::scopeSpecIsSpellable( scope.spec ) )
+    {
+        return std::nullopt;   // not our token, or a spec refuseUnusableScope is about to refuse anyway
+    }
+    if( refPair )
+    {
+        // The token names the WORKING TREE's changes, and this form compares two committed trees — the
+        // working tree is not part of the comparison at all, so the answer would describe a different tree
+        // than the one being judged.
+        std::fprintf( stderr, "ripwire: --scope=diff scopes to the WORKING TREE's changes, but --quality-delta=A..B compares two COMMITTED trees —\n"
+                              "  spell the scope as paths there (e.g. --scope=src/quality.h), or drop the range to measure the working tree\n" );
+        return 1;
+    }
+    std::vector<char> changed( judged.files.size(), 0 );
+    if( !rw::gitChangedFiles( root, judged, changed ) )
+    {
+        std::fprintf( stderr, "ripwire: --scope=diff needs git to say what changed, and %s is not a readable git repository —\n"
+                              "  name the paths instead (e.g. --scope=src/quality.h,src/verbs_quality.h)\n", root.c_str() );
+        return 1;
+    }
+    std::vector<std::string> expanded;
+    for( const std::string& p : scope.patterns )
+    {
+        if( p != rw::quality::kScopeDiffToken )
+        {
+            expanded.push_back( p );   // the token composes by UNION with any literal patterns beside it
+        }
+    }
+    for( std::size_t fileIndex = 0; fileIndex < changed.size(); ++fileIndex )
+    {
+        if( changed[ fileIndex ] )
+        {
+            expanded.emplace_back( rw::relForHash( judged.files[ fileIndex ], deltaRoot ) );
+            ++diffFileCount;
+        }
+    }
+    if( diffFileCount == 0 )
+    {
+        std::fprintf( stderr, "ripwire: --scope=diff expanded to NO changed indexed file — the working tree matches the baseline (or the edits are in files\n"
+                              "  this index does not carry), so the scope owns nothing and an exit 0 under it would say nothing about your change\n" );
+        return 1;
+    }
+    std::sort( expanded.begin(), expanded.end() );
+    expanded.erase( std::unique( expanded.begin(), expanded.end() ), expanded.end() );
+    scope.patterns.swap( expanded );
+    return std::nullopt;
+}
+
+// P1 — the scope flag's two REFUSALS, in their own symbol. They live in the verb rather than in cli.h for
+// the reason --quality-panel=PRESET's refusal does: the vocabulary belongs to quality.h, and cli.h is a leaf
+// that includes only ingest.h. Returns an exit code (already reported on stderr) or nullopt when the scope
+// is usable. `judged` is the tree the findings were taken from — the working tree, or tree B in the
+// ref-pair form — because "names nothing indexed" has to be asked of the corpus that was actually measured.
+std::optional<int> refuseUnusableScope( const rw::Config& cfg, const rw::quality::Scope& scope,
+                                        const rw::IngestResult& judged, std::string_view deltaRoot )
+{
+    if( !scope.active() )
+    {
+        return std::nullopt;
+    }
+    if( !rw::quality::scopeSpecIsSpellable( cfg.qualityScope ) )
+    {
+        // The spec is recorded VERBATIM as a whitespace-delimited by= token in the ack ledger and echoed into
+        // an XML attribute. A pattern that cannot round-trip through both is refused here rather than mangled
+        // at the emitter: matching against something the caller never typed is the one outcome worse than
+        // not matching at all.
+        std::fprintf( stderr, "ripwire: --scope=%.*s contains whitespace or an XML metacharacter — a scope is recorded verbatim in the ack ledger and in the report,\n"
+                              "  so each pattern must be spellable as one token (e.g. --scope=src/quality.h,src/verbs_quality.h)\n",
+                      int( cfg.qualityScope.size() ), cfg.qualityScope.data() );
+        return 1;
+    }
+    // A scope that names nothing INDEXED is a typo, not a measurement — and a typo here reads as "you're
+    // clean", which is the single most dangerous thing this verb can say. Refuse loudly, the same ruling
+    // --dead-code=DIR already carries.
+    for( const std::string& indexedPath : judged.files )
+    {
+        if( scope.matchesPath( rw::relForHash( indexedPath, deltaRoot ) ) )
+        {
+            return std::nullopt;
+        }
+    }
+    std::fprintf( stderr, "ripwire: --scope=%.*s matches no indexed path — an exit 0 under a scope that owns nothing is a failure, not a clean tree\n"
+                          "  (patterns are matched ROOT-RELATIVE, the same spelling p= prints: --scope=src or --scope=src/quality.h, not an absolute path)\n",
+                  int( cfg.qualityScope.size() ), cfg.qualityScope.data() );
+    return 1;
+}
+
+// P1 — the partition itself: move every finding the scope does not cover into `outOfScope`, apply the ack
+// ratchet on that side too (a sibling's ALREADY-ACKED row is answered over there, so disclosing it again
+// would be noise), and return how many of the disclosed rows WOULD have gated. Called before the in-scope
+// ratchet so acked= counts this scope's suppressions rather than the whole tree's.
+std::size_t partitionByScope( const rw::quality::Scope& scope, std::vector<rw::quality::Regression>& regs,
+                              std::vector<rw::quality::Regression>& outOfScope,
+                              const gtl::btree_map<std::string, rw::quality::AckRecord>& acks )
+{
+    if( !scope.active() )
+    {
+        return 0;
+    }
+    std::vector<rw::quality::Regression> mine;
+    mine.reserve( regs.size() );
+    for( rw::quality::Regression& r : regs )
+    {
+        ( rw::quality::scopeCovers( scope, r ) ? mine : outOfScope ).push_back( std::move( r ) );
+    }
+    regs.swap( mine );
+    rw::quality::applyAckRatchet( outOfScope, acks );
+    std::size_t wouldGate = 0;
+    for( const rw::quality::Regression& r : outOfScope )
+    {
+        if( !r.isNewSymbol && !r.isMinor )
+        {
+            ++wouldGate;
+        }
+    }
+    return wouldGate;
+}
+
+// P1 — THE RUBBER-STAMP GUARD, in its own symbol because it is the point of the whole flag. Under a scope an
+// out-of-scope finding is not in the ack SELECTION at all: there is no spelling of --quality-ack that writes
+// one. That leaves exactly one case worth a hard refusal rather than a silent skip — an --ack-only pattern
+// that NAMES a row belonging to someone else. It is the difference between "the flag narrowed what I
+// accepted" and "I asked for that row and did not get it", so the whole ack is refused, nothing is written,
+// and the rows are named. `selected` is the caller's ack predicate, passed rather than rebuilt so the two
+// sites can never disagree about what a pattern selects.
+template<typename Selector>
+std::optional<int> refuseForeignAckSelection( const rw::Config& cfg, const rw::quality::Scope& scope,
+                                              const std::vector<rw::quality::Regression>& outOfScope,
+                                              std::string_view deltaRoot, Selector&& selected )
+{
+    if( !scope.active() || cfg.qualityAckOnly.empty() )
+    {
+        return std::nullopt;
+    }
+    std::string named;
+    std::size_t namedCount = 0;
+    for( const rw::quality::Regression& r : outOfScope )
+    {
+        if( !selected( r, /*inScope=*/false ) )
+        {
+            continue;
+        }
+        ++namedCount;
+        if( namedCount <= 8 )   // a listing, not a dump: the count in the sentence above it is the total
+        {
+            named += "\n    " + r.kind + " " + rw::quality::displaySym( r.sym, deltaRoot );
+            if( !r.path.empty() )
+            {
+                named += " at " + r.path + ":" + std::to_string( r.line );
+            }
+        }
+    }
+    if( namedCount == 0 )
+    {
+        return std::nullopt;
+    }
+    std::fprintf( stderr, "ripwire: --ack-only=%.*s selects %zu finding(s) OUT OF SCOPE for --scope=%s — refusing, and writing nothing at all:%s%s\n"
+                          "  those rows belong to whoever is editing those paths. Acking them here writes their debt into a committed ledger under YOUR\n"
+                          "  reason string, which is how a per-finding ratchet becomes a rubber stamp. Narrow the pattern, or widen the scope if they really are yours.\n",
+                  int( cfg.qualityAckOnly.size() ), cfg.qualityAckOnly.data(), namedCount, scope.spec.c_str(),
+                  named.c_str(), namedCount > 8 ? "\n    …" : "" );
+    return 1;
+}
+
+// P1 — the SCOPE half of the quality-delta legend, printed ONLY when the report actually contains a
+// scope partition or a foreign-ack row. That is a G4 (token density) decision, not a hedge: the
+// paragraph defines scope=, the out-of-scope element and foreign-acks=, and on an unscoped run none
+// of the three is in the document — charging every quality-delta call ~500 tokens to define
+// attributes it did not emit is exactly the padding this legend exists to avoid. A reader can never
+// meet one of those names undefined, because the names and this paragraph appear together or not at
+// all. It lives out here rather than inline so runQualityDelta measures as the code it is.
+// G4 again: no flag name spelled with the double dash anywhere inside an XML comment, so this says
+// "the scope flag" throughout.
+inline constexpr const char* kScopeLegend =
+    " "
+                        "SCOPE, present only when the scope flag was given, and it NARROWS WHAT THIS REPORT "
+                        "CLAIMS: scope= is the pattern list it was given, verbatim. Every counter above "
+                        "(regressions=, minor=, acked=, preexisting-worse=, new-symbol=, gating=) is then over "
+                        "the IN-SCOPE findings alone, and the exit code follows gating= as always. The rest are "
+                        "not dropped: scoped-out= counts the findings filed to somebody else, and every one of "
+                        "them is printed inside an out-of-scope element carrying n= (the same count), would-gate= "
+                        "and note= (the do-not-ack banner). scoped-out-gating= repeats would-gate= on the root "
+                        "because it is the number a reader must not miss: it is how many disclosed rows WOULD "
+                        "have fired the exit code, so exit 0 under a scope means \"nothing of YOURS is broken\", "
+                        "never \"the tree is clean\". Rows inside that element carry the identical attributes to "
+                        "the ones above it and never carry the gating attribute, since they are not what this "
+                        "exit code fires on. HOW A FINDING IS FILED: by its p= path, matched root-relative "
+                        "against the patterns; a clone kind is in scope when ANY member matches, not just the "
+                        "first-sorting one; and a finding with no locator at all is filed OUT of scope, because "
+                        "under a scope \"we cannot say where this is\" honestly reads as not provably yours. "
+                        "foreign-acks= is a SEPARATE axis again, never gating and present only when non-zero: an "
+                        "ack row records the scope that wrote it as a by= token, and this counts the acks that "
+                        "are suppressing a finding whose path that recorded scope does not cover — a session "
+                        "having accepted somebody else's debt. Those rows appear among the sa rows with "
+                        "why set to foreign-scope and carry by= (the recorded scope). TWO FLOORS on that number: "
+                        "only acks suppressing a finding RIGHT NOW can be checked (one whose finding no longer "
+                        "fires has no path to test against), and a row with no by= at all is never counted, "
+                        "since absence of provenance is not evidence of foreign provenance. ";
+
 // runQualityViews was NOT a dispatch chain — it held two
 // branches, one of which was 298 lines. That one body is now runQualityDelta below; the residual
 // runQualityViews keeps only --dead-code. ONE extraction, verbatim: the 298-line body is unsplit, because
@@ -318,6 +526,20 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         const std::string&                deltaRoot = basis.deltaRoot;
         std::vector<quality::Regression>&  regs     = basis.regs;
 
+        // ── P1 SCOPE — the OWNERSHIP partition for a working tree with several writers in it ─────────────
+        quality::Scope                   scope = quality::parseScope( cfg.qualityScope );
+        std::vector<quality::Regression> outOfScope;
+        std::size_t                      diffFileCount = 0;   // P1.2: 0 = the reserved diff token was not used
+        const IngestResult&              judged        = refPair ? refs.target().ing : ing;
+        if( const std::optional<int> refused = expandScopeDiff( scope, refPair, judged, root, deltaRoot, diffFileCount ) )
+        {
+            return *refused;
+        }
+        if( const std::optional<int> refused = refuseUnusableScope( cfg, scope, judged, deltaRoot ) )
+        {
+            return *refused;
+        }
+
         // Signal-to-noise round — the per-finding ACK RATCHET. Suppress findings already accepted (with a
         // reason) in .ripwire_quality_acks, honestly (acked="N"); a finding that WORSENED past its acked
         // magnitude survives the filter and reappears. --quality-ack merges the currently-VISIBLE findings
@@ -329,6 +551,12 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         gtl::btree_map<std::string, quality::AckRecord>& acks = basis.acks;
         quality::countAckRescues( regs, acks, basis.healing.ackRemap,
                                   basis.healing.ackedByRename, basis.healing.ackedByContent );
+        // P1.4 PROVENANCE — the foreign-ack sweep reads the PRE-ratchet list on purpose (computeForeignAcks'
+        // header states why: the question is about acks that are suppressing something right now).
+        const std::vector<quality::StaleAck> foreignAcks = quality::computeForeignAcks( regs, acks );
+        // P1 — the partition runs BEFORE the ratchet so acked="N" counts THIS scope's suppressions rather
+        // than the whole tree's (partitionByScope owns the rest of the rule).
+        const std::size_t scopedOutGating = partitionByScope( scope, regs, outOfScope, acks );
         const std::size_t ackedCount = quality::applyAckRatchet( regs, acks );
         if( cfg.qualityAck )
         {
@@ -336,7 +564,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             // way to accept one deliberate contract change was to accept the whole report — which is how a
             // ratchet quietly becomes a rubber stamp. A finding matches if a substring occurs in its kind or
             // in its canonical id (so "api-surface", "src/quality.h", or one exact id all work).
-            const auto ackSelected = [ & ]( const quality::Regression& r ) -> bool
+            // P1: `inScope` is a parameter rather than a capture because this predicate is asked about BOTH
+            // halves of the partition — once to choose what to write, once to detect an ack selection that
+            // NAMES a row belonging to someone else. It is also what keeps the `gating` pseudo-token honest
+            // under a scope: an out-of-scope row does not gate, so `gating` must not select it.
+            const auto ackSelected = [ & ]( const quality::Regression& r, bool inScope ) -> bool
             {
                 if( cfg.qualityAckOnly.empty() )
                 {
@@ -351,7 +583,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                     // "api-surface" also covers the never-gating new-symbol rows, so acking by kind would
                     // sweep in 59 findings to accept 8. --ack-only=contract-change accepts exactly the
                     // deliberate ones. The pseudo-token "gating" selects whatever would actually exit 2.
-                    const bool gates = !r.isMinor && !r.isNewSymbol;
+                    const bool gates = !r.isMinor && !r.isNewSymbol && inScope;
                     if( !pat.empty() && ( r.kind.find( pat ) != std::string::npos || r.sym.find( pat ) != std::string::npos || ( !r.facet.empty() && r.facet.find( pat ) != std::string::npos ) || ( pat == "gating" && gates ) ) )
                     {
                         return true;
@@ -365,10 +597,16 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 return false;
             };
 
+            // P1 — THE RUBBER-STAMP GUARD (refuseForeignAckSelection owns the rule and the message).
+            if( const std::optional<int> refused = refuseForeignAckSelection( cfg, scope, outOfScope, deltaRoot, ackSelected ) )
+            {
+                return *refused;
+            }
+
             std::size_t ackWritten = 0, ackSkipped = 0;
             for( const quality::Regression& r : regs )
             {
-                if( !ackSelected( r ) ) { ++ackSkipped;  continue; }
+                if( !ackSelected( r, /*inScope=*/true ) ) { ++ackSkipped;  continue; }
                 ++ackWritten;
                 // P0.3: the ack IDENTITY is ackKindToken, not the bare kind — a zero-magnitude finding
                 // (was==now==0: dead-code, api-surface tier A) acks per ORIGIN, so acking the never-gating
@@ -382,7 +620,12 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 // the stored cid always describes the code as accepted, never as it was two edits ago.
                 const auto          cidIt   = basis.healing.cids.cidByKey.find( r.key );
                 const std::uint64_t cid     = ( cidIt == basis.healing.cids.cidByKey.end() ) ? 0u : cidIt->second;
+                // P1.4 PROVENANCE: `by` follows the SAME rule the reason does one line down — set from this
+                // run when this run supplies one, PRESERVED otherwise. A later scope-less re-ack therefore
+                // refreshes the magnitude without erasing the record of who accepted the row originally,
+                // which is the only reading under which the foreign-ack sweep means anything.
                 rec = quality::AckRecord{ ackKind, r.key, std::max( rec.ackNow, r.now ), cid,
+                                          scope.active() ? scope.spec : rec.by,
                                           cfg.qualityAckReason.empty() ? rec.reason : std::string( cfg.qualityAckReason ) };
             }
             if( ackWritten == 0 && !cfg.qualityAckOnly.empty() )
@@ -406,6 +649,15 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             {
                 std::fprintf( stderr, "ripwire: could not write %s\n", acksFile.c_str() );
             }
+            // P1 — the skip is DISCLOSED, never silent: the count of rows this ack deliberately did not
+            // touch is the whole reason the caller passed a scope, and a quiet success would leave them
+            // believing the ledger now covers the report they were looking at.
+            if( wroteAcks && scope.active() && !outOfScope.empty() )
+            {
+                std::fprintf( stderr, "ripwire: %zu finding(s) OUT OF SCOPE for --scope=%s were left unacked — not yours to accept "
+                                      "(they are still in the report, under the out-of-scope element)\n",
+                              outOfScope.size(), scope.spec.c_str() );
+            }
             return wroteAcks ? 0 : 1;
         }
 
@@ -419,6 +671,13 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                                                          : quality::computeStaleAcks( acks, refPair
                                                              ? quality::computeSnapshot( refs.target().ing, refs.target().g, refs.target().root )
                                                              : quality::computeSnapshot( ing, g, cfg.rootPath ) );
+
+        // P1.4 — the <sa> family now carries THREE whys, and the third is counted SEPARATELY: stale= means
+        // "this ack no longer applies", and a foreign ack applies fine — it is the SESSION that was wrong,
+        // not the target. Merging the rows into one list keeps the two emitters from growing a second loop
+        // each; keeping the COUNTS apart keeps stale= meaning what it has always meant.
+        std::vector<quality::StaleAck> saRows = staleAcks;
+        saRows.insert( saRows.end(), foreignAcks.begin(), foreignAcks.end() );
 
         // r26 ORIGIN SPLIT — three counts over the VISIBLE (post-ack) findings, one pass:
         //   minorCount      — the materiality tier (unchanged axis).
@@ -450,6 +709,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // what it rested on; building the XML and JSON halves in one place is what keeps the two surfaces
         // from disclosing different things about the same run.
         const auto [ identityAttrs, identityJson ] = quality::identityDisclosure( basis.healing );
+
+        // P1/P1.4 — the scope disclosure, built once for both emitters (quality::scopeDisclosure).
+        const auto [ scopeAttrs, scopeJson ] = quality::scopeDisclosure( scope, outOfScope.size(), scopedOutGating, foreignAcks.size(), diffFileCount );
 
         // P2.5 — one stderr line NAMING the gating finding, in --token-budget's style ("ripwire: --token-budget
         // exceeded: est_tokens=… > budget=…"). stdout is the machine artifact and a caller that only checks
@@ -489,18 +751,16 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             // R-I: the same two shas + the same unmeasurable-kind disclosure the XML root carries, spelled in
             // JSON. Empty for the bare form, so that object stays byte-identical to before.
             std::printf( "{\"baseline\":\"%s\",\"regressions\":%zu,\"minor\":%zu,\"acked\":%zu,\"stale\":%zu,"
-                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"register-macro-excluded\":%zu,\"at\":%s%s%s,\"r\":[",
+                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"register-macro-excluded\":%zu,\"at\":%s%s%s%s,\"r\":[",
                          jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount, staleAcks.size(),
                          preexistingCount, newSymbolCount, gatingCount, basis.registerMacroExcluded, atJsonJ.c_str(), refs.jsonAttrs.c_str(),
-                         identityJson.c_str() );
-            bool firstR = true;
-            for( const quality::Regression& r : regs )
+                         identityJson.c_str(), scopeJson.c_str() );
+            // P1: one row emitter, called for both halves of the scope partition — the disclosed rows carry
+            // the identical key set, so nothing about a row changes by being someone else's. `gatingAllowed`
+            // is the ONE difference: an out-of-scope row is not what the exit code fires on, so claiming
+            // gating on it would contradict the exit code in the same document.
+            const auto emitJsonRow = [ & ]( const quality::Regression& r, bool gatingAllowed )
             {
-                if( !firstR )
-                {
-                    std::printf( "," );
-                }
-                firstR = false;
                 std::printf( "{\"kind\":\"%s\"", jsonStr( r.kind ).c_str() );
                 if( r.kind == "duplication" )
                 {
@@ -518,7 +778,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 {
                     std::printf( ",\"p\":\"%s:%u\"", jsonStr( r.path ).c_str(), r.line ); // P2.5 locator
                 }
-                if( !r.isNewSymbol && !r.isMinor )
+                if( gatingAllowed && !r.isNewSymbol && !r.isMinor )
                 {
                     std::printf( ",\"gating\":true" ); // P2.5 — the exit predicate, stated per row
                 }
@@ -539,9 +799,38 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                     std::printf( ",\"origin\":\"new-symbol\"" ); // absent = preexisting-worse (mirrors the XML)
                 }
                 std::printf( "}" );
+            };
+            bool firstR = true;
+            for( const quality::Regression& r : regs )
+            {
+                if( !firstR )
+                {
+                    std::printf( "," );
+                }
+                firstR = false;
+                emitJsonRow( r, /*gatingAllowed=*/true );
             }
             std::printf( "]," );
-            std::fputs( quality::staleAcksJsonArray( staleAcks ).c_str(), stdout );   // L2 — "sa":[...], same taxonomy as the XML sa= rows below
+            if( scope.active() )
+            {
+                // The JSON sibling of the XML out-of-scope element: a SEPARATE array, never a flag on a row
+                // in "r", so a consumer that reads "r" and checks "gating" cannot accidentally count someone
+                // else's debt as this run's. Emitted (possibly empty) whenever a scope was given, so its
+                // absence means "no scope", never "no disclosed rows".
+                std::printf( "\"oos\":[" );
+                bool firstO = true;
+                for( const quality::Regression& r : outOfScope )
+                {
+                    if( !firstO )
+                    {
+                        std::printf( "," );
+                    }
+                    firstO = false;
+                    emitJsonRow( r, /*gatingAllowed=*/false );
+                }
+                std::printf( "]," );
+            }
+            std::fputs( quality::staleAcksJsonArray( saRows ).c_str(), stdout );   // L2 — "sa":[...], same taxonomy as the XML sa= rows below
             std::printf( "}" );
             return gatingCount > 0 ? 2 : 0;
         }
@@ -665,17 +954,35 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                      "the check did not run). "
                      "(This sentence deliberately spells no attribute=value literal: the header counters are "
                      "parsed by grep in several gates, and a quoted numeric example here would be matched "
-                     "first.) -->" );
+                     "first.)" );
+        // P1 — the SCOPE half of the legend is printed ONLY when the report actually contains a scope
+        // partition or a foreign-ack row, and that is a G4 (token density) decision, not a hedge: the
+        // paragraph defines scope=, the out-of-scope element and foreign-acks=, and on an unscoped run
+        // none of the three is in the document. Charging every quality-delta call ~500 tokens to define
+        // attributes it did not emit is exactly the padding this legend exists to avoid. A reader can
+        // therefore never meet one of those names undefined: the names and the paragraph appear together.
+        // G4 again: no flag name spelled with the double dash inside an XML comment, so this says "the
+        // scope flag" throughout, and no percent sign anywhere (these are one-argument writes).
+        if( scope.active() || !foreignAcks.empty() )
+        {
+            std::fputs( kScopeLegend, stdout );
+        }
+        std::fputs( " -->", stdout );
         const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
         // at= anchors this regression list to the commit (+dirty state) it was computed against.
-        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\" register-macro-excluded=\"%zu\"%s%s%s>",
+        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\" register-macro-excluded=\"%zu\"%s%s%s%s>",
                      baseMarker, regs.size(), minorCount, ackedCount, staleAcks.size(), preexistingCount, newSymbolCount, gatingCount, basis.registerMacroExcluded,
                      // R-I: at= is OMITTED for the ref-pair form rather than stamped with the working tree's
                      // sha, which would anchor the list to a commit it was not computed from. base_ref= and
                      // target_ref= are the anchor there, and they carry FULL shas because a wave measurement
                      // gets quoted into handoffs where a 9-char prefix is one collision from unverifiable.
-                     refPair ? "" : gitstamp::atAttr( root ).c_str(), refs.attrs.c_str(), identityAttrs.c_str() );
-        for( const quality::Regression& r : regs )
+                     refPair ? "" : gitstamp::atAttr( root ).c_str(), refs.attrs.c_str(), identityAttrs.c_str(),
+                     scopeAttrs.c_str() );
+        // P1: ONE row emitter for both halves of the scope partition — a disclosed row carries the identical
+        // attribute set, because nothing about a finding changes by belonging to someone else. `gatingAllowed`
+        // is the one difference: an out-of-scope row is not what the exit code fires on, and a gating
+        // attribute on it would contradict the header's own gating counter inside the same document.
+        const auto emitRow = [ & ]( const quality::Regression& r, bool gatingAllowed )
         {
             // duplication carries a member LIST (members=) + token count; the per-symbol was/now kinds
             // (complexity/verbosity/nesting/params) carry was/now; api-surface + dead-code are sym-only.
@@ -712,7 +1019,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             {
                 locAttr = " p=\"" + ex( r.path ) + ":" + std::to_string( r.line ) + "\"";
             }
-            const char* gatingAttr = ( !r.isNewSymbol && !r.isMinor ) ? " gating=\"1\"" : "";
+            const char* gatingAttr = ( gatingAllowed && !r.isNewSymbol && !r.isMinor ) ? " gating=\"1\"" : "";
             if( r.kind == "duplication" )
             {
                 std::printf( "<r kind=\"duplication\" members=\"%s\" tokens=\"%u\"%s%s%s%s%s/>", ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
@@ -733,8 +1040,28 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             {
                 std::printf( "<r kind=\"%s\" sym=\"%s\" was=\"%u\" now=\"%u\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.was, r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
             }
+        };
+        for( const quality::Regression& r : regs )
+        {
+            emitRow( r, /*gatingAllowed=*/true );
         }
-        std::fputs( quality::staleAcksXml( staleAcks ).c_str(), stdout );   // L2 — one <sa> row per stale ack (quality::staleAcksXml)
+        if( scope.active() )
+        {
+            // P1 — the DISCLOSURE half. Dropping these rows would make a scoped report a quieter lie than
+            // the unscoped one it replaces: the debt is real, it is in the same tree, and it will be in
+            // someone's report. So they are printed, in their own element, marked non-gating, with the one
+            // sentence a reader needs written where they meet it. Emitted even when EMPTY — an absent
+            // element then means "no scope was given", never "nobody else has anything open".
+            std::printf( "<out-of-scope n=\"%zu\" would-gate=\"%zu\" note=\"not yours - do not ack: these rows lie outside the scope this run named. "
+                         "They are disclosed rather than hidden, they never gate this exit code, and the ack refuses to write them.\">",
+                         outOfScope.size(), scopedOutGating );
+            for( const quality::Regression& r : outOfScope )
+            {
+                emitRow( r, /*gatingAllowed=*/false );
+            }
+            std::printf( "</out-of-scope>" );
+        }
+        std::fputs( quality::staleAcksXml( saRows ).c_str(), stdout );   // L2 — one <sa> row per stale ack (quality::staleAcksXml)
         std::printf( "</quality-delta>" );
         return gatingCount > 0 ? 2 : 0;   // r26: only a PREEXISTING-worse AND major regression gates (== gating=)
     }
