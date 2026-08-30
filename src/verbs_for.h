@@ -2251,21 +2251,13 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // §P2 — the two budget flags obey the documented two-personality rule (D10): --max-tokens SHAPES (byte
         // ceiling at the map family's densest rate × headroom — the old ×4 B/tok overshot ~85×), --token-budget
         // GATES inside emitRecallBudgeted (exit 3, header line only — never the artifact it rejected).
-        // R-R: the run's own root, derived ONCE and spent twice — the ranker relativizes the path tokens it
-        // scores against it, and buildRecall relativizes the separator line it prints against it. Two
-        // consumers of one fact, because a bundle whose ranking and whose display disagreed about the
+        // R-R: the run's own root, derived ONCE and spent twice inside recallFor — the ranker relativizes the
+        // path tokens it scores against it, and buildRecall relativizes the separator line it prints against
+        // it. Two consumers of one fact, because a bundle whose ranking and whose display disagreed about the
         // spelling of a file is exactly the drift the root-relative emission lane spent a round removing.
         // Empty for multi-root, where ing.files already hold the labelled root-relative spelling.
         const std::string_view   recallRootArg = ( ing.realPaths.empty() && cfg.roots.size() == 1 )
                                                      ? std::string_view( cfg.roots[0] ) : std::string_view();
-        // pathFieldDefaultW=1: the recall lens ranks DOCS, where the filename often IS the answer's name
-        // ("readme", "report", "paired_table") — measured by bench/recalleval (gate: recallevalcheck.sh).
-        // The path it scores is root-relative, so the ranking does not depend on how deep the corpus is
-        // checked out (registered + measured in docs/EVALS.md; gate: test/recallrankdepthcheck.sh).
-        // Unguarded: rootPrefixOf("") is "" (its trailing-slash loop needs size() > 1), and
-        // rootRelativeUri(p, "") returns p bar a leading "./" — so the multi-root path needs no branch.
-        const std::string        recallRootPrefix = rw::sarif::rootPrefixOf( recallRootArg );
-        const std::vector<float> rscore = lexicalScores( ing, g.outOff, g.outTargets, cfg.recall, 0, nullptr, 1, recallRootPrefix );
         // Recall is uniquely body-heavy: an unset ceiling used to let a broad docs query stream hundreds of
         // thousands of tokens. Keep explicit --max-tokens authoritative, but make the common agent path safe.
         const bool               defaultRecallBudget = cfg.maxTokens == 0;
@@ -2276,8 +2268,11 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // §B2: --top-k=N now actually SHAPES how many docs recall emits (was accept-and-ignore — --help and
         // the --limit refusal both already promised this). Default stays 8 when the user never passed the flag.
         const int                 recallK = cfg.topKExplicit ? cfg.topK : 8;
-        const RecallBundle       bundle = buildRecall( ing, rscore, cfg.recall, recallK, budget, true, redactPtr,
-                                                       recallRootArg );   // docs only; R-R
+        // recallFor (recall.h) is the ONE rank-then-build call MCP `memory_recall` also makes — the recall
+        // lens's pathFieldDefaultW=1 and its root-prefix derivation live there, so the two front doors cannot
+        // drift apart again (gate: test/recallparitycheck.sh).
+        const RecallBundle       bundle = recallFor( ing, g.outOff, g.outTargets, cfg.recall, recallK, budget,
+                                                     redactPtr, recallRootArg );   // docs only; R-R
 
         const int                rc     = emitRecallBudgeted( stdout, bundle, cfg.tokenBudget );
         reportRedactions( stderr, redactCounts );
