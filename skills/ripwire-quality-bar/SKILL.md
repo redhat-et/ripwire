@@ -215,6 +215,9 @@ something always fires.)
    records `by=<scope>`, so a later run can flag an ack that suppressed a path its author never owned
    (`foreign-acks=`). A pattern with no wildcard is a root-anchored path prefix; `*`/`?` match the whole
    path, with `*` spanning `/`. A scope that names nothing indexed refuses rather than reporting you clean.
+   One reserved word: `--scope=diff` is whatever the working tree changed vs the baseline, expanded to
+   one path per changed indexed file. It is sugar for the **single-writer** case — in the shared tree
+   this flag exists for, a sibling's edits are "changed" too, so name your own paths there.
 
 5. **Want ONE number instead of a list — `ripwire <dir> --dmm`.** `--quality-delta` says *which* kinds got
    worse; it has no scale, so "is this change better than my last one?" has no answer. `--dmm` is that scale:
