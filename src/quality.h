@@ -3950,6 +3950,32 @@ inline std::string takeAckByPrefix( std::string& reason )
     return val;
 }
 
+// ─── THE READER-SIDE TWIN OF THE ACK REASON CLOBBER (2nd site, round 2026-08-30) ───────────────────────
+//
+// Two lines for the same (kind,key) in the file are usually two lanes' independent appends meeting in an
+// ordinary git merge — the ledger is committed and sorted precisely to make that merge clean. D2's rule
+// stands: max(ackNow) wins the ROW, because the ratchet floor can only ever go UP through a duplicate. But
+// the losing line's REASON must be reconciled the same way a live re-ack is (composeAckReason, at the
+// write site in verbs_quality.h), not silently discarded: the winner's own head segment stays the head,
+// and the loser's head becomes the one-hop `prior:` segment. Both sides may already BE chains from earlier
+// re-acks — only each side's head participates, so the cap survives any number of merge rounds, and a
+// byte-identical duplicated line (both-sides-kept merge artifact) is a reason no-op via composeAckReason's
+// identical-head rule.
+inline void mergeDuplicateAckRecord( AckRecord& row, AckRecord&& incoming )
+{
+    const bool         incomingWins = incoming.ackNow > row.ackNow;
+    const std::string& winnerReason = incomingWins ? incoming.reason : row.reason;
+    const std::string& loserReason  = incomingWins ? row.reason : incoming.reason;
+    const std::size_t  sep          = winnerReason.find( kAckReasonChainSep );
+    const std::string  winnerHead   = ( sep == std::string::npos ) ? winnerReason : winnerReason.substr( 0, sep );
+    const std::string  folded       = winnerHead.empty() ? loserReason : composeAckReason( loserReason, winnerHead );
+    if( incomingWins )
+    {
+        row = std::move( incoming );
+    }
+    row.reason = folded;
+}
+
 inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string& path )
 {
     gtl::btree_map<std::string, AckRecord> out;
@@ -3997,9 +4023,13 @@ inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string&
 
         const std::string mapKey = ackMapKey( kind, key );
         const auto        it     = out.find( mapKey );
-        if( it == out.end() || ackNow > it->second.ackNow )
-        { // D2: max(ackNow) wins, not last-line
+        if( it == out.end() )
+        {
             out[ mapKey ] = AckRecord{ kind, key, ackNow, cid, by, reason };
+        }
+        else
+        {
+            mergeDuplicateAckRecord( it->second, AckRecord{ kind, key, ackNow, cid, by, reason } );
         }
     }
     return out;
