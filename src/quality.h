@@ -3762,6 +3762,41 @@ inline std::string ackMapKey( const std::string& kind, std::uint64_t key )
     return kind + " " + hex;
 }
 
+// ─── ACK RATCHET REASON CLOBBER (round 2026-08-29 fix) ─────────────────────────────────────────────────
+//
+// THE BUG. Re-acking an EXISTING (kind,key) row with a new reason used to overwrite `reason` outright.
+// A finding shared by many unrelated sessions — `printUsage`'s verbosity row is re-acked by every flag
+// addition, since each addition changes the function's own body — loses whichever session's justification
+// got there first: two lanes independently wrote and then silently destroyed each other's reasons on the
+// SAME row.
+//
+// THE FIX. When the new reason differs from the row's current one, fold the old reason in rather than
+// dropping it: `<new reason> | prior: <old reason>`. Two things keep this from becoming its own mess:
+//   * IDENTICAL reasons are a no-op — re-running `--quality-ack='same text'` must not grow the chain (and
+//     returns the row UNCHANGED, so a repeat ack does not even touch the file).
+//   * The chain is capped at ONE hop. A row's reason may already itself be a chain from an earlier
+//     re-ack ("Y | prior: X") — only the immediately-preceding segment ("Y") is compared against and kept;
+//     an older segment ("X") is dropped rather than accumulating across every re-ack this row ever sees.
+//     A committed ledger already changes reason on every unrelated flag addition, so an uncapped chain
+//     would grow without bound; one hop of context (who had it right before you) is what a reader actually
+//     needs to reconstruct a decision, without turning the ledger into an append-only reason log.
+inline constexpr std::string_view kAckReasonChainSep = " | prior: ";
+
+inline std::string composeAckReason( const std::string& priorReason, const std::string& newReason )
+{
+    if( priorReason.empty() )
+    {
+        return newReason;
+    }
+    const std::size_t sep            = priorReason.find( kAckReasonChainSep );
+    const std::string currentReason  = ( sep == std::string::npos ) ? priorReason : priorReason.substr( 0, sep );
+    if( currentReason == newReason )
+    {
+        return priorReason;   // identical reason (ignoring any existing chain) — no-op, chain unchanged
+    }
+    return newReason + std::string( kAckReasonChainSep ) + currentReason;
+}
+
 // ─── P0.3 (r27) — ZERO-MAGNITUDE ACKS ARE NOT A BLANK CHECK ────────────────────────────────────────────
 //
 // THE BUG. `applyAckRatchet` suppresses on `r.now <= ackNow`. The api-surface tier-A push emits was=now=0 for
