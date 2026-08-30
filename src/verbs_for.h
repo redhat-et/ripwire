@@ -342,6 +342,22 @@ struct ForLensNotes
     const char*        confidence;  // "high" | "low"
     int                marginPct;   // the whole-percent relative drop the confidence derives from (0 = none)
     bool               weak;
+    // ── HARNESS-FACING instrumentation, JSON dialect ONLY (docs/EVALS.md, "Agent Retrieval Bench —
+    // abstention round 2: the adaptive cut's corpus-support facts", PRE-REGISTERED 2026-08-30) ───────
+    // The adaptive cut computes these three and, before this, emitted none of them on any surface. They
+    // are the raw counts BEHIND confidence=/margin_pct=, not a second opinion about them: same
+    // adaptiveCut call, same score vector, no new scorer and no second pass. Round one closed threshold
+    // tuning over confidence=/margin_pct= as a recorded NEGATIVE and named exactly these as the next
+    // candidate, so they exist here to be MEASURED against the benchmark's selective splits — not yet
+    // to be read by an agent. Hence this dialect and nowhere else: the XML bundle's header rides a
+    // measured byte ceiling (fornotesbudgetcheck.sh fits at est_tokens=800 exactly), and a fact that may
+    // turn out to carry no signal has not earned bytes off every ranked answer. MCP `for` serves the XML
+    // (forTaskText), so no agent surface moves. Promotion to XML root attributes — with the legend
+    // clause, --help and skills text the surface-audit checklist demands — is what a POSITIVE
+    // calibration outcome licenses, and is deliberately NOT done here.
+    std::size_t        keptCount;   // AdaptiveCut::kept — the cliff-clamped head size, in [floor, ceiling]
+    std::size_t        scored;      // AdaptiveCut::positiveHits — indexed symbols with a routed score > 0
+    std::size_t        corpus;      // symbols the lens scored at all — the denominator `scored` means nothing without
 };
 
 // W3FIX H2 — the pieces --for's header comment is made of, so the header can be REBUILT in three shapes (as
@@ -614,6 +630,12 @@ inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes&
     h += ",\"confidence\":\"";
     h += notes.confidence;
     h += "\",\"margin_pct\":" + std::to_string( notes.marginPct );
+    // the adaptive cut's own counts — the abstention round-2 instrumentation described on ForLensNotes.
+    // ALWAYS present (a count of zero is a measurement: "nothing scored", never "the field was dropped"),
+    // and JSON-only BY DESIGN, which the struct's comment states in full rather than repeating here.
+    h += ",\"kept\":" + std::to_string( notes.keptCount );
+    h += ",\"scored\":" + std::to_string( notes.scored );
+    h += ",\"corpus\":" + std::to_string( notes.corpus );
     if( notes.weak )
     {
         h += ",\"weak\":true";
@@ -1615,7 +1637,15 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                 forLensJsonHeader( cfg.forTask, ForLensNotes{ routeNoteRaw, mentionNote, boostNote,
                                                                                               docMentionNote, adaptiveNote, floorNote,
                                                                                               forConf.level,
-                                                                                              forConf.marginPct, forWeak } ),
+                                                                                              forConf.marginPct, forWeak,
+                                                                                              // abstention round 2: forCut is the SAME
+                                                                                              // cut the confidence facts above derive
+                                                                                              // from, so the counts and the verdict
+                                                                                              // cannot disagree. lensRank is per-symbol
+                                                                                              // over the whole index, so its size IS the
+                                                                                              // scored corpus.
+                                                                                              forCut.kept, forCut.positiveHits,
+                                                                                              lensRank.size() } ),
                                                 ForLensJsonInputs{ ing, lensRank, forTopN, fanInPtr, impurePtr, &forChurn,
                                                                    &forClone, testedPtr, ampPtr, redactPtr,
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,

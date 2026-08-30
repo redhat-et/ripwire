@@ -23,6 +23,14 @@ what "meets"/"does not meet" means):
   DOP safety:       false_abstain_rate <= 0.10 AND recall >= 0.20 -> DOP meets floor
   best-F1 threshold: F1 >= 0.35 meets, else does not meet
 
+ROUND TWO (docs/EVALS.md, "Agent Retrieval Bench — abstention round 2: the adaptive cut's
+corpus-support facts", PRE-REGISTERED 2026-08-30) runs in the same pass, over the three counts the
+binary began emitting for it: kept / scored / corpus, none of which reached any surface when round
+one ran. Its PRIMARY is support = scored/corpus with abstain_score = 1 - support; its three
+secondaries are reported and decide nothing; its bands are round one's, plus a directional-refutation
+band (AUROC <= 0.35 means the signal separates the OPPOSITE way and is NOT a pass). Round-two metric
+lines carry an `r2_` prefix, and the behavior-licensing verdict is the AND over BOTH selective splits.
+
 Datasets (details files, produced by run_arb.py --task=abstention and --split=...):
   abstention                    — single-class (all no_gold); recall only, no AUROC/false-abstain
   selective_retrieval_balanced  — full confusion + AUROC + sweep (primary, near-balanced)
@@ -81,6 +89,96 @@ def row_score(row):
         margin = row.get("margin_pct") or 0
         return 1.0 + margin / 100.0
     return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ROUND TWO — the adaptive cut's corpus-support facts (docs/EVALS.md, "Agent Retrieval Bench —
+# abstention round 2: the adaptive cut's corpus-support facts", PRE-REGISTERED 2026-08-30).
+#
+# Round one is a recorded NEGATIVE: confidence=/margin_pct= separate at chance. Round two tests a
+# DIFFERENT signal drawn from the same statistic — not the ranking's SHAPE but the query's GRIP on
+# the corpus. The three counts it reads (kept / scored / corpus) reached no output surface at all
+# when round one ran, which is precisely why round one could not test them.
+#
+# The registered PRIMARY, verbatim, and the only thing that decides a band:
+#     support(sample)       = scored / corpus            # in [0, 1]
+#     abstain_score(sample) = 1.0 - support              # higher = more likely unanswerable
+# The DIRECTION is registered too: the hypothesis is that an unanswerable query has THINNER corpus
+# support. An AUROC <= 0.35 therefore means the signal separates the OPPOSITE way; that is recorded
+# as a refutation of the direction and NOT as a pass, and acting on it would need its own later
+# registration.
+#
+# The SECONDARIES are reported and decide nothing. Naming them secondary in the registration, before
+# any row was read, is the guard against picking the best of four out of the finished table
+# afterwards and calling it the hypothesis.
+
+DIRECTIONAL_REFUTATION = 0.35
+
+
+def row_counts(row):
+    """The three round-two counts as ints, or None if ANY of them is absent or not an integer — a
+    details file written before the instrumentation existed, or a failed invocation. One guard for
+    all four scorers below: each of them needs the same "did the binary actually emit this" answer,
+    and four private copies of it is how one scorer ends up silently coercing a missing count to 0
+    while its neighbours drop the row."""
+    kept, scored, corpus = row.get("kept"), row.get("scored"), row.get("corpus")
+    triple = (kept, scored, corpus)
+    if any(not isinstance(v, int) or isinstance(v, bool) for v in triple):
+        return None
+    return triple
+
+
+def row_support(row):
+    """None (signal_missing) | float in [0,1]: the fraction of the scored corpus this query's terms
+    reach at all. None also when corpus is 0 — 0/0 measures nothing."""
+    counts = row_counts(row)
+    if counts is None or counts[2] <= 0:
+        return None
+    return counts[1] / counts[2]
+
+
+def row_abstain_support(row):
+    """The registered PRIMARY abstain score: monotone DECREASING in support, exactly as registered."""
+    support = row_support(row)
+    return None if support is None else 1.0 - support
+
+
+def row_abstain_scored_raw(row):
+    """SECONDARY (a): raw `scored`, unnormalized, negated so its direction matches the primary's.
+    Reported to show how much of any separation is repo SIZE rather than query grip — which is the
+    whole reason the primary carries a denominator."""
+    counts = row_counts(row)
+    return None if counts is None else -float(counts[1])
+
+
+def row_abstain_headshare(row):
+    """SECONDARY (b): the served head's share of everything that matched, kept/scored, negated for
+    the same direction. Stated rather than left to a division guard: when nothing matched
+    (scored == 0) this maps to the TOP of the range, because under the primary's own logic a query
+    that grips nothing is maximal abstain evidence."""
+    counts = row_counts(row)
+    if counts is None:
+        return None
+    return 0.0 if counts[1] <= 0 else -(counts[0] / counts[1])
+
+
+def row_abstain_joint(row):
+    """SECONDARY (c): the joint rule `abstain iff confidence == "low" AND support < theta`, as a
+    score. Only a "low" row can be abstained on under that rule, so a "high" row is pinned below
+    every "low" one instead of competing on support it is not eligible to be judged by."""
+    support = row_support(row)
+    if support is None or row.get("confidence") not in ("high", "low"):
+        return None
+    return (1.0 - support) if row.get("confidence") == "low" else -1.0
+
+
+# name -> (scorer, is_primary). Order is the report order; only the primary decides a band.
+ROUND2_SIGNALS = (
+    ("support", row_abstain_support, True),
+    ("scored_raw", row_abstain_scored_raw, False),
+    ("head_share", row_abstain_headshare, False),
+    ("joint_low_and_support", row_abstain_joint, False),
+)
 
 
 def confusion(labels, scores, threshold):
@@ -205,7 +303,86 @@ def score_dataset(data_dir, dataset):
     else:
         print("ARB\tcalib\t%s\tauroc\tn/a (single-class dataset)" % dataset)
 
+    summary["round2"] = score_round2(dataset, scored_rows)
     return summary
+
+
+def auroc_band(auc):
+    """The registration's band table, INCLUDING the directional-refutation rung: an AUROC at or below
+    0.35 means the signal separates the OPPOSITE way to the registered hypothesis. That rung is a
+    distinct verdict string rather than a bare `does_not_meet`, because it is a different finding and
+    the registration forbids reading it as a pass."""
+    if auc >= AUROC_MEETS:
+        return "meets"
+    if auc >= AUROC_WEAK:
+        return "weak"
+    return "does_not_meet_opposite_direction" if auc <= DIRECTIONAL_REFUTATION else "does_not_meet"
+
+
+def safe_operating_point(table):
+    """The registered operating point: the highest-recall threshold whose false-abstain rate is still
+    under the ceiling. None when no threshold satisfies both floors — which is itself the answer, not
+    a missing measurement."""
+    safe = [r for r in table
+            if r["false_abstain_rate"] is not None and r["false_abstain_rate"] <= DOP_FALSE_ABSTAIN_MAX
+            and r["recall"] is not None and r["recall"] >= DOP_RECALL_MIN]
+    return max(safe, key=lambda r: r["recall"]) if safe else None
+
+
+def score_round2_signal(dataset, scored_rows, name, scorer, is_primary):
+    """One round-two signal, scored and printed. Split out of score_round2 so the loop stays a loop:
+    the per-signal body is the whole statistic (AUROC, band, sweep, operating point) and the caller
+    is only the join over four of them."""
+    usable = [(row_label(dataset, r), scorer(r)) for r in scored_rows if scorer(r) is not None]
+    labels = [y for y, _ in usable]
+    scores = [s for _, s in usable]
+    n_pos = sum(1 for y in labels if y)
+    n_neg = len(labels) - n_pos
+    missing = len(scored_rows) - len(usable)
+    base = {"primary": is_primary, "signal_missing": missing, "no_gold": n_pos, "positive": n_neg}
+    print("ARB\tcalib\t%s\tr2_%s_signal_missing\t%d" % (dataset, name, missing))
+    if n_pos == 0 or n_neg == 0:
+        print("ARB\tcalib\t%s\tr2_%s_auroc\tn/a (single-class dataset)" % (dataset, name))
+        return dict(base, auroc=None)
+
+    auc = auroc(labels, scores)
+    band = auroc_band(auc)
+    best, table = sweep_thresholds(labels, scores)
+    safe_best = safe_operating_point(table)
+    pct = lambda v: "%.4f" % v if v is not None else "n/a"   # noqa: E731 — one local formatter, six call sites
+
+    print("ARB\tcalib\t%s\tr2_%s_auroc\t%.4f%s" % (dataset, name, auc, "  (PRIMARY)" if is_primary else ""))
+    print("ARB\tcalib\t%s\tr2_%s_auroc_band\t%s" % (dataset, name, band))
+    print("ARB\tcalib\t%s\tr2_%s_best_f1\t%.4f" % (dataset, name, best["f1"]))
+    print("ARB\tcalib\t%s\tr2_%s_best_f1_threshold\t%.6f" % (dataset, name, best["threshold"]))
+    print("ARB\tcalib\t%s\tr2_%s_best_f1_recall\t%s" % (dataset, name, pct(best["recall"])))
+    print("ARB\tcalib\t%s\tr2_%s_best_f1_false_abstain_rate\t%s" % (dataset, name, pct(best["false_abstain_rate"])))
+    print("ARB\tcalib\t%s\tr2_%s_safe_operating_point\t%s" %
+          (dataset, name, "none" if safe_best is None else
+           "theta=%.6f recall=%.4f false_abstain=%.4f" %
+           (safe_best["threshold"], safe_best["recall"], safe_best["false_abstain_rate"])))
+    return dict(base, auroc=auc, auroc_band=band, best_f1=best, safe_operating_point=safe_best,
+                threshold_sweep_size=len(table))
+
+
+def score_round2(dataset, scored_rows):
+    """The round-two pass: the PRIMARY corpus-support statistic and its three reported secondaries.
+    Emits under a `r2_` metric prefix so a reader (and a grep) can never mistake a round-two number
+    for a round-one one — the two rounds share a dataset, a positive class and a band table, and
+    that is exactly the shape in which numbers get quoted against the wrong registration."""
+    out = {"signals": {name: score_round2_signal(dataset, scored_rows, name, scorer, is_primary)
+                       for name, scorer, is_primary in ROUND2_SIGNALS}}
+    primary = out["signals"].get("support") or {}
+    out["primary_auroc"] = primary.get("auroc")
+    out["primary_band"] = primary.get("auroc_band")
+    out["primary_operating_point"] = primary.get("safe_operating_point")
+    # the verdict this dataset contributes. The registration licenses a behavior change only when the
+    # PRIMARY meets AND an operating point exists — on BOTH selective splits, which main() joins.
+    out["licenses_behavior"] = bool(primary.get("auroc_band") == "meets"
+                                    and primary.get("safe_operating_point") is not None)
+    print("ARB\tcalib\t%s\tr2_primary_band\t%s" % (dataset, out["primary_band"]))
+    print("ARB\tcalib\t%s\tr2_licenses_behavior\t%s" % (dataset, out["licenses_behavior"]))
+    return out
 
 
 def main():
@@ -227,6 +404,22 @@ def main():
         summary = score_dataset(args.data, dataset)
         if summary is not None:
             summaries.append(summary)
+
+    # ROUND TWO's verdict is a JOIN, not a per-dataset result: the registration requires the PRIMARY
+    # to meet AND an operating point to exist on BOTH selective splits. Printed here so nobody has to
+    # assemble it by eye from two dataset blocks and get the AND wrong in the direction that ships.
+    splits = [s for s in summaries if s["dataset"].startswith("selective_retrieval_")]
+    if len(splits) == 2:
+        licensed = all((s.get("round2") or {}).get("licenses_behavior") for s in splits)
+        print("ARB\tcalib\tROUND2\tprimary_auroc_by_split\t%s" %
+              "  ".join("%s=%s" % (s["dataset"], "n/a" if (s.get("round2") or {}).get("primary_auroc") is None
+                                   else "%.4f" % s["round2"]["primary_auroc"]) for s in splits))
+        print("ARB\tcalib\tROUND2\tbehavior_licensed\t%s" % licensed)
+        print("ARB\tcalib\tROUND2\tverdict\t%s" %
+              ("POSITIVE — wire the abstention behavior per the registration" if licensed else
+               "NEGATIVE — registered negative; --for behavior unchanged, axis stays disclosed-not-acted-on"))
+    else:
+        print("ARB\tcalib\tROUND2\tverdict\tINCOMPLETE (both selective splits are required by the registration)")
 
     out_path = os.path.join(args.data, "runs", "abstention_calibration_summary.json")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
