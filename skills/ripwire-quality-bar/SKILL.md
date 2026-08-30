@@ -145,7 +145,16 @@ something always fires.)
 3. **Measure the delta** — `ripwire <dir> --quality-delta` → only the regressions you introduced, across the
    10 kinds in the table below. Each emits `<r kind="…" sym=… was=… now=…>` (`members=` for duplication).
    Test-fixture dirs are exempt from `dead-code`; `short-horizon-churn` ignores your own current edit and
-   exempts brand-new symbols/markdown/fixtures. **Watch `verbosity` hardest** — LOC growth is the single
+   exempts brand-new symbols/markdown/fixtures. Two exemptions are DISCLOSED on the report rather than
+   silent, and both change how you read a zero: a symbol defined by a self-registering test/benchmark
+   macro (doctest `TEST_CASE`, gtest `TEST`/`TEST_F`/`TEST_P`, Catch2, Google Benchmark, plus anything in
+   `.ripwire_config`'s `register_macros`) is never `dead-code` — a static initializer is invisible to a
+   name-based call graph — and the header's `register-macro-excluded="N"` counts how many were dropped
+   that way, printed even at 0. A `duplication` row whose members share only a recognized *idiom* — a
+   scalar threshold ladder, an enum-to-string switch table, a builder chain — and share no domain
+   identifiers across different scopes is demoted to `sev="minor"` with `idiom="…"` and stops gating.
+   **The idiom name is there so you can overrule it by reading**: a demotion is a judgement the tool is
+   showing its work on, not a row it hid. **Watch `verbosity` hardest** — LOC growth is the single
    most-measured agent failure mode, the one most likely to hide in an otherwise-clean diff.
 
    **Read the exit code correctly — it is narrower than it looks.** Findings are sorted on three

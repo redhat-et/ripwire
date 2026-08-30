@@ -188,6 +188,12 @@ sections your question needs.
    check `type=` before assuming two members are byte-identical. Larger `tokens=` = more dedup value; a fix
    to one likely belongs in all. **Rule of Three:** extract on the *third* occurrence, not the second — a
    little duplication beats the *wrong* abstraction.
+   A group carrying `idiom="…"` (`threshold-ladder`, `switch-name-table`, `builder-chain`) plus
+   `demoted="1"` is one the detector judged an IDIOM COLLISION, not shared logic: same shape, no shared
+   domain identifiers, different scopes — five unrelated bucketing ladders in five subsystems match each
+   other's token stream and consolidating them would be the wrong abstraction. Demoted groups still print
+   and still count; they stop *gating*. The idiom is named precisely so you can overrule it by reading the
+   bodies — treat it as the tool showing its work, not as a row it decided for you.
 
 4. **AST smells** — `ripwire <dir> --lint`
    `<lint findings="N"><rule name="magic-number" count="82"/> …` then per-finding `<f rule= p= …>` with the
