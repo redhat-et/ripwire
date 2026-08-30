@@ -22,11 +22,12 @@ declarative table.
 
 ### No API key. No embeddings. No index server. No daemon.
 
-### Installed in one line. Understood by your agent from the same line.
-
-One self-contained binary on your own machine, offline — and the same line ships the task-shaped
-skills that teach your agent *when* to reach for it, not just how. Install it and ask it something
-before you finish reading this page:
+One self-contained binary on your own machine, offline, installed in one line — and the same line
+ships the task-shaped skills that teach your agent *when* to reach for it, not just how. If your
+agent can run shell commands — Claude Code, Codex, Cursor, Windsurf, Gemini, opencode, aider — it is
+set up the moment the install finishes; [the MCP server is the optional second
+interface](#set-it-up-in-your-coding-agent). Install it and ask it something before you finish
+reading this page:
 
 ```bash
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"
@@ -34,118 +35,44 @@ ripwire . --for="incremental cache invalidation"
 ```
 
 One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks, and
-the tests that reach them.
+the tests that reach them. This is what comes back — real output from this tree (2026-08-30), trimmed
+and line-wrapped here for reading; the real thing is one minified line:
+
+```xml
+<ctx task="incremental cache invalidation" confidence="high" margin_pct="22"
+     bundle="compact" bodies="0" reason="compact-route">
+  <sigs capped="1">
+    <f p="src/ingest_cache.h">
+      <d l="106" n="kCacheMagic" cx="0" in="0" churn="1" amp="6" pure="1" r="2">
+        <doc>incremental cache (--cache): per-file content hash + raw facts so a
+             re-run re-parses ONLY …</doc>constexpr std::uint32_t kCacheMagic = …</d> …</f>
+    <f p="src/dmm.h">
+      <d l="244" n="ingestCommitTree" cx="6" in="1" churn="4" amp="15" r="3"> … </d></f>
+    <f p="src/ingest.h">
+      <d l="262" n="ingest" cx="1" in="0" churn="23" amp="55" r="4"> … </d></f>
+    … </sigs>
+  <hops shown="2" total="6" capped="1" noedge="3">
+    <h l="1304" p="src/ingest_astquery.h" n="spanTierMemoPath">
+      <calls total="3"><c n="shaKeyedCachePath" l="1570"/> … </calls></h> … </hops>
+</ctx>
+```
+
+Ranked definitions with their one-line docs and signatures — `cx=` complexity, `churn=` git edit
+frequency, `amp=` change amplification, `r=` rank; `confidence=` flags a flat ranking instead of
+letting it read like an answer; `<hops>` rows carry the one-hop call context, caps disclosed. Every
+attribute is defined in the one legend at the top of the real output, which also self-reports the
+bundle's cost — `est_tokens="4263"`, about 4.3K tokens for this answer.
 
 | The agent without a map | The agent with ripwire |
 | --- | --- |
-| greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="3395"` on this repository (re-derived 2026-08-23) |
+| greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="4263"` on this repository (re-derived 2026-08-30, the run above) |
 | reads whole files to find the symbols that matter | those symbols, with complexity, churn and test coverage inline |
 | finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
 | pays for every line it read, right or wrong | measured at **5.0%** of what that grep-and-read pass spends (re-derived 2026-08-23) |
 
-### Against the leading graph-database code-context MCP server
-
-On 48 matched questions across django, webpack and this repository — symbol lookup, conceptual
-search, blast radius, and one-call task orientation — ripwire won 27, lost 7 and tied 14, spending
-**~77K tokens against its ~486K** for the whole sweep. It indexes the same three repositories in
-0.25–0.45 s and 6.6–16.5 MB, against that server's 23–52 s and 391–623 MB, and answers a warm query
-in a median 197 ms against its 1,082 ms. Its seven wins are real and named one by one in the method.
-
-<details>
-<summary>How it was measured, and where ripwire still loses</summary>
-
-Both arms warm with a pre-built index, median of 3 timed calls, stdout to a file rather than a pipe.
-The competitor ran in its stronger retrieval configuration; its numbers were recorded once and then
-frozen, and ripwire's side was re-run after the fixes the first pass produced. Per class, as a share
-of the competitor's bytes on totals: symbol lookup **1.35×**, conceptual search **1.23×**, blast
-radius **0.39×**, task orientation **0.06×**.
-
-Where it loses: on a plain one-symbol lookup the competitor answers in about a kilobyte carrying
-callers and callees, and ripwire spends roughly three times that to also hand back the body. It
-ranks a chunk-id plugin first on one webpack query where ripwire never surfaces the directory at
-all — a ranking miss, and a fix for it was built, met its pre-registered band, and was reverted
-anyway for failing a separate standing requirement. Its depth-labelled blast radius and its import
-edges are both better presentations than ripwire's flat reaching-set.
-
-Full method, pins, per-class tables, the carried-versus-re-judged ledger, and the complete list of
-what the competitor does better:
-[`docs/EVALS.md` §2](docs/EVALS.md#2-head-to-head-against-other-tools).
-</details>
-
-**Nothing it is unsure about reaches your agent unlabelled — and nothing it could not see goes
-unnamed.** Every guess is marked in the output, and every mark has a next step — up to handing it a
-compiler-grade index. Point it at a repository whose main language it has no grammar for and the
-map's first line says so (`unindexed="ml:793,mli:607,…"` on a facebook/infer clone); a file it
-indexed but cannot vouch for carries a parse-health row; every file the crawl passed over is
-itemized with its reason. A confident-looking map that lies by omission is the failure mode this
-tool refuses.
-[What it misses, and what to run next →](#what-it-misses-and-what-to-run-next)
-
-**New (2026-08-23), each measured on this tree's binary, with the command that re-derives it:**
-- **`--pattern` — structural search written in CODE, not in node kinds.** `--pattern='foo($X, ...)'`
-  where `$NAME` binds one node, `$_` binds nothing and `...` is an ellipsis over siblings; comments
-  are transparent, everything else is kind- and text-exact. Served across **13 grammar objects (11
-  languages)**, and it *refuses* rather than lying: a pattern no served grammar resolves, or that
-  collapses to a bare token, exits 1 naming the served and unserved families — never `hits=0`.
-  (`./build/ripwire . --pattern='VERIFY($X)'` on this repo: **101 hits over 625 eligible files**,
-  each row carrying its enclosing symbol; `--pattern='$X'` exits **1** with the refusal text.)
-- **`--safe-delete=SYM` — "can I delete this?" in ONE call.** Composes the signals the tool already
-  computes for a resolved symbol: 1-hop callers, the transitive blast radius, every read/write/
-  import/call site, how much of that radius any test reaches, and `--dead-code`'s own shape — then
-  reports `risk=` as a **fact**, never a go/no-go verdict. (`--safe-delete=coversOrEquals`:
-  `callers="2" impact_reaches="17" uses="2" radius_tested="0" radius_untested="17"
-  dead_code_candidate="0" risk="untested-radius"`.)
-- **`--impact` grew a disclosed import tier.** A class whose consumers `#include` or `require` the
-  file that defines it used to look like it had no blast radius at all. `importers=` is now a second,
-  weaker reach beside `reaches=` — with its own cap pair and `<f via="import">` rows, and **never
-  summed into `reaches=`**, because files and symbols are different units.
-  (`--impact=IngestResult` on this repo: `reaches="0" importers="70" shown_importers="40"
-  importers_capped="1"` — a symbol that reads as unreachable by calls and is included by 70 files.)
-- **Conceptual `--for` queries serve a compact map instead of inline bodies.** Bodies were **52.7% of
-  every conceptual-query byte** — the one class that missed the byte target — so the subtoken+body
-  route now ships the ranked map plus one-hop `<hops>` edge context and no body CDATA, disclosed on
-  the root as `bundle="compact" bodies="0" reason="compact-route"`. Across the frozen 15-query class-B
-  set that is **184,857 B → 95,256 B, −48.5%**, with all 11 judged-decisive markers still present
-  (better than either pre-existing lever's 10/11). `--auto-bodies` is a permanent opt-out, not a
-  migration aid. (One pair on this repo, re-derived 2026-08-23:
-  `--for="incremental cache invalidation"` **8,487 B** compact vs **12,044 B** with `--auto-bodies`,
-  **−29.5%**; the 15-query total is [`docs/EVALS.md` §5](docs/EVALS.md).)
-- **`--pack-task` orders callers by corroboration.** A neighbour reached by several of the bundle's
-  top anchors is more likely to be the thing you must touch than one reached by exactly one, so rows
-  sort by `shared=` — the count of top-K anchors that reach them — omitted at 1 because that is what
-  every 1-hop row satisfies by construction. (`--pack-task="emit the minified xml map"` puts
-  `escapeXml` first at `shared="4"`.)
-- **`--lint` rolls up per rule, so a capped view stops hiding whole rules.** Every rule gets a
-  `<rule name= count= shown_rows= rows_capped=/>` row, and a rule whose registered languages match
-  nothing in the corpus carries `applicable="0"` so its zero reads as structural inertness rather
-  than a measurement. On this repository the default view shows 692 of 3,332 findings — and **14 of
-  the 31 rules that fired contribute zero shown rows**, 368 findings whose only evidence is their
-  `count=`. (`./build/ripwire . --lint`, counted from the `<rule>` rows.)
-- **PHP and Lua joined the language line**, with their floors stated rather than implied: PHP's
-  dynamic dispatch (`$fn()`, `call_user_func`, `__call`) names its callee at run time and is a
-  declared floor; a Lua corpus reports no inheritance edges, because metatable inheritance is a
-  runtime call with no syntax to read.
-
-<details>
-<summary>Earlier — <b>New (2026-08-15)</b>, kept with its own dates rather than overwritten</summary>
-
-- **`--expand` answers "show me this function" in one call, −47.3% tokens** — an exact-name ask now
-  skips the ranked-map preamble by default and the body arrives with its file's sibling symbols and
-  imports inline (`sibs=`/`inc=`), so the follow-up "what else is in this file?" call never happens.
-  (Re-derived 2026-08-15 fix-expand round: `--expand=emitGrepReport` — 47,252 B classic 200-row-map
-  bundle vs 24,911 B today's exact-name default, on this repo; the figure moves as the corpus grows
-  and is not itself CI-gated, so re-measure before citing it in a future round.)
-- **`--grep` groups, deduplicates, and speaks boolean** — per-file grouping, identical-line collapse
-  ("this exact guard appears at 6 call sites" is the finding), and `--and=`/`--not=`/`--grep-scope=`:
-  a two-term ask returns the *complete* answer at **−78%** of the single-term dump. Default view now
-  runs at ~clean-grep cost while naming the enclosing symbol for every hit.
-- **C++ maps got materially truer**: out-of-line definitions past one qualifier
-  (`Outer::Inner::method(){}` — the house style of large C++ codebases) were silently invisible;
-  on one 6,600-file production tree that was ~15% of qualified definitions. Now indexed at any depth.
-- **Compound `--graph-query` filters run ~25× faster** via predicate pushdown — an exact algebraic
-  identity, byte-identical output, gate-enforced.
-
-</details>
+And against five retrieval competitors on a held-out LocBench slice, it finds **all** gold files in
+the top 10 on **58.3%** of instances — the best alternative lands 40.0% — while indexing in 0.31 s.
+[The full leaderboard, losses included ↓](#graph-ranked-retrieval-it-finds-the-right-files-more-often-than-the-alternatives)
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
 
@@ -201,6 +128,46 @@ as `mode="whole-file"` on the response, not silently.
 this project publishes against itself.
 
 </details>
+
+### Against the leading graph-database code-context MCP server
+
+**Won 27 · lost 7 · tied 14** on 48 matched questions across django, webpack and this repository,
+spending **~77K tokens against its ~486K** for the whole sweep.
+
+<details>
+<summary>The full result, how it was measured, and where ripwire still loses</summary>
+
+The 48 questions span symbol lookup, conceptual search, blast radius, and one-call task orientation.
+ripwire indexes the same three repositories in 0.25–0.45 s and 6.6–16.5 MB, against that server's
+23–52 s and 391–623 MB, and answers a warm query in a median 197 ms against its 1,082 ms. Its seven
+wins are real and named one by one in the method.
+
+Both arms warm with a pre-built index, median of 3 timed calls, stdout to a file rather than a pipe.
+The competitor ran in its stronger retrieval configuration; its numbers were recorded once and then
+frozen, and ripwire's side was re-run after the fixes the first pass produced. Per class, as a share
+of the competitor's bytes on totals: symbol lookup **1.35×**, conceptual search **1.23×**, blast
+radius **0.39×**, task orientation **0.06×**.
+
+Where it loses: on a plain one-symbol lookup the competitor answers in about a kilobyte carrying
+callers and callees, and ripwire spends roughly three times that to also hand back the body. It
+ranks a chunk-id plugin first on one webpack query where ripwire never surfaces the directory at
+all — a ranking miss, and a fix for it was built, met its pre-registered band, and was reverted
+anyway for failing a separate standing requirement. Its depth-labelled blast radius and its import
+edges are both better presentations than ripwire's flat reaching-set.
+
+Full method, pins, per-class tables, the carried-versus-re-judged ledger, and the complete list of
+what the competitor does better:
+[`docs/EVALS.md` §2](docs/EVALS.md#2-head-to-head-against-other-tools).
+</details>
+
+**Nothing it is unsure about reaches your agent unlabelled — and nothing it could not see goes
+unnamed.** Every guess is marked in the output, and every mark has a next step — up to handing it a
+compiler-grade index. Point it at a repository whose main language it has no grammar for and the
+map's first line says so (`unindexed="ml:793,mli:607,…"` on a facebook/infer clone); a file it
+indexed but cannot vouch for carries a parse-health row; every file the crawl passed over is
+itemized with its reason. A confident-looking map that lies by omission is the failure mode this
+tool refuses.
+[What it misses, and what to run next →](#what-it-misses-and-what-to-run-next)
 
 ### Saves Tokens: It answers for a fraction of the context
 
@@ -484,27 +451,28 @@ Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, opencode, aider**, and
 call a CLI.
 
 <details>
-<summary><b>What comes back</b> — real output from this repository, pretty-printed and trimmed</summary>
+<summary><b>What comes back</b> — real output from this repository, pretty-printed and trimmed (re-captured 2026-08-30)</summary>
 
 ```xml
 <ctx task="incremental cache invalidation" route="[routed: subtoken+body BM25 — no strong name hit,
-     multi-word conceptual query]" bundle="compact" bodies="0" reason="compact-route" est_tokens="3395">
+     multi-word conceptual query]" confidence="high" margin_pct="22"
+     bundle="compact" bodies="0" reason="compact-route">
   <sigs capped="1">
-    <f p="src/ingest.cpp">
-      <d l="1286" n="compiledQueryCache" cx="1" ccx="0" in="2" churn="105" amp="225" tested="1">HashMap&lt;const TSLanguage*, TSQuery*&gt;&amp; compiledQueryCache()</d>
-      <d l="1441" n="kCacheMagic"        cx="0" ccx="0" in="0" churn="105" amp="223" pure="1"><doc>incremental cache (--cache): per-file content hash + raw facts so a re-run re-parses ONLY c…</doc>constexpr std::uint32_t kCacheMagic = 0x4b505443</d>
+    <f p="src/ingest_cache.h">
+      <d l="106" n="kCacheMagic"   cx="0" ccx="0" in="0" churn="1" amp="6" pure="1" r="2"><doc>incremental cache (--cache): per-file content hash + raw facts so a re-run re-parses ONLY c…</doc>constexpr std::uint32_t kCacheMagic = 0x4b505443</d>
+      <d l="118" n="kCacheVersion" cx="0" ccx="0" in="0" churn="1" amp="6" pure="1" r="31">constexpr std::uint32_t kCacheVersion = …</d>
     </f>
     <f p="src/mcpindex.h">
-      <d l="554" n="mcpCachePath" cx="2" ccx="1" in="1" churn="16" amp="29">inline std::string mcpCachePath( const std::string&amp; root )</d>
-      <d l="950" n="getIndex"     cx="22" ccx="39" in="26" churn="16" amp="54">inline const McpIndex&amp; getIndex( const std::string&amp; root )</d>
+      <d l="554" n="mcpCachePath" cx="2" ccx="1" in="1" churn="18" amp="34" r="13">inline std::string mcpCachePath( const std::string&amp; root )</d>
+      <d l="950" n="getIndex"     cx="22" ccx="39" in="27" churn="18" amp="60" r="9">inline const McpIndex&amp; getIndex( const std::string&amp; root )</d>
     </f>
     …
   </sigs>
-  <hops shown="2" total="6" capped="0" noedge="4">
+  <hops shown="2" total="6" capped="1" noedge="3">
     <h l="244" p="src/dmm.h" n="ingestCommitTree">
-      <calls total="10">
-        <c n="headSnapCachePath" l="984"/><c n="headSnapRepoHex" l="723"/><c n="ingest" l="10411"/>
-        <c n="materializeCommitTree" l="1618"/><c n="headSnapExclHex" l="923"/>…
+      <calls total="11" shown="7" capped="1">
+        <c n="ingest" l="189"/><c n="headSnapCachePath" l="1579"/><c n="headSnapRepoHex" l="1311"/>
+        <c n="materializeCommitTree" l="2239"/><c n="headSnapExclHex" l="1518"/>…
       </calls>
     </h>
   </hops>
@@ -513,10 +481,11 @@ call a CLI.
 
 The cache cluster, ranked and annotated in place: `cx`/`ccx` complexity, `in` reuse count, `churn`
 recent commits, `amp` change amplification, `tested` coverage — the fragile spots are visible
-*before* the agent touches them, in a few thousand tokens instead of five whole files. This is a
-*conceptual* query, so the bundle is the **compact** shape: the ranked map plus one-hop callee edges,
-no inline bodies, and the root says so rather than leaving you to notice. Read the map, then
-`--expand=SYM` the one you want — or pass `--auto-bodies` to get bodies inline as before.
+*before* the agent touches them, in a few thousand tokens (`est_tokens="4263"`, self-reported in the
+header) instead of five whole files. This is a *conceptual* query, so the bundle is the **compact**
+shape: the ranked map plus one-hop callee edges, no inline bodies, and the root says so rather than
+leaving you to notice. Read the map, then `--expand=SYM` the one you want — or pass `--auto-bodies`
+to get bodies inline as before.
 
 </details>
 
@@ -991,6 +960,77 @@ cmake --build build 2>&1 | ./build/ripwire . --from-trace=-
 </details>
 
 ---
+
+## What's new
+
+<details>
+<summary><b>New (2026-08-23)</b> — each measured on this tree's binary, with the command that re-derives it</summary>
+
+- **`--pattern` — structural search written in CODE, not in node kinds.** `--pattern='foo($X, ...)'`
+  where `$NAME` binds one node, `$_` binds nothing and `...` is an ellipsis over siblings; comments
+  are transparent, everything else is kind- and text-exact. Served across **13 grammar objects (11
+  languages)**, and it *refuses* rather than lying: a pattern no served grammar resolves, or that
+  collapses to a bare token, exits 1 naming the served and unserved families — never `hits=0`.
+  (`./build/ripwire . --pattern='VERIFY($X)'` on this repo: **101 hits over 625 eligible files**,
+  each row carrying its enclosing symbol; `--pattern='$X'` exits **1** with the refusal text.)
+- **`--safe-delete=SYM` — "can I delete this?" in ONE call.** Composes the signals the tool already
+  computes for a resolved symbol: 1-hop callers, the transitive blast radius, every read/write/
+  import/call site, how much of that radius any test reaches, and `--dead-code`'s own shape — then
+  reports `risk=` as a **fact**, never a go/no-go verdict. (`--safe-delete=coversOrEquals`:
+  `callers="2" impact_reaches="17" uses="2" radius_tested="0" radius_untested="17"
+  dead_code_candidate="0" risk="untested-radius"`.)
+- **`--impact` grew a disclosed import tier.** A class whose consumers `#include` or `require` the
+  file that defines it used to look like it had no blast radius at all. `importers=` is now a second,
+  weaker reach beside `reaches=` — with its own cap pair and `<f via="import">` rows, and **never
+  summed into `reaches=`**, because files and symbols are different units.
+  (`--impact=IngestResult` on this repo: `reaches="0" importers="70" shown_importers="40"
+  importers_capped="1"` — a symbol that reads as unreachable by calls and is included by 70 files.)
+- **Conceptual `--for` queries serve a compact map instead of inline bodies.** Bodies were **52.7% of
+  every conceptual-query byte** — the one class that missed the byte target — so the subtoken+body
+  route now ships the ranked map plus one-hop `<hops>` edge context and no body CDATA, disclosed on
+  the root as `bundle="compact" bodies="0" reason="compact-route"`. Across the frozen 15-query class-B
+  set that is **184,857 B → 95,256 B, −48.5%**, with all 11 judged-decisive markers still present
+  (better than either pre-existing lever's 10/11). `--auto-bodies` is a permanent opt-out, not a
+  migration aid. (One pair on this repo, re-derived 2026-08-23:
+  `--for="incremental cache invalidation"` **8,487 B** compact vs **12,044 B** with `--auto-bodies`,
+  **−29.5%**; the 15-query total is [`docs/EVALS.md` §5](docs/EVALS.md).)
+- **`--pack-task` orders callers by corroboration.** A neighbour reached by several of the bundle's
+  top anchors is more likely to be the thing you must touch than one reached by exactly one, so rows
+  sort by `shared=` — the count of top-K anchors that reach them — omitted at 1 because that is what
+  every 1-hop row satisfies by construction. (`--pack-task="emit the minified xml map"` puts
+  `escapeXml` first at `shared="4"`.)
+- **`--lint` rolls up per rule, so a capped view stops hiding whole rules.** Every rule gets a
+  `<rule name= count= shown_rows= rows_capped=/>` row, and a rule whose registered languages match
+  nothing in the corpus carries `applicable="0"` so its zero reads as structural inertness rather
+  than a measurement. On this repository the default view shows 692 of 3,332 findings — and **14 of
+  the 31 rules that fired contribute zero shown rows**, 368 findings whose only evidence is their
+  `count=`. (`./build/ripwire . --lint`, counted from the `<rule>` rows.)
+- **PHP and Lua joined the language line**, with their floors stated rather than implied: PHP's
+  dynamic dispatch (`$fn()`, `call_user_func`, `__call`) names its callee at run time and is a
+  declared floor; a Lua corpus reports no inheritance edges, because metatable inheritance is a
+  runtime call with no syntax to read.
+</details>
+
+<details>
+<summary>Earlier — <b>New (2026-08-15)</b>, kept with its own dates rather than overwritten</summary>
+
+- **`--expand` answers "show me this function" in one call, −47.3% tokens** — an exact-name ask now
+  skips the ranked-map preamble by default and the body arrives with its file's sibling symbols and
+  imports inline (`sibs=`/`inc=`), so the follow-up "what else is in this file?" call never happens.
+  (Re-derived 2026-08-15 fix-expand round: `--expand=emitGrepReport` — 47,252 B classic 200-row-map
+  bundle vs 24,911 B today's exact-name default, on this repo; the figure moves as the corpus grows
+  and is not itself CI-gated, so re-measure before citing it in a future round.)
+- **`--grep` groups, deduplicates, and speaks boolean** — per-file grouping, identical-line collapse
+  ("this exact guard appears at 6 call sites" is the finding), and `--and=`/`--not=`/`--grep-scope=`:
+  a two-term ask returns the *complete* answer at **−78%** of the single-term dump. Default view now
+  runs at ~clean-grep cost while naming the enclosing symbol for every hit.
+- **C++ maps got materially truer**: out-of-line definitions past one qualifier
+  (`Outer::Inner::method(){}` — the house style of large C++ codebases) were silently invisible;
+  on one 6,600-file production tree that was ~15% of qualified definitions. Now indexed at any depth.
+- **Compound `--graph-query` filters run ~25× faster** via predicate pushdown — an exact algebraic
+  identity, byte-identical output, gate-enforced.
+
+</details>
 
 ## Measured
 
