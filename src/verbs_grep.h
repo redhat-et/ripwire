@@ -599,7 +599,12 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     {
     std::printf( "<!-- ripwire grep: parallel literal/regex scan; hits GROUP by file under <f p=\"…\">, each <hit> carrying its LINE "
                  "(l=), matched text (m) and enclosing symbol (in=, a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar; "
-                 "ABSENT (never an empty in= value) when no symbol encloses the hit, which is NOT the same claim as file scope). "
+                 "ABSENT (never an empty in= value) when no symbol encloses the hit, which is NOT the same claim as file scope — and "
+                 "on a file row carrying parse_degraded=\"1\" it is NO CLAIM AT ALL: that file's parse holds ERROR/MISSING nodes "
+                 "(the skipped verb itemizes err=/err_ratio=), symbols there may be unextracted, so read in= absence inside it as "
+                 "UNKNOWN, not as file scope; absence of parse_degraded= on a row means the parse was clean, except that a file the "
+                 "ingest never parsed at all — doc-format, binary-sniffed, unreadable — is also unmarked, the skipped verb's "
+                 "unmeasured class). "
                  "root= on the root element is the crawl root every <f p=…> is now RELATIVE to (single-root runs only; absent ⇒ p= is the "
                  "path ingest itself used, unchanged). ORDER: SOURCE files before test/bench files before docs, then path and line. "
                  "shown=/capped= = rows printed vs found (a count of underlying HITS, the same unit hits= uses, not of printed <hit> "
@@ -715,7 +720,11 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // matched line is arbitrary file bytes, so invalid UTF-8 must be scrubbed too, not just C0.
     for( const GrepFileGroup& group : grepGroupByFile( std::span<const GrepHit>( hits ), collapseOn ) )
     {
-        std::printf( "<f p=\"%s\">", ex( pathFor( group.fileId ) ).c_str() );
+        // parse_degraded routing (2026-08-30, degradedhintcheck): join the health fact the skipped verb
+        // already computed — over a shredded parse the in=-absent claim below is unknowable, and the
+        // reader must not be sent hunting for a rename (the looksObjC misroute cost exactly that hunt).
+        std::printf( "<f p=\"%s\"%s>", ex( pathFor( group.fileId ) ).c_str(),
+                     fileParseDegraded( ing, group.fileId ) ? " parse_degraded=\"1\"" : "" );
         for( const GrepCollapsedHit& c : group.hits )
         {
             const GrepHit& h = c.hit;

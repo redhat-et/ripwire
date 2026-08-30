@@ -279,7 +279,11 @@ cli = cli.split("-->", 1)[-1]
 # rows the MCP page-walk was never asked to cover.
 cli = cli.split("<unindexed", 1)[0]
 rows = []
-for fm in re.finditer(r'<f p="([^"]*)">(.*?)</f>', cli, re.S):
+# 2026-08-30 (degradedhintcheck round): an <f> row may carry parse_degraded="1" after p= — this probe runs
+# on the LIVE repo, whose test fixtures include deliberately-degraded files, so the pattern must tolerate
+# attributes rather than silently dropping those files' hits from the reconstruction (which is exactly how
+# this arm went red: 33 of 43 hits vanished from the CLI side while the MCP walk still counted them).
+for fm in re.finditer(r'<f p="([^"]*)"[^>]*>(.*?)</f>', cli, re.S):
     path = fm.group(1)
     for hm in re.finditer(r'<hit l="(\d+)"', fm.group(2)):
         rows.append((path, int(hm.group(1))))

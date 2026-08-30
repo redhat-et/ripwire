@@ -809,6 +809,19 @@ inline const std::string& diskPath( const IngestResult& ing, std::uint32_t fileI
     return ing.realPaths.empty() ? ing.files[ fileId ] : ing.realPaths[ fileId ];
 }
 
+// The ONE degraded-parse predicate (2026-08-30, degradedhintcheck): does this indexed file's recorded
+// parse hold ERROR/MISSING nodes? fileBytes == 0 is the NOT-MEASURED sentinel and answers false — "we
+// did not look" is not "degraded" (see FileHealth above). The skipped verb's classifySkipHealth applies
+// the same errNodes > 0 rule when it builds its rows; grep's parse_degraded= file-row flag and the
+// selector refusals' degraded clause both route through HERE, so the three surfaces can never disagree
+// about what "degraded" means.
+inline bool fileParseDegraded( const IngestResult& ing, std::size_t fileIndex ) noexcept
+{
+    return fileIndex < ing.fileHealth.size()
+        && ing.fileHealth[ fileIndex ].fileBytes > 0
+        && ing.fileHealth[ fileIndex ].errNodes  > 0;
+}
+
 // The macro-edges round's honesty post-pass: a call-SHAPED reference (bare name, no receiver, no explicit
 // qualifier) whose name UNIQUELY names an indexed C-family `#define` (see the uniqueness guard in the
 // function body) is re-tagged RefRole::Macro, so no surface labels such an expansion role="call". Runs

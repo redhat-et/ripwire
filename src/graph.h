@@ -2340,25 +2340,52 @@ inline void splitQualifiedSpec( std::string_view spec, std::string_view& file, s
     if( colon != std::string_view::npos ) { file = stripLineLocator( spec.substr( 0, colon ) );  name = spec.substr( colon + 1 ); }
 }
 
-// resolve a --around spec ("name" or "file:name") to the lowest-id matching symbol; kNoNode if none.
-inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec )
+// THE SCOPE-QUALIFIED TIER (2026-08-30): "Scope::name" — the sym= spelling --edit-check prints and the
+// id= tail every map row carries — resolved by matching the NAME plus a "::"-boundary SUFFIX of the
+// symbol's recorded scope, so `Box::lid`, `deep::Box::lid` and the full recorded scope all name the same
+// definition, exactly as a path tail names a file (canonicalIdMatches, above this in spirit). Probed
+// AFTER the canonical-id tier (a full id is more specific) and BEFORE the file:name fallthrough. Purely
+// additive: pre-tier, a spec containing "::" fell to splitQualifiedSpec, whose last-colon cut made the
+// file half "Scope:" — a string no crawled path contains — so every such spec resolved to NOTHING
+// (measured 2026-08-30: --expand/--callers/--uses/--impact/--edit-check all refused `NoteIndex::empty`
+// while the map printed that very id tail). A WRONG scope still refuses: the tier returns empty and the
+// fallthrough finds nothing, same as before — it never degrades to the bare-name union. Gated by
+// test/selectorscopecheck.sh.
+inline bool scopeSuffixMatches( std::string_view fullScope, std::string_view specScope ) noexcept
 {
-    std::string_view file, name;
-    splitQualifiedSpec( spec, file, name );
+    if( fullScope == specScope )
+    {
+        return true;
+    }
+    return fullScope.size() > specScope.size() + 2
+        && fullScope.substr( fullScope.size() - specScope.size() ) == specScope
+        && fullScope.substr( fullScope.size() - specScope.size() - 2, 2 ) == "::";
+}
 
-    NodeId best = kNoNode;
+inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, std::string_view spec )
+{
+    std::vector<NodeId> out;
+    const std::size_t   cut = spec.rfind( "::" );
+    if( cut == std::string_view::npos || cut == 0 || cut + 2 >= spec.size() )
+    {
+        return out;                                      // no "::", or an empty scope/name half — not this tier's shape
+    }
+    const std::string_view scopePart = spec.substr( 0, cut );
+    const std::string_view name      = spec.substr( cut + 2 );
     for( const Symbol& s : ing.symbols )
     {
-        if( s.name == name && ( file.empty() || filePathContains( ing.files[ s.fileId ], file ) ) )
+        if( s.name == name && !s.scope.empty() && scopeSuffixMatches( s.scope, scopePart ) )
         {
-            if( best == kNoNode || s.id < best )
-            {
-                best = s.id;
-            }
+            out.push_back( s.id );
         }
     }
-    return best;
+    return out;
 }
+
+// resolveFocus — the --around/--lego/--edit-check single-pick resolver — is defined BELOW
+// resolveAllByNameQualified as its lowest-id projection (2026-08-30, selectorscopecheck): the two used to
+// carry the same spec grammar as separate loops, and the moment the Scope::name tier landed in both, the
+// clone lens flagged the pair — one resolver, one pick rule, no drift.
 
 // k-hop neighbourhood of `focus`, BOTH directions (callees via out-edges, callers via in-edges),
 // fan-out-capped per node by (weight desc, NodeId asc). dist=min on first visit. Deterministic.
@@ -2623,6 +2650,11 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
         {
             return byId;
         }
+        std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, name );   // Scope::name tier — see its contract
+        if( !byScope.empty() )
+        {
+            return byScope;
+        }
     }
 
     std::vector<NodeId> out;
@@ -2656,6 +2688,11 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
         {
             return byId;
         }
+        std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, spec );   // Scope::name tier — see its contract
+        if( !byScope.empty() )
+        {
+            return byScope;
+        }
     }
 
     std::string_view file, name;
@@ -2670,6 +2707,17 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
         }
     }
     return out;
+}
+
+// resolve a --around/--lego spec to the lowest-id matching symbol; kNoNode if none. The lowest-id
+// PROJECTION of resolveAllByNameQualified — matches ascend by NodeId there (symbols are walked in id
+// order and every tier preserves that), so front() IS the historic lowest-id pick; one grammar, one
+// resolver, and every tier the full resolver gains (canonical id, Scope::name) reaches the single-pick
+// verbs in the same commit. Declared here, below the full resolver, for exactly that reason.
+inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec )
+{
+    const std::vector<NodeId> matches = resolveAllByNameQualified( ing, spec );
+    return matches.empty() ? kNoNode : matches.front();
 }
 
 // clearly side-effecting C/C++ intrinsics (I/O, allocation, nondeterminism, process control). A
