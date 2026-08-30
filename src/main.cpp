@@ -266,6 +266,15 @@ inline ExpandToken parseExpandToken( const std::string& token, const char* verb 
         return out;
     }
 
+    // An @FILE:LINE line seed (lane/at-seed) carries its own trailing digits: on an @-led token a
+    // digit-led tail with NO dash is the seed's line, not a range attempt — the whole token is the
+    // selector and resolveAtSeed reads the line half itself. "@src/f.cpp:120:5-10" still slices: its
+    // tail has the dash, so the range strips here and "@src/f.cpp:120" resolves as the seed.
+    if( token.front() == '@' && rangeStr.find( '-' ) == std::string_view::npos )
+    {
+        return out;
+    }
+
     out.selector = token.substr( 0, colon );
     const std::size_t dash = rangeStr.find( '-' );
 
@@ -1833,6 +1842,7 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
         { "--dead-code",         c.deadCode               },   // the row order IS the dispatch order (test/dispatchordercheck.sh pins every pair) — never re-pair for layout
         { "--edit-check",       !c.editCheckSym.empty()   }, { "--safe-delete",  !c.safeDeleteSym.empty()  },
         { "--slice",            !c.sliceSpec.empty()      },   // lane/paper-slice: dispatches right after --safe-delete (runSlice)
+        { "--at",               !c.atSpec.empty()         },   // lane/at-seed: the enclosing-chain report, right after --slice (runAt)
         { "--eval",              c.eval                   },
         { "--eval-retrieval",    c.evalRetrieval          }, { "--eval-skills",  !c.evalSkills.empty()    },
         { "--callers",          !c.callers.empty()        }, { "--callees",      !c.callees.empty()       },
@@ -2183,6 +2193,10 @@ const char* jsonUnsupportedVerb( const rw::Config& c )
     if( !c.sliceSpec.empty() )
     {
         return "--slice";
+    }
+    if( !c.atSpec.empty() )
+    {
+        return "--at";
     }
     if( c.prContext )
     {
@@ -3504,6 +3518,12 @@ int main( int argc, char** argv )
     // lane/paper-slice: same family, right after --safe-delete — the row order in scanReportVerbPrecedence
     // mirrors this seam (test/dispatchordercheck.sh pins pairs by that table).
     if( std::optional<int> handled = runSlice( dsp ) )
+    {
+        return *handled;
+    }
+
+    // lane/at-seed: the FILE:LINE enclosing-chain report, right after --slice (same location-seeded family).
+    if( std::optional<int> handled = runAt( dsp ) )
     {
         return *handled;
     }

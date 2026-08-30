@@ -101,6 +101,12 @@ argvFor()
         --report)      printf '%s\0' --report ;;
         --edit-check)  printf '%s\0' --edit-check=parseArgs ;;
         --slice)       printf '%s\0' --slice=parseArgs:c ;;
+        # lane/at-seed: the seed LINE is the verb's own input, so it is DERIVED from a durable anchor
+        # (the resolveFocus definition in graph.h) rather than pinned — the same corpus-coordinate
+        # rule the --from-trace note below states.
+        --at)          local atLine; atLine="$( grep -n 'inline NodeId resolveFocus' "$ROOT/src/graph.h" | head -1 | cut -d: -f1 )"
+                       [ -n "$atLine" ] || atLine=1
+                       printf '%s\0' --at=src/graph.h:$(( atLine + 2 )) ;;
         --situ)        printf '%s\0' --situ ;;
         --handoff)     printf '%s\0' --handoff ;;
         --scan-skills) printf '%s\0' --scan-skills ;;

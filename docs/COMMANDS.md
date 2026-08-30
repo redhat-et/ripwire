@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--scope`](#scope-glob-glob) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-before-symbol`](#insert-before-symbol-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--edit-plan`](#edit-plan-file) · [`--dry-run`](#dry-run-apply) · [`--safe-delete`](#safe-delete-sym) · [`--slice`](#slice-sym-var) · [`--slice-flow`](#slice-flow-back-fwd-both) · [`--slice-depth`](#slice-depth-n) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--plan-lint`](#plan-lint-file) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--scope`](#scope-glob-glob) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-before-symbol`](#insert-before-symbol-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--edit-plan`](#edit-plan-file) · [`--dry-run`](#dry-run-apply) · [`--safe-delete`](#safe-delete-sym) · [`--slice`](#slice-sym-var) · [`--slice-flow`](#slice-flow-back-fwd-both) · [`--slice-depth`](#slice-depth-n) · [`--at`](#at-file-line) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--plan-lint`](#plan-lint-file) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor) · [`--agent`](#agent-codex) · [`--skipped`](#skipped)
 
@@ -579,7 +579,7 @@ $ ./build/ripwire . --callers=DoesNotExist
 (empty)
 ```
 
-**Shaped by:** `--callees`, `--uses`, `--impact`, `--expand`, `--edit-check`, `--slice-flow`, `--rank-by`, `--json`
+**Shaped by:** `--callees`, `--uses`, `--impact`, `--expand`, `--edit-check`, `--slice-flow`, `--at`, `--rank-by`
 
 **Caveats (stated by the binary):**
 
@@ -1208,7 +1208,7 @@ $ ./build/ripwire . --top-k=0 --expand=rankGraphTeleport
 ... [18 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--for`, `--pack-signatures`, `--outline`, `--compress`, `--hotspots`, `--edit-check`, `--run-timeout`
+**Shaped by:** `--top-k`, `--for`, `--pack-signatures`, `--outline`, `--compress`, `--hotspots`, `--edit-check`, `--at`
 
 **Caveats (stated by the binary):**
 
@@ -2160,7 +2160,7 @@ $ ./build/ripwire . --edit-check=rankGraphTeleport
 </edit-check>
 ```
 
-**Shaped by:** `--impact`, `--edit-target-file`, `--slice`
+**Shaped by:** `--impact`, `--edit-target-file`, `--slice`, `--at`
 
 **Caveats (stated by the binary):**
 
@@ -2236,7 +2236,7 @@ ambiguous_callers= names callers whose own calls include an ambiguously-resolved
 
 One <s l= k= t=> row per line touching VAR, source order: k=def|use|both, t=param|decl|assign|call-arg|read (strongest role on the line), CDATA = the trimmed source line; defs=/uses= count occurrences. Bare --slice=SYM lists the sliceable locals (<v n= l= t=/> rows) so a caller can pick VAR. LIMITS in the legend, not implied: no alias analysis, no flow sensitivity, nested-scope shadowing may over-include. SYM matching several definition sites REFUSES (exit 1) listing the file:name spellings that pick one, like --edit-check. Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — other indexed languages refuse loudly (never an empty success). Single-root only.
 
-**Shaped by:** `--slice-flow`, `--slice-depth`
+**Shaped by:** `--slice-flow`, `--slice-depth`, `--at`
 
 **Caveats (stated by the binary):**
 
@@ -2267,6 +2267,17 @@ A bound that cuts a live frontier is disclosed as flow_truncated="1" — a short
 
 - A bound that cuts a live frontier is disclosed as flow_truncated="1" — a short slice means "bounded here", never "nothing further exists".
 - Refused without --slice-flow.
+
+### `--at=FILE:LINE`
+
+**Answers:** the ENCLOSING-DEFINITION CHAIN at one location (1-based line), outermost->innermost — for when you hold a compiler error / diff hunk / stack frame, not a name.
+
+<s n= t= l= el=/> rows, indexed definitions only; sym= names the innermost. The SAME seed composes into any SYM selector as @FILE:LINE (--callers=@src/f.cpp:120, --expand=@..., --edit-check=@..., --slice=@FILE:LINE:VAR, ...) and resolves to that innermost definition — the no-name half of the file:line:name grammar. A malformed seed, an ambiguous or unmatched path, a line past EOF, a line inside no indexed definition, or two disjoint definitions sharing the line each REFUSE with a specific diagnosis (exit 1) — never a guess, never an empty chain.
+
+**Caveats (stated by the binary):**
+
+- the ENCLOSING-DEFINITION CHAIN at one location (1-based line), outermost->innermost — for when you hold a compiler error / diff hunk / stack frame, not a name.
+- A malformed seed, an ambiguous or unmatched path, a line past EOF, a line inside no indexed definition, or two disjoint definitions sharing the line each REFUSE with a specific diagnosis (exit 1) — never a guess, never an empty chain.
 
 ### `--pr-context[=BASEREF]`
 

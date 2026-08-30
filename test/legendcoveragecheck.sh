@@ -126,6 +126,9 @@ ROSTER = [
     ("quality-delta",      [ROOT,  "--quality-delta"]),
     ("test-gate",          [ROOT,  "--test-gate"]),
     ("edit-check",         [SMALL, "--edit-check=escapeXml"]),
+    # lane/at-seed: line 100 of cli.h sits deep inside the Config struct, so the seed stays covered
+    # across ordinary drift; arm (C) below flags it if it ever escapes every definition.
+    ("at",                 [SMALL, "--at=cli.h:100"]),
     ("callers",            [SMALL, "--callers=escapeXml"]),
     ("callees",            [SMALL, "--callees=serialize"]),
     ("callers-columnar",   [SMALL, "--callers=escapeXml", "--format=columnar"]),
