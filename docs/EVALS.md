@@ -3978,6 +3978,24 @@ differently, under a comment claiming they "share `lexicalScores`". That is its 
 own eval; it is out of this round's one-mechanism scope, and it is why MCP `memory_recall` appears above as
 an invariance CONTROL rather than as a subject.
 
+**DISCHARGED 2026-08-30 — MCP takes the CLI's ranking, and the argument that let them differ is gone.** The
+divergence was worse than a score shift: on a corpus where a document's *directory* names the query word and
+its body never does, CLI `--recall=telemetry` returns `telemetry/zeta.md` while MCP `memory_recall` returned
+`(no relevant documents — try different terms)`. The CLI is the reference surface, so the CLI's answer is the
+one that stands: `recallText` now ranks with the recall lens (`pathFieldDefaultW=1` and the root prefix) and
+the two doors are byte-identical, header included. The fix is structural rather than a second copy of one
+argument list — the lens decision moved into `recall.h::recallFor`, the single rank-then-build call BOTH doors
+make, and the old `writeRecall( out, ing, scores, … )` wrapper, whose caller-supplied `scores` parameter WAS
+the divergence, is deleted; no argument remains through which a front door can rank recall its own way.
+**CLI `--recall` output is unchanged, byte for byte** (checked against a pre-change binary over this repo,
+`docs/`, and the probe corpus): this round moves the MCP door only. `test/recallparitycheck.sh` gates the
+class — same corpus and task ⇒ same bundle on both doors, plus the shaping knobs (`--top-k` / `top_k`,
+`--max-tokens` / `budget_tokens`) — and carries the same KILL-TRIPWIRE shape as `recallrankdepthcheck.sh`
+ARM 4, because byte-parity is trivially reachable by scoring no path tokens at all: the two path-only
+documents must still be RETRIEVED on both doors, or the "unification" deleted the measured feature and is
+reverted regardless of every other arm. Against a pre-change binary the gate is red on 8 of its 12 arms,
+that tripwire among them.
+
 ### The result — EXACT invariance, at the registered target (2026-08-25)
 
 **Verdict: SHIP.** The registered band was EXACT invariance, and exact invariance is what the fix reaches —

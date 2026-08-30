@@ -12,6 +12,8 @@
                          //       fence scanner — a doc-side property, computed from the file's own bytes
 #include "layout.h"      // §L4.3: layout::lineOf — the ONE byte-offset-to-line-number helper (reused, not
                          //        re-derived, for the `lines="LO-HI"` section anchor below)
+#include "lexical.h"     // lexicalScores — the recall lens's scorer. Included HERE so recallFor below can be
+                         //        the ONE call both front doors make, arguments and all (see recallFor).
 #include "model.h"
 #include "redact.h"      // redact secrets from recalled doc bodies (incl. extracted docText)
 #include "serialize.h"   // §P2: kMinBytesPerToken / kBudgetHeadroom / bytesPerTokenFor / truncateUtf8WithEllipsis
@@ -1061,14 +1063,40 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
     return 0;
 }
 
-// Write the recall bundle (the MCP `memory_recall` seam and the plain CLI path). Same budget semantics as
-// buildRecall — this is the "render it and hand it over" form for callers that do not gate on the shape.
-inline void writeRecall( std::FILE* out, const IngestResult& ing, const std::vector<float>& scores,
-                         std::string_view task, int k, std::size_t maxBytes, bool docsOnly,
-                         RedactCounts* redact = nullptr, std::string_view rootArg = {} )   // R-R
+// ─── the ONE recall call: rank, then build. Both front doors go through here ────────────────────────
+//
+// CLI `--recall=TASK` and MCP `memory_recall` are the same verb behind two transports, and until now they
+// only CLAIMED to share a scorer. The CLI called `lexicalScores( …, pathFieldDefaultW=1, rootPrefix )`;
+// `mcpverbs.h::recallText` called `lexicalScores( ix.ing, …, task )` — pathFieldDefaultW 0, no root prefix
+// — under a comment reading "Shares lexicalScores + writeRecall with the --recall CLI". The two doors
+// therefore ranked the same query differently: a doc found only by its PATH (its directory or filename
+// spelling the query word) was RETRIEVED by the CLI and reported "no relevant documents" by MCP, and every
+// score the two did share moved anyway, because the path tokens change each document's BM25 length. The
+// divergence was registered in docs/EVALS.md (§"--recall ranks by where the repo sits on disk", 2026-08-25)
+// as a known debt out of that round's one-mechanism scope; this is the discharge.
+//
+// The unification is structural, not a second copy of one argument list: the lens decision (docs only,
+// path weight 1, the root prefix derived from the SAME rootArg buildRecall relativizes its separator line
+// against) lives HERE, in the only place either door can reach the ranking from. `pathFieldDefaultW=1` is
+// the recall lens's measured choice, not a default — bench/recalleval measured +0.03 lenient MRR for it
+// (gate: test/recallevalcheck.sh) and test/recallrankdepthcheck.sh ARM 4 is its kill tripwire. Parity is
+// gated by test/recallparitycheck.sh, which asserts the two doors return the same bundle byte for byte.
+inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
+                               const std::vector<NodeId>& outTargets, std::string_view task, int k,
+                               std::size_t maxBytes, RedactCounts* redact, std::string_view rootArg )   // R-R
 {
-    const RecallBundle bundle = buildRecall( ing, scores, task, k, maxBytes, docsOnly, redact, rootArg );
-    std::fwrite( bundle.text.data(), 1, bundle.text.size(), out );
+    // R-R: one root fact, spent twice — the ranker scores the root-relative path spelling, buildRecall
+    // prints it. Unguarded because rootPrefixOf( "" ) is "" (its trailing-slash loop needs size() > 1), so
+    // the multi-root path (empty rootArg, ing.files already labelled) needs no branch.
+    const std::string        prefix = rw::sarif::rootPrefixOf( rootArg );
+    const std::vector<float> scores = lexicalScores( ing, outOff, outTargets, task, /*pruneTopK=*/0,
+                                                     /*alwaysExact=*/nullptr, /*pathFieldDefaultW=*/1, prefix );
+    return buildRecall( ing, scores, task, k, maxBytes, /*docsOnly=*/true, redact, rootArg );
 }
+
+// (`writeRecall( out, ing, scores, … )` used to live here — a "render it and hand it over" wrapper that took
+// a score vector the CALLER computed. That parameter was the divergence: MCP `memory_recall` was the one
+// caller and it supplied differently-ranked scores. recallFor above takes the graph instead, so there is no
+// argument left through which a front door can rank recall its own way, and the wrapper had nothing to do.)
 
 }   // namespace rw

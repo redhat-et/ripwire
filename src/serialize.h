@@ -3000,7 +3000,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
 {
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F1): the MCP `for` verb has no byte budget, and 0 must never mean
     // "cap at zero bytes" (the cap fired before the first signature and emitted a bare <sigs></sigs>).
-    // Matches writeRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
+    // Matches buildRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
     if( budgetBytes == 0 )
     {
         budgetBytes = SIZE_MAX;
@@ -4088,7 +4088,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
 {
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F2): the MCP `exemplar` verb has no byte budget, and 0 must never
     // mean "cap at zero bytes" (the cap fired before the first body and emitted a bare <bodies></bodies>).
-    // Matches writeRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
+    // Matches buildRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
     if( budgetBytes == 0 )
     {
         budgetBytes = SIZE_MAX;

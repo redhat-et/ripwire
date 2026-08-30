@@ -19,8 +19,12 @@
 #   4. the header carries an honest est_tokens covering the WHOLE payload (§P9.3), within 2x of bytes/2.5
 #   5. budgeted runs are deterministic (byte-identical run to run)
 #   6. an UNFLAGGED run has the documented 8K-token ceiling, discloses its cut, and an explicit high
-#      --max-tokens restores the full selected bodies. With RIPWIRE_BASE_BIN set to a pre-change binary,
-#      the explicit-full body payload is asserted BYTE-IDENTICAL to that binary's unflagged payload.
+#      --max-tokens restores the full selected bodies. With RIPWIRE_BASE_BIN set to a reference binary,
+#      the body payload is asserted BYTE-IDENTICAL to that binary's AT EQUAL FLAGS, at BOTH operating
+#      points (unflagged and explicit-full) — the ceiling BOUNDS recall, it never CHANGES what recall says.
+#      (This arm read "head --max-tokens=1000000 vs base UNFLAGGED" while the reference was pre-ceiling and
+#      its unflagged run WAS the full artifact; that spelling is unpassable against any post-ceiling
+#      reference, so the comparison is now flag-symmetric by construction. See §6b.)
 #
 #   RIPWIRE_BIN=build/ripwire bash test/recallbudgetcheck.sh
 #   RIPWIRE_BIN=build_base/ripwire bash test/recallbudgetcheck.sh    # must FAIL (pre-fix binary)
@@ -191,15 +195,34 @@ done
 [ -z "$MISSING" ] && ok "explicit-full: every selected doc's FULL body is present (tail sentinels)" \
                   || no "explicit-full: missing doc tails:$MISSING"
 
+# ── 6b. reference-binary byte identity, AT EQUAL FLAGS, at BOTH ceilings ────────────────────────────
+# What this arm exists to catch: the default ceiling must BOUND recall, never CHANGE what recall says.
+# It was written in the round that ADDED the 8K default, when the reference binary was PRE-ceiling: an
+# unflagged base run WAS the full artifact, so "base unflagged" vs "head --max-tokens=1000000" was the
+# flag-symmetric comparison of that moment. It stopped being one the instant the ceiling shipped — against
+# any post-ceiling reference the same two commands compare a bounded payload with a full one (16,918 B vs
+# 262,287 B here) and the arm can never pass again, for a reason that has nothing to do with a regression.
+# Restated so it survives its own subject landing: compare base and head UNDER THE SAME FLAGS, at BOTH
+# operating points — the default ceiling AND explicit-full. That is strictly stronger than the original
+# single comparison: it pins the bounded payload (which the original never compared at all, since the
+# pre-ceiling base had none) as well as the full one, and it is the comparison that stays meaningful for
+# every future reference binary. Bodies only (line 1 dropped) so a new HEADER disclosure field is an
+# expected difference and a changed doc SELECTION, ORDER or BODY is not.
 if [ -n "$BASE_BIN" ] && [ -x "$BASE_BIN" ]; then
-    perl -e 'alarm 60; exec @ARGV' "$BASE_BIN" "$R" --recall="$Q" --no-cache > "$TMP/base.out" 2>/dev/null
-    tail -n +2 "$TMP/base.out"  > "$TMP/base.body"
-    tail -n +2 "$TMP/plain.out" > "$TMP/plain.body"
-    cmp -s "$TMP/base.body" "$TMP/plain.body" \
-        && ok "explicit-full: body payload BYTE-IDENTICAL to the pre-change binary ($BASE_BIN)" \
-        || no "explicit-full: body payload differs from the pre-change binary ($BASE_BIN)"
+    base_run(){ perl -e 'alarm 60; exec @ARGV' "$BASE_BIN" "$R" --recall="$Q" --no-cache "$@" 2>/dev/null; }
+    base_run --max-tokens=1000000 > "$TMP/base_full.out"
+    base_run                      > "$TMP/base_def.out"
+    for pair in "base_full:plain:explicit-full (--max-tokens=1000000 on BOTH)" \
+                "base_def:default:unflagged (the 8K default ceiling on BOTH)"; do
+        B_F="${pair%%:*}"; REST="${pair#*:}"; H_F="${REST%%:*}"; LABEL="${REST#*:}"
+        tail -n +2 "$TMP/$B_F.out" > "$TMP/$B_F.body"
+        tail -n +2 "$TMP/$H_F.out" > "$TMP/$H_F.body"
+        cmp -s "$TMP/$B_F.body" "$TMP/$H_F.body" \
+            && ok "$LABEL: body payload BYTE-IDENTICAL to the reference binary ($BASE_BIN)" \
+            || no "$LABEL: body payload differs from the reference binary ($BASE_BIN) — recall's content moved, not just its bound"
+    done
 else
-    echo "  SKIP  pre-change byte-identity (set RIPWIRE_BASE_BIN=<pre-change ripwire> to enable)"
+    echo "  SKIP  reference-binary byte-identity (set RIPWIRE_BASE_BIN=<reference ripwire> to enable)"
 fi
 
 # ── 7. MCP parity: memory_recall is bounded by the SAME default ceiling, budget_tokens raises it ────
