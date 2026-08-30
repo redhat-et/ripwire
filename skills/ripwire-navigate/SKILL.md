@@ -51,6 +51,13 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   (`d=`) and the line it was reached from (`f=`). `--slice-depth=N` bounds the walk (default 8; a
   bound that cuts is disclosed as `flow_truncated="1"`). Stops at the function boundary by design —
   the inter-procedural half is `--callers`/`--impact`.
+- **"I have a FILE:LINE, not a name"** (a compiler error, a diff hunk, a stack frame) →
+  `ripwire <dir> --at=FILE:LINE` — the enclosing-definition chain at that location, outermost→innermost;
+  `sym=` names the innermost. The SAME seed composes into any SYM selector as `@FILE:LINE`
+  (`--callers=@src/f.cpp:120`, `--expand=@…`, `--edit-check=@…`, `--slice=@FILE:LINE:VAR`) and resolves
+  to that innermost definition — skip the "what is this function called" grep entirely. A seed on a
+  blank top-level line, an ambiguous path, or a line two definitions share is refused with a specific
+  diagnosis, never guessed.
 - **"Trace a FLOW: how does A reach B"** → `--path=A,B` (shortest call-path) or `--around=SYM
   [--around-depth=2]` (bounded neighborhood). Not `--for` — `--for` returns a ranked *set* of relevant
   signatures for a task, it does not trace a path between two named points.

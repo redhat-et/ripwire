@@ -324,6 +324,30 @@ struct UsesSelector { bool fileQualified; std::string_view siteMatchName; std::s
 inline UsesSelector resolveUsesSelector( const rw::IngestResult& ing, std::string_view sym, std::size_t defsCount )
 {
     UsesSelector u;
+    if( !sym.empty() && sym.front() == '@' )
+    {
+        // @FILE:LINE line-seed: the site scan matches NAMES, so the seed must rebind to the innermost
+        // enclosing definition's name — pre-fix the raw @-spec was the match key and every site vanished
+        // into a silent count="0" (atcheck (13b)). fileQualified=true so the call-role sites narrow to the
+        // seed's own def (usesChosenCallers), exactly the file:name semantics the seed is sugar for.
+        const rw::AtSeed seed = rw::resolveAtSeed( ing, sym.substr( 1 ) );
+        if( seed.fault == rw::AtFault::None )
+        {
+            const std::string& seedName = ing.symbols[ seed.chain.back() ].name;
+            u.fileQualified = true;
+            u.siteMatchName = seedName;
+            u.suggestName   = seedName;
+            u.defsOfName    = rw::resolveAllByName( ing, seedName ).size();
+            return u;
+        }
+        // faulted seed: leave the (unmatchable) spec as the key so defs and sites stay empty and the
+        // qualified-refusal arm fires — selectorFaultClause's @-arm speaks the diagnosis. Never external="1".
+        u.fileQualified = true;
+        u.siteMatchName = sym;
+        u.suggestName   = sym;
+        u.defsOfName    = 0;
+        return u;
+    }
     u.fileQualified = sym.find( "::" ) == std::string_view::npos && sym.find( ':' ) != std::string_view::npos;
     std::string_view file;
     if( u.fileQualified )
@@ -833,6 +857,73 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
 // §A6a like --edit-check: a selector matching more than ONE definition is REFUSED with the spellings
 // that pick one — a slice of "some overload" is an answer about a body the caller may never have meant,
 // worse than no answer. editCheckGroups supplies the spellings so the two verbs cannot drift.
+// ── the at flag: FILE:LINE → the enclosing-definition chain (ARISE get_enclosing_scopes parity) ────────
+//
+// The report half of the line-seeded addressing pair (graph.h::resolveAtSeed): bare `at` answers "what
+// definitions enclose this location", and the SAME seed spelled `@FILE:LINE` in any SYM selector position
+// resolves to the chain's innermost row. Everything this prints is a fact off the index plus one file read;
+// a seed no indexed definition spans is REFUSED with the shared diagnosis (selectorrefuse.h), never
+// answered with an empty chain — an empty success and a refusal are different claims.
+std::optional<int> runAt( const MainDispatch& d )
+{
+    using namespace rw;
+    const Config&       cfg = d.cfg;
+    const IngestResult& ing = d.ing;
+
+    if( cfg.atSpec.empty() )
+    {
+        return std::nullopt;
+    }
+
+    const AtSeed seed = resolveAtSeed( ing, cfg.atSpec );
+    if( seed.fault != AtFault::None )
+    {
+        std::fprintf( stderr, "ripwire: the at flag's seed '%s' named no location%s\n",
+                      std::string( cfg.atSpec ).c_str(), atSeedFaultClause( ing, seed ).c_str() );
+        return 1;
+    }
+
+    std::vector<char> esc;
+    const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+
+    const bool         atSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  atRootPrefix = atSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    const std::string_view seedPath = atSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ seed.fileId ], atRootPrefix )
+                                                   : std::string_view( ing.files[ seed.fileId ] );
+    // 1-based line holding byte b: the last lineStarts entry at or before b
+    const auto lineOfByte = [ & ]( std::uint32_t b ) -> std::uint32_t
+    {
+        const auto it = std::upper_bound( seed.lineStarts.begin(), seed.lineStarts.end(), b );
+        return std::uint32_t( it - seed.lineStarts.begin() );
+    };
+
+    std::printf( "<!-- ripwire at: the ENCLOSING-DEFINITION CHAIN at one FILE:LINE seed. p= the resolved file, "
+                 "l= the 1-based seed line, sym= the innermost enclosing definition's name (what the same seed "
+                 "resolves to in a selector position), chain= the row count. Rows are INDEXED definitions only, "
+                 "outermost first, innermost last: n= the definition's name, t= its kind tag, l= its own start "
+                 "line, el= its end line (1-based, inclusive). A namespace or any construct the index does not "
+                 "carry is NOT a row, so an outer scope can be absent rather than misnamed; a seed line inside no "
+                 "indexed definition is refused, never served as an empty chain. The same seed composes into any "
+                 "SYM selector as @FILE:LINE (callers, callees, impact, around, expand, uses, edit-check, slice, "
+                 "safe-delete, path, connect) and resolves to the innermost row. -->"
+                 "%s", rootRelPathsLegend( atSingleRoot ) );
+    std::printf( "<at p=\"%s\" l=\"%u\" sym=\"%s\" chain=\"%zu\"",
+                 ex( seedPath ).c_str(), seed.line, ex( ing.symbols[ seed.chain.back() ].name ).c_str(), seed.chain.size() );
+    if( atSingleRoot )
+    {
+        std::printf( " root=\"%s\"", ex( cfg.roots[0] ).c_str() );
+    }
+    std::printf( ">" );
+    for( const NodeId id : seed.chain )
+    {
+        const Symbol& s = ing.symbols[ id ];
+        std::printf( "<s n=\"%s\" t=\"%s\" l=\"%u\" el=\"%u\"/>",
+                     ex( s.name ).c_str(), symTag( s.kind ), s.line, lineOfByte( s.endByte > 0 ? s.endByte - 1 : 0 ) );
+    }
+    std::printf( "</at>\n" );
+    return 0;
+}
+
 std::optional<int> runSlice( const MainDispatch& d )
 {
     using namespace rw;

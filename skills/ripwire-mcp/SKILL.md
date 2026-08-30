@@ -75,6 +75,19 @@ deduped and ordered before it's used as the cache key, so calling with the same 
 still hits the warm cache instead of re-parsing; a genuinely different root set gets its own cache entry, not
 a shared/stale one.
 
+**Line-seeded addressing — `@FILE:LINE` in any resolver-backed selector.** Holding a LOCATION (a diff hunk,
+a compiler error, a stack frame) instead of a name? Pass `@src/foo.cpp:120` (1-based line) as the selector
+and it resolves to the innermost definition enclosing that line — accepted by `find_symbol` /
+`find_referencing_symbols` / `impact` / `edit_check` / `path_between` (`from`/`to`) / `connect` (each entry) /
+`lego` (`type`) / `fetch_body` (`handle`), and by `uses` (which serves the enclosing definition's NAME —
+its sites stay name-matched, `of=` echoes the seed as typed). A bad seed — malformed spec, unmatched or
+ambiguous path, line past EOF, a line no definition spans, two definitions sharing the line — is **refused
+with the same specific diagnosis the CLI's `--at`/selector arms speak**, never guessed. The NAME-matching
+scan verbs (`owners`, `mentions`) do not resolve seeds; a resolvable seed there refuses by naming the
+definition it resolves to, so the retry is in the message. CLI twin: `--at=FILE:LINE` (the bare
+enclosing-chain report) and `@FILE:LINE` in any SYM selector; contract gate: `test/atcheck.sh` +
+`test/mcpverbscheck.sh` §7.
+
 | Verb | CLI twin | Ask it for |
 |---|---|---|
 | `analyze` | `ripwire <dir>` | the ranked XML map |

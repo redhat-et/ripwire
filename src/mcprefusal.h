@@ -23,6 +23,7 @@
 #include "model.h"
 #include "didyoumean.h"    // §B6 M8: the ONE near-miss suggester (lifted out of main.cpp so this is reachable)
 #include "degradedscan.h"  // degradedTextHit — the ONE degraded-parse text scan (selectorrefuse.h words the same facts for the CLI)
+#include "selectorrefuse.h" // the @FILE:LINE at-diagnosis (atSeedFaultClause) — ONE set of fault sentences for both surfaces
 #include "mcpjson.h"       // §H3: mcpdetail::FrameShape — the framing verdict this file words (mcpjson is upstream of everything MCP; no cycle)
 
 #include <algorithm>       // std::find — the declared-field membership tests (M4)
@@ -72,10 +73,10 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
     { "",                        "path",      "a directory to answer about (or a `paths` array of 1..16 workspace roots)", "path=\".\"" },
 
     // ── read verbs ──
-    { "find_symbol",             "symbol",    "a symbol name (the final name segment; add scope to disambiguate)", "symbol=\"parseArgs\"",
-      FieldRule::Required, "pass the final name segment; add scope to disambiguate" },
-    { "find_referencing_symbols","symbol",    "a symbol name (the final name segment; add scope to disambiguate)", "symbol=\"parseArgs\"",
-      FieldRule::Required, "pass the final name segment; add scope to disambiguate" },
+    { "find_symbol",             "symbol",    "a symbol name (the final name segment; add scope to disambiguate) or @FILE:LINE (a 1-based line-seed: the innermost definition enclosing that line)", "symbol=\"parseArgs\"",
+      FieldRule::Required, "pass the final name segment; add scope to disambiguate — or @FILE:LINE when you hold a location" },
+    { "find_referencing_symbols","symbol",    "a symbol name (the final name segment; add scope to disambiguate) or @FILE:LINE (a 1-based line-seed: the innermost definition enclosing that line)", "symbol=\"parseArgs\"",
+      FieldRule::Required, "pass the final name segment; add scope to disambiguate — or @FILE:LINE when you hold a location" },
     { "grep",                    "pattern",   "a literal string to search for",                                    "pattern=\"parseArgs\"" },
     // R-H span tiers: the MCP spelling of the CLI's --grep-in. Optional, and the hatch has to exist on THIS
     // surface too — an MCP-only agent that sees suppressed_comment= has no CLI to re-ask from.
@@ -87,23 +88,23 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
     { "owners",                  "symbol",    "an OPTIONAL symbol name — restricts the report to the file that defines it", "symbol=\"parseArgs\"",
       FieldRule::Optional, "or this tree has no git history (owners is mined from git)" },
     { "for",                     "task",      "the task in plain words",                                           "task=\"add a since filter\"" },
-    { "lego",                    "type",      "an interface or base-type name (file:name disambiguates)",           "type=\"Shape\"" },
-    { "fetch_body",              "handle",    "a `handle` string taken from a read verb's result",                  "handle=\"src/cli.h::rw::parseArgs\"" },
+    { "lego",                    "type",      "an interface or base-type name (file:name disambiguates; @FILE:LINE line-seeds resolve)", "type=\"Shape\"" },
+    { "fetch_body",              "handle",    "a `handle` string taken from a read verb's result (@FILE:LINE line-seeds resolve too)",   "handle=\"src/cli.h::rw::parseArgs\"" },
     { "batch",                   "queries",   "an array of {verb, ...args} sub-query objects",                      "queries=[{\"verb\":\"grep\",\"pattern\":\"x\"}]" },
 
     // ── flagship-reflex verbs ──
     { "exemplar",                "kind",      "a kind token (fn|method|class|struct|iface|var)",                    "kind=\"fn\"",  FieldRule::AnyOf },
     { "exemplar",                "task",      "a task string whose top match donates its kind",                     "task=\"a JSON writer\"", FieldRule::AnyOf },
-    { "impact",                  "symbol",    "a symbol name to take the blast radius of",                          "symbol=\"parseArgs\"" },
-    { "uses",                    "symbol",    "a symbol name to find the resolvable use-sites of",                  "symbol=\"parseArgs\"" },
-    { "path_between",            "from",      "the SOURCE symbol name",                                             "from=\"main\"" },
-    { "path_between",            "to",        "the DESTINATION symbol name",                                        "to=\"parseArgs\"" },
-    { "connect",                 "symbols",   "an array (or comma-string) of 2..16 symbol names",                   "symbols=[\"main\",\"parseArgs\"]" },
+    { "impact",                  "symbol",    "a symbol name to take the blast radius of (file:name disambiguates; @FILE:LINE line-seeds resolve)", "symbol=\"parseArgs\"" },
+    { "uses",                    "symbol",    "a symbol name to find the resolvable use-sites of (an @FILE:LINE line-seed serves the enclosing definition's name)", "symbol=\"parseArgs\"" },
+    { "path_between",            "from",      "the SOURCE symbol name (or @FILE:LINE)",                             "from=\"main\"" },
+    { "path_between",            "to",        "the DESTINATION symbol name (or @FILE:LINE)",                        "to=\"parseArgs\"" },
+    { "connect",                 "symbols",   "an array (or comma-string) of 2..16 symbol names (@FILE:LINE entries resolve)", "symbols=[\"main\",\"parseArgs\"]" },
     { "explore",                 "task",      "the task in plain words",                                            "task=\"add a since filter\"" },
     { "pack_task",               "task",      "the task in plain words",                                            "task=\"add a since filter\"" },
     { "from_trace",              "trace",     "the raw trace TEXT, pasted (not paraphrased into a query)",           "trace=\"Traceback (most recent call last): ...\"" },
-    { "edit_check",              "symbol",    "the def name you just edited (file:name disambiguates)",             "symbol=\"parseArgs\"",
-      FieldRule::Required, "pass the def name you just edited; file:name disambiguates" },
+    { "edit_check",              "symbol",    "the def name you just edited (file:name disambiguates; @FILE:LINE = the def at that line)", "symbol=\"parseArgs\"",
+      FieldRule::Required, "pass the def name you just edited; file:name disambiguates, @FILE:LINE addresses by location" },
     { "whereis",                 "symbol",    "the symbol name to look for across every ref",                       "symbol=\"parseArgs\"" },
 
     // ── edit verbs ──
@@ -821,10 +822,27 @@ inline std::string degradedParseNote( const IngestResult& ing, std::string_view 
            "grep pattern=\"" + cappedEcho( spelling ) + "\" shows the textual hits and marks such file rows parse_degraded=\"1\"";
 }
 
+// The @FILE:LINE half: a spelling that is a line-seed gets the SAME fault diagnosis the CLI's selector
+// clause speaks (selectorrefuse.h::atSeedFaultClause — one sentence per AtFault value, shared verbatim so
+// the same fault is never described two ways across surfaces). "" for a non-@ spelling, and "" for a seed
+// that RESOLVES (fault None) — a resolvable seed reaching a not-found is the caller's own story to tell.
+inline std::string atSeedClause( const IngestResult& ing, std::string_view spelling )
+{
+    if( spelling.empty() || spelling.front() != '@' )
+    {
+        return {};
+    }
+    return atSeedFaultClause( ing, resolveAtSeed( ing, spelling.substr( 1 ) ) );
+}
+
 inline std::string notFound( const IngestResult& ing, std::string_view noun, std::string_view spelling,
                              std::string_view retryHint = {} )
 {
     std::string msg = std::string( noun ) + " not found: '" + cappedEcho( spelling ) + "'";
+    if( !spelling.empty() && spelling.front() == '@' )
+    { // a line-seed: the at-diagnosis is the actionable half; a symbol-name near-miss for '@f.cpp:12' is noise
+        return msg + atSeedClause( ing, spelling );
+    }
     const std::string near = didYouMean( ing, spelling );
     if( !near.empty() && near != spelling )
     {
