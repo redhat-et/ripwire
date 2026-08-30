@@ -2700,7 +2700,7 @@ $ ./build/ripwire . --pack-task="add a new output format flag to the CLI" --part
 
 **Answers:** (with --for/--pack-task) append a compact MERMAID flowchart of the bundle's top-N (<=8) ranked anchors + their 1-hop call edges among themselves — <graph fmt="mermaid"><![CDATA[ flowchart LR ...]]></graph>, right before </ctx>.
 
-Reuses the --mermaid emitter's syntax. Costs tokens beyond the sigs it sits next to — worth it only when the reading agent renders mermaid natively. Off by default (G5): omitted, output is byte-identical.
+Reuses the --mermaid emitter's syntax. Costs tokens beyond the sigs it sits next to — worth it only when the reading agent renders mermaid natively. Off by default and purely additive: omitted, output is byte-identical.
 
 **Try it**
 

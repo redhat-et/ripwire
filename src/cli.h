@@ -1815,7 +1815,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               ranked anchors + their 1-hop call edges among themselves — <graph fmt=\"mermaid\"><![CDATA[\n"
         "                               flowchart LR ...]]></graph>, right before </ctx>. Reuses the --mermaid emitter's syntax.\n"
         "                               Costs tokens beyond the sigs it sits next to — worth it only when the reading agent\n"
-        "                               renders mermaid natively. Off by default (G5): omitted, output is byte-identical.\n"
+        "                               renders mermaid natively. Off by default and purely additive: omitted, output is byte-identical.\n"
         "    --export=cc.json[:FILE]    export per-file metrics (loc/symbols/cx/cognitive_cx/fan-in/fan-out/churn) as CodeCharta\n"
         "                               cc.json (apiVersion 1.3) — write FILE or redirect stdout; feeds a CodeCharta 3D city\n"
         "    --batch=FILE               one-turn context sweep: FILE ('-'=stdin) is newline-delimited `verb:arg` sub-queries\n"
