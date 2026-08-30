@@ -15,6 +15,26 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — `--expand` no longer takes minutes on a file whose lines are hundreds of kilobytes
+
+Secret redaction (`redactSecrets`, on by default at every body-emission seam) was quadratic in LINE
+length. Its low-precision `[A-Za-z0-9+/=_\-]{32,}` rule re-derived three position-independent values at
+every cursor: the enclosing line's boundaries, that line's credential-keyword verdict, and — through a
+greedy `regex_search` anchored at the cursor — the whole character-class run it sits in. Ordinary source
+has ~100-byte lines and never noticed. A minified or vendored bundle is nothing but huge lines, and
+`--expand` hands one to this path whole while pricing its whole-file candidate.
+
+Measured on babel's `.yarn/releases/yarn-3.1.0.cjs` (2,196,921 bytes over 768 lines): a single `--expand`
+selector burned 196.7 s of CPU without finishing under a manual timeout, and an unattended run was killed
+at 1,343.9 s of user CPU with a still-empty output file. It now answers in 0.46 s warm. On a
+self-contained 20 KB-single-line fixture, 23.02 s → 0.017 s. Each of the three values is now computed
+once per line or per run, which makes the sweep linear.
+
+This is an output no-op — same matches, same gate verdicts, same bytes — verified byte-identical on
+stdout, stderr and exit code against the pre-change binary over 24 corpora (20 of them external
+multi-language snapshots) × 5 verb shapes. New gate: `test/redactfixcheck.sh`. Ledger row and the
+`sample(1)` breakdown in `bench/PROFILE.md`.
+
 ## [0.2.2] — 2026-08-09
 
 ### Fixed — a local variable that shadows a function name no longer steals that function's use-sites

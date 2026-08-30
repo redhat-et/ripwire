@@ -716,3 +716,96 @@ build_prof/ripwire <repo> --grep=<literal> >/dev/null      # run twice; the seco
 ```
 Both arms must be timed alternately against the same warm cache on the same box: the phases are all
 CPU-bound, so a busy machine moves both arms together and only the ratio survives.
+
+## 2026-08-30 — `redactSecrets` was quadratic in LINE length: the `--expand` pathological bundle
+
+**Ledger row, not a gate.** Per the house rule these numbers are a record, never a red-CI threshold. The
+gate that landed with the fix, `test/redactfixcheck.sh`, asserts BEHAVIOUR only (the memo caches must not
+leak across a line or a run boundary); a revert would make it slow, not red.
+
+### The symptom
+
+The SWE-Explore harness (`bench/swex/run_swex.py`) guards its extent-resolution `--expand` calls with a
+90 s / 30 s timeout, and it existed for exactly one shape: symbols ranked inside vendored, minified
+bundles. On `babel__babel-13928` those are `.yarn/releases/yarn-3.1.0.cjs` — **2,196,921 bytes across 768
+lines**, so a "line" averages 2.9 KB and the longest are far larger. Those were the only timeouts the
+whole 68-instance run ever hit.
+
+### Reproduce
+
+```sh
+SNAP=bench/external/swex/snapshots/babel__babel-13928
+ripwire "$SNAP" >/dev/null                                            # warm the index once (~2.7 s)
+time ripwire "$SNAP" '--expand=.yarn/releases/yarn-3.1.0.cjs:O3e'     # ONE selector
+```
+
+A self-contained version needing no benchmark data (this is the row measured below, and the same fixture
+`test/redactfixcheck.sh` generates — a 20 KB single line inside a docstring):
+
+```sh
+python3 - "$T" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]) / "memofix.py"
+p.write_text('def f():\n    """\n    token: ' + "z9" * 10000 + ' ' + 'J' * 32 + '\n    """\n    return 0\n')
+PY
+time ripwire "$T" --expand=f --no-cache
+```
+
+### Where the time went
+
+`sample(1)` on the running process, twice (12 s in and 75 s in), both ~100% in one place:
+
+| top of stack | share |
+| --- | --- |
+| `rw::redactdetail::lineNamesCredential` | 26% |
+| `std::basic_regex::__search` + its `__state` copy/alloc churn | 74% |
+| everything else (ingest, graph, serialize) | ~0% |
+
+Called from `runDefaultMap` → `renderWholeFiles` → `redactSecrets`. Note *what* was being redacted: the
+whole-file candidate `chooseExpandServe` prices against the bundle and — at 2.1 MB against a 2,110-byte
+bundle — always discards. The tool spent all of that time redacting output nobody would ever see.
+
+### The cause — three costs, all O(line) or O(run), all paid per POSITION
+
+`redactSecrets` sweeps left to right and, at each cursor, tries the rules the first-byte mask admits. The
+`GenericAssigned` rule (`[A-Za-z0-9+/=_\-]{32,}`, the low-precision shape behind the per-line credential
+keyword gate) made every one of those steps superlinear:
+
+1. `enclosingLine( in, i )` walked to both boundaries of the enclosing line — O(lineLength).
+2. `lineNamesCredential` then rescanned that whole line for one of 12 keywords — O(lineLength).
+3. The rule's own `regex_search( match_continuous )` is a bare greedy class run with nothing after it, so
+   it consumed the **maximal run from the cursor** — O(runLength) — and then, if the gate declined, the
+   sweep advanced ONE byte and re-consumed the same run minus one character. O(runLength²) per run.
+
+On ordinary source, lines are ~100 bytes and this is invisible; that is why it survived. On a minified
+bundle it is quadratic in a number measured in hundreds of kilobytes.
+
+### The fix
+
+All three values are functions of the *line* or the *run* the cursor is in, not of the cursor — so each is
+computed once and reused for as long as it stays true (`redactdetail::LineGate`, `redactdetail::ClassRun`,
+both held in a per-call `SweepState`). The `GenericAssigned` match itself stops going through the regex
+entirely: its match at the cursor IS the maximal class run from the cursor, so it becomes a subtraction
+against a run end found once. The sweep is now linear in the input.
+
+This is pure memoization of already position-independent values, so it is an **output no-op**: verified
+byte-identical (stdout, stderr and exit code) against the pre-change binary over 24 corpora × 5 verb
+shapes = 120 invocations, the 24 including 20 external SWE-Explore snapshots across 9 languages.
+
+### Result
+
+| workload | before | after | ratio |
+| --- | --- | --- | --- |
+| `--expand` on a 20 KB single line (the self-contained fixture above) | 23.02 s | 0.017 s | **~1350x** |
+| `--expand`, ONE selector in babel's 2.1 MB / 768-line yarn bundle | did not complete | 0.46 s warm (1.39 s cold) | — |
+| `--expand`, the harness's own 3-selector chunk on that bundle | did not complete | 0.47 s, 11 bodies | — |
+
+The babel rows have no honest "before" number, because the pre-change binary never produced one. It was
+killed by the harness at its 90 s guard; a manual `timeout 200` run, alone on the box, burned 196.7 s of
+user CPU and was still going when the timeout fired; and an unattended run left to finish was killed at **1,343.9 s of user CPU**
+(23 min 27 s wall) with a still-empty output file. "Did not complete" is the measurement; 196.7 s is the only clean lower
+bound worth quoting.
+
+The four redaction gates (`redactcheck`, `jsonredactcheck`, `mcpredactcheck`, `sigredactcheck`) pass
+unchanged before and after, and `redactfixcheck.sh` passes against BOTH binaries — the old one in 47.5 s,
+the new one in 0.2 s. Same verdicts, same contract; only the cost is gone.

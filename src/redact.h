@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <regex>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -263,6 +264,35 @@ inline std::string_view enclosingLine( std::string_view s, std::size_t pos ) noe
 // a byte with this value) so the sweep only attempts the rules whose first-byte set contains bytes[i].
 // This changes ZERO redaction results: a regex that requires literal prefix "AKIA" cannot match_continuous
 // at a byte that isn't 'A', so skipping it there was always a guaranteed non-match, never a skipped hit.
+// The GenericAssigned rule's leading character class — [A-Za-z0-9+/=_\-] — as a membership table. ONE
+// definition, read by both consumers: the first-byte dispatch below (that rule has no literal prefix, so
+// its first-byte set IS this class) and redactSecrets's run scan. Spelling it twice is how the two would
+// silently drift apart, and a drift there is a redaction that stops firing.
+inline std::array<bool, 256> buildGenericClassTable() noexcept
+{
+    std::array<bool, 256> cls{};
+    for( unsigned char c = 'A'; c <= 'Z'; ++c )
+    {
+        cls[c] = true;
+    }
+    for( unsigned char c = 'a'; c <= 'z'; ++c )
+    {
+        cls[c] = true;
+    }
+    for( unsigned char c = '0'; c <= '9'; ++c )
+    {
+        cls[c] = true;
+    }
+    for( unsigned char c : { '+', '/', '=', '_', '-' } )
+    {
+        cls[c] = true;
+    }
+    return cls;
+}
+
+// The minimum run length that rule's pattern requires — the "{32,}" in [A-Za-z0-9+/=_\-]{32,}.
+inline constexpr std::size_t kGenericMinRunLength = 32;
+
 inline std::array<std::uint16_t, 256> buildFirstByteRuleMask() noexcept
 {
     std::array<std::uint16_t, 256> mask{};   // value-initialised → all-zero (no rule can start here)
@@ -294,22 +324,132 @@ inline std::array<std::uint16_t, 256> buildFirstByteRuleMask() noexcept
     // rule 8: eyJ[...]\.[...]\.[...]                    — literal prefix "eyJ" → 'e'
     addRule( 8, { 'e' } );
     // rule 9 (GenericAssigned): [A-Za-z0-9+/=_\-]{32,} — NO fixed literal prefix; a match can start at any
-    // byte in the character class itself, so its first-byte set IS that class.
-    for( unsigned char c = 'A'; c <= 'Z'; ++c )
+    // byte in the character class itself, so its first-byte set IS that class, read from its one definition.
+    const std::array<bool, 256> genericClass = buildGenericClassTable();
+    for( std::size_t b = 0; b < genericClass.size(); ++b )
     {
-        addRule( 9, { c } );
+        if( genericClass[b] )
+        {
+            addRule( 9, { static_cast<unsigned char>( b ) } );
+        }
     }
-    for( unsigned char c = 'a'; c <= 'z'; ++c )
-    {
-        addRule( 9, { c } );
-    }
-    for( unsigned char c = '0'; c <= '9'; ++c )
-    {
-        addRule( 9, { c } );
-    }
-    addRule( 9, { '+', '/', '=', '_', '-' } );
 
     return mask;
+}
+
+// ── per-line and per-run memoization (perf) ──────────────────────────────────────────────────────────
+// Three of the sweep's costs were O(lineLength) or O(runLength) *at every candidate position*, i.e. O(n²)
+// on a file whose "lines" are hundreds of kilobytes — a minified or vendored bundle such as
+// .yarn/releases/*.cjs, which arrives here WHOLE through --expand's whole-file candidate. Measured on
+// babel__babel-13928's 2.1 MB / 768-line yarn bundle, one --expand selector took >20 minutes, ~100% of it
+// inside redactSecrets: enclosingLine walked to both line boundaries, lineNamesCredential rescanned the
+// whole line for its keyword, and the GenericAssigned regex re-consumed the whole class run — none of
+// which depend on WHERE in the line or run the cursor sits. The two types below hold each of those values
+// for exactly as long as it stays true. Pure memoization: same matches, same gate verdicts, same output
+// bytes (verified byte-identical on 17 corpora), with the boundary cases pinned by redactfixcheck.sh.
+
+// LineGate — the GenericAssigned keyword gate, resolved once per LINE instead of once per candidate
+// position. Both halves of that verdict (which line the cursor is in, and whether that line names a
+// credential) are functions of the LINE, so a cursor that has not left the line reuses both. The cached
+// range is CLOSED — [lineStart, lineEnd] — because that is exactly the set of offsets enclosingLine maps
+// to one line: lineEnd indexes the terminating '\n' (or the end of input on the last line), and
+// enclosingLine( s, thatNewline ) returns the line before it. Initialised empty (start > end) so the
+// first query always computes.
+struct LineGate
+{
+    std::size_t lineStart       = 1;
+    std::size_t lineEnd         = 0;
+    bool        namesCredential = false;
+
+    bool query( std::string_view in, std::size_t pos ) noexcept
+    {
+        if( pos < lineStart || pos > lineEnd )
+        {
+            const std::string_view line = enclosingLine( in, pos );
+            lineStart                   = std::size_t( line.data() - in.data() );
+            lineEnd                     = lineStart + line.size();
+            namesCredential             = lineNamesCredential( line );
+        }
+        return namesCredential;
+    }
+};
+
+// ClassRun — the maximal GenericAssigned character-class run containing the cursor, found once per RUN.
+// That rule's pattern is one greedy class run with nothing after it, so regex_search( match_continuous )
+// at a cursor always consumes the maximal run FROM that cursor — an O(runLength) call at every position
+// inside the run. The run's END is the same for every position inside it, so it is scanned once and the
+// match reduces to subtraction. [runStart, runEnd) is half-open; initialised empty (start > end).
+struct ClassRun
+{
+    std::size_t runStart = 1;
+    std::size_t runEnd   = 0;
+
+    // The rule's match length at `pos` — the maximal class run from `pos` — or 0 where it cannot match.
+    // Exactly equivalent to regex_search( match_continuous ) on the pattern, minimum length aside.
+    std::size_t matchLengthAt( std::string_view in, std::size_t pos, const std::array<bool, 256>& cls ) noexcept
+    {
+        if( !cls[ static_cast<unsigned char>( in[pos] ) ] )
+        {
+            return 0;
+        }
+        if( pos < runStart || pos >= runEnd )
+        {
+            runStart = pos;
+            runEnd   = pos;
+            while( runEnd < in.size() && cls[ static_cast<unsigned char>( in[runEnd] ) ] )
+            {
+                ++runEnd;
+            }
+        }
+        return runEnd - pos;
+    }
+};
+
+// SweepState — the memo caches one redactSecrets sweep carries. Both are keyed on a span the cursor stays
+// inside and the cursor only ever advances, so a stale hit is impossible; they live for one call and are
+// never shared between calls (the transform must stay a pure function of its input).
+struct SweepState
+{
+    LineGate gate;
+    ClassRun run;
+};
+
+// The length of rule `ruleIndex`'s match starting EXACTLY at `pos`, or 0 if that rule does not match
+// there. One contract, two answering paths:
+//
+//   • GenericAssigned — answered structurally, never by the regex. Its pattern is a bare greedy class run
+//     ([A-Za-z0-9+/=_\-]{32,}), so a regex anchored at the cursor re-consumes the entire run at EVERY
+//     position inside it; ClassRun finds that run's end once instead. It is also the one GATED rule: a
+//     run only counts as a secret when its line names a credential assignment (LineGate), which is what
+//     keeps a git SHA or a base64 test vector in prose whole. A declined gate reads as "no match", which
+//     is exactly what it was before — the byte then takes the verbatim-copy path.
+//   • every other rule — regex_search anchored with match_continuous. They are all self-anchoring on a
+//     distinctive literal prefix, so they fail within a byte or two and need no structural shortcut.
+inline std::size_t matchLengthAtCursor( std::size_t ruleIndex, std::string_view in, std::size_t pos,
+                                        std::span<const std::regex> compiled, SweepState& state )
+{
+    // the GenericAssigned class table — built once, and the same table buildFirstByteRuleMask read.
+    static const std::array<bool, 256> kGenericClass = buildGenericClassTable();
+
+    if( kRedactRules[ruleIndex].kind == SecretKind::GenericAssigned )
+    {
+        const std::size_t runLength = state.run.matchLengthAt( in, pos, kGenericClass );
+        if( runLength < kGenericMinRunLength )
+        {
+            return 0;   // shorter than the pattern's minimum → no match at this cursor
+        }
+        return state.gate.query( in, pos ) ? runLength : 0;
+    }
+
+    std::cmatch m;
+    // match_continuous: the regex must match STARTING AT the cursor (not later in the string), so the sweep
+    // advances one candidate position at a time and rule priority (table order) is honoured.
+    if( !std::regex_search( in.data() + pos, in.data() + in.size(), m, compiled[ruleIndex],
+                            std::regex_constants::match_continuous ) )
+    {
+        return 0;
+    }
+    return std::size_t( m.length( 0 ) );
 }
 
 }   // namespace redactdetail
@@ -318,12 +458,17 @@ inline std::array<std::uint16_t, 256> buildFirstByteRuleMask() noexcept
 // redaction. Returns true iff at least one redaction was made. Pure function of `in`: the regexes are
 // compiled ONCE (function-local statics) so the transform is deterministic run-to-run (det-gate + warm==cold).
 //
-// Algorithm: a single left-to-right sweep. At each position we try every rule (table order = priority) via
-// std::regex_search anchored with match_continuous at the cursor; the first rule that matches at the cursor
-// wins. The GenericAssigned rule additionally requires its enclosing line to name a credential (the gate),
-// else it is skipped so ordinary long tokens are preserved. A match is replaced by keepPrefix bytes of the
-// original + "…" + the marker; non-matching bytes are copied verbatim. This is O(n · rules) with tiny
-// constant rules — fine for the budget-capped bodies these seams emit.
+// Algorithm: a single left-to-right sweep. At each position we try the rules the first-byte mask says can
+// start here (table order = priority) anchored at the cursor with match_continuous; the first that matches
+// wins. The GenericAssigned rule is answered by ClassRun rather than by the regex, and additionally
+// requires its enclosing line to name a credential (LineGate), else it is skipped so ordinary long tokens
+// are preserved. A match is replaced by keepPrefix bytes of the original + "…" + the marker; non-matching
+// bytes are copied verbatim.
+//
+// This is O(n · rules) — LINEAR in the input, which it only became once the two caches landed. Before them
+// the line gate and the class-run match were each re-derived at every position, so the sweep was quadratic
+// in LINE length; that is invisible on source and fatal on a minified bundle, where a "line" is hundreds of
+// kilobytes and --expand hands the whole file to this function.
 inline bool redactSecrets( std::string_view in, std::string& out, RedactCounts& counts )
 {
     // compile once — a static array of {regex, ruleIndex}. std::regex construction is not cheap, but it
@@ -349,6 +494,8 @@ inline bool redactSecrets( std::string_view in, std::string& out, RedactCounts& 
     std::size_t i           = 0;
     const std::size_t N     = in.size();
 
+    redactdetail::SweepState state;   // the per-sweep memo caches (see SweepState)
+
     while( i < N )
     {
         bool matchedHere = false;
@@ -365,34 +512,15 @@ inline bool redactSecrets( std::string_view in, std::string& out, RedactCounts& 
                 continue;
             }
 
-            std::cmatch m;
-            // match_continuous: the regex must match STARTING AT the cursor (not later in the string), so the
-            // sweep advances one candidate position at a time and rule priority (table order) is honoured.
-            if( !std::regex_search( base + i, base + N, m, kCompiled[r],
-                                    std::regex_constants::match_continuous ) )
+            // 0 = this rule does not match at the cursor — no match, an empty match (zero progress is never
+            // allowed), or the GenericAssigned gate declining a run whose line names no credential.
+            const std::size_t len = redactdetail::matchLengthAtCursor( r, in, i, kCompiled, state );
+            if( len == 0 )
             {
                 continue;
             }
 
-            const std::size_t len = std::size_t( m.length( 0 ) );
-            if( len == 0 )
-            {
-                continue; // never make zero-progress on an empty match (defensive)
-            }
-
             const RedactRule& rule = kRedactRules[r];
-
-            // GenericAssigned gate: only redact if the enclosing line names a credential assignment. Without
-            // the keyword the long token is left intact (this is the precision guarantee — a git SHA / base64
-            // test vector in prose is NOT a secret). All the vendor-specific rules above are self-anchoring
-            // (distinctive prefixes) and need no line gate.
-            if( rule.kind == SecretKind::GenericAssigned )
-            {
-                if( !redactdetail::lineNamesCredential( redactdetail::enclosingLine( in, i ) ) )
-                {
-                    continue;   // not keyword-gated → not a secret → let the verbatim-copy path keep it
-                }
-            }
 
             // splice: keepPrefix original bytes + "…" (U+2026, 3 UTF-8 bytes) + the fixed marker. Deterministic,
             // length-independent (the emitted bytes never depend on the secret's length beyond the kept prefix).
