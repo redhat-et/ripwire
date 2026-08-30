@@ -508,7 +508,13 @@ struct SpanTierBatch
 //
 // DETERMINISM: which worker draws which file never reaches the result — every file writes only its own
 // slot, and each slot's spans are sorted on the file's own byte offsets.
-SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths );
+//
+// P4.1 `useMemo`: consult (and populate) the per-file span-tier memo — a stat-gated blob under the shared
+// cache-dir ladder that lets an unchanged file skip BOTH the read and the parse on a later run. The result
+// is byte-identical either way (the map is a pure function of the file's bytes and its grammar); false is
+// the --no-cache posture, and the only difference it makes is how long the answer takes. See
+// ingest_astquery.h's own header for the four freshness conditions and the disclosed warm-path-only limit.
+SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths, bool useMemo = true );
 
 // ---- §P0.1: the shape of a user's tree-sitter query, so a capture-less one is never a silent zero ----
 // astQuery reports CAPTURES, so a query that binds none matches nothing it can report:

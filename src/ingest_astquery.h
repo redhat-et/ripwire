@@ -1244,7 +1244,232 @@ static void collectSpanTiers( TSNode root, std::uint32_t byteCount, SpanTierMap&
     out.tier      = std::move( sorted.tier );
 }
 
-SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths )
+// ─── P4.1 — the span-tier MEMO (the --grep fast path) ─────────────────────────────────────────────
+//
+// WHY. R-H's tier pass parses each HIT file with tree-sitter for one purpose: to learn where that file's
+// comment and string spans are. Measured on a 4,175-file corpus, that parse was the single largest cost
+// of a warm --grep answer — 48.6 ms of 227 ms, larger than buildGraph — and it was repeated verbatim on
+// every later grep of the same unchanged file, because nothing carried the result between runs.
+// SpanTierMap is a PURE FUNCTION of (file bytes, grammar), so it memoizes: one small blob per
+// (path, parserVer) under the SAME cache-dir ladder every other ripwire cache uses, written by the pass
+// that first paid for it and read by every later one. See bench/PROFILE.md for the ledger row.
+//
+// WHY IT IS A CORRECTNESS SURFACE, NOT A PERFORMANCE ONE. The tier ladder SUPPRESSES comment/string rows
+// whenever the code tier is non-empty, so a stale span map does not merely slow an answer down — it
+// silently removes rows from one. Freshness is therefore the ingest cache's own A4-P7 stat gate rather
+// than a weaker one, with all four conditions required:
+//   - the blob's recorded PATH matches byte-for-byte (so a 64-bit filename hash collision cannot alias
+//     two files — the hash only picks the filename, it never stands in for identity);
+//   - the file's CURRENT (sizeBytes, mtimeNs) still equal the pair recorded when it was parsed;
+//   - that recorded mtime is STRICTLY OLDER than the blob's own on-disk mtime (the racy rule — a file
+//     rewritten inside one mtime tick of the blob reads as changed, never as fresh);
+//   - the parserVer in the filename matches, so any grammar/.scm change orphans every old blob at once.
+// A miss is silent and self-healing: parse, then write. Every failure mode this cache has degrades in the
+// SAFE direction — a blob that cannot be read, parsed or trusted is simply ignored and the file is
+// re-parsed, which is byte-for-byte the pre-memo behaviour.
+//
+// THE ONE RESIDUAL, named rather than implied: a rewrite that lands on the SAME byte size AND the same
+// mtime, and does so at least one mtime tick before the blob was written, is indistinguishable from no
+// rewrite and would be served a stale map. That is not a new exposure — it is precisely the assumption the
+// parse cache's own warm-run stat gate (ingest_cache.h, A4-P7) already makes about every file in the index,
+// and it is why --no-cache exists and why the gate diffs cold against warm rather than trusting either.
+//
+// DISCLOSED LIMIT, stated rather than implied: this memo does not make the tier pass cheaper the FIRST
+// time a file is classified, and a repo whose files change on every run never warms it. It is a warm-path
+// optimization and nothing else; the disclosed tier budgets (kGrepTierFileBudget / kGrepTierByteBudget)
+// are unchanged and still bound the cold cost. --no-cache turns it off at the caller, like every other
+// ripwire cache, so the reproducibility switch stays one switch.
+constexpr std::uint32_t kSpanTierMemoMagic    = 0x53544d31u;   // 'STM1'
+constexpr std::uint32_t kSpanTierMemoVersion  = 1u;
+constexpr std::uint32_t kSpanTierMemoMaxSpans = 8u << 20;      // refuse to trust (or write) an implausible span count
+
+// The SIZE FLOOR, and why there is one. Parse cost is linear in bytes (E5's 42 ns/B), so a small file's
+// tier map is cheaper to recompute than to look up — while its blob costs the same cache-dir slot as a
+// large one's. That matters because the dir-wide hygiene sweep (quality.h sweepStaleCacheBlobsOnce) caps
+// the whole "ripwire-" family by COUNT as well as by age and total bytes: a memo that wrote one blob per
+// small file would flood that budget and start evicting the main parse caches, trading a few ms of grep
+// for a full re-ingest. Measured on the 4,175-file benchmark corpus, source files at or above this floor
+// are 12.9% of the file count but 86.1% of the bytes — so the floor keeps essentially all of the saving
+// while writing roughly eight times fewer blobs. Files below it take the ordinary read-and-parse path,
+// which is exactly the pre-memo behaviour; nothing about their answer changes.
+constexpr long long     kSpanTierMemoMinBytes = 32ll << 10;
+
+// Composed exactly the way every OTHER blob family is (quality.h): one fixed-width identity hex per key
+// field, then shaKeyedCachePath to assemble and shard the name. Two properties come free and are the reason
+// to reuse rather than hand-roll a fourth name builder — headSnapRepoHex realpath-normalizes before hashing,
+// so two spellings of one file share a blob; and exclConfigHex folds extractionIdentityTag(), so a
+// kParserVer/kCacheVersion bump renames every memo blob at once, which is the same self-healing invalidation
+// the parse cache already has. (The hand-rolled fixed-buffer name builder this replaces was flagged as a
+// 60-token clone of those very builders by --quality-delta, and the detector was right.)
+inline std::string spanTierMemoPath( const std::string& diskPath )
+{
+    return quality::shaKeyedCachePath( "stier", quality::headSnapRepoHex( diskPath ),
+                                       quality::exclConfigHex( {}, "stier" ),
+                                       std::to_string( kSpanTierMemoVersion ) );
+}
+
+// Read the memo for `diskPath` at the stat the caller just took. Returns false — leaving `out` untouched —
+// on ANY doubt whatsoever; there is deliberately no partial-trust path.
+inline bool spanTierMemoLoad( const std::string& diskPath, const StatInfo& now, SpanTierMap& out )
+{
+    if( now.sizeBytes < 0 || now.mtimeNs < 0 )
+    {
+        return false;   // unstatable ⇒ nothing to compare against ⇒ never trusted
+    }
+    const std::string blobPath = spanTierMemoPath( diskPath );
+    const StatInfo    blobStat = statSizeMtime( blobPath );
+    if( blobStat.mtimeNs < 0 || now.mtimeNs >= blobStat.mtimeNs )
+    {
+        return false;   // absent, or the racy rule: the file is not provably older than the blob
+    }
+    std::ifstream blobIn( blobPath, std::ios::binary );
+    if( !blobIn )
+    {
+        return false;
+    }
+    const auto u32 = [ & ]() -> std::uint32_t
+    {
+        std::uint32_t v = 0;
+        blobIn.read( reinterpret_cast<char*>( &v ), sizeof( v ) );
+        return v;
+    };
+    const auto i64 = [ & ]() -> long long
+    {
+        long long v = 0;
+        blobIn.read( reinterpret_cast<char*>( &v ), sizeof( v ) );
+        return v;
+    };
+    if( u32() != kSpanTierMemoMagic || u32() != kSpanTierMemoVersion )
+    {
+        return false;
+    }
+    if( i64() != now.sizeBytes || i64() != now.mtimeNs )
+    {
+        return false;
+    }
+    const std::uint32_t pathLen = u32();
+    if( !blobIn || pathLen != diskPath.size() )
+    {
+        return false;
+    }
+    std::string recordedPath( pathLen, '\0' );
+    blobIn.read( recordedPath.data(), std::streamsize( pathLen ) );
+    if( !blobIn || recordedPath != diskPath )
+    {
+        return false;   // filename-hash collision (or a moved blob) — identity is the PATH, not its hash
+    }
+    const std::uint32_t spanCount = u32();
+    if( !blobIn || spanCount > kSpanTierMemoMaxSpans )
+    {
+        return false;
+    }
+    SpanTierMap loaded;
+    loaded.startByte.resize( spanCount );
+    loaded.endByte.resize( spanCount );
+    loaded.tier.resize( spanCount );
+    if( spanCount > 0 )
+    {
+        blobIn.read( reinterpret_cast<char*>( loaded.startByte.data() ), std::streamsize( spanCount ) * std::streamsize( sizeof( std::uint32_t ) ) );
+        blobIn.read( reinterpret_cast<char*>( loaded.endByte.data() ),   std::streamsize( spanCount ) * std::streamsize( sizeof( std::uint32_t ) ) );
+        blobIn.read( reinterpret_cast<char*>( loaded.tier.data() ),      std::streamsize( spanCount ) );
+    }
+    if( !blobIn )
+    {
+        return false;   // truncated / torn blob — re-parse rather than classify from half a map
+    }
+    loaded.isParsed = true;
+    out             = std::move( loaded );
+    return true;
+}
+
+// Write the memo. Best-effort in every direction: a failure loses only the speed-up, never an answer.
+// Temp-then-rename so a torn write can never be observed as a complete blob (the same discipline
+// atomicWriteQSnap uses); the temp name carries pid + a process-unique counter, so the parallel tier
+// workers — which each own a distinct file slot — cannot collide even across concurrent ripwire runs.
+inline void spanTierMemoStore( const std::string& diskPath, const StatInfo& now, const SpanTierMap& map )
+{
+    if( now.sizeBytes < 0 || now.mtimeNs < 0 || !map.isParsed )
+    {
+        return;
+    }
+    const std::size_t spanCount = map.startByte.size();
+    if( spanCount != map.endByte.size() || spanCount != map.tier.size() || spanCount > kSpanTierMemoMaxSpans )
+    {
+        return;
+    }
+    static std::atomic<std::uint64_t> tempSeq{ 0 };
+    const std::string                 blobPath = spanTierMemoPath( diskPath );
+    char                              suffix[ 64 ];
+    // 4 B literal + %d at 11 + 1 B + %llu at 20 = 36 B worst case into 64 — see test/fixedbufsweep.sh's census
+    std::snprintf( suffix, sizeof( suffix ), ".tmp%d-%llu", int( ::getpid() ), static_cast<unsigned long long>( tempSeq.fetch_add( 1, std::memory_order_relaxed ) ) );
+    const std::string tempPath = blobPath + suffix;
+    {
+        std::ofstream out( tempPath, std::ios::binary | std::ios::trunc );
+        if( !out )
+        {
+            return;
+        }
+        const auto putU32 = [ & ]( std::uint32_t v ) { out.write( reinterpret_cast<const char*>( &v ), sizeof( v ) ); };
+        const auto putI64 = [ & ]( long long v )     { out.write( reinterpret_cast<const char*>( &v ), sizeof( v ) ); };
+        putU32( kSpanTierMemoMagic );
+        putU32( kSpanTierMemoVersion );
+        putI64( now.sizeBytes );
+        putI64( now.mtimeNs );
+        putU32( std::uint32_t( diskPath.size() ) );
+        out.write( diskPath.data(), std::streamsize( diskPath.size() ) );
+        putU32( std::uint32_t( spanCount ) );
+        if( spanCount > 0 )
+        {
+            out.write( reinterpret_cast<const char*>( map.startByte.data() ), std::streamsize( spanCount ) * std::streamsize( sizeof( std::uint32_t ) ) );
+            out.write( reinterpret_cast<const char*>( map.endByte.data() ),   std::streamsize( spanCount ) * std::streamsize( sizeof( std::uint32_t ) ) );
+            out.write( reinterpret_cast<const char*>( map.tier.data() ),      std::streamsize( spanCount ) );
+        }
+        out.flush();
+        if( !out )
+        {
+            std::error_code rmEc;
+            fs::remove( fs::path( tempPath ), rmEc );
+            return;
+        }
+    }
+    std::error_code renameEc;
+    fs::rename( fs::path( tempPath ), fs::path( blobPath ), renameEc );
+    if( renameEc )
+    {
+        std::error_code rmEc;
+        fs::remove( fs::path( tempPath ), rmEc );
+    }
+}
+
+// The two seams the tier worker actually calls: "is this file worth a memo at all" lives HERE, once, so the
+// worker's own body states the intent (try the memo, else parse; record what the parse cost) and carries
+// neither the enable flag nor the size floor as extra branches of its own.
+//
+// The LOAD is consulted before the READ, not merely before the parse: a hit pins the exact (path, size,
+// mtime) whose bytes produced the stored map, and every content-dependent decision the worker makes below it
+// — the binary sniff, the .h-to-ObjC grammar reroute, the grammar choice itself — is a pure function of those
+// same bytes, so re-reading them could only re-derive what the blob already proves. One thing deliberately
+// does NOT move on a hit: SpanTierBatch::bytesParsed counts bytes handed to tree-sitter, and on a memo hit
+// none were. A count that grew on a run which parsed nothing would be a small lie in exactly the place this
+// file's honesty rules care about.
+//
+// The STORE is keyed to the stat taken BEFORE the read, and written after isParsed is set — so the blob is
+// exactly the map this answer used, and a file rewritten between the stat and the read stores a pair that no
+// longer matches it and is therefore rejected on the next load rather than trusted.
+inline bool spanTierMemoTryLoad( bool useMemo, const std::string& diskPath, const StatInfo& now, SpanTierMap& out )
+{
+    return useMemo && now.sizeBytes >= kSpanTierMemoMinBytes && spanTierMemoLoad( diskPath, now, out );
+}
+
+inline void spanTierMemoTryStore( bool useMemo, const std::string& diskPath, const StatInfo& now, const SpanTierMap& map )
+{
+    if( useMemo && now.sizeBytes >= kSpanTierMemoMinBytes )
+    {
+        spanTierMemoStore( diskPath, now, map );
+    }
+}
+
+SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths, bool useMemo )
 {
     SpanTierBatch batch;
     batch.perFile.resize( diskPaths.size() );
@@ -1316,6 +1541,11 @@ SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths )
                 {
                     continue;   // markdown and every unsupported extension: unclassifiable, and it stays that way
                 }
+                const StatInfo fileStat = statSizeMtime( path );
+                if( spanTierMemoTryLoad( useMemo, path, fileStat, batch.perFile[fileIndex] ) )
+                {
+                    continue;   // isParsed was set by the loader; the slot is owned by this worker alone
+                }
                 bytes.clear();
                 if( !readFile( path, bytes ) || looksBinary( bytes ) )
                 {
@@ -1346,6 +1576,7 @@ SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths )
                 batch.perFile[fileIndex].isParsed = true;   // slot owned by this worker alone
                 ts_tree_delete( tree );
                 bytesParsed.fetch_add( bytes.size(), std::memory_order_relaxed );
+                spanTierMemoTryStore( useMemo, path, fileStat, batch.perFile[fileIndex] );
             }
         }
         catch( ... )   // a throw escaping a worker thread is std::terminate — degrade to unclassified instead

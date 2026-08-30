@@ -403,6 +403,11 @@ using rw::selectorNotFoundMessage;   // §B4.2: the shared file:name selector re
 // The shared, post-graph state every verb handler reads. Bundling it into one views-at-the-seam struct
 // keeps each handler to a single parameter; each handler rebinds only the fields it uses, so the moved
 // bodies below are byte-identical to the pre-B7.2 inline dispatch blocks in main().
+// §P4.1 — the --grep scan phases, computed AHEAD of this struct (see verbs_grep.h). Forward-declared so
+// MainDispatch can carry a pointer to them without the grep section having to precede it; nullptr is the
+// ordinary case (any run whose answering verb is not grep) and the verb then computes them inline.
+struct GrepScanPhases;
+
 struct MainDispatch
 {
     const rw::Config&                     cfg;
@@ -423,6 +428,7 @@ struct MainDispatch
     rw::RedactCounts&                     redactCounts;
     rw::RedactCounts*                     redactPtr;
     const rw::notes::NoteIndex*           notesPtr;   // L3: field-notes surfacing index (nullptr ⇒ inert: no/empty file, or multi-root)
+    const GrepScanPhases*                 grepPhases = nullptr;   // §P4.1: prefetched grep scan (nullptr ⇒ compute inline)
 };
 
 }   // namespace — part 1: the shared preamble helpers + the verb-dispatch context
@@ -3241,7 +3247,13 @@ int main( int argc, char** argv )
     // no overlay at all: scipPtr stays nullptr so buildGraph/serialize produce output BYTE-IDENTICAL to a
     // run with no --scip (the degrade contract — a bad index must never change the map, only stderr).
     const ScipOverlay* scipPtr = scipOverlay.empty() ? nullptr : &scipOverlay;
-    const Graph       g   = buildGraph( ing, scipPtr );
+
+    // §P4.1 — the grep scan runs ALONGSIDE the graph build; verbs_grep.h's startGrepScanPrefetch owns every
+    // condition and the degrade path, and is handed §B11.4's own dispatch winner rather than a guess.
+    GrepScanPhases    grepPhases;
+    std::thread       grepPhaseWorker = startGrepScanPrefetch( cfg, ing, verbPrec.winner, grepPhases );
+    const Graph       g               = buildGraph( ing, scipPtr );
+    joinGrepScanPrefetch( grepPhaseWorker );
 
     // --metrics: fan-in per symbol from the in-edge CSR (free graph query) — the descriptive
     // "this is reused N×, prefer reusing it" signal. fan-out + cx come from serialize/Symbol.
@@ -3395,7 +3407,8 @@ int main( int argc, char** argv )
 
     // Phase B7.2: bundle the shared post-graph state; each verb handler below reads what it needs.
     const MainDispatch dsp{ cfg, ing, g, root, multiRoot, ws, fanIn, fanInPtr, qmetrics,
-                           ampPtr, cboPtr, testedPtr, lcom4Ptr, impurePtr, forChurn, redactCounts, redactPtr, notesPtr };
+                           ampPtr, cboPtr, testedPtr, lcom4Ptr, impurePtr, forChurn, redactCounts, redactPtr, notesPtr,
+                           grepPhases.valid ? &grepPhases : nullptr };
 
     if( std::optional<int> handled = runForLens( dsp ) )
     {
