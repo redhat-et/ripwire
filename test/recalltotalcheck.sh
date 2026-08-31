@@ -66,7 +66,7 @@ echo "recalltotalcheck: BIN=$BIN  TARGET=$CORPUS (clean extraction of HEAD from 
 
 # Pin an explicit high body budget: this gate isolates --top-k accounting from recall's default 8K-token
 # body ceiling, which has its own contract in recallbudgetcheck.sh.
-run(){ perl -e 'alarm 60; exec @ARGV' "$BIN" "$CORPUS" --recall="the" --no-cache --max-tokens=1000000 "$@" 2>/dev/null; }
+run(){ perl -e 'alarm 60; exec @ARGV' "$BIN" "$CORPUS" --recall="the" --no-cache --max-tokens=4000000 "$@" 2>/dev/null; }
 # Pure parameter expansion, not `printf | head -1`: an uncapped --top-k=9999 run on the clean corpus is a
 # multi-megabyte payload, and `head` closing the pipe after one line makes bash's printf report
 # "write error: Broken pipe" on stderr nine times per run. Harmless to the verdict, but a gate that
@@ -116,7 +116,7 @@ BIG_CAPPED="$( capped_of "$BIG" )"; BIG_TRUNC="$( trunc_of "$BIG" )"
 if [ "${BIG_CAPPED:-0}" = "0" ] && [ -z "${BIG_TRUNC:-}" ]; then
     ok "--top-k=9999 is genuinely uncapped (capped=0, no truncated= marker) — its shown= is the true relevant count"
 else
-    no "--top-k=9999 came back capped=${BIG_CAPPED:-?}${BIG_TRUNC:+ truncated=$BIG_TRUNC} — the run this gate uses as its UNCAPPED reference was cut, so its shown= is not the true relevant count and every arm below is unsound. The cut is the pinned --max-tokens=1000000 (total=$BIG_TOTAL of a corpus this budget can no longer hold), not --top-k: raise the budget here rather than 'fixing' the arms it breaks."
+    no "--top-k=9999 came back capped=${BIG_CAPPED:-?}${BIG_TRUNC:+ truncated=$BIG_TRUNC} — the run this gate uses as its UNCAPPED reference was cut, so its shown= is not the true relevant count and every arm below is unsound. The cut is the pinned --max-tokens=4000000 (total=$BIG_TOTAL of a corpus this budget can no longer hold), not --top-k: raise the budget here rather than 'fixing' the arms it breaks."
 fi
 
 if [ -n "$BIG_TOTAL" ] && [ -n "$BIG_SHOWN" ]; then
