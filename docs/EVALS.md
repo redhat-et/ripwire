@@ -6882,6 +6882,34 @@ v2 bytes (27,519) now EXCEED the `--expand` baseline (24,966) on this four-insta
 short-function cost regime the reading above already names. Four observations; the
 population-estimate caveat of (5) applies with more force, not less.
 
+**Reference-implementation fidelity audit (2026-08-31, lane/tc-arisecode).** Both slice rungs were
+built from the paper's PROSE alone; the reference implementation has since been published
+([FARD-Lab/ARISE](https://github.com/FARD-Lab/ARISE), MIT) and was read line-by-line
+(`src/arise/analysis/program_graph.py` — the two-pass AST + data-flow builder — and
+`src/arise/tools/dataflow_slice.py` — the traversal) against `src/slice.h`. This paragraph is the
+record of that comparison: it amends two readings of the paper the deviations list above credited
+too generously, and discloses two divergences between ripwire and the reference CODE that the
+prose-only registration could not have named. **No ripwire behavior changed as a result** — the
+registered contract stands, every emitted legend sentence describes ripwire's own behavior and
+remains true, and both newly-disclosed divergences are kept deliberately.
+
+| point | reference as coded | ripwire | verdict |
+| --- | --- | --- | --- |
+| reaching-definition rule | single forward textual pass; `definitions[var]` = last def statement; each use links to exactly that def; an augmented assignment's read links to the PREVIOUS def (uses are processed before defs within a statement) | `sliceReachingDef`: the last def row strictly before the line, same last-writer-wins fold; aug-assign rows `k="both"` and chain to the prior def | **faithful** — the core rule matches exactly; both sides are flow-insensitive single passes with no branch joins and no loop back-edges |
+| statement granularity | TOP-LEVEL function-body statements only: a compound `if`/`try` block is ONE node spanning all its lines, and a `for`/`with` statement's node carries only its target and iterator — the body's defs and uses are dropped entirely | one row per source LINE; every identifier in the definition's span is classified, nothing dropped | deviation (1) above read the paper as finer-grained than us; the published code is strictly COARSER — line grain over-merges only multi-statement lines, the reference over-merges whole compound blocks and loses loop-body occurrences outright |
+| traversal variable scope | the BFS filters EVERY edge to the seed variable (`if variable not in edge_vars: continue`) — the backward slice is the seed's own same-name def-use chain, typically one hop; the variables a reached definition READS are never chained | rung 2 chains through operand variables: a reached def's uses continue to THEIR reaching definitions | **new divergence, disclosed here and KEPT**: ripwire's slice is a strict superset (probe: a four-assignment Python chain — the back-slice reaches the parameter through two intermediate variables; the reference stops at the seed's own definition). The paper's +17pp was measured with the single-variable form |
+| bound | UNBOUNDED — `_bfs_slice` has no depth or node cap (harmless there because single-variable chains are short) | default depth 8, band 1..32, `flow_truncated="1"` when the bound suppresses a novel row | **new divergence, disclosed here and KEPT** — the registration's "bounded BFS" reading came from prose; the bound is ours, and it is the disclosed-truncation posture this document requires |
+| halt at call edges | trivially true — no data-flow edge ever crosses a function; parameters have NO def site at all, so a use of a never-reassigned parameter has no backward edge | span-scoped walk, same intra-procedural guarantee; the parameter line rows as a `t="param"` def and is reachable | faithful on the boundary; ripwire's param rows are richer, kept |
+| direction semantics | backward = USE_DEF edges, forward = DEF_USE, both = union deduplicated by statement; every emitted step is labeled with the SEED variable's name | back/fwd/both, backward first, deduplicated per (variable, line); flow rows carry `v=` (the step's OWN variable), `d=`, `f=` | faithful (modulo the variable-scope row); ripwire's per-step labeling is strictly more informative |
+| seed addressing | (file, line, variable): the statement covering the line via binary search, an explanatory string when none covers it | (symbol, variable) + the line-seed addendum (`--at` / `@FILE:LINE`); the seed variable's rows are the d=0 block | deviation (3) as already disclosed; the addendum closes the addressing gap |
+| scope handling | `global x` / `nonlocal x` statements are treated as DEFS of x — declaration-as-def, no scope analysis; comprehension scopes are NOT separated (their variables leak as plain loads); attribute and subscript stores (`self.x = v`, `a[i] = v`) produce NO defs and NO uses — invisible | name-based: all such identifiers row as reads; no lexical scope separation either | deviation (2) credited the paper with explicit scope handling; the published code is as scope-insensitive as v1, and blinder on attribute stores (invisible there, visible-as-reads here) |
+
+The audit's operative finding for any future head-to-head: the reference slicer that produced the
+paper's +17pp is the WEAKER instrument — top-level-statement grain, single-variable chains, no
+transitive closure, loop bodies dropped. Matching the published number does not require matching
+the published slicer, and a comparison arm that swaps in ripwire's verbs is comparing a superset
+slice against the number the subset earned.
+
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 
 **The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*
