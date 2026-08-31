@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 496 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 497 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4496,7 +4496,7 @@ descriptions 21,172 B, `src/mcp.h`) is larger and riskier and is spec-only, not 
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **496 gate scripts**, all of which exist on disk.
+naming **497 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5327,7 +5327,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 496. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 497. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -7654,3 +7654,158 @@ live build tree before any number is trusted (the CLAUDE.md mixed-binary trap).
 **Explicitly out of this phase.** No census run, no precision number, no resolver change, no output
 change, no counter, no side table. This section is the registration and the read-only recon behind
 it; the first number appears below it, dated, whichever way it goes.
+
+### The census, RUN — S6-C silent-pin precision, 2026-08-31 (the number the section above registered)
+
+**Verdict against the frozen bands: INCONCLUSIVE by coverage.** Locality-pinned precision is
+**0.729 (n = 85)** on astropy-14365 and **0.738 (n = 84)** on astropy-12907. Both point estimates sit
+inside the registered "silence unjustified" region (< 0.80); neither corpus reaches the registered
+**n ≥ 100** floor. The registration says exactly what happens then — *"Published as inconclusive; the
+only funded follow-up is corpus growth, never a fix reached for through the band"* — so **no fix is
+funded by this result**, and no band was widened, narrowed or restated to reach a decision. What the
+census does establish is the instrument, the population's true size, and a mechanically demonstrated
+root cause, all of which make a follow-on census cheap.
+
+**The two corpora are NOT independent, and pooling them is refused.** They are the same project 1,458
+issue-numbers apart, and **154 of the 157 distinct locality-pinned (caller, callee) pairs — 98% — are
+literally the same code in both**. Pooling would give n = 169 at 0.733 and would clear the registered
+floor, which is precisely why it is not done: that number would be one measurement counted twice
+wearing the costume of replication. astropy-12907 is reported as a STABILITY CHECK on the point
+estimate (0.729 → 0.738, every stratum within 0.01), not as a second corpus.
+
+**Deviation from the registered corpora, stated up front because it constrains everything below.** The
+registration named loguru and rq, for comparability with the 2026-07-11 census. Neither is in this
+tree and the round ran under a no-clone constraint, so neither could be indexed. The corpora are
+instead checkouts already present at `bench/external/swex/snapshots/`: **`astropy__astropy-14365`**
+(942 `.py`; ripwire indexes 1149 files / 26,405 symbols) and **`astropy__astropy-12907`** (910 `.py`).
+astropy was chosen because it is the only genuine, large Python *library* in that directory — the six
+`astral-sh__ruff-*` snapshots are larger but their Python is a Rust project's lint FIXTURES
+(deliberately pathological code), and `scip-python` in fact **crashed fatally** on
+`astral-sh__ruff-15626` (`Debug Failure. False expression.` on
+`resources/test/fixtures/flake8_simplify/SIM117.py`, exit 1 after a partial 29 MB index), so that arm
+is recorded UNRUNNABLE rather than quietly dropped. Comparability with 0.378 (loguru) / 0.841 (rq) is
+therefore **lost**, and nothing below should be read against those two.
+
+**C++ arm: UNKNOWN, exactly as the registration provided for.** `scip-clang` is still not installed
+and was not installed for this round. This is a PYTHON-ONLY census; its C++ generalization is unknown
+and the duckdb scoping figures in the registration remain scoping context, never results.
+
+**The instrument (`--pin-census=FILE`, `src/pincensus.h`, gate `test/pincensuscheck.sh`).** Building it
+confirmed the registration's diagnosis rather than merely inheriting it: a call edge serializes as
+`<c n="NAME"/>`, so the identity a precision join needs is simply absent from the output and no
+regrouping of `bench/scip_amb_precision.py` could recover it. The census is an eval-only side file
+emitting, per DECIDED call site, the caller's canonical id, the callee name, the mechanism that
+resolved it (`unique|qualified|receiver-rule|cone|arity|locality|split|scip|binding`), a flag string
+naming *every* narrowing stage that fired (so a tie-break that narrowed 3→2 and still split stays
+visible), and the canonical id of every surviving target. Under `--scip` it also transcribes the
+overlay's own covered sites, so both sides of the join live in one file and no protobuf reader is
+needed downstream. Shape: SoA parallel vectors, 32-bit handles, one flat name pool, CSR-style target
+ranges, `Symbol` untouched (G2; the registration's option (ii) in its smaller, census-only form).
+`stdout` is byte-identical with and without the flag — verified on the fixture by gate arm (E) and
+again on the 1149-file corpus — and three armed runs are byte-identical. The join harness is
+`bench/scip_pin_precision.py`.
+
+**One instrument defect, found and fixed before any number was read, because it would have reproduced
+the very blindness being measured.** `canonicalIdForEmit` degrades an UNSCOPED symbol to its BARE
+NAME, so the census's first draft printed two sibling free functions named `handler` identically —
+name-keyed again. Gate arm (G), run against `test/scipfix`, caught it. The census identity is
+therefore `path::scope::name#NODEID` (`path::name#NODEID` when unscoped) — never a bare name — and arm
+(I) asserts the load-bearing assumption that the handle is stable between the plain and `--scip` runs
+rather than assuming it.
+
+**The population is far smaller than the recon implied — the first substantive finding.** On
+astropy-14365 the resolver decided **46,785** call sites. Of those, **224 (0.48%)** are
+locality-pinned in the registered sense (tier ≥ 2 entering S6-C, exactly one non-self survivor after,
+not SCIP- or binding-pinned); a further 20 had S6-C fire and still split, so the tie-break touches 244
+sites in all. The recon's duckdb framing — ~48k name-collision sites collapsing to ~8.9k residual
+`ambiguous=`, "the gap is mostly this population plus the other silent pins" — is **not** what this
+corpus shows: the gap is dominated by the receiver rules (5,409 sites) and by names that were never
+ambiguous at all (37,984), with locality a half-percent sliver. Whatever the pin's precision proves to
+be, its blast radius here is 0.5% of decided edges.
+
+**Results. Every figure carries its own n; SCIP silence is not disconfirmation, so precision is
+reported only where SCIP speaks.**
+
+| mechanism | astropy-14365 sites | covered | precision | astropy-12907 sites | covered | precision |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **locality (S6-C — the registered primary)** | **224** | **85** | **0.729** | **224** | **84** | **0.738** |
+| receiver-rule (Rule 1/2/2b/3) | 5,409 | 4,580 | 0.984 | 5,328 | 4,466 | 0.983 |
+| cone (CHA-lite) | 254 | 253 | 1.000 | 248 | 248 | 1.000 |
+| arity | 183 | 42 | 0.238 | 197 | 41 | 0.244 |
+| split (today's `amb=` population, per-TARGET) | 2,731 | 677 | 0.146 | 3,092 | 681 | 0.147 |
+| unique (control) | 37,984 | 19,983 | 0.969 | 46,607 | 19,606 | 0.969 |
+
+The control matters: `unique` is 0.969, not 1.000, so roughly 3pp of every figure here is
+ripwire/SCIP disagreement rather than ripwire error. Locality at 0.729 sits 24pp below that floor.
+
+**Secondary decomposition — reported beside the primary, never in place of it, and it moves no band.**
+A `mech` label names the stage that chose *inside the tier*; if SCIP's answer was never in the tier at
+all (it lives in another file, and tiers 1/2 are same-file / same-dir) the miss belongs to the tier
+ladder, not to that stage. Restricting to covered sites where SCIP's target is in the caller's OWN
+file (astropy-14365):
+
+| mechanism | covered | of those, in-file | precision (all) | precision (in-file) |
+| --- | ---: | ---: | ---: | ---: |
+| locality | 85 | 76 | 0.729 | **0.763** |
+| receiver-rule | 4,580 | 2,399 | 0.984 | 0.992 |
+| cone | 253 | 232 | 1.000 | 1.000 |
+| arity | 42 | 9 | 0.238 | 1.000 |
+| unique | 19,983 | 4,423 | 0.969 | 1.000 |
+
+This reads cleanly, and it reverses one alarming-looking number: `arity`'s 0.238 is **not** the arity
+filter — all 32 of its disconfirmations are cross-file, i.e. the true target was never in the tier at
+all, and in-file it is 1.000 (n=9). Every other mechanism is 1.000 or 0.992 in-file. Locality alone is
+**0.763 in-file**: even when the correct definition was sitting in the caller's own file, available to
+the tie-break, S6-C picked a different one about a quarter of the time.
+
+**Root cause, demonstrated rather than inferred.** The 23 disconfirmed locality pins split into three
+shapes: **10** where SCIP resolves to a MODULE-LEVEL function and ripwire pinned a same-file CLASS
+METHOD, **10** where both are methods of sibling classes in one file, **3** cross-file. The first shape
+has a mechanical explanation. `resolve.h::canonicalId` returns the BARE NAME for a symbol with no
+enclosing scope, so a module-level function's canonical id carries no path segment at all — and
+`sharedLocality`, which counts only whole-segment prefixes, therefore scores it **zero against every
+caller in the repo**. A module-level function can never win the locality tie-break, and any same-file
+class method beats it by default. Five lines reproduce it with no oracle involved:
+
+```python
+def compute( x ): return x + 1                       # mod.py::compute  ->  canonId is just "compute"
+class Helper:
+    def compute( self, x ): return x - 1             # mod.py::Helper::compute
+class Caller:
+    def go( self, x ): return compute( x )           # a module-level call
+```
+
+```
+C  locality  2  1  l  mod.py::Caller::go#4  compute  mod.py::Helper::compute#2
+... and the map for that corpus reports ambiguous=0.
+```
+
+The call is pinned to an unrelated class's method, one confident edge is emitted, and the disclosed
+ambiguity gauge says nothing. Real instances in astropy include
+`io/fits/column.py::_ColumnFormat::from_recformat` → `Column::_convert_format` (SCIP: module-level
+`_convert_format`) and three fitters in `modeling/fitting.py` pinned to
+`JointFitter::model_to_fit_params` where SCIP says the module-level function. Note this is the SAME
+degrade that bit the census writer above, in a second place; if a phase 3 is ever funded, the first
+question is whether the fix belongs in `canonicalId`'s unscoped spelling rather than in S6-C.
+
+**Coverage is the binding constraint, and it is OUR ceiling, not SCIP's.** Only 85 of 224 pinned sites
+(38%) are covered. The `--scip` run's own honesty note explains why: `SCIP matched 47% of occurrences
+(85889/183188), 47235 defs unmatched`. The index was generated from this exact checkout, so "older
+commit" is not the explanation — the loss is in ripwire's own SCIP ingestion. Raising that match rate
+is the cheapest route to n ≥ 100 on a corpus already in the tree, and it is an instrument-side change
+that must land BEFORE, not during, the next census.
+
+**What could not be established.** (a) The registered primary at its registered floor — n = 85 of a
+required 100. (b) Any C++ statement: `scip-clang` absent. (c) Comparability with the 0.378 / 0.841
+census: its corpora are not in this tree. (d) A second INDEPENDENT corpus: only one Python project in
+the tree proved measurable. (e) Whether the 10 sibling-class disconfirmations are wrong edges or SCIP
+mis-resolutions — they were read, not adjudicated.
+
+**Standing rules this result does NOT touch.** No fix is funded. If a later phase is funded on a
+larger census, it is judged by the precision statement, never by the direction of `ambiguous=`, which
+MAY RISE to a ceiling of +2.0% against the same-commit baseline — the twice-rejected criterion stays
+rejected. Baseline for this worktree's head, re-derived: `ripwire src --no-cache` gives
+`files=145 symbols=4624 edges=12550 ambiguous=5434 unresolved=1445`; the +1 file / +14 symbols / +24
+`ambiguous` against the registration's `3ce9944` figure is this round's own `src/pincensus.h` and its
+call sites, and excluding that one header reproduces the registered
+`files=144 symbols=4610 edges=12515 unresolved=1445` exactly.
