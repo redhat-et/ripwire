@@ -6840,7 +6840,13 @@ defects; neither is in the rung-2 flow machinery.**
   present. Both occurrences of the pattern in that function are missed (the added line 411 and the
   pre-existing 394), so this is systematic, not a diff artifact: a `T v( a, b );` declaration's
   argument list is not walked for occurrences. This is the ONLY real drop in 188 duckdb+rocksdb
-  instances, and it accounts for 2 of duckdb's 10 missed lines.
+  instances, and it accounts for 2 of duckdb's 10 missed lines. **Fixed at 713a020** (same round:
+  the walk recognizes the most-vexing-parse shape and rows those arguments `k="use" t="call-arg"`,
+  C-family-only, gated red-first in slicecheck arm (1b)); duckdb re-run in full on the fixed
+  binary, same corpus copy and cap: the two drop lines now hit — per-variable line-recall
+  0.911 → **0.917**, hit-all 0.889 → **0.911** (exactly the +2/90 the fix predicts), fn-recall
+  v1 0.547 → 0.550 / v2 0.597 → 0.602, over-inclusion 4.96× → 4.99× — every other instance's
+  rows unchanged.
 - **A C++ keyword can be listed as a sliceable local.** ugrep `lib/matcher.cpp` @ `a8af825d3`,
   `Matcher::advance` (a ~1 200-line SIMD/macro-heavy function): the bare inventory offers
   `<v n="if" l="683" t="decl">`, and `--slice=matcher.cpp:advance:if` returns 13 rows, every one an
