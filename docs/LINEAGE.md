@@ -21,11 +21,11 @@ licence in [`THIRD_PARTY.md`](../THIRD_PARTY.md). First-party code under `src/` 
 third-party code lives under `third_party/` and keeps its own licence. Citing a paper means the idea
 was read and applied, not that any of its text or code is here.
 
-**The counts, derived from the tables below:** **34 repositories** and **59 papers** are folded, and
+**The counts, derived from the tables below:** **34 repositories** and **61 papers** are folded, and
 a labelled survey of **222 tools** contributed nothing and says so. **The two sets are disjoint by
 construction, so they add rather than nest:** a tool that contributed a lesson gets a row in §3a and
-is never repeated in §3b, which makes the field study 28 folded *plus* 220 surveyed — not 28 picked
-out of 220. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
+is never repeated in §3b, which makes the field study 34 folded *plus* 222 surveyed — not 34 picked
+out of 222. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
 fails if the README's sentence disagrees, and proves the disjointness itself (arm E6) rather than
 taking this paragraph's word for it.
 
@@ -33,13 +33,14 @@ taking this paragraph's word for it.
 
 ## 1. Classic papers
 
-Nine results, none newer than 2009, that the ranking and quality machinery is built directly on.
+Ten results, none newer than 2009, that the ranking and quality machinery is built directly on.
 
 | Year | Work | Lesson taken | Where it lives |
 | --- | --- | --- | --- |
 | 1948 | Shannon, *A Mathematical Theory of Communication* — [doi:10.1002/j.1538-7305.1948.tb01338.x](https://doi.org/10.1002/j.1538-7305.1948.tb01338.x) | Entropy is a sum over a probability distribution — and a floating-point sum is only reproducible if its addends arrive in a fixed order. | `ent=` on `--readability`, summed over the token-text-**sorted** vector so no hash iteration order can reach the output (`src/readability.h`) |
 | 1976 | McCabe, *A Complexity Measure* — [doi:10.1109/TSE.1976.233837](https://doi.org/10.1109/TSE.1976.233837) | Complexity is countable from syntax alone: one plus the decision points in a definition. No build, no types. | `cx=` on `--metrics`; the complexity half of `--hotspots` (`src/model.h`) |
 | 1981 | Henry & Kafura, *Software Structure Metrics Based on Information Flow* — IEEE Transactions on Software Engineering SE-7(5):510-518 | Information flow has a DIRECTION, and a structure metric that folds reads and writes into one number throws away the half that matters: what a procedure reads is a dependency, what it writes is a hazard for everyone else. | `--nonlocal-state` reports `reads=` and `writes=` as two separate sets and never sums them, down to a per-cell `dir=r|w|rw` (`src/nonlocalstate.h`) |
+| 1981 | Weiser, *Program Slicing* — ICSE 1981, extended as [doi:10.1109/TSE.1984.5010248](https://doi.org/10.1109/TSE.1984.5010248) | A slice is fixed by a CRITERION — a program point plus a variable — and the answer is the statements that can affect that variable's value there. The criterion, not the file and not the function, is the unit of the question; backward and forward are two directions over the same criterion, not two features. | `--slice=VAR` and `--slice-flow=back\|fwd`, seeded at a criterion by `--at=FILE:LINE` (`src/slice.h`) |
 | 1977 | Halstead, *Elements of Software Science* — Elsevier *(a book, no DOI)* | Volume needs only a TOTAL operator/operand partition, never a per-grammar one: every token falls in exactly one class, so N and η — and therefore V — do not depend on where the line between the classes is drawn. | `vol=` on `--readability`, from one cross-language token-class table; the approximation is disclosed in `--help` and the operator half is reported as `ops=` so a reader can see the split rather than trust it (`src/readability.h`) |
 | 1994 | *Okapi BM25* — Robertson, Walker et al. at TREC-3 (1994), in the Robertson & Spärck Jones probabilistic-relevance lineage. The TREC-3 paper has no DOI; the standard citable reference is the later survey, [Robertson & Zaragoza 2009, *The Probabilistic Relevance Framework: BM25 and Beyond*, doi:10.1561/1500000019](https://doi.org/10.1561/1500000019) | Term frequency saturates and long documents must be discounted; raw counts rank badly. | Both lexical rankers, behind `--for` and `--query` (`src/lexical.h`, k1=1.5, b=0.75) |
 | 1998 | Page & Brin, *The PageRank Citation Ranking* — [Stanford InfoLab 422](http://ilpubs.stanford.edu:8090/422/) | Importance is a fixed point of who-points-at-whom; a biased teleport vector makes it relative to a query. | The default ranked map and `--rank-by=pagerank` (`src/pagerank.cpp`) |
@@ -73,6 +74,7 @@ practitioner article. Each is labelled as such in its own row rather than left t
 | Adaptive-k — [arXiv:2506.08479](https://arxiv.org/abs/2506.08479) | Cut a ranked list at its largest score gap rather than at a fixed k; the knee moves by more than an order of magnitude between queries. | `--adaptive` |
 | LARGER — [arXiv:2605.16352](https://arxiv.org/abs/2605.16352) | Lexical anchors plus confidence-filtered deterministic graph expansion beat plain lexical retrieval on public localization benchmarks, with no embeddings involved. | **The row where a paper argued *for* a mechanism and the measurement said no.** The confidence-filtered anchor-expansion candidate was built, pre-registered against a held-out slice, and scored **+0.41pp** paired with a 95% lower bound of **+0.00pp** — rejected outright by the acceptance gate and never shipped ([`EVALS.md`](EVALS.md) §7, calibration in `bench/locbench/anchorhop_calib.json`). `--anchor` is therefore absent from `--help` and refuses to run without an explicit development environment variable; §8 lists the figure that circulates for it as *not published*. What survived is the paper's cheaper half: query-shape routing, opted out with `--no-route`, and the query-mention anchor, opted out with `--no-mention-boost` (`src/filter.h`, `src/lexical.h`) |
 | *Keyword search is all you need* (AAAI 2026) — [arXiv:2602.23368](https://arxiv.org/abs/2602.23368) | Agentic keyword search reaches most of a retrieval-augmented pipeline's quality with no vector store at all. | There are no embeddings in this binary. `--grep`, `--regex` and `--match` are first-class verbs rather than the fallback (`src/search.h`) |
+| SWE-bench — [arXiv:2310.06770](https://arxiv.org/abs/2310.06770) | A retrieval claim is only checkable against a target nobody in the loop chose: real issues, the real commits that fixed them, and an execution-validated outcome. It is the reason a number here can be argued with rather than trusted. | The SWE-bench-Lite arm of the agent-in-the-loop pilot and the Multi-SWE-bench C++ `n=121` file@10 scoreboard, in [`EVALS.md`](EVALS.md) and `bench/multiswe/` |
 | LocAgent / Loc-Bench — [arXiv:2503.09089](https://arxiv.org/abs/2503.09089) | A strict metric — an instance scores only if **all** gold locations are inside the top k — and a frozen public dataset, so results are comparable rather than self-reported. | `bench/locbench/`, and every localization number in [`EVALS.md`](EVALS.md) |
 | ONTO — [arXiv:2604.17512](https://arxiv.org/abs/2604.17512) | Genuinely tabular rows re-encode far cheaper as parallel arrays than as repeated per-row markup. | `--format=columnar` (`src/columnar.h`) |
 | Controlled serialization study — [arXiv:2603.03306](https://arxiv.org/abs/2603.03306) | The same compact re-encoding collapses on *nested* data, and the headline savings are measured against pretty-printed JSON — a baseline minified XML already beats. | `--format=columnar` refuses every non-tabular verb with exit 1 instead of degrading quietly; the nested map is never re-encoded |
@@ -135,6 +137,46 @@ record is explicit that no head-to-head study supports it. One further finding s
 no citable identifier in the research record and so appears here rather than in the table: the
 measured unreliability of using a language model as a judge, which is why every evaluation instrument
 in this repository is a deterministic oracle.
+
+**The ARISE bibliography, surveyed 2026-08-31.** The ARISE row above is folded; its reference list was
+then read as a source in its own right. The paper's two arXiv versions do not share a bibliography — v1
+(4 May 2026) cites 44 works, v2 (3 Jul 2026) cites 38, and only 26 are common to both — so the survey
+took the union of 56. Two earned rows above: Weiser, whose slice criterion is the unit `--slice` asks
+its question in, and SWE-bench, which was already an instrument here and had no row. The rest were read
+and are named here rather than padded into the tables, because nothing in this tree traces to them yet.
+The dependence-graph line this tool does not implement: **Ferrante, Ottenstein & Warren** (control
+dependence, which `--slice-flow` does not model and, until this survey, did not disclose that it does
+not model); **Horwitz, Reps & Binkley** (the interprocedural boundary `--slice-flow` stops at); and
+**Tip**'s survey, which supplies the vocabulary for both. The graph-schema and localization-agent line,
+read for their schemas and tool surfaces rather than their loops, which are LLM-valued where every
+instrument here is a deterministic oracle: **Yamaguchi, Golde, Arp & Rieck**'s code property graphs and
+Joern, **CodexGraph**, **CGM**, **CoSIL**, **OrcaLoca**, **KGCompass**, **CodePlan**, **AutoCodeRover**
+and **SpecRover**, and **LingmaAgent**. The learned-representation line, whose representations are
+separable from their models but whose models are the contribution: **Allamanis, Brockschmidt &
+Khademi**, **code2vec**, **GraphCodeBERT** and **Devign**. **Utture, Liu, Kalhauge & Palsberg** on
+pruning false positives from static call graphs, whose published rule is model-free and whose
+measurement this tree cannot yet make. **Shi et al.** on irrelevant context, which corroborates the two
+context rows above rather than adding a third. The fault-localization literature, surveyed family by
+family against what is shipped here — **Jones & Harrold**'s Tarantula, **Papadakis & Le Traon**'s
+Metallaxis, the **Wong et al.** and **Liu et al.** surveys, **FlexFL**, **AgentFL**, **RGFL**, and
+**Hossain et al.**'s deep dive — with the honest finding that no static, deterministic, build-free
+family among them is missing. **Takahashi, Sae-Lim, Hayashi & Saeki** on smell-aware bug localization,
+the one mechanism in that literature this tree lacks. The benchmark line: **Bench4BL**, **RepoQA**,
+**RepoBench**, **LONGCODEU**. The program-comprehension studies that describe what a developer actually
+does on landing cold in an unfamiliar tree: **Baltes, Moseler, Beck & Diehl**; **Bexell, Söderberg,
+Rydenfält & Eldh**; **Shah, Rexin, Chernova, Allen-Perez, Griswold & Soosai Raj**; and **Tang, Xu,
+Karmakar & Li**. And, orthogonal to a deterministic zero-dependency mapper but read all the same:
+**EXPEREPAIR**, **SWE-fixer**, **RLCoder**, and the model, serving and monorepo-scale reports ARISE
+cites for context.
+
+**Two attributions corrected in that reading.** ARISE's v1 bibliography credits
+[doi:10.1145/3702652.3744218](https://doi.org/10.1145/3702652.3744218), *Needles in a Haystack: Student
+Struggles with Working on Large Code Bases*, to Pearce, Singh, Hales, Finlayson & Becker at SIGCSE; the
+DOI resolves to Shah, Rexin, Chernova, Allen-Perez, Griswold & Soosai Raj at ICER 2025. It credits *An
+extensive study on smell-aware bug localization* to Takahashi, Higo & Kusumoto at JSS 177:110957;
+Crossref gives Takahashi, Sae-Lim, Hayashi & Saeki, JSS 178:110986
+([doi:10.1016/j.jss.2021.110986](https://doi.org/10.1016/j.jss.2021.110986)). The names used above are
+the ones the DOIs carry, which is the only defensible rule for a document whose purpose is credit.
 
 ---
 
