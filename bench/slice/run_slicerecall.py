@@ -25,6 +25,12 @@ own tree (a detached git worktree; nothing in the live checkout is touched):
 Deterministic given the commit list. Usage:
   python3 bench/slice/run_slicerecall.py [--bin build/ripwire] [--repo .] [--cap 40] [--json out.json]
 
+`--repo` may be ANY git tree, which is how the 2026-08-31 wider-corpus extension runs it: point it at
+a throwaway copy of a D4-pinned external corpus checked out DETACHED at its pin (the mine walks the
+log from HEAD, so the pin alone fixes the commit list) while `--bin` stays this tree's binary. The
+cap applies PER REPO. Neither the qualification rules nor any metric changed for that extension; the
+external path needed only byte-tolerant subprocess decoding and per-reason skip counters, both below.
+
 Known mining limits, stated rather than discovered later: git's funcname heuristic names the nearest
 PRECEDING function header, so a hunk that INSERTS a whole new function attributes to its neighbor —
 such commits either fail unique resolution or measure the neighbor honestly; deletion-only commits
@@ -40,7 +46,11 @@ ROW_L   = re.compile( r'<s l="(\d+)"' )
 V_ROW   = re.compile( r'<v n="([^"]+)"' )
 
 def sh( args, cwd=None, ok_fail=False ):
-    r = subprocess.run( args, cwd=cwd, capture_output=True, text=True )
+    # errors="replace": external corpora carry non-UTF-8 bytes (ugrep's own test fixtures are
+    # deliberately latin-1/binary), and a diff that touches one must not abort the mine. Only
+    # content bytes are ever mangled — hunk headers and funcnames are ASCII by git's own format —
+    # so qualification is unaffected.
+    r = subprocess.run( args, cwd=cwd, capture_output=True, text=True, errors="replace" )
     if r.returncode != 0 and not ok_fail:
         raise RuntimeError( f"{args}: rc={r.returncode}\n{r.stderr[:500]}" )
     return r
@@ -89,7 +99,7 @@ def mine( repo, cap, subject_filter ):
     return picked
 
 def run_ripwire( bin_, tree, args ):
-    return subprocess.run( [ bin_, str( tree ) ] + args, capture_output=True, text=True )
+    return subprocess.run( [ bin_, str( tree ) ] + args, capture_output=True, text=True, errors="replace" )
 
 def main():
     ap = argparse.ArgumentParser()
@@ -107,25 +117,42 @@ def main():
 
     wt = Path( tempfile.mkdtemp( prefix="slicerecall-wt-" ) ) / "tree"
     instances, commits_used = [], 0
+    # WHY a candidate did not become an instance — disclosure only, no qualification rule is read
+    # from these counters. On a large tree the basename selector is ambiguous far more often than in
+    # a small one, and a thin result must be able to say WHICH rule thinned it.
+    skips = { "selector_unserved": 0, "empty_inventory": 0, "no_touched_var": 0, "no_rows": 0 }
     try:
         for c in cand:
             if commits_used >= a.cap:
                 break
-            sh( [ "git", "worktree", "add", "--detach", "--force", str( wt ), c["sha"] ], cwd=repo )
+            # A blob-filtered external clone materializes missing blobs from its promisor remote at
+            # checkout time, and that fetch can fail transiently (observed once on duckdb: "could not
+            # fetch ... from promisor remote", succeeding on the immediate retry). Retry a bounded
+            # number of times; a commit that still cannot be checked out raises, so the commit list
+            # stays exactly the mine's — never silently shortened.
+            for attempt in range( 3 ):
+                w = sh( [ "git", "worktree", "add", "--detach", "--force", str( wt ), c["sha"] ], cwd=repo, ok_fail=( attempt < 2 ) )
+                if w.returncode == 0:
+                    break
+                sh( [ "git", "worktree", "remove", "--force", str( wt ) ], cwd=repo, ok_fail=True )
+                sh( [ "git", "worktree", "prune" ], cwd=repo, ok_fail=True )
             try:
                 base = Path( c["file"] ).name
                 sel  = f"{base}:{c['fn']}"
                 inv  = run_ripwire( bin_, wt, [ f"--slice={sel}" ] )
                 if inv.returncode != 0:
+                    skips[ "selector_unserved" ] += 1
                     continue                                   # ambiguous / not found / unserved: skip, disclosed by count
                 locals_ = set( V_ROW.findall( inv.stdout ) )
                 if not locals_:
+                    skips[ "empty_inventory" ] += 1
                     continue
                 # the added lines, in the file at THIS commit
                 src_lines = ( wt / c["file"] ).read_text( errors="replace" ).splitlines()
                 def line_text( n ): return src_lines[ n-1 ] if 0 < n <= len( src_lines ) else ""
                 touched_vars = sorted( { v for n in c["added"] for v in WORD.findall( line_text( n ) ) if v in locals_ } )
                 if not touched_vars:
+                    skips[ "no_touched_var" ] += 1
                     continue
                 exp = run_ripwire( bin_, wt, [ f"--expand={sel}" ] )
                 expand_bytes = len( exp.stdout.encode() ) if exp.returncode == 0 else None
@@ -157,6 +184,8 @@ def main():
                 if commit_rows:
                     instances.extend( commit_rows )
                     commits_used += 1
+                else:
+                    skips[ "no_rows" ] += 1
             finally:
                 sh( [ "git", "worktree", "remove", "--force", str( wt ) ], cwd=repo, ok_fail=True )
     finally:
@@ -168,6 +197,7 @@ def main():
         vals = [ r[k] for r in instances if r[k] is not None ]
         return sum( vals ) / len( vals ) if vals else None
     summary = {
+        "repo": str( repo ), "candidates_mined": len( cand ), "skips": skips,
         "commits_used": commits_used, "instances": n,
         "v1_line_recall_mean": mean( "v1_line_recall" ),
         "v1_hit_all_rate": ( sum( 1 for r in instances if r["v1_hit_all"] ) / n ) if n else None,
