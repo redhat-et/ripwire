@@ -3287,8 +3287,22 @@ int main( int argc, char** argv )
     // condition and the degrade path, and is handed §B11.4's own dispatch winner rather than a guess.
     GrepScanPhases    grepPhases;
     std::thread       grepPhaseWorker = startGrepScanPrefetch( cfg, ing, verbPrec.winner, grepPhases );
-    const Graph       g               = buildGraph( ing, scipPtr );
+    const Graph       g               = buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
     joinGrepScanPrefetch( grepPhaseWorker );
+
+    // --pin-census (src/pincensus.h): written straight after the graph build, BEFORE verb dispatch, so it
+    // reflects the resolver and is produced whichever verb the run serves. The root condition is the map's
+    // own (mapRootArg's), so census ids join to `id=` by string equality. An unopenable path is a LOUD
+    // note, never a silent no-op — an eval that believes it measured something it did not is the worst case.
+    if( !cfg.pinCensus.empty() )
+    {
+        const std::string censusPath( cfg.pinCensus );
+        const bool        oneRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+        if( !writePinCensus( censusPath.c_str(), g.pinCensus, ing, oneRoot ? cfg.roots[0] : std::string_view() ) )
+        {
+            std::fprintf( stderr, "ripwire: --pin-census could not write '%s'\n", censusPath.c_str() );
+        }
+    }
 
     // --metrics: fan-in per symbol from the in-edge CSR (free graph query) — the descriptive
     // "this is reused N×, prefer reusing it" signal. fan-out + cx come from serialize/Symbol.
