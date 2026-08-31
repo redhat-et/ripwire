@@ -73,6 +73,87 @@ inline SliceFam sliceFamilyOf( Lang l ) noexcept
 // the served-set spelling for the unsupported-language refusal — kept beside the switch it restates
 inline constexpr const char* kSliceServedList = "c/cpp/objc (+cuda/metal), py, js/ts, go, java, rs";
 
+// ── reserved-word exclusion ──────────────────────────────────────────────────────────────────────────
+//
+// A keyword can reach the walk as an `identifier` node only through a MISPARSE: tree-sitter lexes
+// keywords as their own token kinds, so an identifier whose text is a reserved word of the file's own
+// language is an error-recovery artifact of a degraded region (seen in the wild on ugrep's
+// lib/matcher.cpp: a preprocessor guard swallows the `if`, and recovery reads the orphaned
+// `else if( … )` as a declaration whose declarator is `if`). Such an occurrence is dropped from the
+// walk entirely — the inventory, the VAR rows, and the flow substrate — because a keyword is never a
+// variable; --slice=SYM:if then refuses like any unknown VAR, never an empty success.
+//
+// Tables are per-LANGUAGE, not per-family, so the check never rejects a legal identifier: `class` is
+// a valid C identifier, so the C++ list must not apply to Lang::C. Contextual/soft keywords that
+// remain legal identifiers stay OFF the lists on purpose (Python `match`/`type`, TS `type`/
+// `interface`, Java `var`/`record`/`yield`, Rust `union`, JS `let`/`async`).
+
+inline constexpr std::string_view kSliceCReserved[] = {
+    "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum", "extern", "float", "for", "goto", "if", "inline",
+    "int", "long", "register", "restrict", "return", "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void",
+    "volatile", "while" };
+
+inline constexpr std::string_view kSliceCppReserved[] = {
+    "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand", "bitor", "bool", "break", "case", "catch", "char", "char16_t", "char32_t",
+    "char8_t", "class", "co_await", "co_return", "co_yield", "compl", "concept", "const", "const_cast", "consteval", "constexpr", "constinit",
+    "continue", "decltype", "default", "delete", "do", "double", "dynamic_cast", "else", "enum", "explicit", "export", "extern", "false", "float",
+    "for", "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not", "not_eq", "nullptr", "operator", "or",
+    "or_eq", "private", "protected", "public", "register", "reinterpret_cast", "requires", "return", "short", "signed", "sizeof", "static",
+    "static_assert", "static_cast", "struct", "switch", "template", "this", "thread_local", "throw", "true", "try", "typedef", "typeid", "typename",
+    "union", "unsigned", "using", "virtual", "void", "volatile", "wchar_t", "while", "xor", "xor_eq" };
+
+inline constexpr std::string_view kSlicePyReserved[] = {
+    "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except",
+    "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
+    "with", "yield" };
+
+inline constexpr std::string_view kSliceJsReserved[] = {
+    "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export", "extends", "false",
+    "finally", "for", "function", "if", "import", "in", "instanceof", "new", "null", "return", "super", "switch", "this", "throw", "true", "try",
+    "typeof", "var", "void", "while", "with" };
+
+inline constexpr std::string_view kSliceGoReserved[] = {
+    "break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough", "for", "func", "go", "goto", "if", "import",
+    "interface", "map", "package", "range", "return", "select", "struct", "switch", "type", "var" };
+
+inline constexpr std::string_view kSliceJavaReserved[] = {
+    "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue", "default", "do", "double", "else",
+    "enum", "extends", "false", "final", "finally", "float", "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long",
+    "native", "new", "null", "package", "private", "protected", "public", "return", "short", "static", "strictfp", "super", "switch",
+    "synchronized", "this", "throw", "throws", "transient", "true", "try", "void", "volatile", "while" };
+
+inline constexpr std::string_view kSliceRustReserved[] = {
+    "Self", "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "crate", "do", "dyn", "else", "enum", "extern",
+    "false", "final", "fn", "for", "if", "impl", "in", "let", "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref",
+    "return", "self", "static", "struct", "super", "trait", "true", "try", "type", "typeof", "unsafe", "unsized", "use", "virtual", "where",
+    "while", "yield" };
+
+static_assert( std::is_sorted( std::begin( kSliceCReserved ),    std::end( kSliceCReserved ) ) );
+static_assert( std::is_sorted( std::begin( kSliceCppReserved ),  std::end( kSliceCppReserved ) ) );
+static_assert( std::is_sorted( std::begin( kSlicePyReserved ),   std::end( kSlicePyReserved ) ) );
+static_assert( std::is_sorted( std::begin( kSliceJsReserved ),   std::end( kSliceJsReserved ) ) );
+static_assert( std::is_sorted( std::begin( kSliceGoReserved ),   std::end( kSliceGoReserved ) ) );
+static_assert( std::is_sorted( std::begin( kSliceJavaReserved ), std::end( kSliceJavaReserved ) ) );
+static_assert( std::is_sorted( std::begin( kSliceRustReserved ), std::end( kSliceRustReserved ) ) );
+
+inline bool sliceIsReservedName( std::string_view text, Lang lang ) noexcept
+{
+    const auto in = []( const auto& tbl, std::string_view t ) noexcept { return std::binary_search( std::begin( tbl ), std::end( tbl ), t ); };
+    switch( lang )
+    {
+        case Lang::Cpp:        return in( kSliceCppReserved, text );    // CUDA/Metal ride Lang::Cpp (kLangTable)
+        case Lang::C:
+        case Lang::ObjC:       return in( kSliceCReserved, text );      // ObjC's own additions are @-prefixed, never identifiers
+        case Lang::Python:     return in( kSlicePyReserved, text );
+        case Lang::TypeScript:
+        case Lang::JavaScript: return in( kSliceJsReserved, text );
+        case Lang::Go:         return in( kSliceGoReserved, text );
+        case Lang::Java:       return in( kSliceJavaReserved, text );
+        case Lang::Rust:       return in( kSliceRustReserved, text );
+        default:               return false;
+    }
+}
+
 // ── occurrence classification ────────────────────────────────────────────────────────────────────────
 
 // t= vocabulary, in PRIORITY order (a line holding several occurrence roles reports the smallest value)
@@ -493,7 +574,7 @@ inline bool sliceAssignIntroduces( SliceFam fam ) noexcept
 
 // Recursive descent over the definition's span, collecting classified `identifier` occurrences.
 // Depth-bounded only by the AST itself; a definition's subtree is small (one function).
-inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanEnd, SliceFam fam,
+inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanEnd, SliceFam fam, Lang lang,
                        std::string_view src, std::string_view varName,
                        std::vector<SliceOcc>& occ, std::vector<SliceLocal>& locals, std::string_view selfName,
                        std::vector<SliceNamedOcc>& all )
@@ -507,7 +588,11 @@ inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanE
     if( sliceKindIs( node, "identifier" ) && a >= spanStart && b <= spanEnd && b <= src.size() && b > a )
     {
         const std::string_view text = src.substr( a, b - a );
-        const SliceOcc         c    = sliceClassify( node, fam, src );
+        if( sliceIsReservedName( text, lang ) )
+        {
+            return;   // a keyword lexed as an identifier is a degraded-parse artifact, never a variable
+        }
+        const SliceOcc c = sliceClassify( node, fam, src );
         if( !c.skip )
         {
             all.push_back( SliceNamedOcc{ std::string( text ), c } );
@@ -536,7 +621,7 @@ inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanE
     const std::uint32_t childCount = ts_node_child_count( node );
     for( std::uint32_t i = 0; i < childCount; ++i )
     {
-        sliceWalk( ts_node_child( node, i ), spanStart, spanEnd, fam, src, varName, occ, locals, selfName, all );
+        sliceWalk( ts_node_child( node, i ), spanStart, spanEnd, fam, lang, src, varName, occ, locals, selfName, all );
     }
 }
 
@@ -572,7 +657,7 @@ inline SliceScan sliceScanDefinition( const std::string& src, const Symbol& sym,
         return scan;
     }
 
-    sliceWalk( ts_tree_root_node( tree ), sym.sigStartByte, sym.endByte, fam, src, varName, scan.occ, scan.locals, sym.name, scan.all );
+    sliceWalk( ts_tree_root_node( tree ), sym.sigStartByte, sym.endByte, fam, sym.lang, src, varName, scan.occ, scan.locals, sym.name, scan.all );
     scan.parseOk = true;
 
     ts_tree_delete( tree );
@@ -887,7 +972,9 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         "VAR (shadowing) is NOT separated, so its rows may over-include. Intra-procedural only: rows never cross into callees/callers "
         "(the callers/callees/uses verbs give the inter-procedural half). One <s> row per LINE touching VAR: k= def|use|both (both = "
         "the line writes AND reads it, e.g. `x += y`), t= the strongest role on the line (param > decl > assign > call-arg > read), "
-        "CDATA = the trimmed source line. defs=/uses= count OCCURRENCES, not lines. Bare slice=SYM (no :VAR) lists the sliceable "
+        "CDATA = the trimmed source line. defs=/uses= count OCCURRENCES, not lines. A reserved word of the definition's own language "
+        "is never an occurrence or a local — a keyword lexed as an identifier is a degraded-parse artifact and is dropped, so slicing "
+        "one refuses like any unknown VAR. Bare slice=SYM (no :VAR) lists the sliceable "
         "locals instead (<v n= l= t=/> rows at their first-def line, vars= the count). Languages served: C/C++/ObjC (+CUDA/Metal via "
         "the C-family grammars), Python, JS/TS, Go, Java, Rust — every other language refuses loudly, never an empty success. -->";
 
