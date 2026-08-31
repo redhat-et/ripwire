@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# rw_slice <root_dir> <file_path> <line> <variable> [<direction>] [<depth>]
+#
+# Intra-procedural data-flow slice at the ARISE (file, line, variable) seed (ripwire --slice +
+# --slice-flow): direction backward (default) | forward | both, bounded BFS (depth 1..32, default
+# 8, bound always disclosed). LIMITS stated in the emitted legend: name-based, no alias analysis,
+# no lexical scope separation; attribute stores row as reads. Stops at the function boundary —
+# use rw_callers / rw_impact for the inter-procedural half.
+set -u
+root="${1:?usage: rw_slice <root_dir> <file> <line> <variable> [<direction>] [<depth>]}"
+file="${2:?usage: rw_slice <root_dir> <file> <line> <variable> [<direction>] [<depth>]}"
+line="${3:?usage: rw_slice <root_dir> <file> <line> <variable> [<direction>] [<depth>]}"
+var="${4:?usage: rw_slice <root_dir> <file> <line> <variable> [<direction>] [<depth>]}"
+dir="${5:-backward}"
+case "$dir" in
+    backward) flow=back ;;
+    forward)  flow=fwd ;;
+    both)     flow=both ;;
+    *) echo "rw_slice: direction must be backward|forward|both (got '$dir')" >&2; exit 1 ;;
+esac
+bin="${RIPWIRE_BIN:?rw_slice: set RIPWIRE_BIN to the pinned ripwire binary}"
+if [ "$#" -ge 6 ]; then
+    exec "$bin" "$root" --slice="$var" --at="$file:$line" --slice-flow="$flow" --slice-depth="$6"
+fi
+exec "$bin" "$root" --slice="$var" --at="$file:$line" --slice-flow="$flow"

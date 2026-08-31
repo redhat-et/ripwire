@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# rw_expand <root_dir> <symbol> [<start_line> <end_line>]
+#
+# One symbol's full body with inline callee signatures (ripwire --expand); with a start/end pair,
+# only that 1-based slice of the definition's OWN body — the counterpart of arise_get_code_span,
+# addressed by symbol (or @FILE:LINE) instead of a raw file range.
+set -u
+root="${1:?usage: rw_expand <root_dir> <symbol> [<start> <end>]}"
+sym="${2:?usage: rw_expand <root_dir> <symbol> [<start> <end>]}"
+if [ "$#" -ge 4 ]; then
+    exec "${RIPWIRE_BIN:?rw_expand: set RIPWIRE_BIN to the pinned ripwire binary}" "$root" --expand="$sym:$3-$4"
+fi
+exec "${RIPWIRE_BIN:?rw_expand: set RIPWIRE_BIN to the pinned ripwire binary}" "$root" --expand="$sym"

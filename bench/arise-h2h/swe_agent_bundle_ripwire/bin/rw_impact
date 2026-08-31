@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# rw_impact <root_dir> <symbol>
+#
+# The TRANSITIVE blast radius of changing this symbol (ripwire --impact) — the whole reachable
+# caller closure, not just the 1-hop callers. Name-based edges; see rw_callers.
+set -u
+root="${1:?usage: rw_impact <root_dir> <symbol>}"
+sym="${2:?usage: rw_impact <root_dir> <symbol>}"
+exec "${RIPWIRE_BIN:?rw_impact: set RIPWIRE_BIN to the pinned ripwire binary}" "$root" --impact="$sym"

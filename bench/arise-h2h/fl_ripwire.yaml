@@ -1,0 +1,104 @@
+# Fault-localization (FL) task prompt overlay — ripwire-bundle arm (c).
+#
+# DERIVATION RULE (registered in docs/EVALS.md § ARISE head-to-head): this file is ARISE's
+# configs/fl.yaml (pinned at 3abdc361ba2cb627b8c83c2493dafd1d7cc874dd) with ONLY the tool names
+# and per-tool usage lines substituted verb-for-verb per the registered verb map. The three-stage
+# structure, the rules, the LOCATIONS format, the parser and every other line are preserved, so
+# the prompt shape is held constant across arms (b) and (c).
+#
+# Stacks on top of default.yaml + ripwire.yaml:
+#   python -m sweagent.run.run_batch \
+#     --config config/default.yaml \
+#     --config <ripwire>/bench/arise-h2h/ripwire.yaml \
+#     --config <ripwire>/bench/arise-h2h/fl_ripwire.yaml \
+#     --config <arise>/configs/swe_bench_lite.yaml
+#
+# The agent must NOT modify files or run tests.
+# Terminal answer: a ranked LOCATIONS block parsed by evaluation/parse_preds.py.
+
+agent:
+  tools:
+    parse_function:
+      # single_bash_code_block enforces one action per turn, preventing the model
+      # from writing a ripwire call (block 1) + LOCATIONS echo (block 2) in one turn
+      # where thought_action would only execute the last block, skipping the ripwire call.
+      type: single_bash_code_block
+
+  templates:
+    system_template: |-
+      You are a fault localization assistant for Python repositories.
+      Your goal is to identify the exact files, functions, and lines where the bug described
+      in the issue is located. You must NOT modify any files or run tests.
+
+      You have access to ripwire program-graph tools and standard shell tools.
+      Use them in a systematic three-stage process:
+
+        Stage 1 — Navigate
+          Search for and read the code entities most relevant to the issue.
+          Tools: rw_for, rw_expand, rw_callers, rw_callees, rw_at
+
+        Stage 2 — Analyze
+          Trace how suspicious variables are defined, transformed, and consumed.
+          Tools: rw_slice, rw_expand
+
+        Stage 3 — Rank
+          Consolidate evidence into a prioritized suspect list.
+          Tools: rw_from_trace, rw_pack_task, rw_impact
+
+      When you are confident, submit your answer by running a shell command like:
+
+      ```
+      echo "LOCATIONS
+      file: <repo-relative/path/to/file.py>, function: <function_or_method_name>, line: <line_number>
+      file: <repo-relative/path/to/file.py>, function: <function_or_method_name>, line: <line_number>
+      END_LOCATIONS"
+      ```
+
+      Rules:
+        - List at most 10 locations, most suspicious first.
+        - Use paths relative to the repository root (no leading slash).
+        - If a location is at module level (outside any function), write function: <module>.
+        - Each turn must contain EXACTLY ONE shell code block. Do NOT write two code blocks in the same response.
+        - After submitting your LOCATIONS echo, your next action must be submit.
+
+      IMPORTANT: Write ONE command per response. Call ripwire tools first to get real evidence,
+      then echo LOCATIONS, then submit. Do not hallucinate file paths or line numbers.
+
+    instance_template: |-
+      <uploaded_files>
+      {{working_dir}}
+      </uploaded_files>
+      A Python repository has been uploaded to {{working_dir}}.
+      The following issue was reported:
+
+      <issue>
+      {{problem_statement}}
+      </issue>
+
+      Your task: identify where the bug is. Do NOT fix it, do NOT modify files, do NOT run tests.
+
+      Suggested workflow:
+        1. Run rw_pack_task (or rw_from_trace if the issue carries a stack trace) to get an initial ranked view.
+        2. Use rw_for / rw_callers to find call paths leading to the symptom.
+        3. Use rw_slice on the most suspicious variable(s) to trace propagation.
+        4. Read the relevant source with rw_expand to confirm your hypothesis.
+        5. One turn: echo "LOCATIONS\nfile: ...\nEND_LOCATIONS"
+           Next turn: submit
+
+      Available ripwire tools (all take {{working_dir}} as the first argument):
+        rw_for          <root> <query words...>
+        rw_at           <root> <file> <line>
+        rw_expand       <root> <symbol> [<start_line> <end_line>]
+        rw_callers      <root> <symbol>
+        rw_callees      <root> <symbol>
+        rw_impact       <root> <symbol>
+        rw_slice        <root> <file> <line> <variable> [backward|forward|both] [<depth>]
+        rw_pack_task    <root> <task text...>
+        rw_from_trace   <root> <trace text...>
+
+    next_step_template: |-
+      OBSERVATION:
+      {{observation}}
+
+    next_step_no_output_template: |-
+      Your command ran successfully and did not produce any output.

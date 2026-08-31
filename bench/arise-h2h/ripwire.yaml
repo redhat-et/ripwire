@@ -1,0 +1,20 @@
+# ripwire-bundle condition overlay — the arm (c) counterpart of ARISE's configs/arise.yaml.
+#
+# Stack on top of SWE-agent's default.yaml exactly as their overlay stacks:
+#   python -m sweagent.run.run_batch \
+#     --config config/default.yaml \
+#     --config <ripwire>/bench/arise-h2h/ripwire.yaml \
+#     --config <ripwire>/bench/arise-h2h/fl_ripwire.yaml \
+#     --config <arise>/configs/swe_bench_lite.yaml
+#
+# Before running, sync bench/arise-h2h/swe_agent_bundle_ripwire/ into the SWE-agent tree as
+# tools/ripwire (the same copytree step ARISE's README uses for its bundles) and pin RIPWIRE_BIN.
+# Protocol of record: docs/EVALS.md § "ARISE fault-localization head-to-head — PRE-REGISTERED
+# 2026-08-31". Numbers live in EVALS only.
+agent:
+  tools:
+    bundles:
+      - path: tools/registry
+      - path: tools/edit_anthropic
+      - path: tools/review_on_submit_m
+      - path: tools/ripwire

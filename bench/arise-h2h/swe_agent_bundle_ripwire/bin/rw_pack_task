@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# rw_pack_task <root_dir> <task text...>
+#
+# One-call orientation bundle under a token budget (ripwire --pack-task): ranking + top bodies +
+# caller signatures + tests-to-run in one response — the counterpart of arise_build_context_bundle,
+# seeded by the task text itself instead of node ids. Set RW_TOKEN_BUDGET to override the default
+# budget (~6K tokens); every truncation is disclosed in the header.
+set -u
+root="${1:?usage: rw_pack_task <root_dir> <task text...>}"; shift
+bin="${RIPWIRE_BIN:?rw_pack_task: set RIPWIRE_BIN to the pinned ripwire binary}"
+if [ -n "${RW_TOKEN_BUDGET:-}" ]; then
+    exec "$bin" "$root" --pack-task="$*" --token-budget="$RW_TOKEN_BUDGET"
+fi
+exec "$bin" "$root" --pack-task="$*"

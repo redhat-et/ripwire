@@ -1,0 +1,179 @@
+# SWE-agent tool bundle: ripwire verbs, mirrored tool-for-tool onto the ARISE bundle pattern
+# (each tool a tiny bin/ executable + this docstring registry). Protocol and verb map:
+# docs/EVALS.md § "ARISE fault-localization head-to-head — PRE-REGISTERED 2026-08-31".
+# Every shim calls the binary pinned by the RIPWIRE_BIN environment variable — the harness pins
+# the binary, the bundle never guesses one off PATH.
+tools:
+  rw_for:
+    signature: "rw_for <root_dir> <query words...>"
+    docstring: |
+      Search the repository with a ranked, relevance-ordered signature map (matches doc-comments
+      and function bodies, not just names). A symbol named EXACTLY in the query is routed
+      name-first; file paths and dotted names pasted verbatim are anchored near the top.
+      Use this to locate the code behind the issue before reading anything.
+    arguments:
+      - name: root_dir
+        type: string
+        description: "Absolute path to the root of the repository to analyze."
+        required: true
+      - name: query
+        type: string
+        description: "The task or search text — paste identifiers, paths and error strings from the issue verbatim."
+        required: true
+
+  rw_at:
+    signature: "rw_at <root_dir> <file_path> <line>"
+    docstring: |
+      Return the enclosing-definition chain (function/method/class) for a given line in a file,
+      outermost to innermost. Rows are indexed definitions only: no module row, and an absent
+      outer scope is absent rather than misnamed.
+    arguments:
+      - name: root_dir
+        type: string
+        description: "Absolute path to the root of the repository to analyze."
+        required: true
+      - name: file_path
+        type: string
+        description: "File path relative to root_dir (e.g. 'src/mypackage/utils.py')."
+        required: true
+      - name: line
+        type: integer
+        description: "1-based line number to query."
+        required: true
+
+  rw_expand:
+    signature: "rw_expand <root_dir> <symbol> [<start_line> <end_line>]"
+    docstring: |
+      Read one symbol's full body with its callees' signatures inlined; with a start/end pair,
+      only that 1-based slice of the definition's own body. Address by name, FILE:NAME, or
+      @FILE:LINE. Use after rw_for to read the source of a located entity.
+    arguments:
+      - name: root_dir
+        type: string
+        description: "Absolute path to the root of the repository."
+        required: true
+      - name: symbol
+        type: string
+        description: "Symbol selector: NAME, FILE:NAME, path::scope::name, or @FILE:LINE."
+        required: true
+      - name: start_line
+        type: integer
+        description: "Optional 1-based start line within the definition's own body."
+        required: false
+      - name: end_line
+        type: integer
+        description: "Optional 1-based end line within the definition's own body."
+        required: false
+
+  rw_callers:
+    signature: "rw_callers <root_dir> <symbol>"
+    docstring: |
+      Everything that calls the symbol (1 hop). Call edges are name-based: dynamic dispatch,
+      callbacks and getattr-style calls may be missing, so an empty result means "none found",
+      not "none exists".
+    arguments:
+      - name: root_dir
+        type: string
+        description: "Absolute path to the root of the repository to analyze."
+        required: true
+      - name: symbol
+        type: string
+        description: "Symbol selector: NAME, FILE:NAME, or @FILE:LINE."
+        required: true
+
+  rw_callees:
+    signature: "rw_callees <root_dir> <symbol>"
+    docstring: |
+      Everything the symbol calls (1 hop). Same name-based edge caveat as rw_callers.
+    arguments:
+      - name: root_dir
+        type: string
+        description: "Absolute path to the root of the repository to analyze."
+        required: true
+      - name: symbol
+        type: string
+        description: "Symbol selector: NAME, FILE:NAME, or @FILE:LINE."
+        required: true
+
+  rw_impact:
+    signature: "rw_impact <root_dir> <symbol>"
+    docstring: |
+      The transitive caller closure of the symbol — the whole blast radius of changing it, not
+      just the 1-hop callers. Name-based edges; see rw_callers.
+    arguments:
+      - name: root_dir
+        type: string
+        description: "Absolute path to the root of the repository to analyze."
+        required: true
+      - name: symbol
+        type: string
+        description: "Symbol selector: NAME, FILE:NAME, or @FILE:LINE."
+        required: true
+
+  rw_slice:
+    signature: "rw_slice <root_dir> <file_path> <line> <variable> [<direction>] [<depth>]"
+    docstring: |
+      Intra-procedural data-flow slice seeded at (file, line, variable): which statements define,
+      transform and consume the variable, as a bounded BFS over reaching-definition def-use edges
+      (direction backward | forward | both; depth 1..32, default 8, always disclosed). Limits are
+      stated in the output legend: name-based, no alias analysis, no lexical scope separation;
+      attribute stores (self.x = v) appear as reads. Stops at the function boundary — use
+      rw_callers / rw_impact for the inter-procedural half.
+    arguments:
+      - name: root_dir
+        type: string
+        description: "Absolute path to the root of the repository to analyze."
+        required: true
+      - name: file_path
+        type: string
+        description: "File path relative to root_dir."
+        required: true
+      - name: line
+        type: integer
+        description: "1-based line number of the seed statement."
+        required: true
+      - name: variable
+        type: string
+        description: "Variable name to slice on."
+        required: true
+      - name: direction
+        type: string
+        description: "Slice direction: backward (default), forward, or both."
+        required: false
+      - name: depth
+        type: integer
+        description: "BFS depth bound, 1..32 (default 8)."
+        required: false
+
+  rw_pack_task:
+    signature: "rw_pack_task <root_dir> <task text...>"
+    docstring: |
+      One-call context bundle for a task under a token budget: ranked signatures, the top-ranked
+      bodies, caller signatures and tests-to-run in a single response. Seeded by the task text
+      itself; every truncation is disclosed in the header.
+    arguments:
+      - name: root_dir
+        type: string
+        description: "Absolute path to the root of the repository to analyze."
+        required: true
+      - name: task
+        type: string
+        description: "The task in words — paste the issue's own identifiers and paths verbatim."
+        required: true
+
+  rw_from_trace:
+    signature: "rw_from_trace <root_dir> <trace text...>"
+    docstring: |
+      Map a stack trace, sanitizer report or error output to indexed symbols, ranked
+      innermost-first, with the innermost in-corpus symbol's full body included. Paste the trace
+      verbatim — never hand-translate it into a search query. For issue text without a trace,
+      use rw_for or rw_pack_task instead.
+    arguments:
+      - name: root_dir
+        type: string
+        description: "Absolute path to the root of the repository to analyze."
+        required: true
+      - name: trace
+        type: string
+        description: "The stack trace / error output, pasted verbatim."
+        required: true

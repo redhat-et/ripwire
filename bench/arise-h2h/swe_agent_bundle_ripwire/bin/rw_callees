@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# rw_callees <root_dir> <symbol>
+#
+# What this symbol calls, 1-hop (ripwire --callees). Same name-based edge caveat as rw_callers.
+set -u
+root="${1:?usage: rw_callees <root_dir> <symbol>}"
+sym="${2:?usage: rw_callees <root_dir> <symbol>}"
+exec "${RIPWIRE_BIN:?rw_callees: set RIPWIRE_BIN to the pinned ripwire binary}" "$root" --callees="$sym"

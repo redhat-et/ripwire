@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# rw_for <root_dir> <query words...>
+#
+# Ranked, relevance-ordered signatures for a task or query (ripwire --for). Matches doc-comments
+# and bodies, not just names; a symbol named EXACTLY routes name-first. Paste identifiers and
+# paths from the issue verbatim rather than paraphrasing them.
+set -u
+root="${1:?usage: rw_for <root_dir> <query words...>}"; shift
+exec "${RIPWIRE_BIN:?rw_for: set RIPWIRE_BIN to the pinned ripwire binary}" "$root" --for="$*"

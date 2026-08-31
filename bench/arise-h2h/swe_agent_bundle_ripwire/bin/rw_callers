@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# rw_callers <root_dir> <symbol>
+#
+# Who calls this symbol, 1-hop (ripwire --callers). Call edges are name-based: dynamic dispatch,
+# callbacks and macro-assembled calls may be missing — a high-rank symbol with no caller rows can
+# be a dispatch hub, not a leaf.
+set -u
+root="${1:?usage: rw_callers <root_dir> <symbol>}"
+sym="${2:?usage: rw_callers <root_dir> <symbol>}"
+exec "${RIPWIRE_BIN:?rw_callers: set RIPWIRE_BIN to the pinned ripwire binary}" "$root" --callers="$sym"
