@@ -145,9 +145,8 @@ grep -q "reusing cached clone of" "$TMP/b_stderr" \
 XDG3="$TMP/xdg_c"; mkdir -p "$XDG3"
 CACHEDIR3="$XDG3/ripwire/ripwire-remote-$HASH"
 mkdir -p "$CACHEDIR3/.git"
-env -u TMPDIR XDG_CACHE_HOME="$XDG3" "$BIN" "$URL" >"$TMP/c1_stderr" 2>"$TMP/c1_stderr" >/dev/null
+env -u TMPDIR XDG_CACHE_HOME="$XDG3" "$BIN" "$URL" >/dev/null 2>"$TMP/c1_stderr"
 env -u TMPDIR XDG_CACHE_HOME="$XDG3" "$BIN" "$URL" >/dev/null 2>"$TMP/c2_stderr"
-c1=$(grep -c "reusing cached clone of" "$TMP/c1_stderr" 2>/dev/null || echo 0)
 grep -q "reusing cached clone of" "$TMP/c2_stderr" \
     && ok "no --refetch: repeated invocation still reuses (unaffected by the new flag's mere existence)" \
     || no "no --refetch: repeated invocation stopped reusing"
