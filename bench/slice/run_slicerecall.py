@@ -125,7 +125,17 @@ def main():
         for c in cand:
             if commits_used >= a.cap:
                 break
-            sh( [ "git", "worktree", "add", "--detach", "--force", str( wt ), c["sha"] ], cwd=repo )
+            # A blob-filtered external clone materializes missing blobs from its promisor remote at
+            # checkout time, and that fetch can fail transiently (observed once on duckdb: "could not
+            # fetch ... from promisor remote", succeeding on the immediate retry). Retry a bounded
+            # number of times; a commit that still cannot be checked out raises, so the commit list
+            # stays exactly the mine's — never silently shortened.
+            for attempt in range( 3 ):
+                w = sh( [ "git", "worktree", "add", "--detach", "--force", str( wt ), c["sha"] ], cwd=repo, ok_fail=( attempt < 2 ) )
+                if w.returncode == 0:
+                    break
+                sh( [ "git", "worktree", "remove", "--force", str( wt ) ], cwd=repo, ok_fail=True )
+                sh( [ "git", "worktree", "prune" ], cwd=repo, ok_fail=True )
             try:
                 base = Path( c["file"] ).name
                 sel  = f"{base}:{c['fn']}"
