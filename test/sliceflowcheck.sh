@@ -29,7 +29,8 @@
 #   (7)  v1 shape unchanged without the new flags (no flow= attribute, no v= rows)
 #   (8)  determinism (x3, byte-identical)
 #   (9)  xmllint well-formedness
-#   (10) legend honesty: reaching-definition wording, f=/d=/steps= defined, line-granularity limit
+#   (10) legend honesty: reaching-definition wording, f=/d=/steps= defined, line-granularity, alias
+#        and no-control-dependence limits
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/sliceflowcheck.sh   |   bash test/sliceflowcheck.sh path/to/ripwire
 
@@ -241,10 +242,11 @@ fi
 # ── (10) legend honesty ─────────────────────────────────────────────────────────────────────────────
 if printf '%s' "$F" | grep -q 'reaching-definition' \
    && printf '%s' "$F" | grep -q 'd=' && printf '%s' "$F" | grep -q 'f=' && printf '%s' "$F" | grep -q 'steps=' \
-   && printf '%s' "$F" | grep -qi 'line-granular' && printf '%s' "$F" | grep -q 'no alias analysis'; then
-    ok "(10) legend defines the flow vocabulary (reaching-definition, d=, f=, steps=, line-granular + alias limits)"
+   && printf '%s' "$F" | grep -qi 'line-granular' && printf '%s' "$F" | grep -q 'no alias analysis' \
+   && printf '%s' "$F" | grep -qi 'no control dependence' && printf '%s' "$F" | grep -qi 'guard'; then
+    ok "(10) legend defines the flow vocabulary (reaching-definition, d=, f=, steps=, line-granular + alias + control-dependence limits)"
 else
-    no "(10) flow legend must define d=/f=/steps= and state the reaching-definition + line-granularity + alias limits"
+    no "(10) flow legend must define d=/f=/steps= and state the reaching-definition + line-granularity + alias + control-dependence limits"
 fi
 
 # ═══ the at-seed arms (lane/tc-sliceat): --slice takes the FILE:LINE seed — ARISE's (file, line[, var]) ═══
