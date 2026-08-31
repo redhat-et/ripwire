@@ -12,6 +12,9 @@
 #
 # Arms:
 #   (1)  C++ def/use classification: decl / both (+=) / call-arg / read rows, defs=/uses= counts
+#   (1b) C++ direct-initialization ctor args: `Wrap w( seed, … );` — tree-sitter-cpp resolves this to
+#        the most-vexing parse (function_declarator + parameter_declarations, each bare argument a
+#        type_identifier), so the arguments must still row as call-arg uses
 #   (2)  parameter classification: a param occurrence rows t="param" k="def"
 #   (3)  Python classification: assign defs + call-arg use
 #   (4)  bare --slice=SYM inventory: <v n= l= t=/> rows, vars= count
@@ -67,6 +70,23 @@ int shadowed( int n )
         sink( n );
     }
     return n;
+}
+EOF
+
+# C++ direct-initialization fixture, mirroring the duckdb Prefix::TransformToDeprecated drop (EVALS
+# --slice-flow rung 2, finding D1): `Wrap w( seed, extra, true, true );` is the most-vexing parse —
+# tree-sitter-cpp emits declaration → function_declarator → parameter_list, each bare argument a
+# parameter_declaration whose TYPE is a type_identifier (even `true`), not an identifier.
+cat > "$WORK/src/di.cpp" <<'EOF'
+struct Wrap
+{
+    Wrap( int a, int b, bool c, bool d );
+};
+
+int directinit( int seed, int extra )
+{
+    Wrap w( seed, extra, true, true );
+    return seed + extra;
 }
 EOF
 
@@ -160,6 +180,19 @@ printf '%s' "$OUT1" | grep -q 'int count = 0;' \
 printf '%s' "$OUT1" | grep -q 'no alias analysis' \
     && ok "(1) the legend states the name-based limits (no alias analysis)" \
     || { no "(1) legend should disclose 'no alias analysis'"; printf '%s\n' "$OUT1"; }
+
+# ── (1b) direct-initialization ctor args survive the most-vexing parse ──────────────────────────────
+OUT1B="$( sl directinit:seed )"
+printf '%s' "$( row "$OUT1B" 8 )" | grep -q 'k="use" t="call-arg"' \
+    && ok "(1b) directinit:seed — 'Wrap w( seed, … );' rows k=use t=call-arg despite the most-vexing parse" \
+    || { no "(1b) line 8 'Wrap w( seed, … );' should row k=\"use\" t=\"call-arg\""; printf '%s\n' "$OUT1B"; }
+[ "$( attr "$OUT1B" defs )" = 'defs="1"' ] && [ "$( attr "$OUT1B" uses )" = 'uses="2"' ] \
+    && ok "(1b) occurrence counts: defs=1 (param) uses=2 (ctor-arg, return)" \
+    || { no "(1b) expected defs=\"1\" uses=\"2\""; printf '%s\n' "$OUT1B"; }
+OUT1C="$( sl directinit:extra )"
+printf '%s' "$( row "$OUT1C" 8 )" | grep -q 'k="use" t="call-arg"' \
+    && ok "(1b) directinit:extra — the second ctor argument rows k=use t=call-arg too (systematic, not positional)" \
+    || { no "(1b) line 8 should row k=\"use\" t=\"call-arg\" for extra as well"; printf '%s\n' "$OUT1C"; }
 
 # ── (2) parameter classification ────────────────────────────────────────────────────────────────────
 OUT2="$( sl reassign:limit )"
