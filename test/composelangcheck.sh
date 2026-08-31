@@ -15,6 +15,21 @@
 # --metrics. The C<->C++ bridge control (m_gadget -> gadget.c) pins that the fix is langCompatible,
 # NOT a bare lang==Cpp equality test.
 #
+# The SECOND bug this gate was recorded RED against (2026-08-31, base 3ce9944) is the rest of that same
+# adjacency hole, in the SAME language. buildGraph deduped composeEdges on (ownerSym, fieldName) with
+# std::unique — which only removes ADJACENT equals — while sorting them by (ownerSym, typeSym,
+# fieldName). The dedup key was not a prefix of the sort key, so a type NAME with K same-language
+# class/struct definitions put K copies of every field of that type in the ranked bundle, byte-identical,
+# separated by the other fields. Measured on ripwire's own tree at that base: `ripwire . --around=
+# darkflags.h:Gate` emitted `defSite` and `alsoSite` THREE times each (three `struct Site` definitions:
+# darkflags.h, crossref.h, infra/profileScope.h) — 1522 bytes where 1272 carry the same facts; and a
+# --for bundle over the same area shipped 20 <compose> rows where 12 are distinct, spending 524 bytes of
+# its ~7.5KB payload budget on repeats that displaced two real ranked signatures. Pure waste against G4,
+# and misleading — K identical rows read as K distinct use sites. A field has exactly ONE declared type;
+# the extra candidates are resolver ambiguity about WHICH definition the name binds to, which
+# byte-identical rows cannot express anyway. Section 4 pins one row per FIELD; the invariant arm pins it
+# generically (no byte-identical duplicate row in a <compose> block).
+#
 # Usage:
 #   test/composelangcheck.sh
 #   RIPWIRE_BIN=asan/ripwire test/composelangcheck.sh
@@ -30,6 +45,12 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+
+# The single <compose>…</compose> block of a map (--around / --for emit at most one), and the rows in it
+# that appear more than once BYTE-IDENTICALLY. Scoped to the block on purpose: `<field ` is a row shape
+# other surfaces print too (--layout's struct rows), and the invariant here is about ONE compose block.
+compose_block(){ grep -o '<compose>.*</compose>' "$1" 2>/dev/null | head -1; }
+dupe_rows(){ compose_block "$1" | tr '<' '\n' | sed -n 's|^field \(.*\)/>$|<field \1/>|p' | sort | uniq -d; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/composelangfix directory"; exit 2; }
@@ -84,6 +105,46 @@ command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$TMP/widget.xml" 2>/dev
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
+echo "=== 4. same-language multi-definition: ONE row per field, not one per candidate definition ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# `Thing` is defined twice in C++ (widget.cpp and theta.cpp) — both lang-compatible with the owner, so
+# both survive the section-1 guard. The declared type of a field is singular, so each of Widget's two
+# Thing members must still produce exactly one <compose> row.
+THING_COUNT="$( grep -o 'name="m_thing"' "$TMP/widget.xml" | wc -l | tr -d ' ' )"
+[ "$THING_COUNT" -eq 1 ] && ok "m_thing emitted exactly once (count=$THING_COUNT) — the second C++ Thing is the same declared type, not a second member" \
+                          || no "m_thing emitted $THING_COUNT times — one row per candidate DEFINITION (dedup key is not a prefix of the sort key)"
+
+OTHER_COUNT="$( grep -o 'name="m_other"' "$TMP/widget.xml" | wc -l | tr -d ' ' )"
+[ "$OTHER_COUNT" -eq 1 ] && ok "m_other emitted exactly once (count=$OTHER_COUNT)" \
+                          || no "m_other emitted $OTHER_COUNT times — same duplication, second field"
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== 5. INVARIANT: no byte-identical duplicate row inside one <compose> block ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# The generic form of section 4, so a future duplication path that is neither cross-language nor
+# multi-definition is still caught. Duplicated rows are pure token waste (G4) and they MISLEAD: a reader
+# seeing a field N times may reasonably infer N distinct use sites, which is not what the row means.
+for probe in "$TMP/widget.xml" "$TMP/cppfoo.xml"
+do
+    DUPES="$( dupe_rows "$probe" )"
+    [ -z "$DUPES" ] && ok "no duplicate <compose> row in $( basename "$probe" )" \
+                    || no "duplicate <compose> rows in $( basename "$probe" ):
+$( echo "$DUPES" | sed 's/^/          /' )"
+done
+
+# The same invariant on ripwire's OWN tree, where the bug was found: `struct Site` has three C++
+# definitions (darkflags.h, crossref.h, infra/profileScope.h) and darkflags.h's `Gate` has two Site
+# members. This arm is deliberately assertion-only — if Gate ever loses those members it goes quiet
+# rather than red, and section 4's hermetic fixture stays the load-bearing proof.
+"$BIN" "$ROOT" --around=darkflags.h:Gate >"$TMP/selfgate.xml" 2>/dev/null
+SELF_DUPES="$( dupe_rows "$TMP/selfgate.xml" )"
+[ -z "$SELF_DUPES" ] && ok "no duplicate <compose> row in ripwire's own --around=darkflags.h:Gate" \
+                     || no "duplicate <compose> rows in ripwire's own --around=darkflags.h:Gate:
+$( echo "$SELF_DUPES" | sed 's/^/          /' )"
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo
 echo "=== MUTATION: prove the count/presence assertions are load-bearing, not vacuous ==="
 # ═══════════════════════════════════════════════════════════════════════════
 MUT="$( ok(){ :; }; no(){ echo TRIPPED; }
@@ -96,6 +157,14 @@ MUT2="$( ok(){ :; }; no(){ echo TRIPPED; }
         if grep -q 'name="m_missing"' "$TMP/widget.xml"; then ok; else no; fi )"
 [ "$MUT2" = "TRIPPED" ] && ok "mutation self-test (asserting a nonexistent field correctly fails)" \
                         || no "mutation self-test broke — the field-presence grep is not live"
+
+# the section-5 invariant is a "must be EMPTY" assertion, so it passes on any output it cannot read.
+# Hand it a block that IS duplicated and confirm it reports exactly that row.
+printf '%s' '<r><compose><field name="a" type="T" owner="O" rel="uses"/><field name="b" type="T" owner="O" rel="uses"/><field name="a" type="T" owner="O" rel="uses"/></compose></r>' >"$TMP/synthetic.xml"
+MUT3="$( dupe_rows "$TMP/synthetic.xml" )"
+[ "$MUT3" = '<field name="a" type="T" owner="O" rel="uses"/>' ] \
+    && ok "mutation self-test (dupe_rows finds a planted duplicate row, and only it)" \
+    || no "mutation self-test broke — dupe_rows returned [$MUT3] on a block with one planted duplicate"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME CHECKS FAILED"
 exit "$fail"
