@@ -59,9 +59,11 @@ SAFE_CNT=$( grep -c 'safe.cpp' "$OUT" 2>/dev/null ) || SAFE_CNT=0
 # 5. mutation test: change the expected count and verify gate fails
 # (This demonstrates the gate is actually checking the count, not just passing vacuously)
 if [ "$fail" = "0" ]; then
-    # Make a temporary modified check that expects WRONG count (4 instead of 3)
+    # Re-run the count assertion against a WRONG expectation (4 instead of 3): the observed CNT must
+    # DISAGREE with the mutant, which is what "the 3 in the arm above is load-bearing" actually means.
+    # (Comparing two literals here would be constant-true and would prove nothing about CNT.)
     MUTANT_FAIL=0
-    if [ "$CNT" = "3" ] && [ "3" != "4" ]; then
+    if [ "$CNT" != "4" ]; then
         MUTANT_FAIL=1
     fi
     if [ "$MUTANT_FAIL" = "1" ]; then

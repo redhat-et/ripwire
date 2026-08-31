@@ -267,7 +267,7 @@ else
         no "cochange: (consumer.py, model.py) still surprising=\"1\" — the TYPE_CHECKING import is invisible to StaticIncludeCoupling"
         printf '        %s\n' "$CM"
     else
-        ok "cochange: an `if TYPE_CHECKING:` import defeats surprising=\"1\" (the false positive is gone)"
+        ok "cochange: an 'if TYPE_CHECKING:' import defeats surprising=\"1\" (the false positive is gone)"
     fi
     if [ -z "$LO" ]; then
         skip "cochange positive control: the (lone.py, other.py) pair is absent from the emitted rows"
