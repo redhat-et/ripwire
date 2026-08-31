@@ -157,4 +157,21 @@ grep -qiF 'cache-\* pack' "$PERF2" \
     && ok "fresh-eyes and perf-target both carry a ppalt= discount caveat" \
     || no "fresh-eyes and/or perf-target is missing the ppalt= discount caveat"
 
+# The find-bug skill's Honesty line used to say ripwire gives call-graph structure "not data flow" — a claim
+# --slice/--slice-flow's statement-level def-use / reaching-definition slicing (shipped 2026-08-28, 17 days
+# after this line was last touched) makes false. A skill contradicting the tool's own shipped flag set is
+# exactly the class this file exists to catch; assert both directions so neither the false denial nor a
+# silently-dropped pointer to the real verb can land unnoticed.
+FINDBUG="$ROOT/skills/ripwire-find-bug/SKILL.md"
+grep -qi 'not data flow' "$FINDBUG" \
+    && no "find-bug skill still claims ripwire gives structure, not data flow (--slice/--slice-flow shipped)" \
+    || ok "find-bug skill does not deny data-flow support"
+grep -q -- '--slice' "$FINDBUG" \
+    && ok "find-bug skill's Honesty line documents --slice/--slice-flow data-flow support" \
+    || no "find-bug skill's Honesty line does not mention --slice/--slice-flow"
+helpOut2="$( "$BIN" --help 2>/dev/null )"
+{ grep -q -- '--slice=' <<<"$helpOut2" && grep -q -- '--slice-flow' <<<"$helpOut2"; } \
+    && ok "--help still ships --slice=/--slice-flow (the flags the find-bug skill now names)" \
+    || no "--help no longer ships --slice=/--slice-flow — the skill fix now names a retired flag"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
