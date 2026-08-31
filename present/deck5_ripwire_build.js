@@ -217,6 +217,30 @@ function row(s, y, h, cols, opts={}){
   ], { x: MX, y: 6.92, w: 12.09, h: 0.5, fontFace: SANS, fontSize: 10, margin: 0 });
 }
 
+/* ── S5b · new since 2026-08-23 ─────────────────────────────────────────── */
+{
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// new since 2026-08-23 — each figure measured, dated, and re-derivable", CYAN);
+  title(s, "What the last seven days added", { size: 32 });
+  const rows = [
+    ["--slice-flow", "cross-statement data-flow slicing\n(ARISE, arXiv:2605.03117)",
+     "The paper's own slicer — reaching-definition edges, a seed plus a direction, a bounded BFS that stops at function boundaries — implemented and MEASURED on a registered fix-commit protocol: flow rows lift function-level added-line recall 0.163 → 0.198 at 25% of --expand's whole-body bytes (whose recall is 1.0 by construction). 7 commits / 38 instances, cpp only — a thin corpus, reported as thin.", CYAN],
+    ["--slice, first numbers", "the 2026-08-28 registered contract,\nfinally measured",
+     "Per-variable line-recall 0.726, hit-all rate 0.632 — a FLOOR under a noisy relevance oracle: every inspected miss was the protocol's word-regex matching identifiers inside comments and string literals, occurrences the slicer correctly refuses to call variable uses. No inspected instance showed a real occurrence the slice dropped.", CYAN],
+    ["~1350× on --expand", "the secret-redaction sweep was\nquadratic in LINE length",
+     "One selector in a 2.1 MB / 768-line minified yarn bundle NEVER completed — killed at 1,343.9 s of user CPU with an empty output file; 196.7 s is the only clean lower bound — and now answers in 0.46 s warm. The 20 KB single-line fixture: 23.02 s → 0.017 s. A pure memoization, so an output no-op: 120/120 invocations byte-identical; gated on behaviour, the timings a ledger row and never a red-CI threshold.", GREEN],
+  ];
+  let y = 1.72;
+  for (const [flag, what, detail, c] of rows){
+    card(s, MX, y, 12.09, 1.52);
+    s.addText(flag,   { x: MX+0.18, y: y+0.10, w: 2.55, h: 0.40, fontFace: MONO, fontSize: 13, bold: true, color: c, margin: 0 });
+    s.addText(what,   { x: MX+0.18, y: y+0.52, w: 2.55, h: 0.85, fontFace: SANS, fontSize: 9,  italic: true, color: MUTED, margin: 0 });
+    s.addText(detail, { x: MX+2.95, y: y+0.10, w: 9.0,  h: 1.32, fontFace: SANS, fontSize: 11, color: TEXT, valign: "middle", margin: 0 });
+    y += 1.70;
+  }
+  foot(s, "sources: docs/EVALS.md §--slice-flow (registered protocol + per-instance ledger) · bench/PROFILE.md 2026-08-30 — no number travels without its caveat");
+}
+
 /* ── S6 · head-to-head, round 4 ─────────────────────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
