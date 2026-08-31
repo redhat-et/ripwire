@@ -16,9 +16,9 @@ printf '%s' "$BLOCK" | ripwire ROOT --insert-before-symbol=SYM --edit-payload=-
 These flags and the MCP verbs below call the same transaction-safe edit engine. MCP is useful when its
 workspace is already warm or the client has no shell.
 
-`replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` — ripwire's WRITE verbs (26
-verbs total: the read verbs + `fetch_body` + the 10 flagship-reflex verbs (incl. `explore`/`from_trace`/
-`edit_check`) + these 3 edit). Each locates a symbol's definition in the
+`replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` — ripwire's WRITE verbs (31
+verbs total: the 16 read verbs incl. `fetch_body`/`slice` + the 12 flagship-reflex verbs (incl.
+`explore`/`from_trace`/`edit_check`) + these 3 edit). Each locates a symbol's definition in the
 already-parsed index and splices text at its byte span:
 
 | Verb | Args | Does |
