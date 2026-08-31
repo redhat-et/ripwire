@@ -104,9 +104,14 @@ Report the branch you took, then: ranked candidate symbol(s) with `name`, `file:
 enclosing symbol if `--grep` found it; and any `surprising="1"` co-change partner (branch C). Recommend the
 top 1–2 to inspect first, with the evidence trail.
 
-**Honesty:** ripwire gives call-graph *structure*, not data flow. For use-after-move / taint / null / type
-bugs you still need the compiler — use these results to focus *where* to look, not as proof. A high-`amb`
-symbol can be a dispatch hub, not the bug.
+**Honesty:** the call graph gives *structure*; `--slice=SYM:VAR` (add `--slice-flow=back|fwd|both` for the
+transitive reaching-definition walk) gives *intra-procedural, name-based* data flow — reach for it on a
+wrong-value symptom instead of re-reading the whole function by eye. Its own legend discloses the limits
+that matter here, so trust that over this line: statement/line-granular, source-ordered (not flow-sensitive),
+no alias analysis, shadowing may over-include, and it stops at the function boundary (chain
+`--callers`/`--impact` for the inter-procedural half). For use-after-move / taint / null / type bugs that
+cross that boundary you still need the compiler — use these results to focus *where* to look, not as proof.
+A high-`amb` symbol can be a dispatch hub, not the bug.
 
 **Found it?** Pin the gotcha with `ripwire <dir> --note-add="SYM_or_path: what actually went wrong"` — the
 next agent (or you, next session) gets it automatically the next time `--for`/`--expand` surfaces that symbol.

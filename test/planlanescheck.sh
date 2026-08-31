@@ -401,6 +401,19 @@ for c in ( "name-based-callgraph", "bare-name-claims", "folded-claims", "id-coll
     check( c in codes, "G-F warnings always carry the code: " + c )
 check( all( set( w ) >= { "code", "sev", "text" } for w in d["warnings"] ), "G-F every warning has code/sev/text" )
 check( all( w["sev"] in ( "info", "warn" ) for w in d["warnings"] ), "G-F every warning sev is info|warn" )
+
+# UNIT HONESTY: corpus.ambiguous is a call-SITE count (graph.h's ambOut, summed per-symbol — one ambiguous
+# call site can still emit several 1/k-split edges), corpus.edges is a distinct (from,to) PAIR count
+# (g.outTargets.size()). "X of Y call edges are name-ambiguous" presents X as a subset of Y in the SAME
+# unit, which is false — a sentence naming the wrong unit for a real number is a new false claim, not a
+# smaller one. The name-based-callgraph warning text must name the unit each number actually carries.
+nbcg_text = next( w["text"] for w in d["warnings"] if w["code"] == "name-based-callgraph" )
+check( "call edges are name-ambiguous" not in nbcg_text,
+       "G-F name-based-callgraph text does not present ambiguous as an 'X of Y call edges' fraction" )
+check( "call-SITE" in nbcg_text,
+       "G-F name-based-callgraph text names ambiguous as a call-SITE count, distinct from the edge-pair count" )
+check( str( d["corpus"]["ambiguous"] ) in nbcg_text and str( d["corpus"]["edges"] ) in nbcg_text,
+       "G-F name-based-callgraph text still cites both corpus.ambiguous and corpus.edges numbers" )
 sys.exit( bad )
 PY
 
