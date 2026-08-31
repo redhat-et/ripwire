@@ -733,8 +733,14 @@ inline void buildWarnings( const LanesInputs& in, PlanLanesResult& result )
     char            buf[ 640 ];
 
     // §7.1 — always, on every run: the graph these numbers are derived from is name-based and incomplete.
+    // UNIT NOTE: ambiguous counts outgoing-call SITES the resolver could not pin to one target (graph.h's
+    // ambOut, summed per-symbol); edges counts distinct (from,to) PAIRS (g.outTargets.size(), same unit
+    // graphlegend.h's kCallCountUnitLegend names for the map header). One ambiguous call site can still
+    // emit several 1/k-split edges, so "ambiguous of edges" is not a subset fraction in one unit — say two
+    // counts, never a ratio that implies they share a denominator.
     std::snprintf( buf, sizeof( buf ),
-                   "%zu of %zu call edges are name-ambiguous and %zu reference names resolve to no in-corpus definition. "
+                   "%zu outgoing calls are name-ambiguous — a call-SITE count, not the %zu distinct call edges this "
+                   "graph carries — and %zu reference names resolve to no in-corpus definition. "
                    "blast_radius and contract_touch inherit that; dynamic dispatch is not an edge at all (a fn-pointer/"
                    "callback call is an edge only when ONE function is bound to that variable in scope, and a "
                    "macro-generated call only when its function-like #define is indexed), "
