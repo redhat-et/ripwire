@@ -6989,6 +6989,32 @@ limit (name-based, scope-insensitive, attribute stores as reads) is recorded her
 the ripwire arm, not fixed mid-round. The smoke pass runs AFTER this registration commits and its
 outcome is recorded below it, dated, whichever way it goes.
 
+**Smoke pass EXECUTED 2026-08-31, same round — one real defect found and fixed red-first.** Probes
+on django @ `e7fd69d05` (instance django__django-10914's base commit) and sympy @ `8dcb12a6c`
+(sympy__sympy-11400), real functions read by hand first: inventory (`indent_code`'s 12 locals incl.
+comprehension/loop variables — exact), def/use roles (aug-assign `k="both"`, correct chain to the
+prior def), transitive back-flow (loop-body and comprehension occurrences chained, d=1..3 — the
+strict-superset behavior the fidelity audit registered), line seed (`@ccode.py:277` resolves the
+enclosing def, 3 candidates served with `seed_vars=`, never a guess), forward flow (value carried
+def-to-def), and the disclosed limits verified HOLDING as registered: `self.object_list =
+object_list` rows the attribute store as a read (inherited by the ripwire arm), and a method-call
+mutation (`pretty.append(tab*level…)`) is not a def. **The defect:** back-flow from
+`_generate_cache_key`'s `cache_key` returned `steps="0"` — the def statement spans two lines via
+implicit continuation and every operand (`url`, `ctx`, `key_prefix`, `method`) sits on the
+continuation line, which line-keyed chaining never saw. The registered contract's own words ("back
+= statements whose values feed the seed") cover those operands, the disclosed line-grain deviation
+names only the MERGE direction, and black-formatted Python wraps statements everywhere — the
+round-poisoning class. Fixed before any arm runs: occurrences now carry their statement's first
+line as a chaining ANCHOR (`sliceStmtAnchorLine`, per-family statement-container tables) and both
+walk directions chain per statement while rows stay line-granular; the legend now discloses both
+grain directions. Gated red-first in `test/sliceflowcheck.sh` arm 25 (Python + C-family
+continuation fixtures; 5 FAILs recorded against the pre-fix binary), and the deviations table's
+"statement ≈ LINE" row is amended in place in the rung-2 header comment. Post-fix, the probe
+chains fully (`steps="5"`: all four operands at d=1, `request` at d=2); slicecheck /
+mcpslicecheck / atcheck / determinism / xmllint green, ASan+LSan clean on both new gates and the
+django probe. The 2026-08-30/31 measured slice numbers above were taken on the pre-fix binary;
+flow rows are additive, so those figures are floors under this fix, and they are not restated.
+
 **Improve-first (the house rule, binding).** The first completed run is loss-first: every instance
 where arm (c) loses to arm (b) is bucketed by failure mechanism to a LOCAL report, fixed or
 disclosed, and only THEN does any comparative number leave this section. No number from this

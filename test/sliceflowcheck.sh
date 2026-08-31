@@ -69,6 +69,20 @@ def pyflow(a):
     return c
 EOF
 
+# arm (25)'s fuel: statements spanning several LINES via implicit continuation — the operand lives on
+# the CONTINUATION line, so line-keyed chaining alone sees nothing (steps=0, the 2026-08-31 Python
+# smoke-pass defect). Appended AFTER pyflow, so every line number the arms above address is untouched:
+# wideflow at L7, mid's def statement spans 8-9 (scale on 9), out's spans 10-11 (mid on 11), return 12.
+cat >> "$WORK/src/calc.py" <<'EOF'
+
+def wideflow(base, scale):
+    mid = combine(base,
+                  scale)
+    out = (1 +
+           mid)
+    return out
+EOF
+
 # the at-seed arms' fuel: `helper` defined in TWO files (ambiguous by name — the seed must narrow it);
 # a.cpp's copy starts at L14, its L16 names two locals (r,q), its L17 names exactly one (r). Appended
 # AFTER pipeline, so every line number the arms above address is untouched.
@@ -85,6 +99,20 @@ cat > "$WORK/src/b.cpp" <<'EOF'
 int helper( int z )
 {
     return z * 2;
+}
+EOF
+
+# arm (25c)'s C-family fuel, appended LAST so nothing above moves: widecalc at L20, gamma's def
+# statement spans 22-23 (beta on the continuation line), delta's spans 24-25 (gamma on 25), return 26.
+cat >> "$WORK/src/a.cpp" <<'EOF'
+
+int widecalc( int alpha, int beta )
+{
+    int gamma = alpha +
+                beta;
+    int delta = ( 1 +
+                  gamma );
+    return delta;
 }
 EOF
 
@@ -367,6 +395,33 @@ if printf '%s' "$( legend "$S22" )" | grep -qE 'seed=|seed_vars=|var_from='; the
 else
     ok "(24) unseeded legend stays free of the seed vocabulary"
 fi
+
+# ── (25) multi-line statements chain as ONE statement (the 2026-08-31 Python smoke-pass defect) ─────
+# A def whose statement spans several lines must chain through operands on its CONTINUATION lines —
+# statement-anchored chaining, not line-keyed. Red against the pre-fix binary: steps="0" on all three.
+W="$( run --slice=calc.py:wideflow:out --slice-flow=back )"
+[ "$( attr "$W" steps )" = 'steps="3"' ] \
+    && ok "(25a) py back through continuations: steps=\"3\" (mid, then base+scale)" \
+    || { no "(25a) expected steps=\"3\" — a continuation-line operand must chain"; printf '%s\n' "$W"; }
+printf '%s' "$( frow "$W" mid 8 )" | grep -q 'd="1" f="10"' \
+    && ok "(25a) out<-mid: mid's def at l=8 reached d=1 from out's ANCHOR line f=10" \
+    || { no "(25a) expected <s l=\"8\" ... v=\"mid\" d=\"1\" f=\"10\">"; printf '%s\n' "$W"; }
+printf '%s' "$( frow "$W" base 7 )" | grep -q 'd="2"' && printf '%s' "$( frow "$W" scale 7 )" | grep -q 'd="2" f="8"' \
+    && ok "(25a) mid<-base+scale: BOTH params reached d=2 — scale sits on mid's continuation line" \
+    || { no "(25a) expected v=\"base\" and v=\"scale\" param rows at l=7 d=2"; printf '%s\n' "$W"; }
+WF="$( run --slice=calc.py:wideflow:scale --slice-flow=fwd )"
+[ "$( attr "$WF" steps )" = 'steps="2"' ] \
+    && printf '%s' "$( frow "$WF" mid 11 )" | grep -q 'd="2" f="8"' \
+    && printf '%s' "$( frow "$WF" out 12 )" | grep -q 'd="3" f="10"' \
+    && ok "(25b) py fwd through continuations: scale->mid (use on out's continuation) ->out (return)" \
+    || { no "(25b) expected steps=\"2\" with v=\"mid\" l=11 d=2 and v=\"out\" l=12 d=3"; printf '%s\n' "$WF"; }
+WC="$( run --slice=widecalc:delta --slice-flow=back )"
+[ "$( attr "$WC" steps )" = 'steps="3"' ] \
+    && printf '%s' "$( frow "$WC" gamma 22 )" | grep -q 'd="1" f="24"' \
+    && printf '%s' "$( frow "$WC" alpha 20 )" | grep -q 'd="2"' \
+    && printf '%s' "$( frow "$WC" beta 20 )" | grep -q 'd="2" f="22"' \
+    && ok "(25c) C-family back through continuations: gamma d=1, alpha+beta params d=2" \
+    || { no "(25c) expected steps=\"3\" with gamma l=22 d=1, alpha/beta l=20 d=2"; printf '%s\n' "$WC"; }
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"
