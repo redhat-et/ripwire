@@ -35,8 +35,22 @@ ripwire . --for="incremental cache invalidation"
 ```
 
 One deterministic, token-budgeted answer: the relevant symbols, their callers, the change risks, and
-the tests that reach them. This is what comes back — real output from this tree (2026-08-30), trimmed
-and line-wrapped here for reading; the real thing is one minified line:
+the tests that reach them. Run on this repository (2026-08-30), that second line answers in about
+4.3K tokens with:
+
+- **The ranked symbols** — `spanTierMemoPath` (the cache-path composer) first, then the cache-header
+  constants `kCacheMagic`/`kCacheVersion` with their doc comment quoted in place, `ingestCommitTree`,
+  `ingest` — each with its file, line, and signature.
+- **Risk, annotated in place** — complexity, git churn (`ingest` shows 23 recent edits),
+  change amplification (touch `ingest` and 55 graph nodes feel it), purity and test coverage. The
+  fragile spots are visible *before* anything touches them.
+- **One-hop call context** — `spanTierMemoPath` calls `shaKeyedCachePath`, `headSnapRepoHex`,
+  `exclConfigHex`; no second query needed to see the neighbourhood.
+- **Its own confidence** — this answer says `confidence="high"` with the score margin attached; a
+  flat ranking says `low`, so it reads as a starting point instead of masquerading as an answer.
+
+<details>
+<summary>The actual wire format — what your agent reads (minified XML; trimmed and line-wrapped here)</summary>
 
 ```xml
 <ctx task="incremental cache invalidation" confidence="high" margin_pct="22"
@@ -57,11 +71,11 @@ and line-wrapped here for reading; the real thing is one minified line:
 </ctx>
 ```
 
-Ranked definitions with their one-line docs and signatures — `cx=` complexity, `churn=` git edit
-frequency, `amp=` change amplification, `r=` rank; `confidence=` flags a flat ranking instead of
-letting it read like an answer; `<hops>` rows carry the one-hop call context, caps disclosed. Every
-attribute is defined in the one legend at the top of the real output, which also self-reports the
-bundle's cost — `est_tokens="4263"`, about 4.3K tokens for this answer.
+`cx=` complexity, `churn=` git edit frequency, `amp=` change amplification, `r=` rank; `<hops>` rows
+carry the one-hop call context, caps disclosed. Every attribute is defined in the one legend at the
+top of the real output, which also self-reports the bundle's cost — `est_tokens="4263"` here.
+
+</details>
 
 | The agent without a map | The agent with ripwire |
 | --- | --- |
