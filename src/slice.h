@@ -21,7 +21,8 @@
 //
 // The walk re-parses the ONE file holding the definition with the same statically-linked grammar ingest
 // used (sliceGrammarForFile — kLangTable stays the single extension→grammar fact), then classifies
-// every `identifier` node inside [sigStartByte, endByte) by its parent node kind + field position.
+// every `identifier` node inside [sigStartByte, endByte) by its parent node kind + field position
+// (plus, C-family only, the `type_identifier` arguments of a most-vexing-parse direct initialization).
 // Node-kind and field-name strings below are VERIFIED against the vendored parsers (third_party/deps/
 // */src/parser.c), not assumed from upstream docs.
 
@@ -168,6 +169,33 @@ inline bool sliceOperatorIsPlainAssign( TSNode assignNode, std::string_view src 
     return b > a && b <= src.size() && src.substr( a, b - a ) == "=";
 }
 
+// `Wrap w( seed, extra, true, true );` — tree-sitter-cpp resolves a direct-initialization declaration
+// whose arguments are all bare names/literals to the most-vexing parse: declaration → function_declarator
+// → parameter_list, each argument a parameter_declaration whose TYPE field is a type_identifier (even
+// `true`). Inside a definition's span that shape is a constructor call, so those "types" are argument
+// reads; recognize the exact four-level shape so a genuine parameter type (whose function_declarator
+// hangs off a function_definition, not a declaration) never matches.
+inline bool sliceIsDirectInitCtorArg( TSNode n ) noexcept
+{
+    const TSNode p = ts_node_parent( n );
+    if( ts_node_is_null( p ) || !sliceKindIs( p, "parameter_declaration" ) || !sliceIsField( p, "type", n ) )
+    {
+        return false;
+    }
+    const TSNode paramList = ts_node_parent( p );
+    if( ts_node_is_null( paramList ) || !sliceKindIs( paramList, "parameter_list" ) )
+    {
+        return false;
+    }
+    const TSNode fnDecl = ts_node_parent( paramList );
+    if( ts_node_is_null( fnDecl ) || !sliceKindIs( fnDecl, "function_declarator" ) )
+    {
+        return false;
+    }
+    const TSNode decl = ts_node_parent( fnDecl );
+    return !ts_node_is_null( decl ) && sliceKindIs( decl, "declaration" );
+}
+
 // classify ONE identifier node by its parent kind + field position, per family. Every string below is
 // grep-verified against the vendored parser.c of each grammar this family serves.
 inline SliceOcc sliceClassify( TSNode n, SliceFam fam, std::string_view src ) noexcept
@@ -239,6 +267,10 @@ inline SliceOcc sliceClassify( TSNode n, SliceFam fam, std::string_view src ) no
             if( std::strcmp( pk, "argument_list" ) == 0 )
             {
                 use( OccT::CallArg );  return o;
+            }
+            if( std::strcmp( pk, "parameter_declaration" ) == 0 && sliceIsDirectInitCtorArg( n ) )
+            {
+                use( OccT::CallArg );  return o;       // Wrap w( seed, … ); — a ctor argument the grammar dressed as a parameter type
             }
             break;
         }
@@ -504,7 +536,11 @@ inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanE
         return;   // disjoint from the definition — prune the subtree
     }
 
-    if( sliceKindIs( node, "identifier" ) && a >= spanStart && b <= spanEnd && b <= src.size() && b > a )
+    // the C-family also yields variable occurrences dressed as type_identifier: the arguments of a
+    // direct-initialization declaration under the most-vexing parse (see sliceIsDirectInitCtorArg)
+    const bool occurrenceKind = sliceKindIs( node, "identifier" )
+                                || ( fam == SliceFam::C && sliceKindIs( node, "type_identifier" ) && sliceIsDirectInitCtorArg( node ) );
+    if( occurrenceKind && a >= spanStart && b <= spanEnd && b <= src.size() && b > a )
     {
         const std::string_view text = src.substr( a, b - a );
         const SliceOcc         c    = sliceClassify( node, fam, src );
