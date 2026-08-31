@@ -50,7 +50,8 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   `fwd` = the statements its value reaches; each flow row carries the variable (`v=`), the BFS depth
   (`d=`) and the line it was reached from (`f=`). `--slice-depth=N` bounds the walk (default 8; a
   bound that cuts is disclosed as `flow_truncated="1"`). Stops at the function boundary by design —
-  the inter-procedural half is `--callers`/`--impact`.
+  the inter-procedural half is `--callers`/`--impact`. Data dependence only — the guard deciding
+  whether a def executes is never a row.
 - **"I have a FILE:LINE, not a name"** (a compiler error, a diff hunk, a stack frame) →
   `ripwire <dir> --at=FILE:LINE` — the enclosing-definition chain at that location, outermost→innermost;
   `sym=` names the innermost. The SAME seed composes into any SYM selector as `@FILE:LINE`

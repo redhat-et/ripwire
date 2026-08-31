@@ -1233,7 +1233,8 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             "here, NOT proven complete; its absence means the walk finished inside the bound. EXTRA LIMITS on top of v1's: "
             "line-granular ROWS (a multi-statement line merges and may over-connect) over statement-anchored CHAINING (a "
             "statement spanning several lines chains as ONE unit keyed on its first line), and flow follows "
-            "NAMES, not values — no alias analysis, no flow sensitivity beyond source order, shadowing may over-include. -->";
+            "NAMES, not values — no alias analysis, no flow sensitivity beyond source order, shadowing may over-include. DATA dependence "
+            "only — no control dependence: the guard (if/loop) deciding whether a def executes is never a row. -->";
     }
 
     out += "<slice sym=\"";  out += ex( s.name );
