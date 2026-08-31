@@ -321,7 +321,7 @@ The schema is terse by design — a legend comment once at the top, then `<r>` r
 The argument parser is hand-rolled and table-driven. A flagless run emits the core map; every flag is
 additive and gated by a `Config` field.
 
-The MCP server exposes 30 verbs. **All of them** are a thin front door onto **the same
+The MCP server exposes 31 verbs. **All of them** are a thin front door onto **the same
 computation and the same renderer** as a CLI sibling — one output shape, two surfaces. That is a
 deliberate constraint: a verb that rendered differently over MCP would be a second implementation to
 keep honest.

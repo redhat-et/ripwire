@@ -88,13 +88,16 @@ inline constexpr McpVerbInfo kMcpVerbTable[] = {
     { "stray_content",           "per branch: content it authored that HEAD lacks — unmerged vs superseded",  McpVerbGroup::FlagshipReflex },
     { "flags",                   "what is BUILT but DARK: compile / CMake option / getenv gates + guarded size", McpVerbGroup::Read },
     { "doc_drift",               "which markdown doc claims are now false: dead file:line, gone symbols, stale numbers", McpVerbGroup::Read },
+    // lane/tc-sliceat: the ARISE def-use slice (arXiv:2605.03117) as an MCP read — the CLI --slice
+    // contract verb-for-verb (inventory / VAR rows / flow / the @FILE:LINE seed), one emitter, two surfaces.
+    { "slice",                   "per-line def-use rows of one variable inside one definition (+ transitive flow)", McpVerbGroup::Read },
     // ── edit verbs (side-effecting; safety contract = refusal leaves the file byte-identical) ──
     { "replace_symbol_body",     "replace a symbol's entire definition with new_body",                     McpVerbGroup::Edit },
     { "insert_before_symbol",    "insert text immediately before a symbol's definition",                   McpVerbGroup::Edit },
     { "insert_after_symbol",     "insert text immediately after a symbol's definition",                    McpVerbGroup::Edit },
 };
 
-inline constexpr std::size_t kMcpVerbCount = 30;
+inline constexpr std::size_t kMcpVerbCount = 31;   // +1 lane/tc-sliceat: the `slice` read verb
 static_assert( sizeof( kMcpVerbTable ) / sizeof( kMcpVerbTable[0] ) == kMcpVerbCount,
                "kMcpVerbTable size drifted from kMcpVerbCount — update both together (A4-S2)" );
 
@@ -132,14 +135,15 @@ inline constexpr std::string_view kAtSeedRebindClause =
 // absent from kBatchServedVerbs, so the first subtraction has already excluded it, and the count came out
 // 15 where 16 verbs actually refuse. That the assert passed is the tell: it pinned the wrong number, so it
 // would have fired on a future CORRECT edit. The stanza's own prose lists the exclusions by name and lists
-// SIXTEEN of them (3 edit + quality_baseline + quality_delta + batch + the 10 whole-repo/cross-branch
-// verbs), which is the arithmetic below and was never the number printed beside it.
+// SEVENTEEN of them (3 edit + quality_baseline + quality_delta + batch + the 10 whole-repo/cross-branch
+// verbs + slice, the lane/tc-sliceat per-definition read not yet in the sweep), which is the arithmetic
+// below and was never the number printed beside it.
 //
 // The static_assert is the build-time tripwire; test/mcptranchecheck.sh's M14 arm is the runtime one, and
 // it derives its expectation by ENUMERATION (it asks the live batch arm which verbs refuse and counts them)
 // rather than by re-running this formula — a gate that restates the formula cannot catch the formula.
 inline constexpr std::size_t kBatchExcludedCount = kMcpVerbCount - kBatchServedCount;
-static_assert( kBatchExcludedCount == 16,
+static_assert( kBatchExcludedCount == 17,
                "the batch tools/list stanza spells kBatchExcludedCount in prose — a verb joined or left "
                "kMcpVerbTable / kBatchServedVerbs; update the stanza's number and this assert together" );
 
@@ -759,8 +763,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    + mcprefuse::toolMetadataFor( "flags", pathIsRequired ) + "},"
                    "{\"name\":\"doc_drift\",\"description\":\"WHICH OF THIS REPO'S DOC CLAIMS ARE NOW FALSE. Verifies the CHECKABLE anchors in every markdown file against the live index and returns ONLY the ones that no longer hold: file:line refs (missing-file / past-eof / line-moved, the last with got= naming the symbol that now occupies the line), backticked symbol mentions (undefined), `= N` constants and `[N]` array extents. Read this BEFORE trusting a design doc, plan or audit you did not just write — it is the cheap alternative to re-verifying its claims by hand. Every lane deliberately under-reports: a name counts as stale only when it occurs nowhere in the code as an identifier token, and a number only when the corpus binds it uniquely in a declaration; checked + unchecked = anchors, and each declined check is named in an unchecked row. A failed anchor the AUTHOR DATED — an as-of-DATE hedge on the line, a dated heading, an ISO date in the filename or H1, or a labelled front-matter self-date — is reported as kind=\\\"dated-record\\\" with rec= naming which, and counted in dated= rather than drift=, so drift= is the LIVE rot and drift + dated is every anchor that failed. A doc that never writes its own date machine-readably reports live: the lane reads dating marks, it does not guess genre. Prose, Status lines and dates are NOT checked. kind = optional doc-path substring filter.\","
                    + mcprefuse::toolMetadataFor( "doc_drift", pathIsRequired ) + "},"
+                   // lane/tc-sliceat — the ARISE def-use slice (the CLI --slice contract verb-for-verb; sliceBundleText is the ONE emitter both surfaces call).
+                   "{\"name\":\"slice\",\"description\":\"WHERE IS THIS VARIABLE DEFINED AND USED inside one function — NAME-BASED intra-procedural def-use rows of one variable inside ONE uniquely-resolved definition (the ARISE slicer, arXiv:2605.03117). symbol alone lists the sliceable locals to pick from; add var (or spell symbol as SYM:VAR / file:name:VAR) for the per-line rows: k=def|use|both, t=the strongest role on the line, the trimmed source line as CDATA. flow=back|fwd|both adds the TRANSITIVE cross-statement data-flow slice over reaching-definition edges — back = statements whose values feed the seed, fwd = what its value reaches — bounded by depth (an integer in 1..32, default 8, disclosed; a cutting bound emits flow_truncated). @FILE:LINE line-seeds resolve here too and complete the paper's (file, line[, variable]) seed: a seed line naming exactly ONE sliceable local pre-picks it (disclosed as var_from=\\\"seed\\\"), zero or several serve the inventory with the candidates marked. LIMITS, stated not implied: name-based (no alias analysis, shadowing may over-include), intra-procedural (rows never cross into callers/callees — impact/uses give that half), line-granular. Served languages: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — every other language refuses loudly, never an empty success. An ambiguous symbol refuses listing the spellings that pick one. Single-root; read-only.\","
+                   + mcprefuse::toolMetadataFor( "slice", pathIsRequired ) + "},"
                    // A4-R3 batch — one-turn context sweep: N read sub-queries in ONE round-trip, merged + deduped.
-                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array of {verb, ...args} over the SAME path; each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the two ALIASES callers=find_referencing_symbols and callees=find_symbol) with that verb's own args (task/pattern/symbol/type/from/to/handle, and limit/offset on the verbs that page). The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs and quality_baseline (side effects), quality_delta (a heavy both-trees pass, out of place in a fast sweep), batch itself (it does not nest), and the whole-repo / cross-branch set (situational_awareness, memory_recall, connect, explore — and its alias pack_task — from_trace, edit_check, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift). Result is one <batch> of <q i verb ok> elements IN ORDER, each sub-answer verbatim in CDATA; a failing sub-query becomes an inline ok=0 err= entry (never fails the batch); identical payloads dedup to <dup-of q=\\\"i\\\"/>; over 16 → capped honestly (capped=\\\"1\\\", n<requested). Use to gather a task's whole context in one round-trip instead of many.\","
+                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array of {verb, ...args} over the SAME path; each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the two ALIASES callers=find_referencing_symbols and callees=find_symbol) with that verb's own args (task/pattern/symbol/type/from/to/handle, and limit/offset on the verbs that page). The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: the 3 edit verbs and quality_baseline (side effects), quality_delta (a heavy both-trees pass, out of place in a fast sweep), batch itself (it does not nest), slice (a per-definition on-disk re-parse, not yet in the sweep), and the whole-repo / cross-branch set (situational_awareness, memory_recall, connect, explore — and its alias pack_task — from_trace, edit_check, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift). Result is one <batch> of <q i verb ok> elements IN ORDER, each sub-answer verbatim in CDATA; a failing sub-query becomes an inline ok=0 err= entry (never fails the batch); identical payloads dedup to <dup-of q=\\\"i\\\"/>; over 16 → capped honestly (capped=\\\"1\\\", n<requested). Use to gather a task's whole context in one round-trip instead of many.\","
                    + mcprefuse::toolMetadataFor( "batch", pathIsRequired ) + "}"
                    "]}}";
             }
@@ -839,6 +846,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const std::string from    = strArg( "from" );     // path verb: source symbol
             const std::string to      = strArg( "to" );       // path verb: destination symbol
             const std::string trace   = strArg( "trace" );    // L4 from_trace: the raw trace TEXT
+            const std::string var     = strArg( "var" );      // slice: the variable to slice (optional — bare = inventory)
+            const std::string flow    = strArg( "flow" );     // slice: back|fwd|both (validated in sliceText, the CLI wording)
 
             // ── W3FIX H4/M5: every NUMERIC argument through the ONE guarded reader ─────────────────────────
             //
@@ -878,6 +887,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
 
             const McpIntArg     partitionArg   = intArg( "partition", packpartition::kMinPartitions, packpartition::kMaxPartitions );   // --partition=N over MCP
             const std::uint32_t partitionCount = partitionArg.isPresent ? std::uint32_t( partitionArg.value ) : 0u;   // absent ⇒ one un-split bundle
+
+            // slice's flow bound — the CLI --slice-depth's 1..32 band, refused (never clamped) via the shared
+            // reader; the flow-pairing half of the contract (depth needs flow) lives in sliceText, which is
+            // the only point that sees both fields together.
+            static_assert( slicev::kSliceFlowDepthMin == 1 && slicev::kSliceFlowDepthMax == 32,
+                           "the depth refusal names the band 1..32 in mcprefusal.h's kMcpValueFields and in the "
+                           "tools/list slice stanza — the core's band moved; move all three wordings with it" );
+            const McpIntArg sliceDepthArg = intArg( "depth", slicev::kSliceFlowDepthMin, slicev::kSliceFlowDepthMax );
 
             // Index-staleness stamp (CocoIndex lineage idea): every tool RESULT carries the identity
             // of the index it was answered from, so a caller holding results from two different calls can
@@ -1546,6 +1563,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // a symbol matching several definition SITES has several contracts, and this verb answers
                     // about one), so this stays the same single payload-or-refusal branch it always was.
                     const EditCheckReply r = editCheckText( path, symbol );
+                    resp = r.payload.empty() ? errResultMsg( -32602, r.refusal ) : textResult( r.payload );
+                }
+                // lane/tc-sliceat: the ARISE def-use slice — sliceText owns the whole contract (resolution,
+                // the @FILE:LINE seed, flow/depth pairing, every refusal), mirroring the CLI runSlice.
+                else if( name == "slice" && !path.empty() && !symbol.empty() )
+                {
+                    const SliceReply r = sliceText( path, symbol, var, flow,
+                                                    sliceDepthArg.isPresent ? int( sliceDepthArg.value ) : 0, redactPtr );
                     resp = r.payload.empty() ? errResultMsg( -32602, r.refusal ) : textResult( r.payload );
                 }
                 // EDIT verbs — `file` (optional) is the disambiguating file-path substring for a same-named

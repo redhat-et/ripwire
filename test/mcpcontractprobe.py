@@ -22,7 +22,7 @@ THE RECORDED TABLE, wave 2 of the capture-audit-4 fix round (2026-07-30), measur
 against the post-fix binary. Kept HERE, beside the instrument that produces it, so the next round diffs
 against a measurement rather than re-deriving one.
 
-After M2/M4/M12, the first three columns are ONE column: for all 30 verbs the tools/list schema, the
+After M2/M4/M12, the first three columns are ONE column: for all 31 verbs the tools/list schema, the
 unknown-field guard's enforced set (declaredFieldsFor), and the consumed set agree — which is what arm (A)
 of mcpcontractcheck.sh pins. So the table below prints that single column plus `required` plus the CLI
 comparison, and the only rows worth reading are the two flagged DIVERGES.

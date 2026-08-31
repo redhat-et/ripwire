@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # mcptoolprunecheck.sh — the MCP catalog must advertise only verbs that CAN succeed on a PINNED workspace.
 #
-# THE FINDING (octocode recon F4, 2026-08-15): the pinned-root MCP listener advertised all 30 verbs in
+# THE FINDING (octocode recon F4, 2026-08-15): the pinned-root MCP listener advertised all 31 verbs in
 # tools/list regardless of what the pinned workspace actually is. On a workspace that is not a git
 # repository the git-backed verbs can only ever REFUSE, so every connected agent paid their schema bytes
 # every turn to be told "not a git repository" if it ever tried one. octocode's server removes the routes
@@ -12,7 +12,7 @@
 # workspace fixed at startup and REFUSES a `path` naming a different tree, so a git verb there has no
 # reachable git repo at all. A stdio server — bare, or with a `ripwire <root> --mcp` startup root — still
 # answers read verbs about ANY path the caller names, so its git verbs can succeed and stay advertised.
-# Arm (F) pins that half: the same non-git directory over stdio still advertises all 30.
+# Arm (F) pins that half: the same non-git directory over stdio still advertises all 31.
 #
 # WHICH verbs, measured rather than assumed. The recon named five candidates; probing every git-touching
 # verb against a non-git pinned root found only THREE that refuse unconditionally:
@@ -30,7 +30,7 @@
 #
 # Arms:
 #   (A) [red] non-git pinned root: owners / whereis / stray_content are ABSENT from tools/list; the other
-#             27 are present, and the count is 27 — not 30.
+#             28 are present, and the count is 28 — not 31.
 #   (B) [red] the omission is SELF-DESCRIBING: initialize's `instructions` say the root is not a git
 #             repository and NAME the omitted verbs. A silent omission is the dishonest version of this fix.
 #   (C) [red] batch's own exclusion arithmetic MOVES with the omission: the "The other N advertised verbs"
@@ -38,8 +38,8 @@
 #             prose no longer names verbs this server does not advertise.
 #   (D) [red] an omitted verb still DISPATCHES (tools/call owners → its git refusal, not "unknown tool").
 #   (E) [red] the four measured non-git-refusing verbs stay advertised — the anti-over-prune arm.
-#   (F)       stdio on the SAME non-git directory advertises all 30 and discloses nothing (per-call roots).
-#   (G)       a GIT pinned root advertises all 30 and discloses nothing.
+#   (F)       stdio on the SAME non-git directory advertises all 31 and discloses nothing (per-call roots).
+#   (G)       a GIT pinned root advertises all 31 and discloses nothing.
 #
 # Usage:  test/mcptoolprunecheck.sh   |   RIPWIRE_BIN=build_base/ripwire test/mcptoolprunecheck.sh
 # Exits non-zero on any failure. Everything happens under a scratch mktemp dir; test/ is never modified.
@@ -69,10 +69,10 @@ GIT_ONLY="owners whereis stray_content"
 GIT_LESS="cochange situational_awareness quality_delta edit_check"
 
 # finding #12: the exact retained-verb IDENTITY, not just a count — a drop-one/add-one mutation that kept
-# the total at 27 (or 30) would slip past a bare wc -w. Spelled once here; every arm below that checks a
+# the total at 28 (or 31) would slip past a bare wc -w. Spelled once here; every arm below that checks a
 # tools/list listing diffs against ALL_VERBS or ALL_VERBS-minus-GIT_ONLY (EXPECTED_NONGIT) rather than
 # re-deriving it. names_identical prints OK or the missing/extra sets, so a failure names exactly what moved.
-ALL_VERBS="analyze batch cochange connect doc_drift edit_check exemplar explore fetch_body find_referencing_symbols find_symbol flags for from_trace grep impact insert_after_symbol insert_before_symbol lego memory_recall mentions owners path_between quality_baseline quality_delta replace_symbol_body situational_awareness stray_content uses whereis"
+ALL_VERBS="analyze batch cochange connect doc_drift edit_check exemplar explore fetch_body find_referencing_symbols find_symbol flags for from_trace grep impact insert_after_symbol insert_before_symbol lego memory_recall mentions owners path_between quality_baseline quality_delta replace_symbol_body situational_awareness slice stray_content uses whereis"
 # NOT built via `$( … case … esac … )` — bash 3.2 (macOS's stock /bin/bash) misparses a case pattern's
 # bare `)` inside a `$( )` command substitution as closing the substitution early ("syntax error near
 # unexpected token `;;'"), so the filter has to run as a plain loop instead.
@@ -162,13 +162,13 @@ done
 [ -z "$present" ] && ok "(A) omitted:$absent" || no "(A) still advertised on a non-git pinned root:$present"
 
 NOGIT_COUNT="$( printf '%s' "$NOGIT_NAMES" | wc -w | tr -d ' ' )"
-[ "$NOGIT_COUNT" = "27" ] && ok "(A) tools/list advertises 27 verbs (30 minus the 3 git-only)" \
-                          || no "(A) tools/list advertises $NOGIT_COUNT verbs, expected 27"
+[ "$NOGIT_COUNT" = "28" ] && ok "(A) tools/list advertises 28 verbs (31 minus the 3 git-only)" \
+                          || no "(A) tools/list advertises $NOGIT_COUNT verbs, expected 28"
 
 # finding #12: count + absence alone would not catch a drop-one/add-one mutation (omit a 28th verb instead
 # of / in addition to one of the three, while some OTHER verb slips in) — pin the exact retained SET.
 NOGIT_IDENTITY="$( names_identical "$NOGIT_NAMES" "$EXPECTED_NONGIT" )"
-[ "$NOGIT_IDENTITY" = "OK" ] && ok "(A) the retained 27 are EXACTLY ALL_VERBS minus the 3 git-only (identity, not just count)" \
+[ "$NOGIT_IDENTITY" = "OK" ] && ok "(A) the retained 28 are EXACTLY ALL_VERBS minus the 3 git-only (identity, not just count)" \
                              || no "(A) retained-set identity mismatch: $NOGIT_IDENTITY"
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -199,7 +199,7 @@ echo "=== (C) [red] batch's exclusion arithmetic moves with the omission ==="
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 # The same derivation mcptranchecheck.sh's M14 arm runs, against the PRUNED listing: the count batch
 # states must equal (advertised - the batch-served verbs that are still advertised), and the prose must
-# not name a verb this server does not serve. A hand-written 16 next to a 27-verb listing is M14's own
+# not name a verb this server does not serve. A hand-written 17 next to a 28-verb listing is M14's own
 # finding, one policy over.
 python3 - "$TMP/nogit.list" <<'PY' > "$TMP/m14p.res" 2>&1
 import sys, json, re
@@ -277,15 +277,15 @@ stop_pinned
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 echo
-echo "=== (F) stdio on the SAME non-git directory advertises all 30 (per-call roots — you cannot know) ==="
+echo "=== (F) stdio on the SAME non-git directory advertises all 31 (per-call roots — you cannot know) ==="
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 stdio_call "$NOGIT" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' > "$TMP/stdio.list"
 STDIO_NAMES="$( python3 -c "$names_py" "$TMP/stdio.list" )"
 STDIO_COUNT="$( printf '%s' "$STDIO_NAMES" | wc -w | tr -d ' ' )"
-[ "$STDIO_COUNT" = "30" ] && ok "(F) stdio startup-root server still advertises all 30" \
+[ "$STDIO_COUNT" = "31" ] && ok "(F) stdio startup-root server still advertises all 31" \
                           || no "(F) stdio advertises $STDIO_COUNT verbs — a stdio read verb may name ANY path, so nothing is provably unreachable"
 STDIO_IDENTITY="$( names_identical "$STDIO_NAMES" "$ALL_VERBS" )"
-[ "$STDIO_IDENTITY" = "OK" ] && ok "(F) stdio's 30 are EXACTLY ALL_VERBS (identity, not just count)" \
+[ "$STDIO_IDENTITY" = "OK" ] && ok "(F) stdio's 31 are EXACTLY ALL_VERBS (identity, not just count)" \
                              || no "(F) stdio retained-set identity mismatch: $STDIO_IDENTITY"
 stdio_call "$NOGIT" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' >/dev/null
 INIT_STDIO="$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | "$BIN" "$NOGIT" --mcp 2>/dev/null | tail -1 )"
@@ -299,22 +299,22 @@ grep -q QUIET "$TMP/fdisc" && ok "(F) stdio discloses no omission (nothing was o
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 echo
-echo "=== (G) a GIT pinned root advertises all 30 and discloses nothing ==="
+echo "=== (G) a GIT pinned root advertises all 31 and discloses nothing ==="
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
 start_pinned "$GITWS" || { echo "listener on the git workspace failed to start: $( head -3 "$TMP/srv.err" )"; exit 1; }
 http_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' > "$TMP/git.init"
 http_call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' > "$TMP/git.list"
 GIT_NAMES="$( python3 -c "$names_py" "$TMP/git.list" )"
 GIT_COUNT="$( printf '%s' "$GIT_NAMES" | wc -w | tr -d ' ' )"
-[ "$GIT_COUNT" = "30" ] && ok "(G) git pinned root advertises all 30 verbs" \
-                        || no "(G) git pinned root advertises $GIT_COUNT verbs, expected 30"
+[ "$GIT_COUNT" = "31" ] && ok "(G) git pinned root advertises all 31 verbs" \
+                        || no "(G) git pinned root advertises $GIT_COUNT verbs, expected 31"
 gone=""
 for v in $GIT_ONLY; do
     case " $GIT_NAMES " in *" $v "*) ;; *) gone="$gone $v";; esac
 done
 [ -z "$gone" ] && ok "(G) every git verb present on a real repo" || no "(G) pruned on a REAL git repo:$gone"
 GIT_IDENTITY="$( names_identical "$GIT_NAMES" "$ALL_VERBS" )"
-[ "$GIT_IDENTITY" = "OK" ] && ok "(G) the git root's 30 are EXACTLY ALL_VERBS (identity, not just count)" \
+[ "$GIT_IDENTITY" = "OK" ] && ok "(G) the git root's 31 are EXACTLY ALL_VERBS (identity, not just count)" \
                            || no "(G) git-root retained-set identity mismatch: $GIT_IDENTITY"
 python3 -c '
 import sys, json

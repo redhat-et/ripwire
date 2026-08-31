@@ -1842,7 +1842,10 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
         { "--dead-code",         c.deadCode               },   // the row order IS the dispatch order (test/dispatchordercheck.sh pins every pair) — never re-pair for layout
         { "--edit-check",       !c.editCheckSym.empty()   }, { "--safe-delete",  !c.safeDeleteSym.empty()  },
         { "--slice",            !c.sliceSpec.empty()      },   // lane/paper-slice: dispatches right after --safe-delete (runSlice)
-        { "--at",               !c.atSpec.empty()         },   // lane/at-seed: the enclosing-chain report, right after --slice (runAt)
+        // lane/tc-sliceat: beside --slice, the at flag is that verb's LINE SEED (runSlice consumes it —
+        // ARISE seeds its slicer at (file, line[, variable])), so the pair COMPOSES and never surfaces
+        // as a dropped-verb warning; alone, the at flag is still the enclosing-chain report (runAt).
+        { "--at",               !c.atSpec.empty() && c.sliceSpec.empty() },
         { "--eval",              c.eval                   },
         { "--eval-retrieval",    c.evalRetrieval          }, { "--eval-skills",  !c.evalSkills.empty()    },
         { "--callers",          !c.callers.empty()        }, { "--callees",      !c.callees.empty()       },
