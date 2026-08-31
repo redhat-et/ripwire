@@ -6860,6 +6860,22 @@ selector-unserved counts are the wider finding here: the harness addresses funct
 qualification rule, not of the slicer — it costs corpus size, and it is disclosed rather than
 worked around, because widening the selector mid-round would have changed what "qualifies" after
 the numbers were in view.
+
+**(6) ugrep re-measured after the D2 fix (2026-08-31, same round).** Finding D2 above — a degraded
+parse offering the reserved word `if` as a sliceable local — was fixed before this round merged
+(per-language keyword tables in the slice walk), and numbers measured without that fix are stale for
+the mechanism it removes, so the ugrep arm re-ran on the fixed binary, same corpus copy, same cap.
+The keyword instance no longer QUALIFIES (an added line naming only `if` names no sliceable local
+now), which is the fix behaving: instances 5 → **4**, all four at `v1 line-recall` **1.0** / hit-all
+**1.0** (was 0.800/0.800 — the sole miss was the keyword instance), fn-recall v1 = v2 = **0.727**
+(was 0.582; the v2 delta stays +0.0pp), per-instance values otherwise identical to the first run
+modulo ~+210 B of the fix's own legend disclosure. Two honest movements against the headline: mean
+over-inclusion RISES 20.47× → 25.29× because the removed instance had the LOWEST ratio — set
+composition, not a regression (the surviving 58.0×/22.5×/17.0×/3.7× rows are unchanged) — and mean
+v2 bytes (27,519) now EXCEED the `--expand` baseline (24,966) on this four-instance set, the
+short-function cost regime the reading above already names. Four observations; the
+population-estimate caveat of (5) applies with more force, not less.
+
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 
 **The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*
