@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# rw_at <root_dir> <file_path> <line>
+#
+# The enclosing-definition chain at one location (ripwire --at), outermost->innermost — the
+# counterpart of arise_get_enclosing_scopes. Rows are INDEXED definitions only: there is no module
+# row, and an absent outer scope is absent, never misnamed.
+set -u
+root="${1:?usage: rw_at <root_dir> <file_path> <line>}"
+file="${2:?usage: rw_at <root_dir> <file_path> <line>}"
+line="${3:?usage: rw_at <root_dir> <file_path> <line>}"
+exec "${RIPWIRE_BIN:?rw_at: set RIPWIRE_BIN to the pinned ripwire binary}" "$root" --at="$file:$line"

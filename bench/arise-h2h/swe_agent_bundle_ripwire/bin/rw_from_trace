@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# rw_from_trace <root_dir> <trace text...>
+#
+# Map a stack trace / error output to indexed symbols, innermost-first, with the innermost
+# in-corpus symbol's body (ripwire --from-trace). Paste the trace verbatim — never hand-translate
+# it into a query. This is the trace half of arise_rank_suspects; combine with rw_for for the
+# issue-text half.
+set -u
+root="${1:?usage: rw_from_trace <root_dir> <trace text...>}"; shift
+printf '%s\n' "$*" | exec "${RIPWIRE_BIN:?rw_from_trace: set RIPWIRE_BIN to the pinned ripwire binary}" "$root" --from-trace=-
