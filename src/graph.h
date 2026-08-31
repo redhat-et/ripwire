@@ -16,6 +16,7 @@
 #include "smallvec.h"            // rw::SmallVec — THE ONE ALIAS (src/smallvec.h picks the implementation)
 #include "resolve.h"             // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
 #include "scipoverlay.h"         // SCIP precision overlay (data struct only; parser lives in scip.h)
+#include "pincensus.h"           // eval-only per-call-site decision census (--pin-census); inert unless armed
 #include "infra/sortutil.h"      // radix edge sorting for large integer-key graph edge lists
 #include "docparse.h"            // detail::readWholeFile — resolveAtSeed reads the seed line's byte range off disk
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
@@ -94,6 +95,10 @@ struct Graph
                                               // prior. Empty ⇒ treated as all-1 (no bias). Never touches the
                                               // transition matrix (edges), only the prior — the nudge that lets
                                               // structure still dominate on toy graphs.
+    PinCensus                  pinCensus;     // eval-only S6-C silent-pin census (src/pincensus.h). EMPTY and
+                                              // untouched unless buildGraph was called with census=true
+                                              // (`--pin-census=FILE`), so every other run allocates nothing and
+                                              // emits nothing — the map is byte-identical either way.
 };
 
 // ObjC/ObjC++ and C++ share ONE call namespace: a .mm calls C++ functions (declared in .h/.cpp)
@@ -721,7 +726,11 @@ inline const rw::SmallVec<NodeId, 2>* fnBindTargetIds( const HashMap<std::string
     return ( bit != byName.end() ) ? &bit->second : nullptr;
 }
 
-inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr )
+// `census` arms the eval-only S6-C silent-pin census (src/pincensus.h): every DECIDED call site records
+// which narrowing stage committed it and to which canonical target. It adds rows to g.pinCensus and
+// changes NOTHING else — no candidate is admitted, dropped or reordered by it, so the emitted map is
+// byte-identical armed or not (test/pincensuscheck.sh arm (E) is the executable form of that sentence).
+inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
     const std::size_t N = ing.symbols.size();
@@ -1073,6 +1082,30 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                            //   ancestors walk so following one direction can never leak siblings)
     std::vector<NodeId>      filtScratch;  // reused per-call survivor buffer for CHA-lite / arity filtering
 
+    // ---- census arming + the ORACLE side (eval-only; src/pincensus.h) ------------------------------
+    // The oracle rows are a straight transcription of the overlay's own (from, calleeName) → target table
+    // into the census's id space — the same table graph.h consults below, so the two sides of the join
+    // come from ONE source of truth and cannot drift. coveredFrom is sorted by (from, calleeName, to), so
+    // the grouping below is a single pass and the row order is deterministic.
+    g.pinCensus.armed = census;
+    if( census && scip != nullptr )
+    {
+        for( std::size_t i = 0; i < scip->coveredFrom.size(); )
+        {
+            std::size_t j = i;
+            while( j < scip->coveredFrom.size() && scip->coveredFrom[j].from == scip->coveredFrom[i].from
+                   && scip->coveredFrom[j].calleeName == scip->coveredFrom[i].calleeName )
+            {
+                ++j;
+            }
+            g.pinCensus.addOracleRow( scip->coveredFrom[i].from, scip->coveredFrom[i].calleeName );
+            for( std::size_t k = i; k < j; ++k )
+            {
+                g.pinCensus.oraTo.push_back( scip->coveredFrom[k].to );
+            }
+            i = j;
+        }
+    }
     for( const Reference& r : ing.references )
     {
         // file-scope / inheritance / doc-mention / HAS-A → not a call. ABS-3: read/write/import use-sites
@@ -1090,6 +1123,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         cand.clear();
         tier.clear();
         float tierConf = 1.0f;                                 // tier 1: same file (default; overridden below)
+        // census bookkeeping (inert unless armed): which narrowing stages actually FIRED on this site, and
+        // how wide the tier was when it reached the locality tie-break. Read only at the emission point.
+        std::size_t censusPreS6c   = 0;
+        bool        censusCone     = false;
+        bool        censusArity    = false;
+        bool        censusLocality = false;
 
         // SCIP overlay: if the index resolved THIS (fromSymbol, calleeName) call-site, its precise
         // target(s) REPLACE the name-based candidate set. The call is pinned (full confidence, NOT counted
@@ -1537,6 +1576,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     if( !filtScratch.empty() && filtScratch.size() < tier.size() )
                     {
                         tier.swap( filtScratch );
+                        censusCone = true;
                     }
                 }
             }
@@ -1573,9 +1613,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 if( !filtScratch.empty() && filtScratch.size() < tier.size() )
                 {
                     tier.swap( filtScratch );
+                    censusArity = true;
                 }
             }
         }
+        censusPreS6c = tier.size();   // the tier width the locality tie-break is handed (census only)
 
         // S6-C locality tie-break: a still-ambiguous call (>1 candidate left in the tier) prefers the candidate(s)
         // whose canonical id shares the LONGEST whole-SEGMENT prefix with the CALLER's canonical id — same file >
@@ -1636,6 +1678,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         }
                     }
                     tier.resize( w );
+                    censusLocality = true;   // S6-C committed on this site (census only)
                 }
             }
         }
@@ -1704,6 +1747,23 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( nReal == 0 )
         {
             continue;
+        }
+        // ---- the census row (eval-only; costs one branch on every other run) ---------------------------
+        // Recorded HERE and nowhere else: this is the exact point where the resolver has finished deciding
+        // and is about to commit the edge, so the row states what was committed and what committed it.
+        // pincensus.h::classifyPin owns the precedence rule; this site only reports the stage outcomes.
+        if( census )
+        {
+            const PinDecision d = classifyPin( scipPinned, bindingPinned, nReal, canonical, narrowed,
+                                               censusCone, censusArity, censusLocality );
+            g.pinCensus.addRow( r.fromSymbol, r.calleeName, d.mech, d.flags, censusPreS6c, nReal );
+            for( NodeId to : tier )
+            {
+                if( to != r.fromSymbol )
+                {
+                    g.pinCensus.tgtIds.push_back( to );
+                }
+            }
         }
         const float base = conf / float( nReal );              // split over real (non-self) targets
         for( NodeId to : tier )
