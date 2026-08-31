@@ -6910,6 +6910,90 @@ transitive closure, loop bodies dropped. Matching the published number does not 
 the published slicer, and a comparison arm that swaps in ripwire's verbs is comparing a superset
 slice against the number the subset earned.
 
+## ARISE fault-localization head-to-head — PRE-REGISTERED 2026-08-31 (before any arm runs)
+
+**What this registers.** The head-to-head the fidelity audit above scoped: ripwire's verbs mounted
+inside ARISE's own SWE-agent fault-localization harness, scored by ARISE's own evaluator, against
+their bundle and against the vanilla baseline. Everything below is fixed BEFORE any arm runs an
+instance; at registration time NO model endpoint or API key exists in the environment, so the
+key-free prefix (environment, bundle, smoke, dry-runs) is executed and the measured runs are
+blocked at the LM boundary — nothing in this section is a result.
+
+**The task and the scorer of record, imported unmodified.** The FL task is a SWE-agent `run_batch`
+over SWE-bench Lite with config overlays (a condition overlay + `fl.yaml`); the agent may not edit
+files or run tests, and the terminal answer is a ranked `LOCATIONS … END_LOCATIONS` block (file,
+function, line triples) parsed from the trajectory by their `evaluation/parse_preds.py`. Scoring is
+their `evaluation/run_eval.py` + `src/arise/eval/gold.py`, byte-unmodified (the SWEX/ARB scorer-of-
+record precedent): File Recall@k and File MRR, Function Recall@k / F1@k / MRR, Line Recall@k, Line
+IoU, Coverage@budget — every metric exactly as they define it, with the gold labels derived from
+the SWE-bench patch by their funcname-regex rules, whose quirks are inherited equally by every arm.
+Token cost per arm is reported beside recall via their own `--token-usage` trajectory parse (the §5
+discipline: recall and cost together, never recall alone).
+
+**Pins, recorded at registration.** ARISE `3abdc361ba2cb627b8c83c2493dafd1d7cc874dd`
+([FARD-Lab/ARISE](https://github.com/FARD-Lab/ARISE), MIT); SWE-agent **1.1.0** at
+`3ea751c087f32b16e039a2233dd6eefecef325d5` (SWE-ReX 1.4.0); dataset
+`princeton-nlp/SWE-bench_Lite`, test split (300 instances, 11 Python repos), HF revision
+`6ec7bb89b9342f664a54a6e0a6ea6501d3437cc2`; harness Python 3.14.6; ripwire = the plain
+`build/ripwire` at the head this round runs from, pinned into the shims via `RIPWIRE_BIN`. The
+**model ID is left explicitly unpinned here and is pinned at run time, before the first instance
+runs** — runs are blocked on an API key at registration time, and whichever model is pinned then is
+used identically for all three arms in the same window (their published numbers used
+Qwen2.5-Coder-32B-Instruct-AWQ on local vLLM; a different backbone here makes our (a)/(b) re-runs
+the only in-table baselines, which is why they are required).
+
+**The three arms, all in THEIR scaffold — anything else measures the scaffold.** (a) **vanilla
+SWE-agent**: `config/default.yaml` + their `fl_baseline.yaml` (shell-only). (b) **ARISE full
+bundle**: `default.yaml` + their `arise.yaml` + their `fl.yaml`. (c) **ripwire bundle**:
+`default.yaml` + `bench/arise-h2h/ripwire.yaml` (mounts `bench/arise-h2h/swe_agent_bundle_ripwire/`,
+mirroring their bin-shim pattern: one tiny executable + config.yaml docstring per verb) +
+`bench/arise-h2h/fl_ripwire.yaml`, which is their `fl.yaml` with ONLY the tool names and per-tool
+usage lines substituted verb-for-verb — stages, rules, LOCATIONS format, `single_bash_code_block`
+parser and every other line preserved, so the prompt shape is held constant. Same model, same turn
+and cost budget, same parser across all three. Verb map (registered in the bundle's config.yaml):
+`--for` ↔ arise_search; `--at` ↔ arise_get_enclosing_scopes; `--expand` (with `SYM:A-B` range) ↔
+arise_get_code_span; `--callers`/`--callees`/`--impact` ↔ arise_traverse_relations;
+`--slice`/`--slice-flow` (line-seeded `--slice=@FILE:LINE` + variable) ↔ arise_get_dataflow_slice;
+`--pack-task` ↔ arise_build_context_bundle; `--from-trace` ↔ rank_suspects' trace half. Shim
+docstrings state ripwire's own limits (name-based edges, no alias analysis) — never a capability
+the binary does not have.
+
+**The rung this registration funds: the 60-instance stable-order slice.** Instance selection rule,
+deterministic given the dataset pin alone: the test split in its dataset order at revision
+`6ec7bb89…`, indices 0, 5, 10, …, 295 (stride 5 from index 0; SWE-agent spelling
+`instances.slice: "::5"`) — 60 instances, proportional across the split's repo blocks, chosen by
+arithmetic and not by eye. The full-300 run is a later rung under this same protocol, owner-funded
+separately.
+
+**Their numbers stay theirs.** The published baseline→ARISE-Full Function Recall@1 43.0→60.0 (Line
+Recall@1 26.0→41.0, Pass@1 17.3%→22.0%) is quoted as THEIR run on their backbone; any table this
+protocol produces reports OUR re-runs of arms (a) and (b) beside those quotes, never substituted
+for them, with the backbone difference stated on the same row.
+
+**Which comparison is primary (the tier-mirroring rule).** Their scaffold's Stage-2 prompt tells
+the agent to slice "suspicious variables" — the +17pp is partly prompt-shaped tool routing, not
+tool quality alone, and their tier bundles (tier1/tier2/coarse/explain) exist to isolate that. The
+ripwire bundle mounts the full-tier verb map above, so the PRIMARY comparison is **arm (c) vs arm
+(b), ARISE-Full, tool-for-tool under the constant prompt shape**; per-tier comparisons (a ripwire
+bundle cut down to mirror tier1 or tier2) are secondary rungs that reuse this registration's rules
+and mirror whichever tier bundle they are compared against, tool-for-tool — a ripwire arm is never
+scored against a tier it carries more tools than.
+
+**Precondition, registered as blocking: the Python slice smoke pass.** `--slice`/`--slice-flow`'s
+measured runs so far are cpp-only; SWE-bench Lite is Python, so this is the slicer's first measured
+Python outing. Before any arm runs, slicecheck-style probes on real Python from the pinned-SHA
+SWE-bench repos (inventory sanity, def/use classification on the shapes the reference handles,
+flow chains) must pass against ripwire's own registered contract. A probe failure against the
+contract is a red-first gate + fix BEFORE the head-to-head; a probe landing on an already-disclosed
+limit (name-based, scope-insensitive, attribute stores as reads) is recorded here as inherited by
+the ripwire arm, not fixed mid-round. The smoke pass runs AFTER this registration commits and its
+outcome is recorded below it, dated, whichever way it goes.
+
+**Improve-first (the house rule, binding).** The first completed run is loss-first: every instance
+where arm (c) loses to arm (b) is bucketed by failure mechanism to a LOCAL report, fixed or
+disclosed, and only THEN does any comparative number leave this section. No number from this
+protocol is published in the README or deck until that pass completes.
+
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 
 **The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*
