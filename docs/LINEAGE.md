@@ -22,7 +22,7 @@ third-party code lives under `third_party/` and keeps its own licence. Citing a 
 was read and applied, not that any of its text or code is here.
 
 **The counts, derived from the tables below:** **34 repositories** and **59 papers** are folded, and
-a labelled survey of **221 tools** contributed nothing and says so. **The two sets are disjoint by
+a labelled survey of **222 tools** contributed nothing and says so. **The two sets are disjoint by
 construction, so they add rather than nest:** a tool that contributed a lesson gets a row in §3a and
 is never repeated in §3b, which makes the field study 28 folded *plus* 220 surveyed — not 28 picked
 out of 220. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
@@ -215,7 +215,7 @@ fails if any name appears twice *within* this table.
 | Agent orchestration frameworks | LangGraph, AutoGen, CrewAI, DSPy, Mastra | 5 |
 | Code-mod and migration | OpenRewrite, Codemod, comby, jscodeshift, Sourcegraph Batch Changes | 5 |
 | AI pull-request reviewers | CodeRabbit, Greptile, Graphite Diamond, Cursor Bugbot, Qodo Merge, DeepSource, Sourcery, Ellipsis, Bito, Korbit, Cubic, Baz, Entelligence, CodeAnt, Devlo, Trag, Panto, Macroscope | 18 |
-| Deterministic linters and aggregators | ESLint, Biome, oxlint, Pylint, Cppcheck, Bandit, reviewdog, pre-commit, MegaLinter, Trunk, Qlty | 11 |
+| Deterministic linters and aggregators | ESLint, Biome, oxlint, Pylint, Cppcheck, Bandit, reviewdog, pre-commit, MegaLinter, Trunk, Qlty, ShellCheck | 12 |
 | Compile- or type-required analysis | SonarQube, Clang Static Analyzer, Infer, Clippy, golangci-lint, Staticcheck, SpotBugs, Coverity, Error Prone | 9 |
 | Security and supply chain | Snyk, Socket, gitleaks, TruffleHog, Trivy, Checkov, KICS, Grype, Syft, OSV-Scanner, Dependabot, Renovate, sigstore, Pixee, ZeroPath, Mobb, Copilot Autofix | 17 |
 | Type checkers | mypy, pyright, ty, pyrefly, tsgo, Sorbet, PHPStan, Psalm | 8 |
