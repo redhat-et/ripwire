@@ -116,6 +116,20 @@ int widecalc( int alpha, int beta )
 }
 EOF
 
+# arm (26)'s fuel: the RECEIVER-MUTATION shape. Every write to `bag` happens inside a method call, so
+# the name-based classifier — which has no types and no callee bodies — sees only reads and the slice
+# reports steps="0". Appended LAST; arm (26) asserts NO line numbers, so nothing above can move it.
+cat >> "$WORK/src/a.cpp" <<'EOF'
+
+int gather( int seed, int cap )
+{
+    std::vector<int> bag;
+    bag.reserve( cap );
+    bag.push_back( seed );
+    return bag.size();
+}
+EOF
+
 echo "sliceflowcheck: BIN=$BIN  (temp corpus, no git)"
 
 run(){ ( cd "$WORK" && "$BIN" . "$@" --no-cache 2>/dev/null ); }
@@ -422,6 +436,50 @@ WC="$( run --slice=widecalc:delta --slice-flow=back )"
     && printf '%s' "$( frow "$WC" beta 20 )" | grep -q 'd="2" f="22"' \
     && ok "(25c) C-family back through continuations: gamma d=1, alpha+beta params d=2" \
     || { no "(25c) expected steps=\"3\" with gamma l=22 d=1, alpha/beta l=20 d=2"; printf '%s\n' "$WC"; }
+
+# ── (26) receiver mutation is DECLINED as a def, and the decline is DISCLOSED ───────────────────────
+# `bag.push_back( seed )` writes bag. The classifier cannot know that: proving it needs the callee's
+# body and the receiver's type, neither of which a name-based slicer has. Guessing from a curated
+# method-name list is what this arm refuses on the tool's behalf — measured 2026-08-31, the same
+# populations that would gain a def are dominated by names that must NOT become one (`reserve`, 150
+# receiver-only sites in src/, changes capacity and never the value; `clear`/`pop_back`, 114 more,
+# carry no incoming value), and sliceFlowExpandFwd's `if( r.hasDef ) break;` means a wrong def does
+# not merely add a row — it KILLS the reach of the correct def before it.
+#
+# So the ANSWER stays steps="0" and the FIX is the disclosure. This arm pins both halves:
+#   (a) the semantics are unchanged — a future round that quietly promotes receiver calls to defs
+#       reds this arm and has to argue for it,
+#   (b) the zero is no longer bare — the legend names receiver mutation as a limit in its own words,
+#       and the root carries counts_floor="1" like the five graph verbs that are floors for the same
+#       name-based reason.
+# RED against the pre-fix binary on (b) and (c): the legend has no such clause and <slice> has no
+# counts_floor= attribute. Arm (a) is GREEN before and after, deliberately — it is the control.
+R="$( run --slice=gather:bag )"
+RF="$( run --slice=gather:bag --slice-flow=back )"
+[ "$( attr "$R" defs )" = 'defs="1"' ] && [ "$( attr "$RF" steps )" = 'steps="0"' ] \
+    && ok "(26a) CONTROL: receiver mutation stays a read — defs=\"1\", steps=\"0\" (semantics unchanged)" \
+    || { no "(26a) expected the declined semantics: defs=\"1\" and steps=\"0\""; printf '%s\n' "$R"; printf '%s\n' "$RF"; }
+# the v1 rows must still SHOW the mutating lines — the slice is under-classified, never empty
+printf '%s' "$( elem "$R" )" | grep -q 'push_back' \
+    && ok "(26a) the push_back line is still emitted as a row — under-classified, not omitted" \
+    || { no "(26a) the receiver-mutation line must still appear as a row"; printf '%s\n' "$R"; }
+for lit in 'receiver' 'counts_floor='; do
+    printf '%s' "$( legend "$R" )" | grep -q -- "$lit" \
+        && ok "(26b) v1 legend carries \"$lit\"" \
+        || { no "(26b) the v1 legend must define/name \"$lit\""; }
+done
+printf '%s' "$( legend "$RF" )" | grep -q 'receiver' \
+    && ok "(26b) the FLOW legend also names the receiver-mutation limit where steps= is defined" \
+    || no "(26b) the flow legend must name receiver mutation beside its steps= definition"
+printf '%s' "$( elem "$R" )" | grep -q '^<slice [^>]*counts_floor="1"' \
+    && printf '%s' "$( elem "$RF" )" | grep -q '^<slice [^>]*counts_floor="1"' \
+    && ok "(26c) <slice> carries counts_floor=\"1\" — defs=/uses=/steps= are floors, seeded or not" \
+    || { no "(26c) <slice> must carry counts_floor=\"1\" on both the v1 and the flow form"; printf '%s\n' "$( elem "$R" )"; }
+# the inventory form is a count too (vars=), so it carries the marker as well
+RI="$( run --slice=gather )"
+printf '%s' "$( elem "$RI" )" | grep -q 'counts_floor="1"' \
+    && ok "(26c) the bare-inventory form carries the marker too (vars= is a floor)" \
+    || { no "(26c) --slice=SYM inventory must carry counts_floor=\"1\""; printf '%s\n' "$( elem "$RI" )"; }
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"
