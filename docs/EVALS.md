@@ -7513,3 +7513,144 @@ judges — the adapters consume the rank facts and the file tail instead of thei
 head-only approximations, and the pre-registered metrics (file MRR / Recall@20 there; nDCG@500 /
 recall@100 there) move or they do not. Publication stays gated on those re-measures per the
 improve-first rule.
+
+## The locality-pinned population — S6-C silent-pin precision census, PRE-REGISTERED 2026-08-31 (before any census run)
+
+**What this registers.** A measurement-only census of the one resolver population no instrument has
+ever isolated: call sites the S6-C locality tie-break pins to a single target and therefore —
+deliberately, by documented design — never counts in `amb=` / the header `ambiguous=`. This section
+fixes the population definition, the oracle, the instrumentation verdict, the corpora, and the
+accept/reject bands BEFORE any number exists. Nothing below is a result; the census itself is a later
+phase, and no resolver or output behaviour changes in this one.
+
+**The mechanism under audit, restated from the source (`src/graph.h`, S6-C block;
+`resolve.h::sharedLocality`).** After qualified/canonical resolution, the receiver-narrowing rules,
+the CHA cone and the arity filter have all run, a call whose candidate tier still holds >1 in-repo
+definition prefers the candidate(s) whose canonical id (`path/to/file.ext::scope::name`) shares the
+longest whole-SEGMENT prefix with the caller's canonical id — same file > same class/scope > same
+directory. `sharedLocality` counts only prefixes ending exactly on a `/` or `::` boundary, so partial
+overlap inside one segment (`Xenon` vs `Xtra`) scores zero and cannot manufacture a win. The
+tie-break only re-weights among tier survivors: it never adds a candidate the fallback ladder didn't
+reach, and it never empties the tier (a full locality tie leaves the tier intact and the call stays
+split). It is skipped entirely when the caller is scope-less (bare canonical id — no locality to
+compare; so every S6-C pin has a SCOPED caller), when the receiver is a depth-2 chained field
+(`RecvKind::FieldOfThis` / `FieldOfVar` — the chainguardcheck history), and on SCIP- or
+binding-pinned sites. When it leaves exactly ONE non-self survivor, the call emits as a single
+confident edge and `ambOut` is NOT incremented — `src/graph.h`'s `ambOut` declaration and the
+amb-clue comment both say so explicitly. That pin is invisible in every disclosed gauge. The
+invisible population is the subject.
+
+**The population, defined for the census.** A *locality-pinned site* is a resolved call reference
+where (a) the site is not SCIP- or binding-pinned, (b) the tier entering S6-C held ≥2 candidates, and
+(c) after S6-C exactly one non-self survivor remains. Strata reported beside it, same run, same
+oracle: (i) *other silent pins* — qualified `A::b`, `this->`, Rule-3 file narrowing, cone/arity
+collapse to one — also uncounted in `amb=` but each carrying receiver or qualifier evidence the
+locality prior lacks (the expected upper reference); (ii) *residual splits* — today's `amb=`
+population, the 2026-07-11 census's "amb-flagged" group (the expected lower reference,
+≈ 1/mean-split-width). Scale scoping from recon, explicitly UNPINNED and re-derived by the census
+before use: on duckdb roughly ~48k name-collision call sites collapse to ~8.9k residual `ambiguous=`
+— the gap is mostly this population plus the other silent pins, in unknown proportion.
+
+**Units, registered so the known error cannot recur.** `ambiguous=` counts call SITES (`ambOut` is
+incremented at most once per reference). `edges=` counts unique deduplicated `(from,to)` PAIRS
+(`outTargets`). One ambiguous site can emit several 1/k-split edges; k repeated calls to one callee
+are k sites but one edge. They are never divided into a "share of edges": `src/lanes.h:737` made
+exactly that error ("X of Y call edges are name-ambiguous") and is fixed at `73b057f`
+(`fix/codex-punchlist`; not yet an ancestor of this worktree's head). The two historical
+"`ambiguous/edges = 39.x%`" convenience lines earlier in this file mix the same units and stand as
+history — read them as a gauge, never a proportion. The census reports each population as a count in
+its own unit, full stop.
+
+**What the existing oracle can and cannot see — the instrumentation verdict, established by reading
+`bench/scip_amb_precision.py`.** The prior census (pre-cutover history-of-record: ctxpack
+`bench/ANSWERQUALITY.md`, appended 2026-07-11) measured amb-flagged precision **0.378** (loguru,
+300 buckets / 794 edges) and **0.841** (rq, 520 / 622) against a non-ambiguous control of **1.000**
+over 2,077 edges. Its grouping key is whether the callee NAME has >1 in-corpus definition — and a
+locality-pinned site lands in that "amb" group with emitted=1, where the harness scores it **1.0 BY
+CONSTRUCTION**: the serialized edge is `<c n="X"/>` with no target identity, the `--scip` overlay's
+replacement edge carries the same name, so `min(pinned=1, emitted=1)/1 = 1` whether the pin chose
+SCIP's target or a wrong same-name definition. So the answer to the registered question is the
+stronger one: the harness does not merely lump tie-break pins in with confidently-resolved edges in a
+way a regrouping could fix — it is structurally BLIND to a wrong pin, because edge serialization is
+name-keyed. **Phase 2 therefore needs new instrumentation, not a new grouping.** Minimal registered
+form: an eval-only, flag-gated census emission at the resolver — per call site: caller id, callee
+name, surviving target canonical id(s), and decision mechanism ∈ {qualified, receiver-rule, cone,
+arity, locality, split} — joined against SCIP's per-site target by symbol identity, not by name. The
+overlay join point (`src/scipoverlay.h`'s `(fromSymbol, calleeName)` → pinned-target side table)
+already holds both sides in memory during a `--scip` run, so agreement is computable exactly where
+replacement happens today. The census surface must be output-invariant for every existing argv (G5
+additive; `argvdiffcheck`-clean) and pass determinism ×3 before its first number is read.
+
+**Arms and corpora.** *Python arm — runnable today*: `scip-python` 0.6.6 is installed
+(`/opt/homebrew/bin/scip-python`). Corpora: loguru and rq exactly as in the 2026-07-11 census, for
+comparability; at most one larger Python repo may be added ONLY if its SHA is pinned in the census
+commit before any run. *C++ arm — CONDITIONAL on `scip-clang`, which is NOT installed at
+registration* (`scip-clang` and `scip` both absent from PATH, checked 2026-08-31). The untracked
+`compile_commands.json` at the main checkout root (48 entries) was re-checked at registration: it
+carries compile commands for all five own translation units — `main.cpp` and `tsprobe.cpp` once,
+`ingest.cpp` / `pagerank.cpp` / `infra/diagnostics.cpp` twice across the `ripwire` and
+`ripwire_probe` targets — with only the optional `RIPWIRE_ALLOC_COUNT` TU (`alloccount.cpp`) absent,
+which is correct (it is deliberately out of the shipped target). (The recon brief said 4 of 5; the
+re-check says all five are present, and the re-check wins.) **If `scip-clang` is never installed, the
+round completes as a PYTHON-ONLY census and is published as exactly that**: a narrower result whose
+C++ generalization is UNKNOWN and says so in the same table — the duckdb scoping figures then stay
+scoping context, never results. That degradation is registered here, up front, not discovered in the
+writeup.
+
+**Baseline, re-derived on this worktree's own head** (`3ce9944`, plain build,
+`./build/ripwire src --no-cache`):
+
+```
+files=144 symbols=4610 edges=12515 ambiguous=5410 unresolved=1445
+```
+
+**Registered bands — fixed before any number.** Primary metric: precision of S6-C locality-pinned
+edges where SCIP speaks, per corpus — a pinned edge is *confirmed* iff SCIP's resolved target IS the
+pinned definition, by symbol identity.
+
+* **Silence justified (current behaviour stands):** precision ≥ **0.90** on every measured corpus
+  with ≥ 100 SCIP-covered pinned sites. The pin's exclusion from `amb=` is then earned, and this
+  becomes the citable justification for it.
+* **Silence unjustified (funds the disclosure fix):** precision < **0.80** on any corpus with ≥ 100
+  covered pinned sites — the tie-break is manufacturing silent wrong edges at a rate the honesty
+  contract cannot carry.
+* **Inconclusive:** 0.80–0.90, or < 100 covered pinned sites on every corpus. Published as
+  inconclusive; the only funded follow-up is corpus growth, never a fix reached for through the band.
+
+Reference strata are published beside the primary in the same table: other-silent-pin precision and
+residual-split per-target precision (the continuation of 0.378 / 0.841).
+
+**The trap, encoded: "reduce `ambiguous=`" is NOT a criterion, and any later fix is judged
+non-inferior instead.** That criterion is twice-rejected in this file — #2a (type-mention lane,
+2026-08-20: NOT MET and "unmeetable at the registered site") and #3b (depth-2 lane, 2026-08-21:
+REJECT, with the postmortem showing the `ambiguous=` rise was recovered and corrected information).
+Replacing a wrongly-pinned edge with an honest split RAISES `ambiguous=`; a round judged on lowering
+it is judged backwards. So for whatever fix this census funds (phase 3, separately registered):
+header `ambiguous=` MAY RISE, ceiling **+2.0%** against the same-commit baseline, with the primary
+being the precision statement above — never the direction of `ambiguous=`.
+
+**What a negative looks like — and every one of them is publishable in §7.** (a) Precision ≥ 0.90:
+the lane's premise ("the silent pin hides wrong edges") is REFUTED; no fix is funded; the result is
+recorded as a registered negative for the lane and a positive for current behaviour. (b) Coverage
+failure: SCIP speaks on too few pinned sites to decide; recorded as inconclusive, with the coverage
+number, not quietly widened until it decides. (c) The Python-only degradation above. The falsifiable
+claim is: *"S6-C's silent commitments are at least as trustworthy (≥ 0.90 where SCIP speaks) as the
+census's confident control."* Either verdict is a result; a registration that cannot fail is not a
+registration.
+
+**Design latitude, registered but deliberately NOT chosen here.** The owner has pre-authorized
+changing the data structure: *"if need/want a different data structure, or if a different data
+structure is more optimal for these use cases it is totally fine to do that."* G2 still binds —
+DOD/POD/SoA, 32-bit handles, cache locality, no generic graph library. The two candidate shapes for
+the eventual honest-disclosure fix, ordered by size: (i) a third parallel per-symbol counter beside
+`ambOut` / `unresolvedOut` (one more `std::vector<std::uint32_t>`, no `Symbol` change) — gives the
+population size and a header gauge, but cannot feed the oracle join by itself; (ii) retained
+candidate SETS for decided call sites — a sparse CSR-style side table keyed by CALL SITE, not by
+edge, holding the pre-pin tier for pinned sites — the larger option, enabling both the census join
+and a future "show the pin's alternatives" surface. Choosing between them is phase 2's measurement
+call. Any change that moves `sizeof(Symbol)` obliges `cmake --build build --clean-first -j` on every
+live build tree before any number is trusted (the CLAUDE.md mixed-binary trap).
+
+**Explicitly out of this phase.** No census run, no precision number, no resolver change, no output
+change, no counter, no side table. This section is the registration and the read-only recon behind
+it; the first number appears below it, dated, whichever way it goes.
