@@ -1957,7 +1957,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             ce.typeName  = r.calleeName;
             ce.ownerName = ing.symbols[ r.fromSymbol ].name;
             ce.rel       = r.composeRel;
-            g.composeEdges.push_back( std::move( ce ) );
+            // ONE edge per field, never one per candidate DEFINITION: a field has exactly one declared
+            // type, so K same-language defs of that name are ambiguity about WHICH one it binds to. The
+            // adjacent-only dedup below cannot collapse them (its key is not a prefix of the sort order)
+            // and every copy reached <compose> byte-identically. byName is id-ascending, so this keeps
+            // the lowest-id candidate: deterministic, and byte-invisible. Gate: composelangcheck §4/§5.
+            g.composeEdges.push_back( std::move( ce ) );  break;
         }
     }
     // sort by (ownerSym, typeSym, fieldName) for determinism; dedup on (ownerSym, fieldName) — the
