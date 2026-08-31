@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 494 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 495 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4496,7 +4496,7 @@ descriptions 21,172 B, `src/mcp.h`) is larger and riskier and is spec-only, not 
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **494 gate scripts**, all of which exist on disk.
+naming **495 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5327,7 +5327,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 494. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 495. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -6724,7 +6724,10 @@ line naming exactly ONE sliceable local pre-picks it, disclosed (`seed=`, `var_f
 several serve the inventory with `seed_vars=` and the candidate `<v>` rows marked `seed="1"` — never a
 guess. v1/v2 slice semantics, bytes and refusals are unchanged on every unseeded invocation (gate arm
 22), and the pre-picked slice's rows are the same scan a `:VAR` spec runs. Gate:
-`test/sliceflowcheck.sh` arms 11–24, red-first against the 5c6a6fd binary (18 FAILs recorded).
+`test/sliceflowcheck.sh` arms 11–24, red-first against the 5c6a6fd binary (18 FAILs recorded). The
+same lane lands the MCP `slice` verb (tools/list 30→31) mirroring this CLI contract
+refusal-for-refusal — one emitter (`sliceBundleText`) on both surfaces, payloads byte-identical on
+the same root/spec — gated by `test/mcpslicecheck.sh` (red-first: 22 FAILs on the pre-verb binary).
 
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 

@@ -106,6 +106,8 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
     { "edit_check",              "symbol",    "the def name you just edited (file:name disambiguates; @FILE:LINE = the def at that line)", "symbol=\"parseArgs\"",
       FieldRule::Required, "pass the def name you just edited; file:name disambiguates, @FILE:LINE addresses by location" },
     { "whereis",                 "symbol",    "the symbol name to look for across every ref",                       "symbol=\"parseArgs\"" },
+    { "slice",                   "symbol",    "the definition to slice: a symbol name, SYM:VAR, file:name[:VAR], or @FILE:LINE[:VAR] (a 1-based line-seed: the innermost definition enclosing that line)", "symbol=\"parseArgs\"",
+      FieldRule::Required, "pass the definition to slice — a name, SYM:VAR, or @FILE:LINE to seed by location" },
 
     // ── edit verbs ──
     { "replace_symbol_body",     "symbol",    "the def name to replace",                                            "symbol=\"parseArgs\"" },
@@ -275,6 +277,7 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     { "budget_tokens", "a positive integer token budget (omit it for the verb's own default)",        "budget_tokens=6000", "integer" },
     { "start_line",    "a positive integer, 1-based and body-relative (omit it to start at line 1)",  "start_line=1", "integer" },
     { "end_line",      "a positive integer, 1-based and body-relative (omit it to read to the end)",  "end_line=40", "integer" },
+    { "depth",         "an integer in 1..32 (the slice flow's BFS bound; omit it for the disclosed default 8; needs flow)", "depth=4", "integer" },
     // ── string ──
     { "path",          "a STRING directory path",                                                     "path=\".\"" },
     { "files",         "a STRING of comma-separated paths, not an array",                             "files=\"src/a.cpp,src/b.h\"" },
@@ -296,6 +299,10 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // twin refuses an unknown --grep-in= value and says why (a typo would read as "code" and quietly
     // suppress the very rows the caller asked to see); both MCP dialects now refuse through this row.
     { "in",            "a STRING span tier: code (the default) or any",                               "in=\"any\"" },
+    // lane/tc-sliceat: slice's own knobs — var picks the variable (omit it for the inventory, or to let an
+    // @FILE:LINE seed line pre-pick), flow is a CLOSED direction set so the sentence names it.
+    { "var",           "a STRING variable name inside the resolved definition (omit it to list the sliceable locals)", "var=\"out\"" },
+    { "flow",          "a STRING flow direction: back, fwd or both (omit it for the flat per-line rows)", "flow=\"back\"" },
     // ── the ENVELOPE, outside `params` (§B6 M6/M7) ──
     // These four were read through the bare findString/findObject path, which collapses "absent" onto
     // "present but not the shape I read" — so `"method":5` became `-32700 "parse error"` (a JSON that parsed
@@ -660,6 +667,8 @@ inline constexpr McpSingleRootVerb kMcpSingleRootVerbs[] = {
     { "owners",                "its author weights are mined from ONE repo's git log; run it per root" },
     { "situational_awareness", "its diff, blast radius and tests_to_run are all keyed to ONE repo's working "
                                "tree; run it per root" },
+    { "slice",                 "it re-parses the ONE on-disk file holding the definition, which a merged "
+                               "multi-root graph cannot address unambiguously; run it per root" },
 };
 
 // The reason `verb` is single-root, or "" when it is not (the caller then dispatches normally).
@@ -969,6 +978,9 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "stray_content",            "path kind" },
     { "flags",                    "path kind symbol" },
     { "doc_drift",                "path kind" },
+    // lane/tc-sliceat: the ARISE def-use slice — var/flow/depth mirror the CLI's :VAR / --slice-flow /
+    // --slice-depth knobs; single-root by kMcpSingleRootVerbs (a per-definition on-disk re-parse).
+    { "slice",                    "path symbol var flow depth" },
     // ── edit verbs ──
     { "replace_symbol_body",      "path paths symbol file new_body", McpVerbFields::Effect::Destructive },
     { "insert_before_symbol",     "path paths symbol file text", McpVerbFields::Effect::Writes },

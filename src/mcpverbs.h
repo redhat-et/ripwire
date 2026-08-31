@@ -25,6 +25,7 @@
 #include "exemplar.h"      // §B6 M2: selectExemplar + kExemplarSelectionRule — the ONE selector/wording both surfaces use
 #include "mcprefusal.h"    // §B6 M7/M8/M9: the shared verb+field refusal table both MCP arms speak
 #include "sarif.h"         // G1 (2026-08-15): rw::sarif::rootRelativeUri/rootPrefixOf — grepHitsJson's root-relative `file` (CLI ≡ MCP, no re-derivation)
+#include "slice.h"         // lane/tc-sliceat: the shared --slice / MCP slice def-use core (sliceBundleText — ONE emitter, two surfaces)
 
 #include <filesystem>      // §B6 M3: the shared root-path existence/directory check (mcpRootRefusal below)
 #include <span>            // std::span — connectemit::rebuildFromLegs reads the caller's retained-leg mask
@@ -2980,6 +2981,186 @@ inline EditCheckReply editCheckText( const std::string& root, const std::string&
     }
 
     return EditCheckReply{ editCheckBundleText( ing, g, root, kDefaultMaxFileBytes, {}, groups[0].lowestNode ), {} };
+}
+
+// ─── `slice` verb (lane/tc-sliceat): the ARISE def-use slice over MCP, mirroring the CLI --slice ────────
+//
+// One contract, two surfaces: SYM lists the sliceable locals; SYM+var (or the SYM:VAR spelling — the two
+// answer byte-identically) serves the per-line def-use rows; flow=back|fwd|both adds the rung-2 transitive
+// data-flow slice with depth bounding it (1..32, default 8); @FILE:LINE seeds by location, pre-picking the
+// variable when the seed line names exactly one sliceable local (disclosed — seed=/var_from=/seed_vars=,
+// the CLI's own vocabulary, because sliceBundleText is the ONE emitter both surfaces call). Refusals mirror
+// the CLI refusal-for-refusal: not-found (echo + near-miss + at-diagnosis), ambiguity (spellings listed,
+// never a silent pick), unserved language (the served list named), unknown var (locals listed), flow
+// misuse. Single-root by table (kMcpSingleRootVerbs): the slice re-parses the definition's on-disk file,
+// which a merged multi-root graph cannot address unambiguously.
+struct SliceReply { std::string payload; std::string refusal; };
+
+inline SliceReply sliceText( const std::string& root, const std::string& symbol, const std::string& var,
+                             const std::string& flow, int depth, RedactCounts* redact )
+{
+    // argument-shape refusals first — they need no index
+    if( !flow.empty() && flow != "back" && flow != "fwd" && flow != "both" )
+    {
+        return SliceReply{ {}, "flow '" + mcprefuse::cappedEcho( flow ) + "' is not a direction (supported: back|fwd|both)" };
+    }
+    if( depth > 0 && flow.empty() )
+    {
+        return SliceReply{ {}, "depth bounds the flow walk and there is none — pass flow=back|fwd|both with it, "
+                               "or omit depth" };
+    }
+
+    const McpIndex&     ix  = getIndex( root );
+    const IngestResult& ing = ix.ing;
+
+    // ── the two-phase spec split, exactly as the CLI: whole spelling first, then HEAD:VAR — skipped when
+    //    the var field already carries the variable (then `symbol` is a pure selector).
+    std::string_view    selector = symbol;
+    std::string_view    varName  = var;
+    std::vector<NodeId> matches  = resolveAllByNameQualified( ing, selector );
+    if( matches.empty() && var.empty() )
+    {
+        const std::size_t lastColon = symbol.rfind( ':' );
+        if( lastColon != std::string::npos && lastColon > 0 && lastColon + 1 < symbol.size() )
+        {
+            selector = std::string_view( symbol ).substr( 0, lastColon );
+            varName  = std::string_view( symbol ).substr( lastColon + 1 );
+            matches  = resolveAllByNameQualified( ing, selector );
+        }
+    }
+    if( matches.empty() )
+    {
+        return SliceReply{ {}, "symbol not found: " + mcprefuse::cappedEcho( symbol )
+                               + " (tried the whole spelling as a selector, then HEAD:VAR)"
+                               + mcprefuse::atSeedClause( ing, symbol ) };   // "" for a plain name
+    }
+
+    // ── §A6a ambiguity refusal, the CLI's own posture: a slice reads exactly ONE body ─────────────────
+    if( matches.size() > 1 )
+    {
+        const Graph& g = ix.g;
+        const std::vector<EditCheckGroup> groups = editCheckGroups( ing, g, matches );
+        std::string spellings;
+        const std::size_t shownCount = std::min<std::size_t>( groups.size(), kEditCheckSpellingsShown );
+        for( std::size_t groupIndex = 0; groupIndex < shownCount; ++groupIndex )
+        {
+            spellings += ( groupIndex ? ", " : "" ) + groups[ groupIndex ].spelling;
+        }
+        if( groups.size() > shownCount )
+        {
+            spellings += " (+" + std::to_string( groups.size() - shownCount ) + " more)";
+        }
+        return SliceReply{ {}, "'" + std::string( selector ) + "' matches " + std::to_string( matches.size() )
+                               + " definitions — a slice reads exactly ONE body, so an ambiguous selector is refused, "
+                                 "never silently narrowed. Qualify one: " + spellings
+                               + " — or seed by location with symbol=@FILE:LINE" };
+    }
+
+    const NodeId  focus = matches[0];
+    const Symbol& sym   = ing.symbols[ focus ];
+
+    // ── served-language gate — an honest refusal, never an empty success ──────────────────────────────
+    const slicev::SliceFam fam = slicev::sliceFamilyOf( sym.lang );
+    if( fam == slicev::SliceFam::None )
+    {
+        return SliceReply{ {}, std::string( "slice not served for " ) + langTag( sym.lang ) + " yet (served: "
+                               + slicev::kSliceServedList + ") — the def-use classification is a verified per-grammar "
+                                 "parent-kind read, and this language's has not been built" };
+    }
+
+    // ── read + re-parse the ONE file holding the definition ───────────────────────────────────────────
+    const std::string& path = diskPath( ing, sym.fileId );
+    std::string        src;
+    if( std::FILE* in = std::fopen( path.c_str(), "rb" ) )
+    {
+        char        buf[ 4096 ];
+        std::size_t n = 0;
+        while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
+        {
+            src.append( buf, n );
+        }
+        std::fclose( in );
+    }
+    else
+    {
+        DEGRADED_PATH_ALERT( "mcp slice: definition file unreadable" );
+        return SliceReply{ {}, "cannot read " + path + " — the slice re-parses the definition's file and has nothing to walk" };
+    }
+
+    const ::TSLanguage* grammar = sliceGrammarForFile( path );
+    slicev::SliceScan   scan    = slicev::sliceScanDefinition( src, sym, fam, grammar, varName );
+    if( !scan.parseOk )
+    {
+        DEGRADED_PATH_ALERT( "mcp slice: definition re-parse failed" );
+        return SliceReply{ {}, "could not re-parse " + path + " (grammar missing, or the indexed span no longer fits "
+                               "the file — a stale index; call any read verb to refresh, or check the CLI --doctor)" };
+    }
+
+    // ── unknown-var refusal, offering the sliceable locals (the CLI's wording, field spellings) ───────
+    if( !varName.empty() && scan.occ.empty() )
+    {
+        std::string locals;
+        std::vector<slicev::SliceLocal> ordered = scan.locals;
+        std::sort( ordered.begin(), ordered.end(), []( const slicev::SliceLocal& a, const slicev::SliceLocal& b )
+                   { return a.line != b.line ? a.line < b.line : a.name < b.name; } );
+        for( std::size_t localIndex = 0; localIndex < ordered.size(); ++localIndex )
+        {
+            locals += ( localIndex ? ", " : "" ) + ordered[ localIndex ].name;
+        }
+        return SliceReply{ {}, "no occurrence of '" + std::string( varName ) + "' in " + sym.name
+                               + " — sliceable locals: " + ( locals.empty() ? "(none found)" : locals )
+                               + " (a bare symbol lists them with first-def lines)" };
+    }
+
+    // ── the @FILE:LINE seed's variable half: pre-pick, or mark the candidates (the CLI contract) ──────
+    slicev::SliceSeedInfo seedInfo;
+    bool                  seededRun = false;
+    std::string           pickedVar;                       // owns the pre-picked name (varName is a view)
+    if( !selector.empty() && selector.front() == '@' )
+    {
+        const AtSeed selSeed = resolveAtSeed( ing, selector.substr( 1 ) );   // the resolver already accepted this spelling
+        if( selSeed.fault == AtFault::None )
+        {
+            seedInfo.spec = std::string( selector.substr( 1 ) );
+            seededRun     = true;
+            if( varName.empty() )
+            {
+                seedInfo.seedVars     = slicev::sliceSeedLineLocals( scan, selSeed.line );
+                seedInfo.seedVarCount = seedInfo.seedVars.size();
+                if( seedInfo.seedVarCount == 1 )
+                {
+                    pickedVar            = seedInfo.seedVars.front();
+                    varName              = pickedVar;
+                    seedInfo.varFromSeed = true;
+                    scan                 = slicev::sliceScanDefinition( src, sym, fam, grammar, varName );
+                }
+            }
+        }
+    }
+
+    // ── the rung-2 flow, when asked for — a flow needs a seed variable ────────────────────────────────
+    const bool flowActive = !flow.empty();
+    if( flowActive && varName.empty() )
+    {
+        return SliceReply{ {}, "flow needs a seed variable — a bare symbol lists the sliceable locals; pick one and "
+                               "re-call with var (or a SYM:VAR / @FILE:LINE:VAR spelling)" };
+    }
+
+    slicev::SliceFlowOut  flowOut;
+    slicev::SliceFlowSpec flowSpec;
+    flowSpec.dir   = flow == "back" ? slicev::SliceFlowDir::Back
+                   : flow == "fwd"  ? slicev::SliceFlowDir::Fwd
+                                    : slicev::SliceFlowDir::Both;
+    flowSpec.bound = depth > 0 ? std::uint32_t( depth ) : slicev::kSliceFlowDefaultDepth;
+    if( flowActive )
+    {
+        flowOut      = slicev::sliceFlowCompute( scan, varName, flowSpec.dir, flowSpec.bound );
+        flowSpec.out = &flowOut;
+    }
+
+    return SliceReply{ slicev::sliceBundleText( ing, root, focus, varName, scan, src, redact,
+                                                flowActive ? &flowSpec : nullptr,
+                                                seededRun ? &seedInfo : nullptr ), {} };
 }
 
 // ─── T4: fetch_body — the LAZY-BODY verb. The read verbs return signatures + a stable `handle`; this verb

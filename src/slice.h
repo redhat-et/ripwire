@@ -675,6 +675,10 @@ inline std::vector<SliceLineRow> sliceFoldLines( const std::vector<SliceOcc>& oc
 enum class SliceFlowDir : std::uint8_t { Back, Fwd, Both };
 
 inline constexpr std::uint32_t kSliceFlowDefaultDepth = 8;    // the disclosed default bound (depth= always states it)
+// the depth band, named so the MCP dialect's refusal and the CLI's parse-time domain (cli.h's
+// --slice-depth= row spells 1..32 as literals) can be pinned together by a static_assert rather than prose
+inline constexpr std::uint32_t kSliceFlowDepthMin = 1;
+inline constexpr std::uint32_t kSliceFlowDepthMax = 32;
 
 struct SliceVarRows
 {

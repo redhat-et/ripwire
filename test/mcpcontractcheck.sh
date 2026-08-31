@@ -11,7 +11,7 @@
 #   3. what the code actually CONSUMES
 #   4. what the CLI does for the same request
 #
-# and that those four disagreed. `paths` was consumed on all 30 verbs and declared on 18; every `required`
+# and that those four disagreed. `paths` was consumed on all 31 verbs and declared on 18; every `required`
 # omitted `path`; 0 of 84 properties carried a description; and six single-root verbs answered a multi-root
 # workspace with a refusal naming a FALSE cause.
 #
@@ -99,14 +99,14 @@ def parseSingleRoot():
 verbFields  = parseVerbFields()
 universal   = parseUniversal()
 singleRoot  = parseSingleRoot()
-check( len( verbFields ) == 30, "kMcpVerbFields parsed: %d verbs" % len( verbFields ) )
+check( len( verbFields ) == 31, "kMcpVerbFields parsed: %d verbs" % len( verbFields ) )
 check( universal == [ "path", "paths" ], "kMcpUniversalFields parsed: %s" % universal )
 check( len( singleRoot ) >= 6, "kMcpSingleRootVerbs parsed: %d rows (%s)" % ( len( singleRoot ), ",".join( singleRoot ) ) )
 
 # ═══ (A) DECLARED == ENFORCED — the schema vs the unknown-field guard (M2) ═════════════════════════════════
 srv   = Stdio()
 tools = srv.call( "tools/list" )[ "result" ][ "tools" ]
-check( len( tools ) == 30, "(A) tools/list advertises 30 verbs" )
+check( len( tools ) == 31, "(A) tools/list advertises 31 verbs" )
 
 mismatch, missingPaths, noDesc = [], [], []
 for t in tools:
@@ -122,19 +122,19 @@ for t in tools:
 
 for n, got, want in mismatch[ :5 ]:
     print( "  FAIL  (A) %s schema=%s enforced=%s" % ( n, got, want ) )
-check( not mismatch,     "(A) all 30 inputSchemas == declaredFieldsFor (schema and unknown-field guard are ONE list)" )
+check( not mismatch,     "(A) all 31 inputSchemas == declaredFieldsFor (schema and unknown-field guard are ONE list)" )
 # M2 stated as its own assertion so a regression names the finding, not just the invariant.
-check( not missingPaths, "(A/M2) `paths` declared on all 30 verbs (was 18; %d missing)" % len( missingPaths ) )
+check( not missingPaths, "(A/M2) `paths` declared on all 31 verbs (was 18; %d missing)" % len( missingPaths ) )
 # M12
 check( not noDesc,       "(A/M12) every declared property carries a description (%d missing)" % len( noDesc ) )
 totalProps = sum( len( t[ "inputSchema" ][ "properties" ] ) for t in tools )
-print( "  INFO  (A) %d declared properties across 30 verbs" % totalProps )
+print( "  INFO  (A) %d declared properties across 31 verbs" % totalProps )
 
 # ═══ (B) M4 — `path` is required exactly when this server cannot supply a root ═════════════════════════════
 # R2a (the 2026-08-12 usage mine) changed WHICH servers can: a bare `--mcp` launched inside a workspace
 # now supplies its own launch cwd (assumedRoot), so the shipped install's schema stops demanding `path`.
 # The M4 principle is unchanged; the truly root-less server is one launched from "/" (the startup guard
-# refuses to assume "/" or $HOME), and THAT schema must still require `path` on all 30 verbs.
+# refuses to assume "/" or $HOME), and THAT schema must still require `path` on all 31 verbs.
 stillReq0 = [ t[ "name" ] for t in tools if "path" in t[ "inputSchema" ].get( "required", [] ) ]
 check( not stillReq0, "(B/M4+R2a) bare `--mcp` launched in a workspace cwd: `path` NOT required (%d wrongly required)" % len( stillReq0 ) )
 rootless = Stdio( cwd = "/" )
