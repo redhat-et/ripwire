@@ -69,6 +69,25 @@ def pyflow(a):
     return c
 EOF
 
+# the at-seed arms' fuel: `helper` defined in TWO files (ambiguous by name — the seed must narrow it);
+# a.cpp's copy starts at L14, its L16 names two locals (r,q), its L17 names exactly one (r). Appended
+# AFTER pipeline, so every line number the arms above address is untouched.
+cat >> "$WORK/src/a.cpp" <<'EOF'
+
+int helper( int q )
+{
+    int r = q + 3;
+    return r;
+}
+EOF
+
+cat > "$WORK/src/b.cpp" <<'EOF'
+int helper( int z )
+{
+    return z * 2;
+}
+EOF
+
 echo "sliceflowcheck: BIN=$BIN  (temp corpus, no git)"
 
 run(){ ( cd "$WORK" && "$BIN" . "$@" --no-cache 2>/dev/null ); }
@@ -198,6 +217,155 @@ if printf '%s' "$F" | grep -q 'reaching-definition' \
     ok "(10) legend defines the flow vocabulary (reaching-definition, d=, f=, steps=, line-granular + alias limits)"
 else
     no "(10) flow legend must define d=/f=/steps= and state the reaching-definition + line-granularity + alias limits"
+fi
+
+# ═══ the at-seed arms (lane/tc-sliceat): --slice takes the FILE:LINE seed — ARISE's (file, line[, var]) ═══
+#
+# RED-FIRST PROOF SHAPE: the baseline binary DROPS --at when --slice is given ("takes precedence …
+# IGNORED this run") and serves the @-selector as a plain inventory — so every arm here asserts
+# seed-SPECIFIC bytes (a seed=/var_from=/seed_vars= attribute, a refusal sentence only the composition
+# prints, the ABSENCE of the IGNORED warning) that the baseline cannot produce.
+
+# ── (11) --slice + --at compose: no IGNORED warning, and the seed line's ONE local is pre-picked ────
+S11="$( run --slice=pipeline --at=src/a.cpp:7 )"
+E11="$( err --slice=pipeline --at=src/a.cpp:7 )"
+if printf '%s' "$E11" | grep -q 'IGNORED this run'; then
+    no "(11) --at beside --slice must SEED the slice, not be dropped with the precedence warning"
+else
+    [ "$( attr "$S11" var )" = 'var="stray"' ] \
+        && ok "(11) --slice=pipeline --at=src/a.cpp:7: L7 names exactly one sliceable local — var=\"stray\" pre-picked" \
+        || { no "(11) expected var=\"stray\" pre-picked from the seed line"; printf '%s\n' "$S11"; }
+fi
+
+# ── (12) the pre-pick DISCLOSES how the seed resolved ───────────────────────────────────────────────
+[ "$( attr "$S11" seed )" = 'seed="src/a.cpp:7"' ] && [ "$( attr "$S11" var_from )" = 'var_from="seed"' ] \
+    && [ "$( attr "$S11" sym )" = 'sym="pipeline"' ] \
+    && ok "(12) seed=\"src/a.cpp:7\" var_from=\"seed\" sym=\"pipeline\" — the resolution is disclosed, not implied" \
+    || { no "(12) expected seed=/var_from=/sym= disclosure on the pre-picked slice"; printf '%s\n' "$S11"; }
+printf '%s' "$( elem "$S11" )" | grep -q '<s l="7" k="def"' && printf '%s' "$( elem "$S11" )" | grep -q '<s l="8" k="use"' \
+    && ok "(12) the pre-picked slice serves stray's v1 rows (def l=7, use l=8)" \
+    || { no "(12) expected stray's def/use rows"; printf '%s\n' "$S11"; }
+
+# ── (13) seed line naming TWO locals: inventory with the candidates marked, never a guess ───────────
+S13="$( run --slice=pipeline --at=src/a.cpp:5 )"
+[ "$( attr "$S13" seed_vars )" = 'seed_vars="2"' ] && [ -z "$( attr "$S13" var )" ] \
+    && ok "(13) L5 names mid+seed: no var pre-picked, seed_vars=\"2\" disclosed" \
+    || { no "(13) expected the inventory with seed_vars=\"2\" and no var="; printf '%s\n' "$S13"; }
+printf '%s' "$( elem "$S13" )" | grep -q '<v n="mid"[^>]*seed="1"' && printf '%s' "$( elem "$S13" )" | grep -q '<v n="seed"[^>]*seed="1"' \
+    && ok "(13) the two candidates carry seed=\"1\" in the inventory" \
+    || { no "(13) expected seed=\"1\" on the mid and seed rows"; printf '%s\n' "$S13"; }
+printf '%s' "$( elem "$S13" )" | grep -q '<v n="stray"[^>]*seed="1"' \
+    && { no "(13) stray is NOT on the seed line — it must not carry seed=\"1\""; printf '%s\n' "$S13"; } \
+    || ok "(13) off-line locals stay unmarked"
+
+# ── (14) seed line naming NO local: the plain inventory, count disclosed as zero ────────────────────
+S14="$( run --slice=pipeline --at=src/a.cpp:4 )"
+[ "$( attr "$S14" seed_vars )" = 'seed_vars="0"' ] && [ "$( attr "$S14" vars )" = 'vars="5"' ] \
+    && ok "(14) a brace-only seed line: seed_vars=\"0\", the full inventory still served" \
+    || { no "(14) expected seed_vars=\"0\" vars=\"5\""; printf '%s\n' "$S14"; }
+
+# ── (15) explicit VAR + seed + flow: v2 semantics unchanged under the seed ──────────────────────────
+S15="$( run --slice=pipeline:out --at=src/a.cpp:6 --slice-flow=back )"
+[ "$( attr "$S15" flow )" = 'flow="back"' ] && [ "$( attr "$S15" seed )" = 'seed="src/a.cpp:6"' ] \
+    && [ "$( attr "$S15" var )" = 'var="out"' ] && [ -z "$( attr "$S15" var_from )" ] \
+    && ok "(15) explicit :out + seed + flow compose; var_from absent (the spec picked the var, not the seed)" \
+    || { no "(15) expected flow=\"back\" seed=\"src/a.cpp:6\" var=\"out\" without var_from"; printf '%s\n' "$S15"; }
+printf '%s' "$( frow "$S15" stray 7 )" | grep -q 'd="1"' \
+    && { printf '%s' "$( elem "$S15" )" | grep -q 'v="dead"' \
+         && { no "(15) dead must stay out of the backward flow under a seed"; printf '%s\n' "$S15"; } \
+         || ok "(15) the stray/dead asymmetry holds under the seed (v2 semantics unchanged)"; } \
+    || { no "(15) expected stray's backward row under the seed"; printf '%s\n' "$S15"; }
+
+# ── (16) the seed NARROWS an ambiguous selector instead of refusing it ──────────────────────────────
+[ "$( rc --slice=helper )" != 0 ] \
+    && ok "(16) --slice=helper alone still refuses (2 definitions)" \
+    || no "(16) --slice=helper should be ambiguous without a seed"
+S16="$( run --slice=helper --at=src/a.cpp:17 )"
+[ "$( attr "$S16" sym )" = 'sym="helper"' ] && [ "$( attr "$S16" var )" = 'var="r"' ] \
+    && printf '%s' "$( attr "$S16" p )" | grep -q 'src/a.cpp' \
+    && ok "(16) --at=src/a.cpp:17 narrows to a.cpp's helper and pre-picks r" \
+    || { no "(16) expected the seed to narrow the 2-def selector to src/a.cpp's helper"; printf '%s\n' "$S16"; }
+
+# ── (17) seed and spec DISAGREE: loud refusal naming both, never a silent pick ──────────────────────
+E17a="$( err --slice=helper --at=src/a.cpp:7 )"
+[ "$( rc --slice=helper --at=src/a.cpp:7 )" != 0 ] \
+    && printf '%s' "$E17a" | grep -q 'pipeline' && printf '%s' "$E17a" | grep -q 'helper' \
+    && ok "(17) seed inside pipeline vs --slice=helper: refused naming both" \
+    || { no "(17) expected a disagreement refusal naming pipeline and helper"; printf '%s\n' "$E17a"; }
+E17b="$( err --slice=pipeline --at=src/b.cpp:3 )"
+[ "$( rc --slice=pipeline --at=src/b.cpp:3 )" != 0 ] \
+    && printf '%s' "$E17b" | grep -q 'helper' \
+    && ok "(17) unique spec + seed in a different definition: refused, seed's definition named" \
+    || { no "(17) expected a disagreement refusal naming helper (the seed's definition)"; printf '%s\n' "$E17b"; }
+
+# ── (18) a plain-identifier spec beside a seed is the ARISE (file, line, VARIABLE) form ─────────────
+S18="$( run --slice=dead --at=src/a.cpp:4 )"
+[ "$( attr "$S18" sym )" = 'sym="pipeline"' ] && [ "$( attr "$S18" var )" = 'var="dead"' ] \
+    && printf '%s' "$( elem "$S18" )" | grep -q '<s l="9" k="def"' \
+    && ok "(18) --slice=dead --at=src/a.cpp:4: no symbol 'dead' exists, so the spec is the seed's VARIABLE" \
+    || { no "(18) expected sym=\"pipeline\" var=\"dead\" via the spec-as-variable reading"; printf '%s\n' "$S18"; }
+
+# ── (19) unknown variable beside a seed: the locals-listing refusal, not a silent inventory ─────────
+E19="$( err --slice=nosuchvar --at=src/a.cpp:4 )"
+[ "$( rc --slice=nosuchvar --at=src/a.cpp:4 )" != 0 ] && printf '%s' "$E19" | grep -q 'stray' \
+    && ok "(19) --slice=nosuchvar + seed: refused, sliceable locals listed" \
+    || { no "(19) expected the unknown-var refusal listing pipeline's locals"; printf '%s\n' "$E19"; }
+
+# ── (20) a faulted seed refuses through --slice with the shared at-diagnosis ────────────────────────
+E20a="$( err --slice=pipeline --at=src/a.cpp:999 )"
+[ "$( rc --slice=pipeline --at=src/a.cpp:999 )" != 0 ] && printf '%s' "$E20a" | grep -q 'has only' \
+    && ok "(20) seed past EOF: the LineOutOfRange diagnosis speaks through --slice" \
+    || { no "(20) expected the shared line-out-of-range clause"; printf '%s\n' "$E20a"; }
+E20b="$( err --slice=pipeline --at=nosuch.cpp:3 )"
+[ "$( rc --slice=pipeline --at=nosuch.cpp:3 )" != 0 ] && printf '%s' "$E20b" | grep -q 'no indexed file' \
+    && ok "(20) unmatched seed file: the FileUnmatched diagnosis speaks through --slice" \
+    || { no "(20) expected the shared no-indexed-file clause"; printf '%s\n' "$E20b"; }
+
+# ── (21) the @-selector spelling pre-picks identically (one seed grammar, two spellings) ────────────
+S21="$( run --slice=@src/a.cpp:7 )"
+[ "$( attr "$S21" var )" = 'var="stray"' ] && [ "$( attr "$S21" var_from )" = 'var_from="seed"' ] \
+    && [ "$( attr "$S21" seed )" = 'seed="src/a.cpp:7"' ] \
+    && ok "(21) --slice=@src/a.cpp:7 pre-picks stray with the same disclosure as the --at form" \
+    || { no "(21) expected the @-selector to pre-pick var=\"stray\" var_from=\"seed\""; printf '%s\n' "$S21"; }
+E21="$( err --slice=@src/a.cpp:7 --at=src/a.cpp:5 )"
+[ "$( rc --slice=@src/a.cpp:7 --at=src/a.cpp:5 )" != 0 ] && printf '%s' "$E21" | grep -qi 'one seed' \
+    && ok "(21) an @-selector beside --at is TWO seeds: refused loudly" \
+    || { no "(21) expected the two-seeds refusal"; printf '%s\n' "$E21"; }
+
+# ── (22) unseeded runs carry NONE of the seed vocabulary (purely additive) ──────────────────────────
+S22="$( run --slice=pipeline:out )"; S22b="$( run --slice=pipeline )"
+if printf '%s' "$( elem "$S22" )$( elem "$S22b" )" | grep -qE 'seed=|seed_vars=|var_from='; then
+    no "(22) plain --slice must not grow seed attributes (purely additive contract)"
+else
+    ok "(22) unseeded --slice output carries no seed vocabulary"
+fi
+
+# ── (23) determinism (x2) + well-formedness on seeded output ────────────────────────────────────────
+T1="$( run --slice=pipeline --at=src/a.cpp:7 )"; T2="$( run --slice=pipeline --at=src/a.cpp:7 )"
+[ -n "$T1" ] && [ "$T1" = "$T2" ] \
+    && ok "(23) determinism: seeded runs byte-identical" \
+    || no "(23) determinism: seeded runs differ or emitted nothing"
+if command -v xmllint >/dev/null 2>&1; then
+    ( cd "$WORK" && "$BIN" . --slice=pipeline --at=src/a.cpp:7 --no-cache 2>/dev/null | xmllint --noout - ) \
+        && ( cd "$WORK" && "$BIN" . --slice=pipeline --at=src/a.cpp:5 --no-cache 2>/dev/null | xmllint --noout - ) \
+        && ok "(23) xmllint: seeded outputs are well-formed XML" \
+        || no "(23) xmllint: seeded output is NOT well-formed XML"
+else
+    echo "  SKIP  (23) xmllint not installed — well-formedness not checked"
+fi
+
+# ── (24) legend honesty: the seed vocabulary is defined exactly when it is armed ────────────────────
+legend(){ printf '%s' "$1" | sed 's/--><slice.*//'; }
+if printf '%s' "$( legend "$S11" )" | grep -q 'seed=' && printf '%s' "$( legend "$S11" )" | grep -q 'var_from=' \
+   && printf '%s' "$( legend "$S13" )" | grep -q 'seed_vars='; then
+    ok "(24) seeded legends define seed=/var_from=/seed_vars= where the reader meets them"
+else
+    no "(24) seeded output must define its seed vocabulary in the legend"
+fi
+if printf '%s' "$( legend "$S22" )" | grep -qE 'seed=|seed_vars=|var_from='; then
+    no "(24) the unseeded legend must NOT carry the seed vocabulary (G4 density)"
+else
+    ok "(24) unseeded legend stays free of the seed vocabulary"
 fi
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'

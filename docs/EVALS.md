@@ -6712,6 +6712,20 @@ README's What's-new (2026-08-30) on an owner pass, caveats carried with the numb
 a wider-corpus rerun (the SWEX/ARB trees
 carry no usable per-commit git history for this shape, so an external corpus with history would need
 pinning first) is future-round material, not this registration.
+
+**Contract addendum — the line seed (2026-08-31, lane/tc-sliceat; surface only, no numbers).** ARISE
+seeds its slicer at *(file, line[, variable])*; the registration above addressed by *(symbol,
+variable)*. `--slice` now takes the line seed through the existing at machinery, both spellings —
+`--at=FILE:LINE` beside `--slice` (no longer a dropped competing verb) and the `--slice=@FILE:LINE`
+selector: the definition sliced is the innermost indexed one enclosing the seed line; a seed narrows
+an otherwise-ambiguous SYM to the enclosing definition; a seed enclosed by none of SYM's definitions
+refuses naming both sides; a plain-identifier spec beside `--at` reads as the seed's VARIABLE. A seed
+line naming exactly ONE sliceable local pre-picks it, disclosed (`seed=`, `var_from="seed"`); zero or
+several serve the inventory with `seed_vars=` and the candidate `<v>` rows marked `seed="1"` — never a
+guess. v1/v2 slice semantics, bytes and refusals are unchanged on every unseeded invocation (gate arm
+22), and the pre-picked slice's rows are the same scan a `:VAR` spec runs. Gate:
+`test/sliceflowcheck.sh` arms 11–24, red-first against the 5c6a6fd binary (18 FAILs recorded).
+
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 
 **The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*
