@@ -173,11 +173,13 @@ inline const char* occTag( OccT t ) noexcept
 
 struct SliceOcc
 {
-    std::uint32_t line  = 0;       // 1-based
-    OccT          t     = OccT::Read;
-    bool          isDef = false;
-    bool          isUse = false;
-    bool          skip  = false;   // a non-occurrence (e.g. a Python keyword-argument NAME) — never emitted
+    std::uint32_t line     = 0;    // 1-based
+    std::uint32_t stmtLine = 0;    // 1-based FIRST line of the enclosing statement — the flow-chaining anchor
+                                   //   (a statement spanning lines via continuation is ONE unit; 0 = fall back to line)
+    OccT          t        = OccT::Read;
+    bool          isDef    = false;
+    bool          isUse    = false;
+    bool          skip     = false;   // a non-occurrence (e.g. a Python keyword-argument NAME) — never emitted
 };
 
 struct SliceLocal
@@ -647,6 +649,65 @@ inline bool sliceAssignIntroduces( SliceFam fam ) noexcept
     return fam == SliceFam::Py;
 }
 
+// ── the statement anchor (arm 25's mechanism) ────────────────────────────────────────────────────────
+//
+// A statement spanning several LINES via continuation (a wrapped call's argument, a parenthesized
+// operand, a multi-line C initializer) must flow-chain as ONE statement — line-keyed chaining alone
+// leaves a def blind to reads on its continuation lines (steps=0 where the contract's own words say
+// the operand feeds the seed; found on real Python, 2026-08-31 smoke pass). The anchor is the FIRST
+// line of the innermost enclosing statement: climb from the identifier until the parent is a
+// statement CONTAINER for the family — the child at that boundary IS the statement.
+
+// declarative table over a switch (G2): the node kinds whose DIRECT children are statements
+inline constexpr const char* kSliceStmtContainers[ std::size_t( SliceFam::None ) ][ 6 ] =
+{
+    /* C    */ { "compound_statement", "translation_unit", "field_declaration_list", "declaration_list", "case_statement", nullptr },
+    /* Py   */ { "block", "module", nullptr, nullptr, nullptr, nullptr },
+    /* Js   */ { "statement_block", "program", "class_body", "switch_case", "switch_default", nullptr },
+    /* Go   */ { "block", "source_file", "expression_case", "default_case", "communication_case", nullptr },
+    /* Java */ { "block", "class_body", "program", "constructor_body", "switch_block_statement_group", nullptr },
+    /* Rust */ { "block", "source_file", "declaration_list", "match_block", nullptr, nullptr },
+};
+
+inline bool sliceIsStmtContainer( TSNode n, SliceFam fam ) noexcept
+{
+    if( fam == SliceFam::None )
+    {
+        return false;
+    }
+    for( const char* kind : kSliceStmtContainers[ std::size_t( fam ) ] )
+    {
+        if( kind == nullptr )
+        {
+            break;
+        }
+        if( sliceKindIs( n, kind ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// the enclosing statement's first line, 1-based; an identifier with no container above it (a degraded
+// parse, or a signature identifier whose statement IS the definition head) anchors to the outermost
+// node below the boundary — and when even that is absent, to its own line (behaves as before)
+inline std::uint32_t sliceStmtAnchorLine( TSNode node, SliceFam fam ) noexcept
+{
+    TSNode cur    = node;
+    TSNode parent = ts_node_parent( cur );
+    while( !ts_node_is_null( parent ) )
+    {
+        if( sliceIsStmtContainer( parent, fam ) )
+        {
+            return std::uint32_t( ts_node_start_point( cur ).row ) + 1;
+        }
+        cur    = parent;
+        parent = ts_node_parent( cur );
+    }
+    return std::uint32_t( ts_node_start_point( node ).row ) + 1;
+}
+
 // ── the walk ─────────────────────────────────────────────────────────────────────────────────────────
 
 // Recursive descent over the definition's span, collecting classified `identifier` occurrences.
@@ -673,9 +734,10 @@ inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanE
         {
             return;   // a keyword lexed as an identifier is a degraded-parse artifact, never a variable
         }
-        const SliceOcc c = sliceClassify( node, fam, src );
+        SliceOcc c = sliceClassify( node, fam, src );
         if( !c.skip )
         {
+            c.stmtLine = sliceStmtAnchorLine( node, fam );
             all.push_back( SliceNamedOcc{ std::string( text ), c } );
             if( !varName.empty() && text == varName )
             {
@@ -754,8 +816,10 @@ inline SliceScan sliceScanDefinition( const std::string& src, const Symbol& sym,
 // inter-procedural half to its call-graph ranking tier, which here is --callers/--impact.
 //
 // DEVIATIONS from the paper, deliberate and disclosed (EVALS carries the registration):
-//   • statement ≈ LINE — rows aggregate per source line (a multi-statement line merges), where the
-//     paper keys on AST statement nodes;
+//   • statement ≈ LINE for the ROWS — rows aggregate per source line (a multi-statement line
+//     merges) — while CHAINING is statement-anchored (arm 25): a statement spanning several lines
+//     via continuation chains as ONE unit keyed on its first line, so a def is never blind to the
+//     operands on its continuation lines;
 //   • name-based and scope-insensitive like v1 — no lexical-scope separation (shadowing may
 //     over-include), no alias analysis, where the paper handles global/nonlocal explicitly;
 //   • the seed is the whole variable inside ONE resolved definition (v1's addressing), not a
@@ -850,23 +914,22 @@ inline std::size_t sliceReachingDef( const SliceVarRows& v, std::uint32_t line )
 // the bounded BFS. Emission dedups per (var, line) row — first (shallowest) reach wins; in Both mode
 // the backward walk runs first, so a row both directions reach keeps its backward depth. truncated
 // flips only when the bound suppresses a NOVEL row — a bound that cuts nothing new is not a cut.
-inline SliceFlowOut sliceFlowCompute( const SliceScan& scan, std::string_view seedVar, SliceFlowDir dir, std::uint32_t bound )
+// the per-variable line folds, name-ascending. scan.all is source-ordered, so a stable sort by name
+// keeps each variable's occurrences line-ascending for the fold.
+inline std::vector<SliceVarRows> sliceFoldVarRows( const SliceScan& scan )
 {
-    SliceFlowOut out;
-
-    // per-variable line folds, name-ascending. scan.all is source-ordered, so a stable sort by name
-    // keeps each variable's occurrences line-ascending for the fold.
+    std::vector<SliceVarRows> vars;
     std::vector<std::uint32_t> order( scan.all.size() );
     for( std::uint32_t occIndex = 0; occIndex < order.size(); ++occIndex ) { order[ occIndex ] = occIndex; }
     std::stable_sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return scan.all[ a ].name < scan.all[ b ].name; } );
     for( std::uint32_t occIndex : order )
     {
         const SliceNamedOcc& no = scan.all[ occIndex ];
-        if( out.vars.empty() || out.vars.back().name != no.name )
+        if( vars.empty() || vars.back().name != no.name )
         {
-            out.vars.push_back( SliceVarRows{ no.name, {} } );
+            vars.push_back( SliceVarRows{ no.name, {} } );
         }
-        std::vector<SliceLineRow>& rows = out.vars.back().rows;
+        std::vector<SliceLineRow>& rows = vars.back().rows;
         if( rows.empty() || rows.back().line != no.occ.line )
         {
             rows.push_back( SliceLineRow{ no.occ.line, false, false, OccT::Read } );
@@ -879,6 +942,120 @@ inline SliceFlowOut sliceFlowCompute( const SliceScan& scan, std::string_view se
             r.t = no.occ.t;
         }
     }
+    return vars;
+}
+
+// the statement-anchored occurrence table (arm 25): chaining is per STATEMENT, not per line — an
+// occurrence's anchor is its statement's FIRST line, so a continuation-line operand chains to and
+// from the def it belongs to. Source order (scan.all) is the iteration order; emission dedup plus
+// the final (d, line, name) sort keep the output canonical regardless.
+struct SliceAnchorOcc
+{
+    std::uint32_t anchor = 0, varIdx = 0, rowIdx = 0;
+    bool          isDef = false, isUse = false;
+};
+
+inline std::vector<SliceAnchorOcc> sliceBuildAnchorOccs( const SliceScan& scan, const std::vector<SliceVarRows>& vars )
+{
+    std::vector<SliceAnchorOcc> occs;
+    occs.reserve( scan.all.size() );
+    for( const SliceNamedOcc& no : scan.all )
+    {
+        std::size_t varIdx = std::size_t( -1 );
+        for( std::size_t varIndex = 0; varIndex < vars.size(); ++varIndex )
+        {
+            if( vars[ varIndex ].name == no.name ) { varIdx = varIndex; }
+        }
+        if( varIdx == std::size_t( -1 ) ) { continue; }   // unreachable — every folded name has a var
+        std::size_t rowIdx = std::size_t( -1 );
+        const std::vector<SliceLineRow>& rows = vars[ varIdx ].rows;
+        for( std::size_t rowIndex = 0; rowIndex < rows.size(); ++rowIndex )
+        {
+            if( rows[ rowIndex ].line == no.occ.line ) { rowIdx = rowIndex; }
+        }
+        if( rowIdx == std::size_t( -1 ) ) { continue; }   // unreachable — the fold made a row per line
+        occs.push_back( SliceAnchorOcc{ no.occ.stmtLine != 0 ? no.occ.stmtLine : no.occ.line,
+                                        std::uint32_t( varIdx ), std::uint32_t( rowIdx ), no.occ.isDef, no.occ.isUse } );
+    }
+    return occs;
+}
+
+// backward expansion of one DEF node: this def STATEMENT's value came from the uses in it —
+// continuation lines included: every variable read anywhere in the statement chains to ITS reaching
+// definition. The reach point is the statement's ANCHOR line, so a same-statement operand resolves
+// to the def BEFORE the statement, never into the statement's own later lines.
+template< class EmitFn, class EnqueueFn >
+inline void sliceFlowExpandBack( const std::vector<SliceVarRows>& vars, const std::vector<SliceAnchorOcc>& anchorOccs,
+                                 std::uint32_t varIdx, std::uint32_t rowIdx, std::uint32_t d, std::uint32_t line,
+                                 const EmitFn& emitRow, const EnqueueFn& enqueue )
+{
+    for( const SliceAnchorOcc& defOcc : anchorOccs )
+    {
+        if( !defOcc.isDef || defOcc.varIdx != varIdx || defOcc.rowIdx != rowIdx ) { continue; }
+        for( const SliceAnchorOcc& useOcc : anchorOccs )
+        {
+            if( useOcc.anchor != defOcc.anchor || !useOcc.isUse ) { continue; }
+            const std::size_t rd = sliceReachingDef( vars[ useOcc.varIdx ], defOcc.anchor );
+            if( rd != std::size_t( -1 ) )
+            {
+                emitRow( useOcc.varIdx, rd, d + 1, line );
+                enqueue( useOcc.varIdx, rd, d + 1 );
+            }
+        }
+    }
+}
+
+// forward expansion of one DEF node: the def reaches every later use of the same variable up to (and
+// including) its next redefinition; a reached STATEMENT that defines a variable carries the value
+// onward — continuation lines included. A use inside the def's OWN statement (possible only when the
+// statement spans lines) is the PREVIOUS def's reader, so it is skipped.
+template< class EmitFn, class EnqueueFn >
+inline void sliceFlowExpandFwd( const std::vector<SliceVarRows>& vars, const std::vector<SliceAnchorOcc>& anchorOccs,
+                                std::uint32_t varIdx, std::uint32_t rowIdx, std::uint32_t d, std::uint32_t line,
+                                const EmitFn& emitRow, const EnqueueFn& enqueue )
+{
+    const SliceVarRows& x = vars[ varIdx ];
+    for( std::size_t rowIndex = rowIdx + 1; rowIndex < x.rows.size(); ++rowIndex )
+    {
+        const SliceLineRow& r = x.rows[ rowIndex ];
+        if( r.hasUse )
+        {
+            bool crossStmt = false;   // at least one use occurrence on this row lies OUTSIDE the def's own statement
+            for( const SliceAnchorOcc& useOcc : anchorOccs )
+            {
+                if( !useOcc.isUse || useOcc.varIdx != varIdx || useOcc.rowIdx != rowIndex ) { continue; }
+                bool ownStmt = false;
+                for( const SliceAnchorOcc& defOcc : anchorOccs )
+                {
+                    ownStmt = ownStmt || ( defOcc.isDef && defOcc.varIdx == varIdx && defOcc.rowIdx == rowIdx && defOcc.anchor == useOcc.anchor );
+                }
+                crossStmt = crossStmt || !ownStmt;
+            }
+            if( crossStmt )
+            {
+                emitRow( varIdx, rowIndex, d + 1, line );
+                for( const SliceAnchorOcc& useOcc : anchorOccs )
+                {
+                    if( !useOcc.isUse || useOcc.varIdx != varIdx || useOcc.rowIdx != rowIndex ) { continue; }
+                    for( const SliceAnchorOcc& defOcc : anchorOccs )
+                    {
+                        if( defOcc.isDef && defOcc.anchor == useOcc.anchor )
+                        {
+                            enqueue( defOcc.varIdx, defOcc.rowIdx, d + 1 );   // aug-assign self-rows included
+                        }
+                    }
+                }
+            }
+        }
+        if( r.hasDef ) { break; }   // the next def kills this def's reach
+    }
+}
+
+inline SliceFlowOut sliceFlowCompute( const SliceScan& scan, std::string_view seedVar, SliceFlowDir dir, std::uint32_t bound )
+{
+    SliceFlowOut out;
+    out.vars = sliceFoldVarRows( scan );
+    const std::vector<SliceAnchorOcc> anchorOccs = sliceBuildAnchorOccs( scan, out.vars );
 
     std::size_t seedIdx = std::size_t( -1 );
     for( std::size_t varIndex = 0; varIndex < out.vars.size(); ++varIndex )
@@ -953,46 +1130,11 @@ inline SliceFlowOut sliceFlowCompute( const SliceScan& scan, std::string_view se
             if( !x.rows[ node.rowIdx ].hasDef ) { continue; }   // both directions expand DEF rows only
             if( backward )
             {
-                // this def line's VALUE came from the uses on it: every variable read here chains to
-                // ITS reaching definition
-                for( std::size_t varIndex = 0; varIndex < out.vars.size(); ++varIndex )
-                {
-                    const SliceVarRows& u = out.vars[ varIndex ];
-                    bool usedHere = false;
-                    for( const SliceLineRow& r : u.rows ) { usedHere = usedHere || ( r.line == line && r.hasUse ); }
-                    if( !usedHere ) { continue; }
-                    const std::size_t rd = sliceReachingDef( u, line );
-                    if( rd != std::size_t( -1 ) )
-                    {
-                        emitRow( varIndex, rd, node.d + 1, line );
-                        enqueue( varIndex, rd, node.d + 1 );
-                    }
-                }
+                sliceFlowExpandBack( out.vars, anchorOccs, node.varIdx, node.rowIdx, node.d, line, emitRow, enqueue );
             }
             else
             {
-                // forward: this def reaches every later use of the same variable up to (and including)
-                // its next redefinition; a reached line that DEFINES a variable carries the value onward
-                for( std::size_t rowIndex = node.rowIdx + 1; rowIndex < x.rows.size(); ++rowIndex )
-                {
-                    const SliceLineRow& r = x.rows[ rowIndex ];
-                    if( r.hasUse )
-                    {
-                        emitRow( node.varIdx, rowIndex, node.d + 1, line );
-                        for( std::size_t varIndex = 0; varIndex < out.vars.size(); ++varIndex )
-                        {
-                            const SliceVarRows& y = out.vars[ varIndex ];
-                            for( std::size_t yRow = 0; yRow < y.rows.size(); ++yRow )
-                            {
-                                if( y.rows[ yRow ].line == r.line && y.rows[ yRow ].hasDef )
-                                {
-                                    enqueue( varIndex, yRow, node.d + 1 );   // aug-assign self-rows included
-                                }
-                            }
-                        }
-                    }
-                    if( r.hasDef ) { break; }   // the next def kills this def's reach
-                }
+                sliceFlowExpandFwd( out.vars, anchorOccs, node.varIdx, node.rowIdx, node.d, line, emitRow, enqueue );
             }
         }
     };
@@ -1089,7 +1231,8 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             "— a stated contract, not a walk artifact. steps= counts flow rows; depth= is the bound in force (default "
             "8, set with slice-depth); flow_truncated= \"1\" means the bound suppressed at least one row — the slice is bounded "
             "here, NOT proven complete; its absence means the walk finished inside the bound. EXTRA LIMITS on top of v1's: "
-            "line-granular (statement = source line, so a multi-statement line merges and may over-connect), and flow follows "
+            "line-granular ROWS (a multi-statement line merges and may over-connect) over statement-anchored CHAINING (a "
+            "statement spanning several lines chains as ONE unit keyed on its first line), and flow follows "
             "NAMES, not values — no alias analysis, no flow sensitivity beyond source order, shadowing may over-include. -->";
     }
 
