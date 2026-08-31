@@ -8,11 +8,21 @@
 // symbol granularity; this is the bounded v1 of that primitive: one definition, one variable, its
 // def/use statement rows in source order.
 //
-// HONESTY CONTRACT (all three limits are stated in the emitted legend, never implied):
+// HONESTY CONTRACT (all four limits are stated in the emitted legend, never implied):
 //   • NAME-BASED — occurrences are identifier-name matches inside the definition's span. No alias
 //     analysis (a pointer/reference alias is invisible), no flow sensitivity (rows are source-ordered,
 //     not dependence-ordered), and a nested scope re-declaring VAR (shadowing) is NOT separated — its
 //     rows may over-include.
+//   • RECEIVER MUTATION IS NOT A DEF — a write a callee performs through the variable (`v.push_back(x)`,
+//     `buf.append(s)`) classifies as a READ, because proving it writes needs the receiver's TYPE and the
+//     callee's BODY, and this slicer has neither. Registered as a DECISION, not an oversight, and
+//     measured before it was registered (2026-08-31, docs/EVALS.md "Receiver mutation as a slice
+//     definition"): across ripwire's own src/ and ugrep @550599a6, 79.1% of receiver call sites on
+//     these variables are not mutations at all, and of the ones that are, `reserve` (capacity, never
+//     value) and `clear`/`pop_back` (no incoming value) dominate — so a curated method-name rule would
+//     mint far more false defs than true ones. A false def is strictly worse than an absent one here:
+//     sliceFlowExpandFwd breaks on the next def, so a fabricated def SUPPRESSES the reach of the real
+//     def before it. The cost is paid in the legend instead, and defs=/steps= carry counts_floor="1".
 //   • INTRA-PROCEDURAL ONLY — rows never cross into callees/callers.
 //   • SERVED LANGUAGES ONLY — classification is a per-language-family parent-kind read, verified per
 //     vendored grammar: C-family (C/C++/ObjC, +CUDA/Metal riding Lang::Cpp), Python, JS/TS, Go, Java,
@@ -31,6 +41,7 @@
 #include "serialize.h"     // escapeXml / appendCdataSafe / symTag / diskPath
 #include "redact.h"        // redactInPlace — statement lines are a body-emission seam
 #include "gitstamp.h"      // atAttr — the at="<sha>[+dirty]" root anchor, same placement as --edit-check
+#include "graphlegend.h"   // kGraphCountFloorAttrXml — ONE spelling of the floor marker, tree-wide
 #include "sarif.h"         // rootPrefixOf / rootRelativeUri — root-relative p=, same as every verb
 
 #include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — the three parse-refusal arms are degrades, not asserts
@@ -1197,7 +1208,15 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         "(statement-level def-use edges as a queryable agent primitive — the ARISE result, arXiv:2605.03117). LIMITS, stated rather "
         "than implied: occurrences are identifier-name matches inside the definition's span — no alias analysis (a pointer/reference "
         "alias is invisible), no flow sensitivity (rows are source-ordered, not dependence-ordered), and a nested scope re-declaring "
-        "VAR (shadowing) is NOT separated, so its rows may over-include. Intra-procedural only: rows never cross into callees/callers "
+        "VAR (shadowing) is NOT separated, so its rows may over-include. RECEIVER MUTATION IS NOT COUNTED AS A DEF: a write a callee "
+        "performs through the variable itself — v.push_back(x), buf.append(s), m.insert(k) — is classified k=\"use\" t=\"read\", "
+        "because proving it writes needs the receiver's TYPE and the callee's BODY and this slicer has neither. Declining to guess is "
+        "deliberate: a method-name list would mint false defs (v.reserve(n) changes capacity, never the value), and a false def is "
+        "worse than a missing one because the flow walk stops at the NEXT def, so a fabricated one suppresses the real def before it. "
+        "The consequence to read for: a variable written ONLY through method calls reports defs= counting just its introduction, and a "
+        "flow of steps=\"0\" — which means \"no def-use edge this slicer can prove\", never \"this variable is never written\". "
+        "counts_floor=\"1\" says exactly that of every count on the root: defs=, uses=, vars= and steps= are FLOORS, never totals. "
+        "Intra-procedural only: rows never cross into callees/callers "
         "(the callers/callees/uses verbs give the inter-procedural half). One <s> row per LINE touching VAR: k= def|use|both (both = "
         "the line writes AND reads it, e.g. `x += y`), t= the strongest role on the line (param > decl > assign > call-arg > read), "
         "CDATA = the trimmed source line. defs=/uses= count OCCURRENCES, not lines. A reserved word of the definition's own language "
@@ -1230,7 +1249,11 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             "at that step, d= the BFS depth it was reached at, f= the line it was reached FROM. Flow rows order by (d=, l=, v=) "
             "— a stated contract, not a walk artifact. steps= counts flow rows; depth= is the bound in force (default "
             "8, set with slice-depth); flow_truncated= \"1\" means the bound suppressed at least one row — the slice is bounded "
-            "here, NOT proven complete; its absence means the walk finished inside the bound. EXTRA LIMITS on top of v1's: "
+            "here, NOT proven complete; its absence means the walk finished inside the bound. steps=\"0\" is a FLOOR like every "
+            "other count here (counts_floor=\"1\"): it means no def-use edge was PROVABLE from this seed, never that the variable "
+            "has no data flow. Its commonest cause is v1's receiver-mutation limit above — a variable whose only writes are method "
+            "calls ON it (queue.push_back(x)) has no def for the walk to anchor on, so both directions return zero while the v1 "
+            "rows still SHOW those lines, classified as reads. Read the rows, not just the count. EXTRA LIMITS on top of v1's: "
             "line-granular ROWS (a multi-statement line merges and may over-connect) over statement-anchored CHAINING (a "
             "statement spanning several lines chains as ONE unit keyed on its first line), and flow follows "
             "NAMES, not values — no alias analysis, no flow sensitivity beyond source order, shadowing may over-include. DATA dependence "
@@ -1282,9 +1305,14 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         }
     }
 
-    // at= then root=, appended after every pre-existing attribute — the --edit-check placement rule
+    // at= then root=, appended after every pre-existing attribute — the --edit-check placement rule.
+    // counts_floor= goes LAST of all (graphlegend.h's own placement rule) so no attribute-ADJACENCY
+    // assertion in test/ can break on it: defs=/uses=/vars=/steps= are floors for the same reason the
+    // graph verbs' counts are — the classification is name-based, and receiver mutation is not a def.
     out += gitstamp::atAttr( root );
-    out += " root=\"";  out += ex( root );  out += "\">";
+    out += " root=\"";  out += ex( root );  out += "\"";
+    out += kGraphCountFloorAttrXml;
+    out += ">";
 
     if( varName.empty() )
     {
