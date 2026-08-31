@@ -6729,6 +6729,137 @@ same lane lands the MCP `slice` verb (tools/list 30→31) mirroring this CLI con
 refusal-for-refusal — one emitter (`sliceBundleText`) on both surfaces, payloads byte-identical on
 the same root/spec — gated by `test/mcpslicecheck.sh` (red-first: 22 FAILs on the pre-verb binary).
 
+
+**Wider-corpus extension — REGISTERED 2026-08-31, before a single external instance was measured.**
+The 2026-08-30 run above closed asking for a corpus with real per-commit history. The pinning that
+sentence asked for already exists in this document: the **D4-frozen external repositories**, three
+C/C++ trees with full history, re-clonable and revision-count-verified at their pinned SHAs —
+**duckdb `19864453`** (48632 revs), **rocksdb `0e2801ac`** (12938 revs), **ugrep `550599a6`**
+(985 revs). This paragraph extends the protocol to those three and fixes every choice before the
+harness runs against them; no pin is invented here, the D4 SHAs are reused verbatim so the corpus of
+this rung and the corpus of the churn lanes are the same frozen trees.
+
+*Unchanged from the 2026-08-30 registration, deliberately:* the instance-qualification rules
+(fix-shaped subject, `git diff -U0` against the first parent confining every added line to ONE
+function per git's own C/C++ hunk funcnames, that function resolving uniquely in the index at that
+commit, at least one added line naming a sliceable local from the function's own `--slice` inventory);
+the three arms (**v1** `--slice=fn:var`, **v2** `--slice=fn:var --slice-flow=both`, **`--expand=fn`**
+priced in raw output bytes); and every metric definition. The cap is the same **newest 40 qualifying
+commits, applied PER REPO** — three independent draws, not one pooled 40. Mining walks each repo's
+log from its pinned SHA, so the commit list is a function of the pin alone and the run is
+deterministic in the same sense the first one was.
+
+*The decision framing, fixed here so it cannot be chosen after seeing scores:* these numbers
+**EXTEND** the 2026-08-30 table, they do not replace it and are **never averaged into it**. Each repo
+is reported as its own row set with its own instance count; the ripwire-history run stays a separate,
+separately-labelled result. All four corpora are cpp-family, so the family split is trivial here — it
+is still stated per corpus rather than collapsed, because the point of the extension is precisely
+that a 38-instance in-tree draw and a large-repo draw are different populations. A repo that yields
+few or zero qualifying instances is reported as such: a zero is a finding about the qualification
+rules (basename selector ambiguity in a large tree, funcname heuristics, deletion-heavy fixes), not
+an outcome to be quietly dropped. The v1 line-recall misses are inspected the way the first run
+inspected them — sample the misses and say, per repo, whether they are the relevance oracle's
+word-regex noise or real drops by the slicer. Numbers land in this section and nowhere public until
+an owner pass.
+
+**Measured 2026-08-31, the wider-corpus run of exactly that protocol.** Binary: this lane's plain
+`build/ripwire` at the registration commit. Each pinned tree was COPIED to a throwaway location and
+left DETACHED at its pin — the D4 originals were not written to — and the harness mined and checked
+out inside the copy. Two adaptations were needed for the external path and both are committed
+separately with their reasoning: byte-tolerant subprocess decoding (ugrep's own test fixtures are
+deliberately non-UTF-8 and aborted the mine) and a bounded retry of the per-commit checkout (a
+blob-filtered clone materializes blobs from its promisor remote, and one such fetch failed
+transiently 40 commits into duckdb). Neither touches qualification, arms or metrics; per-reason skip
+counters were added for the disclosure below. Total wall time for all three repos ≈ 10 min
+(duckdb 4:05, rocksdb 5:30, ugrep 0:44), so no repo was dropped and the reduction clause the
+registration allowed for was not used. Determinism was re-checked the way the rest of this document
+checks it: duckdb and ugrep were re-run end to end, and both the summary and every per-instance row
+compared identical.
+
+What each corpus actually yielded — the mine takes 3× the cap in candidates, so "120" means the
+over-mine bound was reached, not the history exhausted:
+
+| corpus | pin | revs | single-function fix-shaped candidates | commits used | instances | thinned by: selector unserved / empty inventory / no touched var |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| duckdb | `19864453` | 48632 | 120 (over-mine bound) | 40 (cap) | **90** | 34 / 3 / 6 |
+| rocksdb | `0e2801ac` | 12938 | 120 (over-mine bound) | 40 (cap) | **98** | 63 / 1 / 10 |
+| ugrep | `550599a6` | 985 | 16 (**entire history**) | 2 | **5** | 12 / 0 / 2 |
+| ripwire (2026-08-30) | — | — | 10 (entire history) | 7 | 38 | not counted then |
+
+Per repo, never pooled and never averaged with the 2026-08-30 column, which is reproduced here only
+so the two populations can be read side by side:
+
+| metric | duckdb | rocksdb | ugrep | ripwire (2026-08-30) |
+| --- | ---: | ---: | ---: | ---: |
+| v1 per-variable line-recall (mean) | **0.911** | **0.864** | 0.800 | 0.726 |
+| v1 hit-all rate | 0.889 | 0.837 | 0.800 | 0.632 |
+| v1 over-inclusion (rows emitted / lines relevant) | 4.96× | 4.49× | 20.47× | 3.77× |
+| function-level added-line recall, v1 rows | 0.547 | 0.421 | 0.582 | 0.163 |
+| function-level added-line recall, v2 `--slice-flow=both` | **0.597** | **0.469** | 0.582 | 0.198 |
+| the rung-2 delta | **+5.0pp** | **+4.7pp** | +0.0pp | +3.5pp |
+| instances where v2 > v1 / = v1 / < v1 | 14 / 76 / 0 | 17 / 81 / 0 | 0 / 5 / 0 | not counted then |
+| output bytes, mean: v1 / v2 / `--expand` | 2 059 / 4 116 / 4 384 | 2 024 / 3 839 / 7 008 | 7 341 / 22 592 / 28 930 | 2 043 / 4 993 / 20 034 |
+| v2 bytes as a share of `--expand` | **94%** | **55%** | 78% | 25% |
+
+**Reading. (1) The rung-2 delta reproduces, in sign and in size.** +5.0pp and +4.7pp on 90 and 98
+instances against +3.5pp on the in-tree 38 — the first run's modest number was not an artifact of a
+thin corpus, it is what this mechanism is worth on fix-shaped single-function commits. Stronger than
+the means: across all 193 external instances, **no instance moved DOWN** (31 up, 162 unchanged). The
+flow rows are additive by construction, so this is a consistency check passing rather than a
+surprise, but it is the check that would have caught over-connection.
+
+**(2) The cost claim from the first run does NOT generalize, and that is the finding that matters.**
+In-tree, v2 bought its recall at 25% of the `--expand` bytes. Here it is 55% (rocksdb), 78% (ugrep)
+and **94% (duckdb)** — on duckdb the flow slice costs essentially the whole function body, for 0.597
+recall against `--expand`'s 1.0. The mechanism is not doing anything different; the corpus is. These
+repositories' fix-touched functions are SHORT (duckdb `--expand` mean 4 384 B against ripwire's
+20 034 B), and a bounded flow slice cannot be much cheaper than a body it nearly covers. The honest
+statement of the primitive's value claim is therefore conditional: **`--slice-flow` buys its recall
+at a real discount only where the enclosing function is large.** On small functions, `--expand`
+dominates it — full recall for comparable bytes.
+
+**(3) The misses were CLASSIFIED, not sampled** — every one of the 50 missed relevant lines across
+the three repos, by whether the variable's occurrence on that line is a comment, a string, a member
+access on another object, outside the resolved function, or a genuine identifier occurrence the
+slice dropped. rocksdb: **29 of 29 are oracle noise** (26 comment, 2 member, 1 string) — zero real
+drops in 98 instances, and the first run's diagnosis reproduces exactly. duckdb: 10 missed lines →
+4 comment, 3 member access (`state[i]->data`, `list_entry.offset` — the slice is *correct* to
+exclude these; the word-regex oracle is not), 1 mining artifact (git's funcname heuristic attributing
+a newly INSERTED function to its preceding neighbour, the limit the harness's own docstring
+predicted), and **2 genuine drops, both on one line**. So the measured v1 line-recall remains a
+FLOOR under a noisy oracle in the same way and for the same reasons — but at this scale the residue
+is no longer empty, and it named two real defects.
+
+**(4) Two real v1 defects the in-tree corpus could not see. Both are `--slice` inventory/occurrence
+defects; neither is in the rung-2 flow machinery.**
+
+- **Direct-initialization constructor arguments are invisible to the slice.** duckdb
+  `src/execution/index/art/prefix.cpp` @ `e5281f103`, `Prefix::TransformToDeprecated`:
+  `Prefix prefix( art, current_node, true, true );` is absent from `--slice=…:art` and from
+  `--slice=…:current_node`, while every `f( art, … )` call-argument line in the same function is
+  present. Both occurrences of the pattern in that function are missed (the added line 411 and the
+  pre-existing 394), so this is systematic, not a diff artifact: a `T v( a, b );` declaration's
+  argument list is not walked for occurrences. This is the ONLY real drop in 188 duckdb+rocksdb
+  instances, and it accounts for 2 of duckdb's 10 missed lines.
+- **A C++ keyword can be listed as a sliceable local.** ugrep `lib/matcher.cpp` @ `a8af825d3`,
+  `Matcher::advance` (a ~1 200-line SIMD/macro-heavy function): the bare inventory offers
+  `<v n="if" l="683" t="decl">`, and `--slice=matcher.cpp:advance:if` returns 13 rows, every one an
+  `else if ( pat_->ndl_ == N )` clause classified `k="def" t="decl"` — a declaration misparse in a
+  region where the C++ grammar's recovery has degraded. This single instance produces **all 11** of
+  ugrep's missed lines and drives its 20.47× over-inclusion, which is why ugrep's numbers are read
+  as one defect's shadow rather than as a corpus signal.
+
+**(5) ugrep is reported as thin, because it is.** Its ENTIRE 985-revision history yields 16
+single-function fix-shaped candidates, of which 12 fail selector resolution and 2 name no sliceable
+local, leaving **2 commits and 5 instances** — and one of those five is the `if` defect above. No
+row in the ugrep column should be read as a population estimate; it is five observations, published
+because suppressing a thin corpus after seeing it is the thing this document does not do. The
+selector-unserved counts are the wider finding here: the harness addresses functions by BASENAME
+(`file.cpp:fn`), and in a large tree that is ambiguous or unresolvable for 28% (duckdb), 53%
+(rocksdb) and 75% (ugrep) of otherwise-qualifying candidates. That is a property of the
+qualification rule, not of the slicer — it costs corpus size, and it is disclosed rather than
+worked around, because widening the selector mid-round would have changed what "qualifies" after
+the numbers were in view.
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 
 **The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*
