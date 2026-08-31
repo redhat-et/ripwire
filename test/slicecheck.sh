@@ -21,6 +21,8 @@
 #   (8)  unknown-symbol refusal: exit 1, the shared not-found message
 #   (9)  determinism (x3, byte-identical)
 #   (10) xmllint well-formedness (both modes)
+#   (11) keyword-local exclusion: a degraded parse must never offer a reserved word as a sliceable
+#        local (inventory clean of it, slicing it refuses) — the ugrep matcher.cpp misparse shape
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/slicecheck.sh   |   bash test/slicecheck.sh path/to/ripwire
 
@@ -91,6 +93,25 @@ def calc(n):
     total += n
     print(total)
     return total
+EOF
+
+# a degraded-parse C++ fixture: the preprocessor guard swallows the `if`, leaving a bare `else if`
+# chain that tree-sitter-cpp error recovery reads as a DECLARATION whose declarator is the identifier
+# `if` (the ugrep lib/matcher.cpp shape — EVALS "--slice-flow — ARISE rung 2" finding D2). Without the
+# reserved-word exclusion the inventory offers <v n="if" t="decl"/> and --slice=kwprobe:if "succeeds".
+cat > "$WORK/src/degraded.cpp" <<'EOF'
+void g();
+
+void kwprobe( int n )
+{
+    int count = 0;
+#if defined(FAST_PATH)
+    if( n == 1 ) { g(); }
+#endif
+    else if( n == 2 ) { count += 1; }
+    else if( n == 3 ) { count += 2; }
+    g();
+}
 EOF
 
 # an indexed language --slice does NOT serve yet
@@ -229,6 +250,22 @@ if command -v xmllint >/dev/null 2>&1; then
 else
     echo "  SKIP  (10) xmllint not installed — well-formedness not checked"
 fi
+
+# ── (11) keyword-local exclusion on a degraded parse ────────────────────────────────────────────────
+# Both assertions fuse a positive slice-specific byte with the exclusion, so each is red against the
+# no---slice baseline AND against the pre-fix binary (which offered <v n="if" l=… t="decl"/> here).
+OUT11="$( sl kwprobe )"
+if printf '%s' "$( elem "$OUT11" )" | grep -q '<v n="count"' && [ "$( attr "$OUT11" vars )" = 'vars="2"' ] \
+    && ! printf '%s' "$( elem "$OUT11" )" | grep -q '<v n="if"'; then
+    ok "(11) kwprobe inventory: the real locals row (n, count → vars=2), the misparsed keyword 'if' does not"
+else
+    no "(11) a reserved word must never be a sliceable local (expected vars=\"2\" with count, no <v n=\"if\"…>)"; printf '%s\n' "$OUT11"
+fi
+ERR11="$( slerr kwprobe:if )"
+[ "$( slrc kwprobe:if )" != 0 ] \
+    && printf '%s' "$ERR11" | grep -q 'sliceable locals' && printf '%s' "$ERR11" | grep -q 'count' \
+    && ok "(11) kwprobe:if — nonzero exit + the sliceable-locals refusal (a keyword is never a variable)" \
+    || { no "(11) slicing a keyword should refuse like any unknown VAR and offer the real locals"; printf '%s\n' "$ERR11"; }
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"
