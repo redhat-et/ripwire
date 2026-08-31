@@ -58,6 +58,13 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   to that innermost definition — skip the "what is this function called" grep entirely. A seed on a
   blank top-level line, an ambiguous path, or a line two definitions share is refused with a specific
   diagnosis, never guessed.
+- **"I have a FILE:LINE and want the variable story THERE"** → `--slice=@FILE:LINE` (or `--at=FILE:LINE`
+  beside any `--slice` spec — the pair composes as the slicer's seed, ARISE's own
+  `(file, line[, variable])`). A seed line naming exactly ONE sliceable local pre-picks it (disclosed:
+  `seed=`, `var_from="seed"`); zero or several serve the locals inventory with the candidates marked
+  `seed="1"` — pick one and re-run with `:VAR`. A plain identifier beside `--at` reads as the seed's
+  variable (`--slice=out --at=src/f.cpp:12`), and the seed also narrows an ambiguous SYM to the
+  definition enclosing the line.
 - **"Trace a FLOW: how does A reach B"** → `--path=A,B` (shortest call-path) or `--around=SYM
   [--around-depth=2]` (bounded neighborhood). Not `--for` — `--for` returns a ranked *set* of relevant
   signatures for a task, it does not trace a path between two named points.
