@@ -6712,6 +6712,38 @@ README's What's-new (2026-08-30) on an owner pass, caveats carried with the numb
 a wider-corpus rerun (the SWEX/ARB trees
 carry no usable per-commit git history for this shape, so an external corpus with history would need
 pinning first) is future-round material, not this registration.
+
+**Wider-corpus extension — REGISTERED 2026-08-31, before a single external instance was measured.**
+The 2026-08-30 run above closed asking for a corpus with real per-commit history. The pinning that
+sentence asked for already exists in this document: the **D4-frozen external repositories**, three
+C/C++ trees with full history, re-clonable and revision-count-verified at their pinned SHAs —
+**duckdb `19864453`** (48632 revs), **rocksdb `0e2801ac`** (12938 revs), **ugrep `550599a6`**
+(985 revs). This paragraph extends the protocol to those three and fixes every choice before the
+harness runs against them; no pin is invented here, the D4 SHAs are reused verbatim so the corpus of
+this rung and the corpus of the churn lanes are the same frozen trees.
+
+*Unchanged from the 2026-08-30 registration, deliberately:* the instance-qualification rules
+(fix-shaped subject, `git diff -U0` against the first parent confining every added line to ONE
+function per git's own C/C++ hunk funcnames, that function resolving uniquely in the index at that
+commit, at least one added line naming a sliceable local from the function's own `--slice` inventory);
+the three arms (**v1** `--slice=fn:var`, **v2** `--slice=fn:var --slice-flow=both`, **`--expand=fn`**
+priced in raw output bytes); and every metric definition. The cap is the same **newest 40 qualifying
+commits, applied PER REPO** — three independent draws, not one pooled 40. Mining walks each repo's
+log from its pinned SHA, so the commit list is a function of the pin alone and the run is
+deterministic in the same sense the first one was.
+
+*The decision framing, fixed here so it cannot be chosen after seeing scores:* these numbers
+**EXTEND** the 2026-08-30 table, they do not replace it and are **never averaged into it**. Each repo
+is reported as its own row set with its own instance count; the ripwire-history run stays a separate,
+separately-labelled result. All four corpora are cpp-family, so the family split is trivial here — it
+is still stated per corpus rather than collapsed, because the point of the extension is precisely
+that a 38-instance in-tree draw and a large-repo draw are different populations. A repo that yields
+few or zero qualifying instances is reported as such: a zero is a finding about the qualification
+rules (basename selector ambiguity in a large tree, funcname heuristics, deletion-heavy fixes), not
+an outcome to be quietly dropped. The v1 line-recall misses are inspected the way the first run
+inspected them — sample the misses and say, per repo, whether they are the relevance oracle's
+word-regex noise or real drops by the slicer. Numbers land in this section and nowhere public until
+an owner pass.
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 
 **The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*
