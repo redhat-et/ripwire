@@ -1485,7 +1485,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               definitions refuses naming both). A seed line naming exactly ONE sliceable local\n"
         "                               pre-picks it (disclosed: seed= var_from=\"seed\"); zero or several serve the inventory\n"
         "                               with seed_vars= and the candidate rows marked seed=\"1\", never a guess. A plain\n"
-        "                               identifier spec beside --at reads as the seed's VARIABLE (--slice=out --at=src/f.cpp:12).\n"
+        "                               identifier spec beside --at reads as the seed's VARIABLE (--slice=VAR --at=src/f.cpp:12).\n"
         "    --slice-flow=back|fwd|both  TRANSITIVE cross-statement data-flow slice (modifies --slice=SYM:VAR; refused alone or on\n"
         "                               the bare inventory — a flow needs a seed variable). Follows VALUE FLOW over\n"
         "                               reaching-definition def-use edges — a use of v reaches the last def of v in source order\n"
