@@ -121,6 +121,51 @@ struct SliceScan
     std::vector<SliceNamedOcc> all;               // EVERY classified occurrence, source order (flow substrate)
 };
 
+// ── the line seed (lane/tc-sliceat): --slice --at=FILE:LINE / --slice=@FILE:LINE — ARISE's own seed ────
+//
+// The paper seeds its slicer at (file, line[, variable]); ripwire's v1 addressed by (symbol, variable).
+// This is the disclosure record of a line-seeded run: how the seed resolved is EMITTED (seed=, and either
+// var_from="seed" or seed_vars= + per-row seed="1"), never implied — the 07ec07f rebind-disclosure posture.
+struct SliceSeedInfo
+{
+    std::string              spec;                 // the FILE:LINE seed in force (leading @ stripped)
+    bool                     varFromSeed = false;  // var= was pre-picked because the seed line names exactly ONE sliceable local
+    std::size_t              seedVarCount = 0;     // DISTINCT sliceable locals the seed line names (inventory mode discloses)
+    std::vector<std::string> seedVars;             // their names, sorted — inventory rows matching carry seed="1"
+};
+
+// The DISTINCT sliceable locals with a classified occurrence on `seedLine`, sorted by name — the seed's
+// variable candidates. Exactly one candidate ⇒ the caller pre-picks it (disclosed as var_from="seed");
+// zero or several ⇒ the inventory is served with the candidates marked, never a guess (§A6a's rule at
+// variable grain). Occurrences the classifier refused (skip) and names that are not sliceable locals
+// (fields, globals, the fn's own name) do not count — the pick must be something a :VAR spec could name.
+inline std::vector<std::string> sliceSeedLineLocals( const SliceScan& scan, std::uint32_t seedLine )
+{
+    std::vector<std::string> out;
+    for( const SliceNamedOcc& no : scan.all )
+    {
+        if( no.occ.line != seedLine || no.occ.skip )
+        {
+            continue;
+        }
+        bool isLocal = false;
+        for( const SliceLocal& lv : scan.locals )
+        {
+            if( lv.name == no.name ) { isLocal = true; break; }
+        }
+        if( !isLocal )
+        {
+            continue;
+        }
+        if( std::find( out.begin(), out.end(), no.name ) == out.end() )
+        {
+            out.push_back( no.name );
+        }
+    }
+    std::sort( out.begin(), out.end() );
+    return out;
+}
+
 // tree-sitter micro-helpers, in the house spelling
 inline bool sliceKindIs( TSNode n, const char* kind ) noexcept
 {
@@ -630,6 +675,10 @@ inline std::vector<SliceLineRow> sliceFoldLines( const std::vector<SliceOcc>& oc
 enum class SliceFlowDir : std::uint8_t { Back, Fwd, Both };
 
 inline constexpr std::uint32_t kSliceFlowDefaultDepth = 8;    // the disclosed default bound (depth= always states it)
+// the depth band, named so the MCP dialect's refusal and the CLI's parse-time domain (cli.h's
+// --slice-depth= row spells 1..32 as literals) can be pinned together by a static_assert rather than prose
+inline constexpr std::uint32_t kSliceFlowDepthMin = 1;
+inline constexpr std::uint32_t kSliceFlowDepthMax = 32;
 
 struct SliceVarRows
 {
@@ -845,7 +894,8 @@ inline SliceFlowOut sliceFlowCompute( const SliceScan& scan, std::string_view se
 
 inline std::string sliceBundleText( const IngestResult& ing, const std::string& root, NodeId focus,
                                     std::string_view varName, const SliceScan& scan, const std::string& src,
-                                    RedactCounts* redact, const SliceFlowSpec* flowSpec = nullptr )
+                                    RedactCounts* redact, const SliceFlowSpec* flowSpec = nullptr,
+                                    const SliceSeedInfo* seedInfo = nullptr )
 {
     const SliceFlowOut* flow = flowSpec != nullptr ? flowSpec->out : nullptr;
     const Symbol& s = ing.symbols[ focus ];
@@ -891,6 +941,18 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         "locals instead (<v n= l= t=/> rows at their first-def line, vars= the count). Languages served: C/C++/ObjC (+CUDA/Metal via "
         "the C-family grammars), Python, JS/TS, Go, Java, Rust — every other language refuses loudly, never an empty success. -->";
 
+    if( seedInfo != nullptr )
+    {
+        // conditional, like the flow legend below: the seed vocabulary is defined exactly where a reader
+        // meets it and costs zero bytes on an unseeded run (G4).
+        out +=
+            "<!-- slice-seed: this slice was LINE-SEEDED (the at grammar, FILE:LINE — ARISE's own (file, line[, variable]) seed). "
+            "seed= is the seed in force; the definition sliced is the innermost indexed one enclosing that line. var_from=\"seed\" "
+            "means the seed line names exactly ONE sliceable local and var= is it — a pre-pick, disclosed, never a guess. A seed "
+            "line naming zero or several sliceable locals serves the inventory instead: seed_vars= counts the locals that line "
+            "names, and each candidate <v> row carries seed=\"1\" so the caller can pick a :VAR and re-run. -->";
+    }
+
     if( flow != nullptr )
     {
         out +=
@@ -915,9 +977,18 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
     out += "\" lang=\"";     out += langTag( s.lang );
     out += "\"";
 
+    if( seedInfo != nullptr )
+    {
+        out += " seed=\"" + ex( seedInfo->spec ) + "\"";   // the seed in force, before the mode attributes it steered
+    }
+
     if( varName.empty() )
     {
         out += " vars=\"" + std::to_string( scan.locals.size() ) + "\"";
+        if( seedInfo != nullptr )
+        {
+            out += " seed_vars=\"" + std::to_string( seedInfo->seedVarCount ) + "\"";
+        }
     }
     else
     {
@@ -928,6 +999,10 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             useCount += o.isUse ? 1 : 0;
         }
         out += " var=\"" + ex( varName ) + "\" defs=\"" + std::to_string( defCount ) + "\" uses=\"" + std::to_string( useCount ) + "\"";
+        if( seedInfo != nullptr && seedInfo->varFromSeed )
+        {
+            out += " var_from=\"seed\"";
+        }
         if( flow != nullptr )
         {
             out += " flow=\"";
@@ -953,7 +1028,13 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
                    { return a.line != b.line ? a.line < b.line : a.name < b.name; } );
         for( const SliceLocal& lv : ordered )
         {
-            out += "<v n=\"" + ex( lv.name ) + "\" l=\"" + std::to_string( lv.line ) + "\" t=\"" + occTag( lv.t ) + "\"/>";
+            out += "<v n=\"" + ex( lv.name ) + "\" l=\"" + std::to_string( lv.line ) + "\" t=\"" + occTag( lv.t ) + "\"";
+            if( seedInfo != nullptr
+                && std::find( seedInfo->seedVars.begin(), seedInfo->seedVars.end(), lv.name ) != seedInfo->seedVars.end() )
+            {
+                out += " seed=\"1\"";   // a candidate the seed line names — the pick a :VAR re-run would make explicit
+            }
+            out += "/>";
         }
     }
     else

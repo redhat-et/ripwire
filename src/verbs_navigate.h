@@ -924,6 +924,61 @@ std::optional<int> runAt( const MainDispatch& d )
     return 0;
 }
 
+// The --at seed's effect on --slice's resolution (lane/tc-sliceat), in one place so runSlice reads as its
+// phases. Mutates the resolution triple in place; returns the exit code when the seed REFUSES the run
+// (fault, or seed-vs-spec disagreement), std::nullopt to proceed. Three cases, in order:
+//   fault      → the shared at-diagnosis (selectorrefuse.h), exit 1;
+//   spec is a plain identifier naming no symbol → the ARISE VARIABLE half: slice it inside the seed's
+//                innermost enclosing definition (an unknown identifier still lands in the locals-listing
+//                refusal downstream, never a silent inventory);
+//   spec matched definitions → the seed NARROWS them to the definition(s) enclosing the seed line, the
+//                innermost winning; a seed enclosed by none of them is a DISAGREEMENT, refused naming both
+//                sides — a slice of a body the caller may not have meant is worse than no answer (§A6a).
+inline std::optional<int> sliceApplyAtSeed( const rw::IngestResult& ing, const rw::Config& cfg, const rw::AtSeed& seed,
+                                            std::vector<rw::NodeId>& matches, std::string_view& selector,
+                                            std::string_view& varName )
+{
+    using namespace rw;
+
+    if( seed.fault != AtFault::None )
+    {
+        std::fprintf( stderr, "ripwire: --slice: the at seed '%s' named no location%s\n",
+                      std::string( cfg.atSpec ).c_str(), atSeedFaultClause( ing, seed ).c_str() );
+        return 1;
+    }
+
+    if( matches.empty() && cfg.sliceSpec.find( ':' ) == std::string_view::npos )
+    {
+        matches  = { seed.chain.back() };
+        varName  = cfg.sliceSpec;
+        selector = std::string_view( ing.symbols[ seed.chain.back() ].name );
+        return std::nullopt;
+    }
+
+    if( !matches.empty() )
+    {
+        NodeId narrowed = kNoNode;
+        for( const NodeId chainId : seed.chain )   // outermost→innermost: the last hit is the innermost
+        {
+            if( std::find( matches.begin(), matches.end(), chainId ) != matches.end() )
+            {
+                narrowed = chainId;
+            }
+        }
+        if( narrowed == kNoNode )
+        {
+            const Symbol& innermost = ing.symbols[ seed.chain.back() ];
+            std::fprintf( stderr, "ripwire: --slice: the --at seed %s is inside '%s' (%s:%u), which is not among the %zu "
+                                  "definition(s) '--slice=%s' matches — the seed and the spec disagree; drop one of them\n",
+                          std::string( cfg.atSpec ).c_str(), innermost.name.c_str(), ing.files[ innermost.fileId ].c_str(),
+                          innermost.line, matches.size(), std::string( cfg.sliceSpec ).c_str() );
+            return 1;
+        }
+        matches = { narrowed };
+    }
+    return std::nullopt;
+}
+
 std::optional<int> runSlice( const MainDispatch& d )
 {
     using namespace rw;
@@ -955,6 +1010,32 @@ std::optional<int> runSlice( const MainDispatch& d )
             matches  = resolveAllByNameQualified( ing, selector );
         }
     }
+
+    // ── the line seed (lane/tc-sliceat): --at=FILE:LINE beside --slice is this verb's SEED, never a
+    //    dropped competing verb (scanReportVerbPrecedence excludes the pair) — ARISE's own slicer is
+    //    seeded at (file, line[, variable]), and the at machinery already owns the resolution. The
+    //    @FILE:LINE selector spelling is the SAME seed in the spec position, so both carry the same
+    //    disclosure; carrying BOTH spellings is two seeds and refuses (never a silent pick).
+    const bool selectorAtLed = !selector.empty() && selector.front() == '@';
+    const bool atSeeded      = !cfg.atSpec.empty();
+    if( atSeeded && selectorAtLed )
+    {
+        std::fprintf( stderr, "ripwire: --slice=%s already carries an @FILE:LINE seed — one seed per run: drop --at=%s or "
+                              "spell the seed once\n",
+                      std::string( cfg.sliceSpec ).c_str(), std::string( cfg.atSpec ).c_str() );
+        return 1;
+    }
+
+    AtSeed seed{};
+    if( atSeeded )
+    {
+        seed = resolveAtSeed( ing, cfg.atSpec );
+        if( std::optional<int> refused = sliceApplyAtSeed( ing, cfg, seed, matches, selector, varName ) )
+        {
+            return *refused;
+        }
+    }
+
     if( matches.empty() )
     {
         // both readings missed — refuse in the --expand compose shape, naming the grammar so the caller
@@ -1019,8 +1100,8 @@ std::optional<int> runSlice( const MainDispatch& d )
         return 1;
     }
 
-    const ::TSLanguage*     grammar = sliceGrammarForFile( path );
-    const slicev::SliceScan scan    = slicev::sliceScanDefinition( src, sym, fam, grammar, varName );
+    const ::TSLanguage* grammar = sliceGrammarForFile( path );
+    slicev::SliceScan   scan    = slicev::sliceScanDefinition( src, sym, fam, grammar, varName );   // re-scanned below on a seed pre-pick
     if( !scan.parseOk )
     {
         DEGRADED_PATH_ALERT( "slice: definition re-parse failed" );
@@ -1045,6 +1126,44 @@ std::optional<int> runSlice( const MainDispatch& d )
                       std::string( varName ).c_str(), sym.name.c_str(), locals.empty() ? "(none found)" : locals.c_str(),
                       std::string( selector ).c_str() );
         return 1;
+    }
+
+    // ── the seed's variable half (lane/tc-sliceat): pre-pick, or mark the candidates ───────────────────
+    // A seeded run with no VAR reads the seed LINE: exactly one sliceable local named there is the
+    // paper's (file, line, variable) seed completed — pre-picked and DISCLOSED (var_from="seed"); zero
+    // or several serve the inventory with the candidates marked (seed_vars= / per-row seed="1"), never a
+    // guess. The disclosure record rides every seeded run, both spellings.
+    slicev::SliceSeedInfo seedInfo;
+    bool                  seededRun = false;
+    std::string           pickedVar;                       // owns the pre-picked name (varName is a view)
+    std::uint32_t         seedLine  = 0;
+    if( atSeeded )
+    {
+        seedLine      = seed.line;
+        seedInfo.spec = std::string( cfg.atSpec );
+        seededRun     = true;
+    }
+    else if( selectorAtLed )
+    {
+        const AtSeed selSeed = resolveAtSeed( ing, selector.substr( 1 ) );   // the resolver already accepted this spelling
+        if( selSeed.fault == AtFault::None )
+        {
+            seedLine      = selSeed.line;
+            seedInfo.spec = std::string( selector.substr( 1 ) );
+            seededRun     = true;
+        }
+    }
+    if( seededRun && varName.empty() )
+    {
+        seedInfo.seedVars     = slicev::sliceSeedLineLocals( scan, seedLine );
+        seedInfo.seedVarCount = seedInfo.seedVars.size();
+        if( seedInfo.seedVarCount == 1 )
+        {
+            pickedVar            = seedInfo.seedVars.front();
+            varName              = pickedVar;
+            seedInfo.varFromSeed = true;
+            scan                 = slicev::sliceScanDefinition( src, sym, fam, grammar, varName );   // the same scan a :VAR spec runs
+        }
     }
 
     // ── rung 2 (lane/or-arise): the transitive cross-statement flow, when --slice-flow asks for it ─────
@@ -1072,7 +1191,8 @@ std::optional<int> runSlice( const MainDispatch& d )
     }
 
     const std::string xml = slicev::sliceBundleText( ing, d.root, focus, varName, scan, src, d.redactPtr,
-                                                     flowActive ? &flowSpec : nullptr );
+                                                     flowActive ? &flowSpec : nullptr,
+                                                     seededRun ? &seedInfo : nullptr );
     std::fwrite( xml.data(), 1, xml.size(), stdout );
     return 0;
 }

@@ -1,8 +1,8 @@
 ---
 name: ripwire-mcp
 description: >
-  Wire ripwire into a coding agent as an MCP server — "ripwire wrap AGENT". Covers the 30 MCP verbs (15
-  read incl. fetch_body/flags + 12 flagship-reflex verbs incl. connect/explore/from_trace/edit_check and the
+  Wire ripwire into a coding agent as an MCP server — "ripwire wrap AGENT". Covers the 31 MCP verbs (16
+  read incl. fetch_body/flags/slice + 12 flagship-reflex verbs incl. connect/explore/from_trace/edit_check and the
   cross-branch pair whereis/stray_content + 3 edit verbs) and when the persistent server beats the preferred CLI form, the lazy-body handle posture, the shared edit
   safety contract, and the server's staleness/rebuild behavior. Use when setting up ripwire for
   Claude Code / Cursor / Codex / Windsurf / Gemini / opencode / aider, when deciding which ripwire MCP verb to call
@@ -21,13 +21,15 @@ allowed-tools: Bash, Read
 Trigger: "wire ripwire into my agent", "set up the ripwire MCP server", or "which ripwire MCP verb
 answers this?".
 
-**The 30 verbs, at a glance**: 15 read verbs (`analyze`, `for`, `find_symbol`,
+**The 31 verbs, at a glance**: 16 read verbs (`analyze`, `for`, `find_symbol`,
 `find_referencing_symbols`, `grep`, `cochange`, `memory_recall`, `situational_awareness`, `mentions`,
 `owners`, `lego`, `batch` — N read sub-queries in ONE call — `fetch_body`, and `flags` — what is BUILT but
 DARK here: every compile / CMake `option()` / `getenv` gate with its default and the size of the code it
 guards, the answer to "why don't I see feature X?", and `doc_drift` — which of the repo's markdown claims
 are now FALSE: dead `file:line` anchors, deleted symbols, `= N` constants and `[N]` extents the code has
-since changed; call it before trusting a design doc or audit you did not just write) + 12 flagship-reflex verbs
+since changed; call it before trusting a design doc or audit you did not just write, and `slice` — per-line
+def-use rows of ONE variable inside ONE definition, `flow=back|fwd|both` for the transitive data-flow
+slice, `@FILE:LINE` seeds by location and pre-picks the variable the seed line names) + 12 flagship-reflex verbs
 (`exemplar`, `quality_delta`, `quality_baseline`, `impact`, `uses`, `path_between`, `connect` — the
 minimal joining subgraph over N task symbols — the L4 one-call/B11-parity trio `explore`, `from_trace`,
 `edit_check` — so an MCP-only agent gets the same write & done reflexes as the CLI — and the CROSS-BRANCH
