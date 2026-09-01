@@ -6910,6 +6910,228 @@ transitive closure, loop bodies dropped. Matching the published number does not 
 the published slicer, and a comparison arm that swaps in ripwire's verbs is comparing a superset
 slice against the number the subset earned.
 
+## `--slice-guards` — control dependence for the slice, PRE-REGISTERED 2026-08-31 (before any feature code)
+
+**What this registers.** The survey lane's proposal: control-dependence rows beside the flow
+slice's data rows — for each emitted statement, WHICH guard (`if`/loop/early-return conditional)
+decides whether it executes. This section fixes the mechanism's honesty tiers, the corpus, the
+counting rule, the validity preconditions and the accept/reject bands BEFORE any feature code
+exists. Nothing below is a result; this phase changes no binary behaviour, and the one count in it
+is instance QUALIFICATION, not an outcome.
+
+**Provenance, and what the tool says today.** Control and data dependence belong in one graph —
+Ferrante, Ottenstein & Warren's program dependence graph (TOPLAS 1987). The flow slice models DATA
+dependence only, and since `1a12c5a` (merged `f920f45`, 2026-08-31) the emitted legend says so as
+its fifth limit: *"DATA dependence only — no control dependence: the guard (if/loop) deciding
+whether a def executes is never a row."* `test/sliceflowcheck.sh` arm (10) pins that sentence
+(greps for `no control dependence` and `guard`). **The coupling, registered as an obligation:** the
+commit that ships `--slice-guards` MUST, in the same commit, (i) reword that legend clause — on a
+guards run the sentence becomes false, and on a non-guards run it must point at the flag instead —
+and (ii) update arm (10)'s assertion. Ship the rows without touching the clause and the tool lies
+in the opposite direction; touch the clause without the arm and the gate pins the lie. Red-first
+arms for the new rows, the degrade and the refusals extend `sliceflowcheck.sh` per the house rule,
+with the gate-count pins (README/EVALS, `readmedriftcheck.sh`) updated if a new gate file appears.
+
+**Extractability — verified against the vendored grammar, not assumed.** `sliceScanDefinition`
+already re-parses the ONE file holding the definition; the AST is in hand at row-emission time and
+no new parse infrastructure is needed. Every C-family node kind the mechanism reads exists in
+`third_party/deps/cpp/src/parser.c` (grep-verified at this registration): `if_statement` /
+`while_statement` / `for_statement` / `do_statement` / `for_range_loop` / `switch_statement` /
+`case_statement` / `conditional_expression` for guards; `return_statement` / `break_statement` /
+`continue_statement` / `throw_statement` / `goto_statement` / `labeled_statement` for exits;
+`lambda_expression` for the scope boundary an exit scan must respect — a `return` inside a nested
+lambda exits the LAMBDA, and an exit scan that ignores that boundary manufactures false guards, so
+the boundary is part of the contract, not an optimization. No CFG and no post-dominator computation
+is planned. The mechanism is therefore two halves of unequal strength, stated now: the
+**enclosing-guard chain** is EXACT for goto-free structured code by construction (a syntactic
+ancestor walk); the **early-exit half** — a statement after `if( c ) return;` is control-dependent
+on `c` — is an APPROXIMATION of post-dominance, exact for the early-exit idiom and wrong in corners
+(a `break` deep in a nested loop deciding post-loop statements needs the CFG this slicer does not
+build).
+
+**The three honesty tiers, fixed before the code.** *(1) Degraded, detectably —*
+`guards_degraded="1"` when the definition's span defeats the mechanism in a way the AST can see:
+`goto_statement` or `labeled_statement`; a `switch` whose case body can fall through (conservative
+syntactic test — a non-empty case not ending in a jump statement); `co_await` / `co_return` /
+`co_yield` (resumption is scheduler-controlled); `seh_try_statement`; a `preproc_if` /
+`preproc_ifdef` inside the span (the parse in hand is ONE branch of a carved token stream). *(2)
+Invisible, legend-disclosed only —* what no AST read can detect: macro-hidden control flow (a macro
+expanding to `if`/`return` parses as a plain call — this repo's own `DEGRADED_PATH_ALERT` shape is
+the live example); a potentially-throwing call (exceptional edges need the callee's body — the same
+evidence limit the receiver-mutation decision registered); a `noreturn` callee (`exit`/`abort`/
+`longjmp` falsify post-dominance silently). Consequence: guard rows are FLOORS — the
+`counts_floor="1"` discipline extends to them, and an absent guard row never means "unconditional".
+*(3) Family scope —* the measured claim below is C-family ONLY (the corpus is cpp); other served
+families may ship rows but earn no measured claim from this round.
+
+**The corpus problem, settled — the reason this registration exists.** The survey lane described "a
+pinned 38-instance corpus". **It is not pinned in any file**: `bench/slice/run_slicerecall.py`
+MINES at run time — newest-first fix-shaped commits from the `--repo` tree's own history, cap 40 —
+so the instance set is a function of the HEAD it runs at. Settled here, from the harness code and a
+read-only count: **(a)** the paired design is real — all arms run per instance inside ONE
+invocation with one binary, so a v3−v2 delta computed within one invocation is a valid paired
+statistic under any drift; but validity-under-drift is not enough, because the newest-first cap
+makes the SET a function of when you run — a re-roll channel and a population drift. So **(b)** the
+corpus is additionally frozen — by pin, not by JSON: the measurement mine runs against a throwaway
+checkout DETACHED at **`b156027`** (this registration's base; the harness docstring's own
+external-corpus pattern — the pin alone fixes the commit list, and the mine is deterministic given
+it). **(c)** Counted at `b156027` on 2026-08-31, qualification only (no recall or byte was read):
+the ENTIRE history still yields **10** single-function fix-shaped candidates → **7** commits →
+**38** instances — `86d7956` (9), `317fb19` (4), `4b9386c` (6), `ebdeead` (8), `1c1d513` (3),
+`b2cbbda` (7), `cff49a6` (1); skips 1 selector-unserved / 2 no-touched-var — the same 10/7/38 the
+2026-08-30 run reported, counted with today's binary (the D1 ctor-arg and D2 keyword fixes
+included). The drift the recon brief predicted did NOT materialize: none of today's 14 commits
+qualifies — `d106bb4`, the flagged likely entrant, adds lines to `README.md` and `test/` fixtures
+beside `src/graph.h`, and the added-lines-confined rule rejects it. The structural reason is the
+house discipline itself (a fix lands with its gate and doc pins in the same commit), which is why
+this repo's own history is corpus-thin — noted, not relied on. **(d)** Contamination: the pin
+forecloses it — an implementation commit post-dates the pin and can never enter; today's
+slice-adjacent commits are already excluded by (c). No further exclusion rule is registered,
+deliberately: a rule invented later, with an instance list in view, is itself a fitting channel.
+
+**Arms, metric, counting rule.** The harness gains arm (d): **v3** = `--slice=fn:var
+--slice-flow=both --slice-guards`, in the SAME per-instance loop — mining and qualification rules
+byte-untouched. Primary metric: the per-instance paired delta of function-level added-line recall,
+v3 − v2, mean over the 38. Counting rule fixed now: v3 "slice lines" = every line-bearing row the
+invocation emits, guard rows included — if guard rows use a new element tag, the harness's row
+regex must be extended in the same commit, else the arm silently re-measures v2. Cost: mean v3
+bytes beside v2 and `--expand` bytes — recall and cost together, never recall alone (§5). Reported
+beside, not banded: the share of instances with `guards_degraded="1"`, and the per-instance
+up/unchanged split.
+
+**Validity preconditions — the run is invalid before any number is read if any fails.** (i) The
+measurement binary at the pin re-derives exactly 7 commits / 38 instances, identical triples. (ii)
+Arm (b)'s per-instance recall values from the measurement binary equal those from a
+`b156027`-built binary at the same pin — guards code must not move data rows; bytes may differ
+only by the reworded legend's constant delta, identical across instances and disclosed. (iii)
+Additivity holds on every instance: v3 rows ⊇ v2 rows, hence per-instance v3 recall ≥ v2 — any
+instance moving DOWN is a mechanism or harness bug, never a result.
+
+**Registered bands — fixed before any number.** Additivity means the delta cannot be negative;
+magnitude and cost are the whole question.
+
+* **SHIP:** paired mean v3−v2 ≥ **+3.0pp** on the pinned 38, AND ≥ 5 of 38 instances move up, AND
+  mean v3 bytes ≤ **1.6×** mean v2 bytes, AND mean v3 bytes < mean `--expand` bytes on the same
+  instances. The survey lane proposed this band; it is registered here after verifying its metric
+  names match what the harness computes (`fn_added_recall_*`; the byte base, unstated there, is
+  fixed as v2), and +3.0pp is defended against precedent rather than inherited from it: rung 2
+  itself shipped at +3.5pp on this same corpus, and a control rung that cannot roughly match the
+  data rung's contribution is not worth its bytes or its legend complexity.
+* **NEGATIVE (published — §7 discipline):** mean delta < **+1.0pp**, or any cost bound broken. The
+  record reads "control dependence is not worth its bytes on fix-shaped single-function commits";
+  the flag does not ship, and the legend's fifth limit STANDS as the durable disclosure.
+* **INCONCLUSIVE (published as such):** delta in **[+1.0, +3.0)pp**, or fewer than 5 instances
+  moving up — real but undecided at this corpus's power. The only funded follow-up is the external
+  strata below, never a re-roll of the in-tree mine.
+
+**External strata — mandatory report, non-deciding.** The D4-pinned trio (duckdb `19864453`,
+rocksdb `0e2801ac`, ugrep `550599a6`) runs under the same protocol, per repo, never pooled,
+reported beside the in-tree decider. Additivity makes their deltas ≥ 0 by construction, so no band
+attaches; what they decide is the COST REGIME: rung 2's wider run showed v2 already ≈ `--expand`
+bytes on short-function corpora, and if v3 mean bytes exceed `--expand` mean bytes on duckdb or
+rocksdb, every public value claim for `--slice-guards` must carry the short-function caveat in the
+same commit that publishes it — the conditional-cost posture rung 2's reading already adopted.
+
+**The falsifiable claim.** *"On fix-shaped single-function commits, the enclosing-guard chain plus
+early-exit conditionals recovers enough of a fix's added guard lines to be worth ≤ 1.6× the data
+slice's bytes."* Every band above is publishable, including both failures; a registration that
+cannot fail is not a registration.
+
+**Explicitly out of this phase.** No feature code, no flag, no legend change, no gate arm, no
+recall or byte number from any arm — the count above is qualification only, and the first outcome
+number appears below this section, dated, whichever way it goes.
+
+## `--slice-guards` — the registered NEGATIVE, measured 2026-08-31 against the bands above
+
+**Verdict: NEGATIVE, by the bands the section above fixed before the code existed.** The paired mean
+`v3 − v2` on the pinned 38 is **+0.895 pp** (n = 38), under the **+1.0 pp** NEGATIVE threshold. Both
+cost bounds were MET, and that matters to the reading: this is not "too expensive", it is "does not
+buy enough". **The flag does not ship.** The flow legend's fifth limit stands exactly as `f920f45`
+landed it, `test/sliceflowcheck.sh` arm (10) keeps pinning that sentence, and the implementation is
+reverted (`2a21a73` built it and gated it red-first; `15a018c` reverts it whole, tree byte-identical
+to the registration base). Nothing below is speculative — every number came out of that binary.
+
+**Validity preconditions — checked, not asserted.** All three pass, so the delta is readable at all.
+
+| # | Precondition | Result |
+| --- | --- | --- |
+| (i) | the pin re-derives 7 commits / 38 instances, identical triples | **PASS** — 10 candidates → 7 commits → 38 instances; `86d7956`·9, `317fb19`·4, `4b9386c`·6, `ebdeead`·8, `1c1d513`·3, `b2cbbda`·7, `cff49a6`·1; skips 1 selector-unserved / 2 no-touched-var. The instance KEY SET is identical to the `b156027`-binary run, not merely the counts |
+| (ii) | arm (b) unmoved vs a `b156027`-built binary | **PASS** — 0 of 38 instances moved on `v1_line_recall`, `fn_added_recall_v1` or `fn_added_recall_v2`. v1 bytes delta **0** everywhere; v2 bytes delta **+72 on every one of the 38**, a single constant, exactly the reworded fifth limit's length. The registration allowed a legend-constant delta and required it be identical across instances and disclosed; it is both |
+| (iii) | per-instance additivity, v3 rows ⊇ v2 rows | **PASS** — 0 violations and 0 instances moving DOWN, on all 38 (and on all 192 external instances below) |
+
+**The banded result** — recall beside cost, never recall alone (§5).
+
+| Arm | fn added-line recall (mean, n=38) | mean bytes |
+| --- | --- | --- |
+| v1 `--slice=fn:var` | 16.73% | 3,187 |
+| v2 `+ --slice-flow=both` | 20.64% | 7,501 |
+| **v3 `+ --slice-guards`** | **21.53%** | **10,228** |
+| `--expand=fn` (whole body) | 100% by construction | 20,034 |
+
+| Registered criterion | Band | Measured | |
+| --- | --- | --- | --- |
+| paired mean `v3 − v2` | ≥ +3.0 pp SHIPs; < +1.0 pp is NEGATIVE | **+0.895 pp** (sd 2.212 pp, sem 0.359 pp) | **fails** |
+| instances improved | ≥ 5 of 38 | **7** up / 31 same / **0** down | meets |
+| mean v3 bytes ≤ 1.6× v2 | ≤ 1.6× | **1.364×** | meets |
+| mean v3 bytes < `--expand` | < 20,034 | **10,228** | meets |
+
+Three of four criteria are met and the one that decides is not. It misses by 0.105 pp; the paired sem
+is 0.359 pp, so a 95% interval straddles the threshold and no honest reader should call this a wide
+margin. It is still NEGATIVE under the rule fixed before the number existed. Moving a band after
+seeing a number is the single move a registration exists to forbid.
+
+**Why it fails, which is a finding and not a defect.** The mechanism is not inert: **7.53 guard rows
+per instance** on average, non-zero on **35 of 38**, and **zero** instances degraded (no goto, label,
+fallthrough case, coroutine, `__try` or in-span `#if` occurs inside any of the 38 definitions). The
+guards are real. They are simply not *the lines a fix adds*. A fix-shaped commit adds data statements
+and whole new branches; the conditions those statements sit **under** are, overwhelmingly, lines that
+were already there — and added-line recall cannot credit a pre-existing line. The whole +0.895 pp
+comes from **7 instances on 2 of the 7 commits** (`buildForAutoBodies` ×6, `passesPredicates` ×1),
+i.e. the cases where the fix *was* its own guard. That concentration is the substance of the result.
+
+**External strata — mandatory report, NON-DECIDING by the registration, and they disagree.** Same
+protocol, per repo, never pooled, same binary, D4 pins with rev counts re-verified (duckdb 48,632;
+rocksdb 12,938; ugrep 985).
+
+| repo (D4 pin) | cand → commits → n | paired mean `v3 − v2` | up / same / down | v2 B | v3 B | v3/v2 | `--expand` B | v3 vs expand |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| duckdb `19864453` | 120 → 40 → **90** | **+3.04 pp** (sem 0.77) | 18 / 72 / 0 | 6,053 | 8,581 | 1.42× | 4,357 | **exceeds** |
+| rocksdb `0e2801ac` | 120 → 40 → **98** | **+2.08 pp** (sem 0.48) | 21 / 77 / 0 | 5,878 | 8,444 | 1.44× | 7,008 | **exceeds** |
+| ugrep `550599a6` | 16 → 2 → **4** | **+0.00 pp** | 0 / 4 / 0 | 31,384 | 39,462 | 1.26× | 24,966 | **exceeds** |
+
+Two things must be said plainly about that table, and neither changes the verdict.
+
+*First, the cost regime the strata were registered to decide is decided, and it is bad.* On **all
+three** external corpora mean v3 bytes **exceed** mean `--expand` bytes — the whole-body baseline is
+cheaper than the slice. On duckdb and ugrep v2 already exceeded `--expand`, so guards inherit that
+regime; on **rocksdb the crossing is new** (v2 5,878 < 7,008 < v3 8,444), i.e. the guard rows are
+what push it over. The registration's clause therefore binds: any future public value claim for
+`--slice-guards` must carry the short-function caveat in the commit that publishes it.
+
+*Second, the non-deciding numbers are larger than the deciding one, and pretending otherwise would be
+the dishonest move.* 188 instances across two large C++ trees show **+3.04 pp** and **+2.08 pp**, one
+of them at the SHIP threshold, against **+0.895 pp** on the 38-instance in-tree draw. The registration
+declared the strata non-deciding *before* anyone could see this, precisely so that a bigger number
+found later could not be promoted into the decider — so the verdict stands. But the honest reading of
+the pair is that the in-tree corpus, thin by the registration's own admission ("this repo's own
+history is corpus-thin — noted, not relied on"), probably lacked the power to decide the question it
+was given, and the band was calibrated against a population that turns out to be unrepresentative.
+That is a finding about the registration's design, not a licence to revise its output. A future round
+that wants this flag should register the **external strata as the decider** and re-derive its band
+there, with the cost caveat above attached from the start.
+
+**What this negative does NOT establish.** (a) It measures *added-line recall on fix-shaped
+single-function commits* — not whether guard rows help an agent. A reader asking "which condition
+decides this line?" got a correct answer from the mechanism on 35 of 38 instances; this corpus cannot
+see that value. (b) The early-exit half's registered wrong corner (a `break` deep in nested loops
+deciding post-loop statements) was never exercised — it needs the CFG that was deliberately not
+built, and no instance contained the shape. (c) The C-family-only scope holds: the Python/JS/Go/Java/
+Rust node-kind tables were gate-verified on fixtures, never measured. (d) `switch`/`case`, ternary,
+`if`/`else` fork and fallthrough-degrade shapes were probe-verified against the built binary but are
+not in the committed gate, because the gate went away with the flag. (e) No claim is made about
+whether shipping the flag on the external evidence would be right; that is a new registration's
+question, not this one's.
+
 ## ARISE fault-localization head-to-head — PRE-REGISTERED 2026-08-31 (before any arm runs)
 
 **What this registers.** The head-to-head the fidelity audit above scoped: ripwire's verbs mounted
