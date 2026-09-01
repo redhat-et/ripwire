@@ -8,6 +8,10 @@
 #          table and present/README.md's opening line) with nothing deriving it from the generator, so
 #          a deck that grew or shrank falsified both silently. It grew from 18 to 23 in the refresh
 #          that added this arm; without (B) both sentences would still read "18".
+#          Widened 2026-08-31 to THREE sites and TWO demands: the generator itself joined the two
+#          READMEs (its self-verification row states the counts and names this gate as their
+#          evidence, yet only its flag half was ever read), and each site must now both avoid a
+#          wrong count (B1) and carry a right one (B2) — a claim deleted is a claim drifted.
 #
 # Both arms are DERIVE-then-COMPARE, never a pinned constant: the instrument is the artifact itself
 # (the binary's --help, the generator's addSlide calls), so the gate cannot drift out of date on its
@@ -46,12 +50,35 @@ slides="$( grep -oF 'p.addSlide()' "$GEN" | wc -l | tr -d ' ' )"
     printf '        (B) counts occurrences of the literal: p.addSlide()\n'
     exit 2; }
 
-# Prose that states a slide count, and must agree with it. Both files ship publicly; both stated 18
-# while the generator built 18, and both would have kept stating it at 23. Every drifted site is
-# reported, not just the first — the same courtesy deckcheck.sh pays with its file:line list, and the
-# reason this arm accumulates instead of exiting on the first mismatch.
+# Prose that states a slide count, and must agree with it. All three files ship publicly; the two
+# READMEs stated 18 while the generator built 18, and both would have kept stating it at 23.
+#
+# $GEN joined the list on 2026-08-31, for exactly the reason arm (A) scans it. The deck's own
+# self-verification slide ("Every claim, and the command that re-derives it") states BOTH counts in
+# one row and names THIS gate as the command that re-derives them — but $GEN was scanned only for
+# `[0-9]+ long flags`, so the row's flag half was derived and its slide half was merely remembered.
+# The remembered half duly went stale: the generator built 27 slides while the row read 26, green,
+# under a claim citing this gate as its evidence. A claim about the deck is not exempt from the arm
+# for living inside the deck; the generator is prose here as much as either README is.
+#
+# ONE list, declared once, driving BOTH demands below: every site is scanned for a count that
+# disagrees, and required to carry one that agrees. The list is single-sourced because a duplicated
+# one is the very bug this arm keeps being widened to fix — arm (A) scanned $GEN and arm (B) did
+# not, and the fact that nothing tied the two lists together is why that went unnoticed through a
+# stale release. A fourth site added here is scanned AND required, with no second edit to forget.
+# The text after the first colon is what a maintainer sees when that site goes quiet.
+claimSites=(
+    "README.md:the documentation-table row lost its count"
+    "present/README.md:the opening line lost its count"
+    "${GEN#$ROOT/}:the deck's own self-verification row lost its count"
+)
+
+# (B1) SCAN — no site may state a count that disagrees. Every drifted site is reported, not just the
+# first: the same courtesy deckcheck.sh pays with its file:line list, and the reason this arm
+# accumulates instead of exiting on the first mismatch.
 slideClaimFail=0
-for f in "$ROOT/README.md" "$ROOT/present/README.md"; do
+for site in "${claimSites[@]}"; do
+    f="$ROOT/${site%%:*}"
     [ -f "$f" ] || continue
     while IFS=: read -r lineNo claim; do
         [ -z "$claim" ] && continue
@@ -63,11 +90,18 @@ for f in "$ROOT/README.md" "$ROOT/present/README.md"; do
     done <<< "$( grep -noE '[0-9]+ slides' "$f" || true )"
 done
 
-# A claim that vanished is as much a drift as a claim that is wrong: the documentation table's slide
-# count is how a reader sizes the deck before clicking it. Require at least one prose site to state it.
-grep -qE "$slides slides" "$ROOT/README.md" || {
-    printf 'deckclaimcheck: README.md no longer states the deck size (%s slides) — the documentation-table row lost its count\n' "$slides"
-    slideClaimFail=1; }
+# (B2) REQUIRE — every site must STATE the count, not merely avoid contradicting it. A claim that
+# vanished is as much a drift as a claim that is wrong: the count is how a reader sizes the deck
+# before clicking it, and deletion is the easier way out for whoever a (B1) red lands on. Note the
+# deliberate difference from (B1): a MISSING file is skipped there and fails here, because "no
+# wrong count" is vacuously true of a file that does not exist and "states the count" is not.
+for site in "${claimSites[@]}"; do
+    reqFile="${site%%:*}"
+    grep -qE "$slides slides" "$ROOT/$reqFile" || {
+        printf 'deckclaimcheck: %s no longer states the deck size (%s slides) — %s\n' \
+            "$reqFile" "$slides" "${site#*:}"
+        slideClaimFail=1; }
+done
 
 # TERMINAL REGION — deliberately the last read of slideClaimFail, and deliberately self-contained.
 # test/gateexitcheck.sh arm (B) slices from an accumulator's final read to EOF and RUNS that slice in
