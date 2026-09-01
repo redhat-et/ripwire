@@ -77,3 +77,5 @@
 --ids-only	bench/substitution_scrub.py's own flag ("python3 bench/substitution_scrub.py LOG --out cleaned.jsonl --ids-only"), quoted in docs/SUBSTITUTION_METER.md's fixture-scrub recipe where it restricts removal to the exact hookcheck fixture-id rule — not a ripwire binary flag
 --exclude-dir	GNU grep option quoted in docs/EVALS.md §5 grep-row instrument disclosure (clean-arm exclusion of agent-worktree litter) — a foreign tool flag, not a ripwire flag
 --token-usage	ARISE's own evaluation/run_eval.py flag, quoted in docs/EVALS.md's ARISE head-to-head pre-registration (the token-cost-per-arm reporting requirement) — a foreign harness flag, not a ripwire flag
+--slice-guards	PLANNED flag, PRE-REGISTERED in docs/EVALS.md ("--slice-guards — control dependence for the slice", 2026-08-31) before any feature code exists — the registration must name the surface it registers (the --unreachable-from precedent); remove this entry when the flag lands in --help
+--repo	bench/slice/run_slicerecall.py's own flag ("--repo may be ANY git tree", which tree the slice-recall mine walks) quoted in docs/EVALS.md's --slice-guards pre-registration — not a ripwire flag
