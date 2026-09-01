@@ -904,7 +904,7 @@ function row(s, y, h, cols, opts={}){
   kicker(s, "// do not take any of it on trust", AMBER);
   title(s, "Every claim, and the command that re-derives it");
   const claims = [
-    ["174 long flags · 26 slides",        "bash test/deckclaimcheck.sh"],
+    ["174 long flags · 27 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["81.4% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
     ["451 gate scripts",                  "bash test/manifestcheck.sh"],
