@@ -20,7 +20,14 @@ own tree (a detached git worktree; nothing in the live checkout is touched):
   (b) v2  ... --slice-flow=both        FUNCTION-level added-line recall (|added ∩ slice lines| /
                                        |added|) for the v1 rows vs the v2 rows — the rung-2 delta;
   (c) --expand=file:fn                 the whole-body baseline: recall 1.0 by construction, priced in
-                                       raw output bytes (recall and cost reported together, §5).
+                                       raw output bytes (recall and cost reported together, §5);
+  (d) v3  ... --slice-flow=both --slice-guards
+                                       the rung-3 arm: the same function-level added-line recall with
+                                       the control-dependence <g> rows counted as slice lines, plus
+                                       the share of instances the mechanism itself declares degraded.
+                                       Registered in docs/EVALS.md 2026-08-31 BEFORE any feature code
+                                       existed; the v3-v2 delta is PAIRED (both arms run per instance
+                                       inside one invocation, on one binary, at one pinned tree).
 
 Deterministic given the commit list. Usage:
   python3 bench/slice/run_slicerecall.py [--bin build/ripwire] [--repo .] [--cap 40] [--json out.json]
@@ -42,8 +49,27 @@ from pathlib import Path
 
 CPP_EXT = { ".h", ".hpp", ".cpp", ".cc", ".cxx" }
 WORD    = re.compile( r"[A-Za-z_]\w*" )
-ROW_L   = re.compile( r'<s l="(\d+)"' )
+# every LINE-BEARING row the invocation emits. <g> joined <s> when --slice-guards shipped
+# (2026-08-31): docs/EVALS.md's registration fixes the counting rule as "guard rows count as slice
+# lines", and requires this regex to be extended in the SAME commit as any new element tag — a v3 arm
+# reading an <s>-only regex would silently re-measure v2. <g> never appears in the v1/v2 arms' output,
+# so widening it here leaves their numbers byte-identical.
+ROW_L   = re.compile( r'<[sg] l="(\d+)"' )
 V_ROW   = re.compile( r'<v n="([^"]+)"' )
+# the ROOT ELEMENT's open tag. Both guard readers below go through it rather than searching the whole
+# document: the guards LEGEND spells guards_degraded="1" in its own prose in order to define it, so a
+# substring search over stdout calls every instance degraded (found 2026-08-31 on the first v3 run —
+# degraded_share came back 1.00 against a probe showing the attribute absent on that very instance).
+ROOT_EL = re.compile( r'<slice [^>]*>' )
+
+def guards_n( out ):
+    root = ROOT_EL.search( out )
+    m    = re.search( r'guards="(\d+)"', root.group( 0 ) ) if root else None
+    return int( m.group( 1 ) ) if m else None
+
+def guards_degraded( out ):
+    root = ROOT_EL.search( out )
+    return ( 'guards_degraded="1"' in root.group( 0 ) ) if root else None
 
 def sh( args, cwd=None, ok_fail=False ):
     # errors="replace": external corpora carry non-UTF-8 bytes (ugrep's own test fixtures are
@@ -167,6 +193,9 @@ def main():
                         continue
                     v2 = run_ripwire( bin_, wt, [ f"--slice={sel}:{var}", "--slice-flow=both" ] )
                     v2_lines = { int( x ) for x in ROW_L.findall( v2.stdout ) } if v2.returncode == 0 else set()
+                    v3 = run_ripwire( bin_, wt, [ f"--slice={sel}:{var}", "--slice-flow=both", "--slice-guards" ] )
+                    v3_ok    = v3.returncode == 0
+                    v3_lines = { int( x ) for x in ROW_L.findall( v3.stdout ) } if v3_ok else set()
                     inter1 = sum( 1 for n in relevant if n in v1_lines )
                     added_in = c["added"]
                     commit_rows.append( {
@@ -176,8 +205,16 @@ def main():
                         "v1_overinclusion": ( len( v1_lines ) / len( relevant ) ) if relevant else None,
                         "fn_added_recall_v1": sum( 1 for n in added_in if n in v1_lines ) / len( added_in ),
                         "fn_added_recall_v2": sum( 1 for n in added_in if n in v2_lines ) / len( added_in ),
+                        "fn_added_recall_v3": ( sum( 1 for n in added_in if n in v3_lines ) / len( added_in ) ) if v3_ok else None,
+                        # the registration's validity precondition (iii), checked per instance rather
+                        # than asserted: guards ADD rows, so a v3 line set that is not a superset of
+                        # v2's is a mechanism or harness bug, never a result
+                        "v3_superset_of_v2": ( v2_lines <= v3_lines ) if v3_ok else None,
+                        "v3_guards": guards_n( v3.stdout ) if v3_ok else None,
+                        "v3_degraded": guards_degraded( v3.stdout ) if v3_ok else None,
                         "v1_bytes": len( v1.stdout.encode() ),
                         "v2_bytes": len( v2.stdout.encode() ) if v2.returncode == 0 else None,
+                        "v3_bytes": len( v3.stdout.encode() ) if v3_ok else None,
                         "expand_bytes": expand_bytes,
                         "added_lines": len( added_in ), "relevant_lines": len( relevant ),
                     } )
@@ -204,9 +241,21 @@ def main():
         "v1_overinclusion_mean": mean( "v1_overinclusion" ),
         "fn_added_recall_v1_mean": mean( "fn_added_recall_v1" ),
         "fn_added_recall_v2_mean": mean( "fn_added_recall_v2" ),
-        "v1_bytes_mean": mean( "v1_bytes" ), "v2_bytes_mean": mean( "v2_bytes" ),
+        "fn_added_recall_v3_mean": mean( "fn_added_recall_v3" ),
+        # the PAIRED statistic the registration banded: computed per instance, then averaged — never
+        # as a difference of two independently-averaged arms
+        "paired_delta_v3_v2_mean": ( sum( r["fn_added_recall_v3"] - r["fn_added_recall_v2"] for r in instances if r["fn_added_recall_v3"] is not None )
+                                     / sum( 1 for r in instances if r["fn_added_recall_v3"] is not None ) )
+                                   if any( r["fn_added_recall_v3"] is not None for r in instances ) else None,
+        "instances_improved": sum( 1 for r in instances if r["fn_added_recall_v3"] is not None and r["fn_added_recall_v3"] > r["fn_added_recall_v2"] ),
+        "instances_worsened": sum( 1 for r in instances if r["fn_added_recall_v3"] is not None and r["fn_added_recall_v3"] < r["fn_added_recall_v2"] ),
+        "additivity_violations": sum( 1 for r in instances if r["v3_superset_of_v2"] is False ),
+        "degraded_share": ( sum( 1 for r in instances if r["v3_degraded"] ) / n ) if n else None,
+        "v1_bytes_mean": mean( "v1_bytes" ), "v2_bytes_mean": mean( "v2_bytes" ), "v3_bytes_mean": mean( "v3_bytes" ),
         "expand_bytes_mean": mean( "expand_bytes" ),
     }
+    if summary[ "v2_bytes_mean" ] and summary[ "v3_bytes_mean" ]:
+        summary[ "v3_over_v2_bytes" ] = summary[ "v3_bytes_mean" ] / summary[ "v2_bytes_mean" ]
     print( json.dumps( summary, indent=2 ) )
     if a.json:
         Path( a.json ).write_text( json.dumps( { "summary": summary, "instances": instances }, indent=2 ) )

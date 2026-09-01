@@ -208,12 +208,66 @@ struct SliceNamedOcc
     SliceOcc    occ;
 };
 
+// ── rung 3 (--slice-guards): CONTROL dependence, the other half of Ferrante's program dependence graph ─
+//
+// Control and data dependence belong in one graph — Ferrante, Ottenstein & Warren, TOPLAS 1987. Rungs 1
+// and 2 model DATA dependence only; this is the bounded control half: for each emitted row, WHICH
+// condition decides whether that line executes. Registered in docs/EVALS.md before any of this existed.
+//
+// TWO HALVES OF UNEQUAL STRENGTH, and the honesty of this feature is that it says so:
+//   • the ENCLOSING-GUARD CHAIN is EXACT for goto-free structured code by construction — a syntactic
+//     ancestor walk, no CFG required: a statement inside an if's consequence, a loop's body, a switch
+//     case or a ternary arm is control-dependent on that construct's condition, always;
+//   • the EARLY-EXIT half is an APPROXIMATION of Ferrante post-dominance — a statement after
+//     `if( c ) return;` in the same block is treated as control-dependent on `c`. Exact for the
+//     early-exit idiom, and WRONG IN CORNERS this slicer does not claim: a `break` deep in a nested
+//     loop deciding post-loop statements needs the control-flow graph that is deliberately not built.
+//     The scan never crosses a lambda/closure boundary in either direction, so a `return` inside a
+//     nested lambda is the LAMBDA's exit and never the outer function's.
+enum class GuardK : std::uint8_t { If, Loop, Switch, Cond, Exit };
+
+inline constexpr const char* kGuardTagNames[] = { "if", "loop", "sw", "cond", "exit" };
+
+inline const char* guardTag( GuardK k ) noexcept
+{
+    const std::size_t guardIndex = std::size_t( k );
+    return kGuardTagNames[ guardIndex < std::size( kGuardTagNames ) ? guardIndex : std::size( kGuardTagNames ) - 1 ];
+}
+
+// one control-dependence edge: the statement anchored at `line` executes only if the condition whose
+// construct begins at `guardLine` allows it
+struct SliceGuardEdge
+{
+    std::uint32_t line      = 0;   // 1-based, the GUARDED line
+    std::uint32_t guardLine = 0;   // 1-based, the DECIDING construct's first line
+    GuardK        k         = GuardK::If;
+};
+
+// WHY a definition's guard chain is untrustworthy, when the AST can see the reason. The invisible
+// reasons — macro-hidden control flow, a throwing call, a noreturn callee — are legend-only by
+// construction (no AST read detects them), which is why guard rows are FLOORS like every other count.
+struct SliceGuardDegrade
+{
+    bool jumpLabel  = false;   // goto_statement / labeled_statement: control can arrive from anywhere
+    bool fallThru   = false;   // a switch case that can fall through (conservative syntactic test)
+    bool coroutine  = false;   // co_await / co_return / co_yield: resumption is scheduler-controlled
+    bool sehTry     = false;   // __try/__except: a non-C++ exception edge the walk cannot see
+    bool preproc    = false;   // a #if/#ifdef inside the span: the parse in hand is ONE carved branch
+
+    bool any() const noexcept { return jumpLabel || fallThru || coroutine || sehTry || preproc; }
+};
+
 struct SliceScan
 {
     bool                       parseOk = false;   // grammar present + file parsed + span located
     std::vector<SliceOcc>      occ;               // VAR-mode occurrences, source order (empty when var empty)
     std::vector<SliceLocal>    locals;            // the sliceable-locals inventory, first-def order
     std::vector<SliceNamedOcc> all;               // EVERY classified occurrence, source order (flow substrate)
+
+    // rung 3, computed only when the caller asked (--slice-guards): zero bytes and zero work otherwise
+    bool                        guardsComputed = false;
+    std::vector<SliceGuardEdge> guards;           // (line, guardLine) — line-ascending, deduped
+    SliceGuardDegrade           guardDegrade;
 };
 
 // ── the line seed (lane/tc-sliceat): --slice --at=FILE:LINE / --slice=@FILE:LINE — ARISE's own seed ────
@@ -719,6 +773,365 @@ inline std::uint32_t sliceStmtAnchorLine( TSNode node, SliceFam fam ) noexcept
     return std::uint32_t( ts_node_start_point( node ).row ) + 1;
 }
 
+// ── rung 3's node-kind tables (--slice-guards) ───────────────────────────────────────────────────────
+//
+// Every literal below is grep-VERIFIED against the vendored parser it names (third_party/deps/*/src/
+// parser.c), the same discipline the classifier's tables carry. A kind this table misses under-reports,
+// which is why guard rows are floors — never a wrong guard, only a missing one.
+
+// a construct whose BODY is control-dependent on its condition. `condField` names the field holding
+// that condition: a node INSIDE it is the condition, not something the condition guards. nullptr means
+// the whole construct guards everything under it (a case label, a match arm).
+struct SliceGuardKindRow
+{
+    const char* kind      = nullptr;
+    GuardK      k         = GuardK::If;
+    const char* condField = nullptr;
+};
+
+inline constexpr std::size_t kSliceGuardKindCap = 8;
+
+inline constexpr SliceGuardKindRow kSliceGuardKinds[ std::size_t( SliceFam::None ) ][ kSliceGuardKindCap ] =
+{
+    /* C    */ { { "if_statement", GuardK::If, "condition" }, { "while_statement", GuardK::Loop, "condition" },
+                 { "for_statement", GuardK::Loop, nullptr }, { "do_statement", GuardK::Loop, "condition" },
+                 { "for_range_loop", GuardK::Loop, nullptr }, { "switch_statement", GuardK::Switch, "condition" },
+                 { "case_statement", GuardK::Switch, nullptr }, { "conditional_expression", GuardK::Cond, "condition" } },
+    /* Py   */ { { "if_statement", GuardK::If, "condition" }, { "elif_clause", GuardK::If, "condition" },
+                 { "while_statement", GuardK::Loop, "condition" }, { "for_statement", GuardK::Loop, "right" },
+                 { "match_statement", GuardK::Switch, "subject" }, { "case_clause", GuardK::Switch, nullptr },
+                 { "conditional_expression", GuardK::Cond, nullptr }, {} },
+    /* Js   */ { { "if_statement", GuardK::If, "condition" }, { "while_statement", GuardK::Loop, "condition" },
+                 { "for_statement", GuardK::Loop, nullptr }, { "for_in_statement", GuardK::Loop, nullptr },
+                 { "do_statement", GuardK::Loop, "condition" }, { "switch_statement", GuardK::Switch, "value" },
+                 { "switch_case", GuardK::Switch, nullptr }, { "ternary_expression", GuardK::Cond, "condition" } },
+    /* Go   */ { { "if_statement", GuardK::If, "condition" }, { "for_statement", GuardK::Loop, nullptr },
+                 { "expression_switch_statement", GuardK::Switch, "value" }, { "type_switch_statement", GuardK::Switch, nullptr },
+                 { "select_statement", GuardK::Switch, nullptr }, { "expression_case", GuardK::Switch, nullptr },
+                 { "communication_case", GuardK::Switch, nullptr }, {} },
+    /* Java */ { { "if_statement", GuardK::If, "condition" }, { "while_statement", GuardK::Loop, "condition" },
+                 { "for_statement", GuardK::Loop, nullptr }, { "enhanced_for_statement", GuardK::Loop, nullptr },
+                 { "do_statement", GuardK::Loop, "condition" }, { "switch_expression", GuardK::Switch, "condition" },
+                 { "switch_block_statement_group", GuardK::Switch, nullptr }, { "ternary_expression", GuardK::Cond, "condition" } },
+    /* Rust */ { { "if_expression", GuardK::If, "condition" }, { "while_expression", GuardK::Loop, "condition" },
+                 { "for_expression", GuardK::Loop, "value" }, { "loop_expression", GuardK::Loop, nullptr },
+                 { "match_expression", GuardK::Switch, "value" }, { "match_arm", GuardK::Switch, nullptr }, {}, {} },
+};
+
+// a statement that JUMPS out of the straight-line flow. `if( c ) <jump>;` makes everything after it in
+// the same block control-dependent on c — the early-exit approximation, the half that is not exact.
+inline constexpr const char* kSliceJumpKinds[ std::size_t( SliceFam::None ) ][ 6 ] =
+{
+    /* C    */ { "return_statement", "break_statement", "continue_statement", "throw_statement", "goto_statement", nullptr },
+    /* Py   */ { "return_statement", "break_statement", "continue_statement", "raise_statement", nullptr, nullptr },
+    /* Js   */ { "return_statement", "break_statement", "continue_statement", "throw_statement", nullptr, nullptr },
+    /* Go   */ { "return_statement", "break_statement", "continue_statement", "goto_statement", nullptr, nullptr },
+    /* Java */ { "return_statement", "break_statement", "continue_statement", "throw_statement", nullptr, nullptr },
+    /* Rust */ { "return_expression", "break_expression", "continue_expression", nullptr, nullptr, nullptr },
+};
+
+// the SCOPE BOUNDARY the exit scan must not cross, in EITHER direction (the registered contract point):
+// a `return` inside one of these exits IT, never the enclosing function.
+inline constexpr const char* kSliceClosureKinds[ std::size_t( SliceFam::None ) ][ 3 ] =
+{
+    /* C    */ { "lambda_expression", nullptr, nullptr },
+    /* Py   */ { "lambda", "function_definition", nullptr },
+    /* Js   */ { "arrow_function", "function_expression", "function_declaration" },
+    /* Go   */ { "func_literal", nullptr, nullptr },
+    /* Java */ { "lambda_expression", nullptr, nullptr },
+    /* Rust */ { "closure_expression", nullptr, nullptr },
+};
+
+inline bool sliceKindInTable( TSNode n, const char* const* table, std::size_t cap ) noexcept
+{
+    for( std::size_t kindIndex = 0; kindIndex < cap; ++kindIndex )
+    {
+        if( table[ kindIndex ] == nullptr )
+        {
+            break;
+        }
+        if( sliceKindIs( n, table[ kindIndex ] ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool sliceIsJumpKind( TSNode n, SliceFam fam ) noexcept
+{
+    return fam != SliceFam::None && sliceKindInTable( n, kSliceJumpKinds[ std::size_t( fam ) ], 6 );
+}
+
+inline bool sliceIsClosureKind( TSNode n, SliceFam fam ) noexcept
+{
+    return fam != SliceFam::None && sliceKindInTable( n, kSliceClosureKinds[ std::size_t( fam ) ], 3 );
+}
+
+// the guard-construct lookup: which row of this family's table (if any) this node is
+inline const SliceGuardKindRow* sliceGuardRowOf( TSNode n, SliceFam fam ) noexcept
+{
+    if( fam == SliceFam::None )
+    {
+        return nullptr;
+    }
+    const SliceGuardKindRow* rows = kSliceGuardKinds[ std::size_t( fam ) ];
+    for( std::size_t rowIndex = 0; rowIndex < kSliceGuardKindCap; ++rowIndex )
+    {
+        if( rows[ rowIndex ].kind == nullptr )
+        {
+            break;
+        }
+        if( sliceKindIs( n, rows[ rowIndex ].kind ) )
+        {
+            return &rows[ rowIndex ];
+        }
+    }
+    return nullptr;
+}
+
+// does this node ALWAYS leave the straight-line flow? A bare jump does; a block does when its LAST
+// statement does. Conservative on purpose — a maybe-jump must not mint a guard.
+inline bool sliceAlwaysJumps( TSNode n, SliceFam fam ) noexcept
+{
+    if( ts_node_is_null( n ) )
+    {
+        return false;
+    }
+    if( sliceIsJumpKind( n, fam ) )
+    {
+        return true;
+    }
+    if( !sliceIsStmtContainer( n, fam ) )
+    {
+        return false;
+    }
+    const std::uint32_t named = ts_node_named_child_count( n );
+    for( std::uint32_t backIndex = named; backIndex > 0; --backIndex )
+    {
+        const TSNode child = ts_node_named_child( n, backIndex - 1 );
+        if( !ts_node_is_null( child ) && !sliceKindIs( child, "comment" ) )
+        {
+            return sliceIsJumpKind( child, fam );
+        }
+    }
+    return false;
+}
+
+// `if( c ) <always-jumps>` with NO else — the early-exit shape. An if with an else is a fork, not an
+// exit: the statements after it are reached either way, so it guards nothing downstream.
+inline bool sliceIsEarlyExitIf( TSNode n, SliceFam fam ) noexcept
+{
+    const SliceGuardKindRow* row = sliceGuardRowOf( n, fam );
+    if( row == nullptr || row->k != GuardK::If )
+    {
+        return false;
+    }
+    if( !ts_node_is_null( sliceField( n, "alternative" ) ) )
+    {
+        return false;
+    }
+    return sliceAlwaysJumps( sliceField( n, "consequence" ), fam );   // every served family spells it `consequence`
+}
+
+// the degrade sweep: everything an AST read CAN see that defeats the chain. Runs over the same subtree
+// as the guard walk, once, so a definition pays for it only when guards were asked for.
+inline void sliceGuardDegradeSweep( TSNode node, std::uint32_t spanStart, std::uint32_t spanEnd, SliceFam fam,
+                                    SliceGuardDegrade& degrade )
+{
+    if( ts_node_end_byte( node ) <= spanStart || ts_node_start_byte( node ) >= spanEnd )
+    {
+        return;
+    }
+    // OVERLAP admits the subtree for DESCENT — the definition is nested under nodes that contain it —
+    // but a construct only defeats the chain when it BEGINS inside the definition. Testing overlap here
+    // instead flagged every function wrapped in an `#ifdef`, which is most of a portable C++ tree, and
+    // an attribute that fires on everything discloses nothing (found by probe, 2026-08-31).
+    const bool beginsInSpan = ts_node_start_byte( node ) >= spanStart && ts_node_start_byte( node ) < spanEnd;
+    const std::uint32_t childCount = ts_node_child_count( node );
+    if( !beginsInSpan )
+    {
+        for( std::uint32_t childIndex = 0; childIndex < childCount; ++childIndex )
+        {
+            sliceGuardDegradeSweep( ts_node_child( node, childIndex ), spanStart, spanEnd, fam, degrade );
+        }
+        return;
+    }
+    const char* kind = ts_node_type( node );
+    if( std::strcmp( kind, "goto_statement" ) == 0 || std::strcmp( kind, "labeled_statement" ) == 0 )
+    {
+        degrade.jumpLabel = true;
+    }
+    if( std::strcmp( kind, "co_await_expression" ) == 0 || std::strcmp( kind, "co_return_statement" ) == 0
+        || std::strcmp( kind, "co_yield_statement" ) == 0 )
+    {
+        degrade.coroutine = true;
+    }
+    if( std::strcmp( kind, "seh_try_statement" ) == 0 )
+    {
+        degrade.sehTry = true;
+    }
+    if( std::strncmp( kind, "preproc_if", 10 ) == 0 || std::strcmp( kind, "preproc_elif" ) == 0
+        || std::strcmp( kind, "preproc_else" ) == 0 )
+    {
+        degrade.preproc = true;
+    }
+    // fallthrough: a NON-EMPTY case body whose last statement is not a jump can fall into the next case,
+    // so the case label above is not the only condition reaching those statements. C-family and JS only —
+    // no other served family has fallthrough.
+    if( ( fam == SliceFam::C && std::strcmp( kind, "case_statement" ) == 0 )
+        || ( fam == SliceFam::Js && ( std::strcmp( kind, "switch_case" ) == 0 || std::strcmp( kind, "switch_default" ) == 0 ) ) )
+    {
+        TSNode last = {};
+        for( std::uint32_t childIndex = ts_node_named_child_count( node ); childIndex > 0; --childIndex )
+        {
+            const TSNode child = ts_node_named_child( node, childIndex - 1 );
+            if( !sliceKindIs( child, "comment" ) )
+            {
+                last = child;
+                break;
+            }
+        }
+        if( !ts_node_is_null( last ) && !sliceIsJumpKind( last, fam ) && !sliceKindIs( last, "case_statement" ) )
+        {
+            degrade.fallThru = true;
+        }
+    }
+    for( std::uint32_t childIndex = 0; childIndex < childCount; ++childIndex )
+    {
+        sliceGuardDegradeSweep( ts_node_child( node, childIndex ), spanStart, spanEnd, fam, degrade );
+    }
+}
+
+// the guard walk. Descends the definition carrying the guard stack in force, and writes that stack to
+// every LINE the current statement spans — deeper statements are visited later, so the innermost stack
+// wins per line, and a stack always CONTAINS its enclosing guards.
+//
+// `lineGuards[ line - firstLine ]` is the stack for that line. A vector-of-vectors indexed by line is
+// the right shape here: a definition is one function, so the extent is tens of lines, and the
+// alternative (an associative container) is forbidden by the house container rule anyway.
+inline void sliceGuardWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanEnd, SliceFam fam,
+                            std::uint32_t firstLine, std::vector<std::vector<SliceGuardEdge>>& lineGuards,
+                            std::vector<SliceGuardEdge>& stack )
+{
+    if( ts_node_end_byte( node ) <= spanStart || ts_node_start_byte( node ) >= spanEnd )
+    {
+        return;
+    }
+
+    // a closure body is a scope of its own: the exits accumulated OUTSIDE it do not decide whether its
+    // statements run (its invocation does), and its own exits never escape. Enclosing structural guards
+    // still hold — they decide whether the closure is even created — so only the exit half is dropped.
+    std::vector<SliceGuardEdge> inner = stack;
+    if( sliceIsClosureKind( node, fam ) )
+    {
+        inner.clear();
+        for( const SliceGuardEdge& e : stack )
+        {
+            if( e.k != GuardK::Exit )
+            {
+                inner.push_back( e );
+            }
+        }
+    }
+
+    // paint this node's lines with the stack in force. Painting EVERY node (not just statements) is
+    // what makes a multi-statement or continuation line resolve to its innermost guard: the walk is
+    // pre-order, so a deeper node's paint lands later and wins, and a deeper stack always CONTAINS the
+    // shallower one it overwrites.
+    const std::uint32_t startLine = std::uint32_t( ts_node_start_point( node ).row ) + 1;
+    const std::uint32_t endLine   = std::uint32_t( ts_node_end_point( node ).row ) + 1;
+    for( std::uint32_t line = startLine; line <= endLine; ++line )
+    {
+        if( line >= firstLine && std::size_t( line - firstLine ) < lineGuards.size() )
+        {
+            lineGuards[ line - firstLine ] = inner;
+        }
+    }
+
+    const SliceGuardKindRow* row     = sliceGuardRowOf( node, fam );
+    const TSNode             condNode = ( row != nullptr && row->condField != nullptr ) ? sliceField( node, row->condField ) : TSNode{};
+
+    // the early-exit accumulator, per BLOCK: a guarded jump makes every LATER sibling depend on it
+    const bool isBlock = sliceIsStmtContainer( node, fam );
+
+    const std::uint32_t childCount = ts_node_child_count( node );
+    for( std::uint32_t childIndex = 0; childIndex < childCount; ++childIndex )
+    {
+        const TSNode child = ts_node_child( node, childIndex );
+        std::vector<SliceGuardEdge> childStack = inner;
+        if( row != nullptr )
+        {
+            // the condition itself is not guarded BY the construct it belongs to; everything else is
+            const bool insideCond = !ts_node_is_null( condNode )
+                                    && ts_node_start_byte( child ) >= ts_node_start_byte( condNode )
+                                    && ts_node_end_byte( child ) <= ts_node_end_byte( condNode );
+            if( !insideCond )
+            {
+                childStack.push_back( SliceGuardEdge{ 0, startLine, row->k } );
+            }
+        }
+        sliceGuardWalk( child, spanStart, spanEnd, fam, firstLine, lineGuards, childStack );
+        if( isBlock && sliceIsEarlyExitIf( child, fam ) )
+        {
+            inner.push_back( SliceGuardEdge{ 0, std::uint32_t( ts_node_start_point( child ).row ) + 1, GuardK::Exit } );
+        }
+    }
+}
+
+// the entry point: paint the definition's lines, then flatten to line-ascending, deduplicated edges
+inline void sliceCollectGuards( TSNode root, const Symbol& sym, SliceFam fam, SliceScan& scan )
+{
+    scan.guardsComputed = true;
+    if( fam == SliceFam::None || sym.endByte <= sym.sigStartByte )
+    {
+        return;
+    }
+    sliceGuardDegradeSweep( root, sym.sigStartByte, sym.endByte, fam, scan.guardDegrade );
+
+    // locate the definition's own node to bound the line extent — the root spans the whole file
+    std::uint32_t firstLine = 0, lastLine = 0;
+    {
+        TSNode cur = ts_node_descendant_for_byte_range( root, sym.sigStartByte, sym.endByte > 0 ? sym.endByte - 1 : 0 );
+        if( ts_node_is_null( cur ) )
+        {
+            cur = root;
+        }
+        firstLine = std::uint32_t( ts_node_start_point( cur ).row ) + 1;
+        lastLine  = std::uint32_t( ts_node_end_point( cur ).row ) + 1;
+    }
+    if( lastLine < firstLine )
+    {
+        DEGRADED_PATH_ALERT( "slice-guards: definition span has no line extent" );
+        return;
+    }
+
+    std::vector<std::vector<SliceGuardEdge>> lineGuards( std::size_t( lastLine - firstLine ) + 1 );
+    std::vector<SliceGuardEdge>              stack;
+    sliceGuardWalk( root, sym.sigStartByte, sym.endByte, fam, firstLine, lineGuards, stack );
+
+    for( std::size_t lineIndex = 0; lineIndex < lineGuards.size(); ++lineIndex )
+    {
+        const std::uint32_t line = firstLine + std::uint32_t( lineIndex );
+        for( const SliceGuardEdge& e : lineGuards[ lineIndex ] )
+        {
+            if( e.guardLine == line )
+            {
+                continue;   // a construct never guards its own header line — a self-edge adds no line to the slice
+            }
+            bool seen = false;
+            for( const SliceGuardEdge& kept : scan.guards )
+            {
+                seen = seen || ( kept.line == line && kept.guardLine == e.guardLine && kept.k == e.k );
+            }
+            if( !seen )
+            {
+                scan.guards.push_back( SliceGuardEdge{ line, e.guardLine, e.k } );
+            }
+        }
+    }
+}
+
 // ── the walk ─────────────────────────────────────────────────────────────────────────────────────────
 
 // Recursive descent over the definition's span, collecting classified `identifier` occurrences.
@@ -783,7 +1196,7 @@ inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanE
 // the grammar refused or the span is out of range — the caller refuses loudly, never emits an empty
 // success.
 inline SliceScan sliceScanDefinition( const std::string& src, const Symbol& sym, SliceFam fam,
-                                      const ::TSLanguage* grammar, std::string_view varName )
+                                      const ::TSLanguage* grammar, std::string_view varName, bool wantGuards = false )
 {
     SliceScan scan;
     if( grammar == nullptr || sym.sigStartByte >= sym.endByte || sym.endByte > src.size() )
@@ -812,6 +1225,12 @@ inline SliceScan sliceScanDefinition( const std::string& src, const Symbol& sym,
     }
 
     sliceWalk( ts_tree_root_node( tree ), sym.sigStartByte, sym.endByte, fam, sym.lang, src, varName, scan.occ, scan.locals, sym.name, scan.all );
+    if( wantGuards )
+    {
+        // rung 3 rides THIS parse — the AST is already in hand, so control dependence costs no second
+        // parse and no new infrastructure, only a second descent over one function's subtree
+        sliceCollectGuards( ts_tree_root_node( tree ), sym, fam, scan );
+    }
     scan.parseOk = true;
 
     ts_tree_delete( tree );
@@ -1257,7 +1676,87 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             "line-granular ROWS (a multi-statement line merges and may over-connect) over statement-anchored CHAINING (a "
             "statement spanning several lines chains as ONE unit keyed on its first line), and flow follows "
             "NAMES, not values — no alias analysis, no flow sensitivity beyond source order, shadowing may over-include. DATA dependence "
-            "only — no control dependence: the guard (if/loop) deciding whether a def executes is never a row. -->";
+            "only on this run — no control dependence here: the guard (if/loop) deciding whether a def executes is not a row unless "
+            "slice-guards asks for it (rung 3, off by default). -->";
+    }
+
+    if( scan.guardsComputed )
+    {
+        out +=
+            "<!-- slice-guards: CONTROL dependence beside the data rows — for each emitted line, WHICH condition decides whether it "
+            "executes (Ferrante/Ottenstein/Warren's program dependence graph, TOPLAS 1987, whose point is that the two dependences "
+            "belong in one graph). Each <g> row is one DISTINCT deciding line, ordered by l= ascending and emitted after the <s> rows: "
+            "l= the line the deciding construct begins on, k= if|loop|sw|cond|exit, n= how many emitted rows it decides, CDATA = that "
+            "source line. guards= counts the <g> rows. TWO HALVES OF UNEQUAL STRENGTH, and which one you are reading matters: k=\"if\", "
+            "\"loop\", \"sw\" and \"cond\" are the ENCLOSING-GUARD CHAIN — a syntactic ancestor walk, EXACT for goto-free structured "
+            "code by construction; k=\"exit\" is the EARLY-EXIT APPROXIMATION — a row after `if( c ) return;` in the same block is "
+            "treated as deciding on c, exact for that idiom and WRONG IN CORNERS (a break deep in nested loops deciding post-loop "
+            "statements needs the control-flow graph and post-dominator tree this slicer deliberately does not build; such a guard is "
+            "ABSENT, never wrong). guards_degraded=\"1\" fires when the definition's own AST shows the chain being defeated: a goto or "
+            "a label (control can arrive from anywhere), a switch case that can fall through, a coroutine co_await/co_return/co_yield "
+            "(resumption is the scheduler's), __try/__except, or a #if/#ifdef inside the span (the parse in hand is ONE carved "
+            "branch). What no AST read can see is disclosed only here, and is why guard rows are FLOORS under counts_floor=\"1\": "
+            "macro-hidden control flow (a macro expanding to if/return parses as a plain call), a call that may THROW (exceptional "
+            "edges need the callee's body), and a noreturn callee (exit/abort/longjmp falsify post-dominance silently). An absent "
+            "guard row means \"none proved\", NEVER \"this line runs unconditionally\". Scope: a return inside a nested "
+            "lambda/closure exits the LAMBDA, so it never becomes an outer-function exit, and outer exits never reach into a closure "
+            "body. The measured claim is C-family only (docs/EVALS.md); other served families emit rows off the same walk. -->";
+    }
+
+    // ── rung 3: fold the per-line control edges into the DISTINCT deciding lines of THIS emission ──────
+    // Computed before the root because guards= is a root attribute. The guarded set is exactly the lines
+    // this invocation emits — the seed's own rows plus, when a flow ran, its rows — so composing the two
+    // rungs widens the guard set rather than producing a second, disagreeing one.
+    struct GuardRowOut
+    {
+        std::uint32_t guardLine = 0;
+        GuardK        k         = GuardK::If;
+        std::uint32_t n         = 0;   // how many emitted rows this line decides
+    };
+    std::vector<GuardRowOut> guardRows;
+    if( scan.guardsComputed && !varName.empty() )
+    {
+        std::vector<std::uint32_t> emitted;
+        for( const SliceLineRow& r : sliceFoldLines( scan.occ ) )
+        {
+            emitted.push_back( r.line );
+        }
+        if( flow != nullptr )
+        {
+            for( const SliceFlowRow& fr : flow->rows )
+            {
+                emitted.push_back( flow->vars[ fr.varIdx ].rows[ fr.rowIdx ].line );
+            }
+        }
+        std::sort( emitted.begin(), emitted.end() );
+        emitted.erase( std::unique( emitted.begin(), emitted.end() ), emitted.end() );
+
+        for( std::uint32_t line : emitted )
+        {
+            for( const SliceGuardEdge& e : scan.guards )
+            {
+                if( e.line != line )
+                {
+                    continue;
+                }
+                bool merged = false;
+                for( GuardRowOut& g : guardRows )
+                {
+                    if( g.guardLine == e.guardLine && g.k == e.k )
+                    {
+                        ++g.n;
+                        merged = true;
+                    }
+                }
+                if( !merged )
+                {
+                    guardRows.push_back( GuardRowOut{ e.guardLine, e.k, 1 } );
+                }
+            }
+        }
+        // the stated order: (l=, k=) ascending — a contract, not a walk artifact, like the flow rows'
+        std::sort( guardRows.begin(), guardRows.end(), []( const GuardRowOut& a, const GuardRowOut& b )
+                   { return a.guardLine != b.guardLine ? a.guardLine < b.guardLine : std::uint8_t( a.k ) < std::uint8_t( b.k ); } );
     }
 
     out += "<slice sym=\"";  out += ex( s.name );
@@ -1303,6 +1802,16 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
                 out += " flow_truncated=\"1\"";
             }
         }
+        if( scan.guardsComputed )
+        {
+            out += " guards=\"" + std::to_string( guardRows.size() ) + "\"";
+            if( scan.guardDegrade.any() )
+            {
+                // ONE bit, not five: the legend enumerates the reasons, and a per-reason attribute would
+                // invite reading the absent ones as "cleared" — which the invisible defeaters forbid
+                out += " guards_degraded=\"1\"";
+            }
+        }
     }
 
     // at= then root=, appended after every pre-existing attribute — the --edit-check placement rule.
@@ -1334,8 +1843,10 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
     }
     else
     {
-        // the CDATA tail every row shares: the trimmed statement line, redacted and made ]]>-safe
-        const auto rowTail = [ & ]( std::uint32_t line )
+        // the CDATA tail every row shares: the trimmed statement line, redacted and made ]]>-safe.
+        // `tag` closes it — the guard rows below are a different element carrying the same payload, and
+        // one emitter for both is what keeps the redaction seam single (a second copy is a second bug).
+        const auto rowTailAs = [ & ]( std::uint32_t line, const char* tag )
         {
             const auto [ lineStart, lineEnd ] = lineSpanOf( line );
             std::string text( src, lineStart, lineEnd - lineStart );
@@ -1349,8 +1860,11 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             safe.reserve( text.size() );
             appendCdataSafe( text, safe );                      // split ]]>, scrub C0 controls + invalid UTF-8
             out += safe;
-            out += "]]></s>";
+            out += "]]></";
+            out += tag;
+            out += ">";
         };
+        const auto rowTail = [ & ]( std::uint32_t line ) { rowTailAs( line, "s" ); };
 
         // the seed variable's rows — the v1 emission, byte-stable with or without a flow
         // (occ is already line-ascending — the walk is a pre-order pass over one file's AST)
@@ -1378,6 +1892,18 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
                 out += "\" v=\"" + ex( v.name ) + "\" d=\"" + std::to_string( fr.d ) + "\" f=\"" + std::to_string( fr.from ) + "\"";
                 rowTail( r.line );
             }
+        }
+
+        // the guard rows (rung 3), l= ascending, AFTER every data row: a distinct element because a
+        // control edge is not a def-use row, and one row per DISTINCT deciding line because the same
+        // `if` guarding eight slice lines is one fact, not eight (G4). n= carries the weight the
+        // deduplication would otherwise throw away.
+        for( const GuardRowOut& g : guardRows )
+        {
+            out += "<g l=\"" + std::to_string( g.guardLine ) + "\" k=\"";
+            out += guardTag( g.k );
+            out += "\" n=\"" + std::to_string( g.n ) + "\"";
+            rowTailAs( g.guardLine, "g" );
         }
     }
 

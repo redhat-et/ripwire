@@ -1101,7 +1101,7 @@ std::optional<int> runSlice( const MainDispatch& d )
     }
 
     const ::TSLanguage* grammar = sliceGrammarForFile( path );
-    slicev::SliceScan   scan    = slicev::sliceScanDefinition( src, sym, fam, grammar, varName );   // re-scanned below on a seed pre-pick
+    slicev::SliceScan   scan    = slicev::sliceScanDefinition( src, sym, fam, grammar, varName, cfg.sliceGuards );   // re-scanned below on a seed pre-pick
     if( !scan.parseOk )
     {
         DEGRADED_PATH_ALERT( "slice: definition re-parse failed" );
@@ -1162,7 +1162,7 @@ std::optional<int> runSlice( const MainDispatch& d )
             pickedVar            = seedInfo.seedVars.front();
             varName              = pickedVar;
             seedInfo.varFromSeed = true;
-            scan                 = slicev::sliceScanDefinition( src, sym, fam, grammar, varName );   // the same scan a :VAR spec runs
+            scan                 = slicev::sliceScanDefinition( src, sym, fam, grammar, varName, cfg.sliceGuards );   // the same scan a :VAR spec runs
         }
     }
 
@@ -1175,6 +1175,15 @@ std::optional<int> runSlice( const MainDispatch& d )
         std::fprintf( stderr, "ripwire: --slice-flow needs a seed variable — bare --slice=%s lists the sliceable locals; pick one "
                               "and re-run as --slice=%s:VAR --slice-flow=%s\n",
                       std::string( selector ).c_str(), std::string( selector ).c_str(), std::string( cfg.sliceFlow ).c_str() );
+        return 1;
+    }
+    // rung 3 (--slice-guards) attaches control edges to the EMITTED ROWS, and the bare inventory has
+    // none — the same prerequisite the flow has, refused in the same words and at the same point
+    if( cfg.sliceGuards && varName.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --slice-guards needs a seed variable — bare --slice=%s lists the sliceable locals; pick one "
+                              "and re-run as --slice=%s:VAR --slice-guards\n",
+                      std::string( selector ).c_str(), std::string( selector ).c_str() );
         return 1;
     }
 

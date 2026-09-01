@@ -50,8 +50,14 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   `fwd` = the statements its value reaches; each flow row carries the variable (`v=`), the BFS depth
   (`d=`) and the line it was reached from (`f=`). `--slice-depth=N` bounds the walk (default 8; a
   bound that cuts is disclosed as `flow_truncated="1"`). Stops at the function boundary by design —
-  the inter-procedural half is `--callers`/`--impact`. Data dependence only — the guard deciding
-  whether a def executes is never a row.
+  the inter-procedural half is `--callers`/`--impact`. Data dependence only by default — for the
+  guard deciding whether a def executes, add `--slice-guards`.
+- **"WHICH condition decides whether this line runs"** → add `--slice-guards` to either slice form —
+  one `<g l= k= n=>` row per distinct deciding line (`k=` `if`/`loop`/`sw`/`cond` is the enclosing
+  chain, exact for goto-free structured code; `k=exit` approximates post-dominance for the
+  `if( c ) return;` idiom). `guards_degraded="1"` discloses an AST-visible defeat (goto/label,
+  fallthrough case, coroutine, in-span `#if`); macro-hidden flow and throwing calls stay invisible,
+  so an absent guard means "none proved", never "runs unconditionally".
 - **"I have a FILE:LINE, not a name"** (a compiler error, a diff hunk, a stack frame) →
   `ripwire <dir> --at=FILE:LINE` — the enclosing-definition chain at that location, outermost→innermost;
   `sym=` names the innermost. The SAME seed composes into any SYM selector as `@FILE:LINE`
