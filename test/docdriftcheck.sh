@@ -203,11 +203,19 @@ else
 fi
 [ "$( grep -c '' "$TMP/a" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "output contains newlines outside CDATA"
 
-# ── 7) --doc-drift=SUBSTR filters the DOCS, and a miss is an empty report, not a crash ────────────────
+# ── 7) --doc-drift=SUBSTR filters the DOCS, and a miss REFUSES rather than reporting a clean zero ──────
+# F-04: docs="0" drift="0" under a typo'd filter used to read as "no rot" (exit 0) — the same trap
+# --scope and --dead-code=DIR already refuse for their own filters. A filter naming NOTHING refuses
+# loudly (exit 1, naming the filter) instead; the flagless/empty-filter case (§8 below) is untouched.
 "$BIN" "$CORPUS" --doc-drift=NOTES --no-cache 2>/dev/null | grep -q 'docs="1"' \
     && ok "--doc-drift=SUBSTR keeps the matching doc" || no "--doc-drift=SUBSTR dropped the matching doc"
-"$BIN" "$CORPUS" --doc-drift=no-such-doc --no-cache 2>/dev/null | grep -q 'docs="0"' \
-    && ok "--doc-drift=SUBSTR with no match reports docs=0" || no "a non-matching filter did not report docs=0"
+OUT=$( "$BIN" "$CORPUS" --doc-drift=no-such-doc --no-cache 2>"$TMP/nomatch.err" ); RC=$?
+[ -z "$OUT" ] && [ "$RC" -eq 1 ] \
+    && ok "--doc-drift=SUBSTR with no match refuses (exit 1, no stdout) rather than reporting docs=0" \
+    || no "a non-matching filter did not refuse (rc=$RC, stdout=$OUT)"
+grep -q 'no-such-doc' "$TMP/nomatch.err" && grep -q 'matches no document' "$TMP/nomatch.err" \
+    && ok "the refusal names the filter and the reason" \
+    || no "the refusal did not name the filter/reason: $( cat "$TMP/nomatch.err" )"
 
 # ── 8) a doc-free corpus is a clean empty report, not a crash ─────────────────────────────────────────
 mkdir -p "$TMP/bare"; printf 'int main(){return 0;}\n' > "$TMP/bare/m.cpp"
