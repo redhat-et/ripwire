@@ -883,10 +883,10 @@ spot:
 $ ripwire . --callers=rankGraphTeleport
 <callers of="rankGraphTeleport" defs="1" count="6" root="." counts_floor="1">
 <s t="fn" n="runEval" p="src/eval.h:168"/>
-<s t="fn" n="rankGraph" p="src/graph.h:2243"/>
-<s t="fn" n="anchoredLexicalRank" p="src/graph.h:2732"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:810"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:925"/>
+<s t="fn" n="rankGraph" p="src/graph.h:2247"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:2736"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:811"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:926"/>
 <s t="fn" n="getIndex" p="src/mcpindex.h:950"/>
 </callers>
 ```
@@ -1500,7 +1500,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **498 gate scripts** and is the authoritative list;
+`test/regression.sh` names **500 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
