@@ -126,23 +126,74 @@ def help_text_of( binPath ):
     return run.stdout
 
 
-FLAG_TOKEN = re.compile( r'^--?[A-Za-z0-9][A-Za-z0-9-]*' )
+FLAG_TOKEN_ALL = re.compile( r'--?[A-Za-z0-9][A-Za-z0-9-]*' )
 
 
 def normalize_flags( spec ):
-    """'--html[=FILE]' -> ['--html'];  '--grep=STR | --regex=PAT' -> ['--grep','--regex'].
+    """'--html[=FILE]' -> ['--html'];  '--grep=STR | --regex=PAT' -> ['--grep','--regex'];
+    '--limit=N --offset=M' -> ['--limit','--offset'];  '-h, --help' -> ['-h','--help'].
 
     One choke point: the flag NAME is what the drift gate compares, so value syntax, optional-value
-    brackets and alternation must all be stripped here and nowhere else, or the two sides of the
-    comparison would normalize differently and the gate would red on formatting.
+    brackets, quoting and every alternation/aliasing spelling (`|`, `/`, `, `, or a bare space between
+    companion flags) must all be normalized here and nowhere else, or the two sides of the comparison
+    would normalize differently and the gate would red on formatting. `findall` rather than a per-part
+    split: a flag NAME can appear anywhere a dash immediately precedes an alnum inside the accepted
+    spec text (see `_spec_end`, which decides how much of the line COUNTS as spec) — where exactly two
+    tokens touch inside that text is not this function's problem, only naming every one of them is.
     """
     out = []
-    for part in re.split( r'[|/]', spec ):
-        part = part.strip()
-        m    = FLAG_TOKEN.match( part )
-        if m:
-            out.append( m.group( 0 ) )
+    for f in FLAG_TOKEN_ALL.findall( spec ):
+        if f not in out:
+            out.append( f )
     return out
+
+
+def _dash_unit_end( s, pos ):
+    """s[pos] == '-'. End index of one spec TOKEN starting there: a run of non-whitespace chars, with
+    one embedded "..." chunk (which may itself contain whitespace) allowed to ride along — the shape
+    `--note-add="TARGET: text"` needs, since the quoted value is one token despite the space inside it.
+    """
+    n = len( s )
+    j = pos + 1
+    while j < n:
+        c = s[ j ]
+        if c.isspace():
+            break
+        if c == '"':
+            k = s.find( '"', j + 1 )
+            j = ( k + 1 ) if k != -1 else n
+            continue
+        j += 1
+    return j
+
+
+_SPEC_SEP = re.compile( r'\s*[|/,]?\s*' )
+
+
+def _spec_end( content ):
+    """content starts with '-'. Index where the spec chain ends and prose begins.
+
+    A spec is a chain of dash-tokens: the primary flag, then zero or more further tokens each
+    reached by an alternation mark (`|` or `/`, e.g. `--grep-before=N / --grep-after=N`), a comma
+    (`-h, --help`), or nothing but whitespace (a companion flag sharing the line, e.g.
+    `--limit=N --offset=M`, `--arch=FILE --baseline`). The chain stops the first time what follows
+    the separator is NOT another dash-token — most commonly real prose, which is why a single space
+    before prose (the seam this generator used to require TWO spaces to cross) is handled the same
+    as any other amount: `_SPEC_SEP` matches zero-or-more whitespace either way, and it is the next
+    token's shape — dash-prefixed or not — that decides where the spec actually ends, not the width
+    of the gap.
+    """
+    pos = _dash_unit_end( content, 0 )
+    n   = len( content )
+    while True:
+        m = _SPEC_SEP.match( content, pos )
+        sepLen = m.end() - pos
+        if sepLen == 0:
+            return pos
+        nextPos = pos + sepLen
+        if nextPos >= n or content[ nextPos ] != '-':
+            return pos
+        pos = _dash_unit_end( content, nextPos )
 
 
 def parse_help( helpText ):
@@ -157,7 +208,7 @@ def parse_help( helpText ):
     current    = None
     entry      = None
     reSection  = re.compile( r'^  (\S.*?)\s*$' )
-    reEntry    = re.compile( r'^ {4,6}(-\S*(?:\s*\|\s*-\S*)*)(\s\s+|\s*$)(.*)$' )
+    reIndent   = re.compile( r'^( {4,6})(\S.*)$' )
 
     for line in helpText.split( '\n' ):
         mSection = reSection.match( line ) if not line.startswith( '   ' ) else None
@@ -167,11 +218,13 @@ def parse_help( helpText ):
             sections.append( current )
             continue
 
-        mEntry = reEntry.match( line ) if current else None
-        if mEntry:
-            spec  = mEntry.group( 1 ).strip()
-            flags = normalize_flags( spec )
-            entry = { 'flags': flags, 'spec': spec, 'text': [ mEntry.group( 3 ).strip() ] }
+        mIndent = reIndent.match( line ) if current else None
+        if mIndent and mIndent.group( 2 )[ 0 ] == '-':
+            content = mIndent.group( 2 )
+            end     = _spec_end( content )
+            spec    = content[ :end ].strip()
+            flags   = normalize_flags( spec )
+            entry   = { 'flags': flags, 'spec': spec, 'text': [ content[ end: ].strip() ] }
             current[ 1 ].append( entry )
             continue
 

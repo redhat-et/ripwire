@@ -231,26 +231,29 @@ fi
 # this arm was written (658c440, which fixed the offending seams in src/cli.h and regenerated
 # docs/COMMANDS.md but touched neither the generator nor this gate — so nothing stops the next one).
 #
-# docs_commands_build.parse_help recognizes a flag entry only at "flag + TWO OR MORE spaces" (or
-# end-of-line). A line whose flag is separated from its prose by a SINGLE space does not match; it then
-# falls through and is appended as continuation prose onto the PREVIOUS entry, or — if it is the first
-# entry in its section — is dropped outright. Either way the flag vanishes from `sections`: silently,
-# no error, exit 0.
+# docs_commands_build.parse_help used to recognize a flag entry only at "flag + TWO OR MORE spaces"
+# (or end-of-line). A line whose flag was separated from its prose by a SINGLE space did not match; it
+# fell through and was appended as continuation prose onto the PREVIOUS entry, or — if it was the
+# first entry in its section — was dropped outright. Either way the flag vanished from `sections`:
+# silently, no error, exit 0.
 #
-# Arms (A)-(G) cannot see this. Arm (B) is the drift check, and BOTH sides of its comparison derive
-# from parse_help: `binary_flags()` reads the parsed sections, and `documented_flags()` reads the
-# `### ` headings of a document that parse_help itself wrote. A flag the parser loses disappears from
-# both sides at once, so the sets stay equal and (B) is green. Verified at 1dc7b01: parse_help yields
-# 142 flags, COMMANDS.md's headings yield the same 142, and twelve real flags are in NEITHER.
+# Arms (A)-(G) cannot see this class of bug. Arm (B) is the drift check, and BOTH sides of its
+# comparison derive from parse_help: `binary_flags()` reads the parsed sections, and
+# `documented_flags()` reads the `### ` headings of a document that parse_help itself wrote. A flag
+# the parser loses disappears from both sides at once, so the sets stay equal and (B) is green.
 #
-# THE LEDGER. Twelve flags are lost by the parser at 1dc7b01 — including the flagship verbs
-# --merge-scout, --note-add and --plan-lanes, and -h/-v themselves. Fixing that is a parser redesign
-# (the shapes involved are not one bug: a single-space seam, a space INSIDE the value spec
-# --note-add="TARGET: text", and two flags sharing one line --limit=N --offset=M), and it rewrites
-# docs/COMMANDS.md by ~13 entries. So this arm does what --arch --baseline does with layering debt: it
-# PINS the known loss set and gates every change to it. A THIRTEENTH loss — the 658c440 bug happening
-# again — is red immediately. A loss that gets FIXED is also red, so the ledger can only shrink
-# deliberately, in the same commit as the fix, and can never quietly outlive the defect it records.
+# THE LEDGER WAS TWELVE, NOW ZERO. At 1dc7b01, twelve flags were lost by the parser — including the
+# flagship verbs --merge-scout, --note-add and --plan-lanes, and -h/-v themselves — across three
+# DISTINCT shapes: a single-space seam, a space INSIDE the value spec (--note-add="TARGET: text"),
+# and two flags sharing one line (--limit=N --offset=M, and the "|"/"/"-alternated
+# --grep-context=N | --grep-before=N / --grep-after=N). parse_help's entry/prose boundary
+# (`_spec_end` in docs/docs_commands_build.py) now closes all three at once: a spec is a chain of
+# dash-tokens — extended across `|`, `/`, `,`, or a bare space, with one embedded `"..."` chunk
+# allowed inside a token — and the chain simply stops at the first whitespace-separated token that
+# does not itself start with a dash, whatever the width of that whitespace. So THE LEDGER BELOW IS
+# EMPTY. It stays a live pinned set, exactly like --arch --baseline's debt ledger: a THIRTEENTH loss
+# (the 658c440 bug happening again, in a shape `_spec_end` does not yet cover) is red immediately, and
+# the moment is right to add it to LEDGER and open a fix, not to let (H1) go quietly green over it.
 # The lost flags are printed on every run rather than merely counted: a number nobody can read is not
 # a disclosure.
 cat > "$TMP/entryarm.py" <<'PY'
@@ -265,9 +268,11 @@ def ok( m ): print( "  PASS  %s" % m )
 def no( m ):
     global bad; bad = 1; print( "  FAIL  %s" % m )
 
-# KNOWN-LOST at 1dc7b01. Shrink this — never grow it — and only in the commit that fixes the parser.
-LEDGER = [ '--ack-only', '--and', '--grep-context', '--limit', '--lint-ignore', '--lint-select',
-           '--merge-scout', '--not', '--note-add', '--plan-lanes', '-h', '-v' ]
+# KNOWN-LOST. Empty since the parse_help fix that closed the seam/quoted-value/two-flags-per-line
+# shapes (see the block comment above). Grow this ONLY in the commit that discovers a new loss, and
+# shrink it ONLY in the commit that fixes the parser for that shape — it must never quietly outlive
+# the defect it records in either direction.
+LEDGER = []
 
 # Identify CANDIDATE entry lines independently of the contract under test. This grabs only the leading
 # dash token so a candidate can be named; it deliberately does NOT restate parse_help's own entry
@@ -309,10 +314,22 @@ if not newLoss and not rescued:
     ok( "(H1) parse_help's known loss set is exactly the pinned ledger (%d): %s" % ( len( live ), ", ".join( live ) ) )
 
 # ── (H2) mutation control — prove the detector above can still see a loss, and a non-loss ─────────
-# Positive: a single-space seam must be reported lost. Negative: a well-formed two-space entry must
-# survive as its OWN entry, with its own prose, not glued onto a neighbour. If a future parser fix
-# rescues the single-space shape, THIS ARM GOES RED TOO, in the same run as (H1)'s `rescued` failure —
-# both messages then point at the same commit, which is where the fixture and the ledger get updated.
+# The ORIGINAL positive control put a single-space seam in FIXTURE and required lost_flags to report
+# it lost. That fixture is retired: `_spec_end` now closes the seam shape (and the other two) for
+# EVERY line at entry indent (4-6 spaces, leading dash) — the spec/prose boundary is total for that
+# shape by construction, not a pattern match that happens to cover today's known cases. No text
+# satisfying LEAD below can any longer produce a loss, so a fixture built the old way would make (H2)
+# red for the wrong reason: not because the detector went inert, but because the shape it used to
+# probe is closed. (This is exactly the trap the block comment above warns about — if you are
+# re-opening this arm because it went red, re-read that comment before touching LEDGER.)
+#
+# The replacement targets the SUBTRACTION machinery directly, the way arm (F) feeds a synthetic
+# offender straight to an imported predicate instead of hunting for a real leaking document: wrap
+# `gen.parse_help` so it silently discards one well-formed entry on the way out — standing in for a
+# parser regression exactly like the one 658c440 fixed — and confirm `lost_flags`'s logic (LEAD scrape
+# minus `binary_flags(parse_help(...))`) still notices when it is fed that wrapped result. This proves
+# liveness without depending on any parseable shape remaining broken, and it stays a valid probe no
+# matter how much MORE of `_spec_end`'s grammar future work covers.
 FIXTURE = ( "usage: tool <dir>\n"
             "\n"
             "  Section\n"
@@ -320,16 +337,37 @@ FIXTURE = ( "usage: tool <dir>\n"
             "    --bar=Y  two-space ok\n" )
 _pre, secs = gen.parse_help( FIXTURE )
 entries = [ e for _t, es in secs for e in es ]
-specs = [ e[ 'spec' ] for e in entries ]
 fixtureLost = lost_flags( FIXTURE )
 
-if '--foo' in fixtureLost:
-    ok( "(H2) mutation control — the single-space seam is detected as a loss (the detector in (H1) is live, not inert)" )
+def _lost_flags_against( sections ):
+    """lost_flags's own LEAD-scrape-minus-known logic, but against an already-parsed `sections` —
+    the seam that lets (H2) inject a regression without a real broken --help shape to feed it."""
+    known = gen.binary_flags( sections )
+    out = []
+    for line in FIXTURE.split( '\n' ):
+        m = LEAD.match( line )
+        if not m:
+            continue
+        flags = gen.normalize_flags( m.group( 1 ) )
+        if flags and flags[ 0 ] not in known and flags[ 0 ] not in out:
+            out.append( flags[ 0 ] )
+    return out
+
+regressedSections = [ ( t, [ e for e in es if '--foo' not in e[ 'flags' ] ] ) for t, es in secs ]
+mutantLost = _lost_flags_against( regressedSections )
+if '--foo' in mutantLost:
+    ok( "(H2) mutation control — a parser that silently drops a well-formed entry is caught as a loss "
+        "(the detector in (H1) is live, not inert)" )
 else:
-    no( "(H2) mutation control — a single-space seam was NOT reported lost. Either the detector stopped "
-        "detecting (arm (H1)'s PASS means nothing), or parse_help now handles the seam — in which case "
-        "shrink the LEDGER to [] and replace this fixture with a shape the parser still cannot read. "
-        "parse_help returned entries: %s" % specs )
+    no( "(H2) mutation control — a deliberately dropped entry was NOT reported lost; arm (H1)'s PASS "
+        "means nothing. mutant lost_flags: %s" % mutantLost )
+
+if fixtureLost == []:
+    ok( "(H2) positive-shape proof — the real (unmutated) parser loses nothing in this fixture, "
+        "single-space seam included: the shape (H1)'s old ledger pinned is genuinely closed" )
+else:
+    no( "(H2) the real parser still loses something in this fixture: %s — LEDGER and this fixture "
+        "have drifted from what parse_help actually does" % fixtureLost )
 
 barEntry = [ e for e in entries if '--bar' in e[ 'flags' ] ]
 if len( barEntry ) == 1 and barEntry[ 0 ][ 'text' ] == 'two-space ok':

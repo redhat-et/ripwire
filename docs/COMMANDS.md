@@ -40,17 +40,17 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **understand a codebase cold** — [`--top-k`](#top-k-n) · [`--max-tokens`](#max-tokens-n) · [`--token-budget`](#token-budget-n-k-m-g) · [`--help-task`](#help-task-task) · [`--for`](#for-task) · [`--signatures-only`](#signatures-only) · [`--auto-bodies`](#auto-bodies) · [`--no-route`](#no-route) · [`--adaptive`](#adaptive) · [`--no-mention-boost`](#no-mention-boost) · [`--no-doc-mention`](#no-doc-mention) · [`--lego`](#lego-type) · [`--exemplar`](#exemplar-task-kind) · [`--recall`](#recall-task) · [`--tree`](#tree) · [`--html`](#html-file) · [`--color-by`](#color-by-mode) · [`--order`](#order-mode) · [`--no-stable`](#no-stable)
 
-**navigate / answer a question** — [`--around`](#around-sym) · [`--callers`](#callers-sym) · [`--callees`](#callees-sym) · [`--uses`](#uses-sym) · [`--graph-query`](#graph-query-expr) · [`--external-surface`](#external-surface) · [`--path`](#path-src-dst) · [`--connect`](#connect-a-b-c) · [`--impact`](#impact-sym) · [`--verify`](#verify-claim) · [`--mentions`](#mentions-sym) · [`--affected`](#affected-f1-f2-sym) · [`--exercises`](#exercises-testfile) · [`--situ`](#situ-f1-f2) · [`--handoff`](#handoff) · [`--test-gate`](#test-gate-f1-f2) · [`--grep`](#grep-str-regex-pat) · [`--grep-scope`](#grep-scope-line-file) · [`--grep-in`](#grep-in-code-any) · [`--handles`](#handles) · [`--match`](#match-query) · [`--pattern`](#pattern-pat) · [`--query`](#query-terms)
+**navigate / answer a question** — [`--around`](#around-sym) · [`--callers`](#callers-sym) · [`--callees`](#callees-sym) · [`--uses`](#uses-sym) · [`--graph-query`](#graph-query-expr) · [`--external-surface`](#external-surface) · [`--path`](#path-src-dst) · [`--connect`](#connect-a-b-c) · [`--impact`](#impact-sym) · [`--verify`](#verify-claim) · [`--mentions`](#mentions-sym) · [`--affected`](#affected-f1-f2-sym) · [`--exercises`](#exercises-testfile) · [`--situ`](#situ-f1-f2) · [`--handoff`](#handoff) · [`--test-gate`](#test-gate-f1-f2) · [`--grep`](#grep-str-regex-pat) · [`--grep-context`](#grep-context-n-grep-before-n-grep-after-n) · [`--and`](#and-str) · [`--not`](#not-str) · [`--grep-scope`](#grep-scope-line-file) · [`--grep-in`](#grep-in-code-any) · [`--handles`](#handles) · [`--match`](#match-query) · [`--pattern`](#pattern-pat) · [`--query`](#query-terms)
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--scope`](#scope-glob-glob) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-before-symbol`](#insert-before-symbol-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--edit-plan`](#edit-plan-file) · [`--dry-run`](#dry-run-apply) · [`--safe-delete`](#safe-delete-sym) · [`--slice`](#slice-sym-var) · [`--slice-flow`](#slice-flow-back-fwd-both) · [`--slice-depth`](#slice-depth-n) · [`--at`](#at-file-line) · [`--pr-context`](#pr-context-baseref) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--with-history`](#with-history) · [`--plan-lint`](#plan-lint-file) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--arch`](#arch-file-baseline) · [`--arch`](#arch-file-baseline-update) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--lint-select`](#lint-select-prefix) · [`--lint-ignore`](#lint-ignore-prefix) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--ack-only`](#ack-only-substr-substr) · [`--scope`](#scope-glob-glob) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-before-symbol`](#insert-before-symbol-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--edit-plan`](#edit-plan-file) · [`--dry-run`](#dry-run-apply) · [`--safe-delete`](#safe-delete-sym) · [`--slice`](#slice-sym-var) · [`--slice-flow`](#slice-flow-back-fwd-both) · [`--slice-depth`](#slice-depth-n) · [`--at`](#at-file-line) · [`--pr-context`](#pr-context-baseref) · [`--merge-scout`](#merge-scout-ref-ref) · [`--plan-lanes`](#plan-lanes-n-task-goal) · [`--plan-lanes`](#plan-lanes-brief-file) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--doc-drift`](#doc-drift-gateability) · [`--with-history`](#with-history) · [`--plan-lint`](#plan-lint-file) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--note-add`](#note-add-target-text) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor) · [`--agent`](#agent-codex) · [`--skipped`](#skipped)
 
 **security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,** — [`--scan-skill`](#scan-skill-file) · [`--scan-skills`](#scan-skills-dir) · [`--force`](#force)
 
-**knobs / modes** — [`--rank-by`](#rank-by-pagerank-authority-hub-rrf-churn-churn-decay) · [`--format`](#format-candidates) · [`--legend`](#legend-full-compact) · [`--json`](#json) · [`--exclude`](#exclude-substr) · [`--map-diff`](#map-diff) · [`--cache`](#cache-path) · [`--index-out`](#index-out-base) · [`--no-cache`](#no-cache) · [`--max-file-size`](#max-file-size-n-k-m-g) · [`--refetch`](#refetch) · [`--scip`](#scip-index-scip) · [`--pin-census`](#pin-census-file) · [`--mcp`](#mcp) · [`--listen`](#listen-host-port) · [`--mcp-token`](#mcp-token-t) · [`--allow-remote-edits`](#allow-remote-edits) · [`--eval-stray`](#eval-stray-file) · [`--eval`](#eval) · [`--eval-retrieval`](#eval-retrieval) · [`--eval-mined`](#eval-mined-file) · [`--eval-skills`](#eval-skills-file)
+**knobs / modes** — [`--rank-by`](#rank-by-pagerank-authority-hub-rrf-churn-churn-decay) · [`--format`](#format-xml-columnar-rows) · [`--format`](#format-candidates) · [`--legend`](#legend-full-compact) · [`--json`](#json) · [`--limit`](#limit-n-offset-m) · [`--exclude`](#exclude-substr) · [`--map-diff`](#map-diff) · [`--cache`](#cache-path) · [`--index-out`](#index-out-base) · [`--no-cache`](#no-cache) · [`--max-file-size`](#max-file-size-n-k-m-g) · [`--refetch`](#refetch) · [`--scip`](#scip-index-scip) · [`--pin-census`](#pin-census-file) · [`--mcp`](#mcp) · [`--listen`](#listen-host-port) · [`--mcp-token`](#mcp-token-t) · [`--allow-remote-edits`](#allow-remote-edits) · [`--eval-stray`](#eval-stray-file) · [`--eval`](#eval) · [`--eval-retrieval`](#eval-retrieval) · [`--eval-mined`](#eval-mined-file) · [`--eval-skills`](#eval-skills-file) · [`-h`](#h-help) · [`-v`](#v-version)
 
 ---
 
@@ -120,7 +120,7 @@ $ ./build/ripwire . --max-tokens=1500
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--token-budget`, `--recall`, `--detail`, `--pr-context`, `--from-trace`, `--run-trace`, `--json`
+**Shaped by:** `--token-budget`, `--recall`, `--detail`, `--pr-context`, `--from-trace`, `--run-trace`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -410,7 +410,7 @@ $ ./build/ripwire . --exemplar="format byte sizes for humans"
 </exemplar>
 ```
 
-**Shaped by:** `--compress`, `--metrics`, `--json`, `--index-out`
+**Shaped by:** `--compress`, `--metrics`, `--limit`, `--index-out`
 
 ### `--recall=TASK`
 
@@ -441,7 +441,7 @@ It does not compare against a baseline and it cannot fail a commit. The gate for
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--max-tokens`, `--token-budget`, `--from-trace`, `--json`
+**Shaped by:** `--max-tokens`, `--token-budget`, `--from-trace`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -475,7 +475,7 @@ $ ./build/ripwire . --tree
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 ### `--html[=FILE]`
 
@@ -562,7 +562,7 @@ $ ./build/ripwire . --around=rankGraphTeleport
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--callers`, `--layout`, `--json`
+**Shaped by:** `--callers`, `--layout`, `--limit`
 
 ### `--callers=SYM`
 
@@ -579,7 +579,7 @@ $ ./build/ripwire . --callers=DoesNotExist
 (empty)
 ```
 
-**Shaped by:** `--callees`, `--uses`, `--impact`, `--expand`, `--edit-check`, `--slice-flow`, `--at`, `--rank-by`
+**Shaped by:** `--callees`, `--uses`, `--impact`, `--expand`, `--edit-check`, `--slice-flow`, `--at`, `--format`
 
 **Caveats (stated by the binary):**
 
@@ -612,7 +612,7 @@ $ ./build/ripwire . --callees=rankGraphTeleport
 </callees>
 ```
 
-**Shaped by:** `--impact`, `--exercises`, `--rank-by`, `--json`
+**Shaped by:** `--impact`, `--exercises`, `--format`, `--json`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -645,7 +645,7 @@ $ ./build/ripwire . --uses=rankGraphTeleport
 </uses>
 ```
 
-**Shaped by:** `--impact`, `--naming-consistency`, `--edit-check`, `--safe-delete`, `--rank-by`, `--json`, `--index-out`
+**Shaped by:** `--impact`, `--naming-consistency`, `--edit-check`, `--safe-delete`, `--format`, `--limit`, `--index-out`
 
 **Caveats (stated by the binary):**
 
@@ -680,7 +680,7 @@ $ ./build/ripwire . --graph-query='and(callers(name("rankGraphTeleport"),2),kind
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--exercises`, `--json`
+**Shaped by:** `--exercises`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -717,7 +717,7 @@ $ ./build/ripwire . --external-surface
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -742,7 +742,7 @@ $ ./build/ripwire . --path=main,rankGraphTeleport
 </path>
 ```
 
-**Shaped by:** `--connect`, `--json`
+**Shaped by:** `--connect`, `--limit`
 
 ### `--connect=A,B,C`
 
@@ -767,7 +767,7 @@ $ ./build/ripwire . --connect=rankGraphTeleport,runEval,getIndex
 </connect>
 ```
 
-**Shaped by:** `--from-trace`, `--json`
+**Shaped by:** `--from-trace`, `--limit`
 
 ### `--impact=SYM`
 
@@ -798,7 +798,7 @@ $ ./build/ripwire . --impact=rankGraphTeleport
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--uses`, `--metrics`, `--safe-delete`, `--slice-flow`, `--rank-by`, `--json`
+**Shaped by:** `--uses`, `--metrics`, `--safe-delete`, `--slice-flow`, `--format`, `--json`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -838,7 +838,7 @@ $ ./build/ripwire . --mentions=rankGraphTeleport
 </mentions>
 ```
 
-**Shaped by:** `--no-doc-mention`, `--at`, `--json`
+**Shaped by:** `--no-doc-mention`, `--at`, `--limit`
 
 ### `--affected=F1,F2|SYM`
 
@@ -890,7 +890,7 @@ $ ./build/ripwire . --exercises=test/regression.sh
 </exercises>
 ```
 
-**Shaped by:** `--test-gate`, `--json`
+**Shaped by:** `--test-gate`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -942,7 +942,7 @@ $ ./build/ripwire . --test-gate
 </test-gate>
 ```
 
-**Shaped by:** `--mentions`, `--affected`, `--quality-delta`, `--json`
+**Shaped by:** `--mentions`, `--affected`, `--quality-delta`, `--json`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -952,7 +952,7 @@ $ ./build/ripwire . --test-gate
 
 **Answers:** literal / regex search + enclosing symbol + the matched line.
 
-SPAN-TIERED by default (see --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering. For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance). --grep-context=N | --grep-before=N / --grep-after=N   ripgrep-style N lines of source around each hit --and=STR (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex) --not=STR (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)
+SPAN-TIERED by default (see --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses what it held back. --grep-in=any is the exhaustive VIEW -- every hit, no tiering. For task-ranked retrieval use --for=TASK (ranks by PageRank + task relevance).
 
 **Try it**
 
@@ -977,7 +977,48 @@ $ ./build/ripwire . --regex='fnv1a\w+'
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--affected`, `--grep-scope`, `--handles`, `--expand`, `--no-redact`, `--insert-after-symbol`, `--legend`, `--json`
+**Shaped by:** `--affected`, `--and`, `--not`, `--grep-scope`, `--handles`, `--expand`, `--no-redact`, `--insert-after-symbol`
+
+### `--grep-context=N | --grep-before=N / --grep-after=N`
+
+**Answers:** ripgrep-style N lines of source around each hit
+
+**Try it**
+
+_Same search with one line of source context either side._
+
+```
+$ ./build/ripwire . --grep=DEGRADED_PATH_ALERT --grep-context=1
+<!-- ripwire grep: parallel literal/regex scan; hits GROUP by file under <f p="…">, each <hit> carrying its LINE (l=), matched text (m) and enclosing symbol (in=, a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar; ABSENT (never an empty in= value) when no symbol encloses the hit, which is NOT the same claim as file scope). root= on the root element is the crawl root every <f p=…> is now RELATIVE to (single-root runs only; absent ⇒ p= is the path ingest itself used, unchanged). ORDER: SOURCE files before test/bench files before docs, then path and line. shown=/capped= = rows printed vs found (a count of underlying HITS, the same unit hits= uses, not of printed <hit> elements); hits_capped="1" ⇒ hits= is a FLOOR (collection budget reached). SPAN TIERS: each hit is classified by the tree-sitter span it sits in (code/comment/string) and this answer serves the CODE tier, or — when no hit is code — comment and string TOGETHER; tier= names what was served when it is not code, so a pattern living only in prose is answered, never emptied. suppressed_comment=/suppressed_string= are the classified hits held back: not in hits=, and the reason complete= cannot appear. Pass grep-in=any (dashes omitted) for every tier. Hit files are parsed on demand under a fixed budget: tier_parsed= how many were classified, tier_budget= which ceiling stopped it (files or bytes, present only then), tier_unclassified= hits in files nothing classified — always EMITTED, never suppressed. A byte-identical match at OTHER sites in the SAME file folds into the first <hit>'s n= (default 1, unset) and an at-tagged sibling element (l=/in=, self-closing) per extra site — never on a paged or grep-context/-before/-after answer (dashes omitted, illegal in an XML comment), where every site keeps its own <hit>. After the hit rows, <enc> rows list each DISTINCT enclosing symbol NAME of THIS page (first-appearance order, bounded by the page) with callers= its 1-hop DISTINCT-caller count, unioned across same-named defs like the callers verb (a FLOOR — dynamic dispatch contributes no edge), defs= how many defs the name grouped (only when more than one), cx= complexity; amp=/tested= join only when a metrics co-run already computed that lens. On a zero-hit answer a <suggest> element may follow: SUGGESTIONS, never matches — near= the nearest indexed symbol name (did-you-mean), next= a ready-to-paste conceptual fallback; absent for regex/non-word-like patterns or when nothing plausible exists. COMPLETENESS: complete= on the root (value 1) means this listing is EXHAUSTIVE and a consumer need not re-derive it: a LITERAL scan read every indexed file end to end, hit no collection ceiling, and printed every hit it found — so on this answer a zero really is zero and a hit absent above is absent from every indexed file. The claim is complete-within-the-index ONLY: most files the ingest skipped were never scanned (the skipped verb lists exactly which, with reasons; the ONE exception is the unindexed_files_scanned= class right below, itself never covered by complete=), and files outside the indexed roots are outside the claim. It never appears on a regex answer (the prefilter is a performance switch that may not change the answer, so neither mode claims), a capped or paged listing, or a scan that could not read a file; its ABSENCE claims nothing. The enc rows' caller counts stay FLOORS regardless — complete= speaks for the hit rows alone. unindexed_files_scanned= counts files outside the index (unsupported-ext, but text-looking — the skipped verb's own unsupported-ext class) that THIS answer additionally scanned for the same pattern; their hits print inside a trailing unindexed element (present only when it found something), holding its own <f> rows in the same shape as above, and never carry in= — there is no symbol table to check for such a file, which is not the same claim as file scope. unindexed_files_skipped= (present only when nonzero) counts candidates this scan saw but did not read: over the max-file-size ceiling, sniffed binary, or unreadable. unindexed_candidates_capped="1" (present only when true) means the CANDIDATE list itself (the skipped verb's own 500-row-per-class cap) was already a floor, so files past it were never considered here either — see the skipped verb for every row. corpus_excluded= counts files an exclude filter (or built-in crawl policy) kept OUT of the index entirely; corpus_oversize= counts files the crawl SAW but dropped for exceeding the size ceiling. Both answer what an otherwise-empty answer alone cannot: not in this repo, or in a file that was never scanned — the skipped verb itemizes the rows behind either count. raise the default cap with limit=N (offset=M pages); on the root, limit="0" means no explicit limit was given and the verb's own default page size shaped the window — never a zero-row page -->
+<grep pattern="DEGRADED_PATH_ALERT" root="." files="51" hits="168" shown="100" capped="1" hits_capped="0" suppressed_comment="91" suppressed_string="21" tier_parsed="77" corpus_oversize="15" unindexed_files_scanned="104" unindexed_files_skipped="1">
+<f p="src/abicheck.h">
+<hit l="477" in="abicheck::collectAuthoredSites">
+<b>
+<![CDATA[        {]]>
+</b>
+<m>
+<![CDATA[            DEGRADED_PATH_ALERT( "abi: no merge-base for a ref (unrelated history?) — that ref is counted, not compared" );]]>
+</m>
+<a>
+<![CDATA[            ++result.unrelated;]]>
+</a>
+</hit>
+... [17 more line(s); run it to see the whole thing]
+```
+
+**Shaped by:** `--no-redact`
+
+### `--and=STR`
+
+**Answers:** (repeatable)   modifies --grep=STR: keep only hits where STR is ALSO present (literal-only, no --regex)
+
+**Shaped by:** `--grep-scope`
+
+### `--not=STR`
+
+**Answers:** (repeatable)   modifies --grep=STR: drop hits where STR IS present (literal-only, no --regex)
+
+**Shaped by:** `--grep-scope`, `--no-redact`
 
 ### `--grep-scope=line|file`
 
@@ -1039,7 +1080,7 @@ $ ./build/ripwire . --match='(if_statement)'
 ... [20 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--no-redact`, `--sarif`, `--json`
+**Shaped by:** `--no-redact`, `--sarif`, `--limit`
 
 ### `--pattern=PAT`
 
@@ -1047,7 +1088,7 @@ $ ./build/ripwire . --match='(if_statement)'
 
 $NAME binds one node (repeat it and both sites must match structurally); $_ binds nothing; ... (or $$$) is an ellipsis over siblings, matched by ONE first-match-wins probe under a hard cap -- both facts on the element. Comments are transparent, everything else is kind- and text-exact ($A + $B does not match a - b). Served: c cpp objc java csharp javascript typescript python go rust swift; ruby, bash and the data tiers are named in unsupported= instead of answered. A pattern no served grammar resolves, or that collapses to a bare token, is REFUSED -- never reported as hits=0.
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -1148,7 +1189,7 @@ $ ./build/ripwire . --pack-signatures --top-k=10
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--json`
+**Shaped by:** `--top-k`, `--limit`
 
 ### `--outline=A,B,...`
 
@@ -1179,7 +1220,7 @@ $ ./build/ripwire . --outline=rankGraphTeleport --top-k=0
 ... [3 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--expand`, `--compress`, `--no-redact`, `--json`
+**Shaped by:** `--top-k`, `--expand`, `--compress`, `--no-redact`, `--limit`
 
 ### `--expand=A,B,...`
 
@@ -1344,7 +1385,7 @@ $ ./build/ripwire . --metrics --top-k=10
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--json`, `--index-out`
+**Shaped by:** `--limit`, `--index-out`
 
 **Caveats (stated by the binary):**
 
@@ -1381,7 +1422,7 @@ $ ./build/ripwire . --deps
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--arch`, `--json`
+**Shaped by:** `--arch`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -1416,7 +1457,7 @@ $ ./build/ripwire . --hotspots
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--affected`, `--expand`, `--since`, `--json`
+**Shaped by:** `--affected`, `--expand`, `--since`, `--limit`
 
 ### `--clones`
 
@@ -1445,7 +1486,7 @@ $ ./build/ripwire . --clones
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--affected`, `--json`
+**Shaped by:** `--affected`, `--limit`
 
 ### `--readability`
 
@@ -1453,7 +1494,7 @@ $ ./build/ripwire . --clones
 
 APPROXIMATION, disclosed: ONE token-class table serves every language (keywords + punctuation = operators, identifiers + literals = operands), with no per-grammar refinement, so V is cross-language and not a per-grammar Halstead count. The formula was fitted on snippets of 20 lines or fewer, so it is a RANKING lens, not a grade: read the ORDER of the rows, not the number on any one of them. Pages with limit=N (offset=M); default 40 rows. Declarations with no body are not measured.
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -1467,7 +1508,7 @@ APPROXIMATION, disclosed: ONE token-class table serves every language (keywords 
 
 direct_writes= direct_reads= are the subsets in its own body. A cell is a file/namespace-scope variable, a function-local static, or a Python module global; a const/constexpr/consteval declaration is not a cell. Each cell child names its declaration, its direction (dir=r|w|rw) and either the use site in this body (at=) or the callee it came through (via=). Lineage: Fowler's Global Data / Mutable Data smells (2018) name the hazard and ship no metric; Marinescu's ATFD (ICSM 2004) is the closest number but is one-hop, per-class, Java, and direction-blind; QMOOD DAM and MOOD AHF/MHF count DECLARED VISIBILITY and so score a class with private fields and leaked mutable internals as perfectly encapsulated; the only published measurement of externally reachable state (Potanin/Noble/Biddle 2004) is DYNAMIC, Java-only, and its tool is unmaintained. UNSOUND BY CONSTRUCTION -- it cannot see indirect calls, pointer aliasing, macro-named cells or reflection-like dispatch, and a local SHADOWING a cell name can be charged to the cell -- so every count is a FLOOR (counts_floor="1") and the blind spots are listed in the report's own legend. COVERS C++, ObjC and Python -- the languages whose read/write USE SITES the index carries. Every other indexed language is named on the root as unanalyzed_langs= and contributes no cells and no rows: that absence is NOT a measured zero. Pages with limit=N (offset=M); default 40 rows.
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -1479,7 +1520,7 @@ direct_writes= direct_reads= are the subsets in its own body. A cell is a file/n
 
 **Answers:** the FAMILY JOIN: per function, which of FOUR orthogonal evidence families fire, ranked by the COUNT of distinct families
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 ### `--quality-panel[=PRESET]`
 
@@ -1487,7 +1528,7 @@ direct_writes= direct_reads= are the subsets in its own body. A cell is a file/n
 
 Per function, which of SIX evidence families fire -- structural (shape), lexical (identifier text), confusion (syntactic construct), historical (git churn), colocation (what you must read from outside this file), state (this function's OWN BODY touching non-local mutable state) -- ranked by the COUNT of distinct families, NEVER by a weighted composite, each row carrying its own evidence. PRESET selects and cuts, never weights: strict (the four families measured steady enough to gate on, 2 must agree) | default (all six, 2; the bare form) | lenient (all six, 1 -- a reading order, not a verdict). historical and colocation are out of strict: each is a fixed-size worst-40 cut over a ranking whose population moves, so both re-shuffle on code that did not change (docs/EVALS.md section 9.9). A family that could not be measured here is UNAVAILABLE, never 'did not fire', and of= drops with it. A lens: exit 0. Pages limit=N (offset=M). WHY NO COMPOSITE, in full (the emitted legend is deliberately terse and points here): averaging correlated metrics re-weights one signal and calls it six, and a single quotable number is wrong the moment it is quoted -- fam= is ORDINAL, and every row carries its own evidence so a reader can see WHY without a second command. The families are partitioned by KIND of evidence so that corroboration means the lenses failed DIFFERENTLY, not that one weakness echoed six times: the first four are the ensemble join, called through its own entry point and unchanged; colocation and state passed the same orthogonality test on the same corpora before being enabled. Every threshold is REUSED from the lens it came from, none is new: four absolute structural bars (cognitive complexity, lines, nesting, params), and three rankings with no defensible absolute cut, each firing for the worst decile of its OWN ranking (at least one row, at most that lens's default window of 40) -- an ordinal cut is RELATIVE, 'worst in THIS corpus', never 'bad in absolute terms'. The state family fires on the presence of a direct access site and deliberately uses the OWN-BODY half of the lens, not the callee closure: the panel's unit is one function's own comprehensibility, and the closure is a fact about its callees. UNAVAILABLE is never silent: an empty unavailable= means every family was measured, an empty ranking or empty language coverage counts as NOT measured, and the coverage denominators behind each verdict are published so it can be checked instead of trusted. The join=deep+untested annotation puts two facts already in the report side by side (sustained depth, no reaching test) because that pair is where a refactor is most wanted and least safe; counting it would be one family wearing a second hat.
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -1501,7 +1542,7 @@ Per function, which of SIX evidence families fire -- structural (shape), lexical
 
 ATTRIBUTION: the fraction itself is published — it is Beck and Diehl's per-class congruence (FSE 2011) flipped, with Martin's instability Ce/(Ca+Ce) as its crude ancestor. What is refined here is the READER WEIGHTING and the use of EVERY reference role (call, read, write, import, base class, member type), not calls alone. Resolution is NAME-BASED and language-gated, the same heuristic level the uses verb works at; a name with several definitions contributes each of them up to defs_per_name_cap= and amb= counts it. Names with no in-corpus definition land in ext=, which locals and parameters DOMINATE, so ext= is not a dependency count and is excluded from both ratios. ents=/files= are FLOORS. Pages with limit=N (offset=M); default 40 symbol rows and 40 file rows. An ORDERING, never a grade and never a threshold.
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -1527,7 +1568,7 @@ old=fires on the abandoned spelling, new=fires on the chosen one, proxy=old/(old
 
 A group DECIDES only when its leading style (camel/pascal/snake/screaming) clears a 20-name sample floor AND a 90% agreement floor; short of either it reports style=UNAVAILABLE with why= naming which bar it missed, never a guessed winner. Every off-convention name in a DECIDED group (including mixed -- naming-case's own finding, a separator AND a transition in one name, which never wins a vote) gets propose=: its OWN subtokens mechanically recombined into the dominant style -- no dictionary, no synonym judgment, which is what keeps this derivable from the corpus rather than invented. propose= is a SUGGESTION, never a safe-to-blind-apply rename -- an actual rename needs --uses to prove the complete reference set first. Exit 0 always: a lens, not a gate. Pages limit=N (offset=M); default 40 rows
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -1553,7 +1594,7 @@ a no-op alone), OFF by default: local-variable-indexing plan Phase 2 (PLAN.md 20
 
 cic (Scalabrino, ICPC 2016 / JSEP 2018) is the Jaccard overlap of two preprocessed term sets: the comment's vocabulary vs every identifier the definition's own span uses (operators/keywords stripped, camelCase/snake_case split, English stopwords dropped, deduplicated). The two measure different things and are expected to disagree — both are reported, never collapsed to one number. UNAVAILABLE (not scored, never a zero) where no doc comment exists, counted in no_comment= on the root. Complements --doc-drift (which checks whether a markdown CLAIM is stale) with comment CONTENT, over a disjoint input — neither verb duplicates the other. Pages with limit=N (offset=M); default 40 rows.
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -1590,7 +1631,7 @@ $ ./build/ripwire . --cochange
 ... [21 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--cochange-recur`, `--cochange-groups`, `--since`, `--json`
+**Shaped by:** `--cochange-recur`, `--cochange-groups`, `--since`, `--limit`
 
 ### `--cochange-recur=K`
 
@@ -1642,7 +1683,7 @@ $ ./build/ripwire . --hotspots --since="2 weeks ago"
 
 **Answers:** enforce layering rules (exit 2 on violation);
 
-the Martin Ca/Ce/I/A/D block it emits is a design heuristic, not independently outcome-validated (never gates). propagation_cost's N is dependency-capable files only, same denominator as --deps <health>. Layer substrings and regex path-rules match the ROOT-RELATIVE path (src/core/x.cpp), not the spelling you passed, so a rules file means the same thing in every checkout --arch=FILE --baseline     write .ripwire_arch_baseline (accept current debt as baseline), exit 0 --arch=FILE --baseline-update  merge current violations into baseline (accept new debt), exit 0
+the Martin Ca/Ce/I/A/D block it emits is a design heuristic, not independently outcome-validated (never gates). propagation_cost's N is dependency-capable files only, same denominator as --deps <health>. Layer substrings and regex path-rules match the ROOT-RELATIVE path (src/core/x.cpp), not the spelling you passed, so a rules file means the same thing in every checkout
 
 **Try it**
 
@@ -1669,6 +1710,58 @@ $ ./build/ripwire . --arch=test/archfix/rules.txt
 **Caveats (stated by the binary):**
 
 - the Martin Ca/Ce/I/A/D block it emits is a design heuristic, not independently outcome-validated (never gates).
+
+### `--arch=FILE --baseline`
+
+**Answers:** write .ripwire_arch_baseline (accept current debt as baseline), exit 0
+
+**Try it**
+
+_Enforce layering rules (exit 2 on violation) — run against the repo's own test fixture rules._
+
+```
+$ ./build/ripwire . --arch=test/archfix/rules.txt
+<!-- ripwire arch: layering fitness function — edges that violate your declared rules (layer rules and regex path-rules). exit=2 if any NEW (un-baselined) violation. <metrics> = descriptive Martin Ca/Ce/I/A/D + reachability, never gates. Rules — layer substrings and regex path-rules alike — are matched against each file's ROOT-RELATIVE path (src/core/x.cpp), never the absolute or ./-prefixed spelling shown in from=/to=, so a rule means the same thing whatever directory the tree was checked out into. -->
+<arch layers="2" rules="1" pathRules="0" violations="0" baselined="0" new_violations="0">
+<metrics modules="268" typed_modules="95" zone_pain="76" zone_useless="1" zone_ok="18" zone_na="173" propagation_cost="0.009" note="Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from na … [line truncated: 408 more bytes on this line]
+<m path="." ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./.codex-plugin" ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./.github/workflows" ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./bench" ca="0" ce="1" types="20" abstract="2" I="1.00" A="0.10" D="0.10" zone="ok" reachable="1"/>
+<m path="./bench/agentloop" ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./bench/agentloop/fixtures/grader" ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./bench/agentloop/results" ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./bench/cppbench" ca="0" ce="0" types="1" abstract="0" I="0.00" A="0.00" D="1.00" zone="pain" reachable="1" isolated="1"/>
+... [20 more line(s); run it to see the whole thing]
+```
+
+**Shaped by:** `--graph-query`, `--deps`
+
+### `--arch=FILE --baseline-update`
+
+**Answers:** merge current violations into baseline (accept new debt), exit 0
+
+**Try it**
+
+_Enforce layering rules (exit 2 on violation) — run against the repo's own test fixture rules._
+
+```
+$ ./build/ripwire . --arch=test/archfix/rules.txt
+<!-- ripwire arch: layering fitness function — edges that violate your declared rules (layer rules and regex path-rules). exit=2 if any NEW (un-baselined) violation. <metrics> = descriptive Martin Ca/Ce/I/A/D + reachability, never gates. Rules — layer substrings and regex path-rules alike — are matched against each file's ROOT-RELATIVE path (src/core/x.cpp), never the absolute or ./-prefixed spelling shown in from=/to=, so a rule means the same thing whatever directory the tree was checked out into. -->
+<arch layers="2" rules="1" pathRules="0" violations="0" baselined="0" new_violations="0">
+<metrics modules="268" typed_modules="95" zone_pain="76" zone_useless="1" zone_ok="18" zone_na="173" propagation_cost="0.009" note="Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from na … [line truncated: 408 more bytes on this line]
+<m path="." ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./.codex-plugin" ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./.github/workflows" ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./bench" ca="0" ce="1" types="20" abstract="2" I="1.00" A="0.10" D="0.10" zone="ok" reachable="1"/>
+<m path="./bench/agentloop" ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./bench/agentloop/fixtures/grader" ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./bench/agentloop/results" ca="0" ce="0" types="0" abstract="0" I="0.00" A="0.00" D="1.00" zone="n/a" reachable="1" isolated="1"/>
+<m path="./bench/cppbench" ca="0" ce="0" types="1" abstract="0" I="0.00" A="0.00" D="1.00" zone="pain" reachable="1" isolated="1"/>
+... [20 more line(s); run it to see the whole thing]
+```
+
+**Shaped by:** `--graph-query`, `--deps`
 
 ### `--lint`
 
@@ -1699,7 +1792,7 @@ $ ./build/ripwire . --lint
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--affected`, `--expand`, `--naming-calibration`, `--naming-locals`, `--lint-catalog`, `--lint-rules`, `--sarif`, `--with-profile`
+**Shaped by:** `--affected`, `--expand`, `--naming-calibration`, `--naming-locals`, `--lint-catalog`, `--lint-rules`, `--lint-select`, `--lint-ignore`
 
 **Caveats (stated by the binary):**
 
@@ -1716,9 +1809,7 @@ Every built-in rule from every pack (base checks, atoms-*, cache-*, naming-*, th
 
 ### `--lint-rules=DIR`
 
-**Answers:** load user lint rules (YAML, ast-grep style) from DIR — runs with, or instead of, --lint --lint-select=PREFIX[,...] (with --lint / --lint-rules) run ONLY rules whose name starts with one of these PREFIXes (or '*' for all) — comma-separated, e.g.
-
-cache- selects the whole cache-* family. The root then carries selected="K of N" plus the raw select=/ignore= you passed, so a filtered zero is never confusable with an unfiltered one. An unresolvable PREFIX (matches no rule) refuses (exit 1), naming the nearest rule/family by edit distance --lint-ignore=PREFIX[,...] (with --lint / --lint-rules) DROP rules whose name starts with one of these PREFIXes (or '*' to drop everything, e.g. paired with --lint-select elsewhere to isolate one family) — applied AFTER --lint-select narrows the set; same unresolvable-PREFIX refusal and root disclosure as --lint-select
+**Answers:** load user lint rules (YAML, ast-grep style) from DIR — runs with, or instead of, --lint
 
 **Try it**
 
@@ -1738,12 +1829,26 @@ $ ./build/ripwire . --lint-rules=test/lintrulesfix/rules
 </lint>
 ```
 
-**Shaped by:** `--lint-catalog`, `--sarif`
+**Shaped by:** `--lint-catalog`, `--lint-select`, `--lint-ignore`, `--sarif`
+
+### `--lint-select=PREFIX[,...]`
+
+**Answers:** (with --lint / --lint-rules) run ONLY rules whose name starts with one of these PREFIXes (or '*' for all) — comma-separated, e.g.
+
+cache- selects the whole cache-* family. The root then carries selected="K of N" plus the raw select=/ignore= you passed, so a filtered zero is never confusable with an unfiltered one. An unresolvable PREFIX (matches no rule) refuses (exit 1), naming the nearest rule/family by edit distance
+
+**Shaped by:** `--lint-ignore`
 
 **Caveats (stated by the binary):**
 
 - The root then carries selected="K of N" plus the raw select=/ignore= you passed, so a filtered zero is never confusable with an unfiltered one.
-- An unresolvable PREFIX (matches no rule) refuses (exit 1), naming the nearest rule/family by edit distance --lint-ignore=PREFIX[,...] (with --lint / --lint-rules) DROP rules whose name starts with one of these PREFIXes (or '*' to drop everything, e.g.
+- An unresolvable PREFIX (matches no rule) refuses (exit 1), naming the nearest rule/family by edit distance
+
+### `--lint-ignore=PREFIX[,...]`
+
+**Answers:** (with --lint / --lint-rules) DROP rules whose name starts with one of these PREFIXes (or '*' to drop everything, e.g.
+
+paired with --lint-select elsewhere to isolate one family) — applied AFTER --lint-select narrows the set; same unresolvable-PREFIX refusal and root disclosure as --lint-select
 
 ### `--sarif`
 
@@ -1810,7 +1915,7 @@ $ ./build/ripwire . --communities
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--community`, `--json`
+**Shaped by:** `--community`, `--limit`
 
 ### `--community=ID`
 
@@ -1831,7 +1936,7 @@ $ ./build/ripwire . --community=0
 </community>
 ```
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -1867,7 +1972,7 @@ $ ./build/ripwire . --zoom
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--community`, `--json`
+**Shaped by:** `--community`, `--limit`
 
 ### `--report`
 
@@ -1896,7 +2001,7 @@ Call-graph isolate provenance: 1624 declaration, 719 header, 2304 source, 2210 d
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 ### `--seams`
 
@@ -1925,7 +2030,7 @@ $ ./build/ripwire . --seams
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 ### `--mermaid`
 
@@ -1954,7 +2059,7 @@ flowchart LR
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--zoom`, `--with-graph`, `--json`
+**Shaped by:** `--zoom`, `--with-graph`, `--limit`
 
 ### `--owners[=SYM]`
 
@@ -1985,7 +2090,7 @@ $ ./build/ripwire . --owners
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--at`, `--json`
+**Shaped by:** `--at`, `--limit`
 
 ### `--dead-code[=DIR]`
 
@@ -2005,7 +2110,7 @@ $ ./build/ripwire . --dead-code=src
 </dead-code>
 ```
 
-**Shaped by:** `--safe-delete`, `--json`
+**Shaped by:** `--safe-delete`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -2107,9 +2212,7 @@ thresholds and arithmetic from PyDriller's deltamaintainability reference implem
 
 ### `--quality-ack[=REASON]`
 
-**Answers:** accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked="N") until one WORSENS past its acked size --ack-only=SUBSTR[,SUBSTR] (with --quality-ack) ack only SOME findings — those whose KIND, canonical id, or FACET contains one of these;
-
-the pseudo-token 'gating' selects exactly what would exit 2. Bare --quality-ack accepts the WHOLE report, so accepting one deliberate change silently accepts the rest — how a ratchet turns into a rubber stamp. Prefer the facet: --ack-only=contract-change acks the deliberate arity changes WITHOUT the never-gating api-surface new-symbol rows. Matching nothing refuses (exit 1) rather than falling back to acking everything. Whatever you leave unacked stays visible.
+**Answers:** accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked="N") until one WORSENS past its acked size
 
 **Try it**
 
@@ -2117,6 +2220,23 @@ _NEW FLAG: --ack-only matching nothing REFUSES rather than falling back to ackin
 
 ```
 $ ./build/ripwire . --quality-delta --quality-ack --ack-only=zzznope
+(empty)
+```
+
+**Shaped by:** `--ack-only`, `--scope`
+
+### `--ack-only=SUBSTR[,SUBSTR]`
+
+**Answers:** (with --quality-ack) ack only SOME findings — those whose KIND, canonical id, or FACET contains one of these;
+
+the pseudo-token 'gating' selects exactly what would exit 2. Bare --quality-ack accepts the WHOLE report, so accepting one deliberate change silently accepts the rest — how a ratchet turns into a rubber stamp. Prefer the facet: --ack-only=contract-change acks the deliberate arity changes WITHOUT the never-gating api-surface new-symbol rows. Matching nothing refuses (exit 1) rather than falling back to acking everything. Whatever you leave unacked stays visible.
+
+**Try it**
+
+_--ack-only WITHOUT --quality-ack REFUSES loudly (exit 1, the pairing named) — it used to be silently ignored._
+
+```
+$ ./build/ripwire . --ack-only=gating
 (empty)
 ```
 
@@ -2235,7 +2355,7 @@ exactly one of the two is required. Payload paths are relative to the plan file 
 
 ambiguous_callers= names callers whose own calls include an ambiguously-resolved one (g.ambOut) — a caveat, not a count of proven-wrong edges. FACTS only: risk= names what was found — none-found (zero callers AND zero uses), untested-radius (a radius exists and none of it is test-covered), or uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict.
 
-**Shaped by:** `--json`
+**Shaped by:** `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -2297,7 +2417,7 @@ A bound that cuts a live frontier is disclosed as flow_truncated="1" — a short
 
 **Answers:** no-LLM review-evidence bundle for the diff (working-tree, or vs BASEREF): per changed file, its symbols + callers + blast radius + affected tests + co-change partners + owners.
 
-With --max-tokens=N the bundle degrades to fit: per-file structural counts survive for ALL changed files, the deep detail (caller/co-change lists, per-symbol rows) trims deepest-first, and truncated= names what was dropped (est_tokens= reports the fit). ANCHORING: the BASEREF form diffs against merge-base(BASEREF,HEAD), never BASEREF's tip — "what did THIS work change since it forked", not "how do the two trees differ today". base_moved= counts the paths BASEREF moved since the fork that this work never touched (excluded, not silently); anchor="ref-tip-two-dot" = no merge-base (unrelated history). direction= always names the SIDE you are reading, and a no-ref-work row fires when BASEREF's tip IS the merge base -- it carries no divergent work, so every row is HEAD's. --merge-scout=REF[,REF...] read-only cross-branch overlap: for each REF, the symbols it changed vs its merge-base with HEAD (git-archive TEMP copies — never checked out, never mutates a ref); the dirty working tree joins as an implicit extra arm. Pairwise: a changed symbol on TWO arms is a same-symbol conflict, two arms touching different symbols in the same file is a textual risk; <landing order=...> is the fewest-conflicts-first greedy land order (ties: ref name asc). An unresolvable REF refuses loudly (exit 1, names the ref) before any archive work. ANCHORING: every arm is diffed against its OWN merge-base with HEAD, never against live HEAD — a file an arm never opened can never show up because the live line moved. head_conflicts= is what that anchor hides, kept as its own row class: symbols this arm changed that the LIVE LINE also changed since the arm forked (HEAD is not an arm, so no pairwise comparison can see it). Single-root only. --plan-lanes=N --task=GOAL PRE-HOC lane plan: BEFORE a line is written, if this task is split across N isolated worktrees (N=2..16), which lanes would COLLIDE and in what order should they land. Where --merge-scout says "these branches already conflict", this says "these lanes WOULD conflict if assigned this way" — no ref to resolve, no archive, no re-ingest. JSON on stdout, always (redirect it: > .ripwire_lanes.json); ripwire writes no file. Exit 0 whenever a plan was produced, INCLUDING when conflicts are predicted (conflicts are data, and the landing order exists to handle them); exit 1 only for refusals. A claim keys on path+scope+name, never on id= (id degrades to a bare NAME when no scope was captured, so free functions in different files would collide); id= is carried per row for addressability, null when it would be bare, with id_addressable saying so. Three separate pair classes: conflicts[] (same claim key on both lanes — git will fight), same_file_risk[] (different keys, same file, aggregated per file), contract_touch[] (one lane's claim sits in another's blast radius — an adaptation, NOT a merge conflict). The conflict test runs on CLAIMS, never on blast radii. warnings[] carries every honest limit in band with a stable code. Single-root only. AUTO-CARVE SPLITS THE RANKED SURFACE, NOT YOUR SENTENCE: if your task has enumerable parts, use --brief and write one line per part. --plan-lanes --brief=FILE  the explicit form of the above: one non-blank line per lane, N = the line count. Each line is ranked on its own — no community carve, no bin packing — so the lane boundaries are the ones you wrote. This is the mode whose precision is defensible; prefer it when you can. Lane isolation is a QUALITY argument, not a speed one (CAID, arXiv 2603.21489: 63.3% vs 55.5% shared, largest gains on weaker lane models — and wall clock got WORSE).
+With --max-tokens=N the bundle degrades to fit: per-file structural counts survive for ALL changed files, the deep detail (caller/co-change lists, per-symbol rows) trims deepest-first, and truncated= names what was dropped (est_tokens= reports the fit). ANCHORING: the BASEREF form diffs against merge-base(BASEREF,HEAD), never BASEREF's tip — "what did THIS work change since it forked", not "how do the two trees differ today". base_moved= counts the paths BASEREF moved since the fork that this work never touched (excluded, not silently); anchor="ref-tip-two-dot" = no merge-base (unrelated history). direction= always names the SIDE you are reading, and a no-ref-work row fires when BASEREF's tip IS the merge base -- it carries no divergent work, so every row is HEAD's.
 
 **Try it**
 
@@ -2318,6 +2438,81 @@ $ ./build/ripwire . --pr-context
 - With --max-tokens=N the bundle degrades to fit: per-file structural counts survive for ALL changed files, the deep detail (caller/co-change lists, per-symbol rows) trims deepest-first, and truncated= names what was dropped (est_tokens= reports the fit).
 - ANCHORING: the BASEREF form diffs against merge-base(BASEREF,HEAD), never BASEREF's tip — "what did THIS work change since it forked", not "how do the two trees differ today".
 - base_moved= counts the paths BASEREF moved since the fork that this work never touched (excluded, not silently);
+
+### `--merge-scout=REF[,REF...]`
+
+**Answers:** read-only cross-branch overlap: for each REF, the symbols it changed vs its merge-base with HEAD (git-archive TEMP copies — never checked out, never mutates a ref);
+
+the dirty working tree joins as an implicit extra arm. Pairwise: a changed symbol on TWO arms is a same-symbol conflict, two arms touching different symbols in the same file is a textual risk; <landing order=...> is the fewest-conflicts-first greedy land order (ties: ref name asc). An unresolvable REF refuses loudly (exit 1, names the ref) before any archive work. ANCHORING: every arm is diffed against its OWN merge-base with HEAD, never against live HEAD — a file an arm never opened can never show up because the live line moved. head_conflicts= is what that anchor hides, kept as its own row class: symbols this arm changed that the LIVE LINE also changed since the arm forked (HEAD is not an arm, so no pairwise comparison can see it). Single-root only.
+
+**Try it**
+
+_Pairwise cross-arm conflict sites + suggested landing order (any committish works as an arm)._
+
+```
+$ ./build/ripwire . --merge-scout=main~2,main~1
+<!-- ripwire merge-scout: read-only cross-branch overlap for 2 arm(s) — same-symbol change on two arms = conflict, same-file/different-symbol = textual risk. landing = fewest-conflicts-first greedy (ties: ref name asc). Every tree is a git-archive TEMP COPY (read-only); the real working tree/refs are never touched. ANCHORING: every arm is diffed against its OWN merge base with HEAD (the working tree arm against HEAD itself), never against live HEAD — so a file an arm never opened can never appear here just because the live line moved. head_conflicts= is the one thing that anchor hides, kept as its own row class: symbols this arm changed that the LIVE LINE also changed since the arm forked, a merge fight no pairwise ARM comparison can see because HEAD is not an arm. A row carrying anchoring=file-level is a whole-file fallback for a file with zero real-body symbols (no tree-sitter symbol spans it) — counted and conflict-checked like any other row, just not attributed to a symbol inside it. -->
+<merge-scout arms="2" head="061dcf667">
+<arm ref="main~2" base="0b888ab8b" ok="1" changed="0" head_conflicts="0">
+<no-work note="no divergent work vs merge-base — see --stray-content"/>
+</arm>
+<arm ref="main~1" base="9540aff8e" ok="1" changed="0" head_conflicts="0">
+<no-work note="no divergent work vs merge-base — see --stray-content"/>
+</arm>
+<pair a="main~2" b="main~1" conflicts="0" risks="0"/>
+<landing order=""/>
+</merge-scout>
+```
+
+**Shaped by:** `--plan-lanes`, `--plan`
+
+**Caveats (stated by the binary):**
+
+- read-only cross-branch overlap: for each REF, the symbols it changed vs its merge-base with HEAD (git-archive TEMP copies — never checked out, never mutates a ref);
+- An unresolvable REF refuses loudly (exit 1, names the ref) before any archive work.
+- ANCHORING: every arm is diffed against its OWN merge-base with HEAD, never against live HEAD — a file an arm never opened can never show up because the live line moved.
+
+### `--plan-lanes=N --task=GOAL`
+
+**Answers:** PRE-HOC lane plan: BEFORE a line is written, if this task is split across N isolated worktrees (N=2..16), which lanes would COLLIDE and in what order should they land.
+
+Where --merge-scout says "these branches already conflict", this says "these lanes WOULD conflict if assigned this way" — no ref to resolve, no archive, no re-ingest. JSON on stdout, always (redirect it: > .ripwire_lanes.json); ripwire writes no file. Exit 0 whenever a plan was produced, INCLUDING when conflicts are predicted (conflicts are data, and the landing order exists to handle them); exit 1 only for refusals. A claim keys on path+scope+name, never on id= (id degrades to a bare NAME when no scope was captured, so free functions in different files would collide); id= is carried per row for addressability, null when it would be bare, with id_addressable saying so. Three separate pair classes: conflicts[] (same claim key on both lanes — git will fight), same_file_risk[] (different keys, same file, aggregated per file), contract_touch[] (one lane's claim sits in another's blast radius — an adaptation, NOT a merge conflict). The conflict test runs on CLAIMS, never on blast radii. warnings[] carries every honest limit in band with a stable code. Single-root only. AUTO-CARVE SPLITS THE RANKED SURFACE, NOT YOUR SENTENCE: if your task has enumerable parts, use --brief and write one line per part.
+
+**Try it**
+
+_Out-of-range refusal shape for the lane count._
+
+```
+$ ./build/ripwire . --plan-lanes=99 --task=x
+(empty)
+```
+
+**Caveats (stated by the binary):**
+
+- Exit 0 whenever a plan was produced, INCLUDING when conflicts are predicted (conflicts are data, and the landing order exists to handle them);
+- A claim keys on path+scope+name, never on id= (id degrades to a bare NAME when no scope was captured, so free functions in different files would collide);
+- Three separate pair classes: conflicts[] (same claim key on both lanes — git will fight), same_file_risk[] (different keys, same file, aggregated per file), contract_touch[] (one lane's claim sits in another's blast radius — an adaptation, NOT a merge conflict).
+
+### `--plan-lanes --brief=FILE`
+
+**Answers:** the explicit form of the above: one non-blank line per lane, N = the line count.
+
+Each line is ranked on its own — no community carve, no bin packing — so the lane boundaries are the ones you wrote. This is the mode whose precision is defensible; prefer it when you can. Lane isolation is a QUALITY argument, not a speed one (CAID, arXiv 2603.21489: 63.3% vs 55.5% shared, largest gains on weaker lane models — and wall clock got WORSE).
+
+**Try it**
+
+_NEW VERB, explicit form: one line per lane, lane boundaries are the ones you wrote (the defensible mode)._
+
+```
+$ ./build/ripwire . --plan-lanes --brief=<scratch>/aux/lanes_brief.txt
+add a --since filter to the doc-drift verb
+add the CLI parse arm and help text for the new filter
+write regression tests for the new filter
+```
+
+**Caveats (stated by the binary):**
+
+- Lane isolation is a QUALITY argument, not a speed one (CAID, arXiv 2603.21489: 63.3% vs 55.5% shared, largest gains on weaker lane models — and wall clock got WORSE).
 
 ### `--stray-content[=SUBSTR]`
 
@@ -2344,7 +2539,7 @@ $ ./build/ripwire . --stray-content=lane
 </stray-content>
 ```
 
-**Shaped by:** `--plan`, `--abi`, `--whereis`, `--json`, `--eval-stray`
+**Shaped by:** `--plan`, `--abi`, `--whereis`, `--limit`, `--eval-stray`
 
 **Caveats (stated by the binary):**
 
@@ -2369,7 +2564,7 @@ $ ./build/ripwire . --stray-content=r27 --plan
 </landing-plan>
 ```
 
-**Shaped by:** `--pr-context`, `--stray-content`
+**Shaped by:** `--stray-content`
 
 **Caveats (stated by the binary):**
 
@@ -2422,7 +2617,7 @@ $ ./build/ripwire . --whereis=rankGraphTeleport
 ... [23 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--with-history`, `--json`
+**Shaped by:** `--with-history`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -2528,7 +2723,7 @@ Builds a static field CO-ACCESS affinity graph (one observation per indexed C-fa
 
 **Answers:** which of this repo's DOC claims are now false.
 
-Verifies the CHECKABLE anchors in every markdown file (SUBSTR filters doc paths) against the live index and prints ONLY the ones that no longer hold, four kinds: file:line refs (why="missing-file" the path is gone, "past-eof" the file is shorter than that, "line-moved" the line is no longer inside the symbol the doc names beside it — got= names the squatter); backticked symbol mentions ("undefined"); `= N` constants ("const-value"); and `[N]` array extents ("array-extent"). LIMITS, stated because a doc-drift verb that cries wolf is worse than none — every lane deliberately UNDER-reports. A backticked name is called stale only when it occurs nowhere in any non-markdown file as an identifier token, so every library name is silent, and so is any repo constant the grammar does not tag as a definition (namespace-scope constexpr in C++, for one) — those are counted as unchecked r="not-a-definition", never as drift. A number is compared only against a DECLARATION-shaped integer literal (a decl keyword on the line, or the name opening it) that the corpus binds UNIQUELY; two values in the tree means unchecked, not drift. A `NAME = N` whose NAME appears nowhere in the code is prose, counted in prose= and never claimed as an anchor. Symbol mentions inside ``` fences are skipped (illustrative code, not claims). checked + unchecked = anchors, always: whatever was not proved says so in an <unchecked> row. Read why="undefined" precisely — it says the name is defined NOWHERE in this repo, which is not the same as DELETED: in a plan or design doc naming work not yet built, that is expected rather than rot. The file:line, const and array lanes are the high-precision ones; the mention lane is the weakest — --with-history is the fix, splitting it into why="deleted" (history removed the name; got= names the commit and date, at= the file) versus unchecked r="never-in-history" (this repo never had it, so it is not rot at all). DATED RECORDS vs ROT. An audit's finding row and a live map gone stale look identical — both are "the code moved and the doc did not" — so a failed anchor the AUTHOR DATED is split out as kind="dated-record" and counted in dated=, leaving drift= for the LIVE rot. drift + dated is every anchor that failed: a record still prints, it is never dropped. rec= names the evidence, most specific first: "line" (the line itself hedges — an at-the-time / as-of-DATE note, or a row opening with an ISO date), "block" (the nearest heading carries an ISO date), "title" (the filename or H1 does), "stamp" (a LABELLED front-matter self-date: 'Date: …', 'Written …', 'Generated: …'). WHAT THIS LANE CANNOT DO, because both were measured and rejected: it cannot use git history — 90 of this repo's 98 stale file:line anchors were CORRECT at their own doc's last commit, audit findings and live design docs alike, because "was it true when written" is the definition of BOTH a record and rot; and it will not read a bare date in the opening prose, which on this repo alone dated three LIVE documents on a day they merely mentioned. It reads dating MARKS, so a doc that is obviously an artifact-of-a-date to a human but never writes that date machine-readably reports LIVE (this repo has two). The bias is one-directional on purpose: a wrong "record" hides real rot, a wrong "live" only over-reports. An inception or freshness date ('opened …', 'Last updated …') is a claim the doc is CURRENT and never marks a record. NOT CHECKED AT ALL: prose, Status lines, dates, 'N of M done' tallies, and whether a code block's body is still correct. Always exits 0 — a report, not a gate. Root element carries at="<sha>[+dirty]" (omitted on a non-git root) — the commit these counts were computed against, so a number quoted from this report stays comparable across a HEAD that moves mid-session. --doc-drift --gateability  turn "CI stays non-gating" into a finishable to-do list: for every doc that STILL has a LIVE (undated) failing anchor, prints its path and live=N (how many of its rows a date would fix), plus projected_drift= — repo-wide drift= if EVERY listed doc got the fix. The fix is always the same one this lane already reads for rec="title"/"stamp": an ISO date in the doc's H1/filename, or a front-matter self-date line (Date:/Written:/ Generated:/Recorded:/Reviewed:/Audited:/Authored:). projected_drift= is an UPPER BOUND, not a mandate — dating a doc that is genuinely a live/current reference (not a snapshot-in-time record) would hide real rot rather than honestly classify it. Requires --doc-drift (refused loudly alone).
+Verifies the CHECKABLE anchors in every markdown file (SUBSTR filters doc paths) against the live index and prints ONLY the ones that no longer hold, four kinds: file:line refs (why="missing-file" the path is gone, "past-eof" the file is shorter than that, "line-moved" the line is no longer inside the symbol the doc names beside it — got= names the squatter); backticked symbol mentions ("undefined"); `= N` constants ("const-value"); and `[N]` array extents ("array-extent"). LIMITS, stated because a doc-drift verb that cries wolf is worse than none — every lane deliberately UNDER-reports. A backticked name is called stale only when it occurs nowhere in any non-markdown file as an identifier token, so every library name is silent, and so is any repo constant the grammar does not tag as a definition (namespace-scope constexpr in C++, for one) — those are counted as unchecked r="not-a-definition", never as drift. A number is compared only against a DECLARATION-shaped integer literal (a decl keyword on the line, or the name opening it) that the corpus binds UNIQUELY; two values in the tree means unchecked, not drift. A `NAME = N` whose NAME appears nowhere in the code is prose, counted in prose= and never claimed as an anchor. Symbol mentions inside ``` fences are skipped (illustrative code, not claims). checked + unchecked = anchors, always: whatever was not proved says so in an <unchecked> row. Read why="undefined" precisely — it says the name is defined NOWHERE in this repo, which is not the same as DELETED: in a plan or design doc naming work not yet built, that is expected rather than rot. The file:line, const and array lanes are the high-precision ones; the mention lane is the weakest — --with-history is the fix, splitting it into why="deleted" (history removed the name; got= names the commit and date, at= the file) versus unchecked r="never-in-history" (this repo never had it, so it is not rot at all). DATED RECORDS vs ROT. An audit's finding row and a live map gone stale look identical — both are "the code moved and the doc did not" — so a failed anchor the AUTHOR DATED is split out as kind="dated-record" and counted in dated=, leaving drift= for the LIVE rot. drift + dated is every anchor that failed: a record still prints, it is never dropped. rec= names the evidence, most specific first: "line" (the line itself hedges — an at-the-time / as-of-DATE note, or a row opening with an ISO date), "block" (the nearest heading carries an ISO date), "title" (the filename or H1 does), "stamp" (a LABELLED front-matter self-date: 'Date: …', 'Written …', 'Generated: …'). WHAT THIS LANE CANNOT DO, because both were measured and rejected: it cannot use git history — 90 of this repo's 98 stale file:line anchors were CORRECT at their own doc's last commit, audit findings and live design docs alike, because "was it true when written" is the definition of BOTH a record and rot; and it will not read a bare date in the opening prose, which on this repo alone dated three LIVE documents on a day they merely mentioned. It reads dating MARKS, so a doc that is obviously an artifact-of-a-date to a human but never writes that date machine-readably reports LIVE (this repo has two). The bias is one-directional on purpose: a wrong "record" hides real rot, a wrong "live" only over-reports. An inception or freshness date ('opened …', 'Last updated …') is a claim the doc is CURRENT and never marks a record. NOT CHECKED AT ALL: prose, Status lines, dates, 'N of M done' tallies, and whether a code block's body is still correct. Always exits 0 — a report, not a gate. Root element carries at="<sha>[+dirty]" (omitted on a non-git root) — the commit these counts were computed against, so a number quoted from this report stays comparable across a HEAD that moves mid-session.
 
 **Try it**
 
@@ -2553,13 +2748,49 @@ $ ./build/ripwire . --doc-drift
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--recall`, `--comment-coherence`, `--with-history`, `--plan-lint`, `--json`
+**Shaped by:** `--recall`, `--comment-coherence`, `--with-history`, `--plan-lint`, `--limit`
 
 **Caveats (stated by the binary):**
 
 - LIMITS, stated because a doc-drift verb that cries wolf is worse than none — every lane deliberately UNDER-reports.
 - A `NAME = N` whose NAME appears nowhere in the code is prose, counted in prose= and never claimed as an anchor.
 - Symbol mentions inside ``` fences are skipped (illustrative code, not claims).
+
+### `--doc-drift --gateability`
+
+**Answers:** turn "CI stays non-gating" into a finishable to-do list: for every doc that STILL has a LIVE (undated) failing anchor, prints its path and live=N (how many of its rows a date would fix), plus projected_drift= — repo-wide drift= if EVERY listed doc got the fix.
+
+The fix is always the same one this lane already reads for rec="title"/"stamp": an ISO date in the doc's H1/filename, or a front-matter self-date line (Date:/Written:/ Generated:/Recorded:/Reviewed:/Audited:/Authored:). projected_drift= is an UPPER BOUND, not a mandate — dating a doc that is genuinely a live/current reference (not a snapshot-in-time record) would hide real rot rather than honestly classify it. Requires --doc-drift (refused loudly alone).
+
+**Try it**
+
+_Which of this repo's doc claims are now false. CHANGED: row attribute at= renamed to tgt= (at= is now only the root sha stamp)._
+
+```
+$ ./build/ripwire . --doc-drift
+<!-- ripwire doc drift: the CHECKABLE anchors in this repo's markdown, verified against the live index, reporting only the ones that no longer hold. Four kinds: file:line refs (missing-file / past-eof / line-moved, the last only when the doc names a symbol on that line), backticked symbol mentions (undefined), `= N` constants and `[N]` array extents (value/extent vs the declaration). Every lane under reports on purpose: a name is stale only when it occurs NOWHERE in the code as an identifier, and a number is compared only against a declaration shaped literal the corpus binds uniquely. checked + unchecked == anchors: nothing is dropped silently, and the unchecked rows say what was not proved. Read why="undefined" precisely: it says the name is defined NOWHERE in this repo, which is not the same as DELETED — in a plan or design doc naming work not yet built, that is expected rather than rot. Run with the with_history flag to have git history separate the two: the lane then reports why="deleted" with the commit that removed the name, and downgrades a name this repo never had to unchecked r="never in history". A failed anchor the AUTHOR DATED is split out as kind="dated-record" and counted in dated= rather than drift=: an audit finding, a ledger row or an as-of-DATE hedge records what was true then, so drift= is the LIVE rot and drift + dated is every anchor that no longer holds. rec= names the evidence (line / block / title / stamp), and a doc that never writes its own date anywhere a machine can read reports LIVE — the lane reads dating marks, it does not guess genre. Attribute vocabulary, one name one meaning: at= appears ONLY on this root element and is the commit the run was measured against (short sha, plus dirty when the tree had uncommitted changes); ref= is the anchor as the DOC writes it; got= is what the corpus actually says; and tgt= is the corpus SITE backing got= (a path, or path:line). On the <a/> rows k= and kind= are DIFFERENT things and both are kept: k= is the ANCHOR kind (file-line / symbol / const / array), kind= is the record classification (dated-record). k= cannot be renamed to kind= here for the obvious reason that kind= is already taken on the same element; note that in the ranked map the same k= spelling is a PageRank score instead. Docs are ordered by LIVE drift descending (path breaks ties), so the worst rot leads and a fully dated doc, which is drift zero by construction, sinks on the same key. Prose claims, Status lines and dates are NOT checked. A `path:A-B` RANGE gets one more structural check: why="range-straddles" fires when A's innermost symbol does not reach B (got= then names whatever occupies B instead, tgt= that site), regardless of whether the doc names a symbol. weak-file-line, the one unchecked reason that names no symbol, gets a FREE disclosure instead of a verdict: <weak-file-line p= n=> groups, one per doc, list every such anchor whose line DOES sit inside an indexed symbol, and each <w> row's resolves-to= names it — the verb still does not know if that is the symbol the doc meant. This section sits beside, not inside, the <doc> rows: a doc can appear in it while still counting toward clean=, and every row it lists still counts once in the unchecked r="weak-file-line" tally below. FOUR COUNTERS on this element name four DIFFERENT populations, stated here because one of them openly disagrees with a number the map reports elsewhere. docs= is the DOCUMENTS scanned for anchors (markdown by extension, after any filter); it is the denominator of the doc rows below. clean= is how many of those docs came out with NO failed anchor — drift and dated both zero for that doc — so docs minus clean is exactly the number of <doc> rows below, before any paging window is applied. A doc whose anchors were all unchecked, or all prose, is clean here: clean means nothing was found rotten, not that everything was verified. prose= is the anchors dropped as prose, so it is SUBTRACTED from anchors= rather than added to it, and the verb does not claim to have checked them; only the VALUE shapes (`= N` and `[N]`) can be dropped this way, and the drop is itself a corpus lookup — the name was searched for and not found in code — not a pre-check guess. corpus= is the file population the anchors were checked AGAINST, and it is its OWN population rather than a relation to the map's files=: the indexed files this walk could re-read, PLUS a fixed set of config, shader and build-file extensions (CMakeLists.txt, .cmake, .yml/.yaml, .toml, .metal/.glsl/.hlsl and the like — an extension whitelist, never a content sniff), MINUS every file this walk could not open or that exceeded its own 4 MiB read ceiling, which is dropped silently and never counted. So corpus= is USUALLY larger than files= and that is the normal case, but it is not always: a crawl run whose max file size ceiling was raised above 4 MiB indexes files this walk still refuses, and a file the index lists but this run cannot open is counted by one and not the other. Neither number is wrong. corpus="0" means the corpus scan never ran at all, which happens only when the docs raised no anchor SHAPE whatsoever — prose ones included — so anchors="0" beside a non-zero prose= still scanned, and still reports the corpus it scanned. -->
+<doc-drift docs="135" clean="120" anchors="1537" checked="597" unchecked="940" drift="44" dated="19" prose="9" corpus="1356" at="061dcf667">
+<doc p="docs/COMMANDS.md" anchors="74" checked="21" drift="21" dated="0">
+<a k="const" l="2372" c="53" why="const-value" ref="kDriftedLimit = 10" want="10" got="15" tgt="test/docdriftfix/code.h:11"/>
+<a k="array" l="2373" c="54" why="array-extent" ref="kDriftedTable[16]" want="16" got="18" tgt="test/docdriftfix/code.h:14"/>
+<a k="const" l="2374" c="53" why="const-value" ref="kDriftedLimit = 10" want="10" got="15" tgt="test/docdriftfix/code.h:11"/>
+<a k="array" l="2375" c="54" why="array-extent" ref="kDriftedTable[16]" want="16" got="18" tgt="test/docdriftfix/code.h:14"/>
+<a k="const" l="2376" c="53" why="const-value" ref="kDriftedLimit = 10" want="10" got="15" tgt="test/docdriftfix/code.h:11"/>
+<a k="const" l="2377" c="53" why="const-value" ref="kDriftedLimit = 10" want="10" got="15" tgt="test/docdriftfix/code.h:11"/>
+<a k="array" l="2378" c="54" why="array-extent" ref="kDriftedTable[16]" want="16" got="18" tgt="test/docdriftfix/code.h:14"/>
+<a k="const" l="2379" c="53" why="const-value" ref="kDriftedLimit = 10" want="10" got="15" tgt="test/docdriftfix/code.h:11"/>
+<a k="array" l="2380" c="54" why="array-extent" ref="kDriftedTable[16]" want="16" got="18" tgt="test/docdriftfix/code.h:14"/>
+<a k="const" l="2381" c="53" why="const-value" ref="kDriftedLimit = 10" want="10" got="15" tgt="test/docdriftfix/code.h:11"/>
+<a k="array" l="2382" c="54" why="array-extent" ref="kDriftedTable[16]" want="16" got="18" tgt="test/docdriftfix/code.h:14"/>
+... [17 more line(s); run it to see the whole thing]
+```
+
+**Shaped by:** `--recall`, `--comment-coherence`, `--with-history`, `--plan-lint`, `--limit`
+
+**Caveats (stated by the binary):**
+
+- projected_drift= is an UPPER BOUND, not a mandate — dating a doc that is genuinely a live/current reference (not a snapshot-in-time record) would hide real rot rather than honestly classify it.
+- Requires --doc-drift (refused loudly alone).
 
 ### `--with-history`
 
@@ -2633,7 +2864,7 @@ AddressSanitizer:DEADLYSIGNAL
 ==41337==ABORTING
 ```
 
-**Shaped by:** `--top-k`, `--token-budget`, `--help-task`, `--compress`, `--plan-lint`, `--run-trace`, `--json`
+**Shaped by:** `--top-k`, `--token-budget`, `--help-task`, `--compress`, `--plan-lint`, `--run-trace`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -2653,11 +2884,22 @@ Runs CMD under `sh -c` (the make trust model: your user, your environment, stdin
 
 **Answers:** cap for --run-trace's command (default 600 s;
 
-always disclosed as timeout_s=). A command still running at the cap has its whole process group killed and is reported timed_out="1" — an honest TIMEOUT, never an empty success. Modifies --run-trace only; refused loudly alone. --note-add="TARGET: text"  pin a field note (write-side memory) to TARGET — a canonical id (path::scope::name, as --for/--expand emit it) or a file path — in the committed, sorted .ripwire_notes at the repo root. The date is git's committer clock (HEAD), not wall time, so the line is deterministic; prints the exact written line. Also STAMPS the writing repo's HEAD sha + branch onto the note (a "done"/"fixed" claim is then anchored to the commit it was true at) — a non-git root or an unresolvable HEAD writes the plain unstamped line rather than a wrong sha. MUTATES one file; single-root only. text with no causal/decision marker ("because"/"chose"/"over"/"instead"/etc.) gets a gentle stderr tip toward the decision shape — never a refusal, the add always proceeds.
+always disclosed as timeout_s=). A command still running at the cap has its whole process group killed and is reported timed_out="1" — an honest TIMEOUT, never an empty success. Modifies --run-trace only; refused loudly alone.
 
 **Caveats (stated by the binary):**
 
 - A command still running at the cap has its whole process group killed and is reported timed_out="1" — an honest TIMEOUT, never an empty success.
+
+### `--note-add="TARGET: text"`
+
+**Answers:** pin a field note (write-side memory) to TARGET — a canonical id (path::scope::name, as --for/--expand emit it) or a file path — in the committed, sorted .ripwire_notes at the repo root.
+
+The date is git's committer clock (HEAD), not wall time, so the line is deterministic; prints the exact written line. Also STAMPS the writing repo's HEAD sha + branch onto the note (a "done"/"fixed" claim is then anchored to the commit it was true at) — a non-git root or an unresolvable HEAD writes the plain unstamped line rather than a wrong sha. MUTATES one file; single-root only. text with no causal/decision marker ("because"/"chose"/"over"/"instead"/etc.) gets a gentle stderr tip toward the decision shape — never a refusal, the add always proceeds.
+
+**Shaped by:** `--no-redact`
+
+**Caveats (stated by the binary):**
+
 - text with no causal/decision marker ("because"/"chose"/"over"/"instead"/etc.) gets a gentle stderr tip toward the decision shape — never a refusal, the add always proceeds.
 
 ### `--notes`
@@ -2921,7 +3163,7 @@ $ ./build/ripwire --scan-skills=skills
 
 **Answers:** ranking signal (churn = git change-frequency prior, and stamps its own map with rank_by/window/at so it cannot pass for the structural one;
 
-churn-decay = the same prior with each commit weighted 0.5^(age_days/90) instead of counted equally, so recent edits outweigh old ones. Its age clock is HEAD's OWN commit timestamp, never the wall clock, so the default (whole-history) run is byte-stable for a fixed tree; the half-life is disclosed in window=. default pagerank) --format=xml|columnar|rows output shape for the FLAT list verbs (--callers/--callees/--uses/--impact): xml (default, byte-identical) or columnar (a <paths> table + parallel arrays: fields= path,name,line,kind on --callers/--callees/--impact, path,line,role,in_id on --uses — the emitted block's own legend states the zip/n=/&#44;-escape contract; ~15-60% fewer tokens on multi-row results, by de-duplicating the repeated per-row markup + paths; results of a few rows can be LARGER — the paths/cols scaffold has a fixed cost). rows is an alias for columnar. Any OTHER verb refuses (exit 1) — it has no row list to re-encode. Map is unaffected.
+churn-decay = the same prior with each commit weighted 0.5^(age_days/90) instead of counted equally, so recent edits outweigh old ones. Its age clock is HEAD's OWN commit timestamp, never the wall clock, so the default (whole-history) run is byte-stable for a fixed tree; the half-life is disclosed in window=. default pagerank)
 
 **Try it**
 
@@ -2952,6 +3194,26 @@ $ ./build/ripwire . --rank-by=churn --top-k=5
 
 - ranking signal (churn = git change-frequency prior, and stamps its own map with rank_by/window/at so it cannot pass for the structural one;
 - Its age clock is HEAD's OWN commit timestamp, never the wall clock, so the default (whole-history) run is byte-stable for a fixed tree;
+
+### `--format=xml|columnar|rows`
+
+**Answers:** output shape for the FLAT list verbs (--callers/--callees/--uses/--impact): xml (default, byte-identical) or columnar (a <paths> table + parallel arrays: fields= path,name,line,kind on --callers/--callees/--impact, path,line,role,in_id on --uses — the emitted block's own legend states the zip/n=/&#44;-escape contract;
+
+~15-60% fewer tokens on multi-row results, by de-duplicating the repeated per-row markup + paths; results of a few rows can be LARGER — the paths/cols scaffold has a fixed cost). rows is an alias for columnar. Any OTHER verb refuses (exit 1) — it has no row list to re-encode. Map is unaffected.
+
+**Try it**
+
+_CHANGED: unknown --format value named + supported set listed._
+
+```
+$ ./build/ripwire . --callers=rankGraphTeleport --format=bogus
+(empty)
+```
+
+**Shaped by:** `--top-k`, `--pack-signatures`, `--json`, `--limit`
+
+**Caveats (stated by the binary):**
+
 - Any OTHER verb refuses (exit 1) — it has no row list to re-encode.
 
 ### `--format=candidates`
@@ -2969,7 +3231,7 @@ $ ./build/ripwire . --callers=rankGraphTeleport --format=bogus
 (empty)
 ```
 
-**Shaped by:** `--top-k`, `--pack-signatures`, `--rank-by`, `--json`
+**Shaped by:** `--top-k`, `--pack-signatures`, `--json`, `--limit`
 
 ### `--legend=full|compact`
 
@@ -2985,7 +3247,7 @@ full is byte-identical to the default; compact keeps every data/completeness att
 
 **Answers:** machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr names 1:1 — supported for the default map, --for, --pack-task, --callers/--callees/ --impact, --quality-delta, --test-gate (the CI/scripting verbs).
 
-Every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML. Deterministic: same 2-run byte-diff + stable key order contract as the XML. --limit=N --offset=M       paginate a high-cardinality verb. HONORED by: --deps --callers --callees --tree --lint --hotspots --clones --cochange --owners --communities --community --doc-drift --whereis --grep/--regex --match --pattern --impact --uses --exercises --seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate --readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence --naming-consistency --safe-delete. Emit at most N rows, skipping the first M; N overrides the verb's own display cap (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40 impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio symbol rows, 40 nonlocal-state rows, 200 graph-query rows / --top-k). With --offset alone (no --limit) the verb's own default page size applies and the root discloses limit="0" — on OUTPUT that 0 means 'no explicit --limit', never a zero-row page (the flag itself refuses --limit=0). Deterministic seams (rows are already sorted) so --offset=N is the exact continuation of the previous --limit=N page. The root element then carries shown= capped= total= has_more= next_offset= offset= limit= — loop until has_more="0" — EXCEPT the verbs with TWO INDEPENDENT listings, which carry the noun-prefixed form instead (one shown= could only describe one): --test-gate shown_tests=/tests_capped= + shown_untested=/untested_capped=, --communities shown_modules=/modules_capped= + shown_bridges=/bridges_capped=, --ensemble and --context-ratio shown_syms=/syms_capped= + shown_files=/files_capped=; the window takes the PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every page, complete). Any verb NOT in that list REFUSES both flags (exit 1) rather than accepting and ignoring them: budget/top-k verbs (--for/--recall/--pack-task/--from-trace/ --expand/--outline/--pack-signatures/--format=candidates) are shaped by --top-k/--max-tokens/--token-budget, not a page; the rest (--path/--connect/ --around/--exemplar/--report/--mermaid/--map-diff/--metrics and the default map) answer with a single fixed-shape result that has no row list to window at all.
+Every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML. Deterministic: same 2-run byte-diff + stable key order contract as the XML.
 
 **Try it**
 
@@ -3001,8 +3263,36 @@ $ ./build/ripwire . --hotspots --json
 **Caveats (stated by the binary):**
 
 - Every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML.
-- --limit=N --offset=M       paginate a high-cardinality verb.
+
+### `--limit=N --offset=M`
+
+**Answers:** paginate a high-cardinality verb.
+
+HONORED by: --deps --callers --callees --tree --lint --hotspots --clones --cochange --owners --communities --community --doc-drift --whereis --grep/--regex --match --pattern --impact --uses --exercises --seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate --readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence --naming-consistency --safe-delete. Emit at most N rows, skipping the first M; N overrides the verb's own display cap (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40 impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio symbol rows, 40 nonlocal-state rows, 200 graph-query rows / --top-k). With --offset alone (no --limit) the verb's own default page size applies and the root discloses limit="0" — on OUTPUT that 0 means 'no explicit --limit', never a zero-row page (the flag itself refuses --limit=0). Deterministic seams (rows are already sorted) so --offset=N is the exact continuation of the previous --limit=N page. The root element then carries shown= capped= total= has_more= next_offset= offset= limit= — loop until has_more="0" — EXCEPT the verbs with TWO INDEPENDENT listings, which carry the noun-prefixed form instead (one shown= could only describe one): --test-gate shown_tests=/tests_capped= + shown_untested=/untested_capped=, --communities shown_modules=/modules_capped= + shown_bridges=/bridges_capped=, --ensemble and --context-ratio shown_syms=/syms_capped= + shown_files=/files_capped=; the window takes the PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every page, complete). Any verb NOT in that list REFUSES both flags (exit 1) rather than accepting and ignoring them: budget/top-k verbs (--for/--recall/--pack-task/--from-trace/ --expand/--outline/--pack-signatures/--format=candidates) are shaped by --top-k/--max-tokens/--token-budget, not a page; the rest (--path/--connect/ --around/--exemplar/--report/--mermaid/--map-diff/--metrics and the default map) answer with a single fixed-shape result that has no row list to window at all.
+
+**Try it**
+
+_Pagination: 3 items, skipping the first 3 (deterministic seams)._
+
+```
+$ ./build/ripwire . --hotspots --limit=3 --offset=3
+<!-- ripwire hotspots: maintenance-pain = complexity × recent churn (window=12mo). churn=commits touching the file; ccx=Σ cognitive complexity; score=churn×ccx; top=worst function. files= is the DENOMINATOR ranked= is drawn from, and a hotspot needs both factors nonzero, so ranked= + unranked_no_churn= + unranked_no_complexity= = files= exactly. unranked_no_complexity= is a file with commits but no function or method to score (a pure declaration header, markdown, config). unranked_no_churn= is a file no in-window commit was attributed to — and it CONFLATES two cases this verb cannot tell apart: a genuinely quiet file, and one whose path the git-to-index join never bound (a rename, an exclusion, or a spelling the join could not match), which scores zero for a reason that is not about the file. Treat it as an upper bound on quietness, not a measure of it. raise the default cap with limit=N (offset=M pages) -->
+<!-- at= is the git commit these numbers were computed at; a trailing +dirty means the working tree differed from that commit, so the numbers describe the tree, not the commit -->
+<!-- root= on this element is the crawl root every p= below is RELATIVE to (single-root runs only; absent => p= is the path ingest itself used, unchanged). -->
+<hotspots window="12mo" files="1329" ranked="336" unranked_no_churn="0" unranked_no_complexity="993" shown="3" capped="1" total="336" has_more="1" next_offset="6" offset="3" limit="3" root="." at="061dcf667">
+<f p="src/graph.h" churn="35" ccx="1531" score="53585" top="buildGraph" top_ccx="764" top_l="722"/>
+<f p="src/quality.h" churn="65" ccx="769" score="49985" top="computeDelta" top_ccx="236" top_l="3249"/>
+<f p="src/cli.h" churn="92" ccx="419" score="38548" top="parseArgs" top_ccx="187" top_l="3297"/>
+</hotspots>
+```
+
+**Shaped by:** `--graph-query`, `--exercises`, `--community`
+
+**Caveats (stated by the binary):**
+
 - Emit at most N rows, skipping the first M;
+- With --offset alone (no --limit) the verb's own default page size applies and the root discloses limit="0" — on OUTPUT that 0 means 'no explicit --limit', never a zero-row page (the flag itself refuses --limit=0).
+- Deterministic seams (rows are already sorted) so --offset=N is the exact continuation of the previous --limit=N page.
 
 ### `--exclude=SUBSTR`
 
@@ -3062,7 +3352,7 @@ $ ./build/ripwire . --map-diff --top-k=5
 ... [7 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--json`
+**Shaped by:** `--json`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -3326,7 +3616,7 @@ ripwire --eval-retrieval  (known-item, 150 doc-commented symbols; gold is in-cor
 
 **Answers:** labelled skill-ROUTING eval: ROOT is a skills directory (one SKILL.md per subdir);
 
-FILE is TSV `prompt<TAB>skill[,skill]|none<TAB>provenance`. Scores deterministic selectors (keyword overlap = the trivial baseline, BM25 over descriptions/full text, name match, the routed --for ranker) on top-1-in- permitted-set plus positive/negative separation (AUC) — does the right skill fire, does every skill stay quiet on off-topic prompts. Ambiguous moments carry a permitted SET; `none` rows are first-class. -h, --help                 this catalog -v, --version              print the version + short build info, exit 0
+FILE is TSV `prompt<TAB>skill[,skill]|none<TAB>provenance`. Scores deterministic selectors (keyword overlap = the trivial baseline, BM25 over descriptions/full text, name match, the routed --for ranker) on top-1-in- permitted-set plus positive/negative separation (AUC) — does the right skill fire, does every skill stay quiet on off-topic prompts. Ambiguous moments carry a permitted SET; `none` rows are first-class.
 
 **Try it**
 
@@ -3343,6 +3633,27 @@ what is the weather in Paris	none	neg
 **Caveats (stated by the binary):**
 
 - Ambiguous moments carry a permitted SET;
+
+### `-h, --help`
+
+**Answers:** this catalog
+
+**Shaped by:** `--color-by`, `--callers`, `--callees`, `--affected`, `--expand`, `--metrics`, `--nonlocal-state`, `--cochange-groups`
+
+### `-v, --version`
+
+**Answers:** print the version + short build info, exit 0
+
+**Try it**
+
+_Version + short build info._
+
+```
+$ ./build/ripwire --version
+ripwire 0.3.8 (dev, AppleClang 21.0.0.21000101)
+```
+
+**Shaped by:** `--impact`, `--verify`, `--metrics`, `--deps`, `--naming-locals`, `--arch`, `--dry-run`, `--doc-drift`
 
 ---
 
