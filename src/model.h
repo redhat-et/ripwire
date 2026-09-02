@@ -37,14 +37,21 @@ template<class K, class V> using HashMap = ankerl::unordered_dense::map<K, V>;
 using NodeId = std::uint32_t;
 inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 
-// symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro").
+// symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro|field").
 // Macro (the macro-edges round) is APPENDED before Other so no existing kind renumbers: a preprocessor
 // `#define` definition (@definition.macro — C/C++ preproc_def/preproc_function_def, Rust macro_definition).
 // Previously the C/Rust captures mapped to Function, which read as a lie on every t= surface; the kind now
 // says what the thing IS. A macro symbol is DISCLOSED-DEGRADED by construction: its body is unparsed
 // replacement text (edges out of it come from a lexical scan, see ingest.cpp captureMacroBodyCalls), and a
 // call-shaped invocation of its name is a role="macro" edge, never role="call" (RefRole::Macro below).
-enum class SymKind : std::uint8_t { Function, Method, Class, Struct, Interface, Var, Section, Macro, Other };
+// Field (the member-variable round, card A3) is APPENDED after Macro for the same reason: a per-object data
+// member of a class/struct/union (C/C++: a non-static field_declaration; Python: the first `self.x = …` in a
+// method, or an annotated class-body attribute). A field is a symbol with an OWNER-QUALIFIED canonical id
+// (`path::Owner::field`, selector spelling `Owner.field`), NEVER a call-graph node with edges: no reference
+// ever resolves to it through buildGraph, so PageRank is unchanged; its use-sites live in the --uses index,
+// resolved per site (graph.h collectFieldUseSites). Static data members are NOT fields (a class-static
+// CONSTANT keeps its t="var" capture; a mutable static member is not extracted — disclosed).
+enum class SymKind : std::uint8_t { Function, Method, Class, Struct, Interface, Var, Section, Macro, Field, Other };
 
 inline const char* symTag( SymKind k ) noexcept
 {
@@ -58,6 +65,7 @@ inline const char* symTag( SymKind k ) noexcept
         case SymKind::Var:       return "var";
         case SymKind::Section:   return "sec";    // markdown heading (doc structure; isolated in the graph)
         case SymKind::Macro:     return "macro";  // #define (disclosed-degraded: replacement text, not a parsed body)
+        case SymKind::Field:     return "field";  // member variable (id=path::Owner::field; use-sites via --uses=Owner.field)
         default:                 return "other";
     }
 }
@@ -489,6 +497,12 @@ enum class LocalBindKind : std::uint8_t
                //     for suppressShadowedReferences below, NOTHING else: buildGraph's Rule-2 tables skip it
                //     (kind != Type) and the L3 fn tables skip it (typeName empty). APPENDED so no persisted
                //     kind value renumbers (RawBind rides kind through the cache as a u8).
+    ParamType, // member-variable round (card A3): a C++/ObjC function DEFINITION parameter's WRITTEN type
+               //     (`void f( Counter& c )` → c:Counter), so `c.count` resolves to Counter.count in the field
+               //     use-site index (graph.h collectFieldUseSites). Consumed THERE ONLY, deliberately: Rule 2's
+               //     call narrowing (kind == Type) does not read it, so no call edge changes; the L3 fn tables
+               //     skip it by kind; shadow suppression already holds the parameter's VarDecl record.
+               //     APPENDED for the same cache reason as VarDecl.
 };
 
 inline constexpr const char* kFnBindLambdaTarget  = "(lambda)";    // parens are illegal in identifiers, so

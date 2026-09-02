@@ -637,23 +637,10 @@ inline bool spanContains( TSNode outer, TSNode inner ) noexcept
 // reads. We climb through subscript/field chains while `id` is the base object (the leading sub-expression
 // that shares its parent's start byte — the base always begins at the whole `a[i]`/`p->f` expression's first
 // byte; the index/member begin later), then test the assignment/update parent of the climbed node.
-inline bool isWriteTarget( TSNode id ) noexcept
+// the TAIL both write-target tests share: is `node` (already climbed to the outermost expression it is the
+// base of) an update operand, or exactly the `left` side of an assignment?
+inline bool isUpdateOrAssignmentTarget( TSNode node ) noexcept
 {
-    TSNode node = id;
-    for( TSNode up = ts_node_parent( node ); !ts_node_is_null( up ); up = ts_node_parent( node ) )
-    {
-        const char* ut = ts_node_type( up );
-        const bool isSubscriptOrField =    std::strcmp( ut, "subscript_expression" ) == 0   // C/C++ `a[i]`
-                                        || std::strcmp( ut, "field_expression" ) == 0        // C/C++ `p->f`, `a.b`
-                                        || std::strcmp( ut, "subscript" ) == 0               // Python `a[i]`
-                                        || std::strcmp( ut, "attribute" ) == 0;              // Python `a.b`
-        if( !( isSubscriptOrField && ts_node_start_byte( up ) == ts_node_start_byte( node ) ) )
-        {
-            break;                              // `id` is the index/member, or the chain ended → stop climbing
-        }
-        node = up;                              // `id` is the base object → it inherits the whole a[i]/p->f target-ness
-    }
-
     const TSNode parent = ts_node_parent( node );
     if( ts_node_is_null( parent ) )
     {
@@ -677,6 +664,32 @@ inline bool isWriteTarget( TSNode id ) noexcept
         return !ts_node_is_null( lhs ) && sameSpan( lhs, node );
     }
     return false;
+}
+
+// climb from `node` to the outermost expression it is the BASE of: through subscripts always (`a[i]` — the
+// element write is the container's), and through member accesses only when `throughMemberAccess` (`a.b`:
+// a bare identifier inherits the whole chain's target-ness; a member access does NOT climb further, because
+// in `a.b.c = 1` only `c` is written and `b` is traversed).
+inline TSNode outermostBaseOf( TSNode node, bool throughMemberAccess ) noexcept
+{
+    for( TSNode up = ts_node_parent( node ); !ts_node_is_null( up ); up = ts_node_parent( node ) )
+    {
+        const char* ut = ts_node_type( up );
+        const bool isSubscript = std::strcmp( ut, "subscript_expression" ) == 0 || std::strcmp( ut, "subscript" ) == 0;   // C/C++ · Python `a[i]`
+        const bool isMember    = std::strcmp( ut, "field_expression" ) == 0 || std::strcmp( ut, "attribute" ) == 0;       // C/C++ `p->f`,`a.b` · Python `a.b`
+        const bool climbs      = isSubscript || ( throughMemberAccess && isMember );
+        if( !( climbs && ts_node_start_byte( up ) == ts_node_start_byte( node ) ) )
+        {
+            break;                              // `node` is the index/member, or the chain ended → stop climbing
+        }
+        node = up;                              // `node` is the base object → it inherits the whole a[i]/p->f target-ness
+    }
+    return node;
+}
+
+inline bool isWriteTarget( TSNode id ) noexcept
+{
+    return isUpdateOrAssignmentTarget( outermostBaseOf( id, /*throughMemberAccess=*/ true ) );
 }
 
 // is `id` the callee/function-position name of a call (already captured as a Call ref by the tags query)?
@@ -926,30 +939,92 @@ inline bool isTypeDeclarationSite( TSNode id ) noexcept
     return false;
 }
 
+// member-variable round (card A3): is `id` the FIELD half of a member access — C/C++ `a.f` / `p->f`
+// (field_expression, `.field`), Python `o.f` (attribute, `.attribute`)? Returns the access node, or a null
+// node. The receiver half (`a`, `p`, `o`) is NOT this shape and keeps its bare-identifier treatment.
+inline TSNode memberAccessOfField( TSNode id, Lang lang ) noexcept
+{
+    const TSNode parent = ts_node_parent( id );
+    if( ts_node_is_null( parent ) || !isMemberAccessNode( ts_node_type( parent ), lang ) )
+    {
+        return TSNode{};
+    }
+    const TSNode fieldNode = memberAccessField( parent, lang );
+    return ( !ts_node_is_null( fieldNode ) && sameSpan( fieldNode, id ) ) ? parent : TSNode{};
+}
+
+// The member twin of isWriteTarget: the ACCESS node (`a.f`), climbing only through subscripts (`a.buf[i] = v`
+// writes the member array, the same rule the bare form applies to `arr[i] = v`), is an update operand or the
+// LEFT side of an assignment. Deliberately NOT climbed through a further member access: in `a.b.c = 1` only
+// `c` is written and `b` is traversed — a READ. Pass-by-non-const-reference (`mutate( a.f )`) and address-of
+// (`&a.f`) are reads here; a write through either is a disclosed miss, never a claim.
+inline bool isMemberWriteTarget( TSNode access ) noexcept
+{
+    return isUpdateOrAssignmentTarget( outermostBaseOf( access, /*throughMemberAccess=*/ false ) );
+}
+
+// What the value-use visitor accepts at one node, decided ONCE: `accept` false ⇒ nothing to record; else
+// `typeMention` marks the role=Type set and `access` is the member-access node when the identifier is the
+// FIELD half of `a.f` / `p->f` / Python `o.f` (null for a bare identifier).
+struct UseSiteShape
+{
+    bool   accept      = false;
+    bool   typeMention = false;
+    TSNode access {};
+};
+
+inline UseSiteShape classifyUseSite( TSNode n, const char* t, Lang lang ) noexcept
+{
+    UseSiteShape shape;
+    shape.typeMention = isTypeMentionNode( t );
+    const bool isFieldIdent = std::strcmp( t, "field_identifier" ) == 0;
+    if( !shape.typeMention && !isFieldIdent && std::strcmp( t, "identifier" ) != 0 )
+    {
+        return shape;
+    }
+    if( isCallCallee( n ) || isNonValueContext( n ) || ( shape.typeMention && isTypeDeclarationSite( n ) ) )
+    {
+        return shape;
+    }
+    shape.access = shape.typeMention ? TSNode{} : memberAccessOfField( n, lang );
+    shape.accept = !isFieldIdent || !ts_node_is_null( shape.access );   // a field_identifier outside a member access is a declaration site
+    return shape;
+}
+
+// The receiver shape of a member-access use, stamped on the ref so graph.h collectFieldUseSites can resolve
+// the site to an OWNER: recv=ThisObj/NamedVar/FieldOfThis/FieldOfVar — on a Read/Write ref, recv != None
+// MEANS "a member access", and FieldOfVar with an empty recvVar means the receiver was too rich to classify.
+inline void stampMemberReceiver( RawRef& r, TSNode access, Lang lang, std::string_view src )
+{
+    const TSNode recvNode = memberAccessReceiver( access, lang );
+    RecvShape    rs       = ts_node_is_null( recvNode ) ? RecvShape{} : classifyReceiver( recvNode, lang, src, /*allowChain=*/ true );
+    r.recv      = rs.kind == RecvKind::None ? RecvKind::FieldOfVar : rs.kind;   // a member access is never a bare name
+    r.recvVar   = std::move( rs.var );
+    r.fieldName = std::move( rs.field );
+}
+
 void usesVisitNode( UseCtx& cx, TSNode n, const char* t )
 {
     FUSEPROBE_BUMP( kUses );
-    // Two accept sets, one visitor. (1) bare value identifiers (C++ `identifier`, Python `identifier`) →
-    // role=Read/Write, unchanged. field_identifier reads (`obj.field` non-call) are still intentionally out
-    // of scope — member-field use is a richer relation we keep for a later pass. (2) bare TYPE mentions
+    // Three accept sets, one visitor. (1) bare value identifiers (C++ `identifier`, Python `identifier`) →
+    // role=Read/Write, unchanged. (2) the FIELD half of a non-call member access (`obj.field` / `p->field` /
+    // Python `o.field` — C/C++ `field_identifier`, Python `identifier` under an `attribute`) → role=Read/Write
+    // with the RECEIVER shape recorded on the ref (recv=ThisObj/NamedVar/FieldOfThis/FieldOfVar — on a
+    // Read/Write ref, recv != None MEANS "a member access", and FieldOfVar with an empty recvVar means the
+    // receiver was too rich to classify), so graph.h collectFieldUseSites can resolve the site to an OWNER
+    // instead of matching the bare name (the member-variable round, card A3). A field_identifier anywhere else
+    // (a declarator, a designated initializer) is a declaration, never a use. (3) bare TYPE mentions
     // (`type_identifier`) → role=Type: a type named in a signature, a declaration or a template argument IS
-    // a dependency on that type, and it was captured by NOTHING before this. Both roles stay OUT of the call
-    // graph (buildGraph admits Call and Macro only), so the default ranked map is byte-identical either way.
-    const bool typeMention = isTypeMentionNode( t );
-    if( !typeMention && std::strcmp( t, "identifier" ) != 0 )
+    // a dependency on that type, and it was captured by NOTHING before this. All three roles stay OUT of the
+    // call graph (buildGraph admits Call and Macro only), so the default ranked map is byte-identical either way.
+    const UseSiteShape shape = classifyUseSite( n, t, cx.lang );
+    if( !shape.accept )
     {
         return;
     }
-    if( isCallCallee( n ) || isNonValueContext( n ) )
-    {
-        return;
-    }
-    if( typeMention && isTypeDeclarationSite( n ) )
-    {
-        return;
-    }
-    const std::string_view src = cx.src;
-    const std::uint32_t    a   = ts_node_start_byte( n ), b = ts_node_end_byte( n );
+    const std::string_view src      = cx.src;
+    const std::uint32_t    a        = ts_node_start_byte( n ), b = ts_node_end_byte( n );
+    const bool             isMember = !ts_node_is_null( shape.access );
     if( a < b && b <= src.size() )
     {
         RawRef r;
@@ -957,8 +1032,13 @@ void usesVisitNode( UseCtx& cx, TSNode n, const char* t )
         r.startByte = a;
         r.line      = ts_node_start_point( n ).row + 1;
         r.lang      = cx.lang;
-        r.role      = typeMention ? RefRole::Type : ( isWriteTarget( n ) ? RefRole::Write : RefRole::Read );
+        const bool isWrite = isMember ? isMemberWriteTarget( shape.access ) : isWriteTarget( n );
+        r.role      = shape.typeMention ? RefRole::Type : ( isWrite ? RefRole::Write : RefRole::Read );
         r.name      = finalSegment( src.substr( a, b - a ) );   // bare identifier → already final segment
+        if( isMember )
+        {
+            stampMemberReceiver( r, shape.access, cx.lang, src );
+        }
         cx.refs->push_back( std::move( r ) );
     }
 }
@@ -1241,6 +1321,45 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
     }
 }
 
+// member-variable round (card A3): the FIELD post-pass over ONE file's freshly captured defs (defs[first..)).
+// Two rules, both applied after the match loop so the loop itself gains no branch:
+//   * a field with no owner NAME (an anonymous struct/union member, or a `.c` file — Lang::C computes no
+//     scope) has no `Owner.field` address → dropped, disclosed in the member legend (C fields in `.h` headers
+//     extract under the C++ grammar and keep their owner);
+//   * Python: every `self.x = …` fires the pattern, and ONE symbol per (class, name) survives — the lowest
+//     nameByte is the definition, the rest are role="write" use-sites. Decided by a sorted key set so the
+//     survivor never depends on the cursor's match order.
+// Non-field defs are untouched and keep their relative order (a stable partition, not a sort).
+inline void foldFieldDefs( std::vector<RawDef>& defs, std::size_t first, Lang lang )
+{
+    std::vector<std::string> seenPyField;   // "scope\x1fname" of every Python field kept so far, sorted
+    std::size_t write = first;
+    for( std::size_t read = first; read < defs.size(); ++read )
+    {
+        RawDef& d = defs[ read ];
+        bool keep = d.kind != SymKind::Field || !d.scope.empty();
+        if( keep && d.kind == SymKind::Field && lang == Lang::Python )
+        {
+            const std::string key = d.scope + '\x1f' + d.name;
+            const auto        at  = std::lower_bound( seenPyField.begin(), seenPyField.end(), key );
+            keep = at == seenPyField.end() || *at != key;
+            if( keep )
+            {
+                seenPyField.insert( at, key );
+            }
+        }
+        if( keep )
+        {
+            if( write != read )
+            {
+                defs[ write ] = std::move( d );
+            }
+            ++write;
+        }
+    }
+    defs.resize( write );
+}
+
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs )
 {
@@ -1254,6 +1373,8 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     {
         return;
     }
+
+    const std::size_t firstDefOfFile = defs.size();   // member-variable round: foldFieldDefs' window (below)
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: tags query exec+captures" );
@@ -1426,7 +1547,8 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // constant THE WHOLE CLASS — the exact Rust-method span bug the H4 W3 note above describes).
             // No-op for every pre-existing Var capture (Swift/C#/Go/Python parents hit a scope-stop or the
             // file root before any "body"-owning ancestor — verified byte-identical on the gate corpora).
-            if( ts_node_is_null( body ) && kind != SymKind::Var )
+            // A Field's span is its own field_declaration / defining assignment — the Var rule, same reason.
+            if( ts_node_is_null( body ) && kind != SymKind::Var && kind != SymKind::Field )
             {
                 TSNode child = roleNode;
                 TSNode p     = ts_node_parent( roleNode );
@@ -1659,6 +1781,8 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             }
         }
     }
+
+    foldFieldDefs( defs, firstDefOfFile, le.lang );   // member-variable round: owner-less fields drop, Python fields fold to one per (class, name)
 }
 
 }   // namespace — ingest_sidecap.h section of ingest.cpp

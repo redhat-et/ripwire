@@ -164,7 +164,18 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 74;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 75;           // bump on any grammar/.scm/extraction change
+                                                      // 75 = 2026-09-02 (member-variable round, card A3): a new
+                                                      //    SymKind::Field — C/C++ @definition.field (non-static
+                                                      //    field_declaration) and Python (`self.x = …` / annotated
+                                                      //    class attribute, the latter re-kinded from Var) — plus
+                                                      //    the value-use visitor now captures the FIELD half of a
+                                                      //    non-call member access (`a.f`/`p->f`/`o.f`) as a
+                                                      //    Read/Write ref carrying its receiver shape (recv/
+                                                      //    recvVar/fieldName, fields the record already had).
+                                                      //    Record shape unchanged, kCacheVersion stays; the def
+                                                      //    and ref FACTS changed for every C-family and Python
+                                                      //    file → parserVer moves.
                                                       // 74 = 2026-08-30 (objc-sniff lane): looksObjC masks
                                                       //    comments and string/char literals before testing for
                                                       //    @interface/@protocol/@implementation — a C++ .h whose

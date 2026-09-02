@@ -146,7 +146,27 @@ inline constexpr const char* kUsesLegendOpen =
     "role=\"type\"; a type's own DEFINITION is never a use of itself. role=\"macro\" is the call-shaped invocation of "
     "a name uniquely naming an indexed function-like #define — never role=\"call\" (an expansion is not a plain "
     "call); a name shared with a non-macro definition stays role=\"call\". Rows are ordered SOURCE first, then "
-    "test/bench, then docs, by path within a tier. "; // LB-G
+    "test/bench, then docs, by path within a tier. A MEMBER selector (Owner.field) is resolved per site instead of "
+    "name-matched — that run's legend says how. "; // LB-G
+
+// The member-variable round (card A3): the clause the `Owner.field` answer appends to the opener above — ONLY
+// on that answer, so the name-matched --uses legend keeps its byte budget (test/graphlegendbudgetcheck.sh) and
+// every attribute the member form emits is defined where the reader meets it (test/legendcoveragecheck.sh's
+// rule). Shared by both surfaces through fielduses.h.
+inline constexpr const char* kUsesFieldLegend =
+    "MEMBER FORM: member=Owner.field is the ONE field this selector resolved to and every row is a use of THAT field, "
+    "resolved per site (never the union of every name-alike): this->f, self.f and a bare f inside the owner's own "
+    "methods pin to the owner; v.f/v->f pins through v's recorded declared type (a typed local or parameter, or a "
+    "member of the enclosing class); otherwise EVERY owner declaring f is a candidate and the row carries amb=K "
+    "(K candidate owners) — never a silent pin, and no locality tie-break. A chained or unclassifiable receiver "
+    "(a.b.f, g().f) is always amb. pinned=rows resolved to exactly one owner amb_sites=rows carrying amb= "
+    "owners_of_name=fields sharing this name corpus-wide. role=write is an assignment target, compound assignment "
+    "or an increment/decrement; pass-by-non-const-reference and address-of are NOT claimed as writes. NOT SEEN (each a disclosed "
+    "miss, never a widened definition): a field reached through a copied pointer or reference (no alias analysis), "
+    "a C macro whose expansion is a member access, an inherited field named bare in a derived class's method, a "
+    "field named inside a lambda tree-sitter scopes outside the method, `.c` bodies (the value-use pass is "
+    "C++/ObjC/Python; C struct fields are symbols but their .c use-sites are not indexed), static data members "
+    "(not fields). Served for C, C++ and Python fields; a member selector on any other language refuses by name. ";
 
 // --impact's opener, identical on both surfaces before this header.
 inline constexpr const char* kImpactLegendOpen =

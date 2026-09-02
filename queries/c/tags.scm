@@ -79,3 +79,20 @@
 (call_expression
   function: (field_expression
     field: (field_identifier) @name)) @reference.call
+
+; ---- struct/union FIELDS (ripwire addition — the member-variable round, card A3, 2026-09-02) ----
+; The C twin of queries/cpp/tags.scm's @definition.field: every data member of a struct/union body.
+; Same loose shape, same ingest_names.h fieldCaptureKept gate (a `static` specifier is impossible on
+; a C struct member, so nothing drops here). NOTE the coverage boundary, disclosed in the member
+; legend: `.h` is C++-owned, so most C headers' fields extract under the C++ grammar; a field declared
+; in a `.c` body extracts here as t="field" but its USE-SITES are not indexed — the read/write
+; value-use pass is armed for C++/ObjC/Python only.
+(field_declaration_list
+  (field_declaration
+    declarator: [
+      (field_identifier) @name
+      (pointer_declarator declarator: (field_identifier) @name)
+      (pointer_declarator declarator: (pointer_declarator declarator: (field_identifier) @name))
+      (array_declarator declarator: (field_identifier) @name)
+      (pointer_declarator declarator: (array_declarator declarator: (field_identifier) @name))
+    ]) @definition.field)

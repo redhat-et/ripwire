@@ -182,6 +182,21 @@ inline std::string_view declaratorVarName( TSNode decl, std::string_view src )
     return {};
 }
 
+// member-variable round (card A3): the variable name of a PARAMETER declarator, which is declaratorVarName's
+// answer plus one shape it refuses on purpose: a reference_declarator holds its inner declarator as an UNNAMED
+// child (`Counter& c` — the `&` is the only anonymous sibling), so the `declarator` field probe is null there.
+// Unwrapped HERE, for the ParamType record alone — widening declaratorVarName itself would mint Rule-2 Type
+// records for `Foo& x = …` locals too and move call edges outside this round's gate.
+inline std::string_view paramDeclaratorVarName( TSNode decl, std::string_view src )
+{
+    if( !ts_node_is_null( decl ) && std::strcmp( ts_node_type( decl ), "reference_declarator" ) == 0
+        && ts_node_is_null( ts_node_child_by_field_name( decl, "declarator", 10 ) ) && ts_node_named_child_count( decl ) > 0 )
+    {
+        decl = ts_node_named_child( decl, 0 );
+    }
+    return declaratorVarName( decl, src );
+}
+
 // the type NAME of a constructor-style RHS value node: `Foo()` (call_expression) or `new Foo()`
 // (new_expression). Final segment of the callee/constructor identifier. "" if the value isn't a
 // plain constructor call (so `auto x = makeFoo()` infers nothing here unless `makeFoo` names a class —
@@ -827,7 +842,19 @@ inline void emitShadowVarDecls( std::uint32_t fileId, Lang lang, TSNode decl, st
 inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std::string_view src, std::string type,
                            BindSite site, std::vector<RawBind>& binds )
 {
-    emitBind( fileId, lang, declaratorVarName( declNode, src ), std::move( type ), site.startByte, binds );
+    const std::string_view var = declaratorVarName( declNode, src );
+    if( var.empty() && !type.empty() )
+    {
+        // member-variable round (card A3): a REFERENCE local (`const Symbol& s = ing.symbols[ i ];`) is the one
+        // typed declaration Rule 2 refuses (declaratorVarName cannot see through the unnamed reference child).
+        // Recorded as a ParamType fact — the field use-site index's own kind — so `s.name` resolves there while
+        // Rule 2's call narrowing (kind == Type) stays byte-identical.
+        pushRawBind( fileId, lang, paramDeclaratorVarName( declNode, src ), std::move( type ), BindSite{ site.startByte, 0u, 0u }, LocalBindKind::ParamType, binds );
+    }
+    else
+    {
+        emitBind( fileId, lang, var, std::move( type ), site.startByte, binds );
+    }
     emitShadowVarDecls( fileId, lang, declNode, src, site, binds );
 }
 
@@ -847,7 +874,13 @@ inline void emitShadowParamDecls( TSNode params, std::uint32_t fileId, Lang lang
             continue;   // commas, `...`, attribute nodes — nothing declared
         }
         bodySite.startByte = ts_node_start_byte( p );
-        emitShadowVarDecls( fileId, lang, ts_node_child_by_field_name( p, "declarator", 10 ), src, bodySite, binds );
+        const TSNode declarator = ts_node_child_by_field_name( p, "declarator", 10 );
+        emitShadowVarDecls( fileId, lang, declarator, src, bodySite, binds );
+        // member-variable round (card A3): the parameter's WRITTEN type as a ParamType record (`Counter& c` →
+        // c:Counter), read by the field use-site index alone — see LocalBindKind::ParamType. `auto`, templated
+        // and decltype types write nothing (writtenTypeOf's own refusal), and pushRawBind drops the record.
+        pushRawBind( fileId, lang, paramDeclaratorVarName( declarator, src ), writtenTypeOf( ts_node_child_by_field_name( p, "type", 4 ), src ),
+                     BindSite{ ts_node_start_byte( p ), 0u, 0u }, LocalBindKind::ParamType, binds );
     }
 }
 
@@ -952,7 +985,13 @@ inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t file
         // iteration 3, unified with enclosingShadowScope's control-statement rule: the loop variable scopes
         // to the WHOLE for_range_loop statement (its own span), not merely the body.
         const BindSite loopSite{ ts_node_start_byte( n ), ts_node_start_byte( n ), ts_node_end_byte( n ) };
-        emitShadowVarDecls( fileId, lang, ts_node_child_by_field_name( n, "declarator", 10 ), src, loopSite, binds );
+        const TSNode   loopDeclarator = ts_node_child_by_field_name( n, "declarator", 10 );
+        emitShadowVarDecls( fileId, lang, loopDeclarator, src, loopSite, binds );
+        // member-variable round (card A3): the loop variable's WRITTEN type (`for( const Symbol& s : v )` →
+        // s:Symbol) as a ParamType record for the field use-site index — the single most common typed
+        // receiver shape in this repo's own source (`s.name`), and `auto` writes nothing, as for parameters.
+        pushRawBind( fileId, lang, paramDeclaratorVarName( loopDeclarator, src ), writtenTypeOf( ts_node_child_by_field_name( n, "type", 4 ), src ),
+                     BindSite{ ts_node_start_byte( n ), 0u, 0u }, LocalBindKind::ParamType, binds );
         return;
     }
     if( isLambda )

@@ -16,7 +16,20 @@
 ; dataclass fields, TypedDict/NamedTuple members, ClassVar (2 django + 5 653 pydantic sites, 0%
 ; EXCLUSIVE recall before). The `type:` field is the structural line that keeps django's 12 131
 ; plain un-annotated data attrs (`field = models.CharField()`) OUT of the map.
-(class_definition body: (block (expression_statement (assignment left: (identifier) @name type: (type)) @definition.constant)))
+; Member-variable round (card A3, 2026-09-02): the annotated class attribute is a FIELD (t="field",
+; id=path::Owner::field) — it was t="var" before; the same sites, the honest kind. The keep test is
+; unchanged (the type: field IS the structural discriminant; dropGatedCapture keeps every annotated
+; class-body capture — see fieldCaptureKept's Python arm).
+(class_definition body: (block (expression_statement (assignment left: (identifier) @name type: (type)) @definition.field)))
+
+; Instance attribute bound in a method: `self.x = …` / `self.x: T = …` at ANY depth under the method
+; (an `if` in __init__ still declares it). tree-sitter has no descendant operator and tags-pass
+; predicates never run, so the pattern is LOOSE — it matches `obj.x = …` too — and the gate lives in
+; ingest_names.h fieldCaptureKept: the receiver must be the bare identifier `self` and the assignment
+; must sit inside a function inside a class. ONE symbol per (class, name): ingest_sidecap.h keeps the
+; lowest-byte assignment per key (the definition), every later one is a role="write" use-site
+; (test/fieldusescheck.sh arm F). `cls.x = …` is not captured (disclosed).
+(assignment left: (attribute object: (identifier) attribute: (identifier) @name)) @definition.field
 
 ; Plain class-body assignment, kept ONLY when the enclosing class's base NAME is an enum family
 ; (132 sites in django — stdlib enum plus the Choices family — and 108 in pydantic). The semantic

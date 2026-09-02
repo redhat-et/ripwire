@@ -277,6 +277,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // into its Reference while the shared sweep attributes fromSymbol (ingest_model.h).
     const std::vector<std::uint32_t> refOrder = orderReferences( raw.refs, result.files.size() );
     emitReferences( result, raw.refs, refOrder, spanIndex );
+    dropFieldDefinitionSites( result, raw.defs );   // member-variable round: a field's defining assignment is not a use of it
 
     // P2-D Rule 2 bindings, A4-R5 FFI aliases, B6.3 route defs/uses — each in its deterministic total
     // order, span-attributed families over the same DefSpanIndex (ingest_model.h).

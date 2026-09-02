@@ -565,9 +565,9 @@ inline FnPtrBindTables buildFnPtrBindTables( const IngestResult& ing )
     };
     for( const Binding& b : ing.bindings )
     {
-        if( b.kind == LocalBindKind::Type || b.var.empty() || b.typeName.empty() )
+        if( b.kind == LocalBindKind::Type || b.kind == LocalBindKind::ParamType || b.var.empty() || b.typeName.empty() )
         {
-            continue;
+            continue;   // a var→TYPE fact (declared or parameter) is never a fn-pointer binding
         }
         const std::string& tgt = ( b.typeName == kFnBindClobberTarget ) ? emptyTarget : b.typeName;
         if( b.fromSymbol != kNoNode )
@@ -800,6 +800,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     byName.reserve( N );                          // ≤ one entry per symbol → skip the rehash cascade
     for( const Symbol& s : ing.symbols )
     {
+        if( s.kind == SymKind::Field )   // a FIELD is never a call target (`v.data()` minted +370 duckdb edges into `data` members
+        {                                 //   when it was) nor a priorwt "common name" def — see collectFieldUseSites (card A3)
+            continue;
+        }
         byName[ s.name ].push_back( s.id );
     }
 
@@ -883,7 +887,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     std::string canonKey;
     for( const Symbol& s : ing.symbols )
     {
-        if( s.scope.empty() || !hasBody( s.id ) )
+        if( s.scope.empty() || !hasBody( s.id ) || s.kind == SymKind::Field )   // a field is never a qualified-call target either
         {
             continue;
         }
@@ -2830,6 +2834,8 @@ inline std::vector<NodeId> resolveAllByCanonicalId( const IngestResult& ing, std
     return out;
 }
 
+inline std::vector<NodeId> resolveMemberSelector( const IngestResult& ing, std::string_view spec );   // `Owner.field` — defined with the member block below
+
 // Bare name, or a canonical id. The "::" probe runs FIRST and only when the spec carries one, then falls
 // back to the name match — no indexed symbol NAME contains "::" in any grammar we parse, so this is purely
 // additive: every previously-working query resolves byte-identically.
@@ -2856,6 +2862,10 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
         {
             out.push_back( s.id );
         }
+    }
+    if( out.empty() )
+    {
+        out = resolveMemberSelector( ing, name );   // `Owner.field` — the member-variable round's spelling (below)
     }
     return out;
 }
@@ -2909,7 +2919,350 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
             out.push_back( s.id );
         }
     }
+    if( out.empty() && file.empty() )
+    {
+        out = resolveMemberSelector( ing, spec );   // `Owner.field` — the member-variable round's spelling (above)
+    }
     return out;
+}
+
+// ─── MEMBER VARIABLES: `Owner.field` selection + per-site use resolution (the member-variable round, card A3) ─
+//
+// A field (SymKind::Field) is a symbol like any other — canonical id `path::Owner::field`, so the existing
+// `Owner::field` scope tier and the full id already address it. `Owner.field` is the third spelling: the
+// one an agent reads off `this->field` / `obj.field` in the source. It is tried LAST — only after the bare
+// name matched no symbol — so a dotted JSON/TOML key that IS a symbol name keeps resolving as itself, and it
+// is refused the same shape check a file:name or @FILE:LINE spelling would fail (no ':' or '/', exactly one
+// '.', both halves non-empty). The tier is nothing but the scope tier on `Owner::field`, so a method addressed
+// as `Owner.method` resolves too — harmless, and one fewer rule to explain.
+//
+// USE-SITE RESOLUTION — why a field cannot use the name-matched union every other --uses answer serves. A
+// member name is the most shared name in a codebase (`name`, `count`, `id`, `size`), so "every reference
+// named `count`" is the union of every owner's field, every local, every parameter and every global of that
+// name — the exact answer an agent asking "who writes Counter.count" cannot use. collectFieldUseSites
+// resolves each member-access / bare-name site to the OWNERS it can belong to, with the same doctrine the
+// call resolver follows (resolve.h): receiver evidence pins, absence of evidence SPLITS, and a split is
+// disclosed on the row as amb=K — never a silent pin. There is deliberately NO S6-C locality tie-break here:
+// the locality-pinned population is the one resolver decision no instrument has measured (docs/EVALS.md,
+// "The locality-pinned population"), and a field answer is consumed row by row, where a wrong pin is a
+// wrong line, not a slightly-off rank.
+//
+//   recv=None (bare `f`)      : the enclosing symbol's OWN class (a method's scope, a class body, or another
+//                               field's initializer) must declare `f` → pinned to that owner. Anything else
+//                               is a local, a parameter, a global, or an INHERITED field named bare — none
+//                               of which this pass can tell apart, so it contributes NO row (the shadow pass
+//                               at ingest exit already deleted bare names a local declaration covers).
+//   recv=ThisObj (`this->f`,
+//     Python `self.f`)        : the enclosing class declares `f` → pinned; else (the field is inherited) every
+//                               owner declaring `f` is a candidate → amb=K.
+//   recv=NamedVar (`v.f`)     : v's recorded declared TYPE (a typed local/parameter binding, else a member of
+//                               the enclosing class through the S5-E field-type table) declares `f` → pinned;
+//                               else every owner → amb=K.
+//   recv=FieldOfThis /
+//     FieldOfVar (`this->m.f`,
+//     `v.m.f`)                : one more hop through the same two tables; else every owner → amb=K. A receiver
+//                               too rich to classify (a call, a subscript, a deeper chain) is FieldOfVar with
+//                               an empty recvVar → every owner → amb=K.
+//   Every candidate set is filtered by langCompatible with the site (a Python `o.f` never binds a C++ field).
+//
+// NOT SEEN, and said so in the legend (src/graphlegend.h kUsesFieldLegend): a field reached through a copied
+// pointer or reference (`int* p = &o.f; *p = 1;` — no alias analysis), a C macro whose expansion is a member
+// access, an inherited field named bare in a derived class's method, a field named inside a lambda that
+// tree-sitter scopes outside the method, `.c` bodies (the value-use pass is C++/ObjC/Python), and languages
+// whose grammars extract no fields (everything but C/C++/Python — the member selector REFUSES by language
+// name there, memberSelectorUnservedRefusal). Deterministic: one pass over ing.references in index order;
+// candidate order is symbol-id order; nothing iterates a HashMap into output.
+
+inline bool looksLikeMemberSelector( std::string_view spec ) noexcept
+{
+    const std::size_t dot = spec.find( '.' );
+    return dot != std::string_view::npos && dot > 0 && dot + 1 < spec.size()
+        && spec.find( '.', dot + 1 ) == std::string_view::npos
+        && spec.find( ':' ) == std::string_view::npos && spec.find( '/' ) == std::string_view::npos
+        && spec.front() != '@';
+}
+
+inline std::vector<NodeId> resolveMemberSelector( const IngestResult& ing, std::string_view spec )
+{
+    if( !looksLikeMemberSelector( spec ) )
+    {
+        return {};
+    }
+    const std::size_t dot = spec.find( '.' );
+    std::string       scoped;
+    scoped.reserve( spec.size() + 1 );
+    scoped.append( spec.substr( 0, dot ) ).append( "::" ).append( spec.substr( dot + 1 ) );
+    return resolveAllByScopeQualified( ing, scoped );
+}
+
+struct FieldUseSite
+{
+    std::uint32_t refIndex;         // index into ing.references
+    std::uint32_t candidateCount;   // owners the site could belong to; 1 = pinned, >1 = emitted as amb=K
+};
+
+struct FieldUseAnswer
+{
+    std::vector<FieldUseSite> sites;              // in ing.references order (the emitter re-sorts by tier/path/line)
+    std::size_t               ownersOfName = 0;   // Field symbols sharing the name, corpus-wide (the split's ceiling)
+    std::size_t               pinnedCount  = 0;   // sites with candidateCount == 1
+    std::size_t               ambCount     = 0;   // sites with candidateCount > 1
+};
+
+inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, NodeId fieldSym )
+{
+    FieldUseAnswer out;
+    VERIFY( fieldSym < ing.symbols.size() );
+    const Symbol& field = ing.symbols[ fieldSym ];
+
+    // every Field symbol sharing the name, by owner scope (symbol-id order inside each bucket)
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> fieldsByOwner;
+    std::vector<NodeId>                           everyOwner;
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.kind == SymKind::Field && s.name == field.name && !s.scope.empty() )
+        {
+            fieldsByOwner[ s.scope ].push_back( s.id );
+            everyOwner.push_back( s.id );
+        }
+    }
+    out.ownersOfName = everyOwner.size();
+
+    // "<fromSymbol>#<var>" → the var's declared type: Rule 2's own binding table (kind Type — a typed local, a
+    // constructor-initialised one) PLUS the parameter written types (kind ParamType, captured for this index
+    // alone); a conflicting re-declaration tombstones.
+    HashMap<std::string, std::string> localType;
+    localType.reserve( ing.bindings.size() );
+    std::string key;
+    for( const Binding& b : ing.bindings )
+    {
+        if( ( b.kind != LocalBindKind::Type && b.kind != LocalBindKind::ParamType ) || b.fromSymbol == kNoNode || b.var.empty() || b.typeName.empty() )
+        {
+            continue;
+        }
+        buildShadowKey( key, b.fromSymbol, b.var );
+        const auto [ it, inserted ] = localType.try_emplace( key, b.typeName );
+        if( !inserted && !it->second.empty() && it->second != b.typeName )
+        {
+            it->second.clear();
+        }
+    }
+    const FieldNarrowTables narrow = buildFieldNarrowTables( ing );   // "Class#field" → declared type (S5-E)
+
+    const auto ownerOfContext = [ & ]( NodeId encl ) -> std::string_view
+    {
+        if( encl == kNoNode || encl >= ing.symbols.size() )
+        {
+            return {};
+        }
+        const Symbol& e = ing.symbols[ encl ];
+        const bool classLike = e.kind == SymKind::Class || e.kind == SymKind::Struct || e.kind == SymKind::Interface;
+        return classLike ? std::string_view( e.name ) : std::string_view( e.scope );
+    };
+    const auto fieldTypeOf = [ & ]( std::string_view owner, std::string_view member ) -> std::string_view
+    {
+        if( owner.empty() || member.empty() )
+        {
+            return {};
+        }
+        key.clear();
+        key.append( owner ).push_back( '#' );
+        key.append( member );
+        const auto it = narrow.fieldTypeByClass.find( key );
+        return it == narrow.fieldTypeByClass.end() ? std::string_view{} : std::string_view( it->second );
+    };
+    const auto localTypeOf = [ & ]( NodeId encl, std::string_view var ) -> std::string_view
+    {
+        if( encl == kNoNode || var.empty() )
+        {
+            return {};
+        }
+        buildShadowKey( key, encl, var );
+        const auto it = localType.find( key );
+        return it == localType.end() ? std::string_view{} : std::string_view( it->second );
+    };
+
+    std::vector<NodeId> cand;
+    const auto candidatesIn = [ & ]( std::string_view owner, Lang siteLang )
+    {
+        if( owner.empty() )
+        {
+            return;
+        }
+        const auto it = fieldsByOwner.find( std::string( owner ) );
+        if( it == fieldsByOwner.end() )
+        {
+            return;
+        }
+        for( NodeId c : it->second )
+        {
+            if( langCompatible( ing.symbols[ c ].lang, siteLang ) )
+            {
+                cand.push_back( c );
+            }
+        }
+    };
+    const auto everyCompatibleOwner = [ & ]( Lang siteLang )
+    {
+        for( NodeId c : everyOwner )
+        {
+            if( langCompatible( ing.symbols[ c ].lang, siteLang ) )
+            {
+                cand.push_back( c );
+            }
+        }
+    };
+
+    for( std::uint32_t refIndex = 0; refIndex < ing.references.size(); ++refIndex )
+    {
+        const Reference& r = ing.references[ refIndex ];
+        if( ( r.role != RefRole::Read && r.role != RefRole::Write ) || r.isCompose || r.isDocLink || r.lang == Lang::Markdown )
+        {
+            continue;
+        }
+        if( r.calleeName != field.name || !langCompatible( field.lang, r.lang ) )
+        {
+            continue;
+        }
+        cand.clear();
+        const std::string_view ctxOwner = ownerOfContext( r.fromSymbol );
+        switch( r.recv )
+        {
+            case RecvKind::None:
+            {
+                candidatesIn( ctxOwner, r.lang );   // empty ⇒ a local/global/inherited name — not a field use this pass can see
+            }
+            break;
+            case RecvKind::ThisObj:
+            {
+                candidatesIn( ctxOwner, r.lang );
+                if( cand.empty() )
+                {
+                    everyCompatibleOwner( r.lang );   // `this->f` on an inherited field — every owner, disclosed
+                }
+            }
+            break;
+            case RecvKind::NamedVar:
+            {
+                std::string_view type = localTypeOf( r.fromSymbol, r.recvVar );
+                if( type.empty() )
+                {
+                    type = fieldTypeOf( ctxOwner, r.recvVar );   // the receiver is a member of the enclosing class
+                }
+                candidatesIn( type, r.lang );
+                if( cand.empty() )
+                {
+                    everyCompatibleOwner( r.lang );
+                }
+            }
+            break;
+            case RecvKind::FieldOfThis:
+            {
+                candidatesIn( fieldTypeOf( ctxOwner, r.fieldName ), r.lang );
+                if( cand.empty() )
+                {
+                    everyCompatibleOwner( r.lang );
+                }
+            }
+            break;
+            case RecvKind::FieldOfVar:
+            {
+                std::string_view baseType = localTypeOf( r.fromSymbol, r.recvVar );
+                if( baseType.empty() )
+                {
+                    baseType = fieldTypeOf( ctxOwner, r.recvVar );
+                }
+                candidatesIn( fieldTypeOf( baseType, r.fieldName ), r.lang );
+                if( cand.empty() )
+                {
+                    everyCompatibleOwner( r.lang );   // includes the "receiver too rich to classify" shape (empty recvVar)
+                }
+            }
+            break;
+        }
+        if( std::find( cand.begin(), cand.end(), fieldSym ) == cand.end() )
+        {
+            continue;
+        }
+        out.sites.push_back( { refIndex, static_cast<std::uint32_t>( cand.size() ) } );
+        if( cand.size() == 1 )
+        {
+            ++out.pinnedCount;
+        }
+        else
+        {
+            ++out.ambCount;
+        }
+    }
+    return out;
+}
+
+// The --edit-check refusal pattern for a BARE field name declared by several owners: a member's use-sites are
+// resolved PER OWNER, so this verb cannot serve the union (every other kind still gets it). Lists the
+// Owner.field spellings that pick one, capped like editCheckAmbiguousMessage, with a ready-to-run example.
+// "" when the selector is not this shape (fewer than two defs, any non-field def, or one owner spelled twice
+// across roots — the union stays the honest answer there).
+inline constexpr std::size_t kMemberSpellingsShown = 6;
+
+inline std::string memberOwnerRefusal( const IngestResult& ing, std::span<const NodeId> defs, std::string_view spec, std::string_view retryForm )
+{
+    if( defs.size() < 2 )
+    {
+        return {};
+    }
+    std::vector<std::string> spellings;
+    for( NodeId d : defs )
+    {
+        if( d >= ing.symbols.size() || ing.symbols[ d ].kind != SymKind::Field || ing.symbols[ d ].scope.empty() )
+        {
+            return {};
+        }
+        spellings.push_back( ing.symbols[ d ].scope + "." + ing.symbols[ d ].name );
+    }
+    std::sort( spellings.begin(), spellings.end() );
+    spellings.erase( std::unique( spellings.begin(), spellings.end() ), spellings.end() );
+    if( spellings.size() < 2 )
+    {
+        return {};
+    }
+    std::string msg = "'" + std::string( spec ) + "' is a member variable declared by " + std::to_string( spellings.size() )
+                    + " owners, and a member's use-sites are resolved PER OWNER (this verb cannot union them). Qualify one: ";
+    const std::size_t shownCount = std::min( spellings.size(), kMemberSpellingsShown );
+    for( std::size_t spellingIndex = 0; spellingIndex < shownCount; ++spellingIndex )
+    {
+        msg += ( spellingIndex ? ", " : "" ) + spellings[ spellingIndex ];
+    }
+    if( spellings.size() > shownCount )
+    {
+        msg += " (+" + std::to_string( spellings.size() - shownCount ) + " more owners)";
+    }
+    msg += " — e.g. " + std::string( retryForm ) + spellings[ 0 ];
+    return msg;
+}
+
+// A member selector whose OWNER resolves to a type in a language that extracts no fields refuses BY LANGUAGE
+// NAME — an empty answer there would read as "no uses", which is the zero-means-none-exists lie. "" when the
+// spec is not a member selector or the owner is not an indexed unserved type.
+inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::string_view spec )
+{
+    if( !looksLikeMemberSelector( spec ) )
+    {
+        return {};
+    }
+    const std::size_t      dot   = spec.find( '.' );
+    const std::string_view owner = spec.substr( 0, dot );
+    for( const Symbol& s : ing.symbols )
+    {
+        const bool classLike   = s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface;
+        const bool fieldsLang  = s.lang == Lang::Cpp || s.lang == Lang::C || s.lang == Lang::Python;   // queries/{c,cpp,python}/tags.scm carry @definition.field
+        if( classLike && s.name == owner && !fieldsLang )
+        {
+            return "member selector '" + std::string( spec ) + "': field symbols are extracted for C, C++ and Python only — '"
+                 + std::string( owner ) + "' is a lang=" + langTag( s.lang ) + " type (" + ing.files[ s.fileId ]
+                 + "), so its members are not indexed and their use-sites cannot be resolved";
+        }
+    }
+    return {};
 }
 
 // resolve a --around/--lego spec to the lowest-id matching symbol; kNoNode if none. The lowest-id

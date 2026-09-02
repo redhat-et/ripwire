@@ -243,6 +243,10 @@ SymKind defKind( std::string_view tail ) noexcept
         // preproc_function_def, Rust macro_definition — t="macro", a disclosed-degraded callable.
         return SymKind::Macro;
     }
+    if( tail == "field" )          // member variable (card A3) — gated (dropGatedCapture: static members / non-self targets drop)
+    {
+        return SymKind::Field;
+    }
     if( tail == "type" )
     {
         return SymKind::Struct; // typedef/alias/enum bucket

@@ -622,7 +622,7 @@ $ ./build/ripwire . --callees=rankGraphTeleport
 
 **Answers:** the statically resolvable use-sites of SYM (role=call|macro|read|write|import|extends|type, file:line);
 
-external="1" if SYM has no in-corpus def. file:name narrows defs= AND the role="call" sites (kept only where the call RESOLVES to a chosen def — --callers' own narrowing); read/write/import/extends carry no resolution and stay name-matched. narrowed_roles=/defs_of_name=/call_sites_of_name= (file: qualifier only) disclose what narrowed and the un-narrowed totals; a file: qualifier naming a file with no such def REFUSES, like --callers/--impact
+external="1" if SYM has no in-corpus def. file:name narrows defs= AND the role="call" sites (kept only where the call RESOLVES to a chosen def — --callers' own narrowing); read/write/import/extends carry no resolution and stay name-matched. narrowed_roles=/defs_of_name=/call_sites_of_name= (file: qualifier only) disclose what narrowed and the un-narrowed totals; a file: qualifier naming a file with no such def REFUSES, like --callers/--impact Owner.field (also Owner::field, or the id=) — a MEMBER VARIABLE's own use-sites, RESOLVED per site: this->f/self.f/bare f inside the owner pin; v.f pins through v's recorded type, else every owner is a candidate and the row carries amb=K (never a silent pin); write = assignment/compound/++ (address-of and by-reference passing are NOT claimed). A bare field name shared by several owners REFUSES with the Owner.field spellings; C/C++/Python fields only, others refuse
 
 **Try it**
 
@@ -649,7 +649,9 @@ $ ./build/ripwire . --uses=rankGraphTeleport
 
 **Caveats (stated by the binary):**
 
-- a file: qualifier naming a file with no such def REFUSES, like --callers/--impact
+- a file: qualifier naming a file with no such def REFUSES, like --callers/--impact Owner.field (also Owner::field, or the id=) — a MEMBER VARIABLE's own use-sites, RESOLVED per site: this->f/self.f/bare f inside the owner pin;
+- v.f pins through v's recorded type, else every owner is a candidate and the row carries amb=K (never a silent pin);
+- A bare field name shared by several owners REFUSES with the Owner.field spellings;
 
 ### `--graph-query=EXPR`
 

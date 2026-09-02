@@ -26,6 +26,7 @@
 #include "mcprefusal.h"    // §B6 M7/M8/M9: the shared verb+field refusal table both MCP arms speak
 #include "sarif.h"         // G1 (2026-08-15): rw::sarif::rootRelativeUri/rootPrefixOf — grepHitsJson's root-relative `file` (CLI ≡ MCP, no re-derivation)
 #include "slice.h"         // lane/tc-sliceat: the shared --slice / MCP slice def-use core (sliceBundleText — ONE emitter, two surfaces)
+#include "fielduses.h"     // the member-variable round: the ONE --uses=Owner.field renderer (renderFieldUses — CLI ≡ MCP)
 
 #include <filesystem>      // §B6 M3: the shared root-path existence/directory check (mcpRootRefusal below)
 #include <span>            // std::span — connectemit::rebuildFromLegs reads the caller's retained-leg mask
@@ -1868,9 +1869,20 @@ inline std::string usesSelectorRefusal( const IngestResult& ing, const std::stri
         return qualifiedSelectorRefusal( ing, symbol, "--uses=" );   // "" when the qualified spelling resolves
     }
 
-    if( !resolveAllByName( ing, symbol ).empty() )
+    const std::vector<NodeId> defs = resolveAllByName( ing, symbol );
+    // member-variable round (card A3): a bare field name declared by several owners refuses with the Owner.field
+    // spellings — the CLI arm's rule, same message, MCP retry syntax.
+    if( const std::string memberRefusal = memberOwnerRefusal( ing, defs, symbol, "symbol=" ); !memberRefusal.empty() )
+    {
+        return memberRefusal;
+    }
+    if( !defs.empty() )
     {
         return {}; // it has a definition — a normal answer
+    }
+    if( const std::string unserved = memberSelectorUnservedRefusal( ing, symbol ); !unserved.empty() )
+    {
+        return unserved;   // `Owner.field` on a language that extracts no fields — refused by language name, as on the CLI
     }
 
     // no definition: refuse ONLY if it also has no use-site (early-exit scan — one match is enough to prove
@@ -1916,6 +1928,12 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
 
     const std::vector<NodeId> defs     = resolveAllByName( ing, sym );
     const bool                external = defs.empty();
+
+    // member-variable round (card A3): ONE resolved field → the per-site renderer the CLI arm prints (fielduses.h).
+    if( const NodeId field = singleFieldOf( ing, defs ); field != kNoNode )
+    {
+        return renderFieldUses( ing, field, FieldUsesArgs{ symbol, ing.realPaths.empty(), root, page.limit, page.offset } );
+    }
 
     struct UseSite { std::uint32_t fileId; std::uint32_t line; RefRole role; std::string in; };
     std::vector<UseSite> sites;

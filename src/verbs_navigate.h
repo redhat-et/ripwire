@@ -508,6 +508,14 @@ std::optional<int> runUses( const MainDispatch& d )
         const std::vector<NodeId> defs = resolveAllByNameQualified( ing, sym );
         const UsesSelector        sel  = resolveUsesSelector( ing, sym, defs.size() );
 
+        // member-variable round (card A3): ONE resolved field takes the per-site path (fielduses.h — the renderer
+        // the MCP twin returns); a bare field name declared by several owners refuses with the Owner.field
+        // spellings; a member selector on an unserved language refuses by language name. One arm, one branch.
+        if( const std::optional<int> memberExit = memberUsesArm( ing, defs, sym, usSingleRoot, cfg.roots[ 0 ], cfg.pageLimit, cfg.pageOffset ); memberExit )
+        {
+            return *memberExit;
+        }
+
         // §A6b(iii): external="1" is the claim "this name has NO definition in the indexed tree" — it may only
         // be made when that is what was measured. With a file: qualifier defs= is a NARROWED count, so the
         // un-narrowed defs_of_name= is the one that can license the claim; pre-fix a non-defining qualifier
