@@ -8444,3 +8444,117 @@ rejected. Baseline for this worktree's head, re-derived: `ripwire src --no-cache
 `ambiguous` against the registration's `3ce9944` figure is this round's own `src/pincensus.h` and its
 call sites, and excluding that one header reproduces the registered
 `files=144 symbols=4610 edges=12515 unresolved=1445` exactly.
+
+## Member variables as symbols + `--uses=Owner.field` — the member-variable round (card A3), PRE-REGISTERED 2026-09-02 (before any corpus number)
+
+**What this registers.** ARISE-bibliography RANK-A card A3 — CodexGraph's FIELD schema element: a class's
+member variables as first-class symbols, with their read and write use-sites resolved per site, so
+`--uses=Owner.field` answers "who writes this member". Before this round `./build/ripwire . --uses=Symbol.name`
+refused (SymKind had no Field) and the only route to a member's writers was the name-wide union of every
+`name` in the tree. This section fixes the contract, the fixture gate, the corpus floor and the disclosed
+limits BEFORE the floor is measured; the floor's result is appended below it, whatever it is.
+
+**The contract (all of it gate-pinned in `test/fieldusescheck.sh` on `test/fieldusesfix`, none of it an
+accuracy claim).** (1) A new kind `t="field"` (SymKind::Field, appended after Macro) for a per-object data
+member: C/C++ non-static `field_declaration` inside a class/struct/union body; Python the first `self.x = …`
+assignment in a method (one symbol per class and name; later assignments are `role="write"` sites) and an
+annotated class-body attribute `x: T [= v]` (re-kinded from `var` — same sites, honest kind). Canonical id
+`path::Owner::field`; selector spellings `Owner.field`, `Owner::field`, the id. Static data members are NOT
+fields (a class-static constant keeps its `var` row; a mutable static member is not extracted); owner-less
+fields (anonymous struct/union) are dropped. (2) Use-sites: the SAME `<u role= p= [in_id=]/>` row `--uses`
+prints, plus `amb="K"` on a row the resolver could not pin to one owner. `write` = assignment target,
+compound assignment, increment/decrement; **pass-by-non-const-reference and address-of are NOT claimed as
+writes.** Resolution is name-based like the rest of the graph, per site: `this->f` / `self.f` / bare `f`
+inside the owner's own methods pin to the owner; `v.f` / `v->f` pins through v's recorded declared type (a
+typed local, a parameter, a range-for variable, a reference local, or a member of the enclosing class via
+the S5-E field-type table — the parameter/range-for/reference-local types are a NEW binding kind,
+`LocalBindKind::ParamType`, consumed by this index ALONE so no call edge moves); otherwise every owner
+declaring `f` is a candidate and the row carries `amb=K`. **There is deliberately no S6-C locality
+tie-break on a field site** — the locality-pinned population is the one resolver decision no instrument
+has measured (the census section above), and a field answer is read row by row where a wrong pin is a
+wrong line. (3) `--uses=Owner.field` answers; a bare `--uses=field` whose every definition is a field of
+two or more owners REFUSES listing the `Owner.field` spellings (the `--edit-check` ambiguity pattern; MCP
+`uses` speaks the same message); a bare name with exactly one field owner answers with the member form; a
+bare name mixing field and non-field definitions keeps the historic name-wide union. (4) `--nonlocal-state`
+keeps EXCLUDING instance fields — by definition, disclosed on its legend — and gains precision from the
+same facts: a member access (`recv != None` on a Read/Write ref) and a bare name the enclosing method's own
+class declares as a field are no longer charged to a same-named global (the fixture's `int count` global
+vs `Counter.count` / `Gauge.count`). No toggle shipped; see the deviation note in the lane report. (5) The
+member-form legend discloses, per run: no alias analysis (a field reached through a copied pointer or
+reference is missed — `int* alias = &c.count; *alias = 5;` is the fixture's pinned known miss, arm C), a C
+macro expanding to a member access, an inherited field named bare in a derived class's method, a field
+named inside a lambda tree-sitter scopes outside the method, `.c` bodies (the value-use pass is
+C++/ObjC/Python: C struct fields are symbols, their `.c` use-sites are not indexed), static data members;
+languages not served refuse with the language name (`--uses=Box.width` on a Go struct: "'Box' is a
+lang=go type"). (6) `--help` carries the form under `--uses`.
+
+**The fixture gate, red first.** `test/fieldusescheck.sh` was written and run RED against the pre-round
+binary (21 PASS / 43 FAIL at 8e186bb: no `t="field"` rows, every member selector refused) before any
+extraction code. The C++ fixture holds 7 fields across 2 classes with two SAME-NAMED members (`count`,
+`label`), reads and writes inside and outside the owners' methods, a parameter shadowing a field, a
+same-named file-scope global, a typed-parameter receiver, a member-of-the-enclosing-class receiver, an
+untyped template receiver (the registered `amb="2"` row), and the alias miss; the Python fixture holds
+`self.x` fields in two classes sharing a name plus an annotated attribute; a Go file carries the refusal
+case. Every expected row is hand-derived in the gate's header. The gate also pins: determinism, warm ==
+cold, xmllint, no `<c>` edge on a field row, the nonlocal-state precision, and that every attribute the
+member form emits is defined in the legend it prints.
+
+**Corpus floor — PRE-REGISTERED, on the D4-pinned duckdb `19864453` (checkout
+`rw-lane-ab2-corpora/duckdb`, verified `git rev-parse --short=8 HEAD` == `19864453`).** Twelve member
+variables chosen by READING the headers (grep for data-member declarations in `vector.hpp`,
+`data_chunk.hpp`, `physical_operator.hpp`, `expression.hpp`; no tool run before this paragraph was
+written): `Vector.data`, `Vector.validity`, `Vector.type`, `Vector.vector_type`, `Vector.buffer`,
+`Vector.auxiliary`, `DataChunk.count`, `DataChunk.capacity`, `DataChunk.data`,
+`PhysicalOperator.sink_state`, `PhysicalOperator.op_state`, `Expression.return_type`. `Vector.data` and
+`Vector.validity` are declared by more than one duckdb class (`UnifiedVectorFormat` declares both), so
+they are the registered same-name cases. THE FLOOR: each selector must resolve to exactly one field
+(`defs="1"`, `member=` echoing the owner) and report **at least one `role="write"` site**, pinned or
+`amb=`; the accept band is **≥ 10 of 12** meeting both. Reported beside it, per field, never folded into the
+verdict: `count=`, `pinned=`, `amb_sites=`, `owners_of_name=`, and for the whole corpus the flagless-map
+`symbols=` delta and the wall time of one warm `--uses=Owner.field`. A field that misses is a disclosed
+number; the definition of "field" or "write" is not widened to make it pass.
+
+**Token cost, pre-registered shape.** Reported on ripwire's own tree: the flagless map's byte count and
+`symbols=` on `.` and on `src/` before/after, the count of top-200 rows that changed, and `--uses=name`
+(the union, unchanged contract) before/after. If the flagless map grew by more than 5% the field rows would
+move behind `--uses`/`--nonlocal-state`; the measured delta decides, and the result is recorded below.
+
+**RESULT — the corpus floor, measured 2026-09-02 after the registration above (dev build of this lane's
+head, `ripwire <duckdb> --uses=Owner.field --limit=100000`, warm cache after one cold run; the checkout is
+`19864453`).** **12 of 12** registered fields resolve to exactly one field (`defs="1"`, `member=` echoing the
+owner) and report at least one `role="write"` site — the floor (≥ 10 of 12) is met. Per field
+(count / pinned / amb_sites / owners_of_name / write rows): `Vector.data` 475 / 62 / 413 / 49 / 49;
+`Vector.validity` 116 / 29 / 87 / 6 / 2; `Vector.type` 1141 / 13 / 1128 / 116 / 67; `Vector.vector_type`
+13 / 13 / 0 / 1 / 8; `Vector.buffer` 71 / 31 / 40 / 18 / 13; `Vector.auxiliary` 103 / 87 / 16 / 2 / 24;
+`DataChunk.count` 609 / 4 / 605 / 82 / 144; `DataChunk.capacity` 51 / 10 / 41 / 24 / 15; `DataChunk.data`
+1477 / 1064 / 413 / 49 / 36; `PhysicalOperator.sink_state` 67 / 67 / 0 / 1 / 4; `PhysicalOperator.op_state`
+7 / 7 / 0 / 1 / 1; `Expression.return_type` 844 / 22 / 822 / 18 / 168. Read honestly: on a name declared by
+many owners (`type` × 116, `count` × 82) the answer is MOSTLY `amb=` rows — duckdb reaches its members
+through `unique_ptr<DataChunk>`, `auto &`, `reference<T>` and template-wrapped receivers whose written type
+the ParamType/Type capture does not decode (`writtenTypeOf` records only a plain or qualified type
+identifier), so the split is the disclosed truth of what the resolver can see, not a pin. Where the receiver
+is a plain typed local, parameter, range-for variable or reference local, or the field is uniquely named
+(`sink_state`, `op_state`, `vector_type`), the answer pins. The flagless map on duckdb: `symbols=` 61178 →
+71173 (+9995 fields), `edges=` 84701 → 85071 was the FIRST measurement and is the reason fields are now
+excluded from the call resolver's name tables (a field was a candidate of every same-named call — `v.data()`
+minted edges into 49 `data` members); with that fix the call graph is byte-identical to the pre-round binary
+on the same tree (verified per-symbol on ripwire `src/`: 4414 non-field symbols, 0 callee-name differences,
+identical `edges=`/`ambiguous=`/`unresolved=`). One warm `--uses=Vector.data`: 0.42 s wall.
+
+**RESULT — token cost, measured on ripwire's own tree, SAME tree under both binaries (the pre-round
+8e186bb build vs this lane's head).** Flagless map `.`: 21 862 B → 21 906 B (**+44 B, +0.20%**),
+`symbols=` 12 663 → 16 447, `edges=`/`ambiguous=`/`unresolved=` identical (15 308 / 5 611 / 3 742), **0 of
+the 200 rows changed** and 0 field rows reached the top 200. `src/`: 23 320 B → 23 364 B (+44 B, +0.19%),
+`symbols=` 4 647 → 8 139, 0 rows changed. Well under the registered 5% line, so fields stay ordinary
+symbols (isolates in the graph, like `var` constants) rather than moving behind a flag. `--uses=name` (the
+name-wide union, contract unchanged): 11 048 B / count=183 → 12 273 B / count=811 — the member sites the
+old index never captured. `--uses=Symbol.name` on `.` (cold): count=386, pinned=236, amb_sites=150,
+owners_of_name=58, 0.09 s warm. The rich-cache blob of a tree indexed by an EARLIER binary of the same
+parserVer is stale but "valid" — a development-only trap this lane hit (pinned counts read 109 warm vs 236
+cold until the blob was purged); parserVer 75 vs the shipped 74 means no released cache can hit it.
+
+**Deviation, disclosed.** Contract item (4) offered "stop excluding instance fields, or a disclosed toggle"
+for `--nonlocal-state`; this lane shipped neither a widening nor a flag. Fields stay excluded BY DEFINITION
+(the lens's own header: a cell is linkage-scoped state), the legend now says so and points at the member
+selector, and the lens gained the precision the fixture pins (arm G). A `--nonlocal-state` toggle would be
+a new flag with its own help/legend/flag-surface footprint; it is left for a round that wants it.

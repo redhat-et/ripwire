@@ -39,6 +39,7 @@ inline void dedupRawDefs( std::vector<RawDef>& rawDefs )
             case SymKind::Class:     return 3;
             case SymKind::Function:  return 2;
             case SymKind::Var:       return 1;
+            case SymKind::Field:     return 1;   // never collides with Var in practice: the static/non-static gates are complementary
             default:                 return 0;   // Other
         }
     };
@@ -294,7 +295,15 @@ inline DefSpanIndex buildDefSpanIndex( const IngestResult& result, const std::ve
     for( std::uint32_t i = 0; i < rawDefs.size(); ++i )
     {
         const std::size_t spanIndex = fileSpanWrite[ rawDefs[ i ].fileId ]++;
-        index.spans[ spanIndex ] = { rawDefs[ i ].startByte, rawDefs[ i ].endByte, result.symbols[ i ].id };
+        // member-variable round (card A3): a FIELD never encloses anything. Its declaration sits inside the
+        // owner's body, so a real span here would make the field the innermost definition around the S5-E
+        // HAS-A type ref captured on that very line (fromSymbol used to be the CLASS, and buildFieldNarrowTables,
+        // composeEdges and the --lego view all key on that) and around a default initializer's own reads.
+        // A zero-width span contains no byte, so every reference attributes exactly as it did before fields
+        // were symbols — byte-identical fromSymbol corpus-wide. The field's own [start, end) stays on the
+        // Symbol (--expand reads it there), only this containment index is blind to it.
+        const bool isField = rawDefs[ i ].kind == SymKind::Field;
+        index.spans[ spanIndex ] = { rawDefs[ i ].startByte, isField ? rawDefs[ i ].startByte : rawDefs[ i ].endByte, result.symbols[ i ].id };
     }
 
     for( std::size_t fileId = 0; fileId < result.files.size(); ++fileId )
@@ -537,6 +546,33 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
         ref.startByte   = r.startByte;                // shadow fix round: for the block-span containment test
         ref.fromSymbol  = refSweep.find( r.fileId, r.startByte );
     }
+}
+
+// member-variable round (card A3): a Python field is DEFINED by its first `self.x = …` assignment, and that very
+// identifier is what the value-use visitor captured as a role="write" ref — the definition's own name is not a
+// use of it (usescheck.sh 3c pins the same rule for C++ locals). rawDefs is aligned 1:1 with result.symbols
+// (assignSymbols), so a Field def's (fileId, nameByte) is the exact site to drop. C/C++ fields never reach here
+// (a field_identifier in a declarator is not a value use), so the pass is a no-op there; every other ref keeps
+// its position and order.
+inline void dropFieldDefinitionSites( IngestResult& result, const std::vector<RawDef>& rawDefs )
+{
+    HashMap<std::uint64_t, char> defSite;
+    for( const RawDef& d : rawDefs )
+    {
+        if( d.kind == SymKind::Field )
+        {
+            defSite.try_emplace( ( std::uint64_t( d.fileId ) << 32 ) | d.nameByte, 1 );
+        }
+    }
+    if( defSite.empty() )
+    {
+        return;
+    }
+    std::erase_if( result.references, [ & ]( const Reference& r )
+                   {
+                       return ( r.role == RefRole::Read || r.role == RefRole::Write )
+                           && defSite.find( ( std::uint64_t( r.fileId ) << 32 ) | r.startByte ) != defSite.end();
+                   } );
 }
 
 // P2-D Rule 2: attribute each local var→type binding to its enclosing def (same containment scan as refs),

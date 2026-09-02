@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-02, THE MEMBER-VARIABLE ROUND (card A3, test/fieldusescheck.sh): kParserVer 74 -> 75 — a new
+#   SymKind::Field (C/C++ non-static field_declaration, Python self.x / annotated class attribute) plus the
+#   value-use visitor's member-access capture change every C-family and Python file's def and ref FACTS. The
+#   ingest.cpp-side extraction-identity line moved, quality.h's kIngestParserVerMirror was bumped to 75 in the
+#   same diff (qextractionkeycheck), no Snapshot-side function changed, kQSnapCacheScheme stays 8.
 # 2026-08-25, THE SCOPE-LESS QUALITY-KEY FOLD (test/qualitykeycheck.sh, scopeless-fold lane): the KEY
 #   SPACE of every per-symbol map in a Snapshot moved. ccx/loc/nest/params/defs/mask/dead/api were keyed
 #   by `fnv1a64( baselineCanonId(...) )`, which inherits resolve.h::canonicalId's bare-name degrade and

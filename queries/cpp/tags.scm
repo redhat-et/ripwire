@@ -157,6 +157,28 @@
     ]
     default_value: (_)) @definition.constant)
 
+; ---- instance FIELDS (ripwire addition — the member-variable round, card A3, 2026-09-02) ----
+; Every per-object data member of a class/struct/union body: `int count = 0;`, `char* label;`,
+; `int& ref;`, `int buf[8];`, a bitfield `unsigned x : 3;` — declared or default-initialized alike.
+; Deliberately LOOSE like the class-static-constant pattern above (tags-pass predicates never run):
+; it also matches `static int live;` and `static constexpr int kMax = 3;`. The keep decision is
+; ingest_names.h fieldCaptureKept: a `static` storage_class_specifier DROPS the capture — a class-static
+; constant keeps its @definition.constant row above (t="var"), and a mutable static member is not a
+; per-object field (disclosed in the --uses member legend). Method declarations bind through
+; function_declarator and never match this alternation. Fields of an ANONYMOUS struct/union have no
+; owner name and are dropped at extraction (Symbol::scope empty — disclosed). t="field",
+; id=path::Owner::field; use-sites via --uses=Owner.field (test/fieldusescheck.sh).
+(field_declaration_list
+  (field_declaration
+    declarator: [
+      (field_identifier) @name
+      (pointer_declarator declarator: (field_identifier) @name)
+      (pointer_declarator declarator: (pointer_declarator declarator: (field_identifier) @name))
+      (reference_declarator (field_identifier) @name)
+      (array_declarator declarator: (field_identifier) @name)
+      (pointer_declarator declarator: (array_declarator declarator: (field_identifier) @name))
+    ]) @definition.field)
+
 ; ---- CUDA memory-space module bindings (ripwire addition — the cudacheck §7b close-out) ----
 ; `__constant__ float rk_scaleTable[ 64 ];` carries NO initializer (host fills it via
 ; cudaMemcpyToSymbol), so the init_declarator patterns above can never match it — that, not the

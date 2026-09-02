@@ -987,6 +987,65 @@ inline bool fieldConstantCaptureKept( TSNode fieldDeclNode, std::string_view src
     return isStaticMember && declarationCarriesConstQualifier( fieldDeclNode, src );
 }
 
+// The keep decision for the @definition.field captures (member-variable round, card A3; queries/cpp,
+// queries/c, queries/python tags.scm). The patterns are LOOSE on purpose — tags-pass predicates never run
+// — so the contract lives here, per language:
+//   C/C++ : keep iff the field_declaration carries NO `static` storage_class_specifier. A class-static
+//           CONSTANT keeps its own @definition.constant row (t="var", fieldConstantCaptureKept); a mutable
+//           static member is not per-object state and is not extracted at all (disclosed in the member
+//           legend). Bitfields, references, pointers and arrays all keep — the declarator shape is the
+//           query's business, the storage class is this function's.
+//   Python: the annotated class-body attribute (`x: T [= v]`, @name's parent is the assignment itself) keeps
+//           unconditionally — the `type:` field already discriminated it. The `self.x = …` form (@name's
+//           parent is an `attribute`) keeps iff the receiver is the bare identifier `self` AND the assignment
+//           sits inside a function_definition that sits inside a class_definition — `obj.x = …` in a free
+//           function, `cls.x = …`, and a module-level `self.x` (no class) all drop. The per-(class, name)
+//           first-wins dedup is ingest_sidecap.h's, after this gate.
+// Pure syntactic, allocation-free; `noexcept` like its siblings.
+inline bool fieldCaptureKept( Lang lang, TSNode nameNode, TSNode roleNode, std::string_view src ) noexcept
+{
+    if( lang == Lang::Cpp || lang == Lang::C )
+    {
+        return childTokenAmong( roleNode, src, "storage_class_specifier", /*acceptAnonymousToken=*/false, { "static" } ).empty();
+    }
+    if( lang != Lang::Python )
+    {
+        return false;   // no other grammar carries the capture — a query that grew one would need its own arm here
+    }
+    const TSNode parent = ts_node_parent( nameNode );
+    if( ts_node_is_null( parent ) )
+    {
+        return false;
+    }
+    if( std::strcmp( ts_node_type( parent ), "assignment" ) == 0 )
+    {
+        return true;    // the annotated class-body attribute — the query's own class_definition/type: shape did the work
+    }
+    if( std::strcmp( ts_node_type( parent ), "attribute" ) != 0 )
+    {
+        return false;
+    }
+    const TSNode object = ts_node_child_by_field_name( parent, "object", 6 );
+    if( ts_node_is_null( object ) || std::strcmp( ts_node_type( object ), "identifier" ) != 0 || nodeTextOf( object, src ) != "self" )
+    {
+        return false;   // `obj.x = …` / `cls.x = …` — not an instance attribute of the enclosing class
+    }
+    bool sawFunction = false;
+    for( TSNode up = ts_node_parent( roleNode ); !ts_node_is_null( up ); up = ts_node_parent( up ) )
+    {
+        const char* ut = ts_node_type( up );
+        if( std::strcmp( ut, "function_definition" ) == 0 )
+        {
+            sawFunction = true;
+        }
+        else if( std::strcmp( ut, "class_definition" ) == 0 )
+        {
+            return sawFunction;   // a method of this class (or a closure inside one) → keep; a class-body `self.x` → drop
+        }
+    }
+    return false;       // no enclosing class — `self` is just a name here
+}
+
 // forward declarations for dropGatedCapture below — the helpers live after nodeTextOf's section.
 inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept;
 inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noexcept;
@@ -1103,6 +1162,10 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
     if( defCapSv == "definition.constant" )
     {
         return dropConstantCapture( lang, name, nameNode, roleNode, src );
+    }
+    if( defCapSv == "definition.field" )
+    {
+        return !fieldCaptureKept( lang, nameNode, roleNode, src );   // member-variable round: static members / non-self targets drop
     }
     if( defCapSv == "definition.cjsexport" )
     {

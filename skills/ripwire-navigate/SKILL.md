@@ -82,6 +82,7 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
 
 - **Who calls / what it calls** — `ripwire <dir> --callers=SYM` · `ripwire <dir> --callees=SYM`
 - **The resolvable use-sites of a name** (role=call|read|write|import|extends, file:line; `counts_floor="1"` — the count is a floor) — `ripwire <dir> --uses=SYM`
+- **Who reads/writes a MEMBER VARIABLE** (`t="field"` symbols; per-site owner resolution, `amb=K` where several owners could match, never a silent pin) — `ripwire <dir> --uses=Owner.field`
 - **Transitive blast radius** — `ripwire <dir> --impact=SYM`
 - **Neighborhood** (bounded k-hop ego graph) — `ripwire <dir> --around=SYM [--around-depth=2] [--around-fanout=32]`
 - **How does X reach Y** (shortest call-path) — `ripwire <dir> --path=SRC,DST`

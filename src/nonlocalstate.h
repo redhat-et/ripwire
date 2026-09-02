@@ -69,6 +69,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <ranges>
 #include <cstdint>
 #include <cstdio>
 #include <span>          // std::span — enclosingDecl reads whichever contiguous bucket the caller holds
@@ -82,6 +83,30 @@ namespace rw::nonlocal
 
 // The display cap, in the same shape as --readability's 40: raisable with --limit, paged with --offset.
 inline constexpr std::size_t kRowCap = 40;
+
+// member-variable round (card A3): an INSTANCE FIELD is not a cell — per-object state is a different
+// comprehension hazard from linkage-scoped state, and it has its own per-member answer (the uses verb's
+// Owner.field selector). Two shapes used to be charged to a same-named GLOBAL: a member access (`o.count`,
+// `this->count` — recv != None on a Read/Write ref means exactly that), and a bare name inside a method whose
+// own class declares it as a field (C++ member lookup wins over the global there). The "Owner\x1ffield" set
+// below decides the second; both are excluded by isInstanceFieldSite.
+inline HashMap<std::string, char> declaredFieldSet( const IngestResult& ing )
+{
+    HashMap<std::string, char> declaredField;
+    const auto ownedField = []( const Symbol& s ) noexcept { return s.kind == SymKind::Field && !s.scope.empty(); };
+    std::ranges::for_each( ing.symbols | std::views::filter( ownedField ),
+                           [ & ]( const Symbol& s ) { declaredField.try_emplace( s.scope + "\x1f" + s.name, 1 ); } );
+    return declaredField;
+}
+
+inline bool isInstanceFieldSite( const IngestResult& ing, const Reference& ref, const HashMap<std::string, char>& declaredField )
+{
+    if( ref.recv != RecvKind::None )
+    {
+        return true;    // a member access (`o.x` / `this->x`)
+    }
+    return !declaredField.empty() && declaredField.find( ing.symbols[ ref.fromSymbol ].scope + "\x1f" + ref.calleeName ) != declaredField.end();
+}
 
 // Cells per row. A function that reaches 300 globals has already told the reader what it needed to; the
 // list is evidence, not an inventory. Truncation is disclosed per row (cells_shown/cells_capped).
@@ -511,6 +536,7 @@ inline std::vector<AccessSite> collectAccesses( const IngestResult& ing, const s
             locallyBound[ std::to_string( b.fromSymbol ) + "\x1f" + b.var ] = 1;
         }
     }
+    const HashMap<std::string, char> declaredField = declaredFieldSet( ing );   // member-variable round: see isInstanceFieldSite
 
     for( const Reference& ref : ing.references )
     {
@@ -535,6 +561,10 @@ inline std::vector<AccessSite> collectAccesses( const IngestResult& ing, const s
         if( locallyBound.find( std::to_string( ref.fromSymbol ) + "\x1f" + ref.calleeName ) != locallyBound.end() )
         {
             continue;   // the enclosing function declares this name itself — a shadow, not the cell
+        }
+        if( isInstanceFieldSite( ing, ref, declaredField ) )
+        {
+            continue;   // an instance field, never a global cell (member-variable round)
         }
 
         std::uint32_t best      = UINT32_MAX;
@@ -878,7 +908,10 @@ inline constexpr const char* kNonLocalStateLegend =
     "<!-- ripwire nonlocal-state: per function, the NON-LOCAL MUTABLE STATE it can reach, reads and writes "
     "kept apart. A cell is one mutable datum declared outside any local scope: a file or namespace scope "
     "variable, a function-local static (local in name only), or a Python module global. A const, constexpr "
-    "or consteval declaration is NOT a cell. Rows are ordered MOST WRITES FIRST, then most reads. "
+    "or consteval declaration is NOT a cell. An INSTANCE FIELD is not a cell either, by definition: per-object "
+    "state is a different hazard, answered per member by the uses verb's Owner.field selector — so a member access (o.x, this->x) "
+    "and a bare name the enclosing method's own class declares as a field are never charged to a same-named "
+    "global here. Rows are ordered MOST WRITES FIRST, then most reads. "
     "p=path:line n=symbol name "
     "writes=distinct cells this function or its transitive callees WRITE "
     "reads=distinct cells this function or its transitive callees READ "
