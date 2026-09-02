@@ -5,9 +5,12 @@
 # WHAT THIS REPORTS, AND WHAT IT DELIBERATELY DOES NOT. hooks/ripwire-nudge.sh appends one row per
 # observed tool call to ~/.ripwire/substitution.jsonl (schema: docs/SUBSTITUTION_METER.md). This
 # script counts those rows. It prints no verdict, no confidence interval and no interpretation —
-# every number here is a count or a ratio of counts, and the reader decides what it means. That is
-# deliberate: the meter is in its OBSERVE-FIRST phase, the arm assignment is not yet alternating, and
-# a rate computed over a non-randomized sample is a description of what happened, not an effect.
+# every number here is a count or a ratio of counts, and the reader decides what it means.
+#
+# THE ARM ALTERNATES NOW (since 2026-08-19, `arm=auto`), so §1's arm block is a real comparison rather
+# than a placeholder — see "by arm" below. It still prints no verdict and no significance test: the
+# decision rule and the pre-registered band live in docs/EVALS.md §4, and a script that printed a
+# p-value beside a rate would invite reading one number as the other.
 #
 #   substitution rate = ripwire / (ripwire + native)
 #
@@ -18,8 +21,18 @@
 # definition a call this tool could not read, and folding either into a headline rate would launder
 # an unknown into a denominator.
 #
-# THE ARM HAS ALWAYS BEEN `treatment`. No control session has ever been run, so every rate below is a
-# LEVEL, never a difference, and nothing here is a causal claim about the nudge.
+# WHICH ROWS ARE COMPARABLE. `arm=auto` (2026-08-19) is what first produced a mixed population; every
+# row before that deploy is `treatment` by construction and belongs to no comparison. `--window2` is
+# the named cut for that — `2026-08-19T12 <= ts < 2026-09-02T00`, excluding the `smoketest` session —
+# and it is the window docs/EVALS.md §4's "PreToolUse nudge A/B" readout is computed over. Without it,
+# the arm block below pools the pre-deploy all-treatment rows into the treatment arm and understates
+# nothing in particular, which is worse than understating something specific.
+#
+# WHAT THE ARM BLOCK CANNOT CONTROL FOR, AND SAYS SO. The two arms do not sample the same repositories
+# in the same proportions, and repositories differ enormously in baseline substitution. So the block
+# prints THREE cuts, in increasing order of how much they control for that: pooled (an artifact,
+# printed first and labelled), per repository, and per session with the SESSION as the unit — which is
+# the unit `meter_auto_arm` actually randomizes. Read the last one.
 #
 # THE CONFOUND, MADE VISIBLE RATHER THAN CORRECTED. The hook's own nudge is a cause of the next
 # ripwire call, so a single pooled rate partly measures the hook talking to itself. The split below is
@@ -41,7 +54,7 @@
 # too small to read as a rate.
 #
 # Usage:
-#   python3 bench/substitution_report.py [~/.ripwire/substitution.jsonl] [--top N] [--tag REPO]
+#   python3 bench/substitution_report.py [~/.ripwire/substitution.jsonl] [--top N] [--tag REPO] [--window2]
 import argparse
 import collections
 import json
@@ -76,6 +89,10 @@ NON_VERB_FLAGS = frozenset((
     "--no-cache", "--cache-dir", "--no-route", "--route", "--token-budget", "--top-k", "--rank-by",
     "--stable", "--metrics", "--format", "--exclude", "--include", "--jobs", "--lang", "--no-color",
 ))
+
+# The A/B window, as literals rather than a computed range — see --window2.
+WINDOW2_FROM = "2026-08-19T12"
+WINDOW2_TO = "2026-09-02T00"
 
 MCP_PREFIX = "mcp__ripwire__"
 # The hook caps `detail` at 200 characters, so a long command line can be cut mid-flag. Such a row is
@@ -238,6 +255,137 @@ def split_counts(rows):
     return rip, nat
 
 
+# ── the arm comparison (§1). See the header for why three cuts and why the last one is the one to read.
+ARM_MIN_SESSION_ROWS = 30       # a session below this is a fragment, not a session's worth of behaviour
+ARM_MIN_TAG_CALLS = 200         # below this a per-repo ratio is two small numbers divided by each other
+
+
+def arm_rate(rows, arm):
+    """(ripwire, native) for one arm."""
+    return split_counts([r for r in rows if r.get("arm", "?") == arm])
+
+
+def ratio(a, b):
+    """a/b as a float, or None when either side has no denominator. Never rounded here — the caller
+    formats. A ratio, not a difference, because the LEVELS are operator telemetry: see the standing
+    rule recorded in docs/EVALS.md §4."""
+    ra, rb = rate(*a), rate(*b)
+    return None if (ra is None or rb is None or rb == 0) else ra / rb
+
+
+def fmt_ratio(r):
+    return "     n/a" if r is None else "%8.3f" % r
+
+
+def session_shares(rows, arm, min_rows=ARM_MIN_SESSION_ROWS):
+    """One substitution share per session on `arm`, for sessions with at least `min_rows` rows. A
+    session whose rows straddle both arms is DROPPED rather than assigned: that can only happen if the
+    arm config changed mid-session, and a unit of randomization that changed identity is not a unit."""
+    per = collections.defaultdict(list)
+    for r in rows:
+        per[str(r.get("session"))].append(r)
+    out = []
+    for _sid, rs in sorted(per.items(), key=lambda kv: kv[0]):
+        arms = {r.get("arm", "?") for r in rs}
+        if len(arms) != 1 or arms.pop() != arm:
+            continue
+        rip, nat = split_counts(rs)
+        if len(rs) >= min_rows and rip + nat > 0:
+            out.append(rip / (rip + nat))
+    return out
+
+
+def median(values):
+    if not values:
+        return None
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    return ordered[mid] if len(ordered) % 2 else 0.5 * (ordered[mid - 1] + ordered[mid])
+
+
+def post_marker_split(rows, arm, marker):
+    """(before, after) row lists around the FIRST call in each session carrying `marker`.
+
+    The marker is written by the hook in BOTH arms — a control session records where a treatment
+    session would have been spoken to — so this window is symmetric and the control side is a real
+    counterfactual rather than an absence. The firing call itself carries marker=0 (the hook reads the
+    flag before setting it), so the moment is the last marker=0 row before the first marker=1 row."""
+    per = collections.defaultdict(list)
+    for r in rows:
+        if r.get("class") == "session-start":
+            continue
+        per[str(r.get("session"))].append(r)
+    before, after, seen = [], [], 0
+    for _sid, rs in sorted(per.items(), key=lambda kv: kv[0]):
+        arms = {r.get("arm", "?") for r in rs}
+        if len(arms) != 1 or arms.pop() != arm:
+            continue
+        rs.sort(key=lambda r: (r.get("seq", 0),))
+        at = next((i for i, r in enumerate(rs) if r.get(marker)), None)
+        if at is None or at == 0:
+            continue
+        seen += 1
+        before += rs[max(0, at - 1 - WINDOW_CALLS):at]
+        after += rs[at:at + WINDOW_CALLS]
+    return before, after, seen
+
+
+WINDOW_CALLS = 15               # calls either side of the marker moment; stated because a ratio without it means nothing
+
+
+def arm_section(rows):
+    arms = sorted({r.get("arm", "?") for r in rows})
+    print("")
+    print("  by arm — ratios, not levels (the decision rule and its band: docs/EVALS.md §4):")
+    if len(arms) < 2:
+        print("    only one arm present (%s) — this log measures a LEVEL, never a difference." % ", ".join(arms))
+        for arm in arms:
+            print("    %-27s %s" % (arm, fmt_rate(*arm_rate(rows, arm))))
+        return
+    tre, con = arm_rate(rows, "treatment"), arm_rate(rows, "control")
+    print("    %-34s %6s / %-6s  %s" % ("cut", "n(T)", "n(C)", "T/C"))
+    print("    %-34s %6d / %-6d %s   <- ARTIFACT: the arms do not sample the same repos" %
+          ("pooled (do not read as an effect)", tre[0] + tre[1], con[0] + con[1], fmt_ratio(ratio(tre, con))))
+
+    tags = collections.Counter()
+    for r in rows:
+        if r.get("family") in (RIPWIRE_FAMILY, NATIVE_FAMILY):
+            tags[r.get("tag", "?")] += 1
+    for tag, _n in tags.most_common():
+        sub = [r for r in rows if r.get("tag") == tag]
+        t, c = arm_rate(sub, "treatment"), arm_rate(sub, "control")
+        nt, nc = t[0] + t[1], c[0] + c[1]
+        if min(nt, nc) < ARM_MIN_TAG_CALLS:
+            continue
+        print("    %-34s %6d / %-6d %s" % ("repo " + tag[:29], nt, nc, fmt_ratio(ratio(t, c))))
+    skipped = sum(1 for tag in tags
+                  if min(sum(arm_rate([r for r in rows if r.get("tag") == tag], a)) for a in ("treatment", "control"))
+                  < ARM_MIN_TAG_CALLS)
+    if skipped:
+        print("    (%d repo(s) omitted: fewer than %d rate-eligible calls on one side)" % (skipped, ARM_MIN_TAG_CALLS))
+
+    ts, cs = session_shares(rows, "treatment"), session_shares(rows, "control")
+    mt, mc = median(ts), median(cs)
+    print("    %-34s %6d / %-6d %s   <- SESSIONS are the unit of randomization: read this one" %
+          ("per-session median (>=%d rows)" % ARM_MIN_SESSION_ROWS, len(ts), len(cs),
+           fmt_ratio(None if (mt is None or not mc) else mt / mc)))
+    print("      n here counts SESSIONS, not calls. No confidence interval is printed: this script")
+    print("      reports counts, and the bootstrap interval for this statistic is in docs/EVALS.md §4.")
+
+    print("")
+    print("  around the nudge/sweep moment — %d calls either side, treatment beside its counterfactual:" % WINDOW_CALLS)
+    print("    %-34s %6s / %-6s  %s" % ("", "n(bef)", "n(aft)", "after/before"))
+    for marker, label in (("post_nudge", "any nudge moment"), ("post_sweep", "sweep escalation moment")):
+        for arm in ("treatment", "control"):
+            before, after, seen = post_marker_split(rows, arm, marker)
+            b, a = split_counts(before), split_counts(after)
+            tail = "  (the counterfactual: nothing was said here)" if arm == "control" else ""
+            print("    %-34s %6d / %-6d %s   %d session(s)%s" %
+                  ("%s, %s" % (label, arm), b[0] + b[1], a[0] + a[1], fmt_ratio(ratio(a, b)), seen, tail))
+    print("      A decline that the CONTROL arm reproduces is regression to the mean after a sweep,")
+    print("      not an effect of anything the hook said. That is what retired both tiers on 2026-09-02.")
+
+
 def section(title):
     print("")
     print(title)
@@ -253,6 +401,8 @@ def main():
                     help="path to substitution.jsonl (default: ~/.ripwire/substitution.jsonl)")
     ap.add_argument("--top", type=int, default=15, help="how many n-gram rows to print (default 15)")
     ap.add_argument("--tag", default=None, help="restrict to one repo tag")
+    ap.add_argument("--window2", action="store_true",
+                    help="restrict to the A/B window: 2026-08-19T12 <= ts < 2026-09-02T00, session != smoketest")
     args = ap.parse_args()
 
     if not os.path.exists(args.log):
@@ -262,15 +412,22 @@ def main():
         return 2
 
     rows, bad = load(args.log)
+    if args.window2:
+        # The bounds are LITERAL and CLOSED on both sides on purpose: the lower one is the `arm=auto`
+        # deploy (rows before it are all-treatment by construction and belong to no comparison), and
+        # the upper one freezes the window so a published number does not drift as the log grows.
+        rows = [r for r in rows
+                if WINDOW2_FROM <= str(r.get("ts", "")) < WINDOW2_TO and r.get("session") != "smoketest"]
     if args.tag:
         rows = [r for r in rows if r.get("tag") == args.tag]
 
     print("substitution meter — %s" % args.log)
-    print("rows=%d  malformed=%d  sessions=%d  repos=%d%s"
+    print("rows=%d  malformed=%d  sessions=%d  repos=%d%s%s"
           % (len(rows), bad,
              len({r.get("session") for r in rows}),
              len({r.get("tag") for r in rows}),
-             ("  tag=%s" % args.tag) if args.tag else ""))
+             ("  tag=%s" % args.tag) if args.tag else "",
+             ("  window2=[%s,%s)" % (WINDOW2_FROM, WINDOW2_TO)) if args.window2 else ""))
     if not rows:
         print("\n(no rows to report)")
         return 0
@@ -312,11 +469,7 @@ def main():
         print("      counts are NOT comparable across the v1/v2 boundary — the classifier widened.")
         print("      Replay the v1 rows' `detail` through the current hook before comparing rates.")
 
-    print("")
-    print("  by arm (dormant until alternation is switched on — expect all-treatment for now):")
-    for arm in sorted({r.get("arm", "?") for r in rows}):
-        sub = [r for r in rows if r.get("arm", "?") == arm]
-        print("    %-27s %s" % (arm, fmt_rate(*split_counts(sub))))
+    arm_section(rows)
 
     # ── §2 the composition of both sides ────────────────────────────────────────────────────────────
     section("2. calls by class (what the rate is made of)")

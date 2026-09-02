@@ -497,6 +497,60 @@ an unstated one makes it untrustworthy:
 The meter does not estimate around any of this. An unobserved call is absent, and absent is not zero
 — the same rule the rest of the tool's output follows.
 
+## What the A/B found — both nudge tiers are RETIRED (2026-09-02) {#what-the-ab-found}
+
+`arm=auto` (below) went live 2026-08-19 and produced the first randomized population this instrument
+ever had. **Window 2** — every row with `ts >= 2026-08-19T12`, `ts < 2026-09-02T00`, and
+`session != smoketest` — is a roughly balanced treatment/control sample across several hundred
+sessions. The readout is registered, with its argv, its per-session bootstrap CI, its `n`s and its
+confounds, in [`EVALS.md` §4, "PreToolUse nudge A/B"](EVALS.md). Its verdict, in one line:
+
+> **No cut separates the arms.** Not the pooled substitution share inside a single repository, not
+> the per-session median with sessions as the unit, and not the before/after around the moment a
+> nudge fires — where the treatment arm's dip is reproduced, larger, by the control arm's own
+> counterfactual. The dip is regression to the mean after a sweep, not an effect of the advice.
+
+The consequence was applied rather than written down. Both tiers stop emitting text:
+
+- the **base tier** (the §CEDE-gated one-time tips) — the hook's own header had recorded, from the
+  2026-08-11 first-12-hours readout, that it converts at ~0%; the A/B is the randomized confirmation;
+- the **sweep escalation** — resolved against *its own* pre-registered band in `EVALS.md` §4, which
+  asked for a `post_sweep=1` substitution rate of ≥ 3×B to KEEP and < ~1.4×B to DISABLE over ≥ 200
+  rate-eligible calls in ≥ 10 sessions. The minimum data is met several times over and the reading is
+  **below 1×B**: escalated sessions substitute slightly *less* after the escalation than before it,
+  and less than the control arm's counterfactual over the same window. That is a DISABLE by the rule
+  as written, and the rule was written before the data existed.
+
+**What "retired" changed, and what it deliberately did not.** The advice is gone. Everything else
+runs exactly as before: the same eligibility rules, the same `.obs`/`.deliv`/`.last` counters, the
+same cooldown policy, in both arms — so the log still records *which call would have been spoken to*.
+That is what keeps "how often was the moment even reached" answerable for the next instrument, and it
+is the covariate the Claude Code prompt router's readout will want.
+
+**Schema note — the `nudge` vocabulary changed at this commit.** Rows written before it use the old
+values; rows after it use the new ones. `v` did not bump, because no field was added, removed or
+retyped — only the set of strings one field takes. A before/after comparison across this commit must
+map them:
+
+| Before 2026-09-02 | After | Meaning |
+| --- | --- | --- |
+| `fired` (treatment) · `control` (control, base tier) | `retired` | this call was the base tier's delivery moment |
+| `dedup` (treatment) · `suppressed-control` (control) | `dedup` | eligible, but inside the cooldown |
+| `sweep<N>` (treatment) · `control` (control, sweep tier) | `retired-sweep` | this call was the escalation moment |
+| `gated` · `none` | unchanged | precondition failed · no pattern applied |
+
+`nudged` is now **always 0**, and `post_nudge`/`post_sweep` are pure counterfactual markers — "an
+eligible base-tier / sweep-tier moment already occurred in this session" — identical in both arms.
+None of the three fields was dropped: a schema that deletes a field cannot be compared across its own
+boundary.
+
+**The arm still means something.** It now separates exactly one behaviour: the **SessionStart
+primer**, which the control arm does not receive. That is the lever the 2026-08-10 finding actually
+credited — concentration (skill and `CLAUDE.md` text), never the PreToolUse hook — so the live A/B
+from here is primer-vs-no-primer, and the PreToolUse path is byte-identical in both arms.
+`RIPWIRE_SWEEP` / `sweep=` still resolve, and still gate the sweep tier's **counters**; they no longer
+gate any delivery, because there is none left to gate.
+
 ## The A/B toggle {#the-ab-toggle}
 
 Default behaviour (nothing named in the environment or `meter.conf`) is still **always-on observation
@@ -505,8 +559,8 @@ something other than that default:
 
 | Arm | Nudge | SessionStart primer | Counted | Row says |
 | --- | --- | --- | --- | --- |
-| unset (default) / `treatment` | yes | yes | yes | `arm":"treatment"`, `nudge` one of `fired`/`sweep<N>`/`dedup`/`gated`/`none` |
-| `control` | **no** | **no** | yes | `arm":"control"`, `nudge":"control"` (would have fired) or `"suppressed-control"` (would have deduped) |
+| unset (default) / `treatment` | **retired — none** | yes | yes | `arm":"treatment"`, `nudge` one of `retired`/`retired-sweep`/`dedup`/`gated`/`none` |
+| `control` | **retired — none** | **no** | yes | `arm":"control"`, and the same `nudge` values: since 2026-09-02 the PreToolUse path is arm-independent |
 | `auto` | *depends — see below* | *depends* | yes | `arm` is `treatment` or `control`, decided by a hash of the session id |
 
 `auto` is what makes the arm a real per-session coin flip instead of an all-or-nothing switch: it

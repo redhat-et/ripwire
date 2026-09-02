@@ -862,6 +862,141 @@ runs *before* the command and cannot see that it found nothing, so that trigger 
 Shipping it alongside this one would also put two new triggers behind one readout and make the
 verdict unattributable. It gets its own round once this one resolves.
 
+### PreToolUse nudge A/B — the READOUT that resolves the two registrations above (2026-09-02)
+
+This section **resolves** the sweep-escalation registration immediately above, and the base tier's
+older informal claim beside it. The verdict is a **registered negative**, and the consequence was
+applied in the same commit that published it: both nudge tiers now emit nothing. The instrument stays.
+
+**Why there is a readout at all now.** Every earlier reading of this log measured a LEVEL, because
+`arm` was 100% `treatment` on every row ever written — the registration above says so in its own
+confounds paragraph. `arm=auto` (a stable hash of the session id, `meter_auto_arm` in
+`hooks/ripwire-nudge.sh`) went live 2026-08-19 and is the first mechanism that could populate both
+arms from ordinary use. This is the first difference this instrument has ever been able to report.
+
+**The window, and the argv that reproduces every number below.** Window 2 is
+`ts >= 2026-08-19T12` (the deploy), `ts < 2026-09-02T00` (a CLOSED upper bound, so the numbers do not
+drift as the log grows), `session != smoketest`.
+
+```bash
+python3 bench/substitution_report.py                      # the house report, whole log, §1 "by arm"
+python3 bench/substitution_report.py --window2            # the same report restricted to Window 2
+```
+
+`--window2` and the per-arm breakdown under §1 landed with this readout; before it the script printed
+a stale `by arm (dormant until alternation is switched on — expect all-treatment for now)` header over
+a live 50/50 split, which is how a measurement gets taken and not read for two weeks.
+
+**Sample.** 32,874 rows across 397 sessions; arm split treatment 18,702 / control 14,172; rate-eligible
+calls (the `ripwire` + `native` families, the denominator of the substitution rate) treatment
+**n = 11,891**, control **n = 7,789**. The escalation fired 154 times across 31 treatment sessions.
+`unclassified` was 5.5% of rows, inside the ≤15% instrument-drift condition the registration above
+sets as its secondary (c).
+
+**The arms, as RATIOS.** Per the standing rule, the levels are operator telemetry and stay in the
+operator-local ledger; what is published here is each cut's `n` and the treatment-to-control ratio,
+which is the quantity the decision actually turns on. A ratio of 1.000 is "no difference".
+
+| Cut | n (rate-eligible) | treatment ÷ control |
+| --- | --- | ---: |
+| pooled over the whole window | 11,891 / 7,789 | 0.716 |
+| **inside one repository (`ripwire`)** | 3,131 / 6,310 | **0.992** |
+| inside one repository (`canyonraid49`) | 4,970 / 296 | 1.453 |
+| per-session median, sessions ≥ 30 rows, **sessions as the unit** | 24 / 22 sessions | **1.100** |
+
+**The pooled row is an artifact and must not be read as an effect.** The two arms did not sample the
+same repositories: `canyonraid49` contributes 4,970 treatment calls against 296 control ones, and
+`comfyui-on-openshift` is similarly lopsided. Pooling across repositories with very different baseline
+substitution rates and very different arm balances is Simpson's paradox with the arithmetic already
+done. The two rows that control for it — one repository at a time, and per-session with the session as
+the unit — are the ones the verdict rests on, and they are the two closest to 1.000 in the table.
+
+**The per-session bootstrap CI.** Sessions are the unit of randomization (`meter_auto_arm` hashes the
+session id), so they are the unit the interval is computed over. 20,000 bootstrap resamples of the
+24 treatment and 22 control session shares, seed 20260902, percentile interval, **no smoothing and no
+pooling of the tails**:
+
+| Statistic | Point | 95% bootstrap CI |
+| --- | ---: | --- |
+| median share, treatment ÷ control | 1.100 | **[0.772, 1.570]** |
+| median share, treatment − control, in units of the control median | +0.100 | [−0.274, +0.473] |
+
+`P(treatment median ≤ control median) = 0.341` across the resamples. The interval spans 1.000 with
+room on both sides; at n = 24/22 sessions it would take an effect several times larger than anything
+in this table to clear it. **This is a null with its power stated, not a null with its `n` hidden.**
+
+**The sweep escalation, resolved against its own pre-registered band.** The band above asks for
+`post_sweep=1` substitution ≥ 3×B to KEEP, ~1.4×B–3×B to REWORD, < ~1.4×B to DISABLE, over a minimum
+of 200 rate-eligible `post_sweep=1` calls in ≥ 10 sessions.
+
+| Registered quantity | Reading |
+| --- | --- |
+| minimum data (≥200 calls, ≥10 sessions) | **met**: 11,721 calls in 31 sessions |
+| `post_sweep=1` ÷ B, where B is the same arm's whole-window rate | **0.998×B** |
+| `post_sweep=1` ÷ the same arm's own `post_sweep=0` calls (n = 170) | 0.879× |
+| secondary (c): `unclassified` share under 15% | 5.5% — instrument not drifting |
+
+**0.998×B is a DISABLE by the rule as written**, and the rule was written in July, before any of these
+rows existed. The second row points the same way and is reported second because its denominator
+(n = 170) is far too small to decide anything on its own — the escalation fires at the third call of a
+class, so a session has almost no `post_sweep=0` history by construction. That smallness is a property
+of the mechanism, not of this window, and it is why the whole-arm B is the primary reading.
+
+**The control arm kills the last alternative explanation.** Aligning every session on the escalation
+moment and comparing the 15 rate-eligible calls after it to the 15 before:
+
+| Arm | sessions | n before / after | after ÷ before |
+| --- | ---: | --- | ---: |
+| treatment (a real escalation fired) | 31 | 131 / 248 | 0.901 |
+| control (the counterfactual moment, nothing was said) | 22 | 92 / 217 | **0.565** |
+
+Both arms decline, and the arm that was *never spoken to* declines **more**. The post-nudge dip that
+motivated three rounds of retuning is regression to the mean after a burst of same-class retrieval,
+which is exactly what a sweep is. Nothing the hook said moved it. At `post_sweep=1` the two arms stand
+at a treatment ÷ control ratio of 0.709, which carries the same repository-composition confound as the
+pooled row above and is reported for completeness rather than as a second finding.
+
+**Consequence, applied — the negative is the deliverable.**
+
+- The base tier's one-time tips and the sweep escalation both stop emitting text, in both arms.
+- Everything that makes the moment *measurable* stays: the same eligibility rules, the same
+  `.obs`/`.deliv`/`.last` counters, the same cooldown policy, in both arms. The row now says `retired`
+  where a base-tier delivery would have happened and `retired-sweep` where an escalation would have —
+  see the schema note in `docs/SUBSTITUTION_METER.md`, which maps the old `nudge` vocabulary onto the
+  new one so a comparison across this commit is possible rather than merely tempting.
+- The arm is retained and still assigned. It now separates exactly one behaviour, the **SessionStart
+  primer**, which the control arm does not receive. The PreToolUse path is byte-identical in both arms
+  and `test/hookcheck.sh` arm M20b asserts that directly.
+- `RIPWIRE_SWEEP=0` — the config-only kill switch the registration insisted on building before the
+  measurement — is now moot for delivery and gates the escalation's counters only. Building it early
+  still paid: the decision cost a policy change and no rollback.
+
+**Confounds, stated in full — the same ones as the registration above, plus two this readout adds.**
+Single operator. Heavily biased toward this repository, the least representative corpus available.
+The nudge is a cause of the call it counts, which is why `post_nudge` and `post_sweep` exist. And two
+that are specific to this reading:
+
+- **Repository composition is not balanced across arms**, for the reason above; the pooled row is
+  reported and then set aside rather than quietly dropped.
+- **~14% of the `grep`-class rows in this window are polls, not searches** — `grep -c`/`grep -q` over
+  a running job's log, and `ps aux | grep` liveness checks — and they are not evenly distributed
+  across arms. Removing them raises the treatment arm's share by a factor of 1.09 and the control
+  arm's by 1.02, i.e. the measurement artifact runs in the direction of *understating* treatment.
+  It is far too small to overturn a CI of [0.772, 1.570], but it is a real defect in the denominator
+  and it is fixed in the commit after this one (`build-poll` / `process-poll`, family `meta`,
+  excluded from the rate like `gate-run`). Rows written before that fix keep the `grep` class; the
+  classifier section of `docs/SUBSTITUTION_METER.md` records the boundary.
+
+**Scope guard, unchanged.** This measures TOOL CHOICE. It is not a task-success claim; §8 explains why
+that instrument stays unrun.
+
+**What this does NOT license.** It does not say advice cannot move an agent's tool choice — it says
+*this* advice, delivered at *this* moment (after the default has already been chosen, inside a
+`PreToolUse` payload), did not. The 2026-08-10 finding that concentration in the skill and `CLAUDE.md`
+text is what moved routing stands untouched, and the next instrument — the Claude Code prompt router,
+pre-registered below — deliberately moves the intervention to a different moment: **before** the first
+tool is chosen, with a paste-ready command instead of a verb name.
+
 ### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **The mechanism under test.** `--for` becomes terminal by default: after the ranked signatures, the
