@@ -16,9 +16,12 @@
 //     two variables; each occurrence binds to the innermost enclosing scope whose declaration precedes
 //     it, and the flow walk never chains into a sibling block's shadow. Rows of a shadowed name carry
 //     b= (the binding's declaration line), the root bindings=. Python is function-scoped (one binding).
-//   • RECEIVER MUTATION IS NOT A DEF — a write a callee performs through the variable (`v.push_back(x)`,
-//     `buf.append(s)`) classifies as a READ, because proving it writes needs the receiver's TYPE and the
-//     callee's BODY, and this slicer has neither. Registered as a DECISION, not an oversight, and
+//   • A WRITE HIDDEN BEHIND A CALL IS NOT A DEF — a write a callee performs through the variable
+//     (`v.push_back(x)`, `buf.append(s)`) classifies as a READ, and a write a callee or macro performs
+//     through an ARGUMENT (a by-reference/pointer parameter, an out-parameter, a function-like macro)
+//     classifies as a CALL-ARG use (widened 2026-09-02, audit F-12), because proving either writes needs
+//     the receiver's TYPE, the callee's SIGNATURE and BODY, or the macro's expansion, and this slicer has
+//     none of them. Registered as a DECISION, not an oversight, and
 //     measured before it was registered (2026-08-31, docs/EVALS.md "Receiver mutation as a slice
 //     definition"): across ripwire's own src/ and ugrep @550599a6, 79.1% of receiver call sites on
 //     these variables are not mutations at all, and of the ones that are, `reserve` (capacity, never
@@ -181,13 +184,19 @@ inline bool sliceIsReservedName( std::string_view text, Lang lang ) noexcept
 
 // ── occurrence classification ────────────────────────────────────────────────────────────────────────
 
-// t= vocabulary, in PRIORITY order (a line holding several occurrence roles reports the smallest value)
-enum class OccT : std::uint8_t { Param = 0, Decl = 1, Assign = 2, CallArg = 3, Read = 4 };
+// t= vocabulary, in PRIORITY order (a line holding several occurrence roles reports the smallest value).
+// Global/Nonlocal are Python's scope statements: neither a def nor a use (k="scope"), weakest of all.
+enum class OccT : std::uint8_t { Param = 0, Decl = 1, Assign = 2, CallArg = 3, Read = 4, Global = 5, Nonlocal = 6 };
 
 // declarative table over a switch (G2's constexpr-table rule — also what keeps this from cloning the
 // shapeName/styleTag/statusName switch skeleton QD flagged on the first cut), indexed by the enum value
-inline constexpr const char* kOccTagNames[] = { "param", "decl", "assign", "call-arg", "read" };
-static_assert( std::size( kOccTagNames ) == std::size_t( OccT::Read ) + 1 );
+inline constexpr const char* kOccTagNames[] = { "param", "decl", "assign", "call-arg", "read", "global", "nonlocal" };
+static_assert( std::size( kOccTagNames ) == std::size_t( OccT::Nonlocal ) + 1 );
+
+inline bool sliceIsScopeStatementRole( OccT t ) noexcept
+{
+    return t == OccT::Global || t == OccT::Nonlocal;
+}
 
 inline const char* occTag( OccT t ) noexcept
 {
@@ -405,6 +414,13 @@ inline bool sliceInField( TSNode p, const char* field, TSNode n ) noexcept
     return ts_node_start_byte( outer ) <= ts_node_start_byte( n ) && ts_node_end_byte( n ) <= ts_node_end_byte( outer );
 }
 
+// the JS/TS destructuring wrappers an identifier climbs through to reach its declarator
+inline bool sliceIsJsPatternKind( TSNode n ) noexcept
+{
+    return sliceKindIs( n, "object_pattern" ) || sliceKindIs( n, "array_pattern" ) || sliceKindIs( n, "pair_pattern" )
+           || sliceKindIs( n, "object_assignment_pattern" ) || sliceKindIs( n, "assignment_pattern" ) || sliceKindIs( n, "rest_pattern" );
+}
+
 // the assignment operator's own text — "+=", "=", … — read to split a plain write from a read-modify-write
 inline bool sliceOperatorIsPlainAssign( TSNode assignNode, std::string_view src ) noexcept
 {
@@ -577,6 +593,14 @@ inline SliceOcc sliceClassify( TSNode n, SliceFam fam, std::string_view src ) no
             {
                 o.skip = true;  return o;              // f(count=3) — the NAME is the callee's keyword, not this local
             }
+            if( std::strcmp( pk, "global_statement" ) == 0 )
+            {
+                o.t = OccT::Global;  return o;         // global X — a scope declaration: neither a read nor a write (k="scope")
+            }
+            if( std::strcmp( pk, "nonlocal_statement" ) == 0 )
+            {
+                o.t = OccT::Nonlocal;  return o;       // nonlocal X — same
+            }
             if( std::strcmp( pk, "argument_list" ) == 0 )
             {
                 use( OccT::CallArg );  return o;
@@ -586,31 +610,57 @@ inline SliceOcc sliceClassify( TSNode n, SliceFam fam, std::string_view src ) no
 
         case SliceFam::Js:
         {
-            if( std::strcmp( pk, "variable_declarator" ) == 0 && sliceIsField( p, "name", n ) )
+            // DESTRUCTURING: climb the pattern wrappers to the binding site, so `const { x, y: yy, z = 3,
+            // ...rest } = o`, `const [ a, b ] = o`, `function f({ p }, [ q ])`, `for (const { k } of o)`
+            // and `({ x } = o)` all bind their names (audit 2026-09-02, F-08: they minted nothing). The
+            // side that never binds: a pair_pattern's KEY (a property name, or a computed-key expression)
+            // and a default's RIGHT side — those are reads and fall through.
+            TSNode      d  = n;
+            TSNode      pp = p;
+            const char* dk = pk;
+            bool        patternRead = false;
+            while( !ts_node_is_null( pp ) && sliceIsJsPatternKind( pp ) )
             {
-                def( OccT::Decl );  return o;          // let count = 0;
+                if( ( std::strcmp( dk, "pair_pattern" ) == 0 && !sliceInField( pp, "value", d ) )
+                    || ( ( std::strcmp( dk, "object_assignment_pattern" ) == 0 || std::strcmp( dk, "assignment_pattern" ) == 0 ) && !sliceInField( pp, "left", d ) ) )
+                {
+                    patternRead = true;
+                    break;
+                }
+                d  = pp;
+                pp = ts_node_parent( pp );
+                dk = ts_node_is_null( pp ) ? "" : ts_node_type( pp );
             }
-            if( std::strcmp( pk, "formal_parameters" ) == 0 )
+            if( !patternRead && !ts_node_is_null( pp ) )
             {
-                def( OccT::Param );  return o;         // function f(count)
-            }
-            if( ( std::strcmp( pk, "required_parameter" ) == 0 || std::strcmp( pk, "optional_parameter" ) == 0 )
-                && sliceInField( p, "pattern", n ) )
-            {
-                def( OccT::Param );  return o;         // TS: (count: number)
-            }
-            if( std::strcmp( pk, "assignment_pattern" ) == 0 && sliceIsField( p, "left", n ) )
-            {
-                // (count = 0) — a parameter default when the pattern sits in a parameter shape, else a
-                // destructuring default; both introduce the name
-                const TSNode gp = ts_node_parent( p );
-                const bool   inParams = !ts_node_is_null( gp )
-                                        && ( sliceKindIs( gp, "formal_parameters" ) || sliceKindIs( gp, "required_parameter" ) || sliceKindIs( gp, "optional_parameter" ) );
-                def( inParams ? OccT::Param : OccT::Decl );  return o;
-            }
-            if( std::strcmp( pk, "assignment_expression" ) == 0 && sliceIsField( p, "left", n ) )
-            {
-                def( OccT::Assign );  return o;
+                // identity when n sits directly in the field (`arr[i] = …` must not def i), containment
+                // once a pattern was climbed (the field then holds the pattern, not the identifier)
+                const bool climbed = !ts_node_eq( d, n );
+                const auto inField = [ & ]( const char* field ) noexcept { return climbed ? sliceInField( pp, field, d ) : sliceIsField( pp, field, n ); };
+                if( std::strcmp( dk, "variable_declarator" ) == 0 && inField( "name" ) )
+                {
+                    def( OccT::Decl );  return o;      // let count = 0;   const { x } = o;
+                }
+                if( std::strcmp( dk, "formal_parameters" ) == 0 )
+                {
+                    def( OccT::Param );  return o;     // function f(count)   f({ p }, [ q ])   f(count = 0)
+                }
+                if( ( std::strcmp( dk, "required_parameter" ) == 0 || std::strcmp( dk, "optional_parameter" ) == 0 ) && inField( "pattern" ) )
+                {
+                    def( OccT::Param );  return o;     // TS: (count: number)   ({ p }: T)
+                }
+                if( std::strcmp( dk, "assignment_expression" ) == 0 && inField( "left" ) )
+                {
+                    def( OccT::Assign );  return o;    // count = …   ({ x } = o)
+                }
+                if( std::strcmp( dk, "for_in_statement" ) == 0 && inField( "left" ) )
+                {
+                    def( OccT::Decl );  return o;      // for (x of xs)   for (const { k } of xs)
+                }
+                if( std::strcmp( dk, "catch_clause" ) == 0 && inField( "parameter" ) )
+                {
+                    def( OccT::Decl );  return o;      // catch (e)   catch ({ message })
+                }
             }
             if( std::strcmp( pk, "augmented_assignment_expression" ) == 0 && sliceIsField( p, "left", n ) )
             {
@@ -619,10 +669,6 @@ inline SliceOcc sliceClassify( TSNode n, SliceFam fam, std::string_view src ) no
             if( std::strcmp( pk, "update_expression" ) == 0 )
             {
                 both( OccT::Assign );  return o;       // count++
-            }
-            if( std::strcmp( pk, "for_in_statement" ) == 0 && sliceIsField( p, "left", n ) )
-            {
-                def( OccT::Decl );  return o;          // for (x of xs) — bare-left form
             }
             if( std::strcmp( pk, "arguments" ) == 0 )
             {
@@ -894,13 +940,6 @@ inline bool sliceIsJsFunctionKind( TSNode n ) noexcept
     return false;
 }
 
-// the JS/TS destructuring wrappers an identifier climbs through to reach its declarator
-inline bool sliceIsJsPatternKind( TSNode n ) noexcept
-{
-    return sliceKindIs( n, "object_pattern" ) || sliceKindIs( n, "array_pattern" ) || sliceKindIs( n, "pair_pattern" )
-           || sliceKindIs( n, "object_assignment_pattern" ) || sliceKindIs( n, "assignment_pattern" ) || sliceKindIs( n, "rest_pattern" );
-}
-
 // JS: `var x` (variable_declaration) is function-scoped; `let`/`const` (lexical_declaration) block-scoped
 inline bool sliceJsIsVarBinding( TSNode declIdent ) noexcept
 {
@@ -1029,9 +1068,11 @@ inline void sliceWalk( TSNode node, const SliceWalkCtx& ctx, SliceScan& scan, Sl
     }
 
     // the C-family also yields variable occurrences dressed as type_identifier: the arguments of a
-    // direct-initialization declaration under the most-vexing parse (see sliceIsDirectInitCtorArg)
+    // direct-initialization declaration under the most-vexing parse (see sliceIsDirectInitCtorArg);
+    // JS/TS dress an object-pattern shorthand binder (`const { x } = o`) as its own node kind
     const bool occurrenceKind = sliceKindIs( node, "identifier" )
-                                || ( ctx.fam == SliceFam::C && sliceKindIs( node, "type_identifier" ) && sliceIsDirectInitCtorArg( node ) );
+                                || ( ctx.fam == SliceFam::C && sliceKindIs( node, "type_identifier" ) && sliceIsDirectInitCtorArg( node ) )
+                                || ( ctx.fam == SliceFam::Js && sliceKindIs( node, "shorthand_property_identifier_pattern" ) );
     if( occurrenceKind && a >= ctx.spanStart && b <= ctx.spanEnd && b <= ctx.src.size() && b > a )
     {
         const std::string_view text = ctx.src.substr( a, b - a );
@@ -1050,8 +1091,10 @@ inline void sliceWalk( TSNode node, const SliceWalkCtx& ctx, SliceScan& scan, Sl
                 scan.dropped.push_back( SliceNamedOcc{ std::string( text ), c } );   // counted (preproc_rows=), never a row, never a local
                 return;
             }
-            const bool introduces = c.isDef
-                                    && ( c.t == OccT::Param || c.t == OccT::Decl || ( c.t == OccT::Assign && sliceAssignIntroduces( ctx.fam ) ) );
+            // a Python global/nonlocal statement introduces the name too (with its own role), so the
+            // assignments after it bind to the scope statement rather than minting an unbound group
+            const bool introduces = ( c.isDef && ( c.t == OccT::Param || c.t == OccT::Decl || ( c.t == OccT::Assign && sliceAssignIntroduces( ctx.fam ) ) ) )
+                                    || sliceIsScopeStatementRole( c.t );
             if( introduces && text != ctx.selfName )
             {
                 // the binding this declaration creates — or, in the same scope, the one it re-declares
@@ -1188,7 +1231,7 @@ inline void sliceFoldOcc( std::vector<SliceLineRow>& rows, const SliceOcc& o )
 {
     if( rows.empty() || rows.back().line != o.line || rows.back().bindingIdx != o.bindingIdx )
     {
-        rows.push_back( SliceLineRow{ o.line, false, false, OccT::Read, false, o.bindingIdx } );
+        rows.push_back( SliceLineRow{ o.line, false, false, o.t, false, o.bindingIdx } );   // seeded with the FIRST role, then min'd — Read is not the weakest any more
     }
     SliceLineRow& r = rows.back();
     r.hasDef = r.hasDef || o.isDef;
@@ -1571,12 +1614,16 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         "function-scoped by the language, so one binding per name (comprehension and lambda scopes are not separated). A shadowed "
         "seed carries bindings= on the root and b= on every row — the line of the declaration the row binds to, b=\"0\" when no "
         "declaration inside the definition binds it (an outer/global name, or a use before its declaration); a flow row of a "
-        "shadowed name carries b= too, and the inventory lists one <v> per binding. RECEIVER MUTATION IS NOT COUNTED AS A DEF: a write a callee "
-        "performs through the variable itself — v.push_back(x), buf.append(s), m.insert(k) — is classified k=\"use\" t=\"read\", "
-        "because proving it writes needs the receiver's TYPE and the callee's BODY and this slicer has neither. Declining to guess is "
+        "shadowed name carries b= too, and the inventory lists one <v> per binding. A WRITE HIDDEN BEHIND A CALL IS NOT COUNTED AS A "
+        "DEF — two shapes, one blind spot: a write a callee performs through the variable itself (RECEIVER MUTATION: v.push_back(x), "
+        "buf.append(s), m.insert(k)) is classified k=\"use\" t=\"read\", and a write a callee or macro performs through an ARGUMENT — a "
+        "by-reference or pointer parameter (fill( buf ) where fill takes T& or T*), an out-parameter, a function-like macro (SETIT( m ) "
+        "expanding to m = 42) — is classified k=\"use\" t=\"call-arg\", because proving either writes needs the receiver's TYPE, the "
+        "callee's SIGNATURE and BODY, or the macro's expansion, and this slicer has none of them. Declining to guess is "
         "deliberate: a method-name list would mint false defs (v.reserve(n) changes capacity, never the value), and a false def is "
         "worse than a missing one because the flow walk stops at the NEXT def, so a fabricated one suppresses the real def before it. "
-        "The consequence to read for: a variable written ONLY through method calls reports defs= counting just its introduction, and a "
+        "The consequence to read for: a variable written ONLY through method calls, out-parameters or macros reports defs= counting "
+        "just its introduction, and a "
         "flow of steps=\"0\" — which means \"no def-use edge this slicer can prove\", never \"this variable is never written\". "
         "counts=\"as-classified\" on the root replaces the graph verbs' counts_floor= marker ON PURPOSE: defs=, uses=, vars= and "
         "steps= are exact counts of what this name-based classifier ROWED, and are NEITHER floors NOR totals of the variable's real "
@@ -1585,9 +1632,13 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         "the family's grammar exposes as a bare identifier (Python `o.v`, Java `o.v`). A count here is a claim about the rows, never "
         "about the program. "
         "Intra-procedural only: rows never cross into callees/callers "
-        "(the callers/callees/uses verbs give the inter-procedural half). One <s> row per LINE touching VAR: k= def|use|both (both = "
-        "the line writes AND reads it, e.g. `x += y`), t= the strongest role on the line (param > decl > assign > call-arg > read), "
-        "CDATA = the trimmed source line. defs=/uses= count OCCURRENCES, not lines. A reserved word of the definition's own language "
+        "(the callers/callees/uses verbs give the inter-procedural half). One <s> row per LINE touching VAR: k= def|use|both|scope (both = "
+        "the line writes AND reads it, e.g. `x += y`; scope = a Python global/nonlocal statement — a scope declaration, neither a read "
+        "nor a write, that introduces the name and never anchors a flow), t= the strongest role on the line (param > decl > assign > "
+        "call-arg > read > global/nonlocal), CDATA = the trimmed source line. defs=/uses= count OCCURRENCES, not lines. JS/TS "
+        "destructuring binders — `const { x, y: yy, z = 3, ...rest } = o`, `[a, b] = arr`, a destructured parameter, `for (const { k } "
+        "of xs)` — are locals whose def row is the pattern's line (a default's right side and a computed key are reads). A reserved "
+        "word of the definition's own language "
         "is never an occurrence or a local — a keyword lexed as an identifier is a degraded-parse artifact and is dropped, so slicing "
         "one refuses like any unknown VAR. PREPROCESSOR RULE (C-family): a conditional region starting inside the definition is "
         "decided only by its literal — the body of `#if 0` and the `#else` of `#if 1` are DEAD, their rows are dropped and their "
@@ -1761,7 +1812,7 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         for( const SliceLineRow& r : sliceFoldLines( scan.occ ) )
         {
             out += "<s l=\"" + std::to_string( r.line ) + "\" k=\"";
-            out += r.hasDef && r.hasUse ? "both" : r.hasDef ? "def" : "use";
+            out += r.hasDef && r.hasUse ? "both" : r.hasDef ? "def" : r.hasUse ? "use" : "scope";
             out += "\" t=\"";
             out += occTag( r.t );
             out += "\"";
@@ -1788,7 +1839,7 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
                 const SliceVarRows& v = flow->vars[ fr.varIdx ];
                 const SliceLineRow& r = v.rows[ fr.rowIdx ];
                 out += "<s l=\"" + std::to_string( r.line ) + "\" k=\"";
-                out += r.hasDef && r.hasUse ? "both" : r.hasDef ? "def" : "use";
+                out += r.hasDef && r.hasUse ? "both" : r.hasDef ? "def" : r.hasUse ? "use" : "scope";
                 out += "\" t=\"";
                 out += occTag( r.t );
                 out += "\" v=\"" + ex( v.name ) + "\" d=\"" + std::to_string( fr.d ) + "\" f=\"" + std::to_string( fr.from ) + "\"";

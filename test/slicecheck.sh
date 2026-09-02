@@ -29,6 +29,11 @@
 #   (12) C++ condition declaration `if( int k = x )`: tree-sitter-cpp emits a `declaration` whose
 #        initializer sits in a `value` field with NO init_declarator, so x must row as a READ of x
 #        (and k as its decl) — a false def here is a false binding after scope separation
+#   (13) JS/TS destructuring binders are sliceable locals whose def is the pattern line: object,
+#        array, renamed (`y: yy`), defaulted (`z = 3`, its right side a read), rest, a destructured
+#        parameter, `for (const { k } of xs)`, and `({ x } = o)` as an assign
+#   (14) Python `global X` / `nonlocal X` row k="scope" t="global"|"nonlocal" — a scope declaration,
+#        neither read nor write — and introduce the name in the inventory with that role
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/slicecheck.sh   |   bash test/slicecheck.sh path/to/ripwire
 
@@ -156,6 +161,43 @@ int condread( int x )
     while( int m = x ) { x = m; }
     return x;
 }
+EOF
+
+# arm (13)'s fuel: JS/TS destructuring — before the fix `const { x, y } = o` minted NO local and NO def
+# (audit 2026-09-02, F-08: vars="2" listing only o and s; --slice=destructure:x -> defs="0").
+cat > "$WORK/src/d.js" <<'EOF'
+function destructure( o, { p, q }, [ r ] ) {
+  const { x, y: yy, z = 3, ...rest } = o;
+  const [ a, b ] = o;
+  let s = x + yy + z + a + b + p + q + r;
+  ({ x } = o);
+  for (const { k } of o) { s += k; }
+  return s + rest.length;
+}
+EOF
+cat > "$WORK/src/d.ts" <<'EOF'
+function tsdestructure( o: any, { p, q }: { p: number; q: number } ): number {
+  const { x, y: yy } = o;
+  let s: number = x + yy + p + q;
+  return s;
+}
+EOF
+# arm (14)'s fuel: Python scope statements
+cat > "$WORK/src/g.py" <<'EOF'
+COUNTER = 0
+
+def bump(n):
+    global COUNTER
+    COUNTER = COUNTER + n
+    return COUNTER
+
+def outer():
+    acc = 0
+    def inner(k):
+        nonlocal acc
+        acc += k
+        return acc
+    return inner
 EOF
 
 echo "slicecheck: BIN=$BIN  (temp corpus, no git)"
@@ -328,6 +370,48 @@ OUT12I="$( sl condread )"
     && ! printf '%s' "$( elem "$OUT12I" )" | grep -q '<v n="x" l="3"' \
     && ok "(12) inventory: x, k, m — k IS the decl at l3, x is not re-declared there" \
     || { no "(12) expected vars=\"3\" with <v n=\"k\" l=\"3\"/> and no <v n=\"x\" l=\"3\"/>"; printf '%s\n' "$OUT12I"; }
+
+# ── (13) JS/TS destructuring binders are locals with the pattern line as their def ──────────────────
+OUT13="$( sl d.js:destructure )"
+if [ "$( attr "$OUT13" vars )" = 'vars="12"' ] \
+   && printf '%s' "$( elem "$OUT13" )" | grep -q '<v n="x" l="2" t="decl"/>' && printf '%s' "$( elem "$OUT13" )" | grep -q '<v n="yy" l="2" t="decl"/>' \
+   && printf '%s' "$( elem "$OUT13" )" | grep -q '<v n="z" l="2" t="decl"/>' && printf '%s' "$( elem "$OUT13" )" | grep -q '<v n="rest" l="2" t="decl"/>' \
+   && printf '%s' "$( elem "$OUT13" )" | grep -q '<v n="a" l="3" t="decl"/>' && printf '%s' "$( elem "$OUT13" )" | grep -q '<v n="b" l="3" t="decl"/>' \
+   && printf '%s' "$( elem "$OUT13" )" | grep -q '<v n="p" l="1" t="param"/>' && printf '%s' "$( elem "$OUT13" )" | grep -q '<v n="r" l="1" t="param"/>' \
+   && printf '%s' "$( elem "$OUT13" )" | grep -q '<v n="k" l="6" t="decl"/>' \
+   && ! printf '%s' "$( elem "$OUT13" )" | grep -q '<v n="y"'; then
+    ok "(13) destructure inventory: vars=12 — o/p/q/r params, x/yy/z/rest (object), a/b (array), s, k (for-of); the KEY y is not a local"
+else
+    no "(13) expected vars=\"12\" with x/yy/z/rest@2, a/b@3, p/q/r@1 params, k@6 and no <v n=\"y\">"; printf '%s\n' "$OUT13"
+fi
+OUT13X="$( sl d.js:destructure:x )"
+[ "$( attr "$OUT13X" defs )" = 'defs="2"' ] && printf '%s' "$( row "$OUT13X" 2 )" | grep -q 'k="def" t="decl"' \
+    && printf '%s' "$( row "$OUT13X" 5 )" | grep -q 'k="def" t="assign"' \
+    && ok "(13) destructure:x — the pattern line rows k=def t=decl, '({ x } = o)' rows k=def t=assign: defs=2" \
+    || { no "(13) expected defs=\"2\": l=2 k=def t=decl and l=5 k=def t=assign"; printf '%s\n' "$OUT13X"; }
+OUT13Z="$( sl d.js:destructure:z )"
+[ "$( attr "$OUT13Z" defs )" = 'defs="1"' ] && printf '%s' "$( row "$OUT13Z" 2 )" | grep -q 'k="def" t="decl"' \
+    && ok "(13) destructure:z — a defaulted binder is a decl (its default's right side is not a write of z)" \
+    || { no "(13) expected defs=\"1\" with l=2 k=def t=decl for the defaulted binder"; printf '%s\n' "$OUT13Z"; }
+OUT13T="$( sl tsdestructure )"
+printf '%s' "$( elem "$OUT13T" )" | grep -q '<v n="x" l="2" t="decl"/>' && printf '%s' "$( elem "$OUT13T" )" | grep -q '<v n="p" l="1" t="param"/>' \
+    && ok "(13) TS: the typed destructured parameter and the object pattern are binders too" \
+    || { no "(13) expected TS binders x@2 (decl) and p@1 (param)"; printf '%s\n' "$OUT13T"; }
+
+# ── (14) Python global/nonlocal: a scope declaration is neither a read nor a write ──────────────────
+OUT14="$( sl bump:COUNTER )"
+printf '%s' "$( row "$OUT14" 4 )" | grep -q 'k="scope" t="global"' \
+    && [ "$( attr "$OUT14" defs )" = 'defs="1"' ] && [ "$( attr "$OUT14" uses )" = 'uses="2"' ] \
+    && ok "(14) bump:COUNTER — 'global COUNTER' rows k=scope t=global and counts as neither def nor use (defs=1 uses=2)" \
+    || { no "(14) expected l=4 k=\"scope\" t=\"global\", defs=\"1\" uses=\"2\""; printf '%s\n' "$OUT14"; }
+OUT14I="$( sl bump )"
+printf '%s' "$( elem "$OUT14I" )" | grep -q '<v n="COUNTER" l="4" t="global"/>' \
+    && ok "(14) bump inventory lists COUNTER at its global statement with t=global — a global, not a local, and it says so" \
+    || { no "(14) expected <v n=\"COUNTER\" l=\"4\" t=\"global\"/>"; printf '%s\n' "$OUT14I"; }
+OUT14N="$( sl inner:acc )"
+printf '%s' "$( row "$OUT14N" 11 )" | grep -q 'k="scope" t="nonlocal"' && printf '%s' "$( row "$OUT14N" 12 )" | grep -q 'k="both"' \
+    && ok "(14) inner:acc — 'nonlocal acc' rows k=scope t=nonlocal, 'acc += k' rows k=both" \
+    || { no "(14) expected l=11 k=\"scope\" t=\"nonlocal\" and l=12 k=\"both\""; printf '%s\n' "$OUT14N"; }
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

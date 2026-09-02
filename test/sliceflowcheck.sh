@@ -39,6 +39,8 @@
 #        walk binds each use to the innermost enclosing declaration (never chains into a sibling
 #        block's shadow), rows of a shadowed name carry b= (the binding's declaration line), the
 #        inventory lists each binding, and the legend states the scope rule per family
+#   (29) JS destructuring chains (s <- x,y <- o) and the widened under-count clause: the legend names
+#        by-reference/out-parameter/macro writes beside receiver mutation, and defines k=scope
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/sliceflowcheck.sh   |   bash test/sliceflowcheck.sh path/to/ripwire
 
@@ -217,6 +219,16 @@ function jsshadow( n ) {
   if ( n ) { var hoisted = n; }
   let r = v + hoisted;
   return r;
+}
+EOF
+
+# arm (29)'s fuel: the audit's own JS shape — before the fix `--slice=destructure:s --slice-flow=back`
+# returned steps="0"; the whole chain s <- x,y <- o was lost (F-08).
+cat > "$WORK/src/d.js" <<'EOF'
+function destructure( o ) {
+  const { x, y } = o;
+  let s = x + y;
+  return s;
 }
 EOF
 
@@ -692,6 +704,27 @@ if printf '%s' "$( legend "$SV" )" | grep -q 'b=' && printf '%s' "$( legend "$SV
 else
     no "(28f) the legend must define b=/bindings=, state the scope rule, and drop the over-include disclaimer"
 fi
+
+# ── (29) destructuring chains, and the under-count clause names every hidden-write shape ───────────
+DJ="$( run --slice=destructure:s --slice-flow=back )"
+[ "$( attr "$DJ" steps )" = 'steps="3"' ] \
+    && printf '%s' "$( frow "$DJ" x 2 )" | grep -q 'k="def" t="decl" v="x" d="1" f="3"' \
+    && printf '%s' "$( frow "$DJ" y 2 )" | grep -q 'k="def" t="decl" v="y" d="1" f="3"' \
+    && printf '%s' "$( frow "$DJ" o 1 )" | grep -q 't="param" v="o" d="2" f="2"' \
+    && ok "(29a) js destructure:s back: s <- x,y (the pattern line, d=1) <- o (d=2), steps=\"3\"" \
+    || { no "(29a) expected steps=\"3\": x and y at l=2 d=1, o at l=1 d=2"; printf '%s\n' "$DJ"; }
+# the under-count clause: receiver mutation was the only named shape; a write through an ARGUMENT
+# (by-reference parameter, out-parameter, function-like macro) is the same blind spot (F-12)
+L29="$( legend "$DJ" )"
+if printf '%s' "$L29" | grep -qi 'by-reference' && printf '%s' "$L29" | grep -qi 'out-param' && printf '%s' "$L29" | grep -qi 'macro' \
+   && printf '%s' "$L29" | grep -q 'call-arg'; then
+    ok "(29b) the legend's under-count clause names by-reference / out-parameter / macro writes (classified call-arg) beside receiver mutation"
+else
+    no "(29b) the legend must widen the under-count clause to by-reference, out-parameter and macro writes"
+fi
+printf '%s' "$L29" | grep -q 'scope' && printf '%s' "$L29" | grep -q 'nonlocal' && printf '%s' "$L29" | grep -qi 'destructur' \
+    && ok "(29b) the legend defines k=scope (global/nonlocal) and names destructuring binders" \
+    || no "(29b) the legend must define k=scope / t=global|nonlocal and name destructuring"
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"
