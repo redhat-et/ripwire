@@ -26,6 +26,9 @@
 #   (10) xmllint well-formedness (both modes)
 #   (11) keyword-local exclusion: a degraded parse must never offer a reserved word as a sliceable
 #        local (inventory clean of it, slicing it refuses) — the ugrep matcher.cpp misparse shape
+#   (12) C++ condition declaration `if( int k = x )`: tree-sitter-cpp emits a `declaration` whose
+#        initializer sits in a `value` field with NO init_declarator, so x must row as a READ of x
+#        (and k as its decl) — a false def here is a false binding after scope separation
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/slicecheck.sh   |   bash test/slicecheck.sh path/to/ripwire
 
@@ -140,6 +143,19 @@ def rubyfn(x)
   y = x + 1
   y
 end
+EOF
+
+# arm (12)'s fuel: the C++17-style condition declaration. `if( int k = x )` parses as condition_clause
+# -> declaration{ type, declarator: k, value: x } — no init_declarator — and the pre-fix classifier read
+# every non-type child of a declaration as a declarator, minting a false def of x (found 2026-09-02
+# while separating block scopes: the false def became a bogus binding of x at that line).
+cat > "$WORK/src/cond.cpp" <<'EOF'
+int condread( int x )
+{
+    if( int k = x ) { x = k; }
+    while( int m = x ) { x = m; }
+    return x;
+}
 EOF
 
 echo "slicecheck: BIN=$BIN  (temp corpus, no git)"
@@ -299,6 +315,19 @@ ERR11="$( slerr kwprobe:if )"
     && printf '%s' "$ERR11" | grep -q 'sliceable locals' && printf '%s' "$ERR11" | grep -q 'count' \
     && ok "(11) kwprobe:if — nonzero exit + the sliceable-locals refusal (a keyword is never a variable)" \
     || { no "(11) slicing a keyword should refuse like any unknown VAR and offer the real locals"; printf '%s\n' "$ERR11"; }
+
+# ── (12) a condition declaration's initializer is a READ, never a def ───────────────────────────────
+# RED against the pre-fix binary: defs="5" (param + two false decls + two assigns) and <v n="x" l="3">.
+OUT12="$( sl condread:x )"
+[ "$( attr "$OUT12" defs )" = 'defs="3"' ] && [ "$( attr "$OUT12" uses )" = 'uses="3"' ] \
+    && printf '%s' "$( row "$OUT12" 3 )" | grep -q 'k="both" t="assign"' \
+    && ok "(12) condread:x — 'if( int k = x ) { x = k; }' rows k=both t=assign (read in the condition, write in the body): defs=3 uses=3" \
+    || { no "(12) expected defs=\"3\" uses=\"3\" and l=3 k=\"both\" t=\"assign\" — the initializer x must not be a decl"; printf '%s\n' "$OUT12"; }
+OUT12I="$( sl condread )"
+[ "$( attr "$OUT12I" vars )" = 'vars="3"' ] && printf '%s' "$( elem "$OUT12I" )" | grep -q '<v n="k" l="3" t="decl"/>' \
+    && ! printf '%s' "$( elem "$OUT12I" )" | grep -q '<v n="x" l="3"' \
+    && ok "(12) inventory: x, k, m — k IS the decl at l3, x is not re-declared there" \
+    || { no "(12) expected vars=\"3\" with <v n=\"k\" l=\"3\"/> and no <v n=\"x\" l=\"3\"/>"; printf '%s\n' "$OUT12I"; }
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

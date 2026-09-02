@@ -35,6 +35,10 @@
 #        (preproc_rows= counts them) so a dead def can never replace the live chain; every other
 #        conditional region (`#ifdef`/`#ifndef`/`#if EXPR`) is build-dependent, so its rows are KEPT,
 #        flagged pp="1", and a pp def does not kill the reach of the unconditional def before it
+#   (28) block-scope separation: a name declared twice in one definition is TWO variables — the flow
+#        walk binds each use to the innermost enclosing declaration (never chains into a sibling
+#        block's shadow), rows of a shadowed name carry b= (the binding's declaration line), the
+#        inventory lists each binding, and the legend states the scope rule per family
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/sliceflowcheck.sh   |   bash test/sliceflowcheck.sh path/to/ripwire
 
@@ -170,6 +174,49 @@ int if1else( int n )
     a = 999;
 #endif
     return a;
+}
+EOF
+
+# arm (28)'s fuel: BLOCK-SCOPED SHADOWING, in a file of its own. Before the fix the backward walk from
+# r chained into the inner block's `v` (l5/l6) and never reached `int v = n;` (l3) or the param — the
+# answer was a chain through a variable r does not read (audit 2026-09-02, F-02). Go and JS shapes
+# pin the rule outside C: an occurrence binds to the innermost enclosing block whose declaration
+# precedes it; Go's `v := v + 1` reads the OUTER v in its own initializer; JS `var` is function-scoped.
+cat > "$WORK/src/scope.cpp" <<'EOF'
+int shadowing( int n )
+{
+    int v = n;
+    {
+        int v = 7;
+        v = v + 1;
+    }
+    int r = v;
+    return r;
+}
+EOF
+cat > "$WORK/src/scope.go" <<'EOF'
+package main
+
+func goshadow(n int) int {
+	v := n
+	if v > 0 {
+		v := v + 1
+		_ = v
+	}
+	r := v
+	return r
+}
+EOF
+cat > "$WORK/src/scope.js" <<'EOF'
+function jsshadow( n ) {
+  let v = n;
+  {
+    let v = 7;
+    v = v + 1;
+  }
+  if ( n ) { var hoisted = n; }
+  let r = v + hoisted;
+  return r;
 }
 EOF
 
@@ -579,6 +626,71 @@ if printf '%s' "$( legend "$P0V" )" | grep -q 'preproc_rows=' && printf '%s' "$(
     ok "(27d) the legend states the preprocessor rule (#if 0 dropped, #ifdef kept+flagged) and defines pp=/preproc_rows="
 else
     no "(27d) the legend must name #if 0, ifdef, pp= and preproc_rows="
+fi
+
+# ── (28) block scopes are separated: a shadow in a sibling block is not a reaching def ─────────────
+# RED against the pre-fix binary: shadowing:r back chained l6 -> l5 (the inner v) and stopped there.
+SC="$( run --slice=scope.cpp:shadowing:r --slice-flow=back )"
+[ "$( attr "$SC" steps )" = 'steps="2"' ] \
+    && printf '%s' "$( frow "$SC" v 3 )" | grep -q 'k="def" t="decl" v="v" d="1" f="8"' \
+    && printf '%s' "$( frow "$SC" n 1 )" | grep -q 't="param" v="n" d="2" f="3"' \
+    && ok "(28a) shadowing:r back: r<-v(l3, the OUTER v)<-n — steps=\"2\"" \
+    || { no "(28a) expected steps=\"2\": the outer v's def at l=3 (d=1 f=8) and the param at l=1 (d=2)"; printf '%s\n' "$SC"; }
+printf '%s' "$( elem "$SC" )" | grep -qE '<s l="(5|6)"' \
+    && { no "(28a) the inner block's v (l5/l6) must NOT be in r's backward slice — r never reads it"; printf '%s\n' "$SC"; } \
+    || ok "(28a) the inner shadow is absent — scope-separated, not name-matched"
+# the flat rows of a shadowed name are LABELLED per binding, never merged
+SV="$( run --slice=scope.cpp:shadowing:v )"
+[ "$( attr "$SV" bindings )" = 'bindings="2"' ] \
+    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="3" k="def" t="decl" b="3">' \
+    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="5" k="def" t="decl" b="5">' \
+    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="6" k="both" t="assign" b="5">' \
+    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="8" k="use" t="read" b="3">' \
+    && ok "(28b) shadowing:v: bindings=\"2\" and every row carries b= (l3/l8 -> b=3, l5/l6 -> b=5)" \
+    || { no "(28b) expected bindings=\"2\" with b=\"3\" on l3/l8 and b=\"5\" on l5/l6"; printf '%s\n' "$SV"; }
+SF="$( run --slice=scope.cpp:shadowing:v --slice-flow=fwd )"
+printf '%s' "$( frow "$SF" r 9 )" | grep -q 'd="2" f="8"' \
+    && ! printf '%s' "$( elem "$SF" )" | grep -q 'v="r"[^>]*f="6"' \
+    && ok "(28b) fwd from v: the outer binding reaches r (l9, d=2); the inner one reaches nothing outside its block" \
+    || { no "(28b) expected r at l=9 d=2 f=8 and no reach from the inner block"; printf '%s\n' "$SF"; }
+# the inventory lists each BINDING, so a caller can see the shadow before slicing
+SI="$( run --slice=scope.cpp:shadowing )"
+[ "$( attr "$SI" vars )" = 'vars="4"' ] \
+    && printf '%s' "$( elem "$SI" )" | grep -q '<v n="v" l="3" t="decl"/>' && printf '%s' "$( elem "$SI" )" | grep -q '<v n="v" l="5" t="decl"/>' \
+    && ok "(28c) inventory: vars=\"4\" — n, v@3, v@5, r (two <v n=\"v\"> rows, one per binding)" \
+    || { no "(28c) expected vars=\"4\" with <v n=\"v\" l=\"3\"/> and <v n=\"v\" l=\"5\"/>"; printf '%s\n' "$SI"; }
+# an unshadowed slice is byte-for-byte free of the b=/bindings= vocabulary (purely additive)
+if printf '%s' "$( elem "$( run --slice=pipeline:out --slice-flow=both )" )" | grep -qE ' b="|bindings='; then
+    no "(28c) an unshadowed slice must not carry b=/bindings="
+else
+    ok "(28c) unshadowed output carries no binding vocabulary"
+fi
+# Go: `v := v + 1` in the inner block reads the OUTER v; r reads the outer v
+SG="$( run --slice=goshadow:r --slice-flow=back )"
+printf '%s' "$( frow "$SG" v 4 )" | grep -q 'd="1" f="9"' && printf '%s' "$( frow "$SG" n 3 )" | grep -q 'd="2"' \
+    && ! printf '%s' "$( elem "$SG" )" | grep -qE '<s l="(6|7)"' \
+    && ok "(28d) go: goshadow:r back binds to the outer v (l4) and the param, never the inner := shadow" \
+    || { no "(28d) expected v at l=4 d=1 f=9, n at l=3 d=2, no l6/l7 rows"; printf '%s\n' "$SG"; }
+# `v := v + 1` (l6) is ONE line touching TWO bindings: the := declares the inner v (b=6), the
+# initializer reads the OUTER v (b=4) — two rows, never merged into a lying k="both"
+SGI="$( run --slice=goshadow:v )"
+printf '%s' "$( elem "$SGI" )" | grep -q '<s l="6" k="def" t="decl" b="6">' && printf '%s' "$( elem "$SGI" )" | grep -q '<s l="6" k="use" t="read" b="4">' \
+    && ok "(28d) go: l6 splits into the inner := def (b=6) and the outer read in its own initializer (b=4)" \
+    || { no "(28d) expected two l=6 rows: k=def b=6 and k=use b=4"; printf '%s\n' "$SGI"; }
+# JS: let is block-scoped, var is function-scoped (hoisting)
+SJ="$( run --slice=jsshadow:r --slice-flow=back )"
+printf '%s' "$( frow "$SJ" v 2 )" | grep -q 'd="1" f="8"' && ! printf '%s' "$( elem "$SJ" )" | grep -qE '<s l="(4|5)"' \
+    && printf '%s' "$( frow "$SJ" hoisted 7 )" | grep -q 'd="1" f="8"' \
+    && ok "(28e) js: r<-v binds to the outer let (l2), skips the inner block, and reaches the function-scoped var (l7)" \
+    || { no "(28e) expected v at l=2 d=1, no l4/l5 rows, hoisted at l=7 d=1"; printf '%s\n' "$SJ"; }
+# the rule is stated where b= and bindings= are met, and the old over-include disclaimer is gone
+if printf '%s' "$( legend "$SV" )" | grep -q 'b=' && printf '%s' "$( legend "$SV" )" | grep -q 'bindings=' \
+   && printf '%s' "$( legend "$SV" )" | grep -qi 'innermost' && printf '%s' "$( legend "$SV" )" | grep -qi 'function-scoped' \
+   && ! printf '%s' "$( legend "$SV" )" | grep -q 'shadowing may over-include' \
+   && ! printf '%s' "$( legend "$SV" )" | grep -q 'NOT separated'; then
+    ok "(28f) the legend defines b=/bindings=, states the innermost-binding rule and the function-scoped families, and no longer claims shadowing over-includes"
+else
+    no "(28f) the legend must define b=/bindings=, state the scope rule, and drop the over-include disclaimer"
 fi
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
