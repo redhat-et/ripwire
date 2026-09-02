@@ -316,6 +316,176 @@ inline std::string commaSymbols( const std::vector<std::string>& symbols )
     return out;
 }
 
+// Code-file extensions the FILE half of a FILE:LINE seed is allowed to end in. Deliberately narrow (the
+// languages --slice/--at actually serve, per their own legend) rather than "any dotted token" — a prose
+// sentence is full of dotted tokens (URLs, "e.g.", version numbers) that are not a source file.
+inline constexpr std::string_view kCodeExtensions[] = {
+    ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh", ".c", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs",
+    ".java", ".rb", ".swift", ".cs", ".m", ".mm", ".cu", ".cuh", ".metal",
+};
+
+inline bool looksLikeFileToken( std::string_view token ) noexcept
+{
+    for( const std::string_view ext : kCodeExtensions )
+    {
+        if( token.size() > ext.size() && token.ends_with( ext ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The FILE:LINE half of the --at/--slice=@FILE:LINE seed grammar, read out of a task in either spelling
+// the user might type it: a literal "src/main.cpp:120" token pasted verbatim (a compiler error, a diff
+// hunk, a stack frame — the moment --at itself documents), or the same fact said in words ("line 40 in
+// budget.cpp" / "line 40 of src/main.cpp"). Structural extraction only — no phrase scoring — because a
+// FILE:LINE pair is either present or it is not; there is no paraphrase of a line number.
+inline std::string firstFileLineToken( std::string_view task )
+{
+    constexpr std::string_view kBreaks = " \t\n\r\"'`(),;";
+    for( std::size_t i = 0; i < task.size(); )
+    {
+        const std::size_t begin = task.find_first_not_of( kBreaks, i );
+        if( begin == std::string_view::npos )
+        {
+            break;
+        }
+        std::size_t end = task.find_first_of( kBreaks, begin );
+        if( end == std::string_view::npos )
+        {
+            end = task.size();
+        }
+        std::string_view token = task.substr( begin, end - begin );
+        while( !token.empty() && ( token.back() == '.' || token.back() == ':' || token.back() == '?' || token.back() == '!' ) )
+        {
+            token.remove_suffix( 1 );
+        }
+        const std::size_t colon = token.rfind( ':' );
+        if( colon != std::string_view::npos && colon + 1 < token.size() )
+        {
+            const std::string_view lineDigits = token.substr( colon + 1 );
+            const std::string_view fileGuess  = token.substr( 0, colon );
+            const bool allDigits = !lineDigits.empty() && std::all_of( lineDigits.begin(), lineDigits.end(),
+                                   []( const unsigned char c ) { return std::isdigit( c ) != 0; } );
+            if( allDigits && looksLikeFileToken( fileGuess ) )
+            {
+                return std::string( fileGuess ) + ":" + std::string( lineDigits );
+            }
+        }
+        i = end + 1;
+    }
+    // Fallback: "line N" and a code-extensioned path said as two separate words in the same task — both
+    // halves of the same seed spoken in prose rather than pasted as one token. Either half alone is too
+    // weak to mint a location the --at/--slice seed grammar would accept, so both are required.
+    const std::string  lower   = lowerAscii( task );
+    const std::size_t  linePos = boundedFind( lower, "line" );
+    if( linePos == std::string_view::npos )
+    {
+        return {};
+    }
+    std::size_t p = linePos + 4;
+    while( p < task.size() && task[p] == ' ' ) { ++p; }
+    const std::size_t digitsBegin = p;
+    while( p < task.size() && std::isdigit( static_cast<unsigned char>( task[p] ) ) ) { ++p; }
+    if( p == digitsBegin )
+    {
+        return {};
+    }
+    const std::string_view lineNum = task.substr( digitsBegin, p - digitsBegin );
+    for( std::size_t i2 = 0; i2 < task.size(); )
+    {
+        const std::size_t begin2 = task.find_first_not_of( kBreaks, i2 );
+        if( begin2 == std::string_view::npos )
+        {
+            break;
+        }
+        std::size_t end2 = task.find_first_of( kBreaks, begin2 );
+        if( end2 == std::string_view::npos )
+        {
+            end2 = task.size();
+        }
+        std::string_view token2 = task.substr( begin2, end2 - begin2 );
+        while( !token2.empty() && ( token2.back() == '.' || token2.back() == ',' || token2.back() == '?' || token2.back() == '!' ) )
+        {
+            token2.remove_suffix( 1 );
+        }
+        if( looksLikeFileToken( token2 ) )
+        {
+            return std::string( token2 ) + ":" + std::string( lineNum );
+        }
+        i2 = end2 + 1;
+    }
+    return {};
+}
+
+// Cue phrases that place the word right after them in a VARIABLE slot — "trace the flow of budget",
+// "the data flowing into total_bytes". A local variable never appears in ing.symbols (extraction indexes
+// definitions, not locals), so this is the router's only channel for naming one: purely lexical, mirroring
+// the symbol-slot design above (a cue is the whole discriminator, not the word itself). Longer/more
+// specific phrases are listed first only for readability; every one is tried and the EARLIEST match in the
+// task wins, so overlapping cues ("into" inside "flows into") cannot pick a later, weaker anchor.
+inline constexpr std::string_view kVariableSlotCues[] = {
+    "the value of", "value of", "flowing into", "flows into", "feeds into", "feed into", "flow of", "into",
+};
+
+// A short function-word the extractor should hop over once ("the", "a data flow value of..." style
+// filler) rather than accept as the variable itself — "flow of the budget" should name budget, not the.
+inline constexpr std::string_view kVariableSlotFillers[] = {
+    "the", "a", "an", "this", "that", "it", "its", "data", "value", "code",
+};
+
+inline std::string variableSlotCandidate( std::string_view task, std::string_view lowerTask ) noexcept
+{
+    std::size_t bestPos = std::string_view::npos;
+    std::size_t bestEnd = 0;
+    for( const std::string_view cue : kVariableSlotCues )
+    {
+        for( std::size_t from = 0; ; )
+        {
+            const std::size_t p = boundedFind( lowerTask, cue, from );
+            if( p == std::string_view::npos )
+            {
+                break;
+            }
+            if( bestPos == std::string_view::npos || p < bestPos )
+            {
+                bestPos = p;
+                bestEnd = p + cue.size();
+            }
+            from = p + 1;
+        }
+    }
+    if( bestPos == std::string_view::npos )
+    {
+        return {};
+    }
+    std::size_t begin = bestEnd;
+    for( int hop = 0; hop < 2; ++hop )
+    {
+        while( begin < task.size() && task[begin] == ' ' ) { ++begin; }
+        std::size_t end = begin;
+        while( end < task.size() && wordByte( task[end] ) ) { ++end; }
+        if( end == begin )
+        {
+            return {};
+        }
+        const std::string_view word   = task.substr( begin, end - begin );
+        const std::string      lowered = lowerAscii( word );
+        bool filler = false;
+        for( std::size_t f = 0; f < std::size( kVariableSlotFillers ) && !filler; ++f )
+        {
+            filler = kVariableSlotFillers[f] == lowered;
+        }
+        if( !filler )
+        {
+            return std::string( word );
+        }
+        begin = end;
+    }
+    return {};
+}
+
 inline void addLexical( std::vector<RouteChoice>& choices, const char* id, const char* skill, const char* reason,
                         std::string command, int score, int floor, int priority )
 {
@@ -404,6 +574,65 @@ inline std::optional<RouteChoice> instrumentedTaskChoice( std::string_view task,
 
 // High-confidence additions that need more than the generic phrase scorer, kept out of classify so the
 // central routing ladder stays readable as instrumented intents grow.
+// The three "where did this value come from" surfaces — --slice=@FILE:LINE (a named location),
+// --uses=SYM (writer-attribution wording), --slice=SYM[:VAR] (data-flow wording) — extracted out of
+// directTaskChoice the same way instrumentedTaskChoice is above it, so the central ladder stays readable
+// as intents grow.
+inline std::optional<RouteChoice> flowTaskChoice( std::string_view task, std::string_view lower,
+                                                  const std::string& root, const std::vector<std::string>& symbols )
+{
+    // at-line: a FILE:LINE seed the task NAMES, in either spelling the --at/--slice=@FILE:LINE grammar
+    // documents — a location IS the seed, so this is a structural check, not a phrase-scored one.
+    const std::string fileLine = firstFileLineToken( task );
+    if( !fileLine.empty() )
+    {
+        return RouteChoice{ "at-line", "ripwire-navigate", "a file:line location named in the task",
+                            commandWithValue( root, "--slice=", "@" + fileLine ), 100, 84 };
+    }
+    // who-writes: "who writes/sets/modifies/assigns SYM" needs exactly one resolved symbol, the same
+    // discipline edit-contract uses. --uses=SYM is the closest shipped surface (every resolvable
+    // read/write/import/call/extends site, not writes alone); a write-only filter is future work. The
+    // dotted Owner.field phrasing ("who writes Symbol.name") is NOT specially parsed here — the field
+    // half is lane E's, kept deliberately uncoupled — so today the router resolves only the OWNER symbol
+    // ("Symbol" out of "Symbol.name", via the existing word-bounded symbol match) and routes to it.
+    const int whoWritesScore = phraseScore( lower, { { "who writes", 9 }, { "who sets", 8 }, { "who modifies", 8 },
+                                                     { "who assigns", 8 }, { "who mutates", 7 },
+                                                     { "writes the field", 8 }, { "sets the field", 7 },
+                                                     { "writes to", 5 } } );
+    if( symbols.size() == 1 && whoWritesScore >= 7 )
+    {
+        return RouteChoice{ "who-writes", "ripwire-navigate",
+                            "one exact indexed symbol plus writer-attribution wording (Owner.field coupling deferred)",
+                            commandWithValue( root, "--uses=", symbols[0] ), 100, 81 };
+    }
+    // data-flow: "where does this value come from" / "which statements feed X" / "trace the flow of X"
+    // needs exactly one resolved symbol too — --slice needs a SYM to pick the one definition to slice.
+    // A variable named through a slot cue ("value of X", "into X", "flow of X") upgrades the command to
+    // the transitive --slice-flow=back walk; without one, bare --slice=SYM lists the sliceable locals —
+    // a real, runnable command (the verb's own documented bare-SYM form), never a placeholder the verb
+    // would refuse.
+    const int dataFlowScore = phraseScore( lower, { { "data flow", 9 }, { "which statements feed", 9 },
+                                                    { "statements feed", 8 }, { "trace the flow", 8 },
+                                                    { "trace the data", 7 }, { "flow of the value", 8 },
+                                                    { "where does this value come from", 9 },
+                                                    { "where does the value", 7 }, { "flows into", 6 },
+                                                    { "feeds into", 6 }, { "value flow", 6 } } );
+    if( symbols.size() == 1 && dataFlowScore >= 7 )
+    {
+        const std::string variable = variableSlotCandidate( task, lower );
+        if( !variable.empty() && variable != symbols[0] )
+        {
+            return RouteChoice{ "data-flow", "ripwire-navigate",
+                                "one exact indexed symbol plus data-flow wording plus a variable-slot mention",
+                                commandWithValue( root, "--slice=", symbols[0] + ":" + variable ) + " --slice-flow=back", 100, 83 };
+        }
+        return RouteChoice{ "data-flow", "ripwire-navigate",
+                            "one exact indexed symbol plus data-flow wording (no variable named — lists its locals)",
+                            commandWithValue( root, "--slice=", symbols[0] ), 100, 83 };
+    }
+    return std::nullopt;
+}
+
 inline std::optional<RouteChoice> directTaskChoice( std::string_view task, std::string_view lower,
                                                     const std::string& root, const std::vector<std::string>& symbols )
 {
@@ -447,6 +676,13 @@ inline std::optional<RouteChoice> directTaskChoice( std::string_view task, std::
         return RouteChoice{ "edit-contract", "ripwire-change-check",
                             "one exact indexed symbol plus post-edit contract wording",
                             commandWithValue( root, "--edit-check=", symbols[0] ), 100, 82 };
+    }
+    // at-line / who-writes / data-flow: structural or phrase-scored the same way the categories above
+    // are, just extracted into their own function (see flowTaskChoice's own comment) to keep this ladder
+    // from growing without bound as more "where did this value come from" surfaces are added.
+    if( std::optional<RouteChoice> flow = flowTaskChoice( task, lower, root, symbols ) )
+    {
+        return flow;
     }
     return std::nullopt;
 }

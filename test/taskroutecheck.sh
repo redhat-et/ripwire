@@ -24,6 +24,12 @@ int targetSymbol() { return gammaNode(); }
 int classify() { return targetSymbol(); }
 int report() { return classify(); }
 int summary() { return report(); }
+int computeBudget( int rawBytes )
+{
+    int budget = rawBytes / 2;
+    int reserve = rawBytes - budget;
+    return budget + reserve;
+}
 SRC
 git -C "$REPO" add router.cpp
 git -C "$REPO" commit -qm base
@@ -135,6 +141,41 @@ case "$TG" in *'status="recommend"'*'intent="gate-evidence"'*'--test-gate'*) ok 
 TG0="$( route 'i want a sanity pass over my diff — which tests do i even need here?' )"
 case "$TG0" in *'intent="gate-evidence"'*) no "'which tests' alone minted a gate-evidence route: $TG0";; *) ok "'which tests' alone is not a shell-gate evidence request";; esac
 
+# ── data-flow / at-line / who-writes: the router-coverage gap for "where did this value come from" ─────
+# Today's abstains this round closes: a FILE:LINE seed named in the task (structural, no symbol needed),
+# one resolved symbol plus writer-attribution wording (--uses=SYM; the Owner.field dotted form is lane
+# E's and stays deliberately uncoupled — the router resolves only the owner symbol and says so), and one
+# resolved symbol plus data-flow wording (--slice=SYM, upgraded to --slice=SYM:VAR --slice-flow=back when
+# a variable-slot cue also names a variable). All arms below are red against a pre-fix binary (abstain).
+DF1="$( route 'trace the flow of budget inside computeBudget' )"
+case "$DF1" in *'status="recommend"'*'intent="data-flow"'*'--slice='*'computeBudget:budget'*'--slice-flow=back'*) ok "symbol + variable-slot cue -> --slice=SYM:VAR --slice-flow=back";; *) no "data-flow SYM:VAR route wrong: $DF1";; esac
+DF2="$( route 'where does this value come from inside computeBudget' )"
+case "$DF2" in *'status="recommend"'*'intent="data-flow"'*'--slice='*'computeBudget'*) case "$DF2" in *'--slice-flow'*) no "data-flow with no variable cue still emitted --slice-flow: $DF2";; *) ok "symbol only, no variable cue -> bare --slice=SYM (lists locals)";; esac;; *) no "data-flow SYM-only route wrong: $DF2";; esac
+DF0="$( route 'which statements feed the pending value' )"
+case "$DF0" in *'--slice='*) no "data-flow wording with no resolved symbol invented a --slice command: $DF0";; *) ok "data-flow wording alone (no resolved symbol) abstains rather than invent a SYM";; esac
+AL1="$( route 'what defines the value assigned at router.cpp:10' )"
+case "$AL1" in *'status="recommend"'*'intent="at-line"'*'--slice='*'@router.cpp:10'*) ok "literal FILE:LINE token -> --slice=@FILE:LINE";; *) no "at-line literal-token route wrong: $AL1";; esac
+AL2="$( route 'walk me through line 10 of router.cpp' )"
+case "$AL2" in *'status="recommend"'*'intent="at-line"'*'--slice='*'@router.cpp:10'*) ok "prose 'line N of FILE' -> --slice=@FILE:LINE";; *) no "at-line prose-form route wrong: $AL2";; esac
+AL0="$( route 'what happens around line 10 in the budget calculation' )"
+case "$AL0" in *'--slice='*'@'*) no "'line N' with no code-file token minted an at-line route: $AL0";; *) ok "'line N' alone (no file extension) mints no at-line route";; esac
+WW1="$( route 'who writes to targetSymbol these days' )"
+case "$WW1" in *'status="recommend"'*'intent="who-writes"'*'--uses='*'targetSymbol'*) ok "who-writes wording + one resolved symbol -> --uses=SYM";; *) no "who-writes route wrong: $WW1";; esac
+WW2="$( route 'who modifies targetSymbol.contract these days' )"
+case "$WW2" in *'status="recommend"'*'intent="who-writes"'*'--uses='*'targetSymbol'*) ok "Owner.field phrasing resolves the OWNER symbol only, uncoupled from the field";; *) no "who-writes Owner.field route wrong: $WW2";; esac
+WW0="$( route 'who writes the release notes each week' )"
+case "$WW0" in *'--uses='*) no "who-writes wording with no resolved symbol invented a --uses command: $WW0";; *) ok "who-writes wording alone (no resolved symbol) abstains rather than invent a SYM";; esac
+# Execution check: the SYM:VAR and @FILE:LINE commands the router just emitted are not placeholders —
+# strip the recommended argv's quoting and actually run it through the shipped --slice verb.
+DFRUN="$( "$BIN" "$REPO" --no-cache --slice='computeBudget:budget' --slice-flow=back )"; rc=$?
+{ [ $rc -eq 0 ] && printf '%s' "$DFRUN" | grep -q '<slice '; } \
+    && ok "the emitted data-flow SYM:VAR command runs and returns a <slice> root" \
+    || no "the emitted data-flow SYM:VAR command failed to run (rc=$rc)"
+ALRUN="$( "$BIN" "$REPO" --no-cache --slice='@router.cpp:10' )"; rc=$?
+{ [ $rc -eq 0 ] && printf '%s' "$ALRUN" | grep -q 'seed="router.cpp:10"'; } \
+    && ok "the emitted at-line @FILE:LINE command runs and seeds at the named line" \
+    || no "the emitted at-line @FILE:LINE command failed to run (rc=$rc)"
+
 N="$( route 'Write a cheerful release announcement' )"
 case "$N" in *'status="abstain"'*) ok "off-topic prompt abstains";; *) no "off-topic prompt did not abstain: $N";; esac
 [ "$( printf '%s' "$N" | grep -o '<run>' | wc -l | tr -d ' ' )" = 0 ] && ok "abstention emits zero commands" || no "abstention emitted a command"
@@ -154,7 +195,7 @@ if command -v xmllint >/dev/null 2>&1; then xmllint --noout "$TMP/q1" 2>/dev/nul
 "$BIN" "$REPO" "$ROOT/test/fixture" --help-task='plan a feature' >/dev/null 2>"$TMP/multi.err"; rc=$?
 [ "$rc" -ne 0 ] && grep -qi 'single-root' "$TMP/multi.err" && ok "multi-root routing refuses" || no "multi-root routing did not refuse"
 for f in --verify --connect --expand --grep --grep-context --edit-check --from-trace --situ --pack-task --exemplar --for \
-         --edit-plan --dry-run --handles --legend --doctor --agent=codex --test-gate; do "$BIN" --help 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
+         --edit-plan --dry-run --handles --legend --doctor --agent=codex --test-gate --slice --slice-flow --at --uses; do "$BIN" --help 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
 
 # ── byte-compat: the verify-claim template must emit the SHIPPED --verify grammar byte-exactly ─────────
 # (PLAN 2026-08-13 addendum: gate against the real verb's PARSER, never a copy of its syntax.)

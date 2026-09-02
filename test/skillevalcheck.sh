@@ -71,12 +71,18 @@ awk '$1=="overlap"{found=1} END{exit !found}' "$TMP/a" \
 # the 2026-07-25 pair above is likewise superseded; full recalibration record in docs/EVALS.md.
 # 2026-08-08: scoped to the split=test row, NOT the whole-corpus arm line — since the dev split gained
 # rows this round, the whole-corpus number is now a mix of the frozen benchmark and free-to-iterate
-# tuning rows, and this floor exists to protect the FROZEN half specifically.)
+# tuning rows, and this floor exists to protect the FROZEN half specifically.
+# 2026-09-02 (lane/n2-d recalibration): the header rule is "floors ~9-10pp below measured", and the
+# 60.0 floor above had drifted 13pp under the actual measured value with unchanged skills (bm25-desc
+# split=test hit@1 73.1%, sep-auc 0.957 — a description edit could tank routing by ~13pp and still pass
+# here). Re-derived at 10pp under measured: floor 63.0. sep-auc floor left at 0.89 (0.957 measured is
+# 0.067 above it, inside the file's own historical 0.06-0.07 band; not moved by this round). Full record
+# in docs/EVALS.md §4.
 h1=$(  awk '$1=="split=test" && $2=="bm25-desc"{gsub("%","",$3); print $3}' "$TMP/a" )
 auc=$( awk '$1=="split=test" && $2=="bm25-desc"{print $6}' "$TMP/a" )
-awk -v v="$h1"  'BEGIN{exit !(v+0 >= 60.0)}' \
-    && ok "bm25-desc hit@1 (split=test) = ${h1}% (floor 60.0%)" \
-    || no "bm25-desc hit@1 (split=test) = ${h1}% fell under the 60.0% floor — a skill description likely broke routing"
+awk -v v="$h1"  'BEGIN{exit !(v+0 >= 63.0)}' \
+    && ok "bm25-desc hit@1 (split=test) = ${h1}% (floor 63.0%)" \
+    || no "bm25-desc hit@1 (split=test) = ${h1}% fell under the 63.0% floor — a skill description likely broke routing"
 awk -v v="$auc" 'BEGIN{exit !(v+0 >= 0.89)}' \
     && ok "bm25-desc sep-auc (split=test) = ${auc} (floor 0.89 — negatives stay quiet)" \
     || no "bm25-desc sep-auc (split=test) = ${auc} fell under 0.89 — positives/negatives no longer separate"
@@ -153,11 +159,18 @@ done
 #     0.896−0.15→floor 0.75) — deliberately looser than test's 8-9pp/0.06-0.07.
 #     Recalibrate only on a deliberate dev-split edit (new rows, a description iteration you mean to
 #     measure), never silently.
+#     2026-09-02 (lane/n2-d recalibration): the dev pool's own dedicated 15pp-margin policy above had
+#     drifted to 23pp under the actual measured value (69.1% hit@1 with unchanged skills — a routing
+#     drop of nearly a quarter of the corpus could pass here unnoticed). This round applies the file's
+#     own general header rule ("floors ~9-10pp below measured") uniformly instead of keeping dev on its
+#     own looser 15pp policy: re-derived at 10pp under 69.1% → floor 59.0. sep-auc floor left at 0.75
+#     (0.887 measured is 0.137 above it — wide, but sep-auc was not the number that had drifted; not
+#     moved by this round). Full record in docs/EVALS.md §4.
 h1d=$(  awk '$1=="split=dev" && $2=="bm25-desc"{gsub("%","",$3); print $3}' "$TMP/a" )
 aucd=$( awk '$1=="split=dev" && $2=="bm25-desc"{print $6}' "$TMP/a" )
-awk -v v="$h1d"  'BEGIN{exit !(v+0 >= 46.0)}' \
-    && ok "dev-split bm25-desc hit@1 = ${h1d}% (floor 46.0%)" \
-    || no "dev-split bm25-desc hit@1 = ${h1d}% fell under the 46.0% floor"
+awk -v v="$h1d"  'BEGIN{exit !(v+0 >= 59.0)}' \
+    && ok "dev-split bm25-desc hit@1 = ${h1d}% (floor 59.0%)" \
+    || no "dev-split bm25-desc hit@1 = ${h1d}% fell under the 59.0% floor"
 awk -v v="$aucd" 'BEGIN{exit !(v+0 >= 0.75)}' \
     && ok "dev-split bm25-desc sep-auc = ${aucd} (floor 0.75)" \
     || no "dev-split bm25-desc sep-auc = ${aucd} fell under 0.75"

@@ -28,12 +28,19 @@ judgedN="$( printf '%s' "$judged" | sed -n 's/.*for-routed [0-9][0-9]*\/\([0-9][
 # set from regressing while easy description-copy rows keep the aggregate green. RECALIBRATED 2026-08-11
 # (S1 growth pass, judged 58→152): measured with unchanged skills bm25-desc 89/152 (58.6%), for-routed
 # 91/152 (59.9%); both floors re-derived at 50% — never inherited across a denominator change.
-[ $(( descHit * 100 )) -ge $(( judgedN * 50 )) ] \
-    && ok "bm25-desc judged hit@1 stays at or above 50% ($descHit/$judgedN)" \
-    || no "bm25-desc judged hit@1 fell below 50% ($descHit/$judgedN)"
-[ $(( routedHit * 100 )) -ge $(( judgedN * 50 )) ] \
-    && ok "for-routed judged hit@1 stays at or above 50% ($routedHit/$judgedN)" \
-    || no "for-routed judged hit@1 fell below 50% ($routedHit/$judgedN)"
+# RECALIBRATED AGAIN 2026-09-02 (lane/n2-d, corpus unchanged at judged=152): measured with unchanged
+# skills bm25-desc 98/152 (64.5%), for-routed 92/152 (60.5%) — both had drifted well above the frozen
+# 50% floor. Re-derived per the file's own header rule: bm25-desc floor 60%, for-routed floor 55% — a
+# smaller margin (~4.5pp / ~5.5pp) than the ~9-10pp convention, because this denominator (n=152) moves
+# one full percentage point per ~1.5 rows, so a 9-10pp margin would tolerate an 8-9 row swing before
+# firing; the tighter margin here still catches a routing regression on this scale while never being a
+# false alarm on the measured value itself. Full record in docs/EVALS.md §4.
+[ $(( descHit * 100 )) -ge $(( judgedN * 60 )) ] \
+    && ok "bm25-desc judged hit@1 stays at or above 60% ($descHit/$judgedN)" \
+    || no "bm25-desc judged hit@1 fell below 60% ($descHit/$judgedN)"
+[ $(( routedHit * 100 )) -ge $(( judgedN * 55 )) ] \
+    && ok "for-routed judged hit@1 stays at or above 55% ($routedHit/$judgedN)" \
+    || no "for-routed judged hit@1 fell below 55% ($routedHit/$judgedN)"
 
 printf '%s\t%s\t%s\n' \
     'I just opened this unfamiliar repository. What are the main subsystems and entry points?' \
