@@ -421,6 +421,158 @@ std::optional<int> refuseForeignAckSelection( const rw::Config& cfg, const rw::q
     return 1;
 }
 
+// ── quality-delta legend, SECTIONED (density round 2026-09-02, lane B) ────────────────────────────
+//
+// WHY THIS SHAPE. --quality-delta ranks first in this tool's measured call mix — CLAUDE.md tells every
+// agent to run it before calling work done — and its legend was ONE 8,574 B constant (10,512 B with the
+// scope half) emitted
+// unconditionally against a 572 B payload on a clean run — 93.7% of every "am I done?" checkpoint was
+// fixed text the reader had already met. The fix generalizes the rule kScopeLegend below already
+// followed alone: A DEFINITION IS EMITTED WHEN THE THING IT DEFINES IS IN THE DOCUMENT. Nothing is
+// dropped and no limit is softened — a reader still can never meet an undefined name, because a name
+// and its sentence appear together or not at all. What went away is (a) four baseline= markers this
+// run did not use, (b) the identity/rekey/duplication paragraphs for attributes this run did not emit,
+// and (c) prose that restated --help. --help is the catalog; this is the key to THIS document.
+//
+// G4, for every constant below: an XML comment may never contain the literal byte pair "--", so flag
+// names are written bare ("quality-baseline", "the scope flag"), and no "%" appears anywhere because
+// these reach stdout through one-argument writes. NO ATTRIBUTE=VALUE NUMERIC LITERAL may be spelled in
+// this prose either: several gates grep the header counters (regressions=, gating=, stale=) and a
+// quoted example here would be matched ahead of the real one.
+
+// Always. The verb, the ten kinds, the three axes, the exit predicate, and the two counters that are
+// printed even at zero. Every row in the document — finding rows and stale-ack rows alike — carries
+// kind=, so it is defined here rather than in either conditional row dictionary.
+inline constexpr const char* kQdLegendCore =
+    "<!-- ripwire quality-delta: only what a change made WORSE against the floor baseline= names below. "
+    "Descriptive: weigh and fix the real ones, do not game the number (a wrong abstraction beats a low "
+    "score). TEN KINDS, and kind= on every row names which one: complexity over the ccx bar, verbosity "
+    "(LOC), nesting, params, duplication, dead-code, api-surface (new public contract drift), "
+    "error-masking, short-horizon-churn, new-clone-of-reused-helper. THREE independent axes, in this "
+    "order: (1) acked findings are suppressed entirely (acked= counts them); (2) ORIGIN — a finding on a "
+    "symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only "
+    "because the code is NEW carries origin=\"new-symbol\"; (3) MATERIALITY — a small numeric delta is "
+    "sev=\"minor\", and minor= counts them. EXIT 2 fires only on preexisting-worse AND major, the gating= "
+    "count; new-symbol rows "
+    "never gate, so exit 0 is NOT a verdict on them — nothing that existed got worse, but the new debt is "
+    "yours: read them. Clone kinds are new-symbol only when EVERY member is new; short-horizon-churn is "
+    "preexisting by construction. preexisting-worse= and new-symbol= partition regressions=. stale= is a "
+    "FOURTH axis, never gating and never counted in regressions=: rows in the .ripwire_quality_acks ledger "
+    "whose target no longer applies. "
+    "register-macro-excluded= is a FLOOR, not a finding: symbols this run excluded from the dead-code kind "
+    "because their own definition is a registered self-registering test/benchmark macro call. Never gates, "
+    "never counted in regressions=, printed even at zero (zero means none excluded, not that the check did "
+    "not run). ";
+
+// The macro FAMILIES, and why a member of one cannot be judged dead — printed only when the run actually
+// excluded something, because on a repo with no such macro the roster explains an empty set.
+inline constexpr const char* kQdRegisterMacroLegend =
+    "The registered families are doctest/Catch2 TEST_CASE, GoogleTest TEST/TEST_F/TEST_P, Google Benchmark "
+    "BENCHMARK, plus any name a .ripwire_config register_macros= line adds; each registers itself through a "
+    "static initializer the call graph cannot see, so zero in-edges on one is not evidence of anything. ";
+
+// One sentence per baseline= marker, and ONLY the marker this run actually used. The five are not
+// interchangeable — three of them compare against HEAD, so anything already committed cannot appear —
+// and the state a reader is in is the state they need spelled out.
+inline constexpr const char* kQdBaseSidecar =
+    "baseline=\"sidecar\" is the pinned .ripwire_quality_baseline snapshot, honored because it was pinned "
+    "at the CURRENT git HEAD: the one floor YOU chose. ";
+inline constexpr const char* kQdBaseHead =
+    "baseline=\"git-HEAD\" means no sidecar existed, so the working tree was auto-compared against the "
+    "HEAD tree — anything already committed cannot appear. ";
+inline constexpr const char* kQdBaseHeadRemoved =
+    "baseline=\"git-HEAD (stale sidecar removed)\" means a sidecar existed, was pinned at a DIFFERENT sha, "
+    "and this run DELETED it from your working tree before falling back to the HEAD tree (re-pin with "
+    "quality-baseline) — so anything already committed cannot appear. ";
+inline constexpr const char* kQdBaseHeadIgnored =
+    "baseline=\"git-HEAD (stale sidecar ignored)\" is the same staleness verdict, but the file was left on "
+    "disk (the read-only MCP arm, or an unlink that failed), and the comparison fell back to the HEAD "
+    "tree — so anything already committed cannot appear. ";
+inline constexpr const char* kQdBaseRefPair =
+    "baseline=\"ref-pair\" means neither a sidecar nor the working tree: the verb was given a RANGE, so it "
+    "compared two COMMITTED trees and no sidecar was read, written or deleted. base_ref= and target_ref= "
+    "are the two RESOLVED shas, at full length because a wave number gets quoted into handoffs, and they "
+    "are the anchor, so at= is omitted. churn= is reported unavailable there, which is the honest statement "
+    "that one of the ten kinds, short-horizon-churn, cannot be measured at all in that form: it needs git "
+    "history at the tree being judged, and both trees are materialized OUT of the repo into temp dirs. Its "
+    "silence in such a report is not evidence that nothing churned. ";
+// at= is absent in the ref-pair form, so its sentence is too.
+inline constexpr const char* kQdAtLegend =
+    "at= is the git commit (plus a dirty marker when the working tree differs) this list was computed at. ";
+
+// Emitted only when the identity re-filing actually ran, i.e. when the run carries its renames= family.
+inline constexpr const char* kQdIdentityLegend =
+    "IDENTITY across a rename or a move: a finding is keyed path::scope::name, which a rename would "
+    "destroy, so the baseline and the .ripwire_quality_acks ledger are both re-filed into the CURRENT "
+    "tree's identity before either is read, by two EXACT mechanisms — git's own rename record, and equality "
+    "of a whitespace-and-name-scrubbed body hash — never a similarity heuristic. renames= is how many "
+    "rename pairs were read, rename_window_commits= how deep the commit window went, acked_by_rename= and "
+    "acked_by_content= how many of the acked= suppressions each mechanism is responsible for. Three appear "
+    "ONLY when true, so an absent one is not a silent no: renames_window_truncated= (history is deeper than "
+    "the window), renames_truncated= (the pair cap was hit), renames_ambiguous= (an ancestor two current "
+    "symbols both claim — refused rather than guessed). ORIGIN reads the re-filed baseline too, so a "
+    "regression carried in with a rename is judged preexisting-worse and GATES instead of slipping through "
+    "as new-symbol. FLOORS, stated because silence here would read as a guarantee: the two clone kinds key "
+    "on a member-SET hash and are NOT re-filed, so a clone ack still dies on a rename; ORIGIN follows the "
+    "rename record but never content, because the baseline stores no content id at all; and a move git "
+    "recorded no rename for still reads as new-symbol. ";
+
+// How the two mechanisms decide, in full — printed only when an ack was actually SUPPRESSED by one of
+// them (acked= is non-zero), which is the only state in which a reader has a suppression to audit. The
+// determinism properties are the audit: an identity claim nobody can re-derive is not a disclosure.
+inline constexpr const char* kQdIdentityMechLegend =
+    "The two mechanisms in full, because a suppression is a claim about identity: git's rename record is "
+    "read with rename detection and the similarity threshold PINNED in the command, never inherited from "
+    "the repo config, over a fixed COMMIT window rather than a wall-clock one, so the answer is the same "
+    "everywhere; the content match is equality of a body hash scrubbed of whitespace and of the symbol's "
+    "own name, for a move git recorded no rename for. A body that CHANGED is a different finding and is "
+    "matched by neither. ";
+
+// Emitted only when the scheme re-keying actually moved or refused a row — i.e. when acks_rekeyed_by_scheme=
+// or scheme_ambiguous= is on the root. Both are git-INDEPENDENT, so this is not folded into the paragraph
+// above: it survives a run where git could not be read at all.
+inline constexpr const char* kQdSchemeLegend =
+    "A THIRD re-filing, git-independent: on 2026-08-25 the per-symbol quality key stopped being a "
+    "canonical-id hash (which degraded to a BARE NAME for a scope-less symbol, folding every same-named one "
+    "in the tree into a single identity) and became the path-qualified key the churn kind has used since "
+    "the churn-keying round. Ack rows written under the old rule replay forward into the new one, both "
+    "being pure functions of the same path, scope and name — no git, no similarity threshold. "
+    "acks_rekeyed_by_scheme= counts the rows that replay moved, and is absent once a ledger has been "
+    "written back under the new rule, which is the normal steady state rather than a failure. "
+    "scheme_ambiguous= counts rows it REFUSED to move: the old key of a name that folded across N files "
+    "maps to N new keys, so which symbol the ack was written for is unknowable from the ledger; those rows "
+    "keep their old key and surface under stale= rather than being fanned out to all N or guessed. ";
+
+// The sa ROW dictionary — emitted only when there are sa rows. The stale= axis itself is defined in the
+// core paragraph, because the counter is on the root of every report whether or not any row follows it.
+inline constexpr const char* kQdStaleLegend =
+    "Each sa row carries key= (the ack identity as stored) and why=, which is target-gone (the key names no "
+    "symbol or group any more) or finding-gone (the target survived, this kind just does not fire on it). "
+    "Hygiene disclosure only — the ledger file is never auto-edited. ";
+
+// Emitted only when the document actually has finding rows (in scope or disclosed out of scope).
+inline constexpr const char* kQdRowLegend =
+    "ROWS: sym= is the canonical id the finding regressed on; was= and now= carry the before/after value for "
+    "the numeric kinds; p=\"path:line\" is the locator (root-relative; the first-sorting member for the "
+    "clone kinds; omitted, never faked, when none resolves). churn= and surface= are per-kind "
+    "classification facets (short-horizon-churn's self/ambient split; api-surface's new-symbol/"
+    "contract-change tier). Every row the header's gating= counter counts also carries a gating attribute "
+    "set to 1 — marked positively, never by the ABSENCE of sev or origin. ";
+
+// Emitted only when a clone-family row (duplication / new-clone-of-reused-helper) is in the document,
+// which is what puts members=, tokens= and idiom= on a first screen. A clean tree has none.
+inline constexpr const char* kQdCloneLegend =
+    "CLONE ROWS name the whole group rather than one symbol: members= is the member list and tokens= its "
+    "shared normalized-token count (the same per-group pair the clones verb reports). idiom= names a "
+    "RECOGNIZED BODY SHAPE every member spells, out of a closed set of three (threshold-ladder, "
+    "switch-name-table, builder-chain). idiom= alone changes nothing; a group that ALSO shares no "
+    "non-keyword identifier between any two members, sits in pairwise-distinct enclosing contexts, and "
+    "stays under 80 normalized tokens is an idiom COLLISION rather than a copy, and is reported minor "
+    "instead of gating. Break any one of those and it gates as before, idiom= and all: two bucketing "
+    "ladders over the SAME enum are a copy. The shape is read off the body's token stream and not a parse "
+    "tree, so a macro-assembled body classifies as whatever its raw tokens spell — the name is printed so "
+    "the call can be overruled by reading. ";
+
 // P1 — the SCOPE half of the quality-delta legend, printed ONLY when the report actually contains a
 // scope partition or a foreign-ack row. That is a G4 (token density) decision, not a hedge: the
 // paragraph defines scope=, the out-of-scope element and foreign-acks=, and on an unscoped run none
@@ -431,7 +583,6 @@ std::optional<int> refuseForeignAckSelection( const rw::Config& cfg, const rw::q
 // G4 again: no flag name spelled with the double dash anywhere inside an XML comment, so this says
 // "the scope flag" throughout.
 inline constexpr const char* kScopeLegend =
-    " "
                         "SCOPE, present only when the scope flag was given, and it NARROWS WHAT THIS REPORT "
                         "CLAIMS: scope= is the pattern list it was given, verbatim. Every counter above "
                         "(regressions=, minor=, acked=, preexisting-worse=, new-symbol=, gating=) is then over "
@@ -446,8 +597,13 @@ inline constexpr const char* kScopeLegend =
                         "exit code fires on. HOW A FINDING IS FILED: by its p= path, matched root-relative "
                         "against the patterns; a clone kind is in scope when ANY member matches, not just the "
                         "first-sorting one; and a finding with no locator at all is filed OUT of scope, because "
-                        "under a scope \"we cannot say where this is\" honestly reads as not provably yours. "
-                        "foreign-acks= is a SEPARATE axis again, never gating and present only when non-zero: an "
+                        "under a scope \"we cannot say where this is\" honestly reads as not provably yours. ";
+
+// foreign-acks= is itself "present only when non-zero", so its paragraph follows the same rule the
+// attribute does. Split out of kScopeLegend on 2026-09-02: a scoped run with no foreign ack was paying
+// ~590 B to define an attribute, a why= value and a by= token none of which were in its document.
+inline constexpr const char* kForeignAcksLegend =
+                        "foreign-acks= is a SEPARATE axis, never gating and present only when non-zero: an "
                         "ack row records the scope that wrote it as a by= token, and this counts the acks that "
                         "are suppressing a finding whose path that recorded scope does not cover — a session "
                         "having accepted somebody else's debt. Those rows appear among the sa rows with "
@@ -455,6 +611,103 @@ inline constexpr const char* kScopeLegend =
                         "only acks suppressing a finding RIGHT NOW can be checked (one whose finding no longer "
                         "fires has no path to test against), and a row with no by= at all is never counted, "
                         "since absence of provenance is not evidence of foreign provenance. ";
+
+// The section table. One struct rather than seven parameters because every field is a property OF THE
+// DOCUMENT being introduced, and a caller that has to remember an argument ORDER is the seam where a
+// legend starts describing a run it is not attached to.
+struct QualityDeltaLegendParts
+{
+    std::string_view                              marker;        // baseSel.marker — the ONE spelling table (quality::selectBaseline)
+    bool                                          refPair;       // the RANGE form: base_ref=/target_ref= are the anchor, at= is absent
+    std::string_view                              identityAttrs; // the exact string spliced into the root open tag
+    bool                                          anySaRow;      // sa rows present => key= and the why= taxonomy are on screen
+    bool                                          anyAcked;      // acked= is non-zero => there is a suppression to audit
+    bool                                          anyRegisterMacro; // register-macro-excluded= is non-zero => the family roster describes a real set
+    const std::vector<rw::quality::Regression>&   rows;          // in-scope findings
+    const std::vector<rw::quality::Regression>&   disclosedRows; // out-of-scope findings — identical attribute set
+    bool                                          scoped;        // a scope partition or a foreign-ack row is in the document
+    bool                                          anyForeignAck; // foreign-acks= is on the root, with foreign-scope sa rows under it
+};
+
+// A DEFINITION IS EMITTED WHEN THE THING IT DEFINES IS IN THE DOCUMENT. Nothing is dropped and no limit is
+// softened: a reader can never meet an undefined name, because a name and its sentence appear together or
+// not at all. See the constants above for what each section covers and why it is conditional.
+inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p )
+{
+    const auto anyCloneRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        for( const rw::quality::Regression& r : v )
+        {
+            if( r.kind == "duplication" || r.kind == "new-clone-of-reused-helper" ) { return true; }
+        }
+        return false;
+    };
+
+    std::fputs( kQdLegendCore, stdout );
+
+    // (1) the ONE floor in force. Keyed off the same pointer the element prints, so the sentence cannot
+    // drift from the attribute. A marker with no sentence would be a disclosure gap, so the fallthrough is
+    // the git-HEAD sentence — what every non-sidecar, non-ref-pair marker degrades to.
+    if     ( p.marker == "sidecar"                          ) { std::fputs( kQdBaseSidecar,     stdout ); }
+    else if( p.marker == "ref-pair"                         ) { std::fputs( kQdBaseRefPair,     stdout ); }
+    else if( p.marker == "git-HEAD (stale sidecar removed)" ) { std::fputs( kQdBaseHeadRemoved, stdout ); }
+    else if( p.marker == "git-HEAD (stale sidecar ignored)" ) { std::fputs( kQdBaseHeadIgnored, stdout ); }
+    else                                                      { std::fputs( kQdBaseHead,        stdout ); }
+
+    // (2) at= is omitted in the ref-pair form, so its sentence follows the attribute, not the verb.
+    if( !p.refPair )
+    {
+        std::fputs( kQdAtLegend, stdout );
+    }
+    if( p.anyRegisterMacro )
+    {
+        std::fputs( kQdRegisterMacroLegend, stdout );
+    }
+
+    // (3) the two identity re-filings, each keyed to the attribute family it defines. The second is
+    // git-INDEPENDENT, so it is a separate condition rather than a clause of the first.
+    if( !p.identityAttrs.empty() )
+    {
+        std::fputs( kQdIdentityLegend, stdout );
+        if( p.anyAcked )
+        {
+            std::fputs( kQdIdentityMechLegend, stdout );
+        }
+    }
+    if( p.identityAttrs.find( "acks_rekeyed_by_scheme=" ) != std::string_view::npos
+        || p.identityAttrs.find( "scheme_ambiguous=" ) != std::string_view::npos )
+    {
+        std::fputs( kQdSchemeLegend, stdout );
+    }
+
+    // (4) key= and the why= taxonomy exist only in a document that has sa rows. stale= itself is a header
+    // counter, always printed, and is defined in the core paragraph's axis list.
+    if( p.anySaRow )
+    {
+        std::fputs( kQdStaleLegend, stdout );
+    }
+
+    // (5) the row dictionary, and its clone-family half. A clean tree emits neither attribute set, so at the
+    // "done" checkpoint an agent actually makes, the reader pays for neither.
+    if( !p.rows.empty() || !p.disclosedRows.empty() )
+    {
+        std::fputs( kQdRowLegend, stdout );
+        if( anyCloneRow( p.rows ) || anyCloneRow( p.disclosedRows ) )
+        {
+            std::fputs( kQdCloneLegend, stdout );
+        }
+    }
+
+    if( p.scoped )
+    {
+        std::fputs( kScopeLegend, stdout );
+    }
+    if( p.anyForeignAck )
+    {
+        std::fputs( kForeignAcksLegend, stdout );
+    }
+    std::fputs( "-->", stdout );   // every section constant above ends with its own separating space
+}
 
 // runQualityViews was NOT a dispatch chain — it held two
 // branches, one of which was 298 lines. That one body is now runQualityDelta below; the residual
@@ -844,136 +1097,19 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         std::vector<char> esc;
         const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
         // §B7.1 (CA4) — the heading used to open "only what changed for the WORSE vs
-        // .ripwire_quality_baseline", which is FALSE in every state but one: three of the four floors this
+        // .ripwire_quality_baseline", which is FALSE in every state but one: three of the five floors this
         // verb can use are not that file, and in one of them the file was judged stale and DELETED from the
         // user's tree during this very run. The floor actually used is named by baseline= on the element
-        // below, so the heading now points at that attribute instead of asserting a floor, and the four
-        // marker states (plus at=) are defined HERE — the first screen is the only place a reader meets
-        // them, and a marker string that is only legible to whoever wrote it is not a disclosure.
-        // G4: no "--" anywhere inside an XML comment ⇒ flag names are written bare ("quality-baseline"),
-        // the same convention kMaxTokensFitLegend follows. No "%" either: this is a one-argument printf.
-        std::printf( "<!-- ripwire quality-delta: only what a change made WORSE against the floor named by "
-                     "baseline= below. FOUR floors, and they are not interchangeable: sidecar = the pinned "
-                     ".ripwire_quality_baseline snapshot, honored only because it was pinned at the CURRENT "
-                     "git HEAD; git-HEAD = no sidecar existed, so the working tree was auto-compared against "
-                     "the HEAD tree; git-HEAD (stale sidecar removed) = a sidecar existed, was pinned at a "
-                     "DIFFERENT sha, and this run DELETED it from your working tree before falling back to "
-                     "HEAD (re-pin with quality-baseline); git-HEAD (stale sidecar ignored) = same staleness "
-                     "verdict, but the file was left on disk (the read-only MCP arm, or an unlink that "
-                     "failed). Only the first is a floor YOU chose; the other three compare against HEAD, so "
-                     "anything already committed cannot appear. A FIFTH marker, ref-pair, means none of those: "
-                     "the verb was given a RANGE, so it compared two COMMITTED trees and no sidecar was read, "
-                     "written or deleted. Those reports carry base_ref= and target_ref= (the two RESOLVED "
-                     "shas, at full length, because a wave number gets quoted into handoffs) and OMIT at=, "
-                     "since the pair is the anchor. They also carry churn set to unavailable, which is the "
-                     "honest statement that one of the ten kinds, short-horizon-churn, cannot be measured "
-                     "there at all: it needs git history at the tree being judged, and both trees are "
-                     "materialized OUT of the repo into temp dirs. Its silence in such a report is therefore "
-                     "not evidence that nothing churned. at= is the git commit (plus a dirty marker "
-                     "when the working tree differs) this list was computed at. Findings: "
-                     "complexity over the ccx bar, verbosity (LOC)/nesting/params regressions, new duplication, "
-                     "newly-dead, new public api-surface (contract drift), error-masking, short-horizon churn, "
-                     "new clone of a reused helper. THREE independent axes, applied in this order: (1) acked "
-                     "findings are suppressed entirely (acked= counts them, honestly); (2) ORIGIN — a finding on "
-                     "a symbol that EXISTED at the baseline is preexisting-worse (no origin= attribute), one that "
-                     "exists only because the code is NEW carries origin=\"new-symbol\"; (3) MATERIALITY — a small "
-                     "numeric delta is sev=\"minor\". EXIT 2 fires only on preexisting-worse AND major, i.e. "
-                     "gating=\"N\" above; new-symbol rows never gate. Clone kinds classify by their member set (a "
-                     "group is new-symbol only if EVERY member is new); short-horizon-churn is preexisting by "
-                     "construction. exit 0 is NOT a verdict on the new-symbol rows — nothing that existed got "
-                     "worse, but the new debt is yours: read them. IDENTITY across a rename or a move: a "
-                     "finding is keyed by path::scope::name, which a rename would otherwise destroy, so both "
-                     "the baseline and the .ripwire_quality_acks ledger are re-filed into the CURRENT tree's "
-                     "identity before either is read. Two mechanisms, both exact, neither a similarity "
-                     "heuristic: the rename record git itself kept (read with rename detection and the "
-                     "similarity threshold PINNED in the command, never inherited from the repo's config, and "
-                     "over a fixed COMMIT window rather than a wall-clock one, so the answer is the same "
-                     "everywhere), and equality of a body hash scrubbed of whitespace and of the symbol's own "
-                     "name for a move git recorded no rename for. A body that CHANGED is a different finding "
-                     "and is not matched by either. The header discloses what that rested on, and the names "
-                     "here carry no example value on purpose (the counters are grep-parsed by several gates, "
-                     "so a quoted number in this sentence would be matched ahead of the real one): renames= is "
-                     "how many rename pairs were read, rename_window_commits= how deep the commit window went, "
-                     "acked_by_rename= and acked_by_content= how many of the acked= suppressions each of the "
-                     "two mechanisms is responsible for. Three more appear ONLY when they are true, so an "
-                     "absent one is not a silent no: renames_window_truncated= (history is deeper than the "
-                     "window, older renames were not read), renames_truncated= (the pair cap was hit) and "
-                     "renames_ambiguous= (an ancestor identity two current symbols both claim — refused rather "
-                     "than guessed). All of them are absent entirely when git could not be read at all. "
-                     "TWO MORE describe a THIRD, git-independent re-filing, and so are NOT suppressed when git "
-                     "is unreadable: on 2026-08-25 the per-symbol quality key stopped being a canonical-id hash "
-                     "(which degraded to a BARE NAME for a scope-less symbol, folding every same-named one in "
-                     "the tree into a single identity) and became the path-qualified key the churn kind has "
-                     "used since the churn-keying round. Ack rows written under the old rule are replayed forward into "
-                     "the new one, because both are pure functions of the same path, scope and name — no git, "
-                     "no similarity threshold. acks_rekeyed_by_scheme= counts the rows that replay moved, and "
-                     "is absent once a ledger has been written back under the new rule, which is the normal "
-                     "steady state rather than a failure. scheme_ambiguous= counts rows it REFUSED to move: "
-                     "the old key of a name that folded across N files maps to N new keys, so which symbol the "
-                     "ack was written for is unknowable from the ledger, and those rows keep their old key and "
-                     "also surface under stale= rather than being fanned out to all N or assigned to a guess. "
-                     "ORIGIN reads the re-filed baseline too, so a symbol whose file git recorded a "
-                     "rename for keeps its history and a regression carried in with that rename is judged "
-                     "preexisting-worse and GATES, where it used to slip through as new-symbol. FLOORS, "
-                     "stated because a silence here would read as a guarantee: the two clone kinds key on a "
-                     "member-SET hash and are NOT re-filed, so a clone ack still dies on a rename; a content "
-                     "match needs a content id, which only rows acked by a version that records one carry, and "
-                     "the baseline stores none at all, so ORIGIN follows the rename record but never content; "
-                     "and a move git recorded no rename for still reads as new-symbol. Descriptive: weigh + fix the real "
-                     "ones, do not game the number (a wrong abstraction beats a low score). "
-                     "stale=\"N\" is a SEPARATE axis, never gating, over the .ripwire_quality_acks ledger: an "
-                     "ack whose target no longer applies. Each sa row's why is target-gone (the key names no "
-                     "symbol/group any more) or finding-gone (the target survived, this kind just does not "
-                     "fire on it) — hygiene disclosure only, the ledger file is never auto-edited. "
-                     "Each row carries "
-                     // Found by this lane's own legend-coverage sweep, not by the brief: the two attributes
-                     // that IDENTIFY a row — which axis regressed, and on what — were the only ones the
-                     // dictionary below never named, while it defines p=, sev=, origin= and gating=.
-                     "kind= (which of the measured axes regressed) and sym= (the canonical id it regressed on) — "
-                     // The duplication pair is a DIRTY-TREE-ONLY first screen: a clean tree emits no rows at
-                     // all, so the legendcoverage ratchet only meets members=/tokens= when the working tree
-                     // holds a fresh duplicate, and a gap here reds the suite exactly when an agent has
-                     // uncommitted edits open. Defined here so that encounter is green; the baseline stays a
-                     // downward-only ratchet with no line added for it.
-                     "except duplication rows, which name the whole clone group rather than one symbol: members= "
-                     "is the group's member list and tokens= its shared normalized-token count (the same per-group "
-                     "pair the clones verb reports) — a duplication row may also carry idiom=, which names the "
-                     "RECOGNIZED BODY SHAPE every member of the group spells, out of a closed set of three "
-                     "(threshold-ladder, switch-name-table, builder-chain). idiom= alone changes nothing; a group "
-                     "that ALSO shares no non-keyword identifier between any two members, sits in pairwise-distinct "
-                     "enclosing contexts, and stays under 80 normalized tokens is an idiom COLLISION rather than a "
-                     "copy, and is reported minor instead of gating. Break any one of those and it gates as before, "
-                     "idiom= and all: two bucketing ladders over the SAME enum are a copy. The shape is read off the "
-                     "body's token stream and not a parse tree, so a macro-assembled body classifies as whatever its "
-                     "raw tokens spell — the name is printed so the call can be overruled by reading. — plus "
-                     "p=\"path:line\" (root-relative; the first-sorting member for the clone kinds; omitted, "
-                     "never faked, when no locator resolves), and every row the header's gating= counter "
-                     "counts also carries a gating attribute set to 1 — those are the rows the exit code fires "
-                     "on, and they are now marked positively rather than by the ABSENCE of sev/origin. "
-                     "register-macro-excluded= is a SEPARATE floor, not a finding: it counts symbols this "
-                     "run excluded from the dead-code kind because their OWN definition is a registered "
-                     "self-registering test/benchmark macro call (doctest/Catch2 TEST_CASE family, GoogleTest "
-                     "TEST/TEST_F/TEST_P, Google Benchmark BENCHMARK family, plus any name a .ripwire_config "
-                     "register_macros= line adds) — such a symbol registers itself through a static initializer "
-                     "the call graph cannot see, so zero in-edges on it is not evidence of anything. Never gates, "
-                     "never counted in regressions=, and printed even when zero (0 means none excluded, not that "
-                     "the check did not run). "
-                     "(This sentence deliberately spells no attribute=value literal: the header counters are "
-                     "parsed by grep in several gates, and a quoted numeric example here would be matched "
-                     "first.)" );
-        // P1 — the SCOPE half of the legend is printed ONLY when the report actually contains a scope
-        // partition or a foreign-ack row, and that is a G4 (token density) decision, not a hedge: the
-        // paragraph defines scope=, the out-of-scope element and foreign-acks=, and on an unscoped run
-        // none of the three is in the document. Charging every quality-delta call ~500 tokens to define
-        // attributes it did not emit is exactly the padding this legend exists to avoid. A reader can
-        // therefore never meet one of those names undefined: the names and the paragraph appear together.
-        // G4 again: no flag name spelled with the double dash inside an XML comment, so this says "the
-        // scope flag" throughout, and no percent sign anywhere (these are one-argument writes).
-        if( scope.active() || !foreignAcks.empty() )
-        {
-            std::fputs( kScopeLegend, stdout );
-        }
-        std::fputs( " -->", stdout );
+        // below, so the heading points at that attribute instead of asserting a floor.
+        //
+        // 2026-09-02 (lane B): the marker states are still defined on the first screen — the only place a
+        // reader meets them — but ONE state per run, the one in force, rather than all five on every call.
+        // emitQualityDeltaLegend above holds the section table and the reasoning; it is passed the same
+        // values the root element below prints, so "the legend defines what the header emits" is read off
+        // one set of values rather than restated as a second condition that could drift from it.
+        emitQualityDeltaLegend( { baseSel.marker, refPair, identityAttrs, !saRows.empty(), ackedCount > 0,
+                                  basis.registerMacroExcluded > 0, regs, outOfScope,
+                                  scope.active() || !foreignAcks.empty(), !foreignAcks.empty() } );
         const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
         // at= anchors this regression list to the commit (+dirty state) it was computed against.
         std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\" register-macro-excluded=\"%zu\"%s%s%s%s>",
