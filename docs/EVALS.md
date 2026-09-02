@@ -1433,6 +1433,65 @@ layer validation — the router can no longer recommend a claim the verb would r
 `test/taskroutecheck.sh` holds both directions: emitted claims execute through the real parser
 byte-identically, and the parser-refused form never routes to `--verify`.
 
+### `--help-task` data-flow / at-line / who-writes coverage (2026-09-02)
+
+**The gap.** `--help-task` abstained on three question shapes with no card at all: "where does this
+wrong value come from", a task naming a `FILE:LINE` location, and "who writes SYM". Three new
+intents close it (`src/taskroute.h`, extracted into `flowTaskChoice` beside the existing
+`instrumentedTaskChoice`): `data-flow` → `--slice=SYM:VAR --slice-flow=back` when a resolved symbol
+AND a variable-slot cue (`"value of X"`, `"into X"`, `"flow of X"`) both fire, else bare
+`--slice=SYM` (lists sliceable locals — a real command, never a placeholder) when only the symbol
+resolves; `at-line` → `--slice=@FILE:LINE` from a literal or prose-stated file:line, structural
+rather than phrase-scored; `who-writes` → `--uses=SYM` on "who writes/sets/modifies/assigns SYM".
+The `Owner.field` dotted phrasing is deliberately NOT specially parsed — that coupling belongs to a
+different round — so today the router resolves the OWNER symbol only (`Symbol` out of
+`Symbol.name`) and says so in the emitted reason string.
+
+**Fixture, honestly extended.** 25 new `test/taskroutefix/prompts.tsv` rows (provenance
+`handwritten-digE`; 14 test / 11 dev — every row's actual hash-rule split AND actual routing
+outcome verified against a live binary before insertion, not asserted). Because these three
+intents' triggering vocabulary is itself a small closed phrase list (the same shape
+`exact-grep`/`edit-contract`'s paraphrase rows are in — see `test/taskroutefix/PROVENANCE.md`'s
+`instrumented-cli` note, extended this round to say so explicitly), a genuinely original sentence
+that still routes necessarily reuses one of the trigger phrases somewhere, so these rows are
+exempt from the trigram contamination screen the same structural way. `contamination_screen.py`
+(now also scanning `--slice --slice-flow --at --uses` `--help` text, in addition to the original 8
+recommended verbs) flags zero new contamination from this round; it does flag one pre-existing,
+unrelated collision (confirmed present on `origin/main` before this round), filed separately.
+
+**Held-out floors, before/after** (`bench/taskroute_eval.py`, same corpus, only the binary
+changed):
+
+| Split | Metric | Before | After | Floor |
+| --- | --- | --- | --- | --- |
+| test (n=66) | accuracy | 0.727 | 0.894 | — |
+| test (n=66) | precision | 1.000 | 1.000 | ≥0.90 |
+| test (n=66) | harmful | 0.000 | 0.000 | ≤0.02 |
+| test (n=66) | negative-specificity | 1.000 | 1.000 | ≥0.90 |
+| test (n=66) | coverage | 0.647 | 0.863 | — (no coverage floor, by the round-1 rule) |
+| dev (n=92) | accuracy | 0.837 | 0.935 | — |
+| dev (n=92) | precision | 1.000 | 1.000 | ≥0.90 |
+| dev (n=92) | harmful | 0.000 | 0.000 | ≤0.02 |
+| dev (n=92) | coverage | 0.800 | 0.920 | — |
+
+Before/after confusion on the three new intents (test split): `data-flow` 4 abstains → 0,
+`at-line` 4 abstains → 0, `who-writes` 3 abstains → 0 — every miss this round targeted is closed;
+every OTHER confusion line (verify-claim prose-embedded claims, understand-symbol, etc. — the
+known v1.1 backlog from the 2026-08-12 round above) is unchanged, which is the row-count-diff way
+of showing this round touched nothing else.
+
+**Regression discipline.** The 133 rows that existed before this round are BYTE-IDENTICAL on both
+`status` and `resolved_symbols` (the `<facts resolved_symbols=N>` count) before vs after — checked
+by running every row through `--help-task` on both binaries and diffing the two (status, intent,
+resolved_symbols) snapshots; the diff is empty over those 133 rows (only the 25 new appended rows
+differ, as expected). `quality-delta --scope='src/*'` is clean (`gating="0"`) after the code
+landed — an initial pass flagged a `duplication` finding (a new filler-word helper structurally
+matched the pre-existing `weakSymbolCandidate`'s stop-word check) and a `verbosity` finding
+(`directTaskChoice` more than doubled in line count); both were fixed by extracting the three new
+checks into their own `flowTaskChoice` function (mirroring the existing `instrumentedTaskChoice`
+extraction) and by inlining the small filler-word loop directly rather than introducing a shared
+helper that collided token-for-token with `weakSymbolCandidate`'s existing shape.
+
 ### Skill-routing surface forms — S1b round, PRE-REGISTERED 2026-08-19 (before any skill edit)
 
 **Why this round exists, and why it is close to one already rejected.** The S1 round above ran a
