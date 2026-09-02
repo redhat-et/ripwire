@@ -269,6 +269,67 @@ meter_dest()
     fi
 }
 
+# ---- meter_set_repo DIR — resolve `meter_repo` (where the call happened) and `meter_tag` (which
+#      REPOSITORY to group it under) in ONE git invocation, and set `meter_isrepo`.
+#
+#      WHY THE TAG IS NOT THE REPO DIRECTORY'S BASENAME ANY MORE (2026-09-02). It was, and every linked
+#      worktree of one repository therefore reported as its own repo: a dozen `.claude/worktrees/<name>`
+#      checkouts of ripwire appeared in the report as a dozen different "repos", each with its own tiny
+#      sample. The per-repo cut is precisely the one that controls for repository composition — the
+#      confound that makes the pooled A/B ratio uninterpretable — so a per-repo cut that shatters one
+#      repository into twelve is the cut most damaged by getting this wrong.
+#
+#      `--git-common-dir` is the fix because it is exactly the thing a linked worktree SHARES with its
+#      main worktree: `/path/to/repo/.git` for both, while `--show-toplevel` differs. Strip the
+#      trailing `/.git` and the basename is the repository. `repo` is left alone and still names the
+#      worktree the call actually happened in — folding the TAG must not falsify the PATH.
+#
+#      One fork, not two: `--path-format=absolute` makes `--show-toplevel` and `--git-common-dir`
+#      answerable together (a bare `--git-common-dir` prints a RELATIVE `.git` when git's cwd is the
+#      toplevel). That option needs git >= 2.31, and an older git rejects the whole invocation rather
+#      than part of it, so the fallback re-asks for the toplevel alone — otherwise an old git would
+#      turn every call into "not a repo" and silently stop the tag AND the nudge gate together. The
+#      fallback costs a second fork only where the first form failed: outside a repo, or on an old git.
+meter_isrepo=0
+meter_set_repo()
+{
+    meter_repo=""
+    meter_tag=""
+    meter_isrepo=0
+    _msr="$( git -C "$1" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null )"
+    _mcommon=""
+    case "$_msr" in
+        *"$_mnl"*) meter_repo="${_msr%%"$_mnl"*}"
+                   _mcommon="${_msr#*"$_mnl"}"
+                   _mcommon="${_mcommon%%"$_mnl"*}" ;;
+        *)         meter_repo="$_msr" ;;
+    esac
+    if [ -z "$meter_repo" ]
+    then
+        meter_repo="$( git -C "$1" rev-parse --show-toplevel 2>/dev/null )"
+        _mcommon=""
+    fi
+    [ -n "$meter_repo" ] && meter_isrepo=1
+    [ -n "$meter_repo" ] || meter_repo="$1"
+
+    # `/path/repo/.git` -> `/path/repo`. A relative or empty answer, and a bare repository's
+    # `/path/foo.git` (which does not end in `/.git`), fall through to the worktree path — honest
+    # rather than clever, and the fallback is exactly the pre-2026-09-02 behaviour.
+    _mt="${_mcommon%/}"
+    case "$_mt" in
+        /*/.git) _mt="${_mt%/.git}" ;;
+        *)       _mt="" ;;
+    esac
+    [ -n "$_mt" ] || _mt="$meter_repo"
+    meter_tag="${_mt##*/}"
+    return 0
+}
+
+# A literal newline, once, as a variable: a `case` pattern cannot carry one inline, and the $'\n'
+# spelling inside a pattern is not portable across the shells this hook is asked to run under.
+_mnl="
+"
+
 # ---- meter_auto_arm SESSION — the ~50/50 split used when the arm config names the literal `auto`
 #      (see the design note above §METER). `cksum` (POSIX, present on every platform this hook ships
 #      on) hashes the session id to a number; the low two decimal digits split the range in half. Any
@@ -616,7 +677,7 @@ meter_classify_other()
             case "$_bc" in
                 *'<<'*)            _binline=1 ;;
             esac ;;
-        mkdir|rmdir|cp|mv|rm|touch|chmod|chown|echo|printf|pwd|which|date|sleep|wc|df|du|ps|pgrep|kill|export|true|false|jobs|wait|open|mktemp|basename|dirname|source|.)
+        mkdir|rmdir|cp|mv|rm|touch|chmod|chown|echo|printf|pwd|which|date|sleep|wc|df|du|kill|export|true|false|jobs|wait|open|mktemp|basename|dirname|source|.)
             _bmisc=1 ;;
         stat|diff|cmp|tr|sort|uniq|cut|tee|seq|realpath|readlink|:)
             # 2026-08-12: the second half of the path-component fix. These heads used to reach a row
@@ -649,7 +710,30 @@ meter_classify_head()
         ripwire)
             mclass="ripwire-cli"; return 0 ;;
         grep|egrep|fgrep|zgrep|rg|ag|ack|ack-grep|ugrep)
+            # A COUNT-ONLY or QUIET grep is a POLL, not a search (2026-09-02, from mining the log for
+            # the A/B readout: ~14% of that window's grep-class rows were these). `grep -c Building
+            # <buildlog>` asks how far a build has got; `grep -q PARGATES_EXIT <taskfile>` asks whether
+            # a gate run has finished. Neither retrieves any content, so neither is a call a ranked map
+            # could ever have answered instead — counting them as native retrieval put calls in the
+            # denominator that this tool is not competing for, and they were not evenly distributed
+            # across the A/B's arms, which made the artifact directional rather than merely noisy.
+            #
+            # The test is deliberately syntactic and lowercase-only: `-c`/`-q` in any cluster, or the
+            # long forms. `-C` is grep's CONTEXT flag and must not match, which is why the character
+            # class is not case-insensitive. A legitimate "count occurrences in source" `grep -c` is
+            # swept up too; that is accepted, because a count is not a thing this tool returns either.
+            if printf '%s' "$_bc" | grep -qE -- '(^|[[:space:]])(-[A-Za-z]*[cq][A-Za-z]*|--count|--quiet)([[:space:]]|$)'
+            then
+                mclass="build-poll"; return 0
+            fi
             mclass="grep"; return 0 ;;
+        ps|pgrep)
+            # A PROCESS POLL: a liveness check on a background job (the wait-loop idiom), where the
+            # grep in the pipeline filters a PROCESS TABLE rather than searching a codebase. Decided at
+            # the HEAD, before the vocabulary scan, which is what stops that piped grep being read as
+            # the observation. These two words used to reach meter_classify_other's plumbing list; they
+            # no longer get that far, and the entry there was removed rather than left as dead pattern.
+            mclass="process-poll"; return 0 ;;
         find|fd|fdfind)
             mclass="find"; return 0 ;;
         cat|head|tail|less|more|bat|nl|tac)
@@ -776,6 +860,12 @@ meter_classify_bash()
     case "$_bhead" in
         ripwire-cli|grep|find|read|git-diff|git-log|git-show-stat)
             return 0 ;;                     # the first command IS the observation
+        process-poll)
+            # A poll's line often continues into a real command after the loop it guards, so the walk
+            # still runs and a RETRIEVAL class it finds outranks the poll — the same rule the
+            # build/script-run heads already follow. What the poll head buys is that the pipeline grep
+            # beside the process listing never becomes the observation.
+            ;;
     esac
     # An inline program's own text is not a sequence of shell commands — do not walk it.
     [ "$_binline" = "1" ] && [ -n "$_bhead" ] && return 0
@@ -846,6 +936,7 @@ meter_family()
         git-diff|git-log|git-show-stat) printf 'git' ;;
         git-remote|git-misc)            printf 'git' ;;
         session-start|gate-run)         printf 'meta' ;;
+        build-poll|process-poll)        printf 'meta' ;;
         build|script-run|shell-misc)    printf 'other' ;;
         *)                              printf 'other' ;;
     esac
@@ -875,9 +966,7 @@ then
     # qualified for a nudge still counts as a session. This hook is registered for startup|resume|
     # clear, so a long session can legitimately produce more than one of these rows.
     tool_name="SessionStart"
-    meter_repo=$( git -C "$dir" rev-parse --show-toplevel 2>/dev/null )
-    [ -n "$meter_repo" ] || meter_repo="$dir"
-    meter_tag="${meter_repo##*/}"
+    meter_set_repo "$dir"
     meter_init
     meter_log "session-start" "meta" 0 "none" "${dir}"
 
@@ -1153,13 +1242,8 @@ dir="$f3_cwd"
 #      The METER logs either way: an un-nudgeable call is still a call, and dropping those would bias
 #      the denominator toward exactly the sessions the nudge can reach. ----
 nudge_ok=1
-meter_repo=$( git -C "$dir" rev-parse --show-toplevel 2>/dev/null )
-if [ -z "$meter_repo" ]
-then
-    meter_repo="$dir"
-    nudge_ok=0
-fi
-meter_tag="${meter_repo##*/}"
+meter_set_repo "$dir"
+[ "$meter_isrepo" = "1" ] || nudge_ok=0
 command -v ripwire >/dev/null 2>&1 || nudge_ok=0
 
 session="$f3_session"

@@ -152,7 +152,7 @@ guess.
 | `seq` | int | Per-session monotonic counter, 1-based. The ordering key. |
 | `session` | string | The agent's session id, or `ppid<N>` when the payload carries none. |
 | `repo` | string | Git top level of the call's `cwd`, or the `cwd` itself outside a repo. |
-| `tag` | string | Basename of `repo` — the short name to group by. |
+| `tag` | string | The **repository** to group by — see the note below. Not simply the basename of `repo`. |
 | `tool` | string | Raw tool name: `Bash`, `Read`, `Grep`, `Glob`, `mcp__ripwire__…`, `SessionStart`. |
 | `class` | string | Fine classification — the table below. |
 | `family` | string | `ripwire` · `native` · `git` · `other` · `meta`. |
@@ -168,6 +168,29 @@ Example:
 ```json
 {"v":2,"ts":"2026-08-11T15:29:17Z","seq":1,"session":"a1b2","repo":"/src/ripwire","tag":"ripwire","tool":"Grep","class":"grep","family":"native","nudged":1,"nudge":"fired","post_nudge":0,"post_sweep":0,"arm":"treatment","detail":"needle"}
 ```
+
+### `tag` is the repository, not the directory (2026-09-02)
+
+`tag` used to be the basename of `repo`, and every **linked git worktree** of one repository therefore
+reported as its own repo: a dozen `~/.claude/worktrees/<name>` checkouts of ripwire appeared in the
+report as a dozen different "repos", each with its own tiny sample. That is the worst place for this
+error to land, because the per-repo cut is precisely the one that controls for repository composition
+— the confound that makes a pooled cross-repo rate uninterpretable.
+
+`tag` now comes from the repo's **git common dir** (`git rev-parse --path-format=absolute
+--show-toplevel --git-common-dir`, one invocation for both facts), with the trailing `/.git` stripped
+and the basename taken. A linked worktree shares its common dir with its main worktree, so the two
+fold together; two genuinely different repositories still get two different tags. Outside a repo — or
+on a git older than 2.31, which rejects `--path-format` — it falls back to the directory basename,
+which is the pre-2026-09-02 behaviour.
+
+`repo` is deliberately **not** folded. It still names the worktree the call actually happened in:
+grouping the tag must not falsify the path, or a row stops saying where it came from.
+
+**Schema note.** Rows written before this change keep the old per-worktree tag. `v` did not bump — no
+field was added, removed or retyped — so a per-repo analysis that spans the boundary sees one
+repository under several names on the older side. Group by `repo`'s common prefix, or restrict the
+window, rather than trusting a `tag` histogram across it.
 
 ### `seq`, and why not `ts`
 
@@ -346,6 +369,8 @@ Resolution order, first match wins:
 | --- | --- | --- |
 | `ripwire` | `ripwire-cli` | ripwire |
 | `grep` `egrep` `fgrep` `zgrep` `rg` `ag` `ack` `ack-grep` `ugrep` | `grep` | native |
+| the same **with a count-only or quiet flag** (`-c`, `-q` in any lowercase cluster, `--count`, `--quiet`) | `build-poll` | **meta** |
+| `ps` `pgrep` — including `ps aux \| grep "[t]hing"`, where the grep filters a process table | `process-poll` | **meta** |
 | `find` `fd` `fdfind` | `find` | native |
 | `cat` `head` `tail` `less` `more` `bat` `nl` `tac` — **without** a `>` redirect | `read` | native |
 | the same **with** `>` (`cat > f <<EOF`) — a write, not a read | `shell-misc` | other |
@@ -363,7 +388,7 @@ Resolution order, first match wins:
 | the same, with anything else | `build` | other |
 | `pytest` `ctest` `tox`; anything under `test/…`; `python3`/`bash`/`sh` pointed at `test/…`, `*check.sh`, `pargates`, `regression.sh`; those scripts run directly | `gate-run` | meta |
 | `python3` `python` `bash` `sh` `zsh` `node` `ruby` `perl` `osascript` — with **anything else**: an inline program (`-c`, `-e`, `-`, a heredoc) or a non-gate script path | `script-run` | other |
-| `cd` `mkdir` `cp` `mv` `rm` `touch` `chmod` `echo` `wc` `ps` `export` `sleep` `stat` `diff` `cmp` `tr` `sort` `uniq` `cut` `tee` `seq` `realpath` `:` … , and `ls` without `-R` | `shell-misc` | other |
+| `cd` `mkdir` `cp` `mv` `rm` `touch` `chmod` `echo` `wc` `export` `sleep` `stat` `diff` `cmp` `tr` `sort` `uniq` `cut` `tee` `seq` `realpath` `:` … , and `ls` without `-R` | `shell-misc` | other |
 
 3. **The segment walk.** A compound line is not one command, and reading only its first word was the
    largest single source of `unclassified` in the log: the first word is routinely plumbing
@@ -411,9 +436,39 @@ And note where `shell-misc` sits: it is the one leading-word family checked **af
 scan rather than before it. `ls test | grep -i doccommand` is evidence about a grep; a leading-word
 rule that returned first would destroy that evidence. A bare `ls -la docs/` has none to destroy.
 
+### The two poll classes (2026-09-02)
+
+`build-poll` and `process-poll` were split out of `grep` after mining the A/B window for the readout
+in [`EVALS.md` §4](EVALS.md): **~14% of that window's `grep`-class rows were polls, not searches**, and
+they were not evenly distributed across the arms, which made the resulting bias directional rather
+than merely noisy.
+
+- **`build-poll`** — a grep whose only output is a count or a boolean: `grep -c Building <buildlog>`
+  ("how far has the build got"), `grep -q PARGATES_EXIT <taskfile>` ("has the gate run finished").
+- **`process-poll`** — `ps` or `pgrep` as the leading word, which is the liveness check on a
+  background job. It is decided at the **head**, before the vocabulary scan, so the grep inside
+  `ps aux | grep "[t]hing"` filters a process table and never becomes the observation.
+
+Both are family `meta` and therefore outside the substitution rate, for the same reason `gate-run` is:
+**a poll retrieves no content, so there is no ranked map that could have answered it instead.** Leaving
+them in put calls in the denominator that this tool is not competing for.
+
+Two costs, stated rather than hidden. A legitimate "count the occurrences in this source file"
+`grep -c` is swept up too — accepted, because a count is not a thing this tool returns either. And the
+flag test is deliberately **lowercase-only**: `-C` is grep's *context* flag and must not match, which
+is why the character class is not case-insensitive. `git grep -c` still classifies as `grep`, because
+the git subcommand table decides before the flag test runs.
+
+**Schema note.** Rows written before this change carry `grep` for exactly these command shapes. There
+is no way to reclassify them in place — `detail` is capped at 200 characters and a long line can be cut
+mid-flag — so a rate computed across the boundary mixes two denominators. The correction is small and
+its direction is known: removing the polls from the A/B window raises the treatment arm's share by a
+factor of 1.09 and the control arm's by 1.02.
+
 ### Why the non-retrieval classes exist
 
-`build`, `gate-run`, `git-remote`, `git-misc`, `script-run` and `shell-misc` are **not** part of the
+`build`, `gate-run`, `git-remote`, `git-misc`, `script-run`, `shell-misc`, `build-poll` and
+`process-poll` are **not** part of the
 substitution rate — their families are `other`, `meta` and `git`, and §1 of the report divides
 ripwire by native only. They exist because Track B §S4 ranks the rtk-absorption queue from *the
 command mix an agent actually runs*, and a command class that writes no row is a class that survey

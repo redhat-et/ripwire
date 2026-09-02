@@ -1432,6 +1432,131 @@ if [ -f "$SCHEMADOC" ]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (12d) THE POLL CLASSES AND THE WORKTREE TAG — three instrument defects found while reading the A/B
+#
+# All three were found by MINING the live log for the 2026-09-02 readout, not by inspection, and each
+# one biases a number the readout published:
+#
+#   PB  ~14% of the window's `grep`-class rows are POLLS, not searches. `grep -c Building <buildlog>`
+#       and `grep -q PARGATES_EXIT <taskfile>` are progress polls on a running job; `ps aux | grep
+#       "[t]est"` is a liveness check. None of them retrieves content, so none of them can ever be
+#       substituted by a ranked map — counting them as native retrieval inflates the denominator with
+#       calls the tool is not competing for. They were also NOT evenly distributed across arms, which
+#       made the artifact directional. They get `build-poll` / `process-poll`, family `meta`, excluded
+#       from the rate exactly like `gate-run`.
+#
+#   TAG `tag` was the basename of the repo DIRECTORY, so every linked worktree of one repository
+#       reported as its own repo (a dozen `.claude/worktrees/<name>` checkouts of ripwire showed up as
+#       a dozen "repos"). The per-repo cut is the one that controls for composition, so a per-repo cut
+#       that splits one repo into twelve is the cut most damaged by it. `tag` now comes from the
+#       repo's git COMMON dir, which a linked worktree shares with its main worktree.
+#
+# The negative controls are the point of this section: a rule that swallows an ordinary recursive grep
+# (PB5), or a tag derivation that folds two genuinely different repos together (TAG2), is worse than
+# the defect it fixes.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+PBBAD=""
+i=0
+for triple in "grep -c Building /tmp/build.log^build-poll^meta" \
+              "grep -c \\\"===\\\" /tmp/gate.log^build-poll^meta" \
+              "grep -q PARGATES_EXIT /tmp/task.outp^build-poll^meta" \
+              "rg -q needle src/^build-poll^meta" \
+              "ps aux | grep \\\"[t]est_thing\\\"^process-poll^meta" \
+              "pgrep -f ripwire^process-poll^meta" \
+              "grep -rn needle .^grep^native" \
+              "grep -C 3 needle file.txt^grep^native" \
+              "rg needle src/^grep^native"; do
+    c="${triple%%^*}"; rest="${triple#*^}"; wc_="${rest%^*}"; wf="${rest#*^}"; i=$(( i + 1 ))
+    TPB="$TMP/tpb_$i"; mkdir -p "$TPB"; LPB="$TMP/pb_$i.jsonl"
+    sweep_run "$LPB" "$TPB" "$( bashjson "pollcase_$i" "$c" )" >/dev/null 2>&1
+    gc="$( meterrowget "$LPB" 1 class )"; gf="$( meterrowget "$LPB" 1 family )"
+    [ "$gc" = "$wc_" ] && [ "$gf" = "$wf" ] || PBBAD="$PBBAD [$c -> $gc/$gf, want $wc_/$wf]"
+done
+[ -z "$PBBAD" ] \
+    && ok "PB1-PB5 classifier: count/quiet greps are build-poll, ps/pgrep are process-poll, real searches unchanged" \
+    || no "PB1-PB5 classifier: misclassified:$PBBAD"
+
+# PB6: a poll is not a sweep. Five `grep -c` polls in one session must never reach an escalation
+# moment — the class they carry is not in the sweep set, which is the same reason a build never was.
+TPB6="$TMP/tpb6"; mkdir -p "$TPB6"; LPB6="$TMP/pb6.jsonl"
+PB6BAD=""
+for n in 1 2 3 4 5; do
+    O="$( sweep_run "$LPB6" "$TPB6" "$( bashjson pollsweep 'grep -c Building /tmp/build.log' )" )"
+    [ -z "$O" ] || PB6BAD="$PB6BAD [call$n emitted]"
+    case "$( meterrowget "$LPB6" "$n" nudge )" in
+        none) ;;
+        *) PB6BAD="$PB6BAD [call$n nudge=$( meterrowget "$LPB6" "$n" nudge )]" ;;
+    esac
+done
+[ -z "$PB6BAD" ] && [ "$( meterrows "$LPB6" )" = "5" ] \
+    && ok "PB6 classifier: five build polls are counted, never nudge-eligible, never an escalation moment" \
+    || no "PB6 classifier:$PB6BAD (rows=$( meterrows "$LPB6" ))"
+
+# ── TAG1-TAG3: `tag` folds a linked worktree into its main worktree, and nothing else ──────────────
+# A real `git worktree add`, not a simulation: the whole defect lives in what git reports for a
+# checkout whose .git is a FILE pointing at the main repo's common dir.
+WTMAIN="$TMP/wtmain"; mkdir -p "$WTMAIN"
+git -C "$WTMAIN" init -q
+git -C "$WTMAIN" config user.email "dev@x.com"; git -C "$WTMAIN" config user.name "Dev"
+printf 'x\n' >"$WTMAIN/f.txt"; git -C "$WTMAIN" add f.txt >/dev/null 2>&1
+git -C "$WTMAIN" commit -q -m init >/dev/null 2>&1
+WTLINK="$TMP/vibrant-euler-dd516f"
+if git -C "$WTMAIN" worktree add -q -b wtbranch "$WTLINK" >/dev/null 2>&1; then
+    TW1="$TMP/ttag1"; mkdir -p "$TW1"; LW1="$TMP/tag1.jsonl"
+    sweep_run "$LW1" "$TW1" '{"session_id":"wtcase","cwd":"'"$WTLINK"'","tool_name":"Grep","tool_input":{"pattern":"needle"}}' >/dev/null 2>&1
+    GOTTAG="$( meterrowget "$LW1" 1 tag )"
+    [ "$GOTTAG" = "wtmain" ] \
+        && ok "TAG1 tag: a linked worktree reports its MAIN worktree's name (wtmain), not its own dir" \
+        || no "TAG1 tag: linked worktree reported tag=[$GOTTAG], expected wtmain"
+    # and `repo` still names the worktree the call actually happened in — folding the TAG must not
+    # falsify the path, which is the field that says where the row came from.
+    GOTREPO="$( meterrowget "$LW1" 1 repo )"
+    case "$GOTREPO" in
+        *vibrant-euler-dd516f) ok "TAG1b tag: `repo` still names the worktree the call happened in" ;;
+        *) no "TAG1b tag: repo=[$GOTREPO] — folding the tag must not falsify the path" ;;
+    esac
+else
+    echo "  SKIP  TAG1 (git worktree add unavailable)"
+fi
+TW2="$TMP/ttag2"; mkdir -p "$TW2"; LW2="$TMP/tag2.jsonl"
+sweep_run "$LW2" "$TW2" '{"session_id":"tagplain","cwd":"'"$WTMAIN"'","tool_name":"Grep","tool_input":{"pattern":"needle"}}' >/dev/null 2>&1
+[ "$( meterrowget "$LW2" 1 tag )" = "wtmain" ] \
+    && ok "TAG2 tag: an ordinary repo still reports its own basename (the negative control)" \
+    || no "TAG2 tag: plain repo reported tag=[$( meterrowget "$LW2" 1 tag )], expected wtmain"
+TW2B="$TMP/ttag2b"; mkdir -p "$TW2B"; LW2B="$TMP/tag2b.jsonl"
+sweep_run "$LW2B" "$TW2B" '{"session_id":"tagsub","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"needle"}}' >/dev/null 2>&1
+[ "$( meterrowget "$LW2B" 1 tag )" = "repo" ] \
+    && ok "TAG2b tag: two different repos still get two different tags (no over-folding)" \
+    || no "TAG2b tag: second repo reported tag=[$( meterrowget "$LW2B" 1 tag )], expected repo"
+TW3="$TMP/ttag3"; mkdir -p "$TW3"; LW3="$TMP/tag3.jsonl"
+sweep_run "$LW3" "$TW3" '{"session_id":"tagnonrepo","cwd":"'"$NONREPO"'","tool_name":"Grep","tool_input":{"pattern":"needle"}}' >/dev/null 2>&1
+[ "$( meterrowget "$LW3" 1 tag )" = "nonrepo" ] \
+    && ok "TAG3 tag: outside a repo the tag still falls back to the directory basename" \
+    || no "TAG3 tag: non-repo reported tag=[$( meterrowget "$LW3" 1 tag )], expected nonrepo"
+# The SessionStart path derives the tag too, and derived it separately — a fix applied to one and not
+# the other would split a session's own rows across two tags.
+TW4="$TMP/ttag4"; mkdir -p "$TW4"; LW4="$TMP/tag4.jsonl"
+if [ -d "$WTLINK" ]; then
+    printf '%s' '{"session_id":"tagss","cwd":"'"$WTLINK"'","source":"startup"}' \
+        | env HOME="$METERHOME" RIPWIRE_METER_LOG="$LW4" RIPWIRE_METER_FIXTURE=1 \
+            PATH="$WITH_RIPWIRE" TMPDIR="$TW4" bash "$HOOK" --session-start >/dev/null 2>&1
+    [ "$( meterrowget "$LW4" 1 tag )" = "wtmain" ] \
+        && ok "TAG4 tag: the SessionStart row folds the worktree the same way the PreToolUse rows do" \
+        || no "TAG4 tag: session-start row tag=[$( meterrowget "$LW4" 1 tag )], expected wtmain"
+fi
+
+# ── PB7: the schema doc carries the two new classes and the tag change as a schema note ───────────
+if [ -f "$SCHEMADOC" ]; then
+    PB7MISS=""
+    for needle in 'build-poll' 'process-poll' 'git-common-dir'; do
+        grep -Fq "$needle" "$SCHEMADOC" || PB7MISS="$PB7MISS $needle"
+    done
+    [ -z "$PB7MISS" ] && ok "PB7 docs: SUBSTITUTION_METER.md documents the poll classes and the tag derivation" \
+        || no "PB7 docs: SUBSTITUTION_METER.md is missing:$PB7MISS"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # (13) FIXTURE ISOLATION — the arms that prove a gate run cannot reach the operator's log
 #
 # The design and the bug are documented at the top of this file. This section runs LAST because I2,
