@@ -346,6 +346,58 @@ namespace mcpedit
         return out;
     }
 
+    // F-07: the target file's dominant line ending, so a payload can be harmonized to match it before it is
+    // spliced in. Counts CRLF pairs and BARE LF (a '\n' with no preceding '\r') separately, so a file that
+    // is genuinely mixed already is reported as such rather than forced into one bucket. `None` is a file
+    // with no newline at all (e.g. single statement, or empty) — nothing for a payload to match.
+    enum class EolStyle : std::uint8_t { None, Lf, Crlf, Mixed };
+
+    inline EolStyle detectDominantEol( const std::string& bytes )
+    {
+        std::size_t crlf = 0, bareLf = 0;
+        for( std::size_t i = 0; i < bytes.size(); ++i )
+        {
+            if( bytes[i] != '\n' )
+            {
+                continue;
+            }
+            if( i > 0 && bytes[i - 1] == '\r' ) { ++crlf; }
+            else                                { ++bareLf; }
+        }
+        if( crlf == 0 && bareLf == 0 ) { return EolStyle::None; }
+        if( bareLf == 0 )              { return EolStyle::Crlf; }
+        if( crlf == 0 )                { return EolStyle::Lf; }
+        return EolStyle::Mixed;
+    }
+
+    // Declarative table over a switch/case (CONTRIBUTING.md §3): EolStyle's enumerators are declared
+    // None,Lf,Crlf,Mixed in that order, so the enum value IS the index — no case labels to keep in sync.
+    inline const char* eolStyleName( EolStyle e ) noexcept
+    {
+        static constexpr const char* kNames[] = { "none", "lf", "crlf", "mixed" };
+        const std::size_t             i       = static_cast<std::size_t>( e );
+        return ( i < sizeof( kNames ) / sizeof( kNames[0] ) ) ? kNames[i] : "none";
+    }
+
+    // F-07: rewrite every BARE '\n' in `text` to '\r\n', so a payload written in plain LF (the shape almost
+    // every agent emits) does not leave a CRLF-dominant target file with a mixed-ending tail after the
+    // splice. Idempotent — a '\n' already preceded by '\r' is left alone, never doubled, so a payload that
+    // is already CRLF (or already mixed) is not corrupted by a second pass.
+    inline std::string normalizeToCrlf( const std::string& text )
+    {
+        std::string out;
+        out.reserve( text.size() + text.size() / 16 );
+        for( std::size_t i = 0; i < text.size(); ++i )
+        {
+            if( text[i] == '\n' && ( i == 0 || text[i - 1] != '\r' ) )
+            {
+                out += '\r';
+            }
+            out += text[i];
+        }
+        return out;
+    }
+
     // A3-F8: the advisory edit lock lives in the per-user CACHE DIR, keyed by an FNV-1a-64 hash of the
     // absolute target path — NOT as a "<path>.ripwire-lock" sidecar next to the target. The old sidecar was
     // created and never unlinked, so every MCP edit left permanent litter in the user's repo (git-status
@@ -672,9 +724,19 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
         return oc;
     }
 
+    // F-07: harmonize the payload's line endings to the TARGET's own dominant ending before splicing. A
+    // payload written in plain LF (the common agent shape) spliced verbatim into a CRLF-dominant file used
+    // to leave the file silently MIXED — nothing on the receipt said so. Only the Crlf case is normalized
+    // (Lf targets already match a plain-LF payload; None/Mixed targets have no single convention to match,
+    // so the payload is left exactly as given rather than guessed into one). Disclosed on the receipt below
+    // either way via file_eol=/eol_normalized=, so an agent never has to re-read the file to find out.
+    const mcpedit::EolStyle fileEol       = mcpedit::detectDominantEol( src );
+    const bool              eolNormalized = ( fileEol == mcpedit::EolStyle::Crlf ) && ( text.find( '\n' ) != std::string::npos );
+    const std::string       editText      = eolNormalized ? mcpedit::normalizeToCrlf( text ) : text;
+
     // 4. splice in memory, then ONE atomic temp-rename write (no partial write is possible).
     std::size_t newStart = 0, newEnd = 0;
-    const std::string newBytes = mcpedit::applyEdit( op, src, a, b, text, newStart, newEnd );
+    const std::string newBytes = mcpedit::applyEdit( op, src, a, b, editText, newStart, newEnd );
 
     // F1: RE-CHECK FRESHNESS IMMEDIATELY BEFORE THE RENAME. The advisory lock serializes cooperating ripwire
     //     edits, but a NON-cooperating external writer (editor/formatter on save) won't take the lock. So right
@@ -724,9 +786,19 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
                   + ( target.byHandle ? "\",\"resolved_from_handle\":\"" + mcpdetail::jsonEscape( symbol ) : std::string() )
                   + ( target.bySeed   ? "\",\"resolved_from_seed\":\""   + mcpdetail::jsonEscape( symbol ) : std::string() )
                   + "\",\"file\":\"" + mcpdetail::jsonEscape( path )
+                  // F-16: span is the POST-EDIT byte range in the NEW file (where the applied text now
+                  // sits), not the region overwritten in the old one — for ReplaceBody those two lengths
+                  // usually differ. replaced_bytes is that separate number: how many OLD bytes this op
+                  // overwrote (b-a for ReplaceBody; 0 for the two insert ops, which overwrite nothing).
                   + "\",\"span\":{\"start\":" + std::to_string( newStart ) + ",\"end\":" + std::to_string( newEnd ) + "}"
+                  + ",\"replaced_bytes\":" + std::to_string( op == mcpedit::Op::ReplaceBody ? ( b - a ) : 0 )
                   + ",\"old_file_bytes\":" + std::to_string( src.size() )
                   + ",\"new_file_bytes\":" + std::to_string( newBytes.size() )
+                  // F-07: the TARGET's own dominant line ending, and whether the payload was rewritten to
+                  // match it (Crlf targets only — see above). A caller that cares whether its LF payload
+                  // just got silently rewritten reads this instead of re-hashing the file.
+                  + ",\"file_eol\":\"" + mcpedit::eolStyleName( fileEol )
+                  + "\",\"eol_normalized\":" + ( eolNormalized ? "true" : "false" )
                   + ",\"stale_index\":\"" + mcpdetail::jsonEscape( oldStamp )
                   + "\",\"note\":\"index invalidated; the next verb call rebuilds from disk\"}";
     return oc;

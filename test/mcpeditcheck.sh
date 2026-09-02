@@ -119,6 +119,66 @@ grep -q SFX_OK "$TMP/r1_regions" \
     && ok "replace_symbol_body: suffix bytes after the span are byte-identical" \
     || no "replace_symbol_body: suffix bytes changed"
 
+# F-16: span is the POST-EDIT range (its length is the PAYLOAD's length), not the region overwritten
+# in the OLD file — replaced_bytes is that separate number. orig_span_len below is computed the OLD
+# way (from file-size deltas, same formula as the prefix/suffix check above); replaced_bytes must equal
+# it exactly.
+python3 - "$TMP/geo.orig" "$ORIG" "$R1" <<'PY' >"$TMP/r1_replaced"
+import sys, json
+orig = open(sys.argv[1], "rb").read()
+new  = open(sys.argv[2], "rb").read()
+pay  = json.loads(sys.argv[3])
+a = pay["span"]["start"]; b = pay["span"]["end"]
+orig_span_len = len(orig) - (len(new) - (b - a))
+print("MATCH" if pay.get("replaced_bytes") == orig_span_len else "MISMATCH got=%r want=%r" % (pay.get("replaced_bytes"), orig_span_len))
+PY
+grep -q '^MATCH' "$TMP/r1_replaced" \
+    && ok "replace_symbol_body: replaced_bytes equals the OLD span length, distinct from the post-edit span=" \
+    || no "replace_symbol_body: replaced_bytes disagrees with the old span length: $( cat "$TMP/r1_replaced" )"
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== 1b. F-07: a CRLF-dominant target's payload is harmonized, never left mixed ==="
+# ═══════════════════════════════════════════════════════════════════════════
+W1B="$( mktemp -d "$TMP/work.XXXXXX" )"
+printf 'int crlfFn( int n )\r\n{\r\n    return n + 1;\r\n}\r\n' > "$W1B/crlf.cpp"
+NEWBODY_LF='int crlfFn( int n )\n{\n    return 7;\n}'
+mcp_call \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"replace_symbol_body\",\"arguments\":{\"path\":\"$W1B\",\"symbol\":\"crlfFn\",\"new_body\":\"$NEWBODY_LF\"}}}" \
+    >"$TMP/rcrlf"
+RCRLF="$( inner_or_err "$TMP/rcrlf" )"
+case "$RCRLF" in
+    __ERROR__*) no "F-07: unexpected error: ${RCRLF#__ERROR__:}";;
+    *'"file_eol":"crlf"'*'"eol_normalized":true'*) ok "F-07: receipt discloses file_eol=crlf and eol_normalized=true";;
+    *) no "F-07: receipt did not disclose the CRLF harmonization: $( echo "$RCRLF" | head -c 200 )";;
+esac
+# no BARE '\n' anywhere in the result — every '\n' must be immediately preceded by '\r'.
+if python3 -c "
+import sys
+b = open('$W1B/crlf.cpp','rb').read()
+bad = any(b[i]==10 and (i==0 or b[i-1]!=13) for i in range(len(b)))
+sys.exit(1 if bad else 0)
+"; then
+    ok "F-07: the spliced file carries NO bare LF — uniformly CRLF, not mixed"
+else
+    no "F-07: the spliced file still has a bare LF mixed with CRLF"
+fi
+grep -q 'return 7' "$W1B/crlf.cpp" && ok "F-07: the new body is present" || no "F-07: new body missing after CRLF splice"
+
+# a plain-LF target is left untouched — normalization is Crlf-target-only.
+W1C="$( mktemp -d "$TMP/work.XXXXXX" )"
+printf 'int lfFn( int n )\n{\n    return n + 1;\n}\n' > "$W1C/lf.cpp"
+mcp_call \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"replace_symbol_body\",\"arguments\":{\"path\":\"$W1C\",\"symbol\":\"lfFn\",\"new_body\":\"int lfFn( int n )\\n{\\n    return 7;\\n}\"}}}" \
+    >"$TMP/rlf"
+RLF="$( inner_or_err "$TMP/rlf" )"
+case "$RLF" in
+    *'"file_eol":"lf"'*'"eol_normalized":false'*) ok "F-07: an LF-dominant target reports file_eol=lf, eol_normalized=false (untouched)";;
+    *) no "F-07: LF-target receipt unexpected: $( echo "$RLF" | head -c 200 )";;
+esac
+
 # ═══════════════════════════════════════════════════════════════════════════
 echo
 echo "=== 2. insert_before / insert_after: placement + newline rule ==="
