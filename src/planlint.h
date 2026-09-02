@@ -205,6 +205,8 @@ struct LedgerOrphan
 struct LintResult
 {
     bool          ok             = true;  // false only when FILE could not be opened (or exceeds the size cap)
+    std::string   refuseReason;           // F-09: populated only when ok==false — the specific why (e.g. a
+                                          // directory was named); empty ⇒ the generic "cannot open" cause
     std::string   file;                   // echoed verbatim, exactly as given on the command line
     std::string   atStamp;                // gitstamp anchor for the FILE's OWN enclosing repo; "" if not one
     bool          gitAvailable   = false; // whether the file's own directory resolved to a git repo at all
@@ -509,6 +511,21 @@ inline LintResult computePlanLint( const std::string& fileArg )
 {
     LintResult res;
     res.file = fileArg;
+
+    // F-09: refuse anything that is not a REGULAR file before ever trying to read it. darkflags::readWhole
+    // opens with fopen(path,"rb"); on a directory that open (and the immediate zero-byte fread loop) both
+    // succeed on this platform, so without this check `--plan-lint=$SOME_DIR` silently lints as an empty,
+    // clean plan (dialect="0", exit 0) instead of the usage error a directory actually is. Degrade, not
+    // assert: an unreadable/nonexistent path still falls through to readWhole below and gets the existing
+    // generic refusal (a stat() failure here is not itself a claim the file is missing).
+    std::error_code                        statEc;
+    const std::filesystem::file_status     st = std::filesystem::status( fileArg, statEc );
+    if( !statEc && std::filesystem::exists( st ) && !std::filesystem::is_regular_file( st ) )
+    {
+        res.ok           = false;
+        res.refuseReason = std::filesystem::is_directory( st ) ? "is a directory, not a file" : "is not a regular file";
+        return res;
+    }
 
     std::string bytes;
     if( !darkflags::readWhole( fileArg, bytes ) )
