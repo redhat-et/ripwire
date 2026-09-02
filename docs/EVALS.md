@@ -674,6 +674,60 @@ measures a routing PROXY, not task success, and the skills program's own success
 ADOPTION plus token cost (the substitution-meter log) — never a correctness claim this eval was
 never built to support.
 
+### Skill-routing floor recalibration — 2026-09-02 (lane/n2-d, deliberate, no skill edit)
+
+**Why.** The gate header rule (`test/skillevalcheck.sh`, `test/skillroutingjudgedcheck.sh`) is
+"floors sit ~9-10pp below the measured value" — a margin, not a fixed number, meant to be
+re-derived whenever measurement drifts far enough from the standing floor that a real regression
+could hide inside the gap. It had drifted: no skill description changed since the last
+recalibration (S1 round above), but the corpus and/or the ranker's own behavior on it moved the
+measured numbers well clear of their floors, on all four instruments. This round moved every floor
+back to its ~9-10pp band (or, for the judged-only pair, the tightest defensible margin given its
+smaller N — see below), with no code or skill-content change alongside it, per METHODOLOGY §5's
+rule that a recalibration is registered and recorded separately from any change it might otherwise
+be confused with.
+
+**Measured (2026-09-02, unchanged skills, same corpora as the S1 round):**
+
+| Instrument | Metric | Measured | Old floor | Drift | New floor | New margin |
+| --- | --- | --- | --- | --- | --- | --- |
+| `skillevalcheck.sh` split=test | bm25-desc hit@1 | 73.1% | 60.0% | 13.1pp | 63.0% | 10.1pp |
+| `skillevalcheck.sh` split=test | bm25-desc sep-auc | 0.957 | 0.89 | 0.067 | 0.89 (unmoved) | 0.067 |
+| `skillevalcheck.sh` split=dev | bm25-desc hit@1 | 69.1% | 46.0% | 23.1pp | 59.0% | 10.1pp |
+| `skillevalcheck.sh` split=dev | bm25-desc sep-auc | 0.887 | 0.75 | 0.137 | 0.75 (unmoved) | 0.137 |
+| `skillroutingjudgedcheck.sh` judged (n=152) | bm25-desc hit@1 | 98/152 = 64.5% | 50.0% | 14.5pp | 60.0% | 4.5pp |
+| `skillroutingjudgedcheck.sh` judged (n=152) | for-routed hit@1 | 92/152 = 60.5% | 50.0% | 10.5pp | 55.0% | 5.5pp |
+
+**Test/dev floors: the 10pp band, applied uniformly.** Both `skillevalcheck.sh` hit@1 floors move
+to ~10pp under measured. The dev-split floor previously ran its OWN, deliberately looser 15pp-margin
+policy (documented inline since the 2026-08-11 S1 growth pass) — that policy is retired by this
+round in favor of the file's general header rule, applied to both splits alike: dev is a
+free-to-iterate tuning pool, but a 23pp gap between measured and floor is no longer "loose on
+purpose", it is a margin wide enough to hide a real regression. sep-auc floors on both splits are
+LEFT UNMOVED — their measured-to-floor gap (0.067 / 0.137) sits inside or near the file's own
+historical 0.06-0.07 band and was not the number that had drifted out of band; moving a floor that
+is not the problem is not this round's job.
+
+**Judged-only floors: margin necessarily tighter than 9-10pp, and why that is still sound.** Naively
+applying "10pp below measured" to the judged pair gives ~54.5%/~50.5% — but the judged corpus is
+n=152, where one row is ≈0.66pp: a 10pp margin would tolerate an 8-9 row swing before the gate ever
+fires, wide enough that a real routing regression on a handful of hard paraphrases could land
+entirely inside it. The floors actually applied — 60%/55% — are tighter (≈4.5pp/≈5.5pp) by design:
+narrow enough that the gate still catches a regression at this corpus's resolution, while every
+measured value stays comfortably clear of its floor (98/152 needs ≥92 to pass the 60% floor, 6 rows
+of headroom; 92/152 needs ≥84 to pass the 55% floor, 8 rows of headroom). This is a deliberate
+departure from the file's own general rule,
+made explicit here rather than silently applying a formula that would not actually protect anything
+at this N — consistent with the S1 round's own precedent of re-deriving from measurement rather
+than inheriting a number across a denominator or corpus change.
+
+**Verification.** Both gates run clean against the new floors on the SAME (unchanged) skills and
+corpora that produced the measured column above: `test/skillevalcheck.sh` ALL PASS
+(bm25-desc hit@1 73.1% ≥ 63.0%, dev 69.1% ≥ 59.0%, both sep-auc floors held at their old values);
+`test/skillroutingjudgedcheck.sh` ALL PASS (bm25-desc 98/152 ≥ 60%, for-routed 92/152 ≥ 55%). No
+skill description, skill body, or ranker code changed in this round — the recalibration is the
+whole diff, isolated in its own commit per METHODOLOGY §5.
+
 ### Skill-routing consensus content gaps — PRE-REGISTERED 2026-08-11 (before any skill edit)
 
 **Evidence base.** The S1 ceiling check (blind two-rater protocol, sealed key, raters saw only the
