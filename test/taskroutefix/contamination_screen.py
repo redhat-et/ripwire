@@ -5,8 +5,9 @@ The 2b-round method: a routing fixture is self-quotation if its prompts reuse th
 cards' own vocabulary, so every HANDWRITTEN prompt's lowercased word-trigrams are flagged
 when the same trigram occurs inside either reference corpus:
   (a) any double-quoted string literal in src/taskroute.h (the intent cards), or
-  (b) the --help blocks of the 8 recommended verbs (--verify --connect --expand
-      --from-trace --situ --pack-task --exemplar --for), read from the live binary.
+  (b) the --help blocks of the 12 recommended verbs (--verify --connect --expand
+      --from-trace --situ --pack-task --exemplar --for --slice --slice-flow --at --uses),
+      read from the live binary.
 
 Exempt as STRUCTURED SHAPE, not vocabulary (the machine or the claim grammar wrote them,
 never the fixture author — surrounding prose is still screened):
@@ -39,7 +40,8 @@ ROOT = HERE.parents[1]
 TSV = HERE / "prompts.tsv"
 CARDS = ROOT / "src" / "taskroute.h"
 
-RECOMMENDED_FLAGS = ("--verify", "--connect", "--expand", "--from-trace", "--situ", "--pack-task", "--exemplar", "--for")
+RECOMMENDED_FLAGS = ("--verify", "--connect", "--expand", "--from-trace", "--situ", "--pack-task", "--exemplar", "--for",
+                      "--slice", "--slice-flow", "--at", "--uses")
 FIXTURE_SYMBOLS = ("alphaNode", "betaNode", "gammaNode", "targetSymbol", "CacheNode", "HttpClient",
                    "StorageDriver", "parseConfigValue", "renderXmlRow", "sendRequest", "cacheValue")
 CLAIM_RE = re.compile(r"\b(?:calls|uses|unused|contains|defines|reaches)\s*\([^)]*\)")

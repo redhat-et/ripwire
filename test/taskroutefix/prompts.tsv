@@ -132,3 +132,28 @@ test	dirty	edit-contract	instrumented-cli	just finished editing StorageDriver, c
 dev	dirty	edit-contract	instrumented-cli	i edited HttpClient earlier; did i change its contract at all
 test	clean	abstain	instrumented-cli	where does the team stand on the quarterly plan
 dev	clean	abstain	instrumented-cli	i modified the slide deck after my patch of the agenda
+test	clean	data-flow	handwritten-digE	what data flow leads into readLimit inside HttpClient
+test	clean	data-flow	handwritten-digE	there is a value flow problem, something feeds into retryCount inside StorageDriver and I cannot tell what
+test	clean	data-flow	handwritten-digE	something about the data flow inside CacheNode looks off and I cannot tell where it went wrong
+test	clean	data-flow	handwritten-digE	the number renderXmlRow returns looks corrupted, give me the statements feed picture for it
+dev	clean	abstain	handwritten-digE	the data flow on the shipping estimate looks wrong and nobody can tell what feeds into it
+test	clean	abstain	handwritten-digE	nobody knows what changed the numbers on the nightly dashboard
+test	clean	at-line	handwritten-digE	our sanitizer log points at router.cpp:11, what is actually happening there
+test	clean	at-line	handwritten-digE	a reviewer flagged router.cpp:12 in the diff, what does that spot belong to
+test	clean	at-line	handwritten-digE	can you tell me what encloses line 11 of router.cpp
+test	clean	at-line	handwritten-digE	I keep landing on line 12 inside router.cpp and want to know what owns it
+test	clean	who-writes	handwritten-digE	who sets targetSymbol these days, I keep losing track
+test	clean	who-writes	handwritten-digE	who assigns cacheValue during a normal run
+test	clean	who-writes	handwritten-digE	who sets HttpClient before it gets used downstream
+test	clean	abstain	handwritten-digE	who is responsible for updating the onboarding checklist
+dev	clean	data-flow	handwritten-digE	the data flow that feeds into pendingCount inside targetSymbol looks wrong lately
+dev	clean	data-flow	handwritten-digE	I want the statements feed detail for whatever is flowing into cursorOffset inside targetSymbol
+dev	clean	data-flow	handwritten-digE	the data flow around alphaNode looks wrong during the staging run
+dev	clean	data-flow	handwritten-digE	what data flow reaches CacheNode during the smoke pass
+dev	clean	at-line	handwritten-digE	walk me through router.cpp:5, what sits there during nightly
+dev	clean	at-line	handwritten-digE	line 9 of router.cpp keeps showing up during batch review
+dev	clean	at-line	handwritten-digE	the cleanup report cites router.cpp:9, what belongs there
+dev	clean	who-writes	handwritten-digE	who modifies StorageDriver once the pipeline starts
+dev	clean	who-writes	handwritten-digE	who sets renderXmlRow before the page ships
+dev	clean	abstain	handwritten-digE	the failure happened somewhere around line 12 but I do not have a filename yet
+test	clean	abstain	handwritten-digE	the dashboard numbers on the nightly run look stale and nobody can say why
