@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
-# hooks/ripwire-nudge.sh — OPT-IN Claude Code PreToolUse hook. Two jobs in one script: the
-# ADVISORY-ONLY nudge (below), and the SUBSTITUTION METER (see the §METER block further down).
+# hooks/ripwire-nudge.sh — OPT-IN Claude Code PreToolUse + SessionStart hook.
 #
-# Nudges an agent from raw grep/rg, from whole-file Read / candidate-Glob, and from raw `git diff`/
+# READ §RETIRED FIRST. As of 2026-09-02 the PreToolUse path SAYS NOTHING: a randomized A/B measured
+# both nudge tiers inert and the registered consequence was applied. What survives on that path is the
+# SUBSTITUTION METER (§METER) plus the eligibility bookkeeping that tells a later readout which calls
+# the retired advice would have landed on. The SessionStart primer still speaks, and is still the one
+# thing the control arm does not get. The design record below describes a mechanism that is GONE; it
+# is kept because a measured negative whose reasoning is deleted gets rebuilt by the next person.
+#
+# The original two-jobs description follows. Historically: two jobs in one script, the ADVISORY-ONLY
+# nudge (below) and the SUBSTITUTION METER (see the §METER block further down).
+#
+# Nudged an agent from raw grep/rg, from whole-file Read / candidate-Glob, and from raw `git diff`/
 # `git log`/`git show --stat`, toward the matching ripwire verb. Ships INACTIVE — only registered via
 # `skills/install.sh --hook`, never automatically (see the Phase B5.2 / R5 agent-context-science
 # design: "with grep available, the agent defaults to it... a PreToolUse hook is the high-leverage
@@ -150,6 +159,54 @@ set -u
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §RETIRED — BOTH NUDGE TIERS NO LONGER SPEAK (2026-09-02). THE INSTRUMENT STAYS.
+#
+# WHAT THE A/B FOUND. The `arm=auto` split described above went live 2026-08-19 and finally produced
+# the randomized population the two blocks above were waiting for. Window 2 (`ts >= 2026-08-19T12`,
+# `ts < 2026-09-02T00`, `session != smoketest`) is a roughly balanced treatment/control sample across
+# hundreds of sessions, and NO CUT SEPARATES THE ARMS: not the pooled substitution share inside a
+# single repository, not the per-session median with sessions as the unit (a 95% bootstrap CI on the
+# treatment/control median ratio that spans 1.0 with room to spare), and not the before/after around
+# the moment a nudge fires — where the treatment arm's dip is reproduced, larger, by the control arm's
+# own counterfactual, which makes it regression to the mean after a sweep and not an effect of
+# anything this file said. The full readout, its argv and its confounds are registered in
+# `docs/EVALS.md` §4; the numbers themselves are operator telemetry and live in the operator ledger.
+#
+# THE CONSEQUENCE, APPLIED RATHER THAN WRITTEN DOWN. Both tiers stop emitting text:
+#   - the BASE tier (the §CEDE-gated one-time tips) — its own §SWEEP header already recorded, from the
+#     2026-08-11 first-12-hours readout, that it converts at ~0%; the A/B is the randomized
+#     confirmation of a finding this file has carried in a comment for three weeks;
+#   - the SWEEP escalation (§SWEEP) — resolved against ITS OWN pre-registered band. The registration
+#     in `docs/EVALS.md` §4 asks for `post_sweep=1` substitution >= 3xB to KEEP and < ~1.4xB to
+#     DISABLE, over >=200 rate-eligible calls in >=10 sessions. The minimum data is met several times
+#     over and the reading is BELOW 1xB — escalated sessions substitute slightly LESS after the
+#     escalation than before it, and less than the control arm's counterfactual over the same window.
+#     That is a DISABLE by the rule as written, and the rule was written before the data existed.
+#
+# WHAT "RETIRED" MEANS HERE, PRECISELY. The advice is gone; every other thing this file does is
+# untouched. The eligibility bookkeeping still runs, in both arms, on exactly the counters and the
+# cooldown policy it ran on before (§DEDUP), so the log still records WHICH CALL WOULD HAVE BEEN
+# SPOKEN TO — that is what keeps "how often was the moment even reached" answerable for the next
+# instrument, and it is the covariate the Claude Code prompt router's readout will want. What changed
+# in the row is only the vocabulary of `nudge`: `retired` where a delivery would have happened,
+# `retired-sweep` where an escalation would have, `dedup` where the cooldown would have silenced it.
+# `fired`/`sweep<N>`/`control`/`suppressed-control` are no longer written — historical rows keep them,
+# and `docs/SUBSTITUTION_METER.md` records the boundary as a schema note.
+#
+# `nudged` is now always 0, and `post_nudge`/`post_sweep` become pure counterfactual markers ("an
+# eligible base-tier / sweep-tier moment already occurred in this session"), identical in both arms.
+# They are kept, not deleted: a schema that drops a field cannot be compared across its own boundary.
+#
+# THE ARM STILL MEANS SOMETHING. It now separates exactly one behaviour: the SessionStart primer,
+# which the control arm does not receive. That is the lever the 2026-08-10 finding actually credited
+# — CONCENTRATION (skill and CLAUDE.md text), never the PreToolUse hook — so the live A/B from here
+# is primer-vs-no-primer, and this file's PreToolUse path is now identical in both arms.
+#
+# RIPWIRE_SWEEP / `sweep=` in meter.conf still resolve, and still gate the sweep tier's COUNTERS. They
+# no longer gate any delivery, because there is none left to gate.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # §FIXTURE — A TEST RUN MAY NEVER REACH THE OPERATOR'S LOG (2026-08-12)
 #
 # This hook has a gate, test/hookcheck.sh, which drives it with invented PreToolUse payloads by the
@@ -211,6 +268,67 @@ meter_dest()
         _mhome=""
     fi
 }
+
+# ---- meter_set_repo DIR — resolve `meter_repo` (where the call happened) and `meter_tag` (which
+#      REPOSITORY to group it under) in ONE git invocation, and set `meter_isrepo`.
+#
+#      WHY THE TAG IS NOT THE REPO DIRECTORY'S BASENAME ANY MORE (2026-09-02). It was, and every linked
+#      worktree of one repository therefore reported as its own repo: a dozen `.claude/worktrees/<name>`
+#      checkouts of ripwire appeared in the report as a dozen different "repos", each with its own tiny
+#      sample. The per-repo cut is precisely the one that controls for repository composition — the
+#      confound that makes the pooled A/B ratio uninterpretable — so a per-repo cut that shatters one
+#      repository into twelve is the cut most damaged by getting this wrong.
+#
+#      `--git-common-dir` is the fix because it is exactly the thing a linked worktree SHARES with its
+#      main worktree: `/path/to/repo/.git` for both, while `--show-toplevel` differs. Strip the
+#      trailing `/.git` and the basename is the repository. `repo` is left alone and still names the
+#      worktree the call actually happened in — folding the TAG must not falsify the PATH.
+#
+#      One fork, not two: `--path-format=absolute` makes `--show-toplevel` and `--git-common-dir`
+#      answerable together (a bare `--git-common-dir` prints a RELATIVE `.git` when git's cwd is the
+#      toplevel). That option needs git >= 2.31, and an older git rejects the whole invocation rather
+#      than part of it, so the fallback re-asks for the toplevel alone — otherwise an old git would
+#      turn every call into "not a repo" and silently stop the tag AND the nudge gate together. The
+#      fallback costs a second fork only where the first form failed: outside a repo, or on an old git.
+meter_isrepo=0
+meter_set_repo()
+{
+    meter_repo=""
+    meter_tag=""
+    meter_isrepo=0
+    _msr="$( git -C "$1" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null )"
+    _mcommon=""
+    case "$_msr" in
+        *"$_mnl"*) meter_repo="${_msr%%"$_mnl"*}"
+                   _mcommon="${_msr#*"$_mnl"}"
+                   _mcommon="${_mcommon%%"$_mnl"*}" ;;
+        *)         meter_repo="$_msr" ;;
+    esac
+    if [ -z "$meter_repo" ]
+    then
+        meter_repo="$( git -C "$1" rev-parse --show-toplevel 2>/dev/null )"
+        _mcommon=""
+    fi
+    [ -n "$meter_repo" ] && meter_isrepo=1
+    [ -n "$meter_repo" ] || meter_repo="$1"
+
+    # `/path/repo/.git` -> `/path/repo`. A relative or empty answer, and a bare repository's
+    # `/path/foo.git` (which does not end in `/.git`), fall through to the worktree path — honest
+    # rather than clever, and the fallback is exactly the pre-2026-09-02 behaviour.
+    _mt="${_mcommon%/}"
+    case "$_mt" in
+        /*/.git) _mt="${_mt%/.git}" ;;
+        *)       _mt="" ;;
+    esac
+    [ -n "$_mt" ] || _mt="$meter_repo"
+    meter_tag="${_mt##*/}"
+    return 0
+}
+
+# A literal newline, once, as a variable: a `case` pattern cannot carry one inline, and the $'\n'
+# spelling inside a pattern is not portable across the shells this hook is asked to run under.
+_mnl="
+"
 
 # ---- meter_auto_arm SESSION — the ~50/50 split used when the arm config names the literal `auto`
 #      (see the design note above §METER). `cksum` (POSIX, present on every platform this hook ships
@@ -559,7 +677,7 @@ meter_classify_other()
             case "$_bc" in
                 *'<<'*)            _binline=1 ;;
             esac ;;
-        mkdir|rmdir|cp|mv|rm|touch|chmod|chown|echo|printf|pwd|which|date|sleep|wc|df|du|ps|pgrep|kill|export|true|false|jobs|wait|open|mktemp|basename|dirname|source|.)
+        mkdir|rmdir|cp|mv|rm|touch|chmod|chown|echo|printf|pwd|which|date|sleep|wc|df|du|kill|export|true|false|jobs|wait|open|mktemp|basename|dirname|source|.)
             _bmisc=1 ;;
         stat|diff|cmp|tr|sort|uniq|cut|tee|seq|realpath|readlink|:)
             # 2026-08-12: the second half of the path-component fix. These heads used to reach a row
@@ -592,7 +710,30 @@ meter_classify_head()
         ripwire)
             mclass="ripwire-cli"; return 0 ;;
         grep|egrep|fgrep|zgrep|rg|ag|ack|ack-grep|ugrep)
+            # A COUNT-ONLY or QUIET grep is a POLL, not a search (2026-09-02, from mining the log for
+            # the A/B readout: ~14% of that window's grep-class rows were these). `grep -c Building
+            # <buildlog>` asks how far a build has got; `grep -q PARGATES_EXIT <taskfile>` asks whether
+            # a gate run has finished. Neither retrieves any content, so neither is a call a ranked map
+            # could ever have answered instead — counting them as native retrieval put calls in the
+            # denominator that this tool is not competing for, and they were not evenly distributed
+            # across the A/B's arms, which made the artifact directional rather than merely noisy.
+            #
+            # The test is deliberately syntactic and lowercase-only: `-c`/`-q` in any cluster, or the
+            # long forms. `-C` is grep's CONTEXT flag and must not match, which is why the character
+            # class is not case-insensitive. A legitimate "count occurrences in source" `grep -c` is
+            # swept up too; that is accepted, because a count is not a thing this tool returns either.
+            if printf '%s' "$_bc" | grep -qE -- '(^|[[:space:]])(-[A-Za-z]*[cq][A-Za-z]*|--count|--quiet)([[:space:]]|$)'
+            then
+                mclass="build-poll"; return 0
+            fi
             mclass="grep"; return 0 ;;
+        ps|pgrep)
+            # A PROCESS POLL: a liveness check on a background job (the wait-loop idiom), where the
+            # grep in the pipeline filters a PROCESS TABLE rather than searching a codebase. Decided at
+            # the HEAD, before the vocabulary scan, which is what stops that piped grep being read as
+            # the observation. These two words used to reach meter_classify_other's plumbing list; they
+            # no longer get that far, and the entry there was removed rather than left as dead pattern.
+            mclass="process-poll"; return 0 ;;
         find|fd|fdfind)
             mclass="find"; return 0 ;;
         cat|head|tail|less|more|bat|nl|tac)
@@ -719,6 +860,12 @@ meter_classify_bash()
     case "$_bhead" in
         ripwire-cli|grep|find|read|git-diff|git-log|git-show-stat)
             return 0 ;;                     # the first command IS the observation
+        process-poll)
+            # A poll's line often continues into a real command after the loop it guards, so the walk
+            # still runs and a RETRIEVAL class it finds outranks the poll — the same rule the
+            # build/script-run heads already follow. What the poll head buys is that the pipeline grep
+            # beside the process listing never becomes the observation.
+            ;;
     esac
     # An inline program's own text is not a sequence of shell commands — do not walk it.
     [ "$_binline" = "1" ] && [ -n "$_bhead" ] && return 0
@@ -789,6 +936,7 @@ meter_family()
         git-diff|git-log|git-show-stat) printf 'git' ;;
         git-remote|git-misc)            printf 'git' ;;
         session-start|gate-run)         printf 'meta' ;;
+        build-poll|process-poll)        printf 'meta' ;;
         build|script-run|shell-misc)    printf 'other' ;;
         *)                              printf 'other' ;;
     esac
@@ -818,9 +966,7 @@ then
     # qualified for a nudge still counts as a session. This hook is registered for startup|resume|
     # clear, so a long session can legitimately produce more than one of these rows.
     tool_name="SessionStart"
-    meter_repo=$( git -C "$dir" rev-parse --show-toplevel 2>/dev/null )
-    [ -n "$meter_repo" ] || meter_repo="$dir"
-    meter_tag="${meter_repo##*/}"
+    meter_set_repo "$dir"
     meter_init
     meter_log "session-start" "meta" 0 "none" "${dir}"
 
@@ -873,6 +1019,37 @@ case "$tool_name" in
     # installer; see the disclosure in docs/SUBSTITUTION_METER.md for what stays invisible.
     mcp__ripwire__*) category=""; mclass="ripwire-mcp" ;;
     *) exit 0 ;;
+esac
+
+# ---- §ROUTE-OBSERVE (2026-09-02) — close the prompt router's adoption-within-two loop.
+#      hooks/ripwire-claude-route.sh decides, at UserPromptSubmit, which verb it recommended; only a
+#      PreToolUse hook can see whether the agent then ran it. So this hook hands the payload to that
+#      script's `--observe` arm, which writes its own row to routing.jsonl and touches nothing here.
+#
+#      SUBORDINATE, LIKE EVERYTHING ELSE IN THIS FILE: stdout and stderr are discarded and the exit
+#      status is swallowed, so a broken, missing or slow router cannot change what this hook does.
+#
+#      IT ALSO MUST NOT COST A FORK PER CALL ON A MACHINE WITH NO ROUTER. `--observe` returns
+#      immediately when there is no pending file for the session, but finding that out is already a
+#      fork — so the cheap precondition is checked HERE: routing-pending/ exists and holds at least one
+#      file. Without the router installed the directory never exists and this is one stat(). Only Bash
+#      and the MCP verbs are considered, because those are the only tools `--observe` can score.
+case "$tool_name" in
+    Bash|mcp__ripwire__*)
+        _robs="${BASH_SOURCE[0]%/*}/ripwire-claude-route.sh"
+        _rpd="${RIPWIRE_HOME:-${HOME:+$HOME/.ripwire}}/routing-pending"
+        if [ -x "$_robs" ] && [ -d "$_rpd" ]
+        then
+            for _rpf in "$_rpd"/*.json
+            do
+                if [ -e "$_rpf" ]
+                then
+                    { printf '%s' "$input" | "$_robs" --observe >/dev/null 2>&1; } || true
+                    break
+                fi
+            done
+        fi
+        ;;
 esac
 
 # ---- field extractor: jq if present (robust, handles escaping) else a flat grep/sed fallback that
@@ -1074,6 +1251,10 @@ mdetail="$f3_detail"
 # risk is accepted because the failure mode is silence (a nudge that could have helped does not fire),
 # never a wrong or noisy one.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §RETIRED (2026-09-02): this gate now decides ELIGIBILITY ONLY — `category` no longer selects any
+# text, it selects whether the row records a base-tier moment at all. The rule is kept rather than
+# dropped because the retired tier's eligibility is the thing the next instrument compares against,
+# and a gate quietly widened after the advice was removed would change what "eligible" counted.
 if [ "$category" = "grep" ] || [ "$category" = "bash-grep" ]
 then
     if [ "$tool_name" = "Bash" ]
@@ -1092,13 +1273,8 @@ dir="$f3_cwd"
 #      The METER logs either way: an un-nudgeable call is still a call, and dropping those would bias
 #      the denominator toward exactly the sessions the nudge can reach. ----
 nudge_ok=1
-meter_repo=$( git -C "$dir" rev-parse --show-toplevel 2>/dev/null )
-if [ -z "$meter_repo" ]
-then
-    meter_repo="$dir"
-    nudge_ok=0
-fi
-meter_tag="${meter_repo##*/}"
+meter_set_repo "$dir"
+[ "$meter_isrepo" = "1" ] || nudge_ok=0
 command -v ripwire >/dev/null 2>&1 || nudge_ok=0
 
 session="$f3_session"
@@ -1201,25 +1377,18 @@ else
         _darm=1                                          # re-armed: cooldown elapsed, cap not yet spent
     fi
 
+    # §RETIRED (2026-09-02): the arming decision is computed and RECORDED exactly as before, and then
+    # nothing is said. Both arms take the same branch — the base tier's control/treatment distinction
+    # was a counterfactual for text that no longer exists in either arm — so the two reasons below are
+    # arm-independent and mean "this call was the delivery moment" / "the cooldown covered this call".
     if [ "$_darm" = "1" ]
     then
         { printf '.' >>"$_ddeliv"; } 2>/dev/null || true
         { printf '%s' "$_dobsn" >"$_dlast"; } 2>/dev/null || true
         { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anynudge"; } 2>/dev/null || true
-        if [ "$meter_arm" = "control" ]
-        then
-            nudge="control"                             # counterfactual fire: treatment would have spoken
-        else
-            nudged=1
-            nudge="fired"
-        fi
+        nudge="retired"
     else
-        if [ "$meter_arm" = "control" ]
-        then
-            nudge="suppressed-control"                  # counterfactual dedup: treatment would be silent too
-        else
-            nudge="dedup"
-        fi
+        nudge="dedup"
     fi
 fi
 
@@ -1230,14 +1399,15 @@ fi
 [ -e "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anysweep" ] && meter_postsweep=1
 
 # 2026-08-19: the outer gate no longer excludes the control arm. Counting still has to happen there —
-# same reasoning as the base-tier marker above — so that `sweep_count`/the `.esc` marker reach the
-# same state a treatment session's would, and a control-arm row can say "control" (this call is the
-# counterfactual escalation) instead of just "this session was in the control arm, who knows if
-# anything would have fired here." Only the pattern capture (`.pat`, used solely to BUILD delivered
-# text) is skipped for control — nothing ever reads it there, so writing it would be pure waste.
-sweep_hit=0
+# same reasoning as the base-tier marker above — so that `sweep_count` and the delivery markers reach
+# the same state a treatment session's would, and the row can say which call was the escalation moment
+# instead of just "this session was in the control arm, who knows if anything would have fired here."
+#
+# §RETIRED (2026-09-02): the PATTERN CAPTURE is gone with the text it fed. It existed only to quote the
+# agent's own last three search patterns back at it inside a runnable `--for="…"`; with no message to
+# build, keeping it would mean writing sanitized copies of the operator's queries into $TMPDIR for a
+# reader that no longer exists. Counting is what remains.
 sweep_count=0
-sweep_q=""
 if [ "$sweep_on" = "1" ] && [ "$nudge_ok" = "1" ]
 then
     case "$mclass" in
@@ -1254,25 +1424,6 @@ then
             _swdots=""
             { _swdots="$(<"$_swf")"; } 2>/dev/null || _swdots=""
             sweep_count="${#_swdots}"
-
-            # The grep escalation is the one that can quote the agent's own query back at it, so the
-            # patterns are remembered as they go past. Sanitized HERE, not at emit time: whatever
-            # lands in this file is already safe to interpolate into a double-quoted --for=. Skipped
-            # in the control arm: this capture only ever feeds delivered text, and control never
-            # delivers text.
-            if [ "$mclass" = "grep" ] && [ "$meter_arm" != "control" ]
-            then
-                _swpat="$mdetail"
-                [ "$tool_name" = "Bash" ] && _swpat="$meter_arg1"
-                _swpat="${_swpat//[!A-Za-z0-9_.:-]/ }"
-                while [ "${_swpat}" != "${_swpat//  / }" ]
-                do
-                    _swpat="${_swpat//  / }"
-                done
-                _swpat="${_swpat# }"; _swpat="${_swpat% }"
-                _swpat="${_swpat:0:60}"
-                [ -n "$_swpat" ] && { printf '%s\n' "$_swpat" >>"${_swf}.pat"; } 2>/dev/null
-            fi
 
             # 2026-08-19 retune: the escalation used to be a ONE-SHOT `.esc` marker, exactly the
             # fire-once-forever shape §DEDUP above replaces for the base tier, and for the same
@@ -1308,126 +1459,30 @@ then
                 fi
             fi
 
+            # §RETIRED (2026-09-02): armed, recorded, silent — and arm-independent, for the same
+            # reason the base tier's branch above is. `retired-sweep` OVERWRITES a `retired` the base
+            # tier may have set on the same call: the escalation was the stronger of the two tips, so
+            # naming it is what keeps "which tier reached this moment" readable in one field.
             if [ "$_swarm" = "1" ]
             then
                 { printf '.' >>"${_swf}.deliv"; } 2>/dev/null || true
                 { printf '%s' "$sweep_count" >"${_swf}.last"; } 2>/dev/null || true
                 { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anysweep"; } 2>/dev/null || true
                 { : > "${TMPDIR:-/tmp}/ripwire-nudge.${session}.anynudge"; } 2>/dev/null || true
-                sweep_hit=1
-                if [ "$meter_arm" = "control" ]
-                then
-                    nudge="control"                     # counterfactual escalation: treatment would fire here
-                else
-                    nudged=1
-                    nudge="sweep${sweep_n}"
-                fi
+                nudge="retired-sweep"
             fi
             ;;
     esac
 fi
 
 meter_log "$mclass" "$( meter_family "$mclass" )" "$nudged" "$nudge" "$mdetail"
-
-[ "$nudged" = "1" ] || exit 0
-
-if [ "$sweep_hit" = "1" ]
-then
-    # The directory the pasted command should be run against: the repo root, except for a read sweep,
-    # where the directory of the file just read is the tighter and more useful scope. Only an absolute
-    # path is trusted — a relative one would produce a command that is wrong from anywhere else.
-    sweep_dir="$meter_repo"
-    if [ "$mclass" = "read" ]
-    then
-        case "$mdetail" in
-            /*/*) sweep_dir="${mdetail%/*}" ;;
-        esac
-    fi
-
-    if [ "$mclass" = "grep" ] && [ -e "${_swf}.pat" ]
-    then
-        # The last three patterns, oldest first, deduplicated, space-joined — the agent's own words,
-        # which is the whole point: a query it can paste without inventing anything.
-        _swq=""
-        while IFS= read -r _swline
-        do
-            [ -n "$_swline" ] || continue
-            case " $_swq " in
-                *" $_swline "*) continue ;;
-            esac
-            _swq="${_swq:+$_swq }$_swline"
-        done <<EOF3
-$( tail -n 3 "${_swf}.pat" 2>/dev/null )
-EOF3
-        sweep_q="${_swq:0:100}"
-    fi
-
-    case "$mclass" in
-        grep)
-            _swfor="${sweep_q:-<the task, in words>}"
-            msg="ripwire tip (SWEEP, ${sweep_count} search calls this session): a same-class sweep is trial-and-error retrieval — N round-trips and N outputs for one question. ONE call replaces it, paste-ready: \`ripwire ${sweep_dir} --for=\"${_swfor}\"\` — ranked over the WHOLE corpus (it matches doc-comments and bodies, not just the literal string) with signatures attached, so there is no read-the-file-for-context step after it. Want everything in one budgeted bundle instead — ranking + top bodies + callers + tests_to_run? \`ripwire ${sweep_dir} --pack-task=\"${_swfor}\"\`. Still after a literal string? \`ripwire ${sweep_dir} --grep='STR'\` returns each match with its enclosing function. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down.)"
-            ;;
-        read)
-            msg="ripwire tip (SWEEP, ${sweep_count} whole-file reads this session): reading files one after another is the largest token sink in an agent loop, and less context measures MORE accurate, not just cheaper (code-repair accuracy fell 29%->3% as context grew 32K->256K, LongCodeBench). ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --pack-task=\"<what you are trying to do>\"\` — ranking + top bodies + caller signatures + notes + tests_to_run in one bundle under one token budget. Already know the symbol? \`ripwire ${sweep_dir} --expand=SYM\` returns its body plus its callees' signatures instead of the file around it. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down.)"
-            ;;
-        glob)
-            msg="ripwire tip (SWEEP, ${sweep_count} filename globs this session): a glob finds files by NAME, which is exactly why it takes several tries. ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --for=\"<the task, in words>\"\` ranks files by what the code actually DOES (doc-comments and bodies, not paths) and hands back signatures instead of a path list you still have to open. Just want the lay of the land? \`ripwire ${sweep_dir}\` with no flags is the whole map. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down.)"
-            ;;
-        git-diff|git-log|git-show-stat)
-            msg="ripwire tip (SWEEP, ${sweep_count} raw git-history calls this session): ONE call replaces the sweep, paste-ready: \`ripwire ${sweep_dir} --situ\` — the mid-task bundle: the blast radius of what you have changed, tests_to_run, the co-change partners you have forgotten, and a hotspot alert, in one pass. Reviewing someone else's branch instead? \`ripwire ${sweep_dir} --pr-context\`. Want what changed STRUCTURALLY rather than line counts? \`ripwire ${sweep_dir} --map-diff\`. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down.)"
-            ;;
-        *)
-            msg="ripwire tip (SWEEP, ${sweep_count} calls this session): \`ripwire ${sweep_dir} --for=\"<the task, in words>\"\` answers the whole sweep in one ranked call. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down.)"
-            ;;
-    esac
-
-    if command -v jq >/dev/null 2>&1
-    then
-        jq -n --arg m "$msg" \
-            '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow",additionalContext:$m}}'
-    else
-        esc=$( printf '%s' "$msg" | tr '\n' ' ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' )
-        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","additionalContext":"%s"}}\n' "$esc"
-    fi
-    exit 0
-fi
-
-# ---- build the one-time suggestion (one short message per category; the git-diff/git-log/
-#      git-show-stat messages each name a SINGLE best verb for the observed form, not a catalog) ----
-case "$category" in
-    grep)
-        pattern=$( field pattern )
-        [ -n "$pattern" ] || pattern="PATTERN"
-        pattern=$( printf '%s' "$pattern" | cut -c1-60 )
-        msg="ripwire tip: for text search across this repo, \`ripwire . --grep='${pattern}'\` returns each match WITH its enclosing function/class — often replacing the read-the-file-for-context step. Conceptual/multi-word task instead of a literal string? \`ripwire . --for=\"...\"\`. Symbol usage/call sites? \`ripwire . --callers=SYM\` / \`--uses=SYM\`. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
-        ;;
-    git-diff)
-        msg="ripwire tip: for a diff, \`ripwire . --situ\` maps the mid-task blast radius, tests-to-run, and forgotten co-change partners in one pass (swap in \`--pr-context\` when reviewing a PR). (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
-        ;;
-    git-log)
-        msg="ripwire tip: for git log, \`ripwire . --rank-by=churn\` ranks who's actually churning that code (swap in \`--map-diff\` for what changed structurally). (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
-        ;;
-    git-show-stat)
-        msg="ripwire tip: for a commit's --stat summary, \`ripwire . --map-diff\` shows what changed structurally, not just line counts. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
-        ;;
-    read)
-        msg="ripwire tip: reading whole files is the biggest token sink in an agent loop, and less context measures MORE accurate, not just cheaper (code-repair accuracy fell 29%->3% as context grew 32K->256K, LongCodeBench). To understand ONE symbol, \`ripwire . --expand=SYM\` returns its body plus its callees' signatures instead of the file around it. Don't yet know which file to open? \`ripwire . --for=\"<task in words>\"\` ranks them, or \`ripwire . --pack-task=\"<task>\"\` returns ranking + bodies + callers + tests in ONE budgeted call. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
-        ;;
-    glob)
-        msg="ripwire tip: a filename glob finds files by NAME; \`ripwire . --for=\"<task in words>\"\` ranks them by what the code actually does (matching doc-comments and bodies, not just paths) and hands back signatures rather than a path list you still have to open. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
-        ;;
-    *)
-        msg="ripwire tip: this looks like a recursive grep/rg over the tree. \`ripwire . --grep='PATTERN'\` (literal) or \`ripwire . --for=\"task in words\"\` (conceptual) often answers the same question with the enclosing symbol attached, in far fewer tokens than raw grep + file reads. (Advisory only — your command runs either way; may repeat later this session, capped and cooled down. \`ripwire --help\` lists everything.)"
-        ;;
-esac
-
-if command -v jq >/dev/null 2>&1
-then
-    jq -n --arg m "$msg" \
-        '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow",additionalContext:$m}}'
-else
-    esc=$( printf '%s' "$msg" | tr '\n' ' ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' )
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","additionalContext":"%s"}}\n' "$esc"
-fi
-
+# ---- §RETIRED (2026-09-02): the PreToolUse path ENDS here. It writes one meter row and exits 0 with
+#      an EMPTY stdout, unconditionally, on every tool call it observes. The one-time tips and the
+#      sweep escalation that used to be built below are gone — see §RETIRED at the top of this file
+#      for the readout that retired them and for what stayed. The SessionStart primer (above, and
+#      still arm-differentiated) is the only thing this hook says to an agent now.
+#
+#      This is a CONTRACT, not an incidental property, and test/hookcheck.sh asserts it directly: a
+#      PreToolUse invocation of this hook produces no stdout. An advisory hook that is measured to be
+#      inert and keeps talking anyway is just tokens.
 exit 0

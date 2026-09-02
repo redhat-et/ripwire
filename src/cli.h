@@ -496,7 +496,7 @@ struct Config
     bool             doctor           = false;              // --doctor: self-diagnosis (binary/PATH staleness, grammar load, cache-dir
                                                              // health, git reachability, tree-sitter version) — a DIAGNOSTIC verb, not
                                                              // the deterministic map; environment-dependent lines are its whole point.
-    std::string_view agent;                                 // --agent=codex: extend --doctor over Codex's LIVE binary/skills/hooks/MCP surface
+    std::string_view agent;                                 // --agent=codex|claude: extend --doctor over that agent's LIVE binary/skills/hooks surface
     bool             skippedList      = false;              // --skipped (§P0.5d, §L1): WHY the index does not contain a file, and
                                                              // which files it DOES contain but cannot vouch for — one <f p= why=/> row
                                                              // per drop (oversize/excluded/unsupported-ext) plus <h p= why=/> rows for
@@ -1915,7 +1915,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               row (ok=\"0\") also carries hint=, the derived verdict (which of self=/which=\n"
         "                               is stale and the fix, which grammar(s) failed to compile, why the cache dir\n"
         "                               isn't writable, ...) — a passing row never carries hint=.\n"
-        "    --agent=codex              (with --doctor) also inspect Codex's LIVE CLI-first integration: PATH binary, exact\n" "                               installed-skill manifest parity, advisory hook executability, and the secondary\n"
+        "    --agent=codex|claude       (with --doctor) also inspect that agent's LIVE CLI-first integration: PATH binary, exact\n" "                               installed-skill manifest parity, advisory hook executability, and the secondary\n"
         "                               mcp_servers.ripwire command/--mcp args. Read-only; emits fixed repair commands and\n"
         "                               never prints config contents or shell command lines. Other values refuse.\n"
         "    --skipped                  WHY the index does not contain a file, and which files it DOES contain but cannot\n"
@@ -2285,7 +2285,7 @@ inline constexpr ViewFlag kViewFlags[] =
 {
     // server + self-eval inputs
     { "--mcp-token=",   &Config::mcpToken        , EmptyValue::Refuse, "a shared bearer token",                  "--mcp-token=$RIPWIRE_MCP_TOKEN" },
-    { "--agent=",      &Config::agent           , EmptyValue::Refuse, "codex",                                 "--agent=codex" },
+    { "--agent=",      &Config::agent           , EmptyValue::Refuse, "codex",                                 "--agent=codex" },   // also accepts claude — see validateAgent
     { "--eval-mined=",  &Config::evalMined       , EmptyValue::Refuse, "a minedpair.jsonl file path",            "--eval-mined=bench/minedpair.jsonl" },
     { "--eval-skills=", &Config::evalSkills      , EmptyValue::Refuse, "a labelled TSV file path",               "--eval-skills=bench/skillroute.tsv" },
 
@@ -3463,9 +3463,9 @@ inline void validateAgent( Config& c ) noexcept
         std::fprintf( stderr, "ripwire: --agent=codex modifies --doctor — pass both (e.g. ripwire <dir> --doctor --agent=codex)\n" );
         c.ok = false;
     }
-    if( !c.agent.empty() && c.agent != "codex" )
+    if( !c.agent.empty() && c.agent != "codex" && c.agent != "claude" )
     {
-        std::fprintf( stderr, "ripwire: unsupported --agent value '%.*s' (supported: codex)\n", int( c.agent.size() ), c.agent.data() );
+        std::fprintf( stderr, "ripwire: unsupported --agent value '%.*s' (supported: codex, claude)\n", int( c.agent.size() ), c.agent.data() );
         c.ok = false;
     }
 }

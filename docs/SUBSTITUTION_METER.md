@@ -152,7 +152,7 @@ guess.
 | `seq` | int | Per-session monotonic counter, 1-based. The ordering key. |
 | `session` | string | The agent's session id, or `ppid<N>` when the payload carries none. |
 | `repo` | string | Git top level of the call's `cwd`, or the `cwd` itself outside a repo. |
-| `tag` | string | Basename of `repo` — the short name to group by. |
+| `tag` | string | The **repository** to group by — see the note below. Not simply the basename of `repo`. |
 | `tool` | string | Raw tool name: `Bash`, `Read`, `Grep`, `Glob`, `mcp__ripwire__…`, `SessionStart`. |
 | `class` | string | Fine classification — the table below. |
 | `family` | string | `ripwire` · `native` · `git` · `other` · `meta`. |
@@ -168,6 +168,29 @@ Example:
 ```json
 {"v":2,"ts":"2026-08-11T15:29:17Z","seq":1,"session":"a1b2","repo":"/src/ripwire","tag":"ripwire","tool":"Grep","class":"grep","family":"native","nudged":1,"nudge":"fired","post_nudge":0,"post_sweep":0,"arm":"treatment","detail":"needle"}
 ```
+
+### `tag` is the repository, not the directory (2026-09-02)
+
+`tag` used to be the basename of `repo`, and every **linked git worktree** of one repository therefore
+reported as its own repo: a dozen `~/.claude/worktrees/<name>` checkouts of ripwire appeared in the
+report as a dozen different "repos", each with its own tiny sample. That is the worst place for this
+error to land, because the per-repo cut is precisely the one that controls for repository composition
+— the confound that makes a pooled cross-repo rate uninterpretable.
+
+`tag` now comes from the repo's **git common dir** (`git rev-parse --path-format=absolute
+--show-toplevel --git-common-dir`, one invocation for both facts), with the trailing `/.git` stripped
+and the basename taken. A linked worktree shares its common dir with its main worktree, so the two
+fold together; two genuinely different repositories still get two different tags. Outside a repo — or
+on a git older than 2.31, which rejects `--path-format` — it falls back to the directory basename,
+which is the pre-2026-09-02 behaviour.
+
+`repo` is deliberately **not** folded. It still names the worktree the call actually happened in:
+grouping the tag must not falsify the path, or a row stops saying where it came from.
+
+**Schema note.** Rows written before this change keep the old per-worktree tag. `v` did not bump — no
+field was added, removed or retyped — so a per-repo analysis that spans the boundary sees one
+repository under several names on the older side. Group by `repo`'s common prefix, or restrict the
+window, rather than trusting a `tag` histogram across it.
 
 ### `seq`, and why not `ts`
 
@@ -346,6 +369,8 @@ Resolution order, first match wins:
 | --- | --- | --- |
 | `ripwire` | `ripwire-cli` | ripwire |
 | `grep` `egrep` `fgrep` `zgrep` `rg` `ag` `ack` `ack-grep` `ugrep` | `grep` | native |
+| the same **with a count-only or quiet flag** (`-c`, `-q` in any lowercase cluster, `--count`, `--quiet`) | `build-poll` | **meta** |
+| `ps` `pgrep` — including `ps aux \| grep "[t]hing"`, where the grep filters a process table | `process-poll` | **meta** |
 | `find` `fd` `fdfind` | `find` | native |
 | `cat` `head` `tail` `less` `more` `bat` `nl` `tac` — **without** a `>` redirect | `read` | native |
 | the same **with** `>` (`cat > f <<EOF`) — a write, not a read | `shell-misc` | other |
@@ -363,7 +388,7 @@ Resolution order, first match wins:
 | the same, with anything else | `build` | other |
 | `pytest` `ctest` `tox`; anything under `test/…`; `python3`/`bash`/`sh` pointed at `test/…`, `*check.sh`, `pargates`, `regression.sh`; those scripts run directly | `gate-run` | meta |
 | `python3` `python` `bash` `sh` `zsh` `node` `ruby` `perl` `osascript` — with **anything else**: an inline program (`-c`, `-e`, `-`, a heredoc) or a non-gate script path | `script-run` | other |
-| `cd` `mkdir` `cp` `mv` `rm` `touch` `chmod` `echo` `wc` `ps` `export` `sleep` `stat` `diff` `cmp` `tr` `sort` `uniq` `cut` `tee` `seq` `realpath` `:` … , and `ls` without `-R` | `shell-misc` | other |
+| `cd` `mkdir` `cp` `mv` `rm` `touch` `chmod` `echo` `wc` `export` `sleep` `stat` `diff` `cmp` `tr` `sort` `uniq` `cut` `tee` `seq` `realpath` `:` … , and `ls` without `-R` | `shell-misc` | other |
 
 3. **The segment walk.** A compound line is not one command, and reading only its first word was the
    largest single source of `unclassified` in the log: the first word is routinely plumbing
@@ -411,9 +436,39 @@ And note where `shell-misc` sits: it is the one leading-word family checked **af
 scan rather than before it. `ls test | grep -i doccommand` is evidence about a grep; a leading-word
 rule that returned first would destroy that evidence. A bare `ls -la docs/` has none to destroy.
 
+### The two poll classes (2026-09-02)
+
+`build-poll` and `process-poll` were split out of `grep` after mining the A/B window for the readout
+in [`EVALS.md` §4](EVALS.md): **~14% of that window's `grep`-class rows were polls, not searches**, and
+they were not evenly distributed across the arms, which made the resulting bias directional rather
+than merely noisy.
+
+- **`build-poll`** — a grep whose only output is a count or a boolean: `grep -c Building <buildlog>`
+  ("how far has the build got"), `grep -q PARGATES_EXIT <taskfile>` ("has the gate run finished").
+- **`process-poll`** — `ps` or `pgrep` as the leading word, which is the liveness check on a
+  background job. It is decided at the **head**, before the vocabulary scan, so the grep inside
+  `ps aux | grep "[t]hing"` filters a process table and never becomes the observation.
+
+Both are family `meta` and therefore outside the substitution rate, for the same reason `gate-run` is:
+**a poll retrieves no content, so there is no ranked map that could have answered it instead.** Leaving
+them in put calls in the denominator that this tool is not competing for.
+
+Two costs, stated rather than hidden. A legitimate "count the occurrences in this source file"
+`grep -c` is swept up too — accepted, because a count is not a thing this tool returns either. And the
+flag test is deliberately **lowercase-only**: `-C` is grep's *context* flag and must not match, which
+is why the character class is not case-insensitive. `git grep -c` still classifies as `grep`, because
+the git subcommand table decides before the flag test runs.
+
+**Schema note.** Rows written before this change carry `grep` for exactly these command shapes. There
+is no way to reclassify them in place — `detail` is capped at 200 characters and a long line can be cut
+mid-flag — so a rate computed across the boundary mixes two denominators. The correction is small and
+its direction is known: removing the polls from the A/B window raises the treatment arm's share by a
+factor of 1.09 and the control arm's by 1.02.
+
 ### Why the non-retrieval classes exist
 
-`build`, `gate-run`, `git-remote`, `git-misc`, `script-run` and `shell-misc` are **not** part of the
+`build`, `gate-run`, `git-remote`, `git-misc`, `script-run`, `shell-misc`, `build-poll` and
+`process-poll` are **not** part of the
 substitution rate — their families are `other`, `meta` and `git`, and §1 of the report divides
 ripwire by native only. They exist because Track B §S4 ranks the rtk-absorption queue from *the
 command mix an agent actually runs*, and a command class that writes no row is a class that survey
@@ -497,6 +552,60 @@ an unstated one makes it untrustworthy:
 The meter does not estimate around any of this. An unobserved call is absent, and absent is not zero
 — the same rule the rest of the tool's output follows.
 
+## What the A/B found — both nudge tiers are RETIRED (2026-09-02) {#what-the-ab-found}
+
+`arm=auto` (below) went live 2026-08-19 and produced the first randomized population this instrument
+ever had. **Window 2** — every row with `ts >= 2026-08-19T12`, `ts < 2026-09-02T00`, and
+`session != smoketest` — is a roughly balanced treatment/control sample across several hundred
+sessions. The readout is registered, with its argv, its per-session bootstrap CI, its `n`s and its
+confounds, in [`EVALS.md` §4, "PreToolUse nudge A/B"](EVALS.md). Its verdict, in one line:
+
+> **No cut separates the arms.** Not the pooled substitution share inside a single repository, not
+> the per-session median with sessions as the unit, and not the before/after around the moment a
+> nudge fires — where the treatment arm's dip is reproduced, larger, by the control arm's own
+> counterfactual. The dip is regression to the mean after a sweep, not an effect of the advice.
+
+The consequence was applied rather than written down. Both tiers stop emitting text:
+
+- the **base tier** (the §CEDE-gated one-time tips) — the hook's own header had recorded, from the
+  2026-08-11 first-12-hours readout, that it converts at ~0%; the A/B is the randomized confirmation;
+- the **sweep escalation** — resolved against *its own* pre-registered band in `EVALS.md` §4, which
+  asked for a `post_sweep=1` substitution rate of ≥ 3×B to KEEP and < ~1.4×B to DISABLE over ≥ 200
+  rate-eligible calls in ≥ 10 sessions. The minimum data is met several times over and the reading is
+  **below 1×B**: escalated sessions substitute slightly *less* after the escalation than before it,
+  and less than the control arm's counterfactual over the same window. That is a DISABLE by the rule
+  as written, and the rule was written before the data existed.
+
+**What "retired" changed, and what it deliberately did not.** The advice is gone. Everything else
+runs exactly as before: the same eligibility rules, the same `.obs`/`.deliv`/`.last` counters, the
+same cooldown policy, in both arms — so the log still records *which call would have been spoken to*.
+That is what keeps "how often was the moment even reached" answerable for the next instrument, and it
+is the covariate the Claude Code prompt router's readout will want.
+
+**Schema note — the `nudge` vocabulary changed at this commit.** Rows written before it use the old
+values; rows after it use the new ones. `v` did not bump, because no field was added, removed or
+retyped — only the set of strings one field takes. A before/after comparison across this commit must
+map them:
+
+| Before 2026-09-02 | After | Meaning |
+| --- | --- | --- |
+| `fired` (treatment) · `control` (control, base tier) | `retired` | this call was the base tier's delivery moment |
+| `dedup` (treatment) · `suppressed-control` (control) | `dedup` | eligible, but inside the cooldown |
+| `sweep<N>` (treatment) · `control` (control, sweep tier) | `retired-sweep` | this call was the escalation moment |
+| `gated` · `none` | unchanged | precondition failed · no pattern applied |
+
+`nudged` is now **always 0**, and `post_nudge`/`post_sweep` are pure counterfactual markers — "an
+eligible base-tier / sweep-tier moment already occurred in this session" — identical in both arms.
+None of the three fields was dropped: a schema that deletes a field cannot be compared across its own
+boundary.
+
+**The arm still means something.** It now separates exactly one behaviour: the **SessionStart
+primer**, which the control arm does not receive. That is the lever the 2026-08-10 finding actually
+credited — concentration (skill and `CLAUDE.md` text), never the PreToolUse hook — so the live A/B
+from here is primer-vs-no-primer, and the PreToolUse path is byte-identical in both arms.
+`RIPWIRE_SWEEP` / `sweep=` still resolve, and still gate the sweep tier's **counters**; they no longer
+gate any delivery, because there is none left to gate.
+
 ## The A/B toggle {#the-ab-toggle}
 
 Default behaviour (nothing named in the environment or `meter.conf`) is still **always-on observation
@@ -505,8 +614,8 @@ something other than that default:
 
 | Arm | Nudge | SessionStart primer | Counted | Row says |
 | --- | --- | --- | --- | --- |
-| unset (default) / `treatment` | yes | yes | yes | `arm":"treatment"`, `nudge` one of `fired`/`sweep<N>`/`dedup`/`gated`/`none` |
-| `control` | **no** | **no** | yes | `arm":"control"`, `nudge":"control"` (would have fired) or `"suppressed-control"` (would have deduped) |
+| unset (default) / `treatment` | **retired — none** | yes | yes | `arm":"treatment"`, `nudge` one of `retired`/`retired-sweep`/`dedup`/`gated`/`none` |
+| `control` | **retired — none** | **no** | yes | `arm":"control"`, and the same `nudge` values: since 2026-09-02 the PreToolUse path is arm-independent |
 | `auto` | *depends — see below* | *depends* | yes | `arm` is `treatment` or `control`, decided by a hash of the session id |
 
 `auto` is what makes the arm a real per-session coin flip instead of an all-or-nothing switch: it
@@ -560,6 +669,35 @@ the nudge, however the log gets sliced.
 **Nothing alternates on its own unless `auto` is named.** Assignment under `auto` is per session, by
 the hash of its id — deterministic, not re-rolled, and not something a config change mid-session can
 retroactively flip for calls already logged.
+
+## The other log in this directory: `routing.jsonl` (2026-09-02)
+
+`~/.ripwire/` now holds a second, smaller log written by a different instrument, and the two are
+deliberately separate files rather than one with a `kind` column.
+
+`routing.jsonl` is the **prompt routers'** log — `hooks/ripwire-claude-route.sh` (Claude Code
+`UserPromptSubmit`) and `hooks/ripwire-codex-route.sh` (the Codex equivalent). Its unit is a
+**prompt**, not a tool call; its rows are `UserPromptSubmit` decisions (`status`, `intent`,
+`recommended`, `arm`) and `RouteObservation` outcomes (`adopted` / `missed` / `continued`), and it is
+the instrument the band pre-registered in [`EVALS.md` §4](EVALS.md) ("Claude Code prompt router") is
+measured through. `agent` says which router wrote a row; a row without one predates the field and came
+from the Codex router.
+
+Three things it shares with this meter, and one it does not:
+
+- **The same arm.** `hooks/ripwire-claude-route.sh` resolves `arm` by the rules `meter_init` applies —
+  env over `meter.conf` over the `treatment` default, with `auto` selecting the same session-id hash —
+  so a session lands on the same side in both instruments and the two logs join on `session_hash`.
+- **The same fixture guard.** An explicit `RIPWIRE_HOME` keeps a gate run out of the operator's log,
+  and `RIPWIRE_ROUTE_METER=0` opts out of routing telemetry without disabling routing.
+- **The same "best-effort, never fatal" posture.** Every write degrades to silence.
+- **It records no prompt text at all.** This meter's `detail` field stores 200 characters of the raw
+  command, path or pattern, in cleartext, and says so under "Where the log lives" above.
+  `routing.jsonl` stores a `cksum` and a byte length instead. Prompt recovery from it is not a policy;
+  it is impossible.
+
+`bench/substitution_report.py` does not read `routing.jsonl` — different unit, different question, and
+folding them would put prompts and tool calls in one denominator.
 
 ## Reading the log
 

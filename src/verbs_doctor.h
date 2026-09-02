@@ -356,9 +356,12 @@ struct DoctorAgentRows
 inline DoctorAgentRows doctorAgentRows( const rw::Config& cfg, const char* argv0 )
 {
     DoctorAgentRows out;
-    if( cfg.agent != "codex" ) { return out; }
-    out.rootAttr = " agent=\"codex\"";
-    for( const rw::codexdoctor::Check& check : rw::codexdoctor::inspect( selfExecutablePath( argv0 ) ) )
+    if( cfg.agent != "codex" && cfg.agent != "claude" ) { return out; }
+    const bool claude = cfg.agent == "claude";
+    out.rootAttr = claude ? " agent=\"claude\"" : " agent=\"codex\"";
+    const std::string self = selfExecutablePath( argv0 );
+    for( const rw::codexdoctor::Check& check : ( claude ? rw::codexdoctor::claudeInspect( self )
+                                                        : rw::codexdoctor::inspect( self ) ) )
     {
         ++out.checks;
         if( check.ok ) { ++out.passed; }

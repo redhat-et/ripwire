@@ -105,7 +105,10 @@ printf '%s' "$MOUT" | grep -q 'ripwire wrap codex' \
 printf '%s' "$MOUT" | grep -q 'DO_NOT_PRINT_CODEX_DOCTOR_SECRET' \
     && no "failing Codex doctor leaked a config secret" || ok "failing Codex doctor still redacts config secrets"
 
-BAD="$( "$BIN" "$REPO" --doctor --agent=claude --no-cache 2>&1 )"; BRC=$?
+# `claude` was this arm's "unknown value" until 2026-09-02, when --agent gained a claude surface of
+# its own (src/codexdoctor.h::claudeInspect, gated by test/routehookcheck.sh section V). The arm still
+# needs a value the parser genuinely does not know, so it now uses one that names no agent at all.
+BAD="$( "$BIN" "$REPO" --doctor --agent=notanagent --no-cache 2>&1 )"; BRC=$?
 [ "$BRC" -eq 1 ] && printf '%s' "$BAD" | grep -q 'supported: codex' \
     && ok "unknown --agent value refuses with the supported set" || no "unknown --agent value did not refuse precisely"
 ALONE="$( "$BIN" "$REPO" --agent=codex --no-cache 2>&1 )"; ARC=$?

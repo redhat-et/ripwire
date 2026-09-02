@@ -88,143 +88,151 @@ is_valid_json()
     if command -v jq >/dev/null 2>&1; then jq -e . >/dev/null 2>&1; else python3 -c 'import json,sys; json.load(sys.stdin)' >/dev/null 2>&1; fi
 }
 
+# ---- meter-row readers. Defined HERE, above section (1), rather than inside section (11) where they
+#      were born: since the §RETIRED change the hook says nothing on the PreToolUse path, so the ROW is
+#      what every arm from (1) onward has to read to assert anything at all.
+meterrows()   { [ -f "$1" ] && grep -c . "$1" 2>/dev/null || echo 0; }
+meterrowget() {
+    # meterrowget FILE ROWINDEX KEY   (1-based; also validates that every row parses as JSON)
+    python3 - "$1" "$2" "$3" <<'PY' 2>/dev/null
+import json, sys
+path, idx, key = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+rows = [json.loads(l) for l in open(path) if l.strip()]
+print("" if len(rows) < idx else rows[idx - 1].get(key, "<missing>"))
+PY
+}
+
 echo "hookcheck: HOOK=$HOOK"
 
-# ── (1) Grep case: fires, valid JSON, allow-never-deny, names --grep ───────────────────────────────
-# Pattern is an OR-chain (P4.2, 2026-08-29): the base tier no longer fires on a short single literal
-# (see §CEDE in the hook and section (14) below) — this case exercises the base tier's ordinary path,
-# which now REQUIRES a multi-pattern/OR signal to be eligible at all.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# §RETIRED (2026-09-02) — WHAT SECTIONS (1)-(7), (12) AND (12c) NOW ASSERT.
+#
+# The randomized A/B registered in docs/EVALS.md §4 measured BOTH nudge tiers inert, and the hook
+# applied the consequence: the PreToolUse path emits NOTHING, on every tool call, in both arms. The
+# arms below used to assert the text of a tip; they now assert the two things that replaced it —
+# stdout is EMPTY, and the METER ROW still records which call the retired advice would have landed on
+# (`nudge=retired` for the base tier, `nudge=retired-sweep` for the escalation, `dedup` inside the
+# cooldown). That second half is the load-bearing one: an eligibility rule that stops being gated the
+# moment its delivery is removed will drift, and the drift is invisible because nothing speaks.
+#
+# The SessionStart primer is untouched and still gated by section (3i) and arms A3/A4 — it is the one
+# thing this hook still says, and the one behaviour the arm still separates.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+# ── (1) Grep case: counted, ELIGIBLE, and silent ──────────────────────────────────────────────────
+# Pattern is an OR-chain (P4.2, 2026-08-29): the §CEDE gate still decides base-tier ELIGIBILITY, so a
+# short single literal would log nudge=none and this arm would pass for the wrong reason.
 T1="$TMP/t1"; mkdir -p "$T1"
+L1="$TMP/t1.jsonl"
 GREP_JSON='{"session_id":"grepcase","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"foo|bar","path":"."}}'
-OUT1="$( run_hook "$GREP_JSON" "$WITH_RIPWIRE" "$T1" )"; RC1=$?
-echo "-- Grep case output --"; echo "$OUT1"; echo "(exit=$RC1)"
+OUT1="$( printf '%s' "$GREP_JSON" | env RIPWIRE_METER_LOG="$L1" PATH="$WITH_RIPWIRE" TMPDIR="$T1" bash "$HOOK" )"; RC1=$?
+echo "-- Grep case output --"; echo "[$OUT1]"; echo "(exit=$RC1)"
 
 [ "$RC1" -eq 0 ] && ok "Grep case: exit 0" || no "Grep case: exit was $RC1"
-[ -n "$OUT1" ] && printf '%s' "$OUT1" | is_valid_json && ok "Grep case: valid JSON on stdout" \
-    || no "Grep case: stdout is not valid JSON (or empty)"
-printf '%s' "$OUT1" | grep -q '"permissionDecision"[[:space:]]*:[[:space:]]*"allow"' \
-    && ok "Grep case: permissionDecision allow" || no "Grep case: missing/wrong permissionDecision"
-printf '%s' "$OUT1" | grep -qi 'deny\|"ask"' \
-    && no "Grep case: output mentions deny/ask (must never)" || ok "Grep case: no deny/ask anywhere"
-printf '%s' "$OUT1" | grep -q -- '--grep' \
-    && ok "Grep case: suggestion names --grep" || no "Grep case: suggestion missing --grep"
+[ -z "$OUT1" ] && ok "Grep case: SILENT — the retired base tier says nothing" \
+    || no "Grep case: the retired base tier emitted ${#OUT1} byte(s): [$OUT1]"
+[ "$( meterrowget "$L1" 1 nudge )" = "retired" ] && [ "$( meterrowget "$L1" 1 nudged )" = "0" ] \
+    && ok "Grep case: the delivery moment is still RECORDED (nudged=0 nudge=retired)" \
+    || no "Grep case: row = nudged=[$( meterrowget "$L1" 1 nudged )] nudge=[$( meterrowget "$L1" 1 nudge )]"
 
-# ── (2) Grep case, second invocation same session: dedup — silent, still exit 0 ────────────────────
-OUT1B="$( run_hook "$GREP_JSON" "$WITH_RIPWIRE" "$T1" )"; RC1B=$?
+# ── (2) Grep case, second invocation same session: inside the cooldown ────────────────────────────
+OUT1B="$( printf '%s' "$GREP_JSON" | env RIPWIRE_METER_LOG="$L1" PATH="$WITH_RIPWIRE" TMPDIR="$T1" bash "$HOOK" )"; RC1B=$?
 echo "-- Grep case, 2nd invocation (dedup) --"; echo "[$OUT1B]"; echo "(exit=$RC1B)"
 [ "$RC1B" -eq 0 ] && ok "Grep dedup: exit 0" || no "Grep dedup: exit was $RC1B"
-[ -z "$OUT1B" ] && ok "Grep dedup: silent on 2nd call (no spam)" || no "Grep dedup: 2nd call was not silent: $OUT1B"
+[ -z "$OUT1B" ] && ok "Grep dedup: silent on 2nd call" || no "Grep dedup: 2nd call was not silent: $OUT1B"
+[ "$( meterrowget "$L1" 2 nudge )" = "dedup" ] \
+    && ok "Grep dedup: the cooldown is still recorded on the row (nudge=dedup)" \
+    || no "Grep dedup: row 2 nudge=[$( meterrowget "$L1" 2 nudge )], expected dedup"
 
 # ── (3) Bash-grep case (recursive): fires, names --grep or --for ───────────────────────────────────
 # OR-chain pattern (P4.2) — see the note at case (1).
 T3="$TMP/t3"; mkdir -p "$T3"
 BASHGREP_JSON='{"session_id":"bashcase","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"grep -rn '\''needle|other'\'' ."}}'
-OUT3="$( run_hook "$BASHGREP_JSON" "$WITH_RIPWIRE" "$T3" )"; RC3=$?
-echo "-- Bash-grep case output --"; echo "$OUT3"; echo "(exit=$RC3)"
+L3="$TMP/t3.jsonl"
+OUT3="$( printf '%s' "$BASHGREP_JSON" | env RIPWIRE_METER_LOG="$L3" PATH="$WITH_RIPWIRE" TMPDIR="$T3" bash "$HOOK" )"; RC3=$?
+echo "-- Bash-grep case output --"; echo "[$OUT3]"; echo "(exit=$RC3)"
 
 [ "$RC3" -eq 0 ] && ok "Bash-grep case: exit 0" || no "Bash-grep case: exit was $RC3"
-printf '%s' "$OUT3" | is_valid_json && ok "Bash-grep case: valid JSON on stdout" \
-    || no "Bash-grep case: stdout is not valid JSON"
-printf '%s' "$OUT3" | grep -q '"permissionDecision"[[:space:]]*:[[:space:]]*"allow"' \
-    && ok "Bash-grep case: permissionDecision allow" || no "Bash-grep case: missing/wrong permissionDecision"
-printf '%s' "$OUT3" | grep -qE -- '--grep|--for' \
-    && ok "Bash-grep case: suggestion names --grep/--for" || no "Bash-grep case: suggestion missing a verb"
+[ -z "$OUT3" ] && ok "Bash-grep case: silent" || no "Bash-grep case: emitted [$OUT3]"
+[ "$( meterrowget "$L3" 1 class )" = "grep" ] && [ "$( meterrowget "$L3" 1 nudge )" = "retired" ] \
+    && ok "Bash-grep case: counted as grep, delivery moment recorded (nudge=retired)" \
+    || no "Bash-grep case: row = class=[$( meterrowget "$L3" 1 class )] nudge=[$( meterrowget "$L3" 1 nudge )]"
 
 # ripgrep spelling also counts (OR-chain pattern, P4.2 — see the note at case (1))
-T3B="$TMP/t3b"; mkdir -p "$T3B"
+T3B="$TMP/t3b"; mkdir -p "$T3B"; L3B="$TMP/t3b.jsonl"
 RG_JSON='{"session_id":"rgcase","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"rg '\''needle|other'\'' ."}}'
-OUT3B="$( run_hook "$RG_JSON" "$WITH_RIPWIRE" "$T3B" )"; RC3B=$?
-[ "$RC3B" -eq 0 ] && [ -n "$OUT3B" ] && ok "Bash rg case: fires (exit 0, non-empty)" \
-    || no "Bash rg case: did not fire as expected (exit=$RC3B out=[$OUT3B])"
+OUT3B="$( printf '%s' "$RG_JSON" | env RIPWIRE_METER_LOG="$L3B" PATH="$WITH_RIPWIRE" TMPDIR="$T3B" bash "$HOOK" )"; RC3B=$?
+[ "$RC3B" -eq 0 ] && [ -z "$OUT3B" ] && [ "$( meterrowget "$L3B" 1 nudge )" = "retired" ] \
+    && ok "Bash rg case: eligible, recorded, silent (exit 0)" \
+    || no "Bash rg case: exit=$RC3B out=[$OUT3B] nudge=[$( meterrowget "$L3B" 1 nudge )]"
 
-# ── (3c) git diff case (Phase B9): fires, names --situ ──────────────────────────────────────────────
-T3C="$TMP/t3c"; mkdir -p "$T3C"
-GITDIFF_JSON='{"session_id":"gitdiffcase","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"git diff HEAD"}}'
-OUT3C="$( run_hook "$GITDIFF_JSON" "$WITH_RIPWIRE" "$T3C" )"; RC3C=$?
-echo "-- git diff case output --"; echo "$OUT3C"; echo "(exit=$RC3C)"
-[ "$RC3C" -eq 0 ] && ok "git diff case: exit 0" || no "git diff case: exit was $RC3C"
-printf '%s' "$OUT3C" | is_valid_json && ok "git diff case: valid JSON on stdout" \
-    || no "git diff case: stdout is not valid JSON"
-printf '%s' "$OUT3C" | grep -q '"permissionDecision"[[:space:]]*:[[:space:]]*"allow"' \
-    && ok "git diff case: permissionDecision allow" || no "git diff case: missing/wrong permissionDecision"
-printf '%s' "$OUT3C" | grep -q -- '--situ' \
-    && ok "git diff case: suggestion names --situ" || no "git diff case: suggestion missing --situ"
+# ── (3c)-(3e) the git-history categories: still classified, still eligible, silent ─────────────────
+# One loop rather than three near-identical blocks: with no text to inspect, what each of these arms
+# now asserts is the same three facts, and the class is the only thing that differs.
+G3BAD=""
+i=0
+for pair in "gitdiffcase|git diff HEAD|git-diff" \
+            "gitdiffstatcase|git diff --stat -- src/foo.cpp|git-diff" \
+            "gitlogcase|git log --oneline -5|git-log" \
+            "gitshowcase|git show abc123 --stat|git-show-stat"; do
+    sid="${pair%%|*}"; rest="${pair#*|}"; c="${rest%|*}"; want="${rest#*|}"; i=$(( i + 1 ))
+    TG="$TMP/t3g_$i"; mkdir -p "$TG"; LG="$TMP/t3g_$i.jsonl"
+    J='{"session_id":"'"$sid"'","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"'"$c"'"}}'
+    O="$( printf '%s' "$J" | env RIPWIRE_METER_LOG="$LG" PATH="$WITH_RIPWIRE" TMPDIR="$TG" bash "$HOOK" )"; R=$?
+    gc="$( meterrowget "$LG" 1 class )"; gn="$( meterrowget "$LG" 1 nudge )"
+    [ "$R" -eq 0 ] && [ -z "$O" ] && [ "$gc" = "$want" ] && [ "$gn" = "retired" ] \
+        || G3BAD="$G3BAD [$c -> exit=$R out=${O:+set} class=$gc nudge=$gn, want $want/retired]"
+done
+[ -z "$G3BAD" ] \
+    && ok "git diff/log/show --stat: classified, delivery moment recorded, all silent" \
+    || no "git-history cases:$G3BAD"
 
-# --stat, path-limited form also fires (fresh session)
-T3C2="$TMP/t3c2"; mkdir -p "$T3C2"
-GITDIFFSTAT_JSON='{"session_id":"gitdiffstatcase","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"git diff --stat -- src/foo.cpp"}}'
-OUT3C2="$( run_hook "$GITDIFFSTAT_JSON" "$WITH_RIPWIRE" "$T3C2" )"; RC3C2=$?
-[ "$RC3C2" -eq 0 ] && printf '%s' "$OUT3C2" | grep -q -- '--situ' \
-    && ok "git diff --stat path case: fires and names --situ" \
-    || no "git diff --stat path case: exit=$RC3C2 out=[$OUT3C2]"
-
-# ── (3d) git log case (Phase B9): fires, names --rank-by=churn ─────────────────────────────────────
-T3D="$TMP/t3d"; mkdir -p "$T3D"
-GITLOG_JSON='{"session_id":"gitlogcase","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"git log --oneline -5"}}'
-OUT3D="$( run_hook "$GITLOG_JSON" "$WITH_RIPWIRE" "$T3D" )"; RC3D=$?
-echo "-- git log case output --"; echo "$OUT3D"; echo "(exit=$RC3D)"
-[ "$RC3D" -eq 0 ] && ok "git log case: exit 0" || no "git log case: exit was $RC3D"
-printf '%s' "$OUT3D" | is_valid_json && ok "git log case: valid JSON on stdout" \
-    || no "git log case: stdout is not valid JSON"
-printf '%s' "$OUT3D" | grep -q -- '--rank-by=churn' \
-    && ok "git log case: suggestion names --rank-by=churn" || no "git log case: suggestion missing --rank-by=churn"
-
-# ── (3e) git show --stat case (Phase B9): fires, names --map-diff ──────────────────────────────────
-T3E="$TMP/t3e"; mkdir -p "$T3E"
-GITSHOW_JSON='{"session_id":"gitshowcase","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"git show abc123 --stat"}}'
-OUT3E="$( run_hook "$GITSHOW_JSON" "$WITH_RIPWIRE" "$T3E" )"; RC3E=$?
-echo "-- git show --stat case output --"; echo "$OUT3E"; echo "(exit=$RC3E)"
-[ "$RC3E" -eq 0 ] && ok "git show --stat case: exit 0" || no "git show --stat case: exit was $RC3E"
-printf '%s' "$OUT3E" | is_valid_json && ok "git show --stat case: valid JSON on stdout" \
-    || no "git show --stat case: stdout is not valid JSON"
-printf '%s' "$OUT3E" | grep -q -- '--map-diff' \
-    && ok "git show --stat case: suggestion names --map-diff" || no "git show --stat case: suggestion missing --map-diff"
-
-# dedup: a second git-diff call in the SAME session is silent (per-category dedup extends to new categories)
-OUT3C_DEDUP="$( run_hook "$GITDIFF_JSON" "$WITH_RIPWIRE" "$T3C" )"; RC3C_DEDUP=$?
-[ "$RC3C_DEDUP" -eq 0 ] && [ -z "$OUT3C_DEDUP" ] && ok "git diff dedup: silent on 2nd call (no spam)" \
-    || no "git diff dedup: 2nd call was not silent: $OUT3C_DEDUP"
+# dedup: a second git-diff call in the SAME session records the cooldown
+T3C="$TMP/t3c"; mkdir -p "$T3C"; L3C="$TMP/t3c.jsonl"
+GITDIFF_JSON='{"session_id":"gitdiffdedup","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"git diff HEAD"}}'
+printf '%s' "$GITDIFF_JSON" | env RIPWIRE_METER_LOG="$L3C" PATH="$WITH_RIPWIRE" TMPDIR="$T3C" bash "$HOOK" >/dev/null 2>&1
+OUT3C_DEDUP="$( printf '%s' "$GITDIFF_JSON" | env RIPWIRE_METER_LOG="$L3C" PATH="$WITH_RIPWIRE" TMPDIR="$T3C" bash "$HOOK" )"; RC3C_DEDUP=$?
+[ "$RC3C_DEDUP" -eq 0 ] && [ -z "$OUT3C_DEDUP" ] && [ "$( meterrowget "$L3C" 2 nudge )" = "dedup" ] \
+    && ok "git diff dedup: the 2nd call records nudge=dedup" \
+    || no "git diff dedup: exit=$RC3C_DEDUP out=[$OUT3C_DEDUP] nudge=[$( meterrowget "$L3C" 2 nudge )]"
 
 # ── (3f) Read case (2026-08-10 audit): fires, names --expand, allow-never-deny ─────────────────────
 # The read nudge is the load-bearing one: whole-file reads are the largest token sink in an agent loop
 # and the only default a skill description cannot intercept.
-T3F="$TMP/t3f"; mkdir -p "$T3F"
+T3F="$TMP/t3f"; mkdir -p "$T3F"; L3F="$TMP/t3f.jsonl"
 READ_JSON='{"session_id":"readcase","cwd":"'"$REPO"'","tool_name":"Read","tool_input":{"file_path":"src/foo.cpp"}}'
-OUT3F="$( run_hook "$READ_JSON" "$WITH_RIPWIRE" "$T3F" )"; RC3F=$?
-echo "-- Read case output --"; echo "$OUT3F"; echo "(exit=$RC3F)"
+OUT3F="$( printf '%s' "$READ_JSON" | env RIPWIRE_METER_LOG="$L3F" PATH="$WITH_RIPWIRE" TMPDIR="$T3F" bash "$HOOK" )"; RC3F=$?
+echo "-- Read case output --"; echo "[$OUT3F]"; echo "(exit=$RC3F)"
 [ "$RC3F" -eq 0 ] && ok "Read case: exit 0" || no "Read case: exit was $RC3F"
-printf '%s' "$OUT3F" | is_valid_json && ok "Read case: valid JSON on stdout" \
-    || no "Read case: stdout is not valid JSON"
-printf '%s' "$OUT3F" | grep -q '"permissionDecision"[[:space:]]*:[[:space:]]*"allow"' \
-    && ok "Read case: permissionDecision allow" || no "Read case: missing/wrong permissionDecision"
-printf '%s' "$OUT3F" | grep -qi 'deny\|"ask"' \
-    && no "Read case: output mentions deny/ask (must never)" || ok "Read case: no deny/ask anywhere"
-printf '%s' "$OUT3F" | grep -q -- '--expand' \
-    && ok "Read case: suggestion names --expand" || no "Read case: suggestion missing --expand"
+[ -z "$OUT3F" ] && ok "Read case: silent" || no "Read case: emitted [$OUT3F]"
+[ "$( meterrowget "$L3F" 1 class )" = "read" ] && [ "$( meterrowget "$L3F" 1 nudge )" = "retired" ] \
+    && ok "Read case: counted as read, delivery moment recorded (nudge=retired)" \
+    || no "Read case: row = class=[$( meterrowget "$L3F" 1 class )] nudge=[$( meterrowget "$L3F" 1 nudge )]"
 
 # dedup within the read category
-OUT3F2="$( run_hook "$READ_JSON" "$WITH_RIPWIRE" "$T3F" )"; RC3F2=$?
-[ "$RC3F2" -eq 0 ] && [ -z "$OUT3F2" ] && ok "Read dedup: silent on 2nd call" \
-    || no "Read dedup: 2nd call was not silent: $OUT3F2"
+OUT3F2="$( printf '%s' "$READ_JSON" | env RIPWIRE_METER_LOG="$L3F" PATH="$WITH_RIPWIRE" TMPDIR="$T3F" bash "$HOOK" )"; RC3F2=$?
+[ "$RC3F2" -eq 0 ] && [ -z "$OUT3F2" ] && [ "$( meterrowget "$L3F" 2 nudge )" = "dedup" ] \
+    && ok "Read dedup: 2nd call records nudge=dedup" \
+    || no "Read dedup: exit=$RC3F2 out=[$OUT3F2] nudge=[$( meterrowget "$L3F" 2 nudge )]"
 
-# a Grep in the SAME session still fires: read and grep are different habits, deduped separately.
+# A Grep in the SAME session reaches its OWN first-sighting slot: read and grep are different habits
+# with independent cooldown clocks, and with nothing on stdout the row is the only place that shows.
 # OR-chain pattern (P4.2, 2026-08-29) — see the note at case (1).
 GREP_SAME='{"session_id":"readcase","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"x|y"}}'
-OUT3F3="$( run_hook "$GREP_SAME" "$WITH_RIPWIRE" "$T3F" )"; RC3F3=$?
-[ "$RC3F3" -eq 0 ] && [ -n "$OUT3F3" ] \
-    && ok "Read and Grep dedup independently (different habits, one nudge each)" \
-    || no "Read/Grep share a dedup marker: exit=$RC3F3 out=[$OUT3F3]"
+OUT3F3="$( printf '%s' "$GREP_SAME" | env RIPWIRE_METER_LOG="$L3F" PATH="$WITH_RIPWIRE" TMPDIR="$T3F" bash "$HOOK" )"; RC3F3=$?
+[ "$RC3F3" -eq 0 ] && [ -z "$OUT3F3" ] && [ "$( meterrowget "$L3F" 3 nudge )" = "retired" ] \
+    && ok "Read and Grep keep INDEPENDENT cooldown clocks (grep row 3 is a fresh first sighting)" \
+    || no "Read/Grep share a cooldown clock: row 3 nudge=[$( meterrowget "$L3F" 3 nudge )], expected retired"
 
-# ── (3g) Glob case: fires, names --for ─────────────────────────────────────────────────────────────
-T3G="$TMP/t3g"; mkdir -p "$T3G"
+# ── (3g) Glob case: classified, eligible, silent ───────────────────────────────────────────────────
+T3G="$TMP/t3gl"; mkdir -p "$T3G"; L3G="$TMP/t3gl.jsonl"
 GLOB_JSON='{"session_id":"globcase","cwd":"'"$REPO"'","tool_name":"Glob","tool_input":{"pattern":"**/*.cpp"}}'
-OUT3G="$( run_hook "$GLOB_JSON" "$WITH_RIPWIRE" "$T3G" )"; RC3G=$?
-echo "-- Glob case output --"; echo "$OUT3G"; echo "(exit=$RC3G)"
-[ "$RC3G" -eq 0 ] && ok "Glob case: exit 0" || no "Glob case: exit was $RC3G"
-printf '%s' "$OUT3G" | is_valid_json && ok "Glob case: valid JSON on stdout" \
-    || no "Glob case: stdout is not valid JSON"
-printf '%s' "$OUT3G" | grep -q -- '--for' \
-    && ok "Glob case: suggestion names --for" || no "Glob case: suggestion missing --for"
+OUT3G="$( printf '%s' "$GLOB_JSON" | env RIPWIRE_METER_LOG="$L3G" PATH="$WITH_RIPWIRE" TMPDIR="$T3G" bash "$HOOK" )"; RC3G=$?
+echo "-- Glob case output --"; echo "[$OUT3G]"; echo "(exit=$RC3G)"
+[ "$RC3G" -eq 0 ] && [ -z "$OUT3G" ] && [ "$( meterrowget "$L3G" 1 class )" = "glob" ] \
+    && [ "$( meterrowget "$L3G" 1 nudge )" = "retired" ] \
+    && ok "Glob case: counted as glob, delivery moment recorded, silent" \
+    || no "Glob case: exit=$RC3G out=[$OUT3G] class=[$( meterrowget "$L3G" 1 class )] nudge=[$( meterrowget "$L3G" 1 nudge )]"
 
 # ── (3h) Read/Glob degrade to silence off their preconditions, same as every other category ────────
 T3H="$TMP/t3h"; mkdir -p "$T3H"
@@ -335,13 +343,15 @@ NOCTX_JSON='{"session_id":"noctxcase","cwd":"'"$REPO"'","tool_name":"Grep","tool
 OUT6="$( run_hook "$NOCTX_JSON" "$NO_RIPWIRE" "$T6" )"; RC6=$?
 [ "$RC6" -eq 0 ] && [ -z "$OUT6" ] && ok "ripwire missing: silent" || no "ripwire missing: exit=$RC6 out=[$OUT6], expected silent"
 
-# ── (7) Different session ids each get their own one-time nudge (dedup is per-session, not global) ─
-# OR-chain pattern (P4.2) — see the note at case (1).
-T7="$TMP/t7"; mkdir -p "$T7"
+# ── (7) Different session ids keep independent cooldown state (per-session, not global) ───────────
+# OR-chain pattern (P4.2) — see the note at case (1). With nothing on stdout, the row is the proof:
+# a second session's FIRST eligible call must read `retired` (its own first sighting), not `dedup`.
+T7="$TMP/t7"; mkdir -p "$T7"; L7="$TMP/t7.jsonl"
 GREP_JSON_S2='{"session_id":"grepcase2","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"foo|bar"}}'
-OUT7="$( run_hook "$GREP_JSON_S2" "$WITH_RIPWIRE" "$T7" )"; RC7=$?
-[ "$RC7" -eq 0 ] && [ -n "$OUT7" ] && ok "New session id: fires independently of case (1)'s dedup marker" \
-    || no "New session id: exit=$RC7 out=[$OUT7], expected a fresh nudge"
+OUT7="$( printf '%s' "$GREP_JSON_S2" | env RIPWIRE_METER_LOG="$L7" PATH="$WITH_RIPWIRE" TMPDIR="$T7" bash "$HOOK" )"; RC7=$?
+[ "$RC7" -eq 0 ] && [ -z "$OUT7" ] && [ "$( meterrowget "$L7" 1 nudge )" = "retired" ] \
+    && ok "New session id: fresh cooldown state, independent of case (1)'s markers" \
+    || no "New session id: exit=$RC7 out=[$OUT7] nudge=[$( meterrowget "$L7" 1 nudge )]"
 
 # ── (8) installer: skills/install.sh --hook writes the documented settings.json snippet ────────────
 HOOK_HOME="$TMP/hookhome"; mkdir -p "$HOOK_HOME"
@@ -434,16 +444,6 @@ run_meter()
     fi
 }
 
-meterrows()   { [ -f "$1" ] && grep -c . "$1" 2>/dev/null || echo 0; }
-meterrowget() {
-    # meterrowget FILE ROWINDEX KEY   (1-based; also validates that every row parses as JSON)
-    python3 - "$1" "$2" "$3" <<'PY' 2>/dev/null
-import json, sys
-path, idx, key = sys.argv[1], int(sys.argv[2]), sys.argv[3]
-rows = [json.loads(l) for l in open(path) if l.strip()]
-print("" if len(rows) < idx else rows[idx - 1].get(key, "<missing>"))
-PY
-}
 bashjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1" "$REPO" "$2"; }
 
 # ── M1-M3: a classified call writes one row, at the DEFAULT global path, with the full field set ────
@@ -478,12 +478,12 @@ done
 TM4="$TMP/tm4"; mkdir -p "$TM4"; L4="$TMP/m4.jsonl"
 M4_JSON='{"session_id":"meter4","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"n|m"}}'
 OUTM4="$( run_meter "$L4" "$M4_JSON" "$TM4" )"
-[ "$( meterrowget "$L4" 1 nudged )" = "1" ] && [ "$( meterrowget "$L4" 1 nudge )" = "fired" ] && [ -n "$OUTM4" ] \
-    && ok "M4 meter: the call the nudge fired on is logged nudged=1 nudge=fired" \
+[ "$( meterrowget "$L4" 1 nudged )" = "0" ] && [ "$( meterrowget "$L4" 1 nudge )" = "retired" ] && [ -z "$OUTM4" ] \
+    && ok "M4 meter: the delivery moment is logged nudged=0 nudge=retired (§RETIRED: recorded, not spoken)" \
     || no "M4 meter: nudged=[$( meterrowget "$L4" 1 nudged )] nudge=[$( meterrowget "$L4" 1 nudge )] out=[${OUTM4:+set}]"
 OUTM5="$( run_meter "$L4" "$M4_JSON" "$TM4" )"
 [ "$( meterrows "$L4" )" = "2" ] && [ "$( meterrowget "$L4" 2 nudged )" = "0" ] && [ "$( meterrowget "$L4" 2 nudge )" = "dedup" ] && [ -z "$OUTM5" ] \
-    && ok "M5 meter: a deduped (silent) call is STILL counted, as nudged=0 nudge=dedup" \
+    && ok "M5 meter: a call inside the cooldown is STILL counted, as nudged=0 nudge=dedup" \
     || no "M5 meter: rows=$( meterrows "$L4" ) nudged=[$( meterrowget "$L4" 2 nudged )] nudge=[$( meterrowget "$L4" 2 nudge )] out=[$OUTM5]"
 [ "$( meterrowget "$L4" 1 seq )" = "1" ] && [ "$( meterrowget "$L4" 2 seq )" = "2" ] \
     && ok "M6 meter: seq is monotonic within a session (1,2) — sequences are reconstructable" \
@@ -542,8 +542,8 @@ run_meter "$L14" '{"session_id":"meter14","cwd":"'"$REPO"'","tool_name":"Glob","
     || no "M14 meter: Read/Glob classified as [$( meterrowget "$L14" 1 class )/$( meterrowget "$L14" 2 class )]"
 TM15="$TMP/tm15"; mkdir -p "$TM15"; L15="$TMP/m15.jsonl"
 run_meter "$L15" "$( bashjson meter15 'git diff HEAD' )" "$TM15" >/dev/null 2>&1
-[ "$( meterrowget "$L15" 1 class )" = "git-diff" ] && [ "$( meterrowget "$L15" 1 family )" = "git" ] && [ "$( meterrowget "$L15" 1 nudged )" = "1" ] \
-    && ok "M15 meter: git diff -> git-diff/git, and the nudge it fires is recorded on the row" \
+[ "$( meterrowget "$L15" 1 class )" = "git-diff" ] && [ "$( meterrowget "$L15" 1 family )" = "git" ] && [ "$( meterrowget "$L15" 1 nudge )" = "retired" ] \
+    && ok "M15 meter: git diff -> git-diff/git, and the retired delivery moment is recorded on the row" \
     || no "M15 meter: git diff row = [$( meterrowget "$L15" 1 class )/$( meterrowget "$L15" 1 family )/nudged=$( meterrowget "$L15" 1 nudged )]"
 
 # ── M16-M17: ambiguity is logged, out-of-scope is not a row ─────────────────────────────────────────
@@ -579,21 +579,28 @@ LASTROW="$( meterrows "$DEFAULT_LOG" )"
     && ok "M18 meter: two repos append to the ONE global log, each row tagged by repo" \
     || no "M18 meter: global log has $LASTROW row(s), tags [$( meterrowget "$DEFAULT_LOG" 1 tag )/$( meterrowget "$DEFAULT_LOG" 2 tag )]"
 
-# ── M19-M20: the dormant A/B toggle. Ships built, ships OFF; the arm is on every row ────────────────
-# OR-chain pattern (P4.2, 2026-08-29) — these arms are about arm plumbing, not the grep gate; see the
-# note at case (1). A literal `grep -rn needle .` would demote category to "" before the arm is ever
-# consulted, which would make M19/M20 pass for the wrong reason (nudge=none, not nudge=control/fired).
+# ── M19-M20: the arm is on every row, and the PreToolUse path is now ARM-INDEPENDENT ───────────────
+# §RETIRED (2026-09-02): with both tiers silent in both arms, the PreToolUse path can no longer differ
+# by arm — so these arms assert exactly that, plus the two things that did NOT change: the arm is still
+# resolved, still recorded on the row, and still defaults to treatment. The one behaviour the arm does
+# separate is the SessionStart primer, gated by A3/A4.
+# OR-chain pattern (P4.2, 2026-08-29): a literal `grep -rn needle .` would demote category to "" before
+# the arm is consulted, and these arms would pass for the wrong reason (nudge=none).
 TM19="$TMP/tm19"; mkdir -p "$TM19"; L19="$TMP/m19.jsonl"
 OUTM19="$( run_meter "$L19" "$( bashjson meter19 "grep -rn 'needle|other' ." )" "$TM19" RIPWIRE_METER_ARM=control )"
 [ "$( meterrowget "$L19" 1 arm )" = "control" ] && [ "$( meterrowget "$L19" 1 nudged )" = "0" ] \
-    && [ "$( meterrowget "$L19" 1 nudge )" = "control" ] && [ -z "$OUTM19" ] \
-    && ok "M19 meter: control arm counts the call and suppresses the nudge, and says so on the row" \
+    && [ "$( meterrowget "$L19" 1 nudge )" = "retired" ] && [ -z "$OUTM19" ] \
+    && ok "M19 meter: control arm counts the call, records the delivery moment, and says nothing" \
     || no "M19 meter: arm=[$( meterrowget "$L19" 1 arm )] nudged=[$( meterrowget "$L19" 1 nudged )] nudge=[$( meterrowget "$L19" 1 nudge )] out=[$OUTM19]"
 TM20="$TMP/tm20"; mkdir -p "$TM20"; L20="$TMP/m20.jsonl"
 OUTM20="$( run_meter "$L20" "$( bashjson meter20 "grep -rn 'needle|other' ." )" "$TM20" )"
-[ "$( meterrowget "$L20" 1 arm )" = "treatment" ] && [ -n "$OUTM20" ] \
-    && ok "M20 meter: DEFAULT arm is treatment — observation is always on, alternation is not" \
-    || no "M20 meter: default arm=[$( meterrowget "$L20" 1 arm )] out=[${OUTM20:+set}]"
+[ "$( meterrowget "$L20" 1 arm )" = "treatment" ] && [ -z "$OUTM20" ] \
+    && [ "$( meterrowget "$L20" 1 nudge )" = "retired" ] \
+    && ok "M20 meter: DEFAULT arm is treatment, and treatment's PreToolUse path is silent too" \
+    || no "M20 meter: default arm=[$( meterrowget "$L20" 1 arm )] nudge=[$( meterrowget "$L20" 1 nudge )] out=[${OUTM20:+set}]"
+[ "$OUTM19" = "$OUTM20" ] \
+    && ok "M20b meter: control and treatment produce BYTE-IDENTICAL PreToolUse output (both empty)" \
+    || no "M20b meter: the arms still differ on the PreToolUse path: control=[$OUTM19] treatment=[$OUTM20]"
 
 # ── M21-M23: the meter is subordinate to the call it observes ───────────────────────────────────────
 # OR-chain pattern (P4.2) — same reason as M19/M20: these arms are about the meter's failure-tolerance,
@@ -603,14 +610,14 @@ UNWRITABLE="$TMP/unwritable"; mkdir -p "$UNWRITABLE"; chmod 500 "$UNWRITABLE"
 OUTM21="$( printf '%s' "$( bashjson meter21 "grep -rn 'needle|other' ." )" \
     | env HOME="$UNWRITABLE" PATH="$WITH_RIPWIRE" TMPDIR="$TM21" bash "$HOOK" )"; RCM21=$?
 chmod 700 "$UNWRITABLE"
-[ "$RCM21" -eq 0 ] && [ -n "$OUTM21" ] && printf '%s' "$OUTM21" | is_valid_json \
-    && ok "M21 meter: an unwritable log costs the hooked command nothing (exit 0, nudge still emitted)" \
+[ "$RCM21" -eq 0 ] && [ -z "$OUTM21" ] \
+    && ok "M21 meter: an unwritable log costs the hooked command nothing (exit 0, no stderr, no stdout)" \
     || no "M21 meter: unwritable log broke the hook: exit=$RCM21 out=[$OUTM21]"
 TM22="$TMP/tm22"; mkdir -p "$TM22"; L22="$TMP/m22.jsonl"
-OUTM22="$( run_meter "$L22" "$( bashjson meter22 "grep -rn 'needle|other' ." )" "$TM22" RIPWIRE_METER=0 )"
-[ "$( meterrows "$L22" )" = "0" ] && [ -n "$OUTM22" ] \
-    && ok "M22 meter: RIPWIRE_METER=0 opts out of counting only — the nudge still works" \
-    || no "M22 meter: opt-out left $( meterrows "$L22" ) row(s), out=[${OUTM22:+set}]"
+OUTM22="$( run_meter "$L22" "$( bashjson meter22 "grep -rn 'needle|other' ." )" "$TM22" RIPWIRE_METER=0 )"; RCM22=$?
+[ "$( meterrows "$L22" )" = "0" ] && [ -z "$OUTM22" ] && [ "$RCM22" -eq 0 ] \
+    && ok "M22 meter: RIPWIRE_METER=0 opts out of counting and costs the hooked call nothing" \
+    || no "M22 meter: opt-out left $( meterrows "$L22" ) row(s), exit=$RCM22 out=[${OUTM22:+set}]"
 TM23="$TMP/tm23"; mkdir -p "$TM23"; L23="$TMP/m23.jsonl"
 run_meter "$L23" '{"session_id":"meter23","cwd":"'"$REPO"'","tool_name":"Bash","tool_input":{"command":"grep -rn \"a\\nb\" ."}}' "$TM23" >/dev/null 2>&1
 [ "$( meterrows "$L23" )" = "1" ] && [ "$( wc -l <"$L23" | tr -d ' ' )" = "1" ] \
@@ -870,243 +877,208 @@ grepjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Grep","tool_inpu
 readjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Read","tool_input":{"file_path":"%s"}}' "$1" "$REPO" "$2"; }
 globjson() { printf '{"session_id":"%s","cwd":"%s","tool_name":"Glob","tool_input":{"pattern":"%s"}}' "$1" "$REPO" "$2"; }
 
-# ── S1-S6: the grep sweep. Three calls, one escalation, on the third, carrying the observed patterns.
-#    Patterns are single literals on purpose (P4.2, 2026-08-29): this is the real-world "same-class
-#    sweep of known-literal greps" shape the escalation was measured against, and it must still
-#    escalate at the 3rd call even though NONE of the three would individually pass the base tier's
-#    new OR-chain/multi-pattern gate (§CEDE in the hook) — see S1's updated assertion below.
+# ── S1-S6: the grep sweep, RETIRED (2026-09-02). Three calls, ONE escalation moment, recorded and
+#    silent. Patterns are single literals on purpose: this is the real-world "same-class sweep of
+#    known-literal greps" shape, and the escalation tier still reaches its threshold at the 3rd call
+#    even though none of the three passes the base tier's §CEDE gate. That the ESCALATION MOMENT is
+#    still identified at exactly call 3 is the whole contract now — the text it used to carry is gone
+#    and the arms that asserted `--for="alpha beta gamma"`, the repo-directory interpolation and the
+#    per-class message wording went with it, because there is nothing left for them to read.
 TS1="$TMP/ts1"; mkdir -p "$TS1"; LS1="$TMP/s1.jsonl"
 SW1="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep alpha )" )"
 SW2="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep beta )" )"
 SW3="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep gamma )" )"; RCS3=$?
 SW4="$( sweep_run "$LS1" "$TS1" "$( grepjson sweepgrep delta )" )"
-echo "-- sweep escalation (grep, 3rd call) --"; echo "$SW3"
 
-# P4.2 (2026-08-29): call 1's pattern ("alpha") is a short single literal, so the base tier's own
-# gate (§CEDE) now demotes it silently — the ordinary one-time tip no longer fires here. Only the
-# ESCALATION (S2, below) still applies to a same-class sweep of literal patterns; see the section
-# header's rationale.
-[ -z "$SW1" ] && ok "S1 sweep: call 1 (a single literal) is silent — the base tier cedes it to rg" \
-    || no "S1 sweep: call 1 unexpectedly fired: [$SW1]"
-[ -z "$SW2" ] && ok "S3 sweep: call 2 does NOT escalate (two same-class calls are not a sweep)" \
-    || no "S3 sweep: call 2 fired something: [$SW2]"
-[ "$RCS3" -eq 0 ] && [ -n "$SW3" ] && printf '%s' "$SW3" | grep -Fq 'SWEEP' \
-    && ok "S2 sweep: call 3 escalates (exit 0, names itself a SWEEP)" \
-    || no "S2 sweep: call 3 did not escalate: exit=$RCS3 out=[$SW3]"
-printf '%s' "$SW3" | grep -Fq -- '--for=\"alpha beta gamma\"' \
-    && ok "S2b sweep: the escalation is PASTE-READY — --for= carries the 3 observed patterns" \
-    || no "S2b sweep: escalation lacks --for=\"alpha beta gamma\": [$SW3]"
-# the hook tags rows with `git rev-parse --show-toplevel`, which resolves symlinks — on macOS
-# $TMPDIR lives under /var -> /private/var, so compare against the resolved path the hook will use
-REPO_TOP="$( git -C "$REPO" rev-parse --show-toplevel 2>/dev/null )"
-printf '%s' "$SW3" | grep -Fq "ripwire $REPO_TOP --for" \
-    && ok "S2c sweep: the pasted command names the repo directory, not a placeholder" \
-    || no "S2c sweep: escalation does not name $REPO_TOP"
-[ -z "$SW4" ] && ok "S4 sweep: call 4 is silent (one escalation per class per session)" \
-    || no "S4 sweep: call 4 escalated a second time: [$SW4]"
-printf '%s' "$SW3" | is_valid_json && ok "S6 sweep: escalation is valid JSON" \
-    || no "S6 sweep: escalation is not valid JSON"
-printf '%s' "$SW3" | grep -q '"permissionDecision"[[:space:]]*:[[:space:]]*"allow"' \
-    && ok "S6b sweep: escalation is permissionDecision allow (advisory, never a blocker)" \
-    || no "S6b sweep: escalation is not an allow"
-printf '%s' "$SW3" | grep -qi 'deny\|"ask"\|updatedInput' \
-    && no "S6c sweep: escalation mentions deny/ask/updatedInput (must never)" \
-    || ok "S6c sweep: no deny/ask/updatedInput anywhere in the escalation"
+[ -z "$SW1" ] && ok "S1 sweep: call 1 (a single literal) is silent" \
+    || no "S1 sweep: call 1 emitted: [$SW1]"
+[ -z "$SW2" ] && ok "S3 sweep: call 2 is silent, and is not the escalation moment" \
+    || no "S3 sweep: call 2 emitted: [$SW2]"
+[ "$( meterrowget "$LS1" 2 nudge )" = "none" ] \
+    && ok "S3b sweep: call 2's row says nudge=none (two same-class calls are not a sweep)" \
+    || no "S3b sweep: row 2 nudge=[$( meterrowget "$LS1" 2 nudge )], expected none"
+[ "$RCS3" -eq 0 ] && [ -z "$SW3" ] && ok "S2 sweep: call 3 is silent (exit 0)" \
+    || no "S2 sweep: call 3 exit=$RCS3 out=[$SW3]"
+[ -z "$SW4" ] && ok "S4 sweep: call 4 is silent too" || no "S4 sweep: call 4 emitted: [$SW4]"
 
-# ── S5: the escalation is on the ROW. Without this the efficacy question cannot be asked at all ─────
-[ "$( meterrowget "$LS1" 3 nudge )" = "sweep3" ] && [ "$( meterrowget "$LS1" 3 nudged )" = "1" ] \
-    && ok "S5 sweep: the firing row is logged nudged=1 nudge=sweep3" \
+# ── S5: the escalation MOMENT is on the ROW. Without this the eligibility question — how often was
+#    the sweep threshold even reached — cannot be asked at all, and it is the covariate the next
+#    instrument's readout needs.
+[ "$( meterrowget "$LS1" 3 nudge )" = "retired-sweep" ] && [ "$( meterrowget "$LS1" 3 nudged )" = "0" ] \
+    && ok "S5 sweep: the escalation moment is logged nudged=0 nudge=retired-sweep" \
     || no "S5 sweep: row 3 = nudged=[$( meterrowget "$LS1" 3 nudged )] nudge=[$( meterrowget "$LS1" 3 nudge )]"
 [ "$( meterrowget "$LS1" 3 post_sweep )" = "0" ] && [ "$( meterrowget "$LS1" 4 post_sweep )" = "1" ] \
-    && ok "S5b sweep: post_sweep marks the calls AFTER the escalation, not the one it fired on" \
+    && ok "S5b sweep: post_sweep marks the calls AFTER the escalation moment, not the one at it" \
     || no "S5b sweep: post_sweep was [$( meterrowget "$LS1" 3 post_sweep )] then [$( meterrowget "$LS1" 4 post_sweep )]"
 [ "$( meterrows "$LS1" )" = "4" ] \
-    && ok "S5c sweep: all four calls are still counted (escalating does not drop a row)" \
+    && ok "S5c sweep: all four calls are still counted" \
     || no "S5c sweep: expected 4 rows, got $( meterrows "$LS1" )"
 
-# ── S7: the read sweep names the directory of the file just read, not a placeholder ─────────────────
-TS7="$TMP/ts7"; mkdir -p "$TS7"; LS7="$TMP/s7.jsonl"
-sweep_run "$LS7" "$TS7" "$( readjson sweepread /w/proj/src/a.cpp )" >/dev/null
-sweep_run "$LS7" "$TS7" "$( readjson sweepread /w/proj/src/b.cpp )" >/dev/null
-SW7="$( sweep_run "$LS7" "$TS7" "$( readjson sweepread /w/proj/src/c.cpp )" )"
-echo "-- sweep escalation (read, 3rd call) --"; echo "$SW7"
-printf '%s' "$SW7" | grep -Fq -- '--pack-task' && printf '%s' "$SW7" | grep -Fq -- '--expand' \
-    && ok "S7 sweep: the read escalation names --pack-task and --expand" \
-    || no "S7 sweep: read escalation missing --pack-task/--expand: [$SW7]"
-printf '%s' "$SW7" | grep -Fq 'ripwire /w/proj/src --pack-task' \
-    && ok "S7b sweep: it is scoped to the directory of the file just read" \
-    || no "S7b sweep: read escalation does not name /w/proj/src"
-
-# ── S8-S9: the glob and git-history sweeps name their one-call substitutes ──────────────────────────
-TS8="$TMP/ts8"; mkdir -p "$TS8"; LS8="$TMP/s8.jsonl"
-sweep_run "$LS8" "$TS8" "$( globjson sweepglob '**/*.c' )" >/dev/null
-sweep_run "$LS8" "$TS8" "$( globjson sweepglob '**/*.h' )" >/dev/null
-SW8="$( sweep_run "$LS8" "$TS8" "$( globjson sweepglob '**/*.py' )" )"
-printf '%s' "$SW8" | grep -Fq 'SWEEP' && printf '%s' "$SW8" | grep -Fq -- '--for=' \
-    && ok "S8 sweep: the glob sweep escalates and names --for" \
-    || no "S8 sweep: glob escalation = [$SW8]"
-TS9="$TMP/ts9"; mkdir -p "$TS9"; LS9="$TMP/s9.jsonl"
-sweep_run "$LS9" "$TS9" "$( bashjson sweepgit 'git diff HEAD' )" >/dev/null
-sweep_run "$LS9" "$TS9" "$( bashjson sweepgit 'git diff --stat' )" >/dev/null
-SW9="$( sweep_run "$LS9" "$TS9" "$( bashjson sweepgit 'git diff -- src/' )" )"
-printf '%s' "$SW9" | grep -Fq 'SWEEP' && printf '%s' "$SW9" | grep -Fq -- '--situ' \
-    && ok "S9 sweep: the git-history sweep escalates and names --situ" \
-    || no "S9 sweep: git-diff escalation = [$SW9]"
-
-# ── S10: classes dedup INDEPENDENTLY — a spent grep escalation must not silence a read sweep ────────
-TS10="$TMP/ts10"; mkdir -p "$TS10"; LS10="$TMP/s10.jsonl"
-for p in a b c; do sweep_run "$LS10" "$TS10" "$( grepjson sweepboth "$p" )" >/dev/null; done
-for f in /q/x/1.c /q/x/2.c; do sweep_run "$LS10" "$TS10" "$( readjson sweepboth "$f" )" >/dev/null; done
-SW10="$( sweep_run "$LS10" "$TS10" "$( readjson sweepboth /q/x/3.c )" )"
-printf '%s' "$SW10" | grep -Fq -- '--pack-task' \
-    && ok "S10 sweep: a spent grep escalation does not consume the read escalation" \
-    || no "S10 sweep: read sweep did not escalate after a grep sweep: [$SW10]"
-
-# ── S11: NON-SWEEP BEHAVIOUR IS BYTE-UNCHANGED. The feature is additive or it is not shipped. ───────
-# Same inputs, escalation off vs on: calls 1 and 2 of every category must match byte for byte. The
-# grep pattern is an OR-chain (P4.2, 2026-08-29) so calls 1-2 actually deliver non-empty tip text to
-# compare — a single literal would make both sides trivially empty and prove nothing about bytes.
-S11BAD=""
-for spec in "grep|$( grepjson X 'alpha|two' )|$( grepjson X 'beta|two' )" \
-            "read|$( readjson X /w/p/a.c )|$( readjson X /w/p/b.c )" \
-            "glob|$( globjson X '**/*.c' )|$( globjson X '**/*.h' )" \
-            "gitdiff|$( bashjson X 'git diff HEAD' )|$( bashjson X 'git diff --stat' )"; do
-    lbl="${spec%%|*}"; rest="${spec#*|}"; j1="${rest%%|*}"; j2="${rest#*|}"
-    TA="$TMP/s11a_$lbl"; TB="$TMP/s11b_$lbl"; mkdir -p "$TA" "$TB"
-    A1="$( sweep_run "$TMP/s11a.jsonl" "$TA" "$j1" )"; A2="$( sweep_run "$TMP/s11a.jsonl" "$TA" "$j2" )"
-    B1="$( sweep_run "$TMP/s11b.jsonl" "$TB" "$j1" RIPWIRE_SWEEP=0 )"
-    B2="$( sweep_run "$TMP/s11b.jsonl" "$TB" "$j2" RIPWIRE_SWEEP=0 )"
-    [ "$A1" = "$B1" ] && [ "$A2" = "$B2" ] || S11BAD="$S11BAD $lbl"
+# ── S6: NOTHING reaches stdout on any of the four calls, and nothing reaches stderr either. This is
+#    the §RETIRED contract stated positively: the PreToolUse path is now a pure instrument.
+ERRS6="$TMP/s6.err"; TS6="$TMP/ts6"; mkdir -p "$TS6"
+S6BAD=""
+for pt in a b c d e; do
+    O="$( sweep_run "$TMP/s6.jsonl" "$TS6" "$( grepjson sweepsilent "$pt" )" 2>>"$ERRS6" )"
+    [ -z "$O" ] || S6BAD="$S6BAD [$pt: $O]"
 done
-[ -z "$S11BAD" ] \
-    && ok "S11 sweep: calls 1-2 are byte-identical with the escalation on and off (purely additive)" \
-    || no "S11 sweep: pre-sweep output differs with the feature on, for:$S11BAD"
+[ -z "$S6BAD" ] && ok "S6 sweep: five same-class calls, zero bytes of stdout across all of them" \
+    || no "S6 sweep: output leaked:$S6BAD"
+[ ! -s "$ERRS6" ] && ok "S6b sweep: and nothing on the hooked call's stderr" \
+    || no "S6b sweep: stderr leaked: $( cat "$ERRS6" )"
 
-# ── S12: the two off-switches. RIPWIRE_SWEEP=0 is what a null EVALS §4 readout ships. ───────────────
-# OR-chain patterns (P4.2, 2026-08-29): this arm is about the BASE tier's own dedup/cooldown machinery
-# continuing to run with the escalation off, which requires calls that are actually nudge-eligible —
-# see the note at case (1). A literal pattern would never reach the dedup block at all (nudge=none on
-# every call), which would make the row 3 assertion below fail for an unrelated reason.
+# ── S7-S9: the read, glob and git-history sweeps reach their own escalation moments ────────────────
+S79BAD=""
+i=0
+for spec in "read|/w/proj/src/a.cpp|/w/proj/src/b.cpp|/w/proj/src/c.cpp" \
+            "glob|**/*.c|**/*.h|**/*.py"; do
+    kind="${spec%%|*}"; rest="${spec#*|}"; i=$(( i + 1 ))
+    TS="$TMP/ts7_$i"; mkdir -p "$TS"; LS="$TMP/s7_$i.jsonl"
+    n=0
+    while [ -n "$rest" ]; do
+        arg="${rest%%|*}"; case "$rest" in *"|"*) rest="${rest#*|}" ;; *) rest="" ;; esac
+        n=$(( n + 1 ))
+        if [ "$kind" = read ]; then J="$( readjson "sweep$kind" "$arg" )"; else J="$( globjson "sweep$kind" "$arg" )"; fi
+        O="$( sweep_run "$LS" "$TS" "$J" )"
+        [ -z "$O" ] || S79BAD="$S79BAD [$kind call$n emitted]"
+    done
+    [ "$( meterrowget "$LS" 3 nudge )" = "retired-sweep" ] || S79BAD="$S79BAD [$kind row3=$( meterrowget "$LS" 3 nudge )]"
+done
+TS9="$TMP/ts9"; mkdir -p "$TS9"; LS9="$TMP/s9.jsonl"
+for c in 'git diff HEAD' 'git diff --stat' 'git diff -- src/'; do
+    O="$( sweep_run "$LS9" "$TS9" "$( bashjson sweepgit "$c" )" )"
+    [ -z "$O" ] || S79BAD="$S79BAD [git-diff emitted]"
+done
+[ "$( meterrowget "$LS9" 3 nudge )" = "retired-sweep" ] || S79BAD="$S79BAD [git-diff row3=$( meterrowget "$LS9" 3 nudge )]"
+[ -z "$S79BAD" ] \
+    && ok "S7-S9 sweep: read / glob / git-history sweeps each reach their escalation moment, silently" \
+    || no "S7-S9 sweep:$S79BAD"
+
+# ── S10: classes track INDEPENDENTLY — a spent grep escalation must not consume the read tier's ────
+TS10="$TMP/ts10"; mkdir -p "$TS10"; LS10="$TMP/s10.jsonl"
+for pt in a b c; do sweep_run "$LS10" "$TS10" "$( grepjson sweepboth "$pt" )" >/dev/null; done
+for f in /q/x/1.c /q/x/2.c /q/x/3.c; do sweep_run "$LS10" "$TS10" "$( readjson sweepboth "$f" )" >/dev/null; done
+[ "$( meterrowget "$LS10" 3 nudge )" = "retired-sweep" ] && [ "$( meterrowget "$LS10" 6 nudge )" = "retired-sweep" ] \
+    && ok "S10 sweep: a spent grep escalation does not consume the read escalation slot" \
+    || no "S10 sweep: rows 3/6 = [$( meterrowget "$LS10" 3 nudge )]/[$( meterrowget "$LS10" 6 nudge )]"
+
+# ── S12: the off-switches still resolve. RIPWIRE_SWEEP=0 now gates the sweep COUNTERS only, since
+#    there is no delivery left to gate — so with it set, the 3rd call must fall through to the base
+#    tier's own verdict instead of being named an escalation moment.
 TS12="$TMP/ts12"; mkdir -p "$TS12"; LS12="$TMP/s12.jsonl"
-for p in "a|z" "b|z"; do sweep_run "$LS12" "$TS12" "$( grepjson sweepoff "$p" )" RIPWIRE_SWEEP=0 >/dev/null; done
+for pt in "a|z" "b|z"; do sweep_run "$LS12" "$TS12" "$( grepjson sweepoff "$pt" )" RIPWIRE_SWEEP=0 >/dev/null; done
 SW12="$( sweep_run "$LS12" "$TS12" "$( grepjson sweepoff 'c|z' )" RIPWIRE_SWEEP=0 )"
 [ -z "$SW12" ] && [ "$( meterrowget "$LS12" 3 nudge )" = "dedup" ] \
-    && ok "S12 sweep: RIPWIRE_SWEEP=0 disables the escalation and leaves counting intact" \
+    && ok "S12 sweep: RIPWIRE_SWEEP=0 stops the escalation bookkeeping and leaves counting intact" \
     || no "S12 sweep: with RIPWIRE_SWEEP=0 the 3rd call gave out=[$SW12] nudge=[$( meterrowget "$LS12" 3 nudge )]"
 TS12B="$TMP/ts12b"; mkdir -p "$TS12B"; LS12B="$TMP/s12b.jsonl"
-for p in a b c; do sweep_run "$LS12B" "$TS12B" "$( grepjson sweepctl "$p" )" RIPWIRE_METER_ARM=control >/dev/null; done
-[ "$( meterrowget "$LS12B" 3 nudge )" = "control" ] \
-    && ok "S12b sweep: the control arm never escalates (the A/B stays clean)" \
+for pt in a b c; do sweep_run "$LS12B" "$TS12B" "$( grepjson sweepctl "$pt" )" RIPWIRE_METER_ARM=control >/dev/null; done
+[ "$( meterrowget "$LS12B" 3 nudge )" = "retired-sweep" ] \
+    && ok "S12b sweep: the control arm reaches the SAME escalation moment (the tiers are arm-independent now)" \
     || no "S12b sweep: control-arm 3rd call logged nudge=[$( meterrowget "$LS12B" 3 nudge )]"
-# OR-chain patterns (P4.2) — row 3's "dedup" assertion needs the base tier's dedup block actually
-# entered; see the note at S12 above.
 TS12C="$TMP/ts12c"; mkdir -p "$TS12C"; LS12C="$TMP/s12c.jsonl"
-for p in "a|z" "b|z" "c|z"; do sweep_run "$LS12C" "$TS12C" "$( grepjson sweepn4 "$p" )" RIPWIRE_SWEEP_N=4 >/dev/null; done
-SW12C="$( sweep_run "$LS12C" "$TS12C" "$( grepjson sweepn4 'd|z' )" RIPWIRE_SWEEP_N=4 )"
-[ "$( meterrowget "$LS12C" 3 nudge )" = "dedup" ] && printf '%s' "$SW12C" | grep -Fq 'SWEEP' \
-    && [ "$( meterrowget "$LS12C" 4 nudge )" = "sweep4" ] \
-    && ok "S12c sweep: RIPWIRE_SWEEP_N=4 moves the threshold, and the row says sweep4" \
+for pt in "a|z" "b|z" "c|z"; do sweep_run "$LS12C" "$TS12C" "$( grepjson sweepn4 "$pt" )" RIPWIRE_SWEEP_N=4 >/dev/null; done
+sweep_run "$LS12C" "$TS12C" "$( grepjson sweepn4 'd|z' )" RIPWIRE_SWEEP_N=4 >/dev/null
+[ "$( meterrowget "$LS12C" 3 nudge )" = "dedup" ] && [ "$( meterrowget "$LS12C" 4 nudge )" = "retired-sweep" ] \
+    && ok "S12c sweep: RIPWIRE_SWEEP_N=4 moves the threshold to the 4th call" \
     || no "S12c sweep: N=4 gave row3=[$( meterrowget "$LS12C" 3 nudge )] row4=[$( meterrowget "$LS12C" 4 nudge )]"
 
-# ── S13: the escalation degrades to SILENCE off its preconditions, and never onto stderr ────────────
+# ── S13: the sweep path degrades to SILENCE off its preconditions, and never onto stderr ───────────
 TS13="$TMP/ts13"; mkdir -p "$TS13"; ERR13="$TMP/s13.err"
 S13BAD=""
-for p in a b c; do
-    O="$( printf '%s' '{"session_id":"sweepnongit","cwd":"'"$NONREPO"'","tool_name":"Grep","tool_input":{"pattern":"'"$p"'"}}' \
+for pt in a b c; do
+    O="$( printf '%s' '{"session_id":"sweepnongit","cwd":"'"$NONREPO"'","tool_name":"Grep","tool_input":{"pattern":"'"$pt"'"}}' \
         | env HOME="$METERHOME" RIPWIRE_METER_LOG="$TMP/s13.jsonl" PATH="$WITH_RIPWIRE" TMPDIR="$TS13" bash "$HOOK" 2>>"$ERR13" )"
     R=$?; [ "$R" -eq 0 ] && [ -z "$O" ] || S13BAD="$S13BAD [nongit:$R:$O]"
 done
 TS13B="$TMP/ts13b"; mkdir -p "$TS13B"
-for p in a b c; do
-    O="$( printf '%s' "$( grepjson sweepnorip "$p" )" \
+for pt in a b c; do
+    O="$( printf '%s' "$( grepjson sweepnorip "$pt" )" \
         | env HOME="$METERHOME" RIPWIRE_METER_LOG="$TMP/s13b.jsonl" PATH="$NO_RIPWIRE" TMPDIR="$TS13B" bash "$HOOK" 2>>"$ERR13" )"
     R=$?; [ "$R" -eq 0 ] && [ -z "$O" ] || S13BAD="$S13BAD [norip:$R:$O]"
 done
 [ -z "$S13BAD" ] && ok "S13 sweep: a 3-call sweep in a non-git dir / with no ripwire stays silent, exit 0" \
     || no "S13 sweep: fired or failed off its preconditions:$S13BAD"
+# S13c: `gated` needs a call that is base-tier ELIGIBLE and then fails a precondition. A single
+# literal is ineligible before gating is ever consulted (§CEDE) and logs `none`, which would make this
+# arm pass on a hook that had lost the gating branch entirely.
+TS13C="$TMP/ts13c"; mkdir -p "$TS13C"; LS13C="$TMP/s13c.jsonl"
+printf '%s' '{"session_id":"gatedcase","cwd":"'"$NONREPO"'","tool_name":"Grep","tool_input":{"pattern":"needle|other"}}' \
+    | env HOME="$METERHOME" RIPWIRE_METER_LOG="$LS13C" PATH="$WITH_RIPWIRE" TMPDIR="$TS13C" bash "$HOOK" >/dev/null 2>&1
+[ "$( meterrowget "$LS13C" 1 nudge )" = "gated" ] \
+    && ok "S13c sweep: an eligible call outside a git repo is still counted, as nudge=gated" \
+    || no "S13c sweep: non-git eligible row nudge=[$( meterrowget "$LS13C" 1 nudge )], expected gated"
 [ ! -s "$ERR13" ] && ok "S13b sweep: the escalation path writes nothing to the hooked call's stderr" \
     || no "S13b sweep: stderr leaked: $( cat "$ERR13" )"
 
-# ── S14: a Bash grep sweep escalates too, and the patterns come off the command line ────────────────
-# Grep-the-tool and `grep -rn` on the command line are the SAME habit and must count toward one sweep.
+# ── S14: a Bash grep and the Grep tool are the SAME habit and count toward ONE sweep ───────────────
 TS14="$TMP/ts14"; mkdir -p "$TS14"; LS14="$TMP/s14.jsonl"
 sweep_run "$LS14" "$TS14" "$( bashjson sweepbash 'grep -rn needleone .' )" >/dev/null
 sweep_run "$LS14" "$TS14" "$( bashjson sweepbash 'rg needletwo src/' )" >/dev/null
 SW14="$( sweep_run "$LS14" "$TS14" "$( grepjson sweepbash needlethree )" )"
-echo "-- sweep escalation (mixed Bash-grep + Grep tool) --"; echo "$SW14"
-printf '%s' "$SW14" | grep -Fq -- '--for=\"needleone needletwo needlethree\"' \
-    && ok "S14 sweep: Bash grep/rg and the Grep tool count as ONE sweep, patterns from both" \
-    || no "S14 sweep: mixed grep sweep gave [$SW14]"
+[ -z "$SW14" ] && [ "$( meterrowget "$LS14" 3 nudge )" = "retired-sweep" ] \
+    && ok "S14 sweep: Bash grep/rg and the Grep tool count as ONE sweep (mixed shapes, one threshold)" \
+    || no "S14 sweep: mixed grep sweep gave out=[$SW14] row3=[$( meterrowget "$LS14" 3 nudge )]"
+
+# ── S15: the §RETIRED contract, asserted against the SCRIPT rather than one payload. A future edit
+#    that reintroduces a PreToolUse message would pass every arm above that only reads a row.
+#    Comments are stripped first: the file DELIBERATELY keeps the retired mechanism's design record,
+#    including the PreToolUse response shape it used to emit, and a naive grep would read the record
+#    as the code.
+grep -v '^[[:space:]]*#' "$HOOK" | grep -Fq 'hookEventName":"PreToolUse' \
+    && no "S15 retired: the hook still contains a live PreToolUse output emitter" \
+    || ok "S15 retired: no live PreToolUse output emitter remains in the hook"
+grep -v '^[[:space:]]*#' "$HOOK" | grep -Fq 'hookEventName":"SessionStart' \
+    && ok "S15b retired: the SessionStart primer emitter is still there (only the nudges were retired)" \
+    || no "S15b retired: the SessionStart primer emitter is gone — too much was removed"
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-# (12c) §CEDE — THE LITERAL-GREP CEDE (P4.2, 2026-08-29)
+# (12c) §CEDE — THE LITERAL-GREP CEDE (P4.2, 2026-08-29), AS AN ELIGIBILITY RULE (§RETIRED 2026-09-02)
 #
-# Agents correctly drop to `rg`/`grep` for a known-literal hunt (our own docs concede the case), and
-# the base one-time nudge used to fire on that FIRST call regardless — nagging about a comparison the
-# tool loses. This section pins the acceptance criterion directly: the base tier is now silent on a
-# short single-literal `rg "exact string"` one-shot, in BOTH tool shapes (Grep tool and Bash rg/grep),
-# while an OR-chain / multi-`-e` pattern (where the bundle genuinely wins) still fires — and a
-# grep-then-read CHAIN still gets a nudge, via the read half, with no new tracking code (P1-P8 below).
-# The sweep-still-escalates direction is pinned separately, in S1-S6 and S14 above.
+# Agents correctly drop to `rg`/`grep` for a known-literal hunt (our own docs concede the case), so the
+# base tier stopped treating that first call as a nudge moment at all. Since the tier itself was
+# retired the rule no longer decides whether anything is SAID — it decides whether the row records a
+# base-tier moment, which is what the next instrument compares its own coverage against. The arms
+# below are therefore unchanged in what they exercise and changed in what they read: the `nudge` field
+# instead of the message. A short single literal must log `none`; an OR-chain or a second `-e` must
+# log `retired`. If that ever silently widens, every "how often was the moment reached" number
+# computed across the change is wrong and nothing on stdout would have shown it.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
-# P1: Grep tool, single literal pattern -> silent, but still counted (class=grep, nudge=none)
-TP1="$TMP/tp1"; mkdir -p "$TP1"; LP1="$TMP/p1.jsonl"
-OUTP1="$( sweep_run "$LP1" "$TP1" "$( grepjson cedegrep needle )" )"
-[ -z "$OUTP1" ] && [ "$( meterrowget "$LP1" 1 class )" = "grep" ] && [ "$( meterrowget "$LP1" 1 nudge )" = "none" ] \
-    && ok "P1 cede: Grep tool, single literal pattern is silent but still counted (class=grep, nudge=none)" \
-    || no "P1 cede: out=[$OUTP1] class=[$( meterrowget "$LP1" 1 class )] nudge=[$( meterrowget "$LP1" 1 nudge )]"
+CEDEBAD=""
+i=0
+# spec fields are separated by `^`, NOT `|`: the OR-chain cases below carry a literal `|` inside the
+# pattern, which is the entire signal under test, and a `|` separator would eat it.
+for spec in "P1 Grep-tool single literal^grep^needle^none" \
+            "P2 Bash 'grep -rn STR .'^bash^grep -rn needle .^none" \
+            "P3 Bash rg \"exact string\"^bash^rg \\\"exact string\\\" .^none" \
+            "P4 Grep-tool OR-chain^grep^TODO|FIXME^retired" \
+            "P5 Bash rg OR-chain^bash^rg 'foo|bar' .^retired" \
+            "P6 Bash rg two -e flags^bash^rg -e foo -e bar .^retired" \
+            "P7 Bash rg one -e flag^bash^rg -e needle .^none"; do
+    lbl="${spec%%^*}"; rest="${spec#*^}"; kind="${rest%%^*}"; rest="${rest#*^}"
+    arg="${rest%^*}"; want="${rest##*^}"; i=$(( i + 1 ))
+    TP="$TMP/tp_$i"; mkdir -p "$TP"; LP="$TMP/p_$i.jsonl"
+    if [ "$kind" = grep ]; then J="$( grepjson "cede$i" "$arg" )"; else J="$( bashjson "cede$i" "$arg" )"; fi
+    O="$( sweep_run "$LP" "$TP" "$J" )"
+    got="$( meterrowget "$LP" 1 nudge )"; gc="$( meterrowget "$LP" 1 class )"
+    [ -z "$O" ] || CEDEBAD="$CEDEBAD [$lbl emitted output]"
+    [ "$got" = "$want" ] || CEDEBAD="$CEDEBAD [$lbl -> nudge=$got, want $want]"
+    [ "$gc" = "grep" ] || CEDEBAD="$CEDEBAD [$lbl -> class=$gc, want grep]"
+done
+[ -z "$CEDEBAD" ] \
+    && ok "P1-P7 cede: single literals log nudge=none, OR-chains and multi -e log nudge=retired, all silent" \
+    || no "P1-P7 cede:$CEDEBAD"
 
-# P2: Bash `grep -rn STR .`, single literal -> silent, still counted
-TP2="$TMP/tp2"; mkdir -p "$TP2"; LP2="$TMP/p2.jsonl"
-OUTP2="$( sweep_run "$LP2" "$TP2" "$( bashjson cedebash 'grep -rn needle .' )" )"
-[ -z "$OUTP2" ] && [ "$( meterrowget "$LP2" 1 class )" = "grep" ] && [ "$( meterrowget "$LP2" 1 nudge )" = "none" ] \
-    && ok "P2 cede: Bash 'grep -rn STR .', single literal is silent but still counted" \
-    || no "P2 cede: out=[$OUTP2] class=[$( meterrowget "$LP2" 1 class )] nudge=[$( meterrowget "$LP2" 1 nudge )]"
-
-# P3: Bash `rg STR .`, single literal -> silent (the acceptance criterion's exact example). The
-# embedded double quotes are pre-escaped (\") since bashjson() does not escape its $2 for JSON.
-TP3="$TMP/tp3"; mkdir -p "$TP3"; LP3="$TMP/p3.jsonl"
-OUTP3="$( sweep_run "$LP3" "$TP3" "$( bashjson cederg 'rg \"exact string\" .' )" )"
-[ -z "$OUTP3" ] \
-    && ok "P3 cede: Bash rg \"exact string\" .  — the acceptance criterion's literal example is silent" \
-    || no "P3 cede: rg \"exact string\" fired: [$OUTP3]"
-
-# P4: Grep tool, OR-chain pattern -> still fires (the bundle genuinely wins here)
-TP4="$TMP/tp4"; mkdir -p "$TP4"; LP4="$TMP/p4.jsonl"
-OUTP4="$( sweep_run "$LP4" "$TP4" "$( grepjson cedeor 'TODO|FIXME' )" )"
-[ -n "$OUTP4" ] && printf '%s' "$OUTP4" | grep -q -- '--grep' \
-    && ok "P4 cede: Grep tool, OR-chain pattern still fires (multi-pattern search, bundle wins)" \
-    || no "P4 cede: OR-chain pattern did not fire: [$OUTP4]"
-
-# P5: Bash `rg 'A|B' .` -> still fires
-TP5="$TMP/tp5"; mkdir -p "$TP5"; LP5="$TMP/p5.jsonl"
-OUTP5="$( sweep_run "$LP5" "$TP5" "$( bashjson cedeorbash "rg 'foo|bar' ." )" )"
-[ -n "$OUTP5" ] \
-    && ok "P5 cede: Bash rg with an OR-chain pattern still fires" \
-    || no "P5 cede: OR-chain Bash rg did not fire: [$OUTP5]"
-
-# P6: Bash `rg -e foo -e bar .` (two -e flags, no pipe) -> still fires
-TP6="$TMP/tp6"; mkdir -p "$TP6"; LP6="$TMP/p6.jsonl"
-OUTP6="$( sweep_run "$LP6" "$TP6" "$( bashjson cedemultie 'rg -e foo -e bar .' )" )"
-[ -n "$OUTP6" ] \
-    && ok "P6 cede: Bash rg with two -e pattern flags still fires (multi-pattern, no OR-pipe needed)" \
-    || no "P6 cede: multi -e Bash rg did not fire: [$OUTP6]"
-
-# P7: a SINGLE -e flag does not count as multi-pattern -> stays silent
-TP7="$TMP/tp7"; mkdir -p "$TP7"; LP7="$TMP/p7.jsonl"
-OUTP7="$( sweep_run "$LP7" "$TP7" "$( bashjson cedeonee 'rg -e needle .' )" )"
-[ -z "$OUTP7" ] \
-    && ok "P7 cede: Bash rg with exactly one -e flag is still a single pattern — stays silent" \
-    || no "P7 cede: single -e Bash rg unexpectedly fired: [$OUTP7]"
-
-# P8: the CHAIN case needs no new code — grep(literal, silent) then Read(fires), same session
+# P8: the CHAIN case still needs no new code — a literal grep (ineligible) then a Read (eligible),
+# same session, independent tiers. Read from the rows, since neither call speaks.
 TP8="$TMP/tp8"; mkdir -p "$TP8"; LP8="$TMP/p8.jsonl"
 OUTP8G="$( sweep_run "$LP8" "$TP8" "$( grepjson cedechain needle )" )"
 OUTP8R="$( sweep_run "$LP8" "$TP8" "$( readjson cedechain src/foo.cpp )" )"
-[ -z "$OUTP8G" ] && [ -n "$OUTP8R" ] && printf '%s' "$OUTP8R" | grep -q -- '--expand' \
-    && ok "P8 cede: grep-then-read CHAIN still nudges, via the unmodified read tier (no new mechanism)" \
-    || no "P8 cede: chain gave grep=[$OUTP8G] read=[$OUTP8R]"
+[ -z "$OUTP8G" ] && [ -z "$OUTP8R" ] \
+    && [ "$( meterrowget "$LP8" 1 nudge )" = "none" ] && [ "$( meterrowget "$LP8" 2 nudge )" = "retired" ] \
+    && ok "P8 cede: grep(ineligible) then read(eligible) — the read tier is reached independently" \
+    || no "P8 cede: chain gave rows [$( meterrowget "$LP8" 1 nudge )]/[$( meterrowget "$LP8" 2 nudge )] out=[$OUTP8G][$OUTP8R]"
 
 # ── C1: the `cd`-prefix strip. 816 of the live log's 927 unclassified rows began with `cd <path> &&`
 #        — the worktree idiom — and stripping it is what took `unclassified` from 42.9% to 7.4%. ─────
@@ -1195,12 +1167,25 @@ if [ -f "$SCHEMADOC" ]; then
     done
     [ -z "$C3MISS" ] && ok "C3 docs: SUBSTITUTION_METER.md documents the escalation and the new classes" \
         || no "C3 docs: SUBSTITUTION_METER.md is missing:$C3MISS"
+    # §RETIRED (2026-09-02): the retirement is only honest if the schema doc carries the new `nudge`
+    # vocabulary AND says what the A/B found. A code change that silently outruns its own schema doc is
+    # the exact failure the v1/v2 boundary note exists to prevent.
+    C3RMISS=""
+    for needle in 'retired-sweep' 'What the A/B found'; do
+        grep -Fq "$needle" "$SCHEMADOC" || C3RMISS="$C3RMISS $needle"
+    done
+    [ -z "$C3RMISS" ] && ok "C3r docs: SUBSTITUTION_METER.md carries the retirement and the new nudge vocabulary" \
+        || no "C3r docs: SUBSTITUTION_METER.md is missing:$C3RMISS"
 fi
 EVALSDOC="$ROOT/docs/EVALS.md"
 if [ -f "$EVALSDOC" ]; then
     grep -Fq 'Nudge sweep-escalation efficacy' "$EVALSDOC" && grep -Fq 'post_sweep' "$EVALSDOC" \
         && ok "C3b docs: EVALS.md carries the pre-registered efficacy readout for the escalation" \
         || no "C3b docs: EVALS.md has no sweep-escalation registration — the verdict is unregistered"
+    # The registration promised a verdict. A registered band with no resolution is a band nobody paid.
+    grep -Fq 'PreToolUse nudge A/B' "$EVALSDOC" \
+        && ok "C3c docs: EVALS.md carries the A/B READOUT that resolved that registration" \
+        || no "C3c docs: EVALS.md has a registered band with no readout beside it"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1372,12 +1357,15 @@ done
     || no "C10 classifier: misclassified:$C10BAD"
 
 # ── A1-A4: THE ARM CONTRACT. The toggle must work in the configuration that will use it. ────────────
-# A1 and A3 are the two live bugs. A1 asserts the ONE configuration a real control arm runs in — the
-# arm named, the fixture guard on, no destination named — because that is exactly the configuration
-# in which it silently did the opposite of the documented thing.
-# OR-chain patterns throughout (P4.2, 2026-08-29): A1/A2/A4 depend on the TREATMENT side actually
-# being nudge-eligible to prove the control side's silence is the ARM speaking, not a single-literal
-# pattern that would be silent either way — see the note at case (1).
+# A1 asserts the ONE configuration a real control arm runs in — the arm named, the fixture guard on,
+# no destination named — because that is exactly the configuration in which meter_init once silently
+# did the opposite of the documented thing.
+#
+# §RETIRED (2026-09-02): A2's positive control moved. The PreToolUse path is now silent in BOTH arms,
+# so "treatment still speaks" cannot be the thing that proves the arm was consulted; A3/A4 carry that
+# job alone, on the SessionStart primer, which is the only arm-differentiated behaviour left. The
+# OR-chain patterns stay, because A1/A2 still need a base-tier-ELIGIBLE call for their rows to mean
+# anything — see the note at case (1).
 TA1="$TMP/ta1"; mkdir -p "$TA1"
 ARMHOME="$TMP/armhome"; mkdir -p "$ARMHOME"
 OUTA1="$( printf '%s' "$( grepjson armcase 'needle|other' )" \
@@ -1391,9 +1379,9 @@ TA2="$TMP/ta2"; mkdir -p "$TA2"; LA2="$TMP/a2.jsonl"
 OUTA2="$( sweep_run "$LA2" "$TA2" "$( grepjson armlog 'needle|other' )" RIPWIRE_METER_ARM=control )"
 TA2B="$TMP/ta2b"; mkdir -p "$TA2B"; LA2B="$TMP/a2b.jsonl"
 OUTA2B="$( sweep_run "$LA2B" "$TA2B" "$( grepjson armlogt 'needle|other' )" )"
-[ -z "$OUTA2" ] && [ "$( meterrowget "$LA2" 1 arm )" = "control" ] && [ -n "$OUTA2B" ] \
+[ -z "$OUTA2" ] && [ "$( meterrowget "$LA2" 1 arm )" = "control" ] && [ -z "$OUTA2B" ] \
     && [ "$( meterrowget "$LA2B" 1 arm )" = "treatment" ] \
-    && ok "A2 arm: with a log named, control counts+records+stays silent and treatment still speaks" \
+    && ok "A2 arm: with a log named, both arms count, record and stay silent on the PreToolUse path" \
     || no "A2 arm: control out=[${OUTA2:+set}] arm=[$( meterrowget "$LA2" 1 arm )]; treatment out=[${OUTA2B:+set}] arm=[$( meterrowget "$LA2B" 1 arm )]"
 
 # A3: the SessionStart primer is a nudge — by a wide margin the largest one — so the control arm does
@@ -1444,6 +1432,131 @@ if [ -f "$SCHEMADOC" ]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (12d) THE POLL CLASSES AND THE WORKTREE TAG — three instrument defects found while reading the A/B
+#
+# All three were found by MINING the live log for the 2026-09-02 readout, not by inspection, and each
+# one biases a number the readout published:
+#
+#   PB  ~14% of the window's `grep`-class rows are POLLS, not searches. `grep -c Building <buildlog>`
+#       and `grep -q PARGATES_EXIT <taskfile>` are progress polls on a running job; `ps aux | grep
+#       "[t]est"` is a liveness check. None of them retrieves content, so none of them can ever be
+#       substituted by a ranked map — counting them as native retrieval inflates the denominator with
+#       calls the tool is not competing for. They were also NOT evenly distributed across arms, which
+#       made the artifact directional. They get `build-poll` / `process-poll`, family `meta`, excluded
+#       from the rate exactly like `gate-run`.
+#
+#   TAG `tag` was the basename of the repo DIRECTORY, so every linked worktree of one repository
+#       reported as its own repo (a dozen `.claude/worktrees/<name>` checkouts of ripwire showed up as
+#       a dozen "repos"). The per-repo cut is the one that controls for composition, so a per-repo cut
+#       that splits one repo into twelve is the cut most damaged by it. `tag` now comes from the
+#       repo's git COMMON dir, which a linked worktree shares with its main worktree.
+#
+# The negative controls are the point of this section: a rule that swallows an ordinary recursive grep
+# (PB5), or a tag derivation that folds two genuinely different repos together (TAG2), is worse than
+# the defect it fixes.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+PBBAD=""
+i=0
+for triple in "grep -c Building /tmp/build.log^build-poll^meta" \
+              "grep -c \\\"===\\\" /tmp/gate.log^build-poll^meta" \
+              "grep -q PARGATES_EXIT /tmp/task.outp^build-poll^meta" \
+              "rg -q needle src/^build-poll^meta" \
+              "ps aux | grep \\\"[t]est_thing\\\"^process-poll^meta" \
+              "pgrep -f ripwire^process-poll^meta" \
+              "grep -rn needle .^grep^native" \
+              "grep -C 3 needle file.txt^grep^native" \
+              "rg needle src/^grep^native"; do
+    c="${triple%%^*}"; rest="${triple#*^}"; wc_="${rest%^*}"; wf="${rest#*^}"; i=$(( i + 1 ))
+    TPB="$TMP/tpb_$i"; mkdir -p "$TPB"; LPB="$TMP/pb_$i.jsonl"
+    sweep_run "$LPB" "$TPB" "$( bashjson "pollcase_$i" "$c" )" >/dev/null 2>&1
+    gc="$( meterrowget "$LPB" 1 class )"; gf="$( meterrowget "$LPB" 1 family )"
+    [ "$gc" = "$wc_" ] && [ "$gf" = "$wf" ] || PBBAD="$PBBAD [$c -> $gc/$gf, want $wc_/$wf]"
+done
+[ -z "$PBBAD" ] \
+    && ok "PB1-PB5 classifier: count/quiet greps are build-poll, ps/pgrep are process-poll, real searches unchanged" \
+    || no "PB1-PB5 classifier: misclassified:$PBBAD"
+
+# PB6: a poll is not a sweep. Five `grep -c` polls in one session must never reach an escalation
+# moment — the class they carry is not in the sweep set, which is the same reason a build never was.
+TPB6="$TMP/tpb6"; mkdir -p "$TPB6"; LPB6="$TMP/pb6.jsonl"
+PB6BAD=""
+for n in 1 2 3 4 5; do
+    O="$( sweep_run "$LPB6" "$TPB6" "$( bashjson pollsweep 'grep -c Building /tmp/build.log' )" )"
+    [ -z "$O" ] || PB6BAD="$PB6BAD [call$n emitted]"
+    case "$( meterrowget "$LPB6" "$n" nudge )" in
+        none) ;;
+        *) PB6BAD="$PB6BAD [call$n nudge=$( meterrowget "$LPB6" "$n" nudge )]" ;;
+    esac
+done
+[ -z "$PB6BAD" ] && [ "$( meterrows "$LPB6" )" = "5" ] \
+    && ok "PB6 classifier: five build polls are counted, never nudge-eligible, never an escalation moment" \
+    || no "PB6 classifier:$PB6BAD (rows=$( meterrows "$LPB6" ))"
+
+# ── TAG1-TAG3: `tag` folds a linked worktree into its main worktree, and nothing else ──────────────
+# A real `git worktree add`, not a simulation: the whole defect lives in what git reports for a
+# checkout whose .git is a FILE pointing at the main repo's common dir.
+WTMAIN="$TMP/wtmain"; mkdir -p "$WTMAIN"
+git -C "$WTMAIN" init -q
+git -C "$WTMAIN" config user.email "dev@x.com"; git -C "$WTMAIN" config user.name "Dev"
+printf 'x\n' >"$WTMAIN/f.txt"; git -C "$WTMAIN" add f.txt >/dev/null 2>&1
+git -C "$WTMAIN" commit -q -m init >/dev/null 2>&1
+WTLINK="$TMP/vibrant-euler-dd516f"
+if git -C "$WTMAIN" worktree add -q -b wtbranch "$WTLINK" >/dev/null 2>&1; then
+    TW1="$TMP/ttag1"; mkdir -p "$TW1"; LW1="$TMP/tag1.jsonl"
+    sweep_run "$LW1" "$TW1" '{"session_id":"wtcase","cwd":"'"$WTLINK"'","tool_name":"Grep","tool_input":{"pattern":"needle"}}' >/dev/null 2>&1
+    GOTTAG="$( meterrowget "$LW1" 1 tag )"
+    [ "$GOTTAG" = "wtmain" ] \
+        && ok "TAG1 tag: a linked worktree reports its MAIN worktree's name (wtmain), not its own dir" \
+        || no "TAG1 tag: linked worktree reported tag=[$GOTTAG], expected wtmain"
+    # and `repo` still names the worktree the call actually happened in — folding the TAG must not
+    # falsify the path, which is the field that says where the row came from.
+    GOTREPO="$( meterrowget "$LW1" 1 repo )"
+    case "$GOTREPO" in
+        *vibrant-euler-dd516f) ok "TAG1b tag: `repo` still names the worktree the call happened in" ;;
+        *) no "TAG1b tag: repo=[$GOTREPO] — folding the tag must not falsify the path" ;;
+    esac
+else
+    echo "  SKIP  TAG1 (git worktree add unavailable)"
+fi
+TW2="$TMP/ttag2"; mkdir -p "$TW2"; LW2="$TMP/tag2.jsonl"
+sweep_run "$LW2" "$TW2" '{"session_id":"tagplain","cwd":"'"$WTMAIN"'","tool_name":"Grep","tool_input":{"pattern":"needle"}}' >/dev/null 2>&1
+[ "$( meterrowget "$LW2" 1 tag )" = "wtmain" ] \
+    && ok "TAG2 tag: an ordinary repo still reports its own basename (the negative control)" \
+    || no "TAG2 tag: plain repo reported tag=[$( meterrowget "$LW2" 1 tag )], expected wtmain"
+TW2B="$TMP/ttag2b"; mkdir -p "$TW2B"; LW2B="$TMP/tag2b.jsonl"
+sweep_run "$LW2B" "$TW2B" '{"session_id":"tagsub","cwd":"'"$REPO"'","tool_name":"Grep","tool_input":{"pattern":"needle"}}' >/dev/null 2>&1
+[ "$( meterrowget "$LW2B" 1 tag )" = "repo" ] \
+    && ok "TAG2b tag: two different repos still get two different tags (no over-folding)" \
+    || no "TAG2b tag: second repo reported tag=[$( meterrowget "$LW2B" 1 tag )], expected repo"
+TW3="$TMP/ttag3"; mkdir -p "$TW3"; LW3="$TMP/tag3.jsonl"
+sweep_run "$LW3" "$TW3" '{"session_id":"tagnonrepo","cwd":"'"$NONREPO"'","tool_name":"Grep","tool_input":{"pattern":"needle"}}' >/dev/null 2>&1
+[ "$( meterrowget "$LW3" 1 tag )" = "nonrepo" ] \
+    && ok "TAG3 tag: outside a repo the tag still falls back to the directory basename" \
+    || no "TAG3 tag: non-repo reported tag=[$( meterrowget "$LW3" 1 tag )], expected nonrepo"
+# The SessionStart path derives the tag too, and derived it separately — a fix applied to one and not
+# the other would split a session's own rows across two tags.
+TW4="$TMP/ttag4"; mkdir -p "$TW4"; LW4="$TMP/tag4.jsonl"
+if [ -d "$WTLINK" ]; then
+    printf '%s' '{"session_id":"tagss","cwd":"'"$WTLINK"'","source":"startup"}' \
+        | env HOME="$METERHOME" RIPWIRE_METER_LOG="$LW4" RIPWIRE_METER_FIXTURE=1 \
+            PATH="$WITH_RIPWIRE" TMPDIR="$TW4" bash "$HOOK" --session-start >/dev/null 2>&1
+    [ "$( meterrowget "$LW4" 1 tag )" = "wtmain" ] \
+        && ok "TAG4 tag: the SessionStart row folds the worktree the same way the PreToolUse rows do" \
+        || no "TAG4 tag: session-start row tag=[$( meterrowget "$LW4" 1 tag )], expected wtmain"
+fi
+
+# ── PB7: the schema doc carries the two new classes and the tag change as a schema note ───────────
+if [ -f "$SCHEMADOC" ]; then
+    PB7MISS=""
+    for needle in 'build-poll' 'process-poll' 'git-common-dir'; do
+        grep -Fq "$needle" "$SCHEMADOC" || PB7MISS="$PB7MISS $needle"
+    done
+    [ -z "$PB7MISS" ] && ok "PB7 docs: SUBSTITUTION_METER.md documents the poll classes and the tag derivation" \
+        || no "PB7 docs: SUBSTITUTION_METER.md is missing:$PB7MISS"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # (13) FIXTURE ISOLATION — the arms that prove a gate run cannot reach the operator's log
 #
 # The design and the bug are documented at the top of this file. This section runs LAST because I2,
@@ -1460,21 +1573,26 @@ fi
 # ── I1: isolation REDIRECTS the rows, it does not silently drop them ────────────────────────────────
 # The positive control for I2. If L1 were implemented by turning the meter off, I2 would pass for the
 # wrong reason and every arm in section (11) would still be exercising the write path by luck.
+# The floor moved 20 -> 12 at §RETIRED (2026-09-02) and the reason is bookkeeping, not weakening:
+# sections (1)-(7) now name their OWN sandbox log per arm, because with nothing on stdout the row is
+# the only thing left to assert against and a shared sink cannot be indexed by row number. Those rows
+# moved from this sink to another sandbox file under the same $TMP; none of them moved toward $HOME,
+# which is what I2 below proves by provenance rather than by counting.
 GS_ROWS="$( meterrows "$GATE_SINK" )"
-[ "$GS_ROWS" -ge 20 ] \
+[ "$GS_ROWS" -ge 12 ] \
     && ok "I1 isolation: the rows sections (1)-(10) used to leak land in the gate's own sink ($GS_ROWS rows)" \
     || no "I1 isolation: gate sink holds $GS_ROWS row(s) — isolation must redirect the rows, not drop them"
 
-# ── I3: the L2 guard. A harness that names no destination writes NO row, and still nudges ───────────
-# OR-chain pattern (P4.2, 2026-08-29) — needs to actually be nudge-eligible; see the note at case (1).
+# ── I3: the L2 guard. A harness that names no destination writes NO row ────────────────────────────
+# OR-chain pattern (P4.2, 2026-08-29) — needs to actually be base-tier eligible; see the note at (1).
 TI3="$TMP/ti3"; mkdir -p "$TI3"
 GUARDHOME="$TMP/guardhome"; mkdir -p "$GUARDHOME"
 OUTI3="$( printf '%s' "$( grepjson guardcase 'needle|other' )" \
     | env -u RIPWIRE_METER_LOG -u RIPWIRE_HOME HOME="$GUARDHOME" RIPWIRE_METER_FIXTURE=1 \
         PATH="$WITH_RIPWIRE" TMPDIR="$TI3" bash "$HOOK" )"; RCI3=$?
-[ "$RCI3" -eq 0 ] && [ -n "$OUTI3" ] && [ ! -f "$GUARDHOME/.ripwire/substitution.jsonl" ] \
-    && ok "I3 isolation: RIPWIRE_METER_FIXTURE with no named destination writes no row, and the nudge still fires" \
-    || no "I3 isolation: exit=$RCI3 nudge=[${OUTI3:+set}] rows=$( meterrows "$GUARDHOME/.ripwire/substitution.jsonl" )"
+[ "$RCI3" -eq 0 ] && [ -z "$OUTI3" ] && [ ! -f "$GUARDHOME/.ripwire/substitution.jsonl" ] \
+    && ok "I3 isolation: RIPWIRE_METER_FIXTURE with no named destination writes no row and costs the call nothing" \
+    || no "I3 isolation: exit=$RCI3 out=[${OUTI3:+set}] rows=$( meterrows "$GUARDHOME/.ripwire/substitution.jsonl" )"
 
 # ── I4: with the guard absent, the production $HOME fallback still resolves ─────────────────────────
 # THE ONE ARM THAT OPTS OUT OF L2, so that the resolution real installs actually use stays gated. It

@@ -81,18 +81,27 @@ CODEX_ADAPTER="$ROOT/hooks/ripwire-codex-nudge.sh"
 ADAPTER_TMP="$TMP/adapter"; mkdir -p "$ADAPTER_TMP"
 ADAPTER_BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${ADAPTER_BIN#/}" = "$ADAPTER_BIN" ] && ADAPTER_BIN="$ROOT/$ADAPTER_BIN"
-# OR-chain pattern (P4.2, 2026-08-29): the shared hook's base tier no longer fires on a short single
-# literal (see hooks/ripwire-nudge.sh's §CEDE) — this fixture only exercises the ADAPTER's own
-# reshaping of whatever ripwire-nudge.sh emits, so it needs a nudge-eligible call underneath it.
+# §RETIRED (2026-09-02): the shared hook's PreToolUse path no longer emits ANY context — a randomized
+# A/B measured both nudge tiers inert and the registered consequence was applied (docs/EVALS.md §4,
+# hooks/ripwire-nudge.sh §RETIRED). These two arms used to assert that the adapter PRESERVED the
+# advisory context and STRIPPED the Claude-only `permissionDecision`. There is no longer any context to
+# preserve, so what they assert now is the property that actually still has to hold: the adapter passes
+# the shared hook's silence through as silence, exits 0, and writes nothing to stderr — a hook chain
+# that starts narrating on a PreToolUse call is what breaks Codex, whatever it narrates.
+#
+# The SessionStart half is where the adapter's reshaping still matters, and it is gated by
+# test/codexwrapcheck.sh and test/agentloopcodexcheck.sh rather than duplicated here.
 ADAPTER_JSON='{"session_id":"codex-adapter","cwd":"'"$ROOT"'","tool_name":"Grep","tool_input":{"pattern":"releaseTag|buildTag","path":"."}}'
+ADAPTER_ERR="$TMP/adapter.err"
 ADAPTER_OUT="$( printf '%s' "$ADAPTER_JSON" | PATH="$( dirname "$ADAPTER_BIN" ):$PATH" TMPDIR="$ADAPTER_TMP" \
-    RIPWIRE_HOME="$ADAPTER_TMP" RIPWIRE_METER_FIXTURE=1 bash "$CODEX_ADAPTER" )"
-printf '%s' "$ADAPTER_OUT" | jq -e '.hookSpecificOutput.additionalContext | length > 0' >/dev/null \
-    && ok "Codex adapter preserves model-visible advisory context" \
-    || no "Codex adapter dropped the advisory context"
-printf '%s' "$ADAPTER_OUT" | jq -e '.hookSpecificOutput.permissionDecision == null' >/dev/null \
-    && ok "Codex adapter removes allow-without-updatedInput" \
-    || no "Codex adapter emitted an invalid Codex permissionDecision"
+    RIPWIRE_HOME="$ADAPTER_TMP" RIPWIRE_METER_FIXTURE=1 bash "$CODEX_ADAPTER" 2>"$ADAPTER_ERR" )"
+ADAPTER_RC=$?
+[ "$ADAPTER_RC" -eq 0 ] && [ -z "$ADAPTER_OUT" ] \
+    && ok "Codex adapter passes the retired PreToolUse path through as silence, exit 0" \
+    || no "Codex adapter emitted something on a retired PreToolUse path: exit=$ADAPTER_RC out=[$ADAPTER_OUT]"
+[ ! -s "$ADAPTER_ERR" ] \
+    && ok "Codex adapter writes nothing to the hooked call's stderr" \
+    || no "Codex adapter leaked stderr: $( cat "$ADAPTER_ERR" )"
 
 HOME="$CODEX_FALLBACK_HOME" CODEX_HOME="$CODEX_ROOT" bash "$SK/install.sh" --codex-legacy >/dev/null 2>&1
 legacyFound=$( find -L "$CODEX_ROOT/skills" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | wc -l | tr -d ' ' )
