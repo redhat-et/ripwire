@@ -56,8 +56,15 @@ echo "=== 1. the dry-run receipt states the per-write recheck ==="
 ( cd "$D" && "$BIN" corpus --edit-plan=plans/plan.json --dry-run ) >"$TMP/dry.out" 2>"$TMP/dry.err"
 python3 - "$TMP/dry.out" >"$TMP/dry.v" <<'PY'
 import json, sys
-r = json.load(open(sys.argv[1], encoding="utf-8"))
-print("YES" if r.get("recheck_before_each_write") is True else "NO " + repr(r.get("recheck_before_each_write")))
+try:
+    r = json.load(open(sys.argv[1], encoding="utf-8"))
+except (json.JSONDecodeError, OSError) as e:
+    # F-17: a defective binary's non-JSON (or missing) stdout must fail this arm's grep cleanly, not
+    # dump a raw traceback ahead of the FAIL line — the traceback carried no information the "NO ..."
+    # line below doesn't already state.
+    print("NO unparseable stdout: " + str(e))
+else:
+    print("YES" if r.get("recheck_before_each_write") is True else "NO " + repr(r.get("recheck_before_each_write")))
 PY
 grep -q '^YES' "$TMP/dry.v" \
     && ok "dry-run receipt carries recheck_before_each_write:true" \
@@ -68,9 +75,15 @@ echo "=== 2. the apply receipt states it too, and the commit still lands every f
 ( cd "$D" && "$BIN" corpus --edit-plan=plans/plan.json --apply ) >"$TMP/app.out" 2>"$TMP/app.err"
 python3 - "$TMP/app.out" >"$TMP/app.v" <<'PY'
 import json, sys
-r = json.load(open(sys.argv[1], encoding="utf-8"))
-print("YES" if r.get("recheck_before_each_write") is True else "NO " + repr(r.get("recheck_before_each_write")))
-print("APPLIED", r.get("applied"), "FILES", r.get("files"), "ROLLBACK", r.get("rollback_on_write_error"))
+try:
+    r = json.load(open(sys.argv[1], encoding="utf-8"))
+except (json.JSONDecodeError, OSError) as e:
+    # F-17: same non-JSON-stdout guard as arm 1 — both lines downstream still get a value to grep against.
+    print("NO unparseable stdout: " + str(e))
+    print("APPLIED None FILES None ROLLBACK None")
+else:
+    print("YES" if r.get("recheck_before_each_write") is True else "NO " + repr(r.get("recheck_before_each_write")))
+    print("APPLIED", r.get("applied"), "FILES", r.get("files"), "ROLLBACK", r.get("rollback_on_write_error"))
 PY
 head -1 "$TMP/app.v" | grep -q '^YES' \
     && ok "apply receipt carries recheck_before_each_write:true" \
@@ -88,9 +101,14 @@ echo "=== 3. the two per-file safety claims travel together ==="
 # undo a bad write but not to notice someone else's good one.
 python3 - "$TMP/app.out" >"$TMP/pair.v" <<'PY'
 import json, sys
-r = json.load(open(sys.argv[1], encoding="utf-8"))
-rb, rc = r.get("rollback_on_write_error"), r.get("recheck_before_each_write")
-print("PAIRED" if rb is True and rc is True else "UNPAIRED rollback=%r recheck=%r" % (rb, rc))
+try:
+    r = json.load(open(sys.argv[1], encoding="utf-8"))
+except (json.JSONDecodeError, OSError) as e:
+    # F-17: same guard — an unparseable receipt is UNPAIRED by construction, not a crash.
+    print("UNPAIRED unparseable stdout: " + str(e))
+else:
+    rb, rc = r.get("rollback_on_write_error"), r.get("recheck_before_each_write")
+    print("PAIRED" if rb is True and rc is True else "UNPAIRED rollback=%r recheck=%r" % (rb, rc))
 PY
 grep -q '^PAIRED' "$TMP/pair.v" \
     && ok "rollback and per-write recheck are both claimed" \
