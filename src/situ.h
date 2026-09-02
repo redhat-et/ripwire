@@ -732,9 +732,7 @@ inline constexpr const char* kTestGateLegend =
     "ripwire test-gate (TDAD-parity, arXiv 2603.17973, -70% agent-caused regressions): tests to run for this "
     "change + the UNTESTED blast radius; exit 4 if tests OR untested is non-empty, else run them and rely on "
     "green. shown_tests=/shown_untested= are TWO INDEPENDENT row counts: the <t> tests-to-run rows and the "
-    "<u> blast-radius rows. The <t> rows are the COMPLETE obligation, never windowed, so they REPEAT "
-    "VERBATIM on every page (concatenate from one page only); offset=/limit= window the <u> rows alone, "
-    "default 25 (raise with limit=N, offset=M pages). script_gates_unmodelled= is the legacy test/*.sh "
+    "<u> blast-radius rows. script_gates_unmodelled= is the legacy test/*.sh "
     "corpus path count; script_gates_registered= counts suite members; script_gates_mapped= those with exact "
     "dependency evidence; script_gates_unresolved_dynamic= is the registered remainder, disclosed rather "
     "than guessed. Shell <t> rows join tests= only via evidence=script_literal (script text contains the "
@@ -744,7 +742,19 @@ inline constexpr const char* kTestGateLegend =
     // locally honest and the three numbers are not comparable, which is exactly how a reader gets it wrong.
     "UNIT: untested= here counts impacted SYMBOLS. The seams verb spells untested= over cross-directory "
     "call EDGES and the flip verb over the defs a gate lights — three different things, never compared or "
-    "summed across verbs. -->";
+    "summed across verbs. ";
+
+// 2026-09-02 (lane B, density round): the page-invariance and windowing contract is a rule about ROWS, and
+// on the empty-diff case — a clean working tree, the shape this verb is most often called in — there are no
+// rows for it to be a rule about. Split out so that case stops paying for it; shown_tests=/shown_untested=
+// keep their definition above unconditionally, because both attributes are on the root even at zero and
+// test/legendcoveragecheck.sh reads the root of exactly that bare run. The phrases
+// test/testgatelegendbudgetcheck.sh arm (b) pins ("REPEAT VERBATIM") live here and are asserted on the
+// src/model.h fixture, which has rows.
+inline constexpr const char* kTestGateRowLegend =
+    "The <t> rows are the COMPLETE obligation, never windowed, so they REPEAT VERBATIM on every page "
+    "(concatenate from one page only); offset=/limit= window the <u> rows alone, default 25 (raise with "
+    "limit=N, offset=M pages). ";
 
 // Emit the --test-gate report as minified XML (house shape) for an ALREADY-COMPUTED gate result. Deterministic
 // + xmllint-clean; the header counts are always full. §A3a: the <u> untested-row list joins pageview.h's
@@ -761,13 +771,15 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     std::vector<char> esc;
     const auto         ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
 
-    std::fprintf( out, "<!-- %s", kTestGateLegend );
     const PageWindow  uw        = pageWindow( r.untested.size(), effectiveRowCap( pageLimit, int( kMaxUntestedRows ) ), pageOffset );
     const std::size_t shownRows = uw.end - uw.begin;
     char              uab[ kPageDisclosureCap ];
     // r26-stamp Task A: anchor tests/untested to the commit (+dirty state) the change set was diffed against
     // — "" (omitted) when the caller passes no root (root="" ⇒ non-git-style skip, same convention as gitstamp.h).
     const std::size_t testRows = r.tests.size() + r.shellGates.obligations.size();
+    // The row-contract half is emitted only when this document HAS rows for it to govern.
+    std::fprintf( out, "<!-- %s%s-->", kTestGateLegend,
+                  ( testRows > 0 || !r.untested.empty() ) ? kTestGateRowLegend : "" );
     std::fprintf( out, "<test-gate changed=\"%u\" impacted=\"%zu\" tests=\"%zu\" untested=\"%zu\""
                        " shown_tests=\"%zu\" tests_capped=\"0\" shown_untested=\"%zu\" untested_capped=\"%d\""
                        " script_gates_unmodelled=\"%zu\" script_gates_registered=\"%zu\" script_gates_mapped=\"%zu\""

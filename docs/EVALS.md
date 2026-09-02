@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 497 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 498 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4485,6 +4485,73 @@ here counts impacted SYMBOLS`, `call EDGES`, `defs a gate lights`) shared with `
 (4,885 B / 332 B / 93.6%, `src/main.cpp:7528`). The MCP `tools/list` schema (37,925 B/session,
 descriptions 21,172 B, `src/mcp.h`) is larger and riskier and is spec-only, not attempted.
 
+### The done-checkpoint verbs (2026-09-02) — the C1/C2 follow-ups, executed
+
+**Why these three and not the biggest legend in the tree.** Per-session call-mix telemetry
+(`~/.ripwire/substitution.jsonl`, schema `docs/SUBSTITUTION_METER.md`) over a two-week window ranks
+`--quality-delta` FIRST among ripwire invocations — ahead of `--for`, `--quality-ack` and
+`--test-gate`, in that order — with the MCP transport last at zero. That ordering is the whole
+selection criterion: `--quality-delta` is the verb `CLAUDE.md` tells every agent to run before calling
+work done, so its fixed text is paid at every checkpoint, while the MCP `tools/list` schema
+(43,392 B/session) is bigger but is not on any measured path and was deliberately left alone. Only the
+RANKING is published here; absolute usage levels stay local by standing policy.
+
+**Measured before/after** (pre-fix = the `8e186bb` binary, post-fix = this head; both run against the
+same pinned `8e186bb` checkout so working-tree dirtiness cannot move a number). Legend = the sum of
+the LEADING contiguous `<!-- … -->` blocks, `test/panellegendcheck.sh`'s method.
+
+| shape (argv, run against a checkout pinned at `8e186bb`) | legend B before | after | Δ | payload B |
+| --- | ---: | ---: | ---: | ---: |
+| `--quality-delta` | 8,574 | **3,838** | −55.2% | 572 |
+| `--quality-delta --exclude=bench/external --scope='src/*'` | 10,512 | **5,112** | −51.4% | 859 |
+| `--quality-delta=HEAD~1..HEAD` (the ref-pair form) | 8,574 | **4,254** | −50.4% | 651 |
+| `--quality-delta` on a dirty fixture (6 findings incl. a clone group) | 8,574 | **3,376** | −60.6% | 771 |
+| `--quality-delta` after a `--quality-ack` round trip (acked=6) | 8,574 | **3,783** | −55.9% | 273 |
+| `--safe-delete=parseArgs` | 4,112 | **3,652** | −11.2% | 343 |
+| `--test-gate` on a clean tree (the empty-obligation case) | 1,332 | **1,111** | −16.6% | 299 |
+| `--test-gate=src/model.h` (rows present) | 1,332 | 1,332 | 0 | 2,791 |
+
+**Payload byte-identical, diff-proven with a non-zero row count** on every shape above (the empty-diff
+trap): the document minus its leading comment blocks is byte-for-byte the same from both binaries, at
+6–42 element tags per document. The `--quality-ack` round trip also writes a byte-identical
+`.ripwire_quality_acks` ledger and byte-identical stderr.
+
+**The mechanism — emit-on-presence, not deletion.** No disclosed limit was dropped and no fact moved
+to `docs/COMMANDS.md`. What changed is that a definition is emitted **when the thing it defines is in
+the document**, generalizing the rule `kScopeLegend` already followed alone: one `baseline=` marker
+sentence instead of five, the `at=` sentence only in the forms that carry `at=`, the identity and
+re-keying paragraphs only when their attribute families are on the root, the row and clone-row
+dictionaries only when there are rows, the `foreign-acks=` paragraph only when it is non-zero, and
+`--test-gate`'s page-invariance contract only when the document has rows for it to govern.
+`--safe-delete` names the one `risk=` value this run reports rather than a glossary of all three, and
+its `defs=` union and `ambiguous_callers=` caveats print only when `defs>1` / `ambiguous_callers>0`.
+
+**Coverage went UP, not down.** The definitional predicate `test/legendcoveragecheck.sh` arm (B) uses
+(the attribute name immediately followed by `=`) reports **zero** undefined root attributes on all
+four `--quality-delta` shapes, against 2–6 before: this lane closed `sa@key`, `sa@why`, `r@was`,
+`r@now`, `quality-delta@minor`, `quality-delta@stale` and `quality-delta@churn`, none of which
+`legendcoveragecheck`'s roster reaches because it runs only the bare working-tree form.
+
+**The ratchet is absolute bytes, and the arithmetic is why.** `test/donelegendcheck.sh` pins seven
+shapes by absolute legend size and reports the fraction as INFO. A `legend<=payload` arm is
+unsatisfiable on the case these verbs exist to handle well — a clean tree's payload is near-zero by
+construction — so at 40% of a 572 B payload the whole legend would have to fit in 381 B, shorter than
+the list of the ten measured kinds. **A ≤40% relative ceiling for `--quality-delta` and ≤50% for
+`--safe-delete`/`--test-gate` were considered and are recorded as UNREACHABLE rather than as missed
+work**: post-fix fractions are 87.0% / 91.4% / 78.8% on the clean cases and 81.4–86.7% wherever
+the payload is real. The same reasoning `test/testgatelegendbudgetcheck.sh` recorded in 2026-08-28.
+`test/donelegendcheck.sh` red-first-verified against the `8e186bb` binary: **20 failing assertions**
+(7 budgets, 9 emit-on-presence, 4 coverage), ALL PASS at this head. Its seven shapes are all measured
+on temp git fixtures the gate builds itself, including the ref-pair one — this repo's own
+`HEAD~1..HEAD` names a different diff after every landing, so a budget on it would be a ratchet whose
+value depends on whoever committed last.
+
+**The residual, named.** `--safe-delete`'s remaining 3,652 B is **1,679 B of the shared
+`rw::graphCountDisclosure()` tail**, left byte-identical on purpose: `test/floormarkcheck.sh` arm (4)
+asserts that tail is byte-identical across CLI and MCP on seven other verbs, and a private shorter
+copy here would be exactly the dialect divergence that gate exists to catch. Compacting it is a
+`src/graphlegend.h` change touching eight verbs at once, and is a separate round.
+
 ---
 
 ## 6. Correctness and quality instruments
@@ -4496,7 +4563,7 @@ descriptions 21,172 B, `src/mcp.h`) is larger and riskier and is spec-only, not 
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **497 gate scripts**, all of which exist on disk.
+naming **498 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5327,7 +5394,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 497. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 498. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a

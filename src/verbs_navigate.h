@@ -631,6 +631,63 @@ std::optional<int> runUses( const MainDispatch& d )
 // dead-code candidacy (--dead-code's own high-confidence shape — sourceHasStaticToken/deadCodeEligibleKind
 // above — asked about one already-resolved definition instead of the whole tree).
 //
+// The legend --safe-delete prints, hoisted out of runSafeDelete for the reason situ.h states of
+// kTestGateLegend: it is a paragraph, not control flow, and its three conditional clauses are decisions
+// ABOUT THE DOCUMENT, not about the walk that produced it.
+//
+// 2026-09-02 (lane B, density round): the legend was 2,433 B of own prose ahead of a 376 B payload on a
+// one-caller symbol. Three clauses now follow the same rule the quality-delta legend does — a definition is
+// emitted when the thing it defines is in the document. The defs union caveat prints only when defs really
+// is above one; the ambiguity caveat only when a caller in THIS document is ambiguous; and risk= gets the
+// sentence for the value this run reports rather than a glossary of all three, because a reader needs their
+// own verdict spelled out, not the other two. The shared graphCountDisclosure() tail is untouched, byte for
+// byte: test/floormarkcheck.sh arm (4) pins it across seven other verbs and a private shorter copy here
+// would be exactly the dialect divergence that gate exists to catch.
+//
+// §G4: an XML comment may never contain the literal byte pair "--", so every sibling-verb mention below is
+// spelled WITHOUT its leading flag dashes (impact/uses/callers/dead-code) — the one departure from how this
+// file's prose comments spell them elsewhere.
+inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t ambiguousCallers, std::string_view risk, bool singleRoot )
+{
+    std::printf( "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
+                "— never a verdict. defs= is resolveAllByNameQualified's match count, exactly as the impact/uses/callers "
+                "verbs already disclose it. callers= is the 1-hop caller count (the callers verb's own walk over defs' "
+                "in-edges); impact_reaches= is the FULL transitive blast radius (the impact verb's own walk); uses= is every "
+                "read/write/import/call/extends SITE of the name (the uses verb's own walk), reference-name-based, so an "
+                "overloaded name unions every definition's sites. All three are counts_floor= FLOORS, never totals — see "
+                "COUNTING UNIT below. tested_self= is 1 when an indexed test transitively CALLS this symbol (the tested= "
+                "lens; a test symbol itself is never counted, matching the metrics/for/exemplar verbs' rule), and "
+                "radius_tested= plus radius_untested= partition impact_reaches= by that same lens — radius_untested= equal "
+                "to impact_reaches= means NOTHING downstream is covered by an indexed test, the strongest signal here. "
+                "dead_code_candidate= is 1 ONLY when this selector resolves to exactly ONE definition and it is the "
+                "dead-code verb's own high-confidence shape (a source free function, non-header, internal/static linkage, "
+                "zero direct callers); a 0 never means \"in use\", only that this narrow detector's preconditions do not "
+                "hold here — run the dead-code verb for the full-corpus scan. ambiguous_callers= counts callers whose OWN "
+                "outgoing calls include at least one that resolved to more than one candidate definition (g.ambOut, the "
+                "same counter a ranked row's amb= reads). %s%srisk= NAMES what was found, never a go/no-go verdict, and "
+                "this run reports %s%s-->%s",
+                // The union caveat, only when there is a union to caveat.
+                defCount > 1
+                    ? "defs= is above 1 here, so EVERY count in this element UNIONS more than one physical definition "
+                      "sharing this name. "
+                    : "",
+                // The ambiguity caveat, only when a caller in this document actually is ambiguous. With the count at
+                // zero there is no row to be careful about, and the warning describes nothing on screen.
+                ambiguousCallers > 0
+                    ? "That is a caveat that one of the callers below MAY be reaching a different same-named definition, "
+                      "never proof that this one is (such a caller row carries amb=1); read the source if which-target "
+                      "matters. "
+                    : "",
+                // One risk= value, the one in force. A verdict a reader has to look up in a glossary of three is a
+                // marker string legible only to whoever wrote it.
+                  risk == "none-found"
+                      ? "none-found: zero callers AND zero uses — an ABSENCE of evidence, never evidence of absence. "
+                  : risk == "untested-radius"
+                      ? "untested-radius: callers or uses exist, and NONE of the transitive blast radius is test-covered. "
+                      : "uses-exist: callers or uses exist, and at least part of the radius is test-covered. ",
+                rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( singleRoot ) );
+}
+
 // risk= NAMES what was found, never a go/no-go verdict: "none-found" (zero 1-hop callers AND zero use
 // sites of any role — an ABSENCE of evidence, never evidence of absence: dynamic dispatch, callbacks and
 // unindexed macros contribute no edge either, same as every call-graph surface here), "untested-radius"
@@ -786,31 +843,16 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // §G4: an XML comment may never contain the literal byte pair "--", so every sibling-verb mention below
     // is spelled WITHOUT its leading flag dashes (impact/uses/callers/dead-code, never --impact/--uses/
     // --callers/--dead-code) — the one departure from how this file's prose comments spell them elsewhere.
-    std::printf( "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
-                "— never a verdict. defs= is resolveAllByNameQualified's match count, exactly as the impact/uses/callers "
-                "verbs already disclose it; above 1, every count below UNIONS more than one physical definition sharing this "
-                "name. callers= is the 1-hop caller count (the callers verb's own walk over defs' in-edges); impact_reaches= "
-                "is the FULL transitive blast radius (the impact verb's own walk) — like every graph-count surface here it "
-                "is a counts_floor= FLOOR, never a total (dynamic dispatch, callbacks and unindexed macros contribute no "
-                "edge — see COUNTING UNIT below). uses= is every read/write/import/call/extends SITE of the name (the uses "
-                "verb's own walk); reference-name-based, so an overloaded name unions every definition's sites. "
-                "tested_self=\"1\" means an indexed test transitively CALLS this symbol (the tested= lens — a test symbol "
-                "itself is never counted, matching the metrics/for/exemplar verbs' own rule). Of the impact_reaches= blast "
-                "radius, radius_tested=/radius_untested= partition it by that same lens; radius_untested= == impact_reaches= "
-                "means NOTHING downstream of this symbol is covered by an indexed test — the strongest signal this element "
-                "carries. dead_code_candidate=\"1\" fires ONLY when this selector resolves to exactly ONE definition and it "
-                "is the dead-code verb's own high-confidence shape (a source free function, non-header, internal/static "
-                "linkage, zero direct callers) — \"0\" never means \"in use\", only that this narrow detector's preconditions "
-                "do not hold here; run the dead-code verb for the full-corpus scan (it also accepts a directory filter). "
-                "ambiguous_callers= counts callers whose OWN outgoing calls include at least one that resolved to more than "
-                "one candidate definition (g.ambOut, the same per-symbol counter a ranked row's amb= reads) — a caveat that "
-                "one of the callers below MAY be reaching a different same-named definition, never proof that this one is "
-                "(a caller row that is itself ambiguous carries amb=\"1\"); read the source if which-target matters. risk= "
-                "NAMES what was found, never a go/no-go verdict: \"none-found\" (zero callers AND zero uses — an ABSENCE of "
-                "evidence, never evidence of absence), \"untested-radius\" (callers/uses exist and NONE of the transitive "
-                "blast radius is test-covered), or \"uses-exist\" (callers/uses exist and at least part of the radius is "
-                "tested). %s-->%s",
-                rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( sdSingleRoot ) );
+    //
+    // 2026-09-02 (lane B, density round): this legend was 2,433 B of own prose ahead of a 376 B payload on a
+    // one-caller symbol. Two sections now follow the SAME rule the quality-delta legend does — a definition
+    // is emitted when the thing it defines is in the document. The defs union caveat is printed only when
+    // defs really is above one, and risk= gets the sentence for the value THIS run reports rather than all
+    // three, because a reader needs their own verdict spelled out, not a glossary of the other two. The
+    // shared graphCountDisclosure() tail is untouched, byte for byte: test/floormarkcheck.sh pins it across
+    // seven other verbs and a private shorter copy here would be exactly the dialect divergence it exists
+    // to catch.
+    emitSafeDeleteLegend( defs.size(), ambiguousCallers, risk, sdSingleRoot );
 
     const Symbol&      lead = ing.symbols[ defs[0] ];   // resolveAllByNameQualified walks ascending id — defs[0] is the
                                                         // lowest, same convention --impact/--uses/--callers's of=/defs=
