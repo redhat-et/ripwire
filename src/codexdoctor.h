@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <string>
 #include <string_view>
@@ -164,19 +165,62 @@ inline bool everyCommandExecutable( const std::vector<std::string>& commands )
     } );
 }
 
-inline Check hooksCheck( const std::filesystem::path& hooksPath )
+// ---- HookSurvey — the facts BOTH agents' hook checks are made of, gathered once. The two agents
+//      register different hook scripts under different event names in different files, but the four
+//      questions are identical: was the config readable, how many entries name the nudge script, how
+//      many name the router, and does every one of those commands resolve to something executable.
+//      What differs is only which needles to look for and how the answers are worded, so the survey is
+//      shared and the two checks below stay short enough to read side by side.
+struct HookSurvey
 {
     bool read = false;
-    const std::string json = readSmallFile( hooksPath, read );
-    const std::vector<std::string> nudge = commandValuesContaining( json, "ripwire-codex-nudge.sh" );
-    const std::vector<std::string> route = commandValuesContaining( json, "ripwire-codex-route.sh" );
-    const bool events = json.find( "PreToolUse" ) != std::string::npos && json.find( "SessionStart" ) != std::string::npos
-                     && json.find( "UserPromptSubmit" ) != std::string::npos;
-    Check out{ "codex-hooks", read && events && nudge.size() >= 2 && !route.empty() && everyCommandExecutable( nudge ) && everyCommandExecutable( route ),
-               "configured=\"" + std::string( read ? "1" : "0" ) + "\" nudge_refs=\"" + std::to_string( nudge.size() )
-               + "\" route_refs=\"" + std::to_string( route.size() ) + "\"" };
-    if( !out.ok ) { out.attrs += " hint=\"run bash skills/install.sh --codex --hook to refresh all advisory Codex hooks\""; }
+    std::string json;
+    std::vector<std::string> nudge;
+    std::vector<std::string> route;
+    bool nudgeExecutable = false;
+    bool routeExecutable = false;
+};
+
+inline HookSurvey surveyHooks( const std::filesystem::path& path, std::string_view nudgeNeedle, std::string_view routeNeedle )
+{
+    HookSurvey out;
+    out.json = readSmallFile( path, out.read );
+    out.nudge = commandValuesContaining( out.json, nudgeNeedle );
+    out.route = commandValuesContaining( out.json, routeNeedle );
+    out.nudgeExecutable = everyCommandExecutable( out.nudge );
+    out.routeExecutable = everyCommandExecutable( out.route );
     return out;
+}
+
+inline bool namesEvents( const HookSurvey& survey, std::initializer_list<const char*> events )
+{
+    return std::all_of( events.begin(), events.end(),
+                        [ & ]( const char* event ) { return survey.json.find( event ) != std::string::npos; } );
+}
+
+// ---- hookRow — the row SHAPE both agents emit: configured, how many nudge references, and one
+//      route field whose key and value each agent chooses. Factored out with the survey above so the
+//      two checks below are four lines each and read as a pair of policies rather than a pair of
+//      near-identical bodies; the attribute vocabulary then cannot drift between agents by accident.
+inline Check hookRow( const char* name, const HookSurvey& survey, bool ok,
+                      const char* routeKey, const std::string& routeValue, const char* hint )
+{
+    Check out{ name, ok,
+               "configured=\"" + std::string( survey.read ? "1" : "0" ) + "\" nudge_refs=\""
+               + std::to_string( survey.nudge.size() ) + "\" " + routeKey + "=\"" + routeValue + "\"" };
+    if( !out.ok ) { out.attrs += " hint=\"" + std::string( hint ) + "\""; }
+    return out;
+}
+
+inline Check hooksCheck( const std::filesystem::path& hooksPath )
+{
+    // Two nudge references, not one: the PreToolUse entry and the SessionStart entry are registered
+    // together, and a config carrying only one of them is a half-finished install.
+    const HookSurvey survey = surveyHooks( hooksPath, "ripwire-codex-nudge.sh", "ripwire-codex-route.sh" );
+    const bool ok = survey.read && namesEvents( survey, { "PreToolUse", "SessionStart", "UserPromptSubmit" } )
+                 && survey.nudge.size() >= 2 && !survey.route.empty() && survey.nudgeExecutable && survey.routeExecutable;
+    return hookRow( "codex-hooks", survey, ok, "route_refs", std::to_string( survey.route.size() ),
+                    "run bash skills/install.sh --codex --hook to refresh all advisory Codex hooks" );
 }
 
 inline std::string tomlString( std::string_view section, std::string_view key )
@@ -205,6 +249,55 @@ inline Check mcpCheck( const std::filesystem::path& configPath )
                + ( executable ? "1" : "0" ) + "\" mcp_arg=\"" + ( mcpArg ? "1" : "0" ) + "\"" };
     if( !out.ok ) { out.attrs += " hint=\"run ripwire wrap codex and apply the printed mcp_servers.ripwire recipe\""; }
     return out;
+}
+
+// ---- THE CLAUDE SURFACE. It lives in this header rather than a claudedoctor.h of its own because it
+//      reuses `commandValuesContaining`, `everyCommandExecutable`, `readSmallFile` and `skillsCheck`
+//      verbatim: a second header would either duplicate those four or export them, and the file is
+//      already "read-only checks for a LIVE agent install surface" rather than "checks for Codex".
+//
+//      WHAT IT ADDS OVER THE CODEX ROW: `route_hook`, a plain boolean saying whether
+//      hooks/ripwire-claude-route.sh is registered as a UserPromptSubmit hook. That hook is the
+//      instrument the band pre-registered in docs/EVALS.md §4 is measured through, so "is it actually
+//      wired up" is a question whose answer must not be inferred from the absence of rows in a log —
+//      an unregistered hook and a hook that never fires produce the same empty log.
+//
+//      As everywhere else in this file, no configuration CONTENT is emitted: a doctor report gets
+//      pasted into issues, so the row carries counts and booleans and never a command line.
+inline Check claudeHooksCheck( const std::filesystem::path& settingsPath )
+{
+    // `route_hook` is a BOOLEAN here where the Codex row prints a count, and that is the one place the
+    // two rows deliberately differ: the Claude router is registered exactly once or not at all, and the
+    // pre-registered readout's first question is "is the instrument wired up", not "how many times".
+    const HookSurvey survey = surveyHooks( settingsPath, "ripwire-nudge.sh", "ripwire-claude-route.sh" );
+    const bool routeOk = !survey.route.empty() && namesEvents( survey, { "UserPromptSubmit" } ) && survey.routeExecutable;
+    const bool ok = survey.read && namesEvents( survey, { "PreToolUse", "SessionStart" } )
+                 && survey.nudge.size() >= 2 && survey.nudgeExecutable && routeOk;
+    return hookRow( "claude-hooks", survey, ok, "route_hook", routeOk ? "1" : "0",
+                    "run bash skills/install.sh --hook to register the meter, the primer and the prompt router" );
+}
+
+// The two shared checks name Codex in their remediation hints, and a hint that tells a Claude Code
+// user to run the Codex installer is worse than no hint at all. The MEASUREMENT is identical for both
+// agents; only the closing sentence differs, so it is rewritten here rather than parameterised through
+// call sites that would then have to keep two strings in step.
+inline void retargetHint( Check& check, std::string_view claudeHint )
+{
+    const std::size_t at = check.attrs.find( " hint=\"" );
+    if( at == std::string::npos ) { return; }
+    check.attrs = check.attrs.substr( 0, at ) + " hint=\"" + std::string( claudeHint ) + "\"";
+}
+
+inline std::vector<Check> claudeInspect( const std::string& selfPath )
+{
+    const std::filesystem::path claudeHome = envOr( "HOME", "" ) + "/.claude";
+    Check binary = binaryCheck( selfPath );
+    binary.name = "claude-binary";
+    retargetHint( binary, "reinstall the current build so Claude Code shell calls and this doctor resolve the same ripwire binary" );
+    Check skills = skillsCheck( claudeHome / "skills" );
+    skills.name = "claude-skills";
+    retargetHint( skills, "run bash skills/install.sh --claude to restore exact manifest parity" );
+    return { binary, skills, claudeHooksCheck( claudeHome / "settings.json" ) };
 }
 
 inline std::vector<Check> inspect( const std::string& selfPath )

@@ -1021,6 +1021,37 @@ case "$tool_name" in
     *) exit 0 ;;
 esac
 
+# ---- §ROUTE-OBSERVE (2026-09-02) — close the prompt router's adoption-within-two loop.
+#      hooks/ripwire-claude-route.sh decides, at UserPromptSubmit, which verb it recommended; only a
+#      PreToolUse hook can see whether the agent then ran it. So this hook hands the payload to that
+#      script's `--observe` arm, which writes its own row to routing.jsonl and touches nothing here.
+#
+#      SUBORDINATE, LIKE EVERYTHING ELSE IN THIS FILE: stdout and stderr are discarded and the exit
+#      status is swallowed, so a broken, missing or slow router cannot change what this hook does.
+#
+#      IT ALSO MUST NOT COST A FORK PER CALL ON A MACHINE WITH NO ROUTER. `--observe` returns
+#      immediately when there is no pending file for the session, but finding that out is already a
+#      fork — so the cheap precondition is checked HERE: routing-pending/ exists and holds at least one
+#      file. Without the router installed the directory never exists and this is one stat(). Only Bash
+#      and the MCP verbs are considered, because those are the only tools `--observe` can score.
+case "$tool_name" in
+    Bash|mcp__ripwire__*)
+        _robs="${BASH_SOURCE[0]%/*}/ripwire-claude-route.sh"
+        _rpd="${RIPWIRE_HOME:-${HOME:+$HOME/.ripwire}}/routing-pending"
+        if [ -x "$_robs" ] && [ -d "$_rpd" ]
+        then
+            for _rpf in "$_rpd"/*.json
+            do
+                if [ -e "$_rpf" ]
+                then
+                    { printf '%s' "$input" | "$_robs" --observe >/dev/null 2>&1; } || true
+                    break
+                fi
+            done
+        fi
+        ;;
+esac
+
 # ---- field extractor: jq if present (robust, handles escaping) else a flat grep/sed fallback that
 #      is adequate for this payload's simple, non-repeating string keys (tool_name, cwd, session_id,
 #      pattern, command, path never recur across nesting levels here). Degraded fallback never crashes

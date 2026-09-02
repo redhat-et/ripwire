@@ -32,6 +32,11 @@ if [ "${1:-}" = "--observe" ]; then
     sessionHash="$( hash_text "$session" )"
     pending="$meterHome/routing-pending/$sessionHash.json"
     [ -s "$pending" ] || exit 0
+    # The symmetric half of the guard in hooks/ripwire-claude-route.sh: both routers share this
+    # directory, so each observes only the files it wrote. Absent `agent` means "written before the
+    # field existed", which can only be this router — so the default keeps every existing file
+    # observable and nothing about this hook's behaviour changes on a Codex-only machine.
+    case "$( jq -r '.agent // "codex"' "$pending" 2>/dev/null )" in claude) exit 0 ;; esac
 
     tool="$( printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null )"
     command="$( printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null )"

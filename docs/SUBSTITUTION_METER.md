@@ -670,6 +670,35 @@ the nudge, however the log gets sliced.
 the hash of its id — deterministic, not re-rolled, and not something a config change mid-session can
 retroactively flip for calls already logged.
 
+## The other log in this directory: `routing.jsonl` (2026-09-02)
+
+`~/.ripwire/` now holds a second, smaller log written by a different instrument, and the two are
+deliberately separate files rather than one with a `kind` column.
+
+`routing.jsonl` is the **prompt routers'** log — `hooks/ripwire-claude-route.sh` (Claude Code
+`UserPromptSubmit`) and `hooks/ripwire-codex-route.sh` (the Codex equivalent). Its unit is a
+**prompt**, not a tool call; its rows are `UserPromptSubmit` decisions (`status`, `intent`,
+`recommended`, `arm`) and `RouteObservation` outcomes (`adopted` / `missed` / `continued`), and it is
+the instrument the band pre-registered in [`EVALS.md` §4](EVALS.md) ("Claude Code prompt router") is
+measured through. `agent` says which router wrote a row; a row without one predates the field and came
+from the Codex router.
+
+Three things it shares with this meter, and one it does not:
+
+- **The same arm.** `hooks/ripwire-claude-route.sh` resolves `arm` by the rules `meter_init` applies —
+  env over `meter.conf` over the `treatment` default, with `auto` selecting the same session-id hash —
+  so a session lands on the same side in both instruments and the two logs join on `session_hash`.
+- **The same fixture guard.** An explicit `RIPWIRE_HOME` keeps a gate run out of the operator's log,
+  and `RIPWIRE_ROUTE_METER=0` opts out of routing telemetry without disabling routing.
+- **The same "best-effort, never fatal" posture.** Every write degrades to silence.
+- **It records no prompt text at all.** This meter's `detail` field stores 200 characters of the raw
+  command, path or pattern, in cleartext, and says so under "Where the log lives" above.
+  `routing.jsonl` stores a `cksum` and a byte length instead. Prompt recovery from it is not a policy;
+  it is impossible.
+
+`bench/substitution_report.py` does not read `routing.jsonl` — different unit, different question, and
+folding them would put prompts and tool calls in one denominator.
+
 ## Reading the log
 
 ```bash

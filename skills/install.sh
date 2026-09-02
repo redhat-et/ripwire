@@ -40,6 +40,53 @@ refresh_hook_matcher()
     fi
 }
 
+# ── install_claude_route SETTINGS — register hooks/ripwire-claude-route.sh as a UserPromptSubmit hook.
+# SEPARATE FROM the PreToolUse merge below, and called from BOTH of its paths, deliberately: that
+# function returns early when the nudge entry already exists, so folding the router into its "add"
+# branch would mean every machine that ran --hook before 2026-09-02 never gets the router, silently,
+# forever. Idempotent the same way refresh_hook_matcher is — an entry that already names this command
+# is refreshed in place, never appended a second time.
+#
+# The D1 lesson, applied: the success echo is inside the `&& mv` chain, so a jq failure or an empty
+# temp file prints the failure line and leaves settings.json untouched. An installer that announces a
+# change it did not make is worse than one that fails loudly.
+install_claude_route()
+{
+    routeScript="$( dirname "$src" )/hooks/ripwire-claude-route.sh"
+    [ -f "$routeScript" ] || {
+        echo "skills/install.sh: hooks/ripwire-claude-route.sh is missing beside $src; router not registered." >&2
+        return 1
+    }
+    chmod +x "$routeScript" 2>/dev/null || true
+
+    if jq -e --arg cmd "$routeScript" \
+        'any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; .command == $cmd)' "$1" >/dev/null 2>&1; then
+        echo "ripwire UserPromptSubmit router already registered in $1 ($routeScript) — nothing to do."
+        return 0
+    fi
+
+    echo "skills/install.sh --hook will add this OPT-IN, advisory-only entry to $1:"
+    echo "  hooks.UserPromptSubmit += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$routeScript\" }] }]"
+    echo "  behavior: asks ripwire --help-task before the first tool is chosen and, ONLY at high"
+    echo "            confidence, adds one paste-ready command as context. It never blocks a prompt."
+    echo "  counting: appends one row per prompt to ~/.ripwire/routing.jsonl carrying a CHECKSUM and"
+    echo "            byte length of the prompt and a hashed session id — never the prompt text."
+    echo "            RIPWIRE_ROUTE_METER=0 opts out of that without disabling routing."
+
+    tmp="$( mktemp )"
+    if jq --arg cmd "$routeScript" '
+        .hooks //= {} |
+        .hooks.UserPromptSubmit //= [] |
+        .hooks.UserPromptSubmit += [{ matcher: "*", hooks: [{ type: "command", command: $cmd, timeout: 8 }] }]
+    ' "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
+        echo "done. Registered ripwire's UserPromptSubmit prompt router in $1."
+    else
+        rm -f "$tmp"
+        echo "skills/install.sh: could not merge the router into $1 (is it valid JSON?); nothing changed." >&2
+        return 1
+    fi
+}
+
 # ── --hook: register hooks/ripwire-nudge.sh as a PreToolUse hook in ~/.claude/settings.json ──
 # Advisory-only (see the script's own header): never blocks/denies/rewrites a tool call, fires at most
 # once per session per pattern. Idempotent — re-running does not duplicate the settings.json entry.
@@ -63,7 +110,8 @@ install_claude_hook()
     if jq -e --arg cmd "$hookScript" \
         'any((.hooks.PreToolUse // [])[]?.hooks[]?; .command == $cmd)' \
         "$settings" >/dev/null 2>&1; then
-        refresh_hook_matcher "$settings" "$hookScript" "$hookMatcher"
+        refresh_hook_matcher "$settings" "$hookScript" "$hookMatcher" || return $?
+        install_claude_route "$settings"
         return $?
     fi
 
@@ -77,7 +125,10 @@ install_claude_hook()
     echo "skills/install.sh --hook will add these OPT-IN, advisory-only entries to $settings:"
     echo "  hooks.PreToolUse  += [{ matcher: \"$hookMatcher\", hooks: [{ type: \"command\", command: \"$hookScript\" }] }]"
     echo "  hooks.SessionStart += [{ matcher: \"startup|resume|clear\", hooks: [{ type: \"command\", command: \"$hookScript --session-start\" }] }]"
-    echo "  behavior: never blocks/denies/rewrites a tool call; at most one suggestion per session per pattern."
+    echo "  behavior: never blocks/denies/rewrites a tool call, and since 2026-09-02 never speaks on it"
+    echo "            either — the advisory nudge was measured inert and retired (docs/EVALS.md §4)."
+    echo "            What remains on PreToolUse is the substitution meter and the router's adoption"
+    echo "            observation. The SessionStart entry still injects the use-when guidance."
     echo "  counting: appends one JSONL row per observed call to ~/.ripwire/substitution.jsonl, and that row"
     echo "            carries the RAW file path (Read), RAW grep/glob pattern, or the first 200 B of the RAW"
     echo "            command (Bash) you just ran, plus the absolute repo path and session id — in cleartext."
@@ -94,12 +145,13 @@ install_claude_hook()
         .hooks.SessionStart //= [] |
         .hooks.SessionStart += [{ matcher: "startup|resume|clear", hooks: [{ type: "command", command: $scmd }] }]
     ' "$settings" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$settings"; then
-        echo "done. Registered ripwire's PreToolUse nudge + SessionStart primer hooks in $settings."
+        echo "done. Registered ripwire's PreToolUse meter + SessionStart primer hooks in $settings."
     else
         rm -f "$tmp"
         echo "skills/install.sh: could not merge $settings (is it valid JSON?); nothing changed." >&2
         exit 1
     fi
+    install_claude_route "$settings"
 }
 
 install_codex_hook()
