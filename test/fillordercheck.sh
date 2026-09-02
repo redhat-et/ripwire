@@ -47,7 +47,14 @@ echo "fillordercheck: BIN=$BIN"
 order_of(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'order="?[a-zA-Z_:().-]+"?' | head -1 | sed -E 's/order="?//; s/"?$//'; }
 est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | grep -oE '[0-9]+'; }
 
-# ── #1: GOLDEN NEUTRAL — test/fixture (est_tokens=769) stays important-first, no auto-flip ─────────────
+# ── #1: GOLDEN NEUTRAL — test/fixture (est_tokens=837) stays important-first, no auto-flip ─────────────
+# RE-PINNED 769 → 837 (the member-variable round, card A3, 2026-09-02): the fixture's `struct Point` gains
+# two t="field" rows (Point.x, Point.y — new SymKind::Field) and the v1 legend comment grew its t= vocabulary
+# (|field(member-var;no-edges;uses=Owner.field)); +164 emitted bytes (1923 → 2087 = wc -c test/golden.xml,
+# regenerated in the same commit) at the same language-weighted rate: 2087/837 = 2.4934 B/tok, inside the
+# calibrated 2.36-2.59 band. Counts move 6/14/5 → 6/16/5 (two field rows, ZERO new edges — a field is never a
+# call target) and rank VALUES redistribute over 16 nodes; `important-first` is unchanged. The prior re-pins'
+# reasoning below still stands verbatim.
 # RE-PINNED 785 → 769 (R-R, 2026-08-24: root-relative EMISSION for ALL verbs): the companion to the
 # 2026-08-17 re-pin four paragraphs down. That landing relativized the per-row `p=`; this one finishes the
 # job on the per-row `id=`, which still carried the crawl root's own prefix ("test/fixture/" on each of the
@@ -103,7 +110,7 @@ est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | 
 # expectation is unchanged. The threshold (16000) is >25x this number either way.
 EFIX="$( est_of test/fixture )"
 OFIX="$( order_of test/fixture )"
-{ [ "$EFIX" = "769" ] && [ "$OFIX" = "important-first" ]; } \
+{ [ "$EFIX" = "837" ] && [ "$OFIX" = "important-first" ]; } \
     && ok "test/fixture (est_tokens=$EFIX) does NOT auto-flip — order=$OFIX (golden neutral)" \
     || no "test/fixture unexpectedly changed order or est_tokens (est=$EFIX order=$OFIX)"
 
