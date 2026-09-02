@@ -290,6 +290,12 @@ struct DriftResult
     std::string         filter;
     std::string         atStamp;                // r26-stamp Task A: gitstamp::stampAt(root) — "" on a non-git root
 
+    // F-04: a non-empty --doc-drift=FILTER that names no markdown document at all. The caller (runDocDrift)
+    // refuses on this rather than printing a page — the same ruling --scope and --dead-code=DIR already
+    // carry for their own filters: an exit-0 "docs=0 drift=0" reads as "no rot", not as "your filter is a
+    // typo", which is the one reading a filter this specific can never safely support silently.
+    bool                filterMatchedNothing = false;
+
     // A non-owning view of the caller's history index (--with-history), kept so the report can STATE what
     // the probe did. Views at the seam: the caller owns the index and outlives both the compute and the
     // write. nullptr ⇒ the probe was never asked for, and no <history> element is emitted at all.
@@ -2309,6 +2315,16 @@ inline DriftResult computeDocDrift( const IngestResult& ing, const std::string& 
     // The docs to scan, in index order — settled BEFORE any thread starts, so the slot each doc writes is
     // fixed by the file id and not by which worker got there first.
     DocScan scan = scanDocAnchors( ing, root, filter, defined );
+
+    // F-04: a filter that matched zero markdown documents is a user error (typo, moved file), not a clean
+    // tree — bail out here, before the expensive corpus scan, with nothing else computed. The caller turns
+    // this into a refusal; a flagless/empty-filter run with genuinely zero markdown docs in the tree is
+    // unaffected (filter.empty() short-circuits the check, same as --scope's own "no glob given" posture).
+    if( !filter.empty() && scan.docRel.empty() )
+    {
+        res.filterMatchedNothing = true;
+        return res;
+    }
 
     // …and the ORDERED half, serial: `facts` and `rows` grow in doc-index order, and the unread docs are
     // compacted out here rather than in a worker, so the alert fires once, in order, on the main thread.

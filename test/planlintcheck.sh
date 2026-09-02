@@ -136,6 +136,17 @@ MISSING_OUT="$( "$BIN" "$ROOT" --plan-lint="$TMP/does-not-exist.md" --no-cache 2
 [ -z "$MISSING_OUT" ] && ok "(5) nothing printed to stdout on refusal" || no "(5) stdout was non-empty on refusal"
 grep -q -- '--plan-lint' "$TMP/stderr" && ok "(5) stderr names the flag" || no "(5) stderr does not mention --plan-lint"
 
+# ── (5b) F-09: a DIRECTORY is refused, not silently linted as an empty clean plan ─────────────────────
+# darkflags::readWhole opens with fopen(path,"rb"); on this platform that open (and the immediate
+# zero-byte fread loop) both succeed on a directory, so before the stat() guard this used to print
+# dialect="0" at exit 0 — a directory reading as "clean plan" is a usage error, not a finding.
+mkdir -p "$TMP/adir"
+DIR_OUT="$( "$BIN" "$ROOT" --plan-lint="$TMP/adir" --no-cache 2>"$TMP/direrr" )"; DIR_RC=$?
+[ "$DIR_RC" = "1" ] && ok "(5b) a directory argument exits 1" || no "(5b) exit $DIR_RC, expected 1"
+[ -z "$DIR_OUT" ] && ok "(5b) nothing printed to stdout on a directory refusal" || no "(5b) stdout was non-empty: $DIR_OUT"
+grep -q 'is a directory' "$TMP/direrr" && ok "(5b) stderr names the specific reason (a directory, not a file)" \
+                                        || no "(5b) stderr does not name the directory reason: $( cat "$TMP/direrr" )"
+
 # ── (6) --json is not yet supported for this verb, and refuses LOUDLY rather than silently ignoring it
 JSON_OUT="$( "$BIN" "$ROOT" --plan-lint=test/planlintfix/wave.md --json --no-cache 2>"$TMP/jsonerr" )"; JSON_RC=$?
 [ "$JSON_RC" = "1" ] && ok "(6) --plan-lint --json refuses (exit 1)" || no "(6) --plan-lint --json exited $JSON_RC, expected 1"

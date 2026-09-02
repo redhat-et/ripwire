@@ -1494,6 +1494,16 @@ std::optional<int> runDocDrift( const MainDispatch& d )
 
     const docdrift::DriftResult result = docdrift::computeDocDrift( d.ing, d.root, d.cfg.excludes, d.cfg.docDriftFilter,
                                                                     d.cfg.withHistory ? &history : nullptr );
+    // F-04: a filter naming no markdown document at all refuses rather than printing docs="0" drift="0" —
+    // the same ruling --scope and --dead-code=DIR already apply to their own filters (verbs_quality.h).
+    if( result.filterMatchedNothing )
+    {
+        std::fprintf( stderr, "ripwire: --doc-drift=%.*s matches no document — an exit 0 under a filter that owns nothing is a "
+                              "failure, not a clean tree\n  (filter is a substring match against ROOT-RELATIVE markdown paths, "
+                              "e.g. --doc-drift=README or --doc-drift=docs/COMMANDS.md)\n",
+                      int( d.cfg.docDriftFilter.size() ), d.cfg.docDriftFilter.data() );
+        return 1;
+    }
     docdrift::writeDocDriftPage( stdout, result, d.cfg.detail ? SIZE_MAX : docdrift::kMaxAnchorsShown, d.cfg.gateabilityFlag,
                                  d.cfg.pageLimit, d.cfg.pageOffset );
     return 0;
@@ -1515,7 +1525,16 @@ std::optional<int> runPlanLint( const MainDispatch& d )
     const planlint::LintResult res = planlint::computePlanLint( file );
     if( !res.ok )
     {
-        std::fprintf( stderr, "ripwire: --plan-lint: cannot open '%s' (or it exceeds the size cap)\n", file.c_str() );
+        // F-09: a stat()-detected non-regular-file (a directory, most commonly) gets its own specific reason
+        // instead of the generic "cannot open" — the two causes are indistinguishable to a caller otherwise.
+        if( !res.refuseReason.empty() )
+        {
+            std::fprintf( stderr, "ripwire: --plan-lint: '%s' %s\n", file.c_str(), res.refuseReason.c_str() );
+        }
+        else
+        {
+            std::fprintf( stderr, "ripwire: --plan-lint: cannot open '%s' (or it exceeds the size cap)\n", file.c_str() );
+        }
         return 1;
     }
     planlint::writePlanLint( stdout, res );
