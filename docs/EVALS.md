@@ -997,6 +997,104 @@ text is what moved routing stands untouched, and the next instrument — the Cla
 pre-registered below — deliberately moves the intervention to a different moment: **before** the first
 tool is chosen, with a paste-ready command instead of a verb name.
 
+### Claude Code prompt router — PRE-REGISTERED 2026-09-02 (before any router code, and before deploy)
+
+The readout above retired an intervention that arrived **after** the agent had already chosen a
+default, inside a `PreToolUse` payload, carrying a verb name. This registration moves the intervention
+to a different moment and gives it a different payload, and registers the band **before** the code
+exists so that the next negative is as publishable as the last one.
+
+**The mechanism under test.** `hooks/ripwire-claude-route.sh`, a Claude Code `UserPromptSubmit` hook.
+On every submitted prompt it asks the deterministic `--help-task` classifier — the same one gated by
+`test/taskroutecheck.sh` at precision 1.000 / harmful 0.000 — and, **only** when that classifier
+returns `status="recommend"`, injects ONE paste-ready command as `additionalContext`. At
+`status="abstain"` it injects nothing at all. It is the Claude Code port of
+`hooks/ripwire-codex-route.sh`, which has shipped for Codex since 2026-08-28 and has never seen a
+measured session, because every measured session in this account runs in Claude Code.
+
+**Three things differ from the retired nudge, and they are the hypothesis.** (1) The moment: before
+the first tool is chosen, not after. (2) The payload: a runnable command with the arguments filled in
+from the prompt, not a verb name and an ellipsis. (3) The gate: a classifier with a measured
+precision, so the intervention is silent on the ~17% of prompts it cannot route rather than firing on
+everything. Any of the three could be the thing that matters; this round cannot separate them and does
+not claim to.
+
+**Primary metric — adoption-within-two, on recommended prompts only.** For each `UserPromptSubmit` row
+with `status="recommend"`, look at the next **two** ripwire-family tool calls in that session and ask
+whether either of them used the recommended verb. `adopted` / `missed` / `continued` are written by the
+hook itself, at observation time, into `~/.ripwire/routing.jsonl` — the `--observe` arm is invoked from
+the existing `PreToolUse` hook, so the outcome is an assignment the analysis reads rather than one it
+reconstructs from a transcript. The unit is a recommended prompt.
+
+**The control arm is a real counterfactual, not an absence.** The arm is decided by the same stable
+session-id hash the meter uses (`meter_auto_arm`), so a session is on the same arm in both instruments
+and the two logs join. A control session runs the classifier, writes the identical
+`UserPromptSubmit` row and the identical pending file, and **injects nothing**. Adoption-within-two is
+therefore measurable on both sides: the control arm's number is "how often would the agent have run
+that verb anyway", which is exactly the quantity the retired nudge never had and the reason its three
+readouts were all uninterpretable.
+
+**Band, pre-registered before the first row exists.** This is a difference between two arms, not a
+level, so it is stated directly:
+
+| Verdict | treatment − control, adoption-within-two on recommended prompts |
+| --- | --- |
+| **KEEP** | **≥ +10 pp** |
+| **REWORD** (inconclusive) | 0 pp – +10 pp |
+| **REMOVE** | **≤ 0 pp** |
+
+**Minimum data: ≥ 40 recommended prompts per arm.** Below that the readout is declared
+**underpowered** — not null — the router stays on, and the clock extends by two weeks, once. A second
+underpowered readout is a REMOVE: a router that cannot accumulate 40 recommended prompts per arm in a
+month of daily use is not reaching enough moments to matter, whatever its conversion rate would have
+been. The 95% interval is to be computed with sessions as the unit, as in the readout above, and
+reported with its `n` — the retired nudge's whole problem was three readouts with no interval on any of
+them.
+
+**Secondary, reported but not gating.** (a) Substitution share (`bench/substitution_report.py` §1, the
+per-session and per-repo cuts, never the pooled one) over the same window, treatment vs control — the
+router should move tool choice generally, not only on the prompts it spoke on. (b) Coverage: the
+`recommend` share of all prompts, which the `--help-task` corpus measures at 0.825 and which this log
+measures in the wild; a coverage collapse invalidates the readout the same way an `unclassified`
+drift does. (c) Route accuracy in the field is **not** measurable from this log by construction — the
+rows are hash-only — and no number resembling it will be reported from it.
+
+**Decision rule.** One readout, at four weeks (or six, under the extension). KEEP → the router stays as
+shipped. REWORD → one revision of the injected framing text, then a fresh registration with a new band;
+the mechanism is not re-litigated. **REMOVE → the hook is unregistered from the installer and deleted**,
+not left in place behind a flag. That is a deliberate change from the retired nudge's disposition,
+which was written as a config flip and consequently sat inert and unread for three weeks after its own
+data said to turn it off.
+
+**The instrument records no prompt text, by construction.** `routing.jsonl` rows carry a `cksum` of the
+prompt and its byte length, never the text; the session id is hashed too. Prompt recovery from this log
+is not a policy, it is impossible. `RIPWIRE_ROUTE_METER=0` opts out of logging without disabling
+routing, and an explicit `RIPWIRE_HOME` keeps fixture runs away from the operator's log — the same
+two-layer guard `docs/SUBSTITUTION_METER.md` §Fixture isolation describes, for the same reason.
+
+**Prompt-injection posture, registered as a contract rather than an aspiration.** The injected context
+is assembled from exactly two sources: compile-time constant framing text, and the `--help-task`
+classifier's own XML output, whose intent and command strings come from the binary's route table. **No
+repository content reaches it** — not a file name, not a symbol, not a match — and the user's prompt
+reaches it only as whatever the classifier echoes of it. `test/routehookcheck.sh` proves this with a
+hostile prompt carrying XML and JSON structure breakers plus imperative instructions, and asserts that
+the hook's stdout stays well-formed JSON whose `additionalContext` contains none of the injected
+markers. A router that can be steered by the thing it is reading would be a worse failure than a router
+that does not work.
+
+**Confounds, stated in full and in advance.** Single operator; heavily biased toward this repository.
+The router is a cause of the call it counts — that is the point, and it is why the metric is a
+between-arm difference rather than a level. Adoption-within-two is a proxy for usefulness, not a
+measure of it: an agent that reads the recommendation, decides it is wrong, and does something better
+scores as `missed`, and this instrument cannot tell that apart from an agent that ignored it. The
+window is two calls because a longer one collects verbs the agent would have reached anyway; that
+choice is registered here rather than tuned after the readout. And the `--help-task` classifier
+abstains on the data-flow prompt family (four of four probes as of 2026-09-02), so the `recommend`
+population is biased toward the intents it already covers.
+
+**The readout is a LATER session.** This lane ships the instrument and the band. Nothing in this
+registration is a result.
+
 ### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **The mechanism under test.** `--for` becomes terminal by default: after the ranked signatures, the
