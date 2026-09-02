@@ -22,7 +22,8 @@
 //     value) and `clear`/`pop_back` (no incoming value) dominate — so a curated method-name rule would
 //     mint far more false defs than true ones. A false def is strictly worse than an absent one here:
 //     sliceFlowExpandFwd breaks on the next def, so a fabricated def SUPPRESSES the reach of the real
-//     def before it. The cost is paid in the legend instead, and defs=/steps= carry counts_floor="1".
+//     def before it. The cost is paid in the legend instead, and every count carries counts="as-classified"
+//     (kSliceCountsAttrXml) — not counts_floor=, because a slice count over-includes as well.
 //   • PREPROCESSOR RULE (C-family) — `#if 0` bodies and the `#else` of `#if 1` are dropped (preproc_rows=
 //     discloses the count); every other conditional region is build-dependent, kept and flagged pp="1",
 //     and a pp def never kills the reach of the unconditional def before it. See SlicePp below.
@@ -44,7 +45,6 @@
 #include "serialize.h"     // escapeXml / appendCdataSafe / symTag / diskPath
 #include "redact.h"        // redactInPlace — statement lines are a body-emission seam
 #include "gitstamp.h"      // atAttr — the at="<sha>[+dirty]" root anchor, same placement as --edit-check
-#include "graphlegend.h"   // kGraphCountFloorAttrXml — ONE spelling of the floor marker, tree-wide
 #include "sarif.h"         // rootPrefixOf / rootRelativeUri — root-relative p=, same as every verb
 
 #include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — the three parse-refusal arms are degrades, not asserts
@@ -87,6 +87,13 @@ inline SliceFam sliceFamilyOf( Lang l ) noexcept
 
 // the served-set spelling for the unsupported-language refusal — kept beside the switch it restates
 inline constexpr const char* kSliceServedList = "c/cpp/objc (+cuda/metal), py, js/ts, go, java, rs";
+
+// THE COUNT MARKER. Every <slice> root carries counts="as-classified", appended LAST like the graph
+// verbs' counts_floor= — and deliberately not that marker: a floor promises true >= reported, and a
+// slice count breaks that promise in BOTH directions (defs= misses a write hidden behind a call; defs=
+// over-counts a build-dependent pp row or a same-spelled member the grammar exposes as an identifier).
+// The numbers are exact counts of what the name-based classifier rowed, and the legend says so.
+inline constexpr const char* kSliceCountsAttrXml = " counts=\"as-classified\"";
 
 // ── reserved-word exclusion ──────────────────────────────────────────────────────────────────────────
 //
@@ -1308,7 +1315,12 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         "worse than a missing one because the flow walk stops at the NEXT def, so a fabricated one suppresses the real def before it. "
         "The consequence to read for: a variable written ONLY through method calls reports defs= counting just its introduction, and a "
         "flow of steps=\"0\" — which means \"no def-use edge this slicer can prove\", never \"this variable is never written\". "
-        "counts_floor=\"1\" says exactly that of every count on the root: defs=, uses=, vars= and steps= are FLOORS, never totals. "
+        "counts=\"as-classified\" on the root replaces the graph verbs' counts_floor= marker ON PURPOSE: defs=, uses=, vars= and "
+        "steps= are exact counts of what this name-based classifier ROWED, and are NEITHER floors NOR totals of the variable's real "
+        "defs and uses. They run LOW where a write hides behind a call (the clause above: defs= misses it, uses= carries it) and HIGH "
+        "where a rowed occurrence is not this variable's — a pp=\"1\" row the build may compile out, or a same-spelled member/attribute "
+        "the family's grammar exposes as a bare identifier (Python `o.v`, Java `o.v`). A count here is a claim about the rows, never "
+        "about the program. "
         "Intra-procedural only: rows never cross into callees/callers "
         "(the callers/callees/uses verbs give the inter-procedural half). One <s> row per LINE touching VAR: k= def|use|both (both = "
         "the line writes AND reads it, e.g. `x += y`), t= the strongest role on the line (param > decl > assign > call-arg > read), "
@@ -1348,8 +1360,8 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             "at that step, d= the BFS depth it was reached at, f= the line it was reached FROM. Flow rows order by (d=, l=, v=) "
             "— a stated contract, not a walk artifact. steps= counts flow rows; depth= is the bound in force (default "
             "8, set with slice-depth); flow_truncated= \"1\" means the bound suppressed at least one row — the slice is bounded "
-            "here, NOT proven complete; its absence means the walk finished inside the bound. steps=\"0\" is a FLOOR like every "
-            "other count here (counts_floor=\"1\"): it means no def-use edge was PROVABLE from this seed, never that the variable "
+            "here, NOT proven complete; its absence means the walk finished inside the bound. steps=\"0\" is as-classified like every "
+            "other count here (counts=\"as-classified\" above): it means no def-use edge was PROVABLE from this seed, never that the variable "
             "has no data flow. Its commonest cause is v1's receiver-mutation limit above — a variable whose only writes are method "
             "calls ON it (queue.push_back(x)) has no def for the walk to anchor on, so both directions return zero while the v1 "
             "rows still SHOW those lines, classified as reads. Read the rows, not just the count. EXTRA LIMITS on top of v1's: "
@@ -1425,12 +1437,13 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
     }
 
     // at= then root=, appended after every pre-existing attribute — the --edit-check placement rule.
-    // counts_floor= goes LAST of all (graphlegend.h's own placement rule) so no attribute-ADJACENCY
-    // assertion in test/ can break on it: defs=/uses=/vars=/steps= are floors for the same reason the
-    // graph verbs' counts are — the classification is name-based, and receiver mutation is not a def.
+    // counts= goes LAST of all (the graphlegend.h placement rule for its counts_floor= sibling) so no
+    // attribute-ADJACENCY assertion in test/ can break on it. It is NOT counts_floor=: a slice count
+    // over-includes (a pp row, a same-spelled member) as well as under-includes (a write hidden behind a
+    // call), so "floor" was a false claim (audit 2026-09-02, F-03) — the marker says what the numbers ARE.
     out += gitstamp::atAttr( root );
     out += " root=\"";  out += ex( root );  out += "\"";
-    out += kGraphCountFloorAttrXml;
+    out += kSliceCountsAttrXml;
     out += ">";
 
     if( varName.empty() )

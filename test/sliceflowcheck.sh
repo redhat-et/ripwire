@@ -494,10 +494,12 @@ WC="$( run --slice=widecalc:delta --slice-flow=back )"
 #   (a) the semantics are unchanged — a future round that quietly promotes receiver calls to defs
 #       reds this arm and has to argue for it,
 #   (b) the zero is no longer bare — the legend names receiver mutation as a limit in its own words,
-#       and the root carries counts_floor="1" like the five graph verbs that are floors for the same
-#       name-based reason.
-# RED against the pre-fix binary on (b) and (c): the legend has no such clause and <slice> has no
-# counts_floor= attribute. Arm (a) is GREEN before and after, deliberately — it is the control.
+#       and the root carries counts="as-classified": NOT the graph verbs' counts_floor= — a slice count
+#       over-includes as well as under-includes (audit 2026-09-02, F-03: defs="3" where the variable has
+#       one def), so "floor" was a false claim and the marker now says what the numbers ARE — exact
+#       counts of what the name-based classifier rowed, neither floors nor totals of the program's truth.
+# RED against the pre-fix binary on (b) and (c): the legend has no such clause and <slice> carried the
+# counts_floor= marker it could not honour. Arm (a) is GREEN before and after, deliberately — the control.
 R="$( run --slice=gather:bag )"
 RF="$( run --slice=gather:bag --slice-flow=back )"
 [ "$( attr "$R" defs )" = 'defs="1"' ] && [ "$( attr "$RF" steps )" = 'steps="0"' ] \
@@ -507,23 +509,28 @@ RF="$( run --slice=gather:bag --slice-flow=back )"
 printf '%s' "$( elem "$R" )" | grep -q 'push_back' \
     && ok "(26a) the push_back line is still emitted as a row — under-classified, not omitted" \
     || { no "(26a) the receiver-mutation line must still appear as a row"; printf '%s\n' "$R"; }
-for lit in 'receiver' 'counts_floor='; do
-    printf '%s' "$( legend "$R" )" | grep -q -- "$lit" \
+for lit in 'receiver' 'counts="as-classified"' 'neither floors nor totals'; do
+    printf '%s' "$( legend "$R" )" | grep -qi -- "$lit" \
         && ok "(26b) v1 legend carries \"$lit\"" \
         || { no "(26b) the v1 legend must define/name \"$lit\""; }
 done
+# the legend may NAME counts_floor= (to say why it is absent) but must never CLAIM it
+printf '%s' "$( legend "$R" )" | grep -qE 'counts_floor="1"|are FLOORS' \
+    && no "(26b) the v1 legend must not claim a floor — a slice count over-includes too" \
+    || ok "(26b) the v1 legend makes no floor claim"
 printf '%s' "$( legend "$RF" )" | grep -q 'receiver' \
     && ok "(26b) the FLOW legend also names the receiver-mutation limit where steps= is defined" \
     || no "(26b) the flow legend must name receiver mutation beside its steps= definition"
-printf '%s' "$( elem "$R" )" | grep -q '^<slice [^>]*counts_floor="1"' \
-    && printf '%s' "$( elem "$RF" )" | grep -q '^<slice [^>]*counts_floor="1"' \
-    && ok "(26c) <slice> carries counts_floor=\"1\" — defs=/uses=/steps= are floors, seeded or not" \
-    || { no "(26c) <slice> must carry counts_floor=\"1\" on both the v1 and the flow form"; printf '%s\n' "$( elem "$R" )"; }
+printf '%s' "$( elem "$R" )" | grep -q '^<slice [^>]*counts="as-classified"' \
+    && printf '%s' "$( elem "$RF" )" | grep -q '^<slice [^>]*counts="as-classified"' \
+    && ! printf '%s' "$( elem "$R" )$( elem "$RF" )" | grep -q 'counts_floor=' \
+    && ok "(26c) <slice> carries counts=\"as-classified\" and NOT counts_floor= — defs=/uses=/steps= are what the classifier rowed, seeded or not" \
+    || { no "(26c) <slice> must carry counts=\"as-classified\" (never counts_floor=) on both the v1 and the flow form"; printf '%s\n' "$( elem "$R" )"; }
 # the inventory form is a count too (vars=), so it carries the marker as well
 RI="$( run --slice=gather )"
-printf '%s' "$( elem "$RI" )" | grep -q 'counts_floor="1"' \
-    && ok "(26c) the bare-inventory form carries the marker too (vars= is a floor)" \
-    || { no "(26c) --slice=SYM inventory must carry counts_floor=\"1\""; printf '%s\n' "$( elem "$RI" )"; }
+printf '%s' "$( elem "$RI" )" | grep -q 'counts="as-classified"' && ! printf '%s' "$( elem "$RI" )" | grep -q 'counts_floor=' \
+    && ok "(26c) the bare-inventory form carries the marker too (vars= is as-classified)" \
+    || { no "(26c) --slice=SYM inventory must carry counts=\"as-classified\""; printf '%s\n' "$( elem "$RI" )"; }
 
 # ── (27) preprocessor-dead regions never replace the live chain; build-dependent ones are flagged ───
 # RED against the pre-fix binary: if0:w back returned steps="1" whose only row was `v = 111;` from
