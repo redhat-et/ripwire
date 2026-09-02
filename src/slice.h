@@ -23,6 +23,9 @@
 //     mint far more false defs than true ones. A false def is strictly worse than an absent one here:
 //     sliceFlowExpandFwd breaks on the next def, so a fabricated def SUPPRESSES the reach of the real
 //     def before it. The cost is paid in the legend instead, and defs=/steps= carry counts_floor="1".
+//   • PREPROCESSOR RULE (C-family) — `#if 0` bodies and the `#else` of `#if 1` are dropped (preproc_rows=
+//     discloses the count); every other conditional region is build-dependent, kept and flagged pp="1",
+//     and a pp def never kills the reach of the unconditional def before it. See SlicePp below.
 //   • INTRA-PROCEDURAL ONLY — rows never cross into callees/callers.
 //   • SERVED LANGUAGES ONLY — classification is a per-language-family parent-kind read, verified per
 //     vendored grammar: C-family (C/C++/ObjC, +CUDA/Metal riding Lang::Cpp), Python, JS/TS, Go, Java,
@@ -191,6 +194,7 @@ struct SliceOcc
     bool          isDef    = false;
     bool          isUse    = false;
     bool          skip     = false;   // a non-occurrence (e.g. a Python keyword-argument NAME) — never emitted
+    bool          pp       = false;   // inside a BUILD-DEPENDENT preprocessor region (#ifdef/#ifndef/#if EXPR) — kept, flagged pp="1"
 };
 
 struct SliceLocal
@@ -214,7 +218,69 @@ struct SliceScan
     std::vector<SliceOcc>      occ;               // VAR-mode occurrences, source order (empty when var empty)
     std::vector<SliceLocal>    locals;            // the sliceable-locals inventory, first-def order
     std::vector<SliceNamedOcc> all;               // EVERY classified occurrence, source order (flow substrate)
+    std::vector<SliceNamedOcc> dropped;           // occurrences inside a preprocessor-DEAD region — never rows; preproc_rows= counts their lines
 };
+
+// tree-sitter micro-helpers, in the house spelling
+inline bool sliceKindIs( TSNode n, const char* kind ) noexcept
+{
+    return std::strcmp( ts_node_type( n ), kind ) == 0;
+}
+
+// ── preprocessor-conditional regions (C-family only) ─────────────────────────────────────────────────
+//
+// tree-sitter-c/cpp parse `#if`/`#ifdef` blocks inside a body as preproc_if / preproc_ifdef nodes whose
+// direct children are the guarded statements and whose `alternative` field is the `#else` / `#elif` /
+// `#elifdef` chain. A lexical walk that ignores them reads a def under `#if 0` as a real def, and because
+// the flow walk stops at the NEXT def, that dead def then REPLACES the live chain (audit 2026-09-02,
+// F-01: `--slice=if0:w --slice-flow=back` returned only `v = 111;` from inside `#if 0`).
+//
+// THE RULE, exactly as the legend states it:
+//   • DECIDED — the literal conditions. `#if 0`'s body and the `#else` of `#if 1` are DEAD: their rows are
+//     dropped and counted on the root as preproc_rows=. `#if 1`'s body and the `#else` of `#if 0` are
+//     LIVE and unmarked. Only the bare literal decides (`#if (0)` is an expression, see below).
+//   • UNDECIDED — everything else: `#ifdef X`, `#ifndef X`, `#elifdef`, `#if defined(X)`, `#if EXPR`,
+//     `#elif`. Whether X is defined belongs to the BUILD (-DNDEBUG, -DHAVE_FOO), not to the file; "the
+//     file never #defines X" is exactly the shape of a build-defined macro, so it is not evidence of
+//     dead code. These rows are KEPT and flagged pp="1", and a pp def does not kill the reach of the
+//     unconditional def before it in the flow walk — both are emitted, so the worst case is an extra
+//     flagged row, never a replaced chain.
+//   • A region that ENCLOSES the whole definition is not considered (the definition exists as indexed;
+//     an include guard wraps every function in a header). Only conditionals starting inside the span.
+//   • Condition text (`#ifdef NAME`, `#if defined(X)`) is never an occurrence: macro names are not
+//     variables.
+enum class SlicePp : std::uint8_t { Live = 0, Undecided = 1, Dead = 2 };
+
+inline bool sliceIsPreprocConditional( TSNode n ) noexcept
+{
+    return sliceKindIs( n, "preproc_if" ) || sliceKindIs( n, "preproc_ifdef" ) || sliceKindIs( n, "preproc_elif" )
+           || sliceKindIs( n, "preproc_elifdef" ) || sliceKindIs( n, "preproc_else" );
+}
+
+// the states of (this node's own body, its `alternative` chain), folded under the enclosing state —
+// dead dominates, undecided survives a live inner literal, live never lifts an outer undecided
+inline std::pair<SlicePp, SlicePp> slicePreprocBranchStates( TSNode n, std::string_view src, SlicePp enclosing ) noexcept
+{
+    SlicePp body = SlicePp::Undecided, alt = SlicePp::Undecided;
+    if( sliceKindIs( n, "preproc_else" ) )
+    {
+        body = SlicePp::Live;   // the caller already folded the chain's state into `enclosing`
+        alt  = SlicePp::Live;
+    }
+    else if( sliceKindIs( n, "preproc_if" ) || sliceKindIs( n, "preproc_elif" ) )
+    {
+        const TSNode cond = ts_node_child_by_field_name( n, "condition", 9 );
+        if( !ts_node_is_null( cond ) && sliceKindIs( cond, "number_literal" ) )
+        {
+            const std::uint32_t a = ts_node_start_byte( cond ), b = ts_node_end_byte( cond );
+            const std::string_view text = ( b > a && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view();
+            if( text == "0" )      { body = SlicePp::Dead;  alt = SlicePp::Live; }
+            else if( text == "1" ) { body = SlicePp::Live;  alt = SlicePp::Dead; }
+        }
+    }
+    const auto fold = []( SlicePp outer, SlicePp inner ) noexcept { return std::uint8_t( outer ) > std::uint8_t( inner ) ? outer : inner; };
+    return { fold( enclosing, body ), fold( enclosing, alt ) };
+}
 
 // ── the line seed (lane/tc-sliceat): --slice --at=FILE:LINE / --slice=@FILE:LINE — ARISE's own seed ────
 //
@@ -259,12 +325,6 @@ inline std::vector<std::string> sliceSeedLineLocals( const SliceScan& scan, std:
     }
     std::sort( out.begin(), out.end() );
     return out;
-}
-
-// tree-sitter micro-helpers, in the house spelling
-inline bool sliceKindIs( TSNode n, const char* kind ) noexcept
-{
-    return std::strcmp( ts_node_type( n ), kind ) == 0;
 }
 
 inline TSNode sliceField( TSNode p, const char* field ) noexcept
@@ -726,12 +786,34 @@ inline std::uint32_t sliceStmtAnchorLine( TSNode node, SliceFam fam ) noexcept
 inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanEnd, SliceFam fam, Lang lang,
                        std::string_view src, std::string_view varName,
                        std::vector<SliceOcc>& occ, std::vector<SliceLocal>& locals, std::string_view selfName,
-                       std::vector<SliceNamedOcc>& all )
+                       std::vector<SliceNamedOcc>& all, std::vector<SliceNamedOcc>& dropped, SlicePp pp )
 {
     const std::uint32_t a = ts_node_start_byte( node ), b = ts_node_end_byte( node );
     if( b <= spanStart || a >= spanEnd )
     {
         return;   // disjoint from the definition — prune the subtree
+    }
+
+    // a preprocessor conditional STARTING inside the definition: decide (or refuse to decide) each
+    // branch, skip the condition text, and carry the state down — see SlicePp for the rule
+    if( fam == SliceFam::C && a >= spanStart && sliceIsPreprocConditional( node ) )
+    {
+        const auto [ bodyState, altState ] = slicePreprocBranchStates( node, src, pp );
+        const TSNode condition   = sliceField( node, "condition" );
+        const TSNode macroName   = sliceField( node, "name" );
+        const TSNode alternative = sliceField( node, "alternative" );
+        const std::uint32_t ppChildCount = ts_node_child_count( node );
+        for( std::uint32_t childIndex = 0; childIndex < ppChildCount; ++childIndex )
+        {
+            const TSNode child = ts_node_child( node, childIndex );
+            if( ( !ts_node_is_null( condition ) && ts_node_eq( child, condition ) ) || ( !ts_node_is_null( macroName ) && ts_node_eq( child, macroName ) ) )
+            {
+                continue;   // macro names and #if expressions are never variable occurrences
+            }
+            const bool isAlt = !ts_node_is_null( alternative ) && ts_node_eq( child, alternative );
+            sliceWalk( child, spanStart, spanEnd, fam, lang, src, varName, occ, locals, selfName, all, dropped, isAlt ? altState : bodyState );
+        }
+        return;
     }
 
     // the C-family also yields variable occurrences dressed as type_identifier: the arguments of a
@@ -749,6 +831,12 @@ inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanE
         if( !c.skip )
         {
             c.stmtLine = sliceStmtAnchorLine( node, fam );
+            c.pp       = pp == SlicePp::Undecided;
+            if( pp == SlicePp::Dead )
+            {
+                dropped.push_back( SliceNamedOcc{ std::string( text ), c } );   // counted (preproc_rows=), never a row, never a local
+                return;
+            }
             all.push_back( SliceNamedOcc{ std::string( text ), c } );
             if( !varName.empty() && text == varName )
             {
@@ -775,7 +863,7 @@ inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanE
     const std::uint32_t childCount = ts_node_child_count( node );
     for( std::uint32_t i = 0; i < childCount; ++i )
     {
-        sliceWalk( ts_node_child( node, i ), spanStart, spanEnd, fam, lang, src, varName, occ, locals, selfName, all );
+        sliceWalk( ts_node_child( node, i ), spanStart, spanEnd, fam, lang, src, varName, occ, locals, selfName, all, dropped, pp );
     }
 }
 
@@ -811,7 +899,8 @@ inline SliceScan sliceScanDefinition( const std::string& src, const Symbol& sym,
         return scan;
     }
 
-    sliceWalk( ts_tree_root_node( tree ), sym.sigStartByte, sym.endByte, fam, sym.lang, src, varName, scan.occ, scan.locals, sym.name, scan.all );
+    sliceWalk( ts_tree_root_node( tree ), sym.sigStartByte, sym.endByte, fam, sym.lang, src, varName, scan.occ, scan.locals, sym.name, scan.all,
+               scan.dropped, SlicePp::Live );
     scan.parseOk = true;
 
     ts_tree_delete( tree );
@@ -844,26 +933,34 @@ struct SliceLineRow
     bool          hasDef = false;
     bool          hasUse = false;
     OccT          t      = OccT::Read;
+    bool          pp     = false;   // the line sits in a build-dependent preprocessor region (a line never straddles one)
 };
 
-// fold line-ascending occurrences into per-line rows — the ONE aggregation both the v1 seed rows and
-// the flow substrate use, so the two can never disagree on what a line's k=/t= is
+// fold ONE occurrence into the row list — the single aggregation rule both the v1 seed rows and the
+// flow substrate use, so the two can never disagree on what a line's k=/t=/pp= is
+inline void sliceFoldOcc( std::vector<SliceLineRow>& rows, const SliceOcc& o )
+{
+    if( rows.empty() || rows.back().line != o.line )
+    {
+        rows.push_back( SliceLineRow{ o.line, false, false, OccT::Read, false } );
+    }
+    SliceLineRow& r = rows.back();
+    r.hasDef = r.hasDef || o.isDef;
+    r.hasUse = r.hasUse || o.isUse;
+    r.pp     = r.pp || o.pp;
+    if( std::uint8_t( o.t ) < std::uint8_t( r.t ) )
+    {
+        r.t = o.t;   // enum order IS the priority order
+    }
+}
+
+// fold line-ascending occurrences into per-line rows
 inline std::vector<SliceLineRow> sliceFoldLines( const std::vector<SliceOcc>& occ )
 {
     std::vector<SliceLineRow> rows;
     for( const SliceOcc& o : occ )
     {
-        if( rows.empty() || rows.back().line != o.line )
-        {
-            rows.push_back( SliceLineRow{ o.line, false, false, OccT::Read } );
-        }
-        SliceLineRow& r = rows.back();
-        r.hasDef = r.hasDef || o.isDef;
-        r.hasUse = r.hasUse || o.isUse;
-        if( std::uint8_t( o.t ) < std::uint8_t( r.t ) )
-        {
-            r.t = o.t;   // enum order IS the priority order
-        }
+        sliceFoldOcc( rows, o );
     }
     return rows;
 }
@@ -907,19 +1004,26 @@ struct SliceFlowSpec
     std::uint32_t       bound = kSliceFlowDefaultDepth;
 };
 
-// the reaching definition of vars[vi] at line L: the LAST def row strictly before L in source order
-// (the paper's edge rule, at line grain). Returns the row index, or npos when no def precedes.
-inline std::size_t sliceReachingDef( const SliceVarRows& v, std::uint32_t line )
+// the reaching definitions of vars[vi] at line L: the LAST unconditional def row strictly before L in
+// source order (the paper's edge rule, at line grain) PLUS every build-dependent (pp) def row after it —
+// a def the build may compile out cannot be allowed to hide the def it would otherwise replace, so both
+// are reaching. Empty when no def precedes.
+inline std::vector<std::size_t> sliceReachingDefs( const SliceVarRows& v, std::uint32_t line )
 {
-    std::size_t hit = std::size_t( -1 );
+    std::vector<std::size_t> hits;
     for( std::size_t rowIndex = 0; rowIndex < v.rows.size() && v.rows[ rowIndex ].line < line; ++rowIndex )
     {
-        if( v.rows[ rowIndex ].hasDef )
+        if( !v.rows[ rowIndex ].hasDef )
         {
-            hit = rowIndex;
+            continue;
         }
+        if( !v.rows[ rowIndex ].pp )
+        {
+            hits.clear();   // an unconditional def kills every reach before it
+        }
+        hits.push_back( rowIndex );
     }
-    return hit;
+    return hits;
 }
 
 // the bounded BFS. Emission dedups per (var, line) row — first (shallowest) reach wins; in Both mode
@@ -940,18 +1044,7 @@ inline std::vector<SliceVarRows> sliceFoldVarRows( const SliceScan& scan )
         {
             vars.push_back( SliceVarRows{ no.name, {} } );
         }
-        std::vector<SliceLineRow>& rows = vars.back().rows;
-        if( rows.empty() || rows.back().line != no.occ.line )
-        {
-            rows.push_back( SliceLineRow{ no.occ.line, false, false, OccT::Read } );
-        }
-        SliceLineRow& r = rows.back();
-        r.hasDef = r.hasDef || no.occ.isDef;
-        r.hasUse = r.hasUse || no.occ.isUse;
-        if( std::uint8_t( no.occ.t ) < std::uint8_t( r.t ) )
-        {
-            r.t = no.occ.t;
-        }
+        sliceFoldOcc( vars.back().rows, no.occ );
     }
     return vars;
 }
@@ -1006,8 +1099,7 @@ inline void sliceFlowExpandBack( const std::vector<SliceVarRows>& vars, const st
         for( const SliceAnchorOcc& useOcc : anchorOccs )
         {
             if( useOcc.anchor != defOcc.anchor || !useOcc.isUse ) { continue; }
-            const std::size_t rd = sliceReachingDef( vars[ useOcc.varIdx ], defOcc.anchor );
-            if( rd != std::size_t( -1 ) )
+            for( const std::size_t rd : sliceReachingDefs( vars[ useOcc.varIdx ], defOcc.anchor ) )
             {
                 emitRow( useOcc.varIdx, rd, d + 1, line );
                 enqueue( useOcc.varIdx, rd, d + 1 );
@@ -1017,9 +1109,10 @@ inline void sliceFlowExpandBack( const std::vector<SliceVarRows>& vars, const st
 }
 
 // forward expansion of one DEF node: the def reaches every later use of the same variable up to (and
-// including) its next redefinition; a reached STATEMENT that defines a variable carries the value
-// onward — continuation lines included. A use inside the def's OWN statement (possible only when the
-// statement spans lines) is the PREVIOUS def's reader, so it is skipped.
+// including) its next UNCONDITIONAL redefinition (a build-dependent pp def is passed through — it may
+// not be compiled); a reached STATEMENT that defines a variable carries the value onward — continuation
+// lines included. A use inside the def's OWN statement (possible only when the statement spans lines)
+// is the PREVIOUS def's reader, so it is skipped.
 template< class EmitFn, class EnqueueFn >
 inline void sliceFlowExpandFwd( const std::vector<SliceVarRows>& vars, const std::vector<SliceAnchorOcc>& anchorOccs,
                                 std::uint32_t varIdx, std::uint32_t rowIdx, std::uint32_t d, std::uint32_t line,
@@ -1058,7 +1151,7 @@ inline void sliceFlowExpandFwd( const std::vector<SliceVarRows>& vars, const std
                 }
             }
         }
-        if( r.hasDef ) { break; }   // the next def kills this def's reach
+        if( r.hasDef && !r.pp ) { break; }   // the next UNCONDITIONAL def kills this def's reach; a build-dependent one may not exist
     }
 }
 
@@ -1221,7 +1314,13 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         "the line writes AND reads it, e.g. `x += y`), t= the strongest role on the line (param > decl > assign > call-arg > read), "
         "CDATA = the trimmed source line. defs=/uses= count OCCURRENCES, not lines. A reserved word of the definition's own language "
         "is never an occurrence or a local — a keyword lexed as an identifier is a degraded-parse artifact and is dropped, so slicing "
-        "one refuses like any unknown VAR. Bare slice=SYM (no :VAR) lists the sliceable "
+        "one refuses like any unknown VAR. PREPROCESSOR RULE (C-family): a conditional region starting inside the definition is "
+        "decided only by its literal — the body of `#if 0` and the `#else` of `#if 1` are DEAD, their rows are dropped and their "
+        "line count disclosed as preproc_rows= (absent when nothing was dropped), so a never-compiled def can never replace the live "
+        "chain; every OTHER conditional (`#ifdef X`, `#ifndef X`, `#if defined(X)`, `#if EXPR`, `#elif`) depends on the BUILD's macro "
+        "set, which this slicer does not have, so its rows are KEPT and each carries pp=\"1\" — read a pp=\"1\" def as one the build "
+        "may compile out, and in a flow it does not kill the reach of the unconditional def before it (both are emitted). Macro "
+        "names in `#ifdef`/`#if` text are never occurrences. Bare slice=SYM (no :VAR) lists the sliceable "
         "locals instead (<v n= l= t=/> rows at their first-def line, vars= the count). Languages served: C/C++/ObjC (+CUDA/Metal via "
         "the C-family grammars), Python, JS/TS, Go, Java, Rust — every other language refuses loudly, never an empty success. -->";
 
@@ -1257,7 +1356,9 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             "line-granular ROWS (a multi-statement line merges and may over-connect) over statement-anchored CHAINING (a "
             "statement spanning several lines chains as ONE unit keyed on its first line), and flow follows "
             "NAMES, not values — no alias analysis, no flow sensitivity beyond source order, shadowing may over-include. DATA dependence "
-            "only — no control dependence: the guard (if/loop) deciding whether a def executes is never a row. -->";
+            "only — no control dependence: the guard (if/loop) deciding whether a def executes is never a row. A pp=\"1\" def (build-"
+            "dependent preprocessor region, v1's rule above) is a reaching def AND so is the unconditional def before it — the walk "
+            "passes through it in both directions rather than let a def the build may drop hide the one it would replace. -->";
     }
 
     out += "<slice sym=\"";  out += ex( s.name );
@@ -1302,6 +1403,24 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             {
                 out += " flow_truncated=\"1\"";
             }
+        }
+    }
+
+    // preproc_rows= — the LINES a preprocessor-dead region cost this answer: in VAR mode the seed
+    // variable's dropped lines (the rows that would have printed), in inventory mode every dropped line
+    // holding an occurrence. Absent when zero (the skipped verb's "absent means nothing was dropped").
+    {
+        std::vector<std::uint32_t> droppedLines;
+        for( const SliceNamedOcc& no : scan.dropped )
+        {
+            if( ( varName.empty() || no.name == varName ) && std::find( droppedLines.begin(), droppedLines.end(), no.occ.line ) == droppedLines.end() )
+            {
+                droppedLines.push_back( no.occ.line );
+            }
+        }
+        if( !droppedLines.empty() )
+        {
+            out += " preproc_rows=\"" + std::to_string( droppedLines.size() ) + "\"";
         }
     }
 
@@ -1361,6 +1480,10 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
             out += "\" t=\"";
             out += occTag( r.t );
             out += "\"";
+            if( r.pp )
+            {
+                out += " pp=\"1\"";   // LAST on the row, so no k=/t= adjacency assertion can break on it
+            }
             rowTail( r.line );
         }
 
@@ -1376,6 +1499,10 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
                 out += "\" t=\"";
                 out += occTag( r.t );
                 out += "\" v=\"" + ex( v.name ) + "\" d=\"" + std::to_string( fr.d ) + "\" f=\"" + std::to_string( fr.from ) + "\"";
+                if( r.pp )
+                {
+                    out += " pp=\"1\"";
+                }
                 rowTail( r.line );
             }
         }

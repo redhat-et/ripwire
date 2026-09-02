@@ -31,6 +31,10 @@
 #   (9)  xmllint well-formedness
 #   (10) legend honesty: reaching-definition wording, f=/d=/steps= defined, line-granularity, alias
 #        and no-control-dependence limits
+#   (27) preprocessor-dead regions (C-family): `#if 0` bodies and the `#else` of `#if 1` are DROPPED
+#        (preproc_rows= counts them) so a dead def can never replace the live chain; every other
+#        conditional region (`#ifdef`/`#ifndef`/`#if EXPR`) is build-dependent, so its rows are KEPT,
+#        flagged pp="1", and a pp def does not kill the reach of the unconditional def before it
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/sliceflowcheck.sh   |   bash test/sliceflowcheck.sh path/to/ripwire
 
@@ -128,6 +132,44 @@ int gather( int seed, int cap )
     bag.reserve( cap );
     bag.push_back( seed );
     return bag.size();
+}
+EOF
+
+# arm (27)'s fuel: PREPROCESSOR-CONDITIONAL regions, in a file of their own so no line above moves.
+# if0: the `#if 0` body holds a def of v that no build ever compiles — before the fix it was the
+# reaching def of `int w = v;` and the live chain w<-v<-n was REPLACED (not truncated) by `v = 111;`
+# (audit 2026-09-02, F-01). ifdef_guard: a build-DEPENDENT region — nobody can decide it without
+# the build's macro set, so the honest posture is keep + flag, never drop and never trust.
+cat > "$WORK/src/pp.cpp" <<'EOF'
+int if0( int n )
+{
+    int v = n;
+#if 0
+    v = 111;
+#endif
+    int w = v;
+    return w;
+}
+
+int ifdef_guard( int n )
+{
+    int s = n;
+#ifdef NEVER_DEFINED_XYZ
+    s = 7;
+#endif
+    int t = s;
+    return t;
+}
+
+int if1else( int n )
+{
+    int a = n;
+#if 1
+    a = a + 1;
+#else
+    a = 999;
+#endif
+    return a;
 }
 EOF
 
@@ -482,6 +524,55 @@ RI="$( run --slice=gather )"
 printf '%s' "$( elem "$RI" )" | grep -q 'counts_floor="1"' \
     && ok "(26c) the bare-inventory form carries the marker too (vars= is a floor)" \
     || { no "(26c) --slice=SYM inventory must carry counts_floor=\"1\""; printf '%s\n' "$( elem "$RI" )"; }
+
+# ── (27) preprocessor-dead regions never replace the live chain; build-dependent ones are flagged ───
+# RED against the pre-fix binary: if0:w back returned steps="1" whose only row was `v = 111;` from
+# inside `#if 0` — the real chain w<-v<-n ABSENT, no disclosure. A wrong chain is worse than a refusal.
+P0="$( run --slice=if0:w --slice-flow=back )"
+[ "$( attr "$P0" steps )" = 'steps="2"' ] \
+    && printf '%s' "$( frow "$P0" v 3 )" | grep -q 'k="def" t="decl" v="v" d="1" f="7"' \
+    && printf '%s' "$( frow "$P0" n 1 )" | grep -q 't="param" v="n" d="2" f="3"' \
+    && ok "(27a) if0:w back: the LIVE chain w<-v(l3)<-n(l1), steps=\"2\"" \
+    || { no "(27a) expected steps=\"2\" with v's live def at l=3 (d=1) and the param at l=1 (d=2)"; printf '%s\n' "$P0"; }
+printf '%s' "$( elem "$P0" )" | grep -q 'v = 111' \
+    && { no "(27a) the #if 0 def 'v = 111;' must NOT be a row — it is preprocessor-dead"; printf '%s\n' "$P0"; } \
+    || ok "(27a) the #if 0 def is absent from the flow"
+P0V="$( run --slice=if0:v )"
+[ "$( attr "$P0V" defs )" = 'defs="1"' ] && [ "$( attr "$P0V" preproc_rows )" = 'preproc_rows="1"' ] \
+    && ! printf '%s' "$( elem "$P0V" )" | grep -q '<s l="5"' \
+    && ok "(27a) if0:v flat: defs=\"1\", the dropped row DISCLOSED as preproc_rows=\"1\", no l=5 row" \
+    || { no "(27a) expected defs=\"1\" preproc_rows=\"1\" and no l=5 row"; printf '%s\n' "$P0V"; }
+# build-dependent: kept, flagged, and NOT allowed to kill the reach of the unconditional def before it
+P1="$( run --slice=ifdef_guard:t --slice-flow=back )"
+printf '%s' "$( frow "$P1" s 15 )" | grep -q 'd="1" f="17" pp="1"' \
+    && ok "(27b) ifdef_guard:t back: the #ifdef def 's = 7;' (l15) is a row AND carries pp=\"1\"" \
+    || { no "(27b) expected <s l=\"15\" … v=\"s\" d=\"1\" f=\"17\" pp=\"1\">"; printf '%s\n' "$P1"; }
+printf '%s' "$( frow "$P1" s 13 )" | grep -q 'k="def" t="decl" v="s" d="1" f="17"' \
+    && printf '%s' "$( frow "$P1" n 11 )" | grep -q 'd="2"' \
+    && ok "(27b) …and the unconditional def 'int s = n;' (l13) is STILL reached (d=1) with n behind it (d=2) — a pp def does not kill the reach" \
+    || { no "(27b) the unconditional def at l=13 and the param at l=11 must both be reached past the pp def"; printf '%s\n' "$P1"; }
+[ -z "$( attr "$P1" preproc_rows )" ] \
+    && ok "(27b) nothing dropped ⇒ no preproc_rows= (absent means zero, the skipped convention)" \
+    || { no "(27b) a kept region must not count as dropped"; printf '%s\n' "$P1"; }
+P1F="$( run --slice=ifdef_guard:s --slice-flow=fwd )"
+# (s's own l17 use is a d=0 seed row, so the reach shows as t's return read at l18: d=2, from 17)
+printf '%s' "$( frow "$P1F" t 18 )" | grep -q 'd="2" f="17"' \
+    && ok "(27b) fwd from s: the l13 def reaches the l17 use THROUGH the pp def (no kill) — t's read at l18 rows d=2 f=17" \
+    || { no "(27b) expected v=\"t\" l=\"18\" d=\"2\" f=\"17\" — the pp def must not stop the forward reach"; printf '%s\n' "$P1F"; }
+# #if 1: the body is live and unflagged, the #else is dead and dropped
+P2="$( run --slice=if1else:a )"
+printf '%s' "$( elem "$P2" )" | grep -q '<s l="25" k="both" t="assign">' \
+    && ! printf '%s' "$( elem "$P2" )" | grep -q 'a = 999' \
+    && [ "$( attr "$P2" preproc_rows )" = 'preproc_rows="1"' ] \
+    && ok "(27c) if1else:a: the #if 1 body rows unflagged (k=both), the #else body dropped, preproc_rows=\"1\"" \
+    || { no "(27c) expected l=25 k=both unflagged, no 'a = 999', preproc_rows=\"1\""; printf '%s\n' "$P2"; }
+# the rule is stated, exactly, where the reader meets pp= and preproc_rows=
+if printf '%s' "$( legend "$P0V" )" | grep -q 'preproc_rows=' && printf '%s' "$( legend "$P0V" )" | grep -q 'pp=' \
+   && printf '%s' "$( legend "$P0V" )" | grep -q '#if 0' && printf '%s' "$( legend "$P0V" )" | grep -qi 'ifdef'; then
+    ok "(27d) the legend states the preprocessor rule (#if 0 dropped, #ifdef kept+flagged) and defines pp=/preproc_rows="
+else
+    no "(27d) the legend must name #if 0, ifdef, pp= and preproc_rows="
+fi
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"
