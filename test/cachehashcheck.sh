@@ -2,10 +2,20 @@
 # cachehashcheck.sh — G-A1: the CLI incremental cache keys on CONTENT HASH, never mtime.
 #
 # Regression fence: the audit reproduced that the CLI
-# `--cache=PATH` path is immune to the classic "mtime-lies" attack — edit a file's content, then
+# `--cache=PATH` path survives the classic "mtime-lies" attack — edit a file's content, then
 # `touch -r` its mtime back to the pre-edit value, and a warm re-run must STILL see the new content.
-# This is unlike the MCP staleness hole (§3b #1, fixed separately by S1 in mcp.h) — the CLI path
-# re-crawls and re-hashes bytes every invocation, so an equal mtime never masks a content change.
+#
+# WHAT THIS HEADER USED TO CLAIM, AND WHY IT NO LONGER DOES (corrected 2026-09-03, card A3). It used to
+# generalise the pass into immunity: "the CLI path re-crawls and re-hashes bytes every invocation, so an
+# equal mtime never masks a content change". The re-crawl half is still true. The re-hash half stopped
+# being true when the A4-P7 stat-gate landed — a warm run now SKIPS the read+hash for any file whose
+# (sizeBytes, mtimeNs) still match the cache record and whose recorded mtime is strictly older than the
+# cache blob's own. So the CLI shares the MCP server's documented same-(mtime,size) residual instead of
+# being immune to the class, and what this gate actually proves is the case it actually stages: the edit
+# below changes the byte LENGTH, and the SIZE discriminator is what catches it. That is the realistic
+# attack and the regression worth fencing; it is not immunity. The residual is reproduced with argv in
+# test/freshnesscheck.sh arm 6 and in the card A3 section of docs/EVALS.md, both of which also pin
+# `--no-cache` as the escape hatch.
 #
 # Recipe ( "G-A1"):
 #   1. write a source file, run ripwire with --cache=<tmp>/c.bin to populate (cold)

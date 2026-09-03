@@ -809,3 +809,62 @@ bound worth quoting.
 The four redaction gates (`redactcheck`, `jsonredactcheck`, `mcpredactcheck`, `sigredactcheck`) pass
 unchanged before and after, and `redactfixcheck.sh` passes against BOTH binaries — the old one in 47.5 s,
 the new one in 0.2 s. Same verdicts, same contract; only the cost is gone.
+
+## 2026-09-03 — card A3 freshness disclosure: what the per-request re-validation actually costs
+
+LEDGER row, never a gate (the no-perf-budget rule). Registered band: docs/EVALS.md, "Freshness disclosure
+on a cached answer (card A3)", band 1 — the re-validation under 5% of warm wall-clock on a ~1500-file tree.
+
+### Instrument and argv
+
+`RIPWIRE_MCP_TIMINGS=1` makes `--mcp` print one stderr line per handled request —
+`ripwire-timing verb=<v> wall_ms=<f> rebuilt=<0|1>` — which is what separates a warm reuse from a rebuild
+without guessing. One long-lived server per arm over the SAME tree, driven through a FIFO:
+
+```
+RIPWIRE_MCP_TIMINGS=1 TMPDIR=<per-arm> <bin> --mcp < fifo
+  {"jsonrpc":"2.0","id":1,"method":"initialize"}
+  {"jsonrpc":"2.0","id":N,"method":"tools/call","params":{"name":"find_symbol",
+     "arguments":{"path":"/Users/.../canyonraid48","symbol":"printf"}}}
+```
+
+12 warm requests, then 6 more each preceded by `touch <root>/log/log.cpp` (an indexed file, content
+untouched) to force a rebuild. Corpus: the private `canyonraid48` tree, **`files=2377`** as this binary
+indexes it (the band said ~1500; the tree that was available is larger, and the count is reported rather
+than the target). Arms alternated HEAD / base `3eec040` five times; the table is the median of the five
+per-trial p50s. Apple Silicon, warm page cache, machine otherwise idle.
+
+### Result
+
+| request class | base `3eec040` | HEAD (with `_fresh`) | delta |
+| --- | --- | --- | --- |
+| warm reuse (`rebuilt=0`) | 11.17 ms | 10.52 ms | **−0.65 ms (−5.8%)** |
+| rebuild (`rebuilt=1`) | 499.15 ms | 479.37 ms | **−19.78 ms (−4.0%)** |
+
+Both point estimates are NEGATIVE — the instrumented binary measured faster — which is the honest way of
+saying the added cost is below this machine's noise floor. The base arm's own five trials spread 9.94 →
+17.28 ms warm and 460 → 515 ms rebuild, wider than either delta. Band 1 is met, and it is met with a
+measurement that cannot resolve the cost, not with a cost of zero.
+
+That is what the code predicts. `mcpStale()` is byte-identical to base (the count is a separate function
+the hot path never calls), so the warm path adds one 15-byte `std::string`. The rebuild path adds one full
+stat sweep plus two O(n log n) fingerprint sorts and one linear walk — against a rebuild that re-crawls,
+re-hashes and re-ranks 2377 files.
+
+### The number the band was really asking for
+
+Band 1 assumed a NEW per-query check and asked what fraction of the warm request it would be. The
+inventory found the check already existed, so the interesting quantity is the other one: how much of a warm
+request IS the re-validation. Same instrument, two tree sizes, same verb:
+
+| tree | indexed files | warm p50 |
+| --- | --- | --- |
+| `canyonraid48/Metal` | 120 | 0.51 ms |
+| `canyonraid48` | 2377 | 10.52 ms |
+
+**≈4.4 µs per indexed file** ( (10.52 − 0.51) / (2377 − 120) ), which puts ~95% of a 2377-file warm request
+in the freshness sweep. A warm MCP request on a tree this size is very nearly nothing but the re-validation
+the server was already doing silently — the disclosure is a report on work already paid for, and that is
+the finding, not a footnote to it. It also sets the price of ever closing the same-(mtime,size) residual:
+the whole-tree re-read `mcpStale`'s comment prices at ~13x lands on top of a request that is already
+sweep-bound.

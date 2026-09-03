@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 500 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 501 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4909,7 +4909,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **500 gate scripts**, all of which exist on disk.
+naming **501 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5740,7 +5740,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 500. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 501. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -8707,3 +8707,150 @@ the member sites), `--nonlocal-state` (the instance-field disclosure sentence an
 The 44ac095 golden re-pins this rule made unnecessary (test/golden.xml, fillordercheck's est_tokens) are
 reverted to their 8e186bb bytes; the qschemetrip re-pin stays (it is driven by the kParserVer declaration
 line, which legitimately moved to 75) and so does the README/EVALS gate count (fieldusescheck exists).
+
+## Freshness disclosure on a cached answer (card A3) — PRE-REGISTERED 2026-09-03 (before any measurement)
+
+**What this registers.** ARISE-bibliography RANK-A card A3, the shape Graft spends ~3 ms per query on: an
+answer served from a warm index should say, on its own root, whether it still describes the tree the agent
+is editing — so the agent never has to ask, and never has to run a second command to find out. The
+capability is a disclosure, not a new index: `fresh="ok"` when the file set behind the answer was
+re-validated during this query, `reindexed`/`stale_files`/`changed_files` when it was not clean. This
+section fixes the surface inventory, the bands and the rejection rule BEFORE any number, and the results
+are appended under it whatever they are.
+
+**The surface inventory this lane must produce first, with argv.** "Which surfaces can actually serve a
+stale answer today" is a measurement, not a premise, and the design depends on the answer:
+
+| surface | what it re-validates per query | can it serve stale? |
+| --- | --- | --- |
+| CLI cold (`--no-cache`) | reads and hashes every crawled file | to be measured |
+| CLI warm (default TMPDIR cache, or `--cache=PATH`) | crawl + per-file `(mtimeNs, sizeBytes)` stat gate + the racy rule; read+hash on any mismatch | to be measured |
+| `--mcp` warm reuse | `mcpStale()` — the watched-dir mtime sweep plus the per-file mtime+size loop — then a rebuild when either moves | to be measured |
+
+**Band 1 — cost.** The re-validation must cost **under 5% of warm wall-clock** on a ~1500-file tree. A
+LEDGER row in `bench/PROFILE.md` with the argv, never a red gate (the no-perf-budget-gates rule). If the
+honest check turns out to be one the surface already runs, the row says so and reports the delta it
+actually added, which may be zero — a zero is a result, not a pass by default.
+
+**Band 2 — induced staleness, four fixtures, 100%.** Against a long-lived server holding a warm index:
+(a) EDIT a file, (b) DELETE a file, (c) ADD a file, (d) `touch` a file **without changing its content**.
+Each must report the right attribute. (d) is the discriminating one: a `touch` moves mtime, so a
+stat-keyed check is entitled to re-validate — but it must **not** claim anything was stale, because no
+byte changed. The contract is therefore: (d) may disclose that a re-validation ran, and must disclose
+`changed_files="0"` alongside it, so "the index was refreshed" and "the tree changed" are never conflated.
+An implementation that reports (d) the same way it reports (a) fails this band.
+
+**Band 3 — byte-identity, and the rejection rule.** Two halves, and the second is registered as
+rejectable in advance:
+
+- A **timing** value (`revalidated_ms`) MUST NOT enter the output unless an explicit gate excludes it from
+  the determinism comparison. The default is to ship the boolean alone and record the timing half here as
+  REJECTED with its reason.
+- The CLI map's warm output is asserted **byte-identical to its cold output** (`docs/ARCHITECTURE.md` §2,
+  and the determinism gate in `CONTRIBUTING.md`). Any attribute whose value depends on the CLI's own cache
+  state therefore cannot be emitted on the CLI at all. If the inventory shows the CLI re-validates on every
+  invocation, the only CLI-legal value of the attribute is a CONSTANT, and a constant attribute on the map
+  root buys no information for its bytes (G4) while re-pinning `test/golden.xml`, 24 recorded captures in
+  `docs/COMMANDS.md` and `docs/captures/`, and 15 gates. That half is then recorded here as REJECTED with
+  the measurement that justifies it — not shipped quietly and not silently dropped.
+
+**Gate.** `test/freshnesscheck.sh`, written and run RED before any implementation code: the four band-2
+fixtures plus a mutation control (a build that never re-stats between queries must go red) plus the
+clean-warm control (a query over an untouched tree must NOT claim a re-index).
+
+**What this section will NOT claim.** No accuracy number, no ranking effect, and no closure of the
+same-`(mtimeNs, sizeBytes)` residual that `mcpStale()`'s comment already documents as irreducible without
+a whole-tree re-read. If the inventory reproduces that residual on a surface whose own gate header claims
+immunity to it, the finding is recorded here and the claim is corrected — a stale honesty claim is the
+same defect class as a stale answer.
+
+### The card A3 result, measured 2026-09-03 against the bands registered above
+
+**The surface inventory, with argv — and it changed the design.** Every row was reproduced, not reasoned
+about. The reproduction that matters uses a mtime pinned OLD on both sides, so the cache blob's own write
+time is strictly newer than the file's recorded mtime and the racy rule does not fire:
+
+```
+mkdir tree && printf 'int alphaaa( int x ) { return x + 1; }\nint caller( void ) { return alphaaa( 2 ); }\n' > tree/a.c
+touch -t 202601011200.00 tree/a.c
+ripwire tree --cache=C --top-k=20          # -> n="alphaaa" n="caller"
+printf 'int betaaaa( int x ) { return x + 1; }\nint caller( void ) { return betaaaa( 2 ); }\n' > tree/a.c
+touch -t 202601011200.00 tree/a.c          # same byte length, mtime restored
+ripwire tree --cache=C --top-k=20          # -> n="alphaaa" n="caller"   <-- STALE
+ripwire tree --top-k=20                    # -> n="alphaaa" n="caller"   <-- STALE (default TMPDIR cache too)
+ripwire tree --top-k=20 --no-cache         # -> n="betaaaa" n="caller"   <-- correct
+```
+
+| surface | what it re-validates per query | can it serve stale? |
+| --- | --- | --- |
+| CLI cold (`--no-cache`) | reads and hashes every crawled file | **no** |
+| CLI warm (default TMPDIR cache, or `--cache=PATH`) | crawl + per-file `(mtimeNs, sizeBytes)` stat gate + racy rule | **yes** — the same-`(mtime, size)` edit above, on BOTH warm paths |
+| `--mcp` warm reuse | `mcpStale()`: watched-dir mtime sweep + per-file mtime+size loop, rebuild on any move | **yes** — the same residual, and nothing else |
+
+Two findings fell out of that table, and both changed what this lane shipped.
+
+**Finding 1 — the residual is shared, and a gate header said otherwise.** `test/cachehashcheck.sh`'s header
+generalised its own passing arm into immunity: *"the CLI path re-crawls and re-hashes bytes every
+invocation, so an equal mtime never masks a content change."* The re-crawl half is still true; the re-hash
+half stopped being true when the A4-P7 stat-gate landed, and the run above is the counterexample. What that
+gate actually proves is the case it stages — its edit changes the byte LENGTH, and the SIZE discriminator
+catches it. The header is corrected to say that, and the residual is now executable rather than prose:
+`test/freshnesscheck.sh` arm 6 reproduces it, pins `--no-cache` as the escape hatch and pins that a
+length-changing edit under a restored mtime IS caught. This is the honesty-claim half of the same defect
+class as a stale answer, which the registration said would be recorded if it turned up. It turned up.
+
+**Finding 2 — the re-validation already existed everywhere; only the disclosure was missing.** No surface
+lacks a per-query check. The CLI re-crawls every invocation; the MCP server sweeps every request and
+rebuilds before answering. So the design registered above ("a per-query re-stat … when stale, either
+transparently re-index or serve with `stale=1`") resolves to: the re-index policy, already in force on both
+surfaces, finally said out loud. `_fresh` never takes the value `"stale"` on either surface, because
+neither surface serves-and-flags.
+
+**Band 2 — induced staleness: 4/4, plus both controls.** `test/freshnesscheck.sh`, written and run RED
+first (16 FAIL at `2898e51`, every one because the fields did not exist).
+
+| fixture | `_fresh` | `_stale_files` | `_changed_files` |
+| --- | --- | --- | --- |
+| first build | `ok` | absent | absent |
+| clean re-query (CONTROL) | `ok` | absent | absent |
+| EDIT one file | `reindexed` | 1 | 1 |
+| DELETE one file | `reindexed` | 1 | 1 |
+| ADD one file | `reindexed` | **0** | 1 |
+| `touch`, content identical | `reindexed` | 1 | **0** |
+
+The two bold cells are the band's discriminating clause and they point opposite ways, which is why the
+disclosure is two counts and not one. An ADD moves no INDEXED file's stat — its directory's mtime is what
+moved — so `_stale_files:0` is the true answer, and a fused counter would have to lie in one direction or
+the other. A `touch` moves a recorded stat and not one byte, so `_stale_files:1, _changed_files:0` says
+exactly what happened: the check fired, correctly, and nothing was stale. The gate corroborates that zero
+independently by asserting the verb's answer is byte-identical across the pass.
+
+**Band 1 — cost: met, and the band's premise was wrong.** Full ledger, argv and instrument in
+`bench/PROFILE.md` ("card A3 freshness disclosure"). On a **2377-file** tree, HEAD vs base `3eec040`, five
+alternating trials: warm requests **10.52 ms vs 11.17 ms** and rebuilds **479.4 ms vs 499.2 ms** — both
+deltas NEGATIVE, i.e. the added cost does not resolve against a base arm whose own trials spread 9.9–17.3
+ms warm. Band 1 asked what fraction of the warm request a NEW check would be; the inventory says the check
+was already there, so the number worth recording is the inverse: **≈4.4 µs per indexed file**, derived from
+0.51 ms at 120 files against 10.52 ms at 2377, which puts **~95% of a warm MCP request in the freshness
+sweep**. A warm request on a tree this size is very nearly nothing but the re-validation that was already
+running silently.
+
+**Band 3 — byte-identity: shipped as the boolean, with BOTH registered halves REJECTED as registered.**
+
+- *`revalidated_ms` — REJECTED.* Not emitted. A per-request wall time is exactly the kind of value the
+  determinism contract has no tolerance band for, and the registration named shipping the boolean alone as
+  the default rather than as a retreat. The timing lives where timings live: `RIPWIRE_MCP_TIMINGS`'s
+  env-gated stderr line, and the ledger above.
+- *A CLI attribute on the map root — REJECTED, and the measurement is the reason.* The CLI re-crawls every
+  invocation, so its only truthful value is a CONSTANT `fresh="ok"`. Warm output is asserted byte-identical
+  to cold, so nothing that varies with the CLI's own cache state may be emitted there at all — the one
+  genuinely informative variant (how many files were trusted on stat alone this run) is cold/warm-varying by
+  construction and therefore illegal. A constant attribute on the map root buys no information for its
+  bytes (G4) while re-pinning `test/golden.xml`, 24 recorded captures across `docs/COMMANDS.md` and
+  `docs/captures/`, and 15 gates. The CLI's freshness story is instead told where it is true and free: the
+  reproduction above, `--no-cache` as the escape hatch, and `test/freshnesscheck.sh` arm 6.
+
+**What this section does not claim.** No accuracy number and no ranking effect: `_fresh` is process
+history, never tree state, and like `_reingest` it is deliberately excluded from every warm-equals-cold
+comparison. The same-`(mtime, size)` residual is NOT closed on either surface, and the ledger above prices
+why: the whole-tree re-read that would close it lands on a warm request that is already ~95% stat sweep.
