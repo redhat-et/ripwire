@@ -13,9 +13,12 @@
 #                                 was served from the index as it stood.
 #                   "reindexed" — the re-validation ran, found the tree had moved, and the index was
 #                                 rebuilt BEFORE the verb answered. Never a stale serve.
-#   _stale_files    N           — how many INDEXED files diverged from their recorded (mtimeNs, sizeBytes).
-#                                 Emitted only alongside "reindexed". An ADD is legitimately 0 here: no
-#                                 indexed file moved, the containing directory did.
+#   _stale_files    N           — how many INDEXED files diverged from their recorded (mtimeNs, sizeBytes,
+#                                 ctimeNs). Emitted only alongside "reindexed". An ADD is legitimately 0
+#                                 here: no indexed file moved, the containing directory did. The ctimeNs
+#                                 third is what closes the same-(mtime,size) residual arms 6/7 stage: an
+#                                 unprivileged process can restore mtime and preserve length, and cannot
+#                                 restore st_ctime (POSIX exposes no interface for it).
 #   _changed_files  N           — how many files actually differ in CONTENT from the index that was
 #                                 replaced (added + removed + byte-hash-changed). Emitted only alongside
 #                                 "reindexed".
@@ -253,19 +256,25 @@ done
 echo
 echo "=== arm 6: the CLI's own residual, made executable rather than asserted in prose ==="
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
-# The stat-keyed check has one irreducible hole — a content edit that preserves BOTH the mtime and the
-# exact byte length — and cachehashcheck.sh's header used to claim the CLI was immune to it ("the CLI path
-# re-crawls and re-hashes bytes every invocation, so an equal mtime never masks a content change"). The
-# A4-P7 stat-gate made that false: a warm run trusts a cached entry whose (size, mtime) still match and
-# whose recorded mtime is strictly older than the cache blob's own, and then never reads the bytes. This
-# arm reproduces it, so the limit is a thing the suite SHOWS rather than a sentence someone has to
-# remember. Two halves, and only the first two assertions are contracts:
+# The stat gate used to have a hole that this arm could only OBSERVE: a content edit preserving BOTH the
+# mtime and the exact byte length was trusted, never read, and served stale. cachehashcheck.sh's header
+# had generalised its own passing arm into immunity ("the CLI path re-crawls and re-hashes bytes every
+# invocation, so an equal mtime never masks a content change"); the A4-P7 stat-gate made that false and
+# this arm was written to reproduce it rather than let a sentence carry it.
+#
+# It is CLOSED, and every assertion below is now HARD. The discriminator is st_ctime, recorded beside
+# (sizeBytes, mtimeNs) at the moment the file is read+hashed and required to match EXACTLY: ::stat already
+# returns it and the warm path already calls ::stat once per file, so it costs no syscall and no read.
+# st_ctime moves on any write AND on the utimes() that a `touch -r` / editor "preserve mtime" / `cp -p`
+# restore performs, and POSIX gives an unprivileged process no way to set it back.
 #   • HARD — `--no-cache` must be correct (the escape hatch has to work, or the limit is unbounded).
-#   • HARD — a LENGTH-changing edit with the same restored mtime must be caught (the size discriminator is
-#     the thing that makes the residual a corner rather than the common case).
-#   • OBSERVED — whether the same-(mtime,size) edit is missed. Reported, never failed: closing it needs a
-#     whole-tree re-read, which mcpStale's comment prices at ~13x the warm path. If a future round closes
-#     it, this line says so instead of a gate going red for an improvement.
+#   • HARD — the same-(mtime,size) edit IS caught on the warm path (the residual, closed).
+#   • HARD — a LENGTH-changing edit with the same restored mtime is still caught (the size discriminator
+#     is not regressed by the new one).
+# WHAT IS STILL NOT CLAIMED: a caller who can move the system clock backward, raw block-device
+# manipulation, and a filesystem that maintains no distinct ctime (FAT/exFAT, some SMB mounts) are all
+# outside this. On such a filesystem the gate degrades to the pre-ctime behaviour, which is why the racy
+# rule is kept rather than replaced — and why this arm reports the platform it ran on when it fails.
 CLI="$TMP/cliresidual"; mkdir -p "$CLI/tree"
 CLITMP="$TMP/clitmp"; mkdir -p "$CLITMP"
 OLDSTAMP=202601011200.00
@@ -284,8 +293,8 @@ case "$NOCACHE" in
     *)         no "arm 6 (HARD): --no-cache served '$NOCACHE' — a cold parse must never be stale";;
 esac
 case "$WARM" in
-    *betaaaa*) ok "arm 6 (OBSERVED): the same-(mtime,size) edit IS caught on this platform — the residual is narrower than documented";;
-    *alphaaa*) ok "arm 6 (OBSERVED, not a defect): the warm CLI serves the pre-edit symbol — the documented same-(mtime,size) residual, reproduced";;
+    *betaaaa*) ok "arm 6 (HARD): the same-(mtime,size) edit IS caught on the warm CLI path — the ctime discriminator closed the residual";;
+    *alphaaa*) no "arm 6 (HARD): the warm CLI served the PRE-EDIT symbol — the same-(mtime,size) residual is back (or this filesystem maintains no distinct st_ctime: $( df -T 2>/dev/null || mount | grep -E " on / " ))";;
     *)         no "arm 6: the warm run named neither spelling (got: $WARM) — the arm did not stage";;
 esac
 # the size discriminator, which is what keeps the residual a corner case
@@ -296,6 +305,49 @@ case "$LEN" in
     *gammaaaLONGER*) ok "arm 6 (HARD): a LENGTH-changing edit under the same restored mtime is caught";;
     *)               no "arm 6 (HARD): a length-changing edit was missed (got: $LEN) — the size discriminator is blind";;
 esac
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+echo
+echo "=== arm 7 (HARD): the same attack against the LONG-LIVED warm --mcp index ==="
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# Arm 6 stages the residual on the CLI's on-disk cache. This one stages it on the OTHER warm surface —
+# the in-memory McpIndex a --mcp session holds across requests — because the two share the residual and
+# a fix to one is not a fix to the other. mcpStale()'s comment used to say catching this was "provably
+# impossible without READING the file's bytes"; the recorded ctime is the counterexample.
+#
+# The edit is in-place and byte-length-preserving, so NOTHING a cheaper signal could notice moves: the
+# containing directory's mtime does not change (no add/delete/rename), the file's size does not change,
+# and the mtime is restored to the exact value the index recorded. Only st_ctime moved.
+#
+# This is also the END-TO-END arm: an --mcp rebuild re-ingests through the SAME on-disk cache arm 6
+# tests, so a build that fixed only mcpStale() would decide "stale", rebuild, and then have ingest()'s
+# stat gate hand back the pre-edit facts. Both halves have to be right for this arm to pass.
+A7="$WORK/addedlane.cpp"
+if [ ! -f "$A7" ]; then
+    no "arm 7: arm 3's added file is missing — this arm needs a file the index already holds"
+else
+    cp -p "$A7" "$TMP/a7.ref"                              # -p: the ref keeps the EXACT indexed mtime
+    python3 - "$A7" <<'PY7'
+import sys
+p = sys.argv[1]
+b = open(p, "rb").read()
+b2 = b.replace(b"addedLaneArea", b"addedLaneXrea")         # same identifier LENGTH -> same file size
+assert b2 != b and len(b2) == len(b), "arm 7 needs a byte-length-preserving edit"
+open(p, "wb").write(b2)
+PY7
+    touch -r "$TMP/a7.ref" "$A7"                           # restore mtime EXACTLY; st_ctime cannot be restored
+    warm_for 16
+    expect "arm 7 (same-(mtime,size) edit, warm MCP)" reindexed 1 1
+    # ORDER MATTERS: the OLD spelling is tested FIRST. A ranked bundle prints the index's symbol NAMES
+    # and then reads BODIES off disk, so a stale index still emits a body carrying the new spelling —
+    # matching the new name first would pass on a build that never noticed the edit at all. The pre-edit
+    # name can only appear if it is still in the index.
+    case "$WTEXT" in
+        *addedLaneArea*) no "arm 7 (HARD): the warm MCP index still names the PRE-EDIT symbol — a stale answer from a same-(mtime,size) edit";;
+        *addedLaneXrea*) ok "arm 7 (HARD): the warm MCP index named the POST-edit symbol — the residual is closed on this surface too";;
+        *)               no "arm 7: neither spelling appeared in the answer (the arm did not stage)";;
+    esac
+fi
 
 echo
 if [ "$fail" -eq 0 ]; then

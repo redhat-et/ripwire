@@ -1260,7 +1260,7 @@ static void collectSpanTiers( TSNode root, std::uint32_t byteCount, SpanTierMap&
 // than a weaker one, with all four conditions required:
 //   - the blob's recorded PATH matches byte-for-byte (so a 64-bit filename hash collision cannot alias
 //     two files — the hash only picks the filename, it never stands in for identity);
-//   - the file's CURRENT (sizeBytes, mtimeNs) still equal the pair recorded when it was parsed;
+//   - the file's CURRENT (sizeBytes, mtimeNs, ctimeNs) still equal the triple recorded when it was parsed;
 //   - that recorded mtime is STRICTLY OLDER than the blob's own on-disk mtime (the racy rule — a file
 //     rewritten inside one mtime tick of the blob reads as changed, never as fresh);
 //   - the parserVer in the filename matches, so any grammar/.scm change orphans every old blob at once.
@@ -1268,11 +1268,14 @@ static void collectSpanTiers( TSNode root, std::uint32_t byteCount, SpanTierMap&
 // SAFE direction — a blob that cannot be read, parsed or trusted is simply ignored and the file is
 // re-parsed, which is byte-for-byte the pre-memo behaviour.
 //
-// THE ONE RESIDUAL, named rather than implied: a rewrite that lands on the SAME byte size AND the same
-// mtime, and does so at least one mtime tick before the blob was written, is indistinguishable from no
-// rewrite and would be served a stale map. That is not a new exposure — it is precisely the assumption the
-// parse cache's own warm-run stat gate (ingest_cache.h, A4-P7) already makes about every file in the index,
-// and it is why --no-cache exists and why the gate diffs cold against warm rather than trusting either.
+// WHAT USED TO BE THE RESIDUAL, and where it went: a rewrite landing on the SAME byte size AND the same
+// mtime, at least one mtime tick before the blob was written, was indistinguishable from no rewrite and was
+// served a stale map. It shares its fix with the parse cache's own warm-run stat gate (ingest_cache.h,
+// A4-P7): st_ctime is recorded in the third slot and compared, so the utimes() that restores an mtime — and
+// any write at all — is visible for free out of the ::stat the caller already took. What remains outside it
+// is the same narrow set named there: a clock moved backward, raw block-device writes, and a filesystem
+// with no distinct ctime. --no-cache still exists and the gate still diffs cold against warm rather than
+// trusting either.
 //
 // DISCLOSED LIMIT, stated rather than implied: this memo does not make the tier pass cheaper the FIRST
 // time a file is classified, and a repo whose files change on every run never warms it. It is a warm-path
@@ -1280,7 +1283,7 @@ static void collectSpanTiers( TSNode root, std::uint32_t byteCount, SpanTierMap&
 // are unchanged and still bound the cold cost. --no-cache turns it off at the caller, like every other
 // ripwire cache, so the reproducibility switch stays one switch.
 constexpr std::uint32_t kSpanTierMemoMagic    = 0x53544d31u;   // 'STM1'
-constexpr std::uint32_t kSpanTierMemoVersion  = 1u;
+constexpr std::uint32_t kSpanTierMemoVersion  = 2u;   // 2: the record gains ctimeNs (card A3 follow-up) — a FORMAT change, so v1 blobs are simply never loaded and age out
 constexpr std::uint32_t kSpanTierMemoMaxSpans = 8u << 20;      // refuse to trust (or write) an implausible span count
 
 // The SIZE FLOOR, and why there is one. Parse cost is linear in bytes (E5's 42 ns/B), so a small file's
@@ -1312,12 +1315,12 @@ inline std::string spanTierMemoPath( const std::string& diskPath )
 // on ANY doubt whatsoever; there is deliberately no partial-trust path.
 inline bool spanTierMemoLoad( const std::string& diskPath, const StatInfo& now, SpanTierMap& out )
 {
-    if( now.sizeBytes < 0 || now.mtimeNs < 0 )
+    if( now.sizeBytes < 0 || now.mtimeNs < 0 || now.ctimeNs < 0 )
     {
         return false;   // unstatable ⇒ nothing to compare against ⇒ never trusted
     }
     const std::string blobPath = spanTierMemoPath( diskPath );
-    const StatInfo    blobStat = statSizeMtime( blobPath );
+    const StatInfo    blobStat = statSizeTimes( blobPath );
     if( blobStat.mtimeNs < 0 || now.mtimeNs >= blobStat.mtimeNs )
     {
         return false;   // absent, or the racy rule: the file is not provably older than the blob
@@ -1343,7 +1346,12 @@ inline bool spanTierMemoLoad( const std::string& diskPath, const StatInfo& now, 
     {
         return false;
     }
-    if( i64() != now.sizeBytes || i64() != now.mtimeNs )
+    // Short-circuit order is irrelevant here and MUST be: every i64() has to be consumed so the next
+    // field lands at its wire offset. Written as three reads into locals for exactly that reason.
+    const long long recSize  = i64();
+    const long long recMtime = i64();
+    const long long recCtime = i64();
+    if( recSize != now.sizeBytes || recMtime != now.mtimeNs || recCtime != now.ctimeNs )
     {
         return false;
     }
@@ -1388,7 +1396,7 @@ inline bool spanTierMemoLoad( const std::string& diskPath, const StatInfo& now, 
 // workers — which each own a distinct file slot — cannot collide even across concurrent ripwire runs.
 inline void spanTierMemoStore( const std::string& diskPath, const StatInfo& now, const SpanTierMap& map )
 {
-    if( now.sizeBytes < 0 || now.mtimeNs < 0 || !map.isParsed )
+    if( now.sizeBytes < 0 || now.mtimeNs < 0 || now.ctimeNs < 0 || !map.isParsed )
     {
         return;
     }
@@ -1415,6 +1423,7 @@ inline void spanTierMemoStore( const std::string& diskPath, const StatInfo& now,
         putU32( kSpanTierMemoVersion );
         putI64( now.sizeBytes );
         putI64( now.mtimeNs );
+        putI64( now.ctimeNs );
         putU32( std::uint32_t( diskPath.size() ) );
         out.write( diskPath.data(), std::streamsize( diskPath.size() ) );
         putU32( std::uint32_t( spanCount ) );
@@ -1541,7 +1550,7 @@ SpanTierBatch spanTiersOfFiles( std::span<const std::string> diskPaths, bool use
                 {
                     continue;   // markdown and every unsupported extension: unclassifiable, and it stays that way
                 }
-                const StatInfo fileStat = statSizeMtime( path );
+                const StatInfo fileStat = statSizeTimes( path );
                 if( spanTierMemoTryLoad( useMemo, path, fileStat, batch.perFile[fileIndex] ) )
                 {
                     continue;   // isParsed was set by the loader; the slot is owned by this worker alone

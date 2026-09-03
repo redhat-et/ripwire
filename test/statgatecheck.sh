@@ -1,31 +1,40 @@
 #!/usr/bin/env bash
 # statgatecheck.sh — A4-P7: warm-run (size,mtime) STAT-GATE + racy-git rule.
 #
-# ingest()'s incremental --cache now stores (sizeBytes, mtimeNs) per file plus the blob's own write
-# timestamp (kCacheVersion=6). On a warm run each file is stat'd; if size+mtime still match the cache
-# AND the cached mtime is strictly older than the blob write time (not "racy"), the cached parse is
-# trusted WITHOUT reading/hashing the file. On ANY mismatch (or a racy entry, or an unstatable file)
-# the file is read + content-hashed exactly as before — the content hash stays the sole authority for
-# what actually changed. This gate proves the shortcut never returns a stale or wrong answer.
+# ingest()'s incremental --cache stores (sizeBytes, mtimeNs, ctimeNs) per file plus the blob's own write
+# timestamp. On a warm run each file is stat'd ONCE; if all three still match the cache AND the cached
+# mtime is strictly older than the blob write time (not "racy"), the cached parse is trusted WITHOUT
+# reading/hashing the file. On ANY mismatch (or a racy entry, or an unstatable file) the file is read +
+# content-hashed exactly as before — the content hash stays the sole authority for what actually changed.
+# This gate proves the shortcut never returns a stale or wrong answer.
+#
+# WHY THREE TIMESTAMPS AND NOT TWO. (size, mtime) alone leaves the adversarial corner (b2) stages: an
+# unprivileged process can restore mtime with utimes() and can keep the byte length, and the gate then
+# trusts a file whose content changed. It CANNOT restore st_ctime — POSIX exposes no interface for it, and
+# the utimes() that restores mtime is itself an inode change that moves ctime forward. So the third
+# discriminator comes out of the ::stat the gate already performs: no extra syscall, no file read, and (b2)
+# becomes a HARD assertion instead of the informational note it used to be.
+#
+# WHAT THAT STILL DOES NOT COVER, and why (b3) stays: a caller who can move the system clock backward, raw
+# block-device manipulation, and a filesystem that maintains no distinct ctime (FAT/exFAT, some SMB mounts)
+# — there the gate degrades to exactly the pre-ctime behaviour, so the racy rule is KEPT, not replaced.
 #
 # Cases:
 #   (a) warm re-run, no changes            → output byte-identical to the cold run
 #   (b1) NORMAL edit, mtime ADVANCES       → change ALWAYS detected (the common case)
-#   (b2) content edit, mtime forced EQUAL  → the adversarial backdated-mtime + same-size attack.
-#        HONEST DISPOSITION: a stat-only shortcut cannot see this and neither does git (a file whose
-#        size AND mtime are byte-identical to the cache, with mtime older than the cache write, is
-#        trusted). We DOCUMENT it as a known, git-shared limitation. It is NOT asserted as detected.
-#        The racy rule closes the *dangerous* variant of this (an edit landing in the same mtime
-#        granule as the cache write) — exercised in (b3).
+#   (b2) content edit, mtime forced EQUAL  → the adversarial backdated-mtime + same-size attack. HARD:
+#        the restore moved st_ctime, so the gate re-hashes and the edit is detected. This was an
+#        informational note until the ctime discriminator landed (docs/EVALS.md, card A3 follow-up).
 #   (b3) RACY entry (mtime == blob write)  → forced re-hash → edit detected even with mtime unchanged
 #   (c) touch only, no content change      → output still correct (trusted shortcut, no false change)
 #   (d) file added / removed               → correct output
+#   (e) metadata-only chmod to UNREADABLE   → cached parse kept, output unchanged (the ctime cost side)
 #
 # Usage:
 #   bash test/statgatecheck.sh
 #   RIPWIRE_BIN=build_r2a3/ripwire bash test/statgatecheck.sh
 #
-# Exits non-zero on any HARD failure; (b2) is informational only. Prints ALL PASS on success.
+# Exits non-zero on any failure — every case above is HARD. Prints ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -80,7 +89,7 @@ else
     no "(b1) normal edit NOT detected — stat-gate masked a real change (REGRESSION)"
 fi
 
-# ── case (b2): backdated mtime + IDENTICAL size — the git-shared blind spot (informational) ───────
+# ── case (b2): backdated mtime + IDENTICAL size — closed by the recorded ctime (HARD) ─────────────
 WB2="$TMP/b2"; mkdir -p "$WB2"; CB2="$TMP/b2.bin"
 printf 'int sameSizeA( void )\n{\n    return 1;\n}\n' > "$WB2/f.cpp"
 cp -p "$WB2/f.cpp" "$TMP/b2.ref"                                   # -p: ref keeps the EXACT pre-edit mtime (true backdate)
@@ -89,11 +98,10 @@ sleep 1
 printf 'int sameSizeB( void )\n{\n    return 2;\n}\n' > "$WB2/f.cpp"   # SAME byte length as sameSizeA
 touch -r "$TMP/b2.ref" "$WB2/f.cpp"                               # restore mtime EXACTLY to the cached value
 "$BIN" "$WB2" --cache="$CB2" --no-stable >"$TMP/b2.warm" 2>/dev/null
-if grep -q 'n="sameSizeB"' "$TMP/b2.warm"; then
-    note "(b2) backdated same-size edit WAS detected here (mtime restore imperfect on this FS) — stronger than required"
+if grep -q 'n="sameSizeB"' "$TMP/b2.warm" && ! grep -q 'n="sameSizeA"' "$TMP/b2.warm"; then
+    ok "(b2) backdated same-size edit DETECTED — the touch -r moved st_ctime, so the gate re-hashed"
 else
-    note "(b2) backdated same-size edit NOT detected — KNOWN git-shared stat-only limitation (documented, not a failure)"
-    note "(b2) authority is the content hash on the next cold/miss run; only an EXACT (size,mtime<blobwrite) backdate hides a change"
+    no "(b2) backdated same-size edit was TRUSTED — the ctime discriminator is not holding (or this filesystem maintains no distinct st_ctime: $( df -T 2>/dev/null || mount | grep -E " on / " ))"
 fi
 
 # ── case (b3): the RACY rule — an entry whose mtime is >= the blob write time is force-re-hashed ──
@@ -146,6 +154,32 @@ if grep -q 'n="keep"' "$TMP/d.rm" && ! grep -q 'n="added"' "$TMP/d.rm"; then
     ok "(d) removed file gone on next warm run; survivor intact"
 else
     no "(d) removed file still present (or survivor lost)"
+fi
+
+# ── case (e): a METADATA-only change must not COST the file — the ctime discriminator's own cost side ─
+# The third discriminator is deliberately conservative: st_ctime moves on chmod/chown/xattr/rename too, not
+# only on a write. Every one of those falls out of the stat gate and into the read+hash path, which is
+# correct and cheap — EXCEPT when the metadata change is what made the file unreadable. Then the re-hash's
+# read FAILS, and the naive implementation drops every symbol the file had, turning a `chmod 000` into a
+# silent partial index. (postingscheck (d) is the gate that caught it: it makes every source unreadable on
+# purpose, to prove the warm scorer does not re-read per query.)
+#
+# The rule this arm pins: when a file cannot be READ but its (size, mtime) still match the record and the
+# entry is not racy, the cached parse is KEPT. A ctime that moved on its own is a metadata change, not
+# evidence of a content change, and dropping a file we were unable to look at is a worse answer than
+# serving its last-known parse. The exposure is stated where the code is: a same-(mtime,size) edit hidden
+# behind a chmod-to-unreadable is served stale — but no cache-free run can do better (--no-cache cannot
+# read it either), and the MCP edit verbs re-read + byte-hash their target regardless.
+WE="$TMP/e"; mkdir -p "$WE"; CE="$TMP/e.bin"
+printf 'int deltaSym( void )\n{\n    return 3;\n}\n' > "$WE/f.cpp"
+"$BIN" "$WE" --cache="$CE" --no-stable >"$TMP/e.cold" 2>/dev/null
+chmod 000 "$WE/f.cpp"                                             # metadata only: size and mtime unchanged, ctime moves
+"$BIN" "$WE" --cache="$CE" --no-stable >"$TMP/e.warm" 2>/dev/null
+chmod 644 "$WE/f.cpp"
+if diff -q "$TMP/e.cold" "$TMP/e.warm" >/dev/null 2>&1 && grep -q 'n="deltaSym"' "$TMP/e.warm"; then
+    ok "(e) chmod-to-unreadable (ctime moves, size+mtime hold) → cached parse kept, output unchanged"
+else
+    no "(e) a metadata-only chmod DROPPED the file's symbols — the ctime discriminator is costing an answer"
 fi
 
 # ── well-formed XML on the representative outputs ─────────────────────────────────────────────────

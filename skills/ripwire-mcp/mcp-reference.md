@@ -136,16 +136,19 @@ curl -s -X POST http://127.0.0.1:8765/mcp -H 'Content-Type: application/json' \
   is no `"stale"`: this server re-indexes rather than serving-and-flagging, so a stale serve is not one of
   the states. **You do not need to ask whether the map is current — read `_fresh`.**
   `"reindexed"` brings two counts, and the pair is where the honesty is. **`_stale_files`** is how many
-  INDEXED files' recorded `(mtime, size)` moved; **`_changed_files`** is how many files actually differ in
+  INDEXED files' recorded `(mtime, size, ctime)` moved; **`_changed_files`** is how many files actually differ in
   CONTENT from the index that was replaced. They disagree in both directions, on purpose: adding a file is
   `_stale_files:0, _changed_files:1` (no indexed file moved — its directory did), and a bare `touch` with no
   edit is `_stale_files:1, _changed_files:0` (a stat moved and not one byte). So `_changed_files:0` is your
   signal that a rebuild happened and nothing about the code changed — do not re-read anything. Like
   `_reingest`, these are facts about what THIS server did, not about the tree, so never diff them across
-  calls. The irreducible limit is unchanged and worth knowing: a content edit preserving BOTH the mtime and
-  the exact byte length is invisible to a stat-keyed check (`test/freshnesscheck.sh`, and the card A3 section
-  of `docs/EVALS.md` reproduces it on the CLI too) — the edit verbs' own per-write byte-hash guard is what
-  covers that corner for writes.
+  calls. The limit that used to sit here — a content edit preserving BOTH the mtime and the exact byte
+  length being invisible to a stat-keyed check — is CLOSED: the check compares `st_ctime` too, which moves on
+  the `touch -r`/`cp -p` that restores an mtime and which no unprivileged writer can set back
+  (`test/freshnesscheck.sh` arms 6-7). What is left is narrow and worth knowing: a system clock moved
+  backward, raw block-device writes, and filesystems with no distinct ctime (FAT/exFAT, some SMB mounts),
+  where the check degrades to its `(mtime, size)` behaviour. The edit verbs' own per-write byte-hash guard
+  covers writes independently of any of this.
 - **Working-set personalization (Cody-style)**: the PageRank prior is teleport-biased toward files with
   **uncommitted changes** (`git diff --name-only HEAD`) — β=0.7 of the mass on changed-file symbols, same
   weighting `--map-diff` uses. Ranks auto-shift toward what you're actively editing; a clean tree or a

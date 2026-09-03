@@ -26,8 +26,9 @@ struct IngestFileScan
 {
     std::vector<const LangEntry*> lang;        // grammar table entry per fileId (nullptr = doc/unknown ext)
     std::vector<std::uint64_t>    hash;        // content hash (0 = not yet hashed)
-    std::vector<long long>        statSize;    // A4-P7: (size,mtime) observed at hash time (-1 = not captured)
+    std::vector<long long>        statSize;    // A4-P7 + v14: (size,mtime,ctime) observed at hash time (-1 = not captured)
     std::vector<long long>        statMtime;
+    std::vector<long long>        statCtime;
     std::vector<FileHealth>       health;      // §L1: one slot per fileId, one writer per slot
 };
 
@@ -40,6 +41,7 @@ inline IngestFileScan makeFileScan( const std::vector<std::string>& files )
     scan.hash.assign( nfilesEarly, 0 );
     scan.statSize.assign( nfilesEarly, -1 );
     scan.statMtime.assign( nfilesEarly, -1 );
+    scan.statCtime.assign( nfilesEarly, -1 );
     scan.health.resize( nfilesEarly );
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: classify file languages" );
@@ -170,26 +172,64 @@ inline void prewarmTagsQueries( const std::vector<std::string>& files, const Has
                                 const FileFacts& ff = cit->second;
 
                                 // A4-P7 STAT-GATE: trust the cached parse WITHOUT reading/hashing when the
-                                // current size+mtime still match the cache AND the entry is not racy (its
-                                // mtime is strictly older than the blob's own write time — a same-granule
-                                // post-hash edit could otherwise slip through undetected). Content hash stays
-                                // the authority: any mismatch, an unstatable file, or a racy entry falls
-                                // through to the read+hash path below.
-                                const StatInfo si = statSizeMtime( f );
-                                const bool statMatches = si.mtimeNs >= 0 && ff.mtimeNs >= 0
-                                                      && si.sizeBytes == ff.sizeBytes
-                                                      && si.mtimeNs   == ff.mtimeNs;
+                                // current size+mtime+ctime all still match the cache AND the entry is not
+                                // racy (its mtime is strictly older than the blob's own write time — a
+                                // same-granule post-hash edit could otherwise slip through undetected).
+                                // Content hash stays the authority: any mismatch, an unstatable file, or a
+                                // racy entry falls through to the read+hash path below.
+                                //
+                                // ctimeNs is the third discriminator and the one that closes the
+                                // same-(mtime,size) residual: mtime can be restored by any unprivileged
+                                // writer (`touch -r`, `cp -p`, an editor preserving it, a checkout of an
+                                // older revision) and the byte length can survive an edit, but the utimes()
+                                // that performs the restore is itself an inode change and moves ctime
+                                // forward. It is free — this ::stat already returned it. See
+                                // ingest_crawl.h statSizeTimes for what is still outside it (a clock moved
+                                // backward, raw device writes, a ctime-less filesystem), which is why the
+                                // racy rule below is kept rather than replaced.
+                                const StatInfo si = statSizeTimes( f );
+                                const bool sizeMtimeMatch = si.mtimeNs >= 0 && ff.mtimeNs >= 0
+                                                         && si.sizeBytes == ff.sizeBytes
+                                                         && si.mtimeNs   == ff.mtimeNs;
+                                const bool statMatches = sizeMtimeMatch
+                                                      && si.ctimeNs >= 0 && ff.ctimeNs >= 0
+                                                      && si.ctimeNs == ff.ctimeNs;
                                 const bool notRacy = cacheWriteNs >= 0 && ff.mtimeNs < cacheWriteNs;
                                 if( statMatches && notRacy )
                                 {
                                     scan.hash[ fi ]      = ff.hash;        // parse pool sees a cache hit → never reads
                                     scan.statSize[ fi ]  = si.sizeBytes;   // carry stat forward into the re-saved blob
                                     scan.statMtime[ fi ] = si.mtimeNs;
+                                    scan.statCtime[ fi ] = si.ctimeNs;
                                     continue;   // provably unchanged — grammar NOT needed for this file
                                 }
 
                                 if( !readFile( f, bytes ) )
                                 {
+                                    // THE COST SIDE OF THE ctime DISCRIMINATOR, and the one place it needs a
+                                    // degrade. ctime moves on chmod/chown/xattr/rename as well as on a write,
+                                    // so those all land here — correctly, and cheaply, since the re-hash then
+                                    // agrees with the record. But when the metadata change is what made the
+                                    // file UNREADABLE, this read fails, and dropping the file would turn a
+                                    // `chmod 000` into a silently partial index (caught by postingscheck (d),
+                                    // pinned by statgatecheck (e)).
+                                    //
+                                    // So: an unreadable file whose (size, mtime) still match a non-racy record
+                                    // KEEPS its cached parse. A ctime that moved on its own is a metadata
+                                    // change, not evidence of a content change, and serving the last-known
+                                    // parse of a file we were unable to look at beats deleting it from the
+                                    // answer. Disclosed exposure: a same-(mtime,size) edit hidden behind a
+                                    // chmod-to-unreadable is served stale — no cache-free run can do better
+                                    // (--no-cache cannot read it either), and the MCP edit verbs re-read and
+                                    // byte-hash their target regardless. An unreadable file whose size or
+                                    // mtime DID move keeps the pre-existing behaviour: it is dropped.
+                                    if( sizeMtimeMatch && notRacy )
+                                    {
+                                        scan.hash[ fi ]      = ff.hash;
+                                        scan.statSize[ fi ]  = si.sizeBytes;
+                                        scan.statMtime[ fi ] = si.mtimeNs;
+                                        scan.statCtime[ fi ] = si.ctimeNs;   // absorb the metadata move: next run stat-hits again
+                                    }
                                     continue;   // unreadable — worker will skip it too (not a miss to compile for)
                                 }
                                 hasFullBytes = true;
@@ -198,6 +238,7 @@ inline void prewarmTagsQueries( const std::vector<std::string>& files, const Has
                                 // capture the stat observed at hash time so this file stays stat-gate-eligible next run
                                 scan.statSize[ fi ]  = si.sizeBytes >= 0 ? si.sizeBytes : (long long)bytes.size();
                                 scan.statMtime[ fi ] = si.mtimeNs;
+                                scan.statCtime[ fi ] = si.ctimeNs;
                                 if( ff.hash == h )
                                 {
                                     continue;   // cache hit — parse skipped → grammar NOT needed for this file

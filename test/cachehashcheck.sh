@@ -5,17 +5,24 @@
 # `--cache=PATH` path survives the classic "mtime-lies" attack — edit a file's content, then
 # `touch -r` its mtime back to the pre-edit value, and a warm re-run must STILL see the new content.
 #
-# WHAT THIS HEADER USED TO CLAIM, AND WHY IT NO LONGER DOES (corrected 2026-09-03, card A3). It used to
-# generalise the pass into immunity: "the CLI path re-crawls and re-hashes bytes every invocation, so an
-# equal mtime never masks a content change". The re-crawl half is still true. The re-hash half stopped
-# being true when the A4-P7 stat-gate landed — a warm run now SKIPS the read+hash for any file whose
-# (sizeBytes, mtimeNs) still match the cache record and whose recorded mtime is strictly older than the
-# cache blob's own. So the CLI shares the MCP server's documented same-(mtime,size) residual instead of
-# being immune to the class, and what this gate actually proves is the case it actually stages: the edit
-# below changes the byte LENGTH, and the SIZE discriminator is what catches it. That is the realistic
-# attack and the regression worth fencing; it is not immunity. The residual is reproduced with argv in
-# test/freshnesscheck.sh arm 6 and in the card A3 section of docs/EVALS.md, both of which also pin
-# `--no-cache` as the escape hatch.
+# WHAT THIS HEADER USED TO CLAIM, AND WHAT IT CLAIMS NOW (corrected twice, 2026-09-03). It first
+# generalised its own pass into immunity: "the CLI path re-crawls and re-hashes bytes every invocation, so
+# an equal mtime never masks a content change". The re-crawl half was true; the re-hash half stopped being
+# true when the A4-P7 stat-gate landed, because a warm run SKIPS the read+hash for a file whose stat record
+# still matches — so the CLI shared the MCP server's same-(mtime,size) residual rather than being immune to
+# the class, and what this gate proved was the case it stages: the edit below changes the byte LENGTH, and
+# the SIZE discriminator catches it.
+#
+# The residual is now CLOSED (docs/EVALS.md, "Closing the same-(mtime, size) warm-path residual"). The stat
+# record carries a third field, st_ctime, which an unprivileged writer cannot restore — the `touch -r` below
+# moves it — so this gate's own attack would now be caught by TWO independent discriminators. That is why it
+# is still the size half that this gate proves: the arm is deliberately length-CHANGING, so it keeps fencing
+# the size discriminator specifically and does not quietly become a duplicate of statgatecheck (b2) /
+# freshnesscheck arm 6, which stage the length-PRESERVING attack the ctime field exists for.
+#
+# Still not immunity, and the boundary is stated rather than implied: a caller who can move the system clock
+# backward, raw block-device manipulation, and a filesystem with no distinct ctime (FAT/exFAT, some SMB
+# mounts) all remain outside it, and `--no-cache` remains the unconditional escape hatch.
 #
 # Recipe ( "G-A1"):
 #   1. write a source file, run ripwire with --cache=<tmp>/c.bin to populate (cold)
