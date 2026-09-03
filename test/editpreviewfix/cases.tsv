@@ -23,14 +23,15 @@ pre09	preserve	narrow	mod.py	pre09.txt	python body gains a local, same signature
 pre10	preserve	read	mod.py	pre10.txt	python method body rewritten, same signature
 pre11	preserve	scale	lib.h	pre11.txt	parameters RENAMED, count unchanged
 pre12	preserve	reset	mod.py	pre12.txt	python method gains a docstring, same signature
+pre13	preserve	widen	mod.py	pre13.txt	RECORDED LIMIT: a de-indented python body is recovered by the grammar with ZERO error nodes, so it is not detectably invalid and BOTH sides answer unchanged
 inv01	invalid	scale	lib.h	inv01.txt	empty payload — empty never means delete
 inv02	invalid	scale	lib.h	inv02.txt	unbalanced brace — the spliced file gains ERROR nodes
 inv03	invalid	scale	lib.h	inv03.txt	syntactic garbage
 inv04	invalid	scale	lib.h	inv04.txt	parses, but defines a DIFFERENT symbol
-inv05	invalid	widen	mod.py	inv05.txt	python body not indented under its def
+inv05	invalid	widen	mod.py	inv05.txt	python def line missing its colon
 inv06	invalid	widen	mod.py	inv06.txt	python parameter list never closes
 inv07	invalid	widen	mod.py	inv07.txt	parses, but defines a DIFFERENT python function
-inv08	invalid	trim	lib.cpp	inv08.txt	payload carries a NUL byte
+inv08	invalid	trim	lib.cpp	GENERATED:nul	payload carries a NUL byte (generated at run time - see the gate)
 inv09	invalid	trim	lib.cpp	inv09.txt	a comment only — defines nothing
 inv10	invalid	width	lib.h	inv10.txt	parses, but defines a different method name
 inv11	invalid	narrow	mod.py	inv11.txt	whitespace only — defines nothing

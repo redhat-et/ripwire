@@ -1,2 +1,2 @@
-def widen(a, b):
-return a + b
+def widen(a, b)
+    return a + b

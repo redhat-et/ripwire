@@ -2265,7 +2265,7 @@ The delta compares the working tree against HEAD, so every concurrent writer's u
 
 **Answers:** fast per-symbol post-edit contract check: SYM's param count + publicness NOW vs git HEAD (unchanged/new-symbol/contract-change with was/now), plus its 1-hop callers with any call-site provably incompatible with the NEW arity flagged.
 
-A contract is PER DEFINITION, so a SYM matching several definition sites REFUSES (exit 1) and lists the file:name spellings that pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=. A .ripwire_notes entry targeting SYM (or its file) rides along as a <note> child, the same row shape --for/--expand surface.
+A contract is PER DEFINITION, so a SYM matching several definition sites REFUSES (exit 1) and lists the file:name spellings that pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=. A .ripwire_notes entry targeting SYM (or its file) rides along as a <note> child, the same row shape --for/--expand surface. PRE-APPLY PREVIEW — add --edit-payload=FILE|- --dry-run to ask the SAME question about bytes that have NOT been written yet. The payload is spliced over SYM's definition span in memory, exactly as --replace-symbol-body would write it; that one file is re-parsed, the call graph rebuilt over the re-derived tree, and the same document emitted with preview="1". Nothing is written, and every other file plus the git HEAD baseline stay the real tree's. Refuses, exit 1, on a payload that is unreadable, empty, oversize or NUL-bearing, on one whose splice raises the file's parse errors, on one that does not define SYM, and on a span the file's current bytes no longer fit. Single-root, and it previews a body REPLACEMENT only.
 
 **Try it**
 
@@ -2289,12 +2289,13 @@ $ ./build/ripwire . --edit-check=rankGraphTeleport
 **Caveats (stated by the binary):**
 
 - A contract is PER DEFINITION, so a SYM matching several definition sites REFUSES (exit 1) and lists the file:name spellings that pick one — unlike --callers/--uses, this verb may not union overloads and disclose defs=.
+- Refuses, exit 1, on a payload that is unreadable, empty, oversize or NUL-bearing, on one whose splice raises the file's parse errors, on one that does not define SYM, and on a span the file's current bytes no longer fit.
 
 ### `--replace-symbol-body=TARGET`
 
 **Answers:** atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|-
 
-**Shaped by:** `--at`
+**Shaped by:** `--edit-check`, `--at`
 
 ### `--insert-before-symbol=TARGET`
 
@@ -2316,7 +2317,7 @@ TARGET is a symbol name, an @FILE:LINE line-seed (edits the innermost definition
 
 empty payloads refuse, never imply deletion
 
-**Shaped by:** `--replace-symbol-body`
+**Shaped by:** `--edit-check`, `--replace-symbol-body`
 
 **Caveats (stated by the binary):**
 
@@ -2345,6 +2346,8 @@ each target takes the same forms as TARGET above (a name, an @FILE:LINE seed, a 
 **Answers:** the plan's explicit mode: --dry-run preflights and prints the receipt without writing, --apply commits;
 
 exactly one of the two is required. Payload paths are relative to the plan file and CONFINED to its directory: a path resolving outside it (an absolute path, a '..' escape, or a symlink pointing out) refuses, naming the path it resolved to, and the receipt's payload_path shows what each op will READ. Every target/payload/span is preflighted before any write; overlaps refuse. Apply holds sorted per-file locks and atomically renames each file, re-verifying EACH file's bytes immediately before ITS OWN write (recheck_before_each_write in the receipt) so a non-cooperating external writer is detected rather than clobbered. Prior files roll back on a later write failure or such a detection; the message says which happened and how many files it restored. A crash between file renames remains a disclosed limit.
+
+**Shaped by:** `--edit-check`
 
 **Caveats (stated by the binary):**
 

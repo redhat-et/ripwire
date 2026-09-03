@@ -36,6 +36,8 @@
 #include "tracelocus.h"            // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
 #include "editcheck.h"             // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
 #include "slice.h"                 // lane/paper-slice: --slice=SYM[:VAR] — the ARISE-motivated def-use slice core (sliceBundleText)
+#include "editpreview.h"           // card A1: the PRE-APPLY contract preview (editpreview::run) — BEFORE mcp.h, which
+                                   //   is what lets the MCP edit_check verb mirror it from mcpverbs.h
 #include "mcp.h"
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
 #include "editplan.h"              // CLI-first versioned multi-edit transactions
@@ -420,6 +422,48 @@ using rw::selectorNotFoundMessage;   // §B4.2: the shared file:name selector re
 // ordinary case (any run whose answering verb is not grep) and the verb then computes them inline.
 struct GrepScanPhases;
 
+// ── card A1: --edit-check=SYM --edit-payload=FILE --dry-run — WHO OWNS THE COMBINATION ────────────────
+// --edit-payload and --dry-run were each spoken for: the first by the three CLI write verbs, the second by
+// --edit-plan. Both of those handlers dispatch BEFORE the ingest pipeline, so without this predicate the
+// preview never reaches --edit-check at all — it lands on "--edit-payload requires one of
+// --replace-symbol-body…", a refusal that is true of yesterday's flag table and useless about what was typed.
+// One predicate, read by all three handlers, so the ownership is stated once.
+bool editPreviewRequested( const rw::Config& c ) noexcept
+{
+    return !c.editCheckSym.empty() && !c.editPayload.empty() && c.editPlanDryRun && !c.editPlanApply;
+}
+
+// the half-typed forms, refused where the caller can still see which flag is missing. Returns nullopt for
+// every combination that is somebody else's business (including the complete preview, which the ordinary
+// --edit-check handler answers after the tree is parsed).
+std::optional<int> runEditPreviewGuard( const rw::Config& c )
+{
+    if( c.editCheckSym.empty() || !c.editPlan.empty() )
+    {
+        return std::nullopt;
+    }
+    if( !c.editPayload.empty() && c.editPlanApply )
+    {
+        std::fprintf( stderr, "ripwire: --edit-check --edit-payload is a PREVIEW and never writes — pass --dry-run, or apply the "
+                              "payload with --replace-symbol-body=%.*s --edit-payload=%.*s\n",
+                      int( c.editCheckSym.size() ), c.editCheckSym.data(), int( c.editPayload.size() ), c.editPayload.data() );
+        return 1;
+    }
+    if( !c.editPayload.empty() && !c.editPlanDryRun )
+    {
+        std::fprintf( stderr, "ripwire: --edit-check --edit-payload previews an unwritten payload and requires --dry-run "
+                              "(add --dry-run to preview; use --replace-symbol-body to actually write it)\n" );
+        return 1;
+    }
+    if( c.editPayload.empty() && c.editPlanDryRun )
+    {
+        std::fprintf( stderr, "ripwire: --edit-check --dry-run needs the bytes to preview — pass --edit-payload=FILE "
+                              "(or --edit-payload=- for stdin)\n" );
+        return 1;
+    }
+    return std::nullopt;
+}
+
 struct MainDispatch
 {
     const rw::Config&                     cfg;
@@ -441,6 +485,8 @@ struct MainDispatch
     rw::RedactCounts*                     redactPtr;
     const rw::notes::NoteIndex*           notesPtr;   // L3: field-notes surfacing index (nullptr ⇒ inert: no/empty file, or multi-root)
     const GrepScanPhases*                 grepPhases = nullptr;   // §P4.1: prefetched grep scan (nullptr ⇒ compute inline)
+    bool                                   valueUses  = false;     // card A1: the captureValueUses this run's ingest actually used, so the
+                                                                    //   pre-apply preview re-parses its one spliced file the SAME way
 };
 
 }   // namespace — part 1: the shared preamble helpers + the verb-dispatch context
@@ -2382,6 +2428,10 @@ std::optional<int> runCliEditPlan( const rw::Config& cfg )
 {
     const bool hasMode = cfg.editPlanDryRun || cfg.editPlanApply;
     if( cfg.editPlan.empty() && !hasMode ) { return std::nullopt; }
+    if( cfg.editPlan.empty() && !cfg.editCheckSym.empty() )
+    {
+        return std::nullopt;   // card A1: --dry-run beside --edit-check is the PREVIEW's mode flag, not this verb's
+    }
     if( cfg.editPlan.empty() )
     {
         std::fprintf( stderr, "ripwire: --dry-run/--apply requires --edit-plan=FILE\n" );
@@ -2417,6 +2467,10 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     {
         return std::nullopt;
     }
+    if( editCount == 0 && !cfg.editCheckSym.empty() )
+    {
+        return std::nullopt;   // card A1: --edit-payload beside --edit-check is the PREVIEW's payload, not a write
+    }
     if( editCount == 0 )
     {
         std::fprintf( stderr, "ripwire: --edit-payload/--edit-target-file requires one of --replace-symbol-body, "
@@ -2440,53 +2494,14 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
         return 1;
     }
 
-    std::string payload;
-    if( cfg.editPayload == "-" )
+    // card A1: the four payload refusals — unreadable, EMPTY (never a delete), oversize against
+    // --max-file-size, and NUL-bearing (rw::looksBinary itself, so the claim is exactly the condition that
+    // would drop the file from the index) — now live ONCE in editpreview.h and are shared with the pre-apply
+    // preview. Two copies of this ladder is two places for an agent to meet two vocabularies for one refusal.
+    std::string payload, payloadErr;
+    if( !rw::editpreview::readPayload( cfg.editPayload, cfg.maxFileBytes, payload, payloadErr ) )
     {
-        std::array<char, 8192> buf{};
-        for( ;; )
-        {
-            const std::size_t n = std::fread( buf.data(), 1, buf.size(), stdin );
-            payload.append( buf.data(), n );
-            if( n < buf.size() )
-            {
-                if( std::ferror( stdin ) )
-                {
-                    std::fprintf( stderr, "ripwire: could not read --edit-payload=- from stdin\n" );
-                    return 1;
-                }
-                break;
-            }
-        }
-    }
-    else
-    {
-        bool readOk = false;
-        payload = rw::mcpdetail::readFileBytes( std::string( cfg.editPayload ), readOk );
-        if( !readOk )
-        {
-            std::fprintf( stderr, "ripwire: could not read edit payload '%.*s'\n", int( cfg.editPayload.size() ), cfg.editPayload.data() );
-            return 1;
-        }
-    }
-    if( payload.empty() )
-    {
-        std::fprintf( stderr, "ripwire: --edit-payload is empty; empty never means delete\n" );
-        return 1;
-    }
-    if( payload.size() > cfg.maxFileBytes )
-    {
-        std::fprintf( stderr, "ripwire: edit payload is %zu bytes, over the --max-file-size ceiling of %zu bytes\n",
-                      payload.size(), cfg.maxFileBytes );
-        return 1;
-    }
-    // A1: the THIRD arm of the payload gate, beside empty and oversize. The engine refuses this too
-    // (mcpedit::kBinaryPayloadRefusal, which is what covers MCP), but the CLI arm names the FLAG the bytes
-    // arrived through — the agent's next move is to fix that file or that pipe, not the edit engine.
-    if( rw::looksBinary( payload ) )
-    {
-        std::fprintf( stderr, "ripwire: --edit-payload %.*s\n",
-                      int( rw::mcpedit::kBinaryPayloadRefusal.size() ), rw::mcpedit::kBinaryPayloadRefusal.data() );
+        std::fprintf( stderr, "ripwire: %s\n", payloadErr.c_str() );
         return 1;
     }
 
@@ -2533,6 +2548,10 @@ int main( int argc, char** argv )
 
     // CLI-first edit verbs reuse the MCP transaction engine and therefore own their own indexed pass.
     // Dispatch before the ordinary ingest pipeline so the preferred CLI path never parses the tree twice.
+    if( std::optional<int> guarded = runEditPreviewGuard( cfg ) )
+    {
+        return *guarded;   // card A1: a half-typed preview, refused where the missing flag is still nameable
+    }
     if( std::optional<int> planned = runCliEditPlan( cfg ) )
     {
         return *planned;
@@ -3457,7 +3476,7 @@ int main( int argc, char** argv )
     // Phase B7.2: bundle the shared post-graph state; each verb handler below reads what it needs.
     const MainDispatch dsp{ cfg, ing, g, root, multiRoot, ws, fanIn, fanInPtr, qmetrics,
                            ampPtr, cboPtr, testedPtr, lcom4Ptr, impurePtr, forChurn, redactCounts, redactPtr, notesPtr,
-                           grepPhases.valid ? &grepPhases : nullptr };
+                           grepPhases.valid ? &grepPhases : nullptr, needsValueUses };
 
     if( std::optional<int> handled = runForLens( dsp ) )
     {
