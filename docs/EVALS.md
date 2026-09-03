@@ -8835,6 +8835,117 @@ the disclosure marker, judged on one band: full-oracle precision of the remainin
 method of a sibling class does not). The census, the join, the sentinel oracle and the diag stay in
 the tree for that round to run against.
 
+### Phase 4 — the S6-C pin DISCLOSED (`lpin=` / `locality_pinned=`) together with the `localityKey` tie-break, PRE-REGISTERED 2026-09-03 (before its first number)
+
+**What phase 3b left owed, and what this section registers.** Phase 3 funded a disclosure fix: the
+S6-C locality pin emits a confident edge and contributes nothing to `amb=`, and the full-oracle census
+put that pin's precision at 0.368 (n = 163). Phase 3b measured the `localityKey` tie-break (module-level
+functions spelled `path::name` for the locality comparison) and registered it NEGATIVE on a floor set
+without a residue model: it removed 109 silent pins per corpus, lifted the in-repo figure 0.723 → 0.831
+and the full-oracle one 0.368 → 0.670, and missed ≥ 0.85 by 1.9 points. Its RUN section's "exact next
+step" is this registration: the tie-break re-registered TOGETHER with the disclosure marker, judged on
+ONE band, with the n-floor budgeted. Both changes ship or both revert.
+
+**The marker's spelling — chosen so it discloses WITHOUT inflating `amb=`.** Counting the 224 pins on
+astropy into `amb=` would be a +8% rise against the +2.0% non-inferiority ceiling every resolver change
+carries, and it would also conflate two different facts (a k-way split nothing decided, and a one-way
+pin a prior decided). The marker is therefore its own counter, parallel to `ambOut`:
+
+- `Graph::locPinOut` — per symbol, the number of its outgoing calls whose single confident target was
+  chosen by the S6-C locality tie-break ALONE: the tier still held > 1 candidate when it reached S6-C,
+  the compaction left exactly ONE non-self survivor, and the site is neither SCIP- nor binding-pinned.
+  This is exactly the predicate under which `pincensus.h::classifyPin` labels a C row `locality`, so the
+  marker and the census name the SAME population by construction (a gate arm asserts it rather than
+  assuming it). A site S6-C narrowed 3 → 2 is a `split`, `amb=` already counts it, and it is NOT an
+  `lpin`.
+- Row attribute **`lpin="K"`** beside `amb="K"`, XML and `--json` (`"lpin":K`), **absent when K = 0** —
+  zero bytes on every row without a pin, the `dropped_positive=` precedent.
+- Header counter **`locality_pinned=N`** after `unresolved=`, the sum over all symbols (the whole
+  corpus, like `ambiguous=`), XML and JSON, **absent when N = 0**. So a corpus with no locality pin
+  emits a byte-identical map: `test/golden.xml` cannot move from the marker (verified before the build:
+  `test/fixture` has 5 census rows, all `unique`).
+- Legend: two entries in the map's leading comment, `lpin=…` and `hdr:locality_pinned=…`, spelled
+  `name=` so `test/legendcoveragecheck.sh`'s definitional predicate credits them.
+- `amb=`, `ambiguous=`, `unresolved=`, `id=`, notes and baseline keys: untouched by construction.
+
+**The tie-break change**, re-applied verbatim from phase 3b: `Graph::localityKey` = `path::scope::name`,
+`path::name` when unscoped, populated in the `canonId` loop and read at the two S6-C `sharedLocality`
+sites only. `canonId`, `canonicalId`, `canonicalIdForEmit` and the emitted `id=` do not change.
+
+**Cache.** Resolution runs in `buildGraph` on every invocation; no `kParserVer` bump. Cold == warm below
+is the proof.
+
+**Same-commit baselines**, plain build at `1c6fdf4` (= origin/main, this lane's base), `ripwire <root>
+--no-cache`; the D4 trees at `rw-lane-ab2-corpora/{ugrep,rocksdb,duckdb}` each verified at its pin with
+`git status --porcelain` empty. The tree moved since phase 3b (`src/` 146 → 147 files, `ambiguous=`
+5,553 → 5,598), so the ceilings are recomputed here and the phase-3b table is not reused:
+
+| corpus | pin | files | symbols | edges | `ambiguous=` | unresolved | +2.0% ceiling |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ripwire `src/` | 1c6fdf4 | 147 | 4,773 | 13,002 | **5,598** | 1,488 | 5,709 |
+| ugrep | `550599a6` | 156 | 3,626 | 5,381 | **1,721** | 5 | 1,755 |
+| rocksdb | `0e2801ac` | 1,873 | 53,619 | 210,332 | **44,967** | 1,800 | 45,866 |
+| duckdb | `19864453` | 5,123 | 61,178 | 84,701 | **8,934** | 2,650 | 9,112 |
+
+The census at the same commit reproduces phase 3 exactly (`--label astropy-N-r4base`): locality 224
+sites, 163 / 161 covered, **0.368 / 0.373** full-oracle, 0.723 / 0.732 in-repo, 50 / 49 `@external`,
+30 / 30 `@nondef`; `split` 2,731 / 3,092 sites.
+
+**The ONE band — three conjuncts, all-or-nothing.** A miss on any conjunct is a REGISTERED NEGATIVE:
+both changes are reverted in the commit that carries the RUN section and the patch is kept verbatim in
+the lane report. No conjunct moves after a number.
+
+1. **`ambiguous=` non-inferiority: ≤ the +2.0% ceiling above on each of the four corpora** (it MAY rise
+   — a silent pin becoming an honest split is the intended direction; "reduce `ambiguous=`" stays the
+   twice-rejected non-criterion). The marker itself contributes ZERO to this gauge by construction; any
+   movement is the tie-break's.
+2. **Full-oracle precision of the REMAINING pins ≥ 0.60 on astropy-14365** — the `locality` row of
+   `bench/scip_pin_precision.py`, `covered` / `precision` (sentinel rows included, the registered
+   definition since phase 3), measured on the post-change binary. Derivation, stated before the number:
+   phase 3b's residue model is 17 `@external` + 10 same-file sibling-class + 1 `@nondef` + 1 cross-file
+   = 29 disconfirmed of 88, i.e. 0.670 on the previous tree; the floor sits 7 points under that so a
+   moved tree cannot decide the verdict by itself, and any figure under 0.60 falsifies the residue model
+   — which is the finding this floor exists to catch, not a defect to argue with. The reading behind
+   0.60: with `lpin=` on the row, the remaining pin is a DISCLOSED guess; a disclosed guess that is
+   right ≥ 3 times in 5 is worth one confident edge more than a 1/k spray over candidates that are ALL
+   wrong (the external residue), and below that it is not.
+   **n-floor budget, registered before looking:** the primary is 14365 alone if its post-change
+   `covered` ≥ 100. Phase 3b measured n = 88 after the fix, so this is expected NOT to hold; in that case
+   the primary is the POOLED figure over 14365 + 12907 (Σ confirmed / Σ covered across both `locality`
+   rows), which must reach pooled n ≥ 100, with each corpus reported beside it. Dependence disclosed
+   with the number: the two snapshots are the same repository ~1,000 commits apart and share most
+   sites, so the pooled n is a floor on evidence, not two independent samples — the pooling buys
+   stability against per-snapshot drift, not a second population. Pooled n < 100 ⇒ INCONCLUSIVE, which
+   is a miss of this conjunct.
+3. **The marker is exact and costs nothing where it does not fire:** on the plain astropy-14365 run the
+   header `locality_pinned=` equals the number of `C<TAB>locality` rows in that run's `--pin-census`;
+   on `test/fixture` the map contains no `lpin=` and no `locality_pinned=` and `test/golden.xml` is
+   byte-identical (no golden re-derivation: the fixture holds no locality pin and no tie the change
+   moves). Asserted by the gate below on its fixture and repeated on astropy in the RUN section.
+
+**Contract checks, not bands** (each must be clean, none is a criterion of the band): determinism ×2
+on the fixture and on astropy-14365; cold == warm == warm on astropy-14365; `xmllint --noout` on the
+fixture map and the astropy-14365 map; ASan (`LSAN_OPTIONS=suppressions=lsan_suppressions.txt`) on the
+new gate, on `pincensuscheck`, `scipjoincheck`, and on the full `--scip --pin-census` census path over
+astropy-14365 (census rows == dev rows); `pincensuscheck`, `scipjoincheck`, `localitycheck`,
+`resolverhonestycheck`, `chainguardcheck`, `legendcoveragecheck`, `jsonparitycheck`, `manifestcheck`
+green; `docs/COMMANDS.md` NOT regenerated in-lane (the legend string is captured there; the orchestrator
+recomputes from the merged tree, and the in-lane `docscommandscheck` result is reported as-is).
+
+**Gate — written and run RED before the code.** `test/lpincheck.sh` on the new fixture `test/lpinfix/`
+(three files, ~40 lines): `pinned.py` (the pin: `Alpha.run` bare-calls `helper()`, `Alpha.helper` and
+`Beta.helper` in the same file — `lpin="1"` on `Alpha::run`, no `amb=`), `tied.py` (the control:
+`Eps.go` → sibling `Gamma.other` / `Delta.other`, `amb="1"`, no `lpin=`), and `modlevel.py` (the
+phase-3b repro: `Caller.go` bare-calls `compute()` with `Helper.compute` and a module-level `compute`
+in the same file — today a silent pin on `Helper::compute`; after the tie-break a full `modlevel.py::`
+tie ⇒ `amb="1"`, no `lpin=`). Arms: (A) the pin row carries `lpin="1"` and no `amb=`; (B) the tied
+control carries `amb="1"` and no `lpin=`; (C) the module-level site is a split, `amb="1"`, no `lpin=`;
+(D) header `locality_pinned=1` and `ambiguous=2`, and `locality_pinned=` == the census's `C<TAB>locality`
+row count; (E) zero bytes when nothing fires — `test/fixture` emits no `lpin=` and no `locality_pinned=`;
+(F) the legend defines both names with `name=`; (G) `--json` carries `"lpin":1` on the pin row and
+`"locality_pinned":1` in the header; (H) determinism ×2 and `xmllint`. Red on the pre-change binary at
+(A), (C), (D), (F), (G) — nothing emits the attribute yet and `Caller::go` is still pinned.
+
 ## Member variables as symbols + `--uses=Owner.field` — the member-variable round (card A3), PRE-REGISTERED 2026-09-02 (before any corpus number)
 
 **What this registers.** ARISE-bibliography RANK-A card A3 — CodexGraph's FIELD schema element: a class's
