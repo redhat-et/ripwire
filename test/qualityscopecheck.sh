@@ -18,6 +18,13 @@
 #   (E) PROVENANCE     — an ack written under --scope records by=<spec>; a later run flags an ack whose
 #                        by= does not cover the path it is suppressing. Rows with no by= (every row written
 #                        before this feature existed) keep working byte-for-byte.
+#   (F) F-05 REGRESSION — the audit's own finding (2026-09-02): out-of-scope disclosure was ack-ratcheted,
+#                        so a sibling's OWN ack — on a row that has nothing to do with you — made that row
+#                        vanish from YOUR <out-of-scope> element instead of just yours suppressing it. And
+#                        foreign-acks= tested provenance against the clone row's first-sorting member's path
+#                        alone where inclusion already uses the whole member set, so a legitimate any-member
+#                        ack (filed by the member that does NOT sort first) read as foreign every time. Arm
+#                        13 below is the regression lock for both halves.
 #
 # A typo'd scope must never read as "you're clean": a --scope naming nothing indexed REFUSES (exit 1), the
 # same ruling --dead-code=DIR already carries.
@@ -284,6 +291,69 @@ cd "$R"; git add -A; git commit -qm "both writers land"
 grep -q 'COMMITTED trees' "$TMP/rangediff.err" && ok "(12) …and says why the working tree is not the answer there" || { no "(12) …without saying why"; cat "$TMP/rangediff.err"; }
 "$BIN" . --quality-delta=HEAD~1..HEAD --scope=alpha >/dev/null 2>&1; rc=$?
 [ $rc -ne 1 ] && ok "(12) …while a PATH scope still works on the range form (exit $rc)" || no "(12) a path scope was refused on the range form too"
+
+# ── 13) (F) F-05 REGRESSION LOCK: a sibling's ack must never hide a row from YOUR disclosure ─────────────
+# A fresh two-owner repo: gamma writes four EXCLUSIVE findings (never delta's), plus a clone group that
+# straddles gamma and delta (the any-member shared case). gamma acks two of its own exclusive rows —
+# nothing shared — under --scope=gamma. delta's later --scope=delta report must still show ALL FOUR of
+# gamma's rows under <out-of-scope> (acked or not): the legend promises the element is "not dropped …
+# every one of them is printed", and an ack is a fact about gamma's OWN ledger, not about what delta gets
+# told belongs to somebody else.
+F13="$TMP/f13"; mkdir -p "$F13/gamma" "$F13/delta"
+cd "$F13"; git init -q .; git config user.email t@t; git config user.name t
+cat > gamma/lib.h <<'EOF'
+#pragma once
+inline int g_pub( int a ) { return a; }
+EOF
+cat > delta/lib.h <<'EOF'
+#pragma once
+inline int d_pub( int a ) { return a; }
+EOF
+git add -A; git commit -qm base
+"$BIN" . --quality-baseline >/dev/null 2>&1
+cat > gamma/lib.h <<'EOF'
+#pragma once
+inline int g_pub( int a, int b ) { return a + b; }
+inline int gammaMess1( int a, int b ) { return a + b; }
+inline int gammaMess2( int a, int b ) { return a + b; }
+inline int g_twin() { int x = 0; x += 1; x += 2; x += 3; x += 4; x += 5; return x * x + 1; }
+EOF
+cat > delta/lib.h <<'EOF'
+#pragma once
+inline int d_pub( int a ) { return a; }
+inline int d_twin() { int x = 0; x += 1; x += 2; x += 3; x += 4; x += 5; return x * x + 1; }
+EOF
+"$BIN" . --quality-delta --scope=gamma --ack-only=gammaMess --quality-ack="gamma session" --no-cache >/dev/null 2>"$TMP/f13ack.err"; rc=$?
+[ $rc -eq 0 ] && ok "(13) gamma's own-row ack under its scope succeeds" || { no "(13) gamma's ack exited $rc"; cat "$TMP/f13ack.err"; }
+"$BIN" . --quality-delta --scope=delta --no-cache >"$TMP/f13delta.xml" 2>/dev/null
+grep -oE 'scoped-out="[0-9]+"' "$TMP/f13delta.xml" | grep -q 'scoped-out="4"' \
+    && ok "(13B) delta's scoped-out= still counts all 4 of gamma's rows after gamma's own ack" \
+    || { no "(13B) scoped-out= dropped after a sibling's ack — the F-05 bug"; grep -oE '<quality-delta[^>]*>' "$TMP/f13delta.xml"; }
+for sym in g_pub g_twin gammaMess1 gammaMess2; do
+    grep -q "sym=\"$sym\"" "$TMP/f13delta.xml" \
+        && ok "(13B) …and '$sym' is still PRESENT in the disclosure, acked or not" \
+        || { no "(13B) …but '$sym' vanished from <out-of-scope> — an acked row must still be disclosed"; }
+done
+oos_part2(){ sed 's/<out-of-scope/\n<out-of-scope/' "$1" | tail -n +2; }
+oos_part2 "$TMP/f13delta.xml" > "$TMP/f13delta.oos"
+grep -q 'gating="1"' "$TMP/f13delta.oos" && no "(13B) a disclosed row claims to gate" || ok "(13B) no disclosed row claims to gate, ack or not"
+
+# ── 13C) foreign-acks= any-member symmetry: the group's r.path is its FIRST-SORTING member, and
+# "delta" < "gamma" ASCII-sorts first — so gamma is the member that does NOT sort first. gamma legitimately
+# acks the straddling group (gamma owns g_twin, a real member) and that must NOT read as foreign just
+# because the row's own locator names delta's file instead.
+cd "$F13"; rm -f .ripwire_quality_acks
+"$BIN" . --quality-delta --scope=gamma --ack-only=duplication --quality-ack="gamma acks the shared group" --no-cache >/dev/null 2>&1
+"$BIN" . --quality-delta --no-cache >"$TMP/f13unscoped.xml" 2>/dev/null
+grep -q 'foreign-acks=' "$TMP/f13unscoped.xml" \
+    && { no "(13C) gamma's legitimate any-member ack (non-first-sorting member) reads as foreign"; grep -oE '<quality-delta[^>]*>|<sa[^>]*/>' "$TMP/f13unscoped.xml"; } \
+    || ok "(13C) gamma's legitimate any-member ack does not false-positive as foreign-scope"
+# negative control: hand-corrupt the SAME ack's by= to a scope that owns NEITHER member — must still fire.
+sed -i.bak 's/by=gamma /by=zzz-nobody /' .ripwire_quality_acks
+"$BIN" . --quality-delta --no-cache >"$TMP/f13corrupt.xml" 2>/dev/null
+grep -qE 'foreign-acks="[1-9]' "$TMP/f13corrupt.xml" \
+    && ok "(13C) …while a GENUINELY foreign by= (owns no member) is still caught (negative control holds)" \
+    || { no "(13C) a genuinely foreign ack was not caught — the any-member fix over-corrected"; grep -oE '<quality-delta[^>]*>' "$TMP/f13corrupt.xml"; }
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

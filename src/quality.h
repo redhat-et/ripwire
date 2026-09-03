@@ -307,19 +307,35 @@ inline bool isValidMacroToken( std::string_view token ) noexcept
     return true;
 }
 
-// `.ripwire_config`'s ONE recognized key: `register_macros = NAME[, NAME...]`. Grammar: one directive per
-// line, '#' full-line comments, blank lines ignored; a line whose key is not "register_macros" is skipped
-// (forward-compat — see kConfigFile's comment above), and a malformed/non-identifier token is dropped
-// rather than accepted. Absent/unreadable/empty file yields an empty list — INERTNESS CONTRACT: no config
-// file changes nothing about this run's set of exempted names (kBuiltinRegisterMacros still applies).
-// Sorted + deduped so two hand-edits appending the same name in different positions merge to one.
-inline std::vector<std::string> readRegisterMacrosConfig( std::string_view root )
+// F-13 (audit 2026-09-02) — readRegisterMacrosConfig's two return lists: the valid names, and every KEY
+// token seen that was not "register_macros". The second list used to be thrown away at the point of
+// discovery (a bare `continue`), which is how a typo like `register_macrs = …` silently restored the false
+// positives the real key exists to remove — nothing on stderr, no header attribute, an inert config that
+// LOOKED live. Kept as two vectors rather than one struct-per-line list: every consumer wants "the name
+// set" untouched (registeredMacroNames, the hot matching path) and only the CLI verb layer wants the
+// second list, once per invocation, for disclosure.
+struct RegisterMacrosConfig
 {
-    std::vector<std::string> names;
-    std::string               text;
+    std::vector<std::string> names;              // valid register_macros=NAME tokens, sorted + deduped
+    std::vector<std::string> unrecognizedKeys;    // distinct non-"register_macros" keys seen, sorted + deduped
+};
+
+// `.ripwire_config`'s ONE recognized key: `register_macros = NAME[, NAME...]`. Grammar: one directive per
+// line, '#' full-line comments, blank lines ignored; a line with no '=' at all carries no key/value shape
+// this file defines anything for, so it is left alone rather than guessed at (same "never throws, never
+// guesses" posture as the malformed-token skip below). A line that DOES have that shape but whose key is
+// not "register_macros" is a candidate directive with the wrong name — recorded in unrecognizedKeys rather
+// than silently skipped (F-13) — and a malformed/non-identifier value token is dropped rather than
+// accepted. Absent/unreadable/empty file yields two empty lists — INERTNESS CONTRACT: no config file
+// changes nothing about this run's set of exempted names (kBuiltinRegisterMacros still applies), and an
+// unrecognized key is disclosed, never a refusal — a typo in an otherwise-inert config must not fail a run.
+inline RegisterMacrosConfig readRegisterMacrosConfig( std::string_view root )
+{
+    RegisterMacrosConfig out;
+    std::string          text;
     if( !docparse::detail::readWholeFile( configPath( root ), text ) || text.empty() )
     {
-        return names;   // absent/unreadable/empty — inert, never a refusal
+        return out;   // absent/unreadable/empty — inert, never a refusal
     }
     std::size_t pos = 0;
     while( pos <= text.size() )
@@ -333,19 +349,21 @@ inline std::vector<std::string> readRegisterMacrosConfig( std::string_view root 
         {
             continue;
         }
+        const std::size_t eq = line.find( '=' );
+        if( eq == std::string_view::npos )
+        {
+            continue;   // no '=' at all — not this file's directive grammar, nothing to warn about
+        }
+        std::string_view key = line.substr( 0, eq );
+        while( !key.empty() && ( key.back() == ' ' || key.back() == '\t' ) ) { key.remove_suffix( 1 ); }
         constexpr std::string_view kKey = "register_macros";
-        if( line.size() <= kKey.size() || line.compare( 0, kKey.size(), kKey ) != 0 )
+        if( key != kKey )
         {
-            continue;   // unrecognized key — forward-compat skip, not a refusal
+            out.unrecognizedKeys.emplace_back( key );   // F-13: disclosed, not skipped
+            continue;
         }
-        std::string_view rest = line.substr( kKey.size() );
-        while( !rest.empty() && ( rest.front() == ' ' || rest.front() == '\t' ) ) { rest.remove_prefix( 1 ); }
-        if( rest.empty() || rest.front() != '=' )
-        {
-            continue;   // "register_macros" with no '=' is not the directive — skip, do not guess
-        }
-        rest.remove_prefix( 1 );
-        std::size_t start = 0;
+        std::string_view rest = line.substr( eq + 1 );
+        std::size_t      start = 0;
         while( start <= rest.size() )
         {
             const std::size_t comma = rest.find( ',', start );
@@ -354,7 +372,7 @@ inline std::vector<std::string> readRegisterMacrosConfig( std::string_view root 
             while( !tok.empty() && ( tok.front() == ' ' || tok.front() == '\t' ) ) { tok.remove_prefix( 1 ); }
             if( isValidMacroToken( tok ) )
             {
-                names.emplace_back( tok );
+                out.names.emplace_back( tok );
             }
             if( comma == std::string_view::npos )
             {
@@ -363,9 +381,11 @@ inline std::vector<std::string> readRegisterMacrosConfig( std::string_view root 
             start = comma + 1;
         }
     }
-    std::sort( names.begin(), names.end() );
-    names.erase( std::unique( names.begin(), names.end() ), names.end() );
-    return names;
+    std::sort( out.names.begin(), out.names.end() );
+    out.names.erase( std::unique( out.names.begin(), out.names.end() ), out.names.end() );
+    std::sort( out.unrecognizedKeys.begin(), out.unrecognizedKeys.end() );
+    out.unrecognizedKeys.erase( std::unique( out.unrecognizedKeys.begin(), out.unrecognizedKeys.end() ), out.unrecognizedKeys.end() );
+    return out;
 }
 
 // The combined, sorted, deduped registered-macro name list for ONE run: the built-ins above plus whatever
@@ -373,7 +393,7 @@ inline std::vector<std::string> readRegisterMacrosConfig( std::string_view root 
 inline std::vector<std::string> registeredMacroNames( std::string_view root )
 {
     std::vector<std::string> names( kBuiltinRegisterMacros.begin(), kBuiltinRegisterMacros.end() );
-    for( std::string& extra : readRegisterMacrosConfig( root ) )
+    for( std::string& extra : readRegisterMacrosConfig( root ).names )
     {
         names.push_back( std::move( extra ) );
     }
@@ -704,6 +724,47 @@ inline std::vector<NodeId> registeredMacroSymbolIds( const IngestResult& ing, co
     } );
     std::sort( ids.begin(), ids.end() );
     return ids;
+}
+
+// F-13 (audit 2026-09-02) — which of `configNames` (the .ripwire_config-supplied names ONLY; never pass the
+// built-ins here, they are the tool's own defaults, not a repo's claim) matched NO indexed symbol at all.
+// Such a name is either a typo or names a macro this corpus does not use — inert either way, and inert
+// SILENTLY was the actual defect: the exemption looked live in .ripwire_config but excluded nothing, which
+// is worse than not having the line, because it reads as "handled". Reuses registeredMacroSymbolIds itself
+// (one full-corpus scan per name) rather than re-deriving the match rule, so "matched" here means exactly
+// what it means for the exemption that actually runs — a repo's config is at most a handful of names, so
+// the O(names) rescan costs nothing next to the ingest this verb already paid for.
+inline std::vector<std::string> inertRegisterMacroNames( const IngestResult& ing, const std::vector<std::string>& configNames )
+{
+    std::vector<std::string> inert;
+    for( const std::string& name : configNames )
+    {
+        if( registeredMacroSymbolIds( ing, { name } ).empty() )
+        {
+            inert.push_back( name );
+        }
+    }
+    return inert;
+}
+
+// F-13 — the two disclosure lists a CLI verb needs, computed once. Pure (no I/O): the caller owns the
+// stderr wording and the root attribute, same split every other verb in this file keeps (quality.h
+// computes, verbs_quality.h prints) — kept here rather than duplicated at each of the two call sites
+// (--dead-code and --quality-delta both exempt via registeredMacroNames/registeredMacroSymbolIds).
+struct RegisterMacroConfigDiagnostics
+{
+    std::vector<std::string> unrecognizedKeys;   // distinct unrecognized .ripwire_config keys
+    std::vector<std::string> inertNames;         // register_macros= names that matched no indexed symbol
+    std::size_t              total() const noexcept { return unrecognizedKeys.size() + inertNames.size(); }
+};
+
+inline RegisterMacroConfigDiagnostics diagnoseRegisterMacroConfig( const IngestResult& ing, std::string_view root )
+{
+    const RegisterMacrosConfig      cfg = readRegisterMacrosConfig( root );
+    RegisterMacroConfigDiagnostics  diag;
+    diag.unrecognizedKeys = cfg.unrecognizedKeys;
+    diag.inertNames        = inertRegisterMacroNames( ing, cfg.names );
+    return diag;
 }
 
 inline gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashesBySym( const IngestResult& ing, std::string_view root )
@@ -4565,11 +4626,20 @@ inline std::pair<std::string, std::string> identityDisclosure( const IdentityHea
     return { attrs, json };
 }
 
+// Is `r` currently suppressed by an ack in `acks` — same lookup applyAckRatchet uses (ackKindToken, not the
+// bare kind: a ZERO-magnitude finding acks on identity + ORIGIN, so an ack against the never-gating
+// new-symbol row can never suppress the gating contract-change row for the same symbol), factored out so a
+// caller that needs the ANSWER without mutating the vector (partitionByScope's out-of-scope disclosure,
+// F-05 fix below) does not re-derive the map key by hand. Returns the record so a caller can also read its
+// `by=` provenance.
+inline const AckRecord* findSuppressingAck( const Regression& r, const gtl::btree_map<std::string, AckRecord>& acks )
+{
+    const auto it = acks.find( ackMapKey( ackKindToken( r ), r.key ) );
+    return ( it != acks.end() && r.now <= it->second.ackNow ) ? &it->second : nullptr;
+}
+
 // Drop every regression already acked at a magnitude ≥ its current `now`; return how many were suppressed
 // (the honest acked="N" header count). A worsened finding (now > acked floor) survives — the ratchet.
-// P0.3: the lookup token is ackKindToken, not the bare kind — a ZERO-magnitude finding acks on identity +
-// ORIGIN, so an ack taken against the never-gating new-symbol row can no longer suppress the gating
-// contract-change row for the same symbol.
 inline std::size_t applyAckRatchet( std::vector<Regression>& regs, const gtl::btree_map<std::string, AckRecord>& acks )
 {
     if( acks.empty() )
@@ -4578,11 +4648,7 @@ inline std::size_t applyAckRatchet( std::vector<Regression>& regs, const gtl::bt
     }
     const std::size_t before = regs.size();
     regs.erase( std::remove_if( regs.begin(), regs.end(),
-                                [ & ]( const Regression& r )
-                                {
-                                    const auto it = acks.find( ackMapKey( ackKindToken( r ), r.key ) );
-                                    return it != acks.end() && r.now <= it->second.ackNow;
-                                } ),
+                                [ & ]( const Regression& r ) { return findSuppressingAck( r, acks ) != nullptr; } ),
                 regs.end() );
     return before - regs.size();
 }
@@ -4805,7 +4871,15 @@ inline std::vector<StaleAck> computeForeignAcks( const std::vector<Regression>& 
             // stated rather than silently skipped.
             continue;
         }
-        if( !by.matchesPath( r.path ) )
+        // F-05 fix (audit 2026-09-02, item 3): a clone finding's ONLY locator on the row itself is r.path,
+        // the first-sorting member — but inclusion (scopeCovers, kScopeLegend's own words: "a clone kind is
+        // in scope when ANY member matches, not just the first-sorting one") already uses the whole
+        // memberPaths set. Testing provenance against r.path alone made a legitimate any-member ack — filed
+        // by whichever owner's path happens to sort AFTER the first — read as foreign every time, a false
+        // positive on exactly the shared-ownership case this scope feature exists for. scopeCovers is the
+        // one predicate both questions ("is this finding covered by S") share; asking it of `by` here keeps
+        // inclusion and provenance symmetric.
+        if( !scopeCovers( by, r ) )
         {
             out.push_back( { it->second.kind, it->second.key, StaleAckWhy::ForeignScope, it->second.by } );
         }

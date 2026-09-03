@@ -344,10 +344,21 @@ std::optional<int> refuseUnusableScope( const rw::Config& cfg, const rw::quality
     return 1;
 }
 
-// P1 — the partition itself: move every finding the scope does not cover into `outOfScope`, apply the ack
-// ratchet on that side too (a sibling's ALREADY-ACKED row is answered over there, so disclosing it again
-// would be noise), and return how many of the disclosed rows WOULD have gated. Called before the in-scope
-// ratchet so acked= counts this scope's suppressions rather than the whole tree's.
+// P1 — the partition itself: move every finding the scope does not cover into `outOfScope`, and return how
+// many of the disclosed rows WOULD have gated. Called before the in-scope ratchet so acked= counts this
+// scope's suppressions rather than the whole tree's.
+//
+// F-05 fix (audit 2026-09-02, item 2): this USED to ack-ratchet outOfScope too ("a sibling's ALREADY-ACKED
+// row is answered over there, so disclosing it again would be noise") — but kScopeLegend promises the
+// out-of-scope element is "not dropped: … every one of them is printed", unconditionally, and an ack
+// written by ANYONE (not just the row's own owner — applyAckRatchet does not check by= at all) made a row
+// vanish from that element entirely: a sibling's exclusive debt, acked once under its OWN scope for an
+// unrelated reason, silently stopped being disclosed to every other scope's report. Confirmed live: acking
+// two of an owner's four exclusive findings under --scope=alpha made a LATER --scope=beta run's
+// <out-of-scope> show zero of that owner's rows instead of the two still-unacked, non-straddling ones.
+// Disclosure is now unconditional — outOfScope keeps every row the scope does not cover, acked or not.
+// wouldGate stays ack-aware (an already-acked row would not have gated even inside its owner's own scope),
+// computed via findSuppressingAck so nothing is removed from what gets printed.
 std::size_t partitionByScope( const rw::quality::Scope& scope, std::vector<rw::quality::Regression>& regs,
                               std::vector<rw::quality::Regression>& outOfScope,
                               const gtl::btree_map<std::string, rw::quality::AckRecord>& acks )
@@ -363,14 +374,18 @@ std::size_t partitionByScope( const rw::quality::Scope& scope, std::vector<rw::q
         ( rw::quality::scopeCovers( scope, r ) ? mine : outOfScope ).push_back( std::move( r ) );
     }
     regs.swap( mine );
-    rw::quality::applyAckRatchet( outOfScope, acks );
     std::size_t wouldGate = 0;
     for( const rw::quality::Regression& r : outOfScope )
     {
-        if( !r.isNewSymbol && !r.isMinor )
+        if( r.isNewSymbol || r.isMinor )
         {
-            ++wouldGate;
+            continue;
         }
+        if( rw::quality::findSuppressingAck( r, acks ) != nullptr )
+        {
+            continue;   // acked (by whoever) — would not have gated even in its own scope
+        }
+        ++wouldGate;
     }
     return wouldGate;
 }
@@ -470,6 +485,18 @@ inline constexpr const char* kQdRegisterMacroLegend =
     "The registered families are doctest/Catch2 TEST_CASE, GoogleTest TEST/TEST_F/TEST_P, Google Benchmark "
     "BENCHMARK, plus any name a .ripwire_config register_macros= line adds; each registers itself through a "
     "static initializer the call graph cannot see, so zero in-edges on one is not evidence of anything. ";
+
+// F-13 (audit 2026-09-02) — printed only when .ripwire_config itself has something wrong with it, which
+// used to be a silent no-op: a typo'd key was skipped with no trace, and a register_macros= name that
+// matched nothing in the corpus looked exactly like one that was quietly doing its job. config-warnings=
+// is the one root count covering both; the specific keys/names are on stderr (never guessed at in the XML
+// — a name a hand-edited config carries is not free text this attribute repeats).
+inline constexpr const char* kQdRegisterMacroWarnLegend =
+    "config-warnings= is a FLOOR, never gating and printed only when non-zero: it counts two DISCLOSED "
+    ".ripwire_config problems, each also written to stderr — an unrecognized key (the only key this file "
+    "reads is register_macros) and a register_macros= name that matched no indexed symbol, either a typo or "
+    "a macro this corpus does not use. Neither refuses the run; a misconfigured exemption is not a broken "
+    "tree, but a silent one used to read as a working one. ";
 
 // One sentence per baseline= marker, and ONLY the marker this run actually used. The five are not
 // interchangeable — three of them compare against HEAD, so anything already committed cannot appear —
@@ -623,6 +650,7 @@ struct QualityDeltaLegendParts
     bool                                          anySaRow;      // sa rows present => key= and the why= taxonomy are on screen
     bool                                          anyAcked;      // acked= is non-zero => there is a suppression to audit
     bool                                          anyRegisterMacro; // register-macro-excluded= is non-zero => the family roster describes a real set
+    bool                                          anyRegisterMacroWarning; // F-13: config-warnings= is non-zero
     const std::vector<rw::quality::Regression>&   rows;          // in-scope findings
     const std::vector<rw::quality::Regression>&   disclosedRows; // out-of-scope findings — identical attribute set
     bool                                          scoped;        // a scope partition or a foreign-ack row is in the document
@@ -662,6 +690,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p )
     if( p.anyRegisterMacro )
     {
         std::fputs( kQdRegisterMacroLegend, stdout );
+    }
+    if( p.anyRegisterMacroWarning )
+    {
+        std::fputs( kQdRegisterMacroWarnLegend, stdout );
     }
 
     // (3) the two identity re-filings, each keyed to the attribute family it defines. The second is
@@ -707,6 +739,40 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p )
         std::fputs( kForeignAcksLegend, stdout );
     }
     std::fputs( "-->", stdout );   // every section constant above ends with its own separating space
+}
+
+// F-13 — the one place both --dead-code and --quality-delta turn a RegisterMacroConfigDiagnostics into
+// output: the specific keys/names on stderr (never guessed at in the XML — a hand-edited config's tokens
+// are not free text an attribute repeats), and the shared `config-warnings="N"` attribute string, present
+// only when non-zero (this file's standing convention for every optional root attribute). One function so
+// the two verbs cannot report the same misconfiguration two different ways.
+inline std::string registerMacroConfigWarningAttr( const rw::quality::RegisterMacroConfigDiagnostics& diag )
+{
+    if( diag.total() == 0 )
+    {
+        return std::string();
+    }
+    const auto joined = [] ( const std::vector<std::string>& v ) -> std::string
+    {
+        std::string out;
+        for( std::size_t i = 0; i < v.size(); ++i )
+        {
+            if( i ) { out += ", "; }
+            out += v[i];
+        }
+        return out;
+    };
+    if( !diag.unrecognizedKeys.empty() )
+    {
+        std::fprintf( stderr, "ripwire: .ripwire_config has an unrecognized key (the only key this file reads is register_macros): %s\n",
+                      joined( diag.unrecognizedKeys ).c_str() );
+    }
+    if( !diag.inertNames.empty() )
+    {
+        std::fprintf( stderr, "ripwire: .ripwire_config's register_macros= names a macro matching no indexed symbol (typo, or unused): %s\n",
+                      joined( diag.inertNames ).c_str() );
+    }
+    return " config-warnings=\"" + std::to_string( diag.total() ) + "\"";
 }
 
 // runQualityViews was NOT a dispatch chain — it held two
@@ -972,6 +1038,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // P1/P1.4 — the scope disclosure, built once for both emitters (quality::scopeDisclosure).
         const auto [ scopeAttrs, scopeJson ] = quality::scopeDisclosure( scope, outOfScope.size(), scopedOutGating, foreignAcks.size(), diffFileCount );
 
+        // F-13 — the .ripwire_config disclosure, built once for both emitters (see the header comment on
+        // registerMacroConfigWarningAttr just above runQualityViews for why the stderr wording lives there).
+        const rw::quality::RegisterMacroConfigDiagnostics configDiag = rw::quality::diagnoseRegisterMacroConfig( ing, root );
+        const std::string configWarnAttr = registerMacroConfigWarningAttr( configDiag );
+
         // P2.5 — one stderr line NAMING the gating finding, in --token-budget's style ("ripwire: --token-budget
         // exceeded: est_tokens=… > budget=…"). stdout is the machine artifact and a caller that only checks
         // `$?` gets a number with no subject; this puts the WHICH on the channel a human reads, without
@@ -1009,11 +1080,16 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             const std::string atJsonJ = atValJ.empty() ? std::string( "null" ) : ( "\"" + atValJ + "\"" );
             // R-I: the same two shas + the same unmeasurable-kind disclosure the XML root carries, spelled in
             // JSON. Empty for the bare form, so that object stays byte-identical to before.
+            // F-13: config-warnings is the JSON sibling of the XML config-warnings= attribute — omitted
+            // (never 0) when .ripwire_config carried nothing to disclose, same "absent means never happened,
+            // 0 means checked and clean" rule scopeJson/identityJson already follow.
+            const std::string configWarnJson = configDiag.total() == 0 ? std::string()
+                                              : ",\"config-warnings\":" + std::to_string( configDiag.total() );
             std::printf( "{\"baseline\":\"%s\",\"regressions\":%zu,\"minor\":%zu,\"acked\":%zu,\"stale\":%zu,"
-                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"register-macro-excluded\":%zu,\"at\":%s%s%s%s,\"r\":[",
+                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"register-macro-excluded\":%zu,\"at\":%s%s%s%s%s,\"r\":[",
                          jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount, staleAcks.size(),
                          preexistingCount, newSymbolCount, gatingCount, basis.registerMacroExcluded, atJsonJ.c_str(), refs.jsonAttrs.c_str(),
-                         identityJson.c_str(), scopeJson.c_str() );
+                         identityJson.c_str(), scopeJson.c_str(), configWarnJson.c_str() );
             // P1: one row emitter, called for both halves of the scope partition — the disclosed rows carry
             // the identical key set, so nothing about a row changes by being someone else's. `gatingAllowed`
             // is the ONE difference: an out-of-scope row is not what the exit code fires on, so claiming
@@ -1108,18 +1184,18 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // values the root element below prints, so "the legend defines what the header emits" is read off
         // one set of values rather than restated as a second condition that could drift from it.
         emitQualityDeltaLegend( { baseSel.marker, refPair, identityAttrs, !saRows.empty(), ackedCount > 0,
-                                  basis.registerMacroExcluded > 0, regs, outOfScope,
+                                  basis.registerMacroExcluded > 0, configDiag.total() > 0, regs, outOfScope,
                                   scope.active() || !foreignAcks.empty(), !foreignAcks.empty() } );
         const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
         // at= anchors this regression list to the commit (+dirty state) it was computed against.
-        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\" register-macro-excluded=\"%zu\"%s%s%s%s>",
+        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\" register-macro-excluded=\"%zu\"%s%s%s%s%s>",
                      baseMarker, regs.size(), minorCount, ackedCount, staleAcks.size(), preexistingCount, newSymbolCount, gatingCount, basis.registerMacroExcluded,
                      // R-I: at= is OMITTED for the ref-pair form rather than stamped with the working tree's
                      // sha, which would anchor the list to a commit it was not computed from. base_ref= and
                      // target_ref= are the anchor there, and they carry FULL shas because a wave measurement
                      // gets quoted into handoffs where a 9-char prefix is one collision from unverifiable.
                      refPair ? "" : gitstamp::atAttr( root ).c_str(), refs.attrs.c_str(), identityAttrs.c_str(),
-                     scopeAttrs.c_str() );
+                     scopeAttrs.c_str(), configWarnAttr.c_str() );
         // P1: ONE row emitter for both halves of the scope partition — a disclosed row carries the identical
         // attribute set, because nothing about a finding changes by belonging to someone else. `gatingAllowed`
         // is the one difference: an out-of-scope row is not what the exit code fires on, and a gating
@@ -1451,6 +1527,11 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         // confidence dead-code before this fix (test/registermacrocheck.sh pins the repro). Reuses this
         // block's own sourceFor() cache rather than re-reading files via forEachSymbolBody.
         const std::vector<std::string> registerMacroNames = quality::registeredMacroNames( d.root );
+        // F-13 — same disclosure --quality-delta's runQualityDelta prints, built once here too: an
+        // unrecognized .ripwire_config key or an inert register_macros= name used to be a silent no-op on
+        // this verb as well.
+        const quality::RegisterMacroConfigDiagnostics dcConfigDiag  = quality::diagnoseRegisterMacroConfig( ing, d.root );
+        const std::string                             dcConfigWarn = registerMacroConfigWarningAttr( dcConfigDiag );
         const auto isRegisteredMacroSymbol = [ & ]( const Symbol& symbol ) -> bool
         {
             const std::string& src = sourceFor( symbol.fileId );
@@ -1570,6 +1651,9 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      "Google Benchmark BENCHMARK family, plus any name a .ripwire_config register_macros= line adds): such a "
                      "symbol registers itself through a static initializer the call graph cannot see, so zero in-edges on it is "
                      "not evidence of anything — never a finding, never gating, absent nothing (0 is printed, not omitted). "
+                     "config-warnings= counts two DISCLOSED .ripwire_config problems, each also written to stderr — an "
+                     "unrecognized key, and a register_macros= name matching no indexed symbol — never gating, present "
+                     "only when non-zero. "
                      "Graph evidence is local to the indexed tree; verify before deleting -->" );
         // §P15/§P16: candidates is already deterministically sorted (path asc, line asc, name asc) and used to
         // print every candidate unconditionally — completeness was the whole contract, matching --uses' shape,
@@ -1585,12 +1669,12 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             std::vector<char> dcFiltEsc;
             dcFilterAttr = " filter=\"" + std::string( escapeXml( cfg.deadCodeDir, dcFiltEsc ) ) + "\"";
         }
-        std::printf( "<dead-code count=\"%zu\" confidence=\"high\" evidence=\"internal-linkage+zero-callers\" register-macro-excluded=\"%zu\"%s%s%s>",
+        std::printf( "<dead-code count=\"%zu\" confidence=\"high\" evidence=\"internal-linkage+zero-callers\" register-macro-excluded=\"%zu\"%s%s%s%s>",
                      candidates.size(), registerMacroExcluded,
                      dcFilterAttr.c_str(),
                      pageDisclosure( dcAb, sizeof( dcAb ), dcPw.end - dcPw.begin, candidates.size(), dcPw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),
-                     qvRootAttr.c_str() );
+                     qvRootAttr.c_str(), dcConfigWarn.c_str() );
         std::vector<char> dcEsc;
         for( std::size_t candidateIndex = dcPw.begin; candidateIndex < dcPw.end; ++candidateIndex )
         {
