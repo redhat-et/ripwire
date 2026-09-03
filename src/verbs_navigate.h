@@ -2060,9 +2060,10 @@ std::optional<int> runImpact( const MainDispatch& d )
             // twin cannot drift from this wording (the §B4 echo-site class).
             // LB-H: the import-tier clause is the columnar variant under --format=columnar, because that
             // form carries the count without the rows and a reader must be told which shape they hold.
-            std::printf( "%s%s. %s%s%s%s%s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
+            std::printf( "%s%s. %s%s%s%s%s%s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
                          cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend,
                          rw::kTestedRowLegend, rw::kImpactTestedPartitionLegend,   // A6
+                         rw::kTestedLensBlindSpotLegend,                           // F-02: rides with the partition
                          rw::graphCountDisclosure().c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         }
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note

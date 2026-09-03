@@ -224,6 +224,29 @@ inline constexpr const char* kImpactImportTierColumnarLegend =
 inline constexpr const char* kImpactTestedPartitionLegend =
     "radius_tested=/radius_untested= partition reaches= by that same lens (transitive, unlike callers/callees). ";
 
+// F-02 (round-4 audit): THE LENS'S OWN BLIND SPOT, said where the partition is read.
+//
+// testSymbolForwardReach walks CALL EDGES out of the symbols isTestSymbol recognises — a doctest TEST_CASE, a
+// Python `def test_*`, and their siblings. A test that drives a BUILT BINARY as a subprocess is not a call
+// edge and never will be, so it contributes nothing to this partition. That is not a defect of the lens; it
+// is a defect of the DOCUMENT that reported radius_untested="48" on this repo's own src/ — tested almost
+// entirely by ~500 test/*.sh gates driving the CLI — with nothing in its legend to say what "untested" meant.
+// The test-gate verb's legend already discloses exactly this split (its script_gates_ counters and the
+// evidence=script_literal join); the three graph verbs that ship the partition did not, and a reader who only
+// ever calls those never meets the caveat. Grepping the pre-fix callers legend for
+// subprocess|shell|CLI-level|process boundary|script_literal returned zero hits.
+//
+// PLACEMENT follows the "0 bytes when inert" rule: this rides beside the partition it qualifies and nowhere
+// else. The surfaces carrying only the per-row tested="1" form (kTestedRowLegend, on the for and pack-task
+// lenses) pay nothing, and neither does uses, which has no tested lens at all.
+//
+// G4: this sits inside an XML comment, so no double hyphen may appear — flag names are written without their
+// dashes here for the same reason kImpactImportTierColumnarLegend states, not by oversight.
+inline constexpr const char* kTestedLensBlindSpotLegend =
+    "BLIND SPOT the test-gate legend also names: only a CALL EDGE from an INDEXED test symbol counts here, so a "
+    "shell or CLI-level test running a built binary as a SUBPROCESS is invisible to it and a repo tested that "
+    "way reads all-untested. Read untested= as no in-process test reaches it, not as no test covers it. ";
+
 // A6 (survey card A6, agent-lsp): the tested/untested partition --impact/--callers/--callees rows now carry
 // — ONE definition for the per-row half, shared verbatim across every verb it appears on (a second copy of
 // the identical sentence is exactly the echo-site drift class this file exists to prevent). tested="1" only
@@ -260,8 +283,9 @@ inline constexpr const char* kCallHierarchyLegendCalleesOnly =
 // runCallHierarchy (already this file's largest dispatcher) rather than adding a ternary at the call site.
 inline std::string callHierarchyLegendOpen( bool wantCallers )
 {
-    return wantCallers ? std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend
-                       : std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kCallHierarchyLegendCalleesOnly;
+    // F-02: the blind-spot clause rides with hop_tested=/hop_untested=, which both forms always carry.
+    return wantCallers ? std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend
+                       : std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend + kCallHierarchyLegendCalleesOnly;
 }
 
 // ── LB-G (r10 GitNexus round) — the DISPLAY-CAP clause the neighbour verbs share ─────────────────────────
