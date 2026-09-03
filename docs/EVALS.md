@@ -1261,6 +1261,35 @@ are the pre-widening baseline and are never pooled with rows after it; `bench/ro
 gains `--since=<landing-commit-time>` semantics for the readout and prints which population it read.
 The `n ≥ 40 recommended prompts per arm` floor restarts from zero at that commit.
 
+### The auto-cache key ignores `--exclude` — PRE-REGISTERED 2026-09-03 (found by PROFILE_SCOPE, before any fix)
+
+**What was measured.** A warm default map of this repository's root took **773 ms** on the dev machine
+while a cold `--no-cache` parse of the same root took 340 ms on 11 cores. `RIPWIRE_PROFILE=ON`
+(`src/infra/profileScope.h`) put 536 ms of the warm run in `loadCache` — 372 ms deserialising file
+records, 89 ms on the checksum trailer, 74 ms reading the blob — against 31 ms of parsing. The blob
+being loaded was **686 MB**: `main.cpp::defaultCachePath` keys the auto cache on the root's realpath
+and the lean/rich class only, so `ripwire .` (which crawls `bench/external`, twelve vendored
+checkouts) and `ripwire . --exclude=bench/external` share ONE blob. Reproduced both ways: with the
+686 MB blob present the excluded run reports `reparsed=0 reused=1674` and pays 535 ms to deserialise
+a superset it then discards; with it moved aside the excluded run rewrites a **9.5 MB** blob
+(`reparsed=1668`) and the next un-excluded run cold-parses ~15,000 files (5.0 s). Under an explicit
+`--cache=PATH` the same excluded run loads in **8 ms** (41 ms ingest total) — the number the README's
+"warm" claim is actually about. This is the A4-P4 class-switch thrash again, on the exclude axis;
+`quality.h::exclConfigHex` already folds the exclude set into the quality caches' keys and the
+ingest cache never adopted it.
+
+**Registered fix and bands.** Fold the exclude set and `--max-file-size` into the auto ingest-cache
+key (the `exclConfigHex` material, one blob per exclude configuration per root, still lean/rich
+split; `evictOldCacheFamily` bounds the disk cost as it does today). Bands, all conjuncts, measured
+by a new `test/cacheexclkeycheck.sh` written RED first: (1) `.` → `. --exclude=X` → `.` reparses
+**0 files** on the third run (today: ~15,000); (2) the excluded warm run's `loadCache` is within
+**2×** of its explicit `--cache=PATH` time on the same tree (today: 535 ms vs 8 ms); (3) output
+byte-identical to `--no-cache` for both configurations, determinism ×2; (4) `portablecachecheck`,
+`cachesplitcheck`, `cacheisolationcheck`, `evictioncheck`, `savecachecheck` green with any pinned
+blob names re-derived in their own commit with the reason; (5) wall-time numbers go to
+`bench/PROFILE.md` as a ledger row, never a red gate. NEGATIVE consequence: if (1) or (3) cannot be
+met the key change is reverted and the thrash is disclosed in `--doctor`'s `cache-dir` row instead.
+
 ### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **The mechanism under test.** `--for` becomes terminal by default: after the ranked signatures, the
