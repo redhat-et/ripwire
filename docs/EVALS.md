@@ -8694,3 +8694,70 @@ the member sites), `--nonlocal-state` (the instance-field disclosure sentence an
 The 44ac095 golden re-pins this rule made unnecessary (test/golden.xml, fillordercheck's est_tokens) are
 reverted to their 8e186bb bytes; the qschemetrip re-pin stays (it is driven by the kParserVer declaration
 line, which legitimately moved to 75) and so does the README/EVALS gate count (fieldusescheck exists).
+
+## Pre-apply `--edit-check` — the contract preview on an unwritten payload (card A1), PRE-REGISTERED 2026-09-03 (before any fixture or feature code)
+
+**What this registers.** ARISE-bibliography RANK-A card A1 — the capability gortex calls `preview_edit` and
+agent-lsp calls `simulate_edit`. ripwire's three edit verbs (`--replace-symbol-body`,
+`--insert-before-symbol`, `--insert-after-symbol`, and their MCP twins) write first and are verified after;
+`--edit-check=SYM` answers "did I change a contract someone depends on" only once the bytes are on disk.
+This round closes that loop from the other side: `--edit-check=SYM --edit-payload=FILE --dry-run` answers the
+SAME question about bytes that have not been written. Nothing about the post-hoc verb changes.
+
+**The contract.** The payload is treated as the exact bytes `--replace-symbol-body=SYM
+--edit-payload=FILE` would splice over SYM's full definition span `[sigStartByte, endByte)` — the same
+`mcpedit::applyEdit` call, the same CRLF harmonisation against the target file's own dominant line ending, so
+"what the preview measured" and "what an apply would write" are one function and cannot drift. The spliced
+bytes are parsed through the ordinary ingest path; the working tree is re-derived in memory with ONLY that
+one file's symbols, references, bindings and routes replaced (symbol ids are contiguous per file, so the
+splice is a range swap, not a renumbering heuristic); the call graph is rebuilt over that merged tree; and
+the answer is emitted by the SAME `editCheckBundleText()` assembler the post-hoc verb calls. The root
+element carries `preview="1"` and the legend carries one sentence stating that the document describes an
+UNWRITTEN payload and that no byte was written. The HEAD baseline, the root spelling, the `at=` commit
+anchor and the note children are the real tree's throughout — no temporary root reaches the output.
+
+**Refusals — exit 1, a reason on stderr, nothing on stdout.** (1) The payload is unreadable, EMPTY, over
+`--max-file-size`, or NUL-bearing — the CLI edit bridge's own four refusals, reused verbatim from one
+extracted reader so the preview and the write path cannot word them differently. (2) The payload is
+SYNTACTICALLY INVALID: the spliced file's parse holds MORE ERROR/MISSING nodes than the target file's parse
+holds today. Stated as a DELTA rather than an absolute, because a file that already parses degraded (a
+macro-heavy C++ header) would otherwise make every payload refuse — a refusal that is right about the file
+and wrong about the payload. (3) The payload does not define SYM: no definition of that name survives with a
+span intersecting the spliced region. (4) SYM is a document heading/section — the edit engine's own kind
+guard, because a Section's stored span does not delimit an editable definition. (5) The target is STALE: the
+span does not fit the file's current bytes, or the definition's own name no longer occurs inside its
+recorded span. (6) SYM is ambiguous — the existing §A6a refusal, unchanged, listing the spellings that pick
+one contract. Two combination refusals: `--edit-check --edit-payload` without `--dry-run` (the preview never
+writes; the write verb is named in the message), and `--edit-check --dry-run` with no payload.
+
+**Scope note, recorded rather than papered over.** `--edit-check`'s target grammar is UNCHANGED — bare name,
+`file:name`, `Scope::name`, the canonical id, `@FILE:LINE`. It does not accept a `sym#…@…` edit handle
+today and does not gain one here, so there is no handle-staleness arm; refusal (5) is the file-side
+equivalent and is strictly wider, because it holds for every spelling rather than only for a handle. A
+handle tier on this verb is a target-grammar change with its own help, refusal and gate footprint, and it
+belongs to the round that wants it.
+
+**The band.** A fixture set of **at least 30 payloads** — at least 10 contract-CHANGING, at least 10
+contract-PRESERVING, at least 10 INVALID — across C++ and Python. For every valid payload the gate runs the
+preview on a pristine corpus, then applies the SAME payload to a fresh copy of that corpus through
+`--replace-symbol-body` and runs the ordinary `--edit-check` on the result, and the two documents must
+AGREE. Agreement is byte-equality of the `<edit-check>` element after three normalisations and no others:
+the leading `<!-- … -->` legend is dropped, ` at="…"` is dropped (the applied tree is dirty and the pristine
+one is not), and ` preview="1"` is dropped. Everything else is compared — `status=`, `change=`,
+`params_was/now=`, `public_was/now=`, `defs_was/now=`, `defs=`, `callers=`, `incompatible=`, `p=`, every
+`<def>` row and every `<c>` row in order. **ACCEPT: agreement on ≥ 29 of 30, with ZERO false "unchanged"** —
+a preview reporting `status="unchanged"` where the applied tree reports `contract-change` or `new-symbol` is
+a single-instance FAILURE of the whole band regardless of the ratio, because reassurance is the one answer
+this verb exists to be trusted on. Every INVALID payload must refuse (exit 1, empty stdout); an invalid
+payload that ANSWERS fails the band. The gate carries a MUTATION CONTROL proving it can see a false clean:
+the same comparison is run with a contract-changing preview against a contract-preserving apply, and the
+gate fails if that pair is reported as agreeing. ASan/UBSan clean on every fixture; the preview's output is
+deterministic across repeated runs and pipes clean through `xmllint`.
+
+**NEGATIVE consequence, pre-committed.** Below 29/30, or on any single false "unchanged", the flag does NOT
+ship: the feature code is reverted, the fixture corpus and this section stay, and the result is written up
+here as a registered negative.
+
+**MCP mirror.** The MCP `edit_check` verb gains the same preview only if its input schema can carry the
+payload without breaking `test/mcpcontractcheck.sh`. If it cannot, the CLI-only scope is stated in the
+emitted legend and reported in the lane report rather than left for a reader to discover.
