@@ -9131,6 +9131,94 @@ history, never tree state, and like `_reingest` it is deliberately excluded from
 comparison. The same-`(mtime, size)` residual is NOT closed on either surface, and the ledger above prices
 why: the whole-tree re-read that would close it lands on a warm request that is already ~95% stat sweep.
 
+## Closing the same-`(mtime, size)` warm-path residual (card A3 follow-up) — PRE-REGISTERED 2026-09-03 (before any measurement)
+
+**What this registers.** The card A3 section above reproduced, on argv, a warm-path answer that is STALE:
+a content edit that preserves the byte LENGTH and restores the mtime to a value strictly older than the
+cache blob's own write time is trusted by the A4-P7 stat gate and never read. `test/freshnesscheck.sh` arm 6
+reproduces it with an OBSERVED branch that passes on either outcome, and `test/statgatecheck.sh` case (b2)
+records it as an informational `note`. Two claims in the tree say it cannot be closed cheaply:
+`src/mcpindex.h`'s `mcpStale()` comment — *"Catching it is provably impossible without READING the file's
+bytes"* — and the A3 ledger that prices that read at ~13x the warm sweep. This section registers the
+mechanism, the bands and the rejection rule for closing it, BEFORE any number, and the result is appended
+under it whatever it is.
+
+**The mechanism under test: `st_ctime`, not a content hash.** `::stat` already returns three timestamps and
+the warm path already calls it once per file, so the candidate discriminator costs **zero additional
+syscalls and zero file reads**. `st_ctime` (inode *change* time, not creation time on POSIX) moves on any
+write to the file AND on the `utimes()` that a `touch -r` / editor "preserve mtime" / `cp -p` restore
+performs, and POSIX exposes no interface for setting it — an unprivileged process cannot restore it the way
+it restores mtime. The design is therefore: record `ctimeNs` beside `(sizeBytes, mtimeNs)` at the moment a
+file is read+hashed, and require it to match EXACTLY for the stat gate to trust the cached parse. Two
+surfaces carry the same residual and both are in scope: the CLI incremental cache (`src/ingest_cache.h`
+`FileFacts` + the gate in `src/ingest_prewarm.h`; a per-file record change ⇒ `kCacheVersion` bump ⇒ old
+blobs self-heal via full reparse) and the warm `--mcp` index (`mcpStale()` / `mcpStaleFileCount()`, a new
+`McpIndex::fileCtime` parallel to `fileMtime`/`fileSize`).
+
+**Band 1 — correctness, HARD, no OBSERVED branch left.** The arms that must flip, and the arms that must
+not move:
+
+- `test/freshnesscheck.sh` arm 6: the OBSERVED branch becomes **HARD** in the direction shipped. Shipping
+  the discriminator makes it *"the same-`(mtime, size)` edit IS caught on the warm CLI path"*; refusing
+  keeps the residual reproducible and adds a HARD assertion on the disclosure instead. Both existing HARD
+  halves (`--no-cache` correct, a LENGTH-changing edit under a restored mtime caught) stay HARD.
+- `test/statgatecheck.sh` case (b2): the informational `note` pair becomes a **HARD** assertion. The header's
+  "HONEST DISPOSITION … NOT asserted as detected" paragraph is rewritten to what the code then does.
+- A NEW arm on the `--mcp` surface staging the same attack against a long-lived warm server: same byte
+  length, mtime restored, no sibling add/delete to bump a watched directory's mtime. It must answer with
+  the POST-edit symbol and disclose `_fresh:"reindexed"` with `_changed_files:1`.
+- Non-regression, all must stay green with no edit to their assertions: `statgatecheck` (a)/(b1)/(b3)/(c)/(d),
+  `racymtimecheck` (both arms — the racy rule is NOT replaced, it still covers the coarse-granularity case
+  the recorded ctime cannot, on a filesystem whose ctime granularity is also coarse), `cachehashcheck`,
+  `tornreadcheck`, `savecachecheck`, `cacheisolationcheck`, `cachefuzzcheck`, `portablecachecheck`,
+  `mcpstalecheck`, `mcpincrementalcheck`, `postingscheck`, `qextractionkeycheck`, `qschemetripcheck`.
+
+**Band 2 — cost, a LEDGER row in `bench/PROFILE.md`, never a red gate** (the no-perf-budget rule). The
+ceiling this lane is willing to state, and the rejection rule attached to it:
+
+- On a settled tree (nothing edited between two runs) the discriminator must add **zero file reads** — it is
+  one integer comparison on a `struct stat` already in hand. Measured as warm wall-clock on **two** trees:
+  ripwire's own (`files=1505` as this binary indexes it, `--exclude=bench/external`) and a large one
+  (`rw-lane-ab2-corpora/duckdb`, ~5.1k files, read-only, never modified by this lane). Arms alternated
+  HEAD / base `1c6fdf4`, five trials each, medians reported with the base arm's own trial spread beside
+  them so a delta inside the noise floor is reported as such and not as a win.
+- **REJECTION RULE, registered in advance:** if the warm delta on either tree lands OUTSIDE the base arm's
+  own trial spread in the slower direction, or if a settled warm run re-reads any file it did not re-read
+  before, the fix is REJECTED and this lane ships option (b) — the refusal — instead: the stat gate is kept
+  and its blind spot becomes a disclosed one.
+- The alternative the task named, **content-hashing every stat-equal file on the warm path (option (a)
+  proper)**, is measured as its own arm on the same two trees, produced by a throwaway build that forces
+  `statMatches=false` (i.e. every stat-equal file is read+hashed and its cached FACTS are still reused, so
+  the arm prices the read+hash and not the reparse). That arm is the control that says whether hashing
+  defeats the stat gate's purpose. It is a measurement, not a candidate: it is not committed.
+
+**Band 3 — determinism, format and portability.** All HARD:
+
+- `cold == warm == warm` byte-identical on both trees, and `xmllint --noout` clean on both.
+- ASan (`-DRIPWIRE_ASAN=ON`, `LSAN_OPTIONS=suppressions=lsan_suppressions.txt`) over a cold run AND a warm
+  run that engages the new comparison — the warm path is the one that changed.
+- A `kCacheVersion`-1 blob (i.e. a blob written before this change) must self-heal to a full reparse and a
+  byte-identical answer, never a crash and never a wrong answer — `portablecachecheck` case (c) already
+  stages exactly this by doctoring the version field, and it must stay green with the version it now
+  doctors down FROM.
+- The cache-key portability contract is **unchanged**: keys stay root-relative (`relForHash`), so a
+  committed `--cache=FILE` artifact consumed under a different checkout path still warm-hits at the
+  CONTENT-HASH level (`portablecachecheck` (a): byte-identical to a cold run at B). What such a transported
+  cache may lose is stat-gate ELIGIBILITY — `ctime` is not preserved by `cp`, `tar` or `rsync` on any
+  platform, so a transported tree falls through to read+hash and then hits on the hash. That is a cost, not
+  a correctness change, and it is the honest posture: a tree whose inodes we did not observe being written
+  is exactly the tree whose stat identity we must not trust. `qextractionkeycheck` gates the
+  `kIngestCacheVersionMirror` half in the same commit.
+
+**What this section will NOT claim.** Not "the residual is closed", unconditionally. `st_ctime` closes it
+against every unprivileged same-`(mtime, size)` edit on a filesystem that maintains ctime (APFS, ext4,
+btrfs, xfs, HFS+). It does NOT close it against a caller who can move the system clock backward, against
+raw block-device manipulation, or on a filesystem that does not maintain a distinct ctime (FAT/exFAT, some
+SMB/network mounts) — there the gate degrades to exactly today's behaviour, which is why the racy rule is
+kept rather than replaced. The new boundary is stated in the gate headers as the boundary it is, and
+`--no-cache` remains the unconditional escape hatch. No accuracy number and no ranking effect is claimed:
+this changes WHEN bytes are read, never what is extracted from them.
+
 ## `--impact`/`--callers`/`--callees` tested/untested row partition (card A6, agent-lsp), PRE-REGISTERED 2026-09-03 (before any measurement)
 
 **What this registers.** ARISE-bibliography RANK-A card A6 — agent-lsp's "who breaks, and which of those
