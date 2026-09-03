@@ -92,3 +92,8 @@
 --label	bench/scip_pin_precision.py's own flag ("--label astropy-14365-fix", the census run label) quoted in docs/EVALS.md's phase-3 census argv — not a ripwire flag
 --name-status	git's own diff/log option ("git diff --name-status -M"), quoted in docs/EVALS.md's card-A4 slice-diff registration as the ONE git-recorded rename lookup the diff follows (quality.h's gitRenameMap pins it) — a foreign tool flag, not a ripwire flag
 --no-checkout	git's own clone option ("git clone --local --no-checkout"), quoted in the same registration as how test/slicediffcheck.sh makes its private replay clone without touching the repo under test — a foreign tool flag, not a ripwire flag
+--routing	bench/routing_ab_report.py's own flag ("--routing PATH", the routing.jsonl to read), quoted in docs/EVALS.md §4's readout-instrument paragraph — not a ripwire flag
+--meter	bench/routing_ab_report.py's own flag ("--meter PATH", the substitution.jsonl it joins on session_hash), same paragraph — not a ripwire flag
+--until	bench/routing_ab_report.py's own window flag ("--since/--until", the readout window), same paragraph — the ripwire --since exists but --until is the script's — not a ripwire flag
+--self-test	bench/agentloop/followup_calls.py and bench/arise-h2h/followup_calls.py's own flag (the counters' synthetic-fixture self-check), quoted in docs/EVALS.md's follow-up-call-count registration — not a ripwire flag
+--results	bench/agentloop/followup_calls.py's own flag ("--results FILE", the agentloop pilot json it counts), same registration — not a ripwire flag
