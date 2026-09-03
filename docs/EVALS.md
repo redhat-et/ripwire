@@ -1218,6 +1218,46 @@ with rows after. Instrument B stays owner opt-in and is not needed to fund this.
 lands, the readout above keeps refusing at n < 40 per arm; the current rows are kept as the
 pre-widening baseline, labelled as such.
 
+### `--help-task` widening — PRE-REGISTERED 2026-09-03 (before any intent is added)
+
+**What changes.** The router gains intents for the SYMBOL-FREE moments instrument A found it blind to,
+and nothing else: orient ("what is this codebase / what matters here / how is it organised" →
+`ripwire <root>` default map or `--tree`), tests-for-change ("which tests should I run / did I run the
+right ones" → `--affected`/`--situ`/`--test-gate`), pr-footprint ("what does this PR touch / is it safe
+to merge" → `--pr-context`), contract-after-edit ("did I change a contract someone depends on" →
+`--edit-check`; symbol-bearing form already routes), done-check ("is this ready / what did I make worse"
+→ `--quality-delta`), untested-code ("what has no test / where are the seams" → `--seams`),
+handoff/rot ("hand this area off / where is the rot" → `--hotspots` and `--around`). The symbol-bearing
+guard (`resolved_symbols`) is NOT relaxed: a verb that takes a symbol is still recommended only when
+the symbol resolves on the root. Abstain stays a first-class answer.
+
+**Corpora, fixed before the build.** *Tuning corpus:* `test/taskroutefix/` (159 rows) as today.
+*Held-out corpus:* `test/skillevalfix/prompts.tsv` (266 labelled + 68 `none`), which the lane may READ
+for the per-skill table above but may not edit, and `test/taskroutecheck.sh` gains it as a second arm
+so the fixture cannot be re-tuned into. Prompts whose expected skill is symbol-bearing (navigate,
+find-bug with a named symbol, graph-query) are reported separately from the symbol-free buckets, on the
+ripwire root, so the guard's refusals are not scored as misses.
+
+**Bands (all conjuncts, measured by `test/taskroutecheck.sh` on the commit that lands the intents):**
+
+| Criterion | Band |
+| --- | --- |
+| Precision on the tuning corpus | **1.000**, harmful **0.000** (unchanged; a single harmful recommendation is a REJECT) |
+| Precision on the held-out corpus (recommended prompts whose verb is in the `expected` skill's verb set) | **≥ 0.95**, harmful **0.000** |
+| Coverage on the held-out symbol-free buckets (orient, change-check, quality-bar, write-tests, efficient, handoff, fresh-eyes, layers, before-you-build, reuse-first) | **≥ 0.60** (was 0.02) |
+| Coverage on the held-out `none` bucket (68 prompts that want no verb) | **≤ 0.05** (was 0.00; false recommends here are the cost the band exists to cap) |
+| Wall time per `--help-task` call | ledger only (`bench/PROFILE.md`), never a gate |
+| Determinism | ×2 byte-identical per prompt, cold == warm |
+
+**NEGATIVE consequence.** Any conjunct missed → the intents do not ship; the numbers ship as a registered
+negative with the per-bucket table, and the classifier stays as it is. Meeting coverage by raising `none`
+false-recommends above 0.05 is the specific failure this table refuses.
+
+**Window restart, registered now.** `~/.ripwire/routing.jsonl` rows written before the landing commit
+are the pre-widening baseline and are never pooled with rows after it; `bench/routing_ab_report.py`
+gains `--since=<landing-commit-time>` semantics for the readout and prints which population it read.
+The `n ≥ 40 recommended prompts per arm` floor restarts from zero at that commit.
+
 ### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **The mechanism under test.** `--for` becomes terminal by default: after the ranked signatures, the
