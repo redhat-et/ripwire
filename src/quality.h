@@ -1837,7 +1837,9 @@ inline void evictOldCacheFamily( const std::string& dir, const std::string& pref
 
 // A5 (cache-dir hygiene) — --doctor measured ~11,914 ripwire-* blobs / 2.4 GB in the cache-ladder dir on a
 // machine that runs ~20 parallel agent sessions across many repos. Only the qsnap/qheadsnap families above were
-// ever capped (keep-2-newest); the MAIN parse cache (ripwire-<hash>-lean/rich.bin, defaultCachePath in main.cpp)
+// ever capped (keep-2-newest); the MAIN parse cache (ripwire-<roothash>-<exclhex>-lean/rich.bin, defaultCachePath
+// in main.cpp — N5-A gave it an exclConfigHex field, so a root has one blob per exclude configuration and this
+// dir-wide sweep is what bounds that family)
 // shares the SAME "ripwire-" prefix and dir but had no evictor at all — every distinct (repo, verb-class) pair
 // this machine has ever touched leaves a blob forever.
 //

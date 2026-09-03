@@ -122,8 +122,13 @@ run "$TMP/c1.xml"                                    # cold plain: the un-exclud
 printf 'int keep_1( int a )\n{\n    return a + 101;\n}\n' > "$REPO/keep/k1.cpp"   # one genuine edit
 run "$TMP/c2.xml" --exclude=ext                      # dirty excluded run — it now rewrites its cache
 RC2="$( reparsed )"
-[ "$RC2" = "1" ] && ok "the excluded run reparses only the edited file (reparsed=$RC2) — it IS dirty, so it saves" \
-    || no "excluded run reparsed=$RC2, expected 1 — the fixture edit did not make it dirty"
+# Setup precondition, not a band: the excluded run must be DIRTY, so it really does write a cache. It is
+# dirty for a different reason on each side of the fix and BOTH are correct — before, it warm-hits the
+# shared superset blob and reparses only the one edited file (reparsed=1); after, its own configuration is
+# cold on its first run and it parses its whole 12-file set (reparsed=12). Either way it saves, which is
+# the only thing the next check needs to be meaningful.
+[ -n "$RC2" ] && [ "$RC2" -ge 1 ] && ok "the excluded run is dirty (reparsed=$RC2) — it writes a cache, so the next check is not vacuous" \
+    || no "excluded run reparsed=$RC2 — not dirty, so it never saved and check (c) below would pass vacuously"
 run "$TMP/c3.xml"                                    # plain again: must NOT have lost the ext/ records
 RC3="$( reparsed )"
 [ "$RC3" = "1" ] && ok "band (1): after a dirty excluded run, the next plain run reparses only the edited file (reparsed=$RC3)" \
