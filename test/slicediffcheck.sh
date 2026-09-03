@@ -417,7 +417,10 @@ else
       case "$label" in ''|'#'*) continue ;; esac
       if ! git -C "$CLONE" cat-file -e "$sha^{commit}" 2>/dev/null; then skipped=$(( skipped + 1 )); continue; fi
       git -C "$CLONE" checkout -q -f "$sha" 2>/dev/null || { skipped=$(( skipped + 1 )); continue; }
-      o="$( "$BIN" "$CLONE" --slice="$file:$sym:$var" --since="$sha^" --no-cache 2>/dev/null )"
+      # WARM on purpose: 57 rows x a cold ingest of the whole clone was 80 s here and rc=124 at the 300 s
+      # cap on both ubuntu plain legs of CI run 33762934972. Adjacent checkouts share most files, so the
+      # stat gate re-parses only what the commit touched; arm (14) above is where cold == warm is proved.
+      o="$( "$BIN" "$CLONE" --slice="$file:$sym:$var" --since="$sha^" 2>/dev/null )"
       if empty_diff "$o"; then verdict=empty; else verdict=nonempty; fi
       case "$o" in *'<since '*) : ;; *) verdict=noanswer ;; esac
       if [ "$label" = dependence ]; then

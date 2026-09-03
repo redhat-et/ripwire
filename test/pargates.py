@@ -132,6 +132,9 @@ GATE_BUDGET_SEC = {
                                          # ~54 s idle local; rc=124 at the flat cap on 5 of 6 CI legs.
     "estchargecheck.sh":          900,   # ~26 s idle local; rc=124 at the flat cap on all ubuntu legs.
     "pagingsweepcheck.sh":        900,   # ~34 s idle local; rc=124 at the flat cap on all ubuntu legs.
+    "slicediffcheck.sh":          900,   # replays 57 labelled commits (checkout + --slice --since each); ~80 s local
+                                          # under -j6, rc=124 at the flat cap on both ubuntu PLAIN legs of run
+                                          # 33762934972 (Release legs and macOS fit). Warm replay landed with this row.
     "cppbenchcheck.sh":          1200,
     "regexbombcheck.sh":         1200,
 }
