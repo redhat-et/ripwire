@@ -108,7 +108,7 @@ top 1–2 to inspect first, with the evidence trail.
 transitive reaching-definition walk) gives *intra-procedural, name-based* data flow — reach for it on a
 wrong-value symptom instead of re-reading the whole function by eye. Its own legend discloses the limits
 that matter here, so trust that over this line: statement/line-granular, source-ordered (not flow-sensitive),
-no alias analysis, shadowing may over-include, and it stops at the function boundary (chain
+no alias analysis, block scopes separated (a shadowed name's rows carry `b=`, the declaration each binds to; `pp="1"` marks a build-dependent `#ifdef` row), and it stops at the function boundary (chain
 `--callers`/`--impact` for the inter-procedural half). For use-after-move / taint / null / type bugs that
 cross that boundary you still need the compiler — use these results to focus *where* to look, not as proof.
 A high-`amb` symbol can be a dispatch hub, not the bug.

@@ -3176,9 +3176,10 @@ inline SliceReply sliceText( const std::string& root, const std::string& symbol,
         flowSpec.out = &flowOut;
     }
 
-    return SliceReply{ slicev::sliceBundleText( ing, root, focus, varName, scan, src, redact,
-                                                flowActive ? &flowSpec : nullptr,
-                                                seededRun ? &seedInfo : nullptr ), {} };
+    slicev::SliceEmitOpts emit;   // full legend always — the MCP payload stays byte-identical to the CLI default
+    emit.flow = flowActive ? &flowSpec : nullptr;
+    emit.seed = seededRun ? &seedInfo : nullptr;
+    return SliceReply{ slicev::sliceBundleText( ing, root, focus, varName, scan, src, redact, emit ), {} };
 }
 
 // ─── T4: fetch_body — the LAZY-BODY verb. The read verbs return signatures + a stable `handle`; this verb

@@ -54,7 +54,7 @@ struct Config
     bool             json            = false;              // --json (L2): the SAME content as the XML, machine-parseable, for the
                                                            // CORE verbs ONLY (default map, --for, --pack-task, --callers/--callees/
                                                            // --impact, --quality-delta, --test-gate). Keys mirror the XML attr names
-    std::string_view legend;                               // --legend=full|compact: opt-in schema prose posture for --for/--grep
+    std::string_view legend;                               // --legend=full|compact: opt-in schema prose posture for --for/--grep/--slice
                                                            // 1:1. Every other verb refuses loudly (stderr + exit 1) rather than
                                                            // silently emitting XML — see main.cpp's jsonUnsupportedVerb().
     int              detail          = 0;                  // --detail=N (RESEARCH lever 3): with --for, emit FULL bodies for the
@@ -1483,14 +1483,25 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict.\n"
         "    --slice=SYM[:VAR]          NAME-BASED intra-procedural def-use slice of variable VAR inside the ONE uniquely-resolved\n"
         "                               definition SYM (statement-level def-use edges as a queryable primitive — the ARISE result,\n"
-        "                               arXiv:2605.03117). One <s l= k= t=> row per line touching VAR, source order: k=def|use|both,\n"
-        "                               t=param|decl|assign|call-arg|read (strongest role on the line), CDATA = the trimmed source\n"
-        "                               line; defs=/uses= count occurrences. Bare --slice=SYM lists the sliceable locals (<v n= l=\n"
+        "                               arXiv:2605.03117). One <s l= k= t=> row per line touching VAR, source order: k=def|use|both|\n"
+        "                               scope (scope = a Python global/nonlocal statement, neither read nor write), t=param|decl|\n"
+        "                               assign|call-arg|read|global|nonlocal (strongest role on the line), CDATA = the trimmed source\n"
+        "                               line; defs=/uses= count occurrences. JS/TS destructuring binders (`const {a, b} = o`,\n"
+        "                               `[x] = arr`, destructured parameters) are locals whose def is the pattern line. A write\n"
+        "                               hidden behind a call — receiver mutation, a by-reference/out-parameter, a function-like\n"
+        "                               macro — is a use, never a def (stated in the legend). Bare --slice=SYM lists the sliceable locals (<v n= l=\n"
         "                               t=/> rows) so a caller can pick VAR. LIMITS in the legend, not implied: no alias analysis,\n"
-        "                               no flow sensitivity, nested-scope shadowing may over-include. SYM matching several\n"
+        "                               no flow sensitivity. Block scopes ARE separated: a name declared twice in the definition\n"
+        "                               is two variables, each row of a shadowed name carries b= (the declaration line it binds\n"
+        "                               to), the root bindings=, the inventory one <v> per binding. SYM matching several\n"
         "                               definition sites REFUSES (exit 1) listing the file:name spellings that pick one, like\n"
         "                               --edit-check. Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — other\n"
         "                               indexed languages refuse loudly (never an empty success). Single-root only.\n"
+        "                               PREPROCESSOR (C-family): a `#if 0` body and the `#else` of `#if 1` are DEAD — dropped,\n"
+        "                               the line count disclosed as preproc_rows=; every other conditional region (`#ifdef X`,\n"
+        "                               `#ifndef X`, `#if defined(X)`, `#if EXPR`) is build-dependent and cannot be decided\n"
+        "                               without the build's macro set, so its rows are KEPT and flagged pp=\"1\", and a pp def\n"
+        "                               never hides the unconditional def before it in a flow (both are reaching).\n"
         "                               LINE-SEEDED: --at=FILE:LINE beside --slice (or --slice=@FILE:LINE) is the ARISE\n"
         "                               (file, line[, variable]) seed — the definition sliced is the innermost one enclosing\n"
         "                               the line (a seed narrows an otherwise-ambiguous SYM; a seed enclosed by none of SYM's\n"
@@ -1509,9 +1520,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               depth (seed rows are depth 0), f= the line the step was reached from. steps= counts flow\n"
         "                               rows; depth= states the bound in force. LIMITS (in the legend too): name-based, no alias\n"
         "                               analysis, line-granular ROWS (a multi-statement line merges) over statement-anchored\n"
-        "                               CHAINING (a multi-LINE statement chains as ONE unit), shadowing may over-include, data\n"
-        "                               dependence only — no control dependence (the guard deciding whether a def executes is\n"
-        "                               never a row).\n"
+        "                               CHAINING (a multi-LINE statement chains as ONE unit), a shadowed name's bindings walk\n"
+        "                               separately (never into each other's block), data dependence only — no control\n"
+        "                               dependence (the guard deciding whether a def executes is never a row).\n"
         "    --slice-depth=N            the --slice-flow BFS depth bound, 1..32 (default 8, always disclosed as depth= on the\n"
         "                               root). A bound that cuts a live frontier is disclosed as flow_truncated=\"1\" — a short\n"
         "                               slice means \"bounded here\", never \"nothing further exists\". Refused without --slice-flow.\n"
@@ -1976,8 +1987,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --format=candidates        (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
-        "    --legend=full|compact     output legend posture for --for and --grep/--regex only. full is byte-identical to the\n" "                               default; compact keeps every data/completeness attribute, adds a versioned schema id,\n"
-        "                               and shortens repeated explanatory prose. Unsupported verbs refuse.\n"
+        "    --legend=full|compact     output legend posture for --for, --grep/--regex and --slice (+--slice-flow) only. full is\n" "                               byte-identical to the default; compact keeps every data/completeness attribute, adds a\n"
+        "                               versioned schema id (ripwire.for/v1, ripwire.grep/v1, ripwire.slice/v1), and shortens\n"
+        "                               repeated explanatory prose — the slice rows are byte-identical to the full form, so the\n"
+        "                               many-small-calls seed loop pays the rules once, not per call. Unsupported verbs refuse.\n"
         "    --json                     machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr\n"
         "                               names 1:1 — supported for the default map, --for, --pack-task, --callers/--callees/\n"
         "                               --impact, --quality-delta, --test-gate (the CI/scripting verbs). Every other verb\n"
@@ -3213,9 +3226,9 @@ static inline void validateLegendModifier( Config& c ) noexcept
                       int( c.legend.size() ), c.legend.data() );
         c.ok = false;
     }
-    if( c.forTask.empty() && c.grep.empty() )
+    if( c.forTask.empty() && c.grep.empty() && c.sliceSpec.empty() )
     {
-        std::fprintf( stderr, "ripwire: --legend=%.*s is supported by --for, --grep and --regex only — pass one of those verbs\n",
+        std::fprintf( stderr, "ripwire: --legend=%.*s is supported by --for, --grep, --regex and --slice only — pass one of those verbs\n",
                       int( c.legend.size() ), c.legend.data() );
         c.ok = false;
     }

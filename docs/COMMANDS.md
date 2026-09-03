@@ -2368,28 +2368,27 @@ ambiguous_callers= names callers whose own calls include an ambiguously-resolved
 
 **Answers:** NAME-BASED intra-procedural def-use slice of variable VAR inside the ONE uniquely-resolved definition SYM (statement-level def-use edges as a queryable primitive — the ARISE result, arXiv:2605.03117).
 
-One <s l= k= t=> row per line touching VAR, source order: k=def|use|both, t=param|decl|assign|call-arg|read (strongest role on the line), CDATA = the trimmed source line; defs=/uses= count occurrences. Bare --slice=SYM lists the sliceable locals (<v n= l= t=/> rows) so a caller can pick VAR. LIMITS in the legend, not implied: no alias analysis, no flow sensitivity, nested-scope shadowing may over-include. SYM matching several definition sites REFUSES (exit 1) listing the file:name spellings that pick one, like --edit-check. Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — other indexed languages refuse loudly (never an empty success). Single-root only. LINE-SEEDED: --at=FILE:LINE beside --slice (or --slice=@FILE:LINE) is the ARISE (file, line[, variable]) seed — the definition sliced is the innermost one enclosing the line (a seed narrows an otherwise-ambiguous SYM; a seed enclosed by none of SYM's definitions refuses naming both). A seed line naming exactly ONE sliceable local pre-picks it (disclosed: seed= var_from="seed"); zero or several serve the inventory with seed_vars= and the candidate rows marked seed="1", never a guess. A plain identifier spec beside --at reads as the seed's VARIABLE (--slice=VAR --at=src/f.cpp:12).
+One <s l= k= t=> row per line touching VAR, source order: k=def|use|both| scope (scope = a Python global/nonlocal statement, neither read nor write), t=param|decl| assign|call-arg|read|global|nonlocal (strongest role on the line), CDATA = the trimmed source line; defs=/uses= count occurrences. JS/TS destructuring binders (`const {a, b} = o`, `[x] = arr`, destructured parameters) are locals whose def is the pattern line. A write hidden behind a call — receiver mutation, a by-reference/out-parameter, a function-like macro — is a use, never a def (stated in the legend). Bare --slice=SYM lists the sliceable locals (<v n= l= t=/> rows) so a caller can pick VAR. LIMITS in the legend, not implied: no alias analysis, no flow sensitivity. Block scopes ARE separated: a name declared twice in the definition is two variables, each row of a shadowed name carries b= (the declaration line it binds to), the root bindings=, the inventory one <v> per binding. SYM matching several definition sites REFUSES (exit 1) listing the file:name spellings that pick one, like --edit-check. Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — other indexed languages refuse loudly (never an empty success). Single-root only. PREPROCESSOR (C-family): a `#if 0` body and the `#else` of `#if 1` are DEAD — dropped, the line count disclosed as preproc_rows=; every other conditional region (`#ifdef X`, `#ifndef X`, `#if defined(X)`, `#if EXPR`) is build-dependent and cannot be decided without the build's macro set, so its rows are KEPT and flagged pp="1", and a pp def never hides the unconditional def before it in a flow (both are reaching). LINE-SEEDED: --at=FILE:LINE beside --slice (or --slice=@FILE:LINE) is the ARISE (file, line[, variable]) seed — the definition sliced is the innermost one enclosing the line (a seed narrows an otherwise-ambiguous SYM; a seed enclosed by none of SYM's definitions refuses naming both). A seed line naming exactly ONE sliceable local pre-picks it (disclosed: seed= var_from="seed"); zero or several serve the inventory with seed_vars= and the candidate rows marked seed="1", never a guess. A plain identifier spec beside --at reads as the seed's VARIABLE (--slice=VAR --at=src/f.cpp:12).
 
-**Shaped by:** `--slice-flow`, `--slice-depth`, `--at`
+**Shaped by:** `--slice-flow`, `--slice-depth`, `--at`, `--legend`
 
 **Caveats (stated by the binary):**
 
-- LIMITS in the legend, not implied: no alias analysis, no flow sensitivity, nested-scope shadowing may over-include.
+- A write hidden behind a call — receiver mutation, a by-reference/out-parameter, a function-like macro — is a use, never a def (stated in the legend).
+- LIMITS in the legend, not implied: no alias analysis, no flow sensitivity.
 - SYM matching several definition sites REFUSES (exit 1) listing the file:name spellings that pick one, like --edit-check.
-- Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — other indexed languages refuse loudly (never an empty success).
 
 ### `--slice-flow=back|fwd|both`
 
 **Answers:** TRANSITIVE cross-statement data-flow slice (modifies --slice=SYM:VAR;
 
-refused alone or on the bare inventory — a flow needs a seed variable). Follows VALUE FLOW over reaching-definition def-use edges — a use of v reaches the last def of v in source order before it — by bounded BFS from the seed variable, the ARISE paper's own slicer semantics (arXiv:2605.03117: seed + direction, bounded BFS, stops at the function boundary; the inter-procedural half stays with --callers/--impact by the paper's own design). back = statements whose values feed the seed; fwd = statements the seed's value reaches; both = the union. Flow rows are <s l= k= t= v= d= f=>: v= the variable at that step, d= BFS depth (seed rows are depth 0), f= the line the step was reached from. steps= counts flow rows; depth= states the bound in force. LIMITS (in the legend too): name-based, no alias analysis, line-granular ROWS (a multi-statement line merges) over statement-anchored CHAINING (a multi-LINE statement chains as ONE unit), shadowing may over-include, data dependence only — no control dependence (the guard deciding whether a def executes is never a row).
+refused alone or on the bare inventory — a flow needs a seed variable). Follows VALUE FLOW over reaching-definition def-use edges — a use of v reaches the last def of v in source order before it — by bounded BFS from the seed variable, the ARISE paper's own slicer semantics (arXiv:2605.03117: seed + direction, bounded BFS, stops at the function boundary; the inter-procedural half stays with --callers/--impact by the paper's own design). back = statements whose values feed the seed; fwd = statements the seed's value reaches; both = the union. Flow rows are <s l= k= t= v= d= f=>: v= the variable at that step, d= BFS depth (seed rows are depth 0), f= the line the step was reached from. steps= counts flow rows; depth= states the bound in force. LIMITS (in the legend too): name-based, no alias analysis, line-granular ROWS (a multi-statement line merges) over statement-anchored CHAINING (a multi-LINE statement chains as ONE unit), a shadowed name's bindings walk separately (never into each other's block), data dependence only — no control dependence (the guard deciding whether a def executes is never a row).
 
-**Shaped by:** `--slice-depth`
+**Shaped by:** `--slice-depth`, `--legend`
 
 **Caveats (stated by the binary):**
 
 - refused alone or on the bare inventory — a flow needs a seed variable).
-- LIMITS (in the legend too): name-based, no alias analysis, line-granular ROWS (a multi-statement line merges) over statement-anchored CHAINING (a multi-LINE statement chains as ONE unit), shadowing may over-include, data dependence only — no control dependence (the guard deciding whether a def executes is never a row).
 
 ### `--slice-depth=N`
 
@@ -3237,9 +3236,9 @@ $ ./build/ripwire . --callers=rankGraphTeleport --format=bogus
 
 ### `--legend=full|compact`
 
-**Answers:** output legend posture for --for and --grep/--regex only.
+**Answers:** output legend posture for --for, --grep/--regex and --slice (+--slice-flow) only.
 
-full is byte-identical to the default; compact keeps every data/completeness attribute, adds a versioned schema id, and shortens repeated explanatory prose. Unsupported verbs refuse.
+full is byte-identical to the default; compact keeps every data/completeness attribute, adds a versioned schema id (ripwire.for/v1, ripwire.grep/v1, ripwire.slice/v1), and shortens repeated explanatory prose — the slice rows are byte-identical to the full form, so the many-small-calls seed loop pays the rules once, not per call. Unsupported verbs refuse.
 
 **Caveats (stated by the binary):**
 

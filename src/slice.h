@@ -11,18 +11,28 @@
 // HONESTY CONTRACT (all four limits are stated in the emitted legend, never implied):
 //   • NAME-BASED — occurrences are identifier-name matches inside the definition's span. No alias
 //     analysis (a pointer/reference alias is invisible), no flow sensitivity (rows are source-ordered,
-//     not dependence-ordered), and a nested scope re-declaring VAR (shadowing) is NOT separated — its
-//     rows may over-include.
-//   • RECEIVER MUTATION IS NOT A DEF — a write a callee performs through the variable (`v.push_back(x)`,
-//     `buf.append(s)`) classifies as a READ, because proving it writes needs the receiver's TYPE and the
-//     callee's BODY, and this slicer has neither. Registered as a DECISION, not an oversight, and
+//     not dependence-ordered).
+//   • BLOCK SCOPES ARE SEPARATED (2026-09-02, audit F-02) — a name declared twice in one definition is
+//     two variables; each occurrence binds to the innermost enclosing scope whose declaration precedes
+//     it, and the flow walk never chains into a sibling block's shadow. Rows of a shadowed name carry
+//     b= (the binding's declaration line), the root bindings=. Python is function-scoped (one binding).
+//   • A WRITE HIDDEN BEHIND A CALL IS NOT A DEF — a write a callee performs through the variable
+//     (`v.push_back(x)`, `buf.append(s)`) classifies as a READ, and a write a callee or macro performs
+//     through an ARGUMENT (a by-reference/pointer parameter, an out-parameter, a function-like macro)
+//     classifies as a CALL-ARG use (widened 2026-09-02, audit F-12), because proving either writes needs
+//     the receiver's TYPE, the callee's SIGNATURE and BODY, or the macro's expansion, and this slicer has
+//     none of them. Registered as a DECISION, not an oversight, and
 //     measured before it was registered (2026-08-31, docs/EVALS.md "Receiver mutation as a slice
 //     definition"): across ripwire's own src/ and ugrep @550599a6, 79.1% of receiver call sites on
 //     these variables are not mutations at all, and of the ones that are, `reserve` (capacity, never
 //     value) and `clear`/`pop_back` (no incoming value) dominate — so a curated method-name rule would
 //     mint far more false defs than true ones. A false def is strictly worse than an absent one here:
 //     sliceFlowExpandFwd breaks on the next def, so a fabricated def SUPPRESSES the reach of the real
-//     def before it. The cost is paid in the legend instead, and defs=/steps= carry counts_floor="1".
+//     def before it. The cost is paid in the legend instead, and every count carries counts="as-classified"
+//     (kSliceCountsAttrXml) — not counts_floor=, because a slice count over-includes as well.
+//   • PREPROCESSOR RULE (C-family) — `#if 0` bodies and the `#else` of `#if 1` are dropped (preproc_rows=
+//     discloses the count); every other conditional region is build-dependent, kept and flagged pp="1",
+//     and a pp def never kills the reach of the unconditional def before it. See SlicePp below.
 //   • INTRA-PROCEDURAL ONLY — rows never cross into callees/callers.
 //   • SERVED LANGUAGES ONLY — classification is a per-language-family parent-kind read, verified per
 //     vendored grammar: C-family (C/C++/ObjC, +CUDA/Metal riding Lang::Cpp), Python, JS/TS, Go, Java,
@@ -41,7 +51,6 @@
 #include "serialize.h"     // escapeXml / appendCdataSafe / symTag / diskPath
 #include "redact.h"        // redactInPlace — statement lines are a body-emission seam
 #include "gitstamp.h"      // atAttr — the at="<sha>[+dirty]" root anchor, same placement as --edit-check
-#include "graphlegend.h"   // kGraphCountFloorAttrXml — ONE spelling of the floor marker, tree-wide
 #include "sarif.h"         // rootPrefixOf / rootRelativeUri — root-relative p=, same as every verb
 
 #include "infra/Diagnostics.h"   // DEGRADED_PATH_ALERT — the three parse-refusal arms are degrades, not asserts
@@ -84,6 +93,13 @@ inline SliceFam sliceFamilyOf( Lang l ) noexcept
 
 // the served-set spelling for the unsupported-language refusal — kept beside the switch it restates
 inline constexpr const char* kSliceServedList = "c/cpp/objc (+cuda/metal), py, js/ts, go, java, rs";
+
+// THE COUNT MARKER. Every <slice> root carries counts="as-classified", appended LAST like the graph
+// verbs' counts_floor= — and deliberately not that marker: a floor promises true >= reported, and a
+// slice count breaks that promise in BOTH directions (defs= misses a write hidden behind a call; defs=
+// over-counts a build-dependent pp row or a same-spelled member the grammar exposes as an identifier).
+// The numbers are exact counts of what the name-based classifier rowed, and the legend says so.
+inline constexpr const char* kSliceCountsAttrXml = " counts=\"as-classified\"";
 
 // ── reserved-word exclusion ──────────────────────────────────────────────────────────────────────────
 //
@@ -168,13 +184,19 @@ inline bool sliceIsReservedName( std::string_view text, Lang lang ) noexcept
 
 // ── occurrence classification ────────────────────────────────────────────────────────────────────────
 
-// t= vocabulary, in PRIORITY order (a line holding several occurrence roles reports the smallest value)
-enum class OccT : std::uint8_t { Param = 0, Decl = 1, Assign = 2, CallArg = 3, Read = 4 };
+// t= vocabulary, in PRIORITY order (a line holding several occurrence roles reports the smallest value).
+// Global/Nonlocal are Python's scope statements: neither a def nor a use (k="scope"), weakest of all.
+enum class OccT : std::uint8_t { Param = 0, Decl = 1, Assign = 2, CallArg = 3, Read = 4, Global = 5, Nonlocal = 6 };
 
 // declarative table over a switch (G2's constexpr-table rule — also what keeps this from cloning the
 // shapeName/styleTag/statusName switch skeleton QD flagged on the first cut), indexed by the enum value
-inline constexpr const char* kOccTagNames[] = { "param", "decl", "assign", "call-arg", "read" };
-static_assert( std::size( kOccTagNames ) == std::size_t( OccT::Read ) + 1 );
+inline constexpr const char* kOccTagNames[] = { "param", "decl", "assign", "call-arg", "read", "global", "nonlocal" };
+static_assert( std::size( kOccTagNames ) == std::size_t( OccT::Nonlocal ) + 1 );
+
+inline bool sliceIsScopeStatementRole( OccT t ) noexcept
+{
+    return t == OccT::Global || t == OccT::Nonlocal;
+}
 
 inline const char* occTag( OccT t ) noexcept
 {
@@ -182,15 +204,34 @@ inline const char* occTag( OccT t ) noexcept
     return kOccTagNames[ occIndex < std::size( kOccTagNames ) ? occIndex : std::size( kOccTagNames ) - 1 ];
 }
 
+// "no declaration inside the definition binds this occurrence" — an outer/global name, or a use that
+// precedes its declaration; rows of such an occurrence print b="0" when the name is shadowed
+inline constexpr std::uint32_t kSliceUnbound = 0xFFFFFFFFu;
+
 struct SliceOcc
 {
-    std::uint32_t line     = 0;    // 1-based
-    std::uint32_t stmtLine = 0;    // 1-based FIRST line of the enclosing statement — the flow-chaining anchor
-                                   //   (a statement spanning lines via continuation is ONE unit; 0 = fall back to line)
-    OccT          t        = OccT::Read;
-    bool          isDef    = false;
-    bool          isUse    = false;
-    bool          skip     = false;   // a non-occurrence (e.g. a Python keyword-argument NAME) — never emitted
+    std::uint32_t line       = 0;    // 1-based
+    std::uint32_t stmtLine   = 0;    // 1-based FIRST line of the enclosing statement — the flow-chaining anchor
+                                     //   (a statement spanning lines via continuation is ONE unit; 0 = fall back to line)
+    std::uint32_t byte       = 0;    // file-absolute start byte — the scope-resolution key
+    std::uint32_t bindingIdx = kSliceUnbound;   // index into SliceScan::bindings, resolved after the walk
+    OccT          t          = OccT::Read;
+    bool          isDef      = false;
+    bool          isUse      = false;
+    bool          skip       = false;   // a non-occurrence (e.g. a Python keyword-argument NAME) — never emitted
+    bool          pp         = false;   // inside a BUILD-DEPENDENT preprocessor region (#ifdef/#ifndef/#if EXPR) — kept, flagged pp="1"
+};
+
+// one VARIABLE: a declaration and the scope it is visible in. A name declared twice in one definition
+// is two of these, and rows/flow are keyed per binding, never per name (block-scope separation below).
+struct SliceBinding
+{
+    std::string   name;
+    std::uint32_t declLine    = 0;    // the b= value — the line of the declaration
+    std::uint32_t visibleFrom = 0;    // byte the binding is visible from (its own initializer excluded for Go/Rust)
+    std::uint32_t scopeStart  = 0;    // [scopeStart, scopeEnd): the innermost scope-creating node enclosing the declaration
+    std::uint32_t scopeEnd    = 0;
+    OccT          t           = OccT::Decl;
 };
 
 struct SliceLocal
@@ -212,9 +253,92 @@ struct SliceScan
 {
     bool                       parseOk = false;   // grammar present + file parsed + span located
     std::vector<SliceOcc>      occ;               // VAR-mode occurrences, source order (empty when var empty)
-    std::vector<SliceLocal>    locals;            // the sliceable-locals inventory, first-def order
+    std::vector<SliceLocal>    locals;            // the sliceable-locals NAMES, first-def order (refusal text, seed pick)
+    std::vector<SliceBinding>  bindings;          // the sliceable-locals inventory, one per VARIABLE (a shadowed name lists twice)
     std::vector<SliceNamedOcc> all;               // EVERY classified occurrence, source order (flow substrate)
+    std::vector<SliceNamedOcc> dropped;           // occurrences inside a preprocessor-DEAD region — never rows; preproc_rows= counts their lines
 };
+
+// how many distinct bindings the occurrences of `name` fall into (an unbound group counts as one) —
+// >1 means the name is shadowed and its rows carry b=
+inline std::size_t sliceBindingGroupsOf( const SliceScan& scan, std::string_view name )
+{
+    std::vector<std::uint32_t> seen;
+    for( const SliceNamedOcc& no : scan.all )
+    {
+        if( no.name == name && std::find( seen.begin(), seen.end(), no.occ.bindingIdx ) == seen.end() )
+        {
+            seen.push_back( no.occ.bindingIdx );
+        }
+    }
+    return seen.size();
+}
+
+inline std::uint32_t sliceBindingLine( const SliceScan& scan, std::uint32_t bindingIdx ) noexcept
+{
+    return bindingIdx == kSliceUnbound ? 0u : scan.bindings[ bindingIdx ].declLine;
+}
+
+// tree-sitter micro-helpers, in the house spelling
+inline bool sliceKindIs( TSNode n, const char* kind ) noexcept
+{
+    return std::strcmp( ts_node_type( n ), kind ) == 0;
+}
+
+// ── preprocessor-conditional regions (C-family only) ─────────────────────────────────────────────────
+//
+// tree-sitter-c/cpp parse `#if`/`#ifdef` blocks inside a body as preproc_if / preproc_ifdef nodes whose
+// direct children are the guarded statements and whose `alternative` field is the `#else` / `#elif` /
+// `#elifdef` chain. A lexical walk that ignores them reads a def under `#if 0` as a real def, and because
+// the flow walk stops at the NEXT def, that dead def then REPLACES the live chain (audit 2026-09-02,
+// F-01: `--slice=if0:w --slice-flow=back` returned only `v = 111;` from inside `#if 0`).
+//
+// THE RULE, exactly as the legend states it:
+//   • DECIDED — the literal conditions. `#if 0`'s body and the `#else` of `#if 1` are DEAD: their rows are
+//     dropped and counted on the root as preproc_rows=. `#if 1`'s body and the `#else` of `#if 0` are
+//     LIVE and unmarked. Only the bare literal decides (`#if (0)` is an expression, see below).
+//   • UNDECIDED — everything else: `#ifdef X`, `#ifndef X`, `#elifdef`, `#if defined(X)`, `#if EXPR`,
+//     `#elif`. Whether X is defined belongs to the BUILD (-DNDEBUG, -DHAVE_FOO), not to the file; "the
+//     file never #defines X" is exactly the shape of a build-defined macro, so it is not evidence of
+//     dead code. These rows are KEPT and flagged pp="1", and a pp def does not kill the reach of the
+//     unconditional def before it in the flow walk — both are emitted, so the worst case is an extra
+//     flagged row, never a replaced chain.
+//   • A region that ENCLOSES the whole definition is not considered (the definition exists as indexed;
+//     an include guard wraps every function in a header). Only conditionals starting inside the span.
+//   • Condition text (`#ifdef NAME`, `#if defined(X)`) is never an occurrence: macro names are not
+//     variables.
+enum class SlicePp : std::uint8_t { Live = 0, Undecided = 1, Dead = 2 };
+
+inline bool sliceIsPreprocConditional( TSNode n ) noexcept
+{
+    return sliceKindIs( n, "preproc_if" ) || sliceKindIs( n, "preproc_ifdef" ) || sliceKindIs( n, "preproc_elif" )
+           || sliceKindIs( n, "preproc_elifdef" ) || sliceKindIs( n, "preproc_else" );
+}
+
+// the states of (this node's own body, its `alternative` chain), folded under the enclosing state —
+// dead dominates, undecided survives a live inner literal, live never lifts an outer undecided
+inline std::pair<SlicePp, SlicePp> slicePreprocBranchStates( TSNode n, std::string_view src, SlicePp enclosing ) noexcept
+{
+    SlicePp body = SlicePp::Undecided, alt = SlicePp::Undecided;
+    if( sliceKindIs( n, "preproc_else" ) )
+    {
+        body = SlicePp::Live;   // the caller already folded the chain's state into `enclosing`
+        alt  = SlicePp::Live;
+    }
+    else if( sliceKindIs( n, "preproc_if" ) || sliceKindIs( n, "preproc_elif" ) )
+    {
+        const TSNode cond = ts_node_child_by_field_name( n, "condition", 9 );
+        if( !ts_node_is_null( cond ) && sliceKindIs( cond, "number_literal" ) )
+        {
+            const std::uint32_t a = ts_node_start_byte( cond ), b = ts_node_end_byte( cond );
+            const std::string_view text = ( b > a && b <= src.size() ) ? src.substr( a, b - a ) : std::string_view();
+            if( text == "0" )      { body = SlicePp::Dead;  alt = SlicePp::Live; }
+            else if( text == "1" ) { body = SlicePp::Live;  alt = SlicePp::Dead; }
+        }
+    }
+    const auto fold = []( SlicePp outer, SlicePp inner ) noexcept { return std::uint8_t( outer ) > std::uint8_t( inner ) ? outer : inner; };
+    return { fold( enclosing, body ), fold( enclosing, alt ) };
+}
 
 // ── the line seed (lane/tc-sliceat): --slice --at=FILE:LINE / --slice=@FILE:LINE — ARISE's own seed ────
 //
@@ -261,12 +385,6 @@ inline std::vector<std::string> sliceSeedLineLocals( const SliceScan& scan, std:
     return out;
 }
 
-// tree-sitter micro-helpers, in the house spelling
-inline bool sliceKindIs( TSNode n, const char* kind ) noexcept
-{
-    return std::strcmp( ts_node_type( n ), kind ) == 0;
-}
-
 inline TSNode sliceField( TSNode p, const char* field ) noexcept
 {
     return ts_node_child_by_field_name( p, field, std::uint32_t( std::strlen( field ) ) );
@@ -294,6 +412,13 @@ inline bool sliceInField( TSNode p, const char* field, TSNode n ) noexcept
         return false;
     }
     return ts_node_start_byte( outer ) <= ts_node_start_byte( n ) && ts_node_end_byte( n ) <= ts_node_end_byte( outer );
+}
+
+// the JS/TS destructuring wrappers an identifier climbs through to reach its declarator
+inline bool sliceIsJsPatternKind( TSNode n ) noexcept
+{
+    return sliceKindIs( n, "object_pattern" ) || sliceKindIs( n, "array_pattern" ) || sliceKindIs( n, "pair_pattern" )
+           || sliceKindIs( n, "object_assignment_pattern" ) || sliceKindIs( n, "assignment_pattern" ) || sliceKindIs( n, "rest_pattern" );
 }
 
 // the assignment operator's own text — "+=", "=", … — read to split a plain write from a read-modify-write
@@ -333,6 +458,63 @@ inline bool sliceIsDirectInitCtorArg( TSNode n ) noexcept
     }
     const TSNode decl = ts_node_parent( fnDecl );
     return !ts_node_is_null( decl ) && sliceKindIs( decl, "declaration" );
+}
+
+// JS/TS: the BINDER shapes, destructured or plain. Climbs the pattern wrappers to the binding site, so
+// `const { x, y: yy, z = 3, ...rest } = o`, `const [ a, b ] = o`, `function f({ p }, [ q ])`,
+// `for (const { k } of o)` and `({ x } = o)` all bind their names (audit 2026-09-02, F-08: they minted
+// nothing). The side that never binds — a pair_pattern's KEY (a property name, or a computed-key
+// expression) and a default's RIGHT side — is a read and returns false for the caller to fall through.
+inline bool sliceClassifyJsBinder( TSNode n, TSNode p, const char* pk, SliceOcc& o ) noexcept
+{
+    TSNode      d  = n;
+    TSNode      pp = p;
+    const char* dk = pk;
+    while( !ts_node_is_null( pp ) && sliceIsJsPatternKind( pp ) )
+    {
+        if( ( std::strcmp( dk, "pair_pattern" ) == 0 && !sliceInField( pp, "value", d ) )
+            || ( ( std::strcmp( dk, "object_assignment_pattern" ) == 0 || std::strcmp( dk, "assignment_pattern" ) == 0 ) && !sliceInField( pp, "left", d ) ) )
+        {
+            return false;   // the key / default side: a read
+        }
+        d  = pp;
+        pp = ts_node_parent( pp );
+        dk = ts_node_is_null( pp ) ? "" : ts_node_type( pp );
+    }
+    if( ts_node_is_null( pp ) )
+    {
+        return false;
+    }
+    // identity when n sits directly in the field (`arr[i] = …` must not def i), containment once a
+    // pattern was climbed (the field then holds the pattern, not the identifier)
+    const bool climbed = !ts_node_eq( d, n );
+    const auto inField = [ & ]( const char* field ) noexcept { return climbed ? sliceInField( pp, field, d ) : sliceIsField( pp, field, n ); };
+    const auto def     = [ & ]( OccT t ) noexcept { o.t = t;  o.isDef = true;  return true; };
+    if( std::strcmp( dk, "variable_declarator" ) == 0 && inField( "name" ) )
+    {
+        return def( OccT::Decl );      // let count = 0;   const { x } = o;
+    }
+    if( std::strcmp( dk, "formal_parameters" ) == 0 )
+    {
+        return def( OccT::Param );     // function f(count)   f({ p }, [ q ])   f(count = 0)
+    }
+    if( ( std::strcmp( dk, "required_parameter" ) == 0 || std::strcmp( dk, "optional_parameter" ) == 0 ) && inField( "pattern" ) )
+    {
+        return def( OccT::Param );     // TS: (count: number)   ({ p }: T)
+    }
+    if( std::strcmp( dk, "assignment_expression" ) == 0 && inField( "left" ) )
+    {
+        return def( OccT::Assign );    // count = …   ({ x } = o)
+    }
+    if( std::strcmp( dk, "for_in_statement" ) == 0 && inField( "left" ) )
+    {
+        return def( OccT::Decl );      // for (x of xs)   for (const { k } of xs)
+    }
+    if( std::strcmp( dk, "catch_clause" ) == 0 && inField( "parameter" ) )
+    {
+        return def( OccT::Decl );      // catch (e)   catch ({ message })
+    }
+    return false;
 }
 
 // classify ONE identifier node by its parent kind + field position, per family. Every string below is
@@ -380,10 +562,12 @@ inline SliceOcc sliceClassify( TSNode n, SliceFam fam, std::string_view src ) no
                 {
                     def( OccT::Decl );  return o;      // int count = 0;   (the value side falls through to uses)
                 }
-                if( std::strcmp( dk, "declaration" ) == 0 && !sliceInField( pp, "type", d ) )
+                if( std::strcmp( dk, "declaration" ) == 0 && !sliceInField( pp, "type", d ) && !sliceInField( pp, "value", d ) )
                 {
-                    def( OccT::Decl );  return o;      // int count;
-                }
+                    def( OccT::Decl );  return o;      // int count;  — but not the `x` of `if( int k = x )`: tree-sitter-cpp's
+                }                                      //   condition-clause declaration carries its initializer in a `value` field
+                                                       //   with no init_declarator, and that x is a READ (a false def here became a
+                                                       //   false binding once block scopes were separated, 2026-09-02)
                 if( ( std::strcmp( dk, "parameter_declaration" ) == 0 || std::strcmp( dk, "optional_parameter_declaration" ) == 0 )
                     && !sliceInField( pp, "type", d ) && !sliceInField( pp, "default_value", d ) )
                 {
@@ -466,6 +650,14 @@ inline SliceOcc sliceClassify( TSNode n, SliceFam fam, std::string_view src ) no
             {
                 o.skip = true;  return o;              // f(count=3) — the NAME is the callee's keyword, not this local
             }
+            if( std::strcmp( pk, "global_statement" ) == 0 )
+            {
+                o.t = OccT::Global;  return o;         // global X — a scope declaration: neither a read nor a write (k="scope")
+            }
+            if( std::strcmp( pk, "nonlocal_statement" ) == 0 )
+            {
+                o.t = OccT::Nonlocal;  return o;       // nonlocal X — same
+            }
             if( std::strcmp( pk, "argument_list" ) == 0 )
             {
                 use( OccT::CallArg );  return o;
@@ -475,31 +667,9 @@ inline SliceOcc sliceClassify( TSNode n, SliceFam fam, std::string_view src ) no
 
         case SliceFam::Js:
         {
-            if( std::strcmp( pk, "variable_declarator" ) == 0 && sliceIsField( p, "name", n ) )
+            if( sliceClassifyJsBinder( n, p, pk, o ) )
             {
-                def( OccT::Decl );  return o;          // let count = 0;
-            }
-            if( std::strcmp( pk, "formal_parameters" ) == 0 )
-            {
-                def( OccT::Param );  return o;         // function f(count)
-            }
-            if( ( std::strcmp( pk, "required_parameter" ) == 0 || std::strcmp( pk, "optional_parameter" ) == 0 )
-                && sliceInField( p, "pattern", n ) )
-            {
-                def( OccT::Param );  return o;         // TS: (count: number)
-            }
-            if( std::strcmp( pk, "assignment_pattern" ) == 0 && sliceIsField( p, "left", n ) )
-            {
-                // (count = 0) — a parameter default when the pattern sits in a parameter shape, else a
-                // destructuring default; both introduce the name
-                const TSNode gp = ts_node_parent( p );
-                const bool   inParams = !ts_node_is_null( gp )
-                                        && ( sliceKindIs( gp, "formal_parameters" ) || sliceKindIs( gp, "required_parameter" ) || sliceKindIs( gp, "optional_parameter" ) );
-                def( inParams ? OccT::Param : OccT::Decl );  return o;
-            }
-            if( std::strcmp( pk, "assignment_expression" ) == 0 && sliceIsField( p, "left", n ) )
-            {
-                def( OccT::Assign );  return o;
+                return o;                              // a declarator / parameter / for-of / assignment binder, destructured or plain
             }
             if( std::strcmp( pk, "augmented_assignment_expression" ) == 0 && sliceIsField( p, "left", n ) )
             {
@@ -508,10 +678,6 @@ inline SliceOcc sliceClassify( TSNode n, SliceFam fam, std::string_view src ) no
             if( std::strcmp( pk, "update_expression" ) == 0 )
             {
                 both( OccT::Assign );  return o;       // count++
-            }
-            if( std::strcmp( pk, "for_in_statement" ) == 0 && sliceIsField( p, "left", n ) )
-            {
-                def( OccT::Decl );  return o;          // for (x of xs) — bare-left form
             }
             if( std::strcmp( pk, "arguments" ) == 0 )
             {
@@ -680,24 +846,25 @@ inline constexpr const char* kSliceStmtContainers[ std::size_t( SliceFam::None )
     /* Rust */ { "block", "source_file", "declaration_list", "match_block", nullptr, nullptr },
 };
 
-inline bool sliceIsStmtContainer( TSNode n, SliceFam fam ) noexcept
+// membership of a node's kind in a nullptr-terminated kind row — the ONE loop every kind-table lookup
+// here shares (a row is a fixed-extent array; nullptr ends it early)
+inline bool sliceKindInTable( TSNode n, const char* const* table, std::size_t extent ) noexcept
 {
-    if( fam == SliceFam::None )
+    for( std::size_t kindIndex = 0; kindIndex < extent && table[ kindIndex ] != nullptr; ++kindIndex )
     {
-        return false;
-    }
-    for( const char* kind : kSliceStmtContainers[ std::size_t( fam ) ] )
-    {
-        if( kind == nullptr )
-        {
-            break;
-        }
-        if( sliceKindIs( n, kind ) )
+        if( sliceKindIs( n, table[ kindIndex ] ) )
         {
             return true;
         }
     }
     return false;
+}
+
+// the same lookup on a PER-FAMILY table (kSliceStmtContainers, kSliceScopeKinds): the family picks the row
+template< std::size_t Rows, std::size_t Cols >
+inline bool sliceKindInFamilyTable( TSNode n, SliceFam fam, const char* const ( &table )[ Rows ][ Cols ] ) noexcept
+{
+    return fam != SliceFam::None && sliceKindInTable( n, table[ std::size_t( fam ) ], Cols );
 }
 
 // the enclosing statement's first line, 1-based; an identifier with no container above it (a degraded
@@ -709,7 +876,7 @@ inline std::uint32_t sliceStmtAnchorLine( TSNode node, SliceFam fam ) noexcept
     TSNode parent = ts_node_parent( cur );
     while( !ts_node_is_null( parent ) )
     {
-        if( sliceIsStmtContainer( parent, fam ) )
+        if( sliceKindInFamilyTable( parent, fam, kSliceStmtContainers ) )
         {
             return std::uint32_t( ts_node_start_point( cur ).row ) + 1;
         }
@@ -719,55 +886,256 @@ inline std::uint32_t sliceStmtAnchorLine( TSNode node, SliceFam fam ) noexcept
     return std::uint32_t( ts_node_start_point( node ).row ) + 1;
 }
 
+// ── block-scope separation (audit 2026-09-02, F-02) ──────────────────────────────────────────────────
+//
+// A name declared more than once inside one definition is that many VARIABLES. Every introducing
+// occurrence (param / decl / Python assign) creates a SliceBinding whose scope is the innermost
+// scope-creating ancestor of the declaration inside the span (the definition itself when none), and
+// every other occurrence binds to the innermost enclosing scope whose declaration of the name precedes
+// it — a post-walk pass (sliceResolveBindings), so the walk stays one pre-order pass. Before this the
+// flow walk chained `int r = v;` into a sibling block's `int v = 7;` and never reached the outer
+// declaration or the parameter: a chain through a variable r does not read.
+//
+// Per-family scope kinds, verified against the vendored parser.c of each grammar. Python has NO block
+// scope (function-scoped by the language; comprehension/lambda scopes are not separated here), so its
+// row is empty and every Python binding spans the definition. JS `var` is function-scoped (hoisting),
+// so a var binding climbs to the nearest function kind instead (kSliceJsFunctionKinds).
+inline constexpr const char* kSliceScopeKinds[ std::size_t( SliceFam::None ) ][ 14 ] =
+{
+    /* C    */ { "compound_statement", "for_statement", "for_range_loop", "if_statement", "switch_statement", "while_statement", "do_statement",
+                 "catch_clause", "lambda_expression", "function_definition", nullptr, nullptr, nullptr, nullptr },
+    /* Py   */ { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr },
+    /* Js   */ { "statement_block", "for_statement", "for_in_statement", "catch_clause", "switch_body", "function_declaration", "function_expression",
+                 "arrow_function", "generator_function", "generator_function_declaration", "method_definition", nullptr, nullptr, nullptr },
+    /* Go   */ { "block", "for_statement", "if_statement", "expression_switch_statement", "type_switch_statement", "select_statement", "expression_case",
+                 "default_case", "type_case", "communication_case", "func_literal", "function_declaration", "method_declaration", nullptr },
+    /* Java */ { "block", "for_statement", "enhanced_for_statement", "catch_clause", "lambda_expression", "switch_block", "method_declaration",
+                 "constructor_declaration", "try_with_resources_statement", nullptr, nullptr, nullptr, nullptr, nullptr },
+    /* Rust */ { "block", "for_expression", "while_expression", "if_expression", "match_arm", "closure_expression", "function_item",
+                 nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr },
+};
+
+inline constexpr const char* kSliceJsFunctionKinds[] = { "function_declaration", "function_expression", "arrow_function", "generator_function",
+                                                         "generator_function_declaration", "method_definition" };
+
+inline bool sliceIsJsFunctionKind( TSNode n ) noexcept
+{
+    return sliceKindInTable( n, kSliceJsFunctionKinds, std::size( kSliceJsFunctionKinds ) );
+}
+
+// JS: `var x` (variable_declaration) is function-scoped; `let`/`const` (lexical_declaration) block-scoped
+inline bool sliceJsIsVarBinding( TSNode declIdent ) noexcept
+{
+    TSNode cur = ts_node_parent( declIdent );
+    while( !ts_node_is_null( cur ) && sliceIsJsPatternKind( cur ) )
+    {
+        cur = ts_node_parent( cur );
+    }
+    if( ts_node_is_null( cur ) || !sliceKindIs( cur, "variable_declarator" ) )
+    {
+        return false;
+    }
+    const TSNode decl = ts_node_parent( cur );
+    return !ts_node_is_null( decl ) && sliceKindIs( decl, "variable_declaration" );
+}
+
+// [scopeStart, scopeEnd) of a declaration: the innermost scope-creating ancestor that starts inside the
+// span, else the whole definition
+inline std::pair<std::uint32_t, std::uint32_t> sliceScopeOf( TSNode declIdent, SliceFam fam, std::uint32_t spanStart, std::uint32_t spanEnd ) noexcept
+{
+    const bool fnScoped = fam == SliceFam::Js && sliceJsIsVarBinding( declIdent );
+    TSNode     cur      = ts_node_parent( declIdent );
+    while( !ts_node_is_null( cur ) && ts_node_start_byte( cur ) >= spanStart )
+    {
+        const bool isScope = fnScoped ? sliceIsJsFunctionKind( cur ) : sliceKindInFamilyTable( cur, fam, kSliceScopeKinds );
+        if( isScope )
+        {
+            return { ts_node_start_byte( cur ), ts_node_end_byte( cur ) };
+        }
+        cur = ts_node_parent( cur );
+    }
+    return { spanStart, spanEnd };
+}
+
+// the byte a binding is visible from. Go's `v := v + 1` / `var v = v + 1` and Rust's `let v = v + 1`
+// read the PREVIOUS binding in their own initializer, so those climb to the end of the declaring
+// statement; every other family binds from the identifier itself (C++'s point of declaration).
+inline std::uint32_t sliceVisibleFrom( TSNode declIdent, SliceFam fam ) noexcept
+{
+    if( fam == SliceFam::Go || fam == SliceFam::Rust )
+    {
+        TSNode cur = ts_node_parent( declIdent );
+        for( int hop = 0; hop < 4 && !ts_node_is_null( cur ); ++hop )
+        {
+            if( sliceKindIs( cur, "short_var_declaration" ) || sliceKindIs( cur, "var_spec" ) || sliceKindIs( cur, "let_declaration" ) )
+            {
+                return ts_node_end_byte( cur );
+            }
+            cur = ts_node_parent( cur );
+        }
+    }
+    return ts_node_end_byte( declIdent );
+}
+
+// bind every non-introducing occurrence to the innermost enclosing scope whose declaration of the
+// name precedes it (ties: the latest declaration — Rust re-`let`); none ⇒ kSliceUnbound
+inline void sliceResolveBindings( SliceScan& scan )
+{
+    for( SliceNamedOcc& no : scan.all )
+    {
+        if( no.occ.bindingIdx != kSliceUnbound )
+        {
+            continue;   // an introducing occurrence binds where it was created
+        }
+        std::uint32_t best = kSliceUnbound;
+        for( std::uint32_t bindingIndex = 0; bindingIndex < scan.bindings.size(); ++bindingIndex )
+        {
+            const SliceBinding& b = scan.bindings[ bindingIndex ];
+            if( b.name != no.name || b.scopeStart > no.occ.byte || no.occ.byte >= b.scopeEnd || b.visibleFrom > no.occ.byte )
+            {
+                continue;
+            }
+            const bool inner = best == kSliceUnbound || b.scopeStart > scan.bindings[ best ].scopeStart
+                               || ( b.scopeStart == scan.bindings[ best ].scopeStart && b.visibleFrom > scan.bindings[ best ].visibleFrom );
+            if( inner )
+            {
+                best = bindingIndex;
+            }
+        }
+        no.occ.bindingIdx = best;
+    }
+}
+
 // ── the walk ─────────────────────────────────────────────────────────────────────────────────────────
+
+// what every level of the walk reads and never writes
+struct SliceWalkCtx
+{
+    std::uint32_t    spanStart = 0, spanEnd = 0;   // [sigStartByte, endByte) of the definition
+    SliceFam         fam       = SliceFam::None;
+    Lang             lang      = Lang::Unknown;
+    std::string_view src;                          // the WHOLE file
+    std::string_view selfName;                     // the definition's own name — never a local
+};
+
+// does this occurrence INTRODUCE its name? param / decl everywhere, assign where assignment is the
+// declaration (Python), and a Python global/nonlocal statement (its own role), so the assignments after
+// it bind to the scope statement rather than minting an unbound group
+inline bool sliceIntroduces( const SliceOcc& c, SliceFam fam ) noexcept
+{
+    return ( c.isDef && ( c.t == OccT::Param || c.t == OccT::Decl || ( c.t == OccT::Assign && sliceAssignIntroduces( fam ) ) ) )
+           || sliceIsScopeStatementRole( c.t );
+}
+
+// the binding an introducing occurrence creates — or, in the same scope, the one it re-declares (a Rust
+// re-`let` in one block is a NEW binding; everywhere else a redeclaration is the same variable, and
+// Python's every-assignment-introduces folds onto its first). Also keeps the name-deduped locals list.
+inline std::uint32_t sliceBindIntroducer( SliceScan& scan, std::string_view text, TSNode node, const SliceWalkCtx& ctx, const SliceOcc& c )
+{
+    const auto [ scopeStart, scopeEnd ] = sliceScopeOf( node, ctx.fam, ctx.spanStart, ctx.spanEnd );
+    std::uint32_t bindingIdx = kSliceUnbound;
+    if( ctx.fam != SliceFam::Rust )
+    {
+        for( std::uint32_t bindingIndex = 0; bindingIndex < scan.bindings.size(); ++bindingIndex )
+        {
+            const SliceBinding& existing = scan.bindings[ bindingIndex ];
+            if( existing.name == text && existing.scopeStart == scopeStart && existing.scopeEnd == scopeEnd )
+            {
+                bindingIdx = bindingIndex;
+            }
+        }
+    }
+    if( bindingIdx == kSliceUnbound )
+    {
+        bindingIdx = std::uint32_t( scan.bindings.size() );
+        scan.bindings.push_back( SliceBinding{ std::string( text ), c.line, sliceVisibleFrom( node, ctx.fam ), scopeStart, scopeEnd, c.t } );
+    }
+    bool known = false;
+    for( const SliceLocal& lv : scan.locals )
+    {
+        known = known || ( lv.name == text );
+    }
+    if( !known )
+    {
+        scan.locals.push_back( SliceLocal{ std::string( text ), c.line, c.t } );
+    }
+    return bindingIdx;
+}
+
+// a preprocessor conditional STARTING inside the definition: decide (or refuse to decide) each branch,
+// skip the condition text, and carry the state down — see SlicePp for the rule. `walk` is sliceWalk,
+// passed in so no prototype of it exists (a prototype indexes as a second definition, and --slice on
+// the walk itself would refuse as ambiguous).
+template< class WalkFn >
+inline void sliceWalkPreproc( TSNode node, const SliceWalkCtx& ctx, SliceScan& scan, SlicePp pp, const WalkFn& walk )
+{
+    const auto [ bodyState, altState ] = slicePreprocBranchStates( node, ctx.src, pp );
+    const TSNode condition   = sliceField( node, "condition" );
+    const TSNode macroName   = sliceField( node, "name" );
+    const TSNode alternative = sliceField( node, "alternative" );
+    const std::uint32_t ppChildCount = ts_node_child_count( node );
+    for( std::uint32_t childIndex = 0; childIndex < ppChildCount; ++childIndex )
+    {
+        const TSNode child = ts_node_child( node, childIndex );
+        if( ( !ts_node_is_null( condition ) && ts_node_eq( child, condition ) ) || ( !ts_node_is_null( macroName ) && ts_node_eq( child, macroName ) ) )
+        {
+            continue;   // macro names and #if expressions are never variable occurrences
+        }
+        const bool isAlt = !ts_node_is_null( alternative ) && ts_node_eq( child, alternative );
+        walk( child, ctx, scan, isAlt ? altState : bodyState );
+    }
+}
+
+// one occurrence node: classify, anchor, drop-or-flag by preprocessor state, bind if it introduces
+inline void sliceWalkOccurrence( TSNode node, std::string_view text, const SliceWalkCtx& ctx, SliceScan& scan, SlicePp pp )
+{
+    SliceOcc c = sliceClassify( node, ctx.fam, ctx.src );
+    if( c.skip )
+    {
+        return;
+    }
+    c.stmtLine = sliceStmtAnchorLine( node, ctx.fam );
+    c.byte     = ts_node_start_byte( node );
+    c.pp       = pp == SlicePp::Undecided;
+    if( pp == SlicePp::Dead )
+    {
+        scan.dropped.push_back( SliceNamedOcc{ std::string( text ), c } );   // counted (preproc_rows=), never a row, never a local
+        return;
+    }
+    if( sliceIntroduces( c, ctx.fam ) && text != ctx.selfName )
+    {
+        c.bindingIdx = sliceBindIntroducer( scan, text, node, ctx, c );
+    }
+    scan.all.push_back( SliceNamedOcc{ std::string( text ), c } );
+}
 
 // Recursive descent over the definition's span, collecting classified `identifier` occurrences.
 // Depth-bounded only by the AST itself; a definition's subtree is small (one function).
-inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanEnd, SliceFam fam, Lang lang,
-                       std::string_view src, std::string_view varName,
-                       std::vector<SliceOcc>& occ, std::vector<SliceLocal>& locals, std::string_view selfName,
-                       std::vector<SliceNamedOcc>& all )
+inline void sliceWalk( TSNode node, const SliceWalkCtx& ctx, SliceScan& scan, SlicePp pp )
 {
     const std::uint32_t a = ts_node_start_byte( node ), b = ts_node_end_byte( node );
-    if( b <= spanStart || a >= spanEnd )
+    if( b <= ctx.spanStart || a >= ctx.spanEnd )
     {
         return;   // disjoint from the definition — prune the subtree
     }
+    if( ctx.fam == SliceFam::C && a >= ctx.spanStart && sliceIsPreprocConditional( node ) )
+    {
+        sliceWalkPreproc( node, ctx, scan, pp, []( TSNode child, const SliceWalkCtx& c, SliceScan& s, SlicePp state ) { sliceWalk( child, c, s, state ); } );
+        return;
+    }
 
     // the C-family also yields variable occurrences dressed as type_identifier: the arguments of a
-    // direct-initialization declaration under the most-vexing parse (see sliceIsDirectInitCtorArg)
+    // direct-initialization declaration under the most-vexing parse (see sliceIsDirectInitCtorArg);
+    // JS/TS dress an object-pattern shorthand binder (`const { x } = o`) as its own node kind
     const bool occurrenceKind = sliceKindIs( node, "identifier" )
-                                || ( fam == SliceFam::C && sliceKindIs( node, "type_identifier" ) && sliceIsDirectInitCtorArg( node ) );
-    if( occurrenceKind && a >= spanStart && b <= spanEnd && b <= src.size() && b > a )
+                                || ( ctx.fam == SliceFam::C && sliceKindIs( node, "type_identifier" ) && sliceIsDirectInitCtorArg( node ) )
+                                || ( ctx.fam == SliceFam::Js && sliceKindIs( node, "shorthand_property_identifier_pattern" ) );
+    if( occurrenceKind && a >= ctx.spanStart && b <= ctx.spanEnd && b <= ctx.src.size() && b > a )
     {
-        const std::string_view text = src.substr( a, b - a );
-        if( sliceIsReservedName( text, lang ) )
+        const std::string_view text = ctx.src.substr( a, b - a );
+        if( !sliceIsReservedName( text, ctx.lang ) )   // a keyword lexed as an identifier is a degraded-parse artifact, never a variable
         {
-            return;   // a keyword lexed as an identifier is a degraded-parse artifact, never a variable
-        }
-        SliceOcc c = sliceClassify( node, fam, src );
-        if( !c.skip )
-        {
-            c.stmtLine = sliceStmtAnchorLine( node, fam );
-            all.push_back( SliceNamedOcc{ std::string( text ), c } );
-            if( !varName.empty() && text == varName )
-            {
-                occ.push_back( c );
-            }
-            const bool introduces = c.isDef
-                                    && ( c.t == OccT::Param || c.t == OccT::Decl || ( c.t == OccT::Assign && sliceAssignIntroduces( fam ) ) );
-            if( introduces && text != selfName )
-            {
-                bool known = false;
-                for( const SliceLocal& lv : locals )
-                {
-                    known = known || ( lv.name == text );
-                }
-                if( !known )
-                {
-                    locals.push_back( SliceLocal{ std::string( text ), c.line, c.t } );
-                }
-            }
+            sliceWalkOccurrence( node, text, ctx, scan, pp );
         }
         return;   // an identifier is a leaf — nothing beneath it
     }
@@ -775,7 +1143,7 @@ inline void sliceWalk( TSNode node, std::uint32_t spanStart, std::uint32_t spanE
     const std::uint32_t childCount = ts_node_child_count( node );
     for( std::uint32_t i = 0; i < childCount; ++i )
     {
-        sliceWalk( ts_node_child( node, i ), spanStart, spanEnd, fam, lang, src, varName, occ, locals, selfName, all );
+        sliceWalk( ts_node_child( node, i ), ctx, scan, pp );
     }
 }
 
@@ -811,7 +1179,22 @@ inline SliceScan sliceScanDefinition( const std::string& src, const Symbol& sym,
         return scan;
     }
 
-    sliceWalk( ts_tree_root_node( tree ), sym.sigStartByte, sym.endByte, fam, sym.lang, src, varName, scan.occ, scan.locals, sym.name, scan.all );
+    SliceWalkCtx ctx;
+    ctx.spanStart = sym.sigStartByte;
+    ctx.spanEnd   = sym.endByte;
+    ctx.fam       = fam;
+    ctx.lang      = sym.lang;
+    ctx.src       = src;
+    ctx.selfName  = sym.name;
+    sliceWalk( ts_tree_root_node( tree ), ctx, scan, SlicePp::Live );
+    sliceResolveBindings( scan );
+    for( const SliceNamedOcc& no : scan.all )
+    {
+        if( !varName.empty() && no.name == varName )
+        {
+            scan.occ.push_back( no.occ );   // the VAR-mode view: source order, every binding of the name (rows carry b= when >1)
+        }
+    }
     scan.parseOk = true;
 
     ts_tree_delete( tree );
@@ -831,8 +1214,8 @@ inline SliceScan sliceScanDefinition( const std::string& src, const Symbol& sym,
 //     merges) — while CHAINING is statement-anchored (arm 25): a statement spanning several lines
 //     via continuation chains as ONE unit keyed on its first line, so a def is never blind to the
 //     operands on its continuation lines;
-//   • name-based and scope-insensitive like v1 — no lexical-scope separation (shadowing may
-//     over-include), no alias analysis, where the paper handles global/nonlocal explicitly;
+//   • name-based like v1 — no alias analysis; block scopes ARE separated since 2026-09-02 (a shadowed
+//     name is several bindings, each walked on its own — see the scope-separation block);
 //   • the seed is the whole variable inside ONE resolved definition (v1's addressing), not a
 //     (file, line, variable) triple — the paper's line seed is recoverable by reading the d=0 rows.
 
@@ -840,30 +1223,39 @@ inline SliceScan sliceScanDefinition( const std::string& src, const Symbol& sym,
 // IS the priority), CDATA = the trimmed statement line
 struct SliceLineRow
 {
-    std::uint32_t line   = 0;
-    bool          hasDef = false;
-    bool          hasUse = false;
-    OccT          t      = OccT::Read;
+    std::uint32_t line       = 0;
+    bool          hasDef     = false;
+    bool          hasUse     = false;
+    OccT          t          = OccT::Read;
+    bool          pp         = false;   // the line sits in a build-dependent preprocessor region (a line never straddles one)
+    std::uint32_t bindingIdx = kSliceUnbound;   // a line touching TWO bindings of one name (Go `v := v + 1`) is two rows
 };
 
-// fold line-ascending occurrences into per-line rows — the ONE aggregation both the v1 seed rows and
-// the flow substrate use, so the two can never disagree on what a line's k=/t= is
+// fold ONE occurrence into the row list — the single aggregation rule both the v1 seed rows and the
+// flow substrate use, so the two can never disagree on what a line's k=/t=/pp=/b= is
+inline void sliceFoldOcc( std::vector<SliceLineRow>& rows, const SliceOcc& o )
+{
+    if( rows.empty() || rows.back().line != o.line || rows.back().bindingIdx != o.bindingIdx )
+    {
+        rows.push_back( SliceLineRow{ o.line, false, false, o.t, false, o.bindingIdx } );   // seeded with the FIRST role, then min'd — Read is not the weakest any more
+    }
+    SliceLineRow& r = rows.back();
+    r.hasDef = r.hasDef || o.isDef;
+    r.hasUse = r.hasUse || o.isUse;
+    r.pp     = r.pp || o.pp;
+    if( std::uint8_t( o.t ) < std::uint8_t( r.t ) )
+    {
+        r.t = o.t;   // enum order IS the priority order
+    }
+}
+
+// fold line-ascending occurrences into per-line rows
 inline std::vector<SliceLineRow> sliceFoldLines( const std::vector<SliceOcc>& occ )
 {
     std::vector<SliceLineRow> rows;
     for( const SliceOcc& o : occ )
     {
-        if( rows.empty() || rows.back().line != o.line )
-        {
-            rows.push_back( SliceLineRow{ o.line, false, false, OccT::Read } );
-        }
-        SliceLineRow& r = rows.back();
-        r.hasDef = r.hasDef || o.isDef;
-        r.hasUse = r.hasUse || o.isUse;
-        if( std::uint8_t( o.t ) < std::uint8_t( r.t ) )
-        {
-            r.t = o.t;   // enum order IS the priority order
-        }
+        sliceFoldOcc( rows, o );
     }
     return rows;
 }
@@ -879,7 +1271,8 @@ inline constexpr std::uint32_t kSliceFlowDepthMax = 32;
 struct SliceVarRows
 {
     std::string               name;
-    std::vector<SliceLineRow> rows;    // line-ascending
+    std::uint32_t             bindingIdx = kSliceUnbound;   // ONE binding of the name — a shadowed name is several of these
+    std::vector<SliceLineRow> rows;                          // line-ascending
 };
 
 // one flow step: variable varIdx's line row rowIdx, reached at BFS depth d from line `from`
@@ -907,54 +1300,66 @@ struct SliceFlowSpec
     std::uint32_t       bound = kSliceFlowDefaultDepth;
 };
 
-// the reaching definition of vars[vi] at line L: the LAST def row strictly before L in source order
-// (the paper's edge rule, at line grain). Returns the row index, or npos when no def precedes.
-inline std::size_t sliceReachingDef( const SliceVarRows& v, std::uint32_t line )
+// the emitter's optional inputs, one struct so the two call sites (CLI, MCP) never grow positional
+// nullptrs: a flow to render, a line seed to disclose, the compact legend tier
+struct SliceEmitOpts
 {
-    std::size_t hit = std::size_t( -1 );
+    const SliceFlowSpec* flow          = nullptr;
+    const SliceSeedInfo* seed          = nullptr;
+    bool                 compactLegend = false;   // --legend=compact: schema="ripwire.slice/v1", rows byte-identical
+};
+
+// the reaching definitions of vars[vi] at line L: the LAST unconditional def row strictly before L in
+// source order (the paper's edge rule, at line grain) PLUS every build-dependent (pp) def row after it —
+// a def the build may compile out cannot be allowed to hide the def it would otherwise replace, so both
+// are reaching. Empty when no def precedes.
+inline std::vector<std::size_t> sliceReachingDefs( const SliceVarRows& v, std::uint32_t line )
+{
+    std::vector<std::size_t> hits;
     for( std::size_t rowIndex = 0; rowIndex < v.rows.size() && v.rows[ rowIndex ].line < line; ++rowIndex )
     {
-        if( v.rows[ rowIndex ].hasDef )
+        if( !v.rows[ rowIndex ].hasDef )
         {
-            hit = rowIndex;
+            continue;
         }
+        if( !v.rows[ rowIndex ].pp )
+        {
+            hits.clear();   // an unconditional def kills every reach before it
+        }
+        hits.push_back( rowIndex );
     }
-    return hit;
+    return hits;
 }
 
-// the bounded BFS. Emission dedups per (var, line) row — first (shallowest) reach wins; in Both mode
-// the backward walk runs first, so a row both directions reach keeps its backward depth. truncated
-// flips only when the bound suppresses a NOVEL row — a bound that cuts nothing new is not a cut.
-// the per-variable line folds, name-ascending. scan.all is source-ordered, so a stable sort by name
-// keeps each variable's occurrences line-ascending for the fold.
+// the per-BINDING line folds, (name, binding)-ascending. scan.all is source-ordered, so a stable sort
+// by that key keeps each binding's occurrences line-ascending for the fold. A variable here IS a
+// binding: a shadowed name folds into two entries that the walk never confuses.
 inline std::vector<SliceVarRows> sliceFoldVarRows( const SliceScan& scan )
 {
     std::vector<SliceVarRows> vars;
     std::vector<std::uint32_t> order( scan.all.size() );
     for( std::uint32_t occIndex = 0; occIndex < order.size(); ++occIndex ) { order[ occIndex ] = occIndex; }
-    std::stable_sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return scan.all[ a ].name < scan.all[ b ].name; } );
+    std::stable_sort( order.begin(), order.end(), [ & ]( std::uint32_t a, std::uint32_t b )
+    {
+        const SliceNamedOcc& x = scan.all[ a ];
+        const SliceNamedOcc& y = scan.all[ b ];
+        return x.name != y.name ? x.name < y.name : x.occ.bindingIdx < y.occ.bindingIdx;
+    } );
     for( std::uint32_t occIndex : order )
     {
         const SliceNamedOcc& no = scan.all[ occIndex ];
-        if( vars.empty() || vars.back().name != no.name )
+        if( vars.empty() || vars.back().name != no.name || vars.back().bindingIdx != no.occ.bindingIdx )
         {
-            vars.push_back( SliceVarRows{ no.name, {} } );
+            vars.push_back( SliceVarRows{ no.name, no.occ.bindingIdx, {} } );
         }
-        std::vector<SliceLineRow>& rows = vars.back().rows;
-        if( rows.empty() || rows.back().line != no.occ.line )
-        {
-            rows.push_back( SliceLineRow{ no.occ.line, false, false, OccT::Read } );
-        }
-        SliceLineRow& r = rows.back();
-        r.hasDef = r.hasDef || no.occ.isDef;
-        r.hasUse = r.hasUse || no.occ.isUse;
-        if( std::uint8_t( no.occ.t ) < std::uint8_t( r.t ) )
-        {
-            r.t = no.occ.t;
-        }
+        sliceFoldOcc( vars.back().rows, no.occ );
     }
     return vars;
 }
+
+// the bounded BFS. Emission dedups per (var, line) row — first (shallowest) reach wins; in Both mode
+// the backward walk runs first, so a row both directions reach keeps its backward depth. truncated
+// flips only when the bound suppresses a NOVEL row — a bound that cuts nothing new is not a cut.
 
 // the statement-anchored occurrence table (arm 25): chaining is per STATEMENT, not per line — an
 // occurrence's anchor is its statement's FIRST line, so a continuation-line operand chains to and
@@ -975,9 +1380,9 @@ inline std::vector<SliceAnchorOcc> sliceBuildAnchorOccs( const SliceScan& scan, 
         std::size_t varIdx = std::size_t( -1 );
         for( std::size_t varIndex = 0; varIndex < vars.size(); ++varIndex )
         {
-            if( vars[ varIndex ].name == no.name ) { varIdx = varIndex; }
+            if( vars[ varIndex ].name == no.name && vars[ varIndex ].bindingIdx == no.occ.bindingIdx ) { varIdx = varIndex; }
         }
-        if( varIdx == std::size_t( -1 ) ) { continue; }   // unreachable — every folded name has a var
+        if( varIdx == std::size_t( -1 ) ) { continue; }   // unreachable — every folded (name, binding) has a var
         std::size_t rowIdx = std::size_t( -1 );
         const std::vector<SliceLineRow>& rows = vars[ varIdx ].rows;
         for( std::size_t rowIndex = 0; rowIndex < rows.size(); ++rowIndex )
@@ -1006,8 +1411,7 @@ inline void sliceFlowExpandBack( const std::vector<SliceVarRows>& vars, const st
         for( const SliceAnchorOcc& useOcc : anchorOccs )
         {
             if( useOcc.anchor != defOcc.anchor || !useOcc.isUse ) { continue; }
-            const std::size_t rd = sliceReachingDef( vars[ useOcc.varIdx ], defOcc.anchor );
-            if( rd != std::size_t( -1 ) )
+            for( const std::size_t rd : sliceReachingDefs( vars[ useOcc.varIdx ], defOcc.anchor ) )
             {
                 emitRow( useOcc.varIdx, rd, d + 1, line );
                 enqueue( useOcc.varIdx, rd, d + 1 );
@@ -1017,9 +1421,10 @@ inline void sliceFlowExpandBack( const std::vector<SliceVarRows>& vars, const st
 }
 
 // forward expansion of one DEF node: the def reaches every later use of the same variable up to (and
-// including) its next redefinition; a reached STATEMENT that defines a variable carries the value
-// onward — continuation lines included. A use inside the def's OWN statement (possible only when the
-// statement spans lines) is the PREVIOUS def's reader, so it is skipped.
+// including) its next UNCONDITIONAL redefinition (a build-dependent pp def is passed through — it may
+// not be compiled); a reached STATEMENT that defines a variable carries the value onward — continuation
+// lines included. A use inside the def's OWN statement (possible only when the statement spans lines)
+// is the PREVIOUS def's reader, so it is skipped.
 template< class EmitFn, class EnqueueFn >
 inline void sliceFlowExpandFwd( const std::vector<SliceVarRows>& vars, const std::vector<SliceAnchorOcc>& anchorOccs,
                                 std::uint32_t varIdx, std::uint32_t rowIdx, std::uint32_t d, std::uint32_t line,
@@ -1058,7 +1463,7 @@ inline void sliceFlowExpandFwd( const std::vector<SliceVarRows>& vars, const std
                 }
             }
         }
-        if( r.hasDef ) { break; }   // the next def kills this def's reach
+        if( r.hasDef && !r.pp ) { break; }   // the next UNCONDITIONAL def kills this def's reach; a build-dependent one may not exist
     }
 }
 
@@ -1068,12 +1473,14 @@ inline SliceFlowOut sliceFlowCompute( const SliceScan& scan, std::string_view se
     out.vars = sliceFoldVarRows( scan );
     const std::vector<SliceAnchorOcc> anchorOccs = sliceBuildAnchorOccs( scan, out.vars );
 
-    std::size_t seedIdx = std::size_t( -1 );
+    // the seed is a NAME: every binding of it seeds (a shadowed name's bindings walk separately, each
+    // from its own rows — none ever chains into the other's block)
+    std::vector<std::size_t> seedIdxs;
     for( std::size_t varIndex = 0; varIndex < out.vars.size(); ++varIndex )
     {
-        if( out.vars[ varIndex ].name == seedVar ) { seedIdx = varIndex; }
+        if( out.vars[ varIndex ].name == seedVar ) { seedIdxs.push_back( varIndex ); }
     }
-    if( seedIdx == std::size_t( -1 ) )
+    if( seedIdxs.empty() )
     {
         return out;   // the caller already refuses unknown seeds; belt and braces
     }
@@ -1083,7 +1490,10 @@ inline SliceFlowOut sliceFlowCompute( const SliceScan& scan, std::string_view se
     std::vector<std::vector<bool>> emitted;
     emitted.reserve( out.vars.size() );
     for( const SliceVarRows& v : out.vars ) { emitted.push_back( std::vector<bool>( v.rows.size(), false ) ); }
-    for( std::size_t rowIndex = 0; rowIndex < out.vars[ seedIdx ].rows.size(); ++rowIndex ) { emitted[ seedIdx ][ rowIndex ] = true; }
+    for( const std::size_t seedIdx : seedIdxs )
+    {
+        for( std::size_t rowIndex = 0; rowIndex < out.vars[ seedIdx ].rows.size(); ++rowIndex ) { emitted[ seedIdx ][ rowIndex ] = true; }
+    }
 
     struct Node { std::uint32_t varIdx, rowIdx, d; };
 
@@ -1094,12 +1504,15 @@ inline SliceFlowOut sliceFlowCompute( const SliceScan& scan, std::string_view se
         for( const SliceVarRows& v : out.vars ) { visited.push_back( std::vector<bool>( v.rows.size(), false ) ); }
 
         std::vector<Node> queue;
-        for( std::size_t rowIndex = 0; rowIndex < out.vars[ seedIdx ].rows.size(); ++rowIndex )
+        for( const std::size_t seedIdx : seedIdxs )
         {
-            if( out.vars[ seedIdx ].rows[ rowIndex ].hasDef )
+            for( std::size_t rowIndex = 0; rowIndex < out.vars[ seedIdx ].rows.size(); ++rowIndex )
             {
-                visited[ seedIdx ][ rowIndex ] = true;
-                queue.push_back( Node{ std::uint32_t( seedIdx ), std::uint32_t( rowIndex ), 0 } );
+                if( out.vars[ seedIdx ].rows[ rowIndex ].hasDef )
+                {
+                    visited[ seedIdx ][ rowIndex ] = true;
+                    queue.push_back( Node{ std::uint32_t( seedIdx ), std::uint32_t( rowIndex ), 0 } );
+                }
             }
         }
 
@@ -1153,30 +1566,121 @@ inline SliceFlowOut sliceFlowCompute( const SliceScan& scan, std::string_view se
     if( dir == SliceFlowDir::Back || dir == SliceFlowDir::Both ) { walk( true ); }
     if( dir == SliceFlowDir::Fwd  || dir == SliceFlowDir::Both ) { walk( false ); }
 
-    // the stated output order: (d, line, variable name) ascending — a contract, not a walk artifact
+    // the stated output order: (d, line, variable name, binding) ascending — a contract, not a walk artifact
     std::stable_sort( out.rows.begin(), out.rows.end(), [ & ]( const SliceFlowRow& a, const SliceFlowRow& b )
     {
         const std::uint32_t la = out.vars[ a.varIdx ].rows[ a.rowIdx ].line, lb = out.vars[ b.varIdx ].rows[ b.rowIdx ].line;
         if( a.d != b.d )  { return a.d < b.d; }
         if( la != lb )    { return la < lb; }
-        return out.vars[ a.varIdx ].name < out.vars[ b.varIdx ].name;
+        if( out.vars[ a.varIdx ].name != out.vars[ b.varIdx ].name ) { return out.vars[ a.varIdx ].name < out.vars[ b.varIdx ].name; }
+        return out.vars[ a.varIdx ].bindingIdx < out.vars[ b.varIdx ].bindingIdx;
     } );
+    return out;
+}
+
+// ── the legend ───────────────────────────────────────────────────────────────────────────────────────
+//
+// Emitted by sliceBundleText, kept apart so the emitter's own control flow is about attributes and rows.
+inline std::string sliceLegendText( const SliceEmitOpts& opts )
+{
+    const bool compactLegend = opts.compactLegend;
+    const bool seeded        = opts.seed != nullptr;
+    const bool flowing       = opts.flow != nullptr && opts.flow->out != nullptr;
+    // THE LEGEND. Three tiers, one owner per rule (audit 2026-09-02, F-11: the flow run used to concatenate
+    // two full LIMITS paragraphs restating each other, 88% of the bytes on a small slice):
+    //   • v1 block — every rule of the slice, stated once, numbered so the flow block can point at it;
+    //   • seed / flow blocks — only the vocabulary they add, never a v1 limit restated;
+    //   • compact (--legend=compact, schema="ripwire.slice/v1") — attribute vocabulary only, one block, for
+    //     the many-small-calls seed loop; the payload is byte-identical to the full form.
+    std::string out;
+    if( compactLegend )
+    {
+        out =
+            "<!-- ripwire slice ripwire.slice/v1: name-based intra-procedural def-use rows of one variable in one definition. "
+            "counts=as-classified — defs/uses/vars/steps count what the classifier rowed, neither floors nor totals. "
+            "<s l k t [b] [pp]>: k=def|use|both|scope, t=param|decl|assign|call-arg|read|global|nonlocal, b=declaration line a "
+            "shadowed name binds to (0=unbound), pp=1 build-dependent preprocessor region. Inventory <v n l t [seed]>, vars=count. "
+            "bindings=shadow count; preproc_rows=lines dropped under #if 0; seed/var_from/seed_vars/seed=1 = line-seed disclosure. "
+            "Flow rows add v=variable d=depth f=from-line; steps=flow rows, depth=bound, flow_truncated=1 bounded not complete. "
+            "Limits: a write hidden behind a call (receiver mutation, by-ref/out-param, macro) rows as a use; no alias analysis; "
+            "no control dependence; block scopes separated; C-family #if 0 dropped, other #if kept+flagged. Full legend: omit "
+            "legend=compact (an XML comment cannot spell the flag with its dashes). -->";
+    }
+    else
+    {
+        out =
+            "<!-- ripwire slice: NAME-BASED intra-procedural def-use slice of one variable inside ONE resolved definition (ARISE, "
+            "arXiv:2605.03117). ROWS: one <s> per LINE touching VAR, source order — k= def|use|both|scope (both = the line writes AND "
+            "reads it, `x += y`; scope = a Python global/nonlocal statement: neither read nor write, it introduces the name and "
+            "never anchors a flow), t= the strongest role on the line (param > decl > assign > call-arg > read > global/nonlocal), CDATA "
+            "= the trimmed line. Bare slice=SYM lists the sliceable locals: <v n= l= t=/> per BINDING at its declaration "
+            "line, vars= their count. COUNTS: counts=\"as-classified\" — not the graph verbs' counts_floor= — defs=, uses=, vars= and "
+            "steps= are exact counts of what this classifier ROWED, neither floors nor totals of the program's truth: LOW "
+            "where a write hides behind a call (limit 2), HIGH where a rowed occurrence is not this variable's (a pp=\"1\" row, or a "
+            "same-spelled member/attribute a grammar exposes as a bare identifier — Python/Java `o.v`). LIMITS, stated not implied: "
+            "(1) no alias analysis — a pointer/reference alias is invisible; no flow sensitivity — rows are source-ordered. "
+            "(2) A WRITE HIDDEN BEHIND A CALL IS NOT A DEF: receiver mutation (v.push_back(x), buf.append(s)) rows k=\"use\" t=\"read\", "
+            "and a write through an ARGUMENT — a by-reference/pointer parameter, an out-parameter, a function-like macro (SETIT( m )) — "
+            "rows k=\"use\" t=\"call-arg\", because proving either writes needs the callee's body or the macro's expansion, which "
+            "this slicer lacks; a false def is worse than a missing one (the flow walk stops at the NEXT def), so it declines to guess "
+            "— such a variable reports defs= as its introduction alone and a flow of steps=\"0\": no provable edge, not \"never "
+            "written\". (3) BLOCK SCOPES ARE SEPARATED: a name declared more "
+            "than once inside the definition is that many variables; an occurrence binds to the innermost enclosing scope whose "
+            "declaration precedes it (blocks, loop/if/switch heads, catch clauses, lambdas/closures, per family; JS/TS let/const per "
+            "block, var per function; Go `v := v+1` and Rust `let v = v+1` read the previous binding in their own initializer; Python "
+            "is function-scoped — one binding per name, comprehension/lambda scopes not separated). A shadowed seed carries bindings= "
+            "on the root and b= on every row — the "
+            "declaration line it binds to; b=\"0\" = no declaration inside the definition binds it (an outer name, or a use before its "
+            "declaration). (4) PREPROCESSOR (C-family): a conditional region starting inside the definition is decided only by its "
+            "literal — the body of `#if 0` and the `#else` of `#if 1` are dead, their rows dropped and counted as preproc_rows= "
+            "(absent when zero); every other conditional (`#ifdef`, `#ifndef`, `#if defined(X)`, `#if EXPR`, `#elif`) is "
+            "build-dependent: its rows are kept and flagged pp=\"1\", and in a flow a pp def does not kill the reach of the "
+            "unconditional def before it (both are emitted); macro names in directive text are never occurrences. (5) JS/TS "
+            "destructuring binders (`const { x, y: yy, z = 3, ...rest } = o`, `[a, b] = arr`, destructured parameters, for-of "
+            "patterns) are locals defined at the pattern line; a default's right side and a computed key are reads. "
+            "(6) A reserved word is never an occurrence (a degraded-parse artifact); slicing one refuses like any unknown VAR. "
+            "(7) Intra-procedural: rows never cross into callees/callers (callers/uses give that half). "
+            "Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — any other language refuses loudly, never an empty "
+            "success. -->";
+
+        if( seeded )
+        {
+            // conditional: the seed vocabulary costs zero bytes on an unseeded run (G4)
+            out +=
+                "<!-- slice-seed: LINE-SEEDED (FILE:LINE — ARISE's (file, line[, variable]) seed). seed= is the seed in force; the "
+                "definition sliced is the innermost indexed one enclosing that line. var_from=\"seed\" = the seed line names exactly "
+                "ONE sliceable local and var= is it — a pre-pick, disclosed, never a guess. Zero or several serve the inventory "
+                "instead: seed_vars= counts the locals that line names, each candidate <v> carries seed=\"1\" — pick a :VAR and re-run. -->";
+        }
+
+        if( flowing )
+        {
+            // only what the flow ADDS — every v1 limit above applies unchanged and is not restated here
+            out +=
+                "<!-- slice-flow: TRANSITIVE cross-statement data-flow — bounded BFS from the seed variable over reaching-definition "
+                "edges: a use reaches the LAST unconditional def of its variable before it in source order, plus any pp=\"1\" def "
+                "after that one (the ARISE slicer's rule; stops at the function boundary like the paper's). flow= back = statements "
+                "whose values feed the seed | fwd = statements the seed's value reaches | both = the union (backward first, "
+                "deduplicated). Seed rows are depth 0 in the v1 shape; each FLOW row adds v= the variable at that step, d= its BFS "
+                "depth, f= the line it was reached FROM (b= as in v1 when v= is shadowed); rows order by (d=, l=, v=). steps= counts "
+                "flow rows; depth= is the bound in force (default 8, slice-depth sets it); flow_truncated=\"1\" = the bound suppressed "
+                "at least one row — bounded here, not proven complete. steps=\"0\" = no PROVABLE edge from this seed — its commonest "
+                "cause is limit (2): receiver mutation leaves no def to anchor on — read the rows, not just the count. EXTRA LIMITS: "
+                "rows are line-granular (a multi-statement line merges and may over-connect) while chaining is statement-anchored (a "
+                "statement spanning lines chains as ONE unit keyed on its first line); data dependence only — no control dependence: "
+                "the guard (if/loop) deciding whether a def executes is never a row. -->";
+        }
+    }
     return out;
 }
 
 // ── XML assembly ─────────────────────────────────────────────────────────────────────────────────────
 
-inline std::string sliceBundleText( const IngestResult& ing, const std::string& root, NodeId focus,
-                                    std::string_view varName, const SliceScan& scan, const std::string& src,
-                                    RedactCounts* redact, const SliceFlowSpec* flowSpec = nullptr,
-                                    const SliceSeedInfo* seedInfo = nullptr )
+// the element BODY: the inventory (<v> per binding) or the seed rows + flow rows (<s> per line per
+// binding). Kept apart from sliceBundleText so the emitter's own control flow is the root element.
+inline void sliceEmitBody( std::string& out, const SliceScan& scan, std::string_view varName, const SliceFlowOut* flow,
+                           const std::string& src, RedactCounts* redact, const SliceSeedInfo* seedInfo, std::size_t seedBindingGroups )
 {
-    const SliceFlowOut* flow = flowSpec != nullptr ? flowSpec->out : nullptr;
-    const Symbol& s = ing.symbols[ focus ];
-
-    // R-E: same single-root root= condition every other verb uses (sarif.h); --slice refuses multi-root
-    // before reaching here, so rootPrefix is always live.
-    const std::string rootPrefix = rw::sarif::rootPrefixOf( root );
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view v ) -> std::string { return std::string( escapeXml( v, esc ) ); };
 
@@ -1203,127 +1707,17 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         return { start, end };
     };
 
-    std::string out =
-        "<!-- ripwire slice: NAME-BASED intra-procedural def-use slice of one variable inside ONE uniquely-resolved definition "
-        "(statement-level def-use edges as a queryable agent primitive — the ARISE result, arXiv:2605.03117). LIMITS, stated rather "
-        "than implied: occurrences are identifier-name matches inside the definition's span — no alias analysis (a pointer/reference "
-        "alias is invisible), no flow sensitivity (rows are source-ordered, not dependence-ordered), and a nested scope re-declaring "
-        "VAR (shadowing) is NOT separated, so its rows may over-include. RECEIVER MUTATION IS NOT COUNTED AS A DEF: a write a callee "
-        "performs through the variable itself — v.push_back(x), buf.append(s), m.insert(k) — is classified k=\"use\" t=\"read\", "
-        "because proving it writes needs the receiver's TYPE and the callee's BODY and this slicer has neither. Declining to guess is "
-        "deliberate: a method-name list would mint false defs (v.reserve(n) changes capacity, never the value), and a false def is "
-        "worse than a missing one because the flow walk stops at the NEXT def, so a fabricated one suppresses the real def before it. "
-        "The consequence to read for: a variable written ONLY through method calls reports defs= counting just its introduction, and a "
-        "flow of steps=\"0\" — which means \"no def-use edge this slicer can prove\", never \"this variable is never written\". "
-        "counts_floor=\"1\" says exactly that of every count on the root: defs=, uses=, vars= and steps= are FLOORS, never totals. "
-        "Intra-procedural only: rows never cross into callees/callers "
-        "(the callers/callees/uses verbs give the inter-procedural half). One <s> row per LINE touching VAR: k= def|use|both (both = "
-        "the line writes AND reads it, e.g. `x += y`), t= the strongest role on the line (param > decl > assign > call-arg > read), "
-        "CDATA = the trimmed source line. defs=/uses= count OCCURRENCES, not lines. A reserved word of the definition's own language "
-        "is never an occurrence or a local — a keyword lexed as an identifier is a degraded-parse artifact and is dropped, so slicing "
-        "one refuses like any unknown VAR. Bare slice=SYM (no :VAR) lists the sliceable "
-        "locals instead (<v n= l= t=/> rows at their first-def line, vars= the count). Languages served: C/C++/ObjC (+CUDA/Metal via "
-        "the C-family grammars), Python, JS/TS, Go, Java, Rust — every other language refuses loudly, never an empty success. -->";
-
-    if( seedInfo != nullptr )
-    {
-        // conditional, like the flow legend below: the seed vocabulary is defined exactly where a reader
-        // meets it and costs zero bytes on an unseeded run (G4).
-        out +=
-            "<!-- slice-seed: this slice was LINE-SEEDED (the at grammar, FILE:LINE — ARISE's own (file, line[, variable]) seed). "
-            "seed= is the seed in force; the definition sliced is the innermost indexed one enclosing that line. var_from=\"seed\" "
-            "means the seed line names exactly ONE sliceable local and var= is it — a pre-pick, disclosed, never a guess. A seed "
-            "line naming zero or several sliceable locals serves the inventory instead: seed_vars= counts the locals that line "
-            "names, and each candidate <v> row carries seed=\"1\" so the caller can pick a :VAR and re-run. -->";
-    }
-
-    if( flow != nullptr )
-    {
-        out +=
-            "<!-- slice-flow: TRANSITIVE cross-statement data-flow slice — bounded BFS from the seed variable over "
-            "reaching-definition def-use edges (a use of a variable reaches the LAST definition of it in source order before it "
-            "— the ARISE paper's own slicer semantics, arXiv:2605.03117; like the paper's, this slicer stops at the function "
-            "boundary, the inter-procedural half being the callers/impact verbs). flow= is the direction: back = statements whose "
-            "values feed the seed, fwd = statements the seed's value reaches, both = the union of the two walks (backward first, "
-            "deduplicated). The seed variable's own rows are depth 0 and keep the v1 shape; every FLOW row adds v= the variable "
-            "at that step, d= the BFS depth it was reached at, f= the line it was reached FROM. Flow rows order by (d=, l=, v=) "
-            "— a stated contract, not a walk artifact. steps= counts flow rows; depth= is the bound in force (default "
-            "8, set with slice-depth); flow_truncated= \"1\" means the bound suppressed at least one row — the slice is bounded "
-            "here, NOT proven complete; its absence means the walk finished inside the bound. steps=\"0\" is a FLOOR like every "
-            "other count here (counts_floor=\"1\"): it means no def-use edge was PROVABLE from this seed, never that the variable "
-            "has no data flow. Its commonest cause is v1's receiver-mutation limit above — a variable whose only writes are method "
-            "calls ON it (queue.push_back(x)) has no def for the walk to anchor on, so both directions return zero while the v1 "
-            "rows still SHOW those lines, classified as reads. Read the rows, not just the count. EXTRA LIMITS on top of v1's: "
-            "line-granular ROWS (a multi-statement line merges and may over-connect) over statement-anchored CHAINING (a "
-            "statement spanning several lines chains as ONE unit keyed on its first line), and flow follows "
-            "NAMES, not values — no alias analysis, no flow sensitivity beyond source order, shadowing may over-include. DATA dependence "
-            "only — no control dependence: the guard (if/loop) deciding whether a def executes is never a row. -->";
-    }
-
-    out += "<slice sym=\"";  out += ex( s.name );
-    out += "\" p=\"";        out += ex( rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix ) );
-    out += ":";              out += std::to_string( s.line );
-    out += "\" t=\"";        out += symTag( s.kind );
-    out += "\" lang=\"";     out += langTag( s.lang );
-    out += "\"";
-
-    if( seedInfo != nullptr )
-    {
-        out += " seed=\"" + ex( seedInfo->spec ) + "\"";   // the seed in force, before the mode attributes it steered
-    }
-
     if( varName.empty() )
     {
-        out += " vars=\"" + std::to_string( scan.locals.size() ) + "\"";
-        if( seedInfo != nullptr )
+        // the inventory: one <v> per BINDING (a shadowed name lists once per declaration). sliceWalk
+        // creates bindings in AST (≈ source) order; sort by (declaration line, name) so the order is a
+        // stated contract, not a walk artifact.
+        std::vector<SliceBinding> ordered = scan.bindings;
+        std::sort( ordered.begin(), ordered.end(), []( const SliceBinding& a, const SliceBinding& b )
+                   { return a.declLine != b.declLine ? a.declLine < b.declLine : a.name < b.name; } );
+        for( const SliceBinding& lv : ordered )
         {
-            out += " seed_vars=\"" + std::to_string( seedInfo->seedVarCount ) + "\"";
-        }
-    }
-    else
-    {
-        std::size_t defCount = 0, useCount = 0;
-        for( const SliceOcc& o : scan.occ )
-        {
-            defCount += o.isDef ? 1 : 0;
-            useCount += o.isUse ? 1 : 0;
-        }
-        out += " var=\"" + ex( varName ) + "\" defs=\"" + std::to_string( defCount ) + "\" uses=\"" + std::to_string( useCount ) + "\"";
-        if( seedInfo != nullptr && seedInfo->varFromSeed )
-        {
-            out += " var_from=\"seed\"";
-        }
-        if( flow != nullptr )
-        {
-            out += " flow=\"";
-            out += flowSpec->dir == SliceFlowDir::Back ? "back" : flowSpec->dir == SliceFlowDir::Fwd ? "fwd" : "both";
-            out += "\" depth=\"" + std::to_string( flowSpec->bound ) + "\" steps=\"" + std::to_string( flow->rows.size() ) + "\"";
-            if( flow->truncated )
-            {
-                out += " flow_truncated=\"1\"";
-            }
-        }
-    }
-
-    // at= then root=, appended after every pre-existing attribute — the --edit-check placement rule.
-    // counts_floor= goes LAST of all (graphlegend.h's own placement rule) so no attribute-ADJACENCY
-    // assertion in test/ can break on it: defs=/uses=/vars=/steps= are floors for the same reason the
-    // graph verbs' counts are — the classification is name-based, and receiver mutation is not a def.
-    out += gitstamp::atAttr( root );
-    out += " root=\"";  out += ex( root );  out += "\"";
-    out += kGraphCountFloorAttrXml;
-    out += ">";
-
-    if( varName.empty() )
-    {
-        // the inventory. sliceWalk pushes in AST (≈ source) order; sort by (first-def line, name) so the
-        // order is a stated contract, not a walk artifact.
-        std::vector<SliceLocal> ordered = scan.locals;
-        std::sort( ordered.begin(), ordered.end(), []( const SliceLocal& a, const SliceLocal& b )
-                   { return a.line != b.line ? a.line < b.line : a.name < b.name; } );
-        for( const SliceLocal& lv : ordered )
-        {
-            out += "<v n=\"" + ex( lv.name ) + "\" l=\"" + std::to_string( lv.line ) + "\" t=\"" + occTag( lv.t ) + "\"";
+            out += "<v n=\"" + ex( lv.name ) + "\" l=\"" + std::to_string( lv.declLine ) + "\" t=\"" + occTag( lv.t ) + "\"";
             if( seedInfo != nullptr
                 && std::find( seedInfo->seedVars.begin(), seedInfo->seedVars.end(), lv.name ) != seedInfo->seedVars.end() )
             {
@@ -1357,29 +1751,155 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         for( const SliceLineRow& r : sliceFoldLines( scan.occ ) )
         {
             out += "<s l=\"" + std::to_string( r.line ) + "\" k=\"";
-            out += r.hasDef && r.hasUse ? "both" : r.hasDef ? "def" : "use";
+            out += r.hasDef && r.hasUse ? "both" : r.hasDef ? "def" : r.hasUse ? "use" : "scope";
             out += "\" t=\"";
             out += occTag( r.t );
             out += "\"";
+            if( seedBindingGroups > 1 )
+            {
+                out += " b=\"" + std::to_string( sliceBindingLine( scan, r.bindingIdx ) ) + "\"";
+            }
+            if( r.pp )
+            {
+                out += " pp=\"1\"";   // LAST on the row, so no k=/t= adjacency assertion can break on it
+            }
             rowTail( r.line );
         }
 
         // the flow rows, (d=, l=, v=)-ordered — same element, three extra attributes
         if( flow != nullptr )
         {
+            // b= per flow variable: only a NAME with several bindings in this definition carries it
+            std::vector<bool> shadowed;
+            shadowed.reserve( flow->vars.size() );
+            for( const SliceVarRows& v : flow->vars ) { shadowed.push_back( sliceBindingGroupsOf( scan, v.name ) > 1 ); }
             for( const SliceFlowRow& fr : flow->rows )
             {
                 const SliceVarRows& v = flow->vars[ fr.varIdx ];
                 const SliceLineRow& r = v.rows[ fr.rowIdx ];
                 out += "<s l=\"" + std::to_string( r.line ) + "\" k=\"";
-                out += r.hasDef && r.hasUse ? "both" : r.hasDef ? "def" : "use";
+                out += r.hasDef && r.hasUse ? "both" : r.hasDef ? "def" : r.hasUse ? "use" : "scope";
                 out += "\" t=\"";
                 out += occTag( r.t );
                 out += "\" v=\"" + ex( v.name ) + "\" d=\"" + std::to_string( fr.d ) + "\" f=\"" + std::to_string( fr.from ) + "\"";
+                if( shadowed[ fr.varIdx ] )
+                {
+                    out += " b=\"" + std::to_string( sliceBindingLine( scan, v.bindingIdx ) ) + "\"";
+                }
+                if( r.pp )
+                {
+                    out += " pp=\"1\"";
+                }
                 rowTail( r.line );
             }
         }
     }
+
+}
+
+inline std::string sliceBundleText( const IngestResult& ing, const std::string& root, NodeId focus,
+                                    std::string_view varName, const SliceScan& scan, const std::string& src,
+                                    RedactCounts* redact, const SliceEmitOpts& opts = {} )
+{
+    const SliceFlowSpec* flowSpec      = opts.flow;
+    const SliceSeedInfo* seedInfo      = opts.seed;
+    const bool           compactLegend = opts.compactLegend;
+    const SliceFlowOut*  flow          = flowSpec != nullptr ? flowSpec->out : nullptr;
+    const Symbol&        s             = ing.symbols[ focus ];
+
+    // R-E: same single-root root= condition every other verb uses (sarif.h); --slice refuses multi-root
+    // before reaching here, so rootPrefix is always live.
+    const std::string rootPrefix = rw::sarif::rootPrefixOf( root );
+    std::vector<char> esc;
+    const auto        ex = [ & ]( std::string_view v ) -> std::string { return std::string( escapeXml( v, esc ) ); };
+
+    std::string out = sliceLegendText( opts );
+
+    out += "<slice sym=\"";  out += ex( s.name );
+    out += "\" p=\"";        out += ex( rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix ) );
+    out += ":";              out += std::to_string( s.line );
+    out += "\" t=\"";        out += symTag( s.kind );
+    out += "\" lang=\"";     out += langTag( s.lang );
+    out += "\"";
+    if( compactLegend )
+    {
+        out += " schema=\"ripwire.slice/v1\"";   // the versioned compact dialect id, grep's placement (right after the identity attrs)
+    }
+
+    if( seedInfo != nullptr )
+    {
+        out += " seed=\"" + ex( seedInfo->spec ) + "\"";   // the seed in force, before the mode attributes it steered
+    }
+
+    // bindings= / b= arm only when the seed NAME is shadowed — an unshadowed slice is byte-identical
+    const std::size_t seedBindingGroups = varName.empty() ? 0 : sliceBindingGroupsOf( scan, varName );
+
+    if( varName.empty() )
+    {
+        out += " vars=\"" + std::to_string( scan.bindings.size() ) + "\"";
+        if( seedInfo != nullptr )
+        {
+            out += " seed_vars=\"" + std::to_string( seedInfo->seedVarCount ) + "\"";
+        }
+    }
+    else
+    {
+        std::size_t defCount = 0, useCount = 0;
+        for( const SliceOcc& o : scan.occ )
+        {
+            defCount += o.isDef ? 1 : 0;
+            useCount += o.isUse ? 1 : 0;
+        }
+        out += " var=\"" + ex( varName ) + "\" defs=\"" + std::to_string( defCount ) + "\" uses=\"" + std::to_string( useCount ) + "\"";
+        if( seedBindingGroups > 1 )
+        {
+            out += " bindings=\"" + std::to_string( seedBindingGroups ) + "\"";
+        }
+        if( seedInfo != nullptr && seedInfo->varFromSeed )
+        {
+            out += " var_from=\"seed\"";
+        }
+        if( flow != nullptr )
+        {
+            out += " flow=\"";
+            out += flowSpec->dir == SliceFlowDir::Back ? "back" : flowSpec->dir == SliceFlowDir::Fwd ? "fwd" : "both";
+            out += "\" depth=\"" + std::to_string( flowSpec->bound ) + "\" steps=\"" + std::to_string( flow->rows.size() ) + "\"";
+            if( flow->truncated )
+            {
+                out += " flow_truncated=\"1\"";
+            }
+        }
+    }
+
+    // preproc_rows= — the LINES a preprocessor-dead region cost this answer: in VAR mode the seed
+    // variable's dropped lines (the rows that would have printed), in inventory mode every dropped line
+    // holding an occurrence. Absent when zero (the skipped verb's "absent means nothing was dropped").
+    {
+        std::vector<std::uint32_t> droppedLines;
+        for( const SliceNamedOcc& no : scan.dropped )
+        {
+            if( ( varName.empty() || no.name == varName ) && std::find( droppedLines.begin(), droppedLines.end(), no.occ.line ) == droppedLines.end() )
+            {
+                droppedLines.push_back( no.occ.line );
+            }
+        }
+        if( !droppedLines.empty() )
+        {
+            out += " preproc_rows=\"" + std::to_string( droppedLines.size() ) + "\"";
+        }
+    }
+
+    // at= then root=, appended after every pre-existing attribute — the --edit-check placement rule.
+    // counts= goes LAST of all (the graphlegend.h placement rule for its counts_floor= sibling) so no
+    // attribute-ADJACENCY assertion in test/ can break on it. It is NOT counts_floor=: a slice count
+    // over-includes (a pp row, a same-spelled member) as well as under-includes (a write hidden behind a
+    // call), so "floor" was a false claim (audit 2026-09-02, F-03) — the marker says what the numbers ARE.
+    out += gitstamp::atAttr( root );
+    out += " root=\"";  out += ex( root );  out += "\"";
+    out += kSliceCountsAttrXml;
+    out += ">";
+
+    sliceEmitBody( out, scan, varName, flow, src, redact, seedInfo, seedBindingGroups );
 
     out += "</slice>";
     return out;

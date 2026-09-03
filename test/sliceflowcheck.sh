@@ -31,6 +31,19 @@
 #   (9)  xmllint well-formedness
 #   (10) legend honesty: reaching-definition wording, f=/d=/steps= defined, line-granularity, alias
 #        and no-control-dependence limits
+#   (27) preprocessor-dead regions (C-family): `#if 0` bodies and the `#else` of `#if 1` are DROPPED
+#        (preproc_rows= counts them) so a dead def can never replace the live chain; every other
+#        conditional region (`#ifdef`/`#ifndef`/`#if EXPR`) is build-dependent, so its rows are KEPT,
+#        flagged pp="1", and a pp def does not kill the reach of the unconditional def before it
+#   (28) block-scope separation: a name declared twice in one definition is TWO variables — the flow
+#        walk binds each use to the innermost enclosing declaration (never chains into a sibling
+#        block's shadow), rows of a shadowed name carry b= (the binding's declaration line), the
+#        inventory lists each binding, and the legend states the scope rule per family
+#   (29) JS destructuring chains (s <- x,y <- o) and the widened under-count clause: the legend names
+#        by-reference/out-parameter/macro writes beside receiver mutation, and defines k=scope
+#   (30) legend density (F-11): the flow legend never restates a v1 limit (one block owns each
+#        rule), both blocks fit a byte budget, and --legend=compact serves the slice family with a
+#        versioned schema id and byte-identical rows
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/sliceflowcheck.sh   |   bash test/sliceflowcheck.sh path/to/ripwire
 
@@ -128,6 +141,97 @@ int gather( int seed, int cap )
     bag.reserve( cap );
     bag.push_back( seed );
     return bag.size();
+}
+EOF
+
+# arm (27)'s fuel: PREPROCESSOR-CONDITIONAL regions, in a file of their own so no line above moves.
+# if0: the `#if 0` body holds a def of v that no build ever compiles — before the fix it was the
+# reaching def of `int w = v;` and the live chain w<-v<-n was REPLACED (not truncated) by `v = 111;`
+# (audit 2026-09-02, F-01). ifdef_guard: a build-DEPENDENT region — nobody can decide it without
+# the build's macro set, so the honest posture is keep + flag, never drop and never trust.
+cat > "$WORK/src/pp.cpp" <<'EOF'
+int if0( int n )
+{
+    int v = n;
+#if 0
+    v = 111;
+#endif
+    int w = v;
+    return w;
+}
+
+int ifdef_guard( int n )
+{
+    int s = n;
+#ifdef NEVER_DEFINED_XYZ
+    s = 7;
+#endif
+    int t = s;
+    return t;
+}
+
+int if1else( int n )
+{
+    int a = n;
+#if 1
+    a = a + 1;
+#else
+    a = 999;
+#endif
+    return a;
+}
+EOF
+
+# arm (28)'s fuel: BLOCK-SCOPED SHADOWING, in a file of its own. Before the fix the backward walk from
+# r chained into the inner block's `v` (l5/l6) and never reached `int v = n;` (l3) or the param — the
+# answer was a chain through a variable r does not read (audit 2026-09-02, F-02). Go and JS shapes
+# pin the rule outside C: an occurrence binds to the innermost enclosing block whose declaration
+# precedes it; Go's `v := v + 1` reads the OUTER v in its own initializer; JS `var` is function-scoped.
+cat > "$WORK/src/scope.cpp" <<'EOF'
+int shadowing( int n )
+{
+    int v = n;
+    {
+        int v = 7;
+        v = v + 1;
+    }
+    int r = v;
+    return r;
+}
+EOF
+cat > "$WORK/src/scope.go" <<'EOF'
+package main
+
+func goshadow(n int) int {
+	v := n
+	if v > 0 {
+		v := v + 1
+		_ = v
+	}
+	r := v
+	return r
+}
+EOF
+cat > "$WORK/src/scope.js" <<'EOF'
+function jsshadow( n ) {
+  let v = n;
+  {
+    let v = 7;
+    v = v + 1;
+  }
+  if ( n ) { var hoisted = n; }
+  let r = v + hoisted;
+  return r;
+}
+EOF
+
+# arm (29)'s fuel: the audit's own JS shape — before the fix `--slice=destructure:s --slice-flow=back`
+# returned steps="0"; the whole chain s <- x,y <- o was lost (F-08).
+cat > "$WORK/src/d.js" <<'EOF'
+function destructure( o ) {
+  const { x, y } = o;
+  let s = x + y;
+  return s;
 }
 EOF
 
@@ -452,10 +556,12 @@ WC="$( run --slice=widecalc:delta --slice-flow=back )"
 #   (a) the semantics are unchanged — a future round that quietly promotes receiver calls to defs
 #       reds this arm and has to argue for it,
 #   (b) the zero is no longer bare — the legend names receiver mutation as a limit in its own words,
-#       and the root carries counts_floor="1" like the five graph verbs that are floors for the same
-#       name-based reason.
-# RED against the pre-fix binary on (b) and (c): the legend has no such clause and <slice> has no
-# counts_floor= attribute. Arm (a) is GREEN before and after, deliberately — it is the control.
+#       and the root carries counts="as-classified": NOT the graph verbs' counts_floor= — a slice count
+#       over-includes as well as under-includes (audit 2026-09-02, F-03: defs="3" where the variable has
+#       one def), so "floor" was a false claim and the marker now says what the numbers ARE — exact
+#       counts of what the name-based classifier rowed, neither floors nor totals of the program's truth.
+# RED against the pre-fix binary on (b) and (c): the legend has no such clause and <slice> carried the
+# counts_floor= marker it could not honour. Arm (a) is GREEN before and after, deliberately — the control.
 R="$( run --slice=gather:bag )"
 RF="$( run --slice=gather:bag --slice-flow=back )"
 [ "$( attr "$R" defs )" = 'defs="1"' ] && [ "$( attr "$RF" steps )" = 'steps="0"' ] \
@@ -465,23 +571,205 @@ RF="$( run --slice=gather:bag --slice-flow=back )"
 printf '%s' "$( elem "$R" )" | grep -q 'push_back' \
     && ok "(26a) the push_back line is still emitted as a row — under-classified, not omitted" \
     || { no "(26a) the receiver-mutation line must still appear as a row"; printf '%s\n' "$R"; }
-for lit in 'receiver' 'counts_floor='; do
-    printf '%s' "$( legend "$R" )" | grep -q -- "$lit" \
+for lit in 'receiver' 'counts="as-classified"' 'neither floors nor totals'; do
+    printf '%s' "$( legend "$R" )" | grep -qi -- "$lit" \
         && ok "(26b) v1 legend carries \"$lit\"" \
         || { no "(26b) the v1 legend must define/name \"$lit\""; }
 done
+# the legend may NAME counts_floor= (to say why it is absent) but must never CLAIM it
+printf '%s' "$( legend "$R" )" | grep -qE 'counts_floor="1"|are FLOORS' \
+    && no "(26b) the v1 legend must not claim a floor — a slice count over-includes too" \
+    || ok "(26b) the v1 legend makes no floor claim"
 printf '%s' "$( legend "$RF" )" | grep -q 'receiver' \
     && ok "(26b) the FLOW legend also names the receiver-mutation limit where steps= is defined" \
     || no "(26b) the flow legend must name receiver mutation beside its steps= definition"
-printf '%s' "$( elem "$R" )" | grep -q '^<slice [^>]*counts_floor="1"' \
-    && printf '%s' "$( elem "$RF" )" | grep -q '^<slice [^>]*counts_floor="1"' \
-    && ok "(26c) <slice> carries counts_floor=\"1\" — defs=/uses=/steps= are floors, seeded or not" \
-    || { no "(26c) <slice> must carry counts_floor=\"1\" on both the v1 and the flow form"; printf '%s\n' "$( elem "$R" )"; }
+printf '%s' "$( elem "$R" )" | grep -q '^<slice [^>]*counts="as-classified"' \
+    && printf '%s' "$( elem "$RF" )" | grep -q '^<slice [^>]*counts="as-classified"' \
+    && ! printf '%s' "$( elem "$R" )$( elem "$RF" )" | grep -q 'counts_floor=' \
+    && ok "(26c) <slice> carries counts=\"as-classified\" and NOT counts_floor= — defs=/uses=/steps= are what the classifier rowed, seeded or not" \
+    || { no "(26c) <slice> must carry counts=\"as-classified\" (never counts_floor=) on both the v1 and the flow form"; printf '%s\n' "$( elem "$R" )"; }
 # the inventory form is a count too (vars=), so it carries the marker as well
 RI="$( run --slice=gather )"
-printf '%s' "$( elem "$RI" )" | grep -q 'counts_floor="1"' \
-    && ok "(26c) the bare-inventory form carries the marker too (vars= is a floor)" \
-    || { no "(26c) --slice=SYM inventory must carry counts_floor=\"1\""; printf '%s\n' "$( elem "$RI" )"; }
+printf '%s' "$( elem "$RI" )" | grep -q 'counts="as-classified"' && ! printf '%s' "$( elem "$RI" )" | grep -q 'counts_floor=' \
+    && ok "(26c) the bare-inventory form carries the marker too (vars= is as-classified)" \
+    || { no "(26c) --slice=SYM inventory must carry counts=\"as-classified\""; printf '%s\n' "$( elem "$RI" )"; }
+
+# ── (27) preprocessor-dead regions never replace the live chain; build-dependent ones are flagged ───
+# RED against the pre-fix binary: if0:w back returned steps="1" whose only row was `v = 111;` from
+# inside `#if 0` — the real chain w<-v<-n ABSENT, no disclosure. A wrong chain is worse than a refusal.
+P0="$( run --slice=if0:w --slice-flow=back )"
+[ "$( attr "$P0" steps )" = 'steps="2"' ] \
+    && printf '%s' "$( frow "$P0" v 3 )" | grep -q 'k="def" t="decl" v="v" d="1" f="7"' \
+    && printf '%s' "$( frow "$P0" n 1 )" | grep -q 't="param" v="n" d="2" f="3"' \
+    && ok "(27a) if0:w back: the LIVE chain w<-v(l3)<-n(l1), steps=\"2\"" \
+    || { no "(27a) expected steps=\"2\" with v's live def at l=3 (d=1) and the param at l=1 (d=2)"; printf '%s\n' "$P0"; }
+printf '%s' "$( elem "$P0" )" | grep -q 'v = 111' \
+    && { no "(27a) the #if 0 def 'v = 111;' must NOT be a row — it is preprocessor-dead"; printf '%s\n' "$P0"; } \
+    || ok "(27a) the #if 0 def is absent from the flow"
+P0V="$( run --slice=if0:v )"
+[ "$( attr "$P0V" defs )" = 'defs="1"' ] && [ "$( attr "$P0V" preproc_rows )" = 'preproc_rows="1"' ] \
+    && ! printf '%s' "$( elem "$P0V" )" | grep -q '<s l="5"' \
+    && ok "(27a) if0:v flat: defs=\"1\", the dropped row DISCLOSED as preproc_rows=\"1\", no l=5 row" \
+    || { no "(27a) expected defs=\"1\" preproc_rows=\"1\" and no l=5 row"; printf '%s\n' "$P0V"; }
+# build-dependent: kept, flagged, and NOT allowed to kill the reach of the unconditional def before it
+P1="$( run --slice=ifdef_guard:t --slice-flow=back )"
+printf '%s' "$( frow "$P1" s 15 )" | grep -q 'd="1" f="17" pp="1"' \
+    && ok "(27b) ifdef_guard:t back: the #ifdef def 's = 7;' (l15) is a row AND carries pp=\"1\"" \
+    || { no "(27b) expected <s l=\"15\" … v=\"s\" d=\"1\" f=\"17\" pp=\"1\">"; printf '%s\n' "$P1"; }
+printf '%s' "$( frow "$P1" s 13 )" | grep -q 'k="def" t="decl" v="s" d="1" f="17"' \
+    && printf '%s' "$( frow "$P1" n 11 )" | grep -q 'd="2"' \
+    && ok "(27b) …and the unconditional def 'int s = n;' (l13) is STILL reached (d=1) with n behind it (d=2) — a pp def does not kill the reach" \
+    || { no "(27b) the unconditional def at l=13 and the param at l=11 must both be reached past the pp def"; printf '%s\n' "$P1"; }
+[ -z "$( attr "$P1" preproc_rows )" ] \
+    && ok "(27b) nothing dropped ⇒ no preproc_rows= (absent means zero, the skipped convention)" \
+    || { no "(27b) a kept region must not count as dropped"; printf '%s\n' "$P1"; }
+P1F="$( run --slice=ifdef_guard:s --slice-flow=fwd )"
+# (s's own l17 use is a d=0 seed row, so the reach shows as t's return read at l18: d=2, from 17)
+printf '%s' "$( frow "$P1F" t 18 )" | grep -q 'd="2" f="17"' \
+    && ok "(27b) fwd from s: the l13 def reaches the l17 use THROUGH the pp def (no kill) — t's read at l18 rows d=2 f=17" \
+    || { no "(27b) expected v=\"t\" l=\"18\" d=\"2\" f=\"17\" — the pp def must not stop the forward reach"; printf '%s\n' "$P1F"; }
+# #if 1: the body is live and unflagged, the #else is dead and dropped
+P2="$( run --slice=if1else:a )"
+printf '%s' "$( elem "$P2" )" | grep -q '<s l="25" k="both" t="assign">' \
+    && ! printf '%s' "$( elem "$P2" )" | grep -q 'a = 999' \
+    && [ "$( attr "$P2" preproc_rows )" = 'preproc_rows="1"' ] \
+    && ok "(27c) if1else:a: the #if 1 body rows unflagged (k=both), the #else body dropped, preproc_rows=\"1\"" \
+    || { no "(27c) expected l=25 k=both unflagged, no 'a = 999', preproc_rows=\"1\""; printf '%s\n' "$P2"; }
+# the rule is stated, exactly, where the reader meets pp= and preproc_rows=
+if printf '%s' "$( legend "$P0V" )" | grep -q 'preproc_rows=' && printf '%s' "$( legend "$P0V" )" | grep -q 'pp=' \
+   && printf '%s' "$( legend "$P0V" )" | grep -q '#if 0' && printf '%s' "$( legend "$P0V" )" | grep -qi 'ifdef'; then
+    ok "(27d) the legend states the preprocessor rule (#if 0 dropped, #ifdef kept+flagged) and defines pp=/preproc_rows="
+else
+    no "(27d) the legend must name #if 0, ifdef, pp= and preproc_rows="
+fi
+
+# ── (28) block scopes are separated: a shadow in a sibling block is not a reaching def ─────────────
+# RED against the pre-fix binary: shadowing:r back chained l6 -> l5 (the inner v) and stopped there.
+SC="$( run --slice=scope.cpp:shadowing:r --slice-flow=back )"
+[ "$( attr "$SC" steps )" = 'steps="2"' ] \
+    && printf '%s' "$( frow "$SC" v 3 )" | grep -q 'k="def" t="decl" v="v" d="1" f="8"' \
+    && printf '%s' "$( frow "$SC" n 1 )" | grep -q 't="param" v="n" d="2" f="3"' \
+    && ok "(28a) shadowing:r back: r<-v(l3, the OUTER v)<-n — steps=\"2\"" \
+    || { no "(28a) expected steps=\"2\": the outer v's def at l=3 (d=1 f=8) and the param at l=1 (d=2)"; printf '%s\n' "$SC"; }
+printf '%s' "$( elem "$SC" )" | grep -qE '<s l="(5|6)"' \
+    && { no "(28a) the inner block's v (l5/l6) must NOT be in r's backward slice — r never reads it"; printf '%s\n' "$SC"; } \
+    || ok "(28a) the inner shadow is absent — scope-separated, not name-matched"
+# the flat rows of a shadowed name are LABELLED per binding, never merged
+SV="$( run --slice=scope.cpp:shadowing:v )"
+[ "$( attr "$SV" bindings )" = 'bindings="2"' ] \
+    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="3" k="def" t="decl" b="3">' \
+    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="5" k="def" t="decl" b="5">' \
+    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="6" k="both" t="assign" b="5">' \
+    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="8" k="use" t="read" b="3">' \
+    && ok "(28b) shadowing:v: bindings=\"2\" and every row carries b= (l3/l8 -> b=3, l5/l6 -> b=5)" \
+    || { no "(28b) expected bindings=\"2\" with b=\"3\" on l3/l8 and b=\"5\" on l5/l6"; printf '%s\n' "$SV"; }
+SF="$( run --slice=scope.cpp:shadowing:v --slice-flow=fwd )"
+printf '%s' "$( frow "$SF" r 9 )" | grep -q 'd="2" f="8"' \
+    && ! printf '%s' "$( elem "$SF" )" | grep -q 'v="r"[^>]*f="6"' \
+    && ok "(28b) fwd from v: the outer binding reaches r (l9, d=2); the inner one reaches nothing outside its block" \
+    || { no "(28b) expected r at l=9 d=2 f=8 and no reach from the inner block"; printf '%s\n' "$SF"; }
+# the inventory lists each BINDING, so a caller can see the shadow before slicing
+SI="$( run --slice=scope.cpp:shadowing )"
+[ "$( attr "$SI" vars )" = 'vars="4"' ] \
+    && printf '%s' "$( elem "$SI" )" | grep -q '<v n="v" l="3" t="decl"/>' && printf '%s' "$( elem "$SI" )" | grep -q '<v n="v" l="5" t="decl"/>' \
+    && ok "(28c) inventory: vars=\"4\" — n, v@3, v@5, r (two <v n=\"v\"> rows, one per binding)" \
+    || { no "(28c) expected vars=\"4\" with <v n=\"v\" l=\"3\"/> and <v n=\"v\" l=\"5\"/>"; printf '%s\n' "$SI"; }
+# an unshadowed slice is byte-for-byte free of the b=/bindings= vocabulary (purely additive)
+if printf '%s' "$( elem "$( run --slice=pipeline:out --slice-flow=both )" )" | grep -qE ' b="|bindings='; then
+    no "(28c) an unshadowed slice must not carry b=/bindings="
+else
+    ok "(28c) unshadowed output carries no binding vocabulary"
+fi
+# Go: `v := v + 1` in the inner block reads the OUTER v; r reads the outer v
+SG="$( run --slice=goshadow:r --slice-flow=back )"
+printf '%s' "$( frow "$SG" v 4 )" | grep -q 'd="1" f="9"' && printf '%s' "$( frow "$SG" n 3 )" | grep -q 'd="2"' \
+    && ! printf '%s' "$( elem "$SG" )" | grep -qE '<s l="(6|7)"' \
+    && ok "(28d) go: goshadow:r back binds to the outer v (l4) and the param, never the inner := shadow" \
+    || { no "(28d) expected v at l=4 d=1 f=9, n at l=3 d=2, no l6/l7 rows"; printf '%s\n' "$SG"; }
+# `v := v + 1` (l6) is ONE line touching TWO bindings: the := declares the inner v (b=6), the
+# initializer reads the OUTER v (b=4) — two rows, never merged into a lying k="both"
+SGI="$( run --slice=goshadow:v )"
+printf '%s' "$( elem "$SGI" )" | grep -q '<s l="6" k="def" t="decl" b="6">' && printf '%s' "$( elem "$SGI" )" | grep -q '<s l="6" k="use" t="read" b="4">' \
+    && ok "(28d) go: l6 splits into the inner := def (b=6) and the outer read in its own initializer (b=4)" \
+    || { no "(28d) expected two l=6 rows: k=def b=6 and k=use b=4"; printf '%s\n' "$SGI"; }
+# JS: let is block-scoped, var is function-scoped (hoisting)
+SJ="$( run --slice=jsshadow:r --slice-flow=back )"
+printf '%s' "$( frow "$SJ" v 2 )" | grep -q 'd="1" f="8"' && ! printf '%s' "$( elem "$SJ" )" | grep -qE '<s l="(4|5)"' \
+    && printf '%s' "$( frow "$SJ" hoisted 7 )" | grep -q 'd="1" f="8"' \
+    && ok "(28e) js: r<-v binds to the outer let (l2), skips the inner block, and reaches the function-scoped var (l7)" \
+    || { no "(28e) expected v at l=2 d=1, no l4/l5 rows, hoisted at l=7 d=1"; printf '%s\n' "$SJ"; }
+# the rule is stated where b= and bindings= are met, and the old over-include disclaimer is gone
+if printf '%s' "$( legend "$SV" )" | grep -q 'b=' && printf '%s' "$( legend "$SV" )" | grep -q 'bindings=' \
+   && printf '%s' "$( legend "$SV" )" | grep -qi 'innermost' && printf '%s' "$( legend "$SV" )" | grep -qi 'function-scoped' \
+   && ! printf '%s' "$( legend "$SV" )" | grep -q 'shadowing may over-include' \
+   && ! printf '%s' "$( legend "$SV" )" | grep -q 'NOT separated'; then
+    ok "(28f) the legend defines b=/bindings=, states the innermost-binding rule and the function-scoped families, and no longer claims shadowing over-includes"
+else
+    no "(28f) the legend must define b=/bindings=, state the scope rule, and drop the over-include disclaimer"
+fi
+
+# ── (29) destructuring chains, and the under-count clause names every hidden-write shape ───────────
+DJ="$( run --slice=destructure:s --slice-flow=back )"
+[ "$( attr "$DJ" steps )" = 'steps="3"' ] \
+    && printf '%s' "$( frow "$DJ" x 2 )" | grep -q 'k="def" t="decl" v="x" d="1" f="3"' \
+    && printf '%s' "$( frow "$DJ" y 2 )" | grep -q 'k="def" t="decl" v="y" d="1" f="3"' \
+    && printf '%s' "$( frow "$DJ" o 1 )" | grep -q 't="param" v="o" d="2" f="2"' \
+    && ok "(29a) js destructure:s back: s <- x,y (the pattern line, d=1) <- o (d=2), steps=\"3\"" \
+    || { no "(29a) expected steps=\"3\": x and y at l=2 d=1, o at l=1 d=2"; printf '%s\n' "$DJ"; }
+# the under-count clause: receiver mutation was the only named shape; a write through an ARGUMENT
+# (by-reference parameter, out-parameter, function-like macro) is the same blind spot (F-12)
+L29="$( legend "$DJ" )"
+if printf '%s' "$L29" | grep -qi 'by-reference' && printf '%s' "$L29" | grep -qi 'out-param' && printf '%s' "$L29" | grep -qi 'macro' \
+   && printf '%s' "$L29" | grep -q 'call-arg'; then
+    ok "(29b) the legend's under-count clause names by-reference / out-parameter / macro writes (classified call-arg) beside receiver mutation"
+else
+    no "(29b) the legend must widen the under-count clause to by-reference, out-parameter and macro writes"
+fi
+printf '%s' "$L29" | grep -q 'scope' && printf '%s' "$L29" | grep -q 'nonlocal' && printf '%s' "$L29" | grep -qi 'destructur' \
+    && ok "(29b) the legend defines k=scope (global/nonlocal) and names destructuring binders" \
+    || no "(29b) the legend must define k=scope / t=global|nonlocal and name destructuring"
+
+# ── (30) one legend owns each rule; both fit a budget; compact is admitted ─────────────────────────
+# RED against the pre-fix binary: the flow run concatenated two full LIMITS paragraphs (audit F-11:
+# 2 340 + 2 013 B restating alias/shadowing/receiver), and --legend=compact refused the slice family.
+legbytes(){ printf '%s' "$( legend "$1" )" | wc -c | tr -d ' '; }
+FL="$( run --slice=pipeline:out --slice-flow=both )"; FV="$( run --slice=pipeline:out )"
+nAlias="$( printf '%s' "$( legend "$FL" )" | grep -o 'alias analysis' | wc -l | tr -d ' ' )"
+nHidden="$( printf '%s' "$( legend "$FL" )" | grep -oi 'hidden behind a call' | wc -l | tr -d ' ' )"
+[ "$nAlias" = 1 ] && [ "$nHidden" = 1 ] \
+    && ok "(30a) the flow run states the alias limit once and the hidden-write limit once — the flow block does not restate v1" \
+    || no "(30a) the flow legend restates v1's limits (alias x$nAlias, hidden-write x$nHidden — each must appear exactly once)"
+v1b="$( legbytes "$FV" )"; flb="$( legbytes "$FL" )"; add=$(( flb - v1b ))
+[ "$v1b" -le 3584 ] && [ "$add" -le 1400 ] \
+    && ok "(30b) legend budget: v1 legend $v1b B (<= 3584), the flow addendum $add B (<= 1400)" \
+    || no "(30b) legend over budget: v1 $v1b B (budget 3584), flow addendum $add B (budget 1400) — the essay belongs in docs/COMMANDS.md"
+# compact: admitted, versioned, rows byte-identical to the full form (modulo the schema attribute)
+CF="$( run --slice=pipeline:out --slice-flow=both --legend=compact )"; rcC="$( rc --slice=pipeline:out --slice-flow=both --legend=compact )"
+[ "$rcC" = 0 ] && printf '%s' "$( elem "$CF" )" | grep -q '^<slice [^>]*schema="ripwire.slice/v1"' \
+    && ok "(30c) --legend=compact serves --slice-flow with schema=\"ripwire.slice/v1\" on the root" \
+    || { no "(30c) --legend=compact must serve the slice family with a ripwire.slice/v1 schema id (rc=$rcC)"; printf '%s\n' "$CF" | head -c 400; }
+strip(){ printf '%s' "$( elem "$1" )" | sed 's/ schema="ripwire.slice\/v1"//'; }
+[ -n "$( elem "$FL" )" ] && [ "$( strip "$CF" )" = "$( strip "$FL" )" ] && printf '%s' "$( elem "$FL" )" | grep -q 'v="stray"' \
+    && ok "(30c) compact rows are byte-identical to the full form (payload untouched, non-zero rows)" \
+    || no "(30c) compact must change the legend only — the <slice> element differs from the full form"
+cb="$( legbytes "$CF" )"
+[ "$cb" -gt 0 ] && [ "$cb" -le 1024 ] && [ "$cb" -lt "$flb" ] \
+    && ok "(30c) compact legend is $cb B (<= 1024, and smaller than the full $flb B)" \
+    || no "(30c) compact legend must be a real saving: $cb B (budget 1024, full is $flb B)"
+# an XML comment must not contain '--': the compact legend cannot spell a flag with its dashes (xmllint is the G4 gate)
+if command -v xmllint >/dev/null 2>&1; then
+    ( cd "$WORK" && "$BIN" . --slice=pipeline:out --slice-flow=both --legend=compact --no-cache 2>/dev/null | xmllint --noout - ) \
+        && ( cd "$WORK" && "$BIN" . --slice=pipeline --legend=compact --no-cache 2>/dev/null | xmllint --noout - ) \
+        && ok "(30c) xmllint: compact output (flow + inventory) is well-formed XML" \
+        || no "(30c) xmllint: compact output is NOT well-formed XML (a '--' inside the legend comment?)"
+fi
+[ "$( run --slice=pipeline:out --legend=full )" = "$FV" ] && [ "$( rc --slice=pipeline --legend=compact )" = 0 ] \
+    && ok "(30c) explicit --legend=full is byte-identical to the default; compact serves the bare inventory too" \
+    || no "(30c) --legend=full must not change output, and compact must serve the inventory form"
+E30="$( err --callers=pipeline --legend=compact )"
+[ "$( rc --callers=pipeline --legend=compact )" != 0 ] && printf '%s' "$E30" | grep -q -- '--legend=compact.*--for.*--grep.*--regex.*--slice' \
+    && ok "(30c) an unsupported verb still refuses compact, and the refusal names --slice among the served verbs" \
+    || { no "(30c) the compact refusal must still fire for --callers and list --slice"; printf '%s\n' "$E30"; }
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"
