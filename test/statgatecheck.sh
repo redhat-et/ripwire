@@ -1,22 +1,30 @@
 #!/usr/bin/env bash
 # statgatecheck.sh — A4-P7: warm-run (size,mtime) STAT-GATE + racy-git rule.
 #
-# ingest()'s incremental --cache now stores (sizeBytes, mtimeNs) per file plus the blob's own write
-# timestamp (kCacheVersion=6). On a warm run each file is stat'd; if size+mtime still match the cache
-# AND the cached mtime is strictly older than the blob write time (not "racy"), the cached parse is
-# trusted WITHOUT reading/hashing the file. On ANY mismatch (or a racy entry, or an unstatable file)
-# the file is read + content-hashed exactly as before — the content hash stays the sole authority for
-# what actually changed. This gate proves the shortcut never returns a stale or wrong answer.
+# ingest()'s incremental --cache stores (sizeBytes, mtimeNs, ctimeNs) per file plus the blob's own write
+# timestamp. On a warm run each file is stat'd ONCE; if all three still match the cache AND the cached
+# mtime is strictly older than the blob write time (not "racy"), the cached parse is trusted WITHOUT
+# reading/hashing the file. On ANY mismatch (or a racy entry, or an unstatable file) the file is read +
+# content-hashed exactly as before — the content hash stays the sole authority for what actually changed.
+# This gate proves the shortcut never returns a stale or wrong answer.
+#
+# WHY THREE TIMESTAMPS AND NOT TWO. (size, mtime) alone leaves the adversarial corner (b2) stages: an
+# unprivileged process can restore mtime with utimes() and can keep the byte length, and the gate then
+# trusts a file whose content changed. It CANNOT restore st_ctime — POSIX exposes no interface for it, and
+# the utimes() that restores mtime is itself an inode change that moves ctime forward. So the third
+# discriminator comes out of the ::stat the gate already performs: no extra syscall, no file read, and (b2)
+# becomes a HARD assertion instead of the informational note it used to be.
+#
+# WHAT THAT STILL DOES NOT COVER, and why (b3) stays: a caller who can move the system clock backward, raw
+# block-device manipulation, and a filesystem that maintains no distinct ctime (FAT/exFAT, some SMB mounts)
+# — there the gate degrades to exactly the pre-ctime behaviour, so the racy rule is KEPT, not replaced.
 #
 # Cases:
 #   (a) warm re-run, no changes            → output byte-identical to the cold run
 #   (b1) NORMAL edit, mtime ADVANCES       → change ALWAYS detected (the common case)
-#   (b2) content edit, mtime forced EQUAL  → the adversarial backdated-mtime + same-size attack.
-#        HONEST DISPOSITION: a stat-only shortcut cannot see this and neither does git (a file whose
-#        size AND mtime are byte-identical to the cache, with mtime older than the cache write, is
-#        trusted). We DOCUMENT it as a known, git-shared limitation. It is NOT asserted as detected.
-#        The racy rule closes the *dangerous* variant of this (an edit landing in the same mtime
-#        granule as the cache write) — exercised in (b3).
+#   (b2) content edit, mtime forced EQUAL  → the adversarial backdated-mtime + same-size attack. HARD:
+#        the restore moved st_ctime, so the gate re-hashes and the edit is detected. This was an
+#        informational note until the ctime discriminator landed (docs/EVALS.md, card A3 follow-up).
 #   (b3) RACY entry (mtime == blob write)  → forced re-hash → edit detected even with mtime unchanged
 #   (c) touch only, no content change      → output still correct (trusted shortcut, no false change)
 #   (d) file added / removed               → correct output
@@ -25,7 +33,7 @@
 #   bash test/statgatecheck.sh
 #   RIPWIRE_BIN=build_r2a3/ripwire bash test/statgatecheck.sh
 #
-# Exits non-zero on any HARD failure; (b2) is informational only. Prints ALL PASS on success.
+# Exits non-zero on any failure — every case above is HARD. Prints ALL PASS on success.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -80,7 +88,7 @@ else
     no "(b1) normal edit NOT detected — stat-gate masked a real change (REGRESSION)"
 fi
 
-# ── case (b2): backdated mtime + IDENTICAL size — the git-shared blind spot (informational) ───────
+# ── case (b2): backdated mtime + IDENTICAL size — closed by the recorded ctime (HARD) ─────────────
 WB2="$TMP/b2"; mkdir -p "$WB2"; CB2="$TMP/b2.bin"
 printf 'int sameSizeA( void )\n{\n    return 1;\n}\n' > "$WB2/f.cpp"
 cp -p "$WB2/f.cpp" "$TMP/b2.ref"                                   # -p: ref keeps the EXACT pre-edit mtime (true backdate)
@@ -89,11 +97,10 @@ sleep 1
 printf 'int sameSizeB( void )\n{\n    return 2;\n}\n' > "$WB2/f.cpp"   # SAME byte length as sameSizeA
 touch -r "$TMP/b2.ref" "$WB2/f.cpp"                               # restore mtime EXACTLY to the cached value
 "$BIN" "$WB2" --cache="$CB2" --no-stable >"$TMP/b2.warm" 2>/dev/null
-if grep -q 'n="sameSizeB"' "$TMP/b2.warm"; then
-    note "(b2) backdated same-size edit WAS detected here (mtime restore imperfect on this FS) — stronger than required"
+if grep -q 'n="sameSizeB"' "$TMP/b2.warm" && ! grep -q 'n="sameSizeA"' "$TMP/b2.warm"; then
+    ok "(b2) backdated same-size edit DETECTED — the touch -r moved st_ctime, so the gate re-hashed"
 else
-    note "(b2) backdated same-size edit NOT detected — KNOWN git-shared stat-only limitation (documented, not a failure)"
-    note "(b2) authority is the content hash on the next cold/miss run; only an EXACT (size,mtime<blobwrite) backdate hides a change"
+    no "(b2) backdated same-size edit was TRUSTED — the ctime discriminator is not holding (or this filesystem maintains no distinct st_ctime: $( df -T 2>/dev/null || mount | grep -E " on / " ))"
 fi
 
 # ── case (b3): the RACY rule — an entry whose mtime is >= the blob write time is force-re-hashed ──
