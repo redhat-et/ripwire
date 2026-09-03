@@ -408,6 +408,77 @@ else
 fi
 rm -rf "$PYFIX"
 
+# ── (j) A SAME-NAMED DEFINITION IN ANOTHER FILE IS ANOTHER CONTRACT — defs_now MUST NOT COUNT IT ────────
+# The invariant the (g) arm's comment states and no fixture proved: "on a clean tree defs_was == defs_now
+# everywhere". It was FALSE for the commonest shape in any repo — one bare name (`init`, `run`, `dup`)
+# defined independently in two files. `defs_was` is looked up under quality::qualityKey, which is
+# PATH-QUALIFIED (file + scope + name); `defs_now` used to be counted over `g.canonId[i] == g.canonId[focus]`
+# across the WHOLE CORPUS, and canonicalId degrades a scope-less name to the bare name — so the two sides
+# bucketed differently and an UNTOUCHED tree reported status="contract-change" change="defs" defs_was="1"
+# defs_now="2". Every arm above uses one file per name, which is exactly why none of them saw it.
+#
+# Two halves, and the second is what stops "count only the focus" from being the fix: on a clean tree BOTH
+# spellings must read unchanged, and after a REAL edit to one of them the contract-change must land on that
+# file's contract and NOT on its same-named neighbour. Python and C++ both, because the degrade is the
+# scope-less case and both languages reach it (a module-level def, a free function).
+XFIX="$( mktemp -d )"
+mkdir -p "$XFIX/pkg"
+cat > "$XFIX/pkg/x.py" <<'EOF'
+def dup( a ):
+    return a + 1
+EOF
+cat > "$XFIX/pkg/y.py" <<'EOF'
+def dup( a, b ):
+    return a + b
+EOF
+cat > "$XFIX/pkg/one.cpp" <<'EOF'
+int dupc( int x ) { return x + 1; }
+EOF
+cat > "$XFIX/pkg/two.cpp" <<'EOF'
+int dupc( int x, int y ) { return x + y; }
+EOF
+( cd "$XFIX" && git init -q && git config user.email t@t && git config user.name t \
+  && git add -A && git commit -qm init >/dev/null 2>&1 )
+xec(){ ( cd "$XFIX" && "$BIN" . --edit-check="$1" --no-cache 2>/dev/null ); }
+
+OUTJ_PX="$( xec pkg/x.py:dup )"; OUTJ_PY="$( xec pkg/y.py:dup )"
+OUTJ_C1="$( xec pkg/one.cpp:dupc )"; OUTJ_C2="$( xec pkg/two.cpp:dupc )"
+if ! printf '%s%s%s%s' "$OUTJ_PX" "$OUTJ_PY" "$OUTJ_C1" "$OUTJ_C2" | grep -q '<edit-check '; then
+    no "(j) the two-file same-name fixture did not resolve — this arm measured nothing"
+else
+    _j_clean=1
+    for _o in "$OUTJ_PX" "$OUTJ_PY" "$OUTJ_C1" "$OUTJ_C2"; do
+        printf '%s' "$_o" | sed 's/.*-->//' | grep -q 'status="unchanged"' || _j_clean=0
+    done
+    [ "$_j_clean" = 1 ] \
+        && ok "(j) clean tree, same bare name in two files: all four contracts report status=\"unchanged\"" \
+        || { no "(j) an UNTOUCHED tree reported a contract-change because a same-named definition lives in another file"
+             printf '%s\n' "$OUTJ_PX"; printf '%s\n' "$OUTJ_C1"; }
+    # the invariant stated in editcheck.h, asserted directly: defs_was/defs_now are emitted only on a
+    # contract-change, so on a clean tree the ONLY honest reading is that neither attribute appears at all.
+    printf '%s%s%s%s' "$OUTJ_PX" "$OUTJ_PY" "$OUTJ_C1" "$OUTJ_C2" | sed 's/<!--[^>]*-->//g' | grep -q 'defs_now=' \
+        && { no "(j) defs_now= leaked onto a clean-tree document — defs_was != defs_now on an unedited tree"; printf '%s\n' "$OUTJ_PX"; } \
+        || ok "(j) no defs_was=/defs_now= anywhere on the clean two-file tree (defs_was == defs_now)"
+fi
+
+# the real edit: widen ONLY pkg/y.py's dup. Its own contract must move; its same-named neighbour must not.
+cat > "$XFIX/pkg/y.py" <<'EOF'
+def dup( a, b, c ):
+    return a + b + c
+EOF
+OUTJ_PY2="$( xec pkg/y.py:dup )"; OUTJ_PX2="$( xec pkg/x.py:dup )"; OUTJ_C12="$( xec pkg/one.cpp:dupc )"
+{ printf '%s' "$OUTJ_PY2" | sed 's/.*-->//' | grep -q 'status="contract-change"' \
+  && printf '%s' "$OUTJ_PY2" | grep -q 'params_was="2" params_now="3"' \
+  && printf '%s' "$OUTJ_PY2" | grep -q 'defs_was="1" defs_now="1"' \
+  && printf '%s' "$OUTJ_PY2" | grep -q 'change="params"'; } \
+    && ok "(j) the edited file's own contract still reports the widening (params 2 -> 3, defs unmoved)" \
+    || { no "(j) the real edit is no longer reported on the file that carries it"; printf '%s\n' "$OUTJ_PY2"; }
+{ printf '%s' "$OUTJ_PX2" | sed 's/.*-->//' | grep -q 'status="unchanged"' \
+  && printf '%s' "$OUTJ_C12" | sed 's/.*-->//' | grep -q 'status="unchanged"'; } \
+    && ok "(j) the untouched same-named neighbour (and the C++ pair) stay unchanged through that edit" \
+    || { no "(j) an edit in one file moved a same-named contract in another file"; printf '%s\n' "$OUTJ_PX2"; }
+rm -rf "$XFIX"
+
 # ── WARM-TIME budget: <= 100 ms on ripwire's OWN src/, after the qheadsnap/qsnap cache is primed ────────
 # The 100 ms figure is a PLAIN-build budget. A sanitizer build runs this same path at 120-130 ms on the same
 # machine — measured on the pre-change BASE asan binary too, so it is the instrumentation, not a regression —
