@@ -8998,8 +8998,8 @@ over astropy-14365 (rc 0, 0 reports, census byte-identical to the dev binary's);
 `scipjoincheck`, `localitycheck`, `resolverhonestycheck`, `chainguardcheck`, `legendcoveragecheck`,
 `jsonparitycheck`, `fixedbufsweep` (re-pinned +3 bounded numeric snprintfs), `mcpclidiffcheck`,
 `estchargecheck`, `compactlegendcheck`, `attrvocabcheck`, `deckcheck`, `docscommandscheck`,
-`docdriftcheck`, `flagtablecheck` green. `manifestcheck` red ONLY on the three "505 gate scripts" pins
-(the loop now names 506) — the orchestrator's recompute. The astropy map and both census files are
+`docdriftcheck`, `flagtablecheck` green. `manifestcheck` red ONLY on the three gate-count pins (EVALS:24,
+:4912 and §8 — the loop now names one more script than they say) — the orchestrator's recompute. The astropy map and both census files are
 byte-identical before and after the in-lane refactor that folded six duplicated counter loops into
 `counterTotal`/`counterAt`. `--quality-delta --scope='src/*'` gating 0 after four exact-name acks (the
 two deliberate `serialize`/`serializeJson` contract changes, the one-line `classifyPin` reroute through
@@ -9087,6 +9087,56 @@ unchanged pin, `lpin="1"`; (c) `Box.inherited()` calls `Leaf.validate(v)` where 
 defines no `validate` — the base walk lands `Interval::validate`; (d) `Box.miss()` calls
 `Point.validate(v)` where `Point` defines no `validate` and has no bases — nothing fires, the ladder is
 unchanged. Plus determinism ×2 and `xmllint`. Red on the Phase-4 binary at the main arm and (c).
+
+### Phase 4b, RUN — Rule 2c ships: ACCEPT on all four conjuncts (measured 2026-09-03)
+
+**Verdict: ACCEPT.** The class-name receiver route ships (commit named in the lane report), with a
+kParserVer bump (75 → 76) for the one ingest fact it needed: a Python function definition's parameter
+NAMES, recorded as EMPTY-SPAN `VarDecl` bindings so they feed the shadow veto Rules 2b/2c share and
+nothing else (the r9 shadow suppression tests span containment and stays C++/ObjC-only — the fixture
+control (c) went RED without it: a parameter named `Interval` did not veto the route because Python
+parameters were never bound).
+
+| Conjunct | Registered | Measured (14365 · 12907) | |
+| --- | --- | --- | --- |
+| 1. `ambiguous=` vs the Phase 4 ceilings | ≤ 5,709 / 1,755 / 45,866 / 9,112 | src **5,598** (0, on `git archive 1c6fdf4 src`) · ugrep **1,722** (0) · rocksdb **45,142** (−4) · duckdb **8,929** (−5) | **meets** |
+| 2. the five listed sites leave `locality` CONFIRMED | 5 / 5 as `receiver-rule`, SCIP-confirmed | 14365 **5 / 5** (`_Interval::validate`, `_SelectorArguments::validate` ×2, `ModelBoundingBox::validate`, `IERS::open` through the base walk) · 12907 **5 / 5** at 684 / 1300 / 1344 / 1370 / 801 | **meets** |
+| 3. `receiver-rule` full-oracle precision | ≥ 0.925 on 14365 | **0.931** (5,141 / 5,522; was 0.930 at 4,847) · 12907 0.923 (was 0.921) | **meets** |
+| 4. `locality` full-oracle precision non-inferior | ≥ 0.670 / 0.678 | **0.696** (55 / 79) · **0.705** (55 / 78) | **meets** |
+
+Argv as in Phase 4 with `--label astropy-N-r4b`; the site table from a (caller, callee, line) join of the
+`r4` and `r4b` census files (script in the lane report).
+
+**What the route did across the corpus, not just at the five sites.** On 14365 it moved 675 decided
+sites into `receiver-rule`: 207 from `unique` (one candidate all along; the label changes, the edge does
+not), 34 from `split` (an honest k-way spray now one typed edge), 9 from `locality` (the 5 wrong pins
+plus 4 that happened to be right), and **425 sites that had NO row before** — `Cls.m()` calls to a
+name with many in-repo definitions and no same-file candidate, which the tier ladder used to DROP
+entirely (phase 3's "call-shaped, no decided site" floor). SCIP speaks on 675 of them: **617 confirmed,
+40 `@external`, 18 in-repo disagreements** — and every one of the 18 read at source is the census's own
+documented (caller, callee) key collision (two `BaseRepresentation.represent_as(…)` sites in one test
+sharing one oracle answer, `FloatingPoint.__init__` beside `Array.__init__` in one `Complex.__init__`),
+not a wrong target. `edges=` moved +4 on rocksdb and −3 on duckdb; `ambiguous=` fell on both — the
+route is a recall gain at receiver-rule precision, and the `locality` population shrank by exactly the
+nine sites it explained (`locality_pinned=` 115 → 106 on 14365; ugrep/rocksdb/duckdb unchanged at 66 /
+141 / 171: no class-name receiver reaches S6-C on those C++ trees, where `Cls::m()` is a qualifier).
+
+**Contract checks, all clean:** `clsrecvcheck` (RED first at arms A, D, F on the Phase-4 binary; arm C
+RED once more before the parameter capture), determinism ×2 and cold == warm on astropy-14365 (the
+kParserVer bump re-parses once; warm == cold thereafter), `xmllint` on both maps, `test/golden.xml`
+byte-identical; ASan on `clsrecvcheck`, `lpincheck`, `pincensuscheck`, `scipjoincheck` and the astropy
+census path (census byte-identical to the dev binary's); `narrowcheck`, `fieldnarrowcheck`, `chacheck`,
+`chainguardcheck`, `resolverhonestycheck`, `localitycheck`, `shadowcheck`, `qextractionkeycheck`,
+`qschemetripcheck` (re-pinned with its log entry), `cachehashcheck`, `pyshapecheck`, `usescheck`,
+`fieldusescheck`, `pyimportprecisecheck`, `legendcoveragecheck`, `fixedbufsweep` green; `manifestcheck`
+red only on the gate-count pins (507 now) — the orchestrator's recompute; `--quality-delta
+--scope='src/*'` gating 0.
+
+**What is left, stated.** The eight unreachable sibling-class sites stay disclosed by `lpin=`; the 17
+external pins are the disclosure's remaining job (a tie-break cannot decline to pin, and no in-repo
+oracle says "builtin" — that is `--scip`'s). The remaining `locality` population is n = 79 on 14365, 78
+on 12907: below the n ≥ 100 floor on either alone, pooled 157 — a future band on this stratum inherits
+Phase 4's pooling rule and its stated dependence.
 
 ## Member variables as symbols + `--uses=Owner.field` — the member-variable round (card A3), PRE-REGISTERED 2026-09-02 (before any corpus number)
 
