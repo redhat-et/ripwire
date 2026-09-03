@@ -32,10 +32,14 @@
 #include "infra/dynamic_map.hpp"  // S+tree scratch maps — bounded, no per-operation allocation in hot seen-set paths
 
 #include <sys/stat.h>  // ::mkdir — the per-user cache-dir ladder (cacheDirLadder)
-#include <unistd.h>    // ::getpid — unique HEAD-snapshot temp-dir suffix
+#include <sys/file.h>  // ::flock — F-04: the ack ledger's cross-process write lock (SidecarWriteLock)
+#include <fcntl.h>     // ::open — same
+#include <unistd.h>    // ::getpid — unique HEAD-snapshot temp-dir suffix; ::close/::getuid
+#include <cerrno>      // EWOULDBLOCK — the LOCK_NB retry predicate
+#include <ctime>       // ::nanosleep — the lock's bounded 10 ms poll
 
 #include <algorithm>
-#include <atomic>       // Phase-M: the qsnap tmp-name sequence counter (atomicWriteQSnap); also the A5 process-once cache-sweep guard
+#include <atomic>       // Phase-M: the tmp-name sequence counter (atomicWriteFile); also the A5 process-once cache-sweep guard
 #include <cctype>       // std::isxdigit/std::isdigit — B10.2d churn-blame porcelain parsing
 #include <chrono>       // A5: the 30-day cache-blob age cutoff (evictOldCacheFamily)
 #include <cstdio>
@@ -2204,7 +2208,7 @@ inline int readQSnapBlob( const std::string& path, std::string& out )
     // L1 (Linux runtime probe): opening a DIRECTORY succeeds on Linux/glibc and fails on macOS, so a
     // non-regular file at a cache-blob path is a platform-split hazard rather than a clean miss — it cost
     // ingest.cpp's loadCache an abort (see isRegularFileAt there). A qsnap blob is always a REGULAR file
-    // (atomicWriteQSnap renames one into place); every other shape is a miss on every platform, which is
+    // (atomicWriteFile renames one into place); every other shape is a miss on every platform, which is
     // exactly what this function's 0 already means, so it stays silent and the caller recomputes.
     {
         struct stat probe;
@@ -2246,15 +2250,21 @@ inline std::mutex& headSnapshotIngestMutex()
     return m;
 }
 
-// Atomic qsnap publish (§2b atomic-publish gate: no partial blob is ever visible at qsnapCachePath). Write the
-// blob to a UNIQUE tmp file (pid + a monotone counter → distinct even between the request thread's lazy write
+// Atomic publish (§2b atomic-publish gate: no partial blob is ever visible at the destination). Write the
+// bytes to a UNIQUE tmp file (pid + a monotone counter → distinct even between the request thread's lazy write
 // and the prefetch worker's write of the SAME sha), flush, then rename() — POSIX rename is atomic within a
 // directory, so a concurrent reader (readQSnapBlob here, or a separate ripwire process) sees either the OLD
 // complete file or the NEW complete file, never a torn half-written one. This REPLACES the direct
 // `ofstream(..., trunc)` that was torn-read-prone (a reader could observe a zero-length / partially-written
 // blob mid-write and reject a perfectly good sha), hardening the lazy path too. Degrade-only: any IO failure
 // unlinks the tmp and returns false → the next lazy/prefetch pass simply rewrites it.
-inline bool atomicWriteQSnap( const std::string& path, const std::string& blob )
+//
+// F-04 (round-4 audit): NAMED FOR THE MECHANISM, not for its first caller. It is a pure tmp+rename byte
+// publish with no qsnap knowledge in it, and `.ripwire_quality_acks` needs exactly the same guarantee for
+// exactly the same reason — a reader (git diff, an editor, a plain --quality-delta) must never observe a
+// half-written ledger. Reused rather than copied: a second tmp+rename would be two places for the unlink
+// and degrade rules to drift, which is the clone kind --quality-delta gates on.
+inline bool atomicWriteFile( const std::string& path, const std::string& blob )
 {
     static std::atomic<std::uint64_t> seq{ 0 };
     const std::string tmp = path + ".tmp." + std::to_string( ::getpid() )
@@ -2545,7 +2555,7 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     if( useCache )
     {
         const std::string blob = serializeSnapshot( snap, headSha );
-        atomicWriteQSnap( qsnapPath, blob );                 // tmp+rename — never a torn read (§2b atomic publish)
+        atomicWriteFile( qsnapPath, blob );                 // tmp+rename — never a torn read (§2b atomic publish)
         evictOldQSnapCaches( cacheDirLadder(), repoHex, qExclHex, qsnapPath, 2 );
     }
     return { std::move( snap ), true };
@@ -2693,7 +2703,7 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
     Snapshot bodyOnly;
     bodyOnly.bodyHashBySym = bodyHashesBySym( refIng, tmpRoot );   // pathQualifiedKey on EVERY side of the churn join (baseline, this ref, working tree, per-node lookup) — a one-sided keying change makes every symbol read as rewritten   // root = tmpRoot → root-relative keys (S2)
 
-    atomicWriteQSnap( qbodyPath, serializeSnapshot( bodyOnly, refSha ) );
+    atomicWriteFile( qbodyPath, serializeSnapshot( bodyOnly, refSha ) );
     evictOldCacheFamily( cacheDirLadder(), "ripwire-qbody-" + repoHex + "-" + qbExclHex + "-", qbodyPath, 2 );
     return { std::move( bodyOnly.bodyHashBySym ), true };
 }
@@ -2865,7 +2875,7 @@ inline std::vector<std::vector<std::uint32_t>> gitCoChangeAndChurnCached(
     }
 
     raw = gitLogNameOnlyRaw( root, coSince );                                      // cold — the 431 ms walk
-    atomicWriteQSnap( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
+    atomicWriteFile( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
                                                                                      // write just recomputes next time
     return resolveCommitStream( raw, ing, maxFiles, churnMonths, outChurn, onlyRoot );
 }
@@ -4097,10 +4107,107 @@ inline gtl::btree_map<std::string, AckRecord> readAckRecords( const std::string&
     return out;
 }
 
+// ── F-04 (round-4 audit): THE ACK LEDGER'S CROSS-PROCESS WRITE LOCK ──────────────────────────────────
+//
+// WHAT BROKE. `--quality-ack` is a read-modify-write over the WHOLE ledger: read every existing row, heal
+// the identities, fold this run's accepted findings in, rewrite the file from the in-memory map. Nothing
+// serialized that, and the rewrite was a bare `ofstream(trunc)`. Three sessions acking DISJOINT rows in one
+// shared checkout — the exact scenario `--scope` exists for ("N agent sessions sharing one checkout") —
+// therefore lost two of the three acks on 8 of 8 measured runs: not a partial merge, a full overwrite by
+// whichever process rewrote the file last. One run in eight additionally left a torn line behind, because
+// the truncate itself was racing another process's write.
+//
+// THE TWO HALVES OF THE FIX, and they close different holes:
+//   * this lock, held by the acking process from BEFORE the ledger is read until AFTER it is written
+//     (verbs_quality.h), so the whole read-modify-write is atomic against another COOPERATING ripwire.
+//     It is taken ONLY on the --quality-ack path: a read-only --quality-delta never blocks and never waits.
+//   * the atomic tmp+rename publish below, which is what protects a READER — including `git diff`, an
+//     editor, or a plain --quality-delta — from ever observing a half-written ledger. A lock alone cannot
+//     do that, because readers do not take it.
+//
+// WHY THE LOCK FILE IS NOT `<ledger>.lock` BESIDE THE LEDGER. That was the audit's suggestion and it is the
+// one thing here that must NOT be copied from it: a sidecar lock file created next to a COMMITTED file is
+// permanent git-status litter in the user's repo — the defect A3-F8 already fixed for the MCP edit lock, for
+// the same reason. Same mechanism as that lock instead (mcpedit.h EditLock): a stable lockfile in the
+// per-user cache dir under `locks/`, named from a hash of the ledger's path, so two processes still open the
+// same inode and `flock` still serializes them, with nothing landing in the repo. The path is CANONICALIZED
+// first, so `ripwire .` and `ripwire /abs/repo` — the two spellings rootQualifiedSidecar already exists to
+// reconcile — hash to the same lock.
+//
+// WHY THE WAIT IS LONG. The critical section spans a whole delta computation (seconds, cold), not a splice,
+// so mcpedit's ~200 ms budget would time out on essentially every real contention and degrade straight back
+// into the bug. 60 s of 10 ms polls, then DEGRADED_PATH_ALERT and proceed lock-free: the pre-fix behavior is
+// the floor, never a hang. flock is released by the kernel when the fd closes, so a crashed peer cannot
+// wedge the ledger.
+//
+// HONEST LIMIT: advisory. A non-ripwire writer (a human editing the file, a merge tool) is not serialized by
+// it. The atomic publish still keeps THAT reader from seeing a torn file, but a hand-edit made while a
+// --quality-ack is mid-flight can still be overwritten — the same residual mcpedit.h records for its own lock.
+struct SidecarWriteLock
+{
+    int  fd     = -1;
+    bool locked = false;
+
+    explicit SidecarWriteLock( const std::string& sidecarPath, int maxWaitMs = 60000 )
+    {
+        namespace fs = std::filesystem;
+        std::error_code   canonEc;
+        const fs::path    canon    = fs::weakly_canonical( fs::path( sidecarPath ), canonEc );
+        const std::string identity = canonEc ? sidecarPath : canon.string();
+
+        char name[ 64 ];
+        std::snprintf( name, sizeof( name ), "ripwire-sidecar-%016llx.lock",
+                       static_cast<unsigned long long>( fnv1a64( identity ) ) );
+        const std::string lockDir = cacheDirLadder() + "/locks";
+        ::mkdir( lockDir.c_str(), 0700 );
+        ::chmod( lockDir.c_str(), 0700 );
+        const std::string lockPath = resolveCacheBlobPath( lockDir, name );
+
+        fd = ::open( lockPath.c_str(), O_RDWR | O_CREAT, 0644 );
+        if( fd < 0 )
+        {
+            DEGRADED_PATH_ALERT( "quality: ack-ledger lockfile open failed; proceeding lock-free (a concurrent --quality-ack can lose rows)" );
+            return;
+        }
+        for( int waitedMs = 0; ; waitedMs += 10 )
+        {
+            if( ::flock( fd, LOCK_EX | LOCK_NB ) == 0 ) { locked = true; break; }
+            if( errno != EWOULDBLOCK || waitedMs >= maxWaitMs )
+            {
+                break;
+            }
+            struct timespec ts{ 0, 10 * 1000 * 1000 };   // 10 ms
+            ::nanosleep( &ts, nullptr );
+        }
+        if( !locked )
+        {
+            DEGRADED_PATH_ALERT( "quality: ack-ledger lock contended past the wait budget; proceeding lock-free (a concurrent --quality-ack can lose rows)" );
+        }
+    }
+
+    ~SidecarWriteLock()
+    {
+        if( fd >= 0 )
+        {
+            if( locked )
+            {
+                ::flock( fd, LOCK_UN );
+            }
+            ::close( fd );
+        }
+    }
+
+    SidecarWriteLock( const SidecarWriteLock& )            = delete;
+    SidecarWriteLock& operator=( const SidecarWriteLock& ) = delete;
+};
+
 inline bool writeAckRecords( const std::string& path, const gtl::btree_map<std::string, AckRecord>& acks )
 {
-    std::ofstream f( path, std::ios::trunc );
-    if( !f ) { DEGRADED_PATH_ALERT( "quality: cannot write acks file" ); return false; }
+    // F-04: composed into a string and PUBLISHED by tmp+rename (atomicWriteFile) rather than streamed into an
+    // `ofstream(trunc)`. The bytes are identical — same header lines, same btree order, same per-row
+    // formatting — but a reader can no longer observe the file mid-write. That was not hypothetical: one
+    // concurrent run in eight left a single stray character on its own line in the committed ledger.
+    std::ostringstream f;
     f << "# ripwire quality acks v1 — written by --quality-ack; a finding stays suppressed until it worsens past its acked magnitude\n";
     f << "# format: ack <kind> <16-hex-key> <ackNow> [cid=<16-hex-content-id>] [by=<scope that acked it>] <reason to end of line> — one per line, kept SORTED by (kind,key) on every write (merge-friendly)\n";
     for( const auto& [ mapKey, r ] : acks )                       // btree order → byte-stable, always-sorted file (the merge-friendly guarantee)
@@ -4125,6 +4232,11 @@ inline bool writeAckRecords( const std::string& path, const gtl::btree_map<std::
             f << "by=" << r.by << ' ';
         }
         f << ( r.reason.empty() ? "(no reason given)" : r.reason ) << '\n';
+    }
+    if( !atomicWriteFile( path, f.str() ) )
+    {
+        DEGRADED_PATH_ALERT( "quality: cannot write acks file" );
+        return false;
     }
     return true;
 }
