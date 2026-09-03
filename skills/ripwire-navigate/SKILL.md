@@ -39,6 +39,11 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
   non-call references `--callers` never sees, e.g. a struct read or a header import). Run both — `--impact`
   gives depth (the call chain), `--uses` gives breadth (kinds of reference). `--callers` alone is the wrong
   tool for this question; reach for it only when you already know the change is local.
+- **"Who breaks, AND which of those a test already reaches"** — `--impact`/`--callers`/`--callees` rows
+  carry `tested="1"` when an indexed test transitively reaches that row (omitted, never a literal `0`, when
+  none does); `--impact`'s root adds `radius_tested=`/`radius_untested=` over its transitive reach,
+  `--callers`/`--callees`'s root adds `hop_tested=`/`hop_untested=` over their 1-hop count — one call
+  answers both "what breaks" and "what's covered" instead of a second `--test-gate` round-trip.
 - **"Who calls this, one hop"** (quick sanity check, not a safety judgment) → `--callers=SYM`.
 - **"Where is this VARIABLE defined and used inside one function"** → `--slice=SYM:VAR` — per-line
   def/use rows (declaration/assignment/param vs read) inside the one resolved definition; bare

@@ -3424,6 +3424,37 @@ inline constexpr std::uint32_t kLcom4NA = 0xFFFFFFFFu;   // LCOM4 not applicable
 // --seams so every surface answers the same question about whether an indexed test reaches a symbol.
 inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>& seeds );
 
+// A6 (tested/untested partition): the isTestSymbol-seeded forwardReach computeQMetrics' tested[] column
+// runs, factored out so a caller that wants ONLY this lens (--safe-delete, --impact, --callers) is not
+// charged for the rest of QMetrics (cbo/lcom4/callerCount/git amp) — three near-identical "collect
+// isTestSymbol seeds, forwardReach" loops is exactly the clone class --quality-delta flags, and a caller
+// with its own hand-rolled copy is the divergence risk the shared tested= lens exists to avoid (see the
+// L8 comment on computeQMetrics's own tested[] loop below for why isTestSymbol, not isTestPath, is seeded
+// here — filter.h::isTestSymbol is the SYMBOL-keyed predicate that also catches in-file test conventions).
+inline std::vector<char> testSymbolForwardReach( const IngestResult& ing, const Graph& g );
+
+// n counts as TESTED iff an indexed test transitively reaches it AND n is not itself a test symbol — a test
+// is a SEED, never a covered production row itself, matching computeQMetrics/--exercises/--seams. Factored
+// so --safe-delete/--impact/--callers apply the identical exclusion instead of each re-deriving it.
+inline bool isTestedByReach( const IngestResult& ing, const std::vector<char>& testReach, NodeId n ) noexcept
+{
+    return n < testReach.size() && testReach[n] != 0 && !isTestSymbol( ing, n );
+}
+
+// |nodes ∩ tested|, over isTestedByReach — the tested/untested root-count pair every partitioning verb
+// (--safe-delete/--impact/--callers/--callees) derives the same way, factored so none of them re-writes the
+// loop inline (a second copy of a three-line loop in two verb handlers is exactly what --quality-delta's
+// duplication kind flags, and the loop itself adds nothing to either handler's own logic).
+inline std::size_t countTestedIn( const IngestResult& ing, const std::vector<char>& testReach, const std::vector<NodeId>& nodes )
+{
+    std::size_t n = 0;
+    for( NodeId x : nodes )
+    {
+        if( isTestedByReach( ing, testReach, x ) ) { ++n; }
+    }
+    return n;
+}
+
 // union-find (LCOM4 components). Deterministic: unions in a fixed order over id-sorted method slots.
 struct UnionFind
 {
@@ -3498,19 +3529,13 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
     //    reported tested= as if the crate were untested everywhere. Both loops move together; using the
     //    wider predicate for the seed and the narrower one for the row would mark a test symbol as
     //    covered production.
-    std::vector<NodeId> testSeeds;
-    testSeeds.reserve( S );
+    // A6: the seed-collection + forwardReach pair now lives in testSymbolForwardReach (--safe-delete/
+    // --impact/--callers share it too — see that function's own banner); this loop is unchanged in what it
+    // computes, only in where the traversal is defined.
+    const std::vector<char> testReach = testSymbolForwardReach( ing, g );
     for( NodeId i = 0; i < NodeId( S ); ++i )
     {
-        if( isTestSymbol( ing, i ) )
-        {
-            testSeeds.push_back( i );
-        }
-    }
-    const std::vector<char> testReach = forwardReach( g, testSeeds );
-    for( NodeId i = 0; i < NodeId( S ); ++i )
-    {
-        if( testReach[i] && !isTestSymbol( ing, i ) )
+        if( isTestedByReach( ing, testReach, i ) )
         {
             q.tested[i] = 1u;
         }
@@ -4157,6 +4182,32 @@ inline std::vector<char> forwardReach( const Graph& g, const std::vector<NodeId>
         { const NodeId v = g.outTargets[k]; if( v < N && !seen[v] ) { seen[v] = 1; q.push_back( v ); } }
     }
     return seen;
+}
+
+// The "collect every symbol a predicate marks a seed, then forwardReach from them" shape, shared by
+// testSymbolForwardReach below (isTestSymbol) and situ.h's testSeedForwardReach (isTestPath) — two
+// DIFFERENT predicates over the SAME traversal shape (the L8 comment on computeQMetrics's tested[] loop
+// explains why the predicates must stay different), so the loop that collects seeds and calls forwardReach
+// belongs in ONE place rather than two near-identical copies (--quality-delta's duplication kind).
+template<class Pred>
+inline std::vector<char> seedForwardReachIf( const IngestResult& ing, const Graph& g, Pred&& isSeed )
+{
+    std::vector<NodeId> seeds;
+    seeds.reserve( ing.symbols.size() );
+    for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
+    {
+        if( isSeed( i ) )
+        {
+            seeds.push_back( i );
+        }
+    }
+    return forwardReach( g, seeds );
+}
+
+// See the forward declaration above for why this is factored out of computeQMetrics.
+inline std::vector<char> testSymbolForwardReach( const IngestResult& ing, const Graph& g )
+{
+    return seedForwardReachIf( ing, g, [ & ]( NodeId i ) { return isTestSymbol( ing, i ); } );
 }
 
 // ---- minimal connecting subgraph (--connect=A,B,C): metric-closure 2-approx Steiner ------------------------

@@ -218,6 +218,20 @@ inline constexpr const char* kImpactImportTierColumnarLegend =
     "form (it re-serializes the symbol rows only) — the count is the whole of it here; the default XML form and the "
     "json dialect carry the per-file rows. ";
 
+// A6: the same testSymbolForwardReach lens as --safe-delete's radius_tested=/radius_untested= (README:1025),
+// applied here over reaches= instead of safe-delete's impact_reaches= — same measurement, same names, one
+// definition. kTestedRowLegend (above) defines the per-row half; this defines the root partition alone.
+inline constexpr const char* kImpactTestedPartitionLegend =
+    "radius_tested=/radius_untested= partition reaches= by that same lens (transitive, unlike callers/callees). ";
+
+// A6 (survey card A6, agent-lsp): the tested/untested partition --impact/--callers/--callees rows now carry
+// — ONE definition for the per-row half, shared verbatim across every verb it appears on (a second copy of
+// the identical sentence is exactly the echo-site drift class this file exists to prevent). tested="1" only
+// (never a literal 0) reuses the SAME absence-meaningful convention every other tested= site already follows
+// (serialize.h/verbs_for.h): an untested row costs 0 legend-defined bytes, a tested one costs one attribute.
+inline constexpr const char* kTestedRowLegend =
+    "tested=\"1\" on a row means an indexed test transitively reaches it (never 0, omitted when it does not). ";
+
 // --callers / --callees shipped NO legend at all (0 bytes on both, which is why every one of their root
 // attributes sits in test/legendcoverage_baseline.txt). ONE legend serves both forms: the two verbs are one
 // code path with the edge direction flipped, and giving them two descriptions is precisely the per-verb
@@ -229,7 +243,8 @@ inline constexpr const char* kCallHierarchyLegendOpen =
     "neighbour symbols (a floor, per counts_floor=), windowed by limit= and offset=. A neighbour that is an "
     "indexed function-like #define is a macro row (t=\"macro\", role=\"macro\" on the XML row): the edge "
     "crosses a macro expansion, not a plain call — rows carry no role= otherwise. Rows are ordered SOURCE "
-    "first, then test/bench, then docs, by path within a tier. "; // LB-G
+    "first, then test/bench, then docs, by path within a tier. hop_tested=/hop_untested= partition "
+    "count= by the tested= lens below (1-hop, never transitive). "; // LB-G
 
 // V1 fix (verifier finding 3, 2026-08-15): bodyless_defs= is a CALLEES-only attribute — main.cpp's emitter
 // gates it behind `!wantCallers`, so a --callers document can never carry it. It used to sit inside
@@ -245,8 +260,8 @@ inline constexpr const char* kCallHierarchyLegendCalleesOnly =
 // runCallHierarchy (already this file's largest dispatcher) rather than adding a ternary at the call site.
 inline std::string callHierarchyLegendOpen( bool wantCallers )
 {
-    return wantCallers ? std::string( kCallHierarchyLegendOpen )
-                       : std::string( kCallHierarchyLegendOpen ) + kCallHierarchyLegendCalleesOnly;
+    return wantCallers ? std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend
+                       : std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kCallHierarchyLegendCalleesOnly;
 }
 
 // ── LB-G (r10 GitNexus round) — the DISPLAY-CAP clause the neighbour verbs share ─────────────────────────

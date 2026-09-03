@@ -550,17 +550,12 @@ struct TestGateResult
 // this repo's 5763 symbols) computes it ONCE and hands it in, instead of paying N redundant full forward
 // traversals. Every pre-existing call site keeps its own inline computation via the default argument below,
 // so their bytes are unchanged.
+// A6: the seed-collection loop now lives in graph.h::seedForwardReachIf, shared with
+// testSymbolForwardReach's isTestSymbol seeding — same traversal shape, deliberately different predicate
+// (see that function's banner for why isTestPath, not isTestSymbol, is the right one here).
 inline std::vector<char> testSeedForwardReach( const IngestResult& ing, const Graph& g )
 {
-    std::vector<NodeId> testSeeds;
-    for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
-    {
-        if( isTestPath( ing.files[ing.symbols[i].fileId] ) )
-        {
-            testSeeds.push_back( i );
-        }
-    }
-    return forwardReach( g, testSeeds );
+    return seedForwardReachIf( ing, g, [ & ]( NodeId i ) { return isTestPath( ing.files[ing.symbols[i].fileId] ); } );
 }
 
 // The gate's ONE computation, expressed over an explicit CHANGED-SYMBOL set rather than a changed-FILE mask.

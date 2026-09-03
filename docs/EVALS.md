@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 500 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 501 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4909,7 +4909,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **500 gate scripts**, all of which exist on disk.
+naming **501 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5740,7 +5740,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 500. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 501. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -8694,3 +8694,65 @@ the member sites), `--nonlocal-state` (the instance-field disclosure sentence an
 The 44ac095 golden re-pins this rule made unnecessary (test/golden.xml, fillordercheck's est_tokens) are
 reverted to their 8e186bb bytes; the qschemetrip re-pin stays (it is driven by the kParserVer declaration
 line, which legitimately moved to 75) and so does the README/EVALS gate count (fieldusescheck exists).
+
+## `--impact`/`--callers`/`--callees` tested/untested row partition (card A6, agent-lsp), PRE-REGISTERED 2026-09-03 (before any measurement)
+
+**What this registers.** ARISE-bibliography RANK-A card A6 — agent-lsp's "who breaks, and which of those
+a test reaches" in ONE call: each `<s>` row `--impact`/`--callers`/`--callees` already print gains
+`tested="1"` (the house omitted-not-zero spelling — absent means untested, never a literal `tested="0"`,
+matching every other `tested=` site in this tree), reusing the identical isTestSymbol-seeded
+`forwardReach` `computeQMetrics`'s own `tested=` column runs (`graph.h::testSymbolForwardReach`, now also
+`--safe-delete`'s lens, factored so the three callers share ONE traversal rather than three near-identical
+copies). The root gains the partition's two counts: `--impact` (a TRANSITIVE reach) carries
+`radius_tested=`/`radius_untested=`, reusing the exact vocabulary `--safe-delete` already prints for the
+identical measurement over the identical `transitiveCallers` walk (README:1025); `--callers`/`--callees`
+(1-hop, never transitive) carry `hop_tested=`/`hop_untested=` — a deliberately DIFFERENT name, because
+reusing "radius_" on a 1-hop count would be a false claim of transitivity. The row COUNT is unchanged on
+every dialect (XML/columnar/JSON) — a partition, never a filter.
+
+**The band.** On a ≥50-symbol sample of ripwire's own `src/`, the partition must agree, symbol for symbol,
+100% with `--test-gate`'s own untested= determination for the identical reach set. Disagreement is a
+correctness BUG on whichever verb is wrong, to be reported, not papered over. Gate:
+`test/impactpartitioncheck.sh`.
+
+**Why the comparison is apples-to-apples, not two unrelated measurements agreeing by luck.**
+`situ.h::computeTestGateFor` calls the SAME `rw::transitiveCallers` `--impact` calls, over its whole
+changed-SYMBOL set. BFS reachability is seed-set-monotone-additive: `reach(union of seeds) ==
+union(reach(each seed))`, so unioning N separate `--impact=SEED` calls over a symbol set S is
+architecturally IDENTICAL to `--test-gate`'s blast radius when its "changed" set is EXACTLY S.
+`--test-gate`'s CLI only accepts FILES (not a bare symbol list), so S is chosen as EVERY symbol
+`src/graph.h` defines (134 distinct names measured at this lane's head, comfortably over the 50-symbol
+floor, and deterministic — `--graph-query='file(all,"src/graph\.h")'` is a fixed query against a file
+whose defined-symbol population does not depend on run order) and `--test-gate=src/graph.h` then marks
+EXACTLY that same symbol set as changed — one file, no broader superset of "changed" to reconcile. `<u>`
+rows carry no line number, so the join key is `(name, root-relative-file)`, normalized on both sides
+(`--impact`'s `p="path:line"` vs `--test-gate`'s `p="./path"`); two DIFFERENT same-named symbols in one
+file collapse to the same key on BOTH sides alike (measured: 2 such collisions on this sample,
+`cochangePartners`/gitmine.h and `want`/crossref.h — a disclosed limit of `--test-gate`'s own row
+identity, not a comparison artifact), which is why the gate compares distinct-key SETS rather than raw row
+counts. Rows in the changed file itself, and rows in any file `--test-gate`'s own `<t>` listing names, are
+excluded from the `--impact` side the same way `--test-gate` excludes them from `<u>` (the changed set is
+never its own radius; a test-path row is folded into `<t>`, never listed as untested).
+
+**RESULT — measured 2026-09-03 against the band registered above (dev build of this lane's head,
+`test/impactpartitioncheck.sh`, warm cache).** **100% agreement, exact.** `--test-gate=src/graph.h
+--limit=5000`: `untested="646"`, 646 raw `<u>` rows / 644 distinct `(name,file)` keys. Unioning
+`--impact=src/graph.h:SYM --limit=5000` over all 134 symbols `src/graph.h` defines: every one of those 134
+calls reports `capped="0"` (5000 was enough headroom) and satisfies `radius_tested= + radius_untested= ==
+reaches=` (the partition's own internal arithmetic) and printed-row-count `== reaches=` (row-count
+invariance — the new attribute changed what a row discloses, never how many rows exist). The union of
+every row NOT carrying `tested="1"` (644 keys, after the changed-file and test-file exclusions above)
+equals `--test-gate`'s 644-key untested set EXACTLY — zero rows on either side without a match on the
+other. The complementary claim holds too: no row `--impact` marks `tested="1"` appears in
+`--test-gate`'s untested list. MUTATION CONTROL: dropping one arbitrary row from a copy of the
+`--test-gate` set before re-running the equality check makes it fail, as expected — proof the assertion
+above can discriminate a real regression and is not comparing two accidentally-always-equal sets. No
+disagreement found; nothing needed fixing on either verb.
+
+**Byte cost.** Zero on the untested-dominant case: `tested=` is omitted, never spelled `tested="0"`, so an
+untested row costs 0 bytes over the pre-A6 shape. `radius_tested=`/`radius_untested=` (impact) and
+`hop_tested=`/`hop_untested=` (callers/callees) are two root attributes, present unconditionally (a count
+pair, like `importers=`, never a filter a reader must ask for) — `test/graphlegendbudgetcheck.sh`'s
+per-verb legend-byte ratchets (`--callers` ≤2700 B, `--impact` ≤3100 B) stayed green with this lane's
+legend additions (2551 B / 3004 B measured), so the new vocabulary's OWN definition did not blow either
+budget.
