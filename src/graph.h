@@ -72,6 +72,13 @@ struct Graph
                                             // over-counting gauge would itself be a silent-WRONG signal (the one bug
                                             // this lever exists to kill). Revisit that tier when partial-extraction
                                             // provenance lands. Like ambOut it never counts a resolved edge → low noise.
+    std::vector<std::uint32_t> locPinOut;   // per-symbol: # outgoing calls the S6-C locality tie-break ALONE pinned to one
+                                            // def (pincensus.h::isLocalityPin — the census's `locality` population, 0.368
+                                            // full-oracle precision on astropy). serialize: lpin="K" / locality_pinned=N,
+                                            // both absent when 0. NOT folded into ambOut: a split nothing decided and a
+                                            // pin a prior decided are different facts (docs/EVALS.md "Phase 4").
+    std::vector<std::string>   localityKey; // per-symbol S6-C SCORING key (resolve.h::localityKeyOf): canonId when scoped,
+                                            // `path::name` when not. Read ONLY by the S6-C block; never an identity.
     std::vector<std::string>   canonId;     // per-symbol canonical SCIP-style id `path::scope::name` (S6-C); the
                                             // bare name when no scope is known. The resolution locality tie-break
                                             // and serialize's `id=` attribute both read this. Built in buildGraph.
@@ -737,15 +744,18 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     Graph g;
     g.wOutDeg.assign( N, 0.0 );
     g.ambOut.assign( N, 0u );   // counted in the resolve loop: calls that stay split across >1 def after narrowing
+    g.locPinOut.assign( N, 0u );   // counted in the resolve loop: calls the S6-C locality tie-break alone pinned to one def
     g.unresolvedOut.assign( N, 0u );   // counted in the resolve loop: calls whose in-repo defs were all lang-filtered
     if( scip ) { g.scipDocsSeen = scip->documentsSeen; g.scipEdgesPinned = scip->edgesPinned; }
 
     // S6-C canonical ids: `path::scope::name` per symbol (bare name when no scope). Computed once here so the
     // resolution locality tie-break (below) and serialize's `id=` attribute share one definition. Deterministic.
     g.canonId.resize( N );
+    g.localityKey.resize( N );
     for( const Symbol& s : ing.symbols )
     {
-        g.canonId[ s.id ] = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+        g.canonId[ s.id ]     = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+        g.localityKey[ s.id ] = localityKeyOf( ing.files[ s.fileId ], s.scope, s.name );   // == canonId when scoped
     }
 
     // A4-R5 JNI: decode every `Java_pkg_Cls_method` C/C++ def to its readable dotted Java name and stash it as
@@ -1646,14 +1656,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && !bindingPinned && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar )
         {
-            const std::string& callerCanon = g.canonId[ r.fromSymbol ];
+            const std::string& callerCanon = g.localityKey[ r.fromSymbol ];   // == canonId here (the caller is scoped)
             // memoize each survivor's shared-locality ONCE (was computed twice: once for bestShare, once inside the
             // stable_partition predicate). locShare[i] parallels tier[i]; the compaction below reads the memo.
             locShare.clear();
             std::size_t bestShare = 0;
             for( NodeId c : tier )
             {
-                const std::size_t sh = sharedLocality( callerCanon, g.canonId[c] );
+                const std::size_t sh = sharedLocality( callerCanon, g.localityKey[c] );   // path-scoped even for a free function
                 locShare.push_back( sh );
                 if( sh > bestShare )
                 {
@@ -1754,6 +1764,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( nReal == 0 )
         {
             continue;
+        }
+        // ---- the Phase-4 disclosure marker (shipped): the census's `locality` label, by the same predicate ---
+        if( isLocalityPin( scipPinned, bindingPinned, nReal, censusLocality ) )
+        {
+            ++g.locPinOut[ r.fromSymbol ];
         }
         // ---- the census row (eval-only; costs one branch on every other run) ---------------------------
         // Recorded HERE and nowhere else: this is the exact point where the resolver has finished deciding

@@ -169,6 +169,16 @@ struct PinCensus
 // end. Everything that fired survives in the flag bits regardless.
 struct PinDecision { PinMech mech; std::uint8_t flags; };
 
+// The Phase-4 marker predicate (docs/EVALS.md "Phase 4"): the S6-C compaction left exactly ONE non-self
+// survivor and nothing stronger decided the site — a prior's guess is about to ship as a confident edge.
+// buildGraph counts it into Graph::locPinOut (serialized as lpin="K" / locality_pinned=N) and classifyPin
+// labels the census row `locality` through this SAME function, so the shipped marker and the census name one
+// population by construction rather than by two copies of a four-term condition.
+inline bool isLocalityPin( bool scipPinned, bool bindingPinned, std::size_t nonSelfTargets, bool locality ) noexcept
+{
+    return !scipPinned && !bindingPinned && nonSelfTargets == 1 && locality;
+}
+
 inline PinDecision classifyPin( bool scipPinned, bool bindingPinned, std::size_t nonSelfTargets,
                                 bool qualified, bool narrowed, bool cone, bool arity, bool locality ) noexcept
 {
@@ -183,7 +193,7 @@ inline PinDecision classifyPin( bool scipPinned, bool bindingPinned, std::size_t
     if( scipPinned )              { m = PinMech::Scip; }
     else if( bindingPinned )      { m = PinMech::Binding; }
     else if( nonSelfTargets > 1 ) { m = PinMech::Split; }
-    else if( locality )           { m = PinMech::Locality; }
+    else if( isLocalityPin( scipPinned, bindingPinned, nonSelfTargets, locality ) ) { m = PinMech::Locality; }
     else if( arity )              { m = PinMech::Arity; }
     else if( cone )               { m = PinMech::Cone; }
     else if( narrowed )           { m = PinMech::ReceiverRule; }

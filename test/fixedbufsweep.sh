@@ -156,7 +156,7 @@ TABLE = {
     ( "src/quality.h", "tail" ):       ( 1, "not-markup", "tail[96]: the qsnap/qheadsnap cache FILENAME; family + two hex digests + %016llx, all fixed-width." ),
     # ── src/serialize.h ──────────────────────────────────────────────────────────────────────────────────
     ( "src/serialize.h", "fitAttr" ):  ( 1, "safe",       "fitAttr[96]: two %zu plus the literal ' over_ceiling=1'." ),
-    ( "src/serialize.h", "attr" ):     ( 2, "safe",       "attr[320] x2: the per-symbol metric attrs. Widest 26 lit + 4x10 digits + 11 role + qbuf(<=95) + ambs(<=23) + kbuf(<=23) = 218 B." ),
+    ( "src/serialize.h", "attr" ):     ( 2, "safe",       "attr[352] x2: the per-symbol metric attrs. Widest 26 lit + 4x10 digits + 11 role + qbuf(<=95) + ambs(<=35: amb= + lpin=) + kbuf(<=23) = 230 B." ),
     ( "src/serialize.h", "tail" ):     ( 2, "safe",       "tail[192] x2: the <d> row tail. Widest 34 lit+digits + inAttr(<=23) + lens(qbuf, <=79) + pure(9) = 145 B." ),
     ( "src/serialize.h", "hdr" ):      ( 2, "safe",       "hdr[64] x2 (packBodies/packOutline): '<b t=\"%s\" l=\"%u\" p=\"' — symTag's fixed vocabulary + a line number. THE ESCAPED PATH IS APPENDED AFTER, on std::string. snprintf-then-append: textbook safe." ),
     ( "src/serialize.h", "db" ):       ( 1, "safe",       "db[64 + kPageDisclosureCap]: <deps files=...> plus pageDisclosure's own capped buffer, sized against that cap by construction." ),
@@ -261,7 +261,7 @@ if not bad:
 # net new CALL is one. editcheck.h itself goes 4 -> 5 mentions, which is that same one call. sites/rows are
 # unmoved because the new call interpolates only %zu — it is not a string-interpolating site, so it neither
 # joins the 30 nor needs a TABLE row, and (S1)/(S2) both stayed green across the change.
-EXPECTED = { "mentions": 208, "calls": 189, "sites": 41, "rows": 28, "widthforms": 3 }   # 2026-09-03 (dropped_positive= round): +3 calls/+4 mentions, all three the bounded `snprintf( nb, sizeof( nb ), " dropped_positive=..." )` form in the --for/MCP-for/pack-task emitters plus one comment line, re-read and sized before this pin
+EXPECTED = { "mentions": 211, "calls": 192, "sites": 41, "rows": 28, "widthforms": 3 }   # 2026-09-03 (Phase 4 lpin= round): +3 calls/+3 mentions, all bounded numeric forms — the row `" lpin=\"%u\""` appended into ambs[48] behind amb= (≤ 17 + 18 B; attr[] widened 320→352 to keep its worst case inside), and the JSON `"locality_pinned":%zu,` header + `,"lpin":%u` row twins; no %s, nothing escaped — re-read and sized before this pin
 derived  = { "mentions": mentions, "calls": calls, "sites": sites, "rows": len( found ), "widthforms": len( widths ) }
 drift    = { k: ( EXPECTED[k], derived[k] ) for k in EXPECTED if EXPECTED[k] != derived[k] }
 if drift:

@@ -1302,6 +1302,17 @@ inline std::string canonicalId( std::string_view path, std::string_view scope, s
     return id;
 }
 
+// The S6-C tie-break's SCORING key (Graph::localityKey) — canonicalId's spelling for a scoped symbol, and
+// `path::name` (never the bare name) for an unscoped one. canonicalId's bare-name degrade is right for an
+// IDENTITY (id == name, nothing to emit) and wrong for a LOCALITY score: it gave a module-level function zero
+// shared segments with every caller, so it could never survive the tie-break against a same-file class method
+// (docs/EVALS.md "Phase 3b"/"Phase 4": 10 of 23 disconfirmed pins on astropy). Read by the S6-C block only;
+// id=, note keys, baseline keys and selectors keep canonicalId.
+inline std::string localityKeyOf( std::string_view path, std::string_view scope, std::string_view name )
+{
+    return scope.empty() ? std::string( path ).append( "::" ).append( name ) : canonicalId( path, scope, name );
+}
+
 // §B1.3: canonicalId over a symbol whose PATH SEGMENT is made relative to `root` — the one identity rule two
 // unrelated subsystems both need. quality.h's baselineCanonId (a committed baseline must key the same way
 // whether it was taken by `ripwire .` or `ripwire /abs/repo`) and serialize.h's field-note target (a note is
