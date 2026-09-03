@@ -261,7 +261,7 @@ if not bad:
 # net new CALL is one. editcheck.h itself goes 4 -> 5 mentions, which is that same one call. sites/rows are
 # unmoved because the new call interpolates only %zu — it is not a string-interpolating site, so it neither
 # joins the 30 nor needs a TABLE row, and (S1)/(S2) both stayed green across the change.
-EXPECTED = { "mentions": 211, "calls": 192, "sites": 41, "rows": 28, "widthforms": 3 }   # 2026-09-03 (Phase 4 lpin= round): +3 calls/+3 mentions, all bounded numeric forms — the row `" lpin=\"%u\""` appended into ambs[48] behind amb= (≤ 17 + 18 B; attr[] widened 320→352 to keep its worst case inside), and the JSON `"locality_pinned":%zu,` header + `,"lpin":%u` row twins; no %s, nothing escaped — re-read and sized before this pin
+EXPECTED = { "mentions": 212, "calls": 193, "sites": 41, "rows": 28, "widthforms": 3 }   # 2026-09-03 (round 4 merge): +1 call/+1 mention — quality.h ack-ledger lockfile name "ripwire-sidecar-%016llx.lock" into a sized buffer, bounded hex (re-read, not just counted)
 derived  = { "mentions": mentions, "calls": calls, "sites": sites, "rows": len( found ), "widthforms": len( widths ) }
 drift    = { k: ( EXPECTED[k], derived[k] ) for k in EXPECTED if EXPECTED[k] != derived[k] }
 if drift:
