@@ -337,25 +337,6 @@ inline std::vector<std::uint8_t> scipReadFile( const char* path )
 //       precise edges (never a wrong one): the prov="scip" edges that remain are trustworthy. The old
 //       "greatest def line ≤ occ line" line-scan silently mis-attributed under staleness; keying on
 //       ripwire's own (file,line)→fromSymbol both fixes that and is strictly more precise than a line-scan.
-// Everything is derived from sorted inputs and the result is sorted+deduped, so the overlay — and thus
-// the graph — is byte-deterministic. `calleeName` in coveredFrom is the ripwire def symbol's NAME, so it
-// matches Reference::calleeName at the buildGraph seam.
-// internalOccurrences / matchedOccurrencesPreDedup (A4-F21): the S5 staleness ratio's denominator and
-// numerator, computed HERE (not via ScipOverlay's own refOccurrences/edgesPinned fields, which are the
-// wrong pair for a ratio — see loadScipOverlay's comment) and handed back to the sole caller by reference.
-//   internalOccurrences        — ref occurrences whose SYMBOL resolved into scipDef (i.e. the index thinks
-//                                 it points at a def in THIS tree). Excludes external refs (the majority in
-//                                 real code — std::/library symbols the index also records but that ripwire
-//                                 never could or should match) from the denominator: those aren't a
-//                                 freshness signal at all, just always-absent noise that deflated the old
-//                                 ratio (denominator = ALL occurrences including externals; a fresh index
-//                                 already "fails" most externals by construction, so old pct << true pct).
-//   matchedOccurrencesPreDedup — of those internal occurrences, how many matched a live (non-stale)
-//                                 ripwire ref line PRE-dedup (every occurrence counted once, not collapsed
-//                                 to unique (from,to) edges the way ov.edgesPinned is). Using the deduped
-//                                 edge count as the numerator against a per-occurrence denominator was the
-//                                 other half of the systematic deflation: N call-sites of the same callee
-//                                 from the same enclosing symbol count as 1 edge but N occurrences.
 // ---- the SCIP symbol's LAST descriptor: what kind of thing an occurrence names, and its bare name ----
 // SCIP symbol grammar: `scheme manager package version descriptor+`, each descriptor one of `ns/`, `Type#`,
 // `term.`, `method().` (or `method(disambiguator).`), `(parameter)`, `meta:`, `macro!`; a file-local is the
@@ -412,16 +393,29 @@ inline ScipDescTail scipDescriptorTail( std::string_view sym ) noexcept
     return { scipDescriptorName( sym.substr( 0, sym.size() - 1 ) ), kind };
 }
 
-inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<ScipDocument>& docs,
-                                      std::size_t& internalOccurrences, std::size_t& matchedOccurrencesPreDedup )
+// (a) scipSymbolString → the ripwire def NodeId at (relative_path, startLine+1). A relative_path that
+// maps to no ripwire file, or a def line with no ripwire symbol, is skipped (subset semantics).
+//
+// WHICH definitions may bind, and to WHAT (docs/EVALS.md "Phase 3 — the SCIP join diagnosed"): only a
+// method / type / term descriptor, and only to a symbol of the SAME NAME on that line. The old rule —
+// any definition occurrence, first symbol on the line — bound a parameter (its definition sits on the
+// `def` line) to the enclosing function, and a document-scoped `local N` (its definition can share a
+// line with a module-level assignment) to that symbol for every same-numbered local in every other
+// file: on astropy that was 63,989 + 48,705 phantom "internal" occurrences and a phantom precise edge
+// for each cross-file local that landed on a line with any reference. Locals never bind and are never
+// counted; parameters and meta are remembered in `defSeen` (so a reference to them can be told apart
+// from an external symbol) but bind nothing. `defsUnmatched` counts bindable-class definitions whose
+// line holds no same-named symbol (moved, or a term ripwire extracts no symbol for) — diagnostic only.
+struct ScipDefBinding
 {
-    ScipOverlay ov;
-    ov.documentsSeen = docs.size();
-    internalOccurrences        = 0;
-    matchedOccurrencesPreDedup = 0;
+    HashMap<std::string, NodeId>       scipDef;   // bound definitions: symbol string → ripwire NodeId
+    HashMap<std::string, std::uint8_t> defSeen;   // every non-local definition symbol in the index (value unused)
+    std::size_t                        defsUnmatched = 0;
+};
 
-    // per-file sorted (defLine → NodeId) index, for both the definition mapping and the enclosing-symbol
-    // lookup. Built once, reused. defLines[fileId] = ascending (line, id) pairs of symbols defined there.
+inline ScipDefBinding bindScipDefinitions( const IngestResult& ing, const std::vector<ScipDocument>& docs )
+{
+    // per-file (defLine → NodeId) index, sorted so "first same-named def on the line" is deterministic.
     struct LineDef { std::uint32_t line; NodeId id; };
     std::vector<std::vector<LineDef>> defLines( ing.files.size() );
     for( const Symbol& s : ing.symbols )
@@ -437,20 +431,7 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
                    { return a.line != b.line ? a.line < b.line : a.id < b.id; } );
     }
 
-    // (a) scipSymbolString → the ripwire def NodeId at (relative_path, startLine+1). A relative_path that
-    // maps to no ripwire file, or a def line with no ripwire symbol, is skipped (subset semantics).
-    //
-    // WHICH definitions may bind, and to WHAT (docs/EVALS.md "Phase 3 — the SCIP join diagnosed"): only a
-    // method / type / term descriptor, and only to a symbol of the SAME NAME on that line. The old rule —
-    // any definition occurrence, first symbol on the line — bound a parameter (its definition sits on the
-    // `def` line) to the enclosing function, and a document-scoped `local N` (its definition can share a
-    // line with a module-level assignment) to that symbol for every same-numbered local in every other
-    // file: on astropy that was 63,989 + 48,705 phantom "internal" occurrences and a phantom precise edge
-    // for each cross-file local that landed on a line with any reference. Locals never bind and are never
-    // counted; parameters and meta are remembered in `defSeen` (so a reference to them can be told apart
-    // from an external symbol) but bind nothing.
-    HashMap<std::string, NodeId>       scipDef;
-    HashMap<std::string, std::uint8_t> defSeen;     // every non-local definition symbol in the index (value unused)
+    ScipDefBinding out;
     for( const ScipDocument& doc : docs )
     {
         const std::uint32_t fid = resolveFileSuffix( ing, doc.relativePath );
@@ -469,7 +450,7 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
             {
                 continue; // document-scoped; the string is not an identity across files
             }
-            defSeen.emplace( occ.symbol, std::uint8_t( 0 ) );
+            out.defSeen.emplace( occ.symbol, std::uint8_t( 0 ) );
             if( tail.kind != ScipDescKind::Method && tail.kind != ScipDescKind::Type && tail.kind != ScipDescKind::Term )
             {
                 continue; // a parameter / meta / other: never a ripwire definition, never "unmatched"
@@ -480,20 +461,97 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
             {
                 if( ld.line == defLine1 && std::string_view( ing.symbols[ ld.id ].name ) == tail.name )
                 {
-                    scipDef.emplace( occ.symbol, ld.id );   // first SAME-NAMED def on the line wins (id order)
+                    out.scipDef.emplace( occ.symbol, ld.id );   // first SAME-NAMED def on the line wins (id order)
                     matched = true;
                     break;
                 }
             }
-            // a def occurrence whose exact line has no same-named current symbol = the def MOVED (or the
-            // file changed), or a term ripwire extracts no symbol for: a staleness/extraction signal. Count
-            // it (diagnostic only) so loadScipOverlay can surface the match ratio.
             if( !matched )
             {
-                ++ov.defsUnmatched;
+                ++out.defsUnmatched;
             }
         }
     }
+    return out;
+}
+
+// ripwire's own CALL references keyed (fileId, line) → reference index, sorted, so a SCIP resolution that
+// binds no symbol can be matched to the same-named call edge the resolver committed on that line. Call-role,
+// body-enclosed references only (a file-scope call has no caller to disagree about).
+inline std::vector<std::pair<std::uint64_t, std::uint32_t>> indexCallReferencesByLine( const IngestResult& ing )
+{
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> callRefAt;
+    callRefAt.reserve( ing.references.size() );
+    for( std::size_t i = 0; i < ing.references.size(); ++i )
+    {
+        const Reference& rf = ing.references[ i ];
+        if( rf.role == RefRole::Call && rf.fromSymbol != kNoNode && !rf.isInherit && !rf.isDocLink && !rf.isCompose )
+        {
+            callRefAt.emplace_back( ( std::uint64_t( rf.fileId ) << 32 ) | std::uint64_t( rf.line ), std::uint32_t( i ) );
+        }
+    }
+    std::sort( callRefAt.begin(), callRefAt.end() );
+    return callRefAt;
+}
+
+// A reference occurrence whose symbol bound no definition: a builtin / other package (external), or an
+// in-index parameter, local or un-extracted attribute. If ripwire committed a same-named CALL edge on this
+// line, the index has just disagreed with it, and the census must be able to see that — so the site is
+// transcribed with its kind. Never touches the graph; excluded from the S5 ratio exactly as before.
+inline void transcribeNonDefResolution( const IngestResult& ing, const std::vector<std::pair<std::uint64_t, std::uint32_t>>& callRefAt,
+                                        const ScipDefBinding& binding, std::uint32_t fid, const ScipOccurrence& occ, ScipOverlay& ov )
+{
+    const ScipDescTail tail = scipDescriptorTail( occ.symbol );
+    if( tail.name.empty() )
+    {
+        return;
+    }
+    const std::uint64_t key = ( std::uint64_t( fid ) << 32 ) | ( std::uint64_t( occ.startLine ) + 1 );
+    const auto range = std::equal_range( callRefAt.begin(), callRefAt.end(), std::make_pair( key, std::uint32_t( 0 ) ),
+                                         []( const std::pair<std::uint64_t, std::uint32_t>& a, const std::pair<std::uint64_t, std::uint32_t>& b ) noexcept
+                                         { return a.first < b.first; } );
+    const bool inIndex = tail.kind == ScipDescKind::Local || binding.defSeen.find( occ.symbol ) != binding.defSeen.end();
+    for( auto it = range.first; it != range.second; ++it )
+    {
+        const Reference& rf = ing.references[ it->second ];
+        if( std::string_view( rf.calleeName ) == tail.name )
+        {
+            ov.nonDefCovered.push_back( { rf.fromSymbol, rf.calleeName, inIndex ? kScipNonDefInIndex : kScipNonDefExternal } );
+        }
+    }
+}
+
+// Everything is derived from sorted inputs and the result is sorted+deduped, so the overlay — and thus
+// the graph — is byte-deterministic. `calleeName` in coveredFrom is the ripwire def symbol's NAME, so it
+// matches Reference::calleeName at the buildGraph seam.
+// internalOccurrences / matchedOccurrencesPreDedup (A4-F21): the S5 staleness ratio's denominator and
+// numerator, computed HERE (not via ScipOverlay's own refOccurrences/edgesPinned fields, which are the
+// wrong pair for a ratio — see loadScipOverlay's comment) and handed back to the sole caller by reference.
+//   internalOccurrences        — ref occurrences whose SYMBOL resolved into scipDef (i.e. the index thinks
+//                                 it points at a def in THIS tree). Excludes external refs (the majority in
+//                                 real code — std::/library symbols the index also records but that ripwire
+//                                 never could or should match) from the denominator: those aren't a
+//                                 freshness signal at all, just always-absent noise that deflated the old
+//                                 ratio (denominator = ALL occurrences including externals; a fresh index
+//                                 already "fails" most externals by construction, so old pct << true pct).
+//   matchedOccurrencesPreDedup — of those internal occurrences, how many matched a live (non-stale)
+//                                 ripwire ref line PRE-dedup (every occurrence counted once, not collapsed
+//                                 to unique (from,to) edges the way ov.edgesPinned is). Using the deduped
+//                                 edge count as the numerator against a per-occurrence denominator was the
+//                                 other half of the systematic deflation: N call-sites of the same callee
+//                                 from the same enclosing symbol count as 1 edge but N occurrences.
+inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<ScipDocument>& docs,
+                                      std::size_t& internalOccurrences, std::size_t& matchedOccurrencesPreDedup )
+{
+    ScipOverlay ov;
+    ov.documentsSeen = docs.size();
+    internalOccurrences        = 0;
+    matchedOccurrencesPreDedup = 0;
+
+    // (a) the definition binding (bindScipDefinitions above): symbol string → NodeId, the seen-set, defsUnmatched.
+    const ScipDefBinding binding = bindScipDefinitions( ing, docs );
+    const HashMap<std::string, NodeId>& scipDef = binding.scipDef;
+    ov.defsUnmatched = binding.defsUnmatched;
 
     // ripwire's OWN reference sites, keyed (fileId, line) → enclosing fromSymbol. This is the ground truth
     // the S5 gate matches SCIP ref occurrences against: a ripwire Reference's fromSymbol was attributed by
@@ -521,20 +579,7 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
         }
     }
 
-    // ripwire's own CALL references keyed (fileId, line) → reference index, sorted, for the non-definition
-    // transcription below: a SCIP resolution that binds no symbol is recorded only where ripwire committed
-    // a same-named call edge on that very line. Call-role, body-enclosed references only.
-    std::vector<std::pair<std::uint64_t, std::uint32_t>> callRefAt;
-    callRefAt.reserve( ing.references.size() );
-    for( std::size_t i = 0; i < ing.references.size(); ++i )
-    {
-        const Reference& rf = ing.references[ i ];
-        if( rf.role == RefRole::Call && rf.fromSymbol != kNoNode && !rf.isInherit && !rf.isDocLink && !rf.isCompose )
-        {
-            callRefAt.emplace_back( ( std::uint64_t( rf.fileId ) << 32 ) | std::uint64_t( rf.line ), std::uint32_t( i ) );
-        }
-    }
-    std::sort( callRefAt.begin(), callRefAt.end() );
+    const std::vector<std::pair<std::uint64_t, std::uint32_t>> callRefAt = indexCallReferencesByLine( ing );
 
     // (b) reference occurrences → precise edges. Enclosing symbol comes from ripwire's own parse at the
     // SAME (fileId, line); a SCIP ref line with no ripwire reference is STALE and DROPPED (S5 gate).
@@ -555,28 +600,8 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
             const auto dit = scipDef.find( occ.symbol );
             if( dit == scipDef.end() )
             {
-                // Not a bound definition: a builtin / other package (external), or an in-index parameter,
-                // local or un-extracted attribute. Excluded from the S5 ratio as before — but if ripwire
-                // committed a same-named CALL edge on this line, the index has just disagreed with it, and
-                // the census must be able to see that. Transcribe the site with its kind; never touch the graph.
-                const ScipDescTail tail = scipDescriptorTail( occ.symbol );
-                if( !tail.name.empty() )
-                {
-                    const std::uint64_t key = ( std::uint64_t( fid ) << 32 ) | ( std::uint64_t( occ.startLine ) + 1 );
-                    auto range = std::equal_range( callRefAt.begin(), callRefAt.end(), std::make_pair( key, std::uint32_t( 0 ) ),
-                                                   []( const std::pair<std::uint64_t, std::uint32_t>& a, const std::pair<std::uint64_t, std::uint32_t>& b ) noexcept
-                                                   { return a.first < b.first; } );
-                    const bool inIndex = tail.kind == ScipDescKind::Local || defSeen.find( occ.symbol ) != defSeen.end();
-                    for( auto it = range.first; it != range.second; ++it )
-                    {
-                        const Reference& rf = ing.references[ it->second ];
-                        if( std::string_view( rf.calleeName ) == tail.name )
-                        {
-                            ov.nonDefCovered.push_back( { rf.fromSymbol, rf.calleeName, inIndex ? kScipNonDefInIndex : kScipNonDefExternal } );
-                        }
-                    }
-                }
-                continue; // excluded from the S5 denominator, not a staleness signal
+                transcribeNonDefResolution( ing, callRefAt, binding, fid, occ, ov );   // census-only; see the helper
+                continue; // not a bound definition — excluded from the S5 denominator, not a staleness signal
             }
             const NodeId to = dit->second;
             ++internalOccurrences;                                                                // S5 denominator: occurrences the index claims point INTO this tree
