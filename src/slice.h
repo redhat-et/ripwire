@@ -846,8 +846,8 @@ inline constexpr const char* kSliceStmtContainers[ std::size_t( SliceFam::None )
     /* Rust */ { "block", "source_file", "declaration_list", "match_block", nullptr, nullptr },
 };
 
-// membership of a node's kind in a nullptr-terminated kind row — the ONE loop the statement-container,
-// scope-kind and JS-function-kind lookups share (a per-family row is a fixed-extent array; nullptr ends it early)
+// membership of a node's kind in a nullptr-terminated kind row — the ONE loop every kind-table lookup
+// here shares (a row is a fixed-extent array; nullptr ends it early)
 inline bool sliceKindInTable( TSNode n, const char* const* table, std::size_t extent ) noexcept
 {
     for( std::size_t kindIndex = 0; kindIndex < extent && table[ kindIndex ] != nullptr; ++kindIndex )
@@ -860,9 +860,11 @@ inline bool sliceKindInTable( TSNode n, const char* const* table, std::size_t ex
     return false;
 }
 
-inline bool sliceIsStmtContainer( TSNode n, SliceFam fam ) noexcept
+// the same lookup on a PER-FAMILY table (kSliceStmtContainers, kSliceScopeKinds): the family picks the row
+template< std::size_t Rows, std::size_t Cols >
+inline bool sliceKindInFamilyTable( TSNode n, SliceFam fam, const char* const ( &table )[ Rows ][ Cols ] ) noexcept
 {
-    return fam != SliceFam::None && sliceKindInTable( n, kSliceStmtContainers[ std::size_t( fam ) ], std::size( kSliceStmtContainers[ 0 ] ) );
+    return fam != SliceFam::None && sliceKindInTable( n, table[ std::size_t( fam ) ], Cols );
 }
 
 // the enclosing statement's first line, 1-based; an identifier with no container above it (a degraded
@@ -874,7 +876,7 @@ inline std::uint32_t sliceStmtAnchorLine( TSNode node, SliceFam fam ) noexcept
     TSNode parent = ts_node_parent( cur );
     while( !ts_node_is_null( parent ) )
     {
-        if( sliceIsStmtContainer( parent, fam ) )
+        if( sliceKindInFamilyTable( parent, fam, kSliceStmtContainers ) )
         {
             return std::uint32_t( ts_node_start_point( cur ).row ) + 1;
         }
@@ -916,11 +918,6 @@ inline constexpr const char* kSliceScopeKinds[ std::size_t( SliceFam::None ) ][ 
 inline constexpr const char* kSliceJsFunctionKinds[] = { "function_declaration", "function_expression", "arrow_function", "generator_function",
                                                          "generator_function_declaration", "method_definition" };
 
-inline bool sliceIsScopeKind( TSNode n, SliceFam fam ) noexcept
-{
-    return fam != SliceFam::None && sliceKindInTable( n, kSliceScopeKinds[ std::size_t( fam ) ], std::size( kSliceScopeKinds[ 0 ] ) );
-}
-
 inline bool sliceIsJsFunctionKind( TSNode n ) noexcept
 {
     return sliceKindInTable( n, kSliceJsFunctionKinds, std::size( kSliceJsFunctionKinds ) );
@@ -950,7 +947,7 @@ inline std::pair<std::uint32_t, std::uint32_t> sliceScopeOf( TSNode declIdent, S
     TSNode     cur      = ts_node_parent( declIdent );
     while( !ts_node_is_null( cur ) && ts_node_start_byte( cur ) >= spanStart )
     {
-        const bool isScope = fnScoped ? sliceIsJsFunctionKind( cur ) : sliceIsScopeKind( cur, fam );
+        const bool isScope = fnScoped ? sliceIsJsFunctionKind( cur ) : sliceKindInFamilyTable( cur, fam, kSliceScopeKinds );
         if( isScope )
         {
             return { ts_node_start_byte( cur ), ts_node_end_byte( cur ) };
@@ -1065,11 +1062,12 @@ inline std::uint32_t sliceBindIntroducer( SliceScan& scan, std::string_view text
     return bindingIdx;
 }
 
-inline void sliceWalk( TSNode node, const SliceWalkCtx& ctx, SliceScan& scan, SlicePp pp );
-
 // a preprocessor conditional STARTING inside the definition: decide (or refuse to decide) each branch,
-// skip the condition text, and carry the state down — see SlicePp for the rule
-inline void sliceWalkPreproc( TSNode node, const SliceWalkCtx& ctx, SliceScan& scan, SlicePp pp )
+// skip the condition text, and carry the state down — see SlicePp for the rule. `walk` is sliceWalk,
+// passed in so no prototype of it exists (a prototype indexes as a second definition, and --slice on
+// the walk itself would refuse as ambiguous).
+template< class WalkFn >
+inline void sliceWalkPreproc( TSNode node, const SliceWalkCtx& ctx, SliceScan& scan, SlicePp pp, const WalkFn& walk )
 {
     const auto [ bodyState, altState ] = slicePreprocBranchStates( node, ctx.src, pp );
     const TSNode condition   = sliceField( node, "condition" );
@@ -1084,7 +1082,7 @@ inline void sliceWalkPreproc( TSNode node, const SliceWalkCtx& ctx, SliceScan& s
             continue;   // macro names and #if expressions are never variable occurrences
         }
         const bool isAlt = !ts_node_is_null( alternative ) && ts_node_eq( child, alternative );
-        sliceWalk( child, ctx, scan, isAlt ? altState : bodyState );
+        walk( child, ctx, scan, isAlt ? altState : bodyState );
     }
 }
 
@@ -1122,7 +1120,7 @@ inline void sliceWalk( TSNode node, const SliceWalkCtx& ctx, SliceScan& scan, Sl
     }
     if( ctx.fam == SliceFam::C && a >= ctx.spanStart && sliceIsPreprocConditional( node ) )
     {
-        sliceWalkPreproc( node, ctx, scan, pp );
+        sliceWalkPreproc( node, ctx, scan, pp, []( TSNode child, const SliceWalkCtx& c, SliceScan& s, SlicePp state ) { sliceWalk( child, c, s, state ); } );
         return;
     }
 
