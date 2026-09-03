@@ -881,13 +881,13 @@ spot:
 
 ```
 $ ripwire . --callers=rankGraphTeleport
-<callers of="rankGraphTeleport" defs="1" count="6" root="." counts_floor="1">
+<callers of="rankGraphTeleport" defs="1" count="6" root="." hop_tested="0" hop_untested="6" counts_floor="1">
 <s t="fn" n="runEval" p="src/eval.h:168"/>
-<s t="fn" n="rankGraph" p="src/graph.h:2250"/>
-<s t="fn" n="anchoredLexicalRank" p="src/graph.h:2739"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:856"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:971"/>
-<s t="fn" n="getIndex" p="src/mcpindex.h:1076"/>
+<s t="fn" n="rankGraph" p="src/graph.h:2270"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:2759"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:857"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:972"/>
+<s t="fn" n="getIndex" p="src/mcpindex.h:1104"/>
 </callers>
 ```
 
@@ -1507,7 +1507,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **505 gate scripts** and is the authoritative list;
+`test/regression.sh` names **513 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
