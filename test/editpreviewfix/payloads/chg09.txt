@@ -1,0 +1,2 @@
+def narrow(a, step):
+    return a - step

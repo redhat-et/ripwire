@@ -1,0 +1,2 @@
+def read(self, unit, scaleBy):
+        return unit * scaleBy

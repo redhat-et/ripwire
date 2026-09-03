@@ -1,0 +1,4 @@
+int height( int scaleBy )
+    {
+        return 2 * scaleBy;
+    }

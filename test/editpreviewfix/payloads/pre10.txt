@@ -1,0 +1,3 @@
+def read(self, unit):
+        value = unit
+        return value

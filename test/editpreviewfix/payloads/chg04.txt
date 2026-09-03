@@ -1,0 +1,4 @@
+int clampLow( int v, int floorAt )
+{
+    return v < floorAt ? floorAt : v;
+}

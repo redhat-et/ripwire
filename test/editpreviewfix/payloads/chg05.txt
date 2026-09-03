@@ -1,0 +1,4 @@
+int width( int pad, int extra )
+    {
+        return pad + extra + 1;
+    }

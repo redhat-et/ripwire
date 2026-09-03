@@ -1,0 +1,4 @@
+int blend( int a, int b )
+{
+    return trim( a, b ) + clampLow( a );
+}

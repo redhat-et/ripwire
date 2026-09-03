@@ -1,0 +1,9 @@
+inline int scale( int x, int k )
+{
+    return x * k;
+}
+
+inline int scale( int x, int k, int bias, int cap )
+{
+    return x * k + bias < cap ? x * k + bias : cap;
+}

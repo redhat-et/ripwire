@@ -1,0 +1,2 @@
+def reset(self, hard):
+        return 0 if hard else 1

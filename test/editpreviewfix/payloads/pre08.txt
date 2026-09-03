@@ -1,0 +1,3 @@
+def widen(a, b):
+    total = a + b
+    return total
