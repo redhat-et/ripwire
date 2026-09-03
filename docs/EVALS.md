@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 500 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 501 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4909,7 +4909,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **500 gate scripts**, all of which exist on disk.
+naming **501 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5740,7 +5740,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 500. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 501. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -8694,3 +8694,84 @@ the member sites), `--nonlocal-state` (the instance-field disclosure sentence an
 The 44ac095 golden re-pins this rule made unnecessary (test/golden.xml, fillordercheck's est_tokens) are
 reverted to their 8e186bb bytes; the qschemetrip re-pin stays (it is driven by the kParserVer declaration
 line, which legitimately moved to 75) and so does the README/EVALS gate count (fieldusescheck exists).
+
+### `dropped_positive=` — A2 round, PRE-REGISTERED 2026-09-03 (survey card A²Agent: budget cuts silently
+drop true positives)
+
+**The mechanism under test.** `dropped_positive="N"` on the `--for` and `--pack-task` roots (both dialects,
+CLI XML/JSON and their MCP twins `for`/`pack_task`): how many symbols scored ABOVE the relevance floor
+(positives by LB-A's own admission rule — `relevanceFloorCut`/`relevanceFlooredKeep`, the same cut that
+already narrows `--for`'s quota to non-zero-score rows) and were then removed by the PAYLOAD ceiling — the
+H1 sig-ladder's step F (`trimSigLadder`, `src/serialize.h`) or the collection-phase byte gate — rather than
+a content reason (an unreadable file, an out-of-range signature span, an empty cleaned signature; those are
+NOT the payload ceiling's doing and must not be blamed on it). Shared arithmetic, one function
+(`droppedPositiveCount`, `src/serialize.h`), consumed by both `packSignatures` (XML) and `packSignaturesJson`
+(JSON) via a `droppedPositiveOut` out-param, so the two dialects and the two verbs cannot report two
+different counts for the same query. Emitted ONLY when nonzero — absent on the (overwhelming) no-drop path,
+the `pr_converged="0"` precedent (`src/prconverge.h`) — spliced in the same "insert before the header's
+trailing `-->`" mechanism `weak=`/`est_tokens=` already use for --for (their value is likewise known only
+after the sigs render), and folded into --pack-task's existing per-section `report` clause (whose bytes are
+already inside `kPackTaskHeaderReserve`'s generous fixed allowance, so no separate budget accounting is
+needed there).
+
+**Band (registered before measuring, per the round's own rule).** The attribute must be EXACTLY correct —
+never an estimate, never a floor label (`_floor`/`_capped` mean "this count admits it might be short"; this
+one carries no such hedge, so a wrong count is strictly worse than shipping nothing). Verification method:
+for a shape wide enough to serve its whole kept head without any ladder trim (the reference run) versus the
+same query at a tight budget (the capped run), `reference_rows - capped_rows` — matched by `r=`, the 1-based
+GLOBAL rank assigned once before any trim and therefore invariant across budgets for the same query — is
+ground truth; the reported attribute must equal it exactly. Byte cost on the no-drop path must be zero: the
+XML splice and the JSON `dropped_positive` key are both entirely absent (never a fabricated
+`dropped_positive="0"`), and neither the XML sig-side budget computation (`sigsBudget`) nor
+--pack-task's section-quota arithmetic reads anything related to this attribute, so the no-drop path's
+bytes are unaffected by construction — verified additionally by direct md5 comparison against the pre-change
+binary (`origin/main @ 3eec040`) on 4 no-drop shapes (`--for=pageRankDouble` XML and MCP, `--for=pageRankDouble
+--json`, `--pack-task=pageRankDouble`), all byte-identical.
+
+**Trap found and fixed during verification, recorded so it is not re-discovered.** `--for`'s AUTO-bundle
+sig-side ceiling (`forSigSideCeiling`, `src/verbs_for.h`) freezes the `<sigs>` budget at
+`kForPayloadBudgetBytes` regardless of how large an explicit `--token-budget` is (a deliberate,
+pre-existing rule: a wider ceiling must not re-inflate the sig tail at the auto-bodies' expense —
+`forbudgetmonotoncheck`). A naive verification that used a huge `--token-budget` alone as the "unbounded
+reference" therefore produced a reference that was ITSELF still capped, which read as the attribute
+OVER-counting by the reference's own hidden shortfall (measured once: reported 30, naive reference implied
+25). The fix is procedural, not code: pair the reference and the capped run under the SAME serving shape —
+both `--signatures-only`, or both carrying an explicit `--pack-top-n` (which takes the "explicit sig
+posture" branch and honors the full `--token-budget`) — so the sig-side clamp is either present or absent
+on BOTH sides identically. `test/droppedpositivecheck.sh` builds every reference run this way and also
+refuses to trust a reference that itself carries `dropped_positive=` (arm-internal ground-truth guard).
+
+**A second trap, found by the round's own gate list.** The first cut spelled the splice with an inline
+English bracket note (`dropped_positive="N" [dropped_positive: N symbol(s) scored above the relevance floor
+but were then cut by the payload ceiling]`, ~120 B) and reserved its exact width in every downstream section
+(bodies, enrichment, tail, the explicit-ceiling ladder) so the CONSERVATIVE byte ceiling
+(`ceilingAllowanceBytes`, `kMinBytesPerToken`) could never be blown — `w3fixbudgetcheck` passed. But
+`fornotesbudgetcheck`'s three-budget fixture (950/1500/3000) checks a DIFFERENT, stricter number:
+`est_tokens` computed at the denser `kBytesPerTokenDefault` rate, which that fixture pins with as little as
+~28 tokens of headroom at its middle budget (by design — its own header text: "any addition to --for's
+legend or header, of any size, turns this arm red... the correct response is a DELIBERATE re-anchor"). A
+~120 B addition is ~50 tokens at that rate — genuinely wider than the fixture's margin, and NOT something a
+byte-ceiling reserve can paper over (the reserve controls whether the document overflows the conservative
+allowance, not whether the honest `est_tokens` count stays under the caller's stated number). Re-anchoring
+the fixture was the file's own prescribed fix, but the budget domain here is coarse (`1500`→`1540` jumps a
+whole extra row into the bundle, `est_tokens` 1524→1648 in one step — no clean nearby value exists). The
+actual fix: shrink the spelling to the bare attribute (`dropped_positive="N"`, ~24 B, matching `weak="1"`'s
+own economy) — legendcoveragecheck's `ATTR` regex matches literal `<tag attr="v">` shapes and never sees
+either spelling (both live inside a comment, not a real tag's attribute list; proven green both ways), so
+the bracket note bought no legend coverage, only bytes it could not afford. Both `fornotesbudgetcheck` and
+`w3fixbudgetcheck` pass with the bare spelling and no fixture re-anchor.
+
+**Result: KEEP.** Verified exact on: `--for` XML (`--signatures-only` route and the auto/bodies route, both
+via the paired-shape method above), `--for --json`, `--pack-task` XML, MCP `for`, MCP `pack_task` — a
+conceptual query (`"tree-sitter parse of a source file"`) against `src/` at several token-budgets, plus 5
+additional no-drop queries confirmed silent on all three surfaces (`--for`, `--for --json`, `--pack-task`).
+Mutation control: `droppedPositiveCount` patched to add a constant off-by-three, rebuilt `--clean-first`,
+`test/droppedpositivecheck.sh` went from 14/14 PASS to 12 FAIL (every exact-match and every no-drop-silence
+arm); reverted, rebuilt `--clean-first` again, back to 14/14 PASS — the gate is sensitive to the exact
+arithmetic, not just to presence/absence. Legend: no defining clause needed — the bare attribute rides
+inside the same trailing comment `weak=`/`est_tokens=` already splice into, and `legendcoveragecheck`'s
+`ATTR` regex (which enumerates real TAG attributes, not comment text) never sees it as a first-screen
+attribute needing a registry entry in the first place — the same structural reason `weak=`/`est_tokens=`
+need none of their own; the full explanation lives here, in this registration. Gate:
+`test/droppedpositivecheck.sh` (14 assertions across both dialects, both verbs, both CLI and MCP, plus
+well-formedness and determinism on a drop-case shape); registered in `test/regression.sh`'s absorb loop.

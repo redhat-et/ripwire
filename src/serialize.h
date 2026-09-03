@@ -2878,6 +2878,32 @@ inline RelevanceFloorCut relevanceFloorCut( const std::vector<float>& rank, int 
     return { int( positiveCount ), std::string( nb ) };
 }
 
+// ── A2 (survey card, 2026-09-03) — THE dropped_positive ARITHMETIC, shared by packSignatures (XML) and
+// packSignaturesJson so the two dialects cannot report two different counts for the same query.
+//
+// WHAT IT COUNTS. `candidatePositives` is how many symbols in the ladder's kept head scored ABOVE the
+// relevance floor (rank>0) — positives by the ranker's OWN cut, independent of whether relevanceFloorCut
+// was applied to narrow topN first (LB-A already guarantees every --for kept symbol is positive; --pack-task
+// never applies that narrowing, so its eligible set can still mix positive and zero-score members — this
+// arithmetic works either way because it re-checks rank>0 per symbol rather than assuming the caller floored
+// first). Of those, `positivesContentSkipped` never became a <sigs> row for a CONTENT reason (an unreadable
+// file, an out-of-range sig span, an empty cleaned signature) — not a budget reason, so THE DISCLOSURE (a
+// count of what the PAYLOAD CEILING removed) must not blame the ceiling for it. `positivesSurvived` is how
+// many actually reached the final emitted set (collected AND not later dropped by the H1 ladder's step F).
+// Every candidate positive falls into exactly one of three buckets — content-skipped, budget-dropped (never
+// collected because the collection-phase byte gate broke first, or collected then step-F dropped), or
+// survived — so subtracting the first and third from the total leaves exactly the second, with no need to
+// track "never visited due to budget" as its own running counter.
+//
+// BAND (docs/EVALS.md, A2 registration): this count must be EXACTLY correct on every one of the standing
+// --for-gate sweep's serving shapes — a floor label (`_floor`/`_capped`) is for a count that admits it might
+// be short; this one has no such hedge, so getting it wrong is worse than not shipping it at all.
+inline std::size_t droppedPositiveCount( std::size_t candidatePositives, std::size_t positivesContentSkipped, std::size_t positivesSurvived ) noexcept
+{
+    VERIFY( candidatePositives >= positivesContentSkipped + positivesSurvived );   // see the three-bucket partition above
+    return candidatePositives - positivesContentSkipped - positivesSurvived;
+}
+
 // ── §A4a — THE ONE SIGNATURE-PAYLOAD TRIM LADDER (steps A..F, kForPayloadBudgetBytes above) ──────────
 // Extracted from packSignatures so the JSON sibling runs the SAME ladder rather than a second copy of it:
 // §A4a found `--for --json` byte-identical at --token-budget=1000 and 20000 because the
@@ -2994,10 +3020,22 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                                                                             //   56% over a tight --token-budget the JSON mode honored.
                             std::string_view rootArg = {},   // R-E (2026-08-17): same single-root-only root
                                                              // argument serialize() takes — see its comment.
-                            bool hasRelevanceFloor = false ) // LB-A: drop the zero-score TAIL of the kept head rather
+                            bool hasRelevanceFloor = false,  // LB-A: drop the zero-score TAIL of the kept head rather
                                                              //   than padding the quota with it (relevanceFlooredKeep
                                                              //   above). Off ⇒ byte-identical to the pre-LB-A path.
+                            std::size_t* droppedPositiveOut = nullptr )   // A2 (survey card, 2026-09-03): how many
+                                                             //   POSITIVE-scored candidates (rank>0) within the kept
+                                                             //   head never reached the emitted <sigs> — cut either
+                                                             //   by the collection-phase byte budget or by the H1
+                                                             //   ladder's step F. nullptr ⇒ caller does not want it
+                                                             //   (no extra cost). Only meaningful on the rank-adaptive
+                                                             //   ladder path below; left at 0 on every other path —
+                                                             //   see droppedPositiveCount above for the shared arithmetic.
 {
+    if( droppedPositiveOut )
+    {
+        *droppedPositiveOut = 0;   // default: unset until the ladder path (below) computes the real count
+    }
     // budgetBytes == 0 ⇒ UNLIMITED (A3-F1): the MCP `for` verb has no byte budget, and 0 must never mean
     // "cap at zero bytes" (the cap fired before the first signature and emitted a bare <sigs></sigs>).
     // Matches buildRecall's "0 = no cap" convention; the CLI always passes a real budget (default 64 KB).
@@ -3081,9 +3119,19 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             std::string   sig;              // RAW one-line signature after the rank tiers
             std::string   notes;            // W3-N2: this symbol's note children, PRE-RENDERED (the JSON sibling's shape)
             bool          dropped    = false;
+            bool          positive   = false;   // A2: rank[id] > 0 at collection time (the disclosure's own definition of "positive")
         };
         std::vector<SigFile>  sigFiles;
         std::vector<SigEntry> entries;
+
+        // A2: the kept head's own positive-score population (LB-A's floor already narrows --for's `keep` to
+        // exactly this set; --pack-task's eligibleIds does not, so this is computed fresh rather than assumed).
+        std::size_t candidatePositives = 0;
+        for( std::size_t k = 0; k < keep; ++k )
+        {
+            if( rank[ order[k] ] > 0.0f ) { ++candidatePositives; }
+        }
+        std::size_t positivesContentSkipped = 0;   // A2: positives lost to a CONTENT reason, never the budget
 
         // phase 1 — collect (mirrors the streaming loop byte-for-byte, including the budgetBytes gate)
         for( std::uint32_t f : fileOrder )
@@ -3096,6 +3144,12 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             std::FILE* in = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
             if( !in )
             {
+                // A2: this file's whole bucket never gets a content-skip OR a collection attempt below — it is
+                // a content reason (the file is gone), not a budget one, so tally it here before the `continue`.
+                for( NodeId missed : buckets[f] )
+                {
+                    if( rank[missed] > 0.0f ) { ++positivesContentSkipped; }
+                }
                 continue; // graceful: file gone
             }
             std::string src;
@@ -3134,12 +3188,14 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 const std::size_t a = s.sigStartByte, b = s.sigEndByte;
                 if( a >= src.size() || b > src.size() || a >= b )
                 {
+                    if( rank[id] > 0.0f ) { ++positivesContentSkipped; }   // A2: a content reason, not the budget
                     continue;
                 }
 
                 std::string sig = cleanSig( src.data(), a, b, redact );
                 if( sig.empty() )
                 {
+                    if( rank[id] > 0.0f ) { ++positivesContentSkipped; }   // A2: ditto — an empty cleaned signature
                     continue;
                 }
 
@@ -3209,6 +3265,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 e.doc        = std::move( doc );
                 e.sig        = std::move( sig );
                 e.notes      = renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );   // L3/D5 key + W3-N2 pre-render
+                e.positive   = rank[id] > 0.0f;   // A2: this symbol's own score, at collection time
                 entries.push_back( std::move( e ) );
             }
             sf.entryEnd  = entries.size();
@@ -3253,6 +3310,18 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             // stops at the first fitting state. Pure function of (global rank, the kFor* constants) — the
             // ladder itself is trimSigLadder() above, shared verbatim with the JSON sibling (§A4a).
             trimSigLadder( entries, sigFiles, total, effectiveBudget, entryCost );
+        }
+
+        // A2: the exact count, computed AFTER the ladder has made its final drop decisions (droppedPositiveCount
+        // above — the shared arithmetic with the JSON sibling). Pure bookkeeping, no output bytes either way.
+        if( droppedPositiveOut )
+        {
+            std::size_t positivesSurvived = 0;
+            for( const SigEntry& e : entries )
+            {
+                if( e.positive && !e.dropped ) { ++positivesSurvived; }
+            }
+            *droppedPositiveOut = droppedPositiveCount( candidatePositives, positivesContentSkipped, positivesSurvived );
         }
 
         // phase 2 — emit (identical write shapes to the streaming path)
@@ -6349,6 +6418,7 @@ struct JsonSigEntry
     std::string   notes;            // §B1.3: the rendered `,"notes":[…]` for SYMBOL-level notes ("" ⇒ none)
     std::size_t   noteCount = 0;    //         how many notes that array holds
     bool          dropped    = false;
+    bool          positive   = false;   // A2: rank[id] > 0 at collection time — the XML sibling's own field
 };
 
 // §B1.3: how many notes this array-emitter matched, and how many survived the ladder — the caller pairs
@@ -6551,8 +6621,16 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
                                    const std::vector<std::uint32_t>& globalRankOf,
                                    const JsonSigLens& lens, RedactCounts* redact, std::size_t budgetBytes,
                                    std::vector<JsonSigFile>& outFiles, std::vector<JsonSigEntry>& outEntries,
-                                   std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only
+                                   std::string_view rootArg = {},   // R-E (2026-08-17): same single-root-only
                                                                      // root argument serialize() takes.
+                                   const std::vector<float>* rank = nullptr,          // A2: the score vector, for
+                                                                                       //   the positive/content-skip
+                                                                                       //   split below. nullptr ⇒
+                                                                                       //   the tracking is skipped
+                                                                                       //   (every caller that does
+                                                                                       //   not want droppedPositive).
+                                   std::size_t* positivesContentSkippedOut = nullptr ) // A2: accumulates alongside
+                                                                                       //   `rank` (both null together)
 {
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
@@ -6570,6 +6648,13 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
         std::FILE* in = std::fopen( diskPath( ing, f ).c_str(), "rb" );
         if( !in )
         {
+            if( rank && positivesContentSkippedOut )   // A2: content reason (the file is gone), not the budget
+            {
+                for( NodeId missed : buckets[f] )
+                {
+                    if( (*rank)[missed] > 0.0f ) { ++*positivesContentSkippedOut; }
+                }
+            }
             continue; // graceful: file gone
         }
         std::string src;
@@ -6609,11 +6694,13 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
             const std::size_t a = s.sigStartByte, b = s.sigEndByte;
             if( a >= src.size() || b > src.size() || a >= b )
             {
+                if( rank && positivesContentSkippedOut && (*rank)[id] > 0.0f ) { ++*positivesContentSkippedOut; }
                 continue;
             }
             std::string sig = cleanSig( src.data(), a, b, redact );
             if( sig.empty() )
             {
+                if( rank && positivesContentSkippedOut && (*rank)[id] > 0.0f ) { ++*positivesContentSkippedOut; }
                 continue;
             }
 
@@ -6650,6 +6737,7 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
             e.doc        = std::move( doc );
             e.sig        = std::move( sig );
             e.noteCount  = appendJsonNoteArray( e.notes, lens.noteIndex, symbolNoteTarget( lens.noteIndex, ing, s ) );   // §B1.3
+            e.positive   = rank && (*rank)[id] > 0.0f;   // A2: the XML sibling's own field, same definition
             outEntries.push_back( std::move( e ) );
         }
         sf.entryEnd  = outEntries.size();
@@ -6681,14 +6769,20 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
                                 JsonSigNoteCounts* outNotes    = nullptr,  // §B1.3: matched vs emitted note counts
                                 std::string_view rootArg       = {},       // R-E (2026-08-17): same single-root-only
                                                                            // root argument serialize() takes.
-                                bool hasRelevanceFloor = false )           // LB-A: the XML sibling's own admission rule,
+                                bool hasRelevanceFloor = false,            // LB-A: the XML sibling's own admission rule,
                                                                            //   shared through relevanceFlooredKeep so the
                                                                            //   two dialects cannot select differently.
+                                std::size_t* droppedPositiveOut = nullptr ) // A2: the XML sibling's own out-param —
+                                                                           //   see packSignatures for the full contract.
 {
     const bool rankAdaptivePayload = lens.rankAdaptivePayload;
     if( outCapped )
     {
         *outCapped = false;
+    }
+    if( droppedPositiveOut )
+    {
+        *droppedPositiveOut = 0;
     }
     if( outNotes )
     {
@@ -6731,11 +6825,24 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         }
     }
 
+    // A2: the kept head's own positive-score population — see droppedPositiveCount's comment for why this is
+    // computed fresh rather than assumed equal to `keep` (this dialect's callers do not all pre-floor topN).
+    std::size_t candidatePositives = 0;
+    if( droppedPositiveOut )
+    {
+        for( std::size_t k = 0; k < keep; ++k )
+        {
+            if( rank[ order[k] ] > 0.0f ) { ++candidatePositives; }
+        }
+    }
+    std::size_t positivesContentSkipped = 0;
+
     // phase 1 — collect (collectJsonSigEntries above), then the exact emitted byte total of the array as
     // collected, then the ladder. Phase 2 splices a file wrapper only when that file still has a live entry.
     std::vector<JsonSigFile>  sigFiles;
     std::vector<JsonSigEntry> entries;
-    collectJsonSigEntries( ing, fileOrder, buckets, globalRankOf, lens, redact, budgetBytes, sigFiles, entries, rootArg );
+    collectJsonSigEntries( ing, fileOrder, buckets, globalRankOf, lens, redact, budgetBytes, sigFiles, entries, rootArg,
+                           droppedPositiveOut ? &rank : nullptr, droppedPositiveOut ? &positivesContentSkipped : nullptr );
 
     std::size_t total = 2;                                                       // "[" + "]"
     for( const JsonSigFile& sf : sigFiles )
@@ -6755,6 +6862,15 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     if( outCapped )
     {
         *outCapped = capped;
+    }
+    if( droppedPositiveOut )
+    {
+        std::size_t positivesSurvived = 0;
+        for( const JsonSigEntry& e : entries )
+        {
+            if( e.positive && !e.dropped ) { ++positivesSurvived; }
+        }
+        *droppedPositiveOut = droppedPositiveCount( candidatePositives, positivesContentSkipped, positivesSurvived );
     }
 
     if( outNotes )
