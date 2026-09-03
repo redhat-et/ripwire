@@ -27,7 +27,7 @@
 #        sensitivity) plus the statement grain and the comparable="0" reading
 #   (14) determinism x2 byte-identical, and cold (--no-cache) == warm
 #   (15) xmllint well-formedness on a diff-bearing run
-#   (16) a DATE --since resolves to a commit and discloses resolved=
+#   (16) a DATE --since resolves to a commit and discloses resolved= (approxidate garbage is refused by 12a)
 #   (17) THE BAND: replay test/slicediffix/labels.tsv in a private clone of the repo under test —
 #        dependence rows must be NON-EMPTY on >= 18 of 20, reformat rows EMPTY on >= 19 of 20
 #
@@ -127,7 +127,7 @@ int worker( int limit )
 EOF
 commitall "$A" "comments only"
 out="$( "$BIN" "$A" --slice=src/a.cpp:worker:v --since="$ADD_A" --no-cache 2>/dev/null )"
-if empty_diff "$out" && case "$out" in *'<sd '*|*'<se '*) false ;; *) true ;; esac
+if empty_diff "$out" && case "${out##*<slice }" in *'<sd '*|*'<se '*) false ;; *) true ;; esac
 then ok '(3) a comment-only edit inside the symbol is an EMPTY dependence diff'
 else no '(3) a comment-only edit inside the symbol was not empty'; fi
 C3="$( G "$A" rev-parse HEAD )"
@@ -260,7 +260,7 @@ case "$out" in
   *'status="sym_absent_at_rev"'*'<sd op="+"'*) ok '(8) a definition that did not exist at REV: status="sym_absent_at_rev", every row "+"' ;;
   *) no '(8) a definition absent at REV was not disclosed as sym_absent_at_rev with all-added rows' ;;
 esac
-case "$out" in *'<sd op="-"'*) no '(8b) sym_absent_at_rev emitted a removed row' ;; *) ok '(8b) sym_absent_at_rev emits no removed row' ;; esac
+case "${out##*<slice }" in *'<sd op="-"'*) no '(8b) sym_absent_at_rev emitted a removed row' ;; *) ok '(8b) sym_absent_at_rev emits no removed row' ;; esac
 NEW_C="$( G "$C" rev-parse HEAD )"
 
 # (9) the definition existed, the VARIABLE did not
@@ -312,7 +312,7 @@ case "$out" in
   *'status="file_absent_at_rev"'*'comparable="0"'*) ok '(10) a path absent at REV: status="file_absent_at_rev" comparable="0"' ;;
   *) no '(10) a path absent at REV was not disclosed with comparable="0"' ;;
 esac
-case "$out" in *'<sd '*|*'<se '*) no '(10b) comparable="0" still emitted diff rows' ;; *) ok '(10b) comparable="0" emits no diff rows' ;; esac
+case "${out##*<slice }" in *'<sd '*|*'<se '*) no '(10b) comparable="0" still emitted diff rows' ;; *) ok '(10b) comparable="0" emits no diff rows' ;; esac
 case "$out" in
   *'comparable="0"'*'not evidence'*) ok '(10c) the legend says an empty comparable="0" diff is not evidence of no change' ;;
   *) no '(10c) the legend does not disclaim the comparable="0" emptiness' ;;
@@ -380,7 +380,7 @@ else
 fi
 
 # (16) a DATE --since resolves and discloses resolved=
-out="$( "$BIN" "$A" --slice=src/a.cpp:worker:v --since="1 second ago" --no-cache 2>/dev/null )"
+out="$( "$BIN" "$A" --slice=src/a.cpp:worker:v --since=tomorrow --no-cache 2>/dev/null )"
 case "$out" in
   *'<since '*'resolved="'*) ok '(16) a DATE --since resolves to a commit and discloses resolved=' ;;
   *) no '(16) a DATE --since did not resolve/disclose' ;;

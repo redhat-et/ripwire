@@ -1307,6 +1307,11 @@ struct SliceEmitOpts
     const SliceFlowSpec* flow          = nullptr;
     const SliceSeedInfo* seed          = nullptr;
     bool                 compactLegend = false;   // --legend=compact: schema="ripwire.slice/v1", rows byte-identical
+    // card A4 (--since=REV): the dependence diff, PRE-RENDERED by src/slicediff.h. Two opaque strings
+    // rather than a struct this file has to understand, so the slice core stays ignorant of git entirely
+    // and a run without --since is byte-identical to one before the flag existed (both stay nullptr).
+    const std::string*   sinceLegend   = nullptr;
+    const std::string*   sinceBody     = nullptr;
 };
 
 // the reaching definitions of vars[vi] at line L: the LAST unconditional def row strictly before L in
@@ -1671,6 +1676,12 @@ inline std::string sliceLegendText( const SliceEmitOpts& opts )
                 "the guard (if/loop) deciding whether a def executes is never a row. -->";
         }
     }
+    // the --since block owns its own rules and restates the ones above that bind BOTH of its sides; it is
+    // appended whole, never interleaved, so no tier here changes shape when the diff is present.
+    if( opts.sinceLegend != nullptr )
+    {
+        out += *opts.sinceLegend;
+    }
     return out;
 }
 
@@ -1900,6 +1911,11 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
     out += ">";
 
     sliceEmitBody( out, scan, varName, flow, src, redact, seedInfo, seedBindingGroups );
+
+    if( opts.sinceBody != nullptr )
+    {
+        out += *opts.sinceBody;   // card A4: the <since> child, AFTER every v1/flow row so their order is untouched
+    }
 
     out += "</slice>";
     return out;

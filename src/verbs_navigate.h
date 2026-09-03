@@ -1058,6 +1058,50 @@ inline std::optional<int> sliceApplyAtSeed( const rw::IngestResult& ing, const r
     return std::nullopt;
 }
 
+// ── card A4: --since=REV beside --slice — the DEPENDENCE diff against a committed tree ───────────────
+//
+// Lifted out of runSlice for the same reason sliceApplyAtSeed was: the verb's body is a RESOLUTION
+// LADDER, and a second concern spliced into the middle of it is how that ladder stops being readable.
+// Returns a value ONLY to refuse; nullopt means "nothing to do" (no --since) or "rendered, see the two
+// out-parameters". src/slicediff.h owns every rule about what the diff means.
+inline std::optional<int> sliceSincePrepare( const MainDispatch& d, std::string_view selector, std::string_view varName,
+                                             const std::string& path, const rw::Symbol& sym, rw::slicev::SliceFam fam,
+                                             const ::TSLanguage* grammar, const rw::slicev::SliceScan& scan, const std::string& src,
+                                             std::string& legendOut, std::string& bodyOut, rw::slicev::SliceEmitOpts& emit )
+{
+    const rw::Config& cfg = d.cfg;
+    if( cfg.since.empty() )
+    {
+        return std::nullopt;
+    }
+    // The diff is of the SEED VARIABLE's own statement rows, so it needs one: a bare --slice=SYM inventory
+    // has no variable to have a def-use history. Refused, never silently ignored — the emptyvaluerefusecheck
+    // ruling that a flag doing nothing on a run is a bug, not a no-op.
+    if( varName.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --since=%.*s beside --slice diffs ONE variable's def-use slice, and --slice=%s named no "
+                              "variable — bare --slice=%s lists the sliceable locals; pick one and re-run as --slice=%s:VAR "
+                              "--since=%.*s\n",
+                      int( cfg.since.size() ), cfg.since.data(), std::string( selector ).c_str(),
+                      std::string( selector ).c_str(), std::string( selector ).c_str(),
+                      int( cfg.since.size() ), cfg.since.data() );
+        return 1;
+    }
+    const std::string relPath = std::string( rw::sarif::rootRelativeUri( path, rw::sarif::rootPrefixOf( d.root ) ) );
+    rw::slicediff::Out sd = rw::slicediff::compute( d.root, std::string( cfg.since ), relPath, sym, fam, grammar, varName,
+                                                    scan, src, d.redactPtr, cfg.maxFileBytes, d.valueUses );
+    if( !sd.ok )
+    {
+        std::fprintf( stderr, "%s\n", sd.err.c_str() );
+        return 1;
+    }
+    legendOut       = std::move( sd.legend );
+    bodyOut         = std::move( sd.body );
+    emit.sinceLegend = &legendOut;   // the two out-parameters OWN the bytes; the emitter only borrows them
+    emit.sinceBody   = &bodyOut;
+    return std::nullopt;
+}
+
 std::optional<int> runSlice( const MainDispatch& d )
 {
     using namespace rw;
@@ -1273,6 +1317,13 @@ std::optional<int> runSlice( const MainDispatch& d )
     emit.flow          = flowActive ? &flowSpec : nullptr;
     emit.seed          = seededRun ? &seedInfo : nullptr;
     emit.compactLegend = cfg.legend == "compact";   // the ripwire.slice/v1 dialect: legend only, rows byte-identical
+
+    std::string sinceLegend, sinceBody;             // card A4: owned here, pointed at by emit on success
+    if( std::optional<int> refused = sliceSincePrepare( d, selector, varName, path, sym, fam, grammar, scan, src,
+                                                        sinceLegend, sinceBody, emit ) )
+    {
+        return *refused;
+    }
     const std::string xml = slicev::sliceBundleText( ing, d.root, focus, varName, scan, src, d.redactPtr, emit );
     std::fwrite( xml.data(), 1, xml.size(), stdout );
     return 0;

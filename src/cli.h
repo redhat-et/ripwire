@@ -1291,6 +1291,8 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               sub_windows=, and this clause used to say it had none. An UNRESOLVABLE value is\n"
         "                               refused by --hotspots (exit 1 — its window is part of the measurement)\n"
         "                               and degrades to the verb's own default window elsewhere\n"
+        "                               BESIDE --slice=SYM:VAR it is not a window at all: it names the revision whose\n"
+        "                               def-use slice of that variable this run is diffed against — see --slice\n"
         "    --arch=FILE                enforce layering rules (exit 2 on violation); the Martin Ca/Ce/I/A/D block it emits is a\n"
         "                               design heuristic, not independently outcome-validated (never gates).\n"
         "                               propagation_cost's N is dependency-capable files only, same denominator as --deps <health>.\n"
@@ -1521,6 +1523,16 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               pre-picks it (disclosed: seed= var_from=\"seed\"); zero or several serve the inventory\n"
         "                               with seed_vars= and the candidate rows marked seed=\"1\", never a guess. A plain\n"
         "                               identifier spec beside --at reads as the seed's VARIABLE (--slice=VAR --at=src/f.cpp:12).\n"
+        "                               SINCE: --since=REV|DATE beside --slice=SYM:VAR adds a <since> child carrying the\n"
+        "                               DEPENDENCE diff of that variable against the committed tree at REV — one <sd> row per\n"
+        "                               added or removed STATEMENT of the variable, one <se> row per added or removed def-use\n"
+        "                               edge. The unit is the STATEMENT and the key is the ROLE, never the line and never the\n"
+        "                               text, so a re-wrap, a comment edit, an insertion above the definition, and a rename of\n"
+        "                               an unrelated local all come back EMPTY. Empty means no def-use edge of that variable\n"
+        "                               moved, never that the commit changed nothing — git diff answers the second question.\n"
+        "                               status= names each way the symbol can be absent at REV, and comparable=\"0\" says\n"
+        "                               outright that no comparison was made and the emptiness is not evidence. Refused on the\n"
+        "                               bare inventory: a dependence diff needs a seed variable.\n"
         "    --slice-flow=back|fwd|both  TRANSITIVE cross-statement data-flow slice (modifies --slice=SYM:VAR; refused alone or on\n"
         "                               the bare inventory — a flow needs a seed variable). Follows VALUE FLOW over\n"
         "                               reaching-definition def-use edges — a use of v reaches the last def of v in source order\n"
@@ -3377,9 +3389,14 @@ inline void validateModifierGuards( Config& c ) noexcept
     // verb ignores it outright (main.cpp only reads cfg.since inside those paths). Alone it silently no-ops;
     // refuse loudly. P0-4: churn-decay joins the list — its DEFAULT walk is the whole history (the decay is
     // the window), and an explicit --since narrows that walk exactly as it narrows churn's.
-    if( !c.since.empty() && !c.hotspots && !c.cochange && c.rankBy != RankBy::Churn && c.rankBy != RankBy::ChurnDecay )
+    // card A4: --slice=SYM:VAR joins the list — there --since is not a churn WINDOW but the revision whose
+    // def-use slice this one is diffed against (src/slicediff.h). Same flag, same two spellings, and the
+    // same rule as every other pairing: a run where the flag would do nothing refuses instead.
+    if( !c.since.empty() && !c.hotspots && !c.cochange && c.sliceSpec.empty()
+        && c.rankBy != RankBy::Churn && c.rankBy != RankBy::ChurnDecay )
     {
-        std::fprintf( stderr, "ripwire: --since=REV|DATE scopes --hotspots/--cochange/--rank-by=churn|churn-decay — pass one "
+        std::fprintf( stderr, "ripwire: --since=REV|DATE scopes --hotspots/--cochange/--rank-by=churn|churn-decay, and beside "
+                              "--slice=SYM:VAR it names the revision to diff that variable's def-use slice against — pass one "
                               "(e.g. ripwire <dir> --hotspots --since=\"1 week ago\")\n" );
         c.ok = false;
     }
