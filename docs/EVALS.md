@@ -7769,6 +7769,103 @@ budget that only defers tokens into more calls is not the same result as a tight
 none, and right now nothing here can tell the two apart. Not gating anything yet; recorded so the gap
 cannot be quietly forgotten.
 
+**Inventory, taken 2026-09-03 (lane n4-e), before any counting was written.** Where transcripts
+carrying per-call evidence actually live on disk, arm by arm:
+
+- **ARISE head-to-head (all three arms).** Zero local transcripts. The round's own text above is why:
+  every arm is blocked at the LM boundary (no model endpoint/API key at registration time), so no
+  instance has ever run and no SWE-agent `.traj` trajectory exists anywhere in this worktree.
+  `bench/arise-h2h/swe_agent_bundle_ripwire/bin/rw_*` are the nine shims a run *would* invoke; they
+  emit no call log of their own (each `exec`s the pinned binary and exits), so the call evidence for
+  a future real run lives in SWE-agent's own trajectory file, one per instance, exactly like every
+  other tool call in that harness — not in anything ripwire-side to build.
+- **agentloop (claude / codex / opencode).** `bench/agentloop/results/pilot-6run.json` is the only
+  results file committed to this worktree (schema `ripwire-agentloop-results-v2`, `codex-exec`
+  harness, 3 instances × 2 arms, 2026-08-04). It **already carries per-instance call evidence**:
+  `run_agentloop.py`'s own JSONL parsers (`parse_codex_jsonl_metrics` / `parse_opencode_ndjson_metrics`
+  / `parse_claude_session_metrics`) populate `ripwire_calls` (an int) and `ripwire_commands` (the
+  literal command list) on every record at run time — this is the same field `analyze.py`'s
+  `substitution_rate()` already reads, from a different angle. The raw per-line transcripts
+  (`events_path`, e.g. `/private/tmp/ripwire-codex-cli-agentloop-v2/events/*.jsonl`) do **not** exist
+  locally — that directory was ephemeral and is gone — so the counted fields on the results record are
+  the only surviving evidence; nothing here needs the raw file, since the count was extracted at run
+  time, not deferred to post-hoc parsing. The Stage-1 48-run design (§3b above, `claude -p`, schema
+  `ripwire-agentloop-results-v3`) is **not present in this worktree** — not under
+  `bench/agentloop/results/`, not found anywhere else searched (`find` across the tree, git history of
+  that directory) — so its per-instance call counts, if they still exist at all, are absent from this
+  round's reach. Note also that `analyze.py` hard-refuses any file whose `schema` isn't exactly `v3`
+  (`load_results()`), so it cannot be pointed at `pilot-6run.json` — the new counting script below
+  reads any `ripwire-agentloop-results-*` schema instead, deliberately.
+- **ARB lanes (`bench/arb/`).** `bench/external/arb/` (dataset bundles, repo snapshots, run outputs)
+  does not exist in this worktree — untracked and never fetched, per its own registration ("pinned,
+  not committed") — so there is no run output of any kind to count calls from. Separately, and worth
+  recording rather than silently working around: **ARB's adapter is not an agent loop**, so the
+  follow-up-call definition below does not apply to it as written. `run_arb.py`'s `compose_ranking()`
+  calls a **fixed, task-determined sequence of tiers unconditionally** for every instance (e.g.
+  trace2code always calls `--from-trace` then `--for` then `--query`, appending only what the earlier
+  tier didn't already rank) — there is no `--token-budget` retry loop, no agent deciding whether one
+  answer sufficed, and therefore no "extra call after a trimmed first answer" for this column to
+  count; the tier count is a fixed adapter-design constant, not a per-instance behavioral signal. The
+  column is therefore **out of scope for the ARB lanes by design**, not merely unmeasured — recorded
+  here as a correction to the sentence above that named ARB as a joining table.
+
+**Registered (this round, lane n4-e).** Definitions, held identical across both applicable surfaces:
+
+- **calls** — the total number of ripwire invocations attributed to one (instance, arm[, seed]) run,
+  read from whatever field the transcript already carries the count in (agentloop:
+  `record["ripwire_calls"]`; ARISE, once a real `.traj` exists: the number of trajectory steps whose
+  `action` string's leading word is one of the nine registered `rw_*` shim names).
+- **follow-up calls** — `max(calls - 1, 0)`. The first call is the initial retrieval attempt; every
+  call after it is the "extra call" the owed paragraph above is asking about — direct evidence of an
+  agent needing a second (or third, ...) call to reach the same answer.
+- **the statistic** — per-arm mean and median of `calls` and of `follow-ups`, over every record whose
+  count is not absent (below), plus `n` = the record count that mean/median rests on. Reported as one
+  markdown table row per arm; never pooled across arms or across harnesses (a codex call count and a
+  claude call count are not the same measurement — same posture as `analyze.py`'s substitution rate).
+- **floor rule** — a record/trajectory whose completion state is not clean (agentloop: `status != "ok"`;
+  ARISE: `info.exit_status != "submitted"`) has its call count marked a **floor**: an aborted, errored,
+  or timed-out run cannot prove its shim log or transcript parse captured every invocation before it
+  stopped, so the true count may be higher. Marked per-record (`n_floor` in the table) and disclosed in
+  the printed report — never silently averaged in as if it were exact (CLAUDE.md non-negotiable 3).
+- **absent rule** — a record whose call count was never measured (agentloop: `ripwire_calls is None`,
+  e.g. `claude -p` runs recorded before 2026-08-22; ARISE: no `.traj` file exists for that arm at all)
+  is counted separately (`n_absent`) and **excluded** from every mean/median — never coerced to 0,
+  which would misread as "the agent never needed a follow-up" when the truth is "nobody measured it".
+  An arm with zero measured records shows the column as **absent for the whole arm**, not a zero row.
+- **gates** — `test/agentloopfollowupcheck.sh` (`bench/agentloop/followup_calls.py`) and
+  `test/arisefollowupcheck.sh` (`bench/arise-h2h/followup_calls.py`), both listed in
+  `test/regression.sh`. Each gate's own `--self-test` fixture exercises a clean multi-call record, a
+  floor (non-clean completion), and an absent (unmeasured) record before any real number is trusted;
+  the agentloop gate additionally cross-checks the real committed `pilot-6run.json` end to end against
+  hand-derived expected numbers, so a schema-shape regression the synthetic fixture wouldn't catch
+  still fails there.
+
+**RUN, 2026-09-03 (lane n4-e) — what was actually measured, and what remains owed.** The only surface
+with local transcripts carrying the count is agentloop's `pilot-6run.json`. Reproduce with:
+
+```
+python3 bench/agentloop/followup_calls.py --results bench/agentloop/results/pilot-6run.json
+```
+
+| arm | n | measured | absent | floor | mean calls | median calls | mean follow-ups | median follow-ups |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | 3 | 3 | 0 | 0 | 0.00 | 0.00 | 0.00 | 0.00 |
+| ripwire_cli | 3 | 3 | 0 | 0 | 4.33 | 5.00 | 3.33 | 4.00 |
+
+Read narrowly: this is the 2026-08-04 six-run codex pilot (§3b above already retires that pilot's
+*outcome* numbers as non-comparable to the later, better-isolated design — this table only adds the
+call count the pilot happened to already log, it does not rehabilitate the pilot as an outcome
+source). n=3 pairs is nowhere near enough to say anything about the population; it is here because it
+is the only committed file the count could be pulled from without a new run, and every number above is
+computed by the script, never hand-typed.
+
+**Still owed, unchanged by this round:** the Stage-1 48-run claude-harness table (§3b) — absent
+locally, per the inventory above; the ARISE head-to-head, all three arms — absent, blocked at the LM
+boundary, the counting script exists and is gated on a synthetic fixture but has nothing real to run
+against yet. ARB is removed from the "owed" list per the scope correction above, not fulfilled. This
+paragraph replaces, rather than resolves, the original owed sentence's claim that ARB was a joining
+table.
+
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 
 **The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*
