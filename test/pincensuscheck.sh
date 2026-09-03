@@ -73,7 +73,7 @@ if [ -s "$TMP/c1.tsv" ]; then
 else
     no "(B) no census file at $TMP/c1.tsv"
 fi
-head -1 "$TMP/c1.tsv" 2>/dev/null | grep -q '^# ripwire pin-census v1' \
+head -1 "$TMP/c1.tsv" 2>/dev/null | grep -q '^# ripwire pin-census v2' \
     && ok "(B) census declares its own format in a header line" \
     || no "(B) census header line missing/unrecognized: $( head -1 "$TMP/c1.tsv" 2>/dev/null )"
 
@@ -168,6 +168,39 @@ if [ -f "$SCIPFIX/index.scip" ]; then
         && ok "(I) identities carry the #NODEID handle (not a bare, name-keyed id)" \
         || no "(I) identity '$PLAIN_ID' has no #NODEID handle — the join degrades to name matching"
 fi
+
+# ── (J) the call-site LINE rides on every C row (format v2) ───────────────────────────────────────
+# WHY. Phase-3 of the census (docs/EVALS.md "The census, RUN") found coverage — SCIP speaking on only
+# 38% of locality-pinned sites — to be the binding constraint on n, and the loss sits in the (file,line)
+# join `src/scip.h::buildScipOverlay` performs. Diagnosing WHICH lines fail needs the resolver's own
+# 1-based call-site line beside each decision; without it the census cannot be joined to a SCIP
+# occurrence at all and the failure classes can only be guessed. The line is the LAST column so every
+# v1 consumer (`awk $6/$7`, `parts[7]`) keeps reading unchanged.
+RUN_LINE="$( awk -F'\t' '$1=="C" && $6 ~ /^pinned\.py::Alpha::run#/ && $7=="helper" {print $9; exit}' "$TMP/c1.tsv" 2>/dev/null )"
+[ "$RUN_LINE" = 15 ] && ok "(J) the pinned site carries its call-site line as column 9 (15)" \
+    || no "(J) column 9 of the pinned-site row is '$RUN_LINE', want 15 (pinned.py:15 is \`return helper()\`)"
+GO_LINE="$( awk -F'\t' '$1=="C" && $7=="other" {print $9; exit}' "$TMP/c1.tsv" 2>/dev/null )"
+[ "$GO_LINE" = "$( grep -n 'return other()' "$CORPUS/tied.py" | cut -d: -f1 )" ] \
+    && ok "(J) the tied control carries its call-site line too ($GO_LINE)" \
+    || no "(J) tied.py::Eps::go row column 9 is '$GO_LINE', want the \`return other()\` line"
+head -1 "$TMP/c1.tsv" 2>/dev/null | grep -q 'line' \
+    && ok "(J) the header line names the new column" \
+    || no "(J) the header does not declare the line column: $( head -1 "$TMP/c1.tsv" )"
+
+# ── (K) the definition universe rides along as S rows (format v2) ─────────────────────────────────
+# WHY. The other half of the SCIP join is the DEF side: `buildScipOverlay` maps a SCIP definition
+# occurrence to a ripwire symbol by exact (file, line). Classifying a def-side miss needs every symbol
+# ripwire holds with its line — a table no shipped surface lists in full (`--pack-signatures` is a
+# top-50 payload). One `S` row per symbol: id (with #NODEID), kind tag, 1-based def line.
+S_RUN="$( awk -F'\t' '$1=="S" && $2 ~ /^pinned\.py::Alpha::run#/ {print $3 "/" $4; exit}' "$TMP/c1.tsv" 2>/dev/null )"
+[ "$S_RUN" = "fn/14" ] && ok "(K) S row for pinned.py::Alpha::run carries kind and def line (fn/14)" \
+    || no "(K) S row for pinned.py::Alpha::run is '$S_RUN', want fn/14"
+N_S="$( grep -c '^S	' "$TMP/c1.tsv" )"
+N_SYM="$( printf '%s' "$MAP" | grep -o 'symbols=[0-9]*' | head -1 | cut -d= -f2 )"
+[ "$N_S" = "$N_SYM" ] && ok "(K) one S row per symbol ($N_S == header symbols=$N_SYM)" \
+    || no "(K) $N_S S rows but the map header says symbols=$N_SYM"
+grep -q "symbols=$N_SYM" <( tail -1 "$TMP/c1.tsv" ) && ok "(K) the summary line counts the S rows" \
+    || no "(K) summary line lacks symbols=$N_SYM: $( tail -1 "$TMP/c1.tsv" )"
 
 # ── (H) an empty value is REFUSED, never silently treated as "no census" ──────────────────────────
 "$BIN" "$CORPUS" --pin-census= --no-cache >/dev/null 2>"$TMP/empty.err"
