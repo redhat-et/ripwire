@@ -2064,7 +2064,10 @@ keeps a short-lived pending recommendation keyed by a checksum of the session id
 `missed`. `~/.ripwire/routing.jsonl` stores prompt/session checksums, prompt byte count, intent,
 recommended verb, observed verb, ordinal and outcome — never prompt text or a full shell command.
 `python3 bench/routing_report.py [LOG] [--json]` reports the same completed-route denominator overall
-and by intent, and labels fewer than 30 completed routes `underpowered`. This is a local, faster
+and by intent, and labels fewer than 30 completed routes `underpowered`. The log is shared with the
+Claude Code prompt router (§4), whose rows carry `agent="claude"`; the report counts only Codex rows
+(`agent="codex"`, or no `agent` field — the pre-field Codex rows) and discloses the rest as
+`foreign_rows` (fixed 2026-09-03; before that the Claude rows were counted in). This is a local, faster
 readout of the pre-registered metric, not a replacement definition or a task-success claim. Setting
 `RIPWIRE_ROUTE_METER=0` disables both the durable rows and the short-lived pending state without
 disabling advisory routing.

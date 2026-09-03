@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Summarize privacy-safe Codex routing feedback without reading prompt text."""
+"""Summarize privacy-safe Codex routing feedback without reading prompt text.
+
+~/.ripwire/routing.jsonl is shared with hooks/ripwire-claude-route.sh, whose rows carry
+agent="claude". This readout is Codex-only: rows are kept when their `agent` is "codex" — and a row
+with no `agent` field predates that field and was written by the Codex router, so it reads as
+"codex", the same convention hooks/ripwire-claude-route.sh applies. Excluded rows are counted and
+disclosed as foreign_rows, never silently dropped.
+"""
 
 from __future__ import annotations
 
@@ -13,11 +20,19 @@ from typing import Any
 
 
 MIN_COMPLETED = 30
+AGENT = "codex"
 
 
-def load_rows(path: Path) -> tuple[list[dict[str, Any]], int]:
+def row_agent(row: dict[str, Any]) -> str:
+    """A row without an `agent` field predates the field and belongs to the Codex router."""
+    return str(row.get("agent") or AGENT)
+
+
+def load_rows(path: Path, agent: str = AGENT) -> tuple[list[dict[str, Any]], int, int]:
+    """Return (rows written by `agent`, invalid line count, well-formed rows written by other agents)."""
     rows: list[dict[str, Any]] = []
     invalid = 0
+    foreign = 0
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             try:
@@ -25,18 +40,23 @@ def load_rows(path: Path) -> tuple[list[dict[str, Any]], int]:
             except (json.JSONDecodeError, UnicodeDecodeError):
                 invalid += 1
                 continue
-            if isinstance(row, dict):
-                rows.append(row)
-            else:
+            if not isinstance(row, dict):
                 invalid += 1
-    return rows, invalid
+            elif row_agent(row) != agent:
+                foreign += 1
+            else:
+                rows.append(row)
+    return rows, invalid, foreign
 
 
 def ratio(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 6) if denominator else None
 
 
-def summarize(rows: list[dict[str, Any]], invalid: int) -> dict[str, Any]:
+def summarize(rows: list[dict[str, Any]], invalid: int, foreign: int = 0, agent: str = AGENT) -> dict[str, Any]:
+    # Re-filter here as well so a caller that hands summarize() raw rows cannot re-introduce the
+    # cross-agent contamination load_rows() already removed.
+    rows = [row for row in rows if row_agent(row) == agent]
     decisions = [row for row in rows if row.get("event") == "UserPromptSubmit"]
     finals = [row for row in rows if row.get("event") == "RouteObservation" and row.get("outcome") in {"adopted", "missed"}]
     adopted = sum(row.get("outcome") == "adopted" for row in finals)
@@ -59,6 +79,7 @@ def summarize(rows: list[dict[str, Any]], invalid: int) -> dict[str, Any]:
     completed = len(finals)
     return {
         "schema": "ripwire.routing-feedback/v1",
+        "agent": agent,
         "decisions": len(decisions),
         "recommendations": sum(row.get("status") == "recommend" for row in decisions),
         "abstentions": sum(row.get("status") == "abstain" for row in decisions),
@@ -69,6 +90,7 @@ def summarize(rows: list[dict[str, Any]], invalid: int) -> dict[str, Any]:
         "minimum_completed": MIN_COMPLETED,
         "underpowered": completed < MIN_COMPLETED,
         "invalid_rows": invalid,
+        "foreign_rows": foreign,
         "intents": intents,
     }
 
@@ -77,10 +99,10 @@ def print_text(report: dict[str, Any]) -> None:
     rate = "n/a" if report["adoption_rate"] is None else f'{100 * report["adoption_rate"]:.1f}%'
     power = "underpowered" if report["underpowered"] else "readable"
     print(
-        f'routing feedback: decisions={report["decisions"]} recommendations={report["recommendations"]} '
+        f'routing feedback: agent={report["agent"]} decisions={report["decisions"]} recommendations={report["recommendations"]} '
         f'abstentions={report["abstentions"]} completed={report["completed"]} adopted={report["adopted"]} '
         f'missed={report["missed"]} adoption={rate} evidence={power} '
-        f'minimum={report["minimum_completed"]} invalid_rows={report["invalid_rows"]}'
+        f'minimum={report["minimum_completed"]} invalid_rows={report["invalid_rows"]} foreign_rows={report["foreign_rows"]}'
     )
     for row in report["intents"]:
         intent_rate = "n/a" if row["adoption_rate"] is None else f'{100 * row["adoption_rate"]:.1f}%'
@@ -99,8 +121,8 @@ def main() -> int:
     if not args.log.is_file():
         print(f"routing_report.py: no routing telemetry at {args.log}", file=sys.stderr)
         return 2
-    rows, invalid = load_rows(args.log)
-    report = summarize(rows, invalid)
+    rows, invalid, foreign = load_rows(args.log)
+    report = summarize(rows, invalid, foreign)
     if args.json:
         print(json.dumps(report, sort_keys=True, separators=(",", ":")))
     else:

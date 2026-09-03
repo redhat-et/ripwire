@@ -101,6 +101,22 @@ printf '%s' "$REPORT" | jq -e '.schema == "ripwire.routing-feedback/v1" and .dec
     && [ "$RRC" = 0 ] && ok "routing report exposes honest aggregate and per-intent feedback" \
     || no "routing report is missing or misstates the adoption evidence: $REPORT"
 
+# routing.jsonl is SHARED with hooks/ripwire-claude-route.sh, whose rows carry agent="claude" and an
+# arm= field. The Codex report is a Codex-only readout: a Claude decision plus a Claude adopted
+# observation appended to the same log must leave every Codex count untouched (3/2/1 above), while
+# the original Codex rows — written before the agent field existed, so they carry none — still count.
+cat >>"$LOG" <<'JSONL'
+{"v":2,"at":"2026-09-03T00:00:00Z","agent":"claude","event":"UserPromptSubmit","status":"recommend","intent":"understand-symbol","recommended":"--for","arm":"treatment","session_hash":"claudesess","prompt_hash":"claudeprompt","prompt_bytes":40}
+{"v":2,"at":"2026-09-03T00:00:01Z","agent":"claude","event":"RouteObservation","session_hash":"claudesess","prompt_hash":"claudeprompt","intent":"understand-symbol","recommended":"--for","arm":"treatment","observed":"--for","position":1,"outcome":"adopted"}
+{"v":2,"at":"2026-09-03T00:00:02Z","agent":"claude","event":"UserPromptSubmit","status":"abstain","intent":"","recommended":"","arm":"control","session_hash":"claudesess2","prompt_hash":"claudeprompt2","prompt_bytes":12}
+JSONL
+REPORT="$( python3 "$ROOT/bench/routing_report.py" "$LOG" --json 2>/dev/null )"; RRC=$?
+printf '%s' "$REPORT" | jq -e '.decisions == 3 and .recommendations == 2 and .abstentions == 1 and
+    .completed == 2 and .adopted == 1 and .missed == 1 and .adoption_rate == 0.5 and .invalid_rows == 0 and
+    (.intents[] | select(.intent == "understand-symbol") | .completed == 2 and .adopted == 1)' >/dev/null 2>&1 \
+    && [ "$RRC" = 0 ] && ok "routing report excludes agent=\"claude\" rows from the Codex readout" \
+    || no "routing report counted Claude-router rows into the Codex adoption numbers: $REPORT"
+
 # observed= must name the verb the adoption verdict was decided on. A modifier flag ahead of the
 # recommended verb (--no-cache before --for) must not become the observed verb on an adopted row.
 printf '%s\n' "{\"prompt\":\"$PROMPT\",\"cwd\":\"$TMP/repo\",\"session_id\":\"route-mod\"}" | \
