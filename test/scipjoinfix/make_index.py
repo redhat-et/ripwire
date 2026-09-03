@@ -31,40 +31,18 @@
 import os
 import sys
 
+import importlib.util
+
+# The protobuf wire helpers are test/scipfix/make_index.py's, imported rather than copied: one writer for
+# every hand-rolled fixture index, so a field-number fix lands once.
+_SCIPFIX = os.path.join( os.path.dirname( os.path.abspath( __file__ ) ), "..", "scipfix", "make_index.py" )
+_spec = importlib.util.spec_from_file_location( "scipfix_make_index", _SCIPFIX )
+_wire = importlib.util.module_from_spec( _spec )
+_spec.loader.exec_module( _wire )
+field_varint, field_bytes, field_string, packed_int32 = _wire.field_varint, _wire.field_bytes, _wire.field_string, _wire.packed_int32
+
 ROLE_DEFINITION = 0x1
 PFX = "scip-python python scipjoinfix 1 "
-
-
-def varint( n ):
-    out = bytearray()
-    while True:
-        b = n & 0x7F
-        n >>= 7
-        if n:
-            out.append( b | 0x80 )
-        else:
-            out.append( b )
-            return bytes( out )
-
-
-def tag( field, wire ):
-    return varint( ( field << 3 ) | wire )
-
-
-def field_varint( field, value ):
-    return tag( field, 0 ) + varint( value )
-
-
-def field_bytes( field, data ):
-    return tag( field, 2 ) + varint( len( data ) ) + data
-
-
-def field_string( field, s ):
-    return field_bytes( field, s.encode( "utf-8" ) )
-
-
-def packed_int32( field, ints ):
-    return field_bytes( field, b"".join( varint( i ) for i in ints ) )
 
 
 def occurrence( line1, col, symbol, roles ):
@@ -80,12 +58,7 @@ def symbol_information( symbol ):
 
 
 def document( rel, occs, syms ):
-    m = field_string( 1, rel )
-    for o in occs:
-        m += field_bytes( 2, o )
-    for s in syms:
-        m += field_bytes( 3, s )
-    return m
+    return _wire.document( rel, occs, syms )
 
 
 def build():

@@ -224,15 +224,10 @@ inline std::string pinFlagString( std::uint8_t fl )
 //
 // `root` is the run's single root argument (empty on a multi-root run), so the path segment is spelled
 // exactly as the map's `p=`/`id=`. Returns false if the file cannot be opened.
-inline bool writePinCensus( const char* path, const PinCensus& pc, const IngestResult& ing, std::string_view root )
+// The per-symbol census identity, resolved ONCE per symbol and reused — a row-by-row rebuild would re-make
+// the same strings thousands of times over a real corpus, and every row of a census names two of them.
+inline std::vector<std::string> pinCensusIdentities( const IngestResult& ing, std::string_view root )
 {
-    std::FILE* f = std::fopen( path, "wb" );
-    if( f == nullptr )
-    {
-        return false;
-    }
-    // Resolved once per symbol and reused — a row-by-row rebuild would re-make the same strings thousands
-    // of times over a real corpus, and every row of a census names two of them.
     std::vector<std::string> canon( ing.symbols.size() );
     for( std::size_t i = 0; i < ing.symbols.size(); ++i )
     {
@@ -246,10 +241,74 @@ inline bool writePinCensus( const char* path, const PinCensus& pc, const IngestR
         }
         canon[ i ].append( s.name ).append( "#" ).append( std::to_string( i ) );
     }
-    const auto idOf = [ & ]( NodeId n ) -> const char*
+    return canon;
+}
+
+inline const char* pinCensusIdOf( const std::vector<std::string>& canon, NodeId n ) noexcept
+{
+    return ( n < canon.size() ) ? canon[ n ].c_str() : "?";
+}
+
+// `C` rows — one per decided call site; returns the per-mechanism tally the summary line prints.
+inline void writePinCensusDecisionRows( std::FILE* f, const PinCensus& pc, const std::vector<std::string>& canon, std::size_t ( &mechCount )[ 9 ] )
+{
+    for( std::size_t i = 0; i < pc.rows(); ++i )
     {
-        return ( n < canon.size() ) ? canon[ n ].c_str() : "?";
-    };
+        const std::uint8_t m = pc.mech[ i ];
+        if( m < 9 )
+        {
+            ++mechCount[ m ];
+        }
+        std::fprintf( f, "C\t%s\t%u\t%u\t%s\t%s\t%s\t", pinMechName( m ), unsigned( pc.preTier[ i ] ), unsigned( pc.postReal[ i ] ),
+                      pinFlagString( pc.flags[ i ] ).c_str(), pinCensusIdOf( canon, pc.fromSym[ i ] ), pc.nameAt( pc.nameOff[ i ] ) );
+        const std::uint32_t end = pc.rowEnd( i );
+        for( std::uint32_t t = pc.tgtStart[ i ]; t < end; ++t )
+        {
+            std::fprintf( f, "%s%s", ( t > pc.tgtStart[ i ] ) ? "|" : "", pinCensusIdOf( canon, pc.tgtIds[ t ] ) );
+        }
+        std::fprintf( f, "\t%u\n", unsigned( pc.line[ i ] ) );
+    }
+}
+
+// `O` rows — the SCIP oracle; a sentinel row prints `@external` / `@nondef` and carries no target ids.
+inline void writePinCensusOracleRows( std::FILE* f, const PinCensus& pc, const std::vector<std::string>& canon )
+{
+    for( std::size_t i = 0; i < pc.oraRows(); ++i )
+    {
+        std::fprintf( f, "O\t%s\t%s\t", pinCensusIdOf( canon, pc.oraFrom[ i ] ), pc.nameAt( pc.oraNameOff[ i ] ) );
+        const std::uint8_t sentinel = ( i < pc.oraSentinel.size() ) ? pc.oraSentinel[ i ] : std::uint8_t( 0 );
+        if( sentinel != 0 )
+        {
+            std::fputs( sentinel == kScipNonDefExternal ? "@external" : "@nondef", f );
+        }
+        const std::uint32_t end = pc.oraRowEnd( i );
+        for( std::uint32_t t = pc.oraStart[ i ]; t < end; ++t )
+        {
+            std::fprintf( f, "%s%s", ( t > pc.oraStart[ i ] ) ? "|" : "", pinCensusIdOf( canon, pc.oraTo[ t ] ) );
+        }
+        std::fputc( '\n', f );
+    }
+}
+
+// `S` rows — the definition universe, one per symbol (v2).
+inline void writePinCensusSymbolRows( std::FILE* f, const IngestResult& ing, const std::vector<std::string>& canon )
+{
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        std::fprintf( f, "S\t%s\t%s\t%u\n", canon[ i ].c_str(), symTag( ing.symbols[ i ].kind ), unsigned( ing.symbols[ i ].line ) );
+    }
+}
+
+// `root` is the run's single root argument (empty on a multi-root run), so the path segment is spelled
+// exactly as the map's `p=`/`id=`. Returns false if the file cannot be opened.
+inline bool writePinCensus( const char* path, const PinCensus& pc, const IngestResult& ing, std::string_view root )
+{
+    std::FILE* f = std::fopen( path, "wb" );
+    if( f == nullptr )
+    {
+        return false;
+    }
+    const std::vector<std::string> canon = pinCensusIdentities( ing, root );
 
     std::fprintf( f, "# ripwire pin-census v2\tC=kind\\tmech\\tpre\\tpost\\tflags\\tcaller_id\\tcallee\\ttargets(|-sep)\\tline\n" );
     std::fprintf( f, "# line is the 1-based call-site line in the caller's file (v2, appended LAST so v1 readers are unchanged):\n" );
@@ -268,41 +327,9 @@ inline bool writePinCensus( const char* path, const PinCensus& pc, const IngestR
     std::fprintf( f, "#   tier-3 non-unique drop, self-only tier) made no commitment and is deliberately absent.\n" );
 
     std::size_t mechCount[ 9 ] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-    for( std::size_t i = 0; i < pc.rows(); ++i )
-    {
-        const std::uint8_t m = pc.mech[ i ];
-        if( m < 9 )
-        {
-            ++mechCount[ m ];
-        }
-        std::fprintf( f, "C\t%s\t%u\t%u\t%s\t%s\t%s\t", pinMechName( m ), unsigned( pc.preTier[ i ] ), unsigned( pc.postReal[ i ] ),
-                      pinFlagString( pc.flags[ i ] ).c_str(), idOf( pc.fromSym[ i ] ), pc.nameAt( pc.nameOff[ i ] ) );
-        const std::uint32_t end = pc.rowEnd( i );
-        for( std::uint32_t t = pc.tgtStart[ i ]; t < end; ++t )
-        {
-            std::fprintf( f, "%s%s", ( t > pc.tgtStart[ i ] ) ? "|" : "", idOf( pc.tgtIds[ t ] ) );
-        }
-        std::fprintf( f, "\t%u\n", unsigned( pc.line[ i ] ) );
-    }
-    for( std::size_t i = 0; i < pc.oraRows(); ++i )
-    {
-        std::fprintf( f, "O\t%s\t%s\t", idOf( pc.oraFrom[ i ] ), pc.nameAt( pc.oraNameOff[ i ] ) );
-        const std::uint8_t sentinel = ( i < pc.oraSentinel.size() ) ? pc.oraSentinel[ i ] : std::uint8_t( 0 );
-        if( sentinel != 0 )
-        {
-            std::fputs( sentinel == kScipNonDefExternal ? "@external" : "@nondef", f );
-        }
-        const std::uint32_t end = pc.oraRowEnd( i );
-        for( std::uint32_t t = pc.oraStart[ i ]; t < end; ++t )
-        {
-            std::fprintf( f, "%s%s", ( t > pc.oraStart[ i ] ) ? "|" : "", idOf( pc.oraTo[ t ] ) );
-        }
-        std::fputc( '\n', f );
-    }
-    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
-    {
-        std::fprintf( f, "S\t%s\t%s\t%u\n", canon[ i ].c_str(), symTag( ing.symbols[ i ].kind ), unsigned( ing.symbols[ i ].line ) );
-    }
+    writePinCensusDecisionRows( f, pc, canon, mechCount );
+    writePinCensusOracleRows( f, pc, canon );
+    writePinCensusSymbolRows( f, ing, canon );
     std::fprintf( f, "# summary rows=%zu oracle_rows=%zu symbols=%zu", pc.rows(), pc.oraRows(), ing.symbols.size() );
     for( std::uint8_t m = 0; m < 9; ++m )
     {
