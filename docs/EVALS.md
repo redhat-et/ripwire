@@ -8877,7 +8877,7 @@ is the proof.
 
 **Same-commit baselines**, plain build at `1c6fdf4` (= origin/main, this lane's base), `ripwire <root>
 --no-cache`; the D4 trees at `rw-lane-ab2-corpora/{ugrep,rocksdb,duckdb}` each verified at its pin with
-`git status --porcelain` empty. The tree moved since phase 3b (`src/` 146 → 147 files, `ambiguous=`
+a clean `git status`. The tree moved since phase 3b (`src/` 146 → 147 files, `ambiguous=`
 5,553 → 5,598), so the ceilings are recomputed here and the phase-3b table is not reused:
 
 | corpus | pin | files | symbols | edges | `ambiguous=` | unresolved | +2.0% ceiling |
@@ -8945,6 +8945,72 @@ row count; (E) zero bytes when nothing fires — `test/fixture` emits no `lpin=`
 (F) the legend defines both names with `name=`; (G) `--json` carries `"lpin":1` on the pin row and
 `"locality_pinned":1` in the header; (H) determinism ×2 and `xmllint`. Red on the pre-change binary at
 (A), (C), (D), (F), (G) — nothing emits the attribute yet and `Caller::go` is still pinned.
+
+### Phase 4, RUN — the pin disclosed and the tie-break shipped: ACCEPT on the one band, with one registration defect stated (measured 2026-09-03)
+
+**Verdict: ACCEPT.** All three conjuncts of the registered band hold on the post-change binary; the
+disclosure marker and the `localityKey` tie-break ship together (commits `e46638a` feature + gate,
+`292d5de` golden, this section). One clause of conjunct 3 was written wrong in the registration and is
+reported below as a defect of the registration, not re-read to fit the result.
+
+| Conjunct | Registered | Measured | |
+| --- | --- | --- | --- |
+| 1. `ambiguous=` vs the 1c6fdf4 baselines | ≤ +2.0% on each of 4 corpora | src 5,598 → **5,598** (0; measured on `git archive 1c6fdf4 src`, see below) · ugrep 1,721 → **1,722** (+0.06%) · rocksdb 44,967 → **45,146** (+0.40%) · duckdb 8,934 → **8,934** (0) | **meets** |
+| 2. full-oracle precision of the remaining pins | ≥ 0.60; 14365 alone if n ≥ 100, else pooled 14365+12907 at pooled n ≥ 100 | 14365 **0.670** (59 / 88; 17 `@external`, 0 `@nondef`) — n = 88 < 100 as budgeted ⇒ pooled **0.674 (118 / 175)**, n = 175; 12907 0.678 (59 / 87) | **meets** |
+| 3. marker exact, zero bytes when silent | `locality_pinned=` == census `locality` rows on 14365; no marker on `test/fixture`; golden byte-identical | 14365 header **`locality_pinned=115`** == **115** `C<TAB>locality` rows (also `src/`: absent == 0 rows); `test/fixture`: no `lpin=`, no `locality_pinned=`, every `<s>`/`<c>` row byte-identical — **but the golden moved by its legend line** (below) | **meets on substance; the golden clause was mis-registered** |
+
+Argv: `ripwire <root> --no-cache` (band 1; the D4 trees each at their pin, clean `git status`);
+`python3 bench/scip_pin_precision.py --bin ./build/ripwire --repo <astropy-N> --scip astropy-N.scip
+--label astropy-N-r4` (band 2; the r4base labels are the same-commit baselines); `ripwire <astropy-14365>
+--no-cache --pin-census=FILE` and `grep -cE '^C<TAB>locality<TAB>'` against the header (band 3).
+
+**The registration defect, stated plainly.** Conjunct 3 demanded BOTH "two entries in the map's leading
+legend comment" AND "`test/golden.xml` byte-identical". The legend IS the first line of the golden, so
+the two clauses cannot both hold; the parenthetical reason given for the byte-identity clause — "the
+fixture holds no locality pin and no tie the change moves" — is the substance, and that substance
+holds exactly: the golden diff is the legend line and the two `est_tokens` copies that follow the
+legend's own bytes (769 → 822), zero `<s>`/`<c>`/count changes. The golden was re-derived in its own
+commit (`292d5de`) with that diff reviewed by eye. Whether "met on substance" is enough is the
+orchestrator's call, recorded here rather than argued away; the lane's reading is that reverting a
+disclosure because its own required legend entry appears in a legend-bearing golden would be the rule
+eating its purpose.
+
+**What the numbers say.** The marker makes 115 pins on astropy-14365 visible per row (`lpin="K"` on 4
+of the 200 shown rows, 36 bytes) and per corpus (`locality_pinned=115`); ugrep 66, rocksdb 141, duckdb
+171, ripwire `src/` 0 — the last is a real zero (the census holds 0 `locality` rows on this C++ tree:
+qualifiers, receivers and cones decide before the prior ever has to). `ambiguous=` moved by the
+tie-break alone and by no more than 0.40%; the marker contributed nothing to it by construction. The
+tie-break's effect reproduces phase 3b exactly on the moved tree: locality 224 → 115 sites, the
+leavers reappearing as `split` (2,731 → 2,840 on 14365; 3,092 → 3,201 on 12907), `@nondef` 30 → 0,
+full-oracle 0.368 → 0.670 / 0.373 → 0.678.
+
+**A measurement trap, recorded.** `ripwire src/` on the WORKING tree read `ambiguous=5601` (then
+5600) during the lane: the corpus was moving under the measurement — this lane's own new symbols
+(`localityKeyOf`, `isLocalityPin`, `counterTotal`, `counterAt`) — not the resolver. Band 1's `src/`
+row is therefore measured on `git archive 1c6fdf4 src` extracted to scratch, where the new binary
+reads 5,598 / 13,002 edges: identical to the baseline. Any future band on the tool's own tree must pin
+the corpus the same way.
+
+**Contract checks, all clean:** determinism ×2 (fixture, astropy-14365), cold == warm == warm on
+astropy-14365, `xmllint --noout` on both maps; ASan (`LSAN_OPTIONS=suppressions=lsan_suppressions.txt`)
+on `lpincheck`, `pincensuscheck`, `scipjoincheck`, `localitycheck` and the full `--scip --pin-census`
+over astropy-14365 (rc 0, 0 reports, census byte-identical to the dev binary's); `pincensuscheck`,
+`scipjoincheck`, `localitycheck`, `resolverhonestycheck`, `chainguardcheck`, `legendcoveragecheck`,
+`jsonparitycheck`, `fixedbufsweep` (re-pinned +3 bounded numeric snprintfs), `mcpclidiffcheck`,
+`estchargecheck`, `compactlegendcheck`, `attrvocabcheck`, `deckcheck`, `docscommandscheck`,
+`docdriftcheck`, `flagtablecheck` green. `manifestcheck` red ONLY on the three "505 gate scripts" pins
+(the loop now names 506) — the orchestrator's recompute. The astropy map and both census files are
+byte-identical before and after the in-lane refactor that folded six duplicated counter loops into
+`counterTotal`/`counterAt`. `--quality-delta --scope='src/*'` gating 0 after four exact-name acks (the
+two deliberate `serialize`/`serializeJson` contract changes, the one-line `classifyPin` reroute through
+`isLocalityPin`, the one-argument `runAround` call-site extension).
+
+**What stands after this section.** (a) The S6-C pin is no longer silent: every remaining pin carries
+`lpin=` and the header sums them, so the "unearned exclusion from `amb=`" phase 3 funded is discharged
+without touching `amb=`. (b) The residue is now enumerated per site (lane report): of 28 disconfirmed
+remaining pins on 14365 by the (caller, callee) join, 13 external, 13 same-file sibling-class, 1
+`@nondef`, 1 cross-file. Reading the 13 sibling-class sites at source splits them into shapes a
+receiver rule can and cannot reach — the next section registers the reachable one.
 
 ## Member variables as symbols + `--uses=Owner.field` — the member-variable round (card A3), PRE-REGISTERED 2026-09-02 (before any corpus number)
 
