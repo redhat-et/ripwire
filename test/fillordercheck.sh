@@ -101,9 +101,12 @@ est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | 
 # the auto-flip DECISION still keys off the pure model (mapEst.tokens) precisely because the emit ORDER has
 # to be chosen before any byte exists, so #2-#7 below are unaffected and this arm's `important-first`
 # expectation is unchanged. The threshold (16000) is >25x this number either way.
+# 2026-09-03 (round 4, Phase 4 lpin= disclosure): 769 -> 822. The legend gained the lpin=/locality_pinned= entry
+# (test/golden.xml re-derived in its own commit on lane/n4-a, now 2053 bytes); the fixture's emit order is still
+# important-first and #1b below still asserts byte-identity with the golden, so only the pin moved.
 EFIX="$( est_of test/fixture )"
 OFIX="$( order_of test/fixture )"
-{ [ "$EFIX" = "769" ] && [ "$OFIX" = "important-first" ]; } \
+{ [ "$EFIX" = "822" ] && [ "$OFIX" = "important-first" ]; } \
     && ok "test/fixture (est_tokens=$EFIX) does NOT auto-flip — order=$OFIX (golden neutral)" \
     || no "test/fixture unexpectedly changed order or est_tokens (est=$EFIX order=$OFIX)"
 
