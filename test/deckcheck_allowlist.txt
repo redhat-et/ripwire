@@ -87,3 +87,6 @@
 --count	GNU grep's long form of -c, named in docs/SUBSTITUTION_METER.md's build-poll classifier rule (a count-only grep retrieves no content and cannot be substituted) — a foreign tool flag, not a ripwire flag
 --quiet	GNU grep's long form of -q, same build-poll classifier rule as --count above — not a ripwire flag
 --cap	bench/slice/run_slicerecall.py's own flag ("--cap 40", the per-run instance cap) quoted in docs/EVALS.md's --slice-flow correction paragraph as the registered argv — not a ripwire flag
+--project-name	scip-python's own indexer flag ("scip-python index --project-name astropy"), quoted in docs/EVALS.md's locality-census phase-3 recipe as the registered argv — not a ripwire flag
+--project-version	scip-python's own indexer flag ("--project-version 14365"), quoted beside --project-name in the same census recipe — not a ripwire flag
+--label	bench/scip_pin_precision.py's own flag ("--label astropy-14365-fix", the census run label) quoted in docs/EVALS.md's phase-3 census argv — not a ripwire flag

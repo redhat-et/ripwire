@@ -825,11 +825,11 @@ without guessing. One long-lived server per arm over the SAME tree, driven throu
 RIPWIRE_MCP_TIMINGS=1 TMPDIR=<per-arm> <bin> --mcp < fifo
   {"jsonrpc":"2.0","id":1,"method":"initialize"}
   {"jsonrpc":"2.0","id":N,"method":"tools/call","params":{"name":"find_symbol",
-     "arguments":{"path":"/Users/.../canyonraid48","symbol":"printf"}}}
+     "arguments":{"path":"<private objc++ tree>","symbol":"printf"}}}
 ```
 
 12 warm requests, then 6 more each preceded by `touch <root>/log/log.cpp` (an indexed file, content
-untouched) to force a rebuild. Corpus: the private `canyonraid48` tree, **`files=2377`** as this binary
+untouched) to force a rebuild. Corpus: a private ~2400-file ObjC++/Metal tree (not reproducible publicly), **`files=2377`** as this binary
 indexes it (the band said ~1500; the tree that was available is larger, and the count is reported rather
 than the target). Arms alternated HEAD / base `3eec040` five times; the table is the median of the five
 per-trial p50s. Apple Silicon, warm page cache, machine otherwise idle.
@@ -859,8 +859,8 @@ request IS the re-validation. Same instrument, two tree sizes, same verb:
 
 | tree | indexed files | warm p50 |
 | --- | --- | --- |
-| `canyonraid48/Metal` | 120 | 0.51 ms |
-| `canyonraid48` | 2377 | 10.52 ms |
+| `private tree/Metal` | 120 | 0.51 ms |
+| `private tree` | 2377 | 10.52 ms |
 
 **≈4.4 µs per indexed file** ( (10.52 − 0.51) / (2377 − 120) ), which puts ~95% of a 2377-file warm request
 in the freshness sweep. A warm MCP request on a tree this size is very nearly nothing but the re-validation
