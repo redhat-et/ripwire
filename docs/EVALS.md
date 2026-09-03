@@ -6910,6 +6910,107 @@ transitive closure, loop bodies dropped. Matching the published number does not 
 the published slicer, and a comparison arm that swaps in ripwire's verbs is comparing a superset
 slice against the number the subset earned.
 
+**Corrections from the 2026-09-02 read-only adversarial audit — dated, appended, history above untouched.**
+Seven findings against the `--slice` / `--slice-flow` surface at `8e186bb` were re-verified against a
+fresh build of that commit before any code moved (every cited probe reproduced), then fixed red-first
+in five commits on `lane/n2-h`, one finding-group per commit, gates in `test/sliceflowcheck.sh` arms
+27–30 and `test/slicecheck.sh` arms 12–14. Each paragraph below states what the audit found, what
+changed, the fixture numbers before/after, and the effect on the pinned 38-instance in-tree corpus
+(`python3 bench/slice/run_slicerecall.py --bin <binary> --repo . --cap 40`, the registered argv, run
+once per commit against a copy of that commit's binary; `bench/external` is absent in this
+checkout, so the duckdb/rocksdb/ugrep rows are NOT re-run — the external numbers above stand as
+measured on the older binary and are not compared here).
+
+*F-01, HIGH, fixed at `9dd6ef8` — preprocessor-dead code replaced the live chain.* `#if 0` /
+`#ifdef NEVER_*` bodies were lexical to the slicer: `--slice=if0:w --slice-flow=back` returned
+`steps="1"` whose only row was `v = 111;` from inside `#if 0` — the real chain `w ← v ← n` ABSENT,
+not truncated, undisclosed. The rule now (C-family, stated verbatim in the legend and `--help`):
+decided only by the literal — the body of `#if 0` and the `#else` of `#if 1` are dead, their rows
+dropped and counted as `preproc_rows=` (absent when zero); every other conditional (`#ifdef`,
+`#ifndef`, `#if defined(X)`, `#if EXPR`, `#elif`) is build-dependent and cannot be decided without
+the build's macro set — "the file never `#define`s X" is exactly the shape of a `-DNDEBUG`-style
+macro, so it is not evidence of dead code — its rows are kept and flagged `pp="1"`, and in a flow a
+`pp="1"` def is a reaching def AND so is the unconditional def before it (both emitted; the forward
+walk passes through it). Fixture: `if0:w` back `steps` 1 → 2 (v@3, n@1; the `#if 0` row gone,
+`preproc_rows="1"`); `ppsupp:t2` both `steps` 1 → 4 (the `#ifdef` def kept with `pp="1"`, the
+unconditional `s2` def and `p1`/`n` behind it now reached). Corpus: line-recall 0.739 / hit-all
+0.658 / over-inclusion 3.79× / fn-recall v1 0.167, v2 0.206 — all UNCHANGED (this repository's
+single-function fix commits hold no `#if 0`); bytes v1 3 187 → 3 936, v2 7 429 → 8 428, all of it
+legend (the rule must be stated; F-11 below takes it back).
+
+*F-03, HIGH, fixed at `5bb566f` — `counts_floor="1"` was false in the over-direction.* The root
+promised true ≥ reported while the same legend admitted shadowing over-includes (`shadowing:v` →
+`defs="3"` for a variable with one def; `guarded:g` → 3 vs 2). The marker is now
+`counts="as-classified"` (deliberately NOT the graph verbs' `counts_floor=`; the legend names the
+absent marker once to say why): `defs=`, `uses=`, `vars=`, `steps=` are exact counts of what the
+name-based classifier rowed, neither floors nor totals — LOW where a write hides behind a call,
+HIGH where a rowed occurrence is not this variable's (a `pp="1"` row, a same-spelled member/
+attribute). The numbers themselves did not move (the spelling did); corpus identical to F-01's row
+except bytes (v1 4 458, v2 8 968 — legend).
+
+*F-02, HIGH, fixed at `1ce7a3a` — the flow walk chained into a sibling block's shadow.*
+`--slice=shadowing:r --slice-flow=back` chained `l6 → l5` (the inner block's `v`) and never reached
+`int v = n;` or the parameter: a chain through a variable `r` does not read, and the legend disclosed
+only over-inclusion. Block scopes are now separated: a name declared more than once inside the
+definition is that many variables (`SliceBinding`), scoped to the innermost scope-creating ancestor
+per family (kind tables verified against the vendored parsers), every other occurrence bound in a
+post-walk pass to the innermost enclosing scope whose declaration precedes it; rows, folds, the
+anchor table and the BFS are keyed per binding. Go `v := v + 1` and Rust `let v = v + 1` read the
+previous binding in their own initializer (one line, two rows); JS `var` hoists to the function,
+`let`/`const` are per block; Python is function-scoped (one binding). Disclosure: `bindings=` on a
+shadowed seed's root, `b=` on every row of a shadowed name (its declaration line; `b="0"` = unbound),
+the inventory lists one `<v>` per binding; an unshadowed slice is byte-for-byte free of the new
+vocabulary. Fixture: `shadowing:r` back → `steps="2"` = `v@3 (b=3)`, `n@1`, no `l5`/`l6` rows;
+inventory `vars` 3 → 4. **Also fixed, found by the separation:** tree-sitter-cpp's condition-clause
+`declaration` (`if( int k = x )`) carries its initializer in a `value` field with no
+`init_declarator`, and the classifier read `x` as a DECL on the `8e186bb` binary too (`defs="5"`
+where 3 is right) — a false def that became a false binding; `x` rows as a read now (slicecheck arm
+12). Corpus: unchanged (no shadowing inside the 38 instances); bytes v1 5 322, v2 9 904 (legend).
+
+*F-08 (MEDIUM), F-12 and F-15 (LOW), fixed at `a8c08fb`.* JS/TS destructuring binders were
+invisible (`const { x, y } = o` minted no local and no def; `destructure:s` back `steps="0"`): the
+walk now treats `shorthand_property_identifier_pattern` as an occurrence and climbs the pattern
+wrappers to the binding site — `--slice=destructure` inventory 2 → 12 binders, `destructure:x`
+`defs` 0 → 2, `destructure:s` back `steps` 0 → 3 (`s ← x,y ← o`), matching what Python tuple-unpack
+and Go multi-assign already did. Python `global X` / `nonlocal X` rowed `k="use" t="read"` and
+listed a global as a LOCAL: they row `k="scope" t="global|nonlocal"` now (a fourth `k=` value —
+neither read nor write, never a flow anchor) and the inventory shows `<v n="COUNTER" l="4"
+t="global"/>`. The under-count clause named only receiver mutation; it now names a write through an
+ARGUMENT — by-reference/pointer parameter, out-parameter, function-like macro — as the same blind
+spot (classified `k="use" t="call-arg"`), in the legend, the header contract and `--help`. Corpus:
+unchanged (cpp-only corpus, no Python/JS); bytes v1 6 122, v2 10 704 (legend).
+
+*F-11, MEDIUM, fixed at `1b71618` — legend 84–90% of the output, two LIMITS paragraphs restating each
+other, `--legend=compact` refused.* The four fixes above made it worse (v1 legend 2 354 → 5 278 B,
+flow 4 381 → 7 648 B). Now three tiers, one owner per rule: the v1 block states every rule once,
+numbered (1)–(7), **3 585 B** (gate budget 3 584 B on its fixture, a ratchet; four more rules than
+the 2 354 B baseline stated); the seed and flow blocks add only their own vocabulary and point at
+v1's numbered limits — flow addendum **2 027 → 1 338 B**; and `--legend=compact`
+(`schema="ripwire.slice/v1"`, **987 B**, one block that also carries the seed and flow vocabulary)
+for the many-small-calls seed loop, rows byte-identical to the full form (proven against the
+previous commit's binary on 5-, 6- and 6-row flows). Legend share on the audit's own fixture
+(`--slice=guarded:g`, leading-comment bytes / total): 84.2% → 88.7% full (the rules) / **66.0%**
+compact; `--slice-flow=both`: 88.7% → 89.6% full / **61.0%** compact — the ratio is dominated by
+that fixture's 455-byte payload, so the bytes are the honest measure: full v1 legend 2 354 → 3 585
+(+1 231 for four stated rules), full flow legend 4 381 → 4 923 (+542), compact 987. Corpus (the
+registered argv carries no `--legend`, so this is the FULL tier): recall unchanged; bytes v1 3 187 →
+**4 429** (+1 242 = the v1 legend growth, to the byte), v2 7 429 → **7 979** (+550 = the flow legend
+growth). Arithmetic, not a run, because the registered argv is fixed: under `--legend=compact` the
+same instances would carry 4 429 − 3 585 + 987 ≈ 1 831 B (v1) and 7 979 − 4 923 + 987 ≈ 4 043 B (v2),
+−43% / −46% against the 8e186bb baseline.
+
+*What this does to the ARISE-faithfulness table above.* Two rows are amended by these fixes and the
+table is left as written (it records the 2026-08-31 comparison): "reaching-definition rule —
+faithful" now carries one stated deviation, a `pp="1"` (build-dependent) def is a reaching def
+together with the unconditional def before it, where the reference's single forward pass would let
+it replace that def — deliberate, because the reference's slicer is as lexical to the preprocessor
+as v1 was (it never sees C at all); and "scope handling — no lexical scope separation either" is no
+longer true of ripwire: block scopes are separated for C-family/JS/TS/Go/Java/Rust, Python remains
+function-scoped like the reference, and `global`/`nonlocal` are a scope role rather than the
+reference's declaration-as-def. Both make ripwire's slice a still-larger superset of the instrument
+that earned the paper's +17pp; the "matching the published number does not require matching the
+published slicer" reading stands, with one more reason.
+
 ## `--slice-guards` — control dependence for the slice, PRE-REGISTERED 2026-08-31 (before any feature code)
 
 **What this registers.** The survey lane's proposal: control-dependence rows beside the flow
