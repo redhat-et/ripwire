@@ -663,6 +663,19 @@ inline constexpr std::size_t kForTailSigBytes        = 160;
 inline constexpr std::size_t kForPayloadBudgetBytes = 7500;
 inline constexpr std::size_t kForCapTailSigBytes    = 96;
 
+// ── THE --for LENS'S RANKED-HEAD CAP, OWNED ONCE (round-4 finding F-03) ──────────────────────────────
+// How many ranked symbols the --for lens considers before the relevance floor narrows it and the ladder
+// above trims it. The CLI lens (`--pack-top-n`, else this) and the MCP `for` verb MUST read the same
+// number. They spelled it as two independent literals, and the MCP side was additionally handed the
+// SERVER-WIDE `--top-k` — default 200, the ranked MAP's row cap, a knob `--for` is documented to ignore
+// (cli.h honorsTopK). Since the `for` tool schema exposes no cap of its own, EVERY MCP `for` call an agent
+// could make ran a 5x wider candidate pool than the CLI's: on `parse arguments` over this repo,
+// dropped_positive="169" against the CLI's "11", and a substantially different served symbol set, with no
+// argument able to reach the CLI's behavior. Accepted-and-ignored is a named failure family here; silently
+// honoring a knob the twin surface ignores is its mirror image, and it moved what an agent was served.
+// Gate: test/mcpforparitycheck.sh compares the two dialects' served symbol SET and dropped_positive= value.
+inline constexpr int kForLensDefaultTopN = 40;
+
 // ── T3 terminal-by-default --for (pre-registered: docs/EVALS.md §4, T3 round) ────────────────────────
 // The default --for bundle serves the top-ranked symbols' FULL bodies inline after the signatures — the
 // month-scale transcript mine measured map-then-read as the single biggest non-terminal chain, and the

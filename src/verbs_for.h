@@ -1437,7 +1437,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // longer rides in the comment — route= carries it verbatim, attribute-escaped by ctxRootOpen, and
         // the JSON sibling keeps the same RAW text.)
         const std::string taskNote = xmlCommentText( cfg.forTask );
-        int forTopN = cfg.packTopN > 0 ? cfg.packTopN : 40;
+        int forTopN = cfg.packTopN > 0 ? cfg.packTopN : kForLensDefaultTopN;   // F-03: the cap the MCP `for` twin reads too
 
         // Ranking-confidence disclosure (paper-shape lane; arXiv 2607.24882 — abstention/confidence is the
         // unsolved retrieval axis: a retriever must be able to tell the caller when its own ranking is not
@@ -1457,7 +1457,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         std::string adaptiveNote;
         if( cfg.adaptive )
         {
-            const int         ceil = cfg.packTopN > 0 ? cfg.packTopN : 40;
+            const int         ceil = cfg.packTopN > 0 ? cfg.packTopN : kForLensDefaultTopN;
             // scanFullDistribution=true: --for caps at 40, so a sharp query's real cliff often sits BELOW the
             // cap while the top-40 head is flat — a scan bounded at the cap finds no knee and keeps 40/40
             // (the recorded "inert on --for"). Scan the RAW lexical (BM25) distribution BEFORE the cap so the

@@ -1365,7 +1365,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
                 else if( name == "for" && !path.empty() && !task.empty() )
                 {
-                    const std::string t = forTaskText( path, task, topK, redactPtr );
+                    const std::string t = forTaskText( path, task, redactPtr );
                     resp = t.empty() ? errResult( -32602, "no symbols found" ) : textResult( t );
                 }
                 else if( name == "lego" && !path.empty() && !type.empty() )

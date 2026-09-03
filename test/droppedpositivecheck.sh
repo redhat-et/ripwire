@@ -184,7 +184,19 @@ for line in sys.stdin:
         print(r["result"]["content"][0]["text"])
 '; }
 INIT='{"jsonrpc":"2.0","id":1,"method":"initialize"}'
-mcp_call "$INIT" "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"for\",\"arguments\":{\"path\":\"$CORPUS\",\"task\":\"$CONC\"}}}" \
+# RE-DERIVED for round-4 finding F-03. This arm used to run "$CONC" and the MCP verb dropped on it — because
+# the MCP `for` verb was being handed the SERVER-WIDE --top-k (default 200) as its lens cap while the CLI
+# --for served 40, so its bundle started from a 5x wider head and the ceiling always bit. With the two
+# dialects now sharing serialize.h's kForLensDefaultTopN, the MCP bundle for "$CONC" over src/ fits under
+# the default budget with nothing dropped, and the old assertion pinned the DEFECT rather than the contract.
+# The arm's intent — "the attribute is present when the payload ceiling genuinely bites on the MCP dialect"
+# — is unchanged; it needs a query whose 40-symbol head is doc-heavy enough to overflow 7,500 bytes, and
+# MCPCONC is that query (measured on src/: MCP dropped_positive="14", CLI "16" on the same head; the two
+# dialects differ in the NUMBER dropped because the CLI folds churn=/amp=/tested= onto each row and reserves
+# for auto <bodies>, which is exactly why this arm asserts presence and test/mcpforparitycheck.sh asserts the
+# candidate POOL both ladders start from).
+MCPCONC="resolve call edges by name"
+mcp_call "$INIT" "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"for\",\"arguments\":{\"path\":\"$CORPUS\",\"task\":\"$MCPCONC\"}}}" \
     | result_text >"$TMP/mcp_for.xml"
 grep -q 'dropped_positive="[0-9]*"' "$TMP/mcp_for.xml" \
     && ok "#6 MCP for verb: dropped_positive= present on a query wide enough to drop" \
