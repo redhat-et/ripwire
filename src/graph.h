@@ -72,6 +72,13 @@ struct Graph
                                             // over-counting gauge would itself be a silent-WRONG signal (the one bug
                                             // this lever exists to kill). Revisit that tier when partial-extraction
                                             // provenance lands. Like ambOut it never counts a resolved edge → low noise.
+    std::vector<std::uint32_t> locPinOut;   // per-symbol: # outgoing calls the S6-C locality tie-break ALONE pinned to one
+                                            // def (pincensus.h::isLocalityPin — the census's `locality` population, 0.368
+                                            // full-oracle precision on astropy). serialize: lpin="K" / locality_pinned=N,
+                                            // both absent when 0. NOT folded into ambOut: a split nothing decided and a
+                                            // pin a prior decided are different facts (docs/EVALS.md "Phase 4").
+    std::vector<std::string>   localityKey; // per-symbol S6-C SCORING key (resolve.h::localityKeyOf): canonId when scoped,
+                                            // `path::name` when not. Read ONLY by the S6-C block; never an identity.
     std::vector<std::string>   canonId;     // per-symbol canonical SCIP-style id `path::scope::name` (S6-C); the
                                             // bare name when no scope is known. The resolution locality tie-break
                                             // and serialize's `id=` attribute both read this. Built in buildGraph.
@@ -737,15 +744,18 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     Graph g;
     g.wOutDeg.assign( N, 0.0 );
     g.ambOut.assign( N, 0u );   // counted in the resolve loop: calls that stay split across >1 def after narrowing
+    g.locPinOut.assign( N, 0u );   // counted in the resolve loop: calls the S6-C locality tie-break alone pinned to one def
     g.unresolvedOut.assign( N, 0u );   // counted in the resolve loop: calls whose in-repo defs were all lang-filtered
     if( scip ) { g.scipDocsSeen = scip->documentsSeen; g.scipEdgesPinned = scip->edgesPinned; }
 
     // S6-C canonical ids: `path::scope::name` per symbol (bare name when no scope). Computed once here so the
     // resolution locality tie-break (below) and serialize's `id=` attribute share one definition. Deterministic.
     g.canonId.resize( N );
+    g.localityKey.resize( N );
     for( const Symbol& s : ing.symbols )
     {
-        g.canonId[ s.id ] = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+        g.canonId[ s.id ]     = canonicalId( ing.files[ s.fileId ], s.scope, s.name );
+        g.localityKey[ s.id ] = localityKeyOf( ing.files[ s.fileId ], s.scope, s.name );   // == canonId when scoped
     }
 
     // A4-R5 JNI: decode every `Java_pkg_Cls_method` C/C++ def to its readable dotted Java name and stash it as
@@ -928,6 +938,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // P2-D Rule 2b field-narrow tables (class#field → declared type, plus the local-shadow veto set) —
     // built by buildFieldNarrowTables above; consumed via Narrower::rule2bFieldRecvType in the resolve loop.
     const FieldNarrowTables fieldNarrow = buildFieldNarrowTables( ing );
+    // Rule 2c class-name set (docs/EVALS.md "Phase 4b"): every Class/Struct/Interface definition NAME in the
+    // corpus, so `Cls.m()` can read its receiver token as the type it names. Consumed via Narrower::rule2cClassNameRecv.
+    HashMap<std::string, char> classNames;
+    classNames.reserve( N / 8 + 1 );
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface )
+        {
+            classNames.try_emplace( s.name, '\0' );
+        }
+    }
 
     // ── L3 fn-pointer/callback binding tables (var→FUNCTION, Rule 2's exact discipline) — built by
     // buildFnPtrBindTables above; consumed via Narrower::fnPtrBindingTarget in the resolve loop below.
@@ -1026,6 +1047,23 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // to the variable's type; Rule 3 pins a call to the ONE file the caller includes that defines it — all
     // BEFORE the bare-name spray below. See resolve.h.
     const Narrower narrower( canonByName, varType, fileIncludes, symFileId );
+    // ONE apply step for every receiver rule (1 / 2 / 2c / 2b): keep the rule's definition ids that are
+    // language-compatible with the call and inside the same root, and say whether anything survived. The
+    // four rules used to carry four copies of this loop; the filter is stated once so it cannot drift.
+    const auto narrowTo = [ & ]( const rw::SmallVec<NodeId, 2>* hit, const Reference& ref, std::vector<NodeId>& out ) noexcept -> bool
+    {
+        if( hit != nullptr )
+        {
+            for( NodeId c : *hit )
+            {
+                if( langCompatible( ing.symbols[c].lang, ref.lang ) && sameRoot( c, ref.fileId ) )
+                {
+                    out.push_back( c );
+                }
+            }
+        }
+        return !out.empty();
+    };
 
     // accumulate per (from,to): summed per-ref confidence + an integer ref count (key = from<<32|to).
     // weight = (confSum/nref)·√nref = confidence·√num_refs — diminishing returns on repeat refs.
@@ -1277,17 +1315,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // (`narrowed` is declared above the L3 fn-binding block, which fires ahead of Rule 1.)
         if( !scipPinned && !canonical && !narrowed )
         {
-            if( const auto* hit = narrower.rule1ClassMember( r, ing.symbols[ r.fromSymbol ].scope ) )
-            {
-                for( NodeId c : *hit )
-                {
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
-                    {
-                        cand.push_back( c );
-                    }
-                }
-                narrowed = !cand.empty();
-            }
+            narrowed = narrowTo( narrower.rule1ClassMember( r, ing.symbols[ r.fromSymbol ].scope ), r, cand );
         }
         // P2-D Rule 2 (receiver-variable type): a named-receiver call `x.m()` / `x->m()` resolves to the method
         // on the VARIABLE's type (`Foo::m` for `Foo x;`), BEFORE the bare-name spray — the other half of the
@@ -1296,17 +1324,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // call was already pinned canonically or by Rule 1 (those are the more specific / already-resolved signals).
         if( !scipPinned && !canonical && !narrowed )
         {
-            if( const auto* hit = narrower.rule2RecvVarType( r ) )
-            {
-                for( NodeId c : *hit )
-                {
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
-                    {
-                        cand.push_back( c );
-                    }
-                }
-                narrowed = !cand.empty();
-            }
+            narrowed = narrowTo( narrower.rule2RecvVarType( r ), r, cand );
+        }
+        // P2-D Rule 2c (CLASS-NAME receiver, Phase 4b): `Cls.m()` resolves to `Cls::m` (or the shallowest base
+        // defining `m`) when Cls is an in-repo class no local shadows. After Rule 2 (a typed LOCAL wins), before
+        // 2b (a class name outranks a same-named field). See Narrower::rule2cClassNameRecv.
+        if( !scipPinned && !canonical && !narrowed )
+        {
+            narrowed = narrowTo( narrower.rule2cClassNameRecv( r, classNames, fieldNarrow.localNameSet, chaUp ), r, cand );
         }
         // P2-D Rule 2b (receiver-FIELD type, W1-P1-12): a named-receiver call `f.m()` / `f->m()` whose receiver
         // names a FIELD of the caller's enclosing class resolves to the method on the field's DECLARED type
@@ -1319,17 +1344,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // refuses any locally-declared name outright).
         if( !scipPinned && !canonical && !narrowed )
         {
-            if( const auto* hit = narrower.rule2bFieldRecvType( r, ing.symbols[ r.fromSymbol ].scope, fieldNarrow.fieldTypeByClass, fieldNarrow.localNameSet, chaUp ) )
-            {
-                for( NodeId c : *hit )
-                {
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
-                    {
-                        cand.push_back( c );
-                    }
-                }
-                narrowed = !cand.empty();
-            }
+            narrowed = narrowTo( narrower.rule2bFieldRecvType( r, ing.symbols[ r.fromSymbol ].scope, fieldNarrow.fieldTypeByClass, fieldNarrow.localNameSet, chaUp ), r, cand );
         }
         // P2-D Rule 3 (import/include-based file narrow): when the name is ambiguous (K same-name defs) but the
         // caller's file #includes / imports EXACTLY ONE file that defines it, resolve to that file's def(s) and
@@ -1646,14 +1661,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && !bindingPinned && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar )
         {
-            const std::string& callerCanon = g.canonId[ r.fromSymbol ];
+            const std::string& callerCanon = g.localityKey[ r.fromSymbol ];   // == canonId here (the caller is scoped)
             // memoize each survivor's shared-locality ONCE (was computed twice: once for bestShare, once inside the
             // stable_partition predicate). locShare[i] parallels tier[i]; the compaction below reads the memo.
             locShare.clear();
             std::size_t bestShare = 0;
             for( NodeId c : tier )
             {
-                const std::size_t sh = sharedLocality( callerCanon, g.canonId[c] );
+                const std::size_t sh = sharedLocality( callerCanon, g.localityKey[c] );   // path-scoped even for a free function
                 locShare.push_back( sh );
                 if( sh > bestShare )
                 {
@@ -1754,6 +1769,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( nReal == 0 )
         {
             continue;
+        }
+        // ---- the Phase-4 disclosure marker (shipped): the census's `locality` label, by the same predicate ---
+        if( isLocalityPin( scipPinned, bindingPinned, nReal, censusLocality ) )
+        {
+            ++g.locPinOut[ r.fromSymbol ];
         }
         // ---- the census row (eval-only; costs one branch on every other run) ---------------------------
         // Recorded HERE and nowhere else: this is the exact point where the resolver has finished deciding

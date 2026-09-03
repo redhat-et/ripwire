@@ -1302,6 +1302,17 @@ inline std::string canonicalId( std::string_view path, std::string_view scope, s
     return id;
 }
 
+// The S6-C tie-break's SCORING key (Graph::localityKey) — canonicalId's spelling for a scoped symbol, and
+// `path::name` (never the bare name) for an unscoped one. canonicalId's bare-name degrade is right for an
+// IDENTITY (id == name, nothing to emit) and wrong for a LOCALITY score: it gave a module-level function zero
+// shared segments with every caller, so it could never survive the tie-break against a same-file class method
+// (docs/EVALS.md "Phase 3b"/"Phase 4": 10 of 23 disconfirmed pins on astropy). Read by the S6-C block only;
+// id=, note keys, baseline keys and selectors keep canonicalId.
+inline std::string localityKeyOf( std::string_view path, std::string_view scope, std::string_view name )
+{
+    return scope.empty() ? std::string( path ).append( "::" ).append( name ) : canonicalId( path, scope, name );
+}
+
 // §B1.3: canonicalId over a symbol whose PATH SEGMENT is made relative to `root` — the one identity rule two
 // unrelated subsystems both need. quality.h's baselineCanonId (a committed baseline must key the same way
 // whether it was taken by `ripwire .` or `ripwire /abs/repo`) and serialize.h's field-note target (a note is
@@ -1587,19 +1598,29 @@ struct Narrower
             return nullptr;
         }
 
-        // (4) the declared type's own method set first…
+        // (4) the declared type's own method set, then its bases — shared with Rule 2c below.
+        return methodOnTypeOrBases( fit->second, r, chaUp );
+    }
+
+    // The type-side probe Rules 2b and 2c share: `type::callee` in the type's OWN method set first (canonByName,
+    // DEFS only), then a bounded breadth-first DIRECT-base walk (frontier levels over chaUp). The SHALLOWEST
+    // level with a hit decides: exactly one hitting base name → those definitions; two or more at one level →
+    // nullptr (honest ambiguity, the caller's ladder stays unchanged). Deterministic: chaUp lists are
+    // sorted+deduped, the frontier is expanded in stored order with a fixed visit cap, and canonByName
+    // insertion order = symbol-id order.
+    const rw::SmallVec<NodeId, 2>* methodOnTypeOrBases( std::string_view typeName, const Reference& r,
+                                                         const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
         keyScope.clear();
-        keyScope.append( fit->second ).append( "::" ).append( r.calleeName );
+        keyScope.append( typeName ).append( "::" ).append( r.calleeName );
         if( const auto it = canonByName.find( keyScope ); it != canonByName.end() && it->second.size() != 0 )
         {
             return &it->second;
         }
 
-        // …then a bounded breadth-first DIRECT-base walk (frontier levels over chaUp). The SHALLOWEST level
-        // with a hit decides: exactly one hitting base name → narrow; two or more → honest refuse.
         constexpr std::size_t kFieldWalkCap = 16;   // total visited names — bounds depth and width together
         fieldWalk.clear();
-        fieldWalk.push_back( fit->second );
+        fieldWalk.push_back( typeName );
         std::size_t lvlBegin = 0;
         while( lvlBegin < fieldWalk.size() )
         {
@@ -1648,6 +1669,40 @@ struct Narrower
             lvlBegin = lvlEnd;
         }
         return nullptr;
+    }
+
+    // Rule 2c — CLASS-NAME receiver (docs/EVALS.md "Phase 4b"). `Cls.m(…)`, a static / classmethod call THROUGH
+    // THE CLASS NAME, reaches the ladder as a named-receiver call with no local binding, so Rule 2 cannot fire
+    // and the S6-C prior then hands the win to the CALLER's own class by the scope segment (astropy:
+    // `_Interval.validate(v)` pinned to `ModelBoundingBox::validate`). The receiver token IS the type: resolve
+    // the callee against it, then its direct bases (`IERS_B.open()` → `IERS::open`). Narrows ONLY when ALL hold:
+    // (1) bare named-receiver call from a known def; (2) NO local binding of any kind for (fromSymbol, recvVar)
+    // — a parameter/local named like the class shadows it (Rule 2b's veto set); (3) recvVar names an in-repo
+    // class-like definition (`classNames`: SymKind Class/Struct/Interface); (4) the class — or exactly one base
+    // at the shallowest hit level — DEFINES the callee. Two same-named classes both defining it keep BOTH
+    // candidates (an honest split). Any miss ⇒ nullptr. C++'s `Cls::m()` never arrives here (a qualifier).
+    const rw::SmallVec<NodeId, 2>* rule2cClassNameRecv( const Reference& r,
+                                                        const HashMap<std::string, char>&                     classNames,
+                                                        const HashMap<std::string, char>&                     localNames,
+                                                        const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        if( r.recv != RecvKind::NamedVar || r.recvVar.empty() || !r.qualifier.empty() || r.fromSymbol == kNoNode )
+        {
+            return nullptr; // (1) not a bare named-receiver call from a known def
+        }
+        if( classNames.find( r.recvVar ) == classNames.end() )
+        {
+            return nullptr; // (3) the receiver token names no class-like definition anywhere in the corpus
+        }
+        keyBind.clear();
+        appendUint( keyBind, r.fromSymbol );
+        keyBind.push_back( '#' );
+        keyBind.append( r.recvVar );
+        if( localNames.find( keyBind ) != localNames.end() )
+        {
+            return nullptr; // (2) a local / parameter of that name shadows the class
+        }
+        return methodOnTypeOrBases( r.recvVar, r, chaUp );   // (4)
     }
 
     // L3 — the fn-pointer/callback binding visible at a bare call site `fn()`. The two tables are passed

@@ -960,8 +960,56 @@ inline TSNode fnDefParameterList( TSNode fnDef )
 //   * a CATCH clause's parameter — a local of its handler block (iteration 3, the noted 3b gap).
 // Gates the language and node type ITSELF, so captureBindings calls it unconditionally — the shapes are
 // disjoint from every branch of the Rule-2 chain there.
+// Phase 4b (Rule 2c's shadow veto, docs/EVALS.md): a Python function DEFINITION's parameter NAMES as VarDecl
+// evidence with an EMPTY span — the `{0,0}` "contains nothing" shape model.h's Binding documents — so they
+// reach buildFieldNarrowTables' localNameSet (the veto Rules 2b/2c share: a parameter named like a class is a
+// variable, not the class) and NOTHING else: the r9 shadow suppression tests span containment and is
+// registered and measured for C++/ObjC only, so the Python call graph moves through Rule 2c alone. `self`
+// and `cls` are recorded like any other name (no class is spelled that way; a special case would be a
+// second rule to keep in step). Plain, typed, defaulted and splat parameters; tuple patterns bind nothing.
+inline void capturePythonParamShadowDecls( TSNode n, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
+{
+    const TSNode params = ts_node_child_by_field_name( n, "parameters", 10 );
+    if( ts_node_is_null( params ) )
+    {
+        return;
+    }
+    const std::uint32_t cc = ts_node_child_count( params );
+    for( std::uint32_t i = 0; i < cc; ++i )
+    {
+        const TSNode p  = ts_node_child( params, i );
+        const char*  pt = ts_node_type( p );
+        TSNode       ident{};
+        if( std::strcmp( pt, "identifier" ) == 0 )
+        {
+            ident = p;
+        }
+        else if( std::strcmp( pt, "default_parameter" ) == 0 || std::strcmp( pt, "typed_default_parameter" ) == 0 )
+        {
+            ident = ts_node_child_by_field_name( p, "name", 4 );
+        }
+        else if( std::strcmp( pt, "typed_parameter" ) == 0 || std::strcmp( pt, "list_splat_pattern" ) == 0 || std::strcmp( pt, "dictionary_splat_pattern" ) == 0 )
+        {
+            ident = ts_node_named_child( p, 0 );
+        }
+        if( ts_node_is_null( ident ) || std::strcmp( ts_node_type( ident ), "identifier" ) != 0 )
+        {
+            continue;   // commas, separators, tuple patterns — nothing this veto can name
+        }
+        pushRawBind( fileId, lang, nodeTextOf( ident, src ), std::string{}, BindSite{ ts_node_start_byte( p ), 0u, 0u }, LocalBindKind::VarDecl, binds );
+    }
+}
+
 inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
 {
+    if( lang == Lang::Python )
+    {
+        if( std::strcmp( t, "function_definition" ) == 0 )
+        {
+            capturePythonParamShadowDecls( n, fileId, lang, src, binds );   // Phase 4b: veto evidence only (empty span)
+        }
+        return;
+    }
     if( lang != Lang::Cpp && lang != Lang::ObjC )
     {
         return;
