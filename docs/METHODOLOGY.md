@@ -175,5 +175,28 @@ does not advance.
 
 ---
 
+## 8. Placebo-controlled comparisons
+
+A ranking win and a smaller-context-helps-regardless-of-content win look identical from the outside:
+both raise the same accuracy number. The only way to tell them apart is to run a treatment that is
+the same shape and the same cost as the real one but deliberately carries no useful signal, and check
+that the real treatment still beats it.
+
+An external, placebo-controlled study of fault-localization-guided repair makes the case concretely:
+comparing three arms on the same failing candidates — blind whole-solution resampling, spectrum-based
+localized infilling, and same-length infilling at a disjoint *random* code span as the placebo — is
+what let it show localized infilling losing decisively to blind resampling at matched attempt count
+(3:40, p = 3.0×10⁻⁹) ([arXiv:2609.00854](https://arxiv.org/abs/2609.00854)). Without the random-span
+arm run at matched token cost, that result would have read as "targeted editing helps" instead of
+what the placebo showed it to be.
+
+**The standing rule:** every fault-localization or retrieval head-to-head registered in
+`docs/EVALS.md` from this point on must include a random-rank or random-span placebo arm at matched
+token cost alongside the real baseline(s), pre-registered the same way every other arm is. A round
+that skips the placebo arm has not shown a ranking win — it has shown a context-size win, which is a
+different and weaker claim, and the two must never be reported as if they were the same result.
+
+---
+
 *See `CONTRIBUTING.md` for how these rules land as concrete requirements on a change, and
 `docs/EVALS.md` for the instruments and the numbers.*

@@ -1380,11 +1380,18 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**34 repositories and 61 papers** into one deterministic executable, alongside a labelled
+**34 repositories and 67 papers** into one deterministic executable, alongside a labelled
 survey of 222 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
 by `test/readmedriftcheck.sh`, which fails if this sentence and those tables disagree.
+
+One of those papers measures the alternative architecture directly: an independent study found a
+planner that delegates exploration to a sub-agent in an isolated context window losing to search over
+a pre-built index — 65.2% vs 46.2% accuracy, at less than half the cost — with 41.8% of the delegated
+arm's failures happening silently at the planner→sub-agent hand-off
+([arXiv:2608.01507](https://arxiv.org/abs/2608.01507)). A single process answering in one call has no
+hand-off to fail at.
 
 ---
 
