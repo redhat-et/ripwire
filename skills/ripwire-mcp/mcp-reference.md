@@ -128,6 +128,24 @@ curl -s -X POST http://127.0.0.1:8765/mcp -H 'Content-Type: application/json' \
   corpus, which is what makes "the server rebuilds warm" checkable instead of merely claimed. Deliberately
   NOT a fact about the tree — two servers at the identical tree state legitimately disagree on it — so never
   diff it across calls the way you would diff `_index`.
+- **`_fresh` answers the question you actually have** — a third envelope sibling, on EVERY response that
+  reads the index. `_index` and `_reingest` both need a second data point to interpret (one stamp means
+  nothing alone; a cost means nothing without knowing a pass ran). `_fresh` is self-contained: **`"ok"`** —
+  the per-request re-validation ran and found nothing moved, so this answer describes the tree as it is;
+  **`"reindexed"`** — it found the tree had moved and the index was rebuilt *before* the verb answered. There
+  is no `"stale"`: this server re-indexes rather than serving-and-flagging, so a stale serve is not one of
+  the states. **You do not need to ask whether the map is current — read `_fresh`.**
+  `"reindexed"` brings two counts, and the pair is where the honesty is. **`_stale_files`** is how many
+  INDEXED files' recorded `(mtime, size)` moved; **`_changed_files`** is how many files actually differ in
+  CONTENT from the index that was replaced. They disagree in both directions, on purpose: adding a file is
+  `_stale_files:0, _changed_files:1` (no indexed file moved — its directory did), and a bare `touch` with no
+  edit is `_stale_files:1, _changed_files:0` (a stat moved and not one byte). So `_changed_files:0` is your
+  signal that a rebuild happened and nothing about the code changed — do not re-read anything. Like
+  `_reingest`, these are facts about what THIS server did, not about the tree, so never diff them across
+  calls. The irreducible limit is unchanged and worth knowing: a content edit preserving BOTH the mtime and
+  the exact byte length is invisible to a stat-keyed check (`test/freshnesscheck.sh`, and the card A3 section
+  of `docs/EVALS.md` reproduces it on the CLI too) — the edit verbs' own per-write byte-hash guard is what
+  covers that corner for writes.
 - **Working-set personalization (Cody-style)**: the PageRank prior is teleport-biased toward files with
   **uncommitted changes** (`git diff --name-only HEAD`) — β=0.7 of the mass on changed-file symbols, same
   weighting `--map-diff` uses. Ranks auto-shift toward what you're actively editing; a clean tree or a

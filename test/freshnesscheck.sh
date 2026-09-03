@@ -249,6 +249,54 @@ do
 done
 [ "$armfive_fail" -eq 0 ] && ok "arm 5: find_symbol / impact / explore all carry _fresh=ok"
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+echo
+echo "=== arm 6: the CLI's own residual, made executable rather than asserted in prose ==="
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# The stat-keyed check has one irreducible hole — a content edit that preserves BOTH the mtime and the
+# exact byte length — and cachehashcheck.sh's header used to claim the CLI was immune to it ("the CLI path
+# re-crawls and re-hashes bytes every invocation, so an equal mtime never masks a content change"). The
+# A4-P7 stat-gate made that false: a warm run trusts a cached entry whose (size, mtime) still match and
+# whose recorded mtime is strictly older than the cache blob's own, and then never reads the bytes. This
+# arm reproduces it, so the limit is a thing the suite SHOWS rather than a sentence someone has to
+# remember. Two halves, and only the first two assertions are contracts:
+#   • HARD — `--no-cache` must be correct (the escape hatch has to work, or the limit is unbounded).
+#   • HARD — a LENGTH-changing edit with the same restored mtime must be caught (the size discriminator is
+#     the thing that makes the residual a corner rather than the common case).
+#   • OBSERVED — whether the same-(mtime,size) edit is missed. Reported, never failed: closing it needs a
+#     whole-tree re-read, which mcpStale's comment prices at ~13x the warm path. If a future round closes
+#     it, this line says so instead of a gate going red for an improvement.
+CLI="$TMP/cliresidual"; mkdir -p "$CLI/tree"
+CLITMP="$TMP/clitmp"; mkdir -p "$CLITMP"
+OLDSTAMP=202601011200.00
+syms(){ TMPDIR="$CLITMP" "$BIN" "$CLI/tree" --top-k=20 "$@" 2>/dev/null | grep -o 'n="[A-Za-z]*"' | sort -u | tr '\n' ' '; }
+printf 'int alphaaa( int x ) { return x + 1; }\nint caller( void ) { return alphaaa( 2 ); }\n' > "$CLI/tree/a.c"
+touch -t "$OLDSTAMP" "$CLI/tree/a.c"
+COLD="$( syms )"
+case "$COLD" in *alphaaa*) ok "arm 6: cold run indexes the original symbol";; *) no "arm 6: cold run did not index alphaaa (got: $COLD)";; esac
+# the attack: identical byte length, mtime restored to the pre-edit value
+printf 'int betaaaa( int x ) { return x + 1; }\nint caller( void ) { return betaaaa( 2 ); }\n' > "$CLI/tree/a.c"
+touch -t "$OLDSTAMP" "$CLI/tree/a.c"
+WARM="$( syms )"
+NOCACHE="$( syms --no-cache )"
+case "$NOCACHE" in
+    *betaaaa*) ok "arm 6 (HARD): --no-cache sees the new content — the escape hatch is intact";;
+    *)         no "arm 6 (HARD): --no-cache served '$NOCACHE' — a cold parse must never be stale";;
+esac
+case "$WARM" in
+    *betaaaa*) ok "arm 6 (OBSERVED): the same-(mtime,size) edit IS caught on this platform — the residual is narrower than documented";;
+    *alphaaa*) ok "arm 6 (OBSERVED, not a defect): the warm CLI serves the pre-edit symbol — the documented same-(mtime,size) residual, reproduced";;
+    *)         no "arm 6: the warm run named neither spelling (got: $WARM) — the arm did not stage";;
+esac
+# the size discriminator, which is what keeps the residual a corner case
+printf 'int gammaaaLONGER( int x ) { return x + 1; }\nint caller( void ) { return gammaaaLONGER( 2 ); }\n' > "$CLI/tree/a.c"
+touch -t "$OLDSTAMP" "$CLI/tree/a.c"
+LEN="$( syms )"
+case "$LEN" in
+    *gammaaaLONGER*) ok "arm 6 (HARD): a LENGTH-changing edit under the same restored mtime is caught";;
+    *)               no "arm 6 (HARD): a length-changing edit was missed (got: $LEN) — the size discriminator is blind";;
+esac
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "ALL PASS"
