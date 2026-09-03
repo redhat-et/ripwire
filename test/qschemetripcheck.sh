@@ -34,6 +34,12 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-03, PHASE 4b — Rule 2c, the class-name receiver route (test/clsrecvcheck.sh, docs/EVALS.md "Phase 4b"):
+#   kParserVer 75 -> 76 — a Python function DEFINITION's parameter NAMES are now recorded as EMPTY-SPAN VarDecl
+#   bindings (ingest_binds.h::capturePythonParamShadowDecls), the shadow-veto evidence Rules 2b/2c share; every
+#   Python file's binding FACTS change, so the ingest.cpp-side extraction-identity line moved. quality.h's
+#   kIngestParserVerMirror was bumped to 76 in the same diff (qextractionkeycheck), no Snapshot-side function
+#   changed, kQSnapCacheScheme stays 8.
 # 2026-09-02, THE MEMBER-VARIABLE ROUND (card A3, test/fieldusescheck.sh): kParserVer 74 -> 75 — a new
 #   SymKind::Field (C/C++ non-static field_declaration, Python self.x / annotated class attribute) plus the
 #   value-use visitor's member-access capture change every C-family and Python file's def and ref FACTS. The

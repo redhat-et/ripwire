@@ -164,7 +164,7 @@ constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 75;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 76;           // bump on any grammar/.scm/extraction change
                                                       // 75 = 2026-09-02 (member-variable round, card A3): a new
                                                       //    SymKind::Field — C/C++ @definition.field (non-static
                                                       //    field_declaration) and Python (`self.x = …` / annotated
