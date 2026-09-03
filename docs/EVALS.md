@@ -7756,6 +7756,19 @@ where arm (c) loses to arm (b) is bucketed by failure mechanism to a LOCAL repor
 disclosed, and only THEN does any comparative number leave this section. No number from this
 protocol is published in the README or deck until that pass completes.
 
+**Owed, registered 2026-09-03, not yet measured: a follow-up-call-count column.** An external study
+of context compression found that task-completion metrics can hold flat while the interaction cost
+behind them does not — in one of six measured model/regime comparisons, completion moved 80%→85%
+(p = 1.0, i.e. unchanged) while retrieval calls rose 21.0→63.9 (p = .002), and five of six
+comparisons showed a significant retrieval-call surge ([arXiv:2608.16370](https://arxiv.org/abs/2608.16370)).
+Every arm above scores File/Function/Line recall and token cost per instance; none of it currently
+counts how many *extra* tool calls (a second `--for`, an `--expand`, a `--callers`) an agent needed
+to reach the same answer after a given `--token-budget` trimmed the first one. That count is owed as
+a column on this head-to-head and on the ARB lanes below before either is read as settled — a tighter
+budget that only defers tokens into more calls is not the same result as a tighter budget that needs
+none, and right now nothing here can tell the two apart. Not gating anything yet; recorded so the gap
+cannot be quietly forgotten.
+
 ## Agent Retrieval Bench — external loss-first lane, PRE-REGISTERED 2026-08-28 (before any measurement)
 
 **The benchmark.** *Agent Retrieval Bench: Evaluating Repository Context Retrieval for Coding Agents*
