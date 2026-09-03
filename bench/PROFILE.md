@@ -888,7 +888,7 @@ python driver, stdout to `/dev/null`), each arm with its own `TMPDIR` so the cac
 | `hashall` | **option (a) proper**: `head` with `statMatches` forced `false`, so every stat-equal file is read + content-hashed and its cached FACTS are still reused. Prices the read+hash, not a reparse. NOT COMMITTED — a measurement arm, patched in a scratch copy of the tree. |
 
 ```
-TMPDIR=<per-arm> <bin> /Users/qgames/AppDevelopLocal/project2/rw-n4-b --exclude=bench/external   # files=1505
+TMPDIR=<per-arm> <bin> <ripwire-checkout> --exclude=bench/external                                 # files=1505
 TMPDIR=<per-arm> <bin> <corpora>/duckdb                                                          # files=5123
 ```
 

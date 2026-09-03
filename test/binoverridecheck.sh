@@ -77,6 +77,9 @@ EXEMPT = {
     "aiderbytescheck.sh":        "pure-python test of bench/headtohead/r4-2026-08-06/r4_worker.py's aider byte-count wiring; no ripwire binary invocation",
     "argvdiffcheck.sh":          "sanctioned skip fires BEFORE the RIPWIRE_BIN guard, gated on a second env var (RIPWIRE_BASE) neither pargates.py nor regression.sh ever sets; independent of RIPWIRE_BIN/broken-binary state, and already asserted intentional by gateexitcheck.sh arm (D)",
     "nulbytecheck.sh":           "reads the SOURCE TREE (git ls-files), not the binary; BIN is bound for interface uniformity and explicitly documented as unused in the gate's own header",
+    "agentloopfollowupcheck.sh": "pure-python test of bench/agentloop/followup_calls.py over a synthetic pilot json and the committed pilot-6run.json; BIN is bound for interface uniformity and never executed (verified by reading the gate)",
+    "arisefollowupcheck.sh":     "pure-python test of bench/arise-h2h/followup_calls.py over synthetic SWE-agent .traj fixtures; BIN is bound for interface uniformity and never executed (verified by reading the gate)",
+    "routingreportcheck.sh":     "pure-python test of bench/routing_ab_report.py over synthetic routing/substitution jsonl in a temp dir; BIN is bound (`: \"$BIN\"`) for interface uniformity and never executed (verified by reading the gate)",
     "agentloopcodexcheck.sh":    "pure-python test of bench/agentloop prompt-building; the path to build/ripwire is asserted as a STRING, never executed",
     "agentloopgradercheck.sh":   "pure-python test of the agentloop grader's circular-invocation detector; 'ripwire' appears only in fixture command strings, never executed",
     "agentlooplockcheck.sh":     "pure-python/schema test of tasks.lock partitioning; no CLI invocation",
@@ -129,10 +132,12 @@ else:
 #      codexinstallhonestycheck.sh, meterdisclosurecheck.sh — same shape as nulbytecheck.sh. Both test
 #                          skills/install.sh (a shell installer and its banner text), so they need no
 #                          ripwire binary at all. Verified by reading every BIN occurrence in each file:
+#      routingreportcheck.sh — same shape again: the shared BIN= convention line plus a `: "$BIN"` no-op
+#                          annotated "unused"; the subject is bench/routing_ab_report.py, pure python.
 #                          a usage comment, the shared BIN= convention line, and a `: "$BIN"` no-op whose
 #                          trailing comment says it is unused. There is no invocation to find.
 STATICALLY_UNREACHABLE = { "argvdiffcheck.sh", "nulbytecheck.sh",
-                           "codexinstallhonestycheck.sh", "meterdisclosurecheck.sh" }
+                           "codexinstallhonestycheck.sh", "meterdisclosurecheck.sh", "routingreportcheck.sh" }
 grown = []
 for g in sorted( EXEMPT ):
     if g in STATICALLY_UNREACHABLE:
