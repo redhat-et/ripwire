@@ -1723,6 +1723,13 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     std::vector<NodeId>       show  = reach;
     std::sort( show.begin(), show.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
 
+    // A6: the identical isTestSymbol-seeded lens the CLI --impact now runs (graph.h::testSymbolForwardReach)
+    // — mcpclidiffcheck compares root-attribute SETS between the two surfaces, so radius_tested=/
+    // radius_untested= have to ride here too, over the same un-windowed reach set.
+    const std::vector<char> impTestReach   = testSymbolForwardReach( ing, g );
+    const std::size_t       radiusTested   = countTestedIn( ing, impTestReach, reach );
+    const std::size_t       radiusUntested = reach.size() - radiusTested;
+
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
 
@@ -1739,7 +1746,8 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     // exactly the §B4 echo-site divergence the shared-constant rule exists to stop.
     // LB-H: the import tier's clause rides here too — the CLI legend and this one are byte-identical by
     // rule, and an attribute the MCP root now carries has to be defined where the caller meets it.
-    std::fprintf( mem, "%s%s. %s%s%s-->", kImpactLegendOpen, kPageRaiseCapClause, kImpactImportTierLegend,
+    std::fprintf( mem, "%s%s. %s%s%s%s%s-->", kImpactLegendOpen, kPageRaiseCapClause, kImpactImportTierLegend,
+                  kTestedRowLegend, kImpactTestedPartitionLegend,   // A6
                   graphCountDisclosure().c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
     // "is it safe to change X?" reads as the WHOLE blast radius when it can be 3% of it. Same attributes,
@@ -1758,15 +1766,17 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     // LB-H: ONE derivation, shared with the CLI arm (graph.h::impactImportTier) — mcpclidiffcheck compares
     // the two surfaces' attribute sets, and an honesty marker that lands on one of them is the §B4 class.
     const ImportTier imports = impactImportTier( ing, seeds );
-    std::fprintf( mem, "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s%s%s>",
+    std::fprintf( mem, "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s radius_tested=\"%zu\" radius_untested=\"%zu\"%s%s%s%s>",
                   ex( symbol ).c_str(), seeds.size(), reach.size(),
-                  imports.xmlAttrs.c_str(), imRootAttr.c_str(),
+                  imports.xmlAttrs.c_str(), radiusTested, radiusUntested, imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   kGraphCountFloorAttrXml, renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str() );
     for( std::size_t i = ipw.begin; i < ipw.end; ++i )
     { const Symbol& s = ing.symbols[ show[i] ];
       const std::string_view rp = imSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], imRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
-      std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line ); }
+      // A6: tested="1" only (never a literal 0) — see kTestedRowLegend.
+      std::fprintf( mem, "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"%s/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
+                    isTestedByReach( ing, impTestReach, show[i] ) ? " tested=\"1\"" : "" ); }
     // the import tier's rows, after the symbol rows and under their own tag — a different unit, so a
     // different element (see the CLI arm and kImpactImportTierLegend for why they are never one number).
     emitImportRowsXml( mem, ing, std::span<const std::uint32_t>( imports.files ).first( imports.shown ), imRootPrefix,

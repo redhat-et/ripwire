@@ -19,16 +19,22 @@ namespace
 // File-scope (not inside `using namespace rw;`, unlike its callers) — every rw:: type/fn spelled out.
 // R-E (2026-08-17 harvest): rootPrefix empty ⇒ p= stays the ing.files[] spelling unchanged (multi-root, or
 // a caller with no single root to strip) — same convention as serialize()'s pathRel.
+// A6: `testReach` is optional (nullptr on a caller that has not computed the lens) — when given, a row
+// reached by an indexed test (rw::isTestedByReach, the SAME predicate --test-gate's untested= excludes by)
+// gains `"tested":true`; the key is OMITTED otherwise, matching the tested= "absence-meaningful, never
+// false" convention every other tested= site in this tree already follows (serialize.h/verbs_for.h) — zero
+// extra bytes on the untested row, the common case.
 inline void printJsonSymbolRows( const rw::IngestResult& ing, const std::vector<rw::NodeId>& ids, std::size_t begin, std::size_t end,
-                                 std::string_view rootPrefix = {} )
+                                 std::string_view rootPrefix = {}, const std::vector<char>* testReach = nullptr )
 {
     for( std::size_t i = begin; i < end; ++i )
     {
         const rw::Symbol&      s = ing.symbols[ ids[i] ];
         const std::string_view p = rootPrefix.empty() ? std::string_view( ing.files[ s.fileId ] )
                                                        : rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix );
-        std::printf( "%s{\"t\":\"%s\",\"n\":\"%s\",\"p\":\"%s:%u\"}", i == begin ? "" : ",",
-                     rw::symTag( s.kind ), rw::jsonStr( s.name ).c_str(), rw::jsonStr( p ).c_str(), s.line );
+        std::printf( "%s{\"t\":\"%s\",\"n\":\"%s\",\"p\":\"%s:%u\"%s}", i == begin ? "" : ",",
+                     rw::symTag( s.kind ), rw::jsonStr( s.name ).c_str(), rw::jsonStr( p ).c_str(), s.line,
+                     ( testReach && rw::isTestedByReach( ing, *testReach, ids[i] ) ) ? ",\"tested\":true" : "" );
     }
 }
 
@@ -46,6 +52,26 @@ inline void printJsonSymbolRows( const rw::IngestResult& ing, const std::vector<
 inline const char* macroRoleAttr( rw::SymKind k ) noexcept
 {
     return k == rw::SymKind::Macro ? " role=\"macro\"" : "";
+}
+
+// A6: --callers/--callees' 1-hop tested/untested partition, bundled into one call so runCallHierarchy
+// (already this file's largest dispatcher) pays ONE statement instead of separately naming testReach/
+// tested/untested/attr — the counting loop itself lives in graph.h::countTestedIn, shared with --impact.
+struct HopTestedPartition
+{
+    std::vector<char> testReach;
+    std::size_t       tested;
+    std::size_t       untested;
+    std::string       xmlAttr;   // " hop_tested=\"N\" hop_untested=\"M\""
+};
+
+inline HopTestedPartition computeHopTestedPartition( const rw::IngestResult& ing, const rw::Graph& g, const std::vector<rw::NodeId>& rows )
+{
+    std::vector<char> testReach = rw::testSymbolForwardReach( ing, g );
+    const std::size_t tested    = rw::countTestedIn( ing, testReach, rows );
+    const std::size_t untested  = rows.size() - tested;
+    std::string        attr     = " hop_tested=\"" + std::to_string( tested ) + "\" hop_untested=\"" + std::to_string( untested ) + "\"";
+    return { std::move( testReach ), tested, untested, std::move( attr ) };
 }
 
 std::optional<int> runCallHierarchy( const MainDispatch& d )
@@ -114,6 +140,13 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
 
+        // A6 (survey card A6, agent-lsp): tested/untested partition — reuses the identical isTestSymbol-
+        // seeded forwardReach --safe-delete/computeQMetrics already run (graph.h::testSymbolForwardReach),
+        // never a second lens. A row is a partition, never a filter: count= is unchanged and every row still
+        // prints; hop_tested=/hop_untested= sum to result.size() over the FULL (un-windowed) result set, the
+        // same convention reaches=/impact_reaches= already use for radius_tested=/radius_untested=.
+        const HopTestedPartition chTested = computeHopTestedPartition( ing, g, result );
+
         // Count bodyless definitions (declarations with no body): sigEndByte == endByte means no body
         std::size_t bodylessDefsCount = 0;
         if( !wantCallers )  // Only relevant for callees; callers don't have this concern
@@ -174,11 +207,12 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             const std::string attr = "of=\"" + ex( sym ) + "\" defs=\"" + std::to_string( matches.size() )
                                    + "\" count=\"" + std::to_string( result.size() ) + "\""
                                    + ( !wantCallers && bodylessDefsCount > 0 ? " bodyless_defs=\"" + std::to_string( bodylessDefsCount ) + "\"" : "" )
+                                   + chTested.xmlAttr   // A6: hop_tested=/hop_untested=, the same partition on every dialect
                                    + chRootAttr   // R-E: same root= the XML/JSON branches carry
                                    + pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                                      cfg.pageLimit, cfg.pageOffset, chDiscloseCap )
                                    + rw::kGraphCountFloorAttrXml;   // §H4 §3.4 — every dialect carries the marker
-            emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix );
+            emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix, &chTested.testReach );
             return 0;
         }
 
@@ -195,11 +229,12 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             }
             // R-E: the JSON twin of the XML root= below — right after the leading identifying fields.
             if( chSingleRoot ) { std::printf( ",\"root\":\"%s\"", jsonStr( cfg.roots[0] ).c_str() ); }
+            std::printf( ",\"hop_tested\":%zu,\"hop_untested\":%zu", chTested.tested, chTested.untested );   // A6
             std::printf( "%s%s", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap, kJsonPageSyntax ),
                          rw::kGraphCountFloorAttrJson );   // §H4 §3.4 — the JSON dialect's spelling of the same marker
             std::printf( ",\"%s\":[", tag );
-            printJsonSymbolRows( ing, result, pw.begin, pw.end, chRootPrefix );
+            printJsonSymbolRows( ing, result, pw.begin, pw.end, chRootPrefix, &chTested.testReach );
             std::printf( "]}" );
             return 0;
         }
@@ -211,6 +246,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         {
             std::printf( " bodyless_defs=\"%zu\"", bodylessDefsCount );
         }
+        std::printf( "%s", chTested.xmlAttr.c_str() );   // A6: hop_tested=/hop_untested=
         std::printf( "%s%s>", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                     cfg.pageLimit, cfg.pageOffset, chDiscloseCap ),
                      rw::kGraphCountFloorAttrXml );
@@ -218,8 +254,10 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         {
             const Symbol&           s  = ing.symbols[ result[i] ];
             const std::string_view  rp = chSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], chRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
-            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"%s/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
-                         macroRoleAttr( s.kind ) );
+            // A6: tested="1" only (never a literal 0) — the same absence-meaningful convention tested=
+            // already follows everywhere else (serialize.h/verbs_for.h), so an untested row costs 0 bytes.
+            std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"%s%s/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
+                         macroRoleAttr( s.kind ), rw::isTestedByReach( ing, chTested.testReach, result[i] ) ? " tested=\"1\"" : "" );
         }
         std::printf( "</%s>", tag );
         return 0;
@@ -774,19 +812,10 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // tested= lens: an indexed test transitively CALLS the symbol — the identical rule computeQMetrics
     // applies for --metrics/--for/--exemplar (a test symbol is a SEED, never a covered production row
     // itself), re-derived here rather than reached through MainDispatch's testedPtr for the reason in the
-    // header comment above.
-    std::vector<NodeId> testSeeds;
-    testSeeds.reserve( ing.symbols.size() );
-    for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
-    {
-        if( isTestSymbol( ing, i ) )
-        {
-            testSeeds.push_back( i );
-        }
-    }
-    const std::vector<char> testReach = rw::forwardReach( g, testSeeds );
-    const auto isTested = [ & ]( NodeId n ) -> bool
-    { return n < testReach.size() && testReach[n] != 0 && !isTestSymbol( ing, n ); };
+    // header comment above. A6: the seed loop + forwardReach + exclusion now live in graph.h's
+    // testSymbolForwardReach/isTestedByReach — --impact/--callers share this exact pair too.
+    const std::vector<char> testReach = rw::testSymbolForwardReach( ing, g );
+    const auto isTested = [ & ]( NodeId n ) -> bool { return rw::isTestedByReach( ing, testReach, n ); };
 
     bool testedSelf = false;
     for( NodeId def : defs )
@@ -1885,6 +1914,9 @@ struct ImpactView
     std::string_view               rootRaw;     // the unescaped root, for the JSON dialect's own quoting
     int                            pageLimit;
     int                            pageOffset;
+    const std::vector<char>*       testReach;      // A6: testSymbolForwardReach — never null (runImpact always computes it)
+    std::size_t                    radiusTested;    // A6: |reach ∩ tested|, over the FULL (un-windowed) reach set
+    std::size_t                    radiusUntested;  // A6: reaches - radiusTested
 };
 
 // --format=columnar (RESEARCH lever 1): same page window, path-table + parallel arrays.
@@ -1905,12 +1937,14 @@ int emitImpactColumnar( const ImpactView& v )
     const std::string       attr = "of=\"" + std::string( escapeXml( v.sym, esc ) ) + "\" defs=\"" + std::to_string( v.defs )
                                  + "\" reaches=\"" + std::to_string( v.reaches ) + "\""
                                  + " importers=\"" + std::to_string( v.imports.files.size() ) + "\""
+                                 + " radius_tested=\"" + std::to_string( v.radiusTested )       // A6
+                                 + "\" radius_untested=\"" + std::to_string( v.radiusUntested ) + "\""
                                  + std::string( v.rootAttr )
                                  + pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                                    v.pageLimit, v.pageOffset, true )
                                  + rw::kGraphCountFloorAttrXml                              // §H4 §3.4
                                  + rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs );  // W2-F
-    emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix );
+    emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix, v.testReach );
     return 0;
 }
 
@@ -1929,13 +1963,14 @@ int emitImpactJson( const ImpactView& v )
     std::printf( "{\"of\":\"%s\",\"defs\":%zu,\"reaches\":%zu", jsonStr( v.sym ).c_str(), v.defs, v.reaches );
     std::printf( ",\"importers\":%zu,\"shown_importers\":%zu,\"importers_capped\":%s",
                  v.imports.files.size(), v.imports.shown, v.imports.capped ? "true" : "false" );
+    std::printf( ",\"radius_tested\":%zu,\"radius_untested\":%zu", v.radiusTested, v.radiusUntested );   // A6
     if( v.singleRoot ) { std::printf( ",\"root\":\"%s\"", jsonStr( v.rootRaw ).c_str() ); }   // R-E
     std::printf( "%s%s%s,\"impact\":[",
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true, kJsonPageSyntax ),
                  rw::kGraphCountFloorAttrJson,                                                // §H4 §3.4
                  rw::renderDisclosure( v.prD, rw::DiscloseAs::JsonKeys ).c_str() );           // W2-F: ONE keyset
-    printJsonSymbolRows( v.ing, v.show, v.page.begin, v.page.end, v.rootPrefix );
+    printJsonSymbolRows( v.ing, v.show, v.page.begin, v.page.end, v.rootPrefix, v.testReach );
     std::printf( "],\"import_reach\":[" );
     rw::emitImportRowsJson( stdout, v.ing, v.importPage, v.rootPrefix, v.importLazyPage );
     std::printf( "]}" );
@@ -1953,8 +1988,9 @@ int emitImpactXml( const ImpactView& v )
     const auto        ex        = [ & ]( std::string_view t ) -> std::string { return std::string( escapeXml( t, esc ) ); };
     char              ipab[ kPageDisclosureCap ];
     const std::size_t shownRows = v.page.end - v.page.begin;
-    std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s%s%s%s%s>",
-                 ex( v.sym ).c_str(), v.defs, v.reaches, v.imports.xmlAttrs.c_str(), std::string( v.rootAttr ).c_str(),
+    std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s radius_tested=\"%zu\" radius_untested=\"%zu\"%s%s%s%s>",
+                 ex( v.sym ).c_str(), v.defs, v.reaches, v.imports.xmlAttrs.c_str(), v.radiusTested, v.radiusUntested,
+                 std::string( v.rootAttr ).c_str(),
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true ),
                  rw::kGraphCountFloorAttrXml, rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str() );
@@ -1963,7 +1999,9 @@ int emitImpactXml( const ImpactView& v )
         const Symbol&          s  = v.ing.symbols[ v.show[i] ];
         const std::string_view rp = v.singleRoot ? rw::sarif::rootRelativeUri( v.ing.files[ s.fileId ], v.rootPrefix )
                                                  : std::string_view( v.ing.files[ s.fileId ] );
-        std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line );
+        // A6: tested="1" only (never a literal 0) — see kTestedRowLegend.
+        std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"%s/>", symTag( s.kind ), ex( s.name ).c_str(), ex( rp ).c_str(), s.line,
+                     rw::isTestedByReach( v.ing, *v.testReach, v.show[i] ) ? " tested=\"1\"" : "" );
     }
     rw::emitImportRowsXml( stdout, v.ing, v.importPage, v.rootPrefix, v.importLazyPage );
     std::printf( "</impact>" );
@@ -1998,6 +2036,13 @@ std::optional<int> runImpact( const MainDispatch& d )
         const rw::RankDisclosure  prD{ prIters, prConverged, true };   // W2-F: the listing is PageRank-ordered
         std::vector<NodeId>       show  = reach;
         std::sort( show.begin(), show.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
+
+        // A6 (survey card A6, agent-lsp): tested/untested partition of the blast radius, over the FULL
+        // un-windowed reach set (not just the shown page) — the same isTestSymbol-seeded lens --safe-delete's
+        // radius_tested=/radius_untested= already name (README:1025), never re-derived.
+        const std::vector<char> imTestReach     = rw::testSymbolForwardReach( ing, g );
+        const std::size_t       imRadiusTested   = rw::countTestedIn( ing, imTestReach, reach );
+        const std::size_t       imRadiusUntested = reach.size() - imRadiusTested;
         // ── LB-H (r10 §5): the IMPORT tier — every file that directly imports a file defining SYM. ONE
         // measurement (graph.h::impactImportTier) feeds all three dialects AND the MCP twin, so the two
         // surfaces cannot drift. The two reaches stay separate all the way to the bytes: a separate count
@@ -2015,8 +2060,9 @@ std::optional<int> runImpact( const MainDispatch& d )
             // twin cannot drift from this wording (the §B4 echo-site class).
             // LB-H: the import-tier clause is the columnar variant under --format=columnar, because that
             // form carries the count without the rows and a reader must be told which shape they hold.
-            std::printf( "%s%s. %s%s%s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
+            std::printf( "%s%s. %s%s%s%s%s-->", rw::kImpactLegendOpen, rw::kPageRaiseCapClause,
                          cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend,
+                         rw::kTestedRowLegend, rw::kImpactTestedPartitionLegend,   // A6
                          rw::graphCountDisclosure().c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         }
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
@@ -2026,7 +2072,8 @@ std::optional<int> runImpact( const MainDispatch& d )
         const ImpactView view{ ing, cfg.impactSym, seeds.size(), reach.size(), show,
                                pageWindow( show.size(), effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ), cfg.pageOffset ),
                                imports, importPage, importLazyPage, prD, imSingleRoot, imRootPrefix, imRootAttr,
-                               imSingleRoot ? cfg.roots[0] : std::string_view(), cfg.pageLimit, cfg.pageOffset };
+                               imSingleRoot ? cfg.roots[0] : std::string_view(), cfg.pageLimit, cfg.pageOffset,
+                               &imTestReach, imRadiusTested, imRadiusUntested };
 
         if( cfg.columnar ) { return emitImpactColumnar( view ); }
         if( cfg.json     ) { return emitImpactJson( view ); }

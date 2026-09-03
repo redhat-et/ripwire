@@ -120,14 +120,35 @@ inline void emitPathTable( std::FILE* out, const IngestResult& ing,
     std::fputs( "</paths>", out );
 }
 
+// A6: the optional dense 0/1 `<tested>` column, split out of emitColumnarSymbolRows so that function's own
+// branch count does not grow for a column three of its four callers never ask for.
+inline void emitColumnarTestedColumn( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& rows,
+                                      const std::vector<char>& testReach )
+{
+    std::fputs( "<tested>", out );
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        if( i )
+        {
+            std::fputc( ',', out );
+        }
+        std::fputc( isTestedByReach( ing, testReach, rows[i] ) ? '1' : '0', out );
+    }
+    std::fputs( "</tested>", out );
+}
+
 // COLUMNAR form of a symbol-row verb (--callers/--callees/--impact/--pr-context symbols). `wrapperTag` is the
 // element name ("callers"), `wrapperAttrs` the already-formatted attribute string ("of=\"X\" count=\"17\"").
 // `rows` are the symbol node ids in the caller's already-sorted order. Emits:
 //   <TAG ATTRS format="columnar"><paths>..</paths><cols n= fields="path,name,line,kind">
 //     <path>0,0,1,..</path><name>a,b,..</name><line>12,..</line><kind>fn,..</kind></cols></TAG>
+// A6: `testReach` is optional — when given, "tested" joins fields= and a fifth dense `<tested>0,1,..</tested>`
+// column rides alongside (a parallel array cannot omit a false entry the way an XML attribute can; the
+// column itself is present only when a caller passed the lens, so a caller with no test data pays 0 bytes).
 inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
                                     const char* wrapperTag, const std::string& wrapperAttrs,
-                                    const std::vector<NodeId>& rows, std::string_view rootPrefix = {} )
+                                    const std::vector<NodeId>& rows, std::string_view rootPrefix = {},
+                                    const std::vector<char>* testReach = nullptr )
 {
     std::vector<char> esc;
 
@@ -142,7 +163,7 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
     std::fputs( kColumnarLegend, out );   // §B1.5: once per output, before the element it describes
     std::fprintf( out, "<%s %s format=\"columnar\">", wrapperTag, wrapperAttrs.c_str() );
     emitPathTable( out, ing, uniqueFiles, esc, rootPrefix );
-    std::fprintf( out, "<cols n=\"%zu\" fields=\"path,name,line,kind\">", rows.size() );
+    std::fprintf( out, "<cols n=\"%zu\" fields=\"path,name,line,kind%s\">", rows.size(), testReach ? ",tested" : "" );
 
     // path index array
     std::fputs( "<path>", out );
@@ -190,6 +211,11 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
         std::fputs( symTag( ing.symbols[rows[i]].kind ), out );
     }
     std::fputs( "</kind>", out );
+    // A6: present only when the caller passed the lens — see the wrapper banner and emitColumnarTestedColumn.
+    if( testReach )
+    {
+        emitColumnarTestedColumn( out, ing, rows, *testReach );
+    }
 
     std::fprintf( out, "</cols></%s>", wrapperTag );
 }
