@@ -1294,6 +1294,15 @@ struct SliceFlowSpec
     std::uint32_t       bound = kSliceFlowDefaultDepth;
 };
 
+// the emitter's optional inputs, one struct so the two call sites (CLI, MCP) never grow positional
+// nullptrs: a flow to render, a line seed to disclose, the compact legend tier
+struct SliceEmitOpts
+{
+    const SliceFlowSpec* flow          = nullptr;
+    const SliceSeedInfo* seed          = nullptr;
+    bool                 compactLegend = false;   // --legend=compact: schema="ripwire.slice/v1", rows byte-identical
+};
+
 // the reaching definitions of vars[vi] at line L: the LAST unconditional def row strictly before L in
 // source order (the paper's edge rule, at line grain) PLUS every build-dependent (pp) def row after it —
 // a def the build may compile out cannot be allowed to hide the def it would otherwise replace, so both
@@ -1563,15 +1572,113 @@ inline SliceFlowOut sliceFlowCompute( const SliceScan& scan, std::string_view se
     return out;
 }
 
+// ── the legend ───────────────────────────────────────────────────────────────────────────────────────
+//
+// Emitted by sliceBundleText, kept apart so the emitter's own control flow is about attributes and rows.
+inline std::string sliceLegendText( const SliceEmitOpts& opts )
+{
+    const bool compactLegend = opts.compactLegend;
+    const bool seeded        = opts.seed != nullptr;
+    const bool flowing       = opts.flow != nullptr && opts.flow->out != nullptr;
+    // THE LEGEND. Three tiers, one owner per rule (audit 2026-09-02, F-11: the flow run used to concatenate
+    // two full LIMITS paragraphs restating each other, 88% of the bytes on a small slice):
+    //   • v1 block — every rule of the slice, stated once, numbered so the flow block can point at it;
+    //   • seed / flow blocks — only the vocabulary they add, never a v1 limit restated;
+    //   • compact (--legend=compact, schema="ripwire.slice/v1") — attribute vocabulary only, one block, for
+    //     the many-small-calls seed loop; the payload is byte-identical to the full form.
+    std::string out;
+    if( compactLegend )
+    {
+        out =
+            "<!-- ripwire slice ripwire.slice/v1: name-based intra-procedural def-use rows of one variable in one definition. "
+            "counts=as-classified — defs/uses/vars/steps count what the classifier rowed, neither floors nor totals. "
+            "<s l k t [b] [pp]>: k=def|use|both|scope, t=param|decl|assign|call-arg|read|global|nonlocal, b=declaration line a "
+            "shadowed name binds to (0=unbound), pp=1 build-dependent preprocessor region. Inventory <v n l t [seed]>, vars=count. "
+            "bindings=shadow count; preproc_rows=lines dropped under #if 0; seed/var_from/seed_vars/seed=1 = line-seed disclosure. "
+            "Flow rows add v=variable d=depth f=from-line; steps=flow rows, depth=bound, flow_truncated=1 bounded not complete. "
+            "Limits: a write hidden behind a call (receiver mutation, by-ref/out-param, macro) rows as a use; no alias analysis; "
+            "no control dependence; block scopes separated; C-family #if 0 dropped, other #if kept+flagged. Full legend: omit "
+            "legend=compact (an XML comment cannot spell the flag with its dashes). -->";
+    }
+    else
+    {
+        out =
+            "<!-- ripwire slice: NAME-BASED intra-procedural def-use slice of one variable inside ONE resolved definition (ARISE, "
+            "arXiv:2605.03117). ROWS: one <s> per LINE touching VAR, source order — k= def|use|both|scope (both = the line writes AND "
+            "reads it, `x += y`; scope = a Python global/nonlocal statement: neither read nor write, it introduces the name and "
+            "never anchors a flow), t= the strongest role on the line (param > decl > assign > call-arg > read > global/nonlocal), CDATA "
+            "= the trimmed line. Bare slice=SYM lists the sliceable locals: <v n= l= t=/> per BINDING at its declaration "
+            "line, vars= their count. COUNTS: counts=\"as-classified\" — not the graph verbs' counts_floor= — defs=, uses=, vars= and "
+            "steps= are exact counts of what this classifier ROWED, neither floors nor totals of the program's truth: LOW "
+            "where a write hides behind a call (limit 2), HIGH where a rowed occurrence is not this variable's (a pp=\"1\" row, or a "
+            "same-spelled member/attribute a grammar exposes as a bare identifier — Python/Java `o.v`). LIMITS, stated not implied: "
+            "(1) no alias analysis — a pointer/reference alias is invisible; no flow sensitivity — rows are source-ordered. "
+            "(2) A WRITE HIDDEN BEHIND A CALL IS NOT A DEF: receiver mutation (v.push_back(x), buf.append(s)) rows k=\"use\" t=\"read\", "
+            "and a write through an ARGUMENT — a by-reference/pointer parameter, an out-parameter, a function-like macro (SETIT( m )) — "
+            "rows k=\"use\" t=\"call-arg\", because proving either writes needs the callee's body or the macro's expansion, which "
+            "this slicer lacks; a false def is worse than a missing one (the flow walk stops at the NEXT def), so it declines to guess "
+            "— such a variable reports defs= as its introduction alone and a flow of steps=\"0\": no provable edge, not \"never "
+            "written\". (3) BLOCK SCOPES ARE SEPARATED: a name declared more "
+            "than once inside the definition is that many variables; an occurrence binds to the innermost enclosing scope whose "
+            "declaration precedes it (blocks, loop/if/switch heads, catch clauses, lambdas/closures, per family; JS/TS let/const per "
+            "block, var per function; Go `v := v+1` and Rust `let v = v+1` read the previous binding in their own initializer; Python "
+            "is function-scoped — one binding per name, comprehension/lambda scopes not separated). A shadowed seed carries bindings= "
+            "on the root and b= on every row — the "
+            "declaration line it binds to; b=\"0\" = no declaration inside the definition binds it (an outer name, or a use before its "
+            "declaration). (4) PREPROCESSOR (C-family): a conditional region starting inside the definition is decided only by its "
+            "literal — the body of `#if 0` and the `#else` of `#if 1` are dead, their rows dropped and counted as preproc_rows= "
+            "(absent when zero); every other conditional (`#ifdef`, `#ifndef`, `#if defined(X)`, `#if EXPR`, `#elif`) is "
+            "build-dependent: its rows are kept and flagged pp=\"1\", and in a flow a pp def does not kill the reach of the "
+            "unconditional def before it (both are emitted); macro names in directive text are never occurrences. (5) JS/TS "
+            "destructuring binders (`const { x, y: yy, z = 3, ...rest } = o`, `[a, b] = arr`, destructured parameters, for-of "
+            "patterns) are locals defined at the pattern line; a default's right side and a computed key are reads. "
+            "(6) A reserved word is never an occurrence (a degraded-parse artifact); slicing one refuses like any unknown VAR. "
+            "(7) Intra-procedural: rows never cross into callees/callers (callers/uses give that half). "
+            "Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust — any other language refuses loudly, never an empty "
+            "success. -->";
+
+        if( seeded )
+        {
+            // conditional: the seed vocabulary costs zero bytes on an unseeded run (G4)
+            out +=
+                "<!-- slice-seed: LINE-SEEDED (FILE:LINE — ARISE's (file, line[, variable]) seed). seed= is the seed in force; the "
+                "definition sliced is the innermost indexed one enclosing that line. var_from=\"seed\" = the seed line names exactly "
+                "ONE sliceable local and var= is it — a pre-pick, disclosed, never a guess. Zero or several serve the inventory "
+                "instead: seed_vars= counts the locals that line names, each candidate <v> carries seed=\"1\" — pick a :VAR and re-run. -->";
+        }
+
+        if( flowing )
+        {
+            // only what the flow ADDS — every v1 limit above applies unchanged and is not restated here
+            out +=
+                "<!-- slice-flow: TRANSITIVE cross-statement data-flow — bounded BFS from the seed variable over reaching-definition "
+                "edges: a use reaches the LAST unconditional def of its variable before it in source order, plus any pp=\"1\" def "
+                "after that one (the ARISE slicer's rule; stops at the function boundary like the paper's). flow= back = statements "
+                "whose values feed the seed | fwd = statements the seed's value reaches | both = the union (backward first, "
+                "deduplicated). Seed rows are depth 0 in the v1 shape; each FLOW row adds v= the variable at that step, d= its BFS "
+                "depth, f= the line it was reached FROM (b= as in v1 when v= is shadowed); rows order by (d=, l=, v=). steps= counts "
+                "flow rows; depth= is the bound in force (default 8, slice-depth sets it); flow_truncated=\"1\" = the bound suppressed "
+                "at least one row — bounded here, not proven complete. steps=\"0\" = no PROVABLE edge from this seed — its commonest "
+                "cause is limit (2): receiver mutation leaves no def to anchor on — read the rows, not just the count. EXTRA LIMITS: "
+                "rows are line-granular (a multi-statement line merges and may over-connect) while chaining is statement-anchored (a "
+                "statement spanning lines chains as ONE unit keyed on its first line); data dependence only — no control dependence: "
+                "the guard (if/loop) deciding whether a def executes is never a row. -->";
+        }
+    }
+    return out;
+}
+
 // ── XML assembly ─────────────────────────────────────────────────────────────────────────────────────
 
 inline std::string sliceBundleText( const IngestResult& ing, const std::string& root, NodeId focus,
                                     std::string_view varName, const SliceScan& scan, const std::string& src,
-                                    RedactCounts* redact, const SliceFlowSpec* flowSpec = nullptr,
-                                    const SliceSeedInfo* seedInfo = nullptr )
+                                    RedactCounts* redact, const SliceEmitOpts& opts = {} )
 {
-    const SliceFlowOut* flow = flowSpec != nullptr ? flowSpec->out : nullptr;
-    const Symbol& s = ing.symbols[ focus ];
+    const SliceFlowSpec* flowSpec      = opts.flow;
+    const SliceSeedInfo* seedInfo      = opts.seed;
+    const bool           compactLegend = opts.compactLegend;
+    const SliceFlowOut*  flow          = flowSpec != nullptr ? flowSpec->out : nullptr;
+    const Symbol&        s             = ing.symbols[ focus ];
 
     // R-E: same single-root root= condition every other verb uses (sarif.h); --slice refuses multi-root
     // before reaching here, so rootPrefix is always live.
@@ -1602,91 +1709,7 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
         return { start, end };
     };
 
-    std::string out =
-        "<!-- ripwire slice: NAME-BASED intra-procedural def-use slice of one variable inside ONE uniquely-resolved definition "
-        "(statement-level def-use edges as a queryable agent primitive — the ARISE result, arXiv:2605.03117). LIMITS, stated rather "
-        "than implied: occurrences are identifier-name matches inside the definition's span — no alias analysis (a pointer/reference "
-        "alias is invisible), no flow sensitivity (rows are source-ordered, not dependence-ordered). BLOCK SCOPES ARE SEPARATED: a "
-        "name declared more than once inside the definition is that many variables — an occurrence binds to the innermost enclosing "
-        "scope whose declaration of the name precedes it (C-family block/for/if/switch/while/catch/lambda; Go block/if/for/case/func "
-        "literal, and `v := v + 1` reads the previous binding in its own initializer; Rust block/arm/closure, a re-`let` starting a "
-        "new binding after its initializer; Java block/for/catch/lambda; JS/TS let/const per block, `var` per function). Python is "
-        "function-scoped by the language, so one binding per name (comprehension and lambda scopes are not separated). A shadowed "
-        "seed carries bindings= on the root and b= on every row — the line of the declaration the row binds to, b=\"0\" when no "
-        "declaration inside the definition binds it (an outer/global name, or a use before its declaration); a flow row of a "
-        "shadowed name carries b= too, and the inventory lists one <v> per binding. A WRITE HIDDEN BEHIND A CALL IS NOT COUNTED AS A "
-        "DEF — two shapes, one blind spot: a write a callee performs through the variable itself (RECEIVER MUTATION: v.push_back(x), "
-        "buf.append(s), m.insert(k)) is classified k=\"use\" t=\"read\", and a write a callee or macro performs through an ARGUMENT — a "
-        "by-reference or pointer parameter (fill( buf ) where fill takes T& or T*), an out-parameter, a function-like macro (SETIT( m ) "
-        "expanding to m = 42) — is classified k=\"use\" t=\"call-arg\", because proving either writes needs the receiver's TYPE, the "
-        "callee's SIGNATURE and BODY, or the macro's expansion, and this slicer has none of them. Declining to guess is "
-        "deliberate: a method-name list would mint false defs (v.reserve(n) changes capacity, never the value), and a false def is "
-        "worse than a missing one because the flow walk stops at the NEXT def, so a fabricated one suppresses the real def before it. "
-        "The consequence to read for: a variable written ONLY through method calls, out-parameters or macros reports defs= counting "
-        "just its introduction, and a "
-        "flow of steps=\"0\" — which means \"no def-use edge this slicer can prove\", never \"this variable is never written\". "
-        "counts=\"as-classified\" on the root replaces the graph verbs' counts_floor= marker ON PURPOSE: defs=, uses=, vars= and "
-        "steps= are exact counts of what this name-based classifier ROWED, and are NEITHER floors NOR totals of the variable's real "
-        "defs and uses. They run LOW where a write hides behind a call (the clause above: defs= misses it, uses= carries it) and HIGH "
-        "where a rowed occurrence is not this variable's — a pp=\"1\" row the build may compile out, or a same-spelled member/attribute "
-        "the family's grammar exposes as a bare identifier (Python `o.v`, Java `o.v`). A count here is a claim about the rows, never "
-        "about the program. "
-        "Intra-procedural only: rows never cross into callees/callers "
-        "(the callers/callees/uses verbs give the inter-procedural half). One <s> row per LINE touching VAR: k= def|use|both|scope (both = "
-        "the line writes AND reads it, e.g. `x += y`; scope = a Python global/nonlocal statement — a scope declaration, neither a read "
-        "nor a write, that introduces the name and never anchors a flow), t= the strongest role on the line (param > decl > assign > "
-        "call-arg > read > global/nonlocal), CDATA = the trimmed source line. defs=/uses= count OCCURRENCES, not lines. JS/TS "
-        "destructuring binders — `const { x, y: yy, z = 3, ...rest } = o`, `[a, b] = arr`, a destructured parameter, `for (const { k } "
-        "of xs)` — are locals whose def row is the pattern's line (a default's right side and a computed key are reads). A reserved "
-        "word of the definition's own language "
-        "is never an occurrence or a local — a keyword lexed as an identifier is a degraded-parse artifact and is dropped, so slicing "
-        "one refuses like any unknown VAR. PREPROCESSOR RULE (C-family): a conditional region starting inside the definition is "
-        "decided only by its literal — the body of `#if 0` and the `#else` of `#if 1` are DEAD, their rows are dropped and their "
-        "line count disclosed as preproc_rows= (absent when nothing was dropped), so a never-compiled def can never replace the live "
-        "chain; every OTHER conditional (`#ifdef X`, `#ifndef X`, `#if defined(X)`, `#if EXPR`, `#elif`) depends on the BUILD's macro "
-        "set, which this slicer does not have, so its rows are KEPT and each carries pp=\"1\" — read a pp=\"1\" def as one the build "
-        "may compile out, and in a flow it does not kill the reach of the unconditional def before it (both are emitted). Macro "
-        "names in `#ifdef`/`#if` text are never occurrences. Bare slice=SYM (no :VAR) lists the sliceable "
-        "locals instead (<v n= l= t=/> rows at their first-def line, vars= the count). Languages served: C/C++/ObjC (+CUDA/Metal via "
-        "the C-family grammars), Python, JS/TS, Go, Java, Rust — every other language refuses loudly, never an empty success. -->";
-
-    if( seedInfo != nullptr )
-    {
-        // conditional, like the flow legend below: the seed vocabulary is defined exactly where a reader
-        // meets it and costs zero bytes on an unseeded run (G4).
-        out +=
-            "<!-- slice-seed: this slice was LINE-SEEDED (the at grammar, FILE:LINE — ARISE's own (file, line[, variable]) seed). "
-            "seed= is the seed in force; the definition sliced is the innermost indexed one enclosing that line. var_from=\"seed\" "
-            "means the seed line names exactly ONE sliceable local and var= is it — a pre-pick, disclosed, never a guess. A seed "
-            "line naming zero or several sliceable locals serves the inventory instead: seed_vars= counts the locals that line "
-            "names, and each candidate <v> row carries seed=\"1\" so the caller can pick a :VAR and re-run. -->";
-    }
-
-    if( flow != nullptr )
-    {
-        out +=
-            "<!-- slice-flow: TRANSITIVE cross-statement data-flow slice — bounded BFS from the seed variable over "
-            "reaching-definition def-use edges (a use of a variable reaches the LAST definition of it in source order before it "
-            "— the ARISE paper's own slicer semantics, arXiv:2605.03117; like the paper's, this slicer stops at the function "
-            "boundary, the inter-procedural half being the callers/impact verbs). flow= is the direction: back = statements whose "
-            "values feed the seed, fwd = statements the seed's value reaches, both = the union of the two walks (backward first, "
-            "deduplicated). The seed variable's own rows are depth 0 and keep the v1 shape; every FLOW row adds v= the variable "
-            "at that step, d= the BFS depth it was reached at, f= the line it was reached FROM. Flow rows order by (d=, l=, v=) "
-            "— a stated contract, not a walk artifact. steps= counts flow rows; depth= is the bound in force (default "
-            "8, set with slice-depth); flow_truncated= \"1\" means the bound suppressed at least one row — the slice is bounded "
-            "here, NOT proven complete; its absence means the walk finished inside the bound. steps=\"0\" is as-classified like every "
-            "other count here (counts=\"as-classified\" above): it means no def-use edge was PROVABLE from this seed, never that the variable "
-            "has no data flow. Its commonest cause is v1's receiver-mutation limit above — a variable whose only writes are method "
-            "calls ON it (queue.push_back(x)) has no def for the walk to anchor on, so both directions return zero while the v1 "
-            "rows still SHOW those lines, classified as reads. Read the rows, not just the count. EXTRA LIMITS on top of v1's: "
-            "line-granular ROWS (a multi-statement line merges and may over-connect) over statement-anchored CHAINING (a "
-            "statement spanning several lines chains as ONE unit keyed on its first line), and flow follows "
-            "NAMES, not values — no alias analysis, no flow sensitivity beyond source order; a shadowed name's bindings walk separately "
-            "(b=, v1's scope rule above), never into each other's block. DATA dependence "
-            "only — no control dependence: the guard (if/loop) deciding whether a def executes is never a row. A pp=\"1\" def (build-"
-            "dependent preprocessor region, v1's rule above) is a reaching def AND so is the unconditional def before it — the walk "
-            "passes through it in both directions rather than let a def the build may drop hide the one it would replace. -->";
-    }
+    std::string out = sliceLegendText( opts );
 
     out += "<slice sym=\"";  out += ex( s.name );
     out += "\" p=\"";        out += ex( rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix ) );
@@ -1694,6 +1717,10 @@ inline std::string sliceBundleText( const IngestResult& ing, const std::string& 
     out += "\" t=\"";        out += symTag( s.kind );
     out += "\" lang=\"";     out += langTag( s.lang );
     out += "\"";
+    if( compactLegend )
+    {
+        out += " schema=\"ripwire.slice/v1\"";   // the versioned compact dialect id, grep's placement (right after the identity attrs)
+    }
 
     if( seedInfo != nullptr )
     {

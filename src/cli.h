@@ -54,7 +54,7 @@ struct Config
     bool             json            = false;              // --json (L2): the SAME content as the XML, machine-parseable, for the
                                                            // CORE verbs ONLY (default map, --for, --pack-task, --callers/--callees/
                                                            // --impact, --quality-delta, --test-gate). Keys mirror the XML attr names
-    std::string_view legend;                               // --legend=full|compact: opt-in schema prose posture for --for/--grep
+    std::string_view legend;                               // --legend=full|compact: opt-in schema prose posture for --for/--grep/--slice
                                                            // 1:1. Every other verb refuses loudly (stderr + exit 1) rather than
                                                            // silently emitting XML — see main.cpp's jsonUnsupportedVerb().
     int              detail          = 0;                  // --detail=N (RESEARCH lever 3): with --for, emit FULL bodies for the
@@ -1980,8 +1980,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --format=candidates        (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
-        "    --legend=full|compact     output legend posture for --for and --grep/--regex only. full is byte-identical to the\n" "                               default; compact keeps every data/completeness attribute, adds a versioned schema id,\n"
-        "                               and shortens repeated explanatory prose. Unsupported verbs refuse.\n"
+        "    --legend=full|compact     output legend posture for --for, --grep/--regex and --slice (+--slice-flow) only. full is\n" "                               byte-identical to the default; compact keeps every data/completeness attribute, adds a\n"
+        "                               versioned schema id (ripwire.for/v1, ripwire.grep/v1, ripwire.slice/v1), and shortens\n"
+        "                               repeated explanatory prose — the slice rows are byte-identical to the full form, so the\n"
+        "                               many-small-calls seed loop pays the rules once, not per call. Unsupported verbs refuse.\n"
         "    --json                     machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr\n"
         "                               names 1:1 — supported for the default map, --for, --pack-task, --callers/--callees/\n"
         "                               --impact, --quality-delta, --test-gate (the CI/scripting verbs). Every other verb\n"
@@ -3217,9 +3219,9 @@ static inline void validateLegendModifier( Config& c ) noexcept
                       int( c.legend.size() ), c.legend.data() );
         c.ok = false;
     }
-    if( c.forTask.empty() && c.grep.empty() )
+    if( c.forTask.empty() && c.grep.empty() && c.sliceSpec.empty() )
     {
-        std::fprintf( stderr, "ripwire: --legend=%.*s is supported by --for, --grep and --regex only — pass one of those verbs\n",
+        std::fprintf( stderr, "ripwire: --legend=%.*s is supported by --for, --grep, --regex and --slice only — pass one of those verbs\n",
                       int( c.legend.size() ), c.legend.data() );
         c.ok = false;
     }

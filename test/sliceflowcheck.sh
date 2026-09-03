@@ -41,6 +41,9 @@
 #        inventory lists each binding, and the legend states the scope rule per family
 #   (29) JS destructuring chains (s <- x,y <- o) and the widened under-count clause: the legend names
 #        by-reference/out-parameter/macro writes beside receiver mutation, and defines k=scope
+#   (30) legend density (F-11): the flow legend never restates a v1 limit (one block owns each
+#        rule), both blocks fit a byte budget, and --legend=compact serves the slice family with a
+#        versioned schema id and byte-identical rows
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/sliceflowcheck.sh   |   bash test/sliceflowcheck.sh path/to/ripwire
 
@@ -725,6 +728,48 @@ fi
 printf '%s' "$L29" | grep -q 'scope' && printf '%s' "$L29" | grep -q 'nonlocal' && printf '%s' "$L29" | grep -qi 'destructur' \
     && ok "(29b) the legend defines k=scope (global/nonlocal) and names destructuring binders" \
     || no "(29b) the legend must define k=scope / t=global|nonlocal and name destructuring"
+
+# ── (30) one legend owns each rule; both fit a budget; compact is admitted ─────────────────────────
+# RED against the pre-fix binary: the flow run concatenated two full LIMITS paragraphs (audit F-11:
+# 2 340 + 2 013 B restating alias/shadowing/receiver), and --legend=compact refused the slice family.
+legbytes(){ printf '%s' "$( legend "$1" )" | wc -c | tr -d ' '; }
+FL="$( run --slice=pipeline:out --slice-flow=both )"; FV="$( run --slice=pipeline:out )"
+nAlias="$( printf '%s' "$( legend "$FL" )" | grep -o 'alias analysis' | wc -l | tr -d ' ' )"
+nHidden="$( printf '%s' "$( legend "$FL" )" | grep -oi 'hidden behind a call' | wc -l | tr -d ' ' )"
+[ "$nAlias" = 1 ] && [ "$nHidden" = 1 ] \
+    && ok "(30a) the flow run states the alias limit once and the hidden-write limit once — the flow block does not restate v1" \
+    || no "(30a) the flow legend restates v1's limits (alias x$nAlias, hidden-write x$nHidden — each must appear exactly once)"
+v1b="$( legbytes "$FV" )"; flb="$( legbytes "$FL" )"; add=$(( flb - v1b ))
+[ "$v1b" -le 3584 ] && [ "$add" -le 1400 ] \
+    && ok "(30b) legend budget: v1 legend $v1b B (<= 3584), the flow addendum $add B (<= 1400)" \
+    || no "(30b) legend over budget: v1 $v1b B (budget 3584), flow addendum $add B (budget 1400) — the essay belongs in docs/COMMANDS.md"
+# compact: admitted, versioned, rows byte-identical to the full form (modulo the schema attribute)
+CF="$( run --slice=pipeline:out --slice-flow=both --legend=compact )"; rcC="$( rc --slice=pipeline:out --slice-flow=both --legend=compact )"
+[ "$rcC" = 0 ] && printf '%s' "$( elem "$CF" )" | grep -q '^<slice [^>]*schema="ripwire.slice/v1"' \
+    && ok "(30c) --legend=compact serves --slice-flow with schema=\"ripwire.slice/v1\" on the root" \
+    || { no "(30c) --legend=compact must serve the slice family with a ripwire.slice/v1 schema id (rc=$rcC)"; printf '%s\n' "$CF" | head -c 400; }
+strip(){ printf '%s' "$( elem "$1" )" | sed 's/ schema="ripwire.slice\/v1"//'; }
+[ -n "$( elem "$FL" )" ] && [ "$( strip "$CF" )" = "$( strip "$FL" )" ] && printf '%s' "$( elem "$FL" )" | grep -q 'v="stray"' \
+    && ok "(30c) compact rows are byte-identical to the full form (payload untouched, non-zero rows)" \
+    || no "(30c) compact must change the legend only — the <slice> element differs from the full form"
+cb="$( legbytes "$CF" )"
+[ "$cb" -gt 0 ] && [ "$cb" -le 1024 ] && [ "$cb" -lt "$flb" ] \
+    && ok "(30c) compact legend is $cb B (<= 1024, and smaller than the full $flb B)" \
+    || no "(30c) compact legend must be a real saving: $cb B (budget 1024, full is $flb B)"
+# an XML comment must not contain '--': the compact legend cannot spell a flag with its dashes (xmllint is the G4 gate)
+if command -v xmllint >/dev/null 2>&1; then
+    ( cd "$WORK" && "$BIN" . --slice=pipeline:out --slice-flow=both --legend=compact --no-cache 2>/dev/null | xmllint --noout - ) \
+        && ( cd "$WORK" && "$BIN" . --slice=pipeline --legend=compact --no-cache 2>/dev/null | xmllint --noout - ) \
+        && ok "(30c) xmllint: compact output (flow + inventory) is well-formed XML" \
+        || no "(30c) xmllint: compact output is NOT well-formed XML (a '--' inside the legend comment?)"
+fi
+[ "$( run --slice=pipeline:out --legend=full )" = "$FV" ] && [ "$( rc --slice=pipeline --legend=compact )" = 0 ] \
+    && ok "(30c) explicit --legend=full is byte-identical to the default; compact serves the bare inventory too" \
+    || no "(30c) --legend=full must not change output, and compact must serve the inventory form"
+E30="$( err --callers=pipeline --legend=compact )"
+[ "$( rc --callers=pipeline --legend=compact )" != 0 ] && printf '%s' "$E30" | grep -q -- '--legend=compact.*--for.*--grep.*--regex.*--slice' \
+    && ok "(30c) an unsupported verb still refuses compact, and the refusal names --slice among the served verbs" \
+    || { no "(30c) the compact refusal must still fire for --callers and list --slice"; printf '%s\n' "$E30"; }
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

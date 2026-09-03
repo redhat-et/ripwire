@@ -1190,9 +1190,11 @@ std::optional<int> runSlice( const MainDispatch& d )
         flowSpec.out = &flowOut;
     }
 
-    const std::string xml = slicev::sliceBundleText( ing, d.root, focus, varName, scan, src, d.redactPtr,
-                                                     flowActive ? &flowSpec : nullptr,
-                                                     seededRun ? &seedInfo : nullptr );
+    slicev::SliceEmitOpts emit;
+    emit.flow          = flowActive ? &flowSpec : nullptr;
+    emit.seed          = seededRun ? &seedInfo : nullptr;
+    emit.compactLegend = cfg.legend == "compact";   // the ripwire.slice/v1 dialect: legend only, rows byte-identical
+    const std::string xml = slicev::sliceBundleText( ing, d.root, focus, varName, scan, src, d.redactPtr, emit );
     std::fwrite( xml.data(), 1, xml.size(), stdout );
     return 0;
 }
