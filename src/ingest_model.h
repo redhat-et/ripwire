@@ -159,6 +159,52 @@ inline void collapseObjCDeclDefs( std::vector<RawDef>& rawDefs )
 //     ingests, flatten the per-def lex stats into the per-symbol CSR. The two stay in ONE helper so
 //     the "rawDefs is aligned 1:1 with result.symbols after the sort" invariant the CSR flatten
 //     rides on is established and consumed in the same scope (and the profile nesting is unchanged).
+// member-variable round (card A3): split the FIELD defs out of rawDefs BEFORE symbols are assigned, so
+// result.symbols — and every 1:1 array aligned with it (the lex CSR, the def-span index) — never holds a
+// field. Stable: both halves keep dedupRawDefs' order. The returned vector is what assignFields consumes.
+inline std::vector<RawDef> partitionFieldDefs( std::vector<RawDef>& rawDefs )
+{
+    std::vector<RawDef> fieldDefs;
+    const auto isField = []( const RawDef& d ) noexcept { return d.kind == SymKind::Field; };
+    const auto firstField = std::stable_partition( rawDefs.begin(), rawDefs.end(), [ & ]( const RawDef& d ) noexcept { return !isField( d ); } );
+    fieldDefs.reserve( static_cast<std::size_t>( rawDefs.end() - firstField ) );
+    std::move( firstField, rawDefs.end(), std::back_inserter( fieldDefs ) );
+    rawDefs.erase( firstField, rawDefs.end() );
+    return fieldDefs;
+}
+
+// The field side table (IngestResult::fields): the same (fileId, line, name, startByte) order assignSymbols
+// uses, id = the index into `fields` (a FieldId — never a NodeId). Only the facts a member answer needs.
+inline void assignFields( IngestResult& result, std::vector<RawDef>& fieldDefs )
+{
+    std::sort( fieldDefs.begin(), fieldDefs.end(),
+               []( const RawDef& a, const RawDef& b ) noexcept
+               {
+                   if( a.fileId != b.fileId ) { return a.fileId < b.fileId; }
+                   if( a.line != b.line )     { return a.line < b.line; }
+                   if( a.name != b.name )     { return a.name < b.name; }
+                   return a.startByte < b.startByte;
+               } );
+    result.fields.reserve( fieldDefs.size() );
+    for( std::uint32_t fieldIndex = 0; fieldIndex < fieldDefs.size(); ++fieldIndex )
+    {
+        const RawDef& d = fieldDefs[ fieldIndex ];
+        Symbol f;
+        f.id           = fieldIndex;
+        f.kind         = SymKind::Field;
+        f.lang         = d.lang;
+        f.fileId       = d.fileId;
+        f.line         = d.line;
+        f.sigStartByte = d.startByte;
+        f.sigEndByte   = d.endByte;
+        f.endByte      = d.endByte;
+        f.loc          = d.loc;
+        f.name         = d.name;
+        f.scope        = d.scope;
+        result.fields.push_back( std::move( f ) );
+    }
+}
+
 inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, bool captureValueUses )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: assign symbols" );
@@ -295,15 +341,7 @@ inline DefSpanIndex buildDefSpanIndex( const IngestResult& result, const std::ve
     for( std::uint32_t i = 0; i < rawDefs.size(); ++i )
     {
         const std::size_t spanIndex = fileSpanWrite[ rawDefs[ i ].fileId ]++;
-        // member-variable round (card A3): a FIELD never encloses anything. Its declaration sits inside the
-        // owner's body, so a real span here would make the field the innermost definition around the S5-E
-        // HAS-A type ref captured on that very line (fromSymbol used to be the CLASS, and buildFieldNarrowTables,
-        // composeEdges and the --lego view all key on that) and around a default initializer's own reads.
-        // A zero-width span contains no byte, so every reference attributes exactly as it did before fields
-        // were symbols — byte-identical fromSymbol corpus-wide. The field's own [start, end) stays on the
-        // Symbol (--expand reads it there), only this containment index is blind to it.
-        const bool isField = rawDefs[ i ].kind == SymKind::Field;
-        index.spans[ spanIndex ] = { rawDefs[ i ].startByte, isField ? rawDefs[ i ].startByte : rawDefs[ i ].endByte, result.symbols[ i ].id };
+        index.spans[ spanIndex ] = { rawDefs[ i ].startByte, rawDefs[ i ].endByte, result.symbols[ i ].id };
     }
 
     for( std::size_t fileId = 0; fileId < result.files.size(); ++fileId )
@@ -550,19 +588,15 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
 
 // member-variable round (card A3): a Python field is DEFINED by its first `self.x = …` assignment, and that very
 // identifier is what the value-use visitor captured as a role="write" ref — the definition's own name is not a
-// use of it (usescheck.sh 3c pins the same rule for C++ locals). rawDefs is aligned 1:1 with result.symbols
-// (assignSymbols), so a Field def's (fileId, nameByte) is the exact site to drop. C/C++ fields never reach here
-// (a field_identifier in a declarator is not a value use), so the pass is a no-op there; every other ref keeps
-// its position and order.
-inline void dropFieldDefinitionSites( IngestResult& result, const std::vector<RawDef>& rawDefs )
+// use of it (usescheck.sh 3c pins the same rule for C++ locals). `fieldDefs` is partitionFieldDefs' output, so a
+// def's (fileId, nameByte) is the exact site to drop. C/C++ fields never reach here (a field_identifier in a
+// declarator is not a value use), so the pass is a no-op there; every other ref keeps its position and order.
+inline void dropFieldDefinitionSites( IngestResult& result, const std::vector<RawDef>& fieldDefs )
 {
     HashMap<std::uint64_t, char> defSite;
-    for( const RawDef& d : rawDefs )
+    for( const RawDef& d : fieldDefs )
     {
-        if( d.kind == SymKind::Field )
-        {
-            defSite.try_emplace( ( std::uint64_t( d.fileId ) << 32 ) | d.nameByte, 1 );
-        }
+        defSite.try_emplace( ( std::uint64_t( d.fileId ) << 32 ) | d.nameByte, 1 );
     }
     if( defSite.empty() )
     {

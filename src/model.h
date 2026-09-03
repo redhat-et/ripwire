@@ -37,7 +37,7 @@ template<class K, class V> using HashMap = ankerl::unordered_dense::map<K, V>;
 using NodeId = std::uint32_t;
 inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 
-// symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro|field").
+// symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro").
 // Macro (the macro-edges round) is APPENDED before Other so no existing kind renumbers: a preprocessor
 // `#define` definition (@definition.macro — C/C++ preproc_def/preproc_function_def, Rust macro_definition).
 // Previously the C/Rust captures mapped to Function, which read as a lie on every t= surface; the kind now
@@ -46,11 +46,15 @@ inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
 // call-shaped invocation of its name is a role="macro" edge, never role="call" (RefRole::Macro below).
 // Field (the member-variable round, card A3) is APPENDED after Macro for the same reason: a per-object data
 // member of a class/struct/union (C/C++: a non-static field_declaration; Python: the first `self.x = …` in a
-// method, or an annotated class-body attribute). A field is a symbol with an OWNER-QUALIFIED canonical id
-// (`path::Owner::field`, selector spelling `Owner.field`), NEVER a call-graph node with edges: no reference
-// ever resolves to it through buildGraph, so PageRank is unchanged; its use-sites live in the --uses index,
-// resolved per site (graph.h collectFieldUseSites). Static data members are NOT fields (a class-static
-// CONSTANT keeps its t="var" capture; a mutable static member is not extracted — disclosed).
+// method, or an annotated class-body attribute). THE RULE (registered in docs/EVALS.md): a field is NEVER a
+// member of IngestResult::symbols — it lives in IngestResult::fields, a side table with its own index space —
+// so it enters no map row, no symbols= count, no PageRank/--for/--recall/--exemplar ranking, no adaptive cut,
+// no lint/atom attribution, no context-ratio unit, no --tree/--outline count and no quality-delta universe.
+// It is addressable ONLY through the member-selector surfaces (--uses=Owner.field, the bare-name refusal that
+// lists the Owner.field spellings, --nonlocal-state's disclosure); its use-sites are resolved per site by
+// graph.h collectFieldUseSites. Static data members are NOT fields (a class-static CONSTANT keeps its t="var"
+// capture; a mutable static member is not extracted — disclosed). symTag("field") exists for the RawDef kind
+// and diagnostics; no map emitter ever reaches it.
 enum class SymKind : std::uint8_t { Function, Method, Class, Struct, Interface, Var, Section, Macro, Field, Other };
 
 inline const char* symTag( SymKind k ) noexcept
@@ -764,7 +768,11 @@ struct IngestResult
     CrawlSkips              crawlSkips;   // §L1 skip taxonomy + unindexed-ext histogram — see CrawlSkips
     std::vector<FileHealth> fileHealth;   // §L1 parse health, parallel to `files` — see FileHealth
 
-    std::vector<Symbol>      symbols;      // definitions
+    std::vector<Symbol>      symbols;      // definitions (NEVER a SymKind::Field — see fields)
+    std::vector<Symbol>      fields;       // member-variable round (card A3): the FIELD side table. Symbol::id is the index
+                                           // INTO THIS VECTOR (a FieldId, not a NodeId), kind == SymKind::Field, scope == the
+                                           // owner, canonical id path::Owner::field. Sorted like symbols ((fileId, line, name,
+                                           // startByte)); reachable only through graph.h's resolveFieldSelector.
     std::vector<Reference>   references;   // unresolved calls
     std::vector<Include>     includes;     // #include / import directives (physical dependencies)
     std::vector<Binding>     bindings;     // P2-D Rule 2: local var→type bindings (`Foo x;`), for receiver-var narrowing
@@ -1003,6 +1011,15 @@ struct ShadowEvidence
     HashMap<std::string, char>                     fnBindKeys;
     HashMap<std::string, char>                     defNames;
 };
+
+// member-variable round (card A3): is this Read/Write reference a MEMBER ACCESS (`o.f`, `this->f`, `self.f`)?
+// On a Read/Write ref, recv != None means exactly that (ingest_sidecap.h stampMemberReceiver). Such a site
+// names a FIELD — which is never in ing.symbols — so every name-resolving consumer of the use-site stream
+// (contextratio.h, nonlocalstate.h) skips it; the field index (graph.h collectFieldUseSites) answers it.
+inline bool isMemberAccessSite( const Reference& r ) noexcept
+{
+    return ( r.role == RefRole::Read || r.role == RefRole::Write ) && r.recv != RecvKind::None;
+}
 
 inline void buildShadowKey( std::string& key, std::uint32_t fromSymbol, std::string_view name )
 {

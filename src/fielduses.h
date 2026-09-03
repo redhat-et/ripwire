@@ -43,20 +43,11 @@ struct FieldUsesArgs
     int              pageOffset;     // --offset / MCP offset
 };
 
-// The one selector shape the member form serves: a resolution to exactly ONE symbol that is a field. kNoNode
-// otherwise — two fields (the owner refusal), a field beside a same-named function (the historic union), or
-// nothing at all (the not-found path) all fall through to the name-matched arm.
-inline NodeId singleFieldOf( const IngestResult& ing, std::span<const NodeId> defs ) noexcept
+inline std::string renderFieldUses( const IngestResult& ing, FieldId fieldId, const FieldUsesArgs& args )
 {
-    const bool one = defs.size() == 1 && defs[ 0 ] < ing.symbols.size() && ing.symbols[ defs[ 0 ] ].kind == SymKind::Field;
-    return one ? defs[ 0 ] : kNoNode;
-}
-
-inline std::string renderFieldUses( const IngestResult& ing, NodeId fieldSym, const FieldUsesArgs& args )
-{
-    VERIFY( fieldSym < ing.symbols.size() );
-    const Symbol&        field  = ing.symbols[ fieldSym ];
-    const FieldUseAnswer answer = collectFieldUseSites( ing, fieldSym );
+    VERIFY( fieldId < ing.fields.size() );
+    const Symbol&        field  = ing.fields[ fieldId ];
+    const FieldUseAnswer answer = collectFieldUseSites( ing, fieldId );
 
     struct Row { std::uint32_t fileId; std::uint32_t line; RefRole role; std::uint32_t candidateCount; std::string in; };
     std::vector<Row> rows;
@@ -131,25 +122,31 @@ inline std::string renderFieldUses( const IngestResult& ing, NodeId fieldSym, co
     return out;
 }
 
-// The CLI --uses arm, behind ONE branch in runUses: the member answer (exit 0), the several-owners refusal
-// (exit 1), the unserved-language refusal (exit 1), or nullopt when the selector is not a member shape at all
-// and the name-matched arm proceeds. `defs` is what resolveAllByNameQualified returned; `root` is roots[0].
+// The CLI --uses arm, behind ONE branch in runUses, entered ONLY when the selector named no symbol (`defs`
+// empty — a name that IS a symbol keeps the historic name-matched answer, union included): the member answer
+// (exit 0), the several-owners refusal (exit 1), the unserved-language refusal (exit 1), or nullopt when the
+// selector names no field either and the not-found path proceeds. `root` is roots[0].
 inline std::optional<int> memberUsesArm( const IngestResult& ing, std::span<const NodeId> defs, std::string_view sym,
                                          bool singleRoot, std::string_view root, int pageLimit, int pageOffset )
 {
-    if( const NodeId field = singleFieldOf( ing, defs ); field != kNoNode )
+    if( !defs.empty() )
     {
-        std::fputs( renderFieldUses( ing, field, FieldUsesArgs{ sym, singleRoot, root, pageLimit, pageOffset } ).c_str(), stdout );
+        return std::nullopt;
+    }
+    const std::vector<FieldId> fields = resolveFieldSelector( ing, sym );
+    if( fields.size() == 1 )
+    {
+        std::fputs( renderFieldUses( ing, fields[ 0 ], FieldUsesArgs{ sym, singleRoot, root, pageLimit, pageOffset } ).c_str(), stdout );
         return 0;
     }
-    if( const std::string refusal = memberOwnerRefusal( ing, defs, sym, "--uses=" ); !refusal.empty() )
+    if( const std::string refusal = memberOwnerRefusal( ing, fields, sym, "--uses=" ); !refusal.empty() )
     {
         std::fprintf( stderr, "ripwire: --uses=%s refused: %s\n", std::string( sym ).c_str(), refusal.c_str() );
         return 1;
     }
     // `Owner.field` on a type whose language extracts no fields refuses BY LANGUAGE NAME — the generic
-    // not-found would read as a typo, and an empty answer as "no uses". Only when nothing resolved at all.
-    if( const std::string unserved = defs.empty() ? memberSelectorUnservedRefusal( ing, sym ) : std::string{}; !unserved.empty() )
+    // not-found would read as a typo, and an empty answer as "no uses".
+    if( const std::string unserved = memberSelectorUnservedRefusal( ing, sym ); !unserved.empty() )
     {
         std::fprintf( stderr, "ripwire: --uses %s\n", unserved.c_str() );
         return 1;

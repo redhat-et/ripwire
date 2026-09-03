@@ -8659,3 +8659,38 @@ for `--nonlocal-state`; this lane shipped neither a widening nor a flag. Fields 
 (the lens's own header: a cell is linkage-scoped state), the legend now says so and points at the member
 selector, and the lens gained the precision the fixture pins (arm G). A `--nonlocal-state` toggle would be
 a new flag with its own help/legend/flag-surface footprint; it is left for a round that wants it.
+
+**THE SIDE-TABLE RULE — orchestrator decision 2026-09-02, registered here as the contract (supersedes the
+"fields stay ordinary symbols" conclusion of the token-cost result above).** The merged-tree battery went red
+on ten gates (moduleconstcheck, atomscheck, contextratiocheck, docdemotecheck, exemplarconfcheck,
+nestedqualcheck, treecheck, adaptivecheck, compactroutecheck, perfharnesscheck), every one because field
+symbols had entered the GENERAL symbol universe: a field owned an atom finding, became a context-ratio unit,
+displaced an exemplar choice, moved a fixture's symbol count, drifted the --for/--recall/--no-route goldens.
+The rule now: **field symbols are indexed for use-site resolution and addressable ONLY through the
+member-selector surfaces** — `--uses=Owner.field` (also `Owner::field` and the canonical id), the bare-name
+refusal that lists the `Owner.field` spellings, `--nonlocal-state`'s disclosure and exclusion, and
+`test/fieldusescheck.sh`. They do NOT enter the flagless map rows or its `symbols=` count, PageRank /
+`--for` / `--recall` / `--no-route` / `--exemplar` ranking, adaptive-cut candidates, lint/atom finding
+attribution (the enclosing NON-field symbol owns the finding), context-ratio units, `--tree` counts,
+`--outline`, the quality-delta symbol universe, or any fixture symbol count. **Implementation:** a field is
+never a member of `IngestResult::symbols`; it lives in `IngestResult::fields`, a side table with its own
+index space (`FieldId`), partitioned out of the raw defs before symbol ids are assigned
+(`ingest_model.h::partitionFieldDefs` / `assignFields`), so every array aligned 1:1 with symbols (the lex
+CSR, the def-span index, the atom/lint attribution, every count) is blind to fields by construction rather
+than by a per-verb filter. `graph.h::resolveFieldSelector` is the ONLY reader of the table besides
+`--nonlocal-state`'s exclusion set. Two consequences applied in the same commit: (a) the Python annotated
+class attribute (`x: T = v`) STAYS a `t="var"` map symbol — the pre-round contract pyshapecheck pins in the
+map — and is not re-kinded (the `self.x` instance attribute is the one Python field shape); (b)
+`--context-ratio` skips a member-access Read/Write ref (`recv != None`), which resolving by NAME would have
+bound `s.name` to every function called `name` — its calibrated input stream is the pre-round one. The map
+legend's `t=` list no longer names `field` (fields never appear in the map); the token stays in the `--uses`
+member-form legend only. **The proof of the rule, measured**: on the same tree, the 8e186bb binary and this
+lane's head are BYTE-IDENTICAL for the flagless map (`.` 21 906 B / 185 rows; `src/` 23 320 B / 186 rows;
+`test/fixture` 1 923 B; `test/fieldusesfix` 2 691 B / 27 rows), `--for` (routed and `--no-route`),
+`--recall`, `--exemplar=fn`, `--tree`, `--lint`, `--context-ratio`, `--adaptive`, `--hotspots`, `--metrics`,
+`--dead-code`, `--clones`, `--callers`. Three verbs differ ON PURPOSE and only where the lane registered a
+change: `--uses` (the one-sentence member-form pointer in the shared legend; the name-wide union now carries
+the member sites), `--nonlocal-state` (the instance-field disclosure sentence and the precision exclusion).
+The 44ac095 golden re-pins this rule made unnecessary (test/golden.xml, fillordercheck's est_tokens) are
+reverted to their 8e186bb bytes; the qschemetrip re-pin stays (it is driven by the kParserVer declaration
+line, which legitimately moved to 75) and so does the README/EVALS gate count (fieldusescheck exists).

@@ -995,9 +995,8 @@ inline bool fieldConstantCaptureKept( TSNode fieldDeclNode, std::string_view src
 //           static member is not per-object state and is not extracted at all (disclosed in the member
 //           legend). Bitfields, references, pointers and arrays all keep — the declarator shape is the
 //           query's business, the storage class is this function's.
-//   Python: the annotated class-body attribute (`x: T [= v]`, @name's parent is the assignment itself) keeps
-//           unconditionally — the `type:` field already discriminated it. The `self.x = …` form (@name's
-//           parent is an `attribute`) keeps iff the receiver is the bare identifier `self` AND the assignment
+//   Python: the `self.x = …` form (@name's parent is an `attribute`) keeps iff the receiver is the bare
+//           identifier `self` AND the assignment
 //           sits inside a function_definition that sits inside a class_definition — `obj.x = …` in a free
 //           function, `cls.x = …`, and a module-level `self.x` (no class) all drop. The per-(class, name)
 //           first-wins dedup is ingest_sidecap.h's, after this gate.
@@ -1016,10 +1015,6 @@ inline bool fieldCaptureKept( Lang lang, TSNode nameNode, TSNode roleNode, std::
     if( ts_node_is_null( parent ) )
     {
         return false;
-    }
-    if( std::strcmp( ts_node_type( parent ), "assignment" ) == 0 )
-    {
-        return true;    // the annotated class-body attribute — the query's own class_definition/type: shape did the work
     }
     if( std::strcmp( ts_node_type( parent ), "attribute" ) != 0 )
     {

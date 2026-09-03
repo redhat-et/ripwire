@@ -1869,20 +1869,20 @@ inline std::string usesSelectorRefusal( const IngestResult& ing, const std::stri
         return qualifiedSelectorRefusal( ing, symbol, "--uses=" );   // "" when the qualified spelling resolves
     }
 
-    const std::vector<NodeId> defs = resolveAllByName( ing, symbol );
-    // member-variable round (card A3): a bare field name declared by several owners refuses with the Owner.field
-    // spellings — the CLI arm's rule, same message, MCP retry syntax.
-    if( const std::string memberRefusal = memberOwnerRefusal( ing, defs, symbol, "symbol=" ); !memberRefusal.empty() )
-    {
-        return memberRefusal;
-    }
-    if( !defs.empty() )
+    if( !resolveAllByName( ing, symbol ).empty() )
     {
         return {}; // it has a definition — a normal answer
     }
+    // member-variable round (card A3): no symbol — a FIELD? One owner answers (usesText); several owners refuse
+    // with the Owner.field spellings (the CLI arm's rule, same message, MCP retry syntax); an unserved language
+    // refuses by name, as on the CLI.
+    if( const std::vector<FieldId> fields = resolveFieldSelector( ing, symbol ); !fields.empty() )
+    {
+        return memberOwnerRefusal( ing, fields, symbol, "symbol=" );   // "" for one owner — a member answer
+    }
     if( const std::string unserved = memberSelectorUnservedRefusal( ing, symbol ); !unserved.empty() )
     {
-        return unserved;   // `Owner.field` on a language that extracts no fields — refused by language name, as on the CLI
+        return unserved;
     }
 
     // no definition: refuse ONLY if it also has no use-site (early-exit scan — one match is enough to prove
@@ -1929,10 +1929,10 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
     const std::vector<NodeId> defs     = resolveAllByName( ing, sym );
     const bool                external = defs.empty();
 
-    // member-variable round (card A3): ONE resolved field → the per-site renderer the CLI arm prints (fielduses.h).
-    if( const NodeId field = singleFieldOf( ing, defs ); field != kNoNode )
+    // member-variable round (card A3): no symbol but ONE field → the per-site renderer the CLI arm prints (fielduses.h).
+    if( const std::vector<FieldId> fields = defs.empty() ? resolveFieldSelector( ing, sym ) : std::vector<FieldId>{}; fields.size() == 1 )
     {
-        return renderFieldUses( ing, field, FieldUsesArgs{ symbol, ing.realPaths.empty(), root, page.limit, page.offset } );
+        return renderFieldUses( ing, fields[ 0 ], FieldUsesArgs{ symbol, ing.realPaths.empty(), root, page.limit, page.offset } );
     }
 
     struct UseSite { std::uint32_t fileId; std::uint32_t line; RefRole role; std::string in; };

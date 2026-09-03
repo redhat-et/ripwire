@@ -3,7 +3,7 @@
 
 
 class Tally:
-    limit: int = 10                    # line 6: Tally.limit — an annotated class attribute IS a field
+    limit: int = 10                    # line 6: Tally.limit — an annotated class attribute stays a t="var" SYMBOL (not a field)
 
     def __init__(self):
         self.total = 0                 # line 9: Tally.total DEFINITION (the first assignment; a def, not a use)

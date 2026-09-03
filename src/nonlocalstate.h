@@ -93,15 +93,15 @@ inline constexpr std::size_t kRowCap = 40;
 inline HashMap<std::string, char> declaredFieldSet( const IngestResult& ing )
 {
     HashMap<std::string, char> declaredField;
-    const auto ownedField = []( const Symbol& s ) noexcept { return s.kind == SymKind::Field && !s.scope.empty(); };
-    std::ranges::for_each( ing.symbols | std::views::filter( ownedField ),
+    const auto ownedField = []( const Symbol& f ) noexcept { return !f.scope.empty(); };
+    std::ranges::for_each( ing.fields | std::views::filter( ownedField ),   // the field SIDE TABLE — fields are never in ing.symbols
                            [ & ]( const Symbol& s ) { declaredField.try_emplace( s.scope + "\x1f" + s.name, 1 ); } );
     return declaredField;
 }
 
 inline bool isInstanceFieldSite( const IngestResult& ing, const Reference& ref, const HashMap<std::string, char>& declaredField )
 {
-    if( ref.recv != RecvKind::None )
+    if( isMemberAccessSite( ref ) )
     {
         return true;    // a member access (`o.x` / `this->x`)
     }

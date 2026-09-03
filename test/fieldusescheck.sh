@@ -25,12 +25,15 @@
 #   Counter.step  : 11 r                       Counter.label : 40 w
 #   tally.py      : Tally.total 13 w (augmented) · 17 r · 25 r amb=2 — NOT 9 (the defining assignment is the DEF, not a use)
 #                   Meter.total 25 w · 25 r amb=2 (other.total — an untyped receiver is a candidate site of BOTH owners)
-#                   Tally.hits 14 r (receiver of a method call) · Tally.limit: a def with zero use-sites
+#                   Tally.hits 14 r (receiver of a method call) · Tally.limit: the annotated attribute is a t="var"
+#                   SYMBOL (pre-round contract), so its selector takes the name-matched form, not the member form
 #   shapes.go     : Box.width is NOT served (Go) — the selector must REFUSE naming the language
 #
 # Arms:
-#   (A) symbols     — every instance field is a t="field" row with id=path::Owner::field; a class-static constant
-#                     stays t="var"; a static data member and a Go struct field are NOT fields
+#   (A) side table  — THE RULE (docs/EVALS.md): a field is NEVER in the symbol universe. The flagless map carries
+#                     no t="field" row and the 8e186bb symbol count; every instance field answers --uses=Owner.field
+#                     with member= echoing it; a class-static constant and a Python annotated class attribute stay
+#                     t="var"; a static data member and a Go struct field are not fields
 #   (B) golden      — the exact (role, file:line[, amb]) set for Counter.count / Gauge.count / Gauge.level /
 #                     Counter.step / Counter.label, plus the root pinned=/amb_sites=/owners_of_name= arithmetic
 #   (C) known miss  — the alias write (line 42) is ABSENT from BOTH owners' answers (disclosed, never widened)
@@ -73,19 +76,28 @@ expect_rows(){  # $1 selector, $2 label, $3.. expected lines
 
 MAP="$( "$BIN" "$FIX" --no-cache 2>/dev/null )"
 
-# ── (A) symbols ──────────────────────────────────────────────────────────────────────────────────────────
-for id in Counter::count Counter::step Counter::label Gauge::count Gauge::level Gauge::label Gauge::inner \
-          Tally::limit Tally::total Tally::hits Meter::total; do
-    n="${id##*::}"
-    printf '%s' "$MAP" | grep -q "<s t=\"field\"[^>]* n=\"$n\" id=\"[^\"]*::$id\"" \
-        && ok "(A) field symbol $id (t=\"field\", owner-qualified id)" || no "(A) field symbol $id missing or not t=\"field\""
+# ── (A) the side table ───────────────────────────────────────────────────────────────────────────────────
+printf '%s' "$MAP" | grep -q 't="field"' && no '(A) the flagless map carries a t="field" row — fields must never enter the symbol universe' \
+                                          || ok '(A) the flagless map carries no field row (side table only)'
+for fld in Counter.count Counter.step Counter.label Gauge.count Gauge.level Gauge.label Gauge.inner \
+           Tally.total Tally.hits Meter.total; do
+    OUT="$( "$BIN" "$FIX" --uses=$fld --no-cache 2>/dev/null )"
+    [ "$( attr member "$OUT" )" = "$fld" ] && [ "$( attr defs "$OUT" )" = "1" ] \
+        && ok "(A) field $fld answers the member form (member=\"$fld\" defs=\"1\")" || no "(A) field $fld: member=$( attr member "$OUT" ) defs=$( attr defs "$OUT" )"
+done
+for name in count step label level inner hits; do   # (`total` is ALSO a free function in shapes.cpp; `limit` stays a t="var" symbol — both legitimate map rows)
+printf '%s' "$MAP" | grep -q '<s t="var"[^>]* n="limit"' && ok '(A) annotated class attribute limit stays a t="var" map symbol (pre-round contract)' || no '(A) annotated attribute limit is no longer a t="var" symbol'
+printf '%s' "$MAP" | grep -q '<s t="var"[^>]* n="limit"' || true
+    printf '%s' "$MAP" | grep -q "<s t=\"[a-z]*\"[^>]* n=\"$name\"" && no "(A) field name '$name' is a map symbol" || ok "(A) '$name' is not a map symbol"
 done
 printf '%s' "$MAP" | grep -q '<s t="var"[^>]* n="kMax"'   && ok '(A) class-static constant kMax stays t="var"' || no '(A) kMax is no longer t="var"'
-printf '%s' "$MAP" | grep -q '<s t="field"[^>]* n="live"' && no '(A) static data member live wrongly a field' || ok '(A) static data member live is not a field (disclosed)'
+"$BIN" "$FIX" --uses=Counter.live --no-cache >/dev/null 2>&1 && no '(A) static data member live answers as a field' || ok '(A) static data member live is not a field (refuses, disclosed)'
 printf '%s' "$MAP" | grep -q '<s t="[a-z]*"[^>]* n="width"' && no '(A) Go struct field `width` became a symbol (Go is not served)' || ok '(A) Go struct field `width` is not a symbol (unserved language)'
-# one symbol per Python field even though Tally.total/Meter.total are assigned in several methods
-NTOTAL="$( printf '%s' "$MAP" | grep -o '<s t="field"[^>]* n="total"' | wc -l | tr -d ' ' )"
-[ "$NTOTAL" = "2" ] && ok "(A) Python self.total: exactly one field per owner (2 rows)" || no "(A) Python self.total field rows = $NTOTAL (want 2: Tally, Meter)"
+# one field per Python (class, name) even though Tally.total/Meter.total are assigned in several methods: the
+# scope-qualified spellings resolve exactly ONE field each (arm F pins their rows), and a bare `label` — two C++
+# owners, no same-named function — refuses with exactly two spellings
+"$BIN" "$FIX" --uses=label --no-cache >/dev/null 2>"$TMP/label.err"
+grep -q 'declared by 2 owners' "$TMP/label.err" && ok "(A) bare label: exactly one field per owner (2 owners)" || { no "(A) bare label owners != 2"; cat "$TMP/label.err"; }
 
 # ── (B) golden ───────────────────────────────────────────────────────────────────────────────────────────
 expect_rows Counter.count "(B) Counter.count" \
@@ -126,17 +138,18 @@ LV="$( "$BIN" "$FIX" --uses=level --no-cache 2>/dev/null )"; rc=$?
 
 # ── (E) spellings agree ──────────────────────────────────────────────────────────────────────────────────
 [ "$( rows Counter::count )" = "$( rows Counter.count )" ] && ok "(E) Counter::count rows == Counter.count rows" || no "(E) Counter::count and Counter.count disagree"
-CANON="$( printf '%s' "$MAP" | grep -o '<s t="field"[^>]* n="count" id="[^"]*::Counter::count"' | sed -E 's/.*id="([^"]*)".*/\1/' )"
-[ -n "$CANON" ] && [ "$( rows "$CANON" )" = "$( rows Counter.count )" ] && ok "(E) canonical id rows == Counter.count rows" || no "(E) canonical id '$CANON' disagrees with Counter.count"
+CANON="shapes.h::Counter::count"   # the path::Owner::field spelling (a path TAIL resolves, as everywhere)
+[ "$( rows "$CANON" )" = "$( rows Counter.count )" ] && ok "(E) canonical id rows == Counter.count rows" || no "(E) canonical id '$CANON' disagrees with Counter.count"
 
 # ── (F) python ───────────────────────────────────────────────────────────────────────────────────────────
 expect_rows Tally.total "(F) Tally.total" "write tally.py:13" "read tally.py:17" "read tally.py:25 amb=2"
 expect_rows Meter.total "(F) Meter.total" "write tally.py:25" "read tally.py:25 amb=2"
 expect_rows Tally.hits  "(F) Tally.hits"  "read tally.py:14"
 rows Tally.total | grep -q 'tally.py:9' && no "(F) the defining assignment (line 9) counted as a use of Tally.total" || ok "(F) defining assignment (line 9) is a def, not a use"
-LIM="$( "$BIN" "$FIX" --uses=Tally.limit --no-cache 2>/dev/null )"; rc=$?
-[ "$rc" = "0" ] && [ "$( attr defs "$LIM" )" = "1" ] && [ "$( attr count "$LIM" )" = "0" ] \
-    && ok "(F) Tally.limit: a def with zero use-sites answers count=\"0\" (exit 0)" || no "(F) Tally.limit rc=$rc defs=$( attr defs "$LIM" ) count=$( attr count "$LIM" )"
+LIM="$( "$BIN" "$FIX" --uses=Tally::limit --no-cache 2>/dev/null )"; rc=$?   # the SYMBOL spelling — Owner.attr is the member form's, and this is not a member
+[ "$rc" = "0" ] && [ "$( attr defs "$LIM" )" = "1" ] && [ -z "$( attr member "$LIM" )" ] \
+    && ok "(F) Tally::limit: the annotated attribute answers as the t=\"var\" symbol (scope tier, name-matched form, no member=)" \
+    || no "(F) Tally::limit rc=$rc defs=$( attr defs "$LIM" ) member=$( attr member "$LIM" )"
 
 # ── (G) nonlocal-state precision ─────────────────────────────────────────────────────────────────────────
 NLS="$( "$BIN" "$FIX" --nonlocal-state --no-cache 2>/dev/null )"
@@ -149,7 +162,7 @@ done
 printf '%s' "$NLS" | grep -q 'field' && ok "(G) the nonlocal-state legend discloses the instance-field exclusion" || no "(G) nonlocal-state legend does not mention fields"
 
 # ── (H) additive / determinism / well-formedness ─────────────────────────────────────────────────────────
-printf '%s' "$MAP" | grep -q '<s t="field"[^>]*>[^<]*<c ' && no "(H) a field row carries a <c> edge (fields never enter the call graph)" || ok "(H) field rows carry no <c> edges"
+printf '%s' "$MAP" | grep -q 'symbols=27 ' && ok "(H) flagless map symbols=27 — the 8e186bb binary's count on this fixture (fields add nothing)" || no "(H) flagless map symbols= moved: $( printf '%s' "$MAP" | grep -o 'symbols=[0-9]*' | head -1 )"
 "$BIN" "$FIX" --uses=Counter.count --no-cache >"$TMP/a" 2>/dev/null
 "$BIN" "$FIX" --uses=Counter.count --no-cache >"$TMP/b" 2>/dev/null
 cmp -s "$TMP/a" "$TMP/b" && ok "(H) determinism: two --no-cache runs byte-identical" || no "(H) --uses=Counter.count is not deterministic"
