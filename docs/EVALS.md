@@ -1188,6 +1188,36 @@ prompts.tsv was labelled for skill routing, not for the verb router, so it is th
 separate consent), each labelled ripwire-shaped or not by hand. *Band:* ≥ 50% ripwire-shaped →
 treat as (a) above; otherwise (b). Until B exists, an inconclusive A stays inconclusive.
 
+**Instrument A, RUN 2026-09-03 at `6e397e1` (dev build, `./build/ripwire . --exclude=bench/external
+--help-task="<prompt>"`, 266 prompts, 6 worker threads, output deterministic per prompt):** coverage
+**0.023 — 6 recommends / 260 abstains.** The band says **(a): the classifier is the bottleneck**, and
+the margin is not close. The six recommends were `--from-trace` ×2, `--pack-task`, `--exemplar`,
+`--situ`, `--for`. Per expected skill, every one of the seventeen skill buckets is at or near zero:
+find-bug 3/15, change-check 1/13, before-you-build 1/12, quality-bar 1/12, reuse-first 1/11, and
+**0** of 12 for orient, navigate, efficient, write-tests, mcp; 0 of 11 for perf-target, security-scan,
+handoff, layers, graph-query; 0 of 14 fresh-eyes; 0 of 9 opt-remarks (the 68 `none`-labelled prompts
+abstained 68/68, which is correct). Against the stated prior — 0.825 on `test/taskroutefix/` — this is
+a **36× gap between the corpus the router was tuned on and a corpus labelled for the same moments by a
+different hand**, which is the definition of overfitting a fixture.
+
+*Confound, stated:* many prompts.tsv rows name symbols from other repositories (`parseHeader`,
+`resolveTypes`), and `--help-task` guards symbol-bearing recommendations behind `resolved_symbols` on the
+root it is run against — by design, so that it never pastes `--callers=X` for an X the tree does not
+have. That guard explains SOME abstains in navigate/find-bug. It explains none of the symbol-free
+moments: "I just landed in an unfamiliar repo — what matters here" (orient), "which tests should I run
+for this change" (change-check → `--affected`/`--situ`), "what does this PR actually touch"
+(`--pr-context`), "did I change a contract someone depends on" (`--edit-check`) all abstained with
+`resolved_symbols` irrelevant to the verb. Those are the intents to add.
+
+*Consequence per the registration:* the widening is funded, but not as a tweak. The added intents are
+registered as their own band (precision must stay at the router's current 1.000 / harmful 0.000 on
+BOTH corpora, coverage on prompts.tsv ≥ 0.60 for the symbol-free buckets), `test/taskroutecheck.sh`
+gains prompts.tsv as a second, held-out corpus so the fixture cannot be re-tuned into, and the A/B
+window in `routing.jsonl` RESTARTS at the commit that lands them — rows before it are never pooled
+with rows after. Instrument B stays owner opt-in and is not needed to fund this. Until the widening
+lands, the readout above keeps refusing at n < 40 per arm; the current rows are kept as the
+pre-widening baseline, labelled as such.
+
 ### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **The mechanism under test.** `--for` becomes terminal by default: after the ranked signatures, the
