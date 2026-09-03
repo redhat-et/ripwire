@@ -1089,7 +1089,8 @@ inline std::optional<int> sliceSincePrepare( const MainDispatch& d, std::string_
     }
     const std::string relPath = std::string( rw::sarif::rootRelativeUri( path, rw::sarif::rootPrefixOf( d.root ) ) );
     rw::slicediff::Out sd = rw::slicediff::compute( d.root, std::string( cfg.since ), relPath, sym, fam, grammar, varName,
-                                                    scan, src, d.redactPtr, cfg.maxFileBytes, d.valueUses );
+                                                    scan, src, d.redactPtr, cfg.maxFileBytes, d.valueUses,
+                                                    emit.compactLegend );
     if( !sd.ok )
     {
         std::fprintf( stderr, "%s\n", sd.err.c_str() );

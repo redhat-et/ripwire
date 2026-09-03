@@ -427,8 +427,25 @@ inline RevSide sliceAtRev( const std::string& root, const std::string& sha, cons
 // Every limit the slice legend states applies to BOTH sides of the diff, and the diff adds two of its
 // own. The band requires this block to restate them rather than assume the reader scrolled up: a diff
 // cannot be more confident than the slice it diffs.
-inline std::string legendText()
+inline std::string legendText( bool compact )
 {
+    if( compact )
+    {
+        // the ripwire.slice/v1 tier, admitted for this block for the reason it was admitted for the slice
+        // itself (audit 2026-09-02, F-11): the repeated-call loop must not pay the full paragraph every
+        // time. Same rules, same vocabulary, no rule dropped — only the prose explaining each one.
+        return
+            "<!-- slice-since ripwire.slice/v1: DEPENDENCE diff of this variable against the tree at rev=, resolved= the "
+            "commit it resolved to, p= the definition's path now, renamed_from= the spelling that answered at REV. "
+            "<sd op= i= k= t= l= [pp=] [g=]> = one STATEMENT of the variable added or removed; <se op= d= u= dl= ul=/> = one "
+            "def-use EDGE added or removed, by the slice's own reaching-definition rule. UNIT = the STATEMENT, KEY = the ROLE "
+            "— never the line, never the text: a re-wrap, a comment edit, an insertion above the definition, a rename of an "
+            "unrelated local and a value-only edit are all EMPTY. EMPTY means no def-use edge of this variable moved, never "
+            "that the commit changed nothing. Every limit of the slice legend holds on BOTH sides. status=ok | "
+            "sym_absent_at_rev | var_absent_at_rev | file_absent_at_rev | ambiguous_at_rev | unparsed_at_rev; comparable=0 = "
+            "NO comparison was made and the emptiness is not evidence; diff_capped=1 = over 2000 statement rows on a side. "
+            "Full legend: omit legend=compact. -->";
+    }
     return
         "<!-- slice-since: the DEPENDENCE diff of this variable between REV and now — what a regression review "
         "wants instead of the textual diff. rev= the spec as given, resolved= the commit it resolved to, p= the definition's path NOW "
@@ -506,7 +523,7 @@ inline const char* rowKind( const StmtRow& r ) noexcept
 inline Out compute( const std::string& root, const std::string& sinceSpec, const std::string& relPath,
                     const Symbol& sym, SliceFam fam, const ::TSLanguage* grammar, std::string_view varName,
                     const SliceScan& nowScan, const std::string& src, RedactCounts* redact,
-                    std::size_t maxFileBytes, bool captureValueUses )
+                    std::size_t maxFileBytes, bool captureValueUses, bool compactLegend )
 {
     Out out;
 
@@ -686,7 +703,7 @@ inline Out compute( const std::string& root, const std::string& sinceSpec, const
     el += rows;
     el += "</since>";
 
-    out.legend = legendText();
+    out.legend = legendText( compactLegend );
     out.body   = el;
     return out;
 }

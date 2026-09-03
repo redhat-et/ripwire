@@ -28,6 +28,7 @@
 #   (14) determinism x2 byte-identical, and cold (--no-cache) == warm
 #   (15) xmllint well-formedness on a diff-bearing run
 #   (16) a DATE --since resolves to a commit and discloses resolved= (approxidate garbage is refused by 12a)
+#   (18) --legend=compact serves a SHORTER since block whose <since> element and rows are byte-identical
 #   (17) THE BAND: replay test/slicediffix/labels.tsv in a private clone of the repo under test —
 #        dependence rows must be NON-EMPTY on >= 18 of 20, reformat rows EMPTY on >= 19 of 20
 #
@@ -384,6 +385,20 @@ out="$( "$BIN" "$A" --slice=src/a.cpp:worker:v --since=tomorrow --no-cache 2>/de
 case "$out" in
   *'<since '*'resolved="'*) ok '(16) a DATE --since resolves to a commit and discloses resolved=' ;;
   *) no '(16) a DATE --since did not resolve/disclose' ;;
+esac
+
+# (18) the compact legend tier: shorter block, byte-identical element
+cfull="$( "$BIN" "$A" --slice=src/a.cpp:worker:v --since="$BASE_A" --no-cache 2>/dev/null )"
+ccomp="$( "$BIN" "$A" --slice=src/a.cpp:worker:v --since="$BASE_A" --legend=compact --no-cache 2>/dev/null )"
+[ "${#ccomp}" -lt "${#cfull}" ] && ok "(18a) --legend=compact shrinks the since block (${#ccomp} B vs ${#cfull} B)" \
+                               || no '(18a) --legend=compact did not shrink the since block'
+efull="<since ${cfull##*<since }"
+ecomp="<since ${ccomp##*<since }"
+[ "$efull" = "$ecomp" ] && ok '(18b) the <since> element is byte-identical under --legend=compact' \
+                        || no '(18b) --legend=compact changed the <since> element, not just its legend'
+case "${ccomp%%<slice *}" in
+  *'slice-since ripwire.slice/v1'*'comparable=0'*) ok '(18c) the compact since block carries the schema id and still states comparable=0' ;;
+  *) no '(18c) the compact since block dropped its schema id or the comparable=0 reading' ;;
 esac
 
 # ═══ (17) THE BAND — replay the labelled set in a private clone ══════════════════════════════════════
