@@ -8716,6 +8716,112 @@ registration funds ("the pin's exclusion from `amb=` is unearned") stands regard
 `canonicalId` outcome**. Its floor is therefore registered on the stratum it addresses, with the full
 figure held non-inferior, in the next section.
 
+### Phase 3b — the `canonicalId` locality fix, PRE-REGISTERED 2026-09-03 (before its first number)
+
+**What changes.** `resolve.h::canonicalId` spells an unscoped symbol as its BARE NAME, and
+`sharedLocality` counts whole matching segments, so a module-level function scores zero locality
+against every caller and can never survive the S6-C tie-break against a same-file class method. The
+fix gives the tie-break its own spelling: a per-symbol `Graph::localityKey` — `path::scope::name`, and
+`path::name` when unscoped — read ONLY by the S6-C block. `g.canonId`, `canonicalId`, `canonicalIdForEmit`
+and therefore the emitted `id=` (absent for an unscoped symbol), the note keys, the quality baseline
+keys and every selector are untouched **by construction**: no legend moves, no `id=` appears that did
+not before. The population the tie-break fires on is unchanged (a SCOPED caller, tier > 1, not a
+depth-2 chained receiver, not SCIP/binding-pinned); only how candidates are scored changes. Expected
+mechanics on the registered repro (`mod.py::Caller::go` → `compute` with candidates `Helper::compute`
+and module-level `compute`): both now share exactly `mod.py::` → a full tie → the tier stays intact →
+the call is an honest split and `ambiguous=` counts it, where today `Helper::compute` is silently pinned.
+Cross-file: `dir/a.py::X::f` vs `dir/b.py::f` for a caller in `dir/c.py` both share `dir/` → tie →
+split, where today `X::f` wins by `dir/` against zero. So the change converts silent pins to splits; it
+can also let a same-file module-level function WIN when the class candidate is in another file.
+
+**Cache.** `src/ingest_cache.h` persists raw facts (symbols, references); resolution runs in
+`buildGraph` on every invocation, so the change reaches a warm run without a `kParserVer` bump. The
+cold == warm determinism check below is the proof, not the reasoning.
+
+**Registered bands, fixed before the build.** Same-commit baselines, `ripwire <root> --no-cache`, plain
+build at `be3e1e6` (this lane's phase-3 commit; the D4 trees at `rw-lane-ab2-corpora/`, each verified
+at its pin with a clean status):
+
+| corpus | pin | files | symbols | edges | `ambiguous=` | unresolved | +2.0% ceiling |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ripwire `src/` | be3e1e6 | 146 | 4,729 | 12,835 | **5,553** | 1,480 | 5,664 |
+| ugrep | `550599a6` | 156 | 3,626 | 5,381 | **1,721** | 5 | 1,755 |
+| rocksdb | `0e2801ac` | 1,873 | 53,619 | 210,332 | **44,967** | 1,800 | 45,866 |
+| duckdb | `19864453` | 5,123 | 61,178 | 84,701 | **8,934** | 2,650 | 9,112 |
+
+1. **Non-inferiority on the whole-graph `ambiguous=`: ceiling +2.0%** against the figure above on each
+   of the four corpora. It MAY RISE — a silent wrong pin becoming a disclosed split is the intended
+   direction — and "reduce `ambiguous=`" remains the twice-rejected non-criterion. A rise above +2.0% on
+   any corpus is a REJECT of this shape (the fix is reverted; the number ships as a registered negative,
+   the `--slice-guards` precedent).
+2. **Locality precision floor on the stratum the fix addresses: in-repo-only locality precision ≥ 0.85
+   on astropy-14365** (0.723, n = 83 today; the 10 module-level disconfirmations are the reachable
+   set). 12907 reported as the stability check. Sites that leave the `locality` population must
+   reappear under `split` — the harness's mechanism counts are printed before and after and the leavers
+   are reconciled by count (locality lost == split gained, ± sites whose tier also changed width).
+3. **Full-oracle locality precision must not drop** below 0.368 / 0.373 (non-inferior), and every
+   sentinel disconfirmation is expected to persist: this fix does not claim them, and the disclosure
+   question stands after it whatever band 2 says.
+4. **The golden** (`test/golden.xml`, the default map on `test/fixture`) is re-derived in its OWN commit
+   with the reasoning, if and only if the fixture holds a tie the change moves; determinism ×2, cold ==
+   warm, `xmllint --noout` on the fixture and on astropy-14365; ASan clean on the census path.
+
+### Phase 3b, RUN — the `canonicalId` locality fix is a registered NEGATIVE, measured 2026-09-03 against the bands above
+
+**Verdict: NEGATIVE, by the bands the section above fixed before the build.** Band 2 — in-repo-only
+locality precision ≥ 0.85 on astropy-14365 — measured **0.831 (n = 71)**, 1.9 points under the floor
+(0.831 on 12907 as well). Bands 1 and 3 were both MET, and that matters to the reading: this is not "it
+raised `ambiguous=`" or "it made the pin worse", it is "it did not buy enough of the stratum it was
+registered to buy". **The change does not ship.** It was a 14-line diff (a `Graph::localityKey`
+vector beside `canonId`, populated in the same loop, read at the two S6-C `sharedLocality` sites);
+it is reverted whole in the same commit that carries this section, `src/graph.h` byte-identical to
+`be3e1e6`, and the patch is kept verbatim in the lane report. Every number below came out of that binary.
+
+| Registered criterion | Band | 14365 | 12907 | |
+| --- | --- | --- | --- | --- |
+| 1. whole-graph `ambiguous=` vs same-commit baseline | ≤ +2.0% on each of 4 corpora | src 5,553 → **5,555** (+0.04%) · ugrep 1,721 → **1,722** (+0.06%) · rocksdb 44,967 → **45,146** (+0.40%) · duckdb 8,934 → **8,934** (0) | — | **meets** |
+| 2. in-repo-only locality precision | ≥ 0.85 on 14365 | **0.831** (59 / 71) — was 0.723 (60 / 83) | 0.831 (59 / 71) — was 0.732 | **fails** |
+| 2. leavers reappear as `split` | locality lost == split gained | locality 224 → **115** (−109), split 2,731 → **2,840** (+109) | 224 → 115, 3,092 → 3,201 (+109) | meets |
+| 3. full-oracle locality precision | ≥ 0.368 / 0.373 (non-inferior) | **0.670** (59 / 88; 17 `@external`, 0 `@nondef`) | **0.678** (59 / 87; 16 `@external`) | meets |
+| 4. golden / determinism / cold==warm / xmllint / ASan | all clean | `test/golden.xml` byte-identical; ×2 identical; cold == warm == warm on 14365; xmllint clean; ASan census path clean (rc 0, 0 reports) | — | meets |
+
+Argv: `ripwire <root> --no-cache` for band 1 (the D4 trees at `rw-lane-ab2-corpora/{ugrep,rocksdb,duckdb}`,
+each verified at its pin with a clean status); `python3 bench/scip_pin_precision.py --bin ./build/ripwire
+--repo <astropy-N> --scip astropy-N.scip --label astropy-N-lk` for bands 2–3.
+
+**Why it fails, which is a finding and not a defect.** The mechanism did exactly what the registration
+said it would: 109 sites on each corpus that S6-C used to pin silently became full ties and honest
+splits, `ambiguous=` rose by the size of that population and no more, and the 30 `@nondef`
+disconfirmations (parameter and attribute calls the pin had sent to some in-repo `model`) all left the
+population. What remains in the locality stratum after the fix is the population a LOCALITY prior
+cannot decide: of the 29 disconfirmed pins on 14365, **17 are external** (`sum(`, `dtype(`,
+`append(` — every in-repo candidate is wrong, and a tie-break chooses among candidates), **10 are
+same-file sibling-class methods** (`UnitSphericalDifferential.to_cartesian` bare-calls
+`represent_as`, SCIP names `SphericalRepresentation.represent_as` — a receiver-TYPE fact the
+tie-break has no access to), 1 non-def, 1 cross-file. The module-level shape the fix targeted is gone
+from the disconfirmations entirely; it was 10 of 23, and 0.723 → 0.831 is that shape leaving. The floor
+was set at the task's suggested ≥ 0.85 without a model of the residue, and the residue is 2 points
+wide. Moving a band after seeing a number is the single move a registration exists to forbid, so
+0.831 is a NEGATIVE under the rule as written, and the lane says so instead of arguing with it.
+
+**What is established, and stands.** (a) The primary census verdict from phase 3 — full-oracle
+locality precision 0.368 / 0.373 at n ≥ 100 without pooling — is unchanged by this section: the
+disclosure fix (the S6-C pin's exclusion from `amb=` is unearned) is **funded and still owed**; its
+shape is a per-row marker or counter, since counting the 224 pins into `amb=` on astropy would be a
++8% rise against a +2% ceiling. (b) The tie-break fix's effect is now measured, not modelled:
+−109 silent pins, +0.04..0.40% `ambiguous=`, 0.723 → 0.831 in-repo, 0.368 → 0.670 full. (c) Its post-fix
+population, n = 88, falls under the n ≥ 100 floor — a fix that removes wrong pins shrinks the very
+population the census measures, which any re-registration must budget for.
+
+**The exact next step.** Re-register the tie-break change with a floor derived from the residue
+model above (the reachable set is the module-level shape; the sibling-method and external residues
+belong to the receiver rules and to disclosure respectively) — or better, register it TOGETHER with
+the disclosure marker, judged on one band: full-oracle precision of the remaining silent pins plus
+`ambiguous=` non-inferiority. Then the receiver-type route for the 10 sibling-method sites
+(`RecvKind::NamedVar` with a recorded declared type reaches Rule 2 today; a bare same-file call to a
+method of a sibling class does not). The census, the join, the sentinel oracle and the diag stay in
+the tree for that round to run against.
+
 ## Member variables as symbols + `--uses=Owner.field` — the member-variable round (card A3), PRE-REGISTERED 2026-09-02 (before any corpus number)
 
 **What this registers.** ARISE-bibliography RANK-A card A3 — CodexGraph's FIELD schema element: a class's
