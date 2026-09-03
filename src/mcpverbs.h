@@ -1405,22 +1405,45 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     const notes::NoteIndex        noteIndex = notes::loadNoteIndex( root );
     const notes::NoteIndex* const notesPtr  = noteIndex.empty() ? nullptr : &noteIndex;
 
+    // A2 (survey card, 2026-09-03): sigs render into their OWN buffer (rather than streaming straight into
+    // `mem` the way this call used to) so droppedPositive is known BEFORE headerStr is written — headerStr,
+    // once flushed to `mem`, cannot be edited retroactively (the same reason the CLI twin's degrade path
+    // never gets the attribute). Byte-for-byte the same content this call always produced.
+    std::size_t mcpDroppedPositive = 0;
+    std::string sigsStr = renderToString( [ & ]( std::FILE* m2 )
+    {
+        packSignatures( m2, ing, lensRank, forTopN, 0 /* no byte budget in MCP (0 = unlimited) */, true, &fanIn, &impure, redact,
+                        nullptr, nullptr, nullptr, nullptr,   // Q3 lens vectors — the MCP verb has no git/clone pass (as before)
+                        /*rankAdaptivePayload=*/true,         // B0.3: same rank-adaptive payload rule as the CLI --for lens
+                        sigsBudget,                           // H1: global payload budget (trim ladder; payload="capped" marker)
+                        notesPtr,                             // L3: field-notes surfacing (inert when null)
+                        flRootArg,                            // R-E: root-relative p=, same argument the CLI twin passes
+                        /*hasRelevanceFloor=*/true,           // LB-A: shrink past the zero-score tail, never pad
+                        &mcpDroppedPositive );                // A2: exact count, see droppedPositiveCount (serialize.h)
+    } );
+    // A2: same insert-before-"-->" splice as the CLI twin (verbs_for.h) — absent entirely on the (overwhelming)
+    // no-drop path, so headerStr's bytes are unchanged there (byte-identical to the pre-A2 output). Bare
+    // spelling (no bracket note), same economy and same reasoning as the CLI twin — byte-consistent between
+    // the two dialects, the way every other --for header fragment in this function already is.
+    if( mcpDroppedPositive > 0 )
+    {
+        const std::size_t closeAt = headerStr.rfind( " -->" );
+        if( closeAt != std::string::npos )
+        {
+            char nb[ 40 ];
+            std::snprintf( nb, sizeof( nb ), " dropped_positive=\"%zu\"", mcpDroppedPositive );
+            headerStr.insert( closeAt, nb ); // else: unexpected shape, header left as-is
+        }
+    }
     std::fwrite( headerStr.data(), 1, headerStr.size(), mem );
-    packSignatures( mem, ing, lensRank, forTopN, 0 /* no byte budget in MCP (0 = unlimited) */, true, &fanIn, &impure, redact,
-                    nullptr, nullptr, nullptr, nullptr,   // Q3 lens vectors — the MCP verb has no git/clone pass (as before)
-                    /*rankAdaptivePayload=*/true,         // B0.3: same rank-adaptive payload rule as the CLI --for lens
-                    sigsBudget,                           // H1: global payload budget (trim ladder; payload="capped" marker)
-                    notesPtr,                             // L3: field-notes surfacing (inert when null)
-                    flRootArg,                            // R-E: root-relative p=, same argument the CLI twin passes
-                    /*hasRelevanceFloor=*/true );         // LB-A: shrink past the zero-score tail, never pad
-    // §P3 × §P4 (parity with the CLI --for): after a flush the memstream buffer holds header+sigs — narrow
-    // the lego block to the files the budget-trimmed sigs actually kept and re-render (a byte-subset of what
-    // the budget charged for). The header prefix is skipped so only rendered sigs rows are consulted.
-    std::fflush( mem );
-    if( buf && sz > headerStr.size() && !legoStr.empty() && narrowLegoToRenderedSigs( ing, legoScoped, std::string_view( buf + headerStr.size(), sz - headerStr.size() ) ) )
+    // §P3 × §P4 (parity with the CLI --for): narrow the lego block to the files the budget-trimmed sigs
+    // actually kept and re-render (a byte-subset of what the budget already charged for) — reads sigsStr
+    // directly now rather than re-slicing it back out of the flushed memstream buffer.
+    if( !legoStr.empty() && narrowLegoToRenderedSigs( ing, legoScoped, sigsStr ) )
     {
         legoStr = renderToString( [ & ]( std::FILE* m2 ) { packLego( m2, ing, legoScoped, lensRank, 12, redact, &impure, kNoNode, /*withPaths=*/true, flRootArg ); } );   // R-R: the re-render dropped the root its first render (above) passed
     }
+    std::fwrite( sigsStr.data(), 1, sigsStr.size(), mem );
     std::fwrite( legoStr.data(), 1, legoStr.size(), mem );
     std::fwrite( composeStr.data(), 1, composeStr.size(), mem );
     std::fwrite( routeStr.data(), 1, routeStr.size(), mem );   // B6.3

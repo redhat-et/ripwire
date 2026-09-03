@@ -693,6 +693,7 @@ struct RankingSection
     bool        capped = false;
     std::size_t farTotal = 0, farKept = 0;
     std::string farXml;         // the raw <far>…</far> (or "" if omitted) — for the header's listStatus
+    std::size_t droppedPositive = 0;   // A2 (survey card, 2026-09-03): rank>0 eligibleIds cut by the ladder's step F
 };
 
 template<class EscFn>
@@ -706,7 +707,11 @@ inline RankingSection renderRankingWithFar( const IngestResult& ing, const Ranki
                         ri.in->churn, ri.forClone, ri.in->tested, ri.in->amp,
                         /*rankAdaptivePayload=*/true, /*payloadBudgetBytes=*/ri.sigsBudget,
                         /*noteIndex=*/nullptr,       // notes are a DEDICATED section (4), never inline here (avoids double-emit)
-                        ri.in->rootArg );
+                        ri.in->rootArg,
+                        /*hasRelevanceFloor=*/false, // R2: eligibleIds is ALREADY the curated set (d0∪d1 depth mask),
+                                                     //   not a floor-narrowed topN — droppedPositiveCount re-checks
+                                                     //   rank>0 per symbol regardless, so this is unaffected either way
+                        &out.droppedPositive );      // A2: exact count, see droppedPositiveCount (serialize.h)
     } );
     // §P8 vocabulary: the ladder's marker is now `<sigs capped="1">` (src/pageview.h, THE TRUNCATION
     // VOCABULARY, rule 5) — it was payload="capped", and THIS was the string-match that made a string enum
@@ -1565,6 +1570,16 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     report += "notes: "   + listStatus( notesTotal,   notesStr,   notesKept )   + " | ";
     report += "tests: "   + listStatus( testsTotal,   testsStr,   testsKept );
     report += " | far: "  + listStatus( farTotal,      rankOut.farXml, farKept );   // R2: d2plus name-only tier (nested in <sigs>)
+    // A2 (survey card, 2026-09-03) — the pack-task twin of --for's dropped_positive= root fact: how many
+    // rank>0 eligibleIds the section-1 ladder cut. Emitted ONLY when nonzero (the pr_converged precedent,
+    // src/prconverge.h) — the report string's own bytes are already absorbed by kPackTaskHeaderReserve's
+    // generous fixed allowance (see its own comment), so this costs no separate budget accounting, and the
+    // no-drop path (rankOut.droppedPositive == 0) is byte-identical to the pre-A2 report exactly as before.
+    if( rankOut.droppedPositive > 0 )
+    {
+        char b[ 96 ];  std::snprintf( b, sizeof( b ), " | dropped_positive=\"%zu\"", rankOut.droppedPositive );
+        report += b;
+    }
 
     const PackTaskHeaderParts headerParts{ task, rootOpenStr, taskNote, mentionNote, boostNote,
                                             docMentionNote, report, in.rootArg };

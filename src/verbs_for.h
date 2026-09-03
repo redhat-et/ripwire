@@ -728,9 +728,10 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     const JsonSigLens lens{ /*metrics=*/true, in.fanIn, in.impure, in.churnPerFile, in.cloneMember,
                             in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex };
     JsonSigNoteCounts noteCounts;
-    const auto packSigs = [ & ]( std::FILE* dst, std::size_t budget, bool* outCapped )
+    const auto packSigs = [ & ]( std::FILE* dst, std::size_t budget, bool* outCapped, std::size_t* outDroppedPositive )
     { packSignaturesJson( dst, in.ing, in.rank, in.topN, lens, in.redact, in.packBudgetBytes, budget, outCapped, &noteCounts,
-                          in.rootArg, /*hasRelevanceFloor=*/true ); };   // LB-A: same admission rule as the XML twin (R-R: root-relative p/id)
+                          in.rootArg, /*hasRelevanceFloor=*/true,        // LB-A: same admission rule as the XML twin (R-R: root-relative p/id)
+                          outDroppedPositive ); };                      // A2: exact count, see droppedPositiveCount (serialize.h)
 
     // §B1.4: built once, used on both the degrade path below and the normal return — these three are plain
     // size_t values already computed by the caller (no rendering, no redaction seam), so unlike est_tokens
@@ -745,7 +746,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     // the reservation feeding sigsBudget above deliberately does NOT include these bytes.
     std::string tailStanza = "," + renderFileTailJson( *in.fileTail, kForFileTailShownCap );
 
-    bool        sigsCapped = false;
+    bool        sigsCapped         = false;
+    std::size_t sigsDroppedPositive = 0;   // A2: set only by the memstream-buffered render below (nullptr on the ENOMEM degrade path)
     std::string sigsJson;
     {
         char*       jbuf = nullptr;
@@ -761,16 +763,22 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
             std::fwrite( surfaceCountsStanza.data(), 1, surfaceCountsStanza.size(), out );
             std::fwrite( tailStanza.data(), 1, tailStanza.size(), out );                   // the tail survives too (plain strings, nothing to fail)
             std::fputs( ",\"sigs\":", out );
-            packSigs( out, 0, nullptr );
+            packSigs( out, 0, nullptr, nullptr );
             std::fputs( "}", out );
             return 0;
         }
-        packSigs( jm, sigsBudget, &sigsCapped );
+        packSigs( jm, sigsBudget, &sigsCapped, &sigsDroppedPositive );
         std::fflush( jm );  std::fclose( jm );
         if( jbuf ) { sigsJson.assign( jbuf, jsz );  std::free( jbuf ); }
     }
 
     const std::string notesStanza = forLensNotesStanza( noteCounts, in.noteIndex != nullptr );
+    // A2 (survey card, 2026-09-03) — the JSON twin of the XML root's dropped_positive= attribute: emitted ONLY
+    // when nonzero (the pr_converged precedent, src/prconverge.h), so the overwhelming no-drop path pays 0
+    // bytes here exactly as the ENOMEM degrade path above does (sigsDroppedPositive stays 0, never set).
+    const std::string droppedPositiveStanza = sigsDroppedPositive > 0
+        ? ",\"dropped_positive\":" + std::to_string( sigsDroppedPositive )
+        : std::string();
 
     // §C1 + §C2 — the CHARGE, measured from the bytes this function is about to write rather than from the
     // reservation's upper bound. Two members were wrong:
@@ -795,7 +803,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
                                         header.size() + sigsJson.size() + notesStanza.size()
                                             + surfaceCountsStanza.size() + envelopeTextBytes );
     const std::size_t bundleBytesBase   = header.size() + sigsJson.size() + notesStanza.size()
-                                        + surfaceCountsStanza.size() + tailStanza.size() + envelopeTextBytes;
+                                        + surfaceCountsStanza.size() + tailStanza.size() + envelopeTextBytes
+                                        + droppedPositiveStanza.size();   // A2: 0 bytes on the (overwhelming) no-drop path
 
     std::size_t estTokens   = 0;
     std::size_t bundleBytes = bundleBytesBase;
@@ -832,6 +841,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     std::fwrite( surfaceCountsStanza.data(), 1, surfaceCountsStanza.size(), out );
     std::fwrite( tailStanza.data(), 1, tailStanza.size(), out );
     std::fwrite( notesStanza.data(), 1, notesStanza.size(), out );
+    std::fwrite( droppedPositiveStanza.data(), 1, droppedPositiveStanza.size(), out );   // A2
     std::fwrite( overCeiling.data(), 1, overCeiling.size(), out );
     std::fprintf( out, ",\"capped\":%s,\"est_tokens\":%zu,\"sigs\":", sigsCapped ? "true" : "false", estTokens );
     std::fwrite( sigsJson.data(), 1, sigsJson.size(), out );
@@ -1791,6 +1801,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         // conservative kMinBytesPerToken the budget CEILING is sized with — this reports what was actually
         // produced, not the worst-case bound. open_memstream failure degrades to direct emission (no est_tokens
         // attribute — same as before this change; never a fabricated number).
+        // A2 (survey card, 2026-09-03): how many rank>0 candidates the H1 ladder just below cut — set ONLY on
+        // this (memstream-buffered) render, never on the direct-emission degrade path further down, because
+        // headerStr is already flushed to stdout by the time that path runs and cannot be edited retroactively
+        // (the same reason est_tokens is "omitted", not "wrong", on that path — see its DEGRADED_PATH_ALERT).
+        std::size_t forDroppedPositive = 0;
         {
             char*       sbuf = nullptr;
             std::size_t ssz  = 0;
@@ -1802,7 +1817,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 sigsBudget,                                  // H1: global payload budget (trim ladder; payload="capped" marker)
                                 notesPtr,                                    // L3: field-notes surfacing (inert when null)
                                 flRootArg,                                   // R-E: root-relative p=
-                                /*hasRelevanceFloor=*/true );                // LB-A: shrink past the zero-score tail, never pad
+                                /*hasRelevanceFloor=*/true,                  // LB-A: shrink past the zero-score tail, never pad
+                                &forDroppedPositive );                       // A2: exact count, see droppedPositiveCount
                 std::fflush( sm );  std::fclose( sm );
                 if( sbuf ) { sigsStr.assign( sbuf, ssz );  std::free( sbuf ); }
                 sigsPreRendered = true;
@@ -1812,6 +1828,32 @@ std::optional<int> runForLens( const MainDispatch& d )
                 DEGRADED_PATH_ALERT( "main: open_memstream failed for the sigs block — est_tokens omitted from the header" );
             }
         }
+
+        // A2: the splice text, built ONCE here (right after forDroppedPositive becomes known) rather than at
+        // the insert site far below — unlike weak=/est_tokens=, whose PRESENCE is decided before packSignatures
+        // ever runs (so their reserve is a worst-case bound, kEstTokensAttrReserve/kWeakAttrBytes above), this
+        // one is decided BY packSignatures' own return, so its reserve can be the EXACT string that will be
+        // spliced — no bound needed, and no second snprintf later. Every downstream section (bodies,
+        // enrichment, tail, the explicit-ceiling ladder) must see this reserved, or a query that trips the
+        // attribute can push the bundle past its stated --token-budget by the note's own width — measured:
+        // w3fixbudgetcheck's ceiling biconditional and fornotesbudgetcheck's 1500-token fixture both went red
+        // with an early, verbose spelling (a bracketed English explanation, ~120 B) even WITH this reserve
+        // in place — the reserve keeps the document inside the conservative BYTE ceiling, but est_tokens is a
+        // separate, denser measurement these fixtures pin with only ~30 tokens of headroom, and a real 50-token
+        // addition genuinely does not fit either fixture's calibration. Bare spelling instead (~24 B, matching
+        // weak="1"'s own economy) rather than re-anchoring two unrelated fixtures' calibration for one flag:
+        // legendcoveragecheck's ATTR scanner matches literal `<tag attr="v">` shapes and never sees text
+        // embedded in a comment either way (proven: the gate is green with or without a bracket note here),
+        // so the bracket bought no legend coverage — only bytes. The full explanation lives in the round's
+        // registration (docs/EVALS.md, "A2 round") and the bare form is self-explanatory enough on its own.
+        std::string droppedPositiveNote;
+        if( forDroppedPositive > 0 )
+        {
+            char nb[ 40 ];
+            std::snprintf( nb, sizeof( nb ), " dropped_positive=\"%zu\"", forDroppedPositive );
+            droppedPositiveNote = nb;
+        }
+        const std::size_t droppedPositiveSpliceReserve = droppedPositiveNote.size();
 
         // §P3 × §P4: the budget trim above can drop files the lego scope still references — narrow the lego
         // block to the RENDERED sigs' files and re-render (a byte-subset of what the budget already charged
@@ -1877,7 +1919,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             if( cfg.tokenBudget > 0 )
             {
                 const std::size_t spentBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
-                                             + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve
+                                             + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve
                                              + rw::kForFileTailShellReserve;   // deep-tail: the shell's reserved bytes (explicit regime only — this branch)
                 const std::size_t leftBytes  = bundleBudget > spentBytes ? bundleBudget - spentBytes : 1;
                 detailBodyBudget = std::min( detailBodyBudget, leftBytes );
@@ -1902,7 +1944,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             enrich = buildForEnrichment( cfg, ing, g, lensSurfaceIds, lensRank, plan, routeAnchorDefs, redactPtr,
                                           headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
-                                              + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve
+                                              + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve
                                               + ( cfg.tokenBudget > 0 ? rw::kForFileTailShellReserve : 0u ),
                                           // deep-tail: under an explicit ceiling the tail SHELL's bytes are
                                           // reserved ahead of the body walk (the kAutoAttrReserve pattern) so
@@ -1927,7 +1969,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         const std::string tailStr = renderForFileTailXml( forFileTail, cfg.tokenBudget, bundleBudget,
                                                            headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
                                                                + routeStr.size() + graphSection.xml.size() + detailSection.xml.size()
-                                                               + autoSection.xml.size() + autoAttr.size() + 6 + headerSpliceReserve );
+                                                               + autoSection.xml.size() + autoAttr.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve );
 
         // W3FIX H2 — the ceiling ladder (rungs + rationale: serialize.h climbCeilingLadder), same rungs in the
         // same order --pack-task climbs. The header IS charged to the budget above, but charging is not FITTING: at
@@ -1947,7 +1989,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             const std::size_t ladderPayloadBytes = sigsStr.size() + legoStr.size() + composeStr.size() + routeStr.size()
                                                  + detailSection.xml.size() + autoSection.xml.size() + graphSection.xml.size()
                                                  + tailStr.size()                               // deep-tail: the tail is priced like every other section
-                                                 + autoAttr.size() + 6 + headerSpliceReserve;   // + "</ctx>" + the header splices below (autoAttr exact-counted)
+                                                 + autoAttr.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve;   // + "</ctx>" + the header splices below (autoAttr exact-counted; A2's own reserve is exact too)
             const std::size_t ladderCeiling      = rw::ceilingAllowanceBytes( cfg.tokenBudget );
             // RUNG ZERO — the confidence LEGEND clause, before any of the ladder's own rungs: it is the one
             // header string whose loss costs NO unique information (confidence=/margin_pct= stay on the root
@@ -1997,6 +2039,24 @@ std::optional<int> runForLens( const MainDispatch& d )
             if( closeAt != std::string::npos )
             {
                 headerStr.insert( closeAt, " weak=\"1\"" ); // else: unexpected shape, header left as-is
+            }
+        }
+
+        // A2 (survey card, 2026-09-03) — dropped_positive="N": how many symbols scored above the relevance
+        // floor (LB-A's own admission rule) and were then removed by the payload ceiling, either the H1
+        // ladder's step F or the collection-phase byte gate (droppedPositiveCount, serialize.h). Same
+        // insert-before-"-->" splice as weak=/est_tokens= (its value is only known once packSignatures has
+        // already run above) — ZERO stays 0 on this path (forDroppedPositive is never set on the direct-
+        // emission degrade path), which is what keeps the no-drop path byte-identical: absent entirely, the
+        // pr_converged="0" precedent (src/prconverge.h), never a fabricated "dropped_positive=\"0\"". The
+        // bracket note is self-defining (legendcoveragecheck's "mentioned"/"defined" predicates both read the
+        // name it carries), the same reason weak=/est_tokens= need no separate legend clause of their own.
+        if( !droppedPositiveNote.empty() )
+        {
+            const std::size_t closeAt = headerStr.rfind( " -->" );
+            if( closeAt != std::string::npos )
+            {
+                headerStr.insert( closeAt, droppedPositiveNote ); // else: unexpected shape, header left as-is
             }
         }
 
