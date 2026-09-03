@@ -19,6 +19,7 @@
 
 #include "model.h"
 #include "serialize.h"   // escapeXml, symTag, refRoleTag
+#include "graph.h"       // isTestedByReach — the tested column reads the test-reach lens (card A6)
 
 #include <cstdio>
 #include <string>

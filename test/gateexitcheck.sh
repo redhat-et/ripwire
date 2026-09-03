@@ -236,6 +236,7 @@ FAILFAST = {
     "pmccheck.sh":              ( "compile-and-run PMC harness; every arm is `echo FAIL; exit 2`",       2 ),
     "codexplugincheck.sh":      ( "trailing Python assertions make the interpreter rc the gate rc",     1 ),
     "codexwrapcheck.sh":        ( "each setup-contract assertion is fail-fast with explicit exit 1",    1 ),
+    "impactpartitioncheck.sh":  ( "python3 heredoc: the sample-size and empty-output preflights are fail-fast sys.exit(1); the verdict arms accumulate into fail[] and sys.exit(fail[0]) is the rc — probed 2026-09-03 with a stub binary, forced failure exits 1", 1 ),
     # deckclaimcheck.sh was pinned here until 2026-08-10, when its new slide-count arm gained a real
     # accumulator (`slideClaimFail`) so that EVERY drifted prose site is named in one run instead of
     # only the first. Arm (B) now checks it by running its terminal region forced and clean, which is
