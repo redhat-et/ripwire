@@ -9408,3 +9408,90 @@ attribute needing a registry entry in the first place — the same structural re
 need none of their own; the full explanation lives here, in this registration. Gate:
 `test/droppedpositivecheck.sh` (14 assertions across both dialects, both verbs, both CLI and MCP, plus
 well-formedness and determinism on a drop-case shape); registered in `test/regression.sh`'s absorb loop.
+
+## `--slice=SYM:VAR --since=REV` — the def-use slice as a DEPENDENCE diff (card A4, COMMITGUARD), PRE-REGISTERED 2026-09-03 (before the feature existed and before any number)
+
+The survey card (P10 COMMITGUARD, `arXiv:2608.17401`) reads: *"the def-use slice as it was vs as it is,
+so a regression review reads the dependence change and not just the textual diff"*. ripwire already owns
+both endpoints and no operator between them — `--slice=SYM:VAR` slices the working tree, `--since=REV|DATE`
+already scopes `--hotspots`/`--cochange`/`--rank-by=churn`, and `--quality-delta`/`--dmm` already
+re-materialize a committed tree. This registration fixes the band and the output contract BEFORE the code,
+per the house rule; the labelled set it is judged on was written before the feature ran even once.
+
+### The band, fixed here, verbatim
+
+- on **≥20 hand-labelled commits where a dependence edge actually changed** for the sliced `SYM:VAR`, the
+  slice diff must be **NON-EMPTY on ≥18**;
+- on **≥20 commits that only reformatted the sliced symbol** (whitespace, comments, renames of unrelated
+  locals) it must be **EMPTY on ≥19**;
+- the diff's own legend restates **every limit the slice legend states** — the diff cannot be more
+  confident than the slice it diffs;
+- **0 bytes of new output** on any run without `--since`; determinism ×2; cold == warm; `xmllint`; ASan on
+  the new path.
+- **NEGATIVE consequence:** below either floor the diff does **not ship** (registered negative; no slice
+  diff whose false-positive rate makes it review noise).
+
+### The labelled set — written first, `test/slicediffix/labels.tsv`
+
+57 rows over 57 distinct commits of ripwire's own history: **35 `dependence`**, **22 `reformat`**. Both
+buckets clear the ≥20 floor with margin, so the band is MEASURED, not unmeasured. The mining and labelling
+protocol, the VAR-selection rule, and the five candidate shapes that were read and then DROPPED as not
+honestly labellable from the diff alone, are all stated in that file's own header — including the one
+sub-shape the band names that history did not contain (`renames of an unrelated local`: zero commits over
+436 `src/`-touching commits rename a local and change nothing else inside the function; the reformat bucket
+is comments ×19 and whitespace/re-wrap ×3, said rather than manufactured).
+
+### The output contract, fixed here
+
+Emitted ONLY under `--since`; the flag is purely additive and a run without it is byte-identical to today.
+
+- One `<since>` child of `<slice>`, carrying `rev=` (the spec verbatim), `resolved=` (the short sha it
+  resolved to), `p=` (the path read at REV) and `status=`.
+- `<sd op="+|-" i=" ordinal" k= t= l= [pp=] [b=]>CDATA</sd>` — one row per **statement** of VAR that the
+  commit added (`+`, present now) or removed (`-`, present at REV). `l=` is the line on the side the row
+  exists on; the CDATA is that side's text.
+- `<se op="+|-" d= u= dl= ul=/>` — one row per **def-use edge** added or removed, endpoints named by
+  statement ordinal plus the line on the side the edge exists on. Edges are `sliceReachingDefs` at
+  statement grain: the same rule the `--slice-flow` walk already chains on.
+- Counts `added=`/`removed=`/`edges_added=`/`edges_removed=` on `<since>`; `counts="as-classified"` on the
+  root already governs them (a diff of two as-classified sets is as-classified, in both directions).
+
+**The key, and why it is the whole feature.** The diff's unit is the **STATEMENT** — the slicer's own
+`sliceStmtAnchorLine` chaining anchor — never the LINE, and the two sides are aligned by a canonical LCS
+over the tuple `(k, t, pp)` in source order, **never** over line numbers and **never** over statement TEXT.
+Line keying would make every re-wrap and every inserted line above the symbol a false positive; text keying
+would make a renamed unrelated local one. Both are exactly the negative bucket the band scores. The
+consequence, stated in the legend rather than discovered: `v = 111;` → `v = 222;` is an EMPTY slice diff.
+That is correct — no def-use edge moved — and it is why the element is named for dependence and not for
+change.
+
+**Absence is disclosed, never silently empty.** `status=` is one of: `ok` (both sides sliced);
+`sym_absent_at_rev` (the file exists at REV, no definition of SYM in it — the symbol is new, so every row
+reads `+`); `var_absent_at_rev` (SYM exists, VAR has no occurrence — every row reads `+`);
+`file_absent_at_rev` (the path is not in the REV tree and no rename resolves it — `comparable="0"`, NO rows,
+and the legend says outright that an empty diff under `comparable="0"` is not evidence of no change);
+`unparsed_at_rev`. A rename is followed once (`git diff --name-status -M`) and disclosed as
+`renamed_from=`. A `--since` spec that resolves to no commit, and a root that is not a git repository,
+REFUSE at exit 1 — a comparison verb that cannot compare must not exit 0 with an empty answer.
+
+### Instrument and argv
+
+New gate `test/slicediffcheck.sh` (listed in `test/regression.sh` in the same commit). It replays the
+labelled set in a private `git clone --local --no-checkout` of the repo under test — never a worktree of
+it, so the gate is safe under `pargates -j6` — checking out each labelled commit and running
+
+```
+ripwire <clone> --slice=<file>:<sym>:<var> --since=<sha>^
+```
+
+scoring `added+removed+edges_added+edges_removed > 0` as NON-EMPTY. Rows whose commit is not present in
+the repo under test are SKIPPED and counted; if fewer than 20 of either bucket survive, the gate FAILS
+rather than scoring a short set. The remaining arms cover the 0-byte no-`--since` path, determinism ×2,
+cold == warm, `xmllint`, every `status=` value on purpose-built fixtures, the two refusals, and the legend
+restatement.
+
+### The falsifiable claim
+
+*"A def-use slice diffed at statement grain separates a dependence change from a reformat well enough to
+be read INSTEAD of the textual diff during a regression review."* The 18/20 and 19/20 floors are the two
+ways that sentence can be false, and both are scored on the same 57 rows.
