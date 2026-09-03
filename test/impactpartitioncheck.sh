@@ -180,6 +180,50 @@ if testgate_untested:
 else:
     no("MUTATION CONTROL: testgate_untested is empty, nothing to mutate — the sample is not exercising real cases")
 
+# ── (4) F-02 — THE LENS'S BLIND SPOT IS DISCLOSED WHERE THE PARTITION IS READ, AND NOWHERE ELSE ────────
+# testSymbolForwardReach only sees a caller through a CALL EDGE from an indexed test symbol, so a shell or
+# CLI-level test that drives the built binary as a subprocess contributes nothing to it. On this repo's own
+# src/ — tested almost entirely by ~500 test/*.sh gates — that made --impact report radius_untested="48" and
+# --callers hop_untested="9" with NOTHING in either legend saying what "untested" meant there; grepping the
+# pre-fix callers legend for subprocess|shell|CLI-level|process boundary|script_literal returned zero hits.
+# Assertions (1)-(3) above validate the partition against --test-gate's own determination, which is
+# SELF-CONSISTENCY between two verbs sharing one definition of "tested" — it can never catch a caveat that is
+# missing from both. This arm is that check.
+#
+# Scoped both ways, because "add the sentence everywhere" would be the wrong fix: it must appear on every
+# document that CARRIES the partition, and cost 0 bytes on every document that does not (uses has no tested
+# lens at all; the for lens carries only the per-row tested="1" form).
+BLIND_ANCHORS = [ "SUBPROCESS", "CALL EDGE from an INDEXED test symbol", "not as no test covers it" ]
+
+def legend_of(doc):
+    m = re.match(r"\A(?:\s*<!--.*?-->)+", doc, re.S)
+    return m.group(0) if m else ""
+
+CARRIES = [ ("--impact=isPublicApi",  "radius_tested="),
+            ("--callers=buildGraph",  "hop_tested="),
+            ("--callees=buildGraph",  "hop_tested=") ]
+for flag, partition_attr in CARRIES:
+    doc = run([flag])
+    lg  = legend_of(doc)
+    if partition_attr not in doc:
+        no("(4) %s no longer carries %s — this arm measured nothing" % (flag, partition_attr))
+        continue
+    missing = [a for a in BLIND_ANCHORS if a not in lg]
+    if missing:
+        no("(4) %s carries %s but its legend is missing the process-boundary caveat: %s" % (flag, partition_attr, missing))
+    else:
+        ok("(4) %s: the partition and its process-boundary caveat travel together" % flag)
+
+INERT = [ "--uses=rootRelPathsLegend", "--for=resolve call edges by name" ]
+for flag in INERT:
+    doc = run([flag])
+    if "radius_tested=" in doc or "hop_tested=" in doc:
+        no("(4) %s unexpectedly carries a tested PARTITION — the inertness arm's premise is gone" % flag)
+    elif any(a in doc for a in BLIND_ANCHORS):
+        no("(4) %s pays for the partition caveat without carrying the partition (should be 0 bytes)" % flag)
+    else:
+        ok("(4) %s pays 0 bytes for the caveat (no tested partition on it)" % flag)
+
 print()
 if fail[0]:
     print("impactpartitioncheck: FAILURES")

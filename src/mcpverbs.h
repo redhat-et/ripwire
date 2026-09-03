@@ -1205,7 +1205,17 @@ inline std::string mentionsJson( const std::string& root, const std::string& sym
 // Returns the full <ctx>…</ctx> XML as a string (matches G4 — valid XML document). "for" is a
 // C++ keyword so the function is named forTaskText(). `redact` masks credential shapes in the
 // emitted doc comments (A3-F3 — same seam contract as the CLI --for); null under --no-redact.
-inline std::string forTaskText( const std::string& root, const std::string& task, int topK, RedactCounts* redact = nullptr )
+//
+// ── NO CAP PARAMETER, DELIBERATELY (round-4 finding F-03) ───────────────────────────────────────────
+// This function used to take `int topK` and both call sites — the `for` dispatch arm and the `batch`
+// sub-verb — fed it the SERVER-WIDE `--top-k`, whose default is 200. That is the ranked MAP's row cap; the
+// --for lens is documented to ignore it (cli.h honorsTopK) and the CLI accordingly serves a 40-symbol head.
+// So the `: 40` fallback was dead code and every MCP `for` call ran a 5x wider candidate pool than its CLI
+// twin — dropped_positive="169" vs "11" on the same task over this repo, plus a substantially different
+// served symbol set. The `for` tool schema exposes no cap either, so no argument could reach the CLI's
+// behavior. The parameter is GONE rather than defaulted: a knob only ever fed the wrong value is not fixed
+// by giving it a better default, and removing it is what makes the two dialects unable to drift again.
+inline std::string forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr )
 {
     const McpIndex&          ix        = getIndex( root );
     const IngestResult&      ing       = ix.ing;
@@ -1217,7 +1227,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // NOT const: LB-A's relevance floor narrows it below, once every boost has landed on lensRank. The
     // MaxScore pruning bound two stanzas down consumes the PRE-floor value, which is the safe direction —
     // a bound computed for a larger K can only keep more candidates, never fewer.
-    int                      forTopN   = topK > 0 ? topK : 40;
+    int                      forTopN   = kForLensDefaultTopN;   // F-03: the ONE cap, shared with the CLI lens (serialize.h)
     // H2 (B0 r2): the MCP `for` bundle reads only the top-forTopN of this rank plus every interface
     // (packLego) — same exact MaxScore pruning contract as the CLI --for (byte-identical output).
     std::vector<char> ifaceExact( ing.symbols.size(), 0 );
@@ -1769,8 +1779,9 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     // exactly the §B4 echo-site divergence the shared-constant rule exists to stop.
     // LB-H: the import tier's clause rides here too — the CLI legend and this one are byte-identical by
     // rule, and an attribute the MCP root now carries has to be defined where the caller meets it.
-    std::fprintf( mem, "%s%s. %s%s%s%s%s-->", kImpactLegendOpen, kPageRaiseCapClause, kImpactImportTierLegend,
+    std::fprintf( mem, "%s%s. %s%s%s%s%s%s-->", kImpactLegendOpen, kPageRaiseCapClause, kImpactImportTierLegend,
                   kTestedRowLegend, kImpactTestedPartitionLegend,   // A6
+                  kTestedLensBlindSpotLegend,                       // F-02: rides with the partition, byte-identical to the CLI twin
                   graphCountDisclosure().c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
     // "is it safe to change X?" reads as the WHOLE blast radius when it can be 3% of it. Same attributes,
@@ -3873,7 +3884,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( missingField( "for" ) );
         }
-        r.payload = forTaskText( root, task, topK, redactPtr );
+        r.payload = forTaskText( root, task, redactPtr );
         if( r.payload.empty() )
         {
             return bad( "no symbols found" );

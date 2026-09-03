@@ -57,11 +57,23 @@ PY
 # ── (a) the absolute byte ratchet, ONE budget per verb, with headroom above today's measurement and well
 #        below the pre-fix numbers cited above (3179 / 3683 / 4303 B) so this gate is RED on the 1dc7b01
 #        binary and GREEN here. ────────────────────────────────────────────────────────────────────────
+#
+# RAISED ONCE, 2026-09-03, for round-4 finding F-02 — callers 2700 -> 3050, impact 3100 -> 3450. The +311 B
+# is graphlegend.h's kTestedLensBlindSpotLegend: the tested= lens sees a caller only through a call edge from
+# an indexed test symbol, so a shell/CLI test driving the built binary as a subprocess is invisible to it and
+# a repo tested that way (this one: ~500 test/*.sh gates) reads radius_untested="48" with nothing in the
+# legend saying what "untested" meant. This ratchet exists to stop the shared PROSE ESSAY re-inflating, not
+# to stop a missing honesty fact from being stated — non-negotiable 3 outranks it, and the clause was written
+# to the shortest honest form (311 B) before the budgets moved rather than after. The ratchet's original
+# purpose is intact: both new budgets still sit BELOW the pre-fix numbers above (3050 < 3179, 3450 < 3683),
+# so the gate is still red on the 1dc7b01 binary. `uses` is untouched: it carries no tested lens, so it pays
+# 0 bytes for the clause — which is the "0 bytes when inert" placement rule, checked here by its budget not
+# needing to move.
 # bash 3.2 (macOS system /bin/bash) has no associative arrays — a case statement is the portable budget table.
 budgetFor(){
     case "$1" in
-        callers) echo 2700 ;;
-        impact)  echo 3100 ;;
+        callers) echo 3050 ;;
+        impact)  echo 3450 ;;
         uses)    echo 3600 ;;
     esac
 }

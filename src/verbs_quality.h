@@ -834,6 +834,27 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // `refs` is declared HERE because it owns both materialized trees' teardown and they must outlive
         // every read of `regs` (DeltaBasis's header states that rule, and why the emitters below spell every
         // path and symbol against basis.deltaRoot rather than against `root`).
+        // F-04 (round-4 audit) — SERIALIZE THE ACK LEDGER'S READ-MODIFY-WRITE, cross-process.
+        //
+        // --quality-ack reads the whole ledger (inside resolveDeltaBasis just below — the heal has to happen
+        // before computeDelta), folds this run's accepted findings into that map, then rewrites the file from
+        // it. Nothing serialized that. Three sessions acking DISJOINT rows in one shared checkout — the exact
+        // scenario --scope exists for — lost two of the three acks on 8 of 8 measured runs, because whichever
+        // process rewrote last overwrote a map the other two had already published into.
+        //
+        // The lock therefore has to span the READ as well as the write, which is why it is taken HERE and not
+        // inside writeAckRecords: a lock held only around the final rewrite still lets two processes read the
+        // same stale map first and then take turns clobbering. Engaged ONLY under --quality-ack — a read-only
+        // --quality-delta never waits, never creates the lockfile, and is byte-for-byte the run it always was.
+        // RAII: released when this function returns, on every path including the refusals below. quality.h's
+        // SidecarWriteLock has the lockfile's location (per-user cache dir, never a repo-tree sidecar), the
+        // wait budget, and the honest limits.
+        std::optional<quality::SidecarWriteLock> ackLock;
+        if( cfg.qualityAck )
+        {
+            ackLock.emplace( acksFile );
+        }
+
         const bool   refPair = !cfg.qualityDeltaRange.empty();
         RefPairDelta refs;
         DeltaBasis   basis;

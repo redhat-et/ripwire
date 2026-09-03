@@ -177,6 +177,22 @@ inline std::string editCheckAmbiguousMessage( std::string_view spec, std::span<c
 // main.cpp for the full semantics). `root` MUST be spelled exactly as the caller's `ing`/`g` were built
 // against — baselineCanonId keys are root-relative, so a mismatched root spelling manufactures phantom
 // contract-changes (the same class of bug quality_delta's MCP verb already guards against).
+//
+// ── nowDefs: THE COMMENT INSIDE ONCE DESCRIBED A LOOP THAT DID NOT EXIST (fixed 2026-09-03, F-01) ─────────
+// `defs_was` has always come out of a PATH-QUALIFIED bucket (quality::qualityKey). `defs_now` used to be
+// counted over `g.canonId[i] == g.canonId[focus]` across the WHOLE CORPUS, with no file intersection at all,
+// under a comment asserting the opposite. canonicalId degrades a scope-less name to the BARE NAME, so the
+// commonest shape in any repo — one bare name defined independently in two files (`init`, `run`, `read`) —
+// made the two sides bucket differently and reported `status="contract-change" change="defs" defs_was="1"
+// defs_now="2"` on a tree byte-identical to its own HEAD. That headline word is the verb's whole value, and
+// it was lying on the simplest possible fixture; every gate arm that existed used one file per name, which
+// is exactly why none of them saw it (test/editcheckcheck.sh arm (j) is that fixture, Python and C++).
+//
+// The count is now taken under computeSnapshot's OWN KEY, behind the same "has a canonical id" presence gate
+// that loop uses, rather than under a second rule that has to be ARGUED equal to it. `overloadNodes.size()`
+// would give the same answer today — canonicalId degrades exactly when the scope is empty, so (fileId,
+// canonId) equality and (path, scope, name) equality coincide — but that is a claim about a function in
+// another header, i.e. the same kind of seam rule the publicness fold inside deliberately refuses to rest on.
 inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const Graph& g, const std::string& root,
                                                   std::size_t maxFileBytes, const std::vector<std::string>& excludes,
                                                   NodeId focus, std::span<const NodeId> overloadNodes )
@@ -190,13 +206,14 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
     // exactly how the two drifted — for the window between the key-space change and this line, every lookup
     // missed and --edit-check reported `new-symbol` for every symbol on a clean tree.
     //
-    // `overloadNodes` is that bucket INTERSECTED with the focus's file, because a CONTRACT is per definition
-    // site. The two sides are now BOTH path-qualified, which makes them equal by construction on an unedited
-    // tree — and strictly more so than before: the old canonId key degraded a scope-less name to a bare name,
-    // so the bucket silently spanned files while `overloadNodes` never did.
+    // `overloadNodes` is that same bucket, reached through g.canonId + fileId — a CONTRACT is per definition
+    // SITE. Both sides are path-qualified, which is what makes them equal by construction on an unedited tree;
+    // the doc comment above this function records the round in which that was true of the comment only.
+    // `key` is hoisted here because it IS the loop's predicate; the baseline lookup below reads the same value.
+    const std::uint64_t key = quality::qualityKey( ing, focus, root );   // the key computeSnapshot stored
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
     {
-        if( i < g.canonId.size() && !g.canonId[i].empty() && g.canonId[i] == g.canonId[focus] )
+        if( i < g.canonId.size() && !g.canonId[i].empty() && quality::qualityKey( ing, i, root ) == key )
         {
             ++res.nowDefs;
         }
@@ -221,7 +238,6 @@ inline EditCheckContract editCheckContractVsHead( const IngestResult& ing, const
 
     // HEAD baseline — the warm path MUST hit computeHeadSnapshot's own qsnap cache (the ≤100ms budget).
     auto [ base, baselineOk ] = quality::computeHeadSnapshot( root, nullptr, maxFileBytes, excludes );
-    const std::uint64_t key   = quality::qualityKey( ing, focus, root );   // the key computeSnapshot stored
     if( !baselineOk || base.locBySym.find( key ) == base.locBySym.end() )
     {
         res.status = "new-symbol";
@@ -532,10 +548,11 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
                        "overload whose parameter count is BELOW the MAX moves neither number, because the MAX survives "
                        "on both sides, while the call site that used the removed definition no longer binds. "
                        "defs_was=/defs_now= is what closes that: the count of definitions sharing this symbol's "
-                       "CANONICAL ID on each side. That population is the one the baseline snapshot buckets by, so the "
-                       "two numbers answer the same question and are equal on an unedited tree — it is deliberately NOT "
-                       "the root's defs=, which is the same bucket narrowed to this FILE (a contract is per definition "
-                       "site), so where a scope-less name also exists in another file defs= is the smaller of the two. "
+                       "DEFINITION SITE — same file, same scope, same name — on each side. That is the population the "
+                       "baseline snapshot buckets by, so the two numbers answer the same question and are equal on an "
+                       "unedited tree. A same-named definition in ANOTHER FILE is a different contract and is counted "
+                       "on neither side, so defs_now= agrees with the root's defs= by construction and only defs_was= "
+                       "can move it. "
                        "status is therefore the join of THREE was-vs-now facts — the params MAX, publicness, and the "
                        "definition COUNT — and change= names which of them carried it. "
                        "change= adds broken-callers when a seen caller is also flagged, but never on its own — for the "
