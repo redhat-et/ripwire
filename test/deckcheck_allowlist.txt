@@ -90,3 +90,5 @@
 --project-name	scip-python's own indexer flag ("scip-python index --project-name astropy"), quoted in docs/EVALS.md's locality-census phase-3 recipe as the registered argv — not a ripwire flag
 --project-version	scip-python's own indexer flag ("--project-version 14365"), quoted beside --project-name in the same census recipe — not a ripwire flag
 --label	bench/scip_pin_precision.py's own flag ("--label astropy-14365-fix", the census run label) quoted in docs/EVALS.md's phase-3 census argv — not a ripwire flag
+--name-status	git's own diff/log option ("git diff --name-status -M"), quoted in docs/EVALS.md's card-A4 slice-diff registration as the ONE git-recorded rename lookup the diff follows (quality.h's gitRenameMap pins it) — a foreign tool flag, not a ripwire flag
+--no-checkout	git's own clone option ("git clone --local --no-checkout"), quoted in the same registration as how test/slicediffcheck.sh makes its private replay clone without touching the repo under test — a foreign tool flag, not a ripwire flag

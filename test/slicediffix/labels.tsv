@@ -1,0 +1,102 @@
+# labels.tsv — the hand-labelled commit set behind the --slice=SYM:VAR --since=REV band (docs/EVALS.md).
+#
+# One row per LABELLED COMMIT. The gate (test/slicediffcheck.sh) replays each row by checking the commit
+# out in a private clone and running:  ripwire <clone> --slice=FILE:SYM:VAR --since=<sha>^
+#
+# label  = dependence | reformat
+#   dependence — reading THE COMMIT'S DIFF ALONE, this commit adds or removes a STATEMENT inside SYM that
+#                mentions VAR (or changes VAR's role on one). The def-use edge set of VAR must therefore
+#                differ between <sha>^ and <sha>, so the slice diff MUST be non-empty.
+#   reformat   — reading THE COMMIT'S DIFF ALONE, every change this commit makes inside SYM's span is a
+#                COMMENT or WHITESPACE change (cls in the mining pass: commentws | wsonly). No statement
+#                is added, removed or re-roled, so VAR's def-use edge set is identical and the slice diff
+#                MUST be empty. (Line numbers DO move; that is the point of the control.)
+#
+# HONESTY PROTOCOL, in the order it was executed:
+#   1. Candidates were mined mechanically from `git log -p -U0 -- src/` (git's own funcname hunk context
+#      gives SYM). A reformat candidate was kept only when EVERY hunk of that commit inside that function
+#      was comment/whitespace-only AND its old line range fell inside SYM's span at <sha>^ — so the
+#      commit really did touch the sliced symbol.
+#   2. VAR was chosen WITHOUT looking at any diff outcome: for `dependence` it is the variable named in
+#      the added/removed statement; for `reformat` it is the first sliceable local of SYM at <sha> with
+#      defs>=1 and uses>=2 (a control on an empty slice would be vacuous).
+#   3. EVERY row was then read by hand against `git show <sha>` and kept only when the label above could
+#      be stated from the diff text alone. Candidates whose answer depended on the tool were DROPPED, not
+#      guessed — the dropped shapes are listed at the foot of this file.
+#   4. Only after all rows were written was the feature run against them.
+#
+# label	sha	file	sym	var	reason
+dependence	a8bee931b36a042d3618127096065a4e92cb164f	src/main.cpp	runCliEditPlan	cfg	adds the statement `if( cfg.editPlan.empty() && !cfg.editCheckSym.empty() )` — a new use statement of cfg
+dependence	5e78351d7976db2857900076ef446a87639c4ff5	src/verbs_navigate.h	emitImpactJson	v	adds a whole printf statement reading v.radiusTested / v.radiusUntested
+dependence	be3e1e63b04686f22ce8cb63c4ec575b473c0bd6	src/graph.h	buildGraph	g	adds the statement `g.pinCensus.addOracleRow( nd.from, nd.calleeName, nd.kind );`
+dependence	d484dbc12ae582e3d6e429e3117f8fde4e4f34da	src/mcpindex.h	getIndex	ix	adds `ix.lastStaleFiles = ...` and `ix.lastChangedFiles = ...` — two new statements touching ix
+dependence	5425b04ac295b5978157523efcc9e7216acf21e1	src/graph.h	buildGraph	s	removes the `if( s.kind == SymKind::Field ) { continue; }` block — statements reading s deleted
+dependence	ac6344eba59597b709ce3099161561fd294f709d	src/graph.h	buildGraph	s	adds that same `if( s.kind == SymKind::Field ) { continue; }` block — statements reading s created
+dependence	21c75e8c8b2029b881db04651bf38bae6ec0acf4	src/verbs_change.h	runDocDrift	result	adds the statement `if( result.filterMatchedNothing )` — a new use statement of result
+dependence	f1a35715ebc60b6731ea8686cb46643ab4b99480	src/taskroute.h	directTaskChoice	task	adds `if( std::optional<RouteChoice> flow = flowTaskChoice( task, lower, root, symbols ) )` — a new use statement of task
+dependence	713a02018f6e9ac73af875d63671a3ee749c74be	src/slice.h	sliceClassify	n	adds `if( std::strcmp( pk, "parameter_declaration" ) == 0 && sliceIsDirectInitCtorArg( n ) )` — a new use statement of n
+dependence	b8209b9e194efff2c1a308ef66a4bbf2b0132932	src/mcpverbs.h	grepHitsJson	hits	adds the statement `out += grepDegradedNoteJson( ing, std::span<const GrepHit>( hits ) );`
+dependence	29ef234988ca9d7c531b43625be45fdcb0ab4dd6	src/mcprefusal.h	notFound	spelling	adds `if( !spelling.empty() && spelling.front() == '@' )` and its return — new use statements of spelling
+dependence	259facd502a97c9d0162f9eeeedb8ca810c9031c	src/mcprefusal.h	notFound	ing	adds the statement `msg += degradedParseNote( ing, spelling );` — a new use statement of ing
+dependence	bec42fdb9e317656eca15b6d7e830222108b8716	src/main.cpp	jsonUnsupportedVerb	c	adds two `if( !c.<field>.empty() )` statements — new use statements of c
+dependence	acd45bd749a76689aadb0069af5915a8112b21c2	src/slice.h	sliceWalk	text	adds `if( sliceIsReservedName( text, lang ) )` — a new use statement of text
+dependence	07ec07f87cd177a39fd299a1f31c9559e831e279	src/mcpverbs.h	atSeedNameOr	sym	replaces the body with a helper call: two statements reading sym are deleted
+dependence	b718ccab7f722b981b5cacc1a022377f299056a4	src/slice.h	sliceWalk	c	adds `c.stmtLine = sliceStmtAnchorLine( node, fam );` — a new DEF statement of c between its decl and its uses
+dependence	8d0d478a3373cf57389eeb1fd139fe65c5600797	src/main.cpp	parseExpandToken	token	adds `if( token.front() == '@' && rangeStr.find( '-' ) == std::string_view::npos )` — a new use statement of token
+dependence	6b1920ed06bb7afd664a2262e841b8159c14945b	src/graph.h	resolveAllByName	name	adds `std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, name );` — a new use statement of name
+dependence	034c3bb5f6b9bf9a3675ff44aab122c646ef0314	src/slice.h	sliceWalk	text	adds `all.push_back( SliceNamedOcc{ std::string( text ), c } );` — a new use statement of text
+dependence	e67cc2d392abedb9d2770068416e7bbccd7dae4c	src/verbs_for.h	forLensJsonHeader	h	adds three `h += ...` statements — three new def statements of h
+dependence	e69606c72e49bb906e294b7a140b16ef563159de	src/planlint.h	writePlanLint	c	adds `if( c.fromLedger )` and `if( c.terminal == Glyph::None )` — new use statements of c
+dependence	11ce6b215446af901b3e710630c1ad50b11bfc8d	src/main.cpp	jsonUnsupportedVerb	c	adds `if( !c.planLintFile.empty() )` — a new use statement of c
+dependence	e2fa31691b172138bdb134f9fa6784b3a803150a	src/main.cpp	appendCompactForLegend	p	adds `if( p.tailLegend )` — a new use statement of p
+dependence	f8d2db92b38090c0c310f94b36e4805500ea6a6f	src/main.cpp	appendCompactForLegend	p	adds `h.append( p.confidenceNote );` — a new use statement of p
+dependence	08e09154a7ea9f921570979394ae49d0ed329bbd	src/editplan.h	parseEdit	edit	adds `if( !payloadWithinPlanDir( planPath, payloadPath, edit.payloadPath ) )` — a new use statement of edit
+dependence	117fc15b87508450cf83f892f3332e94a3820512	src/taskroute.h	directTaskChoice	task	adds `if( std::optional<RouteChoice> named = instrumentedTaskChoice( task, lower, root ) )` — a new use statement of task
+dependence	56c64716ce97203839947a689b080ac6a990898d	src/cli.h	validateConfig	c	adds the statement `validateAgent( c );` — a new use statement of c
+dependence	d62e5d3db73b02c7c293837cc36b0221d9592a56	src/main.cpp	main	cfg	adds `if( std::optional<int> planned = runCliEditPlan( cfg ) )` — a new use statement of cfg
+dependence	3ac37a6f85b7ede4408b75ff1c9660e5f40716ef	src/situ.h	computeTestGate	changedFile	adds `result.shellGates = buildShellGateIndex( ing, changedFile );` — a new use statement of changedFile
+dependence	916b456d8744bb09e89f65a22b9f46f9f5e129f2	src/quality.h	readAckRecords	cid	adds `cid = takeAckCidPrefix( reason );` inside a new if — a second DEF statement of cid (the decl also loses const)
+dependence	d5d532d942c83e7ddeef2763c3d41a8758896de5	src/mcpverbs.h	forTaskText	task	adds `const queryshape::Verdict shape = queryshape::classify( task );` — a new use statement of task
+dependence	adaa99c606f1631edec53cc5bc47e97d8027173b	src/ingest_astquery.h	spanTiersOfFiles	batch	adds spanTierMemoTryLoad/TryStore statements reading batch.perFile[fileIndex]
+dependence	399298fae146f9bea8de8fa936e223bb287c1a45	src/packtask.h	packTaskBundleText	in	two statements that never mentioned in now pass in.compress — new use statements of in
+dependence	c1c8f775b0abc7b9feda43a86827f09b7a20888f	src/main.cpp	runCliEdit	outcome	the advice fprintf statement is replaced by one reading outcome.file / outcome.symbol
+dependence	4db6fb32129985fd937f9c2fd3c3db627c124bcc	src/editplan.h	parseEdit	edit	adds `if( looksBinary( edit.payload ) ) { ... }` — a new use statement of edit
+reformat	7716810b0198f79409c0b7d97c16c3b1c99c833a	src/serialize.h	packSignatures	ing	every hunk of this commit inside packSignatures is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	3fe07b3ace39eed19ec1dc0048d4ffa8e18597f5	src/main.cpp	buildForAutoBodies	cfg	every hunk of this commit inside buildForAutoBodies is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	393f195e6db37aee7a340c484985ed1084fe41f2	src/main.cpp	computeLensRanking	d	every hunk of this commit inside computeLensRanking is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	46ab680e4f57aade69d4919d29a80bd53093cde1	src/main.cpp	runForLens	d	every hunk of this commit inside runForLens is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	2bc6ff2cb23f505be468e54a09e1e4f211d45669	src/pagerank.cpp	testIterationCeiling	value	every hunk of this commit inside testIterationCeiling is a WHITESPACE/re-wrap-only change (mined cls=wsonly), located inside the function's span at the parent
+reformat	ccf68438e1be9a8eb535f0298221e4db260c02cd	src/main.cpp	forLensHeaderText	p	every hunk of this commit inside forLensHeaderText is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	0ac582160369f874bd863b083e38f1db4c71dad6	src/mcpverbs.h	analyzeToString	ix	every hunk of this commit inside analyzeToString is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	9540aff8e294055170954532439fa2bfd380f179	src/graphlegend.h	callHierarchyLegendOpen	wantCallers	every hunk of this commit inside callHierarchyLegendOpen is a WHITESPACE/re-wrap-only change (mined cls=wsonly), located inside the function's span at the parent
+reformat	a1b02c59ad535f5c8464bb288f868540967d5d05	src/partition.h	splitGroupsUpTo	grp	every hunk of this commit inside splitGroupsUpTo is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	65c3ee34b940abe2746d56ab1fb8b9a196881f27	src/ingest.cpp	captureShadowScopeDecls	binds	every hunk of this commit inside captureShadowScopeDecls is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	51c8b20a117e289ccda6b879342d9c103ff7dc84	src/main.cpp	main	argc	every hunk of this commit inside main is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	a7aa85a83497cfb07530d0d6568ff3e56b652492	src/ingest.cpp	ingest	cacheFile	every hunk of this commit inside ingest is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	f40dd921f61d8633fe46dfbecb6364ec71fd9c1b	src/main.cpp	runForLens	d	every hunk of this commit inside runForLens is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	c15467433f6dd8b2b27d16137d8b6326d3327dc1	src/main.cpp	runDoctor	cfg	every hunk of this commit inside runDoctor is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	771e615757b214b79a20b1651333c0988a7527ee	src/namesplit.h	stripTrailingGroup	close	every hunk of this commit inside stripTrailingGroup is a WHITESPACE/re-wrap-only change (mined cls=wsonly), located inside the function's span at the parent
+reformat	05091bd44e072412ef4df1c256d0e7b747c75586	src/situ.h	writeSituation	ing	every hunk of this commit inside writeSituation is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	e392ca41d8f4920d11aa55e7c324166e66188b13	src/main.cpp	computeLensRanking	d	every hunk of this commit inside computeLensRanking is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	a49ffaedc43bdfaa2e58917438ccaad9b722231b	src/ingest.cpp	saveCache	files	every hunk of this commit inside saveCache is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	23ba6ff2080b0da90fd4fac2cf9e443c47e3b75f	src/cli.h	validateConfig	c	every hunk of this commit inside validateConfig is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	a14bdb879a34fe5605b570eb6fed8f185ddae2b3	src/serialize.h	packSource	ing	every hunk of this commit inside packSource is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	cc5ac59e116eaecf093ff4136430f64a802d320d	src/ingest.cpp	captureTagsFacts	cursor	every hunk of this commit inside captureTagsFacts is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+reformat	79dd3cdafa2cb1befb363a010e5af29a549c4403	src/ingest.cpp	saveCache	files	every hunk of this commit inside saveCache is a COMMENT-only change (mined cls=commentws), located inside the function's span at the parent
+#
+# DROPPED candidate shapes (read, then rejected as not honestly labellable from the diff alone):
+#   - a change that only ADDS AN OCCURRENCE INSIDE AN ALREADY-ROWED STATEMENT (`if( a )` -> `if( a && b )`,
+#     `f( x )` -> `f( x, y )`): at the slicer's declared grain no def-use EDGE moves, so it is neither
+#     bucket. 9 candidates.
+#   - a change whose only occurrence delta is a SAME-SPELLED MEMBER (`readRegisterMacrosConfig( root )` ->
+#     `... .names` where `names` is also a local): the slice legend already discloses that it over-counts
+#     here, so labelling it would be labelling a known limit. 3 candidates.
+#   - FUNCTION EXTRACTION / RENAME commits (git's funcname hunk context names a symbol the commit is
+#     creating or renaming): the two sides are not the same definition. 6 candidates.
+#   - a change to a SHADOWED name (`handled` declared in several blocks of main): honest, but the label
+#     would be about which binding, not about the edge. 1 candidate.
+#   - occurrence deltas that live inside STRING LITERALS (MCP tools/list stanzas). 4 candidates.
+# NOT REACHED: `renames of an unrelated local` — the band names it as a reformat sub-shape, and the mining
+# pass over 436 src/-touching commits found no commit that renames a local and changes nothing else inside
+# the function. The reformat bucket is therefore comments (19) and whitespace/re-wrap (3) only; said here
+# rather than manufactured.
