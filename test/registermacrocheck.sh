@@ -38,6 +38,12 @@
 #   5. DISCLOSURE — both verbs' header comments define register-macro-excluded= (legendcoveragecheck's
 #      `name=` convention), and neither ever OMITS the attribute (0 is printed, not absent).
 #   6. HYGIENE — determinism (two runs byte-identical) and well-formed XML.
+#   7. F-13a — an UNRECOGNIZED .ripwire_config key (`register_macrs = …`, a typo of the one real key) used
+#      to be a silent forward-compat skip: no stderr, no header attribute, the config read as live when it
+#      was actually inert. Now: a stderr warning naming the bad key, plus config-warnings="N" on --dead-code
+#      (0/absent when clean) — and the run still succeeds (exit 0), never a refusal.
+#   8. F-13b — a register_macros= name that matches NO indexed symbol (typo, or simply unused) was equally
+#      silent. Same disclosure shape; a name that DOES match stays quiet (the negative control).
 #
 # Usage:
 #   bash test/registermacrocheck.sh
@@ -295,6 +301,60 @@ if command -v xmllint >/dev/null 2>&1; then
 else
     ok "arm6: xml well-formed (xmllint absent — skipped)"
 fi
+
+# ── ARM 7: F-13a — an unrecognized .ripwire_config key is DISCLOSED, not silently skipped ────────────────
+A7="$WORK/a7"; mkdir -p "$A7"
+cat > "$A7/s.cpp" <<'EOF'
+static void deadHelper() { }
+int main() { return 0; }
+EOF
+printf 'register_macrs = MYFRAMEWORK_TEST\n' > "$A7/.ripwire_config"
+DC7_ERR="$( "$BIN" "$A7" --dead-code --no-cache 2>&1 >/dev/null )"
+DC7="$( "$BIN" "$A7" --dead-code --no-cache 2>/dev/null )"
+printf '%s' "$DC7_ERR" | grep -q 'register_macrs' \
+    && ok "arm7: the typo'd key is named on stderr" \
+    || { no "arm7: no stderr warning for the unrecognized key 'register_macrs'"; printf '%s\n' "$DC7_ERR"; }
+printf '%s' "$DC7" | grep -q 'config-warnings="1"' \
+    && ok "arm7: --dead-code root carries config-warnings=\"1\"" \
+    || { no "arm7: no config-warnings= disclosure on the root"; printf '%s\n' "$DC7" | grep -oE '<dead-code[^>]*>'; }
+DC7_COMMENT="$( printf '%s' "$DC7" | sed -n 's/-->.*$//p' )"
+printf '%s' "$DC7_COMMENT" | grep -q 'config-warnings=' \
+    && ok "arm7: the leading comment defines config-warnings=" \
+    || no "arm7: the leading comment never defines config-warnings="
+printf '%s' "$DC7" | grep -q 'n="deadHelper"' \
+    && ok "arm7: the typo'd key does not stop the run — deadHelper still reported (inertness contract, never a refusal)" \
+    || { no "arm7: the run's own output regressed under a merely-misspelled key"; printf '%s\n' "$DC7"; }
+
+# ── ARM 8: F-13b — a register_macros= name matching NO indexed symbol is DISCLOSED too ────────────────────
+A8="$WORK/a8"; mkdir -p "$A8"
+cat > "$A8/s.cpp" <<'EOF'
+static void deadHelper() { }
+int main() { return 0; }
+EOF
+printf 'register_macros = NOPE_NEVER_USED\n' > "$A8/.ripwire_config"
+DC8_ERR="$( "$BIN" "$A8" --dead-code --no-cache 2>&1 >/dev/null )"
+DC8="$( "$BIN" "$A8" --dead-code --no-cache 2>/dev/null )"
+printf '%s' "$DC8_ERR" | grep -q 'NOPE_NEVER_USED' \
+    && ok "arm8: the inert macro name is named on stderr" \
+    || { no "arm8: no stderr warning for the inert name 'NOPE_NEVER_USED'"; printf '%s\n' "$DC8_ERR"; }
+printf '%s' "$DC8" | grep -q 'config-warnings="1"' \
+    && ok "arm8: --dead-code root carries config-warnings=\"1\"" \
+    || { no "arm8: no config-warnings= disclosure for the inert name"; printf '%s\n' "$DC8" | grep -oE '<dead-code[^>]*>'; }
+# negative control: a name that DOES match stays quiet — arm4's MY_CUSTOM_TEST fixture already proves the
+# exemption itself works; this proves it does not ALSO warn about the name it just used correctly.
+A8B="$WORK/a8b"; newrepo "$A8B"
+cat > "$A8B/sample.cpp" <<'EOF'
+static void liveHelper() { }
+MY_CUSTOM_TEST( MySuite, MyCase ) { liveHelper(); }
+int main() { liveHelper(); return 0; }
+EOF
+printf 'register_macros = MY_CUSTOM_TEST\n' > "$A8B/.ripwire_config"
+commit "$A8B" "config + a genuinely-used custom macro"
+DC8B="$( "$BIN" "$A8B" --dead-code --no-cache 2>/dev/null )"
+DC8B_TAG="$( printf '%s' "$DC8B" | grep -oE '<dead-code[^>]*>' )"
+printf '%s' "$DC8B_TAG" | grep -q 'config-warnings=' \
+    && { no "arm8: a genuinely-used register_macros= name still warned as inert"; printf '%s\n' "$DC8B_TAG"; } \
+    || ok "arm8: a genuinely-used config name draws no warning (negative control)"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"
