@@ -2294,7 +2294,7 @@ $ ./build/ripwire . --edit-check=rankGraphTeleport
 
 **Answers:** atomically replace one uniquely-resolved definition with exact bytes from --edit-payload=FILE|-
 
-**Shaped by:** `--at`
+**Shaped by:** `--edit-target-file`, `--at`
 
 ### `--insert-before-symbol=TARGET`
 
@@ -2326,13 +2326,14 @@ empty payloads refuse, never imply deletion
 
 **Answers:** optional file-path substring disambiguating a same-named definition.
 
-RELATIVE (matched against the indexed spelling) or ABSOLUTE (matched against the file's resolved on-disk path), so the path a receipt or a trace hands you works verbatim. These three CLI verbs reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON receipt; follow with --edit-check=SYM and --affected=FILE. Single-root only.
+RELATIVE (matched against the indexed spelling) or ABSOLUTE (matched against the file's resolved on-disk path), so the path a receipt or a trace hands you works verbatim. These three CLI verbs reuse the MCP edit engine: freshness hash, lock, pre-rename recheck, fsync, mode preservation and atomic rename. Every refusal leaves the target byte-identical. Success prints a JSON receipt whose span is the POST-EDIT byte range (where the payload now sits in the new file), NOT the region overwritten in the old one — for --replace-symbol-body those two lengths usually differ; replaced_bytes is the count of old bytes actually overwritten (0 for the two insert verbs, which never overwrite). Follow with --edit-check=SYM and --affected=FILE. Single-root only.
 
 **Shaped by:** `--insert-after-symbol`
 
 **Caveats (stated by the binary):**
 
 - optional file-path substring disambiguating a same-named definition.
+- replaced_bytes is the count of old bytes actually overwritten (0 for the two insert verbs, which never overwrite).
 
 ### `--edit-plan=FILE`
 
