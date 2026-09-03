@@ -1149,6 +1149,17 @@ population is biased toward the intents it already covers.
 **The readout is a LATER session.** This lane ships the instrument and the band. Nothing in this
 registration is a result.
 
+**The readout instrument.** `python3 bench/routing_ab_report.py [--routing PATH] [--meter PATH]
+[--since AT] [--until AT]` (defaults: `$RIPWIRE_HOME/routing.jsonl` and
+`$RIPWIRE_HOME/substitution.jsonl`) computes exactly the metric above: per arm, recommended-prompt
+count and adoption-within-two rate; join coverage against the substitution meter; and the
+pre-registered KEEP/REWORD/REMOVE verdict once BOTH arms clear 40 recommended prompts, or a refusal
+line naming the band and how many more recommended prompts each arm still needs. It never opens
+anything but the two given paths, filters to `agent="claude"` rows (routing.jsonl is shared with
+`hooks/ripwire-codex-route.sh`'s separate, un-armed instrument — `bench/routing_report.py`, the
+existing single-arm Codex-adoption reader documented above under "`--help-task` adoption"), and
+carries no flag that overrides the floor. Gated by `test/routingreportcheck.sh`.
+
 ### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **The mechanism under test.** `--for` becomes terminal by default: after the ranked signatures, the
