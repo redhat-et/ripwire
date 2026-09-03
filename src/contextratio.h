@@ -296,7 +296,12 @@ inline Facts collectFacts( const IngestResult& ing, const NameDefs& byName,
         {
             continue;   // a doc→code mention is a reader's cross-reference, not a thing the code resolves
         }
-        if( r.role == RefRole::Type )
+        // member-variable round (card A3): a MEMBER ACCESS (`o.count`, `this->name`, model.h isMemberAccessSite)
+        // names a field, and a field is never in ing.symbols; resolving it here by NAME would bind `s.name` to
+        // every FUNCTION called `name`, which is not a thing the code resolves. Same scoping rule as the Type
+        // arm: the field index answers these (--uses=Owner.field), this lens's calibrated input stream stays
+        // the pre-round one, byte-identical.
+        if( r.role == RefRole::Type || isMemberAccessSite( r ) )
         {
             // DELIBERATELY OUT OF SCOPE, and this is a scoping decision rather than a judgement that a type
             // mention is not context. Two reasons. (1) A member declaration `Shared m_a;` already contributes

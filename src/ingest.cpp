@@ -266,6 +266,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // 3a-bis) same-FILE decl/def collapse (ObjC only) — @interface decl vs @implementation def (ingest_model.h)
     collapseObjCDeclDefs( raw.defs );
 
+    // 3a-ter) member-variable round: FIELD defs leave the symbol universe here (IngestResult::fields side table)
+    std::vector<RawDef> fieldDefs = partitionFieldDefs( raw.defs );
+    assignFields( result, fieldDefs );
+
     // 3b) assign Symbol ids in (fileId, line, name) order + the rich-ingest lex-stats CSR (ingest_model.h)
     assignSymbols( result, raw.defs, captureValueUses );
 
@@ -277,7 +281,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // into its Reference while the shared sweep attributes fromSymbol (ingest_model.h).
     const std::vector<std::uint32_t> refOrder = orderReferences( raw.refs, result.files.size() );
     emitReferences( result, raw.refs, refOrder, spanIndex );
-    dropFieldDefinitionSites( result, raw.defs );   // member-variable round: a field's defining assignment is not a use of it
+    dropFieldDefinitionSites( result, fieldDefs );   // member-variable round: a field's defining assignment is not a use of it
 
     // P2-D Rule 2 bindings, A4-R5 FFI aliases, B6.3 route defs/uses — each in its deterministic total
     // order, span-attributed families over the same DefSpanIndex (ingest_model.h).

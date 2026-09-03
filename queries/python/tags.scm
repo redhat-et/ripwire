@@ -16,13 +16,14 @@
 ; dataclass fields, TypedDict/NamedTuple members, ClassVar (2 django + 5 653 pydantic sites, 0%
 ; EXCLUSIVE recall before). The `type:` field is the structural line that keeps django's 12 131
 ; plain un-annotated data attrs (`field = models.CharField()`) OUT of the map.
-; Member-variable round (card A3, 2026-09-02): the annotated class attribute is a FIELD (t="field",
-; id=path::Owner::field) — it was t="var" before; the same sites, the honest kind. The keep test is
-; unchanged (the type: field IS the structural discriminant; dropGatedCapture keeps every annotated
-; class-body capture — see fieldCaptureKept's Python arm).
-(class_definition body: (block (expression_statement (assignment left: (identifier) @name type: (type)) @definition.field)))
+(class_definition body: (block (expression_statement (assignment left: (identifier) @name type: (type)) @definition.constant)))
+; (Member-variable round, card A3: the annotated class attribute STAYS a t="var" map symbol — the pre-round
+; contract pyshapecheck pins in the map. It is not re-kinded to a field, because a field never enters the
+; symbol universe and the flagless map must stay byte-identical; `Owner.attr` reaches it through the
+; symbol scope tier as the name-matched --uses answer, not the member form.)
 
-; Instance attribute bound in a method: `self.x = …` / `self.x: T = …` at ANY depth under the method
+; Instance attribute bound in a method: `self.x = …` / `self.x: T = …` at ANY depth under the method — the ONE
+; Python FIELD shape (IngestResult::fields, never a map symbol)
 ; (an `if` in __init__ still declares it). tree-sitter has no descendant operator and tags-pass
 ; predicates never run, so the pattern is LOOSE — it matches `obj.x = …` too — and the gate lives in
 ; ingest_names.h fieldCaptureKept: the receiver must be the bare identifier `self` and the assignment

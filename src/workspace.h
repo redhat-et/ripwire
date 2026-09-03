@@ -352,6 +352,13 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
             s.fileId += fileOff;
             m.symbols.push_back( std::move( s ) );
         }
+        const std::uint32_t fieldOff = std::uint32_t( m.fields.size() );   // member-variable round: the field side table merges alike
+        for( Symbol& f : p.fields )
+        {
+            f.id     += fieldOff;
+            f.fileId += fileOff;
+            m.fields.push_back( std::move( f ) );
+        }
         for( Reference& ref : p.references )
         {
             if( ref.fromSymbol != kNoNode )
