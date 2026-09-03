@@ -1160,6 +1160,34 @@ anything but the two given paths, filters to `agent="claude"` rows (routing.json
 existing single-arm Codex-adoption reader documented above under "`--help-task` adoption"), and
 carries no flag that overrides the floor. Gated by `test/routingreportcheck.sh`.
 
+**The abstain-shape question — PRE-REGISTERED 2026-09-03 (before the sweep below is read).** The
+first weeks of `routing.jsonl` are ~90% `abstain`, and every abstain carries an EMPTY intent: the
+classifier matched nothing, so the row is "not recognised as a ripwire moment", not "verb withheld".
+Two explanations are indistinguishable from the log by construction (it stores no text): (a) the
+classifier's recall is the bottleneck — agents do type ripwire-shaped prompts and `--help-task` misses
+them; (b) the prompt population is the bottleneck — most prompts are chat, git, and edits that no verb
+serves, and the recommend rate is an honest ceiling. Widening the recommend set is only justified
+under (a); under (b) it would spend the classifier's measured precision (1.000 / harmful 0.000) on
+prompts that never wanted a verb and drag the treatment arm the band above measures.
+
+*Instrument A, run now:* `--help-task` over every labelled prompt of `test/skillevalfix/prompts.tsv`
+(266 prompts whose `expected` column names a ripwire skill, i.e. prompts an agent DID type at a
+ripwire moment), argv `ripwire . --exclude=bench/external --help-task="<prompt>"` on this repo at the
+commit that carries this section, reported as coverage (share of `status="recommend"`) overall and
+per expected skill. *Band:* coverage **≥ 0.80** → the classifier recognises ripwire-shaped prompts and
+the wild abstains are read as (b): waiting for n ≥ 40 per arm is the honest course and no intent is
+widened. Coverage **< 0.60** → (a): the classifier is the bottleneck; the per-skill table names the
+intents to add, the additions are registered as their own band, and the A/B window RESTARTS (rows
+before the change are never pooled with rows after). Between the two → inconclusive; instrument B
+decides. *Known prior, stated so it cannot be re-read as a result:* `test/taskroutecheck.sh` reports
+coverage 0.825 on ITS corpus (`test/taskroutefix/`, 159 rows), a corpus the router was tuned against;
+prompts.tsv was labelled for skill routing, not for the verb router, so it is the harder, fairer set.
+
+*Instrument B, owner opt-in, NOT built:* a local-only labelled sample of ≥ 100 real abstained prompts
+(never committed, never leaves the machine — the meter's no-text rule is the reason this needs a
+separate consent), each labelled ripwire-shaped or not by hand. *Band:* ≥ 50% ripwire-shaped →
+treat as (a) above; otherwise (b). Until B exists, an inconclusive A stays inconclusive.
+
 ### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **The mechanism under test.** `--for` becomes terminal by default: after the ranked signatures, the
