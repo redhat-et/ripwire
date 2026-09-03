@@ -9219,6 +9219,119 @@ kept rather than replaced. The new boundary is stated in the gate headers as the
 `--no-cache` remains the unconditional escape hatch. No accuracy number and no ranking effect is claimed:
 this changes WHEN bytes are read, never what is extracted from them.
 
+### The result, measured 2026-09-03 against the bands registered above — SHIPPED (option (a)'s cheap discriminator, not its content hash)
+
+**The mechanism that shipped.** `st_ctime`, recorded beside `(sizeBytes, mtimeNs)` at the moment a file is
+read+hashed and required to match EXACTLY. `::stat` already returns it and every one of these paths already
+called `::stat` once per file, so the fix costs **no syscall and no file read**. It landed on all three warm
+surfaces that shared the residual, because a fix to one is not a fix to the others: the CLI incremental
+cache (`FileFacts` + the A4-P7 gate; `kCacheVersion` 13 → 14, so v13 blobs self-heal), the `--grep`
+span-tier memo (`kSpanTierMemoVersion` 1 → 2), and the warm `--mcp` index (`McpIndex::fileCtime`,
+`mcpStale()`, `mcpStaleFileCount()`). The `--mcp` half needed the CLI half: an `--mcp` rebuild re-ingests
+through the same on-disk cache, so a build that fixed only `mcpStale()` would have decided "stale", rebuilt,
+and then been handed the pre-edit facts by `ingest()`'s stat gate. `freshnesscheck` arm 7 is the arm that
+proves both halves at once.
+
+**Band 1 — correctness: every registered arm flipped, and one arm was added that the registration did not
+foresee.**
+
+| arm | before | after |
+| --- | --- | --- |
+| `freshnesscheck` arm 6 (warm CLI) | OBSERVED, passed either way | **HARD** — the same-`(mtime, size)` edit IS caught |
+| `freshnesscheck` arm 7 (warm `--mcp`) | did not exist | **HARD** — `_fresh:"reindexed"`, `_stale_files:1`, `_changed_files:1`, post-edit symbol served |
+| `statgatecheck` (b2) | informational `note` pair | **HARD** — the backdated same-size edit is detected |
+| `statgatecheck` (e) | did not exist | **HARD** — a `chmod`-to-unreadable keeps the cached parse |
+
+6 FAIL red-first at `e8af28f`, all green at `ea9a064`. The registered non-regression set is green with no
+edit to its assertions: `racymtimecheck` (both arms — the racy rule is kept, not replaced), `cachehashcheck`,
+`tornreadcheck`, `savecachecheck`, `cacheisolationcheck`, `cachefuzzcheck`, `portablecachecheck`,
+`mcpstalecheck`, `mcpincrementalcheck`, `postingscheck`, `qextractionkeycheck`, `qschemetripcheck` (re-pinned
+— `kCacheVersion` is one of the two declaration lines its hash feeds on), plus `cachesplitcheck`,
+`clonecachecheck`, `headsnapcachecheck`, `qsnapcachecheck`, `qsnapprefetchcheck`, `docmdcachecheck`,
+`evictioncheck`, `greptiercheck`, `grepfastcheck`.
+
+**The arm the registration did not foresee, and the gate that caught it.** `st_ctime` moves on
+`chmod`/`chown`/xattr/rename as well as on a write. Those all fall out of the stat gate into the read+hash
+path — correct, and cheap, since the re-hash then agrees with the record. Except when the metadata change is
+what made the file UNREADABLE: the read fails, and the first implementation dropped every symbol the file
+had, turning a `chmod 000` into a silently partial index. `postingscheck` (d) went red — it makes every
+source unreadable on purpose, to prove the warm scorer does not re-read per query, and that instrument
+collides with this discriminator. The rule that shipped: **an unreadable file whose `(size, mtime)` still
+match a non-racy record KEEPS its cached parse** and absorbs the metadata move, because a ctime that moved
+alone is not evidence of a content change and serving the last-known parse of a file we could not look at
+beats deleting it from the answer. An unreadable file whose size or mtime DID move is still dropped, as
+before. Disclosed exposure, stated at the code and in `statgatecheck` (e)'s header: a same-`(mtime, size)`
+edit hidden behind a chmod-to-unreadable is served stale — and no cache-free run does better, since
+`--no-cache` cannot read it either.
+
+**Band 2 — cost: the fix does not resolve against the noise floor; the alternative costs ~23% of every warm
+run.** Full ledger, argv and instrument in `bench/PROFILE.md` ("card A3 follow-up"). Three binaries — `base`
+= `1c6fdf4`, `head` = this lane, `hashall` = **option (a) proper**, `head` with `statMatches` forced `false`
+so every stat-equal file is read + content-hashed and its cached facts still reused (a throwaway measurement
+arm, not committed). Nine trials per tree with the **arm order rotating by trial**.
+
+| tree | `base` | `head` (ctime) | `hashall` (option (a)) |
+| --- | --- | --- | --- |
+| ripwire, `files=1505` | 62.4 ms (spread 59.8–75.1) | **61.3 ms** (−1.1) | 75.2 ms (**+22.7%** vs head) |
+| duckdb, `files=5123` | 219.4 ms (spread 198.5–342.9) | **212.8 ms** (−6.6) | 261.4 ms (**+22.8%** vs head) |
+
+Both `head` deltas are NEGATIVE and both sit inside the base arm's own trial spread: one integer comparison
+per file, on a `struct stat` the loop had already filled, does not resolve. The registered rejection rule is
+not triggered. `RIPWIRE_CACHE_STATS=1` reports `reparsed=0 reused=1505` and `reparsed=0 reused=5123` for all
+three arms on a settled tree — the arms differ only in whether they READ, which is what makes the wall-clock
+gap readable as the read cost.
+
+**The rotation is part of the result.** A first pass with a FIXED arm order (base always first, head always
+second) reported `head` +19.9 ms on duckdb — outside base's spread, and therefore a REJECT under the rule
+registered above. It was position, not code: the within-trial ramp penalises whichever arm runs second. The
+fixed-order numbers are discarded and the rotated ones are what is reported. Worth recording because the
+registered rejection rule would have fired on a measurement artifact and killed a free fix.
+
+**The verdict on option (a), stated as the task's own question asks it.** Content-hashing every stat-equal
+file is *not* more expensive than the parse it saves — `hashall` never reparses, so its penalty is ~23% of a
+warm run rather than the 1.1–2.3 s cold parse. It is **dominated**: it costs ~23% of every warm invocation,
+and it still closes the residual only for files it can READ, while the recorded ctime closes it for free and
+keeps the cached parse of a file that has become unreadable. So the answer to "does hashing every stat-equal
+file defeat the stat gate's purpose" is yes, measured: on the common no-change path every file is
+stat-equal, so option (a) degenerates to a whole-tree re-read on every invocation, which is the one thing
+the gate exists to avoid.
+
+**Band 3 — determinism, format and portability: all green.** `cold == warm == warm` byte-identical and
+`xmllint --noout` clean on BOTH trees (ripwire root with `--exclude=bench/external`, and duckdb; the corpus
+is left untouched). ASan (`-DRIPWIRE_ASAN=ON`, `LSAN_OPTIONS=suppressions=lsan_suppressions.txt`) cold and
+warm over the repo root: `rc=0`, empty stderr, no LSan report — and both changed gates green under
+`asan/ripwire`. `portablecachecheck` (c) still self-heals a doctored old-version blob, and (a) still proves
+a cache built under root A is byte-identical to a cold run when consumed under root B: the cache-key
+portability contract (root-relative `relForHash` keys) is untouched. What a transported cache may lose is
+stat-gate ELIGIBILITY, since `ctime` is not preserved by `cp`, `tar` or `rsync` anywhere — it then falls
+through to read+hash and hits on the content hash, which is a cost and not a correctness change, and is the
+honest posture: a tree whose inodes we did not observe being written is exactly the tree whose stat identity
+we must not trust.
+
+**The honesty-claim corrections this lane owed.** Three comments generalised a passing arm into an immunity
+the code did not have, which is the same defect class as a stale answer:
+
+* `src/mcpindex.h` — *"Catching it is provably impossible without READING the file's bytes."* Sound about the
+  two fields it considered, wrong about the third the same `::stat` returns. Rewritten to say what the check
+  now does, what it used to miss, and what is still outside it.
+* `test/mcpstalecheck.sh` — the same-`(mtime,size)` corner described as "the documented irreducible
+  residual". Corrected: it was wrong about the cost, not about the read.
+* `src/ingest_astquery.h` — "THE ONE RESIDUAL" on the span-tier memo. Corrected, and the memo fixed rather
+  than only re-described.
+* `test/cachehashcheck.sh`'s header (corrected once already this round) now also says why its arm stays
+  length-CHANGING: so it keeps fencing the size discriminator specifically instead of becoming a duplicate
+  of the arms that stage the length-preserving attack.
+* `docs/ARCHITECTURE.md` §2 and `skills/ripwire-mcp/mcp-reference.md` name the triple and the new boundary.
+
+**What this section does not claim.** The residual is narrowed, not abolished. `st_ctime` closes it against
+every unprivileged same-`(mtime, size)` edit on a filesystem that maintains ctime (APFS, ext4, btrfs, xfs,
+HFS+). It does NOT close it against a caller who can move the system clock backward, against raw
+block-device manipulation, or on a filesystem with no distinct ctime (FAT/exFAT, some SMB mounts) — there
+the gate degrades to exactly its pre-ctime behaviour, which is why the racy rule is kept rather than
+replaced, and both gates print the mounted filesystem when their assertion fails so that case is
+diagnosable. `--no-cache` remains the unconditional escape hatch. No accuracy number and no ranking effect:
+this changes WHEN bytes are read, never what is extracted from them.
+
 ## `--impact`/`--callers`/`--callees` tested/untested row partition (card A6, agent-lsp), PRE-REGISTERED 2026-09-03 (before any measurement)
 
 **What this registers.** ARISE-bibliography RANK-A card A6 — agent-lsp's "who breaks, and which of those

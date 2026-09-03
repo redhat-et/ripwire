@@ -12,9 +12,13 @@
 # AND fold the per-file content hash into the `_index` stamp. A content edit that changes the byte length —
 # i.e. essentially every real edit (adding/renaming/removing a symbol, inserting a line) — is now caught
 # EVEN WITH the mtime restored, and the stamp moves on ANY content change. (The same-(mtime,size) corner —
-# a same-length rename + touch -r — is the documented irreducible residual: catching it would require a
-# whole-tree re-read on every verb call, ~13× the warm-path cost — see mcpStale's comment in src/mcp.h. The
-# EDIT verbs' own per-write byte-hash guard covers that corner for writes.)
+# a same-length rename + touch -r — was documented here as an IRREDUCIBLE residual, on the grounds that
+# catching it needed a whole-tree re-read at ~13x the warm-path cost. That was wrong about the cost, not
+# about the read: st_ctime is a THIRD discriminator out of the same stat(), it moves on the utimes() the
+# restore performs, and an unprivileged writer cannot set it back. The corner is closed — mcpStale()
+# compares it, and test/freshnesscheck.sh arm 7 stages exactly that attack against a long-lived server. The
+# EDIT verbs' own per-write byte-hash guard still covers writes independently, and a filesystem with no
+# distinct ctime degrades to the behaviour this paragraph used to describe.)
 #
 # This gate drives a LONG-LIVED server over a FIFO (same technique as mcpeditcheck.sh step 5 /
 # situdiffcheck.sh's stdio piping): warm the index with a read verb, then make a length-CHANGING content

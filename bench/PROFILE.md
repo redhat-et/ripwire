@@ -868,3 +868,66 @@ the server was already doing silently — the disclosure is a report on work alr
 the finding, not a footnote to it. It also sets the price of ever closing the same-(mtime,size) residual:
 the whole-tree re-read `mcpStale`'s comment prices at ~13x lands on top of a request that is already
 sweep-bound.
+
+## 2026-09-03 — card A3 follow-up: what the ctime discriminator costs, and what re-hashing would have cost
+
+LEDGER row, never a gate (the no-perf-budget rule). Registered band and rejection rule: docs/EVALS.md,
+"Closing the same-`(mtime, size)` warm-path residual (card A3 follow-up)", band 2 — a settled warm run must
+add **zero file reads**, and a warm delta landing outside the base arm's own trial spread in the slower
+direction REJECTS the fix in favour of the disclosure-only refusal.
+
+### Instrument and argv
+
+Three binaries, one measurement harness, wall-clock around the whole process (`time.perf_counter` in a
+python driver, stdout to `/dev/null`), each arm with its own `TMPDIR` so the cache blobs never collide:
+
+| arm | what it is |
+| --- | --- |
+| `base` | `1c6fdf4` (this lane's fork point), built from `git archive` into a scratch tree |
+| `head` | this lane's HEAD — `(size, mtime, ctime)` |
+| `hashall` | **option (a) proper**: `head` with `statMatches` forced `false`, so every stat-equal file is read + content-hashed and its cached FACTS are still reused. Prices the read+hash, not a reparse. NOT COMMITTED — a measurement arm, patched in a scratch copy of the tree. |
+
+```
+TMPDIR=<per-arm> <bin> /Users/qgames/AppDevelopLocal/project2/rw-n4-b --exclude=bench/external   # files=1505
+TMPDIR=<per-arm> <bin> <corpora>/duckdb                                                          # files=5123
+```
+
+Each arm primed with two runs before any trial. **Nine trials, and the arm order ROTATES by trial**
+(`base head hashall` / `head hashall base` / `hashall base head` / …). That rotation is the measurement:
+a first pass with a FIXED order — base always first, head always second — reported head +19.9 ms on duckdb,
+outside base's spread and therefore a REJECT under the registered rule. It was position, not code: the
+within-trial ramp penalises whichever arm runs second. The fixed-order numbers are discarded and the
+rotation is what is reported. Apple Silicon, warm page cache, machine otherwise idle.
+
+### Result — the fix is free, and the alternative is not
+
+| tree | arm | median | min | max |
+| --- | --- | --- | --- | --- |
+| ripwire, `files=1505` | `base` | 62.4 ms | 59.8 | 75.1 |
+| | **`head`** | **61.3 ms** | 59.4 | 75.1 |
+| | `hashall` (option (a)) | 75.2 ms | 71.7 | 83.8 |
+| duckdb, `files=5123` | `base` | 219.4 ms | 198.5 | 342.9 |
+| | **`head`** | **212.8 ms** | 197.2 | 269.0 |
+| | `hashall` (option (a)) | 261.4 ms | 232.3 | 366.9 |
+
+* **`head` vs `base`: −1.1 ms (ripwire) and −6.6 ms (duckdb).** Both point estimates are NEGATIVE and both
+  sit well inside the base arm's own trial spread — the honest reading is that one integer comparison per
+  file, on a `struct stat` the loop had already filled, does not resolve against this machine's noise.
+  Band 2 is met and the rejection rule is not triggered.
+* **`hashall` vs `head`: +13.9 ms (+22.7%) and +48.6 ms (+22.8%).** Strikingly consistent across a 3.4×
+  difference in tree size, because it is the same thing both times: re-reading and re-hashing every file in
+  the tree on every invocation. That is what option (a) costs to buy exactly what one already-taken `stat`
+  field gives for nothing.
+* `RIPWIRE_CACHE_STATS=1` on a settled tree reports `reparsed=0 reused=1505 files=1505` and
+  `reparsed=0 reused=5123 files=5123` for **all three** arms — the arms differ only in whether they READ,
+  never in what they conclude, which is what makes the wall-clock gap readable as the read cost.
+
+### What this does NOT say
+
+It does not say option (a) is unaffordable in absolute terms: `hashall` never reparses (the hash agrees), so
+its penalty is ~23% of a warm run and not the 1.1–2.3 s cold parse. It says option (a) is **dominated** —
+it costs ~23% of every warm invocation, and it still closes the residual only for files it can READ, while
+the recorded ctime closes it for free and keeps the cached parse of a file that has become unreadable
+(`statgatecheck` (e)). The A3 ledger's ~13× figure for a whole-tree re-read on the MCP path stands
+unchallenged; this row prices the same idea on the CLI, where the facts-reuse makes it far cheaper than 13×
+and still the wrong trade.
