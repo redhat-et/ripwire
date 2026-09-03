@@ -9495,3 +9495,56 @@ restatement.
 *"A def-use slice diffed at statement grain separates a dependence change from a reformat well enough to
 be read INSTEAD of the textual diff during a regression review."* The 18/20 and 19/20 floors are the two
 ways that sentence can be false, and both are scored on the same 57 rows.
+
+## `--slice=SYM:VAR --since=REV` — MEASURED 2026-09-03 against the bands above: **POSITIVE, both floors cleared with margin**
+
+**Verdict: the diff SHIPS.** Scored on the 57 rows registered above, replayed by
+`bash test/slicediffcheck.sh build/ripwire` arm (17), which checks each labelled commit out in a private
+clone and runs `ripwire <clone> --slice=<file>:<sym>:<var> --since=<sha>^ --no-cache`:
+
+| bucket | registered floor | scaled floor on the set that survived | measured |
+| --- | --- | --- | --- |
+| `dependence` — must be NON-EMPTY | 18 of 20 | 32 of 35 | **35 / 35** |
+| `reformat` — must be EMPTY | 19 of 20 | 21 of 22 | **22 / 22** |
+| skipped (commit absent from the checkout) | — | — | **0** |
+
+No miss in either direction, so there is no loss bucket to report and nothing was tuned after the fact:
+the labelled set was committed at `95e902d`, the gate went red at `0ba42ab`, and the feature first ran
+against them at `e497a0f`. The floors are scaled from the registered 18-of-20 / 19-of-20 ratios to the
+number of labelled commits actually present in the checkout under test, which is STRICTER here than the
+literal registration (32/35 and 21/22 rather than 18 and 19). One refinement was made to the registration's
+gate description after it was written and is disclosed rather than folded in: a checkout carrying NONE of
+the labelled commits (a shallow CI clone) is an environment SKIP, not a failure; fewer than 20 in a bucket
+while some are present still FAILS. On this checkout 0 were skipped, so the distinction did not bear on
+the number.
+
+**Why 35/35 and 22/22 rather than something near the floor.** Both keys are the reason, and each is a
+falsifier the reformat bucket actually exercised: 3 of the 22 reformat rows are whitespace/re-wrap commits
+(`cls=wsonly` in the mining pass) that a LINE-keyed diff would have reported as changes, and all 22 sit in
+commits whose other hunks move the symbol's line numbers. The gate's own fixtures pin the four shapes
+independently of the corpus — a comment-only edit, a statement re-wrapped across two lines, a function
+inserted ABOVE the symbol so every line number moves, and a value-only edit of the def — plus the two that
+must NOT be empty, an added statement and a def inserted between a def and its use (arms 2–7).
+
+**The rest of the band.**
+
+| requirement | result |
+| --- | --- |
+| the diff's legend restates every limit the slice legend states | **MET** — gate arm 13 asserts `no alias analysis`, `no flow sensitivity`, `STATEMENT` and `comparable="0"` in the block; the block also names intra-procedural, name-based, write-behind-a-call, block-scope separation and the `#if 0` rule |
+| 0 bytes of new output without `--since` | **MET** — arm 1; a run without the flag leaves both `SliceEmitOpts` pointers null and is byte-identical to the pre-feature form |
+| determinism ×2, cold == warm | **MET** — arms 14a/14b, and the repo map ×2 byte-identical (21 870 B class run) |
+| `xmllint` | **MET** — arm 15 on a diff-bearing document |
+| ASan on the new path | **MET** — the WHOLE gate re-run against `asan/ripwire` under `LSAN_OPTIONS=suppressions=lsan_suppressions.txt`: ALL PASS, zero reports, including all 57 replays |
+
+**Byte cost, measured** (`ripwire . --slice=src/slice.h:sliceReachingDefs:v --since=HEAD~1 --no-cache`,
+`wc -c`): 4 174 B without the flag, 7 103 B with it — of which the `<since>` ELEMENT is **141 B** and the
+legend block is **2 796 B**. A legend 20× its payload is the shape the slice family already hit and already
+answered, so the since block joined `--legend=compact` in the same lane: 1 016 B there, total 2 751 B, with
+the `<since>` element byte-IDENTICAL between the two tiers (gate arm 18b). Warm wall-clock for a
+`--since=HEAD~40` run is 0.21 s total, because the REV side materializes ONE FILE rather than a tree.
+
+**What it costs to be wrong, restated as a limit rather than a caveat.** The empty answer is the load-bearing
+one, and it is empty for two different reasons that the legend keeps apart: `added="0" removed="0"
+edges_added="0" edges_removed="0"` means *this variable's def-use edges did not move*, while `comparable="0"`
+means *no comparison was made at all*. Reading the second as the first is the one way this verb can mislead,
+which is why the element never carries both and the legend says so in its own sentence.
