@@ -163,47 +163,19 @@ using rw::quality::deadCodeEligibleKind;
 // DIFFERENT versions (parserVerFor), so a single shared file forced a full re-parse + full rewrite on
 // every class switch (measured: plain-map-after --for 0.81 s vs 0.16 s warm). Suffixing the filename
 // with the class gives each class its OWN warm cache, so alternating verb classes never thrashes.
-// (MCP has its own separate file, mcpCachePath in mcpindex.h — and it needs NO exclude field: every MCP
-// ingest passes `{}` excludes and kDefaultMaxFileBytes, so a server serves exactly ONE configuration
-// per root and its key can never collide across configurations.)
-//
-// N5-A: the same class-switch thrash, on the EXCLUDE axis. The key folded neither the exclude set nor
-// --max-file-size, both of which decide WHICH FILES are extracted, so `ripwire .` and
-// `ripwire . --exclude=bench/external` shared ONE blob. Measured on this repository (EVALS §"The
-// auto-cache key ignores `--exclude`"): the excluded run deserialised the 686 MB un-excluded superset it
-// then discarded — 536 ms of loadCache against 31 ms of parsing, versus 8 ms under an explicit
-// --cache=PATH — and the moment that excluded run was DIRTY (any file changed since it last ran, the
-// ordinary case in a working tree) it rewrote the shared blob with its SUBSET, leaving the next
-// un-excluded run to cold-parse the whole excluded subtree (~15,000 files, 5.0 s).
-//
-// So the filename gains a third field, between the root hash and the class: `exclConfigHex` — the SAME
-// key material (excludes + the family scheme tag + extractionIdentityTag() + maxFileBytes) that
-// quality.h's qheadsnap/qsnap/qbody families have keyed on since P0.2. Reused, not re-derived: one body
-// decides what "which files were extracted" hashes to, for every cache family in the tool.
-//
-// Two consequences, both intended. (1) One blob per (root, exclude config, class) — bounded by the same
-// dir-wide `sweepStaleCacheBlobsOnce` hygiene pass that already bounds this family (prefix "ripwire-",
-// 30-day age cutoff, then oldest-first down to kMaxCacheDirBytes); the new names carry that prefix, so
-// they are inside the swept family by construction (gated: cacheexclkeycheck (f)). (2) A kParserVer /
-// kCacheVersion bump now RENAMES the blob instead of overwriting it in place, because
-// extractionIdentityTag() rides the key — the version-gated content check inside loadCache still exists
-// and is still authoritative, and the orphaned old blob ages out on the 30-day pass like any other.
+// (MCP has its own separate file, mcpCachePath in mcp.h — unaffected.)
 //
 // Y4: resolved through resolveCacheBlobPath (quality.h) — the shard-aware, backward-compatible
 // choke point every ripwire-*.bin blob path now routes through. See its comment for the full rationale.
-constexpr std::uint32_t kAutoCacheScheme = 1;   // bump to rename ONLY this family (mergescout/gitoracle precedent)
-
-std::string defaultCachePath( const std::string& root, bool captureValueUses,
-                              const std::vector<std::string>& excludes, std::size_t maxFileBytes )
+std::string defaultCachePath( const std::string& root, bool captureValueUses )
 {
     char        absbuf[ PATH_MAX ];
     const char* abs = realpath( root.c_str(), absbuf ) ? absbuf : root.c_str();
     std::uint64_t h = 1469598103934665603ull;
     for( const char* c = abs; *c; ++c ) { h ^= static_cast<unsigned char>( *c ); h = rw::hashutil::fnv1aMultiply( h ); }
-    const std::string exclHex = rw::quality::exclConfigHex( excludes, "auto" + std::to_string( kAutoCacheScheme ), maxFileBytes );
-    char tail[ 64 ];
-    std::snprintf( tail, sizeof( tail ), "ripwire-%016llx-%s-%s.bin",
-                   static_cast<unsigned long long>( h ), exclHex.c_str(), captureValueUses ? "rich" : "lean" );
+    char tail[ 48 ];
+    std::snprintf( tail, sizeof( tail ), "ripwire-%016llx-%s.bin",
+                   static_cast<unsigned long long>( h ), captureValueUses ? "rich" : "lean" );
     return resolveCacheBlobPath( cacheDirLadder(), tail );
 }
 
@@ -3259,7 +3231,7 @@ int main( int argc, char** argv )
             std::string cachePath;
             if( !cfg.noCache )
             {
-                cachePath = defaultCachePath( r.arg, needsValueUses, cfg.excludes, cfg.maxFileBytes );
+                cachePath = defaultCachePath( r.arg, needsValueUses );
             }
             parts.push_back( ingest( r.arg.c_str(), cfg.excludes, cachePath, cfg.maxFileBytes, needsValueUses,
                                      /*excludeLabel=*/r.label ) );
@@ -3272,7 +3244,7 @@ int main( int argc, char** argv )
         std::string_view cacheArg = cfg.cacheFile;
         if( cacheArg.empty() && !cfg.noCache )
         {
-            autoCache = defaultCachePath( root, needsValueUses, cfg.excludes, cfg.maxFileBytes );
+            autoCache = defaultCachePath( root, needsValueUses );
             cacheArg  = autoCache;
         }
         ing = ingest( root.c_str(), cfg.excludes, cacheArg, cfg.maxFileBytes, needsValueUses );

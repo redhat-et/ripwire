@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 514 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 513 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -1289,6 +1289,34 @@ byte-identical to `--no-cache` for both configurations, determinism ×2; (4) `po
 blob names re-derived in their own commit with the reason; (5) wall-time numbers go to
 `bench/PROFILE.md` as a ledger row, never a red gate. NEGATIVE consequence: if (1) or (3) cannot be
 met the key change is reverted and the thrash is disclosed in `--doctor`'s `cache-dir` row instead.
+
+**RUN 2026-09-03 — registered NEGATIVE for this shape; reverted in the same commit.** The lane
+(`lane/n5-a`, four commits, patch kept on the branch and in
+`PLAN_NEXT_REPORTS_2026-09-03-r4/lane-cachekey.md`) met all five conjuncts as written: third run
+reparses 0; excluded warm `loadCache` **4.23 ms** vs **4.30 ms** under `--cache=PATH` (0.98×);
+byte-identical to `--no-cache`; every named cache gate green with one pin re-derived; no timing gate.
+The full battery on the merged tree then took **62 min instead of 7** (`gates=527 pass=470 fail=55`,
+48 of the 55 at the 300 s cap on gates that finish in seconds). The mechanism the registration did
+not model: the un-excluded root of this repository is **158,202 files** (`bench/external`), so each
+configuration's blob is 686 MB; 116 gates invoke the root with at least twelve distinct
+`--exclude`/`--max-file-size` sets; the cache directory's 2 GiB cap (`kMaxCacheDirBytes`, 7/8
+hysteresis sweep) holds two such blobs, so under `-j6` the sweep deletes the blob a running gate is
+about to reuse and that gate cold-parses 158K files again — a thrash across configurations that the
+single superset blob, for all its 535 ms, never had. Verified the other way too: a two-configuration
+sequence on a quiet machine does NOT thrash (both blobs coexist, both warm), which is why the lane's
+own gate was green. **Consequence per the registration:** the key change does not ship; the thrash it
+was written against stays disclosed here. Band (4)'s "eviction bounds the disk cost" was met literally
+and was the wrong thing to bound.
+
+**Retry design, registered now, not built.** Keep ONE superset blob per root (exclude-independent,
+so a configuration never triggers a new crawl of files the blob already holds) and make the load
+cheap for a subset: a record OFFSET TABLE in the blob (path-hash → offset, length, content-hash) so an
+excluded run deserialises only the records for the files it crawled, and the trailer checksum covers
+the table plus the records actually read. Bands, in addition to (1)–(5) above: **(6)** the full
+battery's wall time on the dev machine is within 1.2× of the pre-change battery under the same `-j`;
+**(7)** a configuration whose crawled files are all present in the superset blob never cold-parses
+(reparsed=0 on its first run after any other configuration wrote the blob); **(8)** the blob count per
+root stays at two (lean/rich). A `--cache=PATH` explicit blob keeps today's whole-file format.
 
 ### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
@@ -5050,7 +5078,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **514 gate scripts**, all of which exist on disk.
+naming **513 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -5881,7 +5909,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 514. The
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 513. The
   loop is the authority; the stale docstrings are a known drift. `test/manifestcheck.sh` asserts this
   very number against the loop's actual length, so it cannot go stale silently again.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
