@@ -1106,30 +1106,49 @@ bool readFilePrefix( const std::string& path, std::string& out, std::size_t maxB
     return true;
 }
 
-// ---- A4-P7 stat-gate helpers: (size,mtime) probe + cache-write wall clock ----
-// The warm-run shortcut trusts a cached parse WITHOUT reading/hashing the file when its size AND
-// mtime still match the cache, and the cached mtime is not "racy" (see saveCache/kCacheVersion=6).
+// ---- A4-P7 stat-gate helpers: (size,mtime,ctime) probe + cache-write wall clock ----
+// The warm-run shortcut trusts a cached parse WITHOUT reading/hashing the file when its size AND mtime
+// AND ctime still match the cache, and the cached mtime is not "racy" (see saveCache/kCacheVersion).
 //
-// GRANULARITY: mtimeNs carries whatever the platform/filesystem exposes — APFS and ext4 give true
+// WHY ctime IS THE THIRD FIELD AND NOT A CONTENT HASH (card A3 follow-up, docs/EVALS.md). (size, mtime)
+// alone leaves one hole, and it is reachable by ordinary tools rather than only by an attacker: an editor
+// that preserves mtime, a `git checkout` of an older revision, a `cp -p`/`touch -r` restore, all paired
+// with an edit that happens to keep the byte length. The gate then trusts a file whose content changed
+// and the answer is silently stale — reproduced on argv, and now gated (statgatecheck (b2),
+// freshnesscheck arms 6/7). The obvious fix, re-hashing every stat-equal file, is the whole warm path:
+// on the common no-change run EVERY file is stat-equal, so it degenerates to a whole-tree re-read and
+// deletes the reason the gate exists.
+//
+// st_ctime — inode CHANGE time on POSIX, not creation time — closes it for free. It moves on any write to
+// the file AND on the utimes() that performs the mtime restore, and POSIX exposes no interface for setting
+// it: an unprivileged process cannot put it back. It costs no syscall here, because this ::stat already
+// returns it. What it does NOT cover: a caller who can move the system clock backward, raw block-device
+// manipulation, and a filesystem that maintains no distinct ctime (FAT/exFAT, some SMB mounts) — there the
+// gate degrades to exactly the pre-ctime behaviour, which is why the racy rule below is KEPT, not replaced.
+//
+// GRANULARITY: both timestamps carry whatever the platform/filesystem exposes — APFS and ext4 give true
 // nanoseconds, HFS+/some network mounts only whole seconds (the sub-ns field reads 0). The racy-git
 // rule makes coarse granularity SAFE rather than merely lossy: any file whose mtime lands in the same
 // granule as the cache write is force-re-hashed, so a same-granule post-hash edit can never be trusted.
-struct StatInfo { long long mtimeNs; long long sizeBytes; };   // (-1,-1) if the path cannot be stat'd
-inline StatInfo statSizeMtime( const std::string& path ) noexcept
+struct StatInfo { long long mtimeNs; long long sizeBytes; long long ctimeNs; };   // all -1 if the path cannot be stat'd
+inline StatInfo statSizeTimes( const std::string& path ) noexcept
 {
     struct stat st;
     if( ::stat( path.c_str(), &st ) != 0 )
     {
-        return { -1, -1 };
+        return { -1, -1, -1 };
     }
 #if defined( __APPLE__ )
     const long long m = (long long)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
+    const long long c = (long long)st.st_ctimespec.tv_sec * 1000000000LL + st.st_ctimespec.tv_nsec;
 #elif defined( __linux__ )
     const long long m = (long long)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
+    const long long c = (long long)st.st_ctim.tv_sec * 1000000000LL + st.st_ctim.tv_nsec;
 #else
     const long long m = (long long)st.st_mtime * 1000000000LL;   // whole-second fallback
+    const long long c = (long long)st.st_ctime * 1000000000LL;
 #endif
-    return { m, (long long)st.st_size };
+    return { m, (long long)st.st_size, c };
 }
 
 // L1 (Linux runtime probe) — what KIND of thing is at `path`? The cache seams need all three answers, so

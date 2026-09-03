@@ -364,9 +364,10 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                     scan.hash[ fileId ] = h;
                     // A4-P7: capture (size,mtime) at hash time so saveCache can persist a stat-gate
                     // record for this file (cold run / new file / prewarm-skipped path).
-                    const StatInfo si = statSizeMtime( path );
+                    const StatInfo si = statSizeTimes( path );
                     scan.statSize[ fileId ]  = si.sizeBytes >= 0 ? si.sizeBytes : (long long)bytes.size();
                     scan.statMtime[ fileId ] = si.mtimeNs;
+                    scan.statCtime[ fileId ] = si.ctimeNs;
                 }
                 bytesLoaded = true;
             }
@@ -768,7 +769,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         // Skips the ~11ms / 7 MB serialization+write on a no-change warm run.
         if( !cacheFile.empty() && dirty.load() )
         {
-            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, captureValueUses );
+            saveCache( std::string( cacheFile ), rootDir, result.files, scan.hash, scan.statSize, scan.statMtime, scan.statCtime, scan.health, raw.defs, raw.refs, raw.incs, raw.binds, raw.ffis, raw.routeDefs, raw.routeUses, captureValueUses );
         }
     }
     return raw;

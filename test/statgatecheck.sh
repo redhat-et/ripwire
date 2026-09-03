@@ -28,6 +28,7 @@
 #   (b3) RACY entry (mtime == blob write)  → forced re-hash → edit detected even with mtime unchanged
 #   (c) touch only, no content change      → output still correct (trusted shortcut, no false change)
 #   (d) file added / removed               → correct output
+#   (e) metadata-only chmod to UNREADABLE   → cached parse kept, output unchanged (the ctime cost side)
 #
 # Usage:
 #   bash test/statgatecheck.sh
@@ -153,6 +154,32 @@ if grep -q 'n="keep"' "$TMP/d.rm" && ! grep -q 'n="added"' "$TMP/d.rm"; then
     ok "(d) removed file gone on next warm run; survivor intact"
 else
     no "(d) removed file still present (or survivor lost)"
+fi
+
+# ── case (e): a METADATA-only change must not COST the file — the ctime discriminator's own cost side ─
+# The third discriminator is deliberately conservative: st_ctime moves on chmod/chown/xattr/rename too, not
+# only on a write. Every one of those falls out of the stat gate and into the read+hash path, which is
+# correct and cheap — EXCEPT when the metadata change is what made the file unreadable. Then the re-hash's
+# read FAILS, and the naive implementation drops every symbol the file had, turning a `chmod 000` into a
+# silent partial index. (postingscheck (d) is the gate that caught it: it makes every source unreadable on
+# purpose, to prove the warm scorer does not re-read per query.)
+#
+# The rule this arm pins: when a file cannot be READ but its (size, mtime) still match the record and the
+# entry is not racy, the cached parse is KEPT. A ctime that moved on its own is a metadata change, not
+# evidence of a content change, and dropping a file we were unable to look at is a worse answer than
+# serving its last-known parse. The exposure is stated where the code is: a same-(mtime,size) edit hidden
+# behind a chmod-to-unreadable is served stale — but no cache-free run can do better (--no-cache cannot
+# read it either), and the MCP edit verbs re-read + byte-hash their target regardless.
+WE="$TMP/e"; mkdir -p "$WE"; CE="$TMP/e.bin"
+printf 'int deltaSym( void )\n{\n    return 3;\n}\n' > "$WE/f.cpp"
+"$BIN" "$WE" --cache="$CE" --no-stable >"$TMP/e.cold" 2>/dev/null
+chmod 000 "$WE/f.cpp"                                             # metadata only: size and mtime unchanged, ctime moves
+"$BIN" "$WE" --cache="$CE" --no-stable >"$TMP/e.warm" 2>/dev/null
+chmod 644 "$WE/f.cpp"
+if diff -q "$TMP/e.cold" "$TMP/e.warm" >/dev/null 2>&1 && grep -q 'n="deltaSym"' "$TMP/e.warm"; then
+    ok "(e) chmod-to-unreadable (ctime moves, size+mtime hold) → cached parse kept, output unchanged"
+else
+    no "(e) a metadata-only chmod DROPPED the file's symbols — the ctime discriminator is costing an answer"
 fi
 
 # ── well-formed XML on the representative outputs ─────────────────────────────────────────────────

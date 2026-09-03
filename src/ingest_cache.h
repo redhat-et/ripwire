@@ -115,7 +115,19 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 13;           // 13 (§L1 parse health): each FILE record gains the
+constexpr std::uint32_t kCacheVersion = 14;           // 14 (card A3 follow-up): each FILE record gains ctimeNs,
+                                                      //    a THIRD stat-gate discriminator written right after
+                                                      //    mtimeNs. (size, mtime) alone let a byte-length-
+                                                      //    preserving edit with a restored mtime be trusted and
+                                                      //    served STALE — reproduced on argv in docs/EVALS.md and
+                                                      //    gated by statgatecheck (b2) / freshnesscheck arms 6-7.
+                                                      //    st_ctime moves on any write AND on the utimes() that
+                                                      //    performs the restore, and POSIX gives an unprivileged
+                                                      //    process no way to set it back; ::stat already returns
+                                                      //    it, so the fix costs no syscall and no file read. A
+                                                      //    FORMAT change → reject v13 blobs (self-healing full
+                                                      //    reparse writes the field on the next run).
+                                                      // 13 (§L1 parse health): each FILE record gains the
                                                       //    four FileHealth u32s (errNodes, errBytes, fileBytes,
                                                       //    wsBytes) right after the stat-gate pair. The auto-cache
                                                       //    is the DEFAULT path, so a health measurement that did
@@ -746,10 +758,12 @@ inline std::uint64_t blobChecksum( std::string_view s ) noexcept
     return h;
 }
 
-// sizeBytes/mtimeNs (A4-P7): the file's stat at the run that HASHED it — the warm-run stat-gate trusts
-// this record (skips read+hash) only when the current stat still matches AND mtimeNs is not racy. -1 ⇒
-// unknown (cache built before v6, or the file was unstatable at hash time) → the gate always re-hashes.
-struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; };
+// sizeBytes/mtimeNs/ctimeNs (A4-P7 + card A3 follow-up): the file's stat at the run that HASHED it — the
+// warm-run stat-gate trusts this record (skips read+hash) only when ALL THREE still match AND mtimeNs is
+// not racy. ctimeNs is the one an unprivileged writer cannot restore (see ingest_crawl.h statSizeTimes),
+// so it is what makes a same-(mtime,size) edit visible for free. -1 ⇒ unknown (the file was unstatable at
+// hash time) → the gate always re-hashes, which is the safe direction.
+struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; };
 
 // tiny native-endian binary (de)serializer (the cache is host-local, never shipped)
 struct ByteW
@@ -1120,7 +1134,7 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     // F3/X5: the racy-rule reference is THIS cache file's own on-disk mtime, stat'd fresh right now — the
     // same stat()-domain, same-granularity value every per-file mtime below is compared against. -1 (unstatable,
     // e.g. removed between the readFile above and here) ⇒ every stat-gate check sees a racy entry (safe default).
-    blobWriteNsOut = statSizeMtime( path ).mtimeNs;
+    blobWriteNsOut = statSizeTimes( path ).mtimeNs;
 
     // count validation: a corrupt on-disk count (e.g. 0xFFFFFFFF) must never reach reserve() — the throw
     // (length_error/bad_alloc) would escape ingest(), violating its never-throw contract. Every honest
@@ -1134,7 +1148,7 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
     constexpr std::size_t kMinFfiRecordBytes  = 14;   // 2×u8 (kind,lowConf) + 3×str(len u32, empty)
     constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (line) + 1×u8 (method) + 2×str(len u32, empty)
     constexpr std::size_t kMinRouteUseRecordBytes = 13;   // B6.3: 2×u32 (startByte,line) + 1×u8 (method) + 1×str(len u32, empty)
-    const std::size_t kMinFileRecordBytes = 68 + ( captureValueUses ? 4 : 0 );   // path str + hash + sizeBytes + mtimeNs + FileHealth + six record counts, all empty (v6: +2×u64; v10 rich: + dict count u32; v12/B6.3: +2×u32 route counts; v13/§L1: +4×u32 health)
+    const std::size_t kMinFileRecordBytes = 76 + ( captureValueUses ? 4 : 0 );   // path str + hash + sizeBytes + mtimeNs + ctimeNs + FileHealth + six record counts, all empty (v6: +2×u64; v10 rich: + dict count u32; v12/B6.3: +2×u32 route counts; v13/§L1: +4×u32 health; v14: +1×u64 ctimeNs)
     const auto countFits = [ &r ]( std::uint32_t recordCount, std::size_t minRecordBytes ) noexcept
     {
         if( recordCount <= std::size_t( r.end - r.p ) / minRecordBytes )
@@ -1169,6 +1183,7 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
             ff.hash      = r.u64();
             ff.sizeBytes = (long long)r.u64();   // A4-P7 stat-gate discriminator
             ff.mtimeNs   = (long long)r.u64();   // A4-P7 stat-gate discriminator + racy-rule input
+            ff.ctimeNs   = (long long)r.u64();   // v14 stat-gate discriminator: the one a restore cannot forge
             ff.health.errNodes  = r.u32();       // §L1 parse health (v13) — fileBytes==0 keeps its
             ff.health.errBytes  = r.u32();       //   NOT-MEASURED meaning across the round trip
             ff.health.fileBytes = r.u32();
@@ -1293,6 +1308,7 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
 inline void saveCache( const std::string& path, std::string_view rootDir, const std::vector<std::string>& files,
                        const std::vector<std::uint64_t>& fileHash,
                        const std::vector<long long>& fileSize, const std::vector<long long>& fileMtime,
+                       const std::vector<long long>& fileCtime,     // v14: the third stat-gate discriminator, per fileId
                        const std::vector<FileHealth>& fileHealth,   // §L1 (v13): parse health, per fileId
                        const std::vector<RawDef>& defs, const std::vector<RawRef>& refs, const std::vector<Include>& incs,
                        const std::vector<RawBind>& binds, const std::vector<BindingAlias>& ffis,
@@ -1402,6 +1418,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             w.u64( f < fileHash.size() ? fileHash[f] : 0 );
             w.u64( f < fileSize.size() ? (std::uint64_t)fileSize[f] : (std::uint64_t)-1 ); // A4-P7 stat-gate: size at hash time (-1 ⇒ unknown → gate re-hashes)
             w.u64( f < fileMtime.size() ? (std::uint64_t)fileMtime[f] : (std::uint64_t)-1 ); // A4-P7 stat-gate: mtimeNs at hash time (-1 ⇒ unknown)
+            w.u64( f < fileCtime.size() ? (std::uint64_t)fileCtime[f] : (std::uint64_t)-1 ); // v14 stat-gate: ctimeNs at hash time (-1 ⇒ unknown → gate re-hashes)
             {
                 // §L1 (v13): parse health, at a FIXED wire offset right after the stat-gate pair. An
                 // out-of-range f writes the default (fileBytes 0), which the reader already means as

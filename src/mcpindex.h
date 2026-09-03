@@ -89,7 +89,7 @@ namespace mcpdetail
     // nanosecond mtime out of a filled `struct stat`. The sub-second field is spelled DIFFERENTLY per
     // platform — st_mtimespec on Darwin/BSD, st_mtim on Linux (POSIX.1-2008) — and neither name exists on
     // the other, so this is a compile error, not a portability nicety. Same ladder (and same whole-second
-    // last resort) as ingest.cpp's statSizeMtime; kept local rather than shared because that one lives in a
+    // last resort) as ingest.cpp's statSizeTimes; kept local rather than shared because that one lives in a
     // .cpp and hoisting it would move ingest internals into a header for two call sites.
     inline long long mtimeNsOf( const struct stat& st ) noexcept
     {
@@ -113,17 +113,33 @@ namespace mcpdetail
         return mtimeNsOf( st );
     }
 
-    // (mtime-ns, size) of a path in ONE stat(), or (-1,-1) if it can't be stat'd. mcpStale() uses BOTH: a
-    // size change is a free (no-read) staleness signal alongside mtime, so the content-hash fallback only
-    // fires for the same-mtime AND same-size residual (the genuinely ambiguous case).
-    inline std::pair<long long, long long> statOf( const std::string& p )
+    // ctime-ns out of a filled `struct stat`, spelled per platform exactly like mtimeNsOf above. POSIX
+    // st_ctime is the inode CHANGE time, not a creation time: it moves on any write to the file and on any
+    // metadata change, INCLUDING the utimes() that a `touch -r` / `cp -p` / mtime-preserving editor performs.
+    // There is no POSIX interface for setting it, so an unprivileged writer cannot restore it.
+    inline long long ctimeNsOf( const struct stat& st ) noexcept
+    {
+#if defined( __APPLE__ ) || defined( __FreeBSD__ ) || defined( __OpenBSD__ ) || defined( __NetBSD__ )
+        return (long long)st.st_ctimespec.tv_sec * 1000000000LL + st.st_ctimespec.tv_nsec;
+#elif defined( __linux__ )
+        return (long long)st.st_ctim.tv_sec * 1000000000LL + st.st_ctim.tv_nsec;
+#else
+        return (long long)st.st_ctime * 1000000000LL;   // whole-second fallback
+#endif
+    }
+
+    // (mtime-ns, size, ctime-ns) of a path in ONE stat(), or (-1,-1,-1) if it can't be stat'd. mcpStale()
+    // uses all three: size and ctime both come free from the stat that already reads mtime, and between them
+    // they leave no same-(mtime,size) residual for a read to have to cover.
+    struct FileStat { long long mtimeNs; long long sizeBytes; long long ctimeNs; };
+    inline FileStat statOf( const std::string& p )
     {
         struct stat st;
         if( ::stat( p.c_str(), &st ) != 0 )
         {
-            return { -1, -1 };
+            return { -1, -1, -1 };
         }
-        return { mtimeNsOf( st ), (long long)st.st_size };
+        return { mtimeNsOf( st ), (long long)st.st_size, ctimeNsOf( st ) };
     }
 
     // ALL directories under root (root itself included) → their mtimes, pruning the same noise/vendor/build
@@ -511,6 +527,10 @@ struct McpIndex
     std::vector<long long>            fileMtime;   // parallel to ing.files
     std::vector<long long>            fileSize;    // parallel to ing.files: st_size at index build (staleness fast-path discriminator,
                                                    //   free from the same stat() as mtime — a size change is caught without a read).
+    std::vector<long long>            fileCtime;   // parallel to ing.files: st_ctime at index build. The THIRD discriminator, also free
+                                                   //   from that same stat(): an unprivileged writer can restore mtime and preserve
+                                                   //   length, but not ctime, so a same-(mtime,size) edit is stale here (card A3
+                                                   //   follow-up). -1 (unstatable) reads as a mismatch, which is the safe direction.
     std::vector<std::uint64_t>        fileByteHash;   // parallel to ing.files: FNV-1a of the file's BYTES at index build.
                                                       //   The EDIT verbs (replace/insert) compare a fresh read against this before
                                                       //   splicing — mtime alone can lie (same mtime, different content on a fast
@@ -633,27 +653,31 @@ inline std::uint64_t workingSetHashOf( const std::vector<char>& changed )
 //     is now caught EVEN IF the mtime was restored. This is the audit's own reproduction (an edit that adds
 //     or renames a symbol), and it is caught at zero read cost, one stat() per file.
 //
-// The residual (documented honestly — the honesty brand extends to this limit): a content change that
-// preserves BOTH the mtime AND the exact byte length (a same-length identifier rename + `touch -r` to the
-// original mtime, or two such edits inside one coarse-FS-granularity tick on FAT/SMB/NFS/Docker where the
-// second write lands under the first write's already-recorded mtime AND happens not to change the size) is
-// NOT caught by this stat-only check. Catching it is provably impossible without READING the file's bytes,
-// and — because we cannot know WHICH file was touched without reading it — a fully-correct check would have
-// to read+hash EVERY same-(mtime,size) file on EVERY verb call. On the common no-change path all files have
-// an unchanged (mtime,size), so that is a whole-tree re-read per call: MEASURED at ~168 ms/call vs ~12.5
-// ms/call on a 1320-file/38 MB tree (~13×), which destroys the ~10.5 ms stat-sweep design the audit measured
-// and the whole point of the warm McpIndex. A proof-of-clean cache keyed on (mtime,size) can't help
-// either — a `touch -r` reproduces that key exactly, re-opening the same hole. So the hard cost bound (a
-// non-negotiable invariant of the warm-server design) rules out the whole-tree content hash, and we take the
-// audit's explicitly-offered "minimally size+mtime" (§3b.1) instead: it closes the reproduced, realistic case
-// (a length-changing content edit) at zero cost and leaves only the same-(mtime,size) corner. Two backstops
-// already cover that corner in the paths that matter: (1) the EDIT verbs re-read + byte-hash the target file
-// on every write, so a splice is NEVER applied against stale offsets regardless of this check (mcpeditcheck
-// step 5); (2) any watched-directory mtime bump (a sibling add/delete, a re-save through most editors)
-// triggers a full rebuild. `fileSize`/`fileByteHash` are retained on McpIndex for the edit verbs and the
-// content-folded stamp below; the stamp now moves on ANY content change (even the residual), so a caller
-// holding two results can still detect the state changed even when this staleness check is (by cost
-// necessity) conservative.
+//   • ctime differs → stale. (NEW, card A3 follow-up — docs/EVALS.md) The third discriminator, also free
+//     from the SAME stat(). It closes what used to be the residual below.
+//
+// WHAT THE RESIDUAL WAS, AND WHY THE COMMENT THAT USED TO STAND HERE WAS WRONG. A content change preserving
+// BOTH the mtime AND the exact byte length — a same-length identifier rename plus `touch -r` to the original
+// mtime — was NOT caught, and this comment asserted that "catching it is provably impossible without READING
+// the file's bytes". That reasoning was sound about the two fields it considered and wrong about the third
+// the same ::stat already returns. Reading is indeed unaffordable: on the common no-change path every file
+// is stat-equal, so a read+hash fallback is a whole-tree re-read per verb call — MEASURED at ~168 ms/call vs
+// ~12.5 ms/call on a 1320-file/38 MB tree (~13x) — which would destroy the stat-sweep design. But st_ctime
+// moves on any write AND on the utimes() the mtime restore performs, and POSIX gives an unprivileged process
+// no way to set it back, so the same reproduction is now caught at zero additional cost. Reproduced and
+// gated end-to-end in test/freshnesscheck.sh arm 7 (this surface) and arm 6 / statgatecheck (b2) (the CLI
+// cache an --mcp rebuild re-ingests through — both halves had to change, since a rebuild that then trusted
+// ingest()'s stat gate would have been handed the pre-edit facts).
+//
+// WHAT IS STILL OUTSIDE IT, named rather than implied: a caller who can move the system clock backward, raw
+// block-device manipulation, and a filesystem that maintains no distinct ctime (FAT/exFAT, some SMB mounts)
+// — there this check degrades to exactly its pre-ctime behaviour. Two backstops still cover that case in the
+// paths that matter: (1) the EDIT verbs re-read + byte-hash the target file on every write, so a splice is
+// NEVER applied against stale offsets regardless of this check (mcpeditcheck step 5); (2) any
+// watched-directory mtime bump (a sibling add/delete, a re-save through most editors) triggers a full
+// rebuild. `fileSize`/`fileByteHash` are retained on McpIndex for the edit verbs and the content-folded
+// stamp below; the stamp moves on ANY content change, so a caller holding two results can still detect that
+// the state changed even where this check degrades.
 // `skipDirSweep` — Feature 1 fast path: when the kqueue watcher has proven NO structural event fired since
 // the last check, the directory-mtime loop (which catches adds/deletes/renames bubbling into a watched dir)
 // is provably redundant and may be skipped. The PER-FILE mtime+size loop is ALWAYS run regardless: it is the
@@ -681,15 +705,16 @@ inline bool mcpStale( const McpIndex& ix, bool skipDirSweep = false )
         }
     }
 
-    // per-file mtime+size loop — ALWAYS run (the S1 content-staleness authority; never gated by the watcher).
+    // per-file mtime+size+ctime loop — ALWAYS run (the content-staleness authority; never gated by the watcher).
     for( std::size_t i = 0; i < ix.ing.files.size(); ++i )
     {
-        const auto [ mtime, size ] = mcpdetail::statOf( diskPath( ix.ing, std::uint32_t( i ) ) );   // one stat() → both signals
+        const auto [ mtime, size, ctime ] = mcpdetail::statOf( diskPath( ix.ing, std::uint32_t( i ) ) );   // one stat() → all three signals
         const long long recMtime = ix.fileMtime[i];
-        const long long recSize  = ( i < ix.fileSize.size() ) ? ix.fileSize[i] : -1;
-        if( mtime != recMtime || size != recSize )
+        const long long recSize  = ( i < ix.fileSize.size() )  ? ix.fileSize[i]  : -1;
+        const long long recCtime = ( i < ix.fileCtime.size() ) ? ix.fileCtime[i] : -1;
+        if( mtime != recMtime || size != recSize || ctime != recCtime )
         {
-            return true; // mtime OR size moved → stale, no read
+            return true; // mtime OR size OR ctime moved → stale, no read
         }
     }
     return false;
@@ -705,9 +730,10 @@ inline std::size_t mcpStaleFileCount( const McpIndex& ix )
     std::size_t n = 0;
     for( std::size_t i = 0; i < ix.ing.files.size(); ++i )
     {
-        const auto [ mtime, size ] = mcpdetail::statOf( diskPath( ix.ing, std::uint32_t( i ) ) );
-        const long long recSize = ( i < ix.fileSize.size() ) ? ix.fileSize[i] : -1;
-        n += ( mtime != ix.fileMtime[i] || size != recSize ) ? 1u : 0u;
+        const auto [ mtime, size, ctime ] = mcpdetail::statOf( diskPath( ix.ing, std::uint32_t( i ) ) );
+        const long long recSize  = ( i < ix.fileSize.size() )  ? ix.fileSize[i]  : -1;
+        const long long recCtime = ( i < ix.fileCtime.size() ) ? ix.fileCtime[i] : -1;
+        n += ( mtime != ix.fileMtime[i] || size != recSize || ctime != recCtime ) ? 1u : 0u;
     }
     return n;
 }
@@ -978,10 +1004,12 @@ inline std::uint64_t gitHeadMoveToken( const std::string& root )
     std::uint64_t h = 14695981039346656037ull;
     const auto fold = [ &h ]( const std::string& path )
     {
-        const auto [ m, sz ] = mcpdetail::statOf( path );
-        h ^= static_cast<std::uint64_t>( m );
+        // (mtime, size) only, and ctime DELIBERATELY not folded: this is a "did git move HEAD" stamp, not a
+        // staleness check, and a chmod or a re-checkout of an identical ref file must not read as a commit.
+        const auto st = mcpdetail::statOf( path );
+        h ^= static_cast<std::uint64_t>( st.mtimeNs );
         h = hashutil::fnv1aMultiply( h );
-        h ^= static_cast<std::uint64_t>( sz );
+        h ^= static_cast<std::uint64_t>( st.sizeBytes );
         h = hashutil::fnv1aMultiply( h );
     };
     fold( gitDir + "/logs/HEAD" );      // appended on every HEAD move (reflog; default-on for a working tree)
@@ -1175,12 +1203,14 @@ inline const McpIndex& getIndex( const std::string& root )
 
     ix.fileMtime.assign( ix.ing.files.size(), 0 );
     ix.fileSize.assign( ix.ing.files.size(), -1 );      // st_size parallel to files — the staleness fast-path discriminator (S1)
+    ix.fileCtime.assign( ix.ing.files.size(), -1 );     // st_ctime parallel to files — the same-(mtime,size) discriminator (card A3 follow-up)
     ix.fileByteHash.assign( ix.ing.files.size(), 0 );   // per-file byte fingerprint for the edit verbs AND the content-folded stamp (S1)
     for( std::size_t i = 0; i < ix.ing.files.size(); ++i )
     {
-        const auto [ mtime, size ] = mcpdetail::statOf( diskPath( ix.ing, std::uint32_t( i ) ) );
+        const auto [ mtime, size, ctime ] = mcpdetail::statOf( diskPath( ix.ing, std::uint32_t( i ) ) );
         ix.fileMtime[i] = mtime;
         ix.fileSize[i]  = size;
+        ix.fileCtime[i] = ctime;
         bool readOk = false;
         const std::string bytes = mcpdetail::readFileBytes( diskPath( ix.ing, std::uint32_t( i ) ), readOk );
         ix.fileByteHash[i] = readOk ? mcpdetail::byteHash( bytes.data(), bytes.size() ) : 0;   // unreadable → 0 (edit verb refuses; mcpStale sees a mismatch)
