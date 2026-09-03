@@ -9012,6 +9012,82 @@ remaining pins on 14365 by the (caller, callee) join, 13 external, 13 same-file 
 `@nondef`, 1 cross-file. Reading the 13 sibling-class sites at source splits them into shapes a
 receiver rule can and cannot reach — the next section registers the reachable one.
 
+### Phase 4b — Rule 2c, the CLASS-NAME receiver route for the sibling-class residue, PRE-REGISTERED 2026-09-03 (before any fixture, gate or code)
+
+**The residue, read at source before anything was designed.** Phase 4 left 13 same-file sibling-class
+disconfirmations among the remaining pins on astropy-14365 (28 disconfirmed of 68 by the (caller,
+callee) join; 13 external, 1 `@nondef`, 1 cross-file beside them). They are NOT bare calls, and they
+split into two populations by what the receiver token IS:
+
+- **Five sites whose receiver is the NAME OF A CLASS** — a static / classmethod call through the class:
+  `astropy/modeling/bounding_box.py:711` `_Interval.validate(value)` (pinned `ModelBoundingBox::validate`,
+  SCIP `_Interval::validate`); `:1350` and `:1398` `_SelectorArguments.validate(…)` (pinned
+  `CompoundBoundingBox::validate`, SCIP `_SelectorArguments::validate`); `:1427`
+  `ModelBoundingBox.validate(…)` (pinned `CompoundBoundingBox::validate`, SCIP `ModelBoundingBox::validate`);
+  `astropy/utils/iers/iers.py:924` `IERS_B.open()` (pinned `IERS_Auto::open`, SCIP `IERS::open` — the
+  method is INHERITED: `IERS_B` defines no `open`, its base `IERS` does). On 12907 the same five sit at
+  `bounding_box.py:684/1300/1344/1370` and `iers.py:801`. Today ingest classifies the receiver
+  `RecvKind::NamedVar` with `recvVar` = the class name, Rule 2 finds no local binding for it, and S6-C
+  hands the win to the CALLER's own class by the scope segment — the wrong pin every time.
+- **Eight sites no type fact reaches**: untyped locals and parameters (`base.represent_as(…)` ×2,
+  `diff.represent_as(…)`, `value.field(…)`, `masked_cls.from_unmasked(…)`), `super().__new__(…)`, a
+  chained expression `(u / t).decompose()`, and two same-canonical-id overload pairs (`atol.to_value`,
+  `UnitBase::decompose` — a duplicate definition, not a sibling). These stay disclosed by `lpin=` and are
+  declared OUT OF REACH of this section; a path-only S6-C for untyped `NamedVar` receivers was considered
+  and NOT attempted here, because on the C++ corpora the untyped receiver is the common case and the
+  `ambiguous=` ceiling would almost certainly decide it before the census could.
+
+**The route — P2-D Rule 2c, class-name receiver.** In the resolve ladder, immediately after Rule 2
+misses and before Rule 2b: a named-receiver call (`recv == NamedVar`, no qualifier, caller a known def)
+whose `recvVar` (i) has NO local binding of any kind in the caller's scope (a parameter or local named
+like a class shadows it — Rule 2b's `localNames` veto, reused), and (ii) is the name of at least one
+in-repo `Class`/`Struct`/`Interface` definition, resolves the callee against `recvVar::callee` in
+`canonByName` — and, when the class defines no such method, walks its DIRECT bases level by level
+(`chaUp`, the exact discipline Rule 2b already uses), first level with a hit wins. A hit narrows the
+tier to those definitions (`receiver-rule` in the census, the same mechanism label as Rules 1/2/2b/3);
+a miss changes nothing. Two same-named classes both defining the callee keep BOTH candidates: an honest
+split `amb=` counts, never a guess between them. Same-root and language-compatibility filters as Rule 2.
+
+**Same-commit baselines:** the Phase 4 table's four `ambiguous=` figures and ceilings are reused
+unchanged (they were measured on the shipped Phase-4 binary: src 5,598 on `git archive 1c6fdf4 src`;
+ugrep 1,722; rocksdb 45,146; duckdb 8,934 — the ceilings stay the Phase 4 ones, 5,709 / 1,755 / 45,866 /
+9,112, so the two rounds are bounded TOGETHER against the 1c6fdf4 tree, not each against the last).
+Census baseline: the `astropy-N-r4` labels (locality 0.670 / 0.678 at 88 / 87; receiver-rule 0.930 /
+0.921 at 4,847 / 4,766).
+
+**The band — four conjuncts, all-or-nothing; a miss reverts the route in the commit that carries the
+RUN section and keeps the patch verbatim in the lane report.**
+
+1. `ambiguous=` ≤ the Phase 4 ceilings on each of the four corpora.
+2. **The five listed 14365 sites leave the `locality` population and are CONFIRMED** — each appears as a
+   `receiver-rule` C row whose target SCIP names (the `IERS_B.open()` site through the base walk). The
+   12907 five are the stability check, reported beside. A site that leaves `locality` but lands
+   DISCONFIRMED is a miss of this conjunct — the route is only worth shipping if it is right where it
+   fires.
+3. **`receiver-rule` full-oracle precision on 14365 non-inferior: ≥ 0.925** (0.930 today). The route adds
+   rows to this stratum across the whole corpus, not just the five sites; if the rows it adds are
+   wrong elsewhere the stratum dilutes, and −0.5 points is the slack a five-site win must not spend.
+   The new rows' own confirmation count is printed beside it.
+4. **`locality` full-oracle precision non-inferior to 0.670 / 0.678** — removing wrong pins can only
+   raise it; a drop means the route removed RIGHT pins.
+
+**Contract checks, not bands:** determinism ×2, cold == warm on astropy-14365, `xmllint` on fixture and
+astropy maps, ASan on the new gate + `pincensuscheck` + `scipjoincheck` + the astropy census path;
+`golden` byte-identical (the fixture holds no class-name receiver call); `narrowcheck`,
+`fieldnarrowcheck`, `chacheck`, `chainguardcheck`, `resolverhonestycheck`, `localitycheck`,
+`lpincheck`, `pincensuscheck` green; `--quality-delta --scope='src/*'` clean.
+
+**Gate — written and run RED before the code.** `test/clsrecvcheck.sh` on `test/clsrecvfix/` (Python,
+one file): `Box.__setitem__` calls `Interval.validate(v)`; both `Box` and `Interval` define `validate`,
+so today S6-C pins `Box::validate` by scope (`lpin="1"` on `Box::__setitem__`) — after: one edge to
+`Interval::validate`, census mech `receiver-rule`, no `lpin=`. Controls: (a) `Box.other()` calls
+`item.validate(v)` on an UNTYPED local — unchanged, still the S6-C pin with `lpin="1"` (the route keys
+on the class NAME only); (b) `Box.shadowed(Interval)` — a PARAMETER named `Interval` — is vetoed:
+unchanged pin, `lpin="1"`; (c) `Box.inherited()` calls `Leaf.validate(v)` where `Leaf(Interval)`
+defines no `validate` — the base walk lands `Interval::validate`; (d) `Box.miss()` calls
+`Point.validate(v)` where `Point` defines no `validate` and has no bases — nothing fires, the ladder is
+unchanged. Plus determinism ×2 and `xmllint`. Red on the Phase-4 binary at the main arm and (c).
+
 ## Member variables as symbols + `--uses=Owner.field` — the member-variable round (card A3), PRE-REGISTERED 2026-09-02 (before any corpus number)
 
 **What this registers.** ARISE-bibliography RANK-A card A3 — CodexGraph's FIELD schema element: a class's
