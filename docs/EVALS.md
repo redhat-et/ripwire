@@ -8761,3 +8761,71 @@ here as a registered negative.
 **MCP mirror.** The MCP `edit_check` verb gains the same preview only if its input schema can carry the
 payload without breaking `test/mcpcontractcheck.sh`. If it cannot, the CLI-only scope is stated in the
 emitted legend and reported in the lane report rather than left for a reader to discover.
+
+### RESULT — measured 2026-09-03 against the band registered immediately above
+
+**The realized fixture set: 37 payloads — 12 contract-changing, 13 contract-preserving, 12 invalid** — over a
+five-file corpus (`test/editpreviewfix/corpus`: a public C++ header with a free function and two methods, a
+non-public translation unit with three free functions, a C++ caller, a Python module with two free functions
+and a two-method class, a Python caller). The changing class covers a parameter added, a parameter removed,
+a method's arity moving, a zero-parameter method gaining one, Python's implicit `self` on both sides, and an
+added WIDER OVERLOAD (`defs` 1 → 2 with the params MAX 2 → 4, which is the shape the MAX fold exists to
+disclose). The preserving class covers bodies rewritten, locals introduced, a docstring added, and
+parameters RENAMED at unchanged arity.
+
+**Agreement: 25 of 25 valid payloads — ZERO disagreements. Zero false "unchanged". All 12 invalid payloads
+refused (exit 1, empty stdout).** The registered floor is the rate 29/30, i.e. one allowed disagreement;
+`test/editpreviewcheck.sh` applies it to the realized valid set as "at most one disagreement", which on 25
+payloads is a stricter rate than 29/30 rather than a looser one. Agreement is byte-equality of the whole
+`<edit-check>` element after exactly the three normalisations the band named, so `params_was/now=`,
+`public_was/now=`, `defs_was/now=`, `change=`, `callers=`, `incompatible=`, `p=` and every `<c>` row in
+order are all inside the claim. Arm M (a contract-changing preview compared against a contract-preserving
+apply) reports that pair as disagreeing, so the 25/25 is not a comparison of two constants.
+
+**ONE RECLASSIFICATION, and it is a limit rather than a pass.** The set as first drafted classed a
+DE-INDENTED Python body (`def widen(a, b):` followed by an unindented `return`) as invalid. It is not
+detectably invalid: tree-sitter-python RECOVERS that text with **zero** ERROR/MISSING nodes — the `def`
+keeps its parameters and the statement becomes top-level — so the parse-error delta the refusal is built on
+does not move, and the preview answers `unchanged`, which the applied tree also answers. Widening the
+refusal to catch it would mean inventing a syntax verdict the parser did not give, on a surface whose whole
+value is that it does not guess. So the payload was moved to the preserving class as fixture `pre13`, is
+pinned there by gate arm R, is named in the emitted legend, and the invalid class was refilled with a
+Python `def` line missing its colon (which does raise the error count, and does refuse). The class floor of
+10 each is still met on both sides of the move.
+
+**Why the caller SET is allowed to move, and why that is what makes the numbers hold.** The preview does not
+recompute the answer from the payload; it re-derives the TREE and calls the same `editCheckBundleText()`.
+The edited file's symbols, references, bindings and routes are RANGE-SPLICED out of the working-tree ingest
+and replaced by a single-file parse of the spliced bytes (symbol ids are assigned in `(fileId, line, name,
+startByte)` order, so one file's records are a contiguous run and the id remap is one linear shift), then
+`buildGraph()` runs over the merged result. That matters because call resolution carries an ARITY FILTER: a
+payload that changes a parameter count changes which call sites bind, so the caller list and the
+`incompatible="1"` flags are outputs of the rebuilt graph rather than of the old one. The file TABLE is
+never touched, so `ing.files` identities — and every path, root-relative spelling, HEAD-baseline key and
+`at=` anchor derived from them — stay the real tree's; no temporary root reaches the output.
+
+**MCP mirror: SHIPPED.** `edit_check` gained an OPTIONAL `new_body` and stays `readOnlyHint:true` — passing
+it previews, it never writes. `test/mcpcontractcheck.sh` is green (it parses its expected sets out of
+`src/mcprefusal.h`, so the schema, the unknown-field guard and what the code consumes moved together), as
+are `mcpeditcheck`, `mcpeditpresencecheck`, `mcpclidiffcheck`, `mcpverbscheck`, `mcpflagshipcheck`,
+`mcptoolprunecheck` and `mcptranchecheck`. Gate arm N pins the mirror document-for-document against the CLI
+preview; both surfaces route through one `editpreview::run`.
+
+**Cost, reported as a ledger and never as a gate.** On `src/` (130 files), warm: the post-hoc
+`--edit-check` is ~92 ms and the preview ~280 ms (three runs each, same machine, same warm caches). The
+delta is two single-file ingests — the spliced file and, for the honest error-node baseline, the original —
+plus one `buildGraph()` over the merged tree. Deliberate: reading the "before" error count off
+`ing.fileHealth` instead would cost nothing, but `fileBytes == 0` there means NOT MEASURED, which on a
+cache-served parse becomes a silent zero baseline that refuses every payload.
+
+**Clean:** ASan/UBSan (`-fno-sanitize-recover=all`, committed LSan suppressions) over the whole 37-payload
+sweep and over the whole-repo map; three byte-identical preview runs; `xmllint --noout` on the preview
+document. Gate arm W asserts the corpus is still byte-clean after all 37 previews — the dry run writes
+nothing, which is the only claim that must never be taken on trust.
+
+**Two disclosures the legend carries, because they are limits and not footnotes.** (1) A payload the grammar
+RECOVERS is answered on its recovered parse, per the reclassification above. (2) The preview previews a body
+REPLACEMENT only; the two insert verbs have no preview in this round. And the scope note stands unchanged:
+`--edit-check`'s target grammar did not gain a `sym#…@…` handle tier, so the staleness refusal is file-side
+(the span must fit the file's current bytes and still contain the definition's own name), which holds for
+every spelling rather than only for a handle.
