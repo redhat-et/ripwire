@@ -1,0 +1,4 @@
+inline int scale( int v, int factor )
+{
+    return v * factor;
+}

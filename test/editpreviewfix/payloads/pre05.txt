@@ -1,0 +1,5 @@
+int width( int pad )
+    {
+        const int one = 1;
+        return pad + one;
+    }

@@ -450,9 +450,15 @@ editCheckCallers( const IngestResult& ing, const Graph& g, std::span<const NodeI
 // the pre-existing behaviour byte-for-byte (renderNoteChildren is null-safe and emits nothing) — the CLI
 // caller (main.cpp's runEditCheck) passes the loaded index; the MCP edit_check verb (mcpverbs.h) is
 // deliberately left on the nullptr default for this round.
+//
+// `preview` (card A1, editpreview.h): the caller built `ing`/`g` by splicing an UNWRITTEN payload over one
+// definition's span and re-deriving the tree, so this same document describes an edit that has not happened.
+// It is a FLAG ON THE ONE ASSEMBLER rather than a second emitter on purpose: a preview that could drift from
+// the post-hoc answer would be worth nothing, and test/editpreviewcheck.sh compares the two documents
+// byte-for-byte (modulo the legend, at= and this flag's own attribute).
 inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g, const std::string& root,
                                         std::size_t maxFileBytes, const std::vector<std::string>& excludes, NodeId focus,
-                                        const notes::NoteIndex* ni = nullptr )
+                                        const notes::NoteIndex* ni = nullptr, bool preview = false )
 {
     const Symbol& fsym = ing.symbols[ focus ];
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the ONE
@@ -484,7 +490,23 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
 
-    std::string out = "<!-- ripwire edit-check: SYM's contract (param count + publicness) NOW vs git HEAD — unchanged/new-symbol/"
+    // card A1 — the preview sentence, FIRST, because every number below it is about bytes that are not on
+    // disk and a reader who meets that fact at the end has already read the document as a fact about the tree.
+    std::string out = "<!-- ripwire edit-check: ";
+    if( preview )
+    {
+        out += "PREVIEW — preview=\"1\" says this document was computed from an edit payload that has NOT been written "
+               "(the dry run form of this verb; flag spellings are omitted because a double hyphen is illegal inside an "
+               "XML comment). The payload was spliced over SYM's definition span in memory — exactly the bytes the "
+               "replace-symbol-body write verb would have produced, same line-ending harmonisation — that ONE file was "
+               "re-parsed, the call graph rebuilt over the re-derived tree, and everything below measured on it. So a "
+               "caller listed here, or flagged incompatible=\"1\" here, is what an apply WOULD produce, not what the tree "
+               "holds now. No byte of the working tree was written. Every other file, the git HEAD baseline, at= and any "
+               "note child are the REAL tree's. A payload whose splice raises the file's ERROR/MISSING node count is "
+               "refused rather than answered; a payload the grammar RECOVERS (a de-indented Python body) is not "
+               "detectably invalid and is answered on its recovered parse. ";
+    }
+    out += "SYM's contract (param count + publicness) NOW vs git HEAD — unchanged/new-symbol/"
                        "contract-change — plus its 1-hop callers. A caller is flagged incompatible=\"1\" when its argument count "
                        "was reliably counted and NO definition in the folded set could accept it: every one has a FIXED arity that "
                        "disagrees. A variadic, defaulted or implicit-receiver definition (a Python/Ruby method, whose params counts "
@@ -580,6 +602,10 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // R-E (2026-08-17 harvest): root= — same placement rule as kGraphCountFloorAttrXml above (truly last,
     // after every pre-existing attribute, so no substring-adjacency assertion in test/ can break).
     if( ecSingleRoot ) { out += " root=\"";  out += ex( root );  out += "\""; }
+    // card A1: TRULY last — same placement rule as root= and kGraphCountFloorAttrXml above, and for the same
+    // reason (no attribute-adjacency assertion anywhere in test/ can break on an attribute appended past the
+    // end of every group). Absent, not "0", when the document is the ordinary post-hoc answer.
+    if( preview ) { out += " preview=\"1\""; }
     out += ">";
     // L3/D5 note surfacing (paper-noteedit): a note targeting THIS symbol (its canonical id) or the FILE it
     // is defined in rides as a <note> child of <edit-check>, same shape/order/escaping renderNoteChildren

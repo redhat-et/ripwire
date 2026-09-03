@@ -1,0 +1,3 @@
+def reset(self):
+        """Reset the gauge to its zero reading."""
+        return 0

@@ -1,0 +1,5 @@
+int blend( int a, int b, int c )
+{
+    const int low = clampLow( c );
+    return low + trim( a, b );
+}

@@ -1,0 +1,4 @@
+inline int scale( int x, int k )
+{
+    return k * x;
+}

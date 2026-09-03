@@ -1784,6 +1784,30 @@ std::optional<int> runEditCheck( const MainDispatch& d )
     }
     const NodeId focus = groups[0].lowestNode;
 
+    // card A1 — the PRE-APPLY fork. Everything above (resolution, the not-found refusal, the §A6a ambiguity
+    // refusal) is shared verbatim, because a preview that resolved its target differently from the post-hoc
+    // verb would be answering about a different definition. Below the fork the preview splices the payload
+    // over THIS definition's span, re-derives the tree, and calls the SAME assembler; refusals from it are
+    // the same shape as this handler's own (stderr, exit 1, nothing on stdout).
+    if( editPreviewRequested( cfg ) )
+    {
+        std::string payload, payloadErr;
+        if( !rw::editpreview::readPayload( cfg.editPayload, cfg.maxFileBytes, payload, payloadErr ) )
+        {
+            std::fprintf( stderr, "ripwire: --edit-check --dry-run: %s\n", payloadErr.c_str() );
+            return 1;
+        }
+        const rw::editpreview::Outcome preview = rw::editpreview::run( ing, d.g, d.root, cfg.maxFileBytes, cfg.excludes,
+                                                                        d.valueUses, cfg.editCheckSym, focus, payload, d.notesPtr );
+        if( !preview.ok )
+        {
+            std::fprintf( stderr, "ripwire: --edit-check --dry-run: %s\n", preview.message.c_str() );
+            return 1;
+        }
+        std::fwrite( preview.xml.data(), 1, preview.xml.size(), stdout );
+        return 0;
+    }
+
     const std::string xml = editCheckBundleText( ing, d.g, d.root, cfg.maxFileBytes, cfg.excludes, focus, d.notesPtr );
     std::fwrite( xml.data(), 1, xml.size(), stdout );
     return 0;

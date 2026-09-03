@@ -1,0 +1,4 @@
+inline int scale( int x, int k, int bias )
+{
+    return x * k + bias;
+}

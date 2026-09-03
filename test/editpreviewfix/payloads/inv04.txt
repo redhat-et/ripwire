@@ -1,0 +1,4 @@
+inline int somethingElse( int x, int k )
+{
+    return x * k;
+}

@@ -2983,7 +2983,12 @@ inline std::string fromTraceText( const std::string& root, const std::string& tr
 // prevent. Both surfaces word it with editCheckAmbiguousMessage(), so they cannot drift apart.
 struct EditCheckReply { std::string payload; std::string refusal; };
 
-inline EditCheckReply editCheckText( const std::string& root, const std::string& symbol )
+//
+// card A1 — `new_body` turns this into the PRE-APPLY preview: the same question about bytes that have not
+// been written. Nothing writes; the field is optional and the verb stays readOnlyHint:true. The CLI form is
+// --edit-check=SYM --edit-payload=FILE --dry-run, and both surfaces route through editpreview::run, so the
+// two cannot answer differently.
+inline EditCheckReply editCheckText( const std::string& root, const std::string& symbol, const std::string& newBody = {} )
 {
     IngestResult ing;   // Phase-M: serialize the ingest vs the qsnap-prefetch worker (§2b), same as computeQualityDelta
     {
@@ -3006,6 +3011,19 @@ inline EditCheckReply editCheckText( const std::string& root, const std::string&
     if( groups.size() > 1 )
     {
         return EditCheckReply { {}, editCheckAmbiguousMessage( symbol, groups, "symbol=", matches.size() ) };
+    }
+
+    if( !newBody.empty() )
+    {   // the two payload refusals a STRING argument can still trip — the file-side ones (unreadable, over the
+        // size ceiling) belong to the CLI's own reader. A payload with no definition in it lands on
+        // editpreview::run's "does not define SYM", which is the honest sentence for a blank one too.
+        if( looksBinary( newBody ) )
+        {
+            return EditCheckReply{ {}, "new_body " + std::string( mcpedit::kBinaryPayloadRefusal ) };
+        }
+        const rw::editpreview::Outcome preview =
+            rw::editpreview::run( ing, g, root, kDefaultMaxFileBytes, {}, true, symbol, groups[0].lowestNode, newBody, nullptr );
+        return preview.ok ? EditCheckReply{ preview.xml, {} } : EditCheckReply{ {}, preview.message };
     }
 
     return EditCheckReply{ editCheckBundleText( ing, g, root, kDefaultMaxFileBytes, {}, groups[0].lowestNode ), {} };

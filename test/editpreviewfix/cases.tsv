@@ -1,0 +1,38 @@
+# id	class	name	file	payload	what the payload does
+chg01	change	scale	lib.h	chg01.txt	public free fn gains a third parameter (caller passes 2)
+chg02	change	scale	lib.h	chg02.txt	public free fn loses a parameter
+chg03	change	trim	lib.cpp	chg03.txt	non-public free fn gains a parameter, two callers
+chg04	change	clampLow	lib.cpp	chg04.txt	non-public free fn 1 -> 2 params
+chg05	change	width	lib.h	chg05.txt	public method 1 -> 2 params
+chg06	change	height	lib.h	chg06.txt	public method 0 -> 1 param
+chg07	change	blend	lib.cpp	chg07.txt	non-public free fn 3 -> 2 params
+chg08	change	widen	mod.py	chg08.txt	python free fn 2 -> 3 params
+chg09	change	narrow	mod.py	chg09.txt	python free fn 1 -> 2 params
+chg10	change	read	mod.py	chg10.txt	python method (self,unit) -> (self,unit,scaleBy)
+chg11	change	scale	lib.h	chg11.txt	a WIDER overload added beside the original: defs 1 -> 2, params MAX 2 -> 4
+chg12	change	reset	mod.py	chg12.txt	python method (self) -> (self,hard)
+pre01	preserve	scale	lib.h	pre01.txt	body reordered, same signature
+pre02	preserve	scale	lib.h	pre02.txt	body gains a local, same signature
+pre03	preserve	trim	lib.cpp	pre03.txt	ternary rewritten as an if, same signature
+pre04	preserve	clampLow	lib.cpp	pre04.txt	ternary rewritten as an if, same signature
+pre05	preserve	width	lib.h	pre05.txt	method body gains a local, same signature
+pre06	preserve	height	lib.h	pre06.txt	method body rewritten, still zero parameters
+pre07	preserve	blend	lib.cpp	pre07.txt	body reordered — its own callees move, the contract does not
+pre08	preserve	widen	mod.py	pre08.txt	python body gains a local, same signature
+pre09	preserve	narrow	mod.py	pre09.txt	python body gains a local, same signature
+pre10	preserve	read	mod.py	pre10.txt	python method body rewritten, same signature
+pre11	preserve	scale	lib.h	pre11.txt	parameters RENAMED, count unchanged
+pre12	preserve	reset	mod.py	pre12.txt	python method gains a docstring, same signature
+pre13	preserve	widen	mod.py	pre13.txt	RECORDED LIMIT: a de-indented python body is recovered by the grammar with ZERO error nodes, so it is not detectably invalid and BOTH sides answer unchanged
+inv01	invalid	scale	lib.h	inv01.txt	empty payload — empty never means delete
+inv02	invalid	scale	lib.h	inv02.txt	unbalanced brace — the spliced file gains ERROR nodes
+inv03	invalid	scale	lib.h	inv03.txt	syntactic garbage
+inv04	invalid	scale	lib.h	inv04.txt	parses, but defines a DIFFERENT symbol
+inv05	invalid	widen	mod.py	inv05.txt	python def line missing its colon
+inv06	invalid	widen	mod.py	inv06.txt	python parameter list never closes
+inv07	invalid	widen	mod.py	inv07.txt	parses, but defines a DIFFERENT python function
+inv08	invalid	trim	lib.cpp	GENERATED:nul	payload carries a NUL byte (generated at run time - see the gate)
+inv09	invalid	trim	lib.cpp	inv09.txt	a comment only — defines nothing
+inv10	invalid	width	lib.h	inv10.txt	parses, but defines a different method name
+inv11	invalid	narrow	mod.py	inv11.txt	whitespace only — defines nothing
+inv12	invalid	clampLow	lib.cpp	inv12.txt	C++ statement missing its semicolon

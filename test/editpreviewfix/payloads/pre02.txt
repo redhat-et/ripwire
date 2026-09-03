@@ -1,0 +1,5 @@
+inline int scale( int x, int k )
+{
+    const int product = x * k;
+    return product;
+}

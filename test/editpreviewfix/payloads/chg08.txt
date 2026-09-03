@@ -1,0 +1,2 @@
+def widen(a, b, c):
+    return a + b + c

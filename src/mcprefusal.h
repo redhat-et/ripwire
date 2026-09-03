@@ -105,6 +105,12 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
     { "from_trace",              "trace",     "the raw trace TEXT, pasted (not paraphrased into a query)",           "trace=\"Traceback (most recent call last): ...\"" },
     { "edit_check",              "symbol",    "the def name you just edited (file:name disambiguates; @FILE:LINE = the def at that line)", "symbol=\"parseArgs\"",
       FieldRule::Required, "pass the def name you just edited; file:name disambiguates, @FILE:LINE addresses by location" },
+    // card A1 — the PRE-APPLY preview, mirrored from the CLI's --edit-check --edit-payload --dry-run. OPTIONAL
+    // and read-only: passing it does not write, it asks the same contract question about bytes that have not
+    // been written. The field NAME is deliberately `new_body`, the one replace_symbol_body already uses, so a
+    // caller previewing an edit and then making it types one key, not two spellings of one idea.
+    { "edit_check",              "new_body",  "OPTIONAL — the replacement definition to PREVIEW rather than apply: the answer then describes the contract AFTER these bytes would be spliced over the symbol, and nothing is written", "new_body=\"int f( int x ) { return x; }\"",
+      FieldRule::Optional },
     { "whereis",                 "symbol",    "the symbol name to look for across every ref",                       "symbol=\"parseArgs\"" },
     { "slice",                   "symbol",    "the definition to slice: a symbol name, SYM:VAR, file:name[:VAR], or @FILE:LINE[:VAR] (a 1-based line-seed: the innermost definition enclosing that line)", "symbol=\"parseArgs\"",
       FieldRule::Required, "pass the definition to slice — a name, SYM:VAR, or @FILE:LINE to seed by location" },
@@ -973,7 +979,7 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "connect",                  "path paths symbols radius" },
     { "explore",                  "path paths task budget_tokens partition" },
     { "from_trace",               "path paths trace budget_tokens" },
-    { "edit_check",               "path paths symbol" },
+    { "edit_check",               "path paths symbol new_body" },
     { "whereis",                  "path symbol kind limit offset" },
     { "stray_content",            "path kind" },
     { "flags",                    "path kind symbol" },
