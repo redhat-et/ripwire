@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 500 gate scripts plus the determinism, cache-transparency and golden contracts. |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 501 gate scripts plus the determinism, cache-transparency and golden contracts. |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -4909,7 +4909,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **500 gate scripts**, all of which exist on disk.
+naming **501 gate scripts**, all of which exist on disk.
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -8545,6 +8545,176 @@ rejected. Baseline for this worktree's head, re-derived: `ripwire src --no-cache
 `ambiguous` against the registration's `3ce9944` figure is this round's own `src/pincensus.h` and its
 call sites, and excluding that one header reproduces the registered
 `files=144 symbols=4610 edges=12515 unresolved=1445` exactly.
+
+### Phase 3 — the SCIP join diagnosed, and the census re-registered on the full oracle, PRE-REGISTERED 2026-09-03 (before any post-fix number)
+
+**What this registers.** The phase-2 result above stopped at n = 85 because SCIP "spoke" on only 85 of
+224 locality-pinned sites, and named the `--scip` join's `SCIP matched 47% of occurrences
+(85889/183188)` line as the binding constraint. This section is the diagnosis of that line — measured
+per failure class, not guessed — and the registration of what phase 3 changes, with every band fixed
+before the post-fix number is read. Instrument: `bench/scip_match_diag.py` (stdlib-only; reproduces
+both joins `src/scip.h::buildScipOverlay` performs from the census side files and classifies every
+rejection), over `--pin-census` **format v2**, which now carries the call-site line on every `C` row and
+one `S` row per symbol (`test/pincensuscheck.sh` arms (J)/(K), red first). Corpora: the same two
+astropy snapshots, copied to the session scratchpad and re-indexed there with `scip-python` 0.6.6
+(`scip-python index --project-name astropy --project-version 14365 --quiet --output astropy-14365.scip .`,
+same for 12907; 47.5 MB / 45.6 MB). Re-running `bench/scip_pin_precision.py` on the fresh indexes
+reproduces phase 2 exactly — **0.729 (n = 85)** and **0.738 (n = 84)** — so the instrument is stable
+across an index rebuild and the diagnosis below is of the same population.
+
+**Diagnosis, astropy-14365 (`python3 bench/scip_match_diag.py --bin ./build/ripwire --repo
+<astropy-14365> --scip astropy-14365.scip`; 12907 in parentheses where it differs).**
+
+*The 47% is a ratio of two polluted counts, not a match rate.* Of the 183,043 occurrences the overlay
+counts as INTERNAL (their SCIP symbol bound to a ripwire definition), **119,154 — 65.1% — are
+references that cannot be calls by construction**: 63,989 parameter uses, 48,705 `local N` uses,
+6,460 attribute/term reads. They enter the denominator through two defects in the def-side join,
+which binds a SCIP definition occurrence to whatever ripwire symbol is FIRST on that exact line:
+
+* **`local N` symbols are keyed globally.** SCIP scopes `local N` to its document; `scipDef` is one
+  `HashMap<string,NodeId>` over the whole index, so the 39 `local N` definitions that happen to share a
+  line with a real symbol (a module-level assignment) bind that symbol for every same-numbered local in
+  every other file — 48,705 references, 27% of the "internal" denominator, and every one of them that
+  lands on a line with any ripwire reference is a **phantom precise edge** to an unrelated file's
+  symbol (from ≠ to, so it also inflates the numerator).
+* **Parameter definitions bind to the enclosing function.** A parameter's definition occurrence sits on
+  the `def` line, which holds the function's own symbol, so `f().(x)` binds to `f` (25,248 of 28,104
+  parameter defs, 89.8%; 95.5% on 12907). Every use of `x` inside `f` is then an "internal" occurrence
+  whose target is `f` itself — dropped as a self-loop AFTER entering the denominator. The same
+  first-on-the-line rule mis-binds same-line terms (`major, minor = …` → `bugfix`).
+
+*The method and class definitions all bind.* `method` 16,077 / 16,077 (100%), `type` 2,139 / 2,139
+(100%), zero near-misses within ±5 lines on either corpus: decorators and multi-line signatures — the
+phase-1 guess in `bench/ANSWERQUALITY.md` — are **not** a failure class at all. `term` (class and
+module attributes) binds 32%; the 4,710 unbound are attributes ripwire indexes no symbol for
+(`Conf#unicode_output`, `Table#read`), an extraction fact, not a join fact.
+
+*The honest match rate.* Restricting to what the census can possibly cover — a method/type reference,
+call-shaped (`name(` on the line), inside a body, target bound — **27,189 of 33,523 call occurrences
+match a decided call site: 81.1% (81.3% on 12907).** The 6,258 that do not are `iers_conf.reset(…)`,
+`item.reload()`, `super().__enter__()` — receiver calls whose name has many in-repo definitions and no
+same-file/same-dir candidate, which the tier ladder DROPS (no row: the census's documented floor).
+That is the resolver's recall, not the join's; 67 sites (0.2%) are genuine line skew (a multi-line
+call whose name token and call node sit on different lines). The remaining rejections are outside any
+call site: 25,179 mentions (imports, annotations, `isinstance` arguments, inheritance lists) and 5,187
+module-level calls with no enclosing symbol (absent from the census by definition).
+
+*Where the locality coverage actually goes — the finding that changes the census.* Of the 139 uncovered
+locality-pinned sites on 14365 (140 on 12907): **57 (58) SCIP silent** — no occurrence names the callee
+inside the caller; **2 (3) line skew**; and **80 (79) where SCIP DID resolve the occurrence, to
+something that is not any ripwire definition**: 50 (49) to an external package (`sum` → `builtins/sum()`,
+`append` → `builtins/list#append()`, `array` → `numpy._core.multiarray/array()`), 18 (18) to an
+in-package attribute ripwire has no symbol for (`self.model(3, 5)` → `TestInputUnits#model.`), 12 (12) to
+a parameter (`m = model(*params)` → `test_input1D().(model)`). Each was read at source: the tie-break
+pinned a bare `sum(` in `BaseRepresentation.norm` to `BaseRepresentation.sum`, `values.append(vc)` in
+`Card._split` to `Header.append` in another file, a parameter call to `TestJointFitter.model`. Under the
+registration's own rule — *"a pinned edge is confirmed iff SCIP's resolved target IS the pinned
+definition, by symbol identity"* — these are disconfirmations. The phase-2 instrument could not
+transcribe them because the overlay's job is edge REPLACEMENT and it only records targets it can point
+an edge at; a resolution to a non-definition was indistinguishable from silence. That is an instrument
+gap, not a band question, and it is closed below.
+
+**Registered before the fix, in this order.**
+
+1. **The matcher defects are fixed and the shipped overlay changes with them** — a bug fix, disclosed:
+   `local N` symbols never bind and are never internal; a definition occurrence binds only when its
+   descriptor is a method (`().`), type (`#`) or term (`.`) AND a ripwire symbol of the SAME NAME sits on
+   that line (parameters, locals and `__init__:` meta never bind; a same-line different-named symbol
+   never binds). Baseline to compare against, same binary, `ripwire <corpus> --no-cache --scip=<index>`:
+   14365 `edges=35939 ambiguous=2054 precise=20355`, stderr `47% (85889/183188), 47235 defs unmatched`;
+   12907 `edges=40193 ambiguous=2411 precise=19808`, `48% (90106/188992), 44362 defs unmatched`. The
+   post-fix figures are published beside these whichever way they move. `test/scipcheck.sh` stays green
+   unchanged (its fixture has neither locals nor parameters in the index).
+2. **Target for the honesty line.** With the two polluting classes gone, the line's ratio is expected to
+   report the CALL-occurrence rate the diagnosis measured. Registered band: the diag's
+   `CALL-OCCURRENCE MATCH RATE` is **non-inferior** after the fix (≥ 81.0% on both corpora — the fixes
+   remove pollution and must lose no genuine match), and the stderr `matched N%` figure lands within
+   **±5 points of that rate** on both corpora. A widening of the gap means the line still counts
+   something the census cannot cover, and is reported as such.
+3. **The oracle is transcribed in full — `--pin-census` O rows for every SCIP-resolved call site.** Under
+   `--scip`, a reference occurrence that ripwire holds a same-named Call reference for on that line, but
+   whose SCIP target is not a ripwire definition, is written as an `O` row whose target is a sentinel:
+   `@external` (the symbol has no definition occurrence in the index — another package) or `@nondef`
+   (it is defined in the index but bound no symbol: a parameter, a `local`, an attribute ripwire does not
+   extract). The harness counts a sentinel-covered site as COVERED and its in-repo pin as DISCONFIRMED,
+   in a column of its own. **The primary is re-read on this full definition — it is the registered
+   definition — and the phase-2 in-repo-only figure is reported beside it for continuity**, never in
+   its place. Coverage expectation registered as a floor, not a result: locality covered ≥ **160 / 224**
+   on 14365 (85 + 80 sentinel − skew), which reaches the registered **n ≥ 100 on ONE corpus without
+   pooling**. If it does not, the section says so and stops.
+4. **The funded-fix decision is then taken mechanically from the bands already on record**: precision
+   < 0.80 at n ≥ 100 on a corpus funds the `canonicalId` fix; 0.80–0.90 or n < 100 does not; ≥ 0.90
+   refutes the premise. No band moves. If funded, the non-inferiority ceiling (`ambiguous=` +2.0%) and
+   a locality-precision floor are registered in a further section BEFORE that fix's first number.
+
+**Gate.** `test/scipjoincheck.sh` on the new fixture `test/scipjoinfix/` (two files, a hand-rolled
+index from `make_index.py` — the `scipfix` generator's protobuf helpers): the `local 0` cross-file
+collision (no phantom O row), the parameter-on-`def`-line collision (no self-bound target; an `@nondef`
+O row instead), an external resolution (`@external` O row), the unchanged in-repo O row, the harness's
+two-definition readout, and stdout byte-identity / determinism / xmllint under `--scip`. Written and run
+RED against the pre-fix binary before `src/scip.h` changed.
+
+### Phase 3, RUN — the join fixed, the oracle transcribed in full, and the number (2026-09-03)
+
+**Verdict against the bands registered above: the fix is FUNDED.** On the full oracle — the registered
+definition — locality-pinned precision is **0.368 (n = 163)** on astropy-14365 and **0.373 (n = 161)**
+on astropy-12907. Both clear the **n ≥ 100** floor on a single corpus with no pooling, and both sit
+far inside the "silence unjustified" region (< 0.80). Under the phase-2 in-repo-only definition,
+reported for continuity, the figures are **0.723 (n = 83)** and **0.732 (n = 82)**: within two sites of
+phase 2's 0.729 / 0.738 (the two sites that moved are parameter calls the old binding had self-bound
+into "in-repo" coverage; they are now `@nondef`). Argv, both corpora, same binary:
+
+```
+python3 bench/scip_pin_precision.py --bin ./build/ripwire --repo <astropy-14365> --scip astropy-14365.scip --label astropy-14365-fix
+python3 bench/scip_pin_precision.py --bin ./build/ripwire --repo <astropy-12907> --scip astropy-12907.scip --label astropy-12907-fix
+```
+
+| mechanism | 14365 sites | covered (full) | precision (full) | n in-repo | p in-repo | @external | @nondef | 12907 covered | precision | n in-repo | p in-repo |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **locality (S6-C, the primary)** | **224** | **163** | **0.368** | 83 | 0.723 | 50 | 30 | **161** | **0.373** | 82 | 0.732 |
+| receiver-rule | 5,409 | 4,847 | 0.930 | 4,580 | 0.984 | 257 | 10 | 4,766 | 0.921 | 4,466 | 0.983 |
+| cone | 254 | 253 | 1.000 | 253 | 1.000 | 0 | 0 | 248 | 1.000 | 248 | 1.000 |
+| arity | 183 | 112 | 0.089 | 42 | 0.238 | 33 | 37 | 109 | 0.092 | 41 | 0.244 |
+| split (per-target) | 2,731 | 1,128 | 0.105 | 677 | 0.146 | 225 | 226 | 1,168 | 0.101 | 681 | 0.147 |
+| unique (control) | 37,984 | 24,216 | 0.799 | 19,955 | 0.969 | 3,765 | 496 | 23,392 | 0.811 | 19,574 | 0.969 |
+
+Read the control first: `unique` drops from 0.969 to **0.799** on the full oracle. That 17-point gap is
+the name-based resolver's plausibly-internal false-positive rate on this corpus — calls to `sum`,
+`append`, `set`, `dict`, `array` that Pyright resolves to a builtin or numpy while ripwire finds a
+same-named in-repo definition and, the name being unique in the tree, emits one confident edge. It
+was invisible to every prior census because the oracle could not say "not here". Locality at 0.368 sits
+43 points below that control; its 103 disconfirmations decompose as **50 external + 30 non-def + 23
+in-repo** (the 23 are phase 2's 10 module-level / 10 sibling-class / 3 cross-file, unchanged).
+
+**Band 1 — the matcher defects, disclosed.** After the fix the shipped overlay on 14365 reports
+`edges=35905 ambiguous=2054 precise=20302` (was 35939 / 2054 / 20355): **53 phantom precise edges gone**,
+every one a cross-file `local N` collision; on 12907 `edges=40169 ambiguous=2411 precise=19763` (was
+40193 / 2411 / 19808), 45 gone. `ambiguous=` is byte-identical on both. `test/scipcheck.sh` green
+unchanged; `test/scipjoincheck.sh` (red-first on the pre-fix binary: arms C/D/E/F/G) green.
+
+**Band 2 — the honesty line: half met, half MISSED, reported as such.** The diag's CALL-occurrence match
+rate is exactly non-inferior — **81.1% → 81.1%** (27,189 / 33,523) and **81.3% → 81.3%** (27,201 /
+33,457): the fixes removed pollution and lost no genuine match. The stderr line now reads
+`SCIP matched 71% of occurrences (48511/68646)` on 14365 and `72% (47687/66314)` on 12907 — up from
+47% / 48%, but **10 points below the diag rate, outside the registered ±5**. The gap is real and named:
+the line's denominator still includes bound-term references (attribute reads, 6,460 on 14365) and its
+numerator counts a mention line as matched whenever ripwire holds any-role reference there, so it
+measures "occurrence lands on a ripwire reference", not "call lands on a decided call site". Tightening
+it to the call definition would need the line to know a reference's role, which the overlay's
+`(file,line)` table deliberately does not carry. Left as a registered miss; the stderr text is unchanged
+in shape so no gate or doc moved.
+
+**Band 3 — coverage.** Locality covered **163 / 224** on 14365 (floor 160: met) and 161 / 224 on 12907.
+The 61 (63) still uncovered are 59 (60) genuine SCIP silence and 2 (3) line skew.
+
+**What the funded fix can and cannot move — stated before it is registered.** The `canonicalId` fix
+(bare-name spelling for an unscoped symbol ⇒ zero shared locality) reaches exactly the module-level
+shape: 10 of the 23 in-repo disconfirmations on each corpus. It cannot touch the 80 sentinel
+disconfirmations — a tie-break chooses among in-repo candidates, and for those sites every candidate is
+wrong — so the full-oracle primary will remain < 0.80 after it, and **the disclosure question the
+registration funds ("the pin's exclusion from `amb=` is unearned") stands regardless of the
+`canonicalId` outcome**. Its floor is therefore registered on the stratum it addresses, with the full
+figure held non-inferior, in the next section.
 
 ## Member variables as symbols + `--uses=Owner.field` — the member-variable round (card A3), PRE-REGISTERED 2026-09-02 (before any corpus number)
 

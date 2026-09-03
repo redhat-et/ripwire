@@ -1105,6 +1105,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             i = j;
         }
+        // The sites SCIP resolved to something that is NOT a ripwire definition (scipoverlay.h::ScipNonDef):
+        // one sentinel O row each, after the in-repo rows, in the overlay's own sorted order. Census-only —
+        // the resolver below never reads nonDefCovered, so the graph is byte-identical with or without it.
+        for( const ScipNonDef& nd : scip->nonDefCovered )
+        {
+            g.pinCensus.addOracleRow( nd.from, nd.calleeName, nd.kind );
+        }
     }
     for( const Reference& r : ing.references )
     {
@@ -1756,7 +1763,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             const PinDecision d = classifyPin( scipPinned, bindingPinned, nReal, canonical, narrowed,
                                                censusCone, censusArity, censusLocality );
-            g.pinCensus.addRow( r.fromSymbol, r.calleeName, d.mech, d.flags, censusPreS6c, nReal );
+            g.pinCensus.addRow( r.fromSymbol, r.calleeName, d.mech, d.flags, censusPreS6c, nReal, r.line );
             for( NodeId to : tier )
             {
                 if( to != r.fromSymbol )

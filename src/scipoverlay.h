@@ -28,10 +28,23 @@ struct ScipCover { NodeId from; std::string calleeName; NodeId to; };
 // flatten time to stamp prov="scip" onto the matching out-edge.
 struct ScipEdge { NodeId from; NodeId to; };
 
+// one call-site the index resolved to something that is NOT a ripwire definition — a builtin or another
+// package's symbol (`kind` = kScipNonDefExternal) or an in-index definition that bound no symbol: a
+// parameter, a `local`, an attribute ripwire does not extract (kScipNonDefInIndex). Recorded ONLY where
+// ripwire holds a Call reference of the same name on that line, so every entry names a site the resolver
+// DID commit an edge for. Consumed by the eval-only census alone (graph.h --pin-census hook): the map's
+// name-based edge for such a site is neither dropped nor replaced — SCIP has no definition to point the
+// edge at, so there is nothing to substitute. Before this table existed such a resolution was
+// indistinguishable from SCIP silence (docs/EVALS.md, "Phase 3 — the SCIP join diagnosed").
+inline constexpr std::uint8_t kScipNonDefExternal = 1;
+inline constexpr std::uint8_t kScipNonDefInIndex  = 2;
+struct ScipNonDef { NodeId from; std::string calleeName; std::uint8_t kind; };
+
 struct ScipOverlay
 {
     std::vector<ScipCover> coveredFrom;         // sorted by (from, calleeName, to), unique per (from,calleeName,to)
     std::vector<ScipEdge>  preciseEdges;        // sorted by (from, to), unique — for the provenance stamp
+    std::vector<ScipNonDef> nonDefCovered;      // sorted by (from, calleeName, kind), unique — census-only (see ScipNonDef)
     std::size_t            documentsSeen = 0;   // honesty summary / gate
     std::size_t            edgesPinned   = 0;   // == preciseEdges.size()
 

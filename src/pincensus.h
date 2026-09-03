@@ -34,6 +34,7 @@
 
 #include "model.h"
 #include "resolve.h"        // canonicalIdForEmit — the census id must be the map's id= spelling
+#include "scipoverlay.h"    // kScipNonDefExternal / kScipNonDefInIndex — the O-row sentinel kinds
 
 #include <cstdint>
 #include <cstdio>
@@ -101,6 +102,7 @@ struct PinCensus
     std::vector<std::uint16_t> preTier;     // tier width entering S6-C (saturating at 65535)
     std::vector<std::uint16_t> postReal;    // non-self survivors emitted (saturating at 65535)
     std::vector<NodeId>        tgtIds;      // flat surviving-target ids, ascending within a row
+    std::vector<std::uint32_t> line;        // 1-based call-site line (Reference::line) — v2: the line-level join key
     std::string                namePool;    // flat NUL-separated callee names
 
     // ---- `O` rows: SCIP's covered call sites, same id space (only under --scip) --------------------
@@ -108,6 +110,9 @@ struct PinCensus
     std::vector<std::uint32_t> oraNameOff;  // into namePool (shared — the names are the same strings)
     std::vector<std::uint32_t> oraStart;    // into oraTo
     std::vector<NodeId>        oraTo;
+    std::vector<std::uint8_t>  oraSentinel; // 0 = in-repo target(s) in oraTo; kScipNonDefExternal / kScipNonDefInIndex =
+                                            //   SCIP resolved the site to something that is not a ripwire definition
+                                            //   (no oraTo entries; the writer prints `@external` / `@nondef`)
 
     bool armed = false;                     // false ⇒ nothing was recorded and nothing will be written
 
@@ -122,9 +127,10 @@ struct PinCensus
     const char* nameAt( std::uint32_t off ) const noexcept { return namePool.c_str() + off; }
 
     void addRow( NodeId from, std::string_view callee, PinMech m, std::uint8_t fl,
-                 std::size_t pre, std::size_t post )
+                 std::size_t pre, std::size_t post, std::uint32_t siteLine )
     {
         fromSym.push_back( from );
+        line.push_back( siteLine );
         nameOff.push_back( internName( callee ) );
         tgtStart.push_back( std::uint32_t( tgtIds.size() ) );
         mech.push_back( std::uint8_t( m ) );
@@ -133,11 +139,12 @@ struct PinCensus
         postReal.push_back( std::uint16_t( post > 65535 ? 65535 : post ) );
     }
 
-    void addOracleRow( NodeId from, std::string_view callee )
+    void addOracleRow( NodeId from, std::string_view callee, std::uint8_t sentinel = 0 )
     {
         oraFrom.push_back( from );
         oraNameOff.push_back( internName( callee ) );
         oraStart.push_back( std::uint32_t( oraTo.size() ) );
+        oraSentinel.push_back( sentinel );
     }
 
     std::size_t rows() const noexcept { return fromSym.size(); }
@@ -244,8 +251,15 @@ inline bool writePinCensus( const char* path, const PinCensus& pc, const IngestR
         return ( n < canon.size() ) ? canon[ n ].c_str() : "?";
     };
 
-    std::fprintf( f, "# ripwire pin-census v1\tC=kind\\tmech\\tpre\\tpost\\tflags\\tcaller_id\\tcallee\\ttargets(|-sep)\n" );
+    std::fprintf( f, "# ripwire pin-census v2\tC=kind\\tmech\\tpre\\tpost\\tflags\\tcaller_id\\tcallee\\ttargets(|-sep)\\tline\n" );
+    std::fprintf( f, "# line is the 1-based call-site line in the caller's file (v2, appended LAST so v1 readers are unchanged):\n" );
+    std::fprintf( f, "#   the key a SCIP occurrence joins on, so a coverage loss can be classified per site instead of guessed.\n" );
     std::fprintf( f, "# O rows (only under --scip) are the SCIP oracle: O\\tcaller_id\\tcallee\\ttargets(|-sep)\n" );
+    std::fprintf( f, "#   a target of @external (a builtin / another package) or @nondef (an in-index parameter, local or\n" );
+    std::fprintf( f, "#   attribute ripwire extracts no symbol for) means SCIP resolved the site to something that is NOT a\n" );
+    std::fprintf( f, "#   ripwire definition — the index spoke, and disagrees with every in-repo target the C row names.\n" );
+    std::fprintf( f, "# S rows (v2) are the DEFINITION universe, one per symbol: S\\tid\\tkind\\tline — the def side of the\n" );
+    std::fprintf( f, "#   SCIP join (buildScipOverlay maps a SCIP definition to a symbol by exact file+line), listed in full.\n" );
     std::fprintf( f, "# ids are path::scope::name#NODEID (path::name#NODEID when unscoped) — NEVER a bare name: the\n" );
     std::fprintf( f, "#   handle is the join key and is stable across runs of one binary on one corpus, --scip or not.\n" );
     std::fprintf( f, "# mech: unique|qualified|receiver-rule|cone|arity|locality|split|scip|binding — the stage that DECIDED the site\n" );
@@ -268,11 +282,16 @@ inline bool writePinCensus( const char* path, const PinCensus& pc, const IngestR
         {
             std::fprintf( f, "%s%s", ( t > pc.tgtStart[ i ] ) ? "|" : "", idOf( pc.tgtIds[ t ] ) );
         }
-        std::fputc( '\n', f );
+        std::fprintf( f, "\t%u\n", unsigned( pc.line[ i ] ) );
     }
     for( std::size_t i = 0; i < pc.oraRows(); ++i )
     {
         std::fprintf( f, "O\t%s\t%s\t", idOf( pc.oraFrom[ i ] ), pc.nameAt( pc.oraNameOff[ i ] ) );
+        const std::uint8_t sentinel = ( i < pc.oraSentinel.size() ) ? pc.oraSentinel[ i ] : std::uint8_t( 0 );
+        if( sentinel != 0 )
+        {
+            std::fputs( sentinel == kScipNonDefExternal ? "@external" : "@nondef", f );
+        }
         const std::uint32_t end = pc.oraRowEnd( i );
         for( std::uint32_t t = pc.oraStart[ i ]; t < end; ++t )
         {
@@ -280,7 +299,11 @@ inline bool writePinCensus( const char* path, const PinCensus& pc, const IngestR
         }
         std::fputc( '\n', f );
     }
-    std::fprintf( f, "# summary rows=%zu oracle_rows=%zu", pc.rows(), pc.oraRows() );
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        std::fprintf( f, "S\t%s\t%s\t%u\n", canon[ i ].c_str(), symTag( ing.symbols[ i ].kind ), unsigned( ing.symbols[ i ].line ) );
+    }
+    std::fprintf( f, "# summary rows=%zu oracle_rows=%zu symbols=%zu", pc.rows(), pc.oraRows(), ing.symbols.size() );
     for( std::uint8_t m = 0; m < 9; ++m )
     {
         std::fprintf( f, " %s=%zu", pinMechName( m ), mechCount[ m ] );

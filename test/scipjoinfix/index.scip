@@ -1,0 +1,29 @@
+ï
+a.py2
+)scip-python python scipjoinfix 1 a/sum().
+	local 00
+'scip-python python scipjoinfix 1 a/Box#8
+	/scip-python python scipjoinfix 1 a/Box#model().8
+	/scip-python python scipjoinfix 1 a/Box#total().>
+5scip-python python scipjoinfix 1 a/Box#total().(vals)7
+0scip-python python scipjoinfix 1 builtins/sum().5
+	,scip-python python scipjoinfix 1 a/Box#go().<
+3scip-python python scipjoinfix 1 a/Box#go().(model):
+	3scip-python python scipjoinfix 1 a/Box#go().(model)4
+
++scip-python python scipjoinfix 1 a/model().+
+)scip-python python scipjoinfix 1 a/sum().)
+'scip-python python scipjoinfix 1 a/Box#1
+/scip-python python scipjoinfix 1 a/Box#model().1
+/scip-python python scipjoinfix 1 a/Box#total()..
+,scip-python python scipjoinfix 1 a/Box#go().-
++scip-python python scipjoinfix 1 a/model().ð
+b.py5
+,scip-python python scipjoinfix 1 b/helper()..
+%scip-python python scipjoinfix 1 b/K#4
+	+scip-python python scipjoinfix 1 b/K#run().3
+,scip-python python scipjoinfix 1 b/helper().
+	local 0.
+,scip-python python scipjoinfix 1 b/helper().'
+%scip-python python scipjoinfix 1 b/K#-
++scip-python python scipjoinfix 1 b/K#run().

@@ -41,6 +41,15 @@ STRATA (the registration's reference bands, reported in one table)
   unique        the tier held one candidate all along. ~1.0 BY CONSTRUCTION (one possible target, so
                 SCIP cannot pick differently) — a sanity floor, never an independent result.
 
+THE FULL ORACLE (phase 3, registered 2026-09-03 — docs/EVALS.md "Phase 3 — the SCIP join diagnosed")
+  An `O` row may carry a SENTINEL target instead of an id: `@external` (SCIP resolved the site to a
+  builtin or another package's symbol) or `@nondef` (to an in-index parameter, local, or attribute
+  ripwire extracts no symbol for). The index SPOKE on that site and named something that is not any
+  ripwire definition, so under the registration's rule — confirmed iff SCIP's target IS the pinned
+  definition — the site is COVERED and every in-repo pin on it is DISCONFIRMED. Before phase 3 these
+  sites were indistinguishable from silence. Two coverage figures are printed per mechanism: the full
+  definition (`covered`, the primary) and the phase-2 in-repo-only one (`n-inrepo`, for continuity).
+
 KNOWN LIMITS, stated here so they cannot be discovered in a writeup
   * The overlay keys coverage by (fromSymbol, calleeName), not by source position. Two call sites in
     one caller naming the same callee share one oracle answer; `multi_site_groups` counts how often
@@ -108,7 +117,9 @@ def parse_census( path ):
 def measure( decisions, oracle ):
     """Precision per mechanism over COVERED sites only, plus the coverage that produced it."""
     stat = collections.defaultdict( lambda: {
-        "sites": 0, "covered": 0, "confirmed": 0,          # site-level (a pin is one decision)
+        "sites": 0, "covered": 0, "confirmed": 0,          # site-level (a pin is one decision), FULL oracle
+        "covered_inrepo": 0, "confirmed_inrepo": 0,        # the phase-2 definition: SCIP named an in-repo def
+        "sentinel_external": 0, "sentinel_nondef": 0,      # covered ONLY by a sentinel: disconfirmed by kind
         "tgt_covered": 0, "tgt_confirmed": 0,              # target-level (for `split`, which emits k edges)
     } )
     group_sites = collections.Counter()
@@ -121,11 +132,22 @@ def measure( decisions, oracle ):
         if truth is None:
             continue                                        # SCIP is silent here; silence is not disconfirmation
         s[ "covered" ] += 1
+        inrepo = any( not t.startswith( "@" ) for t in truth )
         # site-level: the resolver committed to this target set; confirmed iff EVERY emitted target is
         # one SCIP resolved to. For a single-target pin (every mech but `split`) that is the pin being
         # right. For `split` it is the strict reading, and the per-target rate below is the lenient one.
-        if all( t in truth for t in d[ "targets" ] ):
+        # A sentinel never equals an id, so a site SCIP resolved only to a non-definition is disconfirmed.
+        confirmed = all( t in truth for t in d[ "targets" ] )
+        if confirmed:
             s[ "confirmed" ] += 1
+        if inrepo:
+            s[ "covered_inrepo" ] += 1
+            if confirmed:
+                s[ "confirmed_inrepo" ] += 1
+        elif "@external" in truth:
+            s[ "sentinel_external" ] += 1
+        else:
+            s[ "sentinel_nondef" ] += 1
         for t in d[ "targets" ]:
             s[ "tgt_covered" ] += 1
             if t in truth:
@@ -165,31 +187,35 @@ def main():
 
     stat, multi, groups = measure( decisions, oracle )
 
-    print( "=" * 96 )
+    print( "=" * 118 )
     print( "S6-C silent-pin precision census — %s" % label )
     print( "  repo   %s" % os.path.abspath( a.repo ) )
     print( "  scip   %s (%d covered call sites)" % ( os.path.abspath( a.scip ), len( oracle ) ) )
     print( "  census %d decided call sites, %d distinct (caller,callee) groups, %d of them multi-site"
            % ( len( decisions ), groups, multi ) )
-    print( "=" * 96 )
-    print( "%-16s %8s %9s %10s   %8s %10s %10s" %
-           ( "mechanism", "sites", "covered", "precision", "targets", "tgt-conf", "tgt-prec" ) )
+    print( "=" * 118 )
+    print( "%-16s %8s %9s %10s   %8s %9s   %6s %6s   %8s %10s %10s" %
+           ( "mechanism", "sites", "covered", "precision", "n-inrepo", "p-inrepo", "@ext", "@nondef", "targets", "tgt-conf", "tgt-prec" ) )
     rows = {}
     for m in [ "locality" ] + SILENT_PINS + [ "split", "unique", "scip", "binding" ]:
         s = stat.get( m )
         if not s or s[ "sites" ] == 0:
             continue
         p = pct( s[ "confirmed" ], s[ "covered" ] )
+        pi = pct( s[ "confirmed_inrepo" ], s[ "covered_inrepo" ] )
         tp = pct( s[ "tgt_confirmed" ], s[ "tgt_covered" ] )
         rows[ m ] = { "sites": s[ "sites" ], "covered": s[ "covered" ], "confirmed": s[ "confirmed" ],
-                      "precision": p, "targets_covered": s[ "tgt_covered" ],
+                      "precision": p, "covered_inrepo": s[ "covered_inrepo" ], "confirmed_inrepo": s[ "confirmed_inrepo" ],
+                      "precision_inrepo": pi, "sentinel_external": s[ "sentinel_external" ],
+                      "sentinel_nondef": s[ "sentinel_nondef" ], "targets_covered": s[ "tgt_covered" ],
                       "targets_confirmed": s[ "tgt_confirmed" ], "target_precision": tp }
-        print( "%-16s %8d %9d %10s   %8d %10d %10s" %
-               ( m, s[ "sites" ], s[ "covered" ], fmt( p ), s[ "tgt_covered" ], s[ "tgt_confirmed" ], fmt( tp ) ) )
+        print( "%-16s %8d %9d %10s   %8d %9s   %6d %6d   %8d %10d %10s" %
+               ( m, s[ "sites" ], s[ "covered" ], fmt( p ), s[ "covered_inrepo" ], fmt( pi ),
+                 s[ "sentinel_external" ], s[ "sentinel_nondef" ], s[ "tgt_covered" ], s[ "tgt_confirmed" ], fmt( tp ) ) )
 
     # The registered verdict, applied mechanically to the primary metric so it cannot be nudged in prose.
     loc = rows.get( "locality" )
-    print( "-" * 96 )
+    print( "-" * 118 )
     if not loc or loc[ "covered" ] < 100:
         n = loc[ "covered" ] if loc else 0
         print( "VERDICT: INCONCLUSIVE — %d SCIP-covered locality-pinned sites (< 100 registered floor)." % n )
@@ -210,7 +236,7 @@ def main():
         with open( a.json, "w" ) as fh:
             json.dump( { "label": label, "repo": os.path.abspath( a.repo ), "scip": os.path.abspath( a.scip ),
                          "decided_sites": len( decisions ), "oracle_sites": len( oracle ),
-                         "groups": groups, "multi_site_groups": multi, "mechanisms": rows }, fh, indent = 2, sort_keys = True )
+                         "groups": groups, "multi_site_groups": multi, "mechanisms": rows, "rows": rows }, fh, indent = 2, sort_keys = True )
         print( "wrote %s" % a.json )
     return 0
 
