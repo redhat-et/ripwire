@@ -233,9 +233,9 @@ echo "=== arm 5: every index-reading verb carries the field, not just the ranked
 # claim. Three more verbs from three different families, on the settled tree: all must report ok.
 armfive_fail=0
 i=20
-for V in '{"name":"find_symbol","arguments":{"path":"WORKDIR","name_path":"area"}}' \
-         '{"name":"impact","arguments":{"path":"WORKDIR","symbol":"area"}}' \
-         '{"name":"explore","arguments":{"path":"WORKDIR"}}'
+for V in '{"name":"find_symbol","arguments":{"path":"WORKDIR","symbol":"addedLaneArea"}}' \
+         '{"name":"impact","arguments":{"path":"WORKDIR","symbol":"addedLaneArea"}}' \
+         '{"name":"explore","arguments":{"path":"WORKDIR","task":"compute the area of a shape"}}'
 do
     VV="${V//WORKDIR/$WORK}"
     printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":%s}\n' "$i" "$VV" >&9

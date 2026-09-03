@@ -931,9 +931,16 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 const std::string stamp = indexStamp( path );
                 // R2a: `_assumed_root` — a third envelope sibling (mcpAssumedRootField), emitted ONLY when
                 // the request omitted `path` and the launch-cwd default answered.
+                // Card A3: `_fresh` — a fourth sibling, on EVERY response, because it is the one of these
+                // an agent needs without having asked for it: does this answer still describe the tree I am
+                // editing? `_index` and `_reingest` both require a second data point to interpret (a stamp
+                // means nothing alone; a cost means nothing without knowing a pass ran). `_fresh` is
+                // self-contained by construction, and it is placed after the stamp for the same sequencing
+                // reason — it reads the pass count that building the stamp may have moved.
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
                      + mcpdetail::jsonEscape( text ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
-                     + "\"" + mcpReingestField( passesAtEntry ) + mcpAssumedRootField( assumedRootNote ) + "}}";
+                     + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
+                     + mcpAssumedRootField( assumedRootNote ) + "}}";
             };
             const auto errResult = [ & ]( int code, const char* msg )
             { return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\"" + msg + "\"}}"; };

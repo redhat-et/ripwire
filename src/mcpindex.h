@@ -64,6 +64,7 @@
 #include <sys/event.h>     // kqueue / kevent — the FS-event freshness watcher (macOS/BSD; Feature-1 hot-reload)
 #endif
 
+#include <algorithm>    // std::sort — the card-A3 content-change merge-walk over two path lists
 #include <atomic>       // RIPWIRE_MCP_TIMINGS rebuild-count observable (env-gated stderr timing; off → untouched)
 #include <cctype>
 #include <cerrno>       // errno / EWOULDBLOCK — the edit-lock bounded-acquire loop (F1)
@@ -546,6 +547,15 @@ struct McpIndex
     // ever reach an output byte that must match a cold run — both are process history, not tree state.
     std::uint64_t                     incrementalPasses = 0;
     std::size_t                       lastReingestFiles = 0;
+
+    // ── card A3 freshness disclosure (`_fresh` / `_stale_files` / `_changed_files`; mcpFreshFields below).
+    // Same category as the two above — PROCESS HISTORY, never tree state. Latched at the rebuild that
+    // produced them, from mcpStaleFileCount and mcpContentChangeCount, whose comments carry the contract:
+    // how many recorded stats moved, and how many files actually differ in CONTENT. Two numbers rather than
+    // one because they disagree on two of the four mutations (add: 0/1, touch: 1/0). Both are 0 when the
+    // rebuild ran with no sweep at all — an edit verb's invalidateMcpIndex, or a root switch.
+    std::size_t                       lastStaleFiles    = 0;
+    std::size_t                       lastChangedFiles  = 0;
 };
 
 // Cache file path, deterministic per (user, root), under the shared private cache ladder and its existing
@@ -685,6 +695,87 @@ inline bool mcpStale( const McpIndex& ix, bool skipDirSweep = false )
     return false;
 }
 
+// Card A3 — HOW MANY indexed files diverged, where mcpStale() only answers WHETHER one did. Deliberately a
+// second function rather than an out-parameter on mcpStale: the hot path asks a yes/no question and must
+// keep its first-mismatch early return, and only the REBUILD path (which is about to pay for a full
+// re-ingest, three orders of magnitude more than a stat sweep) needs the number. A dir-only change — the
+// ADD case — correctly counts 0 here: no indexed file moved, the containing directory did.
+inline std::size_t mcpStaleFileCount( const McpIndex& ix )
+{
+    std::size_t n = 0;
+    for( std::size_t i = 0; i < ix.ing.files.size(); ++i )
+    {
+        const auto [ mtime, size ] = mcpdetail::statOf( diskPath( ix.ing, std::uint32_t( i ) ) );
+        const long long recSize = ( i < ix.fileSize.size() ) ? ix.fileSize[i] : -1;
+        n += ( mtime != ix.fileMtime[i] || size != recSize ) ? 1u : 0u;
+    }
+    return n;
+}
+
+// Card A3 — an index's per-file content fingerprints as a SORTED (identity path, byte hash) list. Sorted so
+// the comparison below is one linear walk and independent of crawl order (a workspace merge concatenates
+// per-root file lists, so globally sorted is not free). Reads no file: `hashes` was computed by the build
+// that produced `ing`.
+inline std::vector<std::pair<std::string, std::uint64_t>> mcpContentFingerprints( const IngestResult& ing,
+                                                                                 const std::vector<std::uint64_t>& hashes )
+{
+    std::vector<std::pair<std::string, std::uint64_t>> out;
+    out.reserve( ing.files.size() );
+    for( std::size_t i = 0; i < ing.files.size(); ++i )
+    {
+        out.emplace_back( ing.files[i], i < hashes.size() ? hashes[i] : 0 );
+    }
+    std::sort( out.begin(), out.end() );
+    return out;
+}
+
+// Card A3 — everything about the OUTGOING index that the disclosure needs, captured in one call before the
+// rebuild overwrites it. Two fields because the two questions have different answers (an add moves no
+// indexed file's stat; a touch moves a stat and no byte), and `comparable` because an initial build has no
+// predecessor: it is false exactly when there was nothing to replace, which is what makes the change count
+// below 0 rather than "every file is new".
+struct McpRebuildBaseline
+{
+    bool                                              comparable = false;
+    std::size_t                                       staleFiles = 0;   // indexed files whose recorded stat moved
+    std::vector<std::pair<std::string, std::uint64_t>> content;         // sorted fingerprints of the index being replaced
+};
+
+inline McpRebuildBaseline mcpRebuildBaseline( const McpIndex& ix, bool isIncrementalPass )
+{
+    if( !isIncrementalPass )
+    {
+        return {};
+    }
+    return { true, mcpStaleFileCount( ix ), mcpContentFingerprints( ix.ing, ix.fileByteHash ) };
+}
+
+// Card A3 — how many files actually differ in CONTENT between the replaced index and the fresh one: an
+// ADDED path, a REMOVED path and a path whose bytes moved each count one. This is the number that separates
+// "the index was refreshed" from "the tree changed", and the case they disagree on is the point — a bare
+// `touch` moves a recorded stat (so staleFiles is 1) and no byte (so this is 0).
+//
+// Counted through the two set sizes rather than by adding up cases: over two path-sorted lists, `common` is
+// how many paths both carry and `same` how many of those also agree on bytes, so removed + added + modified
+// collapses to |prev| + |now| − common − same. One walk, one arithmetic identity, no per-case bookkeeping.
+inline std::size_t mcpContentChangeCount( const McpRebuildBaseline& before,
+                                          const std::vector<std::pair<std::string, std::uint64_t>>& now )
+{
+    if( !before.comparable )
+    {
+        return 0;
+    }
+    const auto& prev = before.content;
+    std::size_t common = 0, same = 0, a = 0, b = 0;
+    while( a < prev.size() && b < now.size() )
+    {
+        if( prev[a].first < now[b].first )      { ++a; }
+        else if( now[b].first < prev[a].first ) { ++b; }
+        else                                    { ++common; same += ( prev[a].second == now[b].second ) ? 1u : 0u; ++a; ++b; }
+    }
+    return prev.size() + now.size() - common - same;
+}
+
 // the single process-wide cached index. File-scope (not a function-local static) so the EDIT verbs can flip
 // its `valid` flag after a successful write, forcing the next verb to rebuild (belt-and-braces on top of the
 // mtime watch — see invalidateMcpIndex / the edit handlers). inline → one definition across TUs.
@@ -717,14 +808,49 @@ inline std::atomic<std::uint64_t>& mcpRebuildCounter()
 // Absent field / 0 / N are three distinct facts — see the field's contract on McpIndex::incrementalPasses.
 // A free function rather than three lines inside the response builder: it keeps the branch out of
 // dispatchMcpLine, which is already the largest symbol in the file.
+// The shared predicate behind BOTH disclosure fields: did serving this request refresh an index the process
+// already held? `passesAtEntry` is McpIndex::incrementalPasses as read before the verb ran. One definition,
+// because `_reingest` (what it cost) and `_fresh` (whether it happened at all) must never be able to
+// disagree about whether a pass ran.
+inline bool mcpRefreshedThisRequest( std::uint64_t passesAtEntry )
+{
+    return mcpIndexSlot().incrementalPasses != passesAtEntry;
+}
+
 inline std::string mcpReingestField( std::uint64_t passesAtEntry )
 {
+    return mcpRefreshedThisRequest( passesAtEntry )
+         ? ",\"_reingest\":" + std::to_string( mcpIndexSlot().lastReingestFiles ) : std::string{};
+}
+
+// Card A3 — the `_fresh` envelope field, and the two counts that qualify it. Every response that reads the
+// index carries this, which is the whole capability: an agent holding a warm answer never has to run a
+// second command to find out whether it still describes the tree it is editing.
+//
+//   _fresh:"ok"          the per-request re-validation ran and found nothing moved; served from the index
+//                        as it stood.
+//   _fresh:"reindexed"   the re-validation found the tree had moved, and the index was rebuilt BEFORE the
+//                        verb answered — plus `_stale_files` and `_changed_files`. There is no third value:
+//                        this surface's chosen policy is re-index, never serve-and-flag, so `_fresh` can
+//                        never say "stale". (The CLI's policy is the same by construction — it re-crawls
+//                        every invocation — which is why nothing like this is emitted there; see the card
+//                        A3 section in docs/EVALS.md for the measurement and the rejected CLI half.)
+//
+// The trigger is the SAME predicate `_reingest` uses (incrementalPasses moved), for the same reason: only a
+// refresh of an index this process ALREADY held is a re-index. A first build has nothing to be stale
+// against, and disclosing its counts would leak whether a cache blob happened to exist on disk.
+//
+// The two counts answer different questions and disagree on two of the four mutations — see the contract on
+// McpIndex::lastStaleFiles. Both are emitted whenever `_fresh` is "reindexed", INCLUDING when they are 0:
+// `_stale_files:0` (an add) and `_changed_files:0` (a touch) are the two most informative values either one
+// takes, so suppressing a zero here would delete the answer rather than save the bytes.
+inline std::string mcpFreshFields( std::uint64_t passesAtEntry )
+{
     const McpIndex& ix = mcpIndexSlot();
-    if( ix.incrementalPasses == passesAtEntry )
-    {
-        return {};
-    }
-    return ",\"_reingest\":" + std::to_string( ix.lastReingestFiles );
+    return mcpRefreshedThisRequest( passesAtEntry )
+         ? ",\"_fresh\":\"reindexed\",\"_stale_files\":" + std::to_string( ix.lastStaleFiles )
+             + ",\"_changed_files\":" + std::to_string( ix.lastChangedFiles )
+         : std::string{ ",\"_fresh\":\"ok\"" };
 }
 
 // ── Multi-root workspaces over MCP (A11): the additive `paths` array. A request
@@ -973,6 +1099,11 @@ inline const McpIndex& getIndex( const std::string& root )
     // build for it, not a refresh of anything.
     const bool isIncrementalPass = ix.valid && ix.root == root;
 
+    // card A3: everything the freshness disclosure needs about the index this rebuild is about to replace,
+    // read at the same moment and for the same reason as the line above. Rebuild path only — nothing here
+    // touches the warm reuse that returned above.
+    const McpRebuildBaseline a3Before = mcpRebuildBaseline( ix, isIncrementalPass );
+
     // Multi-root workspace key (A11): per-root ingest (each with ITS OWN mcpCachePath blob — an edit in
     // one root never reparses another) merged into one IngestResult; else the single-root path unchanged.
     const auto wsIt = mcpWorkspaceRegistry().find( root );
@@ -1055,6 +1186,10 @@ inline const McpIndex& getIndex( const std::string& root )
         ix.fileByteHash[i] = readOk ? mcpdetail::byteHash( bytes.data(), bytes.size() ) : 0;   // unreadable → 0 (edit verb refuses; mcpStale sees a mismatch)
     }
     ix.contentHash = mcpdetail::indexContentHash( ix.ing.files, ix.fileMtime, ix.fileByteHash );   // stamp, now content-folded (S1)
+
+    // card A3: latch the two disclosure counts against the baseline captured before the rebuild.
+    ix.lastStaleFiles   = a3Before.staleFiles;
+    ix.lastChangedFiles = mcpContentChangeCount( a3Before, mcpContentFingerprints( ix.ing, ix.fileByteHash ) );
 
     // the staleness watch-list: every directory under root (denylist-pruned), so additions in previously
     // file-less dirs are detected too — see collectDirMtimes.
