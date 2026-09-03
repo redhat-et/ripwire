@@ -1232,9 +1232,12 @@ guard (`resolved_symbols`) is NOT relaxed: a verb that takes a symbol is still r
 the symbol resolves on the root. Abstain stays a first-class answer.
 
 **Corpora, fixed before the build.** *Tuning corpus:* `test/taskroutefix/` (159 rows) as today.
-*Held-out corpus:* `test/skillevalfix/prompts.tsv` (266 labelled + 68 `none`), which the lane may READ
-for the per-skill table above but may not edit, and `test/taskroutecheck.sh` gains it as a second arm
-so the fixture cannot be re-tuned into. Prompts whose expected skill is symbol-bearing (navigate,
+*Held-out corpus:* `test/skillevalfix/prompts.tsv` (266 labelled + 68 `none`), which the lane may not
+edit. Its `split` column is the firewall: the **83 `dev` rows may be read for phrasings** while intents are
+written; the **183 `test` rows are never opened by the lane** and are the ONLY rows the band below is
+scored on, via a new held-out arm of `test/taskroutecheck.sh` that reads them itself. Instrument A's
+0.023 was measured over all 266; the pre-widening `test`-split figure is re-derived by the gate's first
+RED run and recorded beside it, so the before/after is on the same rows. Prompts whose expected skill is symbol-bearing (navigate,
 find-bug with a named symbol, graph-query) are reported separately from the symbol-free buckets, on the
 ripwire root, so the guard's refusals are not scored as misses.
 
