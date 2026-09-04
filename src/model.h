@@ -147,7 +147,15 @@ inline const char* langTag( Lang l ) noexcept
 //   FieldOfVar  — `cfg.opts.enable()` / `m_cfg.opts.enable()`: base = recvVar, intermediate = fieldName.
 // DEPTH IS PINNED AT ONE HOP, not opened toward N: a depth-3 chain still classifies `None` (its
 // residual misfires are DISCLOSED — chainguardcheck arm (h) pins them as a recorded fact).
-enum class RecvKind : std::uint8_t { None, ThisObj, NamedVar, FieldOfThis, FieldOfVar };
+//   SuperObj — Phase 5 (docs/EVALS.md "Phase 5", kParserVer 77): Python `super().m()` / `super(C, self).m()`
+//              — the receiver is the `call` node whose function is the identifier `super`. Before this kind
+//              existed the site classified `None` and reached the ladder as a BARE call, so the S6-C prior
+//              handed it to the caller's OWN class — the one class `super()` by definition skips. Resolves
+//              through the enclosing class's BASES only (resolve.h Narrower::rule1BaseWalk); a miss is the
+//              `@external` veto, never a spray. APPENDED so no persisted value renumbers (RawRef rides the
+//              cache with recv as a u8). Python only: isMemberAccessNode classifies C++/Python receivers and
+//              C++ has no `super`.
+enum class RecvKind : std::uint8_t { None, ThisObj, NamedVar, FieldOfThis, FieldOfVar, SuperObj };
 
 // ABS-3 reference / use-site ROLE: WHAT a reference does at the use site, captured at ingest so a
 // use-site index (`--uses=SYM`) can report the resolvable places a name is referenced, not just calls.
@@ -507,6 +515,14 @@ enum class LocalBindKind : std::uint8_t
                //     call narrowing (kind == Type) does not read it, so no call edge changes; the L3 fn tables
                //     skip it by kind; shadow suppression already holds the parameter's VarDecl record.
                //     APPENDED for the same cache reason as VarDecl.
+    Import,    // Phase 5 (docs/EVALS.md "Phase 5", kParserVer 77): a FILE-SCOPE import binding — `var` is the
+               //     name the import binds in the module namespace, `typeName` the module target as written
+               //     (`import numpy as np` → np:numpy; `import a.b` → a:a.b; `from m import x as y` → y:m;
+               //     `from . import x` → x:.). fromSymbol is kNoNode (a module-level statement), spans {0,0}.
+               //     Consumed by graph.h buildImportBindTable ONLY: the external-name veto reads whether the
+               //     bound name's module is inside the indexed tree. Rule 2 (kind == Type), the L3 fn tables
+               //     and shadow suppression all skip it by kind. Python captures these; a `from m import *`
+               //     records nothing (no name is bound). APPENDED for the same cache reason as VarDecl.
 };
 
 inline constexpr const char* kFnBindLambdaTarget  = "(lambda)";    // parens are illegal in identifiers, so

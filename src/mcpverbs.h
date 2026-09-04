@@ -393,7 +393,7 @@ inline std::string analyzeToString( const std::string& root, int topK, bool stab
                                     // this one must too — "the clause landed at 3 of its 5 echo sites" is the
                                     // §B4 family, and mcpclidiffcheck is the gate that keeps the two surfaces one.
                                     /*ann=*/rw::MapAnnotations{ .prDisclosure = ix.prDisclosure },
-                                    /*statsFirstScreen=*/true, anRootArg, &ix.g.locPinOut ); } );
+                                    /*statsFirstScreen=*/true, anRootArg, &ix.g.locPinOut, ix.g.externalCalls ); } );
 }
 
 // ─── the cross-branch + dark-content MCP twins (`whereis`, `stray_content`, `flags`) ───

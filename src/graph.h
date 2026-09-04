@@ -17,6 +17,7 @@
 #include "resolve.h"             // P2-D one-hop type narrowing (Rule 1: class membership) — applied before the name-based fallback
 #include "scipoverlay.h"         // SCIP precision overlay (data struct only; parser lives in scip.h)
 #include "pincensus.h"           // eval-only per-call-site decision census (--pin-census); inert unless armed
+#include "externalnames.h"       // Phase 5: the committed builtin/stdlib tables behind the external-name veto
 #include "infra/sortutil.h"      // radix edge sorting for large integer-key graph edge lists
 #include "docparse.h"            // detail::readWholeFile — resolveAtSeed reads the seed line's byte range off disk
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
@@ -77,6 +78,12 @@ struct Graph
                                             // full-oracle precision on astropy). serialize: lpin="K" / locality_pinned=N,
                                             // both absent when 0. NOT folded into ambOut: a split nothing decided and a
                                             // pin a prior decided are different facts (docs/EVALS.md "Phase 4").
+    std::size_t                externalCalls = 0;   // Phase 5 (docs/EVALS.md "Phase 5"): call sites the external-name
+                                                     // VETO refused — a bare name or receiver provably bound OUTSIDE the
+                                                     // indexed tree (a builtin/stdlib name with no in-repo evidence, an
+                                                     // external import binding, a `super()` whose MRO left the tree). No
+                                                     // edge, never counted in ambOut/unresolvedOut. Serialized as the
+                                                     // header `external=N` / JSON "external":N, absent when 0.
     std::vector<std::string>   localityKey; // per-symbol S6-C SCORING key (resolve.h::localityKeyOf): canonId when scoped,
                                             // `path::name` when not. Read ONLY by the S6-C block; never an identity.
     std::vector<std::string>   canonId;     // per-symbol canonical SCIP-style id `path::scope::name` (S6-C); the
@@ -694,6 +701,220 @@ inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing )
     return t;
 }
 
+// ── Phase 5 external-name veto tables (docs/EVALS.md "Phase 5", mechanism 1; src/externalnames.h) ─────
+// Three small evidence tables the veto in buildGraph's resolve loop consults AFTER every receiver rule has
+// missed. Built once per graph, deterministic (pure functions of ing.files / ing.symbols / ing.bindings in
+// their canonical orders); every key is "<fileId>#name" so a lookup is one hash probe.
+//   importBind  — Python LocalBindKind::Import bindings, classified: 'i' = the module resolves to an indexed
+//                 file or is relative (in-repo EVIDENCE), 'x' = EXTERNAL (absolute target, unresolvable, and
+//                 its head segment names no .py stem and no directory anywhere in the tree), 'u' = unknown
+//                 (unresolvable but the head names something in the tree — a package the crawl was not
+//                 rooted at; never vetoed). A name bound twice in one file keeps the non-'x' verdict.
+//   fileScopeDef — Python module-level Function/Class definitions per file: same-file definition evidence.
+//   freeName    — C-family: the NAME of every scope-less (free) symbol or macro, declaration or definition,
+//                 anywhere in the corpus, restricted to names in the C-family table. A bare C++ call can
+//                 reach a free function given some declaration (an angle include is not path-resolvable, so
+//                 "declared in an included file" is not decidable here) and can NEVER reach an unrelated
+//                 class's member — so corpus-wide free-symbol presence is the conservative evidence, and
+//                 the veto fires only when the name's in-repo definitions are ALL members.
+struct ExternalVetoTables
+{
+    HashMap<std::string, char> importBind;
+    HashMap<std::string, char> fileScopeDef;
+    HashMap<std::string, char> freeName;
+};
+
+inline ExternalVetoTables buildExternalVetoTables( const IngestResult& ing )
+{
+    ExternalVetoTables t;
+    std::string        key;   // reused "<fileId>#name" buffer
+    const auto fileKey = [ & ]( std::uint32_t fileId, std::string_view name )
+    {
+        key.clear();
+        Narrower::appendUint( key, fileId );
+        key.push_back( '#' );
+        key.append( name );
+    };
+
+    // the tree's module vocabulary: every directory segment and every .py stem — the head-segment probe
+    // that keeps an unresolvable-but-present package from reading as external.
+    HashMap<std::string, char>          moduleNames;
+    HashMap<std::string, std::uint32_t> fileIndex;
+    fileIndex.reserve( ing.files.size() );
+    bool anyImport = false;
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind == LocalBindKind::Import )
+        {
+            anyImport = true;
+            break;
+        }
+    }
+    if( anyImport )
+    {
+        for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+        {
+            const std::string_view path = ing.files[ f ];
+            fileIndex.emplace( lexicalNormalize( path ), f );
+            std::size_t seg = 0;
+            while( seg <= path.size() )
+            {
+                const std::size_t slash = path.find( '/', seg );
+                const std::string_view part = path.substr( seg, ( slash == std::string_view::npos ? path.size() : slash ) - seg );
+                if( slash == std::string_view::npos )
+                {
+                    if( part.size() > 3 && part.substr( part.size() - 3 ) == ".py" )
+                    {
+                        moduleNames.try_emplace( std::string( part.substr( 0, part.size() - 3 ) ), '\0' );
+                    }
+                    break;
+                }
+                if( !part.empty() && part != "." )
+                {
+                    moduleNames.try_emplace( std::string( part ), '\0' );
+                }
+                seg = slash + 1;
+            }
+        }
+        for( const Binding& b : ing.bindings )
+        {
+            if( b.kind != LocalBindKind::Import || b.var.empty() || b.typeName.empty() || b.fileId >= ing.files.size() )
+            {
+                continue;
+            }
+            char verdict = 'x';
+            if( b.typeName.front() == '.' )
+            {
+                verdict = 'i';   // a relative import cannot leave the package
+            }
+            else if( resolvePreciseInclude( ing.files[ b.fileId ], b.typeName, /*isAngle=*/ false, fileIndex ) != kNoFile )
+            {
+                verdict = 'i';
+            }
+            else
+            {
+                const std::size_t dot = b.typeName.find( '.' );
+                const std::string head( dot == std::string::npos ? std::string_view( b.typeName ) : std::string_view( b.typeName ).substr( 0, dot ) );
+                if( moduleNames.find( head ) != moduleNames.end() )
+                {
+                    verdict = 'u';
+                }
+            }
+            fileKey( b.fileId, b.var );
+            const auto [ it, inserted ] = t.importBind.try_emplace( key, verdict );
+            if( !inserted && it->second == 'x' && verdict != 'x' )
+            {
+                it->second = verdict;   // any in-repo/unknown binding of the name outranks an external one
+            }
+        }
+    }
+    for( const Symbol& sy : ing.symbols )
+    {
+        if( sy.lang == Lang::Python )
+        {
+            if( sy.scope.empty() && ( sy.kind == SymKind::Function || sy.kind == SymKind::Class ) )
+            {
+                fileKey( sy.fileId, sy.name );
+                t.fileScopeDef.try_emplace( key, '\0' );
+            }
+        }
+        else if( sy.lang == Lang::Cpp || sy.lang == Lang::C || sy.lang == Lang::ObjC )
+        {
+            if( ( sy.scope.empty() || sy.kind == SymKind::Macro ) && externalnames::isCFamilyStdName( sy.name ) )
+            {
+                t.freeName.try_emplace( sy.name, '\0' );
+            }
+        }
+    }
+    return t;
+}
+
+// ── Phase 5: the external-name VETO predicate (docs/EVALS.md "Phase 5", mechanism 1) ───────────────────
+// `isExternalBound` says whether a call the ladder would otherwise SPRAY by name is provably bound outside
+// the indexed tree. Every branch that returns true is a name-resolution FACT of the language, never a guess
+// about a receiver's type:
+//   Python, bare `f(…)`     — a local/parameter named `f` shadows everything (evidence, keep); an import
+//                             binding decides by resolution ('x' ⇒ veto, 'i'/'u' ⇒ keep); otherwise only a
+//                             builtin-table name with no same-file module-level def and no nested def in the
+//                             caller is a builtin — a bare call never reaches a method.
+//   Python, `x.m(…)`        — `x` bound by an EXTERNAL import and by no local ⇒ the whole call is external.
+//   C-family, bare `f(…)`   — a C-family-table name with no local binding and NO free symbol/macro of that
+//                             name anywhere in the corpus (its in-repo definitions are all members, which an
+//                             unqualified call from outside their class cannot reach; the enclosing class and
+//                             its bases were probed by Rule 1 + the base walk before this).
+// Consulted by buildGraph's resolve loop ONLY after every receiver rule has missed. The key buffer is
+// reused across calls (one allocation amortized), so the predicate is `const` in contract and `mutable` in
+// storage, exactly like Narrower.
+struct ExternalVeto
+{
+    const IngestResult&                                  ing;
+    const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canonByName;
+    const HashMap<std::string, char>&                    localNameSet;
+    const ExternalVetoTables&                            tables;
+    mutable std::string                                  key;   // reused "<fileId>#name" / "<fromSymbol>#name" buffer
+
+    bool hasLocal( const Reference& ref, std::string_view name ) const
+    {
+        key.clear();  Narrower::appendUint( key, ref.fromSymbol );  key.push_back( '#' );  key.append( name );
+        return localNameSet.find( key ) != localNameSet.end();
+    }
+    char importVerdict( const Reference& ref, std::string_view name ) const
+    {
+        key.clear();  Narrower::appendUint( key, ref.fileId );  key.push_back( '#' );  key.append( name );
+        const auto it = tables.importBind.find( key );
+        return ( it == tables.importBind.end() ) ? '\0' : it->second;
+    }
+    bool pythonDefEvidence( const Reference& ref ) const
+    {
+        key.clear();  Narrower::appendUint( key, ref.fileId );  key.push_back( '#' );  key.append( ref.calleeName );
+        if( tables.fileScopeDef.find( key ) != tables.fileScopeDef.end() )
+        {
+            return true;   // a same-file module-level def of the builtin's name shadows the builtin
+        }
+        key.clear();  key.append( ing.symbols[ ref.fromSymbol ].name ).append( "::" ).append( ref.calleeName );
+        if( const auto nit = canonByName.find( key ); nit != canonByName.end() )
+        {
+            for( NodeId c : nit->second )
+            {
+                if( ing.symbols[ c ].fileId == ref.fileId )
+                {
+                    return true;   // a nested def inside the caller shadows the builtin
+                }
+            }
+        }
+        return false;
+    }
+    bool isExternalBound( const Reference& ref ) const
+    {
+        if( ref.lang == Lang::Python )
+        {
+            if( ref.recv == RecvKind::None )
+            {
+                if( hasLocal( ref, ref.calleeName ) )
+                {
+                    return false;
+                }
+                if( const char v = importVerdict( ref, ref.calleeName ); v != '\0' )
+                {
+                    return v == 'x';
+                }
+                return externalnames::isPythonBuiltin( ref.calleeName ) && !pythonDefEvidence( ref );
+            }
+            if( ref.recv == RecvKind::NamedVar && !ref.recvVar.empty() )
+            {
+                return !hasLocal( ref, ref.recvVar ) && importVerdict( ref, ref.recvVar ) == 'x';
+            }
+            return false;
+        }
+        if( ( ref.lang == Lang::Cpp || ref.lang == Lang::C || ref.lang == Lang::ObjC ) && ref.recv == RecvKind::None )
+        {
+            return externalnames::isCFamilyStdName( ref.calleeName ) && !hasLocal( ref, ref.calleeName )
+                && tables.freeName.find( ref.calleeName ) == tables.freeName.end();
+        }
+        return false;
+    }
+};
+
 // L3: the candidate DEF ids for a bound function name — a qualified target (`ns::alpha`, `Cls::alpha`)
 // tries the canonical scope::name map on its LAST TWO segments first (Symbol::scope is a final segment),
 // then degrades to the bare final segment against byName. `key` is the caller's reused buffer. The caller
@@ -950,6 +1171,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
 
+    // Phase 5 external-name veto evidence (docs/EVALS.md "Phase 5") — built by buildExternalVetoTables above;
+    // consumed by the veto step in the resolve loop, after every receiver rule has missed.
+    const ExternalVetoTables extVeto = buildExternalVetoTables( ing );
+
     // ── L3 fn-pointer/callback binding tables (var→FUNCTION, Rule 2's exact discipline) — built by
     // buildFnPtrBindTables above; consumed via Narrower::fnPtrBindingTarget in the resolve loop below.
     const FnPtrBindTables fnBinds  = buildFnPtrBindTables( ing );
@@ -1065,6 +1290,19 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         return !out.empty();
     };
 
+    // ── Phase 5: the external-name VETO (docs/EVALS.md "Phase 5", mechanism 1) — the predicate lives in
+    // ExternalVeto above buildGraph; `vetoExternal` is the refusal: no edge, one header count, one `C external`
+    // census row with no target.
+    const ExternalVeto externalVeto{ ing, canonByName, fieldNarrow.localNameSet, extVeto };
+    const auto vetoExternal = [ & ]( const Reference& ref )
+    {
+        ++g.externalCalls;
+        if( census )
+        {
+            g.pinCensus.addRow( ref.fromSymbol, ref.calleeName, PinMech::External, 0, 0, 0, ref.line );   // no target: a refusal
+        }
+    };
+
     // accumulate per (from,to): summed per-ref confidence + an integer ref count (key = from<<32|to).
     // weight = (confSum/nref)·√nref = confidence·√num_refs — diminishing returns on repeat refs.
     struct EdgeAcc { float confSum = 0.f; std::uint32_t nref = 0; };
@@ -1086,6 +1324,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // names. From the inherit refs (role Extends): the derived class is the enclosing class symbol (or, for a
     // Rust `impl Trait for T`, the type name stashed in `qualifier`); the base is the ref's calleeName.
     HashMap<std::string, std::vector<std::string>> chaUp, chaDown;
+    // Phase 5: the DIRECT bases in DECLARATION order (deduped, never sorted) — the `super()` walk reads them:
+    // for `class C(A, B)` Python's MRO puts A's chain before B's, so when both A and B define `m`, `super().m()`
+    // in C names A::m. chaUp is sorted for its membership uses and cannot say which base came first.
+    HashMap<std::string, std::vector<std::string>> chaUpDeclared;
     {
         const auto isClassLikeK = []( SymKind k ) noexcept
         { return k == SymKind::Class || k == SymKind::Struct || k == SymKind::Interface; };
@@ -1110,6 +1352,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             chaUp  [ std::string( derivedName ) ].push_back( ir.calleeName );
             chaDown[ ir.calleeName ].push_back( std::string( derivedName ) );
+            std::vector<std::string>& declared = chaUpDeclared[ std::string( derivedName ) ];
+            if( std::find( declared.begin(), declared.end(), ir.calleeName ) == declared.end() )
+            {
+                declared.push_back( ir.calleeName );   // source order (ing.references is in (file, byte) order)
+            }
         }
         // dedup each adjacency list — membership is order-independent, so this stays deterministic.
         for( auto& [ k, v ] : chaUp )   { std::sort( v.begin(), v.end() ); v.erase( std::unique( v.begin(), v.end() ), v.end() ); }
@@ -1317,6 +1564,19 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             narrowed = narrowTo( narrower.rule1ClassMember( r, ing.symbols[ r.fromSymbol ].scope ), r, cand );
         }
+        // Phase 5 (docs/EVALS.md "Phase 5", mechanism 2): Rule 1's shapes walk the enclosing class's BASES when the
+        // class itself defines no `m` — and `super().m()` (RecvKind::SuperObj) walks the bases ONLY. See
+        // Narrower::rule1BaseWalk. A `super()` miss is a VETO: the MRO left the indexed tree, and the spray below
+        // would hand the site to the caller's own class — the one class `super()` skips by definition.
+        if( !scipPinned && !canonical && !narrowed )
+        {
+            narrowed = narrowTo( narrower.rule1BaseWalk( r, ing.symbols[ r.fromSymbol ].scope, chaUp, chaUpDeclared ), r, cand );
+        }
+        if( !scipPinned && !canonical && !narrowed && r.recv == RecvKind::SuperObj && bindingTier.empty() )
+        {
+            vetoExternal( r );
+            continue;
+        }
         // P2-D Rule 2 (receiver-variable type): a named-receiver call `x.m()` / `x->m()` resolves to the method
         // on the VARIABLE's type (`Foo::m` for `Foo x;`), BEFORE the bare-name spray — the other half of the
         // [TYPE] cut. Only when the var has a single unambiguous in-scope binding AND that type defines `m`
@@ -1365,6 +1625,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
                 narrowed = !cand.empty();
             }
+        }
+        // ── Phase 5: the external-name veto — every evidence rule above has missed; refuse the spray when the
+        // name or receiver is provably bound outside the tree (isExternalBound above). Role Call only: a Macro
+        // site names an indexed #define, which IS in-repo evidence by construction.
+        if( !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty()
+            && it != byName.end() && externalVeto.isExternalBound( r ) )
+        {
+            vetoExternal( r );
+            continue;
         }
         if( !scipPinned && !canonical && !narrowed )
         {
@@ -1658,8 +1927,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // `this->m_pool.run()` pinned to App::run through THIS block after Rule 1 refused). The honest split
         // stands instead. ThisObj/NamedVar keep the tie-break: for them the scope/locality prior is not
         // contradicted by the receiver (`this->` IS the enclosing class; a typed var already narrowed above).
+        // Phase 5: a `super()` receiver is excluded for the same reason — the enclosing class winning the scope
+        // credit is exactly the class `super()` skips; a multi-base tie stays an honest split.
         if( !scipPinned && !bindingPinned && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
-         && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar )
+         && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar && r.recv != RecvKind::SuperObj )
         {
             const std::string& callerCanon = g.localityKey[ r.fromSymbol ];   // == canonId here (the caller is scoped)
             // memoize each survivor's shared-locality ONCE (was computed twice: once for bestShare, once inside the
@@ -3223,6 +3494,7 @@ inline FieldUseAnswer collectFieldUseSites( const IngestResult& ing, FieldId fie
             }
             break;
             case RecvKind::ThisObj:
+            case RecvKind::SuperObj:   // Phase 5: `super().f` — an inherited member by construction; same owner walk, disclosed
             {
                 candidatesIn( ctxOwner, r.lang );
                 if( cand.empty() )

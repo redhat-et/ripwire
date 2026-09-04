@@ -1133,7 +1133,96 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
 // use-site index reports import sites. The ref is file-scope (fromSymbol=kNoNode) — that is correct for
 // a directive at any container depth, and it NEVER enters the call graph (role != Call → skipped in
 // buildGraph). The ref's line comes from the DIRECTIVE node, never from its enclosing `#if` or body.
-void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_view src, std::vector<Include>& incs, std::vector<RawRef>& refs )
+// Phase 5 (docs/EVALS.md "Phase 5", kParserVer 77): the NAME a Python import statement binds in the module
+// namespace, per imported clause, as a file-scope LocalBindKind::Import RawBind (var = bound name, typeName =
+// the module target as written). `import a.b as c` binds `c`; `import a.b` binds `a` (the head — that is the
+// name Python puts in the namespace); `from m import x as y` binds `y`; `from m import x` binds `x`; a
+// `wildcard_import` binds nothing. The Include record keeps only the module and drops the imported-names
+// clause, so without this the bound NAME is unrecoverable resolve-side — and the external-name veto keys on
+// exactly that name. Node shapes (tree-sitter-python v0.23.6): import_statement name:(dotted_name|aliased_import)+;
+// import_from_statement module_name:(dotted_name|relative_import) name:(dotted_name|aliased_import)* | wildcard_import;
+// aliased_import name:(dotted_name) alias:(identifier). startByte = the statement's own start (file scope →
+// emitBindings attributes kNoNode); spans {0,0}. Pure-syntactic, deterministic, source order.
+inline void capturePythonImportBinds( TSNode stmt, const char* t, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    const bool isFrom = ( std::strcmp( t, "import_from_statement" ) == 0 );
+    if( !isFrom && std::strcmp( t, "import_statement" ) != 0 )
+    {
+        return;
+    }
+    std::string target;
+    if( isFrom )
+    {
+        const TSNode mn = ts_node_child_by_field_name( stmt, "module_name", 11 );
+        if( ts_node_is_null( mn ) )
+        {
+            return;
+        }
+        target = importSpecifierText( mn, src );
+    }
+    const TSNode        moduleNode = isFrom ? ts_node_child_by_field_name( stmt, "module_name", 11 ) : TSNode{};
+    const std::uint32_t n          = ts_node_child_count( stmt );
+    for( std::uint32_t i = 0; i < n; ++i )
+    {
+        const TSNode kid = ts_node_child( stmt, i );
+        if( ts_node_is_null( kid ) )
+        {
+            continue;
+        }
+        const char* kt = ts_node_type( kid );
+        if( isFrom && ts_node_eq( kid, moduleNode ) )
+        {
+            continue;   // the module_name child of a from-import is not a bound name; only the `name:` clauses are
+        }
+        std::string_view bound;
+        std::string      clauseTarget;
+        if( std::strcmp( kt, "aliased_import" ) == 0 )
+        {
+            const TSNode alias = ts_node_child_by_field_name( kid, "alias", 5 );
+            const TSNode nm    = ts_node_child_by_field_name( kid, "name", 4 );
+            if( ts_node_is_null( alias ) || ts_node_is_null( nm ) )
+            {
+                continue;
+            }
+            bound        = pattern::nodeText( alias, src );
+            clauseTarget = isFrom ? target : importSpecifierText( nm, src );
+        }
+        else if( std::strcmp( kt, "dotted_name" ) == 0 )
+        {
+            const std::string_view whole = pattern::nodeText( kid, src );
+            if( isFrom )
+            {
+                bound        = whole;    // `from m import x` — a bare clause name is an identifier (a dotted one is a syntax error)
+                clauseTarget = target;
+            }
+            else
+            {
+                const std::size_t dot = whole.find( '.' );
+                bound        = ( dot == std::string_view::npos ) ? whole : whole.substr( 0, dot );   // `import a.b` binds `a`
+                clauseTarget = std::string( whole );
+            }
+        }
+        else
+        {
+            continue;   // keywords, punctuation, wildcard_import
+        }
+        if( bound.empty() || clauseTarget.empty() )
+        {
+            continue;
+        }
+        RawBind b;
+        b.fileId    = fileId;
+        b.startByte = ts_node_start_byte( stmt );
+        b.lang      = Lang::Python;
+        b.kind      = LocalBindKind::Import;
+        b.var.assign( bound );
+        b.typeName  = std::move( clauseTarget );
+        binds.push_back( std::move( b ) );
+    }
+}
+
+void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_view src, std::vector<Include>& incs, std::vector<RawRef>& refs,
+                      std::vector<RawBind>& binds )
 {
     ChildCursor         cursor( root );
     std::vector<TSNode> kids;
@@ -1196,6 +1285,10 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
             }
         }
 
+        if( lang == Lang::Python && !target.empty() )
+        {
+            capturePythonImportBinds( n, t, fileId, src, binds );   // Phase 5: the bound NAMES, beside the module
+        }
         if( !target.empty() )
         {
             // import-role use-site ref: name = the importable final segment (skip when the target has no

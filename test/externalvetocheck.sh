@@ -105,14 +105,14 @@ printf '%s' "$HDR" | grep -q ' external=5 ' && ok "(H) header external=5 (A, B, 
 printf '%s' "$MAP" | head -1 | grep -q 'hdr:external=' && ok "(H) the legend defines hdr:external=" \
     || no "(H) the legend does not define hdr:external="
 "$BIN" "$CLEAN" --no-cache >"$TMP/clean.xml" 2>/dev/null
-grep -q 'external=' "$TMP/clean.xml" && no "(H) external= present on a veto-free corpus ($CLEAN) — must be absent when 0" \
+# the STATS comment only — the legend line defines `hdr:external=` on every map, so a whole-map grep would false-positive
+grep -o '<!-- files=[^>]*-->' "$TMP/clean.xml" | head -1 | grep -q ' external=' && no "(H) external= present on a veto-free corpus ($CLEAN) — must be absent when 0" \
     || ok "(H) external= absent on a veto-free corpus"
 
 # ── (I) the JSON twin ────────────────────────────────────────────────────────────────────────────
 "$BIN" "$CORPUS" --json --no-cache >"$TMP/map.json" 2>/dev/null
 grep -q '"external":5,' "$TMP/map.json" && ok '(I) --json carries "external":5' \
     || no "(I) --json external gauge missing/wrong: $( grep -o '"external":[0-9]*' "$TMP/map.json" || echo absent )"
-grep -q '"external"' "$TMP/clean.xml" && no "(I) stray external key" || true
 "$BIN" "$CLEAN" --json --no-cache >"$TMP/clean.json" 2>/dev/null
 grep -q '"external"' "$TMP/clean.json" && no '(I) "external" present in --json on a veto-free corpus' \
     || ok '(I) "external" absent from --json on a veto-free corpus'
