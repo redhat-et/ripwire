@@ -105,6 +105,30 @@ guard "--max-tokens on --hotspots"     'honored by the default map'  "$NOROOT" -
 guard "--max-tokens on --grep"         'honored by the default map'  "$NOROOT" --grep=x --max-tokens=50
 guard "--max-tokens on --graph-query"  'honored by the default map'  "$NOROOT" --graph-query='name("x")' --max-tokens=50
 
+# M16 (capture-audit 2026-09-04) — four modifiers that were silently INERT alone: bare `--no-stable`,
+# `--no-redact`, `--refetch`, `--naming-locals` each emitted the byte-identical default map at exit 0 with an
+# empty stderr, while their siblings (--run-timeout, --slice-depth, --ack-only) refuse naming the pairing.
+#   --naming-locals  modifies --lint and nothing else (--help even said "a no-op alone") → refuses.
+#   --no-redact      serves BODIES verbatim; the default map carries none (identifiers/signatures are never
+#                    redacted) → refuses on the bare map, names a body-serving verb; composes with --expand.
+#   --refetch        re-clones a git-URL root; on a local path it reaches nothing → refuses, names the URL form.
+#   --no-stable      is read only under --mcp/--listen. NOT a refusal, by decision: guardmsgcheck.sh pins bare
+#                    `--no-stable` and `--order=stable --no-stable` as accepted CLI spellings and ~70 cache-gate
+#                    invocations pass it bare, so a refusal would break a documented composition. The honest
+#                    floor is a one-line NOTICE (stdout unchanged): a caller can tell a no-op from a typo.
+guard "--naming-locals alone"         '--naming-locals modifies --lint'                        "$NOROOT" --naming-locals
+guard "--no-redact on the bare map"   '--no-redact serves bodies VERBATIM'                     "$NOROOT" --no-redact
+guard "--no-redact with --json (still no bodies)" '--no-redact serves bodies VERBATIM'         "$NOROOT" --no-redact --json
+guard "--refetch on a local path"     '--refetch re-clones a git-URL root'                     "$NOROOT" --refetch
+"$BIN" test/fixture --no-cache >"$TMP/ns.plain" 2>/dev/null
+"$BIN" test/fixture --no-cache --no-stable >"$TMP/ns.out" 2>"$TMP/ns.err"; rcNS=$?
+{ [ "$rcNS" -eq 0 ] && cmp -s "$TMP/ns.plain" "$TMP/ns.out"; } \
+    && ok "--no-stable alone: exit 0 and stdout byte-identical to the plain map (the pinned CLI composition survives)" \
+    || no "--no-stable alone: exit $rcNS or stdout changed — the notice must not become a refusal"
+grep -qF -- '--no-stable is read only by --mcp' "$TMP/ns.err" \
+    && ok "--no-stable alone: DISCLOSED on stderr as read only by --mcp/--listen (no-op told apart from a typo)" \
+    || no "--no-stable alone: silent on stderr — accepted and ignored: [$( head -c 160 "$TMP/ns.err" )]"
+
 [ "$checked" -ge 20 ] && ok "pinned $checked broken-combo refusals" \
                       || no "only $checked guards probed — one was dropped from this gate"
 
@@ -172,6 +196,28 @@ printf '%s' "$graph_out" | grep -q 'mermaid' \
 "$BIN" "$SRC" --recall="notes" --top-k=1 --no-cache >/dev/null 2>"$TMP/rctk.err"
 [ "$?" = 0 ] && ok "--recall --top-k=1: still exits 0 (honors --top-k, outside the report/paging family)" \
              || no "--recall --top-k=1: broke ($(head -1 "$TMP/rctk.err"))"
+
+# M16 — the honouring side of the four. --lint --naming-locals still fires AND the modifier is STAMPED on the
+# root (naming_locals="1"), the way --lint-select stamps selected=/select=: lens 0 measured 3717 -> 4898
+# findings with no attribute saying why. Plain --lint must not carry the stamp.
+"$BIN" "$SRC" --lint --naming-locals --no-cache >"$TMP/nl.xml" 2>"$TMP/nl.err"; rcNL=$?
+{ [ "$rcNL" -eq 0 ] && grep -qE '<lint [^>]*naming_locals="1"' "$TMP/nl.xml"; } \
+    && ok "--lint --naming-locals: exits 0 and the <lint> root carries naming_locals=\"1\"" \
+    || no "--lint --naming-locals: exit $rcNL, or the root does not stamp naming_locals=\"1\": $( grep -oE '<lint [^>]*>' "$TMP/nl.xml" | head -c 200 ) $( head -1 "$TMP/nl.err" )"
+"$BIN" "$SRC" --lint --no-cache 2>/dev/null | grep -qE '<lint [^>]*naming_locals=' \
+    && no "--lint alone stamps naming_locals= although the modifier was not passed" \
+    || ok "--lint alone carries no naming_locals= (the stamp means the modifier was on)"
+# the legend clause is prose inside the <!-- ripwire lint: … --> comment; its distinctive phrase is what is
+# pinned (the comment spans characters a [^>]* class cannot, and a bare `--` in it would be malformed XML).
+grep -qF 'naming_locals="1" on the root' "$TMP/nl.xml" \
+    && ok "--lint legend explains naming_locals=" || no "--lint legend never mentions naming_locals= although the root emits it"
+"$BIN" "$SRC" --lint --naming-locals --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null \
+    && ok "--lint --naming-locals output is well-formed XML (the legend clause carries no double-hyphen)" \
+    || no "--lint --naming-locals output is MALFORMED XML"
+"$BIN" "$FIX" --expand=computeArea --no-redact --no-cache >/dev/null 2>"$TMP/nr.err"
+[ "$?" = 0 ] && ok "--expand --no-redact: still exits 0 (a body-serving verb composes)" || no "--expand --no-redact: broke ($(head -1 "$TMP/nr.err"))"
+"$BIN" "$SRC" --for="distance" --no-redact --no-cache >/dev/null 2>"$TMP/nr2.err"
+[ "$?" = 0 ] && ok "--for --no-redact: still exits 0" || no "--for --no-redact: broke ($(head -1 "$TMP/nr2.err"))"
 
 # --baseline: full four-step contract owned by baselinecheck.sh; not re-verified here.
 

@@ -2119,6 +2119,48 @@ std::string_view firstFlagOutside( const rw::Config& c, std::span<const std::str
     return {};
 }
 
+// the flags that shape the bare map without selecting a verb: a run whose every set table flag is in here, and
+// whose hand-written riders (--expand/--outline/--pack-top-n/--export=cc.json) are off, IS the default map.
+// --metrics and --map-diff ride it without bodies; --pack-signatures is deliberately NOT here (it serves
+// signature bodies through redactPtr, so --no-redact composes with it).
+inline constexpr std::string_view kMapShapingFlags[] =
+{
+    "--json", "--ignore-tests", "--no-cache", "--no-ignore", "--no-stable", "--refetch", "--compress", "--no-redact",
+    "--cache", "--since", "--pin-census", "--scip", "--legend", "--metrics", "--map-diff",
+};
+
+bool isBareMapRun( const rw::Config& c )
+{
+    return firstFlagOutside( c, {}, kMapShapingFlags ).empty()
+        && c.expand.empty() && c.outline.empty() && c.packTopN <= 0 && !c.exportCcJson;
+}
+
+// capture-audit 2026-09-04 (M16): two modifiers that were silently INERT alone — bare, each emitted the
+// byte-identical default map at exit 0 with an empty stderr, while their siblings (--run-timeout,
+// --slice-depth, --ack-only) refuse naming the pairing. Both need main's knowledge to judge "alone" (the flag
+// universe walk, the root list), so they are refused here rather than in cli.h's validateModifierGuards.
+//   --no-redact  serves BODIES verbatim — redactPtr is what the body emitters take (--expand/--for/--pack-task/
+//                --recall/--slice/--connect/--from-trace/--batch/--mcp …). The default map carries no bodies
+//                (identifiers and signatures are never redacted, by design): on the bare map there is nothing
+//                to un-redact, so the refusal names a body-serving verb.
+//   --refetch    re-clones a git-URL root and reaches nothing on a local path.
+std::optional<int> refuseInertMainModifiers( const rw::Config& cfg )
+{
+    if( cfg.noRedact && isBareMapRun( cfg ) )
+    {
+        std::fprintf( stderr, "ripwire: --no-redact serves bodies VERBATIM and the default map carries no bodies (identifiers and signatures are never "
+                              "redacted) — pass a body-serving verb (e.g. ripwire <dir> --expand=SYM --no-redact, or --for=TASK --no-redact)\n" );
+        return 1;
+    }
+    if( cfg.refetch && std::ranges::none_of( cfg.roots, []( std::string_view r ) { return isGitUrl( r ); } ) )
+    {
+        std::fprintf( stderr, "ripwire: --refetch re-clones a git-URL root (https://, http://, git@, ssh://) and this root is a local path — "
+                              "pass a URL (e.g. ripwire https://github.com/OWNER/REPO --refetch)\n" );
+        return 1;
+    }
+    return std::nullopt;
+}
+
 std::string_view jsonUnsupportedVerb( const rw::Config& c )
 {
     // ── the hand-written parseArgs residue: arms no table row can see, one line each ─────────────────────
@@ -2448,6 +2490,14 @@ int main( int argc, char** argv )
     // §F1: and the third class — a map-modifier voided because a report verb answered first says so, while
     // one that COMPOSED (--query --expand) stays quiet, because nothing was dropped.
     warnMapModifierDiscarded( cfg, verbPrec );
+
+    // capture-audit 2026-09-04 (M16): the two modifiers whose "alone" test needs main's knowledge (the flag
+    // universe walk, the root list) — refused here, before any dispatch, the way validateModifierGuards
+    // refuses the ones cli.h can judge on its own.
+    if( const std::optional<int> refused = refuseInertMainModifiers( cfg ) )
+    {
+        return *refused;
+    }
 
     // §B1.5 (capture-audit-4, wave 3) — --plan-lanes is the INERT case, and it wants a different answer from
     // the five eval verbs above. Those emit a dialect --json asked them to change and silently did not; this
@@ -2927,7 +2977,8 @@ int main( int argc, char** argv )
 
     // Wave-4 remote ergonomics: a git-URL positional (https:// or git@) is shallow-cloned to a per-URL
     // cache dir and mapped from there. A plain path passes through unchanged (no clone attempted).
-    // S3: --refetch forces a fresh clone instead of silently reusing an arbitrarily-old cached one.
+    // S3: --refetch forces a fresh clone instead of silently reusing an arbitrarily-old cached one (bare on a
+    // local path it is refused up front — refuseInertMainModifiers).
     // Multi-root: EVERY positional resolves the same way; roots are then deduped (realpath, stderr note),
     // nested roots hard-error, labels assigned, and the set canonically ordered (workspace.h — §2/§2.1).
     std::vector<std::string> resolvedRoots;

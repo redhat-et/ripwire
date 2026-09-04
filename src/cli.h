@@ -925,7 +925,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               (highest-rank content emitted last — recency bias for an LLM). Large default\n"
         "                               maps auto-flip to important-last past ~50%% of a nominal 32K window\n"
         "                               (est_tokens>16000) unless MODE is explicitly given.\n"
-        "    --no-stable                opt out of the stable ordering that --mcp enables by default\n\n"
+        "    --no-stable                opt out of the stable ordering that --mcp/--listen enable by default. Read ONLY there:\n"
+        "                               on the CLI it changes nothing and says so on stderr (the map is important-first\n"
+        "                               unless you pass --order=stable)\n\n"
         "  navigate / answer a question\n"
         "    --around=SYM               ego graph around SYM   [--around-depth=N] [--around-fanout=K]\n"
         "    --callers=SYM              who calls SYM (1-hop in-edges). file:name disambiguates a same-named symbol across files (like --around/--lego);\n"
@@ -1114,7 +1116,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --exemplar. Disclosed per bundle as compress=\"1\" on the <bodies> element; without the\n"
         "                               flag, output is byte-identical. String literals survive; the ranked SET never changes.\n"
         "    --pack-top-n=N             pack the N top symbols' bodies  [--pack-budget-bytes=B]\n"
-        "    --no-redact                emit source/doc text VERBATIM, redacting nothing\n"
+        "    --no-redact                emit source/doc text VERBATIM, redacting nothing. Modifies the BODY-serving verbs\n"
+        "                               (--expand, --for, --pack-task, --recall, --slice, --connect, --from-trace, --batch,\n"
+        "                               --mcp); the default map carries no bodies (identifiers and signatures are never\n"
+        "                               redacted), so bare on the map it is refused, naming one of them\n"
         "                               REDACTED by default (high-confidence credential SHAPES only, precision over recall):\n"
         "                               emitted symbol BODIES, doc/markdown bodies and doc-comment excerpts, the --outline\n"
         "                               skeleton, and SIGNATURES — a default argument carries whatever literal was written.\n"
@@ -1245,7 +1250,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               from the corpus rather than invented. propose= is a SUGGESTION, never a safe-to-blind-apply\n"
         "                               rename -- an actual rename needs --uses to prove the complete reference set first. Exit 0\n"
         "                               always: a lens, not a gate. Pages limit=N (offset=M); default 40 rows\n"
-        "    --naming-locals            OPT-IN --lint MODIFIER (requires --lint; a no-op alone), OFF by default:\n"
+        "    --naming-locals            OPT-IN --lint MODIFIER (requires --lint; refused alone), OFF by default:\n"
         "                               local-variable-indexing plan Phase 2 (docs/LOCALS_INDEXING.md). Runs the\n"
         "                               naming-short/naming-wordy/naming-underscore/naming-case predicates (same tags, same rule\n"
         "                               bodies as the existing Symbol-scoped checks) against LOCAL variable names too, C/C++ only,\n"
@@ -3387,6 +3392,27 @@ inline void validateModifierGuards( Config& c ) noexcept
     {
         std::fprintf( stderr, "ripwire: --run-timeout=SECONDS modifies --run-trace — pass it too (e.g. ripwire <dir> --run-trace=\"make -j\" --run-timeout=60)\n" );
         c.ok = false;
+    }
+
+    // capture-audit 2026-09-04 (M16): --naming-locals is a --lint MODIFIER (the naming-* rules pointed at local
+    // variables; verbs_lint.h's mergeNamingLens is its only reader) and reaches nothing else. --help called it
+    // "a no-op alone"; a documented no-op is still the accept-and-ignore class every sibling here refuses.
+    if( c.namingLocals && !c.lint )
+    {
+        std::fprintf( stderr, "ripwire: --naming-locals modifies --lint (the naming-* rules over local variables) — pass both (e.g. ripwire <dir> --lint --naming-locals)\n" );
+        c.ok = false;
+    }
+
+    // M16, the one modifier here that gets a NOTICE and not a refusal, by decision: --no-stable opts out of
+    // the stable ordering --mcp/--listen turn on (parseArgs' tail) and is read nowhere else, so on the CLI it
+    // changes nothing. test/guardmsgcheck.sh pins bare `--no-stable` and `--order=stable --no-stable` as
+    // accepted CLI spellings and ~70 cache-gate invocations pass it bare — a refusal would break a documented
+    // composition. One line on stderr is the honest floor: a caller can tell a no-op from a typo, and no
+    // output byte moves. (--listen= sets c.mcp, so the server transports are both covered by the one test.)
+    if( c.noStable && !c.mcp )
+    {
+        std::fprintf( stderr, "ripwire: --no-stable is read only by --mcp/--listen (it opts out of the stable ordering the server turns on) — it changed nothing here; "
+                              "the CLI map orders important-first unless you pass --order=stable\n" );
     }
 
     // --with-profile joins measured scope heat onto --lint findings and reaches nothing anywhere else;
