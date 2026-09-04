@@ -206,8 +206,22 @@ if command -v git >/dev/null 2>&1; then
     # 7d) PRECEDENCE — an explicit sidecar (snapshot of the CURRENT edited tree) WINS over HEAD: baseline it
     #     now, and the same edited tree reports 0 regressions (baselined against itself, not HEAD) with
     #     baseline="sidecar". Proves the explicit path still wins and is unchanged.
-    ( cd "$GH" && "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1 )
+    #
+    #     RE-PINNED to the H11 contract (capture-audit 2026-09-04, test/baselinedirtycheck.sh): this tree is
+    #     DIRTY and gating by construction (7b just asserted exit 2 against HEAD), which is exactly the pin
+    #     that used to swallow the debt silently. The BARE form now refuses it — asserted here, because this
+    #     is the one gate that already had the fixture for it — and --allow-dirty is how a caller says "yes,
+    #     that floor is what I mean". Precedence itself is unchanged and is still what the arm measures.
+    ( cd "$GH" && "$BIN" . --quality-baseline --no-cache >/dev/null 2>&1 ) \
+        && no "T0.1: --quality-baseline pinned a gating dirty tree silently (H11 regression)" \
+        || ok "T0.1: --quality-baseline refuses to pin a floor over this tree's own gating debt (H11)"
+    [ -f "$GH/.ripwire_quality_baseline" ] && no "T0.1: the H11 refusal still wrote the sidecar" \
+                                           || ok "T0.1: the H11 refusal wrote nothing"
+    ( cd "$GH" && "$BIN" . --quality-baseline --allow-dirty --no-cache >/dev/null 2>&1 )
     SC="$( dgh )"
+    printf '%s' "$SC" | grep -q 'baseline_absorbed="' \
+        && ok "T0.1: the allow-dirty pin discloses what it absorbed (baseline_absorbed=)" \
+        || { no "T0.1: an allow-dirty pin's delta carries no baseline_absorbed="; printf '%s\n' "$SC" | head -c 300; }
     { printf '%s' "$SC" | grep -q 'baseline="sidecar"' && printf '%s' "$SC" | grep -q 'regressions="0"' && [ "$( ecgh )" = 0 ]; } \
         && ok "T0.1 precedence: explicit sidecar wins over HEAD (baseline=\"sidecar\", 0 regressions vs itself)" \
         || { no "T0.1 precedence: explicit sidecar should win + report clean"; printf '%s\n' "$SC" | head -c 300; }

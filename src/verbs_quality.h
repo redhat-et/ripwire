@@ -515,6 +515,16 @@ inline constexpr const char* kQdBaseHeadIgnored =
     "baseline=\"git-HEAD (stale sidecar ignored)\" is the same staleness verdict, but the file was left on "
     "disk (the read-only MCP arm, or an unlink that failed), and the comparison fell back to the HEAD "
     "tree — so anything already committed cannot appear. ";
+// H11 — emitted ONLY when baseline_absorbed= is on the root, i.e. when the honored sidecar was pinned with
+// --allow-dirty on a tree that already gated. NB: the sentence itself spells the flag WITHOUT its leading
+// dashes, because this text lands inside an XML comment and G4 forbids a literal double-hyphen there (the
+// same reason kQdBaseHeadRemoved says "re-pin with quality-baseline"). The attribute changes what a GREEN exit means, so its sentence
+// has to say so in those words: without it a reader takes gating="0" for "clean", which is precisely the
+// sentence the silent absorb used to manufacture.
+inline constexpr const char* kQdBaselineAbsorbedLegend =
+    "baseline_absorbed=\"N\" means that sidecar was pinned with the allow-dirty flag on a tree that ALREADY held N "
+    "gating finding(s) against HEAD, and those N are inside the floor: a green exit beside this attribute "
+    "reads \"clean since the pin\", never \"clean\". Re-pin on a committed tree to clear it. ";
 inline constexpr const char* kQdBaseRefPair =
     "baseline=\"ref-pair\" means neither a sidecar nor the working tree: the verb was given a RANGE, so it "
     "compared two COMMITTED trees and no sidecar was read, written or deleted. base_ref= and target_ref= "
@@ -655,6 +665,7 @@ struct QualityDeltaLegendParts
     const std::vector<rw::quality::Regression>&   disclosedRows; // out-of-scope findings — identical attribute set
     bool                                          scoped;        // a scope partition or a foreign-ack row is in the document
     bool                                          anyForeignAck; // foreign-acks= is on the root, with foreign-scope sa rows under it
+    std::size_t                                   baselineAbsorbed; // H11: baseline_absorbed= on the root (0 = attribute absent)
 };
 
 // A DEFINITION IS EMITTED WHEN THE THING IT DEFINES IS IN THE DOCUMENT. Nothing is dropped and no limit is
@@ -681,6 +692,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p )
     else if( p.marker == "git-HEAD (stale sidecar removed)" ) { std::fputs( kQdBaseHeadRemoved, stdout ); }
     else if( p.marker == "git-HEAD (stale sidecar ignored)" ) { std::fputs( kQdBaseHeadIgnored, stdout ); }
     else                                                      { std::fputs( kQdBaseHead,        stdout ); }
+    if( p.baselineAbsorbed > 0 )
+    {
+        std::fputs( kQdBaselineAbsorbedLegend, stdout );   // H11 — the attribute that re-reads the exit code
+    }
 
     // (2) at= is omitted in the ref-pair form, so its sentence follows the attribute, not the verb.
     if( !p.refPair )
@@ -810,6 +825,96 @@ int ackNothingToAccept( const std::string& acksFile, const gtl::btree_map<std::s
     return 0;
 }
 
+// ─── H11 (capture-audit 2026-09-04) — WHAT A PIN ON THIS TREE WOULD ABSORB ────────────────────────────
+//
+// THE DEFECT. `--quality-baseline` snapshotted the WORKING TREE and wrote it as the floor, with no regard
+// for whether that tree already held debt. Pinned mid-edit — which is exactly what the quality-bar skill's
+// "run --quality-baseline FIRST" advice produces — every regression already in the tree became the floor,
+// and the next --quality-delta read `baseline="sidecar" regressions="0" gating="0"` on a tree whose own
+// --edit-check said `contract-change incompatible="4"`. A green report, silently manufactured, by the verb
+// whose entire job is to say when you are not green.
+//
+// So the pin now ASKS the question first: taken against git HEAD, how many GATING findings does this tree
+// already hold? Zero (a clean tree, or one whose edits gate nothing) ⇒ the pin is what it always was. More
+// ⇒ refuse, naming the count and the first row, unless the caller says --allow-dirty — in which case the
+// count is STAMPED into the sidecar so every later report can carry it.
+//
+// The ack ratchet is applied, and identity healed, exactly as the delta arm does it: a finding the caller
+// has already accepted with a reason is not debt this pin is hiding from them, so it must not refuse over
+// one. A root with no HEAD tree (non-git, unborn, detached-no-tree) can answer nothing here — the honest
+// degrade is to pin as before, since there is no baseline to have absorbed anything against.
+struct DirtyPinVerdict
+{
+    std::size_t              absorbed = 0;    // gating findings this tree already holds vs HEAD
+    std::string              firstRow;        // the first of them, spelled for a human ("" when absorbed==0)
+};
+
+DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::string& acksFile )
+{
+    using namespace rw;
+    const Config& cfg  = d.cfg;
+    const std::string& root = d.root;
+
+    DirtyPinVerdict verdict;
+    auto [ headSnap, ok ] = computeHeadSnapshot( root, nullptr, cfg.maxFileBytes, cfg.excludes );
+    if( !ok )
+    {
+        return verdict;   // no HEAD tree to compare against — nothing can be absorbed, so nothing is claimed
+    }
+    gtl::btree_map<std::string, quality::AckRecord> acks = quality::readAckRecords( acksFile );
+    quality::healIdentity( headSnap, acks, d.ing, d.g, std::string( cfg.rootPath ), root, /*wantContentIds=*/false );
+    std::vector<quality::Regression> regs =
+        quality::computeDelta( d.ing, d.g, headSnap, cfg.rootPath, cfg.excludes, cfg.maxFileBytes );
+    quality::applyAckRatchet( regs, acks );
+
+    for( const quality::Regression& r : regs )
+    {
+        if( r.isNewSymbol || r.isMinor )
+        {
+            continue;   // the exit predicate, spelled exactly as runQualityDelta's gatingCount spells it
+        }
+        ++verdict.absorbed;
+        if( verdict.firstRow.empty() )
+        {
+            verdict.firstRow = r.kind + " " + quality::displaySym( r.sym, cfg.rootPath )
+                             + " (was=" + std::to_string( r.was ) + " now=" + std::to_string( r.now ) + ")";
+        }
+    }
+    return verdict;
+}
+
+
+// The --quality-baseline arm, whole. Extracted from runQualityDelta when H11 gave the pin a DECISION to make
+// (see inspectDirtyBaselinePin above): the arm shares nothing with the delta arm below it but the two sidecar
+// paths, which are parameters here, and leaving it inline would have grown a 228-branch function for a
+// question that is entirely its own.
+int runQualityBaselinePin( const MainDispatch& d, const std::string& baselineFile, const std::string& acksFile )
+{
+    using namespace rw;
+    const DirtyPinVerdict pin = inspectDirtyBaselinePin( d, acksFile );
+    if( pin.absorbed > 0 && !d.cfg.allowDirty )
+    {
+        std::fprintf( stderr, "ripwire: --quality-baseline: this tree already holds %zu gating finding(s) against HEAD — pinning here would absorb\n"
+                              "  them into the floor, and every later --quality-delta would read clean. First: %s\n"
+                              "  Commit the tree first, or pass --allow-dirty to pin anyway (the sidecar then records the %zu absorbed, and every\n"
+                              "  report against it carries baseline_absorbed=\"%zu\").\n",
+                      pin.absorbed, pin.firstRow.c_str(), pin.absorbed, pin.absorbed );
+        return 1;
+    }
+    const bool wrote = quality::writeBaseline( quality::computeSnapshot( d.ing, d.g, d.cfg.rootPath ), baselineFile,
+                                               gitHeadSha( d.root ), pin.absorbed );
+    if( wrote && pin.absorbed > 0 )
+    {
+        std::fprintf( stderr, "ripwire: --quality-baseline --allow-dirty: pinned with %zu gating finding(s) ABSORBED into the floor "
+                              "(stamped in the sidecar; every --quality-delta against it carries baseline_absorbed=\"%zu\")\n",
+                      pin.absorbed, pin.absorbed );
+    }
+    std::fprintf( stderr, wrote ? "ripwire: wrote %s (snapshot of %zu symbols)\n" : "ripwire: could not write %s\n",
+                  baselineFile.c_str(), d.ing.symbols.size() );
+    return wrote ? 0 : 1;
+}
+
+
 // runQualityViews was NOT a dispatch chain — it held two
 // branches, one of which was 298 lines. That one body is now runQualityDelta below; the residual
 // runQualityViews keeps only --dead-code. ONE extraction, verbatim: the 298-line body is unsplit, because
@@ -837,10 +942,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
 
         if( cfg.qualityBaseline )
         {
-            const bool wrote = quality::writeBaseline( quality::computeSnapshot( ing, g, cfg.rootPath ), baselineFile, gitHeadSha( root ) );
-            std::fprintf( stderr, wrote ? "ripwire: wrote %s (snapshot of %zu symbols)\n" : "ripwire: could not write %s\n",
-                          baselineFile.c_str(), ing.symbols.size() );
-            return wrote ? 0 : 1;
+            return runQualityBaselinePin( d, baselineFile, acksFile );
         }
 
         // Precedence for the baseline: (1) an explicit `.ripwire_quality_baseline` sidecar (from
@@ -1089,6 +1191,13 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
         }
         const std::size_t preexistingCount = regs.size() - newSymbolCount;
+        // H11 — the absorbed-debt stamp on the honored sidecar, or 0. Read ONLY when the sidecar is the floor
+        // in force: on the git-HEAD and ref-pair floors there is no pin whose contents could have absorbed
+        // anything, and printing a 0 there would define an attribute about a file this run did not use.
+        const std::size_t baselineAbsorbed = ( baseSel.marker == std::string_view( "sidecar" ) )
+                                           ? quality::readBaselineAbsorbed( baselineFile ) : 0;
+        const std::string baselineAbsorbedAttr = baselineAbsorbed == 0 ? std::string()
+                                               : " baseline_absorbed=\"" + std::to_string( baselineAbsorbed ) + "\"";
 
         // R1 IDENTITY — the disclosure, built ONCE for both emitters (quality::identityDisclosure). An ack
         // that follows a rename is a claim about identity, and a claim is only honest if the reader can see
@@ -1149,11 +1258,14 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             // 0 means checked and clean" rule scopeJson/identityJson already follow.
             const std::string configWarnJson = configDiag.total() == 0 ? std::string()
                                               : ",\"config-warnings\":" + std::to_string( configDiag.total() );
+            // H11: the JSON twin of baseline_absorbed=, under the same absent-means-none rule as the XML half.
+            const std::string absorbedJson = baselineAbsorbed == 0 ? std::string()
+                                            : ",\"baseline_absorbed\":" + std::to_string( baselineAbsorbed );
             std::printf( "{\"baseline\":\"%s\",\"regressions\":%zu,\"minor\":%zu,\"acked\":%zu,\"stale\":%zu,"
-                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"register-macro-excluded\":%zu,\"at\":%s%s%s%s%s,\"r\":[",
+                         "\"preexisting-worse\":%zu,\"new-symbol\":%zu,\"gating\":%zu,\"register-macro-excluded\":%zu,\"at\":%s%s%s%s%s%s,\"r\":[",
                          jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount, staleAcks.size(),
                          preexistingCount, newSymbolCount, gatingCount, basis.registerMacroExcluded, atJsonJ.c_str(), refs.jsonAttrs.c_str(),
-                         identityJson.c_str(), scopeJson.c_str(), configWarnJson.c_str() );
+                         identityJson.c_str(), scopeJson.c_str(), configWarnJson.c_str(), absorbedJson.c_str() );
             // P1: one row emitter, called for both halves of the scope partition — the disclosed rows carry
             // the identical key set, so nothing about a row changes by being someone else's. `gatingAllowed`
             // is the ONE difference: an out-of-scope row is not what the exit code fires on, so claiming
@@ -1249,17 +1361,17 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // one set of values rather than restated as a second condition that could drift from it.
         emitQualityDeltaLegend( { baseSel.marker, refPair, identityAttrs, !saRows.empty(), ackedCount > 0,
                                   basis.registerMacroExcluded > 0, configDiag.total() > 0, regs, outOfScope,
-                                  scope.active() || !foreignAcks.empty(), !foreignAcks.empty() } );
+                                  scope.active() || !foreignAcks.empty(), !foreignAcks.empty(), baselineAbsorbed } );
         const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
         // at= anchors this regression list to the commit (+dirty state) it was computed against.
-        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\" register-macro-excluded=\"%zu\"%s%s%s%s%s>",
+        std::printf( "<quality-delta baseline=\"%s\" regressions=\"%zu\" minor=\"%zu\" acked=\"%zu\" stale=\"%zu\" preexisting-worse=\"%zu\" new-symbol=\"%zu\" gating=\"%zu\" register-macro-excluded=\"%zu\"%s%s%s%s%s%s>",
                      baseMarker, regs.size(), minorCount, ackedCount, staleAcks.size(), preexistingCount, newSymbolCount, gatingCount, basis.registerMacroExcluded,
                      // R-I: at= is OMITTED for the ref-pair form rather than stamped with the working tree's
                      // sha, which would anchor the list to a commit it was not computed from. base_ref= and
                      // target_ref= are the anchor there, and they carry FULL shas because a wave measurement
                      // gets quoted into handoffs where a 9-char prefix is one collision from unverifiable.
                      refPair ? "" : gitstamp::atAttr( root ).c_str(), refs.attrs.c_str(), identityAttrs.c_str(),
-                     scopeAttrs.c_str(), configWarnAttr.c_str() );
+                     scopeAttrs.c_str(), configWarnAttr.c_str(), baselineAbsorbedAttr.c_str() );
         // P1: ONE row emitter for both halves of the scope partition — a disclosed row carries the identical
         // attribute set, because nothing about a finding changes by belonging to someone else. `gatingAllowed`
         // is the one difference: an out-of-scope row is not what the exit code fires on, and a gating

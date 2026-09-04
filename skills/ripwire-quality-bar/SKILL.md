@@ -139,8 +139,11 @@ something always fires.)
 1. **Zero-setup path:** just make your change, then run `ripwire <dir> --quality-delta` before you call it
    done — in a git repo it auto-compares the working tree vs `git HEAD` (`<quality-delta
    baseline="git-HEAD">` confirms it), no start-of-task action needed. **Tighter loop on a long change:** run
-   `ripwire <dir> --quality-baseline` FIRST to pin an explicit floor (takes precedence over HEAD) so each
-   edit deltas against the original start, not the last commit.
+   `ripwire <dir> --quality-baseline` FIRST — **on a clean tree** — to pin an explicit floor (takes
+   precedence over HEAD) so each edit deltas against the original start, not the last commit. On a tree that
+   already differs from HEAD the pin **refuses**, naming the gating findings it would have swallowed into the
+   floor: commit first, or pass `--allow-dirty` to pin anyway, which stamps the absorbed count so every later
+   report carries `baseline_absorbed="N"` and a green exit beside it reads "clean *since the pin*".
 2. **Make your change.**
 3. **Measure the delta** — `ripwire <dir> --quality-delta` → only the regressions you introduced, across the
    10 kinds in the table below. Each emits `<r kind="…" sym=… was=… now=…>` (`members=` for duplication).
