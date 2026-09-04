@@ -570,6 +570,104 @@ std::optional<int> runEvalViews( const MainDispatch& d )
 }
 
 
+// ── H1 (capture-audit 2026-09-04) — A NOTE TARGET IS A SELECTOR ───────────────────────────────────────
+//
+// THE DEFECT. `--note-add="lessByScoreDescId: …"` — the bare-name spelling the documented agent protocol
+// teaches, and 4 of 4 real --note-add calls in the routing log — stored the target VERBATIM, while the
+// surfacing index keys on the canonical id (serialize.h::symbolNoteTarget = canonicalIdRelTo). So the row
+// landed `dangling="1"` and rode on nothing: --for and --expand of that very symbol emitted no <note>
+// child. The write returned 0 and said nothing. A write-side memory that silently stores dead entries is
+// worse than no memory, because the agent believes it recorded the gotcha.
+//
+// THE FIX. The write side resolves through resolveAllByNameQualified — the SAME resolver --expand /
+// --callers / --uses / --impact / --edit-check resolve with, so every spelling those verbs accept (bare
+// name, file:name, Scope::name, canonical id, @FILE:LINE) keys the identical note. Unique ⇒ store the
+// canonical id and SAY SO (a silent rewrite of a caller's input is the other half of the same dishonesty);
+// N>1 ⇒ refuse naming every candidate, the posture --slice/--edit-check/the edit verbs already take over
+// this resolver ("an ambiguous selector is refused, never silently narrowed"); zero ⇒ a PATH-shaped target
+// still writes (a note on a file that does not exist yet is legal) with a loud dangling warning when it
+// matches no indexed file, and a NAME-shaped one is refused with the read verbs' own did-you-mean.
+//
+// Lifted out of runNotes rather than inlined into it: the handler was already at the verbosity bar, and
+// this is one decision with one output, which is what a function is. Gated by test/notecanoncheck.sh.
+struct NoteTargetResolution
+{
+    std::string target;             // what to STORE — the canonical id when the selector resolved
+    bool        refused = false;    // the refusal is already on stderr; the caller exits 1
+};
+
+NoteTargetResolution resolveNoteAddTarget( const MainDispatch& d, const std::string& rawTarget, std::string normalized )
+{
+    using namespace rw;
+    const IngestResult& ing = d.ing;
+
+    const std::vector<NodeId> defs = resolveAllByNameQualified( ing, rawTarget );
+
+    if( defs.size() == 1 )
+    {
+        const Symbol&     s     = ing.symbols[ defs[0] ];
+        // EXACTLY the key --notes' liveness set and serialize.h's surfacing lookup build (canonicalIdRelTo),
+        // spelled from the same three fields, so "stored" and "found" can never be two different strings.
+        const std::string canon = canonicalId( relForHash( ing.files[ s.fileId ], d.root ), s.scope, s.name );
+        if( canon != normalized )
+        {
+            std::fprintf( stderr, "ripwire: --note-add: target '%s' canonicalised to '%s' — that is the id --for/--expand key notes by\n",
+                          rawTarget.c_str(), canon.c_str() );
+        }
+        return { canon, false };
+    }
+
+    if( defs.size() > 1 )
+    {
+        const std::vector<EditCheckGroup> groups = editCheckGroups( ing, d.g, defs );
+        std::string msg = "ripwire: --note-add: target '" + rawTarget + "' is ambiguous — it matches "
+                        + std::to_string( defs.size() ) + " definitions in " + std::to_string( groups.size() )
+                        + " distinct contracts, and a note keys ONE canonical id (it would surface on one of them and "
+                          "look absent on the rest). Qualify one: ";
+        const std::size_t shownCount = std::min( groups.size(), rw::kEditCheckSpellingsShown );
+        for( std::size_t groupIndex = 0; groupIndex < shownCount; ++groupIndex )
+        {
+            msg += ( groupIndex ? ", " : "" ) + groups[ groupIndex ].spelling;
+        }
+        if( groups.size() > shownCount )
+        {
+            msg += " (+" + std::to_string( groups.size() - shownCount ) + " more contracts)";
+        }
+        msg += " — e.g. --note-add=\"" + groups[0].spelling + ": <your note>\"";
+        std::fprintf( stderr, "%s\n", msg.c_str() );
+        return { std::string{}, true };
+    }
+
+    // ── resolved NOTHING ────────────────────────────────────────────────────────────────────────────────
+    const bool onDisk = [ & ]
+    {
+        struct stat st{};
+        const std::string abs = normalized.empty() || normalized.front() == '/' ? normalized : d.root + "/" + normalized;
+        return ::stat( abs.c_str(), &st ) == 0;
+    }();
+    if( !notes::noteTargetIsPathShaped( normalized ) && !onDisk )
+    {
+        std::fprintf( stderr, "%s\n",
+                      ( selectorNotFoundMessage( ing, "ripwire: --note-add: target not found: ", rawTarget, "--note-add=" )
+                        + " — a note keys the canonical id a read verb resolves; to note a FILE instead, pass a path "
+                          "(one with a '/' or an extension), which may name a file that does not exist yet" ).c_str() );
+        return { std::string{}, true };
+    }
+
+    const bool indexedFile = std::any_of( ing.files.begin(), ing.files.end(),
+                                          [ & ]( const std::string& p ) { return relForHash( p, d.root ) == normalized; } );
+    if( !indexedFile )
+    {
+        // LOUD, but not a refusal: a forward-looking note on a file about to be created is the case this
+        // path exists for. The honesty is in saying, at write time, exactly what --notes will report later.
+        std::fprintf( stderr, "ripwire: --note-add: WARNING: target '%s' matches no indexed file or symbol — the note is stored DANGLING\n"
+                              "  (--notes lists it, nothing surfaces it) until that path is indexed; run --notes to prune it if it was a typo\n",
+                      normalized.c_str() );
+    }
+    return { std::move( normalized ), false };
+}
+
+
 // L3 — repo field notes: the WRITE side (surfacing at retrieval is wired into
 // packSignatures/packBodies above). Two verbs share this handler:
 //   --note-add="TARGET: text" — append a note to the committed, sorted root/.ripwire_notes and print the exact
@@ -647,12 +745,19 @@ std::optional<int> runNotes( const MainDispatch& d )
         // absolute target outside this root can never be reached from another checkout's crawl, so refuse
         // loudly instead of silently writing a note that surfaces nowhere, ever.
         bool outsideRoot = false;
-        const std::string target = notes::normalizeNoteTarget( rawTarget, d.root, outsideRoot );
+        std::string normalizedTarget = notes::normalizeNoteTarget( rawTarget, d.root, outsideRoot );
         if( outsideRoot )
         {
             std::fprintf( stderr, "ripwire: --note-add: target '%s' resolves outside the root '%s' — refusing (notes must stay root-relative/portable)\n", rawTarget.c_str(), d.root.c_str() );
             return 1;
         }
+        // H1: the target is a SELECTOR — resolve it the way every read verb does before anything is stored.
+        const NoteTargetResolution resolved = resolveNoteAddTarget( d, rawTarget, std::move( normalizedTarget ) );
+        if( resolved.refused )
+        {
+            return 1;
+        }
+        const std::string& target = resolved.target;
         std::string date = rw::quality::gitCommitterDateIso( d.root );
         if( date.empty() )
         {

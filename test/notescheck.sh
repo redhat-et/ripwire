@@ -131,9 +131,18 @@ printf '%s' "$EXP_OUT" | grep -qF "$NOTE_OPEN"'<![CDATA[off-by-one lives here]]>
 printf '%s' "$EXP_OUT" | xmllint --noout - 2>/dev/null && ok "--expand with notes is xmllint-clean" || no "--expand with notes is not well-formed"
 
 # ── dangling: a target with no matching symbol/file — flagged in --notes, surfaces NOWHERE else ────────────
-run --note-add="ghost::nope::vanished: this dangling target does not exist" >/dev/null
+# RE-PINNED to the H1 contract (capture-audit 2026-09-04, test/notecanoncheck.sh): a SYMBOL-shaped target
+# that resolves to nothing is now REFUSED at write time (that was the whole defect — a dead note written
+# silently), so `ghost::nope::vanished` can no longer be used to manufacture a dangling row. The remaining —
+# and deliberately legal — way to store one is a PATH that is not in the index: a note left on a file the
+# caller is about to create. That is the row this arm now uses; the refusal half is asserted right below it,
+# so both sides of the new contract are pinned here rather than only the one that still writes.
+run --note-add="src/ghost_not_written_yet.cpp: this dangling target does not exist" >/dev/null
+run --note-add="ghost::nope::vanished: a dead SYMBOL target is refused now" >/dev/null 2>&1 \
+    && no "a symbol-shaped target that resolves to nothing was still written (H1 regression)" \
+    || ok "a symbol-shaped target that resolves to nothing is refused (H1)"
 NOTES_OUT="$( run --notes )"
-printf '%s' "$NOTES_OUT" | grep -qF '<target id="ghost::nope::vanished" dangling="1">' \
+printf '%s' "$NOTES_OUT" | grep -qF '<target id="src/ghost_not_written_yet.cpp" dangling="1">' \
     && ok "--notes flags the dangling target dangling=\"1\"" || { no "--notes did not flag the dangling target"; printf '%s\n' "$NOTES_OUT"; }
 printf '%s' "$NOTES_OUT" | grep -qF '<target id="helper" dangling="0">' \
     && ok "--notes marks a live target dangling=\"0\"" || no "--notes mis-flagged a live target"
@@ -335,7 +344,12 @@ printf '%s' "$XML_A" | xmllint --noout - 2>/dev/null && ok "R6: --for XML after 
 # (a C0 control sanitizeField does not map). Each is asserted THREE ways — exit 1, nothing appended to the
 # file, and the refusal SPELLS the code point rather than echoing the invisible bytes.
 rm -f "$WORK/.ripwire_notes"
-noteAddBlank(){ ( cd "$WORK" && "$BIN" . --no-cache --note-add="alpha: $1" ) >"$OUT_F" 2>"$ERR_F"; }
+# RE-PINNED to the H1 contract: the TARGET here is incidental — every arm below is about the TEXT half — but
+# it can no longer be an arbitrary word, because a name that resolves to nothing is now refused before the
+# text is ever considered, which would have made the CONTROL arm (a note that must WRITE) refuse for the
+# wrong reason. `helper` is a real definition in this fixture, so the only thing these arms can measure is
+# still the blank-text predicate.
+noteAddBlank(){ ( cd "$WORK" && "$BIN" . --no-cache --note-add="helper: $1" ) >"$OUT_F" 2>"$ERR_F"; }
 
 blankRows(){ [ -f "$WORK/.ripwire_notes" ] && grep -c . "$WORK/.ripwire_notes" || echo 0; }
 ROWS_BEFORE="$( blankRows )"

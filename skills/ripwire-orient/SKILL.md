@@ -152,11 +152,16 @@ non-obvious fact about a symbol or file (a race trap, an off-by-one seam, "don't
 re-running X"), pin it so the *next* orientation surfaces it automatically:
 
 ```bash
-ripwire . --note-add="src/foo.cpp::Bar::compute: recompute is NOT idempotent — reset the arena first"
+ripwire . --note-add="Bar::compute: recompute is NOT idempotent — reset the arena first"
 ripwire . --note-add="src/pool.h: 128-byte cache line on Apple, never hardcode 64"   # a file also works
 ```
 
-The TARGET is a canonical id (`path::scope::name`, as `--for`/`--expand` print it in `id=`) or a file path.
+The TARGET is **a symbol name or a path**. A symbol resolves through the same resolver the read verbs use,
+so every spelling they accept works here — a bare name, `file:name`, `Scope::name`, the canonical id
+`path::scope::name`, `@FILE:LINE` — and is **canonicalised to the canonical id on write** (that is the id
+notes are keyed by; the rewrite is echoed on stderr). A name matching several definitions is refused, naming
+each; a name matching none is refused with a did-you-mean. A path is written even when nothing indexed
+matches it yet — a note on a file you are about to add is legal — with a loud warning that it is dangling.
 Notes live in committed `.ripwire_notes` and **surface on their own** — whenever `--for`/`--expand` emit that
 symbol/file, the note rides along as a `<note d="date">…</note>` child. `ripwire . --notes` lists every note
 (`dangling="1"` = target no longer in the tree). `--recall=TASK` is the doc-level complement.
