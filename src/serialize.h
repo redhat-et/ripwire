@@ -1414,21 +1414,36 @@ inline std::string evWhyString( const Symbol& s )
     return why;
 }
 
+// §L10 (2026-09-04): the old wording claimed "the same corpus ranked by pagerank orders differently" as a
+// blanket fact. It is not one — churn ranking IS PageRank, power-iterated over a teleport BIASED by git
+// change-frequency instead of the uniform one; call-graph structure still shapes k=, so on a corpus where
+// structure and churn point the same way the two orders coincide (measured on this repo's own top ranks,
+// 2026-09-04: --rank-by=churn and the default pagerank ranking agreed on the top 4 symbols, in order, with
+// only the k= values differing). What is always true, and what the mechanism actually guarantees, is stated
+// instead: it is a teleport swap, not a wholesale re-ranking, and the two provably diverge exactly where the
+// teleport differs from uniform enough to matter — a heavily-churned symbol with little call-graph support.
 inline constexpr const char* kChurnRankLegend =
-    "<!-- rank_by=churn: k= is a git CHANGE-FREQUENCY prior over window=, not call-graph importance; "
-    "the same corpus ranked by pagerank orders differently -->";
+    "<!-- rank_by=churn: k= is PageRank re-run with the teleport BIASED by git CHANGE-FREQUENCY over window= "
+    "(a churn-weighted PageRank, not a raw frequency count), so call-graph structure still shapes k=; top "
+    "ranks can coincide with rank_by=pagerank when structure and churn agree, and diverge where a "
+    "heavily-churned symbol has little call-graph support -->";
 
 // P0-4 — the decayed sibling. It has MORE to disclose than plain churn, not less: the half-life is a chosen
 // constant (a conventional 90-day default, not a measurement on this corpus), and the age clock is HEAD's own
 // commit timestamp rather than the wall clock, which is the property that makes the default run reproducible
 // on a different day. Both facts change how a k= here should be read, so both are stated where k= is read.
 // G4: no "--" anywhere inside an XML comment ⇒ flag names written bare.
+// §L10: same correction as kChurnRankLegend — "orders differently" is not a fact this ranker can promise
+// either, for the same reason (it is still PageRank, still shaped by structure).
 inline constexpr const char* kChurnDecayRankLegend =
     "<!-- rank_by=churn-decay: k= is a TIME-DECAYED git change-frequency prior, not call-graph importance. Each commit is "
     "weighted 0.5^(age_days/half_life) with the half-life in window= (90d default, a conventional choice, not a measurement "
     "on this corpus); age is measured from HEAD commit timestamp, never the system clock, so the same tree at the same HEAD "
     "ranks identically on any day or machine. window= names the mined span (all-history by default: the decay is the window). "
-    "The same corpus ranked by pagerank, or by undecayed churn, orders differently -->";
+    "k= is PageRank re-run with the teleport biased by this decayed prior instead of the uniform one "
+    "rank_by=pagerank uses, or the undecayed one rank_by=churn uses; top ranks can coincide with either "
+    "sibling when structure and recent churn agree, and diverge where a stale-but-central symbol meets a "
+    "fresh, sparsely-called one -->";
 
 // Which churn legend belongs to which churn ranker — the table-driven form the sibling rankBy lookup uses,
 // so a third churn variant adds a row and not a branch.

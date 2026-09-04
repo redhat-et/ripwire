@@ -130,6 +130,42 @@ CHURN_A="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$REPO" --rank-by=churn --no-c
 CHURN_B="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$REPO" --rank-by=churn --no-cache 2>/dev/null )"
 [ "$CHURN_A" = "$CHURN_B" ] && ok "churn: deterministic on synthetic git repo" || no "churn: non-deterministic on synthetic git repo"
 
+# ── §L10: the churn legend must be TRUE, not just present — a differential fixture that proves the two
+#    rankings CAN put a different symbol in the #1 slot (a leaf with no call-graph support at all, but
+#    heavy recent churn, versus sink() — the structurally best-supported symbol in star.py's topology).
+#    Before this gate the legend claimed "the same corpus ranked by pagerank orders differently" as a
+#    blanket fact, which is false on THIS REPO's own top ranks (measured 2026-09-04: --rank-by=churn and
+#    the default ranking agreed on the top 4, in order) — the legend must describe the MECHANISM (a
+#    churn-biased teleport still shaped by structure), not promise an ordering flip that does not always
+#    happen. This fixture is the flip's existence proof: it shows the mechanism is real without pretending
+#    it is universal.
+cat >"$REPO/leaf.py" <<'EOF'
+def leafFn():
+    return 42
+EOF
+commit_file leaf.py "2026-06-10T00:00:00" "leaf init"
+for i in $( seq 1 20 ); do
+    printf '# churn edit %s\n' "$i" >>"$REPO/leaf.py"
+    commit_file leaf.py "2026-06-$(( 10 + i ))T00:00:00" "leaf edit $i"
+done
+
+PR_OUT2="$(    perl -e 'alarm 15; exec @ARGV' "$BIN" "$REPO" --rank-by=pagerank --no-cache 2>/dev/null )"
+CHURN_OUT2="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$REPO" --rank-by=churn    --no-cache 2>/dev/null )"
+pr_top2="$(    top_name "$PR_OUT2" )"
+churn_top2="$( top_name "$CHURN_OUT2" )"
+{ [ "$pr_top2" != "leafFn" ] && [ "$churn_top2" = "leafFn" ] && [ "$pr_top2" != "$churn_top2" ]; } \
+    && ok "L10: churn ranking CAN flip the #1 symbol vs pagerank (pagerank top=$pr_top2, churn top=$churn_top2)" \
+    || no "L10: expected pagerank top != leafFn and churn top == leafFn, got pagerank=$pr_top2 churn=$churn_top2"
+
+# The wording itself: no blanket "orders differently" promise, and the mechanism (a churn-biased teleport,
+# still PageRank, still shaped by structure) IS stated — on the legend this repo's own default map carries.
+printf '%s' "$CHURN_OUT2" | grep -q 'orders differently' \
+    && no "L10: churn legend still makes the blanket \"orders differently\" claim (false on this repo's own top ranks)" \
+    || ok "L10: churn legend no longer claims the two orderings always differ"
+printf '%s' "$CHURN_OUT2" | grep -q 'teleport BIASED by git CHANGE-FREQUENCY' \
+    && ok "L10: churn legend states the mechanism (a churn-biased PageRank teleport)" \
+    || no "L10: churn legend does not state the teleport mechanism"
+
 # ── xml well-formed (spot-check one mode) ────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
     r pagerank | xmllint --noout - 2>/dev/null && ok "xml well-formed" || no "xml malformed"
