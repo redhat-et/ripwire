@@ -1475,6 +1475,26 @@ inline constexpr const char* kIgnoredLegend =
     "<!-- hdr:ignored_files=files-git's-own-ignore-rules-covered(exact;would-otherwise-be-indexed;the-no-ignore-flag-restores-them)"
     " hdr:ignored_dirs=SUBTREES-those-rules-pruned(walk-stopped-there:contents-UNKNOWN-not-zero;the-skipped-verb-rows-both) -->";
 
+// §L10: sibs=/inc=/<calls> on an --expand <b> body (withFileContext=true — --expand's own two call sites,
+// never packBodies' other callers) had NO in-band definition anywhere — only in --help prose, which a
+// reader of the XML never sees. Printed once, right inside <bodies ...>, before the first <b> child, on
+// EVERY packBodies call that turns withFileContext on — including --top-k=0's payload-only "lean" mode,
+// which used to carry no legend at all (no ranked map ⇒ no kMapLegend either, and this one is independent
+// of that map legend by design for exactly that reason). Flowing through packBodies (not a separate
+// main.cpp fwrite) means it is priced by the SAME rw::chargeSection call that already charges every other
+// byte packBodies emits — no separate byte-accounting to keep in sync with the M6 cheapest-answer pricing.
+// NOTE for future edits: never spell a literal "<calls" (or any other real element name right after "<")
+// inside this string. A tag-scoped extractor elsewhere (grep -oE '<calls[^>]*>' | head -1, in
+// test/expandcallscheck.sh) matches the FIRST such substring in the document, comment or not, and this
+// legend is written before the real <calls ...> child — a bare "<calls...>" example here would shadow it.
+inline constexpr const char* kBodiesLegend =
+    "<!-- a body's sibs=\"a,b,...\" sibs_total=N are the file's OTHER indexed symbols (this body's own name "
+    "excluded), source order, capped at 40 (sibs_capped=\"1\" when the cap fired); inc=\"x.h,...\" inc_total=N "
+    "are the file's own #include/import targets, source order, capped at 24 (inc_capped=\"1\" when the cap "
+    "fired) — both absent when the count is 0 (a documented zero, not a degrade). Each body's own calls "
+    "child (1-hop callee signatures) carries total=/shown=/capped=\"1\" the usual way: capped=\"1\" only "
+    "when shown is below total. -->";
+
 inline constexpr const char* kMetricsLegend =
     "<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=MAX-depth "
     "humps=regions-reaching-the-nesting-bar deep=lines-inside-them(floor,see deep_floor) "
@@ -4506,6 +4526,15 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     std::snprintf( open, sizeof( open ), "<bodies shown=\"%zu\" total=\"%zu\" capped=\"%d\"%s>",
                    shownCount, requestedCount, shownCount < requestedCount ? 1 : 0,
                    compress ? " compress=\"1\"" : "" );
+    // §L10: sibs=/inc=/<calls> are only ever emitted when withFileContext is on (--expand's own call sites),
+    // so the legend that defines them rides the SAME gate — every other packBodies caller (--for auto-body,
+    // --pack-task, --detail, --around, MCP exemplar) stays byte-identical, as withFileContext's own contract
+    // already promises. Written through the same XmlWriter as everything else here, so it is priced by the
+    // one rw::chargeSection call the caller already makes — no separate byte count to keep in sync.
+    if( withFileContext )
+    {
+        w.write( kBodiesLegend );
+    }
     w.write( open );
     w.write( children );
     w.write( "</bodies>" );
