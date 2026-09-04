@@ -1318,6 +1318,66 @@ battery's wall time on the dev machine is within 1.2× of the pre-change battery
 (reparsed=0 on its first run after any other configuration wrote the blob); **(8)** the blob count per
 root stays at two (lean/rich). A `--cache=PATH` explicit blob keeps today's whole-file format.
 
+### `.gitignore` honoured by default, `--no-ignore` to override — PRE-REGISTERED 2026-09-03 (owner decision 1-B)
+
+**Why.** The tool is named for ripgrep, whose defining default is that ignored files are not searched;
+today's crawler walks them. On the development machine that turns this repository's root into a
+158,202-file corpus (twelve gitignored checkouts under `bench/external`), a 686 MB lean blob and a
+1.3 GB rich blob that together sit at the cache directory's 2 GiB cap and evict each other, and every
+gate that touches the root un-excluded into a 300 s timeout (the "timing gates red under load" of
+several past rounds). For every other user it is `node_modules`, `.venv`, `target/`, `build/`, `dist/`:
+the directories that make a first map slow and the ranking noisy, already declared by the repository
+itself. The owner has ruled the corpus change acceptable (adoption is early; the best tool wins over
+compatibility — the standing "new tool, no compat debt" rule), so it is recorded here as accepted, not
+as a blocker.
+
+**What changes.** In a git root the crawl consults git's ignore rules (`git ls-files --others
+--ignored --exclude-standard --directory` or the equivalent walk, decided by the lane and stated with
+its cost), skipping ignored paths; `--no-ignore` restores today's walk; non-git roots and roots where
+git is unavailable keep today's behaviour and say so. `--exclude` keeps working on top. Multi-root
+runs apply the rule per root. The header discloses `ignored_files=N` (absent when 0) and `--skipped`
+lists the ignored set on request, so a symbol that vanished from the map because its file is
+ignored can be found.
+
+**Bands, fixed before the build, measured by a new `test/gitignorecheck.sh` written RED first.**
+(1) A fixture with an ignored subtree: its symbols are absent from the map and counted in
+`ignored_files=`; `--no-ignore` restores them byte-for-byte to today's output. (2) `test/golden.xml`
+byte-identical (the fixture ignores nothing) — if it does not hold, that is a finding about the
+fixture, re-derived in its own commit. (3) On the four D4 corpora at their pins, `ambiguous=`,
+`files=`, `symbols=` re-pinned with the ignored count beside each, so the delta is disclosed, not
+absorbed. (4) This repository's root without `--exclude`: `files=` drops from 158,202 to within 5% of
+the excluded count, and the un-excluded warm map is within 2× of the excluded one. (5) determinism ×2,
+cold == warm, xmllint, ASan on the crawl. (6) Wall time of the ignore walk is a `bench/PROFILE.md`
+ledger row, never a red gate. NEGATIVE consequence: if (1) or (5) fail the default stays as today and
+`--respect-gitignore` ships opt-in with the numbers.
+
+### A second router arm — route on the agent's FIRST TOOL CALL, not the prompt — PRE-REGISTERED 2026-09-03
+
+**Why a second arm.** Instrument A above found the prompt classifier blind to 98% of labelled ripwire
+moments, and the wild log is ~90% empty-intent abstains; the prompt is the noisiest signal available.
+The agent's first `Bash`/`Read` call is the cleanest: `grep -rn NAME src/` names the verb and its
+argument (`--grep=NAME`), a `Read` of a large source file names `--expand=SYM` or `--for` with the
+file already known. The retired nudge (EVALS §4, negative) fired on the same events, but with generic
+text and no argument; this arm pastes the exact command. The substitution meter already logs the
+command and its two successors, so the control arm's counterfactual is free.
+
+**Sizing, from the local meter (rates stay local; the lane report carries them).** Routable events —
+a recursive grep of a source path, or a read of a source file, with build/process polls excluded —
+occur two orders of magnitude more often than prompt-router recommendations, and their natural
+follow-by-ripwire-within-two rate is **0.086**, which is the control arm's expected level. The band
+is therefore the same difference the prompt router registered: KEEP ≥ +10 pp, REWORD 0..+10 pp,
+REMOVE ≤ 0 pp, on ≥ 40 recommended events per arm — reachable in days rather than months.
+
+**Design constraints, registered.** One recommendation per routable event with a per-session cap of
+three (the nudge's negative is the reason: an un-capped hint on every grep is noise); the
+recommendation carries the verb AND its argument, or it abstains; a symbol argument is recommended
+only when it resolves on the root (the `resolved_symbols` guard, unchanged); notification-shaped
+inputs (`[SYSTEM NOTIFICATION`, `<task-notification>`) never route; harmful **0.000** on a labelled
+corpus of 200 real command shapes drawn from the meter's `detail` field (commands, not prompts —
+local, never committed), precision ≥ 0.95. Arm assignment is the meter's `arm` per session, so the
+two routers never disagree inside one session. The readout uses `bench/routing_ab_report.py` with a
+`router=` column; the two arms are read separately and never pooled.
+
 ### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **The mechanism under test.** `--for` becomes terminal by default: after the ranked signatures, the
