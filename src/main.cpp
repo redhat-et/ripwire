@@ -2055,54 +2055,90 @@ void warnMapModifierDiscarded( const rw::Config& c, const VerbPrecedence& prec )
                   prec.winner, discarded.c_str() );
 }
 
-const char* jsonUnsupportedVerb( const rw::Config& c )
+// L2 — the ALLOW-list, and why it is walked over the flag TABLES rather than written as an if-chain.
+//
+// Capture-audit 2026-09-04 (H2): this function was a 77-arm DENY chain that its own header called an
+// allow-list. A deny chain allows by omission, so every verb nobody added to it — twelve of them, the whole
+// newer quality-lens family plus --dmm/--handoff/--lint-catalog/--field-affinity, and --index-out, which
+// WROTE its artifacts at exit 0 — accepted --json and emitted XML with nothing on stderr. The family had
+// been closed twice before (§B1.1's "eight surfaces this list forgot", §B1.5's five self-eval verbs), each
+// time by enumerating members, and each time it re-opened on the member nobody enumerated.
+//
+// Now the supported set is the enumeration and everything else refuses BY DEFAULT: the two tables below
+// name (a) the verbs that own a JSON emitter and (b) the flags that may ride along with one, and
+// firstFlagOutside() walks kBoolFlags/kViewFlags — the same rows parseArgs matched — for any set flag that
+// is in neither. A verb added tomorrow is refused tomorrow, and test/jsoncheck.sh's arm #8b sweeps the same
+// universe (test/flaguniverse.py) so a silent XML fallback cannot ship. The hand-written parseArgs arms the
+// tables cannot see (kHandWrittenFlagArms) are named one by one at the top, which is the honest cost of
+// that residue.
+
+// the verbs with a JSON twin — the read sites of cfg.json outside this refusal (`ripwire . --grep=cfg.json`)
+inline constexpr std::string_view kJsonVerbs[] =
 {
-    if( !c.helpTask.empty() )
+    "--for", "--pack-task", "--callers", "--callees", "--impact", "--quality-delta", "--test-gate", "--metrics",
+    "--plan-lanes",   // JSON-NATIVE: emits JSON with or without the flag, and says so (the redundancy note in main)
+};
+
+// the flags that may ride along under --json without selecting a verb of their own: the map-shaping flags (a
+// bare --json run IS the default map, and these shape it), the lens toggles of the JSON verbs above, and the
+// shape modifiers whose collision the SECOND sentence below reports (--scip, --legend). A modifier of a verb
+// that itself refuses --json is deliberately NOT here — its verb is named first, which is the answer.
+inline constexpr std::string_view kJsonRideAlongFlags[] =
+{
+    "--json", "--ignore-tests", "--no-cache", "--no-ignore", "--no-stable", "--refetch", "--compress", "--no-redact",
+    "--cache", "--since", "--pin-census", "--scip", "--legend",
+    "--anchor", "--no-route", "--adaptive", "--no-mention-boost", "--cochange-boost", "--no-doc-mention", "--signatures-only",
+    "--auto-bodies", "--with-graph", "--scope", "--task", "--brief",
+};
+
+// the first flag set on this invocation that is NEITHER a JSON verb NOR a ride-along — the verb to name in the
+// refusal. Bool rows first so a verb outranks the modifier typed beside it (`--lint --lint-select=x` names
+// --lint); a value row whose companion bool is a different spelling (--listen= → mcp) is named explicitly by
+// the caller ahead of this walk.
+std::string_view firstFlagOutside( const rw::Config& c, std::span<const std::string_view> verbs, std::span<const std::string_view> rideAlong )
+{
+    const auto isAllowed = [ & ]( std::string_view name ) noexcept
     {
-        return "--help-task";
-    }
-    if( c.mcp )
+        return std::ranges::find( verbs, name ) != verbs.end() || std::ranges::find( rideAlong, name ) != rideAlong.end();
+    };
+    for( const rw::BoolFlag& f : rw::kBoolFlags )
     {
-        return "--mcp";
+        if( c.*f.member && !isAllowed( f.lit ) )
+        {
+            return f.lit;
+        }
     }
-    if( c.mapDiff )
+    for( const rw::ViewFlag& f : rw::kViewFlags )
     {
-        return "--map-diff";
+        const std::string_view name = f.prefix.substr( 0, f.prefix.size() - 1 );   // "--callers=" → "--callers"
+        if( !( c.*f.member ).empty() && !isAllowed( name ) )
+        {
+            return name;
+        }
     }
-    if( c.packSignatures )
-    {
-        return "--pack-signatures";
-    }
-    if( c.packTopN > 0 )
-    {
-        return "--pack-top-n";
-    }
-    if( !c.query.empty() )
-    {
-        return "--query";
-    }
-    // §B1.4: `--regex=PAT` sets BOTH c.grep and c.grepRegex, so a separate --grep arm ahead of the --regex
-    // arm told a --regex caller that "--grep" was unsupported — a flag they never typed. One arm, and the
-    // spelling comes from what was actually parsed.
+    return {};
+}
+
+std::string_view jsonUnsupportedVerb( const rw::Config& c )
+{
+    // ── the hand-written parseArgs residue: arms no table row can see, one line each ─────────────────────
+    // §B1.4: `--regex=PAT` sets BOTH c.grep and c.grepRegex; the spelling comes from what was actually parsed
+    // so a --regex caller is never told "--grep" is unsupported — a flag they never typed.
     if( !c.grep.empty() || c.grepRegex )
     {
         return c.grepRegex ? "--regex" : "--grep";
     }
-    if( !c.match.empty() )
+    if( !c.listen.empty() )
     {
-        return "--match";
+        return "--listen";   // implies --mcp; the walk below would name the implied flag, not the typed one
     }
-    if( !c.pattern.empty() )
+    if( c.abiFlag )
     {
-        return "--pattern";
+        return "--abi";      // §B1.1: the sub-verb nested inside `--stray-content --abi`, named ahead of its parent row
     }
-    if( c.lint )
+    if( c.qualityAck )
     {
-        return "--lint";
-    }
-    if( !c.lintRulesDir.empty() )
-    {
-        return "--lint-rules";
+        return "--quality-ack";   // the bare spelling is a hand-written arm and sets no table bool
     }
     if( !c.expand.empty() )
     {
@@ -2112,268 +2148,24 @@ const char* jsonUnsupportedVerb( const rw::Config& c )
     {
         return "--outline";
     }
-    if( !c.legoType.empty() )
+    if( c.packTopN > 0 )
     {
-        return "--lego";
-    }
-    if( !c.exemplar.empty() )
-    {
-        return "--exemplar";
-    }
-    if( !c.recall.empty() )
-    {
-        return "--recall";
-    }
-    if( c.deps )
-    {
-        return "--deps";
-    }
-    if( c.hotspots )
-    {
-        return "--hotspots";
-    }
-    if( c.clones )
-    {
-        return "--clones";
-    }
-    if( c.cochange )
-    {
-        return "--cochange";
-    }
-    if( !c.archRules.empty() )
-    {
-        return "--arch";
-    }
-    if( c.communities )
-    {
-        return "--communities";
-    }
-    if( c.zoom )
-    {
-        return "--zoom";
-    }
-    if( c.report )
-    {
-        return "--report";
-    }
-    if( c.tree )
-    {
-        return "--tree";
-    }
-    if( c.seams )
-    {
-        return "--seams";
-    }
-    if( c.mermaid )
-    {
-        return "--mermaid";
-    }
-    if( !c.pathSpec.empty() )
-    {
-        return "--path";
-    }
-    if( !c.connectSpec.empty() )
-    {
-        return "--connect";
-    }
-    if( !c.mentionsSym.empty() )
-    {
-        return "--mentions";
-    }
-    if( !c.affectedFiles.empty() )
-    {
-        return "--affected";
-    }
-    if( c.situ )
-    {
-        return "--situ";
-    }
-    if( !c.usesSym.empty() )
-    {
-        return "--uses";
-    }
-    if( !c.verifyClaim.empty() )
-    {
-        return "--verify";
-    }
-    if( !c.graphQuery.empty() )
-    {
-        return "--graph-query";
-    }
-    if( c.externalSurface )
-    {
-        return "--external-surface";
-    }
-    if( c.scanSkills )
-    {
-        return "--scan-skills";
-    }
-    if( !c.scanSkillFile.empty() )
-    {
-        return "--scan-skill";
-    }
-    if( !c.batchFile.empty() )
-    {
-        return "--batch";
-    }
-    if( c.html )
-    {
-        return "--html";
-    }
-    if( c.owners )
-    {
-        return "--owners";
-    }
-    if( c.baseline )
-    {
-        return "--baseline";
-    }
-    if( c.baselineUpdate )
-    {
-        return "--baseline-update";
-    }
-    if( c.deadCode )
-    {
-        return "--dead-code";
-    }
-    if( c.qualityBaseline )
-    {
-        return "--quality-baseline";
-    }
-    if( c.qualityAck )
-    {
-        return "--quality-ack";
-    }
-    if( !c.editCheckSym.empty() )
-    {
-        return "--edit-check";
-    }
-    // lane/safe-delete + lane/paper-slice wired dispatch (right after --edit-check, precedence table order)
-    // but not this chain, so both verbs accepted --json and silently emitted XML at exit 0.
-    if( !c.safeDeleteSym.empty() )
-    {
-        return "--safe-delete";
-    }
-    if( !c.sliceSpec.empty() )
-    {
-        return "--slice";
-    }
-    if( !c.atSpec.empty() )
-    {
-        return "--at";
-    }
-    if( c.prContext )
-    {
-        return "--pr-context";
-    }
-    if( c.mergeScoutFlag )
-    {
-        return "--merge-scout";
-    }
-    if( !c.fromTrace.empty() )
-    {
-        return "--from-trace";
-    }
-    if( !c.runTrace.empty() )
-    {
-        return "--run-trace";
-    }
-    if( c.noteAddFlag )
-    {
-        return "--note-add";
-    }
-    if( c.notesList )
-    {
-        return "--notes";
-    }
-    if( c.skippedList )
-    {
-        return "--skipped";
+        return "--pack-top-n";
     }
     if( c.exportCcJson )
     {
         return "--export=cc.json";
     }
-    if( c.doctor )
+
+    // ── every table flag: outside the allow-list ⇒ refused, by default ───────────────────────────────────
+    if( const std::string_view outside = firstFlagOutside( c, kJsonVerbs, kJsonRideAlongFlags ); !outside.empty() )
     {
-        return "--doctor";
+        return outside;
     }
-    if( !c.around.empty() )
-    {
-        return "--around";
-    }
-    // §B1.1: the eight verb surfaces this list forgot — see the header comment above. abiFlag is checked
-    // ahead of strayContent (it only ever fires nested inside `--stray-content --abi`, main.cpp's
-    // runCrossRef) so the refusal names the more specific sub-verb the caller actually typed, the same
-    // specific-before-general order the --regex/--grep arm above already uses.
-    if( c.abiFlag )
-    {
-        return "--abi";
-    }
-    if( c.strayContent )
-    {
-        return "--stray-content";
-    }
-    if( c.whereisFlag )
-    {
-        return "--whereis";
-    }
-    if( c.exercisesFlag )
-    {
-        return "--exercises";
-    }
-    if( !c.communityId.empty() )
-    {
-        return "--community";
-    }
-    if( c.docDrift )
-    {
-        return "--doc-drift";
-    }
-    if( !c.planLintFile.empty() )
-    {
-        return "--plan-lint";
-    }
-    if( c.darkFlags )
-    {
-        return "--flags";
-    }
-    if( c.layoutFlag )
-    {
-        return "--layout";
-    }
-    // §B1.5 (capture-audit-4, wave 3) — the FIVE self-eval verbs, as one group. The wave-2 verifier's
-    // 96-flag sweep found exactly one flag still emitting XML at exit 0 under --json (--eval-stray) and
-    // concluded the class was down to one; it was not, because the sweep's tell was "does it emit XML".
-    // --eval / --eval-retrieval / --eval-mined / --eval-skills emit PLAIN TEXT tables, so they are invisible
-    // to an XML-shaped probe while accepting and ignoring --json exactly as loudly. All five measured
-    // byte-identical with and without the flag on shapes where they actually SUCCEED (a corpus with
-    // doc-commented symbols, a real minedpair.jsonl, a real labels TSV, the skills tree) — which is the
-    // distinction the §B9 caveat names: exercise the shape where the flag would bind, not the one where the
-    // verb refuses for an unrelated reason. Owner ruling 4's REFUSE-ALL shape, verbatim.
-    if( c.eval )
-    {
-        return "--eval";
-    }
-    if( c.evalRetrieval )
-    {
-        return "--eval-retrieval";
-    }
-    if( !c.evalMined.empty() )
-    {
-        return "--eval-mined";
-    }
-    if( !c.evalSkills.empty() )
-    {
-        return "--eval-skills";
-    }
-    if( !c.evalStray.empty() )
-    {
-        return "--eval-stray";
-    }
-    // output-shape modifiers not (yet) mirrored in JSON — refuse rather than silently drop them.
-    // §B1.4: these four are the SHAPE half; kJsonShapeModifiers below names the same four so the refusal can
-    // word them as encodings rather than verbs.
+
+    // ── output-shape modifiers not (yet) mirrored in JSON — refuse rather than silently drop them ───────
+    // §B1.4: kJsonShapeModifiers below names the same four so the refusal can word them as encodings rather
+    // than verbs. Checked LAST so a verb outside the set is named ahead of a shape it was composed with.
     if( c.columnar )
     {
         return "--format=columnar";
@@ -2390,25 +2182,18 @@ const char* jsonUnsupportedVerb( const rw::Config& c )
     {
         return "--scip";
     }
-    return nullptr;
+    return {};
 }
 
 // §B1.4: the output-SHAPE members of the list above, as a table rather than a second if-chain. A flag in
 // here selects an ENCODING for rows some verb already produced, so "--json is not supported for X" is the
 // wrong sentence about it — the caller has picked two encodings, not an unsupported verb.
-inline constexpr const char* kJsonShapeModifiers[] = { "--format=columnar", "--format=candidates", "--detail", "--scip" };
+inline constexpr std::string_view kJsonShapeModifiers[] = { "--format=columnar", "--format=candidates", "--detail", "--scip" };
 
-inline bool isJsonShapeModifier( const char* flag ) noexcept
+inline bool isJsonShapeModifier( std::string_view flag ) noexcept
 {
-    VERIFY( flag != nullptr );
-    for( const char* s : kJsonShapeModifiers )
-    {
-        if( std::strcmp( s, flag ) == 0 )
-        {
-            return true;
-        }
-    }
-    return false;
+    VERIFY( !flag.empty() );
+    return std::ranges::find( kJsonShapeModifiers, flag ) != std::end( kJsonShapeModifiers );
 }
 
 int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::string& root )
@@ -2473,6 +2258,16 @@ std::optional<int> runCliEditPlan( const rw::Config& cfg )
     return 0;
 }
 
+// the spelling of the ONE CLI edit verb this invocation selected — for the refusals that must name it
+const char* cliEditVerbSpelling( const rw::Config& cfg ) noexcept
+{
+    if( !cfg.replaceSymbolBody.empty() )
+    {
+        return "--replace-symbol-body";
+    }
+    return !cfg.insertBeforeSymbol.empty() ? "--insert-before-symbol" : "--insert-after-symbol";
+}
+
 std::optional<int> runCliEdit( const rw::Config& cfg )
 {
     const int editCount = int( !cfg.replaceSymbolBody.empty() ) + int( !cfg.insertBeforeSymbol.empty() )
@@ -2504,8 +2299,11 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     }
     if( cfg.editPayload.empty() )
     {
-        std::fprintf( stderr, "ripwire: a CLI edit requires --edit-payload=FILE (or --edit-payload=- for stdin); "
-                              "an absent payload never means delete\n" );
+        // capture-audit 2026-09-04 (L1, the modifier-pairing dialect): name the verb the caller TYPED, not "a CLI
+        // edit" — every sibling pairing refusal names both flags and shows the composed call.
+        const char* const editVerb = cliEditVerbSpelling( cfg );
+        std::fprintf( stderr, "ripwire: %s=SYM is a CLI edit and needs --edit-payload=FILE (or --edit-payload=- for stdin) — pass both "
+                              "(e.g. ripwire <dir> %s=SYM --edit-payload=new_body.cpp); an absent payload never means delete\n", editVerb, editVerb );
         return 1;
     }
 
@@ -2559,6 +2357,39 @@ int main( int argc, char** argv )
     if( !cfg.ok )
     {
         return 1;
+    }
+
+    // L2: --json refuses LOUDLY for any verb it doesn't (yet) support — see jsonUnsupportedVerb's ALLOW-list
+    // rationale. Checked before ANY dispatch — including the CLI edit bridge below, which used to run AHEAD of
+    // this check (capture-audit 2026-09-04: `--replace-symbol-body=X --edit-payload=F --json` performed the edit
+    // and never saw --json) — so an unsupported combination never reaches a handler that would silently
+    // ignore --json and emit XML.
+    // §B1.4: two sentences, because there are two failures here. An unsupported VERB is told the supported
+    // set plus ONE RUNNABLE EXAMPLE (the --format=columnar refusal has carried one since §A5b; this one did
+    // not). An output-SHAPE modifier is told it collided with another encoding — enumerating "supported
+    // verbs" at someone who typed --format=columnar names nothing they can act on.
+    if( cfg.json )
+    {
+        if( const std::string_view unsupported = jsonUnsupportedVerb( cfg ); !unsupported.empty() )
+        {
+            if( isJsonShapeModifier( unsupported ) )
+            {
+                std::fprintf( stderr, "ripwire: --json and %.*s are two output SHAPES for the same rows — pass one, not both "
+                              "(e.g. ripwire <dir> --callers=SYM --json, or ripwire <dir> --callers=SYM %.*s)\n",
+                              int( unsupported.size() ), unsupported.data(), int( unsupported.size() ), unsupported.data() );
+            }
+            else
+            {
+                // §B1.2: the enumeration used to stop at --test-gate and never mention --metrics, which HAS
+                // had a full JSON twin (row keys amp/cbo/ccx/cx/in/loc/nest/out/params/role/tested) — so a
+                // caller obeying THIS refusal never learned the one flag it was actually looking for existed.
+                // The sentence is the allow-list (kJsonVerbs) spelled out; keep the two in step.
+                std::fprintf( stderr, "ripwire: --json is not yet supported for %.*s — supported: the default map, "
+                              "--for, --pack-task, --callers/--callees, --impact, --quality-delta, --test-gate, "
+                              "--metrics, and --plan-lanes which is JSON-native (e.g. ripwire <dir> --callers=SYM --json)\n", int( unsupported.size() ), unsupported.data() );
+            }
+            return 1;
+        }
     }
 
     // CLI-first edit verbs reuse the MCP transaction engine and therefore own their own indexed pass.
@@ -2617,37 +2448,6 @@ int main( int argc, char** argv )
     // §F1: and the third class — a map-modifier voided because a report verb answered first says so, while
     // one that COMPOSED (--query --expand) stays quiet, because nothing was dropped.
     warnMapModifierDiscarded( cfg, verbPrec );
-
-    // L2: --json refuses LOUDLY for any verb it doesn't (yet) support — see jsonUnsupportedVerb's ALLOW-list
-    // rationale. Checked before ANY dispatch (incl. --mcp / --doctor / the multi-root refusals below) so an
-    // unsupported combination never reaches a handler that would silently ignore --json and emit XML.
-    // §B1.4: two sentences, because there are two failures here. An unsupported VERB is told the supported
-    // set plus ONE RUNNABLE EXAMPLE (the --format=columnar refusal has carried one since §A5b; this one did
-    // not). An output-SHAPE modifier is told it collided with another encoding — enumerating "supported
-    // verbs" at someone who typed --format=columnar names nothing they can act on.
-    if( cfg.json )
-    {
-        if( const char* unsupported = jsonUnsupportedVerb( cfg ) )
-        {
-            if( isJsonShapeModifier( unsupported ) )
-            {
-                std::fprintf( stderr, "ripwire: --json and %s are two output SHAPES for the same rows — pass one, not both "
-                              "(e.g. ripwire <dir> --callers=SYM --json, or ripwire <dir> --callers=SYM %s)\n", unsupported, unsupported );
-            }
-            else
-            {
-                // §B1.2: the enumeration used to stop at --test-gate and never mention --metrics, which HAS
-                // had a full JSON twin (row keys amp/cbo/ccx/cx/in/loc/nest/out/params/role/tested) since it
-                // was never added to the deny-chain above — so a caller obeying THIS refusal never learned
-                // the one flag it was actually looking for existed. Corrected in the same commit as the
-                // eight new arms above, so the sentence changes exactly once.
-                std::fprintf( stderr, "ripwire: --json is not yet supported for %s — supported: the default map, "
-                              "--for, --pack-task, --callers/--callees, --impact, --quality-delta, --test-gate, "
-                              "--metrics (e.g. ripwire <dir> --callers=SYM --json)\n", unsupported );
-            }
-            return 1;
-        }
-    }
 
     // §B1.5 (capture-audit-4, wave 3) — --plan-lanes is the INERT case, and it wants a different answer from
     // the five eval verbs above. Those emit a dialect --json asked them to change and silently did not; this
