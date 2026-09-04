@@ -700,6 +700,11 @@ struct LintRulesRun
 {
     std::vector<LintFinding> findings;
     std::vector<std::string> saturatedRuleIds;   // rule ids whose candidate stream spent its whole budget
+    // §L10: rule ids whose MAIN query compiled for NO linked grammar (a malformed/misspelled tree-sitter
+    // pattern) — astQuery already alerts on stderr and silently contributes zero matches for these, which
+    // made a broken query byte-identical, on stdout, to a well-formed query that legitimately found
+    // nothing. The caller marks these rows compiled="0" instead of a bare count="0" (see printLintRuleTallyRow).
+    std::vector<std::string> uncompiledRuleIds;
 };
 
 // The per-rule astQuery budget shared by the built-in checks (--lint) and the user rules (--lint-rules).
@@ -752,7 +757,8 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
         addCombinator( i, kindNotMatches, rules[i].notMatches );
     }
 
-    const std::vector<AstMatch> ms = astQuery( ing, specs, kLintMaxPerRule );
+    std::vector<std::string>    uncompiledQueries;   // §L10: query TEXT of every spec that compiled for no grammar
+    const std::vector<AstMatch> ms = astQuery( ing, specs, kLintMaxPerRule, &uncompiledQueries );
 
     for( const LintRule& r : rules )    // saturation is measured on the RAW candidate stream, before the combinators thin it
     {
@@ -767,6 +773,23 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
         if( rawForRule >= kLintMaxPerRule )
         {
             saturatedRuleIds.push_back( r.id );
+        }
+    }
+
+    // §L10: a rule whose MAIN query (not a combinator — those degrade silently by design, see addCombinator's
+    // comment above) is in uncompiledQueries never contributed a single AstMatch, so it is indistinguishable
+    // from a well-formed query that legitimately matched nothing. Matched by query TEXT (astQuery's own
+    // uncompiledOut contract carries no tag) — two rules sharing byte-identical broken query text both get
+    // marked, which is the conservative, honest direction (never hides a real compile failure).
+    std::vector<std::string> uncompiledRuleIds;
+    if( !uncompiledQueries.empty() )
+    {
+        for( const LintRule& r : rules )
+        {
+            if( std::find( uncompiledQueries.begin(), uncompiledQueries.end(), r.query ) != uncompiledQueries.end() )
+            {
+                uncompiledRuleIds.push_back( r.id );
+            }
         }
     }
 
@@ -891,7 +914,7 @@ inline LintRulesRun runLintRules( const IngestResult& ing, const std::vector<Lin
         if( a.startByte != b.startByte ) { return a.startByte < b.startByte;
 }
         return a.id < b.id; } );
-    return { std::move( out ), std::move( saturatedRuleIds ) };
+    return { std::move( out ), std::move( saturatedRuleIds ), std::move( uncompiledRuleIds ) };
 }
 
 // ── built-in ERROR-MASKING rule table (GitClear 2026: +47% error-masking constructs in AI-authored code,
