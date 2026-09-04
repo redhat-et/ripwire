@@ -155,7 +155,7 @@ if [ "${1:-}" = "--observe" ]; then
     now="$( date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true )"
     jq -cn --arg at "$now" --argjson position "$position" --arg outcome "$outcome" \
         --arg observed "$observed" --slurpfile route "$pending" \
-        '{v:2,at:$at,agent:"claude",event:"RouteObservation",session_hash:$route[0].session_hash,
+        '{v:2,at:$at,agent:"claude",router:"prompt",event:"RouteObservation",session_hash:$route[0].session_hash,
           prompt_hash:$route[0].prompt_hash,intent:$route[0].intent,recommended:$route[0].recommended,
           arm:($route[0].arm // "treatment"),observed:$observed,position:$position,outcome:$outcome}' \
         >>"$routingLog" 2>/dev/null || true
@@ -196,6 +196,10 @@ resolve_arm "${session:-prompt}"
 # `agent` separates these rows from hooks/ripwire-codex-route.sh's, which share this file and carry no
 # arm: an analysis that pooled them would put an un-armed population into the treatment side.
 if meter_home; then
+    # `router:"prompt"` (2026-09-03) distinguishes this row from hooks/ripwire-claude-toolroute.sh's
+    # `router:"toolcall"` rows, the second router arm pre-registered in docs/EVALS.md -- both routers
+    # share this same log (one file, one contamination surface), and bench/routing_ab_report.py reads
+    # `router` and reports each SEPARATELY; the two are never pooled into one A/B readout.
     promptHash="$( hash_text "$prompt" )"
     [ -n "$session" ] || session="prompt:$promptHash"
     sessionHash="$( hash_text "$session" )"
@@ -205,7 +209,7 @@ if meter_home; then
     jq -cn --arg at "$now" --arg status "$status" --arg intent "$intent" --arg hash "$promptHash" \
         --arg sessionHash "$sessionHash" --arg recommended "$recommended" --arg arm "$route_arm" \
         --argjson bytes "$promptBytes" \
-        '{v:2,at:$at,agent:"claude",event:"UserPromptSubmit",status:$status,intent:$intent,
+        '{v:2,at:$at,agent:"claude",router:"prompt",event:"UserPromptSubmit",status:$status,intent:$intent,
           recommended:$recommended,arm:$arm,session_hash:$sessionHash,prompt_hash:$hash,
           prompt_bytes:$bytes}' >>"$routingLog" 2>/dev/null || true
 
