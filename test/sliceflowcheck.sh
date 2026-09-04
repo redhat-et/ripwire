@@ -333,7 +333,7 @@ E4="$( err --slice=pipeline --slice-flow=back )"
 
 # ── (7) v1 shape unchanged without the new flags ────────────────────────────────────────────────────
 V="$( run --slice=pipeline:out )"
-if printf '%s' "$( elem "$V" )" | grep -qE 'flow=|v="|d="|steps='; then
+if printf '%s' "$( elem "$V" )" | grep -qE 'flow=| v="| d="|steps='; then   # rd= (rung 3) is a v1 row attribute, not a flow one
     no "(7) plain --slice must not grow flow attributes (purely additive contract)"
 else
     printf '%s' "$( elem "$V" )" | grep -q '<s l="6" k="def" t="decl">' \
@@ -630,7 +630,7 @@ printf '%s' "$( frow "$P1F" t 18 )" | grep -q 'd="2" f="17"' \
     || { no "(27b) expected v=\"t\" l=\"18\" d=\"2\" f=\"17\" — the pp def must not stop the forward reach"; printf '%s\n' "$P1F"; }
 # #if 1: the body is live and unflagged, the #else is dead and dropped
 P2="$( run --slice=if1else:a )"
-printf '%s' "$( elem "$P2" )" | grep -q '<s l="25" k="both" t="assign">' \
+printf '%s' "$( elem "$P2" )" | grep -q '<s l="25" k="both" t="assign" rd="23">' \
     && ! printf '%s' "$( elem "$P2" )" | grep -q 'a = 999' \
     && [ "$( attr "$P2" preproc_rows )" = 'preproc_rows="1"' ] \
     && ok "(27c) if1else:a: the #if 1 body rows unflagged (k=both), the #else body dropped, preproc_rows=\"1\"" \
@@ -659,8 +659,8 @@ SV="$( run --slice=scope.cpp:shadowing:v )"
 [ "$( attr "$SV" bindings )" = 'bindings="2"' ] \
     && printf '%s' "$( elem "$SV" )" | grep -q '<s l="3" k="def" t="decl" b="3">' \
     && printf '%s' "$( elem "$SV" )" | grep -q '<s l="5" k="def" t="decl" b="5">' \
-    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="6" k="both" t="assign" b="5">' \
-    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="8" k="use" t="read" b="3">' \
+    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="6" k="both" t="assign" b="5" rd="5">' \
+    && printf '%s' "$( elem "$SV" )" | grep -q '<s l="8" k="use" t="read" b="3" rd="3">' \
     && ok "(28b) shadowing:v: bindings=\"2\" and every row carries b= (l3/l8 -> b=3, l5/l6 -> b=5)" \
     || { no "(28b) expected bindings=\"2\" with b=\"3\" on l3/l8 and b=\"5\" on l5/l6"; printf '%s\n' "$SV"; }
 SF="$( run --slice=scope.cpp:shadowing:v --slice-flow=fwd )"
@@ -689,7 +689,7 @@ printf '%s' "$( frow "$SG" v 4 )" | grep -q 'd="1" f="9"' && printf '%s' "$( fro
 # `v := v + 1` (l6) is ONE line touching TWO bindings: the := declares the inner v (b=6), the
 # initializer reads the OUTER v (b=4) — two rows, never merged into a lying k="both"
 SGI="$( run --slice=goshadow:v )"
-printf '%s' "$( elem "$SGI" )" | grep -q '<s l="6" k="def" t="decl" b="6">' && printf '%s' "$( elem "$SGI" )" | grep -q '<s l="6" k="use" t="read" b="4">' \
+printf '%s' "$( elem "$SGI" )" | grep -q '<s l="6" k="def" t="decl" b="6">' && printf '%s' "$( elem "$SGI" )" | grep -q '<s l="6" k="use" t="read" b="4" rd="4">' \
     && ok "(28d) go: l6 splits into the inner := def (b=6) and the outer read in its own initializer (b=4)" \
     || { no "(28d) expected two l=6 rows: k=def b=6 and k=use b=4"; printf '%s\n' "$SGI"; }
 # JS: let is block-scoped, var is function-scoped (hoisting)
@@ -740,9 +740,14 @@ nHidden="$( printf '%s' "$( legend "$FL" )" | grep -oi 'hidden behind a call' | 
     && ok "(30a) the flow run states the alias limit once and the hidden-write limit once — the flow block does not restate v1" \
     || no "(30a) the flow legend restates v1's limits (alias x$nAlias, hidden-write x$nHidden — each must appear exactly once)"
 v1b="$( legbytes "$FV" )"; flb="$( legbytes "$FL" )"; add=$(( flb - v1b ))
-[ "$v1b" -le 3584 ] && [ "$add" -le 1400 ] \
-    && ok "(30b) legend budget: v1 legend $v1b B (<= 3584), the flow addendum $add B (<= 1400)" \
-    || no "(30b) legend over budget: v1 $v1b B (budget 3584), flow addendum $add B (budget 1400) — the essay belongs in docs/COMMANDS.md"
+# 2026-09-03 (rung 3, docs/EVALS.md "Flow-sensitive slice in the small"): the v1 budget moved 3584 -> 4608 B in the
+# same commit that put rd=/reach= on the first screen. The registration's own band requires the legend to
+# state the reaching-definition rule AND name every construct the walk does not branch on (?:, short-circuit,
+# nested bodies, goto, global/nonlocal, try, alias) instead of guessing — that is legend content by contract,
+# ~900 B, and the pre-existing block already sat within 14 B of the old budget. The addendum budget is unchanged.
+[ "$v1b" -le 4608 ] && [ "$add" -le 1400 ] \
+    && ok "(30b) legend budget: v1 legend $v1b B (<= 4608), the flow addendum $add B (<= 1400)" \
+    || no "(30b) legend over budget: v1 $v1b B (budget 4608), flow addendum $add B (budget 1400) — the essay belongs in docs/COMMANDS.md"
 # compact: admitted, versioned, rows byte-identical to the full form (modulo the schema attribute)
 CF="$( run --slice=pipeline:out --slice-flow=both --legend=compact )"; rcC="$( rc --slice=pipeline:out --slice-flow=both --legend=compact )"
 [ "$rcC" = 0 ] && printf '%s' "$( elem "$CF" )" | grep -q '^<slice [^>]*schema="ripwire.slice/v1"' \
@@ -753,9 +758,11 @@ strip(){ printf '%s' "$( elem "$1" )" | sed 's/ schema="ripwire.slice\/v1"//'; }
     && ok "(30c) compact rows are byte-identical to the full form (payload untouched, non-zero rows)" \
     || no "(30c) compact must change the legend only — the <slice> element differs from the full form"
 cb="$( legbytes "$CF" )"
-[ "$cb" -gt 0 ] && [ "$cb" -le 1024 ] && [ "$cb" -lt "$flb" ] \
-    && ok "(30c) compact legend is $cb B (<= 1024, and smaller than the full $flb B)" \
-    || no "(30c) compact legend must be a real saving: $cb B (budget 1024, full is $flb B)"
+# compact budget 1024 -> 1280 B with rung 3: the compact tier is the attribute-vocabulary tier, and rd=/reach= are
+# first-screen attributes that legendcoveragecheck's rule says must be defined where the reader meets them
+[ "$cb" -gt 0 ] && [ "$cb" -le 1280 ] && [ "$cb" -lt "$flb" ] \
+    && ok "(30c) compact legend is $cb B (<= 1280, and smaller than the full $flb B)" \
+    || no "(30c) compact legend must be a real saving: $cb B (budget 1280, full is $flb B)"
 # an XML comment must not contain '--': the compact legend cannot spell a flag with its dashes (xmllint is the G4 gate)
 if command -v xmllint >/dev/null 2>&1; then
     ( cd "$WORK" && "$BIN" . --slice=pipeline:out --slice-flow=both --legend=compact --no-cache 2>/dev/null | xmllint --noout - ) \
