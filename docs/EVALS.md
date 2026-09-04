@@ -9938,6 +9938,51 @@ depth-≤2 head-segment probe (1 site here, but it is the rule's precision); TS/
 (the veto is Python + C-family only); nested-class shadow evidence (2 sites); the C3 order beyond direct
 bases (0 sites measured).
 
+### Phase 5b — the depth-≤2 head-segment probe, PRE-REGISTERED 2026-09-03 (owner ACCEPTED Phase 5's conjunct-2 letter; this is the refinement that discharges it)
+
+**The decision this discharges.** Phase 5's conjunct 2 counted twelve of thirteen named sites leaving the
+`locality` population. The thirteenth stayed because the registration's own conservative clause said it
+must, and the arithmetic that named it had not applied that clause. The owner accepted the letter rather
+than reverting two mechanisms over one site, on the record, and registered this in the same breath: the
+refinement is written down BEFORE it is built, and it is the reason the acceptance is not a precedent for
+moving a band.
+
+**The mechanism.** Source 1 of Phase 5 reads an absolute Python import binding as EXTERNAL only when
+`resolvePreciseInclude` maps it to no indexed file AND its head segment names no `.py` stem and no
+directory anywhere in the indexed tree. That last clause is a whole-tree name test, which is why
+`from collections import OrderedDict` reads UNKNOWN inside astropy: `astropy/utils/collections.py` exists
+somewhere. But a package importable as a bare head segment from the crawl root sits at DEPTH 1 or 2 of
+that root (`collections.py`, or `collections/__init__.py`); `astropy/utils/collections.py` is depth 3 and
+is importable only as `astropy.utils.collections`. The probe therefore restricts the existing clause to
+candidates at depth ≤ 2 from each crawl root, leaving every other part of the rule untouched. A root
+whose import path is genuinely deeper (a `src/` layout rooted one level down) is the case this could get
+wrong, so the probe additionally accepts a candidate at any depth whose PARENT chain is unbroken by
+`__init__.py`-less directories — stated here because it is the clause that decides whether this is
+precision or a new false-external.
+
+**Bands, fixed before any code and never moved after a number.** Measured with
+`bench/scip_pin_precision.py` + `bench/scip_match_diag.py` against the same SCIP oracles Phase 4b and
+Phase 5 used, on astropy-14365 with 12907 as the stability check.
+1. `table/table.py:2235` `OrderedDict.__getitem__(…)` leaves the `locality` population, counted
+   `@external`; Phase 5's other twelve sites are unchanged.
+2. **No new false external.** Veto precision stays ≥ 0.99 on both corpora (Phase 5 measured 0.996 and
+   0.993); every disconfirmation the probe adds is read at source and named in the RUN.
+3. `ambiguous=` within +0.5% on all four corpora at their pins (a tighter band than Phase 5's +2.0%,
+   because this refinement removes edges rather than adding a mechanism): ripwire `src/` on
+   `git archive <base> src`, ugrep / rocksdb / duckdb in `rw-lane-ab2-corpora`.
+4. Full-oracle `locality` precision does not fall on either corpus (Phase 5 measured 0.836 pooled,
+   n = 122, and Phase 4's pooling rule still carries this stratum).
+5. A new gate arm in `test/externalvetocheck.sh`, RED first, fixing the shape directly: a fixture with a
+   top-level `collections.py` (depth 1, in-repo evidence, MUST NOT be vetoed) beside a nested
+   `pkg/utils/collections.py` (depth 3, no in-repo evidence for a bare `collections` import, MUST be
+   vetoed), plus the `src/`-layout case of the paragraph above.
+6. Determinism ×2, ASan on the fixture, xmllint, `--quality-delta --scope='src/*'` gating 0.
+
+**NEGATIVE consequence, stated now.** If band 2 or 4 misses, the depth restriction does not ship and the
+whole-tree clause stands as Phase 5 wrote it — the conservative reading keeps an edge, which is the side
+of the trade this project already chose. A miss is recorded here as a negative result, not retried with a
+different depth until it passes.
+
 ## Member variables as symbols + `--uses=Owner.field` — the member-variable round (card A3), PRE-REGISTERED 2026-09-02 (before any corpus number)
 
 **What this registers.** ARISE-bibliography RANK-A card A3 — CodexGraph's FIELD schema element: a class's
