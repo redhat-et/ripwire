@@ -168,16 +168,25 @@ void emitGrepSuggest( const rw::IngestResult& ing, const std::string& pat, bool 
     std::printf( "/>" );
 }
 
-// §R-J: the three root attributes unindexed_files_scanned=/unindexed_files_skipped=/
+// §R-J: the root attributes unindexed_hits=/unindexed_files_scanned=/unindexed_files_skipped=/
 // unindexed_candidates_capped= as one string fragment — a pure function of the aux collection, lifted out
 // so emitGrepReport's own body states only "compute aux, then ask what it discloses" rather than the
-// three-attribute assembly itself. unindexed_files_scanned= is unconditional (0 is informative: it means
+// attribute assembly itself. unindexed_files_scanned= is unconditional (0 is informative: it means
 // no unsupported-ext candidate existed, or none survived the size/binary guard — never "this build lacks
-// the feature"); the other two follow corpus_excluded='s convention above: absent means zero/false.
+// the feature"); the two skip attributes follow corpus_excluded='s convention above: absent means zero/false.
+//
+// H4 (capture-audit 2026-09-04 — lens1 F1, lens2 M3, lens8 #12): unindexed_hits= joins them, and is
+// unconditional for the same reason files_scanned= is. hits=/shown=/total= on this root count the IN-INDEX
+// population ONLY — that is what every consumer already reads, and redefining it to include the aux scan
+// would be a silent redefinition of the number the whole verb is read by — so without a SECOND count on
+// the same element the two populations cannot be reconciled from the header at all. That was the
+// measurable half of the defect: an answer stating hits="75" shown="75" capped="0" emitted 98 hit sites,
+// and no attribute anywhere let a reader learn it.
 std::string grepUnindexedAttrs( const rw::GrepAuxCollection& aux )
 {
     const std::uint32_t skipped = aux.filesSkippedOversize + aux.filesSkippedBinary + aux.filesUnreadable;
-    std::string          attr    = " unindexed_files_scanned=\"" + std::to_string( aux.filesScanned ) + "\"";
+    std::string          attr    = " unindexed_hits=\"" + std::to_string( aux.hits.size() ) + "\"";
+    attr += " unindexed_files_scanned=\"" + std::to_string( aux.filesScanned ) + "\"";
     if( skipped > 0 )
     {
         attr += " unindexed_files_skipped=\"" + std::to_string( skipped ) + "\"";
@@ -194,21 +203,35 @@ std::string grepUnindexedAttrs( const rw::GrepAuxCollection& aux )
 // so the "collapse by contiguous path" grouping loop is a helper's job, not emitGrepReport's. Omitted
 // entirely (prints nothing) when there is nothing to say — the same "absent means none" convention
 // corpus_excluded=/corpus_oversize= use, so a caller never needs an empty-check before calling this.
-void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, bool singleRoot, const std::string& rootPrefix, std::vector<char>& esc )
+//
+// H4: this list is a SECONDARY ROW CLASS inside a paged answer, and it now obeys the two rules such a
+// class owes its reader — it carries its OWN count=/shown=/capped=, and it is WINDOWED by the same
+// --limit/--offset the indexed list obeys. It carried neither: a `--grep=e --limit=1` answer said
+// shown="1" and wrote 381,283 aux rows / 98 MB of stdout, and the default answer over-emitted by 29 rows
+// nothing on the root counted. `window` is a slice of THIS list (the caller computes it with the same
+// pageWindow()/rowCap the indexed half uses) — never derived inside the collector, so the §A1 rule holds
+// here too: what was COLLECTED does not move with the page, only what is PRINTED does, which is why
+// count= reads the same on every page of a walk. The shape is --impact's <f via="import"> with
+// shown_importers=/importers_capped=, restated on an element of this sub-list's own.
+void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, const rw::PageWindow& window, bool singleRoot,
+                        const std::string& rootPrefix, std::vector<char>& esc )
 {
     using namespace rw;
     if( hits.empty() )
     {
         return;
     }
-    const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-    std::printf( "<unindexed>" );
-    for( std::size_t i = 0; i < hits.size(); )
+    const auto        ex    = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+    const std::size_t shown = window.end - window.begin;
+    // capped= is exactly "this element printed fewer rows than it holds" — the one reading that stays true
+    // whether the cut came from --limit, from --offset, or from the default row cap.
+    std::printf( "<unindexed count=\"%zu\" shown=\"%zu\" capped=\"%d\">", hits.size(), shown, shown < hits.size() ? 1 : 0 );
+    for( std::size_t i = window.begin; i < window.end; )
     {
         std::size_t j = i;
         std::printf( "<f p=\"%s\">", ex( singleRoot ? rw::sarif::rootRelativeUri( hits[i].path, rootPrefix )
                                                      : std::string_view( hits[i].path ) ).c_str() );
-        for( ; j < hits.size() && hits[j].path == hits[i].path; ++j )
+        for( ; j < window.end && hits[j].path == hits[i].path; ++j )
         {
             const GrepAuxHit& h = hits[j];
             std::string        safe;
@@ -295,7 +318,9 @@ void emitCompactGrepLegend()
     std::printf( "<!-- ripwire grep ripwire.grep/v1: files group source-ordered hits; l=line, m=matched text, "
                  "in=enclosing name when known. shown/capped disclose the printed window; hits_capped=1 makes hits a floor; "
                  "complete=1 only for an exhaustive literal scan whose whole unfiltered window printed. root anchors relative p; "
-                 "enc callers remain a call-graph floor; tier/suppressed and unindexed/corpus attrs disclose excluded populations. -->" );
+                 "enc callers remain a call-graph floor; tier/suppressed and corpus attrs disclose excluded populations. "
+                 "files/hits/shown/total/complete are IN-INDEX only; unindexed_hits sizes the second population and the trailing "
+                 "unindexed element carries its own count/shown/capped under the same window. -->" );
 }
 
 std::string grepTermsAttrs( std::string_view pattern, std::span<const rw::GrepTerm> terms, rw::GrepScope scope,
@@ -672,7 +697,17 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "own unsupported-ext class) that THIS answer additionally scanned for the same pattern; their hits print inside a "
                  "trailing unindexed element (present only when it found something), holding its own <f> rows in the same shape as "
                  "above, and never carry in= — there is no symbol table to check for such a file, which is not the same claim as file "
-                 "scope. unindexed_files_skipped= (present only when nonzero) counts "
+                 "scope. "
+                 // H4 (capture-audit 2026-09-04): the two populations, and the rule that keeps them reconcilable.
+                 // Deliberately no attribute=value literal in these sentences (the quality-delta legend's rule,
+                 // restated on this verb because several gates extract its counters by grep).
+                 "THE TWO POPULATIONS: every count above — files, hits, shown, capped, total, complete — describes the IN-INDEX "
+                 "search ALONE. unindexed_hits= is the second population's size, always stated (a zero included, so its absence is "
+                 "never a question), and the trailing unindexed element restates it as its OWN count= beside shown=/capped= — the "
+                 "same disclosure the impact verb's importer sub-list carries. That element obeys the SAME window this answer's "
+                 "limit/offset set (dashes omitted), so a one-row page is a one-row page on both lists; its capped value 1 means it "
+                 "printed fewer rows than it holds, and pages past the end are empty rather than repeated. "
+                 "unindexed_files_skipped= (present only when nonzero) counts "
                  "candidates this scan saw but did not read: over the max-file-size ceiling, sniffed binary, or unreadable. "
                  "unindexed_candidates_capped=\"1\" (present only when true) means the CANDIDATE list itself (the skipped verb's own "
                  "500-row-per-class cap) was already a floor, so files past it were never considered here either — see the skipped verb "
@@ -777,7 +812,11 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // population is already crawl-bounded (kMaxSkipRowsPerClass), so the folding machinery would add
     // complexity for a set too small to need it. No in= — see GrepAuxHit's own comment in search.h for why
     // that is a missing FIELD, not an omitted attribute.
-    emitGrepUnindexed( aux.hits, singleRoot, rootPrefix, esc );
+    // H4: the SAME window the indexed list above obeys, applied to this list's own length. Computed here
+    // rather than inside the collector for the §A1 reason: nothing derived from --limit/--offset may reach
+    // what is COLLECTED, so count= stays a property of the search and only shown= moves with the page.
+    const PageWindow auxPage = pageWindow( aux.hits.size(), rowCap, cfg.pageOffset );
+    emitGrepUnindexed( aux.hits, auxPage, singleRoot, rootPrefix, esc );
 
     // ── R1b: the <enc> block — the map's context on the answer, no second call (helper above) ──────
     const GrepEncOptions encOpt{ amp, tested, cfg.grepHandles,

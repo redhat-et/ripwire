@@ -76,7 +76,10 @@ G0ROOT="$( root_of grep <"$TMP/g0.xml" )"
     || { no 'grep: zero-hit exhaustive scan does not claim'; printf '%s\n' "$G0ROOT"; }
 
 # ── 4) MUTATION: a --limit cap must drop the claim ─────────────────────────────────────────────────────
-HITS="$( printf '%s' "$G1ROOT" | grep -o 'hits="[0-9]*"' | grep -o '[0-9]*' )"
+# H4 (capture-audit 2026-09-04): the root now also states unindexed_hits= (the second, out-of-index
+# population), so an unanchored hits=" match returns TWO numbers and every arithmetic below reads garbage.
+# Anchored on the leading space, which is what makes it the root's OWN hits= attribute.
+HITS="$( printf '%s' "$G1ROOT" | grep -oE ' hits="[0-9]*"' | head -1 | grep -o '[0-9]*' )"
 if [ "${HITS:-0}" -ge 2 ]; then
     "$BIN" "$CORPUS" --grep=distance --limit=1 >"$TMP/g2.xml" 2>/dev/null
     G2ROOT="$( root_of grep <"$TMP/g2.xml" )"
