@@ -41,6 +41,34 @@ consulted), `off` (`--no-ignore`), `unavailable` (no git work tree at this root,
 at on purpose. A tracked file that happens to match a `.gitignore` pattern stays indexed, because git
 ignores nothing it tracks.
 
+### Changed — one warm cache per tree, and a narrower run no longer throws the wider one's work away
+
+The warm-by-default cache keys on the tree's path and the verb class, and deliberately not on
+`--exclude` or `--max-file-size`: one blob per tree, shared by every configuration you run against it.
+That sharing had a hole. A run with an `--exclude` deserialised the WHOLE blob — including the records
+for the files it had just excluded — and then, if anything had changed, rewrote the blob with only its
+own file set. The next run without that `--exclude` found those files missing and re-parsed them from
+scratch. Alternating `ripwire .` with `ripwire . --exclude=vendored` therefore paid a cold parse in one
+direction and a superset deserialise in the other, every time.
+
+The blob now carries a record offset table, so a run reads only the records for the files it actually
+crawled, and a save carries over — byte for byte — the records for files it did not. The cache only ever
+grows toward the union of the configurations that share it, so switching between them is free in both
+directions.
+
+Measured on a 31,000-file tree (1,000 files kept, 30,000 excluded), comparing `d8fa59c` with this
+change. A warm excluded run: **0.06–0.09 s → 0.01 s**, now indistinguishable from that configuration
+having its own private `--cache=PATH` blob. The run after a changed excluded run: **30,000 files
+re-parsed in 0.96 s → 0 files re-parsed in 0.27 s**. The costs, both real: the table adds **3.3%** to the
+blob (32 bytes per file), and a save that has to carry 30,000 records over takes 0.13–0.40 s where the
+old truncating save took 0.02 s — which is the trade, because the truncation is what made the next run
+cost 0.96 s. Full ledger in `bench/PROFILE.md`; the bands, including the earlier attempt at this that was
+measured and reverted, in `docs/EVALS.md` under "The auto-cache key ignores `--exclude`".
+
+Cache blobs from earlier versions are rejected and rebuilt on the next run, as with every format change:
+no action needed, one cold parse. `RIPWIRE_CACHE_STATS=1` gains `cached_records=` and `blob_entries=`.
+New gate: `test/cacheoffsetcheck.sh`.
+
 ### Fixed — `--expand` no longer takes minutes on a file whose lines are hundreds of kilobytes
 
 Secret redaction (`redactSecrets`, on by default at every body-emission seam) was quadratic in LINE

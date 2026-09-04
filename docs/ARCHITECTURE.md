@@ -355,6 +355,19 @@ extraction change bumps the parser version and costs one cold re-parse. Warm out
 **byte-identical** to cold output by a gate — a cache that changes the answer is a bug, not a
 tradeoff.
 
+Its blob holds ONE superset of records per tree and verb class, shared by every configuration run
+against that tree: the key deliberately ignores `--exclude` and `--max-file-size`, because keying on
+them instead was built, measured and reverted (`docs/EVALS.md`, "The auto-cache key ignores
+`--exclude`"). Sharing is made cheap by the blob's shape rather than by the key. A **record offset
+table** (`pathHash → offset, length, contentHash, recordSum`, ascending, binary-searched) lets a run
+deserialise only the records for the files it crawled, and a save carries over — byte for byte — the
+records for files it did not, so a narrower configuration can never truncate the blob a wider one
+built. The trailer's digest covers the header and the whole table and is verified on every open; each
+record's own digest lives in its table entry and is verified only when that record is read; and a
+trailer that does not exactly describe the file it sits in (`fileSize == tableOffset + entryCount*32 +
+24`) is what catches a truncation that removed whole records. Any of those failing rejects the blob and
+self-heals to a full re-parse.
+
 A second, much smaller cache sits beside it: the **span-tier memo** (`ingest_astquery.h`), which
 `--grep`'s tier pass uses to skip re-parsing a hit file whose bytes have not changed. It is keyed by
 path + parser version, gated on the same `(sizeBytes, mtimeNs, ctimeNs)` stat triple and racy-mtime rule

@@ -980,3 +980,89 @@ instead of 0.10 s until something invalidates the blob. Correctness is unaffecte
 per FILE, so a default run can only ever read back the files it actually crawled (`gitignorecheck`
 arm 10 pins exactly that) — and this is the same shape `--exclude` has always had, which is why the
 ignore mode is deliberately NOT part of the cache key.
+
+---
+
+## 2026-09-03 — the offset-table cache blob (v15): what a subset configuration used to pay, and what it pays now
+
+LEDGER row, never a gate (the no-perf-budget rule). The registered bands are in docs/EVALS.md, "The
+auto-cache key ignores `--exclude`" — bands (1)–(3) from the original registration and (6)–(8) from the
+retry design. Band (6) (full-battery wall within 1.2× of base under the same `-j`) is measured on the
+integration tree after merge, not here.
+
+### Instrument and argv
+
+Two binaries and one synthetic corpus, wall-clock around the whole process (`/usr/bin/time -p`, stdout to
+`/dev/null`), each arm with its own `XDG_CACHE_HOME` (and `TMPDIR` unset) so the blobs never collide:
+
+| arm | what it is |
+| --- | --- |
+| `base` | `d8fa59c` (this lane's fork point) — kCacheVersion 14, one whole-file blob per (root, class) |
+| `head` | this lane's HEAD — kCacheVersion 15, the offset table + carry-over save |
+
+The corpus is **31,000 generated C++ translation units** — 1,000 under `keep/` and 30,000 under `ext/` —
+each a namespace with a struct, a method with one branch, and two free functions. Synthetic on purpose:
+the effect under test is the ratio between a configuration's own file count and the blob's, and the real
+tree that exhibits it (`bench/external`, 158,202 files) cannot be crawled on this machine without the 2 GiB
+cache cap becoming the confound the reverted key change already died of. `--exclude=ext` is the narrow
+configuration (1,000 files); the bare run is the wide one (31,000).
+
+```
+XDG_CACHE_HOME=<per-arm> <bin> <corpus>                  # wide,   files=31000
+XDG_CACHE_HOME=<per-arm> <bin> <corpus> --exclude=ext    # narrow, files=1000
+```
+
+Five trials per timed cell after a priming run, machine otherwise idle, Apple Silicon, warm page cache.
+**The arms were NOT rotated within a trial** (each arm's whole sequence ran before the next). That is a
+weaker protocol than the card-A3 row above, and it is stated rather than hidden — it is adequate here only
+because the two effects being read are 6–9× and 3.6×, an order of magnitude outside the within-trial ramp
+that made rotation load-bearing there. The one cell where it would matter (`wide warm`, a ~0.1 s gap on a
+0.3–0.4 s run) is reported as NOT RESOLVED below.
+
+### Result
+
+| measurement | `base` (v14) | **`head`** (v15) |
+| --- | --- | --- |
+| superset blob, 31,000 files | 30,147,173 B | **31,139,189 B** (+3.3%) |
+| wide warm, 31,000 files (5 trials) | 0.39 0.40 0.41 0.42 0.43 s | 0.29 0.30 0.30 0.33 0.41 s |
+| **narrow warm over the superset blob** (5 trials) | 0.06 0.07 0.07 0.08 0.09 s | **0.01 0.01 0.01 0.01 0.01 s** |
+| narrow warm over its OWN `--cache=PATH` blob | — | 0.01 0.01 0.01 0.01 0.01 s |
+| blob after a DIRTY narrow run | **951,814 B** (truncated to that run's 1,001 files) | **31,139,432 B** (extended) |
+| the wide run that follows it | `reparsed=30000`, 0.96 s | **`reparsed=0`, 0.27 s** |
+| a DIRTY narrow run's own wall (3 trials) | 0.02 s | 0.13 0.15 0.40 s |
+
+* **Band (1)/(7) — the thrash is gone, and it was never about milliseconds.** Under `base`, a narrow run
+  that is DIRTY rewrites the shared blob with its own 1,001 files and the other 30,000 records cease to
+  exist; the next wide run cold-parses all of them (`reparsed=30000`, 0.96 s). Under `head` the same
+  sequence leaves `reparsed=0` and 0.27 s. This row, not the load time, is the reason the format changed.
+* **Band (2) — a subset run no longer pays for the superset.** 0.06–0.09 s → 0.01 s, and the auto-cache
+  superset blob is now indistinguishable from the narrow configuration's own 983,619 B `--cache=PATH`
+  blob (0.01 s both). The registered band was "within 2×"; measured ratio is 1.0–2.0× at 10 ms
+  granularity, which is the resolution floor of this instrument rather than a difference.
+* **The cost, stated plainly: +3.3% blob and a carry-over copy on a dirty subset save.** The table is
+  32 B per file (31,000 × 32 = 992,000 B, the whole of the +992,016 B). A dirty narrow run must copy the
+  30,000 records it did not crawl — ~30 MB read + rewritten — and that takes 0.13–0.40 s where `base`
+  took 0.02 s. That is the trade, and it is the right way round: `base` "saved" 0.1–0.4 s by destroying
+  work that then cost 0.96 s to redo, once per configuration switch, forever.
+* **`wide warm` is NOT RESOLVED.** `head` is nominally ~0.1 s faster, but the arms were not rotated and
+  `head`'s own spread (0.29–0.41) overlaps `base`'s (0.39–0.43). No claim is made in either direction;
+  the wide path reads the same bytes it always did, in one coalesced pread instead of one `readFile`.
+
+### Reproduce
+
+```
+git archive d8fa59c | tar -x -C <scratch>/base && cmake -S <scratch>/base -B <scratch>/base/build \
+  && cmake --build <scratch>/base/build -j 6
+python3 -c "…"                      # 1000 keep/ + 30000 ext/ units, template in this section's prose
+for arm in base head; do
+  X=<scratch>/xdg_$arm; rm -rf $X; mkdir -p $X/ripwire
+  env -u TMPDIR XDG_CACHE_HOME=$X $BIN <corpus> >/dev/null            # prime the superset blob
+  env -u TMPDIR XDG_CACHE_HOME=$X $BIN <corpus> --exclude=ext         # the narrow arm
+  echo 'int knew( int a ) { return a + 7; }' > <corpus>/keep/knew.cpp # make it DIRTY
+  env -u TMPDIR XDG_CACHE_HOME=$X RIPWIRE_CACHE_STATS=1 $BIN <corpus> --exclude=ext
+  env -u TMPDIR XDG_CACHE_HOME=$X RIPWIRE_CACHE_STATS=1 $BIN <corpus>   # reparsed= is the whole story
+done
+```
+
+Name the subtree `ext/`, not `vendor/` — the crawl's taxonomy filter skips a directory called `vendor`
+outright, so a corpus built under that name silently measures 1,000 files in both arms.

@@ -571,7 +571,8 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
 //    pool (the Win-2 dirty flag and the A1 reparsed counter), the install/gate-open moment, and
 //    the dirty-gated saveCache — everything between the prewarm launch and the doc post-pass.
 inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::string_view cacheFile, bool captureValueUses,
-                              HashMap<std::string, FileFacts>& cache, IngestFileScan& scan, QueryPrewarm& prewarm )
+                              HashMap<std::string, FileFacts>& cache, const CacheLoadStats& cacheStats,
+                              IngestFileScan& scan, QueryPrewarm& prewarm )
 {
     RawFacts raw;
     const bool needsCacheHash = !cacheFile.empty();
@@ -758,11 +759,16 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         // ONLY when RIPWIRE_CACHE_STATS is set (off by default → no stdout/stderr perturbation on any
         // normal run or gate). A warm restore over a tree with N-of-F files changed prints reparsed=N,
         // making the "restore cost is proportional to drift, not tree size" claim executable.
+        // v15 adds the two OFFSET-TABLE observables next to them, and they are the ones that make "a
+        // subset configuration reads only its own records" an executable fact rather than a wall-clock
+        // claim: blob_entries is how many files the shared superset blob holds, cached_records is how
+        // many of them this configuration actually deserialised (test/cacheoffsetcheck.sh band (2)).
         if( std::getenv( "RIPWIRE_CACHE_STATS" ) != nullptr )
         {
             const std::size_t reparsed = reparsedCount.load( std::memory_order_relaxed );
-            std::fprintf( stderr, "ripwire: cache-stats reparsed=%zu reused=%zu files=%zu\n",
-                          reparsed, ( nfiles >= reparsed ? nfiles - reparsed : std::size_t( 0 ) ), nfiles );
+            std::fprintf( stderr, "ripwire: cache-stats reparsed=%zu reused=%zu files=%zu cached_records=%zu blob_entries=%zu\n",
+                          reparsed, ( nfiles >= reparsed ? nfiles - reparsed : std::size_t( 0 ) ), nfiles,
+                          cacheStats.recordsRead, cacheStats.blobEntries );
         }
 
         // Win 2: rewrite cache only when at least one file changed (dirty flag set by workers above).
