@@ -1641,6 +1641,17 @@ constexpr const char* kSkippedLegend =
                  " consequence: the walk stopped there, their contents are UNKNOWN rather than zero, and they are in no count here. The two"
                  " are separate because the answer to \"why is my tree missing\" differs: one is a rule you passed, the other is a rule this"
                  " build carries. degraded_parse= / minified_suspect= count the h rows."
+                 " ignored= is ignored_files= on the map: files git's OWN ignore rules cover"
+                 " (.gitignore / .git/info/exclude / core.excludesFile), tested LAST — after the extension, the exclude and the built-in"
+                 " denylist — so it only ever counts a file that would OTHERWISE have been indexed, and the accounting invariant above"
+                 " reads indexed= + oversize= + excluded= + ignored=. ignored_dirs= counts SUBTREES those rules pruned, with the same"
+                 " consequence excluded_dirs= carries: the walk stopped at the directory, contents UNKNOWN rather than zero. Both classes"
+                 " are rowed (why=\"ignored\" for the files, why=\"ignored-dir\" for the subtrees, bytes=\"0\" on a subtree because a"
+                 " directory has no size this verb can honestly report). ignore_mode= names WHICH rule set applied: git (consulted and"
+                 " applied), off (the no-ignore flag), unavailable (no git work tree at this root, or no git binary — the full walk), root-ignored"
+                 " (the root is ITSELF inside an ignored subtree, so honouring the rules would empty the map — the full walk). Only"
+                 " ignore_mode=\"git\" can put a non-zero number beside the two counters; every other mode means nothing was consulted, which"
+                 " is not the same claim as nothing being ignored."
                  " unmeasured= counts indexed files this run never parsed (a doc-format file extracted by the doc pass, a binary sniff or"
                  " nesting guard refusal, a read failure) — they are absent from the health counts, not clean. rows_capped=\"1\" means a row"
                  " list hit its 500-row ceiling, so the rows are a SAMPLE of the count beside them; every count stays exact. A zero means"
@@ -1722,6 +1733,20 @@ void writeOversizeRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vec
 
 // §L1 — the <f> rows for the two non-size drop classes. `why` is a caller-supplied literal from a CLOSED
 // vocabulary (excluded / unsupported-ext), never data — see test/fixedbufsweep.sh's row for this buffer.
+// §N6-C — the ignore mode as one stable token. A LABEL, not a boolean: "unavailable" and "root-ignored"
+// both mean the full walk ran, and a reader debugging a corpus needs to tell them apart.
+const char* ignoreModeLabel( rw::IgnoreMode m ) noexcept
+{
+    switch( m )
+    {
+        case rw::IgnoreMode::Git:         return "git";
+        case rw::IgnoreMode::Off:         return "off";
+        case rw::IgnoreMode::RootIgnored: return "root-ignored";
+        case rw::IgnoreMode::Unavailable: break;
+    }
+    return "unavailable";
+}
+
 void writeDropRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vector<rw::SkippedFile>& rows, const char* why,
                     std::string_view rootPrefix = {} )
 {
@@ -1899,19 +1924,21 @@ std::optional<int> runSkipped( const MainDispatch& d )
         const SkipHealthReport health = classifySkipHealth( ing );
 
         w.write( kSkippedLegend );
-        char hdr[ 640 ];   // twelve counters, each up to 20 digits — sized well clear of a truncated count
+        char hdr[ 768 ];   // fourteen counters, each up to 20 digits, + ignore_mode= — sized well clear of a truncated count
         // mirror ingest()'s own zero-ceiling clamp so the header states the EFFECTIVE bound, never a raw 0
         const std::size_t effectiveMax = cfg.maxFileBytes == 0 ? kDefaultMaxFileBytes : cfg.maxFileBytes;
         const CrawlSkips& cs           = ing.crawlSkips;
-        const bool        rowsCapped   = cs.excluded.size() < cs.excludedFiles || cs.unsupported.size() < cs.unsupportedFiles;
+        const bool        rowsCapped   = cs.excluded.size() < cs.excludedFiles || cs.unsupported.size() < cs.unsupportedFiles
+                                      || cs.ignored.size() < cs.ignoredFiles || cs.ignoredDirRows.size() < cs.ignoredDirs;   // §N6-C
         std::snprintf( hdr, sizeof( hdr ),
                        "<skipped indexed=\"%zu\" oversize=\"%zu\" excluded=\"%llu\" unsupported_ext=\"%llu\" excluded_dirs=\"%llu\""
-                       " pruned_dirs=\"%llu\""
+                       " pruned_dirs=\"%llu\" ignored=\"%llu\" ignored_dirs=\"%llu\" ignore_mode=\"%s\""
                        " degraded_parse=\"%zu\" minified_suspect=\"%zu\" unmeasured=\"%zu\" max_file_size=\"%zu\" json_ceiling=\"%zu\""
                        " yaml_ceiling=\"%zu\"%s",
                        ing.files.size(), ing.skippedOversize.size(),
                        ( unsigned long long ) cs.excludedFiles, ( unsigned long long ) cs.unsupportedFiles,
                        ( unsigned long long ) cs.excludedDirs, ( unsigned long long ) cs.prunedDirs,
+                       ( unsigned long long ) cs.ignoredFiles, ( unsigned long long ) cs.ignoredDirs, ignoreModeLabel( cs.ignoreMode ),
                        health.degraded, health.minified, health.unmeasured,
                        effectiveMax, kMaxJsonConfigBytes, kMaxYamlConfigBytes,
                        rowsCapped ? " rows_capped=\"1\"" : "" );
@@ -1925,6 +1952,8 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeOversizeRows( w, esc, ing.skippedOversize, skRootPrefix );
         writeDropRows( w, esc, cs.excluded,    "excluded", skRootPrefix );
         writeDropRows( w, esc, cs.unsupported, "unsupported-ext", skRootPrefix );
+        writeDropRows( w, esc, cs.ignored,        "ignored",     skRootPrefix );   // §N6-C: the files git's rules covered
+        writeDropRows( w, esc, cs.ignoredDirRows, "ignored-dir", skRootPrefix );   // §N6-C: the subtrees they pruned
         writeUnindexedExtRows( w, esc, cs.unindexedExts );
         writeHealthRows( w, esc, ing, health.findings, skRootPrefix );
         writeLangRows( w, esc, computeLangCounts( ing ) );   // W3-S item 3: corpus composition by language

@@ -802,6 +802,163 @@ bool recordPreSizeDrop( CrawlSkips& skips, HashMap<std::string, std::uint64_t>& 
     return false;
 }
 
+// ── §N6-C: THE IGNORE PROBE — what a repository already told us it does not want indexed ─────────────
+//
+// ripwire is named for ripgrep, whose defining default is that ignored files are not searched. Everything
+// below exists to make the crawl's default agree with that.
+//
+// WHY GIT, AND NOT A .gitignore MATCHER OF OUR OWN. Measured, then decided. A native matcher has to be
+// bug-compatible with git across nested .gitignore precedence, negation (`!keep.c`), `**`, the trailing-
+// slash directory form, `core.excludesFile`, `.git/info/exclude`, and macOS case folding — and the moment
+// it diverges it deletes source from a corpus while claiming the repository asked for that. Shelling to
+// git costs ONE fork per root and is exact by construction: measured 0.02 s (ugrep, rocksdb), 0.15 s
+// (duckdb), 0.02 s on this repository's own root with `--directory` (bench/PROFILE.md carries the row).
+// This is not a new dependency — gitmine.h, crossref.h, prcontext.h, quality.h and binstale.h all already
+// popen git, and the zero-runtime-dependency guardrail (G3) is about what the BINARY links, not about an
+// optional tool whose absence degrades. Its absence degrades here exactly as it does there: no git work
+// tree, or no git binary, and the crawl is today's full walk with IgnoreMode::Unavailable saying so.
+//
+// `--directory` is load-bearing for the cost, not a convenience: it collapses a wholly-ignored directory
+// to one entry, so a 150K-file node_modules/ costs one line of output and one prune, never an enumeration.
+// The price is that a pruned subtree's file count is UNKNOWN — which is precisely what ignoredDirs= says,
+// on the same contract excludedDirs=/prunedDirs= already carry.
+// `-z` (NUL-separated) rather than the default: git QUOTES paths containing unusual bytes, and a quoted
+// path silently fails to match the walk's own spelling, i.e. under-prunes with no diagnostic.
+struct GitIgnoreSet
+{
+    bool                     available = false;   // git answered; dirs/files are authoritative for this root
+    bool                     rootIgnored = false; // git answered "./" — the ROOT is itself ignored (see IgnoreMode)
+    std::vector<std::string> dirs;                // root-relative, NO trailing '/', sorted
+    std::vector<std::string> files;               // root-relative, sorted
+};
+
+// A probe answer larger than this is refused whole rather than applied in part: a PARTIAL ignore set
+// under-prunes silently, which is the one failure mode this lane exists to remove. With `--directory` the
+// realistic ceiling is kilobytes (26 entries on this repository), so this is a hostile-input guard, not a
+// working limit.
+constexpr std::size_t kMaxIgnoreProbeBytes = 64ull * 1024ull * 1024ull;
+
+// Ask git which paths under `rootDir` its own ignore rules cover. Never throws; every failure mode returns
+// `available=false`, which the caller reads as "walk everything, and say that is what happened".
+GitIgnoreSet collectGitIgnored( const char* rootDir )
+{
+    GitIgnoreSet out;
+    const std::string cmd = "git -C " + shSingleQuote( rootDir == nullptr ? std::string( "." ) : std::string( rootDir ) )
+                          + " -c core.quotepath=false ls-files --others --ignored --exclude-standard --directory -z 2>/dev/null";
+    std::FILE* pipe = ::popen( cmd.c_str(), "r" );
+    if( pipe == nullptr )
+    {
+        DEGRADED_PATH_ALERT( "ingest: cannot run git for the ignore probe — full walk" );
+        return out;
+    }
+    std::string buf;
+    char        chunk[ 8192 ];
+    bool        overflowed = false;
+    for( std::size_t n = std::fread( chunk, 1, sizeof( chunk ), pipe ); n > 0; n = std::fread( chunk, 1, sizeof( chunk ), pipe ) )
+    {
+        if( buf.size() + n > kMaxIgnoreProbeBytes )
+        {
+            overflowed = true;
+            break;
+        }
+        buf.append( chunk, n );
+    }
+    const int rc = ::pclose( pipe );
+    if( rc != 0 )
+    {
+        return out;   // not a git work tree, or no git binary — the DESIGNED degrade, silent by contract
+    }
+    if( overflowed )
+    {
+        DEGRADED_PATH_ALERT( "ingest: git ignore probe exceeded its byte ceiling — full walk" );
+        return out;
+    }
+
+    for( std::size_t i = 0; i < buf.size(); )
+    {
+        const std::size_t nul     = buf.find( '\0', i );
+        const std::size_t rawEnd  = nul == std::string::npos ? buf.size() : nul;   // one past the entry's last byte
+        // A trailing-slash entry is a DIRECTORY in git's output; anything else is one file. Read off the RAW
+        // bytes before the trims below remove the slash — and off rawEnd > i, so an empty entry (two NULs in
+        // a row, which -z should never produce and this must not index out of) is simply not a directory.
+        const bool        isDir   = rawEnd > i && buf[ rawEnd - 1 ] == '/';
+        std::string_view  ent( buf.data() + i, rawEnd - i );
+        i = rawEnd + 1;
+        while( !ent.empty() && ent.back() == '/' )
+        {
+            ent.remove_suffix( 1 );
+        }
+        while( ent.size() >= 2 && ent[ 0 ] == '.' && ent[ 1 ] == '/' )
+        {
+            ent.remove_prefix( 2 );
+        }
+        if( ent.empty() )
+        {
+            continue;   // an empty record: not an answer about any path, so it is skipped, not interpreted
+        }
+        if( ent == "." )
+        {
+            // git named the root itself ("./"): this root lives inside an ignored subtree. Honouring that
+            // empties the map, so the whole answer is discarded and the mode records why (RootIgnored).
+            out.rootIgnored = true;
+            return out;
+        }
+        if( isDir ) { out.dirs.emplace_back( ent ); }
+        else        { out.files.emplace_back( ent ); }
+    }
+    std::sort( out.dirs.begin(),  out.dirs.end() );
+    std::sort( out.files.begin(), out.files.end() );
+    out.available = true;
+    return out;
+}
+
+// Sorted-vector membership. A binary search over a contiguous, already-sorted vector beats a hash map at
+// these sizes and costs no allocation, and — unlike a HashMap — has no iteration order that could reach
+// output (the G2 container rule's standing caveat).
+//
+// WHERE THE CALLER MUST TEST IT, because the ordering is the contract. The FILE test runs AFTER the
+// extension classification and the --exclude match (the same reason recordPreSizeDrop's header gives for
+// its own two): `ignored` then only ever describes a file that would OTHERWISE HAVE BEEN INDEXED, which is
+// what lets the header's accounting invariant carry it — indexed= + oversize= + excluded= + ignored= = the
+// population the crawl enumerated — and keeps unsupported_ext=/unindexed= meaning exactly what they meant
+// before this lane. The DIRECTORY test runs after the built-in denylist for the mirror reason: ignoredDirs=
+// then counts only the subtrees no rule this build already carried had pruned.
+bool pathInIgnoreSet( const std::vector<std::string>& sorted, std::string_view rel ) noexcept
+{
+    return std::binary_search( sorted.begin(), sorted.end(), rel,
+                               []( std::string_view a, std::string_view b ) noexcept { return a < b; } );
+}
+
+// §N6-C — the probe AND the mode it implies, as one decision, so collectSources reads the answer instead
+// of computing it. One fork per root, paid only for a directory root the walk actually opened: the probe
+// is worthless on a single-file root and must not be charged to a root the walk already refused.
+GitIgnoreSet probeIgnoreSet( const char* rootDir, bool respectGitignore, IgnoreMode& modeOut )
+{
+    if( !respectGitignore )
+    {
+        return {};   // modeOut was already set to Off by the caller, before any early return could skip it
+    }
+    PROFILE_SCOPE_DESCRIBE( "ingest: crawl (git ignore probe)" );
+    GitIgnoreSet set = collectGitIgnored( rootDir );
+    modeOut = set.available ? IgnoreMode::Git : set.rootIgnored ? IgnoreMode::RootIgnored : IgnoreMode::Unavailable;
+    return set;
+}
+
+// §L1/§N6-C — WHY the walk stopped at this directory, recorded. Contents are UNKNOWN past here whichever
+// rule stopped us, but WHICH rule is itself the disclosure, so the three classes carry three counters
+// (CrawlSkips::excludedDirs / ::ignoredDirs / ::prunedDirs). `excluded` is the only user-driven prune;
+// `ignoredDir` is the repository's own declaration; everything else that reaches here is built-in policy
+// (kCrawlSkipDirs, or the CMakeCache.txt build-output sentinel). The ignore class is ROWED as well as
+// counted: a pruned subtree's contents are unknown, but its PATH is the one fact a reader chasing a
+// vanished symbol needs, and it costs one capped row per subtree.
+template< typename PathFn >
+void recordDirPrune( CrawlSkips& skips, bool excluded, bool ignoredDir, const fs::directory_entry& entry, PathFn&& fullPath )
+{
+    if( excluded )        { ++skips.excludedDirs;  return; }
+    if( ignoredDir )      { recordCrawlDrop( skips.ignoredDirRows, skips.ignoredDirs, fullPath(), {}, entry );  return; }
+    ++skips.prunedDirs;
+}
+
 // §L1: establish the ordering contract on everything the crawl collected out of order. The row vectors
 // sort by path; the extension histogram comes out of a HashMap, whose iteration order is an implementation
 // detail, so it sorts by count DESC then extension ASC. That last one matters more than usual: it rides
@@ -811,6 +968,8 @@ void finalizeCrawlSkips( CrawlSkips& skips, const HashMap<std::string, std::uint
     const auto byPath = []( const SkippedFile& a, const SkippedFile& b ) noexcept { return a.path < b.path; };
     std::sort( skips.excluded.begin(), skips.excluded.end(), byPath );
     std::sort( skips.unsupported.begin(), skips.unsupported.end(), byPath );
+    std::sort( skips.ignored.begin(), skips.ignored.end(), byPath );               // §N6-C, same contract
+    std::sort( skips.ignoredDirRows.begin(), skips.ignoredDirRows.end(), byPath ); // §N6-C, same contract
     skips.unindexedExts.reserve( extTally.size() );
     for( const auto& [ ext, count ] : extTally )
     {
@@ -831,12 +990,16 @@ struct CrawlResult
 };
 
 CrawlResult collectSources( const char* rootDir, const std::vector<std::string>& excludeSubstr,
-                            std::size_t maxFileBytes, std::string_view excludeLabel = {} )
+                            std::size_t maxFileBytes, std::string_view excludeLabel = {}, bool respectGitignore = true )
 {
     std::vector<std::string>     out;
     std::vector<SkippedOversize> skipped;
     CrawlSkips                   skips;
     HashMap<std::string, std::uint64_t> extTally;   // unindexed source/text-looking ext -> file count
+
+    // §N6-C: the mode is set before ANY early return, so a single-file root, an unopenable root and a
+    // refused probe all report what was consulted rather than inheriting a default that implies more.
+    skips.ignoreMode = respectGitignore ? IgnoreMode::Unavailable : IgnoreMode::Off;
 
     std::error_code ec;
     fs::path root = fs::path( rootDir );
@@ -879,6 +1042,8 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         DEGRADED_PATH_ALERT( "ingest: cannot open root directory — empty result" );
         return { std::move( out ), std::move( skipped ), std::move( skips ) };
     }
+
+    const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode );   // §N6-C
 
     const fs::recursive_directory_iterator end;
     for( ; it != end; it.increment( ec ) )
@@ -940,21 +1105,19 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
                 }
                 ec.clear();
             }
+            // §N6-C: the ignore rule is tested LAST, so ignoredDirs= counts only the subtrees no rule this
+            // build already carried had pruned — every existing counter keeps the meaning it had, and the
+            // new one is exactly "what honouring .gitignore additionally removed".
+            bool ignoredDir = false;
+            if( !skip && ignoreSet.available )
+            {
+                ignoredDir = pathInIgnoreSet( ignoreSet.dirs, relForHash( fullPath(), rootDir ) );
+                skip       = ignoredDir;
+            }
             if( skip )
             {
                 it.disable_recursion_pending();
-                // §L1: contents UNKNOWN past here, whichever rule stopped us — but WHICH rule is itself the
-                // disclosure, so the two classes carry two counters (see CrawlSkips::excludedDirs /
-                // ::prunedDirs). `excluded` is the only user-driven prune; everything else that reached this
-                // branch is built-in policy (kCrawlSkipDirs or the CMakeCache.txt build-output sentinel).
-                if( excluded )
-                {
-                    ++skips.excludedDirs;
-                }
-                else
-                {
-                    ++skips.prunedDirs;
-                }
+                recordDirPrune( skips, excluded, ignoredDir, *it, fullPath );   // §L1/§N6-C: see its header
             }
             continue;
         }
@@ -980,6 +1143,13 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         const std::string ext = lowerExtensionOf( name );
         if( recordPreSizeDrop( skips, extTally, ext, excluded, *it, fullPath ) )
         {
+            continue;
+        }
+
+        // §N6-C: AFTER the extension and the --exclude match — see pathInIgnoreSet's header for the ordering.
+        if( ignoreSet.available && pathInIgnoreSet( ignoreSet.files, relForHash( fullPath(), rootDir ) ) )
+        {
+            recordCrawlDrop( skips.ignored, skips.ignoredFiles, fullPath(), ext, *it );
             continue;
         }
 

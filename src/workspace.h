@@ -219,11 +219,20 @@ inline void mergeCrawlDisclosures( IngestResult& m, IngestResult& part, const Wo
     };
     relabel( part.crawlSkips.excluded,    m.crawlSkips.excluded );
     relabel( part.crawlSkips.unsupported, m.crawlSkips.unsupported );
+    relabel( part.crawlSkips.ignored,        m.crawlSkips.ignored );          // §N6-C, per root, labeled like its siblings
+    relabel( part.crawlSkips.ignoredDirRows, m.crawlSkips.ignoredDirRows );   // §N6-C
 
     m.crawlSkips.excludedFiles    += part.crawlSkips.excludedFiles;
     m.crawlSkips.unsupportedFiles += part.crawlSkips.unsupportedFiles;
     m.crawlSkips.excludedDirs     += part.crawlSkips.excludedDirs;
     m.crawlSkips.prunedDirs       += part.crawlSkips.prunedDirs;   // built-in policy prunes sum the same way
+    m.crawlSkips.ignoredFiles     += part.crawlSkips.ignoredFiles; // §N6-C: the rule is applied PER ROOT, so the counts sum
+    m.crawlSkips.ignoredDirs      += part.crawlSkips.ignoredDirs;
+    // §N6-C: one merged header, N roots, and the modes can differ (a git checkout beside a plain directory).
+    // The merged mode is the WEAKEST of them — a reader must not read "git" off a workspace where one root's
+    // rules were never consulted. Ordering is the enum's own: Unavailable < Git < Off < RootIgnored, and the
+    // merge keeps the numerically smallest, i.e. the least that was applied anywhere.
+    m.crawlSkips.ignoreMode = m.crawlSkips.ignoreMode < part.crawlSkips.ignoreMode ? m.crawlSkips.ignoreMode : part.crawlSkips.ignoreMode;
 
     for( const UnindexedExt& ue : part.crawlSkips.unindexedExts )
     {
@@ -250,6 +259,15 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
 {
     IngestResult m;
     VERIFY( roots.size() == parts.size() );
+    // §N6-C: seed the merged ignore mode from the FIRST part, not from IngestResult's own default. The
+    // merge below keeps the WEAKEST mode across roots (mergeCrawlDisclosures), and a reduction seeded with
+    // the "nothing was consulted" default would report exactly that for a workspace where every root's
+    // rules WERE consulted — a merged header claiming less than it did is the same defect class as one
+    // claiming more.
+    if( !parts.empty() )
+    {
+        m.crawlSkips.ignoreMode = parts.front().crawlSkips.ignoreMode;
+    }
 
     std::size_t totFiles = 0, totSyms = 0, totRefs = 0, totIncs = 0, totBinds = 0, totFfis = 0, totRouteDefs = 0, totRouteUses = 0;
     for( const IngestResult& p : parts )

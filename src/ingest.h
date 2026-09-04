@@ -259,9 +259,16 @@ inline bool isSkippedCrawlDir( std::string_view dirName ) noexcept
 // substring is matched against the LABELED spelling `<excludeLabel>/<root-relative-path>` instead of the
 // crawled path — so ONE excludes list applies uniformly across roots and `--exclude=lib1/` scopes to the
 // root labeled lib1. Empty (the default, every single-root call) ⇒ behavior byte-identical to today.
+// respectGitignore (§N6-C, --no-ignore turns it OFF): in a git work tree the crawl consults git's own
+// ignore rules and skips what the repository already declared uninteresting, disclosing the drop as
+// ignored_files=/ignored_dirs=. A non-git root, a missing git binary, or a root that is itself inside an
+// ignored subtree all keep TODAY'S FULL WALK and say which (CrawlSkips::ignoreMode). Default true: the
+// HEAD-snapshot and edit-preview callers re-ingest a `git archive` extraction, which holds tracked files
+// only, so the two sides of a --quality-delta compare the same population either way.
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr = {},
                      std::string_view cacheFile = {}, std::size_t maxFileBytes = kDefaultMaxFileBytes,
-                     bool captureValueUses = true, std::string_view excludeLabel = {} );
+                     bool captureValueUses = true, std::string_view excludeLabel = {},
+                     bool respectGitignore = true );
 
 // ---- shared AST-query pass (powers --match structural search + --lint) ----
 // Re-parse the already-crawled files in parallel and run one or more tree-sitter queries over each tree.

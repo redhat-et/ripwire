@@ -1452,6 +1452,14 @@ inline const char* churnRankLegendFor( const char* label ) noexcept
 // ENCODING overhead but not by a factor, and 715 B of XML-only comment is content, not encoding (XML 1145
 // vs JSON 719 tokens, past the 25% bar). The long form of these definitions belongs in --help, which is not
 // charged against anyone's budget; what a reader needs IN BAND is the key-to-meaning map itself.
+// §N6-C — the ignore disclosure defines itself where the reader meets it, but ONLY on a map that carries
+// the attributes. Unconditional it would grow the map's FIXED FLOOR, which test/tokenbudgetcheck.sh arm #3
+// measures at SEVEN bytes of headroom on `src` at --max-tokens=500 — see buildUnindexedAttr's note below
+// for the measurement that settled the identical question for unindexed=.
+inline constexpr const char* kIgnoredLegend =
+    "<!-- hdr:ignored_files=files-git's-own-ignore-rules-covered(exact;would-otherwise-be-indexed;the-no-ignore-flag-restores-them)"
+    " hdr:ignored_dirs=SUBTREES-those-rules-pruned(walk-stopped-there:contents-UNKNOWN-not-zero;the-skipped-verb-rows-both) -->";
+
 inline constexpr const char* kMetricsLegend =
     "<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=MAX-depth "
     "humps=regions-reaching-the-nesting-bar deep=lines-inside-them(floor,see deep_floor) "
@@ -1560,6 +1568,27 @@ inline std::string buildUnindexedAttr( const CrawlSkips& skips )
     {
         attr += " unindexed_exts=";
         attr += std::to_string( skips.unindexedExts.size() );
+    }
+    return attr;
+}
+
+// §N6-C — what honouring the repository's own .gitignore removed from this corpus. TWO numbers because
+// they answer two different questions and one of them is a floor on a fact rather than the fact: an
+// ignored FILE is an exact drop the walk saw, an ignored SUBTREE stopped the walk at its directory, so how
+// many files sat under it is UNKNOWN, not zero — the contract excluded_dirs=/pruned_dirs= already carry.
+// Returns "" when the rule dropped nothing, so a tree with nothing ignored (and every non-git root, and
+// every --no-ignore run) stays byte-identical to the pre-lane map. That absence is what test/golden.xml
+// and every argvdiff vector ride on.
+inline std::string buildIgnoredAttr( const CrawlSkips& skips )
+{
+    std::string attr;
+    if( skips.ignoredFiles > 0 )
+    {
+        attr += " ignored_files=";  attr += std::to_string( skips.ignoredFiles );
+    }
+    if( skips.ignoredDirs > 0 )
+    {
+        attr += " ignored_dirs=";   attr += std::to_string( skips.ignoredDirs );
     }
     return attr;
 }
@@ -1765,6 +1794,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += kMaxTokensFitLegend; // §B13.4, --max-tokens-only (ditto)
     }
+    const bool ignoreCut = ing.crawlSkips.ignoredFiles > 0 || ing.crawlSkips.ignoredDirs > 0;
+    legend += ignoreCut ? kIgnoredLegend : "";   // §N6-C — charged to the map that carries it; see kIgnoredLegend
     // W2-F: the pr_iters= / pr_converged= definition, charged to the maps that carry the attributes — empty
     // for a lexical or HITS ordering, and the prose half only on the map whose iteration stopped short.
     legend += renderDisclosure( ann.prDisclosure, DiscloseAs::LegendComment );
@@ -1815,6 +1846,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     }
     // §L1: the LANGUAGES this build could not read at all — buildUnindexedAttr carries the whole rule.
     const std::string unindexedAttr = buildUnindexedAttr( ing.crawlSkips );
+    const std::string ignoredAttr   = buildIgnoredAttr( ing.crawlSkips );   // §N6-C, empty unless the ignore rules cut something
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
     // one. Emitted ONLY under --max-tokens (nullptr for every other caller ⇒ byte-identical default map).
@@ -1862,7 +1894,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         {
             stats += " locality_pinned=";  stats += std::to_string( locPinTotal );
         }
-        stats += precAttr;  stats += rootsAttr;  stats += changedAttr;  stats += skippedAttr;  stats += unindexedAttr;  stats += fitAttr;
+        stats += precAttr;  stats += rootsAttr;  stats += changedAttr;  stats += skippedAttr;  stats += unindexedAttr;
+        stats += ignoredAttr;  stats += fitAttr;
         stats += " order=";      stats += orderAttr;
         stats += " -->";
         return stats;

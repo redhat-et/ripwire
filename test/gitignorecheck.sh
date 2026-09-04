@@ -193,7 +193,24 @@ diff -q "$TMP/d1" "$TMP/w3" >/dev/null \
     && ok "a default run after a --no-ignore run is unchanged (no cross-mode blob bleed)" \
     || no "a --no-ignore run's cache blob bled into the following default run"
 
-# ── 11. the flag is in --help (the deckcheck allowlist row for --no-ignore retires with it).
+# ── 11. THE ROOT-IGNORED TRAP. Pointing at a directory that is ITSELF gitignored (`ripwire build/` in a
+#    repo whose .gitignore holds `build/`) makes git answer "./" — everything. Honouring that literally
+#    hands back an EMPTY map for a directory the user pointed at deliberately, which is the worst available
+#    reading of "map this". The full walk runs and ignore_mode= says why.
+run "$TMP/repo/gen_out" >"$TMP/rooted"
+grep -q rwGateVendorSymbol "$TMP/rooted" && ok "a root that is itself ignored is still mapped in full" \
+    || no "mapping a gitignored directory directly returned an empty/short map"
+"$BIN" "$TMP/repo/gen_out" --skipped --no-cache 2>/dev/null | grep -q 'ignore_mode="root-ignored"' \
+    && ok '--skipped says ignore_mode="root-ignored" for a root inside an ignored subtree' \
+    || no 'a root inside an ignored subtree does not disclose ignore_mode="root-ignored"'
+"$BIN" "$TMP/nogit" --skipped --no-cache 2>/dev/null | grep -q 'ignore_mode="unavailable"' \
+    && ok '--skipped says ignore_mode="unavailable" on a non-git root' \
+    || no 'a non-git root does not disclose ignore_mode="unavailable"'
+"$BIN" "$TMP/repo" --skipped --no-ignore --no-cache 2>/dev/null | grep -q 'ignore_mode="off"' \
+    && ok '--skipped says ignore_mode="off" under --no-ignore' \
+    || no '--no-ignore does not disclose ignore_mode="off"'
+
+# ── 12. the flag is in --help (the deckcheck allowlist row for --no-ignore retires with it).
 "$BIN" --help 2>&1 | grep -q -- '--no-ignore' && ok "--no-ignore is documented in --help" \
     || no "--no-ignore is missing from --help"
 
