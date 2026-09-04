@@ -72,9 +72,12 @@ PY
 # bash 3.2 (macOS system /bin/bash) has no associative arrays — a case statement is the portable budget table.
 budgetFor(){
     case "$1" in
-        callers) echo 3050 ;;
-        impact)  echo 3450 ;;
-        uses)    echo 3600 ;;
+        # RE-PINNED +200 (2026-09-04, capture-audit M15): the shared floor essay grew ONE sentence defining the
+        # graph_ambiguous=/graph_unresolved= gauge pair every graph-floored root now carries (the magnitude of
+        # the floor, which no graph verb disclosed). New content on every first screen, not the essay re-inflating.
+        callers) echo 3250 ;;
+        impact)  echo 3650 ;;
+        uses)    echo 3800 ;;
     esac
 }
 VERBS="callers impact uses"

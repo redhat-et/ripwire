@@ -109,7 +109,7 @@ std::optional<int> runAffected( const MainDispatch& d )
                      "%s-->", rw::kGraphCountFloorBriefLegend );
         std::printf( "<affected changed=\"%s\" seeded_by=\"%s\" seeds=\"%zu\" tests=\"%zu\" reached=\"%zu\" script_gates_unmodelled=\"%zu\"%s>",
                      ex( cfg.affectedFiles ).c_str(), rw::affectedSeededBy( sel ), seeds.size(), testFiles.size(), reach.size(), scriptGatesUnmodelledCount( ing ),
-                     rw::kGraphCountFloorAttrXml );   // H5: tests=/reached= are a transitive-caller walk over the name-based CSR
+                     rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; tests=/reached= are a transitive-caller walk over the name-based CSR
         // §P11.4: run= where a REAL runner is derivable, absent where it is not. The index is constructed
         // here (not hoisted into MainDispatch) because it is lazy — a run with no test row reads no script.
         const rw::TestRunnerIndex runners( ing );
@@ -203,7 +203,7 @@ std::optional<int> runExercises( const MainDispatch& d )
                  ( pageDisclosure( epab, sizeof( epab ), shownRows, show.size(), epw.end, cfg.pageLimit, cfg.pageOffset, true )
                    + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
                  exRootAttr.c_str(),
-                 rw::kGraphCountFloorAttrXml );   // H5: reaches= is a transitive-callee walk over the name-based CSR
+                 rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; reaches= is a transitive-callee walk over the name-based CSR
     const rw::TestRunnerIndex runners( ing );      // §P11.4: the seed rows are the tests you are about to re-run
     for( std::size_t i = 0; i < shownSeed; ++i )
     {
@@ -340,11 +340,11 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         const rw::TestGateResult tg = rw::computeTestGate( ing, g, changed );
         if( cfg.json )
         {
-            rw::writeTestGateReportJson( stdout, ing, tg, root, cfg.pageLimit, cfg.pageOffset );
+            rw::writeTestGateReportJson( stdout, ing, g, tg, root, cfg.pageLimit, cfg.pageOffset );
         }
         else
         {
-            rw::writeTestGateReport( stdout, ing, tg, root, cfg.pageLimit, cfg.pageOffset );
+            rw::writeTestGateReport( stdout, ing, g, tg, root, cfg.pageLimit, cfg.pageOffset );
         }
         return tg.hasObligations ? 4 : 0;
     }

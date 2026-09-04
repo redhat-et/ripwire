@@ -583,13 +583,13 @@ inline std::string prBudgetTail( std::size_t changedFiles, std::uint32_t skipped
 // which disclosures they carry — direction= and the no-ref-work row are exactly the kind of attribute that
 // otherwise lands on two of three. G4: attribute text may not contain a double hyphen, so the note names
 // the sibling verbs without their leading dashes.
-inline void writePrRootOpen( std::FILE* out, const std::string& sharedAttrs, const std::string& tailAttrs,
+inline void writePrRootOpen( std::FILE* out, const Graph& g, const std::string& sharedAttrs, const std::string& tailAttrs,
                              const PrContextMask& anchor, const std::string& baseLabelEscaped )
 {
     // §H4 §3.4 / V4 MED-3: the marker rides here, on the ONE root emitter all three forms (empty diff /
     // plain / budgeted) share — which is exactly the drift this helper exists to prevent, and the reason it
     // is appended LAST, past every caller-supplied tail attribute (same placement rule as gitstamp::atAttr).
-    std::fprintf( out, "<pr-context%s%s%s>", sharedAttrs.c_str(), tailAttrs.c_str(), rw::kGraphCountFloorAttrXml );
+    std::fprintf( out, "<pr-context%s%s%s>", sharedAttrs.c_str(), tailAttrs.c_str(), rw::graphCountFloorAttrXml( g ).c_str() );   // M15: gauge + marker
     if( !anchor.refHasNoWork )
     {
         return;
@@ -764,7 +764,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
 
     if( changed.empty() )
     {
-        writePrRootOpen( out, sharedAttrs, " files=\"0\" skipped_mode_only=\"" + std::to_string( skippedModeOnly ) + "\"" + atAttrStr, anchor, escBase );
+        writePrRootOpen( out, g, sharedAttrs, " files=\"0\" skipped_mode_only=\"" + std::to_string( skippedModeOnly ) + "\"" + atAttrStr, anchor, escBase );
         std::fprintf( out, "<!-- no changed files in the index (clean tree, or the diff touched only non-indexed files) -->" );
         std::fprintf( out, "</pr-context>" );
         return 0;
@@ -1011,7 +1011,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     // truncated attributes — every existing consumer and gate is unaffected.
     if( budgetTokens == 0 )
     {
-        writePrRootOpen( out, sharedAttrs, " files=\"" + std::to_string( changed.size() ) + "\" skipped_mode_only=\"" + std::to_string( skippedModeOnly ) + "\"" + atAttrStr, anchor, escBase );
+        writePrRootOpen( out, g, sharedAttrs, " files=\"" + std::to_string( changed.size() ) + "\" skipped_mode_only=\"" + std::to_string( skippedModeOnly ) + "\"" + atAttrStr, anchor, escBase );
         emitFiles( out, kPrTrims[0] );
         std::fprintf( out, "</pr-context>" );
         return 0;
@@ -1019,7 +1019,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
 
     // BUDGETED (--max-tokens) — see pickPrTrimLevel: render each candidate level, keep the least-trimmed fit.
     const PrTrimRender chosen = pickPrTrimLevel( emitFiles, budgetTokens );
-    writePrRootOpen( out, sharedAttrs, prBudgetTail( changed.size(), skippedModeOnly, budgetTokens, chosen, ex( chosen.truncated ) ) + atAttrStr, anchor, escBase );
+    writePrRootOpen( out, g, sharedAttrs, prBudgetTail( changed.size(), skippedModeOnly, budgetTokens, chosen, ex( chosen.truncated ) ) + atAttrStr, anchor, escBase );
     std::fwrite( chosen.body.data(), 1, chosen.body.size(), out );
     std::fprintf( out, "</pr-context>" );
     return 0;

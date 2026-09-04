@@ -1696,7 +1696,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      pageDisclosure( dcAb, sizeof( dcAb ), dcPw.end - dcPw.begin, candidates.size(), dcPw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),
                      qvRootAttr.c_str(), dcConfigWarn.c_str(),
-                     rw::kGraphCountFloorAttrXml );   // H5: "zero callers" is a claim about the name-based CSR — a floor
+                     rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; "zero callers" is a claim about the name-based CSR — a floor
         std::vector<char> dcEsc;
         for( std::size_t candidateIndex = dcPw.begin; candidateIndex < dcPw.end; ++candidateIndex )
         {

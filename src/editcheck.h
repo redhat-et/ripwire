@@ -615,7 +615,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     out += gitstamp::atAttr( root );
     // §H4 §3.4: LAST, after at= — same placement rule, same reason (no existing attribute-adjacency
     // assertion in test/ can break on an attribute appended past the end of every group).
-    out += kGraphCountFloorAttrXml;
+    out += graphCountFloorAttrXml( g );   // M15: gauge + marker
     // R-E (2026-08-17 harvest): root= — same placement rule as kGraphCountFloorAttrXml above (truly last,
     // after every pre-existing attribute, so no substring-adjacency assertion in test/ can break).
     if( ecSingleRoot ) { out += " root=\"";  out += ex( root );  out += "\""; }

@@ -211,7 +211,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                                    + chRootAttr   // R-E: same root= the XML/JSON branches carry
                                    + pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                                      cfg.pageLimit, cfg.pageOffset, chDiscloseCap )
-                                   + rw::kGraphCountFloorAttrXml;   // §H4 §3.4 — every dialect carries the marker
+                                   + rw::graphCountFloorAttrXml( g );   // §H4 §3.4 — every dialect carries the marker
             emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix, &chTested.testReach );
             return 0;
         }
@@ -232,7 +232,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             std::printf( ",\"hop_tested\":%zu,\"hop_untested\":%zu", chTested.tested, chTested.untested );   // A6
             std::printf( "%s%s", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap, kJsonPageSyntax ),
-                         rw::kGraphCountFloorAttrJson );   // §H4 §3.4 — the JSON dialect's spelling of the same marker
+                         rw::graphCountFloorAttrJson( g ).c_str() );   // §H4 §3.4 — the JSON dialect's spelling of the same marker
             std::printf( ",\"%s\":[", tag );
             printJsonSymbolRows( ing, result, pw.begin, pw.end, chRootPrefix, &chTested.testReach );
             std::printf( "]}" );
@@ -249,7 +249,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         std::printf( "%s", chTested.xmlAttr.c_str() );   // A6: hop_tested=/hop_untested=
         std::printf( "%s%s>", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                     cfg.pageLimit, cfg.pageOffset, chDiscloseCap ),
-                     rw::kGraphCountFloorAttrXml );
+                     rw::graphCountFloorAttrXml( g ).c_str() );
         for( std::size_t i = pw.begin; i < pw.end; ++i )
         {
             const Symbol&           s  = ing.symbols[ result[i] ];
@@ -337,7 +337,7 @@ std::optional<int> runGraphQuery( const MainDispatch& d )
         std::printf( "<query expr=\"%s\" count=\"%zu\"%s%s%s%s>",
                      ex( cfg.graphQuery ).c_str(), total,
                      pageDisclosure( gqAb, sizeof( gqAb ), keep, total, gqPw.end, cfg.pageLimit, cfg.pageOffset, true ),
-                     rw::kGraphCountFloorAttrXml, gqRootAttr.c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ).c_str() );
+                     rw::graphCountFloorAttrXml( g ).c_str(), gqRootAttr.c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ).c_str() );
         for( std::size_t ri = gqPw.begin; ri < gqPw.end; ++ri )
         {
             const NodeId            c  = result[ ri ];
@@ -549,7 +549,7 @@ std::optional<int> runUses( const MainDispatch& d )
         // member-variable round (card A3): ONE resolved field takes the per-site path (fielduses.h — the renderer
         // the MCP twin returns); a bare field name declared by several owners refuses with the Owner.field
         // spellings; a member selector on an unserved language refuses by language name. One arm, one branch.
-        if( const std::optional<int> memberExit = memberUsesArm( ing, defs, sym, usSingleRoot, cfg.roots[ 0 ], cfg.pageLimit, cfg.pageOffset ); memberExit )
+        if( const std::optional<int> memberExit = memberUsesArm( ing, g, defs, sym, usSingleRoot, cfg.roots[ 0 ], cfg.pageLimit, cfg.pageOffset ); memberExit )
         {
             return *memberExit;
         }
@@ -635,14 +635,14 @@ std::optional<int> runUses( const MainDispatch& d )
             // a markdown SECTION heading reaches routinely. Same shape as runImpact / the callers arm.
             const std::string attr = "of=\"" + ex( sym ) + "\" defs=\"" + std::to_string( defs.size() )
                                    + "\" external=\"" + ( external ? "1" : "0" ) + "\" count=\"" + std::to_string( sites.size() ) + "\""
-                                   + selectorAttrs + usRootAttr + upage + rw::kGraphCountFloorAttrXml;   // §H4 §3.4
+                                   + selectorAttrs + usRootAttr + upage + rw::graphCountFloorAttrXml( g );   // §H4 §3.4
             emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins, usRootPrefix );
             return 0;
         }
 
         std::printf( "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s%s%s%s>",
                      ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), selectorAttrs.c_str(), usRootAttr.c_str(), upage,
-                     rw::kGraphCountFloorAttrXml );
+                     rw::graphCountFloorAttrXml( g ).c_str() );
         for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
         {
             const UseSite&          u  = sites[ siteIndex ];
@@ -721,7 +721,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t ambiguousCal
                 // zero there is no row to be careful about, and the warning describes nothing on screen.
                 ambiguousCallers > 0
                     ? "That is a caveat that one of the callers below MAY be reaching a different same-named definition, "
-                      "never proof that this one is (such a caller row carries amb=1); read the source if which-target "
+                      "never proof that this one is (such a caller row carries amb=K, K its ambiguous calls, the map row's amb=); read the source if which-target "
                       "matters. "
                     : "",
                 // One risk= value, the one in force. A verdict a reader has to look up in a glossary of three is a
@@ -904,7 +904,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
                 defs.size(), callerIds.size(), ambiguousCallers, reach.size(), sites.size(), testedSelf ? 1 : 0,
                 radiusTested, radiusUntested, deadCodeCandidate ? 1 : 0, risk,
                 pageDisclosure( cab, sizeof( cab ), cw.end - cw.begin, callerIds.size(), cw.end, cfg.pageLimit, cfg.pageOffset, true ),
-                rw::kGraphCountFloorAttrXml, sdRootAttr.c_str() );
+                rw::graphCountFloorAttrXml( g ).c_str(), sdRootAttr.c_str() );
     for( std::size_t i = cw.begin; i < cw.end; ++i )
     {
         const NodeId  callerId = callerIds[i];
@@ -912,7 +912,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
         std::printf( "<c n=\"%s\" p=\"%s:%u\"", ex( cs.name ).c_str(), ex( sdPathRel( cs.fileId ) ).c_str(), cs.line );
         if( callerId < g.ambOut.size() && g.ambOut[ callerId ] > 0 )
         {
-            std::printf( " amb=\"1\"" );
+            std::printf( " amb=\"%u\"", g.ambOut[ callerId ] );   // M15: the same COUNT a map row's amb= prints — one meaning, one unit
         }
         std::printf( "/>" );
     }
@@ -1346,6 +1346,7 @@ std::optional<int> runVerify( const MainDispatch& d )
     const Config&       cfg = d.cfg;
     const IngestResult& ing = d.ing;
     const Graph&        g   = d.g;
+    const std::string   vfFloor = rw::graphCountFloorAttrXml( g );   // M15: gauge + marker, one string for every openRoot shape (a temporary's c_str() would dangle in the honesty ternary)
 
     if( cfg.verifyClaim.empty() )
     {
@@ -1434,7 +1435,7 @@ std::optional<int> runVerify( const MainDispatch& d )
                                         + ( path.empty() ? std::string{} : " hops=\"" + std::to_string( path.size() - 1 ) + "\"" );
         if( !path.empty() )
         {
-            openRoot( "confirmed", facts, "", rw::kGraphCountFloorAttrXml, pageTailOf( path.size(), path.size(), path.size() ) );
+            openRoot( "confirmed", facts, "", vfFloor.c_str(), pageTailOf( path.size(), path.size(), path.size() ) );
             for( NodeId n : path )
             {
                 emitSymRow( n );
@@ -1442,7 +1443,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         }
         else
         {
-            openRoot( "not-established", facts, verify::kLimitCallGraphFloor, rw::kGraphCountFloorAttrXml, pageTailOf( 0, 0, 0 ) );
+            openRoot( "not-established", facts, verify::kLimitCallGraphFloor, vfFloor.c_str(), pageTailOf( 0, 0, 0 ) );
         }
         std::printf( "</verify>" );
         return 0;
@@ -1471,7 +1472,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         const bool        anySites = total > 0;
         const char*       verdict  = claim.shape == verify::ClaimShape::Uses ? ( anySites ? "confirmed" : "not-established" )
                                                                         : ( anySites ? "refuted"   : "not-established" );
-        openRoot( verdict, facts, anySites ? "" : verify::kLimitReferenceFloor, rw::kGraphCountFloorAttrXml,
+        openRoot( verdict, facts, anySites ? "" : verify::kLimitReferenceFloor, vfFloor.c_str(),
                   pageTailOf( w.end - w.begin, total, w.end ) );
         for( std::size_t siteIndex = w.begin; siteIndex < w.end; ++siteIndex )
         {
@@ -1510,7 +1511,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         const bool        complete    = clean && windowWhole;   // T1: the scan's own honesty bits decide, never the verdict
         const char*       verdict     = total > 0 ? "confirmed" : ( clean ? "refuted" : "not-established" );
         const char*       limit       = ( total == 0 && !clean ) ? ( found.isBudgetReached ? verify::kLimitCollectionCeiling : verify::kLimitScanDegraded ) : "";
-        const char*       honesty     = complete ? " complete=\"1\"" : ( !clean ? rw::kGraphCountFloorAttrXml : "" );
+        const char*       honesty     = complete ? " complete=\"1\"" : ( !clean ? vfFloor.c_str() : "" );
         openRoot( verdict, " hits=\"" + std::to_string( total ) + "\"", limit, honesty, pageTailOf( w.end - w.begin, total, w.end ) );
         const std::vector<GrepHit> hits = grepEnrich( ing, std::span<const GrepRawHit>( inFile ).subspan( w.begin, w.end - w.begin ) );
         for( const GrepHit& h : hits )
@@ -1547,7 +1548,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         {
             const PageWindow  w     = pageWindow( defsInFile.size(), kEvidenceCap, 0 );
             const std::string facts = " defs=\"" + std::to_string( defsInFile.size() ) + "\" defs_of_name=\"" + std::to_string( defsOfName.size() ) + "\"";
-            openRoot( "confirmed", facts, "", rw::kGraphCountFloorAttrXml, pageTailOf( w.end - w.begin, defsInFile.size(), w.end ) );
+            openRoot( "confirmed", facts, "", vfFloor.c_str(), pageTailOf( w.end - w.begin, defsInFile.size(), w.end ) );
             for( std::size_t defIndex = w.begin; defIndex < w.end; ++defIndex )
             {
                 emitSymRow( defsInFile[ defIndex ] );
@@ -1574,7 +1575,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         if( occ > 0 )
         {
             const PageWindow w = pageWindow( occ, kEvidenceCap, 0 );
-            openRoot( "not-established", facts, verify::kLimitExtractionFloor, rw::kGraphCountFloorAttrXml, pageTailOf( w.end - w.begin, occ, w.end ) );
+            openRoot( "not-established", facts, verify::kLimitExtractionFloor, vfFloor.c_str(), pageTailOf( w.end - w.begin, occ, w.end ) );
             const std::vector<GrepHit> hits = grepEnrich( ing, std::span<const GrepRawHit>( inFile ).subspan( w.begin, w.end - w.begin ) );
             for( const GrepHit& h : hits )
             {
@@ -1592,7 +1593,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         else
         {
             openRoot( "not-established", facts, found.isBudgetReached ? verify::kLimitCollectionCeiling : verify::kLimitScanDegraded,
-                      rw::kGraphCountFloorAttrXml, pageTailOf( 0, 0, 0 ) );
+                      vfFloor.c_str(), pageTailOf( 0, 0, 0 ) );
         }
         std::printf( "</verify>" );
         return 0;
@@ -1636,7 +1637,7 @@ std::optional<int> runVerify( const MainDispatch& d )
     {
         const std::vector<NodeId> path = rw::shortestPathAny( g, witnesses, targetDefs );
         openRoot( "confirmed", facts + ( path.empty() ? std::string{} : " hops=\"" + std::to_string( path.size() - 1 ) + "\"" ),
-                  "", rw::kGraphCountFloorAttrXml, pageTailOf( path.size(), path.size(), path.size() ) );
+                  "", vfFloor.c_str(), pageTailOf( path.size(), path.size(), path.size() ) );
         for( NodeId n : path )
         {
             emitSymRow( n );
@@ -1644,7 +1645,7 @@ std::optional<int> runVerify( const MainDispatch& d )
     }
     else
     {
-        openRoot( "not-established", facts, verify::kLimitCallGraphFloor, rw::kGraphCountFloorAttrXml, pageTailOf( 0, 0, 0 ) );
+        openRoot( "not-established", facts, verify::kLimitCallGraphFloor, vfFloor.c_str(), pageTailOf( 0, 0, 0 ) );
     }
     std::printf( "</verify>" );
     return 0;
@@ -1852,7 +1853,7 @@ std::optional<int> runPath( const MainDispatch& d )
                      ex( srcN ).c_str(), ex( dstN ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                      srcDefs.size(), dstDefs.size(),
                      path.empty() ? 0 : 1, path.empty() ? std::size_t( 0 ) : path.size() - 1, pthRootAttr.c_str(),
-                     rw::kGraphCountFloorAttrXml );
+                     rw::graphCountFloorAttrXml( g ).c_str() );
         // P2.10: a dead end is exactly the moment to name the next verb. --path is DIRECTED; --connect searches
         // undirected and finds the shared-caller join a directed walk can never see.
         if( path.empty() )
@@ -1936,7 +1937,7 @@ std::optional<int> runConnect( const MainDispatch& d )
         static_assert( rw::kConnectRadiusMax == int( rw::connectcfg::kMaxRadius ),
                        "--connect-radius' refusal band drifted from the core's clamp band — the refusal would name a range the core does not honor" );
         const rw::ConnectResult res = rw::connectSubgraph( g, terminals, std::uint32_t( cfg.connectRadius ) );
-        rw::packConnect( stdout, ing, res, d.redactPtr, cfg.maxTokens, cnRootArg );
+        rw::packConnect( stdout, ing, g, res, d.redactPtr, cfg.maxTokens, cnRootArg );
         return 0;
     }
     return std::nullopt;
@@ -1974,6 +1975,7 @@ struct ImpactView
     const std::vector<char>*       testReach;      // A6: testSymbolForwardReach — never null (runImpact always computes it)
     std::size_t                    radiusTested;    // A6: |reach ∩ tested|, over the FULL (un-windowed) reach set
     std::size_t                    radiusUntested;  // A6: reaches - radiusTested
+    const rw::Graph&               g;               // M15: the gauge pair (graphCountFloorAttrXml) reads ambOut/unresolvedOut
 };
 
 // --format=columnar (RESEARCH lever 1): same page window, path-table + parallel arrays.
@@ -1999,7 +2001,7 @@ int emitImpactColumnar( const ImpactView& v )
                                  + std::string( v.rootAttr )
                                  + pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                                    v.pageLimit, v.pageOffset, true )
-                                 + rw::kGraphCountFloorAttrXml                              // §H4 §3.4
+                                 + rw::graphCountFloorAttrXml( v.g )                              // §H4 §3.4
                                  + rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs );  // W2-F
     emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix, v.testReach );
     return 0;
@@ -2025,7 +2027,7 @@ int emitImpactJson( const ImpactView& v )
     std::printf( "%s%s%s,\"impact\":[",
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true, kJsonPageSyntax ),
-                 rw::kGraphCountFloorAttrJson,                                                // §H4 §3.4
+                 rw::graphCountFloorAttrJson( v.g ).c_str(),                                                // §H4 §3.4
                  rw::renderDisclosure( v.prD, rw::DiscloseAs::JsonKeys ).c_str() );           // W2-F: ONE keyset
     printJsonSymbolRows( v.ing, v.show, v.page.begin, v.page.end, v.rootPrefix, v.testReach );
     std::printf( "],\"import_reach\":[" );
@@ -2050,7 +2052,7 @@ int emitImpactXml( const ImpactView& v )
                  std::string( v.rootAttr ).c_str(),
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true ),
-                 rw::kGraphCountFloorAttrXml, rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str() );
+                 rw::graphCountFloorAttrXml( v.g ).c_str(), rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str() );
     for( std::size_t i = v.page.begin; i < v.page.end; ++i )
     {
         const Symbol&          s  = v.ing.symbols[ v.show[i] ];
@@ -2131,7 +2133,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                                pageWindow( show.size(), effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ), cfg.pageOffset ),
                                imports, importPage, importLazyPage, prD, imSingleRoot, imRootPrefix, imRootAttr,
                                imSingleRoot ? cfg.roots[0] : std::string_view(), cfg.pageLimit, cfg.pageOffset,
-                               &imTestReach, imRadiusTested, imRadiusUntested };
+                               &imTestReach, imRadiusTested, imRadiusUntested, g };
 
         if( cfg.columnar ) { return emitImpactColumnar( view ); }
         if( cfg.json     ) { return emitImpactJson( view ); }

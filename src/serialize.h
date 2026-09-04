@@ -5435,8 +5435,11 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                       RedactCounts* redact,                       // §B0/W3-N1: REQUIRED — the <m> contract sigs are emitted text
                       const std::vector<char>* impure = nullptr,
                       NodeId focusId = kNoNode, bool withPaths = false,
-                      std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                      std::string_view rootArg = {},    // R-E (2026-08-17): same single-root-only root
                                                         // argument serialize() takes — see its comment.
+                      std::string_view graphCountFloorAttr = {} )   // M15: the TARGETED root's gauge + marker
+                                                        // (graphCountFloorAttrXml( g ) — the caller owns the graph);
+                                                        // the ranked --for section passes nothing and keeps its shape
 {
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
@@ -5493,7 +5496,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
     // floor. The marker rides on the TARGETED verb root (--lego=TYPE and its MCP twin); the --for bundle's
     // ranked <lego> section is described by the bundle's own legend and keeps its byte shape.
     w.write( "<lego" );
-    if( focusId != kNoNode ) { w.write( kGraphCountFloorAttrXml ); }
+    if( focusId != kNoNode ) { w.write( graphCountFloorAttr ); }   // graphCountFloorAttrXml( g ): gauge + kGraphCountFloorAttrXml
     w.write( ">" );
     for( std::size_t k = 0; k < keep; ++k )
     {

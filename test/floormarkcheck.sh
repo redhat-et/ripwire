@@ -671,7 +671,7 @@ for fn in sorted( os.listdir( src ) ):
             found[ pat ] += 1
             stmt = window
             # the constant by name, or its exact literal spelling (situ.h's test-gate root writes the literal)
-            if "kGraphCountFloorAttr" in stmt or "kGraphCountFloorText" in stmt or 'counts_floor=\\"1\\"' in stmt or '\\"counts_floor\\":true' in stmt:
+            if "GraphCountFloorAttr" in stmt or "graphCountFloorAttr" in stmt or "kGraphCountFloorText" in stmt or 'counts_floor=\\"1\\"' in stmt or '\\"counts_floor\\":true' in stmt:
                 print( f"  PASS  (10) {fn}:{i+1} {pat} splices the floor in the same statement" )
             else:
                 print( f"  FAIL  (10) {fn}:{i+1} {pat} opens a CSR-derived root with NO floor constant in the statement" ); fail = 1
@@ -682,6 +682,62 @@ print( f"  ..    (10) {sum(found.values())} emitter statement(s) inspected acros
 sys.exit( fail )
 PY10
 [ $? = 0 ] || fail=1
+
+echo
+echo "=== (11) M15 (capture-audit 2026-09-04) — every GRAPH-floored root carries the resolver gauge pair ==="
+# lens 7 F-GAUGE-1: every graph verb said "floor" and none said HOW MUCH of the graph was guessed — the only
+# place the magnitude lived was the map header's ambiguous=/unresolved=, on a verb the agent did not run.
+# Every root whose counts_floor="1" comes from the GRAPH (arms (1), (4), (9) — the collection-cap floors of
+# collectioncapcheck.sh carry a rule-4 marker instead and are out of scope) now carries
+# graph_ambiguous=/graph_unresolved=, and the pair is the SAME two numbers the map header prints on the same
+# corpus — one gauge, never a second derivation.
+gaugeOf(){ "$BIN" "$1" --top-k=1 2>/dev/null | grep -oE 'ambiguous=[0-9]+ unresolved=[0-9]+' | head -1; }
+GAUGE_ROOT="$( gaugeOf . )"; GAUGE_SRC="$( gaugeOf src )"
+[ -n "$GAUGE_ROOT" ] && [ -n "$GAUGE_SRC" ] \
+    && ok "(11) map header gauges read: .=[$GAUGE_ROOT] src=[$GAUGE_SRC]" \
+    || no "(11) presence guard — the map header carries no ambiguous=/unresolved= gauge (root='$GAUGE_ROOT' src='$GAUGE_SRC')"
+# doc:corpus — the corpus each capture above ran on
+for spec in "callers.xml:src" "callees.xml:src" "uses.xml:src" "impact.xml:src" "editcheck.xml:." "graphquery.xml:src" "prcontext.xml:." \
+            "path9.xml:." "connect9.xml:src" "affected9.xml:." "exercises9.xml:." "seams9.xml:src" "deadcode9.xml:src" \
+            "communities9.xml:src" "community9.xml:src" "zoom9.xml:src" "lego9.xml:." \
+            "mcp_uses.xml:src" "mcp_impact.xml:src" "mcp_editcheck.xml:." "mcp_path9.xml:src" "mcp_connect9.xml:src" "mcp_lego9.xml:."; do
+    f="${spec%%:*}"; corpus="${spec#*:}"
+    [ -s "$TMP/$f" ] || { no "(11) $f is empty — nothing to gauge"; continue; }
+    ROOTTAG="$( perl -0pe 's#<!--.*?-->##gs' "$TMP/$f" | grep -oE '<[a-zA-Z][a-zA-Z_-]*( [^>]*)?>' | grep -m1 "$MARK_XML" )"
+    if [ -z "$ROOTTAG" ]; then
+        no "(11) $f: no element carries $MARK_XML — arm (1)/(9) will have said why"; continue
+    fi
+    PAIR="$( printf '%s' "$ROOTTAG" | grep -oE 'graph_ambiguous="[0-9]+" graph_unresolved="[0-9]+"' | head -1 )"
+    if [ -z "$PAIR" ]; then
+        no "(11) $f: floored root carries NO graph_ambiguous=/graph_unresolved= gauge: $( printf '%s' "$ROOTTAG" | cut -c1-160 )"; continue
+    fi
+    WANT="$( [ "$corpus" = src ] && printf '%s' "$GAUGE_SRC" || printf '%s' "$GAUGE_ROOT" )"
+    GOT="$( printf '%s' "$PAIR" | sed -E 's/graph_ambiguous="([0-9]+)" graph_unresolved="([0-9]+)"/ambiguous=\1 unresolved=\2/' )"
+    [ "$GOT" = "$WANT" ] \
+        && ok "(11) $f: gauge $PAIR == the $corpus map header's" \
+        || no "(11) $f: gauge [$GOT] differs from the $corpus map header's [$WANT] — two derivations of one number"
+    L="$( leadComment "$TMP/$f" )"; [ "$f" = lego9.xml ] || [ "$f" = mcp_lego9.xml ] && L="$( grep -oE '<!--.*?-->' "$TMP/$f" | head -3 )"
+    case "$L" in
+        *graph_ambiguous*) ok "(11) $f: legend defines the gauge" ;;
+        *)                 no "(11) $f: legend never mentions graph_ambiguous= — an undefined first-screen attribute" ;;
+    esac
+done
+# the JSON twins: the key pair with the same numbers
+for spec in "mcp_find_symbol.json:src" "mcp_find_referencing_symbols.json:src" "mcp_situ9.json:."; do
+    f="${spec%%:*}"; corpus="${spec#*:}"
+    WANT="$( [ "$corpus" = src ] && printf '%s' "$GAUGE_SRC" || printf '%s' "$GAUGE_ROOT" )"
+    python3 - "$TMP/$f" "$WANT" <<'PY11' && ok "(11) $f: graph_ambiguous/graph_unresolved keys == the $corpus map header's" \
+                                        || no "(11) $f: JSON gauge keys missing or differ from the $corpus map header's [$WANT]"
+import json, re, sys
+d = json.loads( open( sys.argv[1] ).read() )
+m = re.match( r'ambiguous=(\d+) unresolved=(\d+)', sys.argv[2] )
+sys.exit( 0 if m and d.get( "graph_ambiguous" ) == int( m.group( 1 ) ) and d.get( "graph_unresolved" ) == int( m.group( 2 ) ) else 1 )
+PY11
+done
+# mutation
+printf '<callers of="x" count="3" counts_floor="1">' | grep -qE 'graph_ambiguous="[0-9]+"' \
+    && no "(11) the gauge assertion cannot see a floored root without the pair" \
+    || ok "(11) mutation: a floored root without the gauge pair IS detected"
 
 echo
 echo "=== (7) MUTATION — each assertion shape can actually fail ==="

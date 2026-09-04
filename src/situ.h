@@ -283,9 +283,14 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     {
         blastNote.insert( blastNote.size() - 1, "; --pr-context's own per-file blast-radius list is also capped, at 20" );
     }
-    std::fprintf( out, "  [1] blast radius: %zu symbols across %zu files transitively depend on these changes%s\n%s",
-                  reach.size(), affected.size(), blastNote.c_str(),
-                  kGraphCountFloorTextLine );   // H5: the same floor the XML graph verbs mark, in this report's prose
+    std::fprintf( out, "  [1] blast radius: %zu symbols across %zu files transitively depend on these changes%s\n",
+                  reach.size(), affected.size(), blastNote.c_str() );
+    {   // H5/M15: the same floor + gauge the XML graph verbs mark, in this report's prose (one fold: graphGaugeAttrXml's)
+        std::size_t gaugeAmb = 0, gaugeUnresolved = 0;
+        for( std::uint32_t k : g.ambOut )        { gaugeAmb        += k; }
+        for( std::uint32_t k : g.unresolvedOut ) { gaugeUnresolved += k; }
+        std::fprintf( out, kGraphCountFloorTextLine, gaugeAmb, gaugeUnresolved );
+    }
     for( std::size_t i = 0; i < affected.size() && i < kSituBlastFilesShown; ++i )
     {
         const std::string_view rp = situPathRel( affected[i] );
@@ -734,7 +739,9 @@ inline constexpr const char* kTestGateLegend =
     "dependency evidence; script_gates_unresolved_dynamic= is the registered remainder, disclosed rather "
     "than guessed. Shell <t> rows join tests= only via evidence=script_literal (script text contains the "
     "changed path) or evidence=manifest_declared (RIPWIRE_TEST_DEPS metadata). counts_floor=1 keeps these "
-    "static evidence counts honest about shell expansion and generated paths they cannot resolve. "
+    "static evidence counts honest about shell expansion and generated paths they cannot resolve; graph_ambiguous=/"
+    "graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs "
+    "were all language-filtered), the map header's ambiguous=/unresolved=. "
     // §B12.5 — the cross-verb UNIT collision, disclosed on each verb that spells it. Each legend was
     // locally honest and the three numbers are not comparable, which is exactly how a reader gets it wrong.
     "UNIT: untested= here counts impacted SYMBOLS. The seams verb spells untested= over cross-directory "
@@ -762,7 +769,7 @@ inline constexpr const char* kTestGateRowLegend =
 // and a single shown="25" claimed to describe all of them while measuring only the second listing. The two
 // counts are now separate names, and the paging half (pagingDisclosure) attaches to the <u> listing, which
 // is the only one --limit/--offset windows.
-inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const TestGateResult& r,
+inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const Graph& g, const TestGateResult& r,
                                  const std::string& root = {}, int pageLimit = 0, int pageOffset = 0 )
 {
     std::vector<char> esc;
@@ -780,11 +787,12 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     std::fprintf( out, "<test-gate changed=\"%u\" impacted=\"%zu\" tests=\"%zu\" untested=\"%zu\""
                        " shown_tests=\"%zu\" tests_capped=\"0\" shown_untested=\"%zu\" untested_capped=\"%d\""
                        " script_gates_unmodelled=\"%zu\" script_gates_registered=\"%zu\" script_gates_mapped=\"%zu\""
-                       " script_gates_unresolved_dynamic=\"%zu\" counts_floor=\"1\"%s%s>",
+                       " script_gates_unresolved_dynamic=\"%zu\"%s%s%s>",
                   r.changedFiles, r.impactedSymbols, testRows, r.untested.size(),
                   testRows, shownRows, shownRows < r.untested.size() ? 1 : 0,
                   scriptGatesUnmodelledCount( ing ),
                   r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic,
+                  graphCountFloorAttrXml( g ).c_str(),   // M15: gauge + counts_floor="1", the one splice every graph-floored root shares
                   pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
                   gitstamp::atAttr( root ).c_str() );
     // §P11.4: this gate EXITS 4 on the obligation, so its rows carry the command that discharges it — where
@@ -817,7 +825,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
 // untested_capped/script_gates_unmodelled, with the paging half attached to the untested listing alone
 // (pagingDisclosure, kJsonPageSyntax). The legend a JSON caller cannot see is why the KEYS have to be
 // self-describing: `shown` next to two arrays was ambiguous in a way `shown_untested` cannot be.
-inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, const TestGateResult& r,
+inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, const Graph& g, const TestGateResult& r,
                                      const std::string& root = {}, int pageLimit = 0, int pageOffset = 0 )
 {
     // r26-stamp Task A: the JSON sibling of the XML at= anchor — "at":null (never a fake sha) on a non-git root.
@@ -833,10 +841,11 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     std::fprintf( out, "{\"changed\":%u,\"impacted\":%zu,\"tests\":%zu,\"untested\":%zu"
                        ",\"shown_tests\":%zu,\"tests_capped\":false,\"shown_untested\":%zu,\"untested_capped\":%s"
                        ",\"script_gates_unmodelled\":%zu,\"script_gates_registered\":%zu,\"script_gates_mapped\":%zu"
-                       ",\"script_gates_unresolved_dynamic\":%zu,\"counts_floor\":true%s,\"at\":%s,\"tests_to_run\":[",
+                       ",\"script_gates_unresolved_dynamic\":%zu%s%s,\"at\":%s,\"tests_to_run\":[",
                  r.changedFiles, r.impactedSymbols, testRows, r.untested.size(),
                  testRows, shownRows, shownRows < r.untested.size() ? "true" : "false",
                  scriptGatesUnmodelledCount( ing ), r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic,
+                 graphCountFloorAttrJson( g ).c_str(),   // M15: the JSON twin's gauge + "counts_floor":true
                  pageJson, atJson.c_str() );
     const TestRunnerIndex gateRunners( ing );                       // §P11.4, the JSON sibling of the XML run=
     const auto            jesc = []( std::string_view s ) { return jsonStr( s ); };

@@ -119,8 +119,6 @@ community | community@bridges_capped
 community | community@dir
 community | community@shown_bridges
 connect | connect@est_tokens
-connect | connect@groups
-connect | connect@nodes
 connect | connect@radius
 connect | connect@terminals
 connect | g@terminals
@@ -131,7 +129,6 @@ deps | deps@shown
 deps | f@afferent
 deps | godfiles@capped
 deps | godfiles@shown
-deps | godfiles@total
 deps | health@shape
 deps | stabledeps@violations
 deps | v@from

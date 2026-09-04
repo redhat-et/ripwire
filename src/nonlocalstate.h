@@ -933,7 +933,9 @@ inline constexpr const char* kNonLocalStateLegend =
     "carries. Their absence is NOT a measurement of zero. unanalyzed_files=indexed files in those languages "
     "undecided_decls=declarations whose specifiers ran past the text window, so mutability could not be decided; dropped, never guessed "
     "cells_capped=1 on the ROOT when the cell universe hit its ceiling decls_capped=1 when a declaration query hit its match budget. "
-    "counts_floor=1 because this analysis is UNSOUND BY CONSTRUCTION and every count here is a FLOOR. It cannot "
+    "counts_floor=1 because this analysis is UNSOUND BY CONSTRUCTION and every count here is a FLOOR (graph_ambiguous=/"
+    "graph_unresolved= are the whole graph's resolver gauge: calls split over several defs / calls whose in-repo defs were all "
+    "language-filtered, the map header's ambiguous=/unresolved=). It cannot "
     "see: an indirect call (a virtual, an unbound or reassigned function pointer or callback, or a macro "
     "invocation whose #define is not indexed), so the callee "
     "closure stops early; a write through a pointer or reference that ALIASES a cell without naming it; a "
@@ -962,7 +964,7 @@ inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, in
 
     std::fputs( kNonLocalStateLegend, stdout );
     std::printf( "<nonlocal_state cells=\"%zu\" functions=\"%zu\"%s%s", scan.cells.size(), total, disclosure,
-                 rw::kGraphCountFloorAttrXml );
+                 rw::graphCountFloorAttrXml( g ).c_str() );   // M15: gauge + marker
     if( !scan.unanalyzedLangs.empty() )
     {
         std::printf( " unanalyzed_langs=\"%s\" unanalyzed_files=\"%u\"", scan.unanalyzedLangs.c_str(), scan.unanalyzedFileCount );

@@ -2199,7 +2199,7 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
                  ( pagingDisclosure( cmab, sizeof( cmab ), moduleOrder.size(), cmpw.end, cfg.pageLimit, cfg.pageOffset )
                    + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
                  cmRootAttr.c_str(),
-                 rw::kGraphCountFloorAttrXml );   // H5: modules=/bridges=/isolated= partition the name-based CSR
+                 rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; modules=/bridges=/isolated= partition the name-based CSR
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     for( std::size_t moduleIndex = cmpw.begin; moduleIndex < cmpw.end; ++moduleIndex )
@@ -2353,7 +2353,7 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
                  ( pageDisclosure( mpab, sizeof( mpab ), shownMembers, mem.size(), mpw.end, cfg.pageLimit, cfg.pageOffset, true )
                    + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
                  cdRootAttr.c_str(),
-                 rw::kGraphCountFloorAttrXml );   // H5: size=/bridges= are a partition of the name-based CSR
+                 rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; size=/bridges= are a partition of the name-based CSR
     for( std::size_t i = mpw.begin; i < mpw.end; ++i )
     {
         const Symbol&           s  = ing.symbols[ mem[i] ];
@@ -2584,7 +2584,7 @@ std::optional<int> runZoom( const MainDispatch& d )
                      ( pageDisclosure( zoomAb, sizeof( zoomAb ), zoomPw.end - zoomPw.begin, topOrder.size(), zoomPw.end,
                                        cfg.pageLimit, cfg.pageOffset, false )
                        + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
-                     rw::kGraphCountFloorAttrXml );   // H5: isolated=/top_modules= partition the name-based CSR
+                     rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; isolated=/top_modules= partition the name-based CSR
 
         // a stack-free recursion via an explicit lambda (std::function — not hot). Emits <module> elements
         // nested by level; the finest level emits <member> leaves.
@@ -2779,7 +2779,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
                                        cfg.pageLimit, cfg.pageOffset, true )
                        + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
                      stRootAttr.c_str(),
-                     rw::kGraphCountFloorAttrXml );   // H5: bridges=/untested=/seam_pairs= are edges of the name-based CSR
+                     rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; bridges=/untested=/seam_pairs= are edges of the name-based CSR
         for( std::size_t pi = seamsPw.begin; pi < seamsPw.end; ++pi )
         {
             const std::uint32_t    cu    = std::uint32_t( pairs[pi].first >> 32 ), cv = std::uint32_t( pairs[pi].first & 0xffffffffu );
