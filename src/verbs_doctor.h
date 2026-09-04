@@ -557,11 +557,22 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
     // (check 4 above already paid for a git rev-parse/status probe on this same root; two more subprocess
     // calls are noise next to that), and omitted entirely on a non-git root rather than printed as a placeholder.
     const std::string doctorAt = gitstamp::atAttr( std::string( cfg.rootPath ) );
+    // M10 / lens2-crossverb L6 (capture-audit-2026-09-04): TWO shas were in play and neither was labelled.
+    // `at=` above is the TREE's HEAD right now; `--version` separately printed "git <sha>" — the commit this
+    // BINARY was compiled from (cmake/version_stamp.cmake bakes it) — and in any session that commits without
+    // rebuilding, the ordinary state of a dev tree mid-task, the two differ. A reader could not tell which
+    // sha described what. They now ride side by side under names that say so, and the value is byte-identical
+    // to --version's (one constant, two surfaces — test/doctorcheck.sh arm H pins that).
+    // Deliberately NOT a check: a binary older than HEAD is normal between a commit and the next build, and
+    // failing there would cry wolf on every commit — this is the FACT; the verdict would be noise. The
+    // genuinely wrong case (a stale PATH copy shadowing a fresh build) still belongs to `binary-path` above,
+    // which decides it on inode/mtime/size and never on this sha.
+    const std::string doctorBuiltFrom = std::string( " built_from=\"" ) + std::string( escapeXml( kRipwireGitStamp, esc ) ) + "\"";
     // §P8 collision: this root spelled its COUNT `ok=` while every <c> child directly beneath it spells its
     // BOOL `ok=` — two meanings on adjacent lines of one document. Renamed per the index-vs-count rule;
     // `passed=` pairs with the `checks=` denominator beside it. The count had ZERO parsers (doctorcheck.sh's
     // 8 assertions all read the CHILD bool), so the half with readers keeps its name.
-    std::string out = "<doctor checks=\"" + std::to_string( checks ) + "\" passed=\"" + std::to_string( okCount ) + "\"" + agentRows.rootAttr + doctorAt + ">";
+    std::string out = "<doctor checks=\"" + std::to_string( checks ) + "\" passed=\"" + std::to_string( okCount ) + "\"" + agentRows.rootAttr + doctorAt + doctorBuiltFrom + ">";
     out += rows;
     out += "</doctor>";
     std::fputs( out.c_str(), stdout );
