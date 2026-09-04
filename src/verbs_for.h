@@ -98,7 +98,12 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul );
-        out.routeNote  = " [routed: " + rc.reason + shapeDemotionNote( shape ) + "]";
+        // §L10b: no leading space+"[" — this string lands ONLY in the route= attribute value (and its JSON
+        // "route" twin) now, never spliced into free comment prose, so the bracket that used to visually
+        // demarcate it inside a sentence just made the attribute value start with a stray " [". The
+        // trailing "]" stays: test/adaptivecheck.sh and test/routecheck.sh's routeof()/reasonOf() helpers
+        // use it as a stop-anchor (grep -oE 'routed: [^]]*').
+        out.routeNote  = "routed: " + rc.reason + shapeDemotionNote( shape ) + "]";
         out.docTierTag = shapeDocTierTag( shape );   // §A4f: the machine form of the same fact, for --format=candidates
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
         out.anchorDefs = std::move( const_cast<RouteChoice&>( rc ).anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
