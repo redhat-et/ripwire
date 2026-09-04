@@ -156,12 +156,19 @@ en="$( attr "$TMP/ext.xml" names )"; es="$( attr "$TMP/ext.xml" shown )"; ec="$(
 
 echo "== P2.2 --top-k=0 emits the requested payload, not zero bytes =="
 "$BIN" "$SRC" --top-k=0 --expand=middle > "$TMP/tk0.xml" 2>/dev/null; tk0rc=$?
-"$BIN" "$SRC" --expand=middle           > "$TMP/tkd.xml" 2>/dev/null
+# §L10: the SIZE comparison is against an EXPLICIT ranked-map run (--top-k=5), not the bare default. The
+# bare default now runs through M6's own cheapest-complete-answer serving (src/main.cpp) and, on a small
+# enough file, picks WHOLE-FILE mode — no ranked map AND no kBodiesLegend (src/serialize.h) — which can be
+# smaller than the lean top-k=0 form's own legend overhead on a tiny fixture like this one's `middle()`.
+# That is M6 doing its job, not a regression in what THIS arm means to assert: "--top-k=0 emits the body but
+# skips the RANKED MAP a caller who did not ask for --top-k=0 pays for" — --top-k=5 pins that comparison to
+# an actual map-riding-along run, which the bare default no longer reliably is.
+"$BIN" "$SRC" --top-k=5 --expand=middle > "$TMP/tkd.xml" 2>/dev/null
 n0="$( wc -c < "$TMP/tk0.xml" | tr -d ' ' )"; nd="$( wc -c < "$TMP/tkd.xml" | tr -d ' ' )"
 [ "$tk0rc" = "0" ]        && ok "--top-k=0 --expand exits 0"                            || no "--top-k=0 --expand exit=$tk0rc"
 [ "$n0" -gt 0 ]           && ok "--top-k=0 --expand emits $n0 bytes (was 0 — the body vanished)" || no "--top-k=0 --expand emitted 0 bytes"
 has "$TMP/tk0.xml" 'middle' && ok "--top-k=0 --expand contains the requested body"      || no "--top-k=0 --expand has no body"
-[ "$n0" -lt "$nd" ]       && ok "--top-k=0 ($n0 B) < default ride-along run ($nd B)"    || no "--top-k=0 $n0 B not smaller than $nd B"
+[ "$n0" -lt "$nd" ]       && ok "--top-k=0 ($n0 B) < explicit ranked-map run (--top-k=5, $nd B)" || no "--top-k=0 $n0 B not smaller than the ranked-map run's $nd B"
 grep -q '<r ' "$TMP/tk0.xml" && no "--top-k=0 still emitted the ranked map" || ok "--top-k=0 emitted NO ranked map"
 
 # --token-budget must still gate on what was ACTUALLY emitted: serialize() normally folds the body tokens

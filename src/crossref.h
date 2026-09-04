@@ -2081,7 +2081,7 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
     // §L10: the oracle answers "did any line carrying this name ever leave the tree", and a doc that merely
     // QUOTED the symbol (a stale capture file, a plan) counts as a line carrying the name — so a symbol very
     // much alive on HEAD could still get v="removed", citing the doc's deletion rather than the symbol's.
-    // The fix is narrower than "suppress whenever on-head=1": a doc-only mention (PLAN_x.md quoting a name
+    // The fix is narrower than "suppress whenever on-head=1": a doc-only mention (a design doc quoting a name
     // whose code WAS deleted) also sets on-head=1 lexically, and that IS real rot the fate row must still
     // name — suppressing on plain on-head= would silence exactly that true positive. What distinguishes the
     // two is head_labels=: "index" means the PARSED index confirmed a real definition on HEAD (not just a
