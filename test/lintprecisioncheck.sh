@@ -71,18 +71,31 @@ if rows(page1) + rows(page2) != rows(full)[:6]:
 # W3-S item 1 (2026-08-19): the DEFAULT (unpaged) run now carries a byte-budget default cap
 # (kLintDefaultPayloadBytes, src/main.cpp runLint) — the fix for E6's uncapped ~2MB --lint payload. This
 # changes the two assertions the pre-fix gate made here, deliberately:
-#   - it used to require NO pagination-vocabulary attr on the default run at all; it now REQUIRES shown=/
-#     capped= (pageview.h THE TRUNCATION VOCABULARY rule 3: shown= always rides with capped=) while still
-#     requiring the explicit-paging-only half (total=/has_more=/next_offset=/offset=/limit=) stays ABSENT —
-#     an un-paged run is capped by DEFAULT, not by --limit/--offset, so it never claims to BE a page.
+#   - it used to require NO pagination-vocabulary attr on the default run at all; W3-S made it REQUIRE
+#     shown=/capped= (pageview.h THE TRUNCATION VOCABULARY rule 3: shown= always rides with capped=) while
+#     the explicit-paging half stayed ABSENT, on the reasoning that a default-capped run "never claims to BE
+#     a page". Re-pinned 2026-09-04 (capture-audit lane L4 finding 3, PLAN_CAPTURE_AUDIT §1 "M2 paging
+#     quintet only under an explicit --limit"): that posture left the very run a loop STARTS with — the bare
+#     default — with no next_offset= to continue from. pageview.h computePageDisclosure now reads
+#     capped="1" ⇒ total= has_more= next_offset= offset= limit=, HOWEVER the window was set; limit="0" is the
+#     documented no-explicit-limit sentinel. The new contract is asserted precisely below, not loosened:
+#     the quintet is PRESENT, limit="0" offset="0" spell the default window, total= is the same true total
+#     findings= and the full run report, has_more="1" (shown < findings here), next_offset= equals shown=.
 #   - it used to require default == full byte-for-byte; it now requires default to be the sorted PREFIX of
 #     full, truthfully short of it (shown < findings) on a corpus this large, and requires findings= to
 #     still agree across default/full (both see the SAME true total, they just show different amounts).
-paging_only = ("total", "has_more", "next_offset", "offset", "limit")
+paging = ("total", "has_more", "next_offset", "offset", "limit")
 if default.get("shown") is None or default.get("capped") is None:
     raise SystemExit("FAIL default lint is missing shown=/capped= (the W3-S default-cap disclosure)")
-if any(default.get(name) is not None for name in paging_only):
-    raise SystemExit("FAIL default lint carries a paging-only attr with no --limit/--offset given")
+missing = [name for name in paging if default.get(name) is None]
+if missing:
+    raise SystemExit(f"FAIL default lint is capped=\"1\" but lacks the M2 paging quintet {missing} (pageview.h: capped ⇒ quintet on every window)")
+if default.get("limit") != "0" or default.get("offset") != "0":
+    raise SystemExit(f"FAIL default lint must spell the default window limit=\"0\" offset=\"0\", got limit={default.get('limit')} offset={default.get('offset')}")
+if default.get("total") != default.get("findings") or default.get("total") != full.get("total"):
+    raise SystemExit("FAIL default lint total= must equal its own findings= and the full run's total= (one true total, three spellings)")
+if default.get("has_more") != "1" or default.get("next_offset") != default.get("shown"):
+    raise SystemExit("FAIL default lint cut its rows but has_more=/next_offset= do not say so (expected has_more=\"1\", next_offset=shown)")
 if len(rows(default)) != int(default.get("shown", "-1")):
     raise SystemExit("FAIL default lint shown= does not equal its emitted finding count")
 if default.get("findings") != full.get("findings"):
