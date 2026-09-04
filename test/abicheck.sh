@@ -225,6 +225,16 @@ struct OddBall
 EOF
 g commit -qam "widen Sidecar on the live line"
 
+# ── feat-abi-orphan: a ref with NO shared history with HEAD at all -> unrelated= (§L10b: the abi legend
+#    now documents that such a ref ALSO lands inside quiet=, since it never gets the chance to acquire a
+#    row either — a ref that could not be compared and a ref that compared clean both read as "no rows").
+g checkout -q --orphan feat-abi-orphan
+g rm -rf -q .
+printf 'unrelated history root\n' > "$R/orphan.txt"
+g add -A
+g commit -qm "orphan root, shares no history with main"
+g checkout -q main
+
 echo "abicheck: BIN=$BIN  REPO=$R"
 
 # attr ELEMENT ATTR -> the attribute on the FIRST matching element ("" if absent)
@@ -421,12 +431,32 @@ case "$CAPPED:$DROPPED" in
     * )    no "abi: capped=\"$CAPPED\" is not the 0|1 boolean the tool-wide vocabulary requires" ;;
 esac
 
-# every ref is accounted for: listed + quiet + excluded_refs + unrelated == refs
+# every ref is accounted for: listed + quiet + excluded_refs == refs. §L10b: unrelated= is NOT a fifth
+# disjoint bucket in this sum — a ref with no merge-base never gets the chance to acquire a row, so it is
+# ALSO counted inside quiet= (a ref that compared clean and a ref that was never compared both read as "no
+# rows"); adding it again here would double-count feat-abi-orphan below. unrelated=/quiet= are asserted as
+# their OWN (overlapping) relationship immediately after.
 REFS="$( attr abi refs )"; QUIET="$( attr abi quiet )"; UNREL="$( attr abi unrelated )"
 LISTED="$( grep -o '<ref name=' "$TMP/a" | wc -l | tr -d ' ' )"
-SUMR=$(( LISTED + QUIET + EXCLREFS + UNREL ))
-[ "$REFS" = "$SUMR" ] && ok "abi: refs=$REFS reconciles as listed($LISTED)+quiet($QUIET)+excluded_refs($EXCLREFS)+unrelated($UNREL)" \
+SUMR=$(( LISTED + QUIET + EXCLREFS ))
+[ "$REFS" = "$SUMR" ] && ok "abi: refs=$REFS reconciles as listed($LISTED)+quiet($QUIET)+excluded_refs($EXCLREFS)" \
                        || no "abi: refs=$REFS but the per-class ref counts sum to $SUMR"
+
+# ── §L10b (finding, --abi unrelated=/quiet= both count every ref): feat-abi-orphan has no merge-base with
+#    HEAD, so it is counted in unrelated= — and, because it never got the chance to acquire a row, it is
+#    ALSO folded into quiet= (QUIET here is >= 1 purely from the orphan branch, on a fixture whose every
+#    OTHER quiet ref is feat-reformat, already asserted below). The legend now defines unrelated= at all
+#    (it previously had zero mentions) and states the overlap explicitly.
+[ "$UNREL" = "1" ] && ok "abi: unrelated=\"1\" (feat-abi-orphan has no merge-base with HEAD)" \
+                    || no "abi: unrelated=\"$UNREL\", expected 1 (feat-abi-orphan)"
+[ "${QUIET:-0}" -ge 1 ] 2>/dev/null && ok "abi: quiet=\"$QUIET\" includes the orphan ref too (unrelated ⊆ quiet, not disjoint)" \
+                                     || no "abi: quiet=\"$QUIET\" does not include the orphan ref (expected >= 1)"
+printf '%s' "$S" | grep -q 'unrelated= counts refs with no merge-base' \
+    && ok "abi: legend now DEFINES unrelated= (previously zero mentions)" \
+    || no "abi: legend still does not define unrelated="
+printf '%s' "$S" | grep -q 'it ALSO lands in quiet=' \
+    && ok "abi: legend states the unrelated=/quiet= overlap explicitly" \
+    || no "abi: legend does not explain that unrelated= refs also land in quiet="
 
 # ── 10) --detail is the documented escape hatch, and --help says so ────────────────────────────────────
 "$BIN" --help 2>&1 | grep -q 'kind="rename"' \

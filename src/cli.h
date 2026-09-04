@@ -3899,7 +3899,19 @@ inline void validateConfig( Config& c ) noexcept
     // supplies the payload; alone it would emit nothing at all, and on a set-returning verb like --graph-query
     // a 0 would fall into that verb's legacy `topK > 0 ? cap : ALL` arm and dump the whole matched set. Confine
     // it to the four payload verbs and refuse everywhere else, naming the fix.
-    if( c.topK == 0 && c.expand.empty() && c.outline.empty() && !c.packSignatures && c.packTopN <= 0 )
+    //
+    // §L10b LOW tail: --recall's OWN help text says --top-k=N "shapes HOW MANY docs are emitted" — a doc
+    // count, never the ranked-map rows the generic T2 wording below promises. The generic refusal used to
+    // fire on `--recall --top-k=0` too and told the reader "no ranked map, payload only", which is a category
+    // error for a verb that never had a ranked map to begin with. Same refusal (0 is still meaningless: it
+    // asks to recall zero documents), wording matched to what --top-k actually means on this verb.
+    if( c.topK == 0 && !c.recall.empty() )
+    {
+        std::fprintf( stderr, "ripwire: --recall --top-k=0 means \"emit zero documents\" — raise it (--top-k=N) "
+                              "or drop it for the default of 8\n" );
+        c.ok = false;
+    }
+    else if( c.topK == 0 && c.expand.empty() && c.outline.empty() && !c.packSignatures && c.packTopN <= 0 )
     {
         std::fprintf( stderr, "ripwire: --top-k=0 means \"no ranked map, payload only\" — pass a payload verb "
                               "(--expand=SYM / --outline=SYM / --pack-signatures / --pack-top-n=N), or use --top-k=1 for the smallest map\n" );

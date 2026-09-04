@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# guardmsgcheck.sh — the 20 COMBINATION GUARDS at the tail of parseArgs, pinned by MESSAGE, not exit code.
+# guardmsgcheck.sh — the 21 COMBINATION GUARDS at the tail of parseArgs, pinned by MESSAGE, not exit code.
+# (§L10b, 2026-09-04: 20 -> 21 — --recall --top-k=0 split off the generic --top-k=0 guard with its own
+# doc-count wording; see guard #21 below.)
 #
 # The gap this closes ( step 3): parseArgs ends in ~165 lines
 # of combination validation ("--gateability needs --doc-drift", "--partition needs --pack-task", …) emitting
@@ -97,7 +99,12 @@ guard "--gateability without --doc-drift"     "--gateability reports over --doc-
 guard "--format=candidates alone"   '--format=candidates exports a --for=TASK or --query=TERMS result'  "$NOROOT" --format=candidates
 guard "--top-k=0 without a payload" 'payload only'                                                      "$NOROOT" --top-k=0
 
-[ "$checked" -ge 20 ] && ok "pinned $checked guard messages (20 distinct guards)" \
+# 21. §L10b LOW tail: --recall's own --top-k=N means "how many docs", never the ranked-map rows the
+# generic guard above promises — the generic message used to fire on --recall --top-k=0 too and told the
+# reader "no ranked map, payload only", a category error for a verb with no ranked map at all.
+guard "--recall --top-k=0"          'emit zero documents'                                               "$NOROOT" --recall=t --top-k=0
+
+[ "$checked" -ge 21 ] && ok "pinned $checked guard messages (21 distinct guards)" \
                       || no "only $checked guards probed — a guard was dropped from this gate, not from the parser"
 
 # ── the statement in that block that is NOT a guard ───────────────────────────────────────────────────
