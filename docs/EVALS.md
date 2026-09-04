@@ -9464,6 +9464,209 @@ oracle says "builtin" — that is `--scip`'s). The remaining `locality` populati
 on 12907: below the n ≥ 100 floor on either alone, pooled 157 — a future band on this stratum inherits
 Phase 4's pooling rule and its stated dependence.
 
+### Phase 5 — the census residue: the EXTERNAL-NAME VETO (`@external`) and the receiver MRO walk, PRE-REGISTERED 2026-09-03 (before any fixture, gate or code)
+
+**The residue, re-read at source on the d8fa59c binary before anything was designed.** The Phase 4b RUN
+left the `locality` stratum at 55 / 79 on astropy-14365 (0.696) and 55 / 78 on 12907 (0.705): 17 (16)
+`@external` disconfirmations and 7 (7) in-repo ones. The census join reproduced byte-for-byte on the
+d8fa59c binary before this phase (`--label astropy-N-r5base`, same argv as Phase 4). Every one of the 24
+disconfirmed 14365 sites was read at source; they fall into FIVE shapes, and the two mechanisms below are
+designed from those shapes, not from the numbers:
+
+- **(a) a BARE call whose name is a Python builtin**, pinned to a same-file METHOD of that name — a shape
+  Python's name lookup can never produce (a bare `sum(…)` reaches the local, enclosing, module and
+  builtin scopes; never a method): `representation.py:1186` `sum(` → `BaseRepresentation::sum`;
+  `table/index.py:207` `range(` → `Index::range`. 2 sites (12907: `index.py:200`; the `sum` site is not
+  covered there).
+- **(b) a named-receiver call whose receiver is bound by an IMPORT of a module the indexed tree does not
+  contain**: `np.dtype(…)` ×5 at `io/fits/column.py:1391/1394/1397/1402/1432` (`import numpy as np`) →
+  `Column::dtype`; `OrderedDict.__getitem__(…)` at `table/table.py:2235` (`from collections import
+  OrderedDict`) → `Table::__getitem__`. 6 sites (12907: `column.py:1305/1308/1311/1316/1341`,
+  `table.py:2043`).
+- **(c) `super().m(…)`** — ingest classifies the `super()` call-node receiver `RecvKind::None`, so the site
+  reaches the ladder as a BARE call and S6-C hands it to the caller's OWN class, the one class `super()`
+  by definition skips: `fitsrec.py:1254` `super().field(-1)` (FITS_rec's only base is `np.recarray`),
+  `modeling/core.py:151` `super().__init__` and `:485` `super().__repr__` (`_ModelMeta(abc.ABCMeta)`),
+  `modeling/utils.py:436` `super().__setitem__` (`_SpecialOperatorsDict(UserDict)`) — 4 sites whose MRO
+  leaves the repo, SCIP `@external` on all four (12907: `:1229`, `:132`, `:461`, `:431`); and
+  `utils/masked/core.py:476` `super().__new__(cls, …)` in `MaskedNDArray(Masked, np.ndarray)`, whose MRO
+  reaches the in-repo `Masked::__new__` — SCIP names exactly that (12907: `:460`).
+- **(d) a method call on an UNTYPED local or parameter whose method name is a builtin-TYPE method**:
+  `header.py:1795` `self._keyword_indices[keyword].index(idx)` and `:438` `data.index(sep, idx)`
+  (`list.index` / `str.index`), `bounding_box.py:1616` `fixed_inputs.copy()` (`dict.copy`). 3 sites. No
+  type fact reaches them and the enclosing class defines a method of that name: deciding "external" here
+  would be a guess against the class's own method, not a table lookup. **Declared OUT OF REACH.**
+- **(e) a receiver bound by MODULE-LEVEL ASSIGNMENT to a C-extension attribute**: `wcs.py:621/636`
+  `WCSBase.__init__(self, …)` where `WCSBase = _wcs._Wcs` (`= object` in the fallback arm). 2 sites.
+  Not an import, not a class definition; **OUT OF REACH** of this phase.
+
+**The eight "unreachable sibling-class" sites Phase 4b declared, by file:line, and what the r5base join
+says about each today** (the diag `bench/scip_match_diag.py --label astropy-14365-r5base` puts all 106
+`locality` sites at 79 covered / 25 SCIP-silent / 2 line-skew; the per-site verdicts come from the same
+(caller_id, callee, line) join of `astropy-14365-r5base.plain.tsv` × `.scip.tsv` the harness measures):
+
+| # | site (14365 · 12907) | call | pinned | SCIP | r5base verdict | this phase |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `coordinates/representation.py:864` · `:827` | `diff.represent_as(…)` (untyped loop var) | `BaseRepresentation::represent_as` | `BaseDifferential::represent_as` | disconfirmed | out of reach (untyped receiver, no `super`) |
+| 2 | `representation.py:3349` · `:3210` | `base.represent_as(…)` (untyped local) | `UnitSphericalCosLatDifferential::represent_as` | `SphericalRepresentation::represent_as` | disconfirmed | out of reach |
+| 3 | `representation.py:3088` · `:2956` | `base.represent_as(…)` (untyped local) | `UnitSphericalDifferential::represent_as` | `SphericalRepresentation::represent_as` | disconfirmed | out of reach |
+| 4 | `io/fits/fitsrec.py:567` | `value.field(…)` (untyped parameter) | `FITS_rec::field` | `FITS_record::field` | **counted CONFIRMED** — the same line also holds `self.field(…)`, and the census keys the oracle by (caller, callee): one truth set `{FITS_rec::field, FITS_record::field}` covers both sites | unchanged (the join's documented key collision, not a right pin) |
+| 5 | `utils/masked/core.py:125` · `:124` | `masked_cls.from_unmasked(…)` (untyped local) | `Masked::from_unmasked` | `MaskedNDArray::from_unmasked` | disconfirmed | out of reach |
+| 6 | `utils/masked/core.py:476` · `:460` | `super().__new__(cls, …)` | `MaskedNDArray::__new__` | `Masked::__new__` | disconfirmed | **the MRO walk**: `receiver-rule`, confirmed |
+| 7 | `units/core.py:1284` | `(u / tunit_decomposed).decompose()` | `UnitBase::decompose` | `UnitBase::decompose` ∪ `Unit::decompose` | counted CONFIRMED (key collision with `u.decompose()` in the same caller) | unchanged |
+| 8 | `time/core.py:3154` | `atol.to_value(u.day)` | `TimeDelta::to_value` | `TimeDelta::to_value` ∪ `Quantity::to_value` | counted CONFIRMED (key collision with `self.to_value(u.day)` on the same line) | unchanged |
+
+So of the eight, ONE is reachable by the walk (#6), THREE are already scored confirmed by the join's key
+collision and cannot move (#4, #7, #8), and FOUR are untyped-receiver sites no mechanism in this phase
+reaches (#1, #2, #3, #5) — they stay disclosed by `lpin=`. The orchestrator's premise that the walk
+covers all eight is corrected here, before measurement, rather than argued after it. Beside the eight,
+`modeling/core.py:1085` (`bbox.evaluate(…)`, SCIP `@nondef` ∪ `_BoundingDomain::evaluate`) and
+`wcsaxes/core.py:503` (`self.coords.frame.draw(…)`, a depth-3 chain, cross-file) are the other two in-repo
+disconfirmations; both out of reach too.
+
+**Mechanism 1 — the external-name veto (`@external`).** A call the name ladder would otherwise SPRAY (no
+qualifier, not SCIP-pinned, no receiver rule fired) is refused — no edge, counted once into the header
+`external=N` (absent when 0, legend-defined in both dialects, JSON twin `"external":N`) and, under
+`--pin-census`, recorded as a `C external` row with an EMPTY target list — when its name or receiver is
+provably bound OUTSIDE the indexed tree. Three evidence sources, none heuristic:
+
+1. **Import bindings** (a NEW ingest fact, kParserVer 76 → 77, mirror in `src/quality.h` in the same
+   commit): Python `import a.b as c` / `import a.b` / `from m import x as y` / `from . import x` record a
+   file-scope `LocalBindKind::Import` binding `bound-name → module target` (`np → numpy`, `OrderedDict →
+   collections`, `x → .`; `from m import *` records nothing). Today the Include record keeps only the
+   module and drops the imported-names clause, so the bound NAME is not recoverable resolve-side. A
+   binding is EXTERNAL iff its target is absolute (no leading dot), `resolvePreciseInclude` maps it to
+   no indexed file, AND its head segment names no `.py` stem and no directory anywhere in the indexed
+   tree (so a package the crawl did not root at — `src/mypkg/` imported as `mypkg` — reads UNKNOWN,
+   never external: the veto is conservative on the side of keeping an edge). A relative import is always
+   in-repo evidence. Only Python records these this phase (TS/JS/Rust/Go imports are a follow-up).
+2. **The builtin table** — `src/externalnames.h`, a committed sorted table with provenance per group:
+   Python = the 152 names of CPython 3.14.7's `builtins` module (`python3 -c 'import builtins;
+   print(sorted(dir(builtins)))'`, the six `site`-injected names `copyright credits exit help license
+   quit` and the five non-callable constants `True False None Ellipsis NotImplemented` excluded; the
+   exception and warning classes kept — they are callable); C-family = the ISO C11 §7 library function
+   names listed by header (`<stdio.h> <stdlib.h> <string.h> <math.h> <ctype.h> <time.h> <wchar.h>
+   <stdint.h>/<inttypes.h> <signal.h> <assert.h>`) plus the `std::` function templates a bare spelling
+   reaches through ADL or a using-directive, taken from the C++23 synopses of `<algorithm> <utility>
+   <memory> <numeric> <iterator> <functional> <cmath> <cstring> <cstdlib> <cstdio> <string> <ranges>`
+   (`begin end size data empty swap move forward exchange min max clamp sort find copy fill transform
+   accumulate …` — the full list is the table). The Python stdlib MODULE surface (`sys.stdlib_module_names`,
+   297 names) is deliberately NOT a table: a stdlib member only becomes a bare name through an import,
+   and source 1 decides that by resolution, not by list.
+3. **Definition evidence, per language.** Python: a same-file module-level `def`/`class` of the name, a
+   nested `def` of the name inside the caller, an in-repo import binding, or any local/parameter binding
+   of the name (`localNameSet`) is evidence — the ladder runs unchanged. C/C++/ObjC: a symbol of that
+   name (declaration OR definition — the header-decl/.cpp-def split is the common case) in the caller's
+   file or in any file the caller's file transitively includes (the same path-precise `fileIncludes`
+   Rule 3 reads), an enclosing-class or base-class member (mechanism 2, which fires first), or a local
+   binding is evidence — and only a FREE (scope-less) symbol or a macro counts as file/include evidence:
+   a same-name METHOD of an unrelated class in the same file is exactly the target a bare call cannot
+   reach, so it is not evidence (the enclosing class and its bases are mechanism 2's job).
+
+   The veto then fires, in the ladder after Rules 1/2/2c/2b/3 have all missed and BEFORE the tier
+   spray — i.e. it removes `unique`- and `split`-tier pins as well as S6-C ones, because the fact it
+   states ("this name is bound outside the tree") is a name-resolution fact, not a tie-break: (i) a bare
+   Python call whose name has an EXTERNAL import binding, or is in the Python table with no evidence;
+   (ii) a bare C-family `Call` (never `Macro`) whose name is in the C-family table with no evidence;
+   (iii) a Python named-receiver call whose receiver has an EXTERNAL import binding and no local binding.
+   `unresolved=` is untouched (it counts lang-filtered in-repo names; these are not that).
+
+**Mechanism 2 — the receiver MRO walk (Rule 1 generalised).** (i) Rule 1's `this->m()` / `self.m()` /
+bare C-family `m()` shapes, when the enclosing class does NOT define `m`, now continue into the
+class's bases level by level through `Narrower::methodOnTypeOrBases` (the walk Rules 2b/2c already use;
+first level with exactly one hitting base decides, two at one level refuse) — the `IERS_B.open()` base
+walk applied to the caller's own class. A miss leaves the ladder unchanged (a `self.m()` may dispatch
+DOWNWARD to a subclass; the cone filter owns that). (ii) A NEW receiver kind `RecvKind::SuperObj`
+(appended, value 5; Python `super().m()` and `super(C, self).m()`, the `call` node whose function is the
+identifier `super`) resolves through the bases ONLY (the class itself is skipped — `super()` never names
+it); a miss is a VETO counted into `external=`: the MRO left the indexed tree (`object`, a stdlib or
+third-party base), and pinning any in-repo `m` — least of all the caller's own — is wrong by the
+language's definition of `super`. No language other than Python classifies a `super` receiver this
+phase (`isMemberAccessNode` is C++/Python only).
+
+**Same-commit baselines, measured on the d8fa59c binary before the change.** `ambiguous=`: src **5,632**
+on `git archive d8fa59c src` (NOT the 5,598 of the Phase 4b table, which was the 1c6fdf4 tree — the
+r4/r4b lanes' own source is in the corpus now; this phase re-bases on the tree the task names), ugrep
+1,722, rocksdb 45,142, duckdb 8,929 (`--no-cache`, D4 trees at 550599a / 0e2801ac3 / 19864453f7,
+a clean `git status` on each). `edges=` beside them: 13,119 / 5,388 / 210,904 / 84,698. Census
+(`astropy-N-r5base`): locality 0.696 (55 / 79) · 0.705 (55 / 78); receiver-rule 0.931 (5,141 / 5,522);
+unique 0.798 (19,153 / 24,009) with 3,764 `@external` covered sites — the `isinstance` → `TableColumns::
+isinstance` shape, the same defect one tier up, reported below but NOT banded.
+
+**The arithmetic, stated before the run.** From the 14365 population of 79 covered `locality` sites:
+mechanism 1 removes shapes (a) + (b) = 8 sites and mechanism 2's veto removes the 4 `super()`-miss sites
+of shape (c) → 12 of the 17 `@external` leave; site #6 flips to `receiver-rule` → 1 in-repo
+disconfirmation leaves. Expected: **55 / (79 − 13) = 55 / 66 = 0.833** (had all 17 externals left,
+55 / 62 = 0.887; had all eight sibling sites flipped as well, 63 / 66 = 0.955 — neither is reachable,
+and the band is set on what is). 12907: 55 / (78 − 12) = 55 / 66 = 0.833. n = 66 on either corpus is
+under the n ≥ 100 floor; Phase 4's pooling rule applies: **pooled n = 132 ≥ 100**, expected pooled
+110 / 132 = 0.833. If the pooled n falls under 100 the section is INCONCLUSIVE, and no band is widened.
+
+**The band — six conjuncts; conjuncts 1–4 gate BOTH mechanisms together (they share the ladder), 5
+gates mechanism 1 alone and 6 mechanism 2 alone. A miss on 5 reverts mechanism 1 and keeps 2 if 1–4 and
+6 hold; a miss on 6 reverts mechanism 2 (the `SuperObj` kind stays as an ingest fact, its veto arm and
+the Rule-1 base walk go) and keeps 1 if 1–5 hold; a miss on any of 1–4 reverts both. A revert keeps the
+patch verbatim in the lane report. The band is not moved after a number.**
+
+1. `ambiguous=` within **+2.0 %** of the baselines above on all four corpora: src ≤ 5,744, ugrep ≤ 1,756,
+   rocksdb ≤ 46,044, duckdb ≤ 9,107. (A DROP is expected on the C++ trees — a bare std-name spray that
+   used to split now vetoes, and a `this->m()` that used to split across unrelated classes now walks the
+   base — and is fine.)
+2. **The thirteen 14365 sites named above leave the `locality` population**: the 8 of shapes (a)+(b) and
+   the 4 `super()`-miss sites as `C external` rows SCIP scores `@external` (the veto right where it
+   fires), site #6 as a `receiver-rule` row SCIP CONFIRMS. All thirteen, or the conjunct misses. The
+   twelve 12907 sites are the stability check, reported beside.
+3. **`locality` full-oracle precision, pooled over 14365 + 12907, ≥ 0.80** (expected 0.833; the slack
+   is for sites the harness reclassifies when the population shifts, not for wrong pins), each corpus
+   reported with its n, and non-inferior to 0.696 / 0.705 on each corpus alone.
+4. **`receiver-rule` full-oracle precision on 14365 ≥ 0.925** (0.931 today) — the walk adds rows to
+   this stratum corpus-wide; its own new-row confirmation count is printed beside it.
+5. **Veto precision** (mechanism 1): over every `C external` row on 14365 that SCIP covers, the share
+   SCIP scores `@external` (a `@nondef` is neither confirmation nor disconfirmation of "outside the
+   tree" and is reported separately) **≥ 0.95**, n printed. Below that the table or the evidence rule is
+   wrong somewhere, and a veto that drops right edges is worse than the pin it replaces.
+6. **Walk precision** (mechanism 2): over the `receiver-rule` rows the walk ADDED on 14365 (a
+   (caller, callee, line) join of the r5base and r5 census files — rows labelled `receiver-rule` in r5
+   and anything else, or absent, in r5base — restricted to `ThisObj`/bare/`SuperObj` shapes by the
+   fixture-proven mechanism), SCIP-covered confirmation **≥ 0.90**, n printed.
+
+**Reported, not banded:** the `unique` stratum's `@external` count and precision on 14365 before/after
+(expected to fall from 3,764 and rise from 0.798 — the veto reaches that tier by design); `edges=` on all
+four C++ trees; `external=` on all six corpora; the `split` stratum's covered n.
+
+**Contract checks, not bands:** determinism ×2 and cold == warm on astropy-14365 (the kParserVer bump
+re-parses once); `xmllint --noout` on the fixture and astropy maps; ASan on the new gates, `lpincheck`,
+`clsrecvcheck`, `pincensuscheck`, `scipjoincheck` and the astropy census path; `test/golden.xml` (the
+fixture holds no bare builtin call to an in-repo name and no `super()` — re-derived in its own commit if
+that reading is wrong, with the diff stated); the resolver/locality family green (`lpincheck clsrecvcheck
+localitycheck chainguardcheck resolverhonestycheck shadowcheck qextractionkeycheck qschemetripcheck
+cachehashcheck pyshapecheck usescheck fieldusescheck pyimportprecisecheck legendcoveragecheck
+compactlegendcheck fixedbufsweep deckcheck docscommandscheck manifestcheck loopconservationcheck`);
+`--quality-delta --scope='src/*'` gating 0.
+
+**Gates — written and run RED before the code.** `test/externalvetocheck.sh` on `test/extvetofix/`
+(Python `ext.py` + `own.py`, C++ `ext.cpp` + `ext.h` + `decl.cpp`): (A) `Rep.norm` calls bare `sum(…)`
+with `Rep::sum` and `Other::sum` both defined in the file — today an S6-C pin on `Rep::sum` with
+`lpin="1"`; after: NO `sum` edge from `Rep::norm`, no `lpin=`, a `C external` row; (B) `Rep.conv` calls
+`np.dtype(…)` under `import numpy as np` with `Rep::dtype` defined — today pinned; after: vetoed; (C)
+`Rep.get` calls `OrderedDict.__getitem__(…)` under `from collections import OrderedDict` — vetoed; (D)
+control: `Rep.use` calls `helper(1)` under `from .own import helper` — the edge to `own.py::helper`
+stays; (E) control: `own.py` defines a module-level `def sum(xs)` and `K.go` calls `sum([1])` — same-file
+definition evidence, the edge stays; (F) C++: `free_fn` calls bare `find( 3 )` with `Buf::find` and
+`Other2::find` defined — today a split, after: vetoed; (G) control: `uses_decl` calls `clamp( 1 )`,
+declared in the included `ext.h` and defined in `decl.cpp` — include evidence, the edge stays; (H) the
+header reads exactly `external=N` for the fixture's N vetoed sites, and the legend defines it (both
+dialects); (I) `--json` carries `"external":N`; (J) determinism ×2 and `xmllint`. `test/mrowalkcheck.sh`
+on the same fixture: (K) `Leaf.run` calls `super().run()` where `Leaf(Mid)`, `Mid(Base)`, `Base.run`
+defined — today NO edge at all (the S6-C pin lands the caller's own `Leaf::run`, a self-loop, dropped);
+after: one edge to `Base::run`, mech `receiver-rule`; (L) `Ext(dict).reset` calls `super().__init__()`
+with `Other.__init__` defined in the file — today a `unique` edge to `Other::__init__`; after: vetoed,
+`C external`; (M) C++: `Grid::go` calls bare `size()` where `Grid : Buf`, `Buf::size` and `Other2::size`
+defined — today a split (`amb="1"`), after: `Buf::size`, `receiver-rule`; (N) control: `Ext.reset` also
+calls `self.keys()` — no in-repo `keys` anywhere, no row before or after (the walk never invents a
+target); (O) determinism ×2. Both gates enter `test/regression.sh` in their feature commits; red on the
+d8fa59c binary at A, B, C, F, H, I, K, L, M.
+
 ## Member variables as symbols + `--uses=Owner.field` — the member-variable round (card A3), PRE-REGISTERED 2026-09-02 (before any corpus number)
 
 **What this registers.** ARISE-bibliography RANK-A card A3 — CodexGraph's FIELD schema element: a class's
