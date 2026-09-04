@@ -108,9 +108,13 @@ crow_user="$(    "$BIN" "$ROOT" --lint --lint-rules="$COLLIDE" 2>/dev/null | gre
 # beside this bare capped= (this rule's own MATCH-BUDGET saturation) on the same row — a plain substring
 # match on "capped" now also hits "rows_capped", so the check must anchor on the bare ` capped="` spelling
 # (leading space) to keep testing the fact it was written for, not the unrelated new one.
+# The expected count is GOTO_TRUTH (derived above from --match), not a literal: it was pinned at 2 and a
+# fixture added in a later round (test/sliceflowsensfix/disclosed.cpp, the slice's disclosed "goto is
+# untracked" case) made it 3, reddening an arm that is about CAP INHERITANCE, not about how many gotos
+# this tree happens to hold.
 case "$crow_builtin" in
     *' capped='* ) no "built-in goto row inherited the colliding USER rule's cap: $crow_builtin" ;;
-    *count=\"2\"* ) ok "built-in goto row stays a clean total beside a saturating same-named user rule" ;;
+    *count=\"$GOTO_TRUTH\"* ) ok "built-in goto row stays a clean total ($GOTO_TRUTH) beside a saturating same-named user rule" ;;
     * ) no "built-in goto row unexpected shape: $crow_builtin" ;;
 esac
 case "$crow_user" in

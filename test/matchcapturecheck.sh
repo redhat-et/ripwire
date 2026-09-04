@@ -4,7 +4,7 @@
 #   --match='(if_statement)'      -> hits="0"      (before)
 #   --match='(if_statement) @i'   -> hits="5000"
 #   --match='(goto_statement)'    -> hits="0"      (before)
-#   --match='(goto_statement) @g' -> hits="2"
+#   --match='(goto_statement) @g' -> hits="N"  (N derived from the tree, never pinned)
 #
 # astQuery reports CAPTURES, so a query that binds none matches nothing it can report. The zero was clean,
 # confident and wrong — and it already did damage: a capture recorded `--match='(goto_statement)' → hits="0"`
@@ -57,10 +57,21 @@ equalsCaptured "(goto_statement)" '(goto_statement)' '(goto_statement) @g'
 equalsCaptured "(if_statement)"   '(if_statement)'   '(if_statement) @i'
 equalsCaptured "(do_statement)"   '(do_statement)'   '(do_statement) @d'
 
+# ── the tree-wide goto population is DERIVED, never pinned. It was pinned at 2 and a later round added a
+#    third goto in a FIXTURE (test/sliceflowsensfix/disclosed.cpp — the flow-sensitive slice's deliberately
+#    disclosed "goto is untracked" case), which reddened two arms that are not about the number at all: the
+#    arms below test that an EXPLICIT capture is left alone and that a trailing comment does not defeat the
+#    scan. Deriving the count keeps them testing that, and keeps the next fixture from breaking them.
+GOTOS="$( "$BIN" "$ROOT" --match='(goto_statement) @g' 2>/dev/null | grep -oE ' hits="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"
+case "$GOTOS" in
+    ''|0 ) no "cannot derive the goto population (--match '(goto_statement) @g' gave '${GOTOS:-<none>}') — the arms below need a non-zero ground truth"; GOTOS=0 ;;
+    * )    ok "goto ground truth derived from the tree: $GOTOS" ;;
+esac
+
 # ── an EXPLICITLY captured query is untouched: no auto_captured=, same hits as always
 "$BIN" "$ROOT" --match='(goto_statement) @g' >"$TMP/exp" 2>/dev/null; rc=$?
-[ "$rc" -eq 0 ] && [ "$( hitsOf "$TMP/exp" )" = "2" ] && ok "explicit @capture: exit 0 hits=2" \
-    || no "explicit @capture: exit $rc hits=$( hitsOf "$TMP/exp" ) (expected 0 / 2)"
+[ "$rc" -eq 0 ] && [ "$( hitsOf "$TMP/exp" )" = "$GOTOS" ] && ok "explicit @capture: exit 0 hits=$GOTOS" \
+    || no "explicit @capture: exit $rc hits=$( hitsOf "$TMP/exp" ) (expected 0 / $GOTOS)"
 grep -oE '<match [^>]*>' "$TMP/exp" | grep -q 'auto_captured=' \
     && no "explicit @capture leaked auto_captured= on <match> (absent = not rewritten)" \
     || ok "explicit @capture has no auto_captured= on <match> (absent = not rewritten)"
@@ -90,8 +101,8 @@ ok "no capture-less pattern reached a bare hits=\"0\""
              || no "comment-hidden @ NOT refused: '(goto_statement) ; @x' must exit 1, got $?"
 # (b) a capture + trailing comment is a fine query and must still scan
 h="$( "$BIN" "$ROOT" --match='(goto_statement) @g ; note' 2>/dev/null | grep -oE 'hits="[0-9]+"' | head -1 )"
-[ "$h" = 'hits="2"' ] && ok "capture + trailing comment still scans (hits=2)" \
-                      || no "capture + trailing comment broke: want hits=\"2\", got '$h'"
+[ "$h" = "hits=\"$GOTOS\"" ] && ok "capture + trailing comment still scans (hits=$GOTOS)" \
+                      || no "capture + trailing comment broke: want hits=\"$GOTOS\", got '$h'"
 # (c) §P0.4's rule on --match's own engine: a query NO grammar compiles measured nothing — refuse, never zero
 for q in '(this_is_not_a_node)' '((call_expression) (#match? @f "x"))'; do
     "$BIN" "$ROOT" --match="$q" >"$TMP/nogram.out" 2>/dev/null
