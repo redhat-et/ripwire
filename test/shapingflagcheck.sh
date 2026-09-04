@@ -79,9 +79,9 @@ body = src[ src.index( "inline constexpr ShapingVerb kShapingVerbs[] = {" ) : ]
 body = re.sub( r'//[^\n]*', '', body[ : body.index( "\n};" ) ] )
 for name, tail in re.findall( r'\{\s*"(--[a-z-]+)"\s*,([^}]*)\}', body ):
     cols = [ c.strip() for c in tail.split( "," ) ]
-    # columns after the two selector slots are honorsTopK, honorsMaxTokens (defaulted false when absent)
-    flags = [ c for c in cols[ 2: ] if c in ( "true", "false" ) ]
-    print( "%s\t%s\t%s" % ( name, ( flags + [ "false", "false" ] )[ 0 ], ( flags + [ "false", "false" ] )[ 1 ] ) )
+    # columns after the two selector slots are honorsTopK, honorsMaxTokens, honorsTokenBudget (defaulted false when absent)
+    flags = ( [ c for c in cols[ 2: ] if c in ( "true", "false" ) ] + [ "false", "false", "false" ] )[ :3 ]
+    print( "%s\t%s\t%s\t%s" % ( name, flags[ 0 ], flags[ 1 ], flags[ 2 ] ) )
 PY
 ROWS="$( grep -c . "$TMP/rows.tsv" )"
 [ "$ROWS" -ge 12 ] && ok "(B) parsed $ROWS kShapingVerbs rows out of src/cli.h" \
@@ -123,6 +123,12 @@ argvFor()
                        [ -n "$srcTip" ] || srcTip=HEAD
                        printf '%s\0' --pr-context="${srcTip}~1" ;;
         --from-trace)  printf '%s\0' --from-trace="$TMP/trace.txt" ;;
+        # capture-audit 2026-09-04 (H3): the two rows added with an honouring column. --html rides the map's
+        # serialize path (a 58 KB document on this repo, so both knobs bite); --run-trace honours only
+        # --token-budget, which this arm does not pair — its argv is here so the honouring-row rule above is
+        # satisfied by a probe, and `true` is the command so nothing is built.
+        --html)        printf '%s\0' --html ;;
+        --run-trace)   printf '%s\0' --run-trace=true ;;
         *)             return 1 ;;
     esac
 }
@@ -147,11 +153,22 @@ printf '#0 parseArgs at src/cli.h:%s\n#1 serialize at src/serialize.h:900\n#2 ma
 # output and would let an unrelated difference pass as a trim).
 TRIMMARK='trim_level=|truncated=|budget-floor-exceeded|over_ceiling'
 
-nNotice=0; nHonor=0
-while IFS="$( printf '\t' )" read -r verb honorsTop honorsMax; do
+nNotice=0; nHonor=0; nDeferred=0
+while IFS="$( printf '\t' )" read -r verb honorsTop honorsMax honorsBudget; do
     [ -n "$verb" ] || continue
     args=(); while IFS= read -r -d '' a; do args+=( "$a" ); done < <( argvFor "$verb" ) || true
-    [ "${#args[@]}" -gt 0 ] || { no "(B) $verb has no probe argv in this gate — a row was added without one"; continue; }
+    if [ "${#args[@]}" -eq 0 ]; then
+        # capture-audit 2026-09-04 (H3): a notice-only row needs no hand-written probe here — arm (F) below
+        # sweeps every flag in the universe and asserts the notice fires. An HONOURING row is different: its
+        # column is a claim that the verb binds, and only a probe on a shape where the budget bites can prove
+        # that, so it must have one.
+        if [ "$honorsTop" = true ] || [ "$honorsMax" = true ] || [ "$honorsBudget" = true ]; then
+            no "(B) $verb declares it honours a knob but has no probe argv in this gate — an honouring column must be PROVED on a binding shape, not declared"
+        else
+            nDeferred=$(( nDeferred + 1 ))
+        fi
+        continue
+    fi
 
     for pair in "--top-k=3|$honorsTop" "--max-tokens=200|$honorsMax"; do
         flag="${pair%%|*}"; honors="${pair#*|}"
@@ -191,9 +208,17 @@ while IFS="$( printf '\t' )" read -r verb honorsTop honorsMax; do
             grep -q "is not read by $verb" "$TMP/shaped.err" \
                 && no "(B) $verb is DISCLOSED as ignoring $flag while it demonstrably shapes with it — the note is false"
         else
-            cmp -s "$TMP/plain" "$TMP/shaped" \
-                && ok "(B) $verb ignores $flag and its stdout is byte-identical (the notice changes no output byte)" \
-                || no "(B) $verb declares it ignores $flag but the output CHANGED — the column is wrong"
+            if [ "$( fnorm "$TMP/plain" )" = "$( fnorm "$TMP/shaped" )" ]; then
+                ok "(B) $verb ignores $flag and its stdout is byte-identical (the notice changes no output byte)"
+            else
+                # same rule as (F): a second plain run separates "the knob changed a byte" from "this verb's
+                # stdout is not byte-stable" (--run-trace's duration_ms= is masked by fnorm; anything else that
+                # flips is the verb's own defect). Disclosed, not asserted away.
+                "$BIN" . "${args[@]}" >"$TMP/plain2" 2>/dev/null </dev/null
+                [ "$( fnorm "$TMP/plain" )" = "$( fnorm "$TMP/plain2" )" ] \
+                    && no "(B) $verb declares it ignores $flag but the output CHANGED (two plain runs agree) — the column is wrong" \
+                    || ok "(B) $verb ignores $flag; its stdout is NOT byte-stable run-to-run (plain != plain), so byte-identity proves nothing here — the verb's own determinism defect, disclosed"
+            fi
             if grep -q "is not read by $verb" "$TMP/shaped.err"; then
                 nNotice=$(( nNotice + 1 ))
                 ok "(B) $verb DISCLOSES that $flag is not read"
@@ -254,6 +279,171 @@ cmp -s "$TMP/fp.out" "$TMP/fd.out" \
 "$BIN" --help 2>&1 | sed -n '/--from-trace=FILE/,/--note-add/p' | grep -q -- '--max-tokens' \
     && ok "(E) --help's --from-trace paragraph states that it honors --max-tokens" \
     || no "(E) --help's --from-trace paragraph still never mentions --max-tokens"
+
+# ── (F) the UNIVERSE (capture-audit 2026-09-04, H3): every flag is in exactly ONE of three buckets ─────
+#
+# (B) proves the rows kShapingVerbs KNOWS about. The 18 verbs the lens caught (--verify --flags --layout
+# --notes --doctor --skipped --field-affinity --naming-calibration --lint-catalog --dmm --plan-lint --affected
+# --help-task --arch --mermaid --html --scan-skill --eval) were in NEITHER guard table, and neither (B) nor
+# (C) could see them: 54 flag×verb combinations byte-identical at exit 0 with an empty stderr. The family had
+# been closed twice (§B9, §B9.2) by enumerating members; this arm derives the members from src/cli.h
+# (test/flaguniverse.py) so the verb added tomorrow is swept tomorrow.
+#
+# For every flag F and each of the three knobs K the outcome of `F K` must be exactly one of:
+#     REFUSE   stderr carries the honorsPaging-family refusal ("narrows only --graph-query" / "is honored by")
+#     NOTICE   stderr carries "is not read by" (the kShapingVerbs notice)
+#     HONOUR   neither, and the output (or exit code) CHANGED — or the verb's kShapingVerbs row declares it
+#              honours K, which (B) has already proved binds on a shape where the budget bites
+# A fourth outcome — neither sentence and byte-identical output — is the silent class and FAILS by name; both
+# sentences at once is two buckets and fails too. The knob values are tiny (--top-k=1 --max-tokens=10
+# --token-budget=1) so any verb that reads the field binds even on this small corpus: the inert-probe trap the
+# header describes is closed by making the budget bite everywhere, not by trusting bytes.
+#
+# The sweep runs in a THROWAWAY git copy of test/fixture, never in this tree: several verbs write when they
+# run (--note-add, --quality-baseline, --quality-ack, --index-out, --cache, --html=FILE), and the "tree
+# unmodified" arm at the bottom is what catches a probe this list forgot. A flag whose PLAIN run refuses as a
+# lone modifier (the pairing dialect: "modifies … pass both") has no verb to shape and is counted, not
+# asserted; a plain run that refuses for any OTHER reason is a broken probe and fails, so a silent verb cannot
+# hide behind a bad argv. --mcp/--listen are servers (the knob is the pass-through for their sub-requests) and
+# --help/--version print usage; those four are the only rows not probed, and they are named here.
+FCORPUS="$TMP/fcorpus"
+cp -R "$ROOT/test/fixture" "$FCORPUS"
+( cd "$FCORPUS" && git init -q . && git add -A && git -c user.name=gate -c user.email=gate@gate commit -qm fixture ) >/dev/null 2>&1
+printf 'layer test = /no-such-path-xyz/\ndeny test -> render\n' > "$TMP/arch.txt"
+printf '#0 total_area at geometry.cpp:3\n' > "$TMP/ftrace.txt"
+python3 "$ROOT/test/flaguniverse.py" "$ROOT/src/cli.h" > "$TMP/universe.tsv"
+UROWS="$( grep -c . "$TMP/universe.tsv" )"
+[ "$UROWS" -ge 190 ] && ok "(F) derived $UROWS flag rows from src/cli.h" \
+                     || no "(F) only $UROWS rows derived — the scrape broke, so the sweep below asserts nothing"
+fprobeFor()
+{
+    case "$1" in
+        --query=)        printf '%s' '--query=area' ;;
+        --recall=)       printf '%s' '--recall=notes' ;;
+        --for=)          printf '%s' '--for=area' ;;
+        --pack-task=)    printf '%s' '--pack-task=area' ;;
+        --exemplar=)     printf '%s' '--exemplar=area' ;;
+        --around=)       printf '%s' '--around=total_area' ;;
+        --path=)         printf '%s' '--path=total_area,area_of_triangle' ;;
+        --connect=)      printf '%s' '--connect=total_area,area_of_triangle' ;;
+        --edit-check=)   printf '%s' '--edit-check=total_area' ;;
+        --expand=)       printf '%s' '--expand=total_area' ;;
+        --outline=)      printf '%s' '--outline=total_area' ;;
+        --at=)           printf '%s' '--at=geometry.cpp:3' ;;
+        --from-trace=)   printf '%s' "--from-trace=$TMP/ftrace.txt" ;;
+        --cache=)        printf '%s' "--cache=$TMP/fprobe.cache" ;;
+        --index-out=)    printf '%s' "--index-out=$TMP/fprobe.idx" ;;
+        --pin-census=)   printf '%s' "--pin-census=$TMP/fprobe.tsv" ;;
+        --html=)         printf '%s' "--html=$TMP/fprobe.html" ;;
+        --run-trace=)    printf '%s' '--run-trace=true' ;;
+        --note-add=)     printf '%s' '--note-add=total_area: probe' ;;
+        --scan-skill=)   printf '%s' "--scan-skill=$ROOT/skills/ripwire-orient/SKILL.md" ;;
+        --plan-lint=)    printf '%s' "--plan-lint=$ROOT/CONTRIBUTING.md" ;;
+        --arch=)         printf '%s' "--arch=$TMP/arch.txt" ;;
+        --affected=)     printf '%s' '--affected=geometry.cpp' ;;
+        --test-gate=)    printf '%s' '--test-gate=geometry.cpp' ;;
+        --situ=)         printf '%s' '--situ=geometry.cpp' ;;
+        --help-task=)    printf '%s' '--help-task=review' ;;
+        --verify=)       printf '%s' '--verify=calls(total_area,area_of_triangle)' ;;
+        --layout=)       printf '%s' '--layout=Point' ;;
+        --field-affinity=) printf '%s' '--field-affinity=Point' ;;
+        --lego=)         printf '%s' '--lego=Point' ;;
+        --whereis=)      printf '%s' '--whereis=total_area' ;;
+        --owners=)       printf '%s' '--owners=total_area' ;;
+        --graph-query=)  printf '%s' '--graph-query=kind(all,fn)' ;;   # a multi-row set, so --top-k=1 has something to cut
+        --callers=|--callees=|--uses=|--impact=|--mentions=|--safe-delete=) printf '%s' "${1}total_area" ;;
+        --quality-ack=)  printf '%s' '--quality-ack=probe' ;;
+        --order=)        printf '%s' '--order=stable' ;;
+        --rank-by=)      printf '%s' '--rank-by=churn' ;;
+        --format=)       printf '%s' '--format=columnar' ;;
+        --color-by=)     printf '%s' '--color-by=lang' ;;
+        --grep-scope=)   printf '%s' '--grep-scope=file' ;;
+        --grep-in=)      printf '%s' '--grep-in=any' ;;
+        --legend=)       printf '%s' '--legend=compact' ;;
+        --slice-flow=)   printf '%s' '--slice-flow=back' ;;
+        --agent=)        printf '%s' '--agent=codex' ;;
+        --export=)       printf '%s' '--export=cc.json' ;;
+        --quality-panel=) printf '%s' '--quality-panel=default' ;;
+        --limit=)        printf '%s' '--limit=3' ;;
+        --offset=)       printf '%s' '--offset=1' ;;
+        --max-file-size=) printf '%s' '--max-file-size=1M' ;;
+        --pack-budget-bytes=) printf '%s' '--pack-budget-bytes=1000' ;;
+        --top-k=|--max-tokens=|--token-budget=) return 1 ;;   # the knobs themselves
+        --mcp|--listen=|--help|--version) return 1 ;;         # servers and usage — named in the header
+        *=)              printf '%s' "${1}zzqq9" ;;
+        *)               printf '%s' "$1" ;;
+    esac
+}
+# does the kShapingVerbs row for FLAG declare it honours KNOB? (rows.tsv: name, top, max, budget; a nested
+# row such as "--stray-content --plan" is matched on its LAST token)
+fdeclared()
+{
+    local flag="$1" knob="$2" col
+    case "$knob" in --top-k=*) col=2 ;; --max-tokens=*) col=3 ;; *) col=4 ;; esac
+    awk -F'\t' -v f="$flag" -v c="$col" '{ n = split( $1, t, " " ); if( $1 == f || t[ n ] == f ) { print $c; exit } }' "$TMP/rows.tsv"
+}
+# Two things stdout may legitimately vary on between two runs of the SAME argv, and how each is handled so
+# the sweep can never blame a knob for them: (a) --run-trace's duration_ms= is a documented MEASUREMENT
+# (verbs_change.h "Determinism, honestly scoped") — masked before comparing; (b) a verb's first run on a
+# fresh corpus can leave state a second run reads (--doctor's cache-dir bytes=) — every probe is WARMED UP
+# once and the second plain run is the one measured. Anything still flipping after both is disclosed by name
+# through the tie-break in the notice branch, never asserted away and never counted as a knob read.
+fnorm(){ sed -E 's/ duration_ms="[0-9]+"//g' "$1"; }
+REFUSEPAT='narrows only --graph-query|--max-tokens is honored by|--token-budget is honored by'
+NOTICEPAT='is not read by'
+MODIFIERPAT='modif|pass both|pass it too|pass them|only applies|narrows|requires|needs|is read by|read only|honored only by|— pass|pass one|composes with|applies only|selects|re-serializes'
+fRefuse=0; fNotice=0; fHonour=0; fModifier=0; fBad=0
+while IFS="$( printf '\t' )" read -r flag kind example policy; do
+    [ -n "$flag" ] || continue
+    case "$kind" in int) probe="${flag}2" ;; *) probe="$( fprobeFor "$flag" )" || continue ;; esac
+    case "$flag" in --top-k=|--max-tokens=|--token-budget=) continue ;; esac
+    ( cd "$FCORPUS" && "$BIN" . $probe --no-cache >/dev/null 2>/dev/null </dev/null )   # warm-up: cold-vs-warm state is not a knob
+    ( cd "$FCORPUS" && "$BIN" . $probe --no-cache >"$TMP/f.plain" 2>"$TMP/f.plain.err" </dev/null ); rcP=$?
+    if [ "$rcP" -ne 0 ] && [ ! -s "$TMP/f.plain" ] && grep -qE "$MODIFIERPAT" "$TMP/f.plain.err"; then
+        fModifier=$(( fModifier + 1 )); continue         # a lone modifier: no verb answered, nothing to shape
+    fi
+    # A plain run that refuses for the VERB'S OWN reason (a bogus value, a missing fixture) still goes through
+    # the knob loop: both guards speak from validateConfig, BEFORE any handler, so the refusal or the notice
+    # must be on stderr whether or not the verb then answered. A silent verb cannot hide behind a bad probe —
+    # it lands in the fourth bucket below by name.
+    for knob in --top-k=1 --max-tokens=10 --token-budget=1; do
+        ( cd "$FCORPUS" && "$BIN" . $probe "$knob" --no-cache >"$TMP/f.knob" 2>"$TMP/f.knob.err" </dev/null ); rcK=$?
+        isRefuse=0; isNotice=0
+        grep -qE "$REFUSEPAT" "$TMP/f.knob.err" && isRefuse=1
+        grep -qE "$NOTICEPAT" "$TMP/f.knob.err" && isNotice=1
+        if [ "$isRefuse" = 1 ] && [ "$isNotice" = 1 ]; then
+            fBad=$(( fBad + 1 )); no "(F) $probe $knob: BOTH the refusal and the notice fired — two buckets for one flag"
+        elif [ "$isRefuse" = 1 ]; then
+            fRefuse=$(( fRefuse + 1 ))
+        elif [ "$isNotice" = 1 ]; then
+            fNotice=$(( fNotice + 1 ))
+            if [ "$( fnorm "$TMP/f.plain" )" != "$( fnorm "$TMP/f.knob" )" ]; then
+                # a changed byte under a "not read" notice is a wrong column — UNLESS the verb's stdout is not
+                # byte-stable to begin with even after the warm-up and the mask. A second plain run tells the
+                # two apart; the nondeterminism is DISCLOSED by name, never asserted away, and is its own
+                # defect for the determinism lane (M14), not evidence about the knob.
+                ( cd "$FCORPUS" && "$BIN" . $probe --no-cache >"$TMP/f.plain2" 2>/dev/null </dev/null )
+                if [ "$( fnorm "$TMP/f.plain" )" = "$( fnorm "$TMP/f.plain2" )" ]; then
+                    fBad=$(( fBad + 1 )); no "(F) $probe $knob: the notice says the knob is not read, yet stdout CHANGED (and two plain runs agree, so the knob did it)"
+                else
+                    ok "(F) $probe $knob: notice fired; stdout is NOT byte-stable run-to-run on this verb (plain != plain), so byte-identity proves nothing here — a determinism defect of the verb, disclosed, not a knob read"
+                fi
+            fi
+        elif [ "$rcK" -ne "$rcP" ] || [ "$( fnorm "$TMP/f.plain" )" != "$( fnorm "$TMP/f.knob" )" ]; then
+            fHonour=$(( fHonour + 1 ))
+        elif [ "$( fdeclared "${flag%%=*}" "$knob" )" = true ]; then
+            fHonour=$(( fHonour + 1 ))                    # declared in kShapingVerbs and proved binding by (B)
+        else
+            fBad=$(( fBad + 1 )); no "(F) $probe $knob: SILENT — exit $rcK both ways, stdout byte-identical ($( wc -c <"$TMP/f.knob" | tr -d ' ' ) B), no refusal, no notice: accepted and ignored"
+        fi
+    done
+done < "$TMP/universe.tsv"
+[ "$fBad" -eq 0 ] && ok "(F) every flag×knob is in exactly one bucket: refuse=$fRefuse notice=$fNotice honour=$fHonour (lone modifiers skipped: $fModifier)" \
+                  || no "(F) $fBad flag×knob combinations are outside the three buckets (refuse=$fRefuse notice=$fNotice honour=$fHonour modifiers=$fModifier)"
+{ [ "$fRefuse" -ge 60 ] && [ "$fNotice" -ge 60 ] && [ "$fHonour" -ge 30 ]; } \
+    && ok "(F) all three buckets are populated (the sweep measured something)" \
+    || no "(F) a bucket is implausibly small (refuse=$fRefuse notice=$fNotice honour=$fHonour) — the sweep is not covering the universe"
+[ "$nDeferred" -gt 0 ] && ok "(B) $nDeferred notice-only rows carry no hand-written probe and were asserted by (F) instead" || true
 
 # ── the harness must not mutate the tree ───────────────────────────────────────────────────────────────
 git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/status.after"

@@ -3126,6 +3126,49 @@ inline constexpr ShapingVerb kShapingVerbs[] = {
     { "--connect",      nullptr, &Config::connectSpec,  false, true },   // packConnect takes the budget
     { "--pr-context",   &Config::prContext,    nullptr, false, true },   // writePrContext takes the budget
     { "--from-trace",   nullptr, &Config::fromTrace,    false, true, true },   // FromTraceInputs::bodyBudgetBytes
+    { "--run-trace",    nullptr, &Config::runTrace,     false, false, true },  // runRunTrace takes the budget (exec-mode --from-trace)
+    // ── capture-audit 2026-09-04 (H3): the verbs that were in NEITHER guard table ──────────────────────
+    // Eighteen verbs took all three knobs at exit 0 with byte-identical output and an empty stderr — the
+    // table above closed the family it could see, and these were outside both it and honorsPaging. They are
+    // rows now, and test/shapingflagcheck.sh arm (F) sweeps the whole flag universe (test/flaguniverse.py)
+    // so the next verb outside both tables fails the gate by name instead of shipping silent. Every row here
+    // reads none of the three fields (re-derived from the read sites, as the header says) except --html,
+    // which rides the default map's serialize path and honours --top-k/--max-tokens like the map does.
+    { "--html",              &Config::html,               nullptr, true, true },
+    { "--verify",            nullptr, &Config::verifyClaim },
+    { "--flags",             &Config::darkFlags,          nullptr },
+    { "--layout",            &Config::layoutFlag,         nullptr },
+    { "--field-affinity",    &Config::fieldAffinity,      nullptr },
+    { "--naming-calibration",&Config::namingCalibration,  nullptr },
+    { "--lint-catalog",      &Config::lintCatalog,        nullptr },
+    { "--dmm",               &Config::dmm,                nullptr },
+    { "--quality-delta",     &Config::qualityDelta,       nullptr },   // --quality-ack=REASON implies it and lands here too
+    { "--quality-baseline",  &Config::qualityBaseline,    nullptr },
+    { "--affected",          nullptr, &Config::affectedFiles },
+    { "--plan-lint",         nullptr, &Config::planLintFile },
+    { "--plan-lanes",        &Config::planLanesFlag,      nullptr },
+    { "--help-task",         nullptr, &Config::helpTask },
+    { "--arch",              nullptr, &Config::archRules },
+    { "--mermaid",           &Config::mermaid,            nullptr },   // plain and `--zoom --mermaid` (the one --zoom shape outside honorsPaging)
+    { "--scan-skill",        nullptr, &Config::scanSkillFile },
+    { "--eval",              &Config::eval,               nullptr },
+    { "--eval-retrieval",    &Config::evalRetrieval,      nullptr },
+    { "--eval-mined",        nullptr, &Config::evalMined },
+    { "--eval-skills",       nullptr, &Config::evalSkills },
+    { "--eval-stray",        nullptr, &Config::evalStray },
+    { "--export=cc.json",    &Config::exportCcJson,       nullptr },
+    { "--index-out",         nullptr, &Config::indexOut },
+    { "--batch",             nullptr, &Config::batchFile },   // sub-queries carry their own arguments; the outer knob reaches none of them
+    { "--notes",             &Config::notesList,          nullptr },
+    { "--note-add",          &Config::noteAddFlag,        nullptr },
+    { "--doctor",            &Config::doctor,             nullptr },
+    { "--skipped",           &Config::skippedList,        nullptr },
+    { "--edit-plan",         nullptr, &Config::editPlan },
+    { "--replace-symbol-body",  nullptr, &Config::replaceSymbolBody },
+    { "--insert-before-symbol", nullptr, &Config::insertBeforeSymbol },
+    { "--insert-after-symbol",  nullptr, &Config::insertAfterSymbol },
+    { "--stray-content --plan", &Config::landingPlan,     nullptr },   // the two --stray-content sub-modes honorsPaging excludes
+    { "--stray-content --abi",  &Config::abiFlag,         nullptr },
 };
 
 // which row (if any) does this invocation select? First match wins, which mirrors main()'s own dispatch
@@ -3163,7 +3206,15 @@ inline void noticeShapingFlagIgnored( const Config& c ) noexcept
         return; // the default map (and its riders) honour both
     }
 
-    if( c.topKExplicit && !verb->honorsTopK )
+    // capture-audit 2026-09-04 (H3, lens 4): two false notices, both on --for.
+    //   * `--for --format=candidates --top-k=5` said "--top-k is not read by --for … nothing was dropped" on a
+    //     run the candidates export had just CUT to 5 — the export composes with --for and consumes the flag
+    //     (--help: "Composes with --top-k"), so when it is present the flag was read and the note is a lie.
+    //   * `--for --top-k=0` printed this notice AND the T2 refusal ("--top-k=0 means no ranked map, payload
+    //     only") — two sentences about one flag. The T2 guard owns the zero spelling; this note is for a
+    //     positive K the verb never looked at.
+    const bool isTopKConsumedBeside = c.candidates || c.topK == 0;
+    if( c.topKExplicit && !verb->honorsTopK && !isTopKConsumedBeside )
     {
         std::fprintf( stderr, "ripwire: --top-k is not read by %.*s — it shapes the default map, --query, "
                               "--format=candidates, --recall and --graph-query. %.*s emitted its full result "
