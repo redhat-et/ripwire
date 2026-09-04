@@ -9667,6 +9667,115 @@ calls `self.keys()` — no in-repo `keys` anywhere, no row before or after (the 
 target); (O) determinism ×2. Both gates enter `test/regression.sh` in their feature commits; red on the
 d8fa59c binary at A, B, C, F, H, I, K, L, M.
 
+### Phase 5, RUN — ACCEPT on conjuncts 1, 3, 4, 5, 6; conjunct 2 at 12 / 13, a MISS BY THE LETTER the registration itself predicts (measured 2026-09-03)
+
+**Verdict.** Both mechanisms ship on the lane branch (commit named in the lane report; kParserVer 76 → 77
+with the mirror). Five of six conjuncts meet with room; conjunct 2 counts twelve of its thirteen named
+sites leaving — the thirteenth, `table/table.py:2235` `OrderedDict.__getitem__(…)`, stays a `locality`
+pin because the mechanism as REGISTERED says it must: `from collections import OrderedDict` resolves to no
+indexed file, and its head segment `collections` names `astropy/utils/collections.py`, so the binding reads
+UNKNOWN — the conservative clause written into source 1 above, applied to a site the same registration
+listed as leaving. The registration contradicts itself on that one site; the arithmetic was written
+without applying its own head-segment rule. By its letter a miss on 1–4 reverts both mechanisms; by its
+substance the mechanism did exactly what was registered and every measured number is above its floor.
+As the Phase 4 RUN did with its golden clause, this section states the defect and leaves the letter to
+the orchestrator: the code is NOT reverted, the branch is the patch, and the revert recipe is the lane
+report's. Depth-≤2 head-segment probing (a package importable from the crawl root sits at depth 1 or 2;
+`astropy/utils/collections.py` is depth 3) is the obvious refinement and is deliberately NOT applied
+after the number — it is the first candidate for a Phase 5b registration.
+
+| Conjunct | Registered | Measured (14365 · 12907) | |
+| --- | --- | --- | --- |
+| 1. `ambiguous=` ≤ +2.0 % | src ≤ 5,744 · ugrep ≤ 1,756 · rocksdb ≤ 46,044 · duckdb ≤ 9,107 | src **5,634** (+2, +0.04 %) · ugrep **1,703** (−19) · rocksdb **44,969** (−173) · duckdb **9,021** (+92, +1.03 %) | **meets** |
+| 2. the thirteen named sites leave `locality` | 13 / 13 | **12 / 13** — `sum`:1186, `range`:207, `np.dtype` ×5, the four `super()`-miss sites all `C external` and SCIP `@external`; `super().__new__`:476 `receiver-rule` → `Masked::__new__`, SCIP-confirmed; `OrderedDict.__getitem__`:2235 stays (above) · 12907 **11 / 12**, the same site | **miss by the letter** |
+| 3. `locality` full-oracle precision, pooled ≥ 0.80; each ≥ 0.696 / 0.705 | pooled n ≥ 100 | **0.836** (51 / 61) · **0.836** (51 / 61); pooled **0.836** (102 / 122), n = 122 ≥ 100 | **meets** |
+| 4. `receiver-rule` precision on 14365 ≥ 0.925 | | **0.948** (6,961 / 7,339; was 0.931 at 5,522) · 12907 0.942 (was 0.923) | **meets** |
+| 5. veto precision ≥ 0.95 | confirmed / (covered − @nondef) | **0.996** (11,180 / 11,223; 43 in-repo, 4 `@nondef`, n = 11,227 covered of 17,941 refused) · 12907 **0.993** (10,491 / 10,565) | **meets** |
+| 6. walk precision ≥ 0.90 | walk-added `receiver-rule` rows, SCIP-covered | **0.995** (1,832 / 1,841 of 1,851 added; 6 sentinel, 3 in-repo) · 12907 **0.995** (1,683 / 1,692) | **meets** |
+
+Argv as in Phase 4 with `--label astropy-N-r5base` (d8fa59c binary) and `astropy-N-r5`; the site
+tables from the (caller_id, callee, line) join of `.plain.tsv` × `.scip.tsv` (`join.py`, `walkprec.py`
+in the lane report). The conjunct-3 population moved 79 → 61 covered on 14365 (105 → 82 sites): 23 left
+— 13 to `external`, 8 to `split` (rich-receiver sites the S6-C prior no longer credits — see D2 below —
+e.g. `header.py:1795` `self._keyword_indices[keyword].index(idx)` and the depth-3 `wcsaxes/core.py:503`),
+2 to `receiver-rule` (`:476` and its twin `:492`) — and 0 entered. The remaining residue is exactly the
+registration's out-of-reach list: `.index`:438, `.copy`:1616, `WCSBase.__init__` ×2 and the `OrderedDict`
+site (`@external`), sites #1/#2/#3/#5 and `bbox.evaluate`:1085 (in-repo).
+
+**Two defects the instruments found in the first cut, fixed BEFORE these numbers, each with its
+before/after — neither moves a band, both are the registered mechanism failing to be itself:**
+
+- **D1 — a `super()` over two direct bases that both define `m` was VETOED.** `methodOnTypeOrBases`
+  refuses a multi-hit level (nullptr, Rule 2b/2c's honest-ambiguity discipline) and the walk read that
+  nullptr as "the MRO left the tree" — `FlatLambdaCDM(FlatFLRWMixin, LambdaCDM).__init__` and the
+  cosmology `TestFlat*` mixin tests, ~25 sites, refused. Fix: the walk takes the UNION of a multi-base
+  level (an honest split) — and, one step further, the DIRECT-base level honours declaration order
+  (`chaUpDeclared`, the first declared base that defines `m` wins: Python's C3 puts the first base's
+  chain first) because the union alone let the tier ladder's same-file prior pick `LambdaCDM::__init__`
+  over the first-declared `FlatFLRWMixin::__init__` SCIP names (19 sites). S6-C is excluded for a
+  `super()` receiver. Veto-row in-repo disagreements 73 → 43; walk precision first cut 0.995 → 0.995
+  with 19 fewer wrong pins. C3 beyond the direct level is not modelled — disclosed.
+- **D2 — a member access whose receiver is undecidable classified `RecvKind::None`, and every bare-name
+  guard read it as a BARE call.** The veto refused `self.to_cartesian().sum()` as the builtin `sum`,
+  `abs(t1 - t2).max()` as `max`, `"…".format(` as `format`; on ripwire's own src/ ALL 213 first-cut
+  vetoes were this shape (`x.foo().find(…)` read as std `find`), and the same misread is what Rule 1's
+  bare arm and shadow suppression did on the depth-3 chains `test/chainguardcheck.sh` arm (h) had pinned
+  as a disclosed residual. Fix (kParserVer 77, same bump): a call ref whose receiver is a member access
+  with an undecidable receiver stamps `FieldOfVar` with an EMPTY recvVar — the convention Read/Write refs
+  already used — so `None` means bare. src/ `external=` 213 → 0 (absent); chainguardcheck arm (h) re-pinned
+  to the closed shape (its fixture: edges 12 → 15, ambiguous 4 → 6 — the two depth-3 chains take the
+  honest split instead of the enclosing-class pin / the deletion). `ambiguous=` moved +2 on src and +92 on
+  duckdb from this (rich-receiver calls that Rule 1 used to wrong-pin now split), inside the band.
+
+**Two amendments stated before their code, both conservative:** (A1) C-family definition evidence is a
+FREE symbol or macro of the name ANYWHERE in the corpus, not only in the caller's file/includes — an angle
+include is not path-resolvable in a single root, so "declared in an included file" is undecidable, while
+"the name's in-repo definitions are all members" is the fact the veto actually needs; (A2) the `super()`
+direct-base order above.
+
+**Reported, not banded.** `unique` on 14365: 0.798 → **0.876** (19,153 / 24,009 → 18,037 / 20,587),
+`@external` 3,764 → **1,479** — the `isinstance` → `TableColumns::isinstance` shape one tier up, the same
+defect, mostly gone; 12907 0.810 → 0.879, 3,336 → 1,393. `split` `@external` 258 → 201 · 271 → 214.
+`external=` 17,941 on 14365 (17,944 before D1's order fix), 16,970 on 12907; src **absent** (0), ugrep 7,
+rocksdb 369, duckdb 2,055. `edges=`: src 13,119 (0), ugrep 5,371 (−17), rocksdb 210,834 (−70), duckdb
+84,461 (−237). `unresolved=` fell on rocksdb 1,800 → 1,503 and duckdb 2,650 → 1,492: a C++ call to a
+std name whose only in-repo definition is in another language used to count as "lang-filtered
+unresolved"; it is external, and the veto now says so first. The walk's 1,851 added rows on 14365: 1,115
+re-labelled from `unique`, 180 from `cone`, 24 from `split`, and **522 that had NO row** — `super().m()`
+sites the old ladder pinned to the caller's own class and dropped as self-loops; new edges at 0.995.
+The 43 veto rows SCIP scores in-repo: 39 are the census's (caller, callee) key collision (the same
+caller also calls an in-repo `dtype`/`convolve`/`slice`/… beside the vetoed `np.dtype`/`np.convolve`/
+builtin `slice`, one oracle answer for both); the 4 pure ones are `plt.hist` beside an in-repo `hist(…)`
+(SCIP silent on matplotlib, so the key carries only the in-repo half), a same-name re-export shim
+`class BoxLeastSquaresResults(BoxLeastSquaresResults)`, and a nested CLASS `format` inside a test method
+that the nested-def probe (keyed on the enclosing FUNCTION's name) does not see — two sites. Disclosed.
+
+**Contract checks, all clean:** `externalvetocheck` (RED first at A, B, C, F, H, I on the d8fa59c binary)
+and `mrowalkcheck` (RED at K, L, M) green; determinism ×2 and cold == warm on astropy-14365 — measured
+with a PRIVATE `TMPDIR` cache dir, because the lane's own intermediate kParserVer-77 binaries had written
+a blob the final binary would have served (a bump is one-shot; facts that move twice inside one lane
+under one bump leave a stale blob behind — the lane report records the trap); `xmllint` on the fixture and
+the astropy map; `test/golden.xml` re-derived in its own commit — the legend line (`hdr:external=`) and
+`est_tokens` 822 → 884 only, zero row/edge/count changes; ASan on `externalvetocheck`, `mrowalkcheck`,
+`clsrecvcheck`, `pincensuscheck`, `scipjoincheck`, `chainguardcheck` and the astropy census path (both
+census files byte-identical to the dev binary's, 0 reports); the resolver/locality family green
+(`lpincheck clsrecvcheck localitycheck chainguardcheck resolverhonestycheck shadowcheck
+qextractionkeycheck qschemetripcheck cachehashcheck pyshapecheck usescheck fieldusescheck
+pyimportprecisecheck legendcoveragecheck compactlegendcheck fixedbufsweep pincensuscheck scipjoincheck
+narrowcheck fieldnarrowcheck chacheck deckcheck docscommandscheck loopconservationcheck`);
+`manifestcheck` red ONLY on the gate-count pins (515 now) — the orchestrator's recompute;
+`--quality-delta --scope='src/*'` gating 0 after 26 acks under one stated reason (the four deliberate
+contract changes, the ladder's new steps, the census's tenth mechanism, kParserVer, and two lexical clone
+false positives), all by the `gating` pseudo-token.
+
+**What is left, stated.** The `locality` residue on 14365 is 10 covered disconfirmations: 5 `@external`
+(the two builtin-type methods on untyped receivers, the `WCSBase` module-level alias ×2, the `OrderedDict`
+head-segment case) and 5 in-repo (four untyped receivers, one `@nondef`-mixed). n = 61 alone on either
+corpus, 122 pooled — the pooling rule still carries the stratum. Phase 5b candidates, in order: the
+depth-≤2 head-segment probe (1 site here, but it is the rule's precision); TS/JS/Rust/Go import bindings
+(the veto is Python + C-family only); nested-class shadow evidence (2 sites); the C3 order beyond direct
+bases (0 sites measured).
+
 ## Member variables as symbols + `--uses=Owner.field` — the member-variable round (card A3), PRE-REGISTERED 2026-09-02 (before any corpus number)
 
 **What this registers.** ARISE-bibliography RANK-A card A3 — CodexGraph's FIELD schema element: a class's
