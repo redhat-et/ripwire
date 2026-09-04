@@ -15,7 +15,10 @@
 //   * INERT WITHOUT MENTIONS — a task that names no indexed file/module/symbol leaves lensRank untouched
 //     and the output BYTE-IDENTICAL (extraction is pure string work; no I/O, no subprocess).
 //   * NEVER DISPLACES #1 — boosted scores are strictly BELOW the current maximum (the top hit the ranker
-//     already believes in cannot be dethroned by an anchor; it can only be joined near the top).
+//     already believes in cannot be dethroned by an anchor). This is a SCORE promise (within
+//     kMentionTopGapStep of the top score for the first anchored slot), not a rank promise: on a flat or
+//     tied head, several unanchored candidates can sit inside that same 5% band above the anchor, so the
+//     anchored hit can still land a few ranks below #1 (§L10, 2026-09-04 — measured r=5 on a flat head).
 //   * BOUNDED — at most kMentionMaxFiles files x kMentionMaxSymbolsPerFile symbols, plus at most
 //     kMentionMaxDirectSymbols directly-named symbols, are touched.
 //   * DETERMINISTIC — mentions keep task-text appearance order; every match set is reduced with a total

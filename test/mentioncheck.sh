@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # mentioncheck.sh — B8: the query-mention anchor on the --for lens.
 #
-# Default-on: a file, dotted module, or Scope.symbol literally NAMED in the task text is lifted to just
-# below the top hit. Pinned promises (each measured in the 4-arm head-to-head as the #1 loss bucket):
+# Default-on: a file, dotted module, or Scope.symbol literally NAMED in the task text has its SCORE lifted
+# to within 5% of the top score (a score promise, not a rank one — see the §L10 arm below). Pinned promises
+# (each measured in the 4-arm head-to-head as the #1 loss bucket):
 #   (i)   SIGNAL — a path mention ("pkg/beta.py"), a URL-embedded mention, a dotted module ("pkg.beta"),
 #         and a Scope.symbol mention ("Widget.render") each lift the named target into the top ranks,
 #         while the same query WITHOUT the boost leaves it low/absent.
@@ -101,6 +102,23 @@ OFFX="$( cands 'widget pipeline process records inside the `nonexistentpkg` modu
 # header note appears when (and only when) something anchored
 "$BIN" "$FIX" --for="widget pipeline in pkg/beta.py" --no-cache 2>/dev/null | grep -q 'mention anchor:' \
     && ok "--for header names the anchor" || no "--for header note missing"
+
+# ── §L10 (2026-09-04): the note promises a SCORE lift (within kMentionTopGapStep of the top score), not a
+#    RANK lift. The old wording ("lifted to just below the top hit" / "lifted near the top") read as a rank
+#    promise, and the "path mention" case above already falsifies a literal rank-2 reading: flush_stale_cache
+#    lands at rank 3, not 2, because two genuine matches (process_widget_records, widget_pipeline_process)
+#    already score inside that same 5% band above it. Pin both halves so neither regresses silently: the
+#    wording says "score", and the rank gap the old wording got wrong is a real, reproduced fact here, not a
+#    one-off measurement on a different corpus.
+NOTE_ON="$( "$BIN" "$FIX" --for="widget pipeline process records — the fix belongs in pkg/beta.py" --no-cache 2>/dev/null )"
+printf '%s' "$NOTE_ON" | grep -q 'score lifted to within 5% of the top score' \
+    && ok "L10: mention-anchor note promises a SCORE lift, not a rank one" \
+    || { no "L10: mention-anchor note does not carry the score-lift wording"; printf '%s' "$NOTE_ON" | grep -o '\[mention anchor:[^]]*\]'; }
+
+rOn2="$( rankOf "$( cands "widget pipeline process records — the fix belongs in pkg/beta.py" )" flush_stale_cache )"
+[ -n "$rOn2" ] && [ "$rOn2" -gt 2 ] \
+    && ok "L10: the anchored hit is not simply 'just below the top hit' (landed at rank $rOn2, with $(( rOn2 - 1 )) genuine matches ahead of it) — a score promise holds here where a rank-2 promise would not" \
+    || no "L10 fixture drifted: expected the path-mention case to land below rank 2 (the case the old wording got wrong), got rank ${rOn2:-absent}"
 
 # ── (ii) never displaces #1 ──────────────────────────────────────────────────────────────────────────
 ON="$( cands "widget pipeline process records — the fix belongs in pkg/beta.py" )"
