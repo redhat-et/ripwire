@@ -197,9 +197,13 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # arm exists to keep from being written.
 # 17 -> 18 2026-08-30 (lane/at-seed): graph.h's resolveAtSeed reads the seed file's bytes through the
 # same canonical helper to derive the seed line's byte range — the line-seeded selector's one file read.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 18 ] \
-    && ok "repo: --uses=readWholeFile count=18 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 18"
+# 18 -> 19 2026-09-04 (capture-audit lane L1, f97616d, H10): verbs_quality.h's ackNothingToAccept reads the
+# on-disk ack ledger through the same canonical helper to decide whether the rendered ledger already equals its
+# bytes (the idempotent-ack path). Measured 19 with BOTH the ec5e3c3 binary and the merged one on this tree —
+# a corpus fact, not a resolver change.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 19 ] \
+    && ok "repo: --uses=readWholeFile count=19 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 19"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"
