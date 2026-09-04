@@ -1086,7 +1086,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         std::vector<std::uint32_t> churn( ing.files.size(), 0 );
         const rw::SinceScope       noScope;
         const bool                 churnOk = mineChurnPerFile( ing, root, multiRoot, ws, std::string_view(), noScope, rw::ensemble::kEnsembleChurnSince, churn );
-        return rw::ensemble::writeEnsembleReport( ing, churnOk ? &churn : nullptr, root, cfg.pageLimit, cfg.pageOffset );
+        return rw::ensemble::writeEnsembleReport( ing, churnOk ? &churn : nullptr, root, cfg.pageLimit, cfg.pageOffset,
+                                                  mvSingleRoot, mvRootPrefix, mvRootAttr );
     }
 
     // --context-ratio: the LOCAL-REASONING lens (src/contextratio.h owns the measurement AND its emission, the
