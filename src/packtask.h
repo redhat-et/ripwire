@@ -69,7 +69,12 @@ inline constexpr int         kPackTaskDefaultTokens  = 6000;   // the default bu
 inline constexpr int         kPackTaskRankTopN       = 12;     // ranking = the top-12 head, not the full 40 — leaves budget for the later sections
 inline constexpr std::size_t kPackTaskBodyCandidates = 6;      // top-K heads that get FULL bodies (byte budget trims further)
 inline constexpr std::size_t kPackTaskSectionFloor   = 64;     // a section is only attempted when this many bytes remain
-inline constexpr std::size_t kPackTaskHeaderReserve  = 1024;   // the <ctx><!-- report --> + "</ctx>" (a bounded comment)
+// RE-MEASURED 1024 -> 1600 (2026-09-04, capture-audit M11): the header comment alone was 1511 B at a 2040-token
+// budget on this tree — the legend outgrew the reserve over the rounds while every bundle still fit by the
+// single-entry tolerance; the M11 root clause (~250 B) was the straw, surfacing as --partition's core 6% past
+// its ceiling. The reserve must cover the header the ladder cannot trim, or the sections are sized against
+// bytes that are not there.
+inline constexpr std::size_t kPackTaskHeaderReserve  = 1600;   // the <ctx><!-- report --> + "</ctx>" (a bounded comment)
 
 // §B8.3 (trap #8, "a disclosure has BYTES") — the byte floor packTaskListSection holds back for its own
 // wrapper, now that the wrapper carries capped= too. These were bare literals 64 and 96 at the four call
@@ -202,7 +207,10 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
          // graphrag-recon.md idea #1 (2026-08-20, S-effort harvest pick): callers corroborated by SEVERAL
          // top-K anchors outrank one tied to a single anchor — a pure re-sort of the SAME d1 edges, no new
          // graph walk, no pooling. Kept to one clause, same trap-#8 discipline as the rest of this legend.
-         "callers: sorted by shared desc (ties=site order); shared=# of top-K anchors reached, omitted at 1. ";
+         "callers: sorted by shared desc (ties=site order); shared=# of top-K anchors reached, omitted at 1. "
+         // M11: the root's machine-readable price, defined where the ledger prose below states the byte figures.
+         "On the root: est_tokens= prices the delivered bundle in tokens (markup at the map rate, bodies at the body rate), "
+         "budget_tokens= is the token target; over_ceiling= is 1 when the header floor alone exceeds it (the bundle is then complete, not trimmed). ";
     h.append( p.report );
     h.append( extraNotes );
     h += " -->";
@@ -1617,14 +1625,34 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // §F1: + in.trailingSectionBytes — the ladder prices the document the CALLER will emit, which includes
         // the tail it splices in before "</ctx>". Pricing `whole` alone is what let --with-graph land 12.6% past
         // the allowance wearing no label.
+        // M11: the PRICED ROOT — est_tokens= (markup at the map rate, bodies at the body rate, the caller's
+        // trailing section included exactly as the ladder prices it), budget_tokens= (the target, the same
+        // unit), over_ceiling="1" when the ladder's last rung fired. The ledger prose keeps its byte figures;
+        // this is the machine-readable twin a parser that drops comments still gets. The attributes are
+        // PRICED INTO THE LADDER: their widest possible spelling (the pre-ladder estimate's digits — the
+        // ladder only shrinks the header — plus the two optional attributes) rides in the measured bytes, so
+        // a bundle the ladder calls conformant is conformant WITH its root attributes on (packtaskcheck's
+        // ceiling arm caught the 4-byte overshoot of the first, unpriced version).
+        const auto rootAttrsFor = [ & ]( const std::string& doc, bool overCeiling ) -> std::string
+        {
+            const std::size_t markupBytes = doc.size() + in.trailingSectionBytes - std::min( bodiesStr.size(), doc.size() );
+            std::string       attrs       = rw::pricedRootAttr( markupBytes, rw::kBytesPerTokenDefault, bodiesStr.size(), nullptr );
+            attrs += " budget_tokens=\"" + std::to_string( budgetTokens ) + "\"";
+            if( overCeiling ) { attrs += " over_ceiling=\"1\""; }
+            return attrs;
+        };
+        const std::size_t rootAttrsBound = rootAttrsFor( whole, /*overCeiling=*/true ).size();
         const std::string chosen = climbCeilingLadder( buildHeader, headerStr,
-                                                       whole.size() - headerStr.size() + in.trailingSectionBytes,
+                                                       whole.size() - headerStr.size() + in.trailingSectionBytes + rootAttrsBound,
                                                        rw::ceilingAllowanceBytes( budgetTokens ),
                                                        /*hasRouteAttr=*/!lr.routeNote.empty(), kNotes );
         if( chosen != headerStr )
         {
             whole.replace( 0, headerStr.size(), chosen );
         }
+        // the ladder's LAST rung is the only text that spells the marker with a colon (kNotes above); the
+        // legend's own definition of over_ceiling= must never read as the label (bundleidcheck trap #15)
+        rw::spliceRootAttrs( whole, rootAttrsFor( whole, chosen.find( "over_ceiling:" ) != std::string::npos ) );
     }
 
     // §6 --partition: the bundle's own surface (see the contract above). topRanked already contains bodyIds

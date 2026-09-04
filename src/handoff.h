@@ -197,8 +197,10 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
                           "(branch/sha, changed files+symbols via git numstat, blast_files=transitive dependent files, tests-to-run); "
                           "<heuristic> is labeled non-verified suggestion (cochange=usually-edited-together deg=degree, note=committed "
                           ".ripwire_notes row, doc=plan/design pointer s=lexical score for the branch+commit-subject query). "
-                          "budget= is the token-budget cap and withheld= counts heuristic rows dropped to fit it — verified rows are "
-                          "never dropped. gitok=0 means the git diff probe failed and changed counts are floors. -->";
+                          "budget= is the token-budget cap; withheld=1 when heuristic rows were dropped to fit it, withheld_rows= how many "
+                          "(the map's spelling: a boolean, the count beside it) — verified rows are never dropped; est_tokens= prices the "
+                          "delivered packet in tokens and over_ceiling= is 1 when even the verified floor exceeds budget= (the packet is then "
+                          "complete, not trimmed). gitok=0 means the git diff probe failed and changed counts are floors. -->";
         doc += "<handoff";
         doc += at;
         // R-E (2026-08-17 harvest): single-root by construction — the crawl root every p= above is relative to.
@@ -210,7 +212,9 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
         doc += "\" gitok=\"" + std::string( gitOk ? "1" : "0" ) + "\"";
         if( tokenBudget > 0 )
         {
-            doc += " budget=\"" + std::to_string( tokenBudget ) + "\" withheld=\"" + std::to_string( withheld ) + "\"";
+            // M11: withheld= is a BOOLEAN (the map's spelling); the dropped-row COUNT rides beside it.
+            doc += " budget=\"" + std::to_string( tokenBudget ) + "\" withheld=\"" + ( withheld > 0 ? "1" : "0" )
+                 + "\" withheld_rows=\"" + std::to_string( withheld ) + "\"";
         }
         doc += ">";
         doc += v;
@@ -237,6 +241,15 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
         {
             doc = assemble( 0, rows.size() );   // verified floor — over budget, disclosed, never silent
         }
+    }
+    // M11: the PRICED ROOT — est_tokens= at the same conservative rate the byte cap above is derived from, so
+    // est_tokens <= budget exactly when the packet fits; over_ceiling="1" when even the verified floor does not.
+    {
+        const std::size_t legendEnd = doc.find( "<handoff" );
+        std::size_t       estTokens = 0;
+        std::string       rootAttrs = pricedRootAttr( doc.size(), kMinBytesPerToken, 0, &estTokens );
+        if( tokenBudget > 0 && estTokens > tokenBudget ) { rootAttrs += " over_ceiling=\"1\""; }
+        spliceRootAttrs( doc, rootAttrs, legendEnd == std::string::npos ? 0 : legendEnd );
     }
     std::fwrite( doc.data(), 1, doc.size(), out );
     std::fputc( '\n', out );

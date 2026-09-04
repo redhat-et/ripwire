@@ -947,6 +947,40 @@ inline std::size_t tokensForEmittedBytes( std::size_t emittedBytes, double bytes
     return std::size_t( double( emittedBytes ) / bytesPerToken + 0.5 );
 }
 
+// M11 (capture-audit 2026-09-04, lens 7 F-EST-1): THE PRICED ROOT. Every --token-budget consumer prices the
+// document it delivers ON ITS ROOT ELEMENT, in tokens — the unit budget_tokens=/budget= are in — so a parser
+// that discards comments still reads the number (attrvocabcheck §3 gave the map that; --pack-task/--from-trace/
+// --handoff/--expand --top-k=0 priced nothing, or only in prose). The attribute is part of the document it
+// prices, so the digits are converged the way --for's header splice converges them (≤4 passes). `markupBytes`
+// are priced at `markupRate`, `bodyBytes` at kBytesPerTokenBody. Returns the attribute string; `outTokens`
+// receives the number, so the caller's own --token-budget gate reads the SAME value the root shows.
+inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, std::size_t bodyBytes, std::size_t* outTokens )
+{
+    const std::size_t bodyTokens = bodyBytes > 0 ? tokensForEmittedBytes( bodyBytes, kBytesPerTokenBody ) : 0;
+    std::size_t estTokens = tokensForEmittedBytes( markupBytes, markupRate ) + bodyTokens;
+    std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
+    for( int pass = 0; pass < 4; ++pass )
+    {
+        const std::size_t next = tokensForEmittedBytes( markupBytes + attr.size(), markupRate ) + bodyTokens;
+        if( next == estTokens ) { break; }
+        estTokens = next;
+        attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
+    }
+    if( outTokens ) { *outTokens = estTokens; }
+    return attr;
+}
+// Splices `attrs` into the FIRST start-tag of `doc` (the root — its own attribute values are XML-escaped, so
+// the first '>' closes it). No-op, with a degrade alert, if the document has no start-tag at all.
+inline void spliceRootAttrs( std::string& doc, std::string_view attrs, std::size_t rootTagAt = 0 )
+{
+    const std::size_t lt = doc.find( '<', rootTagAt );
+    const std::size_t gt = lt == std::string::npos ? std::string::npos : doc.find( '>', lt );
+    if( gt == std::string::npos ) { DEGRADED_PATH_ALERT( "pricedRoot: document has no root start-tag — est_tokens= not spliced" );  return; }
+    const bool selfClosing = gt > 0 && doc[ gt - 1 ] == '/';
+    doc.insert( selfClosing ? gt - 1 : gt, attrs );
+}
+
+
 // A header that PRINTS est_tokens is part of the document est_tokens describes, so its own digit count feeds
 // back into the number. Emitters whose header is a plain string iterate that to a fixpoint (serialize(), and
 // recall.h's buildRecall before it); emitters whose header can only be produced by writing to a stream price

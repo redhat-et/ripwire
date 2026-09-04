@@ -562,6 +562,7 @@ std::optional<int> runFromTrace( const MainDispatch& d )
     in.bundleBudgetBytes = cfg.tokenBudget > 0
         ? std::size_t( double( cfg.tokenBudget ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
         : rw::kForPayloadBudgetBytes;
+    in.budgetTokens      = cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0;   // M11: budget_tokens= on the root
     in.sigLadderBudgetBytes = cfg.packBudgetBytes;
     in.bodyBudgetBytes      = cfg.maxTokens > 0
         ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
@@ -1010,6 +1011,7 @@ std::optional<int> runRunTrace( const MainDispatch& d )
     in.bundleBudgetBytes = cfg.tokenBudget > 0
         ? std::size_t( double( cfg.tokenBudget ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
         : rw::kForPayloadBudgetBytes;
+    in.budgetTokens      = cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0;   // M11: budget_tokens= on the root
     in.sigLadderBudgetBytes = cfg.packBudgetBytes;
     in.bodyBudgetBytes      = cfg.packBudgetBytes;
     in.compress = cfg.compress;

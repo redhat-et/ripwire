@@ -139,7 +139,10 @@ import sys
 d = open( sys.argv[1], 'rb' ).read()
 i = d.find( b'-->' )
 sys.stdout.buffer.write( d if i < 0 else d[ :i + 3 ] )" "$1"; }
-saysOverCeiling(){ hdr "$1" | grep -q 'over_ceiling'; }
+# M11 (2026-09-04): the legends now DEFINE over_ceiling= ("over_ceiling=1 when …"), so a bare word-grep reads
+# the definition as the label. The label is the root attribute over_ceiling="1" or the ladder's own colon
+# note (" over_ceiling: the header floor …"); the map spells over_ceiling=1 in its stats comment.
+saysOverCeiling(){ hdr "$1" | grep -qE 'over_ceiling(="1"|=1|:)'; }
 
 # ═══ 1) M2 + M3 — G4 AND xmllint under hostile task bytes, every verb that echoes user text ═══════════════════
 # RED (build_base): xmllint FAILS on {--for,--pack-task} x {c0,badu8}; the newline arms emit a literal \n

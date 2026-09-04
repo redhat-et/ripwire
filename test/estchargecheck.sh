@@ -556,6 +556,8 @@ else
     no "#11 A9 could not produce a weak=\"1\" bundle (threshold or query shape changed — re-anchor this arm)"
 fi
 
+# M11 (2026-09-04): the pack-task legend now DEFINES over_ceiling= in prose, so the three greps below read the
+# LABEL — the root attribute over_ceiling="1" or the ladder's colon note — never the bare word.
 # A11 — --pack-task --with-graph. The graph block is a FIXED cost with no trim knob, so at a budget where the
 # bare bundle is conformant and the block pushes it past the allowance, the bundle must SAY over_ceiling.
 # MEASURED pre-fix: bare 2 046 B conformant, +graph 2 437 B against a 2 171 B allowance, 12.6% over, silent.
@@ -571,7 +573,7 @@ for _tb in 800 1000 1200 1500 2000 3000; do
     "$BIN" src --pack-task="$FOR_TASK" --token-budget=$_tb --no-cache >"$TMP/pt_probe.out" 2>/dev/null
     _b="$( bytes_of "$TMP/pt_probe.out" )"
     _a="$( awk "BEGIN{printf \"%d\", $_tb*2.36*1.15}" )"
-    if [ "$_b" -le "$_a" ] 2>/dev/null && ! grep -aq 'over_ceiling' "$TMP/pt_probe.out"; then PT_TB=$_tb; break; fi
+    if [ "$_b" -le "$_a" ] 2>/dev/null && ! grep -aqE 'over_ceiling(="1"|:)' "$TMP/pt_probe.out"; then PT_TB=$_tb; break; fi
 done
 if [ -z "$PT_TB" ]; then
     no "#11 A11: no budget in 800..3000 leaves the bare --pack-task conformant AND unlabelled — the header floor has outgrown the ladder"
@@ -583,13 +585,13 @@ PT_ALLOW="$( awk "BEGIN{printf \"%d\", $PT_TB*2.36*1.15}" )"
 PTB="$( bytes_of "$TMP/pt_bare.out" )";  PTG="$( bytes_of "$TMP/pt_graph.out" )"
 if [ "$PTG" -le "$PT_ALLOW" ] 2>/dev/null; then
     ok "#11 A11 --pack-task --token-budget=$PT_TB --with-graph: $PTG B within the $PT_ALLOW B allowance"
-elif grep -aq 'over_ceiling' "$TMP/pt_graph.out"; then
+elif grep -aqE 'over_ceiling(="1"|:)' "$TMP/pt_graph.out"; then
     ok "#11 A11 --pack-task --token-budget=$PT_TB --with-graph: $PTG B over the $PT_ALLOW B allowance and SAYS SO (over_ceiling)"
 else
     no "#11 A11 --pack-task --token-budget=$PT_TB --with-graph: $PTG B EXCEEDS the $PT_ALLOW B allowance unlabelled (bare form is $PTB B) — the spliced block is uncharged"
 fi
 # control: the bare form at the same budget must NOT be labelled, or the label means nothing
-{ [ "$PTB" -le "$PT_ALLOW" ] && ! grep -aq 'over_ceiling' "$TMP/pt_bare.out"; } 2>/dev/null \
+{ [ "$PTB" -le "$PT_ALLOW" ] && ! grep -aqE 'over_ceiling(="1"|:)' "$TMP/pt_bare.out"; } 2>/dev/null \
     && ok "#11 A11 control: the bare --pack-task at the same budget is conformant AND unlabelled" \
     || no "#11 A11 control: the bare --pack-task at --token-budget=$PT_TB is $PTB B / labelled — the A11 arm proves nothing"
 
@@ -861,6 +863,105 @@ for n in 200 1000 6000; do
         no "§C4 XML N=$n: $xb B exceeds fit_bytes $xfit with no over_ceiling=1"
     else ok "§C4 XML N=$n: $xb B vs fit_bytes $xfit, label consistent"; fi
 done
+
+# ── #15 (capture-audit 2026-09-04, M11 / lens 7 F-EST-1/2/3, lens 1 F10, lens 4): EVERY --token-budget consumer
+#    prices its ROOT. The audited binary took a budget on --pack-task (header prose said `budget=12744 bytes`),
+#    --from-trace, --handoff (--token-budget=100 delivered 521 payload bytes with no est_tokens=/over_ceiling=)
+#    and --expand --top-k=0 (the estimate lived on the <r> header the flag suppresses) and priced nothing an
+#    XML parser can read. RULE: the root carries est_tokens= (tokens — the unit budget_tokens=/budget= are in),
+#    over_ceiling="1" when the un-trimmable floor exceeds the ceiling, and `withheld=` is a BOOLEAN with the
+#    dropped-row COUNT under withheld_rows= (the map already spelled withheld="1" + withheld_est_tokens=;
+#    --handoff spelled the count under the boolean's name). Bands, not pins (house rule for estimates); an
+#    IDENTITY only where the number is by construction the one --token-budget gates on. ──────────────────
+root_est(){ perl -0pe 's#<!--.*?-->##gs' "$1" | grep -oE "<$2( [^>]*)?>" | head -1 | grep -oE ' est_tokens="[0-9]+"' | head -1 | tr -dc '0-9'; }
+root_attr(){ perl -0pe 's#<!--.*?-->##gs' "$1" | grep -oE "<$2( [^>]*)?>" | head -1 | grep -oE " $3=\"[^\"]*\"" | head -1 | sed -E 's/.*="([^"]*)"/\1/'; }
+band15(){   # $1 label $2 file $3 root-element $4 hi*100
+    local label="$1" f="$2" el="$3" hi="$4" E B R
+    E="$( root_est "$f" "$el" )"; B="$( bytes_of "$f" )"
+    if [ -z "$E" ] || [ "$E" -eq 0 ] 2>/dev/null; then
+        no "#15 $label: <$el> root carries no est_tokens= ($( perl -0pe 's#<!--.*?-->##gs' "$f" | grep -oE "<$el( [^>]*)?>" | head -1 | cut -c1-140 ))"; return
+    fi
+    R=$(( B * 100 / E ))
+    { [ "$R" -ge 200 ] && [ "$R" -le "$hi" ]; } \
+        && ok "#15 $label: $B B / est_tokens=$E = $(( R / 100 )).$(( R % 100 )) B/tok — inside the 2.00-$(( hi / 100 )).$(( hi % 100 )) band" \
+        || no "#15 $label: $B B / est_tokens=$E = $(( R / 100 )).$(( R % 100 )) B/tok — OUTSIDE the band (the root's number does not price the delivered document)"
+}
+# (a) --pack-task: a comfortable budget prices; a tiny one labels over_ceiling on the ROOT, not only in prose
+"$BIN" src --pack-task="$FOR_TASK" --token-budget=1500 --no-cache >"$TMP/p15_pt.xml" 2>/dev/null
+band15 "--pack-task --token-budget=1500" "$TMP/p15_pt.xml" ctx 420
+[ "$( root_attr "$TMP/p15_pt.xml" ctx budget_tokens )" = "1500" ] \
+    && ok "#15 --pack-task: root budget_tokens=\"1500\" — the ceiling in the SAME unit as est_tokens=" \
+    || no "#15 --pack-task: root carries no budget_tokens=\"1500\" beside est_tokens= (got '$( root_attr "$TMP/p15_pt.xml" ctx budget_tokens )')"
+"$BIN" src --pack-task="$FOR_TASK" --token-budget=50 --no-cache >"$TMP/p15_pt50.xml" 2>/dev/null
+[ "$( root_attr "$TMP/p15_pt50.xml" ctx over_ceiling )" = "1" ] \
+    && ok "#15 --pack-task --token-budget=50: root over_ceiling=\"1\" (the header floor exceeds the ceiling)" \
+    || no "#15 --pack-task --token-budget=50: no over_ceiling=\"1\" on the root while the ledger prose says the floor exceeds the budget"
+E50="$( root_est "$TMP/p15_pt50.xml" ctx )"
+[ -n "$E50" ] && [ "$E50" -gt 50 ] 2>/dev/null \
+    && ok "#15 --pack-task --token-budget=50: est_tokens=$E50 > 50 — the label and the number agree" \
+    || no "#15 --pack-task --token-budget=50: est_tokens='$E50' does not exceed the budget it is labelled over"
+# (b) --from-trace: the same two shapes on a name-resolved frame
+printf 'Traceback (most recent call last):\n  File "src/graph.h", line 1, in rankGraphTeleport\n' >"$TMP/p15_trace.txt"
+"$BIN" src --from-trace="$TMP/p15_trace.txt" --token-budget=1500 --no-cache >"$TMP/p15_ft.xml" 2>/dev/null
+band15 "--from-trace --token-budget=1500" "$TMP/p15_ft.xml" ctx 420
+[ "$( root_attr "$TMP/p15_ft.xml" ctx budget_tokens )" = "1500" ] \
+    && ok "#15 --from-trace: root budget_tokens=\"1500\"" \
+    || no "#15 --from-trace: root carries no budget_tokens=\"1500\" (got '$( root_attr "$TMP/p15_ft.xml" ctx budget_tokens )')"
+"$BIN" src --from-trace="$TMP/p15_trace.txt" --token-budget=50 --no-cache >"$TMP/p15_ft50.xml" 2>/dev/null
+[ "$( root_attr "$TMP/p15_ft50.xml" ctx over_ceiling )" = "1" ] \
+    && ok "#15 --from-trace --token-budget=50: root over_ceiling=\"1\"" \
+    || no "#15 --from-trace --token-budget=50: no over_ceiling=\"1\" on the root (the prose label alone is what a parser discards)"
+# (c) --handoff: priced, labelled, and withheld= is a boolean with the count beside it
+"$BIN" . --handoff --token-budget=100 --no-cache >"$TMP/p15_ho100.xml" 2>/dev/null
+"$BIN" . --handoff --token-budget=100000 --no-cache >"$TMP/p15_hobig.xml" 2>/dev/null
+band15 "--handoff --token-budget=100000" "$TMP/p15_hobig.xml" handoff 320
+[ "$( root_attr "$TMP/p15_ho100.xml" handoff over_ceiling )" = "1" ] \
+    && ok "#15 --handoff --token-budget=100: root over_ceiling=\"1\" (the verified floor exceeds 100 tokens)" \
+    || no "#15 --handoff --token-budget=100: $( bytes_of "$TMP/p15_ho100.xml" ) B delivered against a 100-token budget with no over_ceiling=\"1\" on the root"
+W100="$( root_attr "$TMP/p15_ho100.xml" handoff withheld )"; WR100="$( root_attr "$TMP/p15_ho100.xml" handoff withheld_rows )"
+case "$W100" in
+    0|1) ok "#15 --handoff: withheld=\"$W100\" is a BOOLEAN (the map's spelling)" ;;
+    *)   no "#15 --handoff: withheld=\"$W100\" is a COUNT under the boolean's name — the map spells withheld=\"1\" and puts the count beside it" ;;
+esac
+if [ -n "$WR100" ] && [ "$WR100" -gt 0 ] 2>/dev/null && [ "$W100" = "1" ]; then
+    ok "#15 --handoff --token-budget=100: withheld_rows=\"$WR100\" carries the dropped-row count beside withheld=\"1\""
+elif [ -n "$WR100" ] && [ "$WR100" = "0" ] && [ "$W100" = "0" ]; then
+    ok "#15 --handoff --token-budget=100: no heuristic row to withhold on this tree (withheld_rows=\"0\" withheld=\"0\" agree)"
+else
+    no "#15 --handoff --token-budget=100: withheld=\"$W100\" withheld_rows=\"${WR100:-<absent>}\" — the pair is missing or disagrees"
+fi
+[ "$( root_attr "$TMP/p15_hobig.xml" handoff over_ceiling )" = "" ] \
+    && ok "#15 --handoff --token-budget=100000: no over_ceiling= (absent = inside the ceiling, the map's convention)" \
+    || no "#15 --handoff --token-budget=100000: over_ceiling=\"$( root_attr "$TMP/p15_hobig.xml" handoff over_ceiling )\" on a packet well inside its budget"
+# (d) --expand --top-k=0: the root prices the bodies-only document, and that number IS the one --token-budget gates on
+"$BIN" src --expand=pageWindow --top-k=0 --no-cache >"$TMP/p15_ex.xml" 2>/dev/null
+band15 "--expand=pageWindow --top-k=0" "$TMP/p15_ex.xml" ctx 420
+EX="$( root_est "$TMP/p15_ex.xml" ctx )"
+if [ -n "$EX" ] && [ "$EX" -gt 1 ] 2>/dev/null; then
+    "$BIN" src --expand=pageWindow --top-k=0 --no-cache --token-budget=$(( EX - 1 )) >/dev/null 2>"$TMP/p15_ex.err"; rc=$?
+    grep -q "withheld_est_tokens=$EX " "$TMP/p15_ex.err" && [ "$rc" -ne 0 ] \
+        && ok "#15 --expand --top-k=0: the root's est_tokens=$EX is the number --token-budget gates on (withheld_est_tokens=$EX, exit $rc) — one estimator" \
+        || no "#15 --expand --top-k=0: root est_tokens=$EX but the gate says '$( head -1 "$TMP/p15_ex.err" | cut -c1-120 )' — two counters"
+fi
+# (e) the withheld spelling family-wide: no XML root anywhere in this arm's captures spells withheld= above 1
+for f in p15_pt p15_pt50 p15_ft p15_ft50 p15_ho100 p15_hobig p15_ex; do
+    if grep -qE ' withheld="([2-9]|[1-9][0-9]+)"' "$TMP/$f.xml" 2>/dev/null; then
+        no "#15 $f: a root spells a COUNT under withheld= — the boolean name"
+    fi
+done
+ok "#15 withheld= is a boolean on every root this arm captured"
+# (f) mutation: the shape can fail
+printf '<handoff budget="100" withheld="12">' >"$TMP/p15_mut.xml"
+[ -z "$( root_est "$TMP/p15_mut.xml" handoff )" ] && [ "$( root_attr "$TMP/p15_mut.xml" handoff withheld )" = "12" ] \
+    && ok "#15 mutation: the audited handoff root (no est_tokens, withheld=12) IS detected" \
+    || no "#15 mutation: the arm cannot see the audited shape"
+# (g) well-formed
+if command -v xmllint >/dev/null 2>&1; then
+    for f in p15_pt p15_pt50 p15_ft p15_ft50 p15_ho100 p15_hobig p15_ex; do
+        [ -s "$TMP/$f.xml" ] || continue
+        xmllint --noout "$TMP/$f.xml" 2>/dev/null && ok "#15 $f.xml is well-formed" || no "#15 $f.xml FAILED xmllint"
+    done
+fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
