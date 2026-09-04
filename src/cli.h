@@ -1992,7 +1992,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               never parsed) and the effective ceilings, so a zero-row report still states its\n"
         "                               bounds. rows_capped=\"1\" ⇒ rows are a sample of an exact count. Rows sort by path;\n"
         "                               composes with --max-file-size/--exclude and multi-root (rows carry the\n"
-        "                               <label>/./<rel> spelling). Read-only; exit 0 always: a report, not a gate.\n\n"
+        "                               <label>/<rel> spelling). Read-only; exit 0 always: a report, not a gate.\n\n"
         "  security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,\n"
         "                               0 = clean; exit 3 = the path could not be read at all — refused,\n"
         "                               never reported as a clean scan); stdout carries one deterministic\n"

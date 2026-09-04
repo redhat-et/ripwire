@@ -3664,11 +3664,18 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
         }
     }
 
+    // M12 (capture-audit-2026-09-04, lane L9): the "file" key is DISPLAY, distinct from `path` above (which
+    // stays untouched — it feeds readFileBytes and the error messages above, i.e. real disk I/O). Before
+    // this fix it printed "./src/graph.h" on a relative root; every other MCP verb's "file" key is already
+    // root-relative (see e.g. the situJPathRel/ccRel/pathForJ lambdas earlier in this file).
+    const bool         fbSingleRoot = ing.realPaths.empty();
+    const std::string  fbDisplayPath = fbSingleRoot ? std::string( sarif::rootRelativeUri( path, sarif::rootPrefixOf( root ) ) ) : path;
+
     oc.ok = true;
     oc.resultJson = std::string( "{\"handle\":\"" ) + mcpdetail::jsonEscape( handle )
                   + "\",\"name\":\"" + mcpdetail::jsonEscape( s.name )
                   + "\",\"kind\":\"" + symTag( s.kind )
-                  + "\",\"file\":\"" + mcpdetail::jsonEscape( path )
+                  + "\",\"file\":\"" + mcpdetail::jsonEscape( fbDisplayPath )
                   + "\",\"line\":" + std::to_string( s.line )
                   + ",\"start_line\":" + std::to_string( clampedStart )
                   + ",\"end_line\":" + std::to_string( clampedEnd )

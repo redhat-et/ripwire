@@ -2661,10 +2661,13 @@ inline std::string_view stripLineLocator( std::string_view path ) noexcept
     return path.substr( 0, colon );
 }
 
-// Does `haystack` (an ing.files entry) contain the user-typed path fragment `needle`? Plain substring,
-// EXCEPT that a merged workspace path carries the `<label>/./<rel>` seam (workspace.h) — so the natural
-// `<label>/<rel>` a reader would type must match too. The collapse only runs on a miss AND only when the
-// haystack actually carries a "/./", so a single-root corpus never allocates and is byte-identical.
+// Does `haystack` (an ing.files entry) contain the user-typed path fragment `needle`? Plain substring, plus
+// a `/./` collapse fallback for a miss. Before M12 (capture-audit-2026-09-04) a merged workspace path
+// carried a `<label>/./<rel>` seam (workspace.h §P8.7) that this collapse existed to see past — workspace.h
+// now spells plain `<label>/<rel>`, which the natural substring test above already matches directly, so
+// this fallback is LEGACY (never triggers on a labeled path any more, and is otherwise harmless: it only
+// runs on a miss AND only when the haystack still carries a literal "/./" for some unrelated reason, so a
+// single-root corpus never allocates and is byte-identical).
 inline bool filePathContains( std::string_view haystack, std::string_view needle )
 {
     if( haystack.find( needle ) != std::string_view::npos )

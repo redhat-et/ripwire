@@ -48,7 +48,11 @@ rc(){ perl -e 'alarm 25; exec @ARGV' "$BIN" "$R" "$@" --no-cache >/dev/null 2>&1
 
 L="$( run --test-gate=src/literal.cpp )"; LRC="$( rc --test-gate=src/literal.cpp )"
 case "$L" in
-    *'<t p="'*'/test/literalcheck.sh" evidence="script_literal" run="bash '*'test/literalcheck.sh"/>'*)
+    # M12 (capture-audit-2026-09-04): p= is ROOT-RELATIVE now — it used to be the raw ingest spelling, which
+    # under this gate's absolute root meant the whole checkout prefix, so the pattern had to wildcard it. The
+    # exact spelling is the stronger assertion, and pinning it is what keeps the fix from silently reverting.
+    # run= keeps its wildcard: it is a pasteable COMMAND, and testmap.h spells it against the on-disk path.
+    *'<t p="test/literalcheck.sh" evidence="script_literal" run="bash '*'test/literalcheck.sh"/>'*)
         ok 'literal changed path maps to its registered shell gate with script_literal evidence and run=' ;;
     *) no "literal shell gate row missing/wrong: $L" ;;
 esac
@@ -64,12 +68,12 @@ esac
 
 D="$( run --test-gate=src/dynamic.cpp )"; DJ="$( run --test-gate=src/dynamic.cpp --json )"
 case "$D" in
-    *'<t p="'*'/test/dynamiccheck.sh" evidence="manifest_declared" run="bash '*'test/dynamiccheck.sh"/>'*)
+    *'<t p="test/dynamiccheck.sh" evidence="manifest_declared" run="bash '*'test/dynamiccheck.sh"/>'*)
         ok 'RIPWIRE_TEST_DEPS maps a dynamic gate with manifest_declared evidence' ;;
     *) no "metadata shell gate row missing/wrong: $D" ;;
 esac
 case "$DJ" in
-    *'"p":"'*'/test/dynamiccheck.sh","evidence":"manifest_declared","run":"bash '*'test/dynamiccheck.sh"'*)
+    *'"p":"test/dynamiccheck.sh","evidence":"manifest_declared","run":"bash '*'test/dynamiccheck.sh"'*)
         ok 'JSON mirrors manifest_declared evidence and run command' ;;
     *) no "JSON metadata evidence missing/wrong: $DJ" ;;
 esac

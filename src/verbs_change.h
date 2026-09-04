@@ -99,21 +99,38 @@ std::optional<int> runAffected( const MainDispatch& d )
         std::sort( testFiles.begin(), testFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+        // M12: --affected carried no root= at all and printed every <test p=> row as the raw ingest-stored
+        // path ("./test/…" on a relative root), unlike --situ/--test-gate/--pr-context/--handoff, whose
+        // tests_to_run rows are all root-relative — the L1 finding: "same three tests, same file, two
+        // spellings — the four tests_to_run lists cannot be diffed with sort | uniq".
+        const bool        afSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+        const std::string afRootPrefix = afSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+        const std::string afRootAttr   = afSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
+        // No multi-root branch inside the lambda (situ.h's tgPathRel is spelled the same way, deliberately):
+        // afRootPrefix is EMPTY under multi-root, and a merged `<label>/<rel>` identity carries neither a
+        // leading "./" nor that prefix, so rootRelativeUri returns it byte-identical. One code path, one
+        // spelling rule, and the multi-root case is a value rather than a branch.
+        const auto         afPathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+        {
+            return rw::sarif::rootRelativeUri( ing.files[ fileId ], afRootPrefix );
+        };
         // seeded_by= is the honesty half of the file-first rule: the two readings answer DIFFERENT questions
         // over the same argument string and return different counts, so which one fired is a fact about the
         // measurement, not a detail. seeds= is the resolved seed-symbol count (1 for a lone function, ~84
         // for a header), which is what makes the two readings comparable at a glance.
         std::printf( "<!-- ripwire affected: test files that transitively reach the changed files/symbols (run these); seeded_by= says which reading the argument took. "
                      "script_gates_unmodelled= counts test/*.sh runners in the corpus (a path count; not every one invokes the binary) — "
-                     "script-to-binary edges are NOT modelled, so those gates are invisible to this walk and never counted in tests=/reached= -->" );
-        std::printf( "<affected changed=\"%s\" seeded_by=\"%s\" seeds=\"%zu\" tests=\"%zu\" reached=\"%zu\" script_gates_unmodelled=\"%zu\">",
-                     ex( cfg.affectedFiles ).c_str(), rw::affectedSeededBy( sel ), seeds.size(), testFiles.size(), reach.size(), scriptGatesUnmodelledCount( ing ) );
+                     "script-to-binary edges are NOT modelled, so those gates are invisible to this walk and never counted in tests=/reached= -->%s",
+                     rw::rootRelPathsLegend( afSingleRoot ) );
+        std::printf( "<affected changed=\"%s\" seeded_by=\"%s\" seeds=\"%zu\" tests=\"%zu\" reached=\"%zu\" script_gates_unmodelled=\"%zu\"%s>",
+                     ex( cfg.affectedFiles ).c_str(), rw::affectedSeededBy( sel ), seeds.size(), testFiles.size(), reach.size(), scriptGatesUnmodelledCount( ing ),
+                     afRootAttr.c_str() );
         // §P11.4: run= where a REAL runner is derivable, absent where it is not. The index is constructed
         // here (not hoisted into MainDispatch) because it is lazy — a run with no test row reads no script.
         const rw::TestRunnerIndex runners( ing );
         for( std::uint32_t f : testFiles )
         {
-            std::printf( "<test p=\"%s\"%s/>", ex( ing.files[f] ).c_str(), rw::runAttr( runners, f, ex ).c_str() );
+            std::printf( "<test p=\"%s\"%s/>", ex( afPathRel( f ) ).c_str(), rw::runAttr( runners, f, ex ).c_str() );
         }
         std::printf( "</affected>" );
         return 0;

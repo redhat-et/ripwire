@@ -774,6 +774,16 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
 {
     std::vector<char> esc;
     const auto         ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+    // M12: --test-gate carried no root= and printed every <t p=> row as the raw ingest-stored path
+    // ("./test/…" on a relative root) — --test-gate refuses under multi-root entirely (dispatch site), so
+    // this is always single-root or the root=""/non-git degrade; rootRelativeUri's own leading-"./" strip
+    // fires unconditionally, so no extra singleRoot gate is needed for the row spelling, only for whether
+    // root= itself is worth printing.
+    const std::string  tgRootPrefix = rw::sarif::rootPrefixOf( root );
+    const auto          tgPathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rw::sarif::rootRelativeUri( ing.files[ fileId ], tgRootPrefix );
+    };
 
     const PageWindow  uw        = pageWindow( r.untested.size(), effectiveRowCap( pageLimit, int( kMaxUntestedRows ) ), pageOffset );
     const std::size_t shownRows = uw.end - uw.begin;
@@ -781,34 +791,41 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     // r26-stamp Task A: anchor tests/untested to the commit (+dirty state) the change set was diffed against
     // — "" (omitted) when the caller passes no root (root="" ⇒ non-git-style skip, same convention as gitstamp.h).
     const std::size_t testRows = r.tests.size() + r.shellGates.obligations.size();
-    // The row-contract half is emitted only when this document HAS rows for it to govern.
-    std::fprintf( out, "<!-- %s%s-->", kTestGateLegend,
-                  ( testRows > 0 || !r.untested.empty() ) ? kTestGateRowLegend : "" );
+    // The row-contract half is emitted only when this document HAS rows for it to govern — and root= is the
+    // same kind of fact: it says what the p= values are RELATIVE to, so on a zero-row document it governs
+    // nothing and costs bytes a zero-row report is the least able to afford (test/donelegendcheck.sh's
+    // tg_empty ratchet). Attribute and clause are therefore gated together: root= never appears without the
+    // sentence defining it, which is what test/legendcoveragecheck.sh asserts.
+    const bool        tgHasRows  = ( testRows > 0 || !r.untested.empty() );
+    const std::string tgRootAttr = ( root.empty() || !tgHasRows ) ? std::string() : ( " root=\"" + ex( root ) + "\"" );
+    std::fprintf( out, "<!-- %s%s-->%s", kTestGateLegend,
+                  tgHasRows ? kTestGateRowLegend : "", rw::rootRelPathsLegend( !tgRootAttr.empty() ) );
     std::fprintf( out, "<test-gate changed=\"%u\" impacted=\"%zu\" tests=\"%zu\" untested=\"%zu\""
                        " shown_tests=\"%zu\" tests_capped=\"0\" shown_untested=\"%zu\" untested_capped=\"%d\""
                        " script_gates_unmodelled=\"%zu\" script_gates_registered=\"%zu\" script_gates_mapped=\"%zu\""
-                       " script_gates_unresolved_dynamic=\"%zu\" counts_floor=\"1\"%s%s>",
+                       " script_gates_unresolved_dynamic=\"%zu\" counts_floor=\"1\"%s%s%s>",
                   r.changedFiles, r.impactedSymbols, testRows, r.untested.size(),
                   testRows, shownRows, shownRows < r.untested.size() ? 1 : 0,
                   scriptGatesUnmodelledCount( ing ),
                   r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic,
                   pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
-                  gitstamp::atAttr( root ).c_str() );
+                  gitstamp::atAttr( root ).c_str(), tgRootAttr.c_str() );
     // §P11.4: this gate EXITS 4 on the obligation, so its rows carry the command that discharges it — where
     // one is derivable. Absent run= = not derivable (testmap.h states why a fallback would be a lie).
     const TestRunnerIndex gateRunners( ing );
     for( std::uint32_t f : r.tests )
     {
-        std::fprintf( out, "<t p=\"%s\"%s/>", ex( ing.files[f] ).c_str(), runAttr( gateRunners, f, ex ).c_str() );
+        std::fprintf( out, "<t p=\"%s\"%s/>", ex( tgPathRel( f ) ).c_str(), runAttr( gateRunners, f, ex ).c_str() );
     }
     for( const ShellGateObligation& gate : r.shellGates.obligations )
     {
-        std::fprintf( out, "<t p=\"%s\" evidence=\"%s\" run=\"%s\"/>", ex( ing.files[gate.fileId] ).c_str(), gate.evidence,
+        std::fprintf( out, "<t p=\"%s\" evidence=\"%s\" run=\"%s\"/>", ex( tgPathRel( gate.fileId ) ).c_str(), gate.evidence,
                       ex( gateRunners.commandForScript( gate.fileId ) ).c_str() );
     }
-    walkUntestedRows( ing, r, uw, [ & ]( std::size_t, const Symbol& s, const std::string& path )
+    walkUntestedRows( ing, r, uw, [ & ]( std::size_t, const Symbol& s, const std::string& )
     {
-        std::fprintf( out, "<u sym=\"%s\" p=\"%s\" ccx=\"%u\"/>", ex( s.name ).c_str(), ex( path ).c_str(), s.ccx );
+        // M12: tgPathRel( s.fileId ), not the raw `path` walkUntestedRows hands in — same gap as the <t> rows above.
+        std::fprintf( out, "<u sym=\"%s\" p=\"%s\" ccx=\"%u\"/>", ex( s.name ).c_str(), ex( tgPathRel( s.fileId ) ).c_str(), s.ccx );
     } );
     std::fprintf( out, "</test-gate>" );
 }
@@ -830,6 +847,14 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     // r26-stamp Task A: the JSON sibling of the XML at= anchor — "at":null (never a fake sha) on a non-git root.
     const std::string atVal  = gitstamp::stampAt( root );
     const std::string atJson = atVal.empty() ? std::string( "null" ) : ( "\"" + atVal + "\"" );
+    // M12: JSON sibling of the XML root=/root-relative p= fix above — same rootRelativeUri unconditional
+    // leading-"./" strip, same root=""-on-a-non-git-root degrade (rw::jsonStr, not a hand quote, for root
+    // itself since it can carry XML-unsafe-irrelevant but JSON-relevant bytes on an unusual path).
+    const std::string  tgJRootPrefix = rw::sarif::rootPrefixOf( root );
+    const auto           tgJPathRel  = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return rw::sarif::rootRelativeUri( ing.files[ fileId ], tgJRootPrefix );
+    };
 
     const PageWindow   uw        = pageWindow( r.untested.size(), effectiveRowCap( pageLimit, int( kMaxUntestedRows ) ), pageOffset );
     const std::size_t  shownRows = uw.end - uw.begin;
@@ -837,33 +862,38 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     pagingDisclosure( pageJson, sizeof( pageJson ), r.untested.size(), uw.end, pageLimit, pageOffset, kJsonPageSyntax );
 
     const std::size_t testRows = r.tests.size() + r.shellGates.obligations.size();
+    // same rows-gate as the XML twin, so the two dialects disclose the SAME facts about the same run rather
+    // than one carrying a root the other omits (test/mcpclidiffcheck.sh's parity question).
+    const bool         tgJHasRows  = ( testRows > 0 || !r.untested.empty() );
+    const std::string  tgJRootJson = ( root.empty() || !tgJHasRows ) ? std::string() : ( ",\"root\":\"" + jsonStr( root ) + "\"" );
     std::fprintf( out, "{\"changed\":%u,\"impacted\":%zu,\"tests\":%zu,\"untested\":%zu"
                        ",\"shown_tests\":%zu,\"tests_capped\":false,\"shown_untested\":%zu,\"untested_capped\":%s"
                        ",\"script_gates_unmodelled\":%zu,\"script_gates_registered\":%zu,\"script_gates_mapped\":%zu"
-                       ",\"script_gates_unresolved_dynamic\":%zu,\"counts_floor\":true%s,\"at\":%s,\"tests_to_run\":[",
+                       ",\"script_gates_unresolved_dynamic\":%zu,\"counts_floor\":true%s,\"at\":%s%s,\"tests_to_run\":[",
                  r.changedFiles, r.impactedSymbols, testRows, r.untested.size(),
                  testRows, shownRows, shownRows < r.untested.size() ? "true" : "false",
                  scriptGatesUnmodelledCount( ing ), r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic,
-                 pageJson, atJson.c_str() );
+                 pageJson, atJson.c_str(), tgJRootJson.c_str() );
     const TestRunnerIndex gateRunners( ing );                       // §P11.4, the JSON sibling of the XML run=
     const auto            jesc = []( std::string_view s ) { return jsonStr( s ); };
     for( std::size_t i = 0; i < r.tests.size(); ++i )
     {
-        std::fprintf( out, "%s{\"p\":\"%s\"%s}", i == 0 ? "" : ",", jsonStr( ing.files[ r.tests[i] ] ).c_str(),
+        std::fprintf( out, "%s{\"p\":\"%s\"%s}", i == 0 ? "" : ",", jsonStr( tgJPathRel( r.tests[i] ) ).c_str(),
                       runFieldJson( gateRunners, r.tests[i], jesc ).c_str() );
     }
     for( std::size_t i = 0; i < r.shellGates.obligations.size(); ++i )
     {
         const ShellGateObligation& gate = r.shellGates.obligations[i];
         std::fprintf( out, "%s{\"p\":\"%s\",\"evidence\":\"%s\",\"run\":\"%s\"}",
-                      r.tests.empty() && i == 0 ? "" : ",", jsonStr( ing.files[gate.fileId] ).c_str(), gate.evidence,
+                      r.tests.empty() && i == 0 ? "" : ",", jsonStr( tgJPathRel( gate.fileId ) ).c_str(), gate.evidence,
                       jsonStr( gateRunners.commandForScript( gate.fileId ) ).c_str() );
     }
     std::fprintf( out, "],\"untested_blast_radius\":[" );
-    walkUntestedRows( ing, r, uw, [ & ]( std::size_t i, const Symbol& s, const std::string& path )
+    walkUntestedRows( ing, r, uw, [ & ]( std::size_t i, const Symbol& s, const std::string& )
     {
+        // M12: tgJPathRel( s.fileId ), not the raw `path` walkUntestedRows hands in.
         std::fprintf( out, "%s{\"sym\":\"%s\",\"p\":\"%s\",\"ccx\":%u}", i == 0 ? "" : ",",
-                     jsonStr( s.name ).c_str(), jsonStr( path ).c_str(), s.ccx );
+                     jsonStr( s.name ).c_str(), jsonStr( tgJPathRel( s.fileId ) ).c_str(), s.ccx );
     } );
     std::fprintf( out, "]}" );
 }

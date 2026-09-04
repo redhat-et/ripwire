@@ -111,6 +111,20 @@ VERBS_XML=(
   "seams:--seams"
   "dead-code:--dead-code"
   "test-gate:--test-gate"
+  # M12 (capture-audit-2026-09-04): a BARE --test-gate/--situ on a freshly-seeded corpus has an EMPTY git
+  # diff, so it emits a header and ZERO rows — which is exactly how "test-gate" above sat green through a
+  # binary that printed every <t>/<u> row as the raw ingest-stored spelling. These four seed the SAME verbs
+  # with an explicit changed-file argument (geometry.cpp is the one fixture file with a dependent), so the
+  # ROW emitters are actually exercised. --affected and --situ join them because L1 (lens2-crossverb) is a
+  # CROSS-VERB finding: four verbs answer "which tests do I run" and printed the same file three ways.
+  "affected:--affected=distance"
+  "test-gate-files:--test-gate=geometry.cpp"
+  "test-gate-files-json:--test-gate=geometry.cpp|--json"
+  "situ-files:--situ=geometry.cpp"
+  # M12 regression guards for the two verbs fixed earlier on this branch (--verify's p= rows, --ensemble's
+  # <s>/<f> rows plus its root=); neither was in this matrix at all, which is how both came to drift.
+  "verify-uses:--verify=uses(area_of_triangle)"
+  "ensemble:--ensemble"
   "handoff:--handoff"
   "owners:--owners"
   "mentions:--mentions=area_of_triangle"
@@ -311,6 +325,151 @@ for entry in "${VERBS_XML[@]}"; do
     ok "$name ARM3 absolute root ≡ relative root"
   else
     no "$name ARM3 absolute and relative root spellings emit different documents"
+  fi
+done
+
+# ── ARM 6 — ONE SPELLING ACROSS THE FOUR "which tests do I run" LISTS ───────────────────────────────────
+# lens2-crossverb L1 (capture-audit-2026-09-04, M12): --affected, --test-gate (XML and JSON) and --situ all
+# answer the same question over the same corpus and named the SAME file three different ways —
+# "/abs/root/sub/consumer.cpp", "./sub/consumer.cpp" and "sub/consumer.cpp" — so the four lists could not be
+# diffed with `sort | uniq`. The arms above catch each verb's leak in isolation; this one pins the CROSS-VERB
+# property directly, because that is the property an agent actually consumes. Run at BOTH root spellings: a
+# verb can be self-consistent and still disagree with its siblings on only one of the two.
+tests_to_run_rows(){ # <root> <argspec...> → one path per line
+  local root="$1"; shift
+  "$BIN" "$root" "$@" 2>/dev/null \
+    | tr '<' '\n' | sed -n 's/^test p="\([^"]*\)".*/\1/p; s/^t p="\([^"]*\)".*/\1/p'
+}
+# This arm needs a corpus that HAS a test file. $SHORT/$DEEP do not: the fixture's one cross-dir caller is a
+# test only by virtue of the "test/fixture/…" path it lives at in THIS repo, and a copy of it elsewhere is
+# just a source file — which is why --affected reports tests=0 on $SHORT. So ARM 6 builds its own copy with
+# an unambiguous tests/ member, rather than quietly asserting nothing.
+A6="$TMP/tests-to-run"; rm -rf "$A6"; mkdir -p "$A6"; cp -R "$FIX/." "$A6/"
+cat > "$A6/test_geometry.cpp" <<'A6EOF'
+#include "geometry.h"
+
+// the corpus's test member: it calls into geometry.cpp's definitions, so every "which tests do I run" verb
+// must name THIS file — and all four must name it the SAME way.
+double test_distance( Point a, Point b )
+{
+    return distance( a, b );
+}
+A6EOF
+seed_git "$A6"
+for spelling in abs rel; do
+  if [ "$spelling" = abs ]; then RT="$A6"; CD="$PWD"; else RT="."; CD="$A6"; fi
+  # --affected is seeded by SYMBOL here: a file seed walks callers of that file's definitions and, on
+  # this corpus, reaches only the cross-dir consumer — the symbol reading is the one that reaches the test.
+  a_rows=$( cd "$CD" && tests_to_run_rows "$RT" --affected=distance )
+  g_rows=$( cd "$CD" && tests_to_run_rows "$RT" --test-gate=geometry.cpp )
+  # the JSON twin carries "p" in BOTH arrays — narrow to tests_to_run so this compares like with like
+  j_rows=$( cd "$CD" && "$BIN" "$RT" --test-gate=geometry.cpp --json 2>/dev/null \
+            | sed -n 's/.*"tests_to_run":\[\([^]]*\)\].*/\1/p' | tr ',' '\n' | sed -n 's/.*"p":"\([^"]*\)".*/\1/p' )
+  s_rows=$( cd "$CD" && "$BIN" "$RT" --situ=geometry.cpp 2>/dev/null \
+            | sed -n '/tests to run/,/^  \[3\]/p' | sed -n 's/^        \([^( ][^(]*\)$/\1/p' | sed 's/[[:space:]]*$//' )
+  if [ -z "$a_rows" ]; then
+    no "ARM6/$spelling --affected emitted NO test row for distance — the arm would be a false green"
+    continue
+  fi
+  for pair in "test-gate:$g_rows" "test-gate-json:$j_rows" "situ:$s_rows"; do
+    other="${pair#*:}"; who="${pair%%:*}"
+    if [ "$a_rows" = "$other" ]; then
+      ok "ARM6/$spelling --affected ≡ --$who tests_to_run spelling ($a_rows)"
+    else
+      no "ARM6/$spelling --affected says '$a_rows' but --$who says '$other' — the two lists cannot be diffed"
+    fi
+  done
+  case "$a_rows" in
+    ./*|/*) no "ARM6/$spelling tests_to_run row '$a_rows' is not root-relative (leading ./ or absolute)" ;;
+    *)      ok "ARM6/$spelling tests_to_run rows are root-relative" ;;
+  esac
+done
+
+# ── ARM 7 — THE WRITE SURFACES: an edit receipt and the follow-up it tells you to paste ─────────────────
+# M12: the MCP/CLI edit engine's receipt "file" key and main.cpp's stderr follow-up hint
+# (`--edit-check=<file>:<sym>, then --affected=<file>`) both printed ing.files[] RAW. On a relative root that
+# is "./app.py", which --edit-check itself never prints and which --affected then re-spells differently; on an
+# absolute root it is the whole checkout prefix. An edit verb WRITES, so this arm runs against its own
+# throwaway copy of the fixture, once per root spelling, and never touches $SHORT/$DEEP.
+for spelling in abs rel; do
+  ED="$TMP/edit-$spelling"; rm -rf "$ED"; mkdir -p "$ED"; cp -R "$FIX/." "$ED/"
+  printf '// tail\n' > "$TMP/payload.txt"
+  if [ "$spelling" = abs ]; then RT="$ED"; else RT="."; fi
+  ( cd "$ED" && "$BIN" "$RT" --insert-after-symbol=area_of_triangle --edit-payload="$TMP/payload.txt" \
+      > "$TMP/edit.out" 2> "$TMP/edit.err" )
+  rcpt=$( sed -n 's/.*"file":"\([^"]*\)".*/\1/p' "$TMP/edit.out" )
+  hint=$( sed -n 's/.*--edit-check=\([^:]*\):.*/\1/p' "$TMP/edit.err" )
+  if [ -z "$rcpt" ]; then
+    no "ARM7/$spelling the edit verb produced no receipt — the arm would be a false green ($( head -c 120 "$TMP/edit.err" ))"
+    continue
+  fi
+  case "$rcpt" in
+    ./*|/*) no "ARM7/$spelling edit receipt \"file\":\"$rcpt\" is not root-relative" ;;
+    *)      ok "ARM7/$spelling edit receipt \"file\":\"$rcpt\" is root-relative" ;;
+  esac
+  if [ "$hint" = "$rcpt" ]; then
+    ok "ARM7/$spelling the --edit-check= hint pastes the receipt's own spelling ($hint)"
+  else
+    no "ARM7/$spelling the --edit-check= hint says '$hint' but the receipt says '$rcpt'"
+  fi
+  # the hint is only useful if the command it prints RUNS — the strongest form of this assertion
+  if ( cd "$ED" && "$BIN" "$RT" --edit-check="$hint:area_of_triangle" >/dev/null 2>&1 ); then
+    ok "ARM7/$spelling the printed --edit-check=$hint:area_of_triangle actually runs"
+  else
+    no "ARM7/$spelling the printed --edit-check=$hint:area_of_triangle does NOT run"
+  fi
+done
+
+# ── ARM 8 — --quality-delta's gating stderr names what its gating ROW names ─────────────────────────────
+# M12: the XML/JSON rows normalize sym's path segment through quality::displaySym; the one stderr line that
+# names the first gating finding did not, so the same finding was "./geometry.cpp::geo::worse" on stderr and
+# "geometry.cpp::geo::worse" in the row (and the full checkout prefix on stderr under an absolute root).
+QD="$TMP/qd"; rm -rf "$QD"; mkdir -p "$QD"; cp -R "$FIX/." "$QD/"
+cat >> "$QD/geometry.cpp" <<'QDEOF'
+
+namespace geo
+{
+double worse( int a, int b )
+{
+    if( a > 1 ) { a += 1; }
+    if( a > 2 ) { a += 2; }
+    if( a > 3 ) { a += 3; }
+    if( a > 4 ) { a += 4; }
+    if( a > 5 ) { a += 5; }
+    if( a > 6 ) { a += 6; }
+    if( a > 7 ) { a += 7; }
+    if( a > 8 ) { a += 8; }
+    if( a > 9 ) { a += 9; }
+    if( a > 10 ) { a += 10; }
+    return double( a + b );
+}
+}
+QDEOF
+seed_git "$QD"
+# now make the COMMITTED symbol materially worse in the working tree — a preexisting-worse major finding,
+# which is the only shape that reaches the stderr line under test
+python3 - "$QD/geometry.cpp" <<'QDPY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+i = s.index("    return double( a + b );")
+extra = "".join("    if( b > %d && a < %d ) { for( int i = 0; i < %d; ++i ) { if( i %% 2 ) { a += i; } } }\n" % (k, k, k)
+                for k in range(11, 26))
+open(p, "w").write(s[:i] + extra + s[i:])
+QDPY
+for spelling in abs rel; do
+  if [ "$spelling" = abs ]; then RT="$QD"; else RT="."; fi
+  ( cd "$QD" && "$BIN" "$RT" --quality-delta > "$TMP/qd.out" 2> "$TMP/qd.err" ) || true
+  qerr=$( sed -n 's/.*gating: [0-9]* preexisting-worse major finding(s); first: [a-z-]* \([^ ]*\) .*/\1/p' "$TMP/qd.err" )
+  qrow=$( tr '<' '\n' < "$TMP/qd.out" | sed -n 's/^r .*gating="1".*/&/p' | sed -n 's/.* sym="\([^"]*\)".*/\1/p' | head -1 )
+  if [ -z "$qerr" ] || [ -z "$qrow" ]; then
+    no "ARM8/$spelling no gating finding was produced (stderr='$qerr' row='$qrow') — the arm would be a false green"
+    continue
+  fi
+  if [ "$qerr" = "$qrow" ]; then
+    ok "ARM8/$spelling the gating stderr line and its row name the same sym ($qrow)"
+  else
+    no "ARM8/$spelling stderr names '$qerr' but the gating row names '$qrow'"
   fi
 done
 

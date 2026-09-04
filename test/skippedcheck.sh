@@ -129,9 +129,11 @@ mkdir -p "$TMP/alpha" "$TMP/beta"
 cp "$TMP/corpus/big.cpp" "$TMP/alpha/big.cpp"
 printf 'int beta_fn( void ) { return 2; }\n' > "$TMP/beta/lib.cpp"
 "$BIN" alpha beta --skipped --max-file-size=1K --no-cache > "$TMP/multi.xml" 2>/dev/null
-grep -q "<f p=\"alpha/./big.cpp\" why=\"oversize\" bytes=\"$bigBytes\" limit=\"1024\"/>" "$TMP/multi.xml" \
+# M12 (capture-audit-2026-09-04): the merged-root spelling lost its `/./` seam — workspace.h emits plain
+# `<label>/<rel>` now, and a SkippedOversize row is relabeled exactly like a file row, so it moves with it.
+grep -q "<f p=\"alpha/big.cpp\" why=\"oversize\" bytes=\"$bigBytes\" limit=\"1024\"/>" "$TMP/multi.xml" \
     && ok "(8) multi-root row carries the labeled <label>/./<rel> spelling" \
-    || { no "(8) multi-root row missing or unlabeled (want p=\"alpha/./big.cpp\")"; head -c 400 "$TMP/multi.xml"; echo; }
+    || { no "(8) multi-root row missing or unlabeled (want p=\"alpha/big.cpp\")"; head -c 400 "$TMP/multi.xml"; echo; }
 grep -q 'oversize="1"' "$TMP/multi.xml" && ok "(8) multi-root count sums across roots" || no "(8) multi-root count wrong (want oversize=\"1\")"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "FAILURES ABOVE"; exit 1; }

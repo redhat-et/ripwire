@@ -355,9 +355,14 @@ inline bool isBoundarySuffix( std::string_view indexedPath, std::string_view git
 
 // ONE normalisation, applied to BOTH sides of the join before any byte comparison, and the only latitude the
 // join has. Two rewrites, in ONE pass so there is no second place to keep in step:
-//   * every `/./` seam collapses — workspace.h spells a merged-root file `<label>/./<rel>` (the `./` is what
-//     makes a single-root id an exact suffix of the workspace id, §P8.7) and git spells it without the seam;
-//   * a LEADING `./` is dropped, repeatedly — a `ripwire .` run spells every file `./<rel>` and git never does.
+//   * every `/./` seam collapses — workspace.h spelled a merged-root file `<label>/./<rel>` this way through
+//     §P8.7 (2026-07-28; the `./` made a single-root id an exact suffix of the workspace id). M12
+//     (capture-audit-2026-09-04) dropped that seam — workspace.h now spells plain `<label>/<rel>` — so this
+//     rewrite is a LEGACY no-op on today's labeled spelling, kept rather than removed because it is still
+//     correct (harmless) on any `/./` a path genuinely contains for an unrelated reason (a `..`-normalized
+//     symlink target, say) and removing a working normalization on a hunch is not this round's job;
+//   * a LEADING `./` is dropped, repeatedly — the INGEST-stored spelling `ripwire .` produces still carries
+//     it (`./<rel>`; only the display-time emitters strip it, via rootRelativeUri) and git never does.
 // The seam test goes first so `/./x` collapses to `/x` rather than losing its leading slash.
 // Deliberately NOT case folding: this filesystem is case-insensitive, so a git path differing from an indexed
 // path only in case means the committed spelling has DRIFTED from the on-disk spelling. That is a fact worth
@@ -547,7 +552,7 @@ inline std::string gitRepoToplevel( const std::string& absDir )
 //     git path( f )  ==  gitPrefix + ing.files[f].substr( indexStripPrefix.size() )
 //
 // where `indexStripPrefix` is the root-spelling bytes git does not use ("./", "src/", "/abs/repo/",
-// "<label>/./") and `gitPrefix` is the crawl root's own position INSIDE the repo when the root is a
+// "<label>/" post-M12) and `gitPrefix` is the crawl root's own position INSIDE the repo when the root is a
 // SUBDIRECTORY of it ("src/"), else empty. Both come from ONE probe file whose absolute path and whose repo
 // toplevel are both known facts — the offset is DERIVED, never inferred from a name collision.
 //

@@ -1083,8 +1083,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             {
                 const std::string at = first->path.empty() ? std::string{}
                                                            : " at " + first->path + ":" + std::to_string( first->line );
+                // M12: displaySym, not first->sym raw — the XML/JSON rows both normalize sym's path segment
+                // for display (quality::displaySym); this stderr line was the one caller that skipped it,
+                // so it named "./src/…::rw::…" beside a row that named the same finding "src/…::rw::…".
                 std::fprintf( stderr, "ripwire: --quality-delta gating: %zu preexisting-worse major finding(s); first: %s %s%s (was=%u now=%u)\n",
-                              gatingCount, first->kind.c_str(), first->sym.c_str(), at.c_str(), first->was, first->now );
+                              gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
             }
         }
 

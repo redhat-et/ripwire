@@ -295,7 +295,7 @@ private:
         return {};
     }
 
-    // Spelled against the ON-DISK path (diskPath), so a multi-root `<label>/./<rel>` identity spelling — which
+    // Spelled against the ON-DISK path (diskPath), so a multi-root `<label>/<rel>` identity spelling — which
     // is a label, not a directory — can never leak into something a shell would mis-resolve. A leading "./"
     // is dropped for readability; the result is pasteable from the repo root.
     std::string spell( std::uint32_t runnerFile ) const
