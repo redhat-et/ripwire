@@ -191,24 +191,34 @@ inline std::string nearestIndexedFileClause( const IngestResult& ing, std::strin
     return " (did you mean '" + std::string( best ) + "'? a path SUFFIX is enough)";
 }
 
+// The nearest indexed symbol name from a FILTERED pool — the one place the corpus is walked for a near-miss
+// over symbols. didYouMean and nearestAggregateName differ only in which symbols are candidates, and writing
+// that twice is the clone --quality-delta flags (159 shared tokens on the first draft of this pair).
+// `keep` is a plain function pointer, not a template parameter: this is a refusal path, the pools are two,
+// and one non-template definition keeps the header cheap for the ~40 translation units that include it.
+inline std::string_view nearestSymbolNameWhere( const IngestResult& ing, std::string_view typed, bool ( *keep )( const Symbol& ) )
+{
+    if( typed.empty() )
+    {
+        return {};   // F10: the nearest name to "" is the shortest name, which is a suggestion about nothing
+    }
+    constexpr int kMaxEditDistance = 3;   // bandwidth cutoff (§P12.1): beyond this a "hint" is noise, not help
+    return nearestNameByEditDistance( ing.symbols.begin(), ing.symbols.end(), typed, kMaxEditDistance,
+                                      [ keep ]( const Symbol& s ) -> std::string_view
+                                      { return keep( s ) ? std::string_view( s.name ) : std::string_view(); } );
+}
+
 // The nearest indexed STRUCT / CLASS / INTERFACE name (F13). --layout and --field-affinity refuse over a
 // pool of 494 aggregates they have already loaded and offered nothing but "try --grep=<what you typed>",
 // while every SYMBOL selector one keystroke away names the symbol. Same core, a different pool — which is
 // exactly what nearestNameByEditDistance exists to make cheap.
 inline std::string nearestAggregateName( const IngestResult& ing, std::string_view typed )
 {
-    if( typed.empty() )
-    {
-        return {};
-    }
-    constexpr int          kMaxEditDistance = 3;
-    const std::string_view best = nearestNameByEditDistance( ing.symbols.begin(), ing.symbols.end(), typed, kMaxEditDistance,
-                                                              []( const Symbol& s ) -> std::string_view
-                                                              {
-                                                                  const bool isAggregate = s.kind == SymKind::Struct || s.kind == SymKind::Class
-                                                                                        || s.kind == SymKind::Interface;
-                                                                  return isAggregate ? std::string_view( s.name ) : std::string_view();
-                                                              } );
+    const std::string_view best = nearestSymbolNameWhere( ing, typed, []( const Symbol& s )
+                                                          {
+                                                              return s.kind == SymKind::Struct || s.kind == SymKind::Class
+                                                                  || s.kind == SymKind::Interface;
+                                                          } );
     return best.empty() || best == typed ? std::string() : ( " (did you mean '" + std::string( best ) + "'?)" );
 }
 
@@ -223,22 +233,13 @@ inline std::string emptyListItemMessage( std::string_view flag, std::size_t oneB
            "remove the extra comma, or name a symbol there (e.g. " + std::string( example ) + ")";
 }
 
+// F10 (capture-audit 2026-09-04): the empty-query guard lives in nearestSymbolNameWhere above, not here —
+// asked for the nearest name to "", the distance metric answers with the SHORTEST symbol in the corpus, and
+// `--path=rankGraphTeleport,` printed "endpoint not found:  (did you mean 'A'?)". Guarded at the shared walk
+// so every caller that can be handed an empty list item is covered, present and future.
 inline std::string didYouMean( const IngestResult& ing, std::string_view name )
 {
-    if( name.empty() )
-    {
-        // F10 (capture-audit 2026-09-04): asked for the nearest name to "", the distance metric answers with
-        // the SHORTEST symbol in the corpus — `--path=rankGraphTeleport,` printed "endpoint not found:
-        // (did you mean 'A'?)". An empty query is not a typo of anything. Guarded HERE rather than at the
-        // callers, because every caller that can be handed an empty list item has the same hole.
-        return {};
-    }
-    constexpr int kMaxEditDistance = 3;   // bandwidth cutoff (§P12.1): beyond this a "hint" is noise, not help
-    const std::string_view best = nearestNameByEditDistance( ing.symbols.begin(), ing.symbols.end(), name, kMaxEditDistance,
-                                                              []( const Symbol& s ) -> std::string_view
-                                                              {
-                                                                  return s.kind == SymKind::Section ? std::string_view() : std::string_view( s.name );
-                                                              } );
+    const std::string_view best = nearestSymbolNameWhere( ing, name, []( const Symbol& s ) { return s.kind != SymKind::Section; } );
     return best.empty() ? std::string() : std::string( best );
 }
 
