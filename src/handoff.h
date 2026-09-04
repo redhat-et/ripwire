@@ -104,11 +104,20 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
         v += "</f>";
     }
     v += "<tests n=\"" + std::to_string( facts.tests.size() ) + "\">";
+    // M21(b) / lens 2 L2 (capture-audit 2026-09-04): this section is titled "tests-to-run" and named files
+    // that are not commands, while --situ / --pr-context / --affected — which compute the SAME list from the
+    // SAME facts — carried run="bash test/…" for those same files. The packet whose whole purpose is to be
+    // read by the NEXT session was the one that said least. Built here, inside the section's scope, because
+    // TestRunnerIndex is lazy: a packet with no test row reads no runner script.
+    const rw::TestRunnerIndex hoRunners( ing );
+    const auto                hoEsc = [ & ]( std::string_view t ) { return std::string( escapeXml( t, esc ) ); };
     for( const std::uint32_t f : facts.tests )
     {
         v += "<t p=\"";
         v += escapeXml( hoPathRel( f ), esc );
-        v += "\"/>";
+        v += "\"";
+        v += rw::runAttrDisclosed( hoRunners, f, hoEsc );
+        v += "/>";
     }
     v += "</tests></verified>";
 
@@ -195,8 +204,9 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     {
         std::string doc = "<!-- ripwire handoff: the continuation packet for the NEXT session. <verified> is disk truth "
                           "(branch=/at=<sha>[+dirty]/subject=<commit subject text>, changed files+symbols via git numstat, "
-                          "blast_files=transitive dependent files, tests-to-run); "
-                          "<heuristic> is labeled non-verified suggestion (cochange=usually-edited-together deg=degree, note=committed "
+                          "blast_files=transitive dependent files, tests-to-run); ";
+        doc += rw::kRunHintLegendClause;   // M21(b): the ONE wording, spliced — never a seventh paraphrase
+        doc += "<heuristic> is labeled non-verified suggestion (cochange=usually-edited-together deg=degree, note=committed "
                           ".ripwire_notes row, doc=plan/design pointer s=lexical score for the branch+commit-subject query). "
                           "budget= is the token-budget cap; withheld=1 when heuristic rows were dropped to fit it, withheld_rows= how many "
                           "(the map's spelling: a boolean, the count beside it) — verified rows are never dropped; est_tokens= prices the "

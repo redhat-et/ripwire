@@ -1096,7 +1096,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
                 out += ",";
             }
             first = false;
-            out += "{\"test\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\"" + runFieldJson( runners, f, jsonEsc ) + "}";
+            out += "{\"test\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\"" + runFieldJsonDisclosed( runners, f, jsonEsc ) + "}";
         }
     }
 

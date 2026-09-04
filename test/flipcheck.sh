@@ -194,8 +194,12 @@ int runCoveredCase()
 EOF
 S="$( flip "$SYN" SYNFIX_FEATURE )"
 want "coverage: both guarded defs are hosts" "$( attr "$S" flip hosts )" "2"
-printf '%s' "$S" | grep -q '<t p="tests/test_cov.cpp"/>' \
-    && ok "coverage: the covering test file is named" || { no "coverage: tests_to_run wrong"; printf '%s' "$S" | tr '<' '\n' | grep '^t p='; }
+# M21(b) re-pin (capture-audit 2026-09-04, lane L8): --flags --flip's <t> rows joined the tests_to_run row
+# family and now carry run="…" or run_unknown="1" like every sibling (test/testrowruncheck.sh is the family
+# gate). Pinned to the NEW contract — the path AND a disclosure — not loosened to a prefix match.
+printf '%s' "$S" | grep -qE '<t p="tests/test_cov\.cpp"( run="[^"]*"| run_unknown="1")/>' \
+    && ok "coverage: the covering test file is named, with its run recipe or run_unknown disclosure" \
+    || { no "coverage: tests_to_run wrong"; printf '%s' "$S" | tr '<' '\n' | grep '^t p='; }
 want "coverage: exactly one host no test reaches" "$( attr "$S" flip untested )" "1"
 printf '%s' "$S" | tr '<' '\n' | grep -q '^u sym="uncoveredDark"' \
     && ok "coverage: uncoveredDark is the untested one" || { no "coverage: untested row wrong"; printf '%s' "$S" | tr '<' '\n' | grep '^u '; }

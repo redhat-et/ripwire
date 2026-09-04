@@ -66,6 +66,7 @@
 #include "arch.h"               // relForHash
 #include "darkflags.h"          // the gate harvest, reused whole
 #include "serialize.h"          // escapeXml
+#include "testmap.h"            // M21(b): TestRunnerIndex / runAttrDisclosed — the ONE run= hint the tests_to_run family shares
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
@@ -1082,10 +1083,13 @@ inline void writeFlipHeader( std::FILE* out, const FlipResult& res, const XmlEsc
                        "C family source only and treats a file declaring its OWN constant of that name as shadowing the gate's, "
                        "but a third header's same named constant (included, not redeclared) would still count. A lit site inside "
                        "no indexed def counts into filescope instead of a host. "
+                       "%s"
                        // §B12.5 — the cross-verb UNIT collision, in the same words on each verb that spells it.
                        "UNIT: untested= here counts HOSTS (indexed defs this gate lights that no test reaches). The test gate "
                        "verb spells untested= over impacted SYMBOLS and the seams verb over cross-directory call EDGES, so the "
-                       "three numbers count three different things and must never be compared or summed across verbs. -->" );
+                       "three numbers count three different things and must never be compared or summed across verbs. -->",
+                       // M21(b): the run=/run_unknown= rule, from testmap.h's ONE constant.
+                       std::string( rw::kRunHintLegendClause ).c_str() );
 
     std::fprintf( out, "<flip gate=\"%s\" kind=\"%s\" default=\"%s\" dark=\"%d\" runtime=\"%d\" p=\"%s\" l=\"%u\""
                        " family=\"%zu\" regions=\"%u\" loc=\"%u\" branches=\"%zu\" bindings=\"%zu\""
@@ -1171,9 +1175,14 @@ inline void writeFlip( std::FILE* out, const FlipResult& res, const IngestResult
         std::fprintf( out, "<d sym=\"%s\" p=\"%s\" ccx=\"%u\"/>",
                       ex( qualifiedName( s ) ).c_str(), ex( rel( s.fileId ) ).c_str(), s.ccx );
     } );
+    // M21(b) (capture-audit 2026-09-04): this <t> listing is a tests_to_run row family like every other,
+    // and it asked for no runner at all — so a reader of a flip report could not tell a harness with no
+    // derivable command from one this verb never looked up. Lazy by construction: a flip with no test row
+    // never reads a runner script.
+    const rw::TestRunnerIndex flipRunners( ing );
     writeCappedList( out, "tests", res.tests, maxRows, [ & ]( std::uint32_t f )
     {
-        std::fprintf( out, "<t p=\"%s\"/>", ex( rel( f ) ).c_str() );
+        std::fprintf( out, "<t p=\"%s\"%s/>", ex( rel( f ) ).c_str(), rw::runAttrDisclosed( flipRunners, f, ex ).c_str() );
     } );
     writeCappedList( out, "untested", res.untested, maxRows, [ & ]( NodeId u )
     {

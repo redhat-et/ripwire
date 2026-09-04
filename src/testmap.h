@@ -347,6 +347,44 @@ inline std::string runFieldJson( const TestRunnerIndex& idx, std::uint32_t fileI
 inline std::string runSuffixText( const TestRunnerIndex& idx, std::uint32_t fileId )
 { return runHint( idx, fileId, "   (run: ", ")", []( std::string_view s ) { return std::string( s ); } ); }
 
+// ── M21(b), capture-audit 2026-09-04 — the NOT-DERIVABLE case, SAID ───────────────────────────────────
+// The three shapes above return "" when no runner is derivable, and every emitter simply printed nothing.
+// The rule behind that ("a guessed command is worse than none") is right and is unchanged here; what was
+// wrong is that an ABSENCE is not a disclosure. A reader of `<t p="./test/verify_radix.cpp"/>` — a row the
+// verb that emits it calls an OBLIGATION and exits 4 over — cannot tell "this harness has no runner in the
+// corpus" from "this emitter never asked". It is the same class as counts_floor= and
+// script_gates_unmodelled=: the gap is stated where the number is consumed. So a tests_to_run row now says
+// one of two things and never neither, and test/testrowruncheck.sh asserts exactly that over every emitter
+// in the family — including --handoff and --flags --flip, which asked for no runner at all.
+//
+// These are WRAPPERS, not copies: the ""-means-not-derivable test stays in runHint alone, so a later edit
+// to what counts as derivable cannot fix one dialect and leave another fabricating.
+template<class EscapeFn>
+inline std::string runAttrDisclosed( const TestRunnerIndex& idx, std::uint32_t fileId, EscapeFn esc )
+{
+    std::string attr = runAttr( idx, fileId, esc );
+    return attr.empty() ? std::string( " run_unknown=\"1\"" ) : attr;
+}
+
+template<class EscapeFn>
+inline std::string runFieldJsonDisclosed( const TestRunnerIndex& idx, std::uint32_t fileId, EscapeFn esc )
+{
+    std::string field = runFieldJson( idx, fileId, esc );
+    return field.empty() ? std::string( ",\"run_unknown\":true" ) : field;
+}
+
+inline std::string runSuffixTextDisclosed( const TestRunnerIndex& idx, std::uint32_t fileId )
+{
+    std::string suffix = runSuffixText( idx, fileId );
+    return suffix.empty() ? std::string( "   (run: not derivable)" ) : suffix;
+}
+
+// The ONE sentence every legend that carries a tests_to_run row splices, so the seven cannot drift into
+// seven wordings of one rule. Deliberately short: it rides on --test-gate's own byte ratchets.
+inline constexpr std::string_view kRunHintLegendClause =
+    "run= is the command that discharges a test row; run_unknown=\"1\" means none is derivable for that "
+    "harness (a guess would be worse than none) — a row carries one or the other, never neither. ";
+
 // ── §P9 N5 / §B7.3 — the blindness this whole map shares, counted ONCE ────────────────────────────────
 // Every verb built on the call-graph walk (--affected, --test-gate, --situ) is blind to the same thing: a
 // shell harness that runs the compiled BINARY as a subprocess is not a call edge, so those gates are

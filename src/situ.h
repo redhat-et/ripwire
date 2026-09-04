@@ -351,7 +351,7 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     for( std::size_t i = 0; i < tests.size() && i < kSituTestRowsShown; ++i )
     {
         const std::string_view rp = situPathRel( tests[i] );
-        std::fprintf( out, "        %.*s%s\n", int( rp.size() ), rp.data(), runSuffixText( situRunners, tests[i] ).c_str() );
+        std::fprintf( out, "        %.*s%s\n", int( rp.size() ), rp.data(), runSuffixTextDisclosed( situRunners, tests[i] ).c_str() );
     }
     // §B7.3: this section inherits --affected's blind spot without --affected's disclosure — a shell harness
     // runs the compiled BINARY as a subprocess, which is not a call edge, so no test/*.sh gate can EVER be
@@ -796,7 +796,12 @@ inline constexpr const char* kTestGateLegend =
 inline constexpr const char* kTestGateRowLegend =
     "The <t> rows are the COMPLETE obligation, never windowed, so they REPEAT VERBATIM on every page "
     "(concatenate from one page only); offset=/limit= window the <u> rows alone, default 25 (raise with "
-    "limit=N, offset=M pages; a cut window carries total=/has_more=/next_offset= so a loop can continue). ";
+    "limit=N, offset=M pages; a cut window carries total=/has_more=/next_offset= so a loop can continue). "
+    "A <u> row is sym= at p=:l=, ccx= its cognitive complexity. ";
+
+// M21(b): the run=/run_unknown= rule, from testmap.h's ONE constant — a rule about <t> rows, so it rides
+// the row-gated legend and the zero-row report (test/donelegendcheck.sh's tg_empty ratchet) pays nothing.
+inline const std::string kTestGateRunLegend{ rw::kRunHintLegendClause };
 
 // Emit the --test-gate report as minified XML (house shape) for an ALREADY-COMPUTED gate result. Deterministic
 // + xmllint-clean; the header counts are always full. §A3a: the <u> untested-row list joins pageview.h's
@@ -836,8 +841,9 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     // sentence defining it, which is what test/legendcoveragecheck.sh asserts.
     const bool        tgHasRows  = ( testRows > 0 || !r.untested.empty() );
     const std::string tgRootAttr = ( root.empty() || !tgHasRows ) ? std::string() : ( " root=\"" + ex( root ) + "\"" );
-    std::fprintf( out, "<!-- %s%s-->%s", kTestGateLegend,
-                  tgHasRows ? kTestGateRowLegend : "", rw::rootRelPathsLegend( !tgRootAttr.empty() ) );
+    std::fprintf( out, "<!-- %s%s%s-->%s", kTestGateLegend,
+                  tgHasRows ? kTestGateRowLegend : "", tgHasRows ? kTestGateRunLegend.c_str() : "",
+                  rw::rootRelPathsLegend( !tgRootAttr.empty() ) );
     std::fprintf( out, "<test-gate changed=\"%u\" impacted=\"%zu\" tests=\"%zu\" untested=\"%zu\""
                        " shown_tests=\"%zu\" tests_capped=\"0\" shown_untested=\"%zu\" untested_capped=\"%d\""
                        " script_gates_unmodelled=\"%zu\" script_gates_registered=\"%zu\" script_gates_mapped=\"%zu\""
@@ -854,7 +860,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     const TestRunnerIndex gateRunners( ing );
     for( std::uint32_t f : r.tests )
     {
-        std::fprintf( out, "<t p=\"%s\"%s/>", ex( tgPathRel( f ) ).c_str(), runAttr( gateRunners, f, ex ).c_str() );
+        std::fprintf( out, "<t p=\"%s\"%s/>", ex( tgPathRel( f ) ).c_str(), runAttrDisclosed( gateRunners, f, ex ).c_str() );
     }
     for( const ShellGateObligation& gate : r.shellGates.obligations )
     {
@@ -864,7 +870,10 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     walkUntestedRows( ing, r, uw, [ & ]( std::size_t, const Symbol& s, const std::string& )
     {
         // M12: tgPathRel( s.fileId ), not the raw `path` walkUntestedRows hands in — same gap as the <t> rows above.
-        std::fprintf( out, "<u sym=\"%s\" p=\"%s\" ccx=\"%u\"/>", ex( s.name ).c_str(), ex( tgPathRel( s.fileId ) ).c_str(), s.ccx );
+        // M21(b): l= — the DEFINING line. Without it a row names a symbol to test and a file to open and
+        // leaves the reader to find it; the sibling that prints the same row shape, --flags --flip's
+        // <u sym= p= l= ccx=>, has carried the line since it was written. Same attribute, same position.
+        std::fprintf( out, "<u sym=\"%s\" p=\"%s\" l=\"%u\" ccx=\"%u\"/>", ex( s.name ).c_str(), ex( tgPathRel( s.fileId ) ).c_str(), s.line, s.ccx );
     } );
     std::fprintf( out, "</test-gate>" );
 }
@@ -919,7 +928,7 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     for( std::size_t i = 0; i < r.tests.size(); ++i )
     {
         std::fprintf( out, "%s{\"p\":\"%s\"%s}", i == 0 ? "" : ",", jsonStr( tgJPathRel( r.tests[i] ) ).c_str(),
-                      runFieldJson( gateRunners, r.tests[i], jesc ).c_str() );
+                      runFieldJsonDisclosed( gateRunners, r.tests[i], jesc ).c_str() );
     }
     for( std::size_t i = 0; i < r.shellGates.obligations.size(); ++i )
     {
@@ -932,8 +941,8 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     walkUntestedRows( ing, r, uw, [ & ]( std::size_t i, const Symbol& s, const std::string& )
     {
         // M12: tgJPathRel( s.fileId ), not the raw `path` walkUntestedRows hands in.
-        std::fprintf( out, "%s{\"sym\":\"%s\",\"p\":\"%s\",\"ccx\":%u}", i == 0 ? "" : ",",
-                     jsonStr( s.name ).c_str(), jsonStr( tgJPathRel( s.fileId ) ).c_str(), s.ccx );
+        std::fprintf( out, "%s{\"sym\":\"%s\",\"p\":\"%s\",\"l\":%u,\"ccx\":%u}", i == 0 ? "" : ",",
+                     jsonStr( s.name ).c_str(), jsonStr( tgJPathRel( s.fileId ) ).c_str(), s.line, s.ccx );
     } );
     std::fprintf( out, "]}" );
 }
