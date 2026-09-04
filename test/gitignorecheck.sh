@@ -135,7 +135,7 @@ grep -qE 'ignored_(files|dirs)=' "$TMP/plain" \
 # ── 6. ABSENT MEANS NOTHING HAPPENED: a git tree with nothing ignored is byte-identical to --no-ignore.
 mkdir -p "$TMP/clean/src"
 printf 'int rwGateCleanSymbol( int a ) { return a + 7; }\n' >"$TMP/clean/src/c.cpp"
-( cd "$TMP/clean" && git init -q . >/dev/null 2>&1 && git config user.email g@e.invalid && git config user.name g \
+( cd "$TMP/clean" && git init -q . >/dev/null 2>&1 && git config user.email g@example.invalid && git config user.name g \
   && git add -A >/dev/null 2>&1 && git commit -qm c >/dev/null 2>&1 )
 run "$TMP/clean" >"$TMP/clean.def"
 run "$TMP/clean" --no-ignore >"$TMP/clean.noig"

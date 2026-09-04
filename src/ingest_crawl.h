@@ -840,9 +840,41 @@ constexpr std::size_t kMaxIgnoreProbeBytes = 64ull * 1024ull * 1024ull;
 
 // Ask git which paths under `rootDir` its own ignore rules cover. Never throws; every failure mode returns
 // `available=false`, which the caller reads as "walk everything, and say that is what happened".
+// A root with no `.git` anywhere above it is not a git root: say so without spawning git at all. The
+// nongitqmetricscheck contract — non-git retrieval never invokes git merely to degrade — covers this probe
+// exactly as it covers churn. Worktrees and submodules keep `.git` as a FILE, so the test is existence, not
+// directory-ness; the walk stops at the filesystem root.
+bool underGitRoot( const char* rootDir )
+{
+    std::string dir = rootDir == nullptr ? std::string( "." ) : std::string( rootDir );
+    char        resolved[ PATH_MAX ];
+    if( ::realpath( dir.c_str(), resolved ) != nullptr )
+    {
+        dir = resolved;
+    }
+    for( ;; )
+    {
+        struct stat st;
+        if( ::stat( ( dir + "/.git" ).c_str(), &st ) == 0 )
+        {
+            return true;
+        }
+        const std::size_t slash = dir.find_last_of( '/' );
+        if( slash == std::string::npos || slash == 0 )
+        {
+            return false;
+        }
+        dir.resize( slash );
+    }
+}
+
 GitIgnoreSet collectGitIgnored( const char* rootDir )
 {
     GitIgnoreSet out;
+    if( !underGitRoot( rootDir ) )
+    {
+        return out;
+    }
     const std::string cmd = "git -C " + shSingleQuote( rootDir == nullptr ? std::string( "." ) : std::string( rootDir ) )
                           + " -c core.quotepath=false ls-files --others --ignored --exclude-standard --directory -z 2>/dev/null";
     std::FILE* pipe = ::popen( cmd.c_str(), "r" );

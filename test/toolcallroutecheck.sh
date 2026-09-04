@@ -87,6 +87,18 @@ else
     no "corpus pass failed the registered bar (see breakdown above)"
 fi
 
+# ---- the binary under test must actually be consulted (binoverridecheck arm 4). The corpus's Read rows
+#      name files that do not exist, so their honest fallback is --for and a ripwire stub that fails on
+#      every invocation leaves the corpus score untouched. This row reads a REAL source file whose stem is
+#      a symbol on this root, so the resolved_symbols guard has to reach the binary and get --expand back;
+#      a dead binary degrades it to --for and the arm goes red. ----
+binOut="$( run_hook Read "$( jq -cn --arg p "$ROOT/src/svector.h" '{file_path:$p}' )" "corpus-binprobe" "$ROOT" )"
+if tail -n1 "$LOG" | jq -e '.status == "recommend" and .recommended == "--expand"' >/dev/null 2>&1; then
+    ok "binary probe: a Read of src/svector.h resolves svector through the binary and recommends --expand"
+else
+    no "binary probe: a Read of src/svector.h did not yield --expand (binary unreachable or stem svector no longer a symbol) -- last row: $( tail -n1 "$LOG" | cut -c1-200 )"
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # Per-session cap: the 4th recommend-worthy event in one session abstains with reason=cap, and injects
 # nothing, in either arm.

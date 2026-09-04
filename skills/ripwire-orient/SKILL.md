@@ -141,7 +141,7 @@ a CodeCharta `cc.json` for its 3D city view; the ladder's visualization end-poin
 matters. A map header showing `skipped_oversize=N` means N otherwise-indexable files were dropped for
 exceeding a size ceiling — they are absent from `files=` and every ranking; `ripwire <dir> --skipped`
 names them (path + bytes + the ceiling that dropped each), so you know what the index cannot show you
-before you trust a "not found". Caveat: *broad, common-word* questions can still favor plain `rg` —
+before you trust a "not found". A git root also drops every `.gitignore`d path by default (header `ignored_files=N`, absent when 0; `--skipped` lists them); `ripwire <dir> --no-ignore` restores the full walk when the symbol you want lives in an ignored tree. Caveat: *broad, common-word* questions can still favor plain `rg` —
 ripwire shines on specific technical asks. CI-enforceable module boundaries graduate to
 `--arch=rules.txt` (see **ripwire-layers**).
 
