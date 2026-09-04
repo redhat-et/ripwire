@@ -739,7 +739,7 @@ struct CrawlSkips
 // The doc post-pass is deliberately left on that side of the line: a notebook's EXTRACTED prose has no
 // tree-sitter parse that could be degraded, and inventing a clean reading for it would be exactly the
 // guess this lane exists to remove.
-// Round-trips the incremental cache (ingest.cpp kCacheVersion 14): the auto-cache is the DEFAULT path, and
+// Round-trips the incremental cache (ingest_cache.h, since kCacheVersion 13): the auto-cache is the DEFAULT path, and
 // a disclosure that evaporates on the warm run is worse than none.
 struct FileHealth
 {

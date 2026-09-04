@@ -1318,6 +1318,64 @@ battery's wall time on the dev machine is within 1.2× of the pre-change battery
 (reparsed=0 on its first run after any other configuration wrote the blob); **(8)** the blob count per
 root stays at two (lean/rich). A `--cache=PATH` explicit blob keeps today's whole-file format.
 
+**RUN 2026-09-03 — the retry SHIPS (`lane/n6-d`, kCacheVersion 15).** Built as registered: the auto-cache
+key is untouched (`main.cpp::defaultCachePath` gains only a comment saying why the reverted key change
+must not come back), and the blob gains a record offset table plus a 24-byte trailer. Two things the
+retry design did not spell out and that the build made explicit:
+
+* **The offset table alone does not meet band (7).** The registration frames the subset problem as a LOAD
+  cost, but the measured thrash is a WRITE: a dirty subset run rewrote the shared blob with its own file
+  set and every record for a file it had not crawled ceased to exist. So `saveCache` also carries those
+  records over — byte for byte, out of the previous blob, each verified against its own `recSum` before it
+  is trusted forward. The blob only ever grows toward the union of the configurations that share it.
+* **`--cache=PATH` is UNIFIED onto the same format** rather than kept whole-file as the registration
+  permitted. One format is one code path: an explicit blob then also gets the subset-cheap load and the
+  carry-over save, and the alternative was two serializers that can drift with no gate on the difference.
+  Portability (T5 root-relative record keys) is unchanged.
+
+Layout, and what each checksum covers: HEADER 25 B (magic, version, parserVer, arch, blobWriteNs,
+entryCount — the same shape as v14); RECORDS in ascending pathHash order, each the v14 per-file record
+byte for byte; OFFSET TABLE of `entryCount × 32 B` (pathHash u64, recOffset u64, contentHash u64,
+recLength u32, recSum u32); TRAILER 24 B (tableOffset u64, entryCount u32, reserved u32, tableSum u64).
+`tableSum` covers HEADER ‖ TABLE and is verified on every open; each entry's `recSum` covers exactly its
+own record and is verified for each record ACTUALLY READ; a record nobody reads is never checksummed and
+never trusted. A torn write is caught by a file shorter than header+trailer, by the EXACT-FIT invariant
+`fileSize == tableOffset + entryCount*32 + 24` (which is what catches a truncation that removes whole
+records), or by `tableSum` — each rejects the WHOLE blob with a `DEGRADED_PATH_ALERT` and self-heals to a
+full reparse. A record torn on its own while the table survives is caught by its `recSum`: that one file
+reparses and the rest of the blob stands. A v14 blob is rejected AND disclosed, never misread.
+
+Bands, measured. Gate `test/cacheoffsetcheck.sh`, written RED first at `8411f7e` (its three discriminating
+arms failed there: band (7) reparsed 60 instead of 0, no `cached_records=`/`blob_entries=` existed, and
+patching the header version to 14 was a no-op because 14 *was* the version):
+
+| band | expected | measured |
+| --- | --- | --- |
+| (1) `.` → `. --exclude=X` → `.` reparses 0 | 0 | **0** (gate check (b)); and after a DIRTY excluded run, still **0** (check (c) — 60 before) |
+| (2) excluded warm load within 2× of `--cache=PATH` | ≤ 2× | **1.0–2.0× at 10 ms resolution** — 0.01 s both, over a 31,000-entry superset blob (0.06–0.09 s on `d8fa59c`); structurally, `cached_records=1000 blob_entries=31000` |
+| (3) byte-identical to `--no-cache`, determinism ×2 | identical | **identical**, both configurations, plus cold==warm; three-run byte determinism on this repo |
+| (4) the named cache gates green, pins re-derived with reasons | green | **green**: `portablecachecheck` `cachesplitcheck` `cacheisolationcheck` `evictioncheck` `savecachecheck` `cachehashcheck` `cachefuzzcheck` `freshnesscheck` `statgatecheck` `racymtimecheck` `indexoutcheck` `artifactcheck` `tornreadcheck` `headsnapcachecheck` `qsnapcachecheck` `mcpstalecheck` `mcpincrementalcheck` `multirootcheck` `qextractionkeycheck`. One pin re-derived in its own commit: `test/qschemetrip.hash` (the manifest hash covers the `kCacheVersion` declaration line) |
+| (5) wall-time numbers are a ledger row, never a gate | ledger | **`bench/PROFILE.md`**, "the offset-table cache blob (v15)" |
+| (6) full battery within 1.2× of base under the same `-j` | ≤ 1.2× | **orchestrator measures** on the merged tree. In-lane, the cache family moved 52.9 s → 41.2 s across 20 gates (the biggest movers `cachefuzzcheck` 8.6→6.6, `qsnapcachecheck` 9.7→6.0, `multirootcheck` 6.8→3.5); no gate got slower by more than 0.1 s |
+| (7) a configuration whose files are all in the blob never cold-parses | reparsed=0 | **0**. On the 31,000-file corpus, the wide run after a dirty narrow run: `reparsed=0` in 0.27 s, against `reparsed=30000` in 0.96 s on `d8fa59c` |
+| (8) blob count per root stays at two (lean/rich) | 2 | **1 lean blob across three exclude/`--max-file-size` configurations** (gate check (a)); the reverted key change would have made this three |
+
+**The cost, disclosed.** The offset table is 32 B per file: +3.3% on a 31,000-file blob (30,147,173 →
+31,139,189 B), all of it table. And a DIRTY subset save must copy the records it did not crawl — 0.13–0.40 s
+for 30,000 records / ~30 MB, against 0.02 s for the v14 save that truncated them instead. That is the right
+way round: v14 "saved" that time by destroying work which then cost 0.96 s to redo on every configuration
+switch.
+
+**Interaction with the `.gitignore`-by-default lane.** A default-ignore run and a `--no-ignore` run are
+just two configurations over one root, so they share one blob exactly as `--exclude` configurations do. A
+file present in the `--no-ignore` crawl and absent from the default one is a table entry the default run
+never looks up (it is not in that crawl) and never drops (carry-over keys on pathHash, and a pathHash no
+file in THIS crawl owns is preserved). The stat-gate is unchanged, so a served record is still gated on
+`(size, mtime, ctime)` plus the content hash. Neither configuration can serve the other's records
+incorrectly, because a record is only ever served to a lookup of its own path — confirmed by comparing the
+record's own stored key against the key that found it, so even a 64-bit pathHash collision reparses rather
+than answers.
+
 ### `.gitignore` honoured by default, `--no-ignore` to override — PRE-REGISTERED 2026-09-03 (owner decision 1-B)
 
 **Why.** The tool is named for ripgrep, whose defining default is that ignored files are not searched;
