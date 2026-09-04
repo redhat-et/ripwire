@@ -628,13 +628,17 @@ inline std::string grepSuggestJson( const IngestResult& ing, const std::string& 
 // only when non-empty (the same "absent means none" convention corpus_excluded/corpus_oversize already use),
 // lifted out for the same reason grepEnclosingJson/grepSuggestJson above were: pure serialization of an
 // already-collected list (search.h's grepCollectAux), so grepHitsJson's own body does not carry the loop.
-// §R-J: the CLI unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= twins as one
-// JSON key fragment — mirrors main.cpp's grepUnindexedAttrs (same three conditions: scanned= unconditional,
-// the other two only when non-zero/true), lifted out for the same reason grepAuxJson below is.
+// §R-J: the CLI unindexed_hits=/unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped=
+// twins as one JSON key fragment — mirrors main.cpp's grepUnindexedAttrs (same conditions: hits= and
+// scanned= unconditional, the two skip keys only when non-zero/true), lifted out for the same reason
+// grepAuxJson below is. H4: unindexed_hits joins it on BOTH dialects at once — mcpclidiffcheck's LENS2 asks
+// that every fact the CLI root states be present here, and a completeness attribute is exactly the class of
+// fact a dialect may not drop.
 inline std::string grepUnindexedKeys( const GrepAuxCollection& aux )
 {
     const std::uint32_t skipped = aux.filesSkippedOversize + aux.filesSkippedBinary + aux.filesUnreadable;
-    std::string          keys    = ",\"unindexed_files_scanned\":" + std::to_string( aux.filesScanned );
+    std::string          keys    = ",\"unindexed_hits\":" + std::to_string( aux.hits.size() );
+    keys += ",\"unindexed_files_scanned\":" + std::to_string( aux.filesScanned );
     if( skipped > 0 )
     {
         keys += ",\"unindexed_files_skipped\":" + std::to_string( skipped );
@@ -667,6 +671,13 @@ inline std::string grepTierKeys( const GrepTierReport& tier )
     if( std::strcmp( tier.emittedTier, "code" ) != 0 )
     {
         keys += std::string( ",\"tier\":\"" ) + tier.emittedTier + "\"";
+        // M17: the CLI grepTierAttrs() twin — same condition, same name. A confidence qualifier is exactly
+        // the class of fact a dialect may not drop (mcpclidiffcheck's LENS2), and an MCP-only agent has no
+        // CLI to re-ask from before trusting the label.
+        if( tier.unclassifiedHits > 0 )
+        {
+            keys += ",\"tier_partial\":true";
+        }
     }
     keys += ",\"tier_parsed\":" + std::to_string( tier.tieredFileCount );
     if( tier.unclassifiedHits > 0 )
@@ -699,22 +710,34 @@ inline std::string grepDegradedNoteJson( const IngestResult& ing, std::span<cons
            " binary-sniffed, unreadable — is also unmarked, the skipped verb's unmeasured class.\"";
 }
 
-inline std::string grepAuxJson( const std::vector<GrepAuxHit>& hits, bool singleRoot, const std::string& rootPrefix )
+// H4 (capture-audit 2026-09-04 — lens1 F1, lens2 M3, lens8 #12): an OBJECT, not a bare array. A bare array
+// is the one JSON shape that cannot carry its own disclosure, and this list needed three: how many hits it
+// holds, how many it printed, and whether that was a cut. Live pre-fix, `grep … limit:3` returned 3 hits
+// and 29 unindexed rows — 2,805 B for a three-row answer — because `limit` reached the indexed list only.
+// The keys are the CLI element's attributes verbatim (count/shown/capped) so the two dialects state the
+// same facts under the same names; `rows` holds what the window admitted.
+inline std::string grepAuxJson( const std::vector<GrepAuxHit>& hits, const PageWindow& window, bool singleRoot,
+                                const std::string& rootPrefix )
 {
     if( hits.empty() )
     {
         return {};
     }
-    std::string out   = ",\"unindexed\":[";
-    bool        first = true;
-    for( const GrepAuxHit& h : hits )
+    const std::size_t shown = window.end - window.begin;
+    std::string       out   = ",\"unindexed\":{\"count\":" + std::to_string( hits.size() )
+                      + ",\"shown\":" + std::to_string( shown )
+                      + ",\"capped\":" + ( shown < hits.size() ? "true" : "false" )
+                      + ",\"rows\":[";
+    bool first = true;
+    for( std::size_t i = window.begin; i < window.end; ++i )
     {
+        const GrepAuxHit& h = hits[i];
         if( !first ) { out += ","; }
         first = false;
         out += "{\"file\":\"" + mcpdetail::jsonEscape( std::string( singleRoot ? sarif::rootRelativeUri( h.path, rootPrefix ) : std::string_view( h.path ) ) )
              + "\",\"line\":" + std::to_string( h.line ) + "}";
     }
-    out += "]";
+    out += "]}";
     return out;
 }
 
@@ -859,7 +882,10 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     out += grepDegradedNoteJson( ing, std::span<const GrepHit>( hits ) );
     // §R-J: the CLI <unindexed> twin (helper above) — appended AFTER "hits" for the same reason the R1
     // block below is: existing key-order-sensitive gates read up through "hits" first.
-    out += grepAuxJson( aux.hits, singleRootJ, rootPrefixJ );
+    // H4: the SAME window the indexed list obeyed, over this list's own length (the CLI emitter's auxPage
+    // twin) — `limit` reached only the hits array before, so a three-row page shipped 29 unindexed rows.
+    out += grepAuxJson( aux.hits, pageWindow( aux.hits.size(), effectiveRowCap( page.limit, kRowCap ), page.offset ),
+                        singleRootJ, rootPrefixJ );
     // R1 (the 2026-08-12 usage mine): the CLI <enc>/<suggest> twins, appended AFTER "hits" so the
     // historic key order three other gates read (files,total,shown,capped) is byte-untouched.
     out += grepEnclosingJson( ing, ix.g, std::span<const GrepHit>( hits ) );

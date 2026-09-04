@@ -191,7 +191,17 @@ with open(sys.argv[2]) as fh:
 problems = []
 if "unindexed_files_scanned" not in j:
     problems.append("missing unindexed_files_scanned key")
-names = [row.get("file", "") for row in j.get("unindexed", [])]
+# H4 (capture-audit 2026-09-04): "unindexed" is an OBJECT now — count/shown/capped beside its rows — so
+# the sub-list can state its own completeness the way the CLI element's attributes do. A bare list is the
+# one JSON shape that cannot. Read rows through it, and keep the old array spelling readable so this arm
+# says what changed rather than crashing on a KeyError.
+u = j.get("unindexed", {})
+rows = u.get("rows", []) if isinstance(u, dict) else u
+if isinstance(u, dict):
+    for k in ("count", "shown", "capped"):
+        if k not in u:
+            problems.append("the unindexed object states no %s" % k)
+names = [row.get("file", "") for row in rows]
 hit = any(n == target or n.endswith("/" + target) for n in names)
 if not hit:
     problems.append("no %r row in the unindexed array (got %r)" % (target, names))

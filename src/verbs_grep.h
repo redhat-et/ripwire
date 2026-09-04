@@ -168,16 +168,25 @@ void emitGrepSuggest( const rw::IngestResult& ing, const std::string& pat, bool 
     std::printf( "/>" );
 }
 
-// §R-J: the three root attributes unindexed_files_scanned=/unindexed_files_skipped=/
+// §R-J: the root attributes unindexed_hits=/unindexed_files_scanned=/unindexed_files_skipped=/
 // unindexed_candidates_capped= as one string fragment — a pure function of the aux collection, lifted out
 // so emitGrepReport's own body states only "compute aux, then ask what it discloses" rather than the
-// three-attribute assembly itself. unindexed_files_scanned= is unconditional (0 is informative: it means
+// attribute assembly itself. unindexed_files_scanned= is unconditional (0 is informative: it means
 // no unsupported-ext candidate existed, or none survived the size/binary guard — never "this build lacks
-// the feature"); the other two follow corpus_excluded='s convention above: absent means zero/false.
+// the feature"); the two skip attributes follow corpus_excluded='s convention above: absent means zero/false.
+//
+// H4 (capture-audit 2026-09-04 — lens1 F1, lens2 M3, lens8 #12): unindexed_hits= joins them, and is
+// unconditional for the same reason files_scanned= is. hits=/shown=/total= on this root count the IN-INDEX
+// population ONLY — that is what every consumer already reads, and redefining it to include the aux scan
+// would be a silent redefinition of the number the whole verb is read by — so without a SECOND count on
+// the same element the two populations cannot be reconciled from the header at all. That was the
+// measurable half of the defect: an answer stating hits="75" shown="75" capped="0" emitted 98 hit sites,
+// and no attribute anywhere let a reader learn it.
 std::string grepUnindexedAttrs( const rw::GrepAuxCollection& aux )
 {
     const std::uint32_t skipped = aux.filesSkippedOversize + aux.filesSkippedBinary + aux.filesUnreadable;
-    std::string          attr    = " unindexed_files_scanned=\"" + std::to_string( aux.filesScanned ) + "\"";
+    std::string          attr    = " unindexed_hits=\"" + std::to_string( aux.hits.size() ) + "\"";
+    attr += " unindexed_files_scanned=\"" + std::to_string( aux.filesScanned ) + "\"";
     if( skipped > 0 )
     {
         attr += " unindexed_files_skipped=\"" + std::to_string( skipped ) + "\"";
@@ -194,21 +203,35 @@ std::string grepUnindexedAttrs( const rw::GrepAuxCollection& aux )
 // so the "collapse by contiguous path" grouping loop is a helper's job, not emitGrepReport's. Omitted
 // entirely (prints nothing) when there is nothing to say — the same "absent means none" convention
 // corpus_excluded=/corpus_oversize= use, so a caller never needs an empty-check before calling this.
-void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, bool singleRoot, const std::string& rootPrefix, std::vector<char>& esc )
+//
+// H4: this list is a SECONDARY ROW CLASS inside a paged answer, and it now obeys the two rules such a
+// class owes its reader — it carries its OWN count=/shown=/capped=, and it is WINDOWED by the same
+// --limit/--offset the indexed list obeys. It carried neither: a `--grep=e --limit=1` answer said
+// shown="1" and wrote 381,283 aux rows / 98 MB of stdout, and the default answer over-emitted by 29 rows
+// nothing on the root counted. `window` is a slice of THIS list (the caller computes it with the same
+// pageWindow()/rowCap the indexed half uses) — never derived inside the collector, so the §A1 rule holds
+// here too: what was COLLECTED does not move with the page, only what is PRINTED does, which is why
+// count= reads the same on every page of a walk. The shape is --impact's <f via="import"> with
+// shown_importers=/importers_capped=, restated on an element of this sub-list's own.
+void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, const rw::PageWindow& window, bool singleRoot,
+                        const std::string& rootPrefix, std::vector<char>& esc )
 {
     using namespace rw;
     if( hits.empty() )
     {
         return;
     }
-    const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-    std::printf( "<unindexed>" );
-    for( std::size_t i = 0; i < hits.size(); )
+    const auto        ex    = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+    const std::size_t shown = window.end - window.begin;
+    // capped= is exactly "this element printed fewer rows than it holds" — the one reading that stays true
+    // whether the cut came from --limit, from --offset, or from the default row cap.
+    std::printf( "<unindexed count=\"%zu\" shown=\"%zu\" capped=\"%d\">", hits.size(), shown, shown < hits.size() ? 1 : 0 );
+    for( std::size_t i = window.begin; i < window.end; )
     {
         std::size_t j = i;
         std::printf( "<f p=\"%s\">", ex( singleRoot ? rw::sarif::rootRelativeUri( hits[i].path, rootPrefix )
                                                      : std::string_view( hits[i].path ) ).c_str() );
-        for( ; j < hits.size() && hits[j].path == hits[i].path; ++j )
+        for( ; j < window.end && hits[j].path == hits[i].path; ++j )
         {
             const GrepAuxHit& h = hits[j];
             std::string        safe;
@@ -240,6 +263,13 @@ const char* grepTierLegend( const rw::GrepTierReport& tier )
     return "SPAN TIERS: each hit is classified by the tree-sitter span it sits in (code/comment/string) and this answer serves "
            "the CODE tier, or — when no hit is code — comment and string TOGETHER; tier= names what was served when it is not "
            "code, so a pattern living only in prose is answered, never emptied. "
+           // M17 (capture-audit 2026-09-04, lens1 F4): the label is a CLAIM, and this sentence is the
+           // difference between a proven one and an unproven one. Deliberately no attribute=value literal
+           // (this verb's own rule — gates parse the header counters by grep).
+           "tier_partial= (value 1, present only then) qualifies that label: it was elected over the CLASSIFIED hits ALONE while "
+           "tier_unclassified= hits were never classified, so read it as the tightest tier PROVEN present, never as proof that no "
+           "hit is code. Nothing past the budget is suppressed, so the partiality narrows what the LABEL may be read to mean, never "
+           "which rows you got; its absence beside a tier= means the label is a fact. "
            "suppressed_comment=/suppressed_string= are the classified hits held back: not in hits=, and the "
            "reason complete= cannot appear. Pass grep-in=any (dashes omitted) for every tier. Hit files are parsed on demand "
            "under a fixed budget: tier_parsed= how many were classified, tier_budget= which ceiling stopped it (files or bytes, "
@@ -268,6 +298,17 @@ std::string grepTierAttrs( const rw::GrepTierReport& tier )
     if( std::strcmp( tier.emittedTier, "code" ) != 0 )
     {
         attrs += std::string( " tier=\"" ) + tier.emittedTier + "\"";
+        // M17: the label was elected over the CLASSIFIED hits only (search.h's grepApplySpanTiers — an
+        // unclassified hit may not vote for a tier nobody proved it belongs to, which is right). What was
+        // wrong is that the RESULT was then stated as a fact about the whole answer: live,
+        // --grep=deterministic said tier="comment+string" — legend-read as "no hit is code" — over 128
+        // classified files while 892 of 1,357 hits were unclassified, and served the code-tier
+        // deterministicShuffle DEFINITION plus three call sites. Emitted exactly when the election was
+        // partial, so a fully classified label still pays nothing and reads as the proof it is.
+        if( tier.unclassifiedHits > 0 )
+        {
+            attrs += " tier_partial=\"1\"";
+        }
     }
     attrs += " tier_parsed=\"" + std::to_string( tier.tieredFileCount ) + "\"";
     if( tier.unclassifiedHits > 0 )
@@ -295,7 +336,9 @@ void emitCompactGrepLegend()
     std::printf( "<!-- ripwire grep ripwire.grep/v1: files group source-ordered hits; l=line, m=matched text, "
                  "in=enclosing name when known. shown/capped disclose the printed window; hits_capped=1 makes hits a floor; "
                  "complete=1 only for an exhaustive literal scan whose whole unfiltered window printed. root anchors relative p; "
-                 "enc callers remain a call-graph floor; tier/suppressed and unindexed/corpus attrs disclose excluded populations. -->" );
+                 "enc callers remain a call-graph floor; tier/suppressed and corpus attrs disclose excluded populations, tier_partial=1 "
+                 "meaning that label was elected over a partial classification. files/hits/shown/total/complete are IN-INDEX only; "
+                 "unindexed_hits sizes the second population, whose element carries its own count/shown/capped under the same window. -->" );
 }
 
 std::string grepTermsAttrs( std::string_view pattern, std::span<const rw::GrepTerm> terms, rw::GrepScope scope,
@@ -672,7 +715,16 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "own unsupported-ext class) that THIS answer additionally scanned for the same pattern; their hits print inside a "
                  "trailing unindexed element (present only when it found something), holding its own <f> rows in the same shape as "
                  "above, and never carry in= — there is no symbol table to check for such a file, which is not the same claim as file "
-                 "scope. unindexed_files_skipped= (present only when nonzero) counts "
+                 "scope. "
+                 // H4 (capture-audit 2026-09-04): the two populations, and the rule that keeps them reconcilable.
+                 // Deliberately no attribute=value literal in these sentences (the quality-delta legend's rule,
+                 // restated on this verb because several gates extract its counters by grep). Kept DENSE for
+                 // the reason the tier clause above is: on a small page this legend IS the answer.
+                 "THE TWO POPULATIONS: every count above — files, hits, shown, capped, total, complete — is the IN-INDEX search "
+                 "ALONE. unindexed_hits= sizes the second one, always stated (a zero included); the trailing unindexed element "
+                 "carries that same number as its own count= beside shown=/capped= and obeys the SAME window limit/offset set here "
+                 "(dashes omitted), so a one-row page is one row on BOTH lists and a page past its end is empty, not repeated. "
+                 "unindexed_files_skipped= (present only when nonzero) counts "
                  "candidates this scan saw but did not read: over the max-file-size ceiling, sniffed binary, or unreadable. "
                  "unindexed_candidates_capped=\"1\" (present only when true) means the CANDIDATE list itself (the skipped verb's own "
                  "500-row-per-class cap) was already a floor, so files past it were never considered here either — see the skipped verb "
@@ -777,7 +829,11 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // population is already crawl-bounded (kMaxSkipRowsPerClass), so the folding machinery would add
     // complexity for a set too small to need it. No in= — see GrepAuxHit's own comment in search.h for why
     // that is a missing FIELD, not an omitted attribute.
-    emitGrepUnindexed( aux.hits, singleRoot, rootPrefix, esc );
+    // H4: the SAME window the indexed list above obeys, applied to this list's own length. Computed here
+    // rather than inside the collector for the §A1 reason: nothing derived from --limit/--offset may reach
+    // what is COLLECTED, so count= stays a property of the search and only shown= moves with the page.
+    const PageWindow auxPage = pageWindow( aux.hits.size(), rowCap, cfg.pageOffset );
+    emitGrepUnindexed( aux.hits, auxPage, singleRoot, rootPrefix, esc );
 
     // ── R1b: the <enc> block — the map's context on the answer, no second call (helper above) ──────
     const GrepEncOptions encOpt{ amp, tested, cfg.grepHandles,

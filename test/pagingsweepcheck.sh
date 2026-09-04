@@ -113,12 +113,15 @@ echo "pagingsweepcheck: BIN=$BIN  PREBIN=${PREBIN:-<none>}"
 # an arm whose row supply this repo cannot guarantee is re-anchored onto a fixture built below rather
 # than left to red on whichever clone happens to be short of rows. Defaults to $ROOT: every other arm is
 # untouched.
-# §R-J: --grep's <unindexed> block (queries/*.scm-class hits) is ADDITIVE and deliberately never
-# paginated — it always prints in full regardless of --limit/--offset, because it is a separate fact from
-# the indexed hits= this whole file's paging CONTRACT is about. Stripped here, at the one seam every
-# page_verb capture runs through, so a pattern that happens to also live in an unsupported-ext file cannot
-# inflate a generic `<hit `/`<f p=`-style row count this file pins to an exact number.
-stripUnindexed(){ sed -E 's#<unindexed>.*</unindexed>##'; }
+# §R-J: --grep's <unindexed> block (queries/*.scm-class hits) is a SEPARATE population from the indexed
+# hits= this whole file's paging CONTRACT is about. Stripped here, at the one seam every page_verb capture
+# runs through, so a pattern that happens to also live in an unsupported-ext file cannot inflate a generic
+# `<hit `/`<f p=`-style row count this file pins to an exact number.
+# H4 (capture-audit 2026-09-04): that block is no longer unwindowed — it carries its own
+# count=/shown=/capped= and obeys the same --limit/--offset (test/sublistcountcheck.sh owns that property).
+# So the opening tag now has attributes, and this strip matches the tag rather than the byte string
+# `<unindexed>`; without the widening the block survived the strip and every grep row count doubled.
+stripUnindexed(){ sed -E 's#<unindexed[^>]*>.*</unindexed>##'; }
 run(){  "$BIN" "${PAGE_CORPUS:-$ROOT}" "$@" --cache="$( cacheFor "${PAGE_CORPUS:-$ROOT}" )" 2>/dev/null | stripUnindexed; }
 cold(){ "$BIN" "${PAGE_CORPUS:-$ROOT}" "$@" --no-cache 2>/dev/null | stripUnindexed; }
 
