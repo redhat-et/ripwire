@@ -115,7 +115,21 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 14;           // 14 (card A3 follow-up): each FILE record gains ctimeNs,
+constexpr std::uint32_t kCacheVersion = 15;           // 15 (offset-table blob): the blob gains a RECORD OFFSET
+                                                      //    TABLE and a 24-byte trailer, so a run deserialises only
+                                                      //    the records for the files it actually crawled, and a
+                                                      //    save CARRIES OVER — byte for byte — the records for
+                                                      //    files the blob holds but this run did not crawl. This is
+                                                      //    the registered retry of "The auto-cache key ignores
+                                                      //    --exclude" (docs/EVALS.md): the auto-cache key stays
+                                                      //    exclude-INDEPENDENT (the per-configuration key was
+                                                      //    measured and REVERTED as a NEGATIVE) and a subset
+                                                      //    configuration is made cheap by SHAPE instead. Layout,
+                                                      //    offsets and what each checksum covers: the v15 frame
+                                                      //    block below. A FORMAT change → v14 blobs are rejected
+                                                      //    and DISCLOSED (the self-healing full reparse rewrites a
+                                                      //    v15 blob on the same run).
+                                                      // 14 (card A3 follow-up): each FILE record gains ctimeNs,
                                                       //    a THIRD stat-gate discriminator written right after
                                                       //    mtimeNs. (size, mtime) alone let a byte-length-
                                                       //    preserving edit with a restored mtime be trusted and
@@ -758,6 +772,289 @@ inline std::uint64_t blobChecksum( std::string_view s ) noexcept
     return h;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// v15 — the OFFSET-TABLE blob frame.
+//
+// WHY. `main.cpp::defaultCachePath` keys the warm-by-default blob on realpath(root) + the lean/rich
+// class only, and that is DELIBERATE and stays: folding the exclude set into the key was built,
+// measured and REVERTED (docs/EVALS.md, "The auto-cache key ignores --exclude", RUN 2026-09-03 — one
+// blob per configuration on a 158K-file root thrashed the cache directory's 2 GiB sweep and took the
+// battery from 7 min to 62). One superset blob per (root, class) is therefore the contract, and the
+// two costs it used to carry are paid off by SHAPE instead:
+//   * a subset run (--exclude / --max-file-size) used to deserialise the whole superset it then threw
+//     away — now the offset table lets it read ONLY its own records;
+//   * a DIRTY subset run used to rewrite the shared blob with its own file set, destroying every
+//     record for a file it did not crawl — now saveCache carries those records over verbatim, so the
+//     blob only ever GROWS toward the union of the configurations that use it.
+//
+// LAYOUT (native-endian; the blob is host-local and arch-guarded, see kArtifactArch):
+//
+//   HEADER — 25 bytes at offset 0, byte-identical in shape to v14:
+//     [ 0: 4)  u32  magic         kCacheMagic "CTPK"
+//     [ 4: 8)  u32  version       kCacheVersion
+//     [ 8:12)  u32  parserVer     parserVerFor( captureValueUses )   (the lean/rich family split)
+//     [12:13)  u8   arch          kArtifactArch (endianness | pointer width << 1)
+//     [13:21)  u64  blobWriteNs   diagnostic write stamp; NOT the racy-rule reference
+//     [21:25)  u32  entryCount    file records == offset-table entries; cross-checked against the trailer
+//
+//   RECORD REGION — [ kCacheHeaderBytes, tableOffset ), entryCount records in ASCENDING pathHash order.
+//     Each record is the v14 per-file record, unchanged byte for byte: the root-relative path string,
+//     the content hash, the (size, mtime, ctime) stat-gate triple, the four FileHealth u32s, the rich
+//     family's subtoken dictionary, then the seven counted record arrays (defs, refs, includes, binds,
+//     FFI aliases, route defs, route uses). Nothing inside a record moved — that is what lets a carry-
+//     over be a raw byte copy and what will let a future content-addressed store lift a record whole.
+//
+//   OFFSET TABLE — [ tableOffset, tableOffset + entryCount*32 ), ascending pathHash, 32 B per entry:
+//     [ 0: 8)  u64  pathHash      contentHash64( the record's root-relative path key )
+//     [ 8:16)  u64  recOffset     absolute byte offset of the record inside this blob
+//     [16:24)  u64  contentHash   the file's content hash, mirrored out of the record
+//     [24:28)  u32  recLength     record length in bytes
+//     [28:32)  u32  recSum        low 32 bits of blobChecksum( the record's bytes )
+//
+//   TRAILER — the last 24 bytes:
+//     [ 0: 8)  u64  tableOffset
+//     [ 8:12)  u32  entryCount    must equal the header's
+//     [12:16)  u32  reserved      0
+//     [16:24)  u64  tableSum      blobChecksum( HEADER bytes || OFFSET TABLE bytes )
+//
+// WHAT THE CHECKSUMS COVER, and how a torn write is caught. `tableSum` covers the header and the whole
+// offset table, and is verified on every open — so the map from "which file" to "which bytes" is never
+// trusted unchecked. Each entry's `recSum` covers exactly its own record's bytes and is verified for
+// each record ACTUALLY READ; a record nobody reads is never checksummed and never trusted. Together
+// that is "the trailer checksum covers the table plus the records actually read".
+//   A torn write is caught three ways, in this order: (a) the file is shorter than header+trailer;
+// (b) the EXACT-FIT invariant `fileSize == tableOffset + entryCount*32 + 24` fails, which is what
+// catches a truncation that removes whole records or lands mid-table; (c) `tableSum` mismatches. Any
+// of the three rejects the WHOLE blob with a DEGRADED_PATH_ALERT and self-heals to a full reparse —
+// never a partial load. A record that is individually torn while the table survives is caught by its
+// own `recSum`: that one file is dropped (disclosed) and reparsed, and the rest of the blob stands.
+// saveCache still publishes by tmp-then-rename with the write byte-count and fclose both checked, so
+// a short write never reaches `path` in the first place; the invariants above are the second line.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+constexpr std::size_t kCacheHeaderBytes  = 25;
+constexpr std::size_t kCacheEntryBytes   = 32;
+constexpr std::size_t kCacheTrailerBytes = 24;
+
+// One offset-table entry, laid out so the on-disk array IS the in-memory array (no per-entry decode).
+// Content-addressed-store handoff: `contentHash` is the field a CAS keys on — moving to a CAS means
+// splitting this row into a per-blob { pathHash → contentHash } manifest and a shared
+// { contentHash → (offset,length,recSum) } store, with pathHash/recOffset/recLength/recSum leaving
+// this struct for the store's own index. Nothing inside a RECORD has to move for that.
+struct CacheEntry
+{
+    std::uint64_t pathHash    = 0;
+    std::uint64_t recOffset   = 0;
+    std::uint64_t contentHash = 0;
+    std::uint32_t recLength   = 0;
+    std::uint32_t recSum      = 0;
+};
+static_assert( sizeof( CacheEntry ) == kCacheEntryBytes, "CacheEntry must be the exact 32-byte on-disk row (no padding)" );
+static_assert( alignof( CacheEntry ) == 8, "CacheEntry must stay 8-byte aligned so the table is a raw array copy" );
+
+// The per-record digest stored in the table: the low half of the same 8-lane FNV the trailer uses.
+// 32 bits is a detection budget, not a security one — the whole-blob guards above sit in front of it.
+inline std::uint32_t recordSum32( std::string_view rec ) noexcept
+{
+    return std::uint32_t( blobChecksum( rec ) & 0xFFFFFFFFull );
+}
+
+// A read-only descriptor open on ONE cache blob, held for the whole of a load or a save so the inode
+// survives another process renaming a new blob over `path` mid-read (rename(2) unlinks, it does not
+// truncate). Owning, non-copyable, closed on scope exit — the one place this file needs RAII.
+struct ReadFd
+{
+    int fd = -1;
+
+    ReadFd() = default;
+    ReadFd( const ReadFd& )            = delete;
+    ReadFd& operator=( const ReadFd& ) = delete;
+    ReadFd( ReadFd&& other ) noexcept : fd( other.fd ) { other.fd = -1; }
+    ~ReadFd() { if( fd >= 0 ) { ::close( fd ); } }
+
+    // openOnce, not a move-assignment: the only mutation this type needs is "fill an empty guard", and
+    // a move-assign operator here would be a byte-for-byte clone of ingest_sidecap.h's TreeGuard one
+    // (--quality-delta's duplication kind says so). One owner, one transfer direction, no reopen.
+    bool openOnce( const std::string& path ) noexcept
+    {
+        VERIFY( fd < 0 );
+        fd = ::open( path.c_str(), O_RDONLY | O_CLOEXEC );
+        return fd >= 0;
+    }
+    bool valid() const noexcept { return fd >= 0; }
+};
+
+// A validated, still-open v15 blob: everything a caller needs to pull records out of it by pathHash.
+// `ok == false` means "there is no usable cache here" for every reason — absent, wrong shape, foreign
+// version/parserVer/arch, torn, or a table that failed its checksum or its bounds.
+struct CacheFrame
+{
+    ReadFd                  blob;
+    std::vector<CacheEntry> entries;         // ascending pathHash; the on-disk table, verbatim
+    std::uint64_t           tableOffset = 0; // records live in [ kCacheHeaderBytes, tableOffset )
+    long long               mtimeNs     = -1;// the blob's own mtime — the warm-run racy-rule reference
+    bool                    ok          = false;
+};
+
+// pread the whole of [ off, off+n ) into `dst`. Short reads are retried (a pread on a regular file can
+// return less than asked for); anything else is a hard false, which every caller turns into a degrade.
+inline bool preadExact( int fd, void* dst, std::size_t n, std::uint64_t off ) noexcept
+{
+    char* out = static_cast<char*>( dst );
+    while( n > 0 )
+    {
+        const ssize_t got = ::pread( fd, out, n, ::off_t( off ) );
+        if( got <= 0 )
+        {
+            return false;
+        }
+        out += std::size_t( got );
+        off += std::uint64_t( got );
+        n   -= std::size_t( got );
+    }
+    return true;
+}
+
+// Open `path` and validate its v15 frame: header guard, exact-fit invariant, table checksum, per-entry
+// bounds and ordering. Shared by loadCache (which reads records out of it) and saveCache (which copies
+// the records this run did not crawl out of it). Never throws, never partially trusts.
+inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/cache: open + validate blob frame (header, trailer, offset table)" );
+    CacheFrame frame;
+    if( !isReadableCacheBlob( path ) )
+    {
+        return frame;   // absent (silent) or an odd shape (already disclosed by isReadableCacheBlob)
+    }
+
+    if( !frame.blob.openOnce( path ) )
+    {
+        return frame;
+    }
+
+    struct stat st;
+    if( ::fstat( frame.blob.fd, &st ) != 0 || !S_ISREG( st.st_mode ) )
+    {
+        return frame;
+    }
+    const std::uint64_t fileBytes = std::uint64_t( st.st_size );
+    if( fileBytes < kCacheHeaderBytes + kCacheTrailerBytes )
+    {
+        return frame;   // too short to hold even an empty frame — an ordinary corrupt/partial file
+    }
+
+    // header — magic/version/parserVer/arch, in that order, short-circuiting like v14's guard did.
+    char header[ kCacheHeaderBytes ];
+    if( !preadExact( frame.blob.fd, header, kCacheHeaderBytes, 0 ) )
+    {
+        return frame;
+    }
+    {
+        std::uint32_t magic = 0, version = 0, parserVer = 0;
+        std::memcpy( &magic,     header + 0, 4 );
+        std::memcpy( &version,   header + 4, 4 );
+        std::memcpy( &parserVer, header + 8, 4 );
+        const std::uint8_t arch = std::uint8_t( header[ 12 ] );
+        if( magic != kCacheMagic )
+        {
+            return frame;
+        }
+        if( version != kCacheVersion )
+        {
+            // v14 (and every older format) is REJECTED, not misread: the records moved behind an offset
+            // table, so a pre-v15 blob has no table to trust. Disclosed rather than silent, because this
+            // is the one guard a format bump is supposed to trip exactly once per stale blob.
+            DEGRADED_PATH_ALERT( "ingest: cache blob is a different format version — rejected and rebuilt (full reparse)" );
+            return frame;
+        }
+        if( parserVer != parserVerFor( captureValueUses ) || arch != kArtifactArch )
+        {
+            return frame;   // a different extraction identity or a foreign arch — the ordinary self-heal
+        }
+        // header[13:21) is the legacy wall-clock write stamp — diagnostic only (see saveCache).
+    }
+    std::uint32_t headerEntryCount = 0;
+    std::memcpy( &headerEntryCount, header + 21, 4 );
+
+    // trailer — tableOffset / entryCount / reserved / tableSum, then the EXACT-FIT invariant.
+    char trailer[ kCacheTrailerBytes ];
+    if( !preadExact( frame.blob.fd, trailer, kCacheTrailerBytes, fileBytes - kCacheTrailerBytes ) )
+    {
+        return frame;
+    }
+    std::uint64_t tableOffset = 0, tableSum = 0;
+    std::uint32_t entryCount = 0;
+    std::memcpy( &tableOffset, trailer +  0, 8 );
+    std::memcpy( &entryCount,  trailer +  8, 4 );
+    std::memcpy( &tableSum,    trailer + 16, 8 );
+
+    if( entryCount != headerEntryCount || tableOffset < kCacheHeaderBytes
+        || entryCount > ( fileBytes - kCacheHeaderBytes - kCacheTrailerBytes ) / kCacheEntryBytes
+        || tableOffset + std::uint64_t( entryCount ) * kCacheEntryBytes + kCacheTrailerBytes != fileBytes )
+    {
+        DEGRADED_PATH_ALERT( "ingest: cache blob trailer does not describe the file (torn write) — cache treated as corrupt" );
+        return frame;
+    }
+
+    // the table itself, checksummed together with the header it belongs to.
+    std::string hdrTable;
+    hdrTable.resize( kCacheHeaderBytes + std::size_t( entryCount ) * kCacheEntryBytes );
+    std::memcpy( hdrTable.data(), header, kCacheHeaderBytes );
+    if( entryCount != 0
+        && !preadExact( frame.blob.fd, hdrTable.data() + kCacheHeaderBytes, std::size_t( entryCount ) * kCacheEntryBytes, tableOffset ) )
+    {
+        return frame;
+    }
+    if( blobChecksum( std::string_view( hdrTable.data(), hdrTable.size() ) ) != tableSum )
+    {
+        DEGRADED_PATH_ALERT( "ingest: cache offset-table checksum mismatch — cache treated as corrupt (full reparse)" );
+        return frame;
+    }
+
+    frame.entries.resize( entryCount );
+    if( entryCount != 0 )
+    {
+        std::memcpy( frame.entries.data(), hdrTable.data() + kCacheHeaderBytes, std::size_t( entryCount ) * kCacheEntryBytes );
+    }
+
+    // per-entry bounds + strict ordering: every record must lie wholly inside the record region, and the
+    // table must be ascending so the lookup below can binary-search it. A table that fails either is
+    // corrupt in a way the checksum cannot see (it was written wrong, not damaged) → reject the blob.
+    for( std::size_t i = 0; i < frame.entries.size(); ++i )
+    {
+        const CacheEntry& e = frame.entries[i];
+        if( e.recOffset < kCacheHeaderBytes || e.recLength == 0
+            || e.recOffset + e.recLength > tableOffset
+            || ( i != 0 && frame.entries[ i - 1 ].pathHash > e.pathHash ) )
+        {
+            DEGRADED_PATH_ALERT( "ingest: cache offset-table entry out of bounds or out of order — cache treated as corrupt" );
+            frame.entries.clear();
+            return frame;
+        }
+    }
+
+    frame.tableOffset = tableOffset;
+    // F3/X5: the racy-rule reference is THIS blob's own on-disk mtime, from the fd we already hold — the
+    // same stat() domain and granularity every per-file mtime is compared against.
+    frame.mtimeNs = statSizeTimes( path ).mtimeNs;
+    frame.ok      = true;
+    return frame;
+}
+
+// The half-open [ first, last ) span of table entries carrying `pathHash`. A u64 FNV collision across a
+// corpus this size is ~1e-9, but a collision that SERVED the wrong file's facts would be a wrong answer,
+// so the lookup returns a range and the caller confirms identity against the record's own stored path.
+inline std::pair<std::size_t, std::size_t> cacheEntryRange( const std::vector<CacheEntry>& entries, std::uint64_t pathHash ) noexcept
+{
+    const auto byHash = []( const CacheEntry& e, std::uint64_t h ) noexcept { return e.pathHash < h; };
+    const auto lo     = std::lower_bound( entries.begin(), entries.end(), pathHash, byHash );
+    auto       hi     = lo;
+    while( hi != entries.end() && hi->pathHash == pathHash )
+    {
+        ++hi;
+    }
+    return { std::size_t( lo - entries.begin() ), std::size_t( hi - entries.begin() ) };
+}
+
 // sizeBytes/mtimeNs/ctimeNs (A4-P7 + card A3 follow-up): the file's stat at the run that HASHED it — the
 // warm-run stat-gate trusts this record (skips read+hash) only when ALL THREE still match AND mtimeNs is
 // not racy. ctimeNs is the one an unprivileged writer cannot restore (see ingest_crawl.h statSizeTimes),
@@ -1056,99 +1353,27 @@ inline std::string reAbsolutize( std::string_view rel, std::string_view root )
     return out;
 }
 
-// load cache → map<path, FileFacts>, keyed by the ABSOLUTE-AS-CRAWLED path under `rootDir` (matching
-// result.files' spelling) even though the on-disk record key is root-relative (T5 portability — see
-// kCacheVersion=3 above). Empty on missing / corrupt / version-or-parserVer mismatch.
-// blobWriteNsOut (supersedes A4-P7): the racy-rule reference a warm run's stat-gate compares
-// every cached file's mtime against. STAMPED FROM A FRESH stat() OF THE CACHE FILE ITSELF (this file's own
-// `path`, taken right here — necessarily "post-rename", since by the time a later run's loadCache opens it
-// the writer's saveCache has long since renamed tmp -> path), NOT from the ns-precision wall-clock the
-// header still carries for legacy/diagnostic reasons. Same clock+granularity domain (stat()) as the
-// per-file mtimes it is compared against below — on a coarse-mtime filesystem (HFS+, many network mounts)
-// the old wall-clock-vs-stat comparison was a tautology (a floored mtime is always < an unfloored LATER
-// timestamp), so a same-granule post-hash edit could slip through undetected. No wall-clock read on this
-// path. Left at -1 on any miss/corrupt/version-mismatch/unstatable-path (out is empty then too), which
-// makes every stat-gate check see a racy entry and re-hash — the safe default.
-inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::string_view rootDir, bool captureValueUses,
-                                                  long long& blobWriteNsOut )
+// Deserialise ONE file record out of a reader bounded to exactly that record's bytes. Lifted verbatim
+// out of loadCache's old per-file loop when v15 made records individually addressable — same field
+// order, same guards, same self-healing posture; the only change is that `r` now ends at the record's
+// own last byte, so a corrupt count can never walk into the next record.
+// Returns false on any corruption; `relOut` is the record's own stored root-relative path key, which
+// the caller compares against the key it looked up (the pathHash-collision guard).
+inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::uint64_t>& fileDict,
+                            std::string& relOut, FileFacts& ffOut )
 {
-    PROFILE_SCOPE_DESCRIBE( "ingest: loadCache (read + deserialize)" );
-    HashMap<std::string, FileFacts> out;
-    blobWriteNsOut = -1;
-
-    // L1: only a REGULAR file may reach readFile below — on Linux a directory opens cleanly and takes its
-    // resize() down with it. Any other shape self-heals into a full reparse, exactly like a checksum
-    // mismatch (see isReadableCacheBlob); blobWriteNsOut stays -1 ⇒ the caller cold-parses.
-    if( !isReadableCacheBlob( path ) )
-    {
-        return out;
-    }
-
-    std::string blob;
-    {
-        PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: read cache blob" );
-        if( !readFile( path, blob ) )
-        {
-            return out;
-        }
-    }
-
-    // BONUS (S): whole-blob FNV-1a checksum trailer (last 8 bytes). saveCache appends fnv1a64(payload) so a
-    // silent bit-flip INSIDE a cached string (fuzzer-found: the count/version guards trust the record bytes)
-    // is caught here → treat as corrupt → self-healing full reparse. A blob too short to hold magic+trailer
-    // is corrupt too. Reader `r` is bounded to the PAYLOAD (blob minus the 8-byte trailer).
-    constexpr std::size_t kTrailerBytes = 8;
-    if( blob.size() < 21 + kTrailerBytes )
-    {
-        return out; // 3×u32 + u8 arch + u64 blobWriteNs header + trailer minimum
-    }
-    const std::size_t payloadLen = blob.size() - kTrailerBytes;
-    {
-        PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: checksum trailer" );
-        std::uint64_t stored = 0;
-        std::memcpy( &stored, blob.data() + payloadLen, kTrailerBytes );
-        if( blobChecksum( std::string_view( blob.data(), payloadLen ) ) != stored )
-        {
-            DEGRADED_PATH_ALERT( "ingest: cache checksum mismatch — cache treated as corrupt (full reparse)" );
-            return out;
-        }
-    }
-
-    ByteR r{ blob.data(), blob.data() + payloadLen };
-    {
-        PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: header" );
-        // A1 (team-index): the kArtifactArch byte is part of the header guard — a foreign-arch blob
-        // (different endianness or pointer width) mismatches here exactly like a version/parserVer
-        // mismatch → out stays empty, blobWriteNsOut stays -1 → the caller cold-parses (self-heal).
-        // Left-to-right && short-circuit means the u8() read only happens once magic/version/parserVer
-        // have matched, keeping the byte-stream cursor consistent on the accepted path.
-        if( r.u32() != kCacheMagic || r.u32() != kCacheVersion || r.u32() != parserVerFor( captureValueUses ) || r.u8() != kArtifactArch )
-        {
-            return out;
-        }
-        (void)r.u64();   // legacy wall-clock write stamp — kept in the wire format for diagnostics, no longer
-                          // the racy-rule reference (F3/X5: see blobWriteNsOut below); must still be consumed
-                          // to keep the byte-stream cursor aligned with the record count that follows.
-    }
-
-    // F3/X5: the racy-rule reference is THIS cache file's own on-disk mtime, stat'd fresh right now — the
-    // same stat()-domain, same-granularity value every per-file mtime below is compared against. -1 (unstatable,
-    // e.g. removed between the readFile above and here) ⇒ every stat-gate check sees a racy entry (safe default).
-    blobWriteNsOut = statSizeTimes( path ).mtimeNs;
-
     // count validation: a corrupt on-disk count (e.g. 0xFFFFFFFF) must never reach reserve() — the throw
     // (length_error/bad_alloc) would escape ingest(), violating its never-throw contract. Every honest
     // count is bounded by remaining bytes / the record's MINIMUM serialized size; past that → corrupt →
-    // same self-healing full-reparse path as a truncated blob (r.ok = false → out.clear() below).
+    // the same self-healing reparse path as a truncated record.
     // (B0.2) a RICH def record additionally carries at least dlWeighted + tokenCount (2×u32) — the pair
     // arrays themselves are bounded per record inside readDef.
-    const std::size_t kMinDefRecordBytes  = minDefRecordBytes( captureValueUses );   // F8: named + tripwire-pinned above
-    constexpr std::size_t kMinIncRecordBytes  =  6;   // 2×u8 (isAngle,isLazy) + 1×str(len u32, empty)
-    constexpr std::size_t kMinBindRecordBytes = 13;   // 1×u32 + 1×u8 + 2×str(len u32, empty)
-    constexpr std::size_t kMinFfiRecordBytes  = 14;   // 2×u8 (kind,lowConf) + 3×str(len u32, empty)
+    const std::size_t     kMinDefRecordBytes      = minDefRecordBytes( captureValueUses );   // F8: named + tripwire-pinned above
+    constexpr std::size_t kMinIncRecordBytes      =  6;   // 2×u8 (isAngle,isLazy) + 1×str(len u32, empty)
+    constexpr std::size_t kMinBindRecordBytes     = 13;   // 1×u32 + 1×u8 + 2×str(len u32, empty)
+    constexpr std::size_t kMinFfiRecordBytes      = 14;   // 2×u8 (kind,lowConf) + 3×str(len u32, empty)
     constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (line) + 1×u8 (method) + 2×str(len u32, empty)
     constexpr std::size_t kMinRouteUseRecordBytes = 13;   // B6.3: 2×u32 (startByte,line) + 1×u8 (method) + 1×str(len u32, empty)
-    const std::size_t kMinFileRecordBytes = 76 + ( captureValueUses ? 4 : 0 );   // path str + hash + sizeBytes + mtimeNs + ctimeNs + FileHealth + six record counts, all empty (v6: +2×u64; v10 rich: + dict count u32; v12/B6.3: +2×u32 route counts; v13/§L1: +4×u32 health; v14: +1×u64 ctimeNs)
     const auto countFits = [ &r ]( std::uint32_t recordCount, std::size_t minRecordBytes ) noexcept
     {
         if( recordCount <= std::size_t( r.end - r.p ) / minRecordBytes )
@@ -1160,146 +1385,447 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
         return false;
     };
 
-    std::uint32_t nf = 0;
-    {
-        PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: file count + reserve" );
-        nf = r.u32();
-        if( !countFits( nf, kMinFileRecordBytes ) )
-        {
-            return out;
-        }
-        out.reserve( nf );
-    }
-    {
-        PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: deserialize file records" );
-        std::vector<std::uint64_t> fileDict;   // H3 (v10): per-file subtoken dictionary (rich family only)
-        for( std::uint32_t i = 0; i < nf && r.ok; ++i )
-        {
-            // T5: the on-disk key is ROOT-RELATIVE (relForHash'd at save time); re-absolutize against the
-            // CURRENT rootDir so the map key matches result.files' spelling for this invocation exactly —
-            // this is what makes a cache built under one root/checkout path warm-hit under another.
-            std::string key = reAbsolutize( r.view(), rootDir );
-            FileFacts   ff;
-            ff.hash      = r.u64();
-            ff.sizeBytes = (long long)r.u64();   // A4-P7 stat-gate discriminator
-            ff.mtimeNs   = (long long)r.u64();   // A4-P7 stat-gate discriminator + racy-rule input
-            ff.ctimeNs   = (long long)r.u64();   // v14 stat-gate discriminator: the one a restore cannot forge
-            ff.health.errNodes  = r.u32();       // §L1 parse health (v13) — fileBytes==0 keeps its
-            ff.health.errBytes  = r.u32();       //   NOT-MEASURED meaning across the round trip
-            ff.health.fileBytes = r.u32();
-            ff.health.wsBytes   = r.u32();
-            if( captureValueUses )
-            {
-                // H3 (v10): the file's subtoken dictionary — def rows below index into it. Must be
-                // strictly ascending (readDef's sorted-row invariant hangs on it); anything else is
-                // corrupt → the same self-healing full-reparse path as a truncated blob.
-                const std::uint32_t dictCount = r.u32();
-                if( !countFits( dictCount, sizeof( std::uint64_t ) ) )
-                {
-                    break;
-                }
-                fileDict.resize( dictCount );
-                if( !r.rawInto( fileDict.data(), std::size_t( dictCount ) * sizeof( std::uint64_t ) ) )
-                {
-                    break;
-                }
-                for( std::size_t k = 1; k < fileDict.size(); ++k )
-                {
-                    if( fileDict[k] <= fileDict[ k - 1 ] )
-                    {
-                        DEGRADED_PATH_ALERT( "ingest: cache file dictionary not strictly ascending — cache treated as corrupt" );
-                        r.ok = false;
-                        break;
-                    }
-                }
-                if( !r.ok )
-                {
-                    break;
-                }
-            }
-            const std::uint32_t nd = r.u32();
-            if( !countFits( nd, kMinDefRecordBytes ) )
-            {
-                break;
-            }
-            ff.defs.reserve( nd );
-            for( std::uint32_t j = 0; j < nd && r.ok; ++j )
-            {
-                ff.defs.push_back( readDef( r, captureValueUses, fileDict ) );
-            }
-            const std::uint32_t nr = r.u32();
-            if( !countFits( nr, kMinRefRecordBytes ) )
-            {
-                break;
-            }
-            ff.refs.reserve( nr );
-            for( std::uint32_t j = 0; j < nr && r.ok; ++j )
-            {
-                ff.refs.push_back( readRef( r ) );
-            }
-            const std::uint32_t ni = r.u32();
-            if( !countFits( ni, kMinIncRecordBytes ) )
-            {
-                break;
-            }
-            ff.incs.reserve( ni );
-            for( std::uint32_t j = 0; j < ni && r.ok; ++j )
-            {
-                const bool isAngle = r.u8() != 0;
-                const bool isLazy  = r.u8() != 0;   // kParserVer 72: TS/JS function-body require/import marker
-                ff.incs.push_back( Include { 0, isAngle, isLazy, r.str() } );
-            }
-            const std::uint32_t nb = r.u32();
-            if( !countFits( nb, kMinBindRecordBytes ) )
-            {
-                break;
-            }
-            ff.binds.reserve( nb );
-            for( std::uint32_t j = 0; j < nb && r.ok; ++j )
-            {
-                ff.binds.push_back( readBind( r ) );
-            }
-            const std::uint32_t na = r.u32();
-            if( !countFits( na, kMinFfiRecordBytes ) )
-            {
-                break;
-            }
-            ff.ffis.reserve( na );
-            for( std::uint32_t j = 0; j < na && r.ok; ++j )
-            {
-                ff.ffis.push_back( readFfi( r ) );
-            }
-            const std::uint32_t nrd = r.u32();
-            if( !countFits( nrd, kMinRouteDefRecordBytes ) )
-            {
-                break;
-            }
-            ff.routeDefs.reserve( nrd );
-            for( std::uint32_t j = 0; j < nrd && r.ok; ++j )
-            {
-                ff.routeDefs.push_back( readRouteDef( r ) ); // B6.3
-            }
-            const std::uint32_t nru = r.u32();
-            if( !countFits( nru, kMinRouteUseRecordBytes ) )
-            {
-                break;
-            }
-            ff.routeUses.reserve( nru );
-            for( std::uint32_t j = 0; j < nru && r.ok; ++j )
-            {
-                ff.routeUses.push_back( readRouteUse( r ) ); // B6.3
-            }
-            if( r.ok )
-            {
-                out.emplace( std::move( key ), std::move( ff ) );
-            }
-        }
-    }
+    relOut       = r.str();
+    ffOut.hash      = r.u64();
+    ffOut.sizeBytes = (long long)r.u64();   // A4-P7 stat-gate discriminator
+    ffOut.mtimeNs   = (long long)r.u64();   // A4-P7 stat-gate discriminator + racy-rule input
+    ffOut.ctimeNs   = (long long)r.u64();   // v14 stat-gate discriminator: the one a restore cannot forge
+    ffOut.health.errNodes  = r.u32();       // §L1 parse health (v13) — fileBytes==0 keeps its
+    ffOut.health.errBytes  = r.u32();       //   NOT-MEASURED meaning across the round trip
+    ffOut.health.fileBytes = r.u32();
+    ffOut.health.wsBytes   = r.u32();
     if( !r.ok )
     {
-        out.clear(); // truncated/corrupt → ignore (full reparse; self-healing)
+        return false;
+    }
+    if( captureValueUses )
+    {
+        // H3 (v10): the file's subtoken dictionary — def rows below index into it. Must be strictly
+        // ascending (readDef's sorted-row invariant hangs on it); anything else is corrupt.
+        const std::uint32_t dictCount = r.u32();
+        if( !countFits( dictCount, sizeof( std::uint64_t ) ) )
+        {
+            return false;
+        }
+        fileDict.resize( dictCount );
+        if( !r.rawInto( fileDict.data(), std::size_t( dictCount ) * sizeof( std::uint64_t ) ) )
+        {
+            return false;
+        }
+        for( std::size_t k = 1; k < fileDict.size(); ++k )
+        {
+            if( fileDict[k] <= fileDict[ k - 1 ] )
+            {
+                DEGRADED_PATH_ALERT( "ingest: cache file dictionary not strictly ascending — cache treated as corrupt" );
+                r.ok = false;
+                return false;
+            }
+        }
+    }
+    const std::uint32_t nd = r.u32();
+    if( !countFits( nd, kMinDefRecordBytes ) )
+    {
+        return false;
+    }
+    ffOut.defs.reserve( nd );
+    for( std::uint32_t j = 0; j < nd && r.ok; ++j )
+    {
+        ffOut.defs.push_back( readDef( r, captureValueUses, fileDict ) );
+    }
+    const std::uint32_t nr = r.u32();
+    if( !countFits( nr, kMinRefRecordBytes ) )
+    {
+        return false;
+    }
+    ffOut.refs.reserve( nr );
+    for( std::uint32_t j = 0; j < nr && r.ok; ++j )
+    {
+        ffOut.refs.push_back( readRef( r ) );
+    }
+    const std::uint32_t ni = r.u32();
+    if( !countFits( ni, kMinIncRecordBytes ) )
+    {
+        return false;
+    }
+    ffOut.incs.reserve( ni );
+    for( std::uint32_t j = 0; j < ni && r.ok; ++j )
+    {
+        const bool isAngle = r.u8() != 0;
+        const bool isLazy  = r.u8() != 0;   // kParserVer 72: TS/JS function-body require/import marker
+        ffOut.incs.push_back( Include { 0, isAngle, isLazy, r.str() } );
+    }
+    const std::uint32_t nb = r.u32();
+    if( !countFits( nb, kMinBindRecordBytes ) )
+    {
+        return false;
+    }
+    ffOut.binds.reserve( nb );
+    for( std::uint32_t j = 0; j < nb && r.ok; ++j )
+    {
+        ffOut.binds.push_back( readBind( r ) );
+    }
+    const std::uint32_t na = r.u32();
+    if( !countFits( na, kMinFfiRecordBytes ) )
+    {
+        return false;
+    }
+    ffOut.ffis.reserve( na );
+    for( std::uint32_t j = 0; j < na && r.ok; ++j )
+    {
+        ffOut.ffis.push_back( readFfi( r ) );
+    }
+    const std::uint32_t nrd = r.u32();
+    if( !countFits( nrd, kMinRouteDefRecordBytes ) )
+    {
+        return false;
+    }
+    ffOut.routeDefs.reserve( nrd );
+    for( std::uint32_t j = 0; j < nrd && r.ok; ++j )
+    {
+        ffOut.routeDefs.push_back( readRouteDef( r ) ); // B6.3
+    }
+    const std::uint32_t nru = r.u32();
+    if( !countFits( nru, kMinRouteUseRecordBytes ) )
+    {
+        return false;
+    }
+    ffOut.routeUses.reserve( nru );
+    for( std::uint32_t j = 0; j < nru && r.ok; ++j )
+    {
+        ffOut.routeUses.push_back( readRouteUse( r ) ); // B6.3
+    }
+    return r.ok;
+}
+
+// What a load learned about the blob, beyond the facts themselves. Three numbers that used to be one
+// out-param: the racy-rule reference, plus the two the RIPWIRE_CACHE_STATS line reports so "a subset
+// configuration reads only its own records" is an EXECUTABLE fact and not a wall-clock claim
+// (test/cacheoffsetcheck.sh band (2)).
+struct CacheLoadStats
+{
+    long long   blobWriteNs = -1;   // the blob's own on-disk mtime; -1 ⇒ no usable cache (every stat-gate check re-hashes)
+    std::size_t blobEntries = 0;    // offset-table entries: how many files the blob holds
+    std::size_t recordsRead = 0;    // records actually deserialised: how many this crawl asked for and got
+};
+
+// load cache → map<path, FileFacts>, keyed by the ABSOLUTE-AS-CRAWLED path under `rootDir` (matching
+// result.files' spelling) even though the on-disk record key is root-relative (T5 portability — see
+// kCacheVersion=3 above). Empty on missing / corrupt / version-or-parserVer mismatch.
+//
+// v15: `crawledFiles` is THIS run's crawl (result.files, absolute-as-crawled). Only the records for
+// those files are read — a blob written by a wider configuration is not deserialised past its offset
+// table, which is the whole point of the format (docs/EVALS.md band (2)). Records are fetched in
+// ascending offset order and adjacent ones are coalesced into a single pread, so a full crawl over a
+// blob it wrote itself is ONE sequential read of the record region, exactly as v14's whole-file read
+// was, while a subset pays only for its own records.
+//
+// stats.blobWriteNs (supersedes A4-P7): the racy-rule reference a warm run's stat-gate compares every
+// cached file's mtime against. STAMPED FROM A FRESH stat() OF THE CACHE FILE ITSELF, NOT from the
+// ns-precision wall-clock the header still carries for legacy/diagnostic reasons. Same clock+granularity
+// domain (stat()) as the per-file mtimes it is compared against — on a coarse-mtime filesystem (HFS+,
+// many network mounts) the old wall-clock-vs-stat comparison was a tautology (a floored mtime is always
+// < an unfloored LATER timestamp), so a same-granule post-hash edit could slip through undetected. Left
+// at -1 on any miss/corrupt/version-mismatch/unstatable-path (out is empty then too), which makes every
+// stat-gate check see a racy entry and re-hash — the safe default.
+inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::string_view rootDir, bool captureValueUses,
+                                                  const std::vector<std::string>& crawledFiles, CacheLoadStats& stats )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest: loadCache (read + deserialize)" );
+    HashMap<std::string, FileFacts> out;
+    stats = CacheLoadStats{};
+
+    const CacheFrame frame = openCacheFrame( path, captureValueUses );
+    if( !frame.ok )
+    {
+        return out;
+    }
+    stats.blobWriteNs = frame.mtimeNs;
+    stats.blobEntries = frame.entries.size();
+
+    // Which of this crawl's files the blob actually holds. `wanted` rides in TABLE order (== ascending
+    // pathHash), then is re-sorted by record offset so the reads below run forward through the file.
+    struct Wanted { std::uint32_t entryIndex; std::uint32_t fileIndex; };
+    std::vector<Wanted> wanted;
+    {
+        PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: offset-table lookup" );
+        wanted.reserve( std::min( crawledFiles.size(), frame.entries.size() ) );
+        for( std::size_t f = 0; f < crawledFiles.size(); ++f )
+        {
+            const std::string_view rel = relForHash( crawledFiles[f], rootDir );
+            const auto [ lo, hi ]      = cacheEntryRange( frame.entries, contentHash64( rel ) );
+            for( std::size_t e = lo; e < hi; ++e )
+            {
+                wanted.push_back( Wanted{ std::uint32_t( e ), std::uint32_t( f ) } );   // identity is confirmed below
+            }
+        }
+        std::sort( wanted.begin(), wanted.end(),
+                   [ & ]( const Wanted& a, const Wanted& b ) noexcept
+                   { return frame.entries[ a.entryIndex ].recOffset < frame.entries[ b.entryIndex ].recOffset; } );
+    }
+    if( wanted.empty() )
+    {
+        return out;
+    }
+    out.reserve( wanted.size() );
+
+    // Read the wanted records in forward order, coalescing runs whose combined span stays under
+    // kReadSpanCap into one pread. A full crawl coalesces into a single sequential read; a subset pays
+    // one read per island. The cap bounds peak scratch memory — a single record larger than it still
+    // gets its own read, because a range always accepts its first entry.
+    constexpr std::uint64_t kReadSpanCap = 32ull * 1024 * 1024;
+    constexpr std::uint64_t kGapCap      = 256ull * 1024;   // skip-over budget: cheaper than a second syscall
+    std::string                fileBuf;                     // the coalesced span currently in memory
+    std::vector<std::uint64_t> dictScratch;                 // H3 (v10): per-file subtoken dictionary (rich only)
+    {
+        PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: deserialize file records" );
+        std::size_t i = 0;
+        while( i < wanted.size() )
+        {
+            const std::uint64_t spanStart = frame.entries[ wanted[i].entryIndex ].recOffset;
+            std::uint64_t       spanEnd   = spanStart + frame.entries[ wanted[i].entryIndex ].recLength;
+            std::size_t         j         = i + 1;
+            while( j < wanted.size() )
+            {
+                const CacheEntry& e    = frame.entries[ wanted[j].entryIndex ];
+                const std::uint64_t end = e.recOffset + e.recLength;
+                if( e.recOffset > spanEnd + kGapCap || end - spanStart > kReadSpanCap )
+                {
+                    break;
+                }
+                spanEnd = std::max( spanEnd, end );
+                ++j;
+            }
+
+            fileBuf.resize( std::size_t( spanEnd - spanStart ) );
+            if( !preadExact( frame.blob.fd, fileBuf.data(), fileBuf.size(), spanStart ) )
+            {
+                DEGRADED_PATH_ALERT( "ingest: cache blob read failed mid-load — the unread records are reparsed" );
+                break;
+            }
+
+            for( ; i < j; ++i )
+            {
+                const CacheEntry& e   = frame.entries[ wanted[i].entryIndex ];
+                const char*       rec = fileBuf.data() + std::size_t( e.recOffset - spanStart );
+                if( recordSum32( std::string_view( rec, e.recLength ) ) != e.recSum )
+                {
+                    // A record torn on its own while the table survived: drop THIS file (it reparses) and
+                    // keep the rest of the blob. The table is what must be trusted whole, not each record.
+                    DEGRADED_PATH_ALERT( "ingest: cache record checksum mismatch — that file is reparsed, the rest of the blob stands" );
+                    continue;
+                }
+                ByteR       r{ rec, rec + e.recLength };
+                std::string rel;
+                FileFacts   ff;
+                if( !readFileRecord( r, captureValueUses, dictScratch, rel, ff ) )
+                {
+                    continue;   // corrupt record → that file reparses (readFileRecord already disclosed)
+                }
+                if( rel != relForHash( crawledFiles[ wanted[i].fileIndex ], rootDir ) )
+                {
+                    // The pathHash matched but the record is for a DIFFERENT file — a 64-bit collision.
+                    // Serving it would be a wrong answer, so the file reparses instead.
+                    DEGRADED_PATH_ALERT( "ingest: cache path-hash collision — the colliding file is reparsed" );
+                    continue;
+                }
+                // T5: the on-disk key is ROOT-RELATIVE; re-absolutize against the CURRENT rootDir so the
+                // map key matches result.files' spelling for this invocation exactly — this is what makes
+                // a cache built under one root/checkout path warm-hit under another.
+                out.emplace( reAbsolutize( rel, rootDir ), std::move( ff ) );
+                ++stats.recordsRead;
+            }
+        }
     }
     return out;
+}
+
+// The cache-write side's per-file record indexes: the seven flat fact arrays grouped back by fileId, so
+// each file's record serializes in one pass. Split by MEASURED shape, not by symmetry:
+//   defIndex — one entry per DEFINITION; same distribution as model.h's SymbolsByFile (mean 8.4/18.2 per
+//           file, p90 18/37), so it takes that index's measured N=8 knee.
+//   incIndex/ffiIndex/routeDefIndex/routeUseIndex — includes, FFI aliases and the two route tables. N=2 is
+//           FREE (rw::svector's inline array shares storage with the heap pointer, so <uint32,1> and
+//           <uint32,2> are both 16 B — a THIRD smaller than the std::vector header it replaces) and covers
+//           85.4%/59.1%, 99.7%/100%, 99.9%/100% and 99.9%/100% of files across the two census corpora.
+//   refIndex/bindIndex — deliberately LEFT as std::vector. Means of 155/248 and 28/59 references and
+//           bindings per file with 17%/40% of files empty and no early knee: an N that covered them would
+//           have to be in the hundreds. They are CSR candidates, a separate wave, not small-vector material.
+struct CacheFileIndexes
+{
+    std::vector<rw::SmallVec<std::uint32_t, 8>> defIndex;
+    std::vector<std::vector<std::uint32_t>>     refIndex, bindIndex;
+    std::vector<rw::SmallVec<std::uint32_t, 2>> incIndex, ffiIndex, routeDefIndex, routeUseIndex;
+};
+
+inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
+                                               const std::vector<RawDef>& defs, const std::vector<RawRef>& refs,
+                                               const std::vector<Include>& incs, const std::vector<RawBind>& binds,
+                                               const std::vector<BindingAlias>& ffis,
+                                               const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses )
+{
+    CacheFileIndexes ix;
+    ix.defIndex.resize( fileCount );
+    ix.refIndex.resize( fileCount );
+    ix.bindIndex.resize( fileCount );
+    ix.incIndex.resize( fileCount );
+    ix.ffiIndex.resize( fileCount );
+    ix.routeDefIndex.resize( fileCount );
+    ix.routeUseIndex.resize( fileCount );
+
+    // One generic grouping pass per family — an out-of-range fileId is DROPPED, never clamped, exactly as
+    // the seven hand-written loops this replaces did.
+    const auto group = [ fileCount ]( const auto& facts, auto& index )
+    {
+        for( std::uint32_t i = 0; i < facts.size(); ++i )
+        {
+            if( facts[i].fileId < fileCount )
+            {
+                index[ facts[i].fileId ].push_back( i );
+            }
+        }
+    };
+    group( defs,      ix.defIndex );
+    group( refs,      ix.refIndex );
+    group( incs,      ix.incIndex );
+    group( binds,     ix.bindIndex );
+    group( ffis,      ix.ffiIndex );
+    group( routeDefs, ix.routeDefIndex );   // B6.3
+    group( routeUses, ix.routeUseIndex );   // B6.3
+    return ix;
+}
+
+// The per-file write KEYS: each crawled file's root-relative cache key, its pathHash, and the fileId order
+// the v15 record region is written in — ascending (pathHash, rel). Deterministic, and the reason the offset
+// table comes out sorted and a full crawl's read coalesces into one contiguous span.
+struct CachePathKeys
+{
+    std::vector<std::string_view> rels;
+    std::vector<std::uint64_t>    pathHashes;
+    std::vector<std::uint32_t>    order;
+};
+
+inline CachePathKeys buildCachePathKeys( const std::vector<std::string>& files, std::string_view rootDir )
+{
+    CachePathKeys     keys;
+    const std::size_t F = files.size();
+    keys.rels.resize( F );
+    keys.pathHashes.resize( F );
+    keys.order.resize( F );
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        keys.rels[f]       = relForHash( files[f], rootDir );
+        keys.pathHashes[f] = contentHash64( keys.rels[f] );
+        keys.order[f]      = f;
+    }
+    std::sort( keys.order.begin(), keys.order.end(),
+               [ & ]( std::uint32_t a, std::uint32_t b ) noexcept
+               { return keys.pathHashes[a] != keys.pathHashes[b] ? keys.pathHashes[a] < keys.pathHashes[b]
+                                                                 : keys.rels[a] < keys.rels[b]; } );
+    return keys;
+}
+
+// One planned output row of a v15 write: either a file THIS run crawled (fileIndex valid) or a record
+// carried over verbatim from the previous blob (carryIndex valid). kNoCacheIndex marks the unused half.
+constexpr std::uint32_t kNoCacheIndex = 0xFFFFFFFFu;
+struct CacheWriteRow { std::uint64_t pathHash; std::uint32_t fileIndex; std::uint32_t carryIndex; };
+
+// The SUPERSET plan for one save. `prevEntries` is the previous blob's offset table (empty when there is
+// no usable previous blob); every entry whose pathHash no file in THIS crawl owns becomes a CARRY row, so
+// an --exclude run can never truncate the shared blob to its own file set. Both input streams are already
+// ascending by pathHash, so the merge is one linear pass and the record region it describes comes out
+// ascending too — which is what makes the offset table binary-searchable and a full crawl's read one
+// contiguous span. `orderIn` is the crawled fileIds in ascending (pathHash, rel) order.
+inline std::vector<CacheWriteRow> buildCacheWritePlan( const std::vector<std::uint32_t>& orderIn,
+                                                       const std::vector<std::uint64_t>& pathHashes,
+                                                       const std::vector<CacheEntry>&    prevEntries,
+                                                       std::vector<CacheEntry>&          carryOut )
+{
+    carryOut.clear();
+    carryOut.reserve( prevEntries.size() );
+    {
+        std::size_t f = 0;   // walks `orderIn` in lockstep with the (ascending) previous table
+        for( const CacheEntry& e : prevEntries )
+        {
+            while( f < orderIn.size() && pathHashes[ orderIn[f] ] < e.pathHash )
+            {
+                ++f;
+            }
+            if( f >= orderIn.size() || pathHashes[ orderIn[f] ] != e.pathHash )
+            {
+                carryOut.push_back( e );   // no file in THIS crawl owns that path — keep the record
+            }
+        }
+    }
+
+    std::vector<CacheWriteRow> plan;
+    plan.reserve( orderIn.size() + carryOut.size() );
+    std::size_t a = 0, b = 0;
+    while( a < orderIn.size() || b < carryOut.size() )
+    {
+        const bool takeFresh = b >= carryOut.size()
+                            || ( a < orderIn.size() && pathHashes[ orderIn[a] ] <= carryOut[b].pathHash );
+        if( takeFresh )
+        {
+            plan.push_back( CacheWriteRow{ pathHashes[ orderIn[a] ], orderIn[a], kNoCacheIndex } );
+            ++a;
+        }
+        else
+        {
+            plan.push_back( CacheWriteRow{ carryOut[b].pathHash, kNoCacheIndex, std::uint32_t( b ) } );
+            ++b;
+        }
+    }
+    return plan;
+}
+
+// Copy one carry-over record out of the previous blob into `w`, VERIFYING it against that blob's own
+// per-record checksum first — a torn record must never be laundered into a freshly-checksummed blob. On
+// any failure the record is dropped (disclosed) and the file simply reparses the next time a
+// configuration crawls it; the rest of the blob is unaffected.
+inline bool appendCarryRecord( ByteW& w, int fd, const CacheEntry& src, std::string& scratch, CacheEntry& entryOut )
+{
+    const std::size_t recOffset = w.b.size();
+    scratch.resize( src.recLength );
+    if( !preadExact( fd, scratch.data(), scratch.size(), src.recOffset )
+        || recordSum32( std::string_view( scratch.data(), scratch.size() ) ) != src.recSum )
+    {
+        DEGRADED_PATH_ALERT( "ingest: cache carry-over record failed its checksum — dropped (that file reparses)" );
+        return false;
+    }
+    w.raw( scratch.data(), scratch.size() );
+    entryOut = CacheEntry{ src.pathHash, std::uint64_t( recOffset ), src.contentHash,
+                           std::uint32_t( scratch.size() ), src.recSum };
+    return true;
+}
+
+// Close a v15 blob: patch the header's entry count (carry-over drops only settle it here), append the
+// offset table, then the 24-byte trailer whose digest covers HEADER || TABLE. Each record carries its own
+// digest in its table entry and is checked only when that record is actually read, so this is the whole of
+// "the checksum covers the table plus the records actually read". The exact-fit invariant the trailer
+// encodes — fileSize == tableOffset + entryCount*32 + 24 — is what makes a truncation that removes whole
+// records detectable at all, so it is asserted here at the one place that can still be wrong about it.
+inline void finishCacheBlob( ByteW& w, const std::vector<CacheEntry>& table )
+{
+    const std::uint32_t entryCount  = std::uint32_t( table.size() );
+    const std::uint64_t tableOffset = std::uint64_t( w.b.size() );
+    std::memcpy( w.b.data() + 21, &entryCount, 4 );
+
+    // The digest's input is header || table, which are not adjacent in the blob, so it is assembled once
+    // here and the table half is then appended to the blob out of the same buffer.
+    std::string hdrTable;
+    hdrTable.resize( kCacheHeaderBytes + std::size_t( entryCount ) * kCacheEntryBytes );
+    std::memcpy( hdrTable.data(), w.b.data(), kCacheHeaderBytes );
+    if( entryCount != 0 )
+    {
+        std::memcpy( hdrTable.data() + kCacheHeaderBytes, table.data(), std::size_t( entryCount ) * kCacheEntryBytes );
+    }
+    w.raw( hdrTable.data() + kCacheHeaderBytes, std::size_t( entryCount ) * kCacheEntryBytes );
+
+    w.u64( tableOffset );
+    w.u32( entryCount );
+    w.u32( 0 );   // reserved
+    w.u64( blobChecksum( std::string_view( hdrTable.data(), hdrTable.size() ) ) );
+    VERIFY( w.b.size() == tableOffset + std::uint64_t( entryCount ) * kCacheEntryBytes + kCacheTrailerBytes );
 }
 
 // write the cache atomically (path.tmp → rename); groups the merged raw facts back by file.
@@ -1325,69 +1851,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
         return;
     }
 
-    const std::size_t F = files.size();
-    // The cache-write side's per-file record indexes. Split by MEASURED shape, not by symmetry:
-    //   dIdx  — one entry per DEFINITION; same distribution as model.h's SymbolsByFile (mean 8.4/18.2 per
-    //           file, p90 18/37), so it takes that index's measured N=8 knee.
-    //   iIdx/aIdx/rdIdx/ruIdx — includes, FFI aliases and the two route tables. N=2 is FREE (rw::svector's
-    //           inline array shares storage with the heap pointer, so <uint32,1> and <uint32,2> are both
-    //           16 B — a THIRD smaller than the std::vector header it replaces) and covers 85.4%/59.1%,
-    //           99.7%/100%, 99.9%/100% and 99.9%/100% of files across the two census corpora.
-    //   rIdx/bIdx — deliberately LEFT as std::vector. Means of 155/248 and 28/59 references and bindings per
-    //           file with 17%/40% of files empty and no early knee: an N that covered them would have to be
-    //           in the hundreds. They are CSR candidates, a separate wave, not small-vector material.
-    std::vector<rw::SmallVec<std::uint32_t, 8>> dIdx( F );
-    std::vector<std::vector<std::uint32_t>>     rIdx( F ), bIdx( F );
-    std::vector<rw::SmallVec<std::uint32_t, 2>> iIdx( F ), aIdx( F ), rdIdx( F ), ruIdx( F );
-    for( std::uint32_t i = 0; i < defs.size(); ++i )
-    {
-        if( defs[i].fileId < F )
-        {
-            dIdx[defs[i].fileId].push_back( i );
-        }
-    }
-    for( std::uint32_t i = 0; i < refs.size(); ++i )
-    {
-        if( refs[i].fileId < F )
-        {
-            rIdx[refs[i].fileId].push_back( i );
-        }
-    }
-    for( std::uint32_t i = 0; i < incs.size(); ++i )
-    {
-        if( incs[i].fileId < F )
-        {
-            iIdx[incs[i].fileId].push_back( i );
-        }
-    }
-    for( std::uint32_t i = 0; i < binds.size(); ++i )
-    {
-        if( binds[i].fileId < F )
-        {
-            bIdx[binds[i].fileId].push_back( i );
-        }
-    }
-    for( std::uint32_t i = 0; i < ffis.size(); ++i )
-    {
-        if( ffis[i].fileId < F )
-        {
-            aIdx[ffis[i].fileId].push_back( i );
-        }
-    }
-    for( std::uint32_t i = 0; i < routeDefs.size(); ++i )
-    {
-        if( routeDefs[i].fileId < F )
-        {
-            rdIdx[routeDefs[i].fileId].push_back( i ); // B6.3
-        }
-    }
-    for( std::uint32_t i = 0; i < routeUses.size(); ++i )
-    {
-        if( routeUses[i].fileId < F )
-        {
-            ruIdx[routeUses[i].fileId].push_back( i ); // B6.3
-        }
-    }
+    const std::size_t      F  = files.size();
+    const CacheFileIndexes ix = buildCacheFileIndexes( F, defs, refs, incs, binds, ffis, routeDefs, routeUses );
 
     // This header field is no longer the racy-rule reference — loadCache now derives that from
     // a fresh stat() of the cache file itself (same clock+granularity domain as the per-file mtimes it's
@@ -1397,6 +1862,25 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     // kCacheVersion for no behavioral gain.
     const long long blobWriteNs = wallClockNs();
 
+    // v15 — the SUPERSET contract. This run crawled `files`; the blob at `path` may hold records for
+    // files this configuration excluded (or size-skipped), and those records must SURVIVE. So the write
+    // plan is a merge of two streams, both in ascending pathHash order:
+    //   FRESH — one record per crawled file, serialized from this run's facts;
+    //   CARRY — the previous blob's records for pathHashes this run did not crawl, copied VERBATIM out
+    //           of that blob (each verified against its own recSum before it is trusted forward).
+    // The previous blob is opened once, through the same validating frame reader loadCache used, and is
+    // held open for the whole copy: rename(2) unlinks rather than truncates, so a concurrent writer
+    // publishing a new blob cannot pull the bytes out from under this one. If the frame does not
+    // validate — absent, foreign version/parserVer/arch, torn — CARRY is simply empty and this run
+    // writes its own file set, which is exactly v14's behaviour and self-heals on the next wider run.
+    const CachePathKeys              keys  = buildCachePathKeys( files, rootDir );
+    const CacheFrame                 prev  = openCacheFrame( path, captureValueUses );
+    std::vector<CacheEntry>          carry;
+    const std::vector<CacheWriteRow> plan  = buildCacheWritePlan( keys.order, keys.pathHashes, prev.entries, carry );
+
+    std::vector<CacheEntry> table;
+    table.reserve( plan.size() );
+
     ByteW w;
     // A1 (team-index): kArtifactArch byte sits in the header right after parserVer so loadCache's guard
     // rejects a foreign-arch (endian/pointer-width) blob before trusting any raw-int record bytes.
@@ -1405,16 +1889,30 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     w.u32( parserVerFor( captureValueUses ) );
     w.u8( kArtifactArch );
     w.u64( (std::uint64_t)blobWriteNs );
-    w.u32( std::uint32_t( F ) );
+    w.u32( 0 );   // entryCount — patched in place below, once the carry-over verification has settled it
+    VERIFY( w.b.size() == kCacheHeaderBytes );
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: serialize records" );
         std::vector<std::uint64_t> fileDict;                                   // per-file subtoken dictionary, reused across files
         std::vector<LexPair>       mergeA, mergeB;                             // ping-pong buffers of the balanced run-merge, reused
         std::vector<std::size_t>   runOffsets, nextRunOffsets;                 // sorted-run bounds inside the ping-pong buffer
         std::vector<std::uint32_t> pairDictIndex;                              // pair slot → dict index, in def-row order
-        for( std::uint32_t f = 0; f < F; ++f )
+        std::string                carryBuf;                                   // one carry-over record, verified before it is appended
+        for( const CacheWriteRow& row : plan )
         {
-            w.str( relForHash( files[f], rootDir ) );
+            if( row.fileIndex == kNoCacheIndex )
+            {
+                CacheEntry copied;
+                if( appendCarryRecord( w, prev.blob.fd, carry[ row.carryIndex ], carryBuf, copied ) )
+                {
+                    table.push_back( copied );
+                }
+                continue;
+            }
+
+            const std::size_t   recOffset = w.b.size();
+            const std::uint32_t f         = row.fileIndex;
+            w.str( keys.rels[f] );
             w.u64( f < fileHash.size() ? fileHash[f] : 0 );
             w.u64( f < fileSize.size() ? (std::uint64_t)fileSize[f] : (std::uint64_t)-1 ); // A4-P7 stat-gate: size at hash time (-1 ⇒ unknown → gate re-hashes)
             w.u64( f < fileMtime.size() ? (std::uint64_t)fileMtime[f] : (std::uint64_t)-1 ); // A4-P7 stat-gate: mtimeNs at hash time (-1 ⇒ unknown)
@@ -1442,7 +1940,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 runOffsets.clear();
                 runOffsets.push_back( 0 );
                 std::uint32_t slotCount = 0;
-                for( const std::uint32_t i : dIdx[f] )
+                for( const std::uint32_t i : ix.defIndex[f] )
                 {
                     const std::vector<std::uint64_t>& row = defs[i].lex.tokenHashes;
                     for( const std::uint64_t hash : row )
@@ -1493,10 +1991,10 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 w.u32( std::uint32_t( fileDict.size() ) );
                 w.raw( fileDict.data(), fileDict.size() * sizeof( std::uint64_t ) );
             }
-            w.u32( std::uint32_t( dIdx[f].size() ) );
+            w.u32( std::uint32_t( ix.defIndex[f].size() ) );
             {
                 std::size_t rowOffset = 0; // running slot offset into pairDictIndex
-                for( std::uint32_t i : dIdx[f] )
+                for( std::uint32_t i : ix.defIndex[f] )
                 {
                     writeDef( w, defs[i], captureValueUses, fileDict.size(), pairDictIndex.data() + rowOffset );
                     if( captureValueUses )
@@ -1505,50 +2003,49 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                     }
                 }
             }
-            w.u32( std::uint32_t( rIdx[f].size() ) );
-            for( std::uint32_t i : rIdx[f] )
+            w.u32( std::uint32_t( ix.refIndex[f].size() ) );
+            for( std::uint32_t i : ix.refIndex[f] )
             {
                 writeRef( w, refs[i] );
             }
-            w.u32( std::uint32_t( iIdx[f].size() ) );
-            for( std::uint32_t i : iIdx[f] )
+            w.u32( std::uint32_t( ix.incIndex[f].size() ) );
+            for( std::uint32_t i : ix.incIndex[f] )
             {
                 w.u8( incs[i].isAngle ? 1 : 0 );
                 w.u8( incs[i].isLazy  ? 1 : 0 );
                 w.str( incs[i].target );
             }
-            w.u32( std::uint32_t( bIdx[f].size() ) );
-            for( std::uint32_t i : bIdx[f] )
+            w.u32( std::uint32_t( ix.bindIndex[f].size() ) );
+            for( std::uint32_t i : ix.bindIndex[f] )
             {
                 writeBind( w, binds[i] );
             }
-            w.u32( std::uint32_t( aIdx[f].size() ) );
-            for( std::uint32_t i : aIdx[f] )
+            w.u32( std::uint32_t( ix.ffiIndex[f].size() ) );
+            for( std::uint32_t i : ix.ffiIndex[f] )
             {
                 writeFfi( w, ffis[i] );
             }
-            w.u32( std::uint32_t( rdIdx[f].size() ) );
-            for( std::uint32_t i : rdIdx[f] )
+            w.u32( std::uint32_t( ix.routeDefIndex[f].size() ) );
+            for( std::uint32_t i : ix.routeDefIndex[f] )
             {
                 writeRouteDef( w, routeDefs[i] ); // B6.3
             }
-            w.u32( std::uint32_t( ruIdx[f].size() ) );
-            for( std::uint32_t i : ruIdx[f] )
+            w.u32( std::uint32_t( ix.routeUseIndex[f].size() ) );
+            for( std::uint32_t i : ix.routeUseIndex[f] )
             {
                 writeRouteUse( w, routeUses[i] ); // B6.3
             }
+            table.push_back( CacheEntry{ row.pathHash, std::uint64_t( recOffset ),
+                                         f < fileHash.size() ? fileHash[f] : 0,
+                                         std::uint32_t( w.b.size() - recOffset ),
+                                         recordSum32( std::string_view( w.b.data() + recOffset, w.b.size() - recOffset ) ) } );
         }
     }   // symmetric bare scope: serialize-records profiling span
 
-    // BONUS (S): append the whole-payload checksum so loadCache can catch a silent bit-flip inside a cached
-    // string (the length/version guards trust the bytes; a flip there survives them). 8-byte trailer, verified
-    // at load. blobChecksum is the fast 8-lane FNV variant — cheap even on a multi-MB blob.
-    std::uint64_t sum = 0;
     {
-        PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: checksum" );
-        sum = blobChecksum( std::string_view( w.b.data(), w.b.size() ) );
+        PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: offset table + trailer" );
+        finishCacheBlob( w, table );
     }
-    w.u64( sum );
     PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: write + rename" );
 
     // unique per-process temp so two concurrent runs (this repo runs ~20 parallel sessions) don't

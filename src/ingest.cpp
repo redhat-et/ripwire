@@ -34,7 +34,8 @@
 #include <cstdlib>             // std::getenv — RIPWIRE_CACHE_STATS drift observable
 #include <cstring>
 #include <sys/stat.h>          // A4-P7: stat() for the (size,mtime) warm-run shortcut
-#include <unistd.h>            // getpid — unique per-process cache temp name
+#include <fcntl.h>             // v15: ::open( O_RDONLY ) — the cache blob's own read descriptor (ingest_cache.h)
+#include <unistd.h>            // getpid — unique per-process cache temp name; ::pread — the offset-table record reads
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -233,11 +234,16 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // incremental: load the content-hash cache BEFORE the prewarm. Empty cacheFile ⇒ full parse.
     // scan.hash: pre-sized to nfiles here (0 = not yet hashed); the prewarm miss-detection pass
     // populates entries for files it reads; the parse pool fills the rest during normal processing.
-    // A4-P7: cacheWriteNs is the loaded blob's write timestamp — the racy-rule reference for the warm-run
-    // stat-gate. -1 (no/rejected cache) makes every stat check see a racy entry → always read+hash (safe).
-    long long cacheWriteNs = -1;
+    // A4-P7: cacheStats.blobWriteNs is the loaded blob's own mtime — the racy-rule reference for the
+    // warm-run stat-gate. -1 (no/rejected cache) makes every stat check see a racy entry → always
+    // read+hash (safe). v15: result.files is passed in because the blob's offset table lets the load
+    // deserialise ONLY the records for the files THIS crawl asked for — a wider configuration's blob is
+    // never walked past its table (docs/EVALS.md, the offset-table retry).
+    CacheLoadStats cacheStats;
     HashMap<std::string, FileFacts> cache =
-        cacheFile.empty() ? HashMap<std::string, FileFacts>{} : loadCache( std::string( cacheFile ), rootDir, captureValueUses, cacheWriteNs );
+        cacheFile.empty() ? HashMap<std::string, FileFacts>{}
+                          : loadCache( std::string( cacheFile ), rootDir, captureValueUses, result.files, cacheStats );
+    const long long cacheWriteNs = cacheStats.blobWriteNs;
     // per-fileId scan arrays (language classify + hash/stat-gate + health slots) — ingest_prewarm.h
     IngestFileScan scan = makeFileScan( result.files );
 
@@ -249,7 +255,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // 2) the parallel parse pool — per-thread accumulators, cache-hit reuse, hostile-input guards,
     //    the pending-parsed-tree overlap with the async query compile, the install/gate-open moment,
     //    the deterministic merge, and the dirty-gated saveCache (ingest_parsepool.h).
-    RawFacts raw = runParsePool( result, rootDir, cacheFile, captureValueUses, cache, scan, prewarm );
+    RawFacts raw = runParsePool( result, rootDir, cacheFile, captureValueUses, cache, cacheStats, scan, prewarm );
 
     result.fileHealth = std::move( scan.health );   // §L1: after saveCache, before the (unmeasured) doc pass
 

@@ -30,8 +30,8 @@
 #       per-configuration key.
 #   (b) BAND (1): `.` -> `. --exclude=ext` -> `.` reparses 0 files on the third run.
 #   (c) BAND (7), subset-does-not-truncate: `.` -> edit one KEPT file -> `. --exclude=ext` (dirty, so
-#       it saves) -> `.`. The third run must reparse only the file that genuinely changed (1). Before
-#       the offset-table carry-over this reparsed the whole excluded subtree (60).
+#       it saves) -> `.`. The third run must reparse NOTHING — the subset run wrote the edited file's
+#       fresh record into the SHARED blob. Before the offset-table carry-over this reparsed 60.
 #   (d) BAND (7), superset-extends: `. --exclude=ext` -> `.` -> edit one EXT file -> `.` ->
 #       `. --exclude=ext`. The excluded run at the end must reparse 0 — the superset run extended the
 #       blob without invalidating the excluded configuration's records.
@@ -133,8 +133,12 @@ RC2="$( reparsed )"
     || no "excluded run reparsed=$RC2, expected 1 — the fixture edit did not make it dirty"
 run "$TMP/c3.xml"                                    # plain again: the ext/ records must have survived
 RC3="$( reparsed )"
-[ "$RC3" = "1" ] && ok "band (7): after a dirty --exclude run the next plain run reparses only the edited file (reparsed=$RC3)" \
-    || no "band (7) VIOLATED: plain-after-dirty-excluded reparsed=$RC3, expected 1 — the subset run truncated the shared blob"
+# 0, not 1: the excluded run wrote a FRESH record for the file it reparsed into the SHARED blob, so the
+# plain run finds every one of the 72 files current. (Under the reverted per-configuration key this was
+# 1 — each configuration kept its own blob and the plain one still held the stale k1. Under the v14
+# single blob with no carry-over it was 60 — the excluded run had deleted the ext/ records outright.)
+[ "$RC3" = "0" ] && ok "band (7): after a dirty --exclude run the next plain run reparses nothing (reparsed=$RC3)" \
+    || no "band (7) VIOLATED: plain-after-dirty-excluded reparsed=$RC3, expected 0 — the subset run truncated the shared blob"
 
 # ── (d) BAND (7), the other direction: a superset run EXTENDS the blob ─────────────────────────────
 newphase

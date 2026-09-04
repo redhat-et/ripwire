@@ -167,6 +167,20 @@ using rw::quality::deadCodeEligibleKind;
 //
 // Y4: resolved through resolveCacheBlobPath (quality.h) — the shard-aware, backward-compatible
 // choke point every ripwire-*.bin blob path now routes through. See its comment for the full rationale.
+//
+// THE EXCLUDE SET AND --max-file-size ARE DELIBERATELY NOT IN THIS KEY, and that is a measured decision,
+// not an oversight. Folding them in (one blob per exclude configuration per root) was built and it met
+// every band it was registered against — and it was REVERTED, because the un-excluded root of a real
+// development tree is 158,202 files, twelve gate configurations then want twelve 686 MB blobs, and the
+// cache directory's 2 GiB cap (kMaxCacheDirBytes) evicts the blob a running gate is about to reuse: the
+// full battery went from 7 minutes to 62. docs/EVALS.md, "The auto-cache key ignores --exclude", RUN
+// 2026-09-03, is the registered NEGATIVE; do not bring the key change back.
+//
+// The two costs that key change was written against are paid off by the BLOB'S SHAPE instead
+// (kCacheVersion 15, src/ingest_cache.h): one superset blob per (root, class) carries a record OFFSET
+// TABLE, so a run deserialises only the records for the files it actually crawled, and a save carries
+// over verbatim the records for files it did not crawl — so a narrower configuration is cheap to load
+// and can no longer truncate the shared blob. Gate: test/cacheoffsetcheck.sh.
 std::string defaultCachePath( const std::string& root, bool captureValueUses )
 {
     char        absbuf[ PATH_MAX ];
