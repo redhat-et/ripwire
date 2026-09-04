@@ -1921,7 +1921,15 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
         { "--test-gate",         c.testGate               }, { "--pr-context",    c.prContext             },
         { "--export=cc.json",    c.exportCcJson           }, { "--merge-scout",   c.mergeScoutFlag        },
         { "--plan-lanes",        c.planLanesFlag          }, { "--stray-content", c.strayContent          },
-        { "--abi",               c.abiFlag                }, { "--eval-stray",   !c.evalStray.empty()     },
+        // H12 (capture-audit 2026-09-04): --abi used to own a row here, but it never independently
+        // dispatches — src/verbs_change.h::runCrossRef only ever reads cfg.abiFlag NESTED inside
+        // `if( cfg.strayContent )`, and --abi alone refuses ("composes with --stray-content's sweep —
+        // pass both", cli.h) exactly like --plan/--gateability/--detail/--partition, none of which own a
+        // row either. Giving it one made this table claim --stray-content beats --abi and print "IGNORED
+        // this run: --abi" while stdout was the <abi> root the whole time — the table naming a winner
+        // dispatch never asked. --abi is a MODE of --stray-content (like --plan), not a competing verb,
+        // so `--stray-content --abi` composes silently, same as `--stray-content --plan` already does.
+        { "--eval-stray",       !c.evalStray.empty()      },
         { "--flags",             c.darkFlags              }, { "--whereis",       c.whereisFlag           },
         { "--layout",            c.layoutFlag             },
         { "--field-affinity",    c.fieldAffinity          },   // §F1: runFieldAffinity, between --layout and --doc-drift

@@ -1708,7 +1708,18 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
 // rather than eyeballed — the whole reason the classifier is documented as auditable.
 
 struct EvalCase   { std::string ref; Verdict expected; Verdict got; bool found = false; };
-struct EvalReport { std::vector<EvalCase> cases; std::uint32_t correct = 0; bool ok = true; };
+struct EvalReport
+{
+    std::vector<EvalCase>   cases;
+    std::uint32_t           correct = 0;
+    std::uint32_t           unknownCount = 0;   // H13: cases whose classifier verdict is Unknown — its own
+                                                 // bucket, disclosed separately so it can never hide inside
+                                                 // "correct" or "incorrect" the way it did when an absent,
+                                                 // NONEXISTENT ref silently defaulted to Merged.
+    std::vector<std::string> badRefs;           // labels naming a ref this git repo does not have at all —
+                                                 // refused, never scored (see evalStray below)
+    bool                     ok = true;
+};
 
 inline bool parseVerdict( std::string_view s, Verdict& out )
 {
@@ -1767,12 +1778,41 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
 
         const auto it = got.find( c.ref );
         c.found = it != got.end();
-        c.got   = c.found ? it->second : Verdict::Merged;
+        if( c.found )
+        {
+            c.got = it->second;
+        }
+        else
+        {
+            // H13: an absent ref scores as merged ONLY when it is a real ref that computeStrayContent
+            // actually scanned and found fully present (writeStrayContentPage omits those by design). A
+            // label naming a ref this repo does not have at all is a broken fixture, not a merged branch
+            // — crediting it as a correct "merged" guess is exactly how a nonexistent ref reached
+            // accuracy=100% here before this fix. Verify existence with the same rev-parse the rest of
+            // the tool already uses (gitResolveCommitSha) rather than trusting the label.
+            if( quality::gitResolveCommitSha( root, c.ref ).empty() )
+            {
+                rep.badRefs.push_back( c.ref );
+                continue;   // refused, never scored — does not touch correct/unknownCount/cases
+            }
+            c.got = Verdict::Merged;
+        }
+        if( c.got == Verdict::Unknown )
+        {
+            // Its own bucket: an Unknown verdict (no merge-base / unrelated history — crossref's own
+            // degrade path) must never be silently absorbed into "correct" against a "merged" expectation,
+            // and this counter makes that visible on the root instead of only inside the per-case rows.
+            ++rep.unknownCount;
+        }
         if( c.got == c.expected )
         {
             ++rep.correct;
         }
         rep.cases.push_back( std::move( c ) );
+    }
+    if( !rep.badRefs.empty() )
+    {
+        rep.ok = false;   // refuse the whole run rather than silently scoring a fixture that names refs that do not exist
     }
     return rep;
 }
@@ -1786,9 +1826,12 @@ inline void writeStrayEval( std::FILE* out, const EvalReport& rep )
     const double      acc = n ? ( 100.0 * double( rep.correct ) / double( n ) ) : 0.0;
     std::fprintf( out, "<!-- ripwire stray-content eval: labelled verdict accuracy. Each row is one branch whose "
                        "true state was established by hand; want= is the label, got= is what the classifier said. "
-                       "A branch absent from the report scores as merged (merged refs are omitted by design). Use "
-                       "this to MEASURE a threshold change instead of eyeballing it. -->" );
-    std::fprintf( out, "<stray-eval cases=\"%zu\" correct=\"%u\" accuracy=\"%.1f\">", n, rep.correct, acc );
+                       "A branch absent from the report scores as merged ONLY when it is a real ref this repo has "
+                       "(merged refs are omitted by design); a label naming a ref that does not exist is refused, "
+                       "not scored (see badRefs on refusal). unknown= on the root counts cases whose verdict "
+                       "is unknown (no merge-base / unrelated history); its own bucket, never folded into merged. "
+                       "Use this to MEASURE a threshold change instead of eyeballing it. -->" );
+    std::fprintf( out, "<stray-eval cases=\"%zu\" correct=\"%u\" unknown=\"%u\" accuracy=\"%.1f\">", n, rep.correct, rep.unknownCount, acc );
     for( const EvalCase& c : rep.cases )
     {
         std::fprintf( out, "<case ref=\"%s\" want=\"%s\" got=\"%s\" hit=\"%d\" reported=\"%d\"/>",

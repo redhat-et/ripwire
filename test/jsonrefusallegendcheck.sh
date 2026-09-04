@@ -204,11 +204,15 @@ def delta( x ):
 PY
 printf '{"query":"gamma delta adjustment","gold_files":[{"path":"a.py"},{"path":"sub/lib.py"}]}\n' > "$TMP/mined.jsonl"
 
-# --eval-stray scores a CLASSIFIER against labelled branch verdicts. On this repo the labelled branches do
-# not exist, so it runs, emits its report and exits 3 ("scored below threshold") — which is a verb that RAN.
+# --eval-stray scores a CLASSIFIER against labelled branch verdicts. Since H13 (evalstraycheck), a label
+# naming a ref that does not exist in $ROOT is REFUSED (exit 1, not silently scored as "merged"), so this
+# fixture must use a committish guaranteed to resolve in ANY checkout of this repo — "HEAD" itself, never a
+# real branch name (a CI checkout can be a single-branch/shallow/detached clone with no other refs at all).
+# "HEAD" is not a ref name enumerateRefs lists, so it is never "found" in the classifier's own report either
+# way — it runs, emits its report and exits 3 ("scored below threshold") — which is a verb that RAN.
 # okCodes exists for exactly that: the control asks "did the flag get a chance to bind", not "did the eval
 # pass". Collapsing the two would make the fixture's own accuracy a silent precondition of a --json gate.
-printf 'feat-unmerged\tunmerged\nfeat-merged\tmerged\n' > "$TMP/strayfixture.tsv"
+printf 'HEAD\tunmerged\nHEAD\tmerged\n' > "$TMP/strayfixture.tsv"
 
 check_eval_refuses()
 {

@@ -1420,6 +1420,22 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         const crossref::EvalReport rep = crossref::evalStray( root, std::string( cfg.evalStray ) );
         if( !rep.ok )
         {
+            if( !rep.badRefs.empty() )
+            {
+                // H13: the file read fine and this IS a git repo — the refusal is that one or more
+                // labelled refs do not exist here at all, so "absent = merged" cannot honestly apply to
+                // them (that default is only for a ref this repo genuinely scanned and found merged).
+                std::string names;
+                for( const std::string& r : rep.badRefs )
+                {
+                    if( !names.empty() ) { names += ", "; }
+                    names += r;
+                }
+                std::fprintf( stderr, "ripwire: --eval-stray: %zu labelled ref(s) do not exist in %s -- not merged, just "
+                                      "absent: %s (fix the labels file or add the ref)\n",
+                              rep.badRefs.size(), root.c_str(), names.c_str() );
+                return 1;
+            }
             std::fprintf( stderr, "ripwire: --eval-stray: cannot read '%.*s', or %s is not a git repository\n",
                           int( cfg.evalStray.size() ), cfg.evalStray.data(), root.c_str() );
             return 1;

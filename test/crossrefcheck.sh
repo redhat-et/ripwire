@@ -267,6 +267,37 @@ printf 'feat-unmerged\tsuperseded\n' > "$TMP/badlabels.tsv"
 "$BIN" "$R" --eval-stray="$TMP/nosuchfile.tsv" >/dev/null 2>&1
 [ $? -eq 1 ] && ok "--eval-stray refuses loudly on a missing labels file" || no "--eval-stray did not exit 1 on a missing file"
 
+# ── 8b) H13: a label naming a ref this repo does NOT have is refused, never scored as "merged" ──────────
+# Before the fix, a ref absent from the classifier's report defaulted straight to Verdict::Merged with no
+# check that the ref even exists — a fixture labelling three refs that were never real branches scored
+# accuracy=66.7% on nothing (two nonexistent refs credited as correctly "merged"). The file reads fine and
+# $R is a real git repo, so the OLD refusal message ("cannot read … or not a git repository") would be a
+# lie here too; the new one must name the bogus ref instead.
+printf 'zz-nonexistent-ref-h13\tmerged\n' > "$TMP/badref.tsv"
+"$BIN" "$R" --eval-stray="$TMP/badref.tsv" >"$TMP/badref.out" 2>"$TMP/badref.err"; badRc=$?
+[ "$badRc" -eq 1 ] \
+    && ok "H13: --eval-stray refuses (exit 1) on a label whose ref does not exist" \
+    || no "H13: --eval-stray exited $badRc (want 1) on a nonexistent-ref label"
+grep -q 'zz-nonexistent-ref-h13' "$TMP/badref.err" \
+    && ok "H13: the refusal NAMES the nonexistent ref" \
+    || { no "H13: the refusal does not name the bad ref"; cat "$TMP/badref.err"; }
+[ ! -s "$TMP/badref.out" ] \
+    && ok "H13: the refused run wrote nothing to stdout (no accuracy computed on a bogus label)" \
+    || { no "H13: the refused run still emitted a <stray-eval> report"; head -c 300 "$TMP/badref.out"; }
+
+# Mixed file: one real (merged) ref plus one bogus ref — still refuses, and only the bogus one wins the
+# blame (a real, correctly-scoreable label must not get silently swallowed by an unrelated bad one).
+printf 'feat-merged\tmerged\nzz-nonexistent-ref-h13\tunmerged\n' > "$TMP/mixedref.tsv"
+"$BIN" "$R" --eval-stray="$TMP/mixedref.tsv" >/dev/null 2>"$TMP/mixedref.err"; mixedRc=$?
+[ "$mixedRc" -eq 1 ] && grep -q 'zz-nonexistent-ref-h13' "$TMP/mixedref.err" && ! grep -q '^feat-merged$' "$TMP/mixedref.err" \
+    && ok "H13: a mixed file refuses naming ONLY the ref that does not exist (feat-merged is real)" \
+    || { no "H13: mixed-file refusal did not isolate the bogus ref"; cat "$TMP/mixedref.err"; }
+
+# unknown= is its own disclosed bucket on the root — never silently absorbed into correct/incorrect.
+grep -q 'unknown="' "$TMP/ev" \
+    && ok "H13: <stray-eval> discloses unknown= on the root (its own bucket, not folded into merged)" \
+    || { no "H13: <stray-eval> root has no unknown= attribute"; head -c 300 "$TMP/ev"; }
+
 # ── 9) well-formed, minified XML (G4) ─────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
     "$BIN" "$R" --stray-content 2>/dev/null | xmllint --noout - 2>/dev/null && ok "stray-content XML well-formed" || no "stray-content XML malformed"
