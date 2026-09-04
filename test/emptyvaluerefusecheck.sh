@@ -191,6 +191,46 @@ fi
 # value-taking ones among them each need a pin somewhere.
 for f in --expand --outline; do refuseCase "$f" "§B5-hand"; done
 
+# ── M6 (capture-audit 2026-09-04): an EXPLICIT empty value on an optional-value flag is not the bare flag ──
+#
+# Ten rows sat in EmptyValue::Meaningful on the reading "`--dead-code=` is exactly `--dead-code`": the value
+# is an optional narrowing, so "" selects the default. The trap is the shell: `--dead-code=$DIR` with an unset
+# $DIR became a repo-wide scan, `--pr-context=$BASE` the working-tree default, `--stray-content=$REF` a sweep
+# of every ref — each at exit 0 with nothing on stderr, each answering a question nobody asked. --test-gate=
+# left that block on 2026-08-24 for exactly this reason. Now ONLY the bare spelling selects the default; the
+# explicit `--flag=` refuses the way every required-value flag does (flag, problem, runnable example), and
+# --situ= joins the eleven because it is the same class (an unset $FILES silently became the git-diff form).
+# --exclude= is parsed by a hand-written startsWith arm outside the table and used to be the one SILENT
+# empty value; it is swept by the derived hand-written arm below and pinned here by name. --html= stays
+# Meaningful on purpose: "" means stdout, a visible, harmless answer, not a different question.
+M6_FLAGS="--dead-code --cochange --field-affinity --flags --stray-content --doc-drift --pr-context --quality-panel --scan-skills --situ --exclude"
+for f in $M6_FLAGS; do refuseCase "$f" "M6"; done
+
+# ── the hand-written startsWith arms, DERIVED from parseArgs (test/flaguniverse.py) ────────────────────
+# The table sweep above can only see kViewFlags rows. The value-taking arms parseArgs still spells out by
+# hand (--exclude= --and= --order= --limit= …) each own their refusal, and one of them (--exclude=) owned
+# none. Every hand-value arm is probed with an empty value: exit 1, nothing on stdout, and the flag NAMED on
+# stderr — the contract, not the sentence, because the enum-valued arms honestly say "unknown value ''" with
+# the supported set rather than "is empty".
+if command -v python3 >/dev/null 2>&1; then
+    python3 "$ROOT/test/flaguniverse.py" "$ROOT/src/cli.h" | awk -F'\t' '$2 == "hand-value" { print $1 }' > "$TMP/hand.txt"
+    HANDCOUNT="$( grep -c . "$TMP/hand.txt" )"
+    [ "$HANDCOUNT" -ge 12 ] && ok "derived $HANDCOUNT hand-written value arms from parseArgs" \
+                            || no "only $HANDCOUNT hand-written arms derived — the scrape broke, so the sweep below asserts nothing"
+    nHandOk=0
+    while IFS= read -r prefix; do
+        [ -n "$prefix" ] || continue
+        "$BIN" test/fixture "$prefix" >"$TMP/out" 2>"$TMP/err" </dev/null; rc=$?
+        if [ "$rc" -eq 1 ] && [ ! -s "$TMP/out" ] && grep -qF -- "${prefix%=}" "$TMP/err"; then
+            nHandOk=$(( nHandOk + 1 ))
+        else
+            no "hand-written sweep: $prefix (empty value) exited $rc with $( wc -c <"$TMP/out" | tr -d ' ' ) stdout bytes and stderr [$( head -c 120 "$TMP/err" | tr '\n' ' ' )] — an empty value must refuse naming the flag"
+        fi
+    done < "$TMP/hand.txt"
+    [ "$nHandOk" = "$HANDCOUNT" ] && ok "hand-written sweep: all $HANDCOUNT startsWith arms refuse an empty value naming the flag" \
+                                  || no "hand-written sweep: $(( HANDCOUNT - nHandOk )) of $HANDCOUNT arms accept an empty value"
+fi
+
 # ── a control: the guard is not vacuous ────────────────────────────────────────────────────────────────
 # If `--since=` refuses, the same corpus with NO flag at all must still produce a map at exit 0, or the
 # assertions above would pass on a binary that refuses everything.

@@ -2445,27 +2445,31 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--regex=",          &Config::grep            , EmptyValue::Refuse, "a regular expression",                             "--regex='parse[A-Z]'",
       &Config::grepRegex, nullptr, &Config::grepGiven, kGrepDupMessage },
 
-    // the bare-or-filter forms: "" is a REAL value here - `--situ=` means exactly `--situ`, and the value is
-    // an OPTIONAL narrowing filter. Recorded rather than silently accepted (that distinction is the column).
-    { "--cochange=",       &Config::cochangeFile    , EmptyValue::Meaningful, nullptr, nullptr, &Config::cochange },
-    { "--situ=",           &Config::situFiles       , EmptyValue::Meaningful, nullptr, nullptr, &Config::situ },
+    // M6 (capture-audit 2026-09-04): the bare-or-filter forms used to be EmptyValue::Meaningful — "" was read
+    // as the bare flag, since the value is an OPTIONAL narrowing. The shell is why that reading was wrong:
+    // `--dead-code=$DIR` with an unset $DIR became a repo-wide scan, `--pr-context=$BASE` the working-tree
+    // default, `--stray-content=$REF` a sweep of every ref, each at exit 0 with an empty stderr — a different
+    // question, answered as if it were the one asked. --test-gate= left the block on 2026-08-24 for exactly
+    // this; the rest follow it now. ONLY the bare spelling selects the default. Gate: emptyvaluerefusecheck.sh.
+    { "--cochange=",       &Config::cochangeFile    , EmptyValue::Refuse, "a changed file path to seed the pair report (bare --cochange ranks every pair)", "--cochange=src/cli.h", &Config::cochange },
+    { "--situ=",           &Config::situFiles       , EmptyValue::Refuse, "changed files, F1,F2 (bare --situ reads git diff)", "--situ=src/cli.h", &Config::situ },
     // `--test-gate=` left the Meaningful block above on 2026-08-24: "" ≡ the bare git-diff form meant an
     // unset shell variable silently gated a DIFFERENT question, on a verb whose exit code gates a merge —
     // the same ruling --dmm=/--quality-delta= below carry for their half-typed ranges. (The unparseable-
     // FILES refusal itself is per-item, in main's --test-gate arm; gate: testgaterefusecheck.sh.)
     { "--test-gate=",      &Config::testGateFiles   , EmptyValue::Refuse, "changed files, F1,F2", "--test-gate=src/cli.h", &Config::testGate },
-    { "--scan-skills=",    &Config::scanSkillsDir   , EmptyValue::Meaningful, nullptr, nullptr, &Config::scanSkills },
-    { "--dead-code=",      &Config::deadCodeDir     , EmptyValue::Meaningful, nullptr, nullptr, &Config::deadCode },
-    { "--pr-context=",     &Config::prContextBase   , EmptyValue::Meaningful, nullptr, nullptr, &Config::prContext },
-    { "--stray-content=",  &Config::strayFilter     , EmptyValue::Meaningful, nullptr, nullptr, &Config::strayContent },
-    { "--flags=",          &Config::darkFlagsFilter , EmptyValue::Meaningful, nullptr, nullptr, &Config::darkFlags },
-    { "--doc-drift=",      &Config::docDriftFilter  , EmptyValue::Meaningful, nullptr, nullptr, &Config::docDrift },
+    { "--scan-skills=",    &Config::scanSkillsDir   , EmptyValue::Refuse, "a skills directory path (bare --scan-skills scans the tree it maps)", "--scan-skills=skills/", &Config::scanSkills },
+    { "--dead-code=",      &Config::deadCodeDir     , EmptyValue::Refuse, "a directory or path substring to scope the candidates (bare --dead-code scans the whole tree)", "--dead-code=src/", &Config::deadCode },
+    { "--pr-context=",     &Config::prContextBase   , EmptyValue::Refuse, "a base ref (bare --pr-context reads the working tree)", "--pr-context=main", &Config::prContext },
+    { "--stray-content=",  &Config::strayFilter     , EmptyValue::Refuse, "a ref-name substring filter (bare --stray-content sweeps every ref)", "--stray-content=lane/", &Config::strayContent },
+    { "--flags=",          &Config::darkFlagsFilter , EmptyValue::Refuse, "a gate-name substring filter (bare --flags lists every gate)", "--flags=RIPWIRE_", &Config::darkFlags },
+    { "--doc-drift=",      &Config::docDriftFilter  , EmptyValue::Refuse, "a document-path substring filter (bare --doc-drift scans every document)", "--doc-drift=README", &Config::docDrift },
     // P3.2: unlike --doc-drift's SUBSTR filter, a bare value here is a real usage error — "" cannot name a
     // plan file, so Refuse (not Meaningful) is the right form, same reasoning --from-trace= already carries.
     { "--plan-lint=",      &Config::planLintFile    , EmptyValue::Refuse, "a plan/design markdown file path", "--plan-lint=wave-plan.md" },
-    // `--field-affinity=` is exactly `--field-affinity`: the value is an OPTIONAL narrowing to one struct,
-    // and the bare form (the whole-repo ranking) is the primary way to ask.
-    { "--field-affinity=", &Config::fieldAffinityStruct, EmptyValue::Meaningful, nullptr, nullptr, &Config::fieldAffinity },
+    // `--field-affinity=STRUCT` narrows to one struct; the bare form (the whole-repo ranking) is the primary way
+    // to ask, and the ONLY spelling that selects it (M6 above).
+    { "--field-affinity=", &Config::fieldAffinityStruct, EmptyValue::Refuse, "a struct or class name (bare --field-affinity ranks every struct)", "--field-affinity=Symbol", &Config::fieldAffinity },
     // --dmm= is Refuse, not Meaningful, even though the BARE --dmm is a real form: `--dmm=` is a half-typed
     // range, and silently running the working-tree comparison for it would answer a question nobody asked.
     { "--dmm=",            &Config::dmmRange, EmptyValue::Refuse, "a commit, or a RANGE A..B (bare --dmm compares the working tree against HEAD)",
@@ -2477,14 +2481,13 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--quality-delta=",  &Config::qualityDeltaRange, EmptyValue::Refuse,
       "a commit, or a RANGE A..B of git refs (bare --quality-delta compares the working tree against the baseline)",
       "--quality-delta=HEAD~1..HEAD", &Config::qualityDelta },
-    // `--quality-panel=` is exactly `--quality-panel`: the value is an OPTIONAL preset selection and the bare
-    // form is the `default` preset. An UNKNOWN value is refused in validateModifierGuards with the supported
+    // `--quality-panel=PRESET` selects a preset; the bare form is the `default` preset and the only spelling
+    // that selects it (M6 above). An UNKNOWN value is refused in validateModifierGuards with the supported
     // list — falling back to a preset the caller did not name would be a silently different report.
-    { "--quality-panel=",  &Config::qualityPanelPreset , EmptyValue::Meaningful, nullptr, nullptr, &Config::qualityPanel },
-    // --html=FILE-or-stdout and --quality-ack=REASON are the same shape for a different reason: the value is
-    // OPTIONAL, so `--html=` is `--html` (write to stdout) and `--quality-ack=` is `--quality-ack` (no
-    // reason). The audit's own enumeration classified both as "already refusing"; neither is. They are
-    // correct-by-design, which is exactly what this column exists to say out loud.
+    { "--quality-panel=",  &Config::qualityPanelPreset , EmptyValue::Refuse, "a preset name (bare --quality-panel is the default preset)", "--quality-panel=default", &Config::qualityPanel },
+    // --html=FILE-or-stdout keeps Meaningful on purpose: `--html=` is `--html` (write to stdout) — a VISIBLE,
+    // harmless answer, not a different question, which is the M6 distinction. --quality-ack=REASON is the
+    // same shape: `--quality-ack=` is a reason-less ack, exactly the bare spelling (its pairing rule is H10's).
     { "--html=",           &Config::htmlFile        , EmptyValue::Meaningful, nullptr, nullptr, &Config::html },
     { "--quality-ack=",    &Config::qualityAckReason, EmptyValue::Meaningful, nullptr, nullptr, &Config::qualityAck, &Config::qualityDelta },
 
@@ -3946,6 +3949,10 @@ inline Config parseArgs( int argc, char** argv ) noexcept
               { refuseFlagValue( "--max-file-size", "a positive byte size, plain or with a K/M/G suffix", a.data() + 16, "--max-file-size=10MB" );  c.ok = false; return c; } }
             else if( startsWith( a, "--exclude=" ) )
             {
+                // M6: the one hand-written value arm that accepted an empty value silently — `--exclude=$X`
+                // with an unset $X excluded nothing and said nothing. Same refusal as its table siblings.
+                if( a.size() == 10 )
+                { refuseEmptyValue( "--exclude=", "a path substring to drop from the crawl", "--exclude=vendor/" );  c.ok = false; return c; }
                 c.excludes.push_back( std::string( a.substr( 10 ) ) );
                 // r27-emitters T5: a BAD VALUE is not an unknown FLAG. `--rank-by=bogus` used to fall through the
                 // exact-match chain to the generic "unknown flag" arm, which told the agent the flag itself does not
