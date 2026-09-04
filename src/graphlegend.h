@@ -167,7 +167,13 @@ inline constexpr const char* kUsesLegendOpen =
     "a name uniquely naming an indexed function-like #define — never role=\"call\" (an expansion is not a plain "
     "call); a name shared with a non-macro definition stays role=\"call\". Rows are ordered SOURCE first, then "
     "test/bench, then docs, by path within a tier. A MEMBER selector (Owner.field) is resolved per site instead of "
-    "name-matched — that run's legend says how. "; // LB-G
+    "name-matched — that run's legend says how. "
+    // M12: in_id= was emitted (here and on --verify's uses()/unused() <u> rows) with no clause anywhere
+    // defining it — a reader had to guess it was the CALLER's canonical id from shape alone.
+    "in_id=the canonical id (root-relative path::scope::name) of the symbol the use-site sits INSIDE, when that "
+    "enclosing symbol is known and scoped; a scope-less enclosing symbol (a free function) degrades to its bare "
+    "name (id == name, the same degrade canonicalId uses everywhere); absent when the use-site is at file scope "
+    "(no enclosing symbol). "; // LB-G
 
 // The member-variable round (card A3): the clause the `Owner.field` answer appends to the opener above — ONLY
 // on that answer, so the name-matched --uses legend keeps its byte budget (test/graphlegendbudgetcheck.sh) and
@@ -335,5 +341,10 @@ inline const char* capLegendClause( bool active ) noexcept
 {
     return active ? kNeighbourCapLegend : "";
 }
+
+// M12's writeMultiRootTable/multiRootTableLegend (the multi-root roots-table disclosure --callers/--uses
+// reuse from the default map) live in serialize.h, not here: they need escapeXml, and serialize.h includes
+// THIS header (for rootRelPathsLegend) before its own escapeXml definition — putting them here would be
+// circular. See serialize.h, right after escapeXml.
 
 } // namespace rw

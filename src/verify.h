@@ -221,7 +221,11 @@ inline constexpr const char* kVerifyLegend =
     "calls/reaches can never refute; unused can never confirm. defines() does not require the symbol to exist anywhere (the claim is about the FILE), "
     "so a refuted defines means the name token never occurs in that file's indexed bytes. "
     "reaches' direction: some symbol defined in the named file or layer transitively CALLS the target. "
-    "Evidence rows are a bounded sample when capped (disclosed on the root); every total lives in the attributes. -->";
+    "Evidence rows are a bounded sample when capped (disclosed on the root); every total lives in the attributes. "
+    // M12: a uses()/unused() <u> row's in_id= — the same attribute --uses itself defines (kUsesLegendOpen), stated
+    // again here because this element's legend is its own leading comment run, not --uses'.
+    "A uses()/unused() <u> row's in_id= is the canonical id (root-relative path::scope::name) of the enclosing "
+    "symbol, degrading to a bare name when unscoped and absent at file scope. -->";
 
 } // namespace verify
 } // namespace rw
