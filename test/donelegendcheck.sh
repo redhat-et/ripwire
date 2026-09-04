@@ -159,7 +159,13 @@ run_budget qd_dirty       3800  8574  "$FX"  --quality-delta
 run_budget qd_dirty_scope 5200 10512  "$FX"  --quality-delta "--scope=src/*"
 run_budget sd_uses        3800  4112  "$FX"  --safe-delete=classifyWidth
 run_budget sd_none        3800  4112  "$FX"  --safe-delete=tangle
-run_budget tg_empty       1200  1332  "$FXC" --test-gate
+# tg_empty 1200 -> 1400 (2026-09-04, capture-audit wave-1 close, lane L4 M15): the zero-row root now carries
+# graph_ambiguous=/graph_unresolved= (the resolver gauge every graph-floored root spells, floormarkcheck arm 11),
+# and two emitted attributes must be DEFINED in this document (arm (d) below) — the shortest honest sentence is
+# 186 B on a legend that was 1111 B, so 1200 cannot hold any wording of it. L4's M2 <u>-paging clause, which had
+# landed in the unconditional half too, moved into kTestGateRowLegend (a rule about rows; tg_empty pays nothing).
+# Measured post-fix 1297 B; 1400 is the ~8% headroom this table's own rule gives one future honest addition.
+run_budget tg_empty       1400  1332  "$FXC" --test-gate
 # The ref-pair form — the only shape that lights the ref-pair marker, omits at= and reports churn as
 # unavailable. Measured on the FIXTURE, with the same edit committed as a second commit, NOT on this repo's
 # own HEAD~1..HEAD: that range means a different diff after every landing, so a budget on it would be a

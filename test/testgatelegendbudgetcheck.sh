@@ -52,10 +52,15 @@ EOF
 # RE-PINNED 1500 -> 1750 (2026-09-04, capture-audit M15): the legend gained ONE sentence defining the
 # graph_ambiguous=/graph_unresolved= gauge pair every graph-floored root now carries — new content, not the
 # essay re-inflating (the pre-fix 1689 B was a different, longer essay).
-if [ "$legend" -le 1750 ]; then
-    ok "(a) --test-gate legend is $legend B (<= 1750 B budget; total=$total payload=$payload)"
+# RE-PINNED 1750 -> 1900 (2026-09-04, capture-audit wave-1 close, lane L9 M12): the rows-bearing document
+# gained root= (what every <t p=>/<u p=> is relative to) and the ONE clause defining it, row-gated with the
+# attribute so a zero-row report pays nothing (situ.h tgRootAttr). Measured on this fixture: 1752 B with
+# the gauge sentence trimmed to its shortest honest form and L4's M2 trio clause moved into the row legend
+# it is a rule about; 1900 leaves ~148 B for one more honest clause and still forbids the 1689 B essay.
+if [ "$legend" -le 1900 ]; then
+    ok "(a) --test-gate legend is $legend B (<= 1900 B budget; total=$total payload=$payload)"
 else
-    no "(a) --test-gate legend is $legend B (> 1750 B budget) — the essay re-inflated"
+    no "(a) --test-gate legend is $legend B (> 1900 B budget) — the essay re-inflated"
 fi
 
 # (b) the honesty vocabulary + the §B12.5 cross-verb UNIT-collision anchors (test/testgatecheck.sh arm (g)

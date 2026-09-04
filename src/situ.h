@@ -768,15 +768,14 @@ inline constexpr const char* kTestGateLegend =
     "ripwire test-gate (TDAD-parity, arXiv 2603.17973, -70% agent-caused regressions): tests to run for this "
     "change + the UNTESTED blast radius; exit 4 if tests OR untested is non-empty, else run them and rely on "
     "green. shown_tests=/shown_untested= are TWO INDEPENDENT row counts: the <t> tests-to-run rows and the "
-    "<u> blast-radius rows (the <u> window pages with limit=N offset=M; a cut one carries total=/has_more=/"
-    "next_offset= so a loop can continue). script_gates_unmodelled= is the legacy test/*.sh "
+    "<u> blast-radius rows. script_gates_unmodelled= is the legacy test/*.sh "
     "corpus path count; script_gates_registered= counts suite members; script_gates_mapped= those with exact "
     "dependency evidence; script_gates_unresolved_dynamic= is the registered remainder, disclosed rather "
     "than guessed. Shell <t> rows join tests= only via evidence=script_literal (script text contains the "
     "changed path) or evidence=manifest_declared (RIPWIRE_TEST_DEPS metadata). counts_floor=1 keeps these "
     "static evidence counts honest about shell expansion and generated paths they cannot resolve; graph_ambiguous=/"
-    "graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs "
-    "were all language-filtered), the map header's ambiguous=/unresolved=. "
+    "graph_unresolved= are the map header's ambiguous=/unresolved= (the resolver gauge: calls split over several "
+    "defs / calls whose in-repo defs were all language-filtered). "
     // §B12.5 — the cross-verb UNIT collision, disclosed on each verb that spells it. Each legend was
     // locally honest and the three numbers are not comparable, which is exactly how a reader gets it wrong.
     "UNIT: untested= here counts impacted SYMBOLS. The seams verb spells untested= over cross-directory "
@@ -790,10 +789,14 @@ inline constexpr const char* kTestGateLegend =
 // test/legendcoveragecheck.sh reads the root of exactly that bare run. The phrases
 // test/testgatelegendbudgetcheck.sh arm (b) pins ("REPEAT VERBATIM") live here and are asserted on the
 // src/model.h fixture, which has rows.
+// 2026-09-04 (capture-audit wave-1 close): lane L4's M2 clause — a cut <u> window carries the paging trio
+// so a loop can continue — landed in the unconditional half above and re-inflated the zero-row case
+// (test/donelegendcheck.sh tg_empty, 1111 → 1428 B with the gauge sentence). It is a rule about the <u>
+// rows and belongs here, where the row contract already names the window; the empty-diff case pays nothing.
 inline constexpr const char* kTestGateRowLegend =
     "The <t> rows are the COMPLETE obligation, never windowed, so they REPEAT VERBATIM on every page "
     "(concatenate from one page only); offset=/limit= window the <u> rows alone, default 25 (raise with "
-    "limit=N, offset=M pages). ";
+    "limit=N, offset=M pages; a cut window carries total=/has_more=/next_offset= so a loop can continue). ";
 
 // Emit the --test-gate report as minified XML (house shape) for an ALREADY-COMPUTED gate result. Deterministic
 // + xmllint-clean; the header counts are always full. §A3a: the <u> untested-row list joins pageview.h's
