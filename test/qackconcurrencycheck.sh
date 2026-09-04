@@ -153,5 +153,62 @@ cmp -s "$WORK/seq" "$WORK/conc" \
     || { no "(4) concurrent and sequential acks disagree — the merge is not equivalent to serial execution"
          diff "$WORK/seq" "$WORK/conc" | head -8; }
 
+# ── (5) H10 (capture-audit 2026-09-04): an ack of ZERO findings writes nothing ─────────────────────────
+# Bare `--quality-ack` on a clean tree printed "acknowledged 0 finding(s)" and re-serialised the whole ledger
+# anyway — the one modifier that WRITES when it has nothing to say, leaving a spurious diff in the caller's
+# tree. A clean corpus (the small committed shapes, unchanged) has no finding to accept: the run must say so,
+# create no ledger, and leave a pre-existing ledger byte-for-byte alone.
+CLEAN="$WORK/clean"; mkdir -p "$CLEAN"
+python3 - "$CLEAN" <<'PY'
+import sys, os
+d = sys.argv[1]
+with open( os.path.join( d, "quiet.py" ), "w" ) as f:
+    f.write( "def quietOne( a, b ):\n    if a > b:\n        return a\n    return b\n" )
+PY
+( cd "$CLEAN" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init >/dev/null 2>&1 )
+( cd "$CLEAN" && "$BIN" . --quality-delta --quality-ack="nothing to accept" >/dev/null 2>"$WORK/zero.err" ); rcZ=$?
+[ ! -e "$CLEAN/.ripwire_quality_acks" ] \
+    && ok "(5) an ack of zero findings creates no ledger (exit $rcZ)" \
+    || no "(5) an ack of zero findings CREATED $CLEAN/.ripwire_quality_acks ($( wc -c <"$CLEAN/.ripwire_quality_acks" | tr -d ' ' ) B) — a write with nothing to say"
+grep -q 'nothing to acknowledge' "$WORK/zero.err" \
+    && ok "(5) the zero-findings ack says so on stderr" \
+    || no "(5) the zero-findings ack is not disclosed: [$( head -c 160 "$WORK/zero.err" | tr '\n' ' ' )]"
+cp "$WORK/seq" "$CLEAN/.ripwire_quality_acks"
+( cd "$CLEAN" && "$BIN" . --quality-delta --quality-ack="still nothing" >/dev/null 2>&1 )
+cmp -s "$WORK/seq" "$CLEAN/.ripwire_quality_acks" \
+    && ok "(5) with a pre-existing ledger, a zero-findings ack leaves it byte-identical" \
+    || { no "(5) a zero-findings ack REWROTE a pre-existing ledger"; diff "$WORK/seq" "$CLEAN/.ripwire_quality_acks" | head -4; }
+
+# ── (6) H10: the COMMITTED ledger is in the tool's own order, so a rewrite is byte-identical ─────────────
+# writeAckRecords emits btree order — (kind, 16-hex key) as one string, bytewise — under the two header lines
+# it always writes; arm (4) proves that writer deterministic. A committed ledger that is NOT in that order
+# (a hand merge that kept both sides' placement) therefore reorders on the FIRST ack anyone runs, which is
+# how one row moved under a bare --quality-ack that acked nothing. This arm reads the repo's own ledger and
+# asserts the invariant a byte-identical rewrite needs: C-sorted keys, no duplicate (kind,key) — the reader
+# merges those — and the header the tool writes.
+COMMITTED="$ROOT/.ripwire_quality_acks"
+if [ -f "$COMMITTED" ]; then
+    python3 - "$COMMITTED" "$WORK/seq" <<'PY' > "$WORK/order.txt"
+import sys
+rows = [ l.rstrip( "\n" ) for l in open( sys.argv[ 1 ], encoding = "utf-8" ) ]
+tool = [ l.rstrip( "\n" ) for l in open( sys.argv[ 2 ], encoding = "utf-8" ) ]
+hdr  = [ l for l in rows if l.startswith( "#" ) ]
+acks = [ l for l in rows if l.startswith( "ack " ) ]
+keys = [ " ".join( l.split( " ", 3 )[ 1:3 ] ) for l in acks ]
+moved = [ keys[ i ] for i, j in enumerate( sorted( range( len( keys ) ), key = lambda k: keys[ k ] ) ) if i != j ]
+print( "rows=%d dups=%d misfiled=%d header_ok=%d" % ( len( acks ), len( keys ) - len( set( keys ) ), len( moved ),
+       int( hdr == [ l for l in tool if l.startswith( "#" ) ] ) ) )
+for k in moved[ :4 ]:
+    print( "misfiled " + k )
+PY
+    ORD="$( head -1 "$WORK/order.txt" )"
+    case "$ORD" in
+        *" dups=0 misfiled=0 header_ok=1") ok "(6) the committed ledger is in the tool's order ($ORD) — a read+rewrite is byte-identical" ;;
+        *) no "(6) the committed ledger is NOT in the tool's order ($ORD): the first ack anyone runs will reorder it"; grep '^misfiled' "$WORK/order.txt" | sed 's/^/        /' ;;
+    esac
+else
+    ok "(6) no committed ledger in this tree — nothing to keep in order"
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"

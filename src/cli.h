@@ -1408,7 +1408,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               IT IS A DELTA, NEVER A LEVEL: a unit you edit without changing its size, complexity or parameter count sits in the same bin with the same volume on both sides and contributes NOTHING. Touching bad code is not punished, deliberately, because a gate that punishes it is a gate people route around.\n"
         "                               dmm=\"UNAVAILABLE\" means good+bad was 0 (a rename, a literal edit, a comment reflow): the change is outside what the model measures. That is NEVER to be read as 1.000 or 0.000, and reason= says which case it was. Same token per property.\n"
         "                               VOLUME IS PHYSICAL LINE SPAN (size_metric=\"physical-loc\"), where the reference implementation uses non-comment non-blank lines, so a heavily commented unit crosses the size threshold here earlier. NO THRESHOLD, NO VERDICT, ALWAYS EXIT 0.\n"
-        "    --quality-ack[=REASON]     accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked=\"N\") until one WORSENS past its acked size\n"
+        "    --quality-ack[=REASON]     accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked=\"N\") until one WORSENS past its acked size.\n"
+        "                               =REASON implies the --quality-delta report it acks; the reason-less spelling needs --quality-delta\n"
+        "                               beside it (refused alone). An ack with 0 findings to accept writes nothing and says so.\n"
         "      --ack-only=SUBSTR[,SUBSTR] (with --quality-ack) ack only SOME findings — those whose KIND, canonical id, or\n"
         "                               FACET contains one of these; the pseudo-token 'gating' selects exactly what would\n"
         "                               exit 2. Bare --quality-ack accepts the WHOLE report, so accepting one deliberate\n"
@@ -2492,9 +2494,11 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--quality-panel=",  &Config::qualityPanelPreset , EmptyValue::Refuse, "a preset name (bare --quality-panel is the default preset)", "--quality-panel=default", &Config::qualityPanel },
     // --html=FILE-or-stdout keeps Meaningful on purpose: `--html=` is `--html` (write to stdout) — a VISIBLE,
     // harmless answer, not a different question, which is the M6 distinction. --quality-ack=REASON is the
-    // same shape: `--quality-ack=` is a reason-less ack, exactly the bare spelling (its pairing rule is H10's).
+    // same shape with one more rule (H10): the reason-carrying spelling implies the --quality-delta report it
+    // acks (validateConfig sets it, where the bare arm used to), while `--quality-ack=` — a reason-less ack,
+    // exactly the bare spelling — is refused there without an explicit --quality-delta: HandlerRefuses.
     { "--html=",           &Config::htmlFile        , EmptyValue::Meaningful, nullptr, nullptr, &Config::html },
-    { "--quality-ack=",    &Config::qualityAckReason, EmptyValue::Meaningful, nullptr, nullptr, &Config::qualityAck, &Config::qualityDelta },
+    { "--quality-ack=",    &Config::qualityAckReason, EmptyValue::HandlerRefuses, nullptr, nullptr, &Config::qualityAck },   // validateConfig: "pass --quality-delta with it"
 
     // the handler refuses an empty value with its own verb-specific sentence - byte-identical to before the
     // move, because the row does NOT refuse here. Each names the refusing site so a reader can check it.
@@ -3817,6 +3821,23 @@ inline void validateConfig( Config& c ) noexcept
         c.ok = false;
     }
 
+    // H10 (capture-audit 2026-09-04): bare --quality-ack was the ONE modifier that WRITES when alone — it
+    // implied --quality-delta, acked "0 finding(s)" at exit 0 and re-serialised .ripwire_quality_acks, while
+    // its own --ack-only refuses bare. The reason-carrying spelling keeps implying the report it acks (the
+    // documented form: `--quality-ack="why"` names its own accountability); the reason-less spellings
+    // (`--quality-ack`, `--quality-ack=`) need an explicit --quality-delta beside them, like --ack-only and
+    // --scope below. The implication is set HERE, where --mcp's stable default is, not in the parser arm.
+    if( c.qualityAck && !c.qualityAckReason.empty() )
+    {
+        c.qualityDelta = true;
+    }
+    if( c.qualityAck && !c.qualityDelta )
+    {
+        std::fprintf( stderr, "ripwire: bare --quality-ack accepts EVERY finding of a --quality-delta report with no reason recorded — "
+                              "pass --quality-delta with it, and say why (e.g. ripwire <dir> --quality-delta --quality-ack=\"why this debt is deliberate\")\n" );
+        c.ok = false;
+    }
+
     // --ack-only=SUBSTR narrows WHICH findings --quality-ack accepts; without --quality-ack there is nothing
     // to narrow, so alone it would silently no-op on the plain map — exit 0, print the ordinary default map,
     // stderr empty. That is the exact failure --ack-only exists to prevent: a typo'd narrowing (or a bare
@@ -4163,7 +4184,11 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                     start = comma + 1;
                 }
             }
-            else if( a == "--quality-ack" )                    { c.qualityAck = true; c.qualityDelta = true; }
+            // H10 (capture-audit 2026-09-04): the bare, reason-less spelling no longer IMPLIES --quality-delta —
+            // it used to, and so alone it acked "0 finding(s)" at exit 0 and rewrote the ledger. validateConfig
+            // refuses it without an explicit --quality-delta; --quality-ack=REASON (the kViewFlags row) still
+            // implies the report it acks.
+            else if( a == "--quality-ack" )                    { c.qualityAck = true; }
             else if( startsWith( a, "--export=" ) )
             {
                 // --export=cc.json  or  --export=cc.json:FILE  (mirror --html's FILE-or-stdout convention).

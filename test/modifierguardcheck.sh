@@ -129,6 +129,15 @@ grep -qF -- '--no-stable is read only by --mcp' "$TMP/ns.err" \
     && ok "--no-stable alone: DISCLOSED on stderr as read only by --mcp/--listen (no-op told apart from a typo)" \
     || no "--no-stable alone: silent on stderr — accepted and ignored: [$( head -c 160 "$TMP/ns.err" )]"
 
+# H10 (capture-audit 2026-09-04) — bare `--quality-ack` was the ONE modifier that WRITES when alone: it
+# implied --quality-delta, acked "0 finding(s)", exited 0, and re-serialised .ripwire_quality_acks (one row
+# moved) — a spurious diff in every agent's tree, from a spelling its own --ack-only refuses bare. The
+# reason-less spellings (`--quality-ack`, `--quality-ack=`) now need an explicit --quality-delta beside them;
+# `--quality-ack=REASON` keeps implying the report it acks (the documented, reason-carrying form). The
+# zero-findings and ledger-order halves are qackconcurrencycheck.sh's (it owns the ledger's write path).
+guard "--quality-ack alone (no reason)"  'pass --quality-delta with it'   "$NOROOT" --quality-ack
+guard "--quality-ack= alone (empty reason)" 'pass --quality-delta with it' "$NOROOT" --quality-ack=
+
 [ "$checked" -ge 20 ] && ok "pinned $checked broken-combo refusals" \
                       || no "only $checked guards probed — one was dropped from this gate"
 

@@ -775,6 +775,41 @@ inline std::string registerMacroConfigWarningAttr( const rw::quality::RegisterMa
     return " config-warnings=\"" + std::to_string( diag.total() ) + "\"";
 }
 
+// H10 (capture-audit 2026-09-04): the --quality-ack run that has NOTHING to accept. It used to re-serialise
+// the ledger unconditionally ("acknowledged 0 finding(s)"), so a committed ledger with one hand-merged row out
+// of btree order moved that row under a run that changed no fact — a spurious diff in the caller's tree. But
+// the rewrite is also the ledger's HEALING path (duplicate lines collapsed to one canonical row, legacy kinds
+// migrated, misfiled rows re-sorted), and healing IS a change worth a diff. So the rule is the byte-level one:
+// a ledger already equal to its own canonical bytes is left alone and the run says so; a non-canonical one is
+// rewritten and the run says that instead. Neither creates a ledger out of nothing. Returns the exit code.
+int ackNothingToAccept( const std::string& acksFile, const gtl::btree_map<std::string, rw::quality::AckRecord>& acks,
+                        const rw::quality::Scope& scope, std::size_t outOfScopeCount )
+{
+    std::string onDisk;
+    rw::docparse::detail::readWholeFile( acksFile, onDisk );   // absent file ⇒ "" ⇒ never equal to a rendered ledger
+    if( acks.empty() || rw::quality::renderAckRecords( acks ) == onDisk )
+    {
+        if( scope.active() && outOfScopeCount > 0 )
+        {
+            std::fprintf( stderr, "ripwire: nothing to acknowledge — 0 finding(s) in --scope=%s (%zu out of scope, not yours); %s left untouched\n",
+                          scope.spec.c_str(), outOfScopeCount, acksFile.c_str() );
+        }
+        else
+        {
+            std::fprintf( stderr, "ripwire: nothing to acknowledge — the report has 0 finding(s); %s left untouched\n", acksFile.c_str() );
+        }
+        return 0;
+    }
+    if( !rw::quality::writeAckRecords( acksFile, acks ) )
+    {
+        std::fprintf( stderr, "ripwire: could not write %s\n", acksFile.c_str() );
+        return 1;
+    }
+    std::fprintf( stderr, "ripwire: nothing to acknowledge — the report has 0 finding(s), but %s was not in canonical form "
+                          "(duplicate, legacy or misfiled rows) and has been re-serialised\n", acksFile.c_str() );
+    return 0;
+}
+
 // runQualityViews was NOT a dispatch chain — it held two
 // branches, one of which was 298 lines. That one body is now runQualityDelta below; the residual
 // runQualityViews keeps only --dead-code. ONE extraction, verbatim: the 298-line body is unsplit, because
@@ -979,6 +1014,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 std::fprintf( stderr, "ripwire: --ack-only=%.*s matched none of the %zu finding(s) — nothing written\n",
                               int( cfg.qualityAckOnly.size() ), cfg.qualityAckOnly.data(), regs.size() );
                 return 1;
+            }
+            // H10: nothing to accept — leave a canonical ledger alone, heal a non-canonical one (ackNothingToAccept)
+            if( regs.empty() )
+            {
+                return ackNothingToAccept( acksFile, acks, scope, outOfScope.size() );
             }
             const bool wroteAcks = quality::writeAckRecords( acksFile, acks );
             if( wroteAcks && !cfg.qualityAckOnly.empty() )
