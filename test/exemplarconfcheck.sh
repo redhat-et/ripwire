@@ -91,22 +91,54 @@ printf '%s' "$SHDR2" | grep -q 'low_confidence' \
     && no "strong query (compute pagerank) wrongly fired low_confidence: $SHDR2" \
     || ok "strong query (compute pagerank) does not fire low_confidence: $SHDR2"
 
-# ── 3) selection itself is untouched — all three queries land on the SAME ROLE-based repo-wide kind=fn ──
-# winner, proving this fix changed only the confidence signal.
+# ── 3) selection itself is untouched — the ROLE-based winner is a function of (corpus, donated KIND), never ──
+# of the query TEXT, proving this fix changed only the confidence signal.
 #
 # The claim is DIFFERENTIAL — "the same winner regardless of query" — so it is asserted differentially.
 # It used to name the winner literally (`fnv1a64`), which made a claim about the corpus rather than about
 # the fix: any change to what the tree contains re-scored the role and reddened a gate that was measuring
-# something else entirely. Whichever symbol wins, all three queries must agree on it, because --exemplar
-# chooses by ROLE and the role does not read the query. Extract it from the weak query and require the
-# two strong ones to match.
-WINNER="$( printf '%s' "$WHDR" | sed -n 's/.* n="\([^"]*\)".*/\1/p' )"
-if [ -z "$WINNER" ]; then
-    no "selection: could not read n= from the weak-query header: $WHDR"
-elif printf '%s' "$SHDR1" | grep -q "n=\"$WINNER\"" && printf '%s' "$SHDR2" | grep -q "n=\"$WINNER\""; then
-    ok "selection (ROLE-based winner n=\"$WINNER\") is query-independent, as the confidence-signal fix requires"
+# something else entirely. Whichever symbol wins, queries must agree on it, because --exemplar chooses by
+# ROLE and the role does not read the query.
+#
+# Re-stated 2026-09-04 (capture-audit close). The arm compared n= across all three queries UNCONDITIONALLY,
+# which smuggled in a second claim: that all three queries also DONATE THE SAME KIND. Kind donation is the
+# task→kind step this header describes, and it reads the query AND the corpus by design. Measured at the
+# wave-1 merge: "compute pagerank" donates kind="var" (n="ResolvedBinary") on the merged tree with the
+# ec5e3c3 binary too, and kind="fn" (n="min") with the merged binary on the ec5e3c3 tree — corpus drift
+# (the 2026-09-04 legend rewording put "PageRank" into var-kind legend constants' bodies), not a selection
+# change. The precise contract, stated rather than loosened: queries that donate the SAME kind= land on the
+# SAME n=; and the arm must be non-vacuous — the weak query and at least one strong query must share a kind,
+# otherwise it FAILS (a comparison with nothing to compare proves nothing) and a strong query is re-anchored.
+kindOf(){ printf '%s' "$1" | sed -n 's/.* kind="\([^"]*\)".*/\1/p'; }
+nameOf(){ printf '%s' "$1" | sed -n 's/.* n="\([^"]*\)".*/\1/p'; }
+WK="$( kindOf "$WHDR" )"; WINNER="$( nameOf "$WHDR" )"
+S1K="$( kindOf "$SHDR1" )"; S1N="$( nameOf "$SHDR1" )"
+S2K="$( kindOf "$SHDR2" )"; S2N="$( nameOf "$SHDR2" )"
+if [ -z "$WINNER" ] || [ -z "$WK" ]; then
+    no "selection: could not read kind=/n= from the weak-query header: $WHDR"
 else
-    no "selection changed between queries (weak picked \"$WINNER\") — this fix must touch ONLY the confidence signal"
+    shared=0; agree=1
+    for triple in "$S1K|$S1N|file churn" "$S2K|$S2N|compute pagerank"; do
+        k="${triple%%|*}"; rest="${triple#*|}"; n="${rest%%|*}"; label="${rest#*|}"
+        if [ "$k" = "$WK" ]; then
+            shared=$(( shared + 1 ))
+            if [ "$n" != "$WINNER" ]; then
+                agree=0
+                no "selection changed between same-kind queries: weak (kind=$WK) picked \"$WINNER\", '$label' picked \"$n\" — this fix must touch ONLY the confidence signal"
+            fi
+        else
+            ok "selection: '$label' donates kind=$k (weak donated $WK) — a different role pool, not comparable by contract (kind donation reads the query and the corpus)"
+        fi
+    done
+    if [ "$S1K" = "$S2K" ] && [ "$S1K" != "$WK" ] && [ "$S1N" != "$S2N" ]; then
+        agree=0
+        no "selection changed between the two same-kind strong queries (kind=$S1K): \"$S1N\" vs \"$S2N\""
+    fi
+    if [ "$shared" -lt 1 ]; then
+        no "selection arm VACUOUS: no strong query donates the weak query's kind=$WK (file churn→$S1K, compute pagerank→$S2K) — re-anchor a strong query so the differential claim has a comparand"
+    elif [ "$agree" = 1 ]; then
+        ok "selection (ROLE-based winner n=\"$WINNER\" for kind=$WK) is query-independent across $shared same-kind strong quer(y/ies), as the confidence-signal fix requires"
+    fi
 fi
 
 # ── 4) determinism (byte-identical run-to-run) + well-formed XML, on the query that now flags degraded ──
