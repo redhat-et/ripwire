@@ -1984,7 +1984,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               isn't writable, ...) — a passing row never carries hint=.\n"
         "                               The root carries TWO shas, and they answer different questions: at= is the\n"
         "                               TREE's HEAD (+dirty) right now, built_from= is the commit THIS BINARY was\n"
-        "                               compiled from (byte-identical to --version's \"git <sha>\"). They differ from\n"
+        "                               compiled from (byte-identical to --version's own built_from=). They differ from\n"
         "                               the moment you commit until the next build — normal, so a mismatch is\n"
         "                               reported, never gated; a stale PATH copy shadowing a fresh build is the\n"
         "                               binary-path row's job and is decided on inode/mtime/size, not on this sha.\n"
@@ -3945,7 +3945,12 @@ inline Config parseArgs( int argc, char** argv ) noexcept
         // in CMakeLists.txt), so this can never drift from the CMake version test/versioncheck.sh checks.
         if( a == "--version" || a == "-v" )
         {
-            std::printf( "ripwire %s (%s, %s %s, git %s)\n", kRipwireVersion, kRipwireBuildType,
+            // §L10b LOW tail: this sha is the commit the BINARY was compiled from, the same fact
+            // --doctor's own built_from= names (verbs_doctor.h; byte-identical, test/doctorcheck.sh arm
+            // H) — labelled the same way here rather than left as a bare "git <sha>" a reader could
+            // mistake for the tree's current HEAD (that is --doctor's separate at=, which moves the
+            // moment you commit without rebuilding; this one does not, until the next build).
+            std::printf( "ripwire %s (%s, %s %s, built_from=%s)\n", kRipwireVersion, kRipwireBuildType,
                          kRipwireCompilerId, kRipwireCompilerVer, kRipwireGitStamp );
             std::exit( 0 );
         }

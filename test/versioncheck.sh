@@ -66,9 +66,12 @@ OUT2="$( "$BIN" --version 2>&1 )"
 # must name the configured checkout's HEAD and disclose whether tracked source differed at build time.
 EXPECTED_SHA="$( git -C "$ROOT" rev-parse --short=9 HEAD 2>/dev/null || true )"
 if [ -n "$EXPECTED_SHA" ]; then
-    printf '%s' "$OUT_LONG" | grep -q "git $EXPECTED_SHA" \
-        && ok "--version names source revision $EXPECTED_SHA" \
-        || no "--version omits source revision $EXPECTED_SHA: $OUT_LONG"
+    # §L10b LOW tail: was a bare "git <sha>" — labelled built_from= (matching --doctor's own attribute
+    # for the identical fact, verbs_doctor.h) so a reader cannot mistake it for the tree's CURRENT HEAD
+    # (--doctor's separate at=, which moves the moment you commit without rebuilding; this one does not).
+    printf '%s' "$OUT_LONG" | grep -q "built_from=$EXPECTED_SHA" \
+        && ok "--version names source revision as built_from=$EXPECTED_SHA" \
+        || no "--version omits built_from=$EXPECTED_SHA: $OUT_LONG"
 
     # The clean/dirty split must use the SAME predicate as cmake/version_stamp.cmake: worktree AND index.
     # A staged-but-uncommitted change stamps +dirty; a gate reading only the worktree would then call an
@@ -76,10 +79,10 @@ if [ -n "$EXPECTED_SHA" ]; then
     # to a build-time stamp, and the ordinary build-then-gate flow never hits it.)
     if git -C "$ROOT" diff --quiet --ignore-submodules -- 2>/dev/null \
         && git -C "$ROOT" diff --cached --quiet --ignore-submodules -- 2>/dev/null; then
-        case "$OUT_LONG" in *"git $EXPECTED_SHA+dirty"*) no "clean checkout falsely stamped dirty";;
+        case "$OUT_LONG" in *"built_from=$EXPECTED_SHA+dirty"*) no "clean checkout falsely stamped dirty";;
                             *) ok "clean checkout is not falsely stamped dirty";; esac
     else
-        printf '%s' "$OUT_LONG" | grep -q "git $EXPECTED_SHA+dirty" \
+        printf '%s' "$OUT_LONG" | grep -q "built_from=$EXPECTED_SHA+dirty" \
             && ok "dirty checkout is disclosed in --version" \
             || no "dirty checkout is not disclosed in --version: $OUT_LONG"
     fi
