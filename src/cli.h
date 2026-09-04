@@ -3640,6 +3640,16 @@ inline void validateConfig( Config& c ) noexcept
 
     validateAgent( c );
 
+    // H10 (capture-audit 2026-09-04): --quality-ack=REASON implies the --quality-delta report it acks. The
+    // implication must be set BEFORE the modifier guards below: noticeShapingFlagIgnored reads c.qualityDelta
+    // to find the verb a stray --top-k/--max-tokens/--token-budget was passed to, and with the implication
+    // set only after it ran, `--quality-ack=why --top-k=1` was the one spelling in the universe that swallowed
+    // a knob SILENTLY (shapingflagcheck (F), red at the wave-1 merge). The reason-less refusal stays below.
+    if( c.qualityAck && !c.qualityAckReason.empty() )
+    {
+        c.qualityDelta = true;
+    }
+
     validateModifierGuards( c );   // §P8: the eleven new "(with X)" companion guards, split out above (see its header)
 
     // --anchor is a negative-result experiment (dropped from --help) — gated behind
@@ -3826,11 +3836,8 @@ inline void validateConfig( Config& c ) noexcept
     // its own --ack-only refuses bare. The reason-carrying spelling keeps implying the report it acks (the
     // documented form: `--quality-ack="why"` names its own accountability); the reason-less spellings
     // (`--quality-ack`, `--quality-ack=`) need an explicit --quality-delta beside them, like --ack-only and
-    // --scope below. The implication is set HERE, where --mcp's stable default is, not in the parser arm.
-    if( c.qualityAck && !c.qualityAckReason.empty() )
-    {
-        c.qualityDelta = true;
-    }
+    // --scope below. The implication is set above validateModifierGuards (not in the parser arm), so the
+    // knob notice sees the implied verb.
     if( c.qualityAck && !c.qualityDelta )
     {
         std::fprintf( stderr, "ripwire: bare --quality-ack accepts EVERY finding of a --quality-delta report with no reason recorded — "
