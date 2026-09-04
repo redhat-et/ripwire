@@ -977,6 +977,7 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
         }
         if( parserVer != parserVerFor( captureValueUses ) || arch != kArtifactArch )
         {
+            DEGRADED_PATH_ALERT( "ingest: cache blob parserVer/arch mismatch (older or foreign binary) — rejected and rebuilt (full reparse)" );
             return frame;   // a different extraction identity or a foreign arch — the ordinary self-heal
         }
         // header[13:21) is the legacy wall-clock write stamp — diagnostic only (see saveCache).
