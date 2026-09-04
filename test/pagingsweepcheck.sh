@@ -657,7 +657,9 @@ for verb in universe:
         continue
     checked += 1
     lacking = [ a for a in QUINTET if not has( a ) ]
-    if not lacking and val( "has_more" ) != "1":
+    # the WINDOW cut rows (shown < total by the numbers) ⇒ a page after this one exists. A root whose only
+    # cut is a fired COLLECTION cap (H8: capped="1" counts_floor="1" with shown == total) has no next page.
+    if not lacking and val( "has_more" ) != "1" and int( val( "shown" ) or 0 ) < int( val( "total" ) or 0 ):
         print( f"  FAIL  (L) {verb}: <{tag}> capped on the default window (offset 0) but has_more=\"{val('has_more')}\" — rows were cut, so there IS more" ); fail = 1
     if lacking:
         print( f"  FAIL  (L) {verb}: <{tag}> is capped on the default window but lacks {lacking} — an agent cannot page from this answer" ); fail = 1

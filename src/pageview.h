@@ -64,9 +64,21 @@
 //
 //   4. <noun>_capped="1"    with NO shown_<noun>= in the element: the TOTAL ITSELF is a floor — the scan or
 //      (floor marker)       budget stopped before it could finish counting, so <noun>= is a lower bound.
-//                           hits_capped= (--grep/--match), findings_capped= (--lint). "1" ⇒ floor; "0" or
+//                           hits_capped= (--grep/--match/--pattern), findings_capped= (--lint/--ensemble/
+//                           --quality-panel), count_capped= (a --lint <rule> row). "1" ⇒ floor; "0" or
 //                           ABSENT ⇒ the total is exact (--lint's §P0.2 legend: "Absent = nothing was
 //                           capped and every count= is a total").
+//                           H8 (capture-audit 2026-09-04): a fired marker is a COLLECTION cut, and the paging
+//                           half must not contradict it. The audited binary printed `hits_capped="1"` beside
+//                           `capped="0" has_more="0" total="5000"` — the complete-last-page lie an agent's
+//                           has_more loop believes. So whenever the marker fires, the same root ALSO carries
+//                           counts_floor="1" (every count on this element is a floor; the cause is the
+//                           marker beside it — the same attribute the graph verbs use for the same reading,
+//                           see graphlegend.h) and capped="1" (rows exist that no page holds; has_more= keeps
+//                           its window meaning, so a loop still terminates). pageDisclosure's
+//                           `collectionCapped` argument is the one place that rule is implemented; every
+//                           emitter of a rule-4 marker passes its cap there under the /*collectionCapped=*/
+//                           annotation (test/collectioncapcheck.sh arm (D) reads src/ for exactly that).
 //
 //   5. capped="1" on a      a payload trimmed by a BYTE budget rather than a row cap, on the trimmed element
 //      byte-trimmed element itself, WITH shown=/total= (capture-audit 2026-09-04): --for's <sigs shown="S"
@@ -173,25 +185,28 @@ struct PageDisclosureValues
     std::size_t nextOrTotal;    // next_offset when hasMore, else rowTotal (pageDisclosure's existing convention)
     int         offsetOut;
     int         limitOut;
+    bool        floor;          // H8: a collection cap fired — counts_floor rides after the paging half
 };
 
 inline PageDisclosureValues computePageDisclosure( std::size_t rowsShown, std::size_t rowTotal, std::size_t windowEnd,
-                                                    int limit, int offset, bool discloseCap ) noexcept
+                                                    int limit, int offset, bool discloseCap, bool collectionCapped = false ) noexcept
 {
     const bool explicitWindow = limit > 0 || offset > 0;
-    if( !explicitWindow && !discloseCap )
+    if( !explicitWindow && !discloseCap && !collectionCapped )
     {
-        return { false, 0, false, 0, 0, 0, 0 };
+        return { false, 0, false, 0, 0, 0, 0, false };
     }
 
     // M2 (capture-audit 2026-09-04, rule 3): the paging half rides whenever the listing was CUT, not only
     // when the caller spelled a window — a default display cap is a window too, and the agent holding
     // that answer needs next_offset= exactly as much. `paging` therefore means "emit the paging half".
-    const unsigned capped  = rowsShown < rowTotal ? 1u : 0u;
+    // H8 (rule 4): a fired COLLECTION cap is a cut too — rows exist that no page holds — so capped="1"
+    // is forced and the floor marker rides; has_more= keeps its window meaning (a loop still terminates).
+    const unsigned capped  = ( rowsShown < rowTotal || collectionCapped ) ? 1u : 0u;
     const bool     paging  = explicitWindow || capped != 0u;
     const unsigned hasMore = paging && windowEnd < rowTotal ? 1u : 0u;
     return { true, capped, paging, hasMore, hasMore ? windowEnd : rowTotal,
-             offset > 0 ? offset : 0, limit > 0 ? limit : 0 };
+             offset > 0 ? offset : 0, limit > 0 ? limit : 0, collectionCapped };
 }
 
 // The root-element disclosure, in two independent halves emitted in ONE call so the attribute ORDER is fixed
@@ -225,44 +240,57 @@ struct PageSyntax
                               // exception (pagingDisclosure below), where the caller spelled its own shown_<noun>= pair
     const char* yes;          // how this surface spells a true boolean
     const char* no;
+    const char* floor;        // H8: the floor marker appended when a COLLECTION cap fired — the same spelling
+                              // graphlegend.h's kGraphCountFloorAttrXml/Json use (one attribute, one reading:
+                              // "every count on this element is a floor"; the cause is the sibling marker)
 };
 inline constexpr PageSyntax kXmlPageSyntax
 {
     " shown=\"%zu\" capped=\"%s\"",
     " shown=\"%zu\" capped=\"%s\" total=\"%zu\" has_more=\"%s\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"",
     " total=\"%zu\" has_more=\"%s\" next_offset=\"%zu\" offset=\"%d\" limit=\"%d\"",
-    "1", "0"
+    "1", "0",
+    " counts_floor=\"1\""
 };
 inline constexpr PageSyntax kJsonPageSyntax
 {
     ",\"shown\":%zu,\"capped\":%s",
     ",\"shown\":%zu,\"capped\":%s,\"total\":%zu,\"has_more\":%s,\"next_offset\":%zu,\"offset\":%d,\"limit\":%d",
     ",\"total\":%zu,\"has_more\":%s,\"next_offset\":%zu,\"offset\":%d,\"limit\":%d",
-    "true", "false"          // JSON spells its booleans as booleans; a leading comma splices after the caller's own keys
+    "true", "false",         // JSON spells its booleans as booleans; a leading comma splices after the caller's own keys
+    ",\"counts_floor\":true"
 };
 
 // ONE function, table-selected — not an XML body plus a JSON body that happen to agree today, and not two
 // one-line wrappers either (a --quality-delta pass reads even those as a clone pair, and it is right to:
 // two entry points is one more than the vocabulary needs). A JSON caller passes kJsonPageSyntax; every XML
 // caller keeps the byte-identical default and never mentions the table at all.
+// `collectionCapped` (H8): true when the verb's OWN collection cap fired (the rule-4 marker it emits beside
+// this block — hits_capped=/findings_capped=). Callers pass it under a /*collectionCapped=*/ annotation so
+// test/collectioncapcheck.sh arm (D) can read, from src/ alone, that every rule-4 emitter feeds it.
 inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t rowsShown, std::size_t rowTotal,
                                    std::size_t windowEnd, int limit, int offset, bool discloseCap,
-                                   const PageSyntax& syn = kXmlPageSyntax ) noexcept
+                                   const PageSyntax& syn = kXmlPageSyntax, bool collectionCapped = false ) noexcept
 {
-    const PageDisclosureValues v = computePageDisclosure( rowsShown, rowTotal, windowEnd, limit, offset, discloseCap );
+    const PageDisclosureValues v = computePageDisclosure( rowsShown, rowTotal, windowEnd, limit, offset, discloseCap, collectionCapped );
     if( !v.active ) { buf[0] = '\0';  return buf; }
 
     const char* isCapped = v.capped ? syn.yes : syn.no;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
+    int written = 0;
     if( !v.paging )
     {
-        std::snprintf( buf, bufCap, syn.capOnly, rowsShown, isCapped );
+        written = std::snprintf( buf, bufCap, syn.capOnly, rowsShown, isCapped );
     }
     else
     {
-        std::snprintf( buf, bufCap, syn.full, rowsShown, isCapped, rowTotal, v.hasMore ? syn.yes : syn.no,
-                       v.nextOrTotal, v.offsetOut, v.limitOut );
+        written = std::snprintf( buf, bufCap, syn.full, rowsShown, isCapped, rowTotal, v.hasMore ? syn.yes : syn.no,
+                                 v.nextOrTotal, v.offsetOut, v.limitOut );
+    }
+    if( v.floor && written > 0 && std::size_t( written ) < bufCap )
+    {
+        std::snprintf( buf + written, bufCap - std::size_t( written ), "%s", syn.floor );
     }
 #pragma clang diagnostic pop
     return buf;
@@ -302,7 +330,8 @@ inline const char* pagingDisclosure( char* buf, std::size_t bufCap, std::size_t 
     return buf;
 }
 
-// Sized for the widest disclosure above: 3 × 20-digit size_t + 2 × 11-char int + the attribute/key names.
-inline constexpr std::size_t kPageDisclosureCap = 192;
+// Sized for the widest disclosure above: 3 × 20-digit size_t + 2 × 11-char int + the attribute/key names
+// + the H8 floor marker.
+inline constexpr std::size_t kPageDisclosureCap = 224;
 
 }   // namespace rw

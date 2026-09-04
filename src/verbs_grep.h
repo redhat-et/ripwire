@@ -608,7 +608,8 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "root= on the root element is the crawl root every <f p=…> is now RELATIVE to (single-root runs only; absent ⇒ p= is the "
                  "path ingest itself used, unchanged). ORDER: SOURCE files before test/bench files before docs, then path and line. "
                  "shown=/capped= = rows printed vs found (a count of underlying HITS, the same unit hits= uses, not of printed <hit> "
-                 "elements); hits_capped=\"1\" ⇒ hits= is a FLOOR (collection budget reached). " );
+                 "elements); hits_capped=\"1\" ⇒ hits= is a FLOOR (collection budget reached) and the root then also carries "
+                 "counts_floor=\"1\" and capped=\"1\" — rows exist that no page holds. " );
     // G3 (2026-08-15 harvest): terms=/scope=/terms_suppressed= appear ONLY when the run passed and/not —
     // deliberately no literal "--and"/"--not" substring (illegal "--" digraph inside an XML comment; spelled
     // without the leading dashes, matching this legend's own convention) — and so does the PROSE defining
@@ -704,7 +705,8 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     std::printf( "<grep pattern=\"%s\"%s%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s%s%s>",
                  ex( pat ).c_str(), schemaAttr, rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
-                                 cfg.pageLimit, cfg.pageOffset, true ),
+                                 cfg.pageLimit, cfg.pageOffset, true, kXmlPageSyntax,
+                                 /*collectionCapped=*/ hitsCapped != 0 ),   // H8: the cap hits_capped= names floors the root
                  hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str() );
     // G1 (2026-08-15 harvest): hits GROUP by file under <f p="…">, root-relative when this is a single-root
     // run (report-memgraph §F6: the absolute root prefix alone was 42.5% of a real --grep payload; the

@@ -21,6 +21,15 @@
 // It is a constant "1" today because the tool cannot detect the absence it is disclosing — a 0 would be a
 // claim of exhaustiveness that nothing in the pipeline can support.
 //
+// H8 AMENDMENT (capture-audit 2026-09-04). The READING of counts_floor= is "every count on this element
+// is a floor"; the CAUSE is disclosed beside it, never encoded in the name. On a graph verb the cause is the
+// floor sentence below (the graph misses edges — nothing raises it). On a collection-capped scan (--match /
+// --lint / --grep / --pattern / --ensemble / --quality-panel) the cause is the rule-4 marker on the same root
+// (hits_capped= / findings_capped=) and it IS raisable — narrow the query. Two causes, one reading, one
+// attribute: a parser that treats counts_floor="1" as "do not trust these totals" is right in both cases,
+// which it was not when the capped scans carried no marker at all and printed has_more="0" capped="0" over
+// a floored total (the complete-last-page lie). pageview.h's PageSyntax::floor spells the identical bytes.
+//
 // Gate: test/floormarkcheck.sh (all five verbs, CLI ≡ MCP wording, and the retired absolutism absent).
 
 #include <string>

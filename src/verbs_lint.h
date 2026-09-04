@@ -1,4 +1,6 @@
 #pragma once
+
+#include <algorithm>   // std::any_of (H8: findings_capped over the emitted rules)
 #if !defined( RIPWIRE_MAIN_TU )
 #error "verbs_lint.h is a SECTION of src/main.cpp's translation unit - include it only from main.cpp (see the verb-family split note there)"
 #endif
@@ -988,7 +990,9 @@ void emitRunLintSarif( const MainDispatch& d,
     }
 
     rw::sarif::SarifRunProperties props;
-    props.anyRuleCapped   = !saturatedRules.empty();
+    // H8: over the EMITTED rules only — the XML root's findings_capped= applies the same predicate.
+    props.anyRuleCapped   = std::any_of( saturatedRules.begin(), saturatedRules.end(), [ & ]( const RuleCap& rc )
+                                         { return !lintSel.active || rw::lintcatalog::lintSelectionKeeps( lintSel, rc.rule ); } );
     props.selectionActive = lintSel.active;
     props.selectedCount   = lintSel.selectedCount;
     props.totalCount      = lintSel.totalCount;
@@ -1063,7 +1067,8 @@ inline constexpr std::string_view kPatternLegend =
                          "everything else is kind- and text-exact. unresolved_in= names the served grammars the pattern did not "
                          "resolve for, and appears whenever that could mislead - on a zero result (the zero may be theirs, not the "
                          "code's) or on any run with skipped_files above zero. shown=/capped= = rows printed vs found. hits= is a "
-                         "FLOOR, not a total, when EITHER hits_capped=\"1\" (engine match limit reached) or ellipsis_capped=\"1\"; "
+                         "FLOOR, not a total, when EITHER hits_capped=\"1\" (engine match limit reached; the root then also carries "
+                         "counts_floor=\"1\" and capped=\"1\" — rows exist that no page holds) or ellipsis_capped=\"1\"; "
                          "the latter means an ellipsis probe gave up on ellipsis_skipped= candidate nodes whose sibling run exceeded "
                          "ellipsis_bound, so a node that would have matched can be missing (ellipsis_skipped= counts ABANDONS and is "
                          "itself a floor on those nodes). raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->";
@@ -1291,14 +1296,17 @@ std::optional<int> runLint( const MainDispatch& d )
             // §L3: no `attr="value"` spelled out below for grammars=/eligible_files=/of_files= — a naive
             // whole-line grep (matchcapturecheck.sh's own idiom) would match the WORDED example first.
             std::printf( "<!-- ripwire match: tree-sitter structural query; each hit = a captured node + its enclosing symbol. "
-                         "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (engine match limit reached). "
+                         "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (engine match limit reached) and the "
+                         "root then also carries counts_floor=\"1\" and capped=\"1\" — rows exist that NO page holds (the engine cap, not the "
+                         "window, dropped them; narrow the query), while has_more= keeps its window meaning so a loop still terminates. "
                          "auto_captured=\"1\" ⇒ the query bound no @capture and ripwire appended `@m` to its single top-level pattern. "
                          "grammars= names every grammar the query compiled against; eligible_files=/of_files= are corpus files in that "
                          "language set vs total indexed files. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->" );
             std::printf( "<match hits=\"%zu\"%s hits_capped=\"%d\"%s grammars=\"%s\" eligible_files=\"%zu\" of_files=\"%zu\"%s>",
                          ms.size(),
                          pageDisclosure( mpab, sizeof( mpab ), matchShown, ms.size(), matchPage.end,
-                                         cfg.pageLimit, cfg.pageOffset, true ),
+                                         cfg.pageLimit, cfg.pageOffset, true, kXmlPageSyntax,
+                                         /*collectionCapped=*/ ms.size() >= kMatchMaxHits ),   // H8: the same cap hits_capped= names
                          ms.size() >= kMatchMaxHits ? 1 : 0,
                          autoCaptured ? " auto_captured=\"1\"" : "",
                          ex( grammarsAttr ).c_str(),
@@ -1343,7 +1351,8 @@ std::optional<int> runLint( const MainDispatch& d )
             const bool tellUnresolved = ps.matches.empty() || ps.skippedFiles > 0;
             std::printf( "<pattern hits=\"%zu\"%s hits_capped=\"%d\" q=\"%s\" grammars=\"%s\" shapes=\"%s\" unsupported=\"%.*s\"%s%s eligible_files=\"%zu\" skipped_files=\"%zu\" of_files=\"%zu\"%s>",
                          ps.matches.size(),
-                         pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true ),
+                         pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true,
+                                         kXmlPageSyntax, /*collectionCapped=*/ ps.matches.size() >= rw::pattern::kMaxHits ),   // H8
                          ps.matches.size() >= rw::pattern::kMaxHits ? 1 : 0,
                          ex( cfg.pattern ).c_str(),
                          ex( ps.grammarsAttr ).c_str(),
@@ -1758,7 +1767,15 @@ std::optional<int> runLint( const MainDispatch& d )
             }
             return nullptr;
         };
-        const bool anyRuleCapped = !saturatedRules.empty();
+        // H8 (capture-audit 2026-09-04, lens 1 F5): OR over the rules this document EMITS, never over every
+        // rule that saturated. `--lint-select=cache-` used to inherit findings_capped="1" from the UNSELECTED
+        // magic-number rule, so 398 had to be read as a floor when, by the legend's own definition, it was a
+        // total. Same predicate as the tally-row loop below and the SARIF twin (lintRuleEmitted).
+        const auto lintRuleEmitted = [ & ]( const RuleCap& rc ) -> bool
+        {
+            return !lintSel.active || rw::lintcatalog::lintSelectionKeeps( lintSel, rc.rule );
+        };
+        const bool anyRuleCapped = std::any_of( saturatedRules.begin(), saturatedRules.end(), lintRuleEmitted );
 
         // §L7: per-rule LANGUAGE applicability — a rule whose registered languages (lintcatalog.h) never
         // intersect the corpus' own languages is not "measured zero", it is structurally inert here.
@@ -1823,11 +1840,13 @@ std::optional<int> runLint( const MainDispatch& d )
                      "A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. "
                      "Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. "
                      "A rule that spends its whole budget carries count_capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
-                     "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one rule is a floor. "
+                     "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one PRINTED rule row is a "
+                     "floor (never inherited from a rule lint-select/lint-ignore dropped), and the root then also carries counts_floor=\"1\" "
+                     "and capped=\"1\": findings= and total= are floors, rows exist that no page holds. "
                      "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). "
                      "On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed "
                      "them, absent an explicit limit=) — a different fact from the per-rule count_capped=\"1\" above, which is a MATCH-BUDGET "
-                     "floor on one rule's own count=; findings= is always the true total either way. "
+                     "floor on one rule's own count=; findings= is the true total unless findings_capped=\"1\" floors it. "
                      "A rule row's applicable=\"0\" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this "
                      "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
                      "how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a "
@@ -1859,7 +1878,8 @@ std::optional<int> runLint( const MainDispatch& d )
             char lintPageBuf[ kPageDisclosureCap ];
             std::printf( "<lint findings=\"%zu\"%s%s%s%s%s>", outs.size(),
                          pageDisclosure( lintPageBuf, sizeof( lintPageBuf ), shownCount, outs.size(), lintPage.end,
-                                        cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true ),
+                                        cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true, kXmlPageSyntax,
+                                        /*collectionCapped=*/ anyRuleCapped ),   // H8: a floored rule floors findings=
                          anyRuleCapped ? " findings_capped=\"1\"" : "", heatJoinedAttr.c_str(), lintRootExtra.c_str(), lintRootAttr.c_str() );
         }
         if( cfg.lint )

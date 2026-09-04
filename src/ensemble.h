@@ -80,6 +80,7 @@
 #include "lintrules.h"       // kLintMaxPerRule — the SAME per-rule budget --lint gives both packs
 #include "quality.h"         // kCcxBar / kLocBar / kNestBar / kParamBar — the repo's existing structural bars
 #include "pageview.h"        // pageWindow + pagingDisclosure — THE TRUNCATION VOCABULARY
+#include "graphlegend.h"     // kGraphCountFloorAttrXml — H8: the floor a fired findings_capped= carries
 #include "gitstamp.h"        // atAttr — the historical family is git-mined, so the row set is stamped like --hotspots
 #include "serialize.h"       // escapeXml
 
@@ -814,7 +815,7 @@ inline constexpr const char* kEnsembleLegend =
     "been evaluated for it, and fam= cannot reach 4 on a corpus where one family was never applicable. "
     "unreadable_files=indexed files the readability lens could not read, so rrank= is a floor over what it saw. "
     "findings_capped=1 when a lexical or confusion rule spent its per-rule budget, with floor_rules= naming "
-    "them: those families are then FLOORS. A naming or atom finding that lies outside every function body is "
+    "them: those families are then FLOORS and the root carries counts_floor=1. A naming or atom finding that lies outside every function body is "
     "not joined to any symbol and is not counted here. "
     "shown_syms=symbol rows printed syms_capped=1 when symbol rows were dropped shown_files=file rows printed "
     "files_capped=1 when file rows were dropped; the symbol listing is the one limit=N and offset=M window, "
@@ -864,7 +865,9 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
     }
     if( !floorRules.empty() )
     {
-        std::printf( " findings_capped=\"1\" floor_rules=\"%s\"", std::string( escapeXml( std::string_view( floorRules ), escFloor ) ).c_str() );
+        std::printf( " findings_capped=\"1\" floor_rules=\"%s\"%s", std::string( escapeXml( std::string_view( floorRules ), escFloor ) ).c_str(),
+                     kGraphCountFloorAttrXml );   // H8: a floored family floors the root's counts
+        // (kGraphCountFloorAttrXml: graphlegend.h — one attribute, one reading, for cap floors and graph floors alike)
     }
     std::printf( " shown_syms=\"%zu\" syms_capped=\"%s\" shown_files=\"%zu\" files_capped=\"%s\"%s%s>",
                  shown, shown < total ? "1" : "0",
