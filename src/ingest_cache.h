@@ -190,7 +190,16 @@ constexpr std::uint32_t kCacheVersion = 15;           // 15 (offset-table blob):
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 76;           // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 77;           // bump on any grammar/.scm/extraction change
+                                                      // 77 = 2026-09-03 (Phase 5, docs/EVALS.md): two Python
+                                                      //    ingest FACTS — (a) a `super()` call receiver classifies
+                                                      //    RecvKind::SuperObj (appended) instead of None, so
+                                                      //    `super().m()` stops reading as a BARE call; (b) every
+                                                      //    import statement records the NAMES it binds as file-
+                                                      //    scope LocalBindKind::Import RawBinds (appended kind),
+                                                      //    `np`→`numpy`, the fuel of the external-name veto.
+                                                      //    Record shapes unchanged, kCacheVersion stays; Python
+                                                      //    ref and bind FACTS changed → parserVer moves.
                                                       // 75 = 2026-09-02 (member-variable round, card A3): a new
                                                       //    SymKind::Field — C/C++ @definition.field (non-static
                                                       //    field_declaration) and Python (`self.x = …` / annotated

@@ -1235,7 +1235,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
         }
 #endif
 
-        captureIncludes( root, le.lang, fileId, src, incs, refs );   // physical deps + ABS-3 import-role use-sites
+        captureIncludes( root, le.lang, fileId, src, incs, refs, binds );   // physical deps + ABS-3 import-role use-sites + Phase 5 import bindings
 
         // A4-R5: cross-language FFI binding declarations (pybind11 / extern "C" / ctypes handle). Inert on a
         // binding-free file (pybind gated on a file signal; extern-C/ctypes only fire on their exact shapes).

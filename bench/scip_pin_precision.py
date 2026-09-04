@@ -69,7 +69,7 @@ import os
 import subprocess
 import sys
 
-MECHS = [ "locality", "qualified", "receiver-rule", "cone", "arity", "split", "unique", "scip", "binding" ]
+MECHS = [ "locality", "qualified", "receiver-rule", "cone", "arity", "split", "unique", "scip", "binding", "external" ]
 # The registered strata, in the order the result table prints them.
 SILENT_PINS = [ "qualified", "receiver-rule", "cone", "arity" ]
 
@@ -138,6 +138,12 @@ def measure( decisions, oracle ):
         # right. For `split` it is the strict reading, and the per-target rate below is the lenient one.
         # A sentinel never equals an id, so a site SCIP resolved only to a non-definition is disconfirmed.
         confirmed = all( t in truth for t in d[ "targets" ] )
+        if d[ "mech" ] == "external":
+            # Phase 5: a VETO row names no target. It is right iff SCIP says the site was bound outside the
+            # tree (`@external`) and wrong iff SCIP names an in-repo definition; a `@nondef`-only answer is
+            # neither (reported in the @nondef column, and excluded from the veto-precision denominator the
+            # registration states: confirmed / (covered - @nondef)).
+            confirmed = ( "@external" in truth ) and not inrepo
         if confirmed:
             s[ "confirmed" ] += 1
         if inrepo:
@@ -197,7 +203,7 @@ def main():
     print( "%-16s %8s %9s %10s   %8s %9s   %6s %6s   %8s %10s %10s" %
            ( "mechanism", "sites", "covered", "precision", "n-inrepo", "p-inrepo", "@ext", "@nondef", "targets", "tgt-conf", "tgt-prec" ) )
     rows = {}
-    for m in [ "locality" ] + SILENT_PINS + [ "split", "unique", "scip", "binding" ]:
+    for m in [ "locality" ] + SILENT_PINS + [ "split", "unique", "external", "scip", "binding" ]:
         s = stat.get( m )
         if not s or s[ "sites" ] == 0:
             continue

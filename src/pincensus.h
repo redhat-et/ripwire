@@ -58,8 +58,13 @@ enum class PinMech : std::uint8_t
     Locality     = 5,   // S6-C: the canonical-id segment prefix decided it — THE POPULATION UNDER AUDIT
     Split        = 6,   // >1 non-self survivor: the 1/k split `amb=` counts (nothing decided)
     Scip         = 7,   // a SCIP index pinned it (only under --scip)
-    Binding      = 8    // A4-R5 cross-language FFI alias
+    Binding      = 8,   // A4-R5 cross-language FFI alias
+    External     = 9    // Phase 5: the external-name VETO refused the site — no target, no edge (a bare name or
+                        // receiver bound OUTSIDE the indexed tree: a builtin/stdlib name with no in-repo evidence,
+                        // an external import binding, or a `super()` whose MRO left the tree). The row exists so
+                        // the veto's OWN precision can be measured against SCIP's `@external`.
 };
+constexpr std::uint8_t kPinMechCount = 10;   // one past External — the census trailer's per-mechanism counter width
 
 inline const char* pinMechName( std::uint8_t m ) noexcept
 {
@@ -74,6 +79,7 @@ inline const char* pinMechName( std::uint8_t m ) noexcept
         case PinMech::Split:        return "split";
         case PinMech::Scip:         return "scip";
         case PinMech::Binding:      return "binding";
+        case PinMech::External:     return "external";
     }
     return "?";
 }
@@ -260,7 +266,7 @@ inline const char* pinCensusIdOf( const std::vector<std::string>& canon, NodeId 
 }
 
 // `C` rows — one per decided call site; returns the per-mechanism tally the summary line prints.
-inline void writePinCensusDecisionRows( std::FILE* f, const PinCensus& pc, const std::vector<std::string>& canon, std::size_t ( &mechCount )[ 9 ] )
+inline void writePinCensusDecisionRows( std::FILE* f, const PinCensus& pc, const std::vector<std::string>& canon, std::size_t ( &mechCount )[ kPinMechCount ] )
 {
     for( std::size_t i = 0; i < pc.rows(); ++i )
     {
@@ -331,17 +337,19 @@ inline bool writePinCensus( const char* path, const PinCensus& pc, const IngestR
     std::fprintf( f, "#   SCIP join (buildScipOverlay maps a SCIP definition to a symbol by exact file+line), listed in full.\n" );
     std::fprintf( f, "# ids are path::scope::name#NODEID (path::name#NODEID when unscoped) — NEVER a bare name: the\n" );
     std::fprintf( f, "#   handle is the join key and is stable across runs of one binary on one corpus, --scip or not.\n" );
-    std::fprintf( f, "# mech: unique|qualified|receiver-rule|cone|arity|locality|split|scip|binding — the stage that DECIDED the site\n" );
+    std::fprintf( f, "# mech: unique|qualified|receiver-rule|cone|arity|locality|split|scip|binding|external — the stage that DECIDED the site\n" );
+    std::fprintf( f, "#   external (Phase 5): the external-name VETO refused the site — an EMPTY target list, no edge; the row is\n" );
+    std::fprintf( f, "#   scored right iff SCIP's answer is @external (the name was bound outside the indexed tree).\n" );
     std::fprintf( f, "# flags: q=qualified r=receiver-rule c=cha-cone a=arity l=locality-tiebreak-fired (every stage that fired)\n" );
     std::fprintf( f, "# rows are a FLOOR on call sites, not a total: a site that produced no edge (name undefined in-repo,\n" );
     std::fprintf( f, "#   tier-3 non-unique drop, self-only tier) made no commitment and is deliberately absent.\n" );
 
-    std::size_t mechCount[ 9 ] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    std::size_t mechCount[ kPinMechCount ] = {};
     writePinCensusDecisionRows( f, pc, canon, mechCount );
     writePinCensusOracleRows( f, pc, canon );
     writePinCensusSymbolRows( f, ing, canon );
     std::fprintf( f, "# summary rows=%zu oracle_rows=%zu symbols=%zu", pc.rows(), pc.oraRows(), ing.symbols.size() );
-    for( std::uint8_t m = 0; m < 9; ++m )
+    for( std::uint8_t m = 0; m < kPinMechCount; ++m )
     {
         std::fprintf( f, " %s=%zu", pinMechName( m ), mechCount[ m ] );
     }

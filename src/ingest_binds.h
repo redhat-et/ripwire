@@ -77,6 +77,15 @@ inline RecvShape classifyReceiver( TSNode node, Lang lang, std::string_view src,
         }
         return { RecvKind::NamedVar, std::string( v ), {} };                          // `x` — Rule 2 fuel
     }
+    if( lang == Lang::Python && std::strcmp( rt, "call" ) == 0 )
+    { // Phase 5: `super().m()` / `super(C, self).m()` — the receiver is a CALL of the identifier `super`
+        const TSNode fn = ts_node_child_by_field_name( node, "function", 8 );
+        if( !ts_node_is_null( fn ) && std::strcmp( ts_node_type( fn ), "identifier" ) == 0 && pattern::nodeText( fn, src ) == "super" )
+        {
+            return { RecvKind::SuperObj, {}, {} };
+        }
+        return {};   // any other call receiver → not one-hop
+    }
     if( allowChain && isMemberAccessNode( rt, lang ) )
     { // depth 2: the receiver is ITSELF one member access — `this->FIELD.m()` / `base.FIELD.m()`
         const TSNode innerRecv  = memberAccessReceiver( node, lang );
@@ -124,9 +133,12 @@ inline RecvShape classifyReceiver( TSNode node, Lang lang, std::string_view src,
 //     caller's own class, and shadow suppression deleted `this->m_cfg.enable()` under a local named
 //     `enable` (docs/EVALS.md §4 "Receiver-guard misfires"; the names carried here make a future
 //     chain-resolution rule resolve-side only, with no second re-parse).
-//   anything else (a depth-3 chain, `(expr)`, subscripts, a call in the chain, …) → None. The bound is
-//     ONE intermediate hop, deliberately: past that the receiver is too rich to decide syntactically.
-//     `test/chainguardcheck.sh` arm (h) pins the bound — and the residual it leaves — as disclosed.
+//   `super()` / `super(C, self)` (Python) → SuperObj (Phase 5: resolves through the bases only)
+//   anything else (a depth-3 chain, `(expr)`, subscripts, a non-super call in the chain, …) → FieldOfVar
+//     with an EMPTY recvVar — "a member access, receiver undecidable" (Phase 5; was None, which the five
+//     bare-name guard sites misread as a BARE call). The bound is ONE intermediate hop, deliberately: past
+//     that the receiver is too rich to decide syntactically. `test/chainguardcheck.sh` arm (h) pins the
+//     bound: the depth-3 call now takes the honest ladder, never Rule 1's enclosing-class pin.
 // Pure-syntactic, deterministic, allocation-light: at most two short identifier copies, and none at all
 // for the None/ThisObj shapes that dominate.
 inline RecvShape receiverOf( TSNode nameNode, Lang lang, std::string_view src )
@@ -146,7 +158,19 @@ inline RecvShape receiverOf( TSNode nameNode, Lang lang, std::string_view src )
     {
         return {};
     }
-    return classifyReceiver( recvNode, lang, src, /*allowChain=*/ true );
+    RecvShape rs = classifyReceiver( recvNode, lang, src, /*allowChain=*/ true );
+    if( rs.kind == RecvKind::None )
+    {
+        // Phase 5 (docs/EVALS.md "Phase 5", kParserVer 77): a member access whose receiver is too rich to
+        // classify (a depth-3 chain, a call other than `super()`, a subscript, a literal, a parenthesized
+        // expression) is still a MEMBER ACCESS — never a bare name. Stamped FieldOfVar with an EMPTY recvVar,
+        // the convention stampMemberReceiver already uses for Read/Write refs, so the `recv == None` guard
+        // sites (Rule 1's bare arm, shadow suppression, the external-name veto's bare arms) read None as
+        // "truly bare". Found by the veto's own precision listing: `self.to_cartesian().sum()` was read as a
+        // bare builtin `sum(…)` and refused. Closes the depth-3 residual test/chainguardcheck.sh arm (h) pinned.
+        rs.kind = RecvKind::FieldOfVar;
+    }
+    return rs;
 }
 
 // ── P2-D Rule 2 LOCAL-VARIABLE TYPE BINDING capture (`Foo x;` → x:Foo) ───────────────────────────────

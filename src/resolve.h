@@ -1419,6 +1419,7 @@ struct Narrower
     mutable std::string keyScope;   // "Scope::name" for canonByName lookups (Rule 1 + Rule 2's type::method)
     mutable std::string keyBind;    // "<fromSymbolId>#var" for the varType binding lookup (Rule 2 + L3)
     mutable std::vector<std::string_view> fieldWalk;   // Rule 2b reused base-walk frontier (views into chaUp's stored strings)
+    mutable rw::SmallVec<NodeId, 2>       walkUnion;   // Phase 5: the union of a multi-base hit level (super() only) — an honest split
 
     explicit Narrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon,
                        const HashMap<std::string, std::string>&             vt,
@@ -1608,14 +1609,51 @@ struct Narrower
     // nullptr (honest ambiguity, the caller's ladder stays unchanged). Deterministic: chaUp lists are
     // sorted+deduped, the frontier is expanded in stored order with a fixed visit cap, and canonByName
     // insertion order = symbol-id order.
-    const rw::SmallVec<NodeId, 2>* methodOnTypeOrBases( std::string_view typeName, const Reference& r,
-                                                         const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    // One level of the base walk: probe `name::callee` for every frontier name from `lvlEnd` on. Returns the
+    // single hitting definition list and whether a SECOND base hit at this level (`multi`); every hit's
+    // definitions are also appended to `walkUnion`, which the caller returns when it asked for the union.
+    std::pair<const rw::SmallVec<NodeId, 2>*, bool> probeWalkLevel( std::size_t lvlEnd, std::string_view callee ) const
     {
-        keyScope.clear();
-        keyScope.append( typeName ).append( "::" ).append( r.calleeName );
-        if( const auto it = canonByName.find( keyScope ); it != canonByName.end() && it->second.size() != 0 )
+        const rw::SmallVec<NodeId, 2>* found = nullptr;
+        bool                           multi = false;
+        walkUnion.clear();
+        for( std::size_t i = lvlEnd; i < fieldWalk.size(); ++i )
         {
-            return &it->second;
+            keyScope.clear();
+            keyScope.append( fieldWalk[ i ] ).append( "::" ).append( callee );
+            const auto it = canonByName.find( keyScope );
+            if( it == canonByName.end() || it->second.size() == 0 )
+            {
+                continue;
+            }
+            multi = multi || ( found != nullptr );
+            found = &it->second;
+            for( NodeId c : it->second )
+            {
+                walkUnion.push_back( c );
+            }
+        }
+        return { found, multi };
+    }
+
+    // `skipSelf` (Phase 5): start at the BASES — the type's own method set is not probed. The `super()`
+    // receiver needs exactly that: `super().m()` inside class C names the first `m` in C's MRO AFTER C.
+    // `unionOnMulti` (Phase 5): when two or more bases at the shallowest hit level define the callee, return the
+    // UNION of their definitions instead of refusing — the `super()` walk needs it: a multi-base tie is an in-repo
+    // ambiguity (Python's C3 order is not modelled), NOT a sign the MRO left the tree, and the caller's veto
+    // must not fire on it. The union reaches the ladder as a narrowed multi-candidate set → an honest split.
+    const rw::SmallVec<NodeId, 2>* methodOnTypeOrBases( std::string_view typeName, const Reference& r,
+                                                         const HashMap<std::string, std::vector<std::string>>& chaUp,
+                                                         bool skipSelf = false, bool unionOnMulti = false ) const
+    {
+        if( !skipSelf )
+        {
+            keyScope.clear();
+            keyScope.append( typeName ).append( "::" ).append( r.calleeName );
+            if( const auto it = canonByName.find( keyScope ); it != canonByName.end() && it->second.size() != 0 )
+            {
+                return &it->second;
+            }
         }
 
         constexpr std::size_t kFieldWalkCap = 16;   // total visited names — bounds depth and width together
@@ -1646,21 +1684,10 @@ struct Narrower
                 }
             }
             // probe the NEW level's names; the shallowest level with any hit decides
-            const rw::SmallVec<NodeId, 2>* found = nullptr;
-            bool                           multi = false;
-            for( std::size_t i = lvlEnd; i < fieldWalk.size(); ++i )
-            {
-                keyScope.clear();
-                keyScope.append( fieldWalk[ i ] ).append( "::" ).append( r.calleeName );
-                if( const auto it = canonByName.find( keyScope ); it != canonByName.end() && it->second.size() != 0 )
-                {
-                    if( found != nullptr ) { multi = true; break; }
-                    found = &it->second;
-                }
-            }
+            const auto [ found, multi ] = probeWalkLevel( lvlEnd, r.calleeName );
             if( multi )
             {
-                return nullptr; // two distinct bases define the method at the same level → honest ambiguity
+                return unionOnMulti ? &walkUnion : nullptr; // two distinct bases define the method at the same level → honest ambiguity
             }
             if( found != nullptr )
             {
@@ -1669,6 +1696,53 @@ struct Narrower
             lvlBegin = lvlEnd;
         }
         return nullptr;
+    }
+
+    // Rule 1, the BASE WALK (docs/EVALS.md "Phase 5", mechanism 2 — the `IERS_B.open()` base walk applied to the
+    // caller's OWN class). The same three shapes Rule 1 owns — `this->m()` / `self.m()`, a bare C-family `m()`
+    // inside a member function — when the enclosing class defines NO `m`: walk its direct bases level by level
+    // (methodOnTypeOrBases, Rules 2b/2c's discipline: the shallowest level with exactly one hitting base decides,
+    // two at one level refuse). Plus the fourth shape this phase adds, `super().m()` (RecvKind::SuperObj), which
+    // walks the bases ONLY — `super()` never names the class itself. A miss returns nullptr: for this/self/bare
+    // the ladder is unchanged (a `self.m()` may dispatch DOWNWARD to a subclass override; the cone filter owns
+    // that), for `super()` the CALLER applies the `@external` veto (the MRO left the indexed tree). Never invents:
+    // every id returned is a real `Base::m` definition in canonByName.
+    // `chaUpDeclared` = the direct bases in DECLARATION order (graph.h): for `super()` the FIRST declared base
+    // that defines the callee wins (Python's MRO puts the first base's chain first — the mixin-before-base
+    // idiom `class FlatLambdaCDM(FlatFLRWMixin, LambdaCDM)`); only when no direct base defines it does the
+    // breadth-first walk continue into the deeper levels, returning the union of a multi-base level as an
+    // honest split (C3 beyond the direct level is not modelled — disclosed).
+    const rw::SmallVec<NodeId, 2>* rule1BaseWalk( const Reference& r, const std::string& callerScope,
+                                                  const HashMap<std::string, std::vector<std::string>>& chaUp,
+                                                  const HashMap<std::string, std::vector<std::string>>& chaUpDeclared ) const
+    {
+        if( callerScope.empty() || !r.qualifier.empty() )
+        {
+            return nullptr;   // no enclosing class to walk from / an explicit `A::m()` is canonical territory
+        }
+        const bool isSuper    = ( r.recv == RecvKind::SuperObj );
+        const bool isThisSelf = ( r.recv == RecvKind::ThisObj );
+        const bool bareCish   = ( r.recv == RecvKind::None ) && ( r.lang == Lang::Cpp || r.lang == Lang::ObjC );
+        if( !isSuper && !isThisSelf && !bareCish )
+        {
+            return nullptr;
+        }
+        if( isSuper )
+        {
+            if( const auto dit = chaUpDeclared.find( callerScope ); dit != chaUpDeclared.end() )
+            {
+                for( const std::string& base : dit->second )
+                {
+                    keyScope.clear();
+                    keyScope.append( base ).append( "::" ).append( r.calleeName );
+                    if( const auto it = canonByName.find( keyScope ); it != canonByName.end() && it->second.size() != 0 )
+                    {
+                        return &it->second;   // the first DECLARED direct base defining the callee — MRO order
+                    }
+                }
+            }
+        }
+        return methodOnTypeOrBases( callerScope, r, chaUp, /*skipSelf=*/ isSuper, /*unionOnMulti=*/ isSuper );
     }
 
     // Rule 2c — CLASS-NAME receiver (docs/EVALS.md "Phase 4b"). `Cls.m(…)`, a static / classmethod call THROUGH

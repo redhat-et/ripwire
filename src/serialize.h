@@ -1663,7 +1663,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                        std::string_view rootArg = {},
                        // Phase 4: the S6-C locality-pin counter (graph.h g.locPinOut) → lpin="K" on the row, header
                        // locality_pinned=N — both absent when zero, so a pin-free corpus is byte-identical.
-                       const std::vector<std::uint32_t>* locPinOut = nullptr )
+                       const std::vector<std::uint32_t>* locPinOut = nullptr,
+                       // Phase 5: the external-name veto's refusal count (graph.h g.externalCalls) → header external=N,
+                       // absent when zero, so a veto-free corpus is byte-identical.
+                       std::size_t externalCalls = 0 )
 {
     const std::size_t* changedCount = ann.changedCount;
     const std::string* mapAtStamp   = ann.atStamp;
@@ -1756,8 +1759,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // written once the document it describes has been measured (PHASE 2 below) and the legend's own bytes
     // are part of what it describes.
     std::string legend = outProv
-        ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=scip(precise;else name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->"
-        : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->";
+        ? "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) prov=scip(precise;else name-based) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->"
+        : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name id=canonical(path::scope::name,when-scoped) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=call-name-defined-only-in-a-lang-incompatible-file (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree(builtin/stdlib-name-without-in-repo-evidence,external-import,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->";
     // R-E fix (2026-08-19): root= was added to <r> with nothing defining it — legendcoveragecheck's arm (A)
     // named it on nine roster verbs at once (the default map, --around, and every map-* variant share this
     // legend). Spelled in THIS legend's own key=meaning dialect rather than as the prose sentence
@@ -1893,6 +1896,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         if( locPinTotal > 0 )                                  // absent when 0 — zero bytes on a pin-free corpus
         {
             stats += " locality_pinned=";  stats += std::to_string( locPinTotal );
+        }
+        if( externalCalls > 0 )                                // Phase 5: same absent-when-0 rule
+        {
+            stats += " external=";  stats += std::to_string( externalCalls );
         }
         stats += precAttr;  stats += rootsAttr;  stats += changedAttr;  stats += skippedAttr;  stats += unindexedAttr;
         stats += ignoredAttr;  stats += fitAttr;
@@ -5997,6 +6004,7 @@ struct JsonMapHeader
                                                     // multi-root (its own roots_count/roots table below already
                                                     // names every root) or a caller that never passes one.
     std::size_t                      localityPinnedCount = 0;   // Phase 4: Σ lpin — "locality_pinned":N, absent when 0
+    std::size_t                      externalCount = 0;         // Phase 5: the veto's refusals — "external":N, absent when 0
 };
 
 // §B1.2: the PROVENANCE stamp — the JSON half of the XML `<r at= rank_by= window=>` attributes. Without it
@@ -6128,6 +6136,12 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
         std::snprintf( hdr, sizeof( hdr ), "\"locality_pinned\":%zu,", h.localityPinnedCount );
         w.write( hdr );
     }
+    // Phase 5: the external-name veto gauge — the JSON twin of the XML `external=`, same absent-when-zero rule.
+    if( h.externalCount > 0 )
+    {
+        std::snprintf( hdr, sizeof( hdr ), "\"external\":%zu,", h.externalCount );
+        w.write( hdr );
+    }
 
     // §P0.5d, JSON lane: the size-ceiling disclosure must reach --json consumers too — the XML header
     // gained skipped_oversize= and a JSON reader (MCP clients most of all) must not be the one audience
@@ -6235,7 +6249,8 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                                                                 // defaulted ⇒ every field null ⇒ no stamp keys.
                            std::string_view rootArg = {},      // R-E: same single-root-only root argument the
                                                                  // XML serialize() takes (see its own comment)
-                           const std::vector<std::uint32_t>* locPinOut = nullptr )   // Phase 4: same as serialize()'s
+                           const std::vector<std::uint32_t>* locPinOut = nullptr,   // Phase 4: same as serialize()'s
+                           std::size_t externalCalls = 0 )                          // Phase 5: same as serialize()'s
 {
     const std::size_t S = ing.symbols.size();
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
@@ -6318,7 +6333,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     {
         JsonWriter hw( dst );
         writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, S, outTargets.size(), keep, estTokens, ambTotal,
-                                                    unresolvedTotal, orderAttr, outProv, &ann, rootArg, locPinTotal } );
+                                                    unresolvedTotal, orderAttr, outProv, &ann, rootArg, locPinTotal, externalCalls } );
         hw.write( ",\"r\":[" );
     };
 

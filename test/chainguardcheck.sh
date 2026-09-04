@@ -170,33 +170,36 @@ printf '%s\n' "$O" | grep 'n="enable"' | grep -q 'a.cpp:3"' \
     && no "(g) goOne() linked to EDecoy::enable — Rule 2b's narrow regressed to a spray" \
     || ok "(g) goOne() decoy EDecoy::enable NOT linked (Rule 2b narrow intact)"
 
-# (h) DISCLOSED residual: the capture bound is ONE intermediate hop, so a depth-3 chain still classifies
-#     None and BOTH bugs persist there — pinned so the residual is a recorded fact, not a surprise.
-#     deepPin() `this->m_box.opts.tick()` still wrong-pins App::tick; deepShadow() (same call under a
-#     shadowing local `tick`) still emits nothing. Separately fundable; see the EVALS registration.
+# (h) The depth-3 residual, CLOSED (Phase 5, docs/EVALS.md "Phase 5"; was a disclosed residual until then).
+#     The capture bound is still ONE intermediate hop, so a depth-3 chain's receiver stays undecidable — but
+#     ingest now stamps such a member access FieldOfVar with an EMPTY recvVar instead of None, so no bare-name
+#     guard reads it as a bare call: deepPin() `this->m_box.opts.tick()` takes the honest split (Opts::tick +
+#     App::tick, amb=1) instead of Rule 1's wrong App::tick pin, and deepShadow() (the same call under a
+#     shadowing local `tick`) keeps both edges instead of being deleted by shadow suppression.
 D="$( callees deepPin )"
-printf '%s\n' "$D" | grep 'n="tick"' | grep -q 'a.cpp:11"' \
-    && ok "(h) deepPin() depth-3 chain still pins App::tick — the one-hop capture bound, disclosed" \
-    || no "(h) deepPin() behavior moved — the depth-3 residual is no longer what the registration discloses"
+( printf '%s\n' "$D" | grep 'n="tick"' | grep -q 'a.cpp:4"' ) && ( printf '%s\n' "$D" | grep 'n="tick"' | grep -q 'a.cpp:11"' ) \
+    && ok "(h) deepPin() depth-3 chain takes the honest split (Opts::tick + App::tick) — no enclosing-class pin" \
+    || no "(h) deepPin() depth-3 chain is not the complete Opts::tick + App::tick split: $( printf '%s' "$D" | tr '\n' ' ' )"
 DS="$( callees deepShadow )"
-printf '%s\n' "$DS" | grep 'n="tick"' | grep -q 'a.cpp' \
-    && no "(h) deepShadow() emits a tick edge — the depth-3 shadow-deletion residual moved; re-derive the disclosure" \
-    || ok "(h) deepShadow() depth-3 shadowed chain still deleted — the residual, disclosed"
+( printf '%s\n' "$DS" | grep 'n="tick"' | grep -q 'a.cpp:4"' ) && ( printf '%s\n' "$DS" | grep 'n="tick"' | grep -q 'a.cpp:11"' ) \
+    && ok "(h) deepShadow() depth-3 shadowed chain keeps its split — shadow suppression no longer deletes it" \
+    || no "(h) deepShadow() lost its edges under the shadowing local — the depth-3 chain is read as a bare name again"
 
 # ── (i) the header gauges agree with the arms above, counted from the fixture rather than guessed.
 #        Post-fix: goThis 2 + goVar 2 + goLoc 2 + goShadow 2 + goVarShadow 1 + goBare 1 + goOne 1
-#        + deepPin 1 + deepShadow 0 = 12 edges; ambiguous = the four widened/recovered splits
-#        (goThis/goVar/goLoc/goShadow) = 4. Base binary reads edges=6 ambiguous=0 — six calls pinned
+#        + deepPin 2 + deepShadow 2 = 15 edges; ambiguous = the four widened/recovered splits
+#        (goThis/goVar/goLoc/goShadow) + the two depth-3 chains (Phase 5) = 6. Base binary read
+#        edges=6 ambiguous=0 (pre-widening) and 12 / 4 before Phase 5 closed the depth-3 residual — six calls pinned
 #        or deleted, ZERO disclosed ambiguity, wrong five times over: exactly why ambiguous= could not
 #        be this round's instrument. ──
 AMB="$( printf '%s\n' "$MAP" | grep -o 'ambiguous=[0-9]*' | head -1 )"
-[ "$AMB" = "ambiguous=4" ] \
-    && ok "(i) header gauge ambiguous=4 — the recovered/widened calls disclose their splits" \
-    || no "(i) header gauge is '$AMB', expected ambiguous=4 (wrong pins widened + shadowed calls recovered)"
+[ "$AMB" = "ambiguous=6" ] \
+    && ok "(i) header gauge ambiguous=6 — the recovered/widened calls and both depth-3 chains disclose their splits" \
+    || no "(i) header gauge is '$AMB', expected ambiguous=6 (wrong pins widened + shadowed calls recovered + depth-3 chains split)"
 EDG="$( printf '%s\n' "$MAP" | grep -o 'edges=[0-9]*' | head -1 )"
-[ "$EDG" = "edges=12" ] \
-    && ok "(i) header gauge edges=12 — recovered and widened edges present, none lost" \
-    || no "(i) header gauge is '$EDG', expected edges=12 — a recovered edge is missing or one was lost"
+[ "$EDG" = "edges=15" ] \
+    && ok "(i) header gauge edges=15 — recovered and widened edges present, none lost" \
+    || no "(i) header gauge is '$EDG', expected edges=15 — a recovered edge is missing or one was lost"
 
 # ── (j) cross-language stability (FIX2): Python/TS chained-call edges are byte-stable ─────────────────
 MAP2="$( "$BIN" "$FIX2" --no-cache 2>/dev/null | tr '>' '\n' )"
