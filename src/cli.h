@@ -3026,10 +3026,16 @@ inline constexpr PagingFamilyFlagGuard kTopKGuard
     "nothing ranked to cap",
     "ripwire <dir> --hotspots --limit=3"
 };
+// H9 (capture-audit 2026-09-04): both sentences must name EVERY kShapingVerbs row that honors the flag.
+// They did not: `--html` (which renders the map and inherits its ceiling) was missing from the first and
+// `--handoff` (whose writeHandoffPacket has taken the budget since M4) from the second — so a caller who
+// hit this refusal was told, in the tool's own words, that a budget it does honor does not exist there.
+// test/budgetpolicycheck.sh arm (A) re-derives both lists from the table on every run, so the next verb to
+// grow a budget column cannot leave the sentence behind.
 inline constexpr PagingFamilyFlagGuard kMaxTokensGuard
 {
-    "--max-tokens is honored by the default map, --recall, --connect, --pr-context, --from-trace and "
-    "--for --detail=N — none of them in the --limit/--offset-honoring set (",
+    "--max-tokens is honored by the default map (and --html, which renders it), --recall, --connect, "
+    "--pr-context, --from-trace and --for --detail=N — none of them in the --limit/--offset-honoring set (",
     ")",
     "no byte budget to shape",
     "ripwire <dir> --hotspots --limit=3"
@@ -3037,7 +3043,7 @@ inline constexpr PagingFamilyFlagGuard kMaxTokensGuard
 inline constexpr PagingFamilyFlagGuard kTokenBudgetGuard
 {
     "--token-budget is honored by the default map (the CI gate), --for, --pack-task, --recall, "
-    "--from-trace and --run-trace — none of them in the --limit/--offset-honoring set (",
+    "--handoff, --from-trace and --run-trace — none of them in the --limit/--offset-honoring set (",
     ")",
     "no byte budget to gate",
     "ripwire <dir> --callers=SYM --limit=3"

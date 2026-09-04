@@ -1329,11 +1329,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // (kDefaultRecallMaxTokens, header-disclosed) — `budget_tokens` raises it explicitly,
                     // the same shaping knob explore/from_trace already declare. 0 (unbounded) is no longer
                     // reachable by omission, only by an explicit large value.
+                    // H9: hand recallText the TOKEN count, not a byte budget converted here. The conversion
+                    // used to live at this call site and at the CLI's, and both then handed the builder a
+                    // byte number the header could no longer name — which is why `budget_tokens=1500` applied
+                    // a 1500-token ceiling and disclosed none. recall.h's recallBytesForTokens owns it now.
                     const std::size_t recallTokens = budgetArg.isPresent ? std::size_t( budgetArg.value )
                                                                          : kDefaultRecallMaxTokens;
-                    const std::size_t recallBytes  = std::size_t( double( recallTokens ) * kMinBytesPerToken
-                                                                  * kBudgetHeadroom );
-                    resp = textResult( recallText( path, task, recallTopK, recallBytes, redactPtr ) );
+                    resp = textResult( recallText( path, task, recallTopK, recallTokens, redactPtr ) );
                 }
                 else if( name == "situational_awareness" && !path.empty() )
                 {

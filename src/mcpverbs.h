@@ -956,13 +956,16 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
 // over MCP. Registered in docs/EVALS.md §"--recall ranks by where the repo sits on disk"; gated by
 // test/recallparitycheck.sh. Returns a plain-text bundle. `redact` masks credential shapes in the recalled
 // doc bodies (A3-F3 — same seam contract as the CLI --recall).
-inline std::string recallText( const std::string& root, const std::string& task, int k, std::size_t maxBytes, RedactCounts* redact = nullptr )
+// H9: `maxTokens` is the ceiling in TOKENS — the unit `budget_tokens` is asked in, the unit the CLI's
+// --max-tokens is asked in, and the unit the header discloses. This used to take BYTES, converted at the
+// call site in mcp.h, which is how the two surfaces both lost the number they were applying.
+inline std::string recallText( const std::string& root, const std::string& task, int k, std::size_t maxTokens, RedactCounts* redact = nullptr )
 {
     const McpIndex& ix = getIndex( root );
     // docs (markdown) only; R-R root-relative separators AND root-relative path ranking — both from this
     // one rootArg, exactly as the CLI derives its own. Empty for a multi-root index, whose ing.files
     // already hold the labelled root-relative spelling.
-    return recallFor( ix.ing, ix.g.outOff, ix.g.outTargets, task, k, maxBytes, redact,
+    return recallFor( ix.ing, ix.g.outOff, ix.g.outTargets, task, k, maxTokens, redact,
                       ix.ing.realPaths.empty() ? std::string_view( root ) : std::string_view() ).text;
 }
 
@@ -2371,7 +2374,9 @@ inline constexpr char kConnectHeader[] =
     " graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls"
     " whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=."
     " defs= on a terminal row = that NAME has N definitions and the lowest-id one was used; qualify with file:name"
-    " to pick another. Steiner rows never carry it -->";
+    " to pick another. Steiner rows never carry it."
+    " max_tokens= is the token ceiling this bundle was SHAPED against (the max_tokens flag; absent = none"
+    " was asked for); est_tokens= is what it cost, and truncated=\"paths\" says the shaping had to cut -->";
 
 // The root element's own bytes: the <connect ...> start-tag PLUS the </connect> close. It is
 // self-referential (the start-tag's length depends on the digits of the number it carries), so it is
@@ -2578,9 +2583,20 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     // `int(...)` throw in the one field whose whole purpose is arithmetic against a budget, and no other
     // verb apologises for an estimate being an estimate. Dropped.
     const std::size_t estTokens = connectEstTokens( payload.size(), connectExtraBytes );
+    // H9: the ceiling this bundle was SHAPED against, named on the root. The trim loop above really does
+    // drop sigs and then whole legs to fit `maxTokens`, and until this attribute existed the only evidence
+    // was `truncated="paths"` — which says something was cut but not what it was cut to. Absent when no
+    // --max-tokens was given (0), so the un-budgeted answer stays byte-identical; the MCP `connect` verb
+    // declares no budget argument, so its answer is the un-budgeted one and the two surfaces still agree.
+    char connectCeiling[ 32 ];  connectCeiling[ 0 ] = '\0';
+    if( maxTokens > 0 )
+    {
+        std::snprintf( connectCeiling, sizeof( connectCeiling ), " max_tokens=\"%d\"", maxTokens );
+    }
     std::fprintf( out, "%s%s", kConnectHeader, rootRelPathsLegend( !rootArg.empty() ) );
-    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s%s%s>",
+    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s%s%s%s>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups, estTokens,
+                  connectCeiling,
                   truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),
                   graphCountFloorAttrXml( g ).c_str() );   // H5/M15: nodes=/edges= are read off the name-based CSR — a floor, with the gauge
     std::fwrite( payload.data(), 1, payload.size(), out );

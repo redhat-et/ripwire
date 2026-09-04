@@ -608,6 +608,7 @@ std::optional<int> runFromTrace( const MainDispatch& d )
     in.bodyBudgetBytes      = cfg.maxTokens > 0
         ? std::size_t( double( cfg.maxTokens ) * rw::kMinBytesPerToken * rw::kBudgetHeadroom )
         : cfg.packBudgetBytes;
+    in.maxTokens            = cfg.maxTokens > 0 ? std::size_t( cfg.maxTokens ) : 0;   // H9: max_tokens= on the root
     in.compress = cfg.compress;
     in.fanIn    = d.fanInPtr;
     in.impure   = d.impurePtr;

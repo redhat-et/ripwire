@@ -1519,7 +1519,46 @@ std::optional<int> runForLens( const MainDispatch& d )
         // the mapping, the two derived strings, and the reasoning behind both live ONCE in
         // deriveForConfidence (above runForLens) — forTopN is final here (floor cut applied), which is
         // what the completeness ground needs.
-        const ForConfidence forConf = deriveForConfidence( forCut, forTopN );
+        ForConfidence forConf = deriveForConfidence( forCut, forTopN );
+        // The confidence pair's own bytes, captured BEFORE the budget clause below is appended — see the
+        // charging note there for why the two disclosures are charged differently.
+        const std::size_t confidenceOwnBytes = forConf.attrs.size() + forConf.note.size();
+
+        // H9 (capture-audit 2026-09-04): the CEILING this bundle was shaped against, named on the root.
+        // `--for --token-budget=1500` re-shapes the whole answer — the root goes `bundle="compact"
+        // bodies="0" reason="budget"` — and the audit found that N itself appeared nowhere, so a reader
+        // could see THAT a budget cut the bundle but never WHICH one, and could not tell a 1500-token cut
+        // from a 15,000-token one. `--pack-task`, the sibling that takes the same flag, has always printed
+        // `budget_tokens=`; this is the same attribute, on the verb that was missing it. `--max-tokens` is
+        // read by --for only under --detail=N (cli.h's kShapingVerbs carve-out), so `max_tokens=` is
+        // charged to exactly that shape and absent otherwise — an attribute that appeared on a run where
+        // the flag was inert would be its own false disclosure.
+        //
+        // CHARGING, and why it splits from the confidence pair's. Both ride forConf, but only the
+        // confidence half is EXEMPT from the byte budget (confidenceExemptBytes is taken from
+        // confidenceOwnBytes above, captured before this append): confidence= must survive a tight ceiling
+        // because it qualifies the ANSWER — the fordisclosurecheck precedent. These two attributes qualify
+        // the BUDGET, and a budget disclosure that made the bundle exceed its own budget would be the
+        // funniest possible way to fail this finding. So they are charged like any other bytes, and the
+        // clause is written terse for the reason forLensHeaderText's W3-S note records at length: this
+        // header has a MEASURED hard byte constraint (fornotesbudgetcheck), where 150 bytes of prose is
+        // 2% of a 1550-token ceiling. Gate: test/budgetpolicycheck.sh arm (B).
+        const bool forGateBudget  = cfg.tokenBudget > 0;
+        const bool forBodyCeiling = cfg.maxTokens > 0 && cfg.detail > 0;   // the kShapingVerbs carve-out, read once
+        if( forGateBudget )
+        {
+            forConf.attrs += " budget_tokens=\"" + std::to_string( cfg.tokenBudget ) + "\"";
+        }
+        if( forBodyCeiling )
+        {
+            forConf.attrs += " max_tokens=\"" + std::to_string( cfg.maxTokens ) + "\"";
+        }
+        if( forGateBudget || forBodyCeiling )
+        {
+            // No "--" in this string: it rides inside an XML comment, where a double hyphen is ill-formed
+            // (G4). The flags are named without their dashes for exactly that reason.
+            forConf.note += " [budget_tokens=/max_tokens=: the token ceiling this bundle was shaped against]";
+        }
 
         // M10: --for reads git for the per-file churn= column (folded onto the bundle below, mined once in
         // main.cpp's gitCoChangeAndChurnCached pass) and, before this fix, carried no anchor — an agent
@@ -1796,7 +1835,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // counts the emitted header verbatim, so leftBytes hands the bodies ~240 B less and the bundle
         // total never crosses the ceiling — charging the sig side as well was double-counting one cost.
         // est_tokens measures the emitted header in both regimes, so nothing under-reports either way.
-        const std::size_t confidenceExemptBytes = forConf.attrs.size() + forConf.note.size() + forAtAttrStr.size();
+        const std::size_t confidenceExemptBytes = confidenceOwnBytes + forAtAttrStr.size();
         // DEEP-TAIL: the tail legend's bytes are exempt from the sig-trim charge in BOTH regimes, the
         // confidence-disclosure precedent verbatim — the tail's contract is that the ranked head is
         // byte-identical with and without it, and charging the clause here would shrink <sigs> to pay for
@@ -2353,15 +2392,15 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         const bool               defaultRecallBudget = cfg.maxTokens == 0;
         const std::size_t        recallMaxTokens = defaultRecallBudget ? rw::kDefaultRecallMaxTokens
                                                                        : std::size_t( cfg.maxTokens );
-        const std::size_t        budget = std::size_t( double( recallMaxTokens ) * rw::kMinBytesPerToken
-                                                       * rw::kBudgetHeadroom );
+        // H9: the TOKEN count is what travels now — recall.h's recallBytesForTokens owns the one conversion,
+        // so the header discloses the ceiling actually applied instead of only the 8000 default.
         // §B2: --top-k=N now actually SHAPES how many docs recall emits (was accept-and-ignore — --help and
         // the --limit refusal both already promised this). Default stays 8 when the user never passed the flag.
         const int                 recallK = cfg.topKExplicit ? cfg.topK : 8;
         // recallFor (recall.h) is the ONE rank-then-build call MCP `memory_recall` also makes — the recall
         // lens's pathFieldDefaultW=1 and its root-prefix derivation live there, so the two front doors cannot
         // drift apart again (gate: test/recallparitycheck.sh).
-        const RecallBundle       bundle = recallFor( ing, g.outOff, g.outTargets, cfg.recall, recallK, budget,
+        const RecallBundle       bundle = recallFor( ing, g.outOff, g.outTargets, cfg.recall, recallK, recallMaxTokens,
                                                      redactPtr, recallRootArg );   // docs only; R-R
 
         const int                rc     = emitRecallBudgeted( stdout, bundle, cfg.tokenBudget );
