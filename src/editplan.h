@@ -247,7 +247,7 @@ inline Outcome prepare( const std::string& root, const std::string& planPath, st
     Outcome out;
     bool planOk = false;
     const std::string plan = mcpdetail::readFileBytes( planPath, planOk );
-    if( !planOk ) { out.message = "cannot read edit plan '" + planPath + "'"; return out; }
+    if( !planOk ) { out.message = "--edit-plan: cannot read edit plan '" + planPath + "'"; return out; }
     if( plan.size() > maxBytes ) { out.message = "edit plan exceeds --max-file-size"; return out; }
     if( mcpdetail::checkFrame( plan ).shape != mcpdetail::FrameShape::Object ) { out.message = "edit plan is not one complete JSON object"; return out; }
     if( !hasOnlyKeys( plan, { "version", "edits" } ) ) { out.message = "edit plan has an unknown or duplicate root field"; return out; }
