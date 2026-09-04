@@ -1356,9 +1356,21 @@ patching the header version to 14 was a no-op because 14 *was* the version):
 | (3) byte-identical to `--no-cache`, determinism ×2 | identical | **identical**, both configurations, plus cold==warm; three-run byte determinism on this repo |
 | (4) the named cache gates green, pins re-derived with reasons | green | **green**: `portablecachecheck` `cachesplitcheck` `cacheisolationcheck` `evictioncheck` `savecachecheck` `cachehashcheck` `cachefuzzcheck` `freshnesscheck` `statgatecheck` `racymtimecheck` `indexoutcheck` `artifactcheck` `tornreadcheck` `headsnapcachecheck` `qsnapcachecheck` `mcpstalecheck` `mcpincrementalcheck` `multirootcheck` `qextractionkeycheck`. One pin re-derived in its own commit: `test/qschemetrip.hash` (the manifest hash covers the `kCacheVersion` declaration line) |
 | (5) wall-time numbers are a ledger row, never a gate | ledger | **`bench/PROFILE.md`**, "the offset-table cache blob (v15)" |
-| (6) full battery within 1.2× of base under the same `-j` | ≤ 1.2× | **orchestrator measures** on the merged tree. In-lane, the cache family moved 52.9 s → 41.2 s across 20 gates (the biggest movers `cachefuzzcheck` 8.6→6.6, `qsnapcachecheck` 9.7→6.0, `multirootcheck` 6.8→3.5); no gate got slower by more than 0.1 s |
+| (6) full battery within 1.2× of base under the same `-j` | ≤ 1.2× | **orchestrator measures** on the merged tree — see the in-lane decomposition below the table |
 | (7) a configuration whose files are all in the blob never cold-parses | reparsed=0 | **0**. On the 31,000-file corpus, the wide run after a dirty narrow run: `reparsed=0` in 0.27 s, against `reparsed=30000` in 0.96 s on `d8fa59c` |
 | (8) blob count per root stays at two (lean/rich) | 2 | **1 lean blob across three exclude/`--max-file-size` configurations** (gate check (a)); the reverted key change would have made this three |
+
+**Band (6), what this lane can and cannot say.** The full-battery wall is measured after merge; a lane
+cannot measure it, and a machine running several lanes at once cannot measure anything small. What was
+measured in-lane is the 20-gate cache family, `d8fa59c`'s tree with `d8fa59c`'s binary against this HEAD's
+tree with this HEAD's binary, sequentially, arms alternated: base 60.3 / 56.2 / 49.1 s, head 64.3 / 68.1 s.
+Head is ~1.15× base and the difference DECOMPOSES, which is the only reason it is reportable at all under
+that load: `cachefuzzcheck` 11.1 → 18.5 s (this lane added four mutations, each run twice — dev and ASan)
+and `cacheoffsetcheck` +3.5 s (a gate that did not exist), against every other gate in the family being
+level or faster (`qsnapcachecheck` 10.0 → 7.9, `statgatecheck` 6.7 → 5.6, `freshnesscheck` 2.7 → 1.6,
+`evictioncheck` 3.5 → 2.5, `savecachecheck` 1.0 → 0.5). So the added seconds are gate COVERAGE this lane
+chose to buy, not the tool getting slower — but the honest statement is that a ±20% reading on a loaded
+multi-lane machine resolves neither, and band (6) is the orchestrator's measurement.
 
 **The cost, disclosed.** The offset table is 32 B per file: +3.3% on a 31,000-file blob (30,147,173 →
 31,139,189 B), all of it table. And a DIRTY subset save must copy the records it did not crawl — 0.13–0.40 s
