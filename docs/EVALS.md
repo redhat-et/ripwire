@@ -1479,6 +1479,22 @@ the three D4 checkouts copied into the gitignored `bench/external/`, 18,995 file
 stand-in was removed again before the commits below. The shape reproduces exactly; the magnitude is
 smaller, and the orchestrator re-verifies the band on the full tree once the snapshots are moved back.
 
+**Band (4), re-verified on the full tree by the orchestrator (2026-09-03, merged round-5 tree, snapshots
+restored).** The development machine's real population, measured with `ripwire <root> --skipped` on the
+merged binary, one cold run per arm with a private `TMPDIR`:
+
+| `ripwire <repo root> <args>` | `indexed=` | `ignored_dirs=` | `ignore_mode=` | cold wall |
+| --- | ---: | ---: | --- | ---: |
+| `--no-ignore` (the pre-2026-09-03 walk) | **158,208** | 0 | `off` | 70.80 s |
+| default (ignore rules honoured) | **1,682** | 1 | `git` | **1.44 s** |
+| `--no-ignore --exclude=bench/external` (the workaround it replaces) | 1,682 | 0 | `off` | — |
+
+The default and the hand-written `--exclude` agree **exactly** — 1,682 both, a 0.0% delta against the
+band's 5% allowance — and the registration's 158,202 figure is confirmed at 158,208 (six files added to
+the ignored tranche since it was written). The cold map goes 70.80 s → 1.44 s, a 49× reduction, on one
+`ignored_dirs=1` prune. This is the band as registered; the in-lane stand-in above is retained because
+it is what the lane's own commits were measured against.
+
 **Cache interaction, stated precisely because it was checked rather than assumed.** The ignore mode is
 NOT part of the cache key, and it does not need to be: the auto-cache blob is keyed per FILE
 (`relForHash` path → `FileFacts`), so a `--no-ignore` run writes a SUPERSET blob and a following

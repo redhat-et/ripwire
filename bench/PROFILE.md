@@ -969,6 +969,17 @@ The shape is the one the registration describes; the magnitude is smaller.
 | default (ignore rules honoured) | **1,522** | **0.52 s** | **0.10 s** |
 | `--exclude=bench/external` (the workaround it replaces) | 1,522 | 0.41 s | 0.10 s |
 
+**Re-measured on the full tree (orchestrator, merged round-5 tree, snapshots restored).** The stand-in
+row above is kept because it is what the lane's commits were measured against; this is the real
+population, `ripwire <repo root> --skipped`, one cold run per arm with a private `TMPDIR`:
+
+| `ripwire <repo root> <args>` | `indexed=` | cold |
+| --- | ---: | ---: |
+| `--no-ignore` | 158,208 | 70.80 s |
+| default (ignore rules honoured) | **1,682** | **1.44 s** |
+
+One `git ls-files --directory` probe and one pruned directory turn a 70.8 s cold map into a 1.44 s one.
+
 The default and the hand-written `--exclude` agree to the file, so the flag that every gate and every
 agent invocation had to remember is now the tool's own behaviour, and the 0.032 s probe replaces 2.3 s
 of crawling and parsing on a cold run.
