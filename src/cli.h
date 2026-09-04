@@ -883,7 +883,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               hits the ceiling. Prints [adaptive: kept K of N ...] in the header. Without it, output is unchanged.\n"
         "    --no-mention-boost         (with --for) disable the query-mention anchor. By DEFAULT, a file, dotted module, or\n"
         "                               Scope.symbol literally NAMED in the task text (a path, `pkg.module`, `Type.method` — even\n"
-        "                               inside a URL) has its SCORE lifted to within 5% of the top score; the header says what\n"
+        "                               inside a URL) has its SCORE lifted to within 5%% of the top score; the header says what\n"
         "                               anchored. That is a score promise, not a rank one: on a flat/tied head the anchored hit\n"
         "                               can still land several ranks below #1. Inert (byte-identical) when the text names\n"
         "                               nothing indexed. RIPWIRE_NO_MENTION=1 disables it\n"
