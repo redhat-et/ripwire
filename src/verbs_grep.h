@@ -266,12 +266,10 @@ const char* grepTierLegend( const rw::GrepTierReport& tier )
            // M17 (capture-audit 2026-09-04, lens1 F4): the label is a CLAIM, and this sentence is the
            // difference between a proven one and an unproven one. Deliberately no attribute=value literal
            // (this verb's own rule — gates parse the header counters by grep).
-           "tier_partial= (value 1, present only then) qualifies that label: it was elected over the CLASSIFIED hits alone while "
-           "tier_unclassified= hits were never classified at all, so read it as the tightest tier PROVEN present, never as proof "
-           "that no hit is code — an unclassified hit may well be. Under tier_budget= exhaustion nothing past the budget was "
-           "suppressed, so the SERVED set is exactly what the exhaustive scan found minus only the classified suppressions: the "
-           "partiality narrows what the LABEL may be read to mean, never which rows you got. Its absence beside a tier= means "
-           "every hit was classified and the label is a fact. "
+           "tier_partial= (value 1, present only then) qualifies that label: it was elected over the CLASSIFIED hits ALONE while "
+           "tier_unclassified= hits were never classified, so read it as the tightest tier PROVEN present, never as proof that no "
+           "hit is code. Nothing past the budget is suppressed, so the partiality narrows what the LABEL may be read to mean, never "
+           "which rows you got; its absence beside a tier= means the label is a fact. "
            "suppressed_comment=/suppressed_string= are the classified hits held back: not in hits=, and the "
            "reason complete= cannot appear. Pass grep-in=any (dashes omitted) for every tier. Hit files are parsed on demand "
            "under a fixed budget: tier_parsed= how many were classified, tier_budget= which ceiling stopped it (files or bytes, "
@@ -338,10 +336,9 @@ void emitCompactGrepLegend()
     std::printf( "<!-- ripwire grep ripwire.grep/v1: files group source-ordered hits; l=line, m=matched text, "
                  "in=enclosing name when known. shown/capped disclose the printed window; hits_capped=1 makes hits a floor; "
                  "complete=1 only for an exhaustive literal scan whose whole unfiltered window printed. root anchors relative p; "
-                 "enc callers remain a call-graph floor; tier/suppressed and corpus attrs disclose excluded populations, and "
-                 "tier_partial=1 means that tier label was elected over a partial classification, not proven over every hit. "
-                 "files/hits/shown/total/complete are IN-INDEX only; unindexed_hits sizes the second population and the trailing "
-                 "unindexed element carries its own count/shown/capped under the same window. -->" );
+                 "enc callers remain a call-graph floor; tier/suppressed and corpus attrs disclose excluded populations, tier_partial=1 "
+                 "meaning that label was elected over a partial classification. files/hits/shown/total/complete are IN-INDEX only; "
+                 "unindexed_hits sizes the second population, whose element carries its own count/shown/capped under the same window. -->" );
 }
 
 std::string grepTermsAttrs( std::string_view pattern, std::span<const rw::GrepTerm> terms, rw::GrepScope scope,
@@ -721,13 +718,12 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "scope. "
                  // H4 (capture-audit 2026-09-04): the two populations, and the rule that keeps them reconcilable.
                  // Deliberately no attribute=value literal in these sentences (the quality-delta legend's rule,
-                 // restated on this verb because several gates extract its counters by grep).
-                 "THE TWO POPULATIONS: every count above — files, hits, shown, capped, total, complete — describes the IN-INDEX "
-                 "search ALONE. unindexed_hits= is the second population's size, always stated (a zero included, so its absence is "
-                 "never a question), and the trailing unindexed element restates it as its OWN count= beside shown=/capped= — the "
-                 "same disclosure the impact verb's importer sub-list carries. That element obeys the SAME window this answer's "
-                 "limit/offset set (dashes omitted), so a one-row page is a one-row page on both lists; its capped value 1 means it "
-                 "printed fewer rows than it holds, and pages past the end are empty rather than repeated. "
+                 // restated on this verb because several gates extract its counters by grep). Kept DENSE for
+                 // the reason the tier clause above is: on a small page this legend IS the answer.
+                 "THE TWO POPULATIONS: every count above — files, hits, shown, capped, total, complete — is the IN-INDEX search "
+                 "ALONE. unindexed_hits= sizes the second one, always stated (a zero included); the trailing unindexed element "
+                 "carries that same number as its own count= beside shown=/capped= and obeys the SAME window limit/offset set here "
+                 "(dashes omitted), so a one-row page is one row on BOTH lists and a page past its end is empty, not repeated. "
                  "unindexed_files_skipped= (present only when nonzero) counts "
                  "candidates this scan saw but did not read: over the max-file-size ceiling, sniffed binary, or unreadable. "
                  "unindexed_candidates_capped=\"1\" (present only when true) means the CANDIDATE list itself (the skipped verb's own "
