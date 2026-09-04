@@ -2773,6 +2773,7 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     if( !acks.empty() )
     {
         oc.staleAcks = rw::quality::computeStaleAcks( acks, rw::quality::computeSnapshot( ing, g, root ) );
+        rw::quality::stampStaleAckIdentity( oc.staleAcks, ing, root );   // M21(a): the CLI twin's sym=/p=
     }
 
     // R3: the marker spelling table lives in selectBaseline, so CLI and MCP name the same state the same way;

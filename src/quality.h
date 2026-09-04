@@ -4830,6 +4830,11 @@ struct StaleAck
     std::uint64_t key = 0;
     StaleAckWhy  why  = StaleAckWhy::TargetGone;
     std::string  by;            // P1.4 — the recorded provenance, on ForeignScope rows only (empty otherwise)
+    // M21(a) (capture-audit 2026-09-04, lens 0 M0-2) — WHICH ack this is, when the tree can still say.
+    // Empty by default and filled by stampStaleAckIdentity; see it for the rule that decides when.
+    std::string   sym;          // the display canonical id (baselineCanonId, root-relative) of the live symbol
+    std::string   path;         // its root-relative file path
+    std::uint32_t line = 0;     // its 1-based defining line — emitted with `path` as p="path:line"
 };
 
 inline const char* staleAckWhyToken( StaleAckWhy why ) noexcept
@@ -5004,10 +5009,77 @@ inline std::vector<StaleAck> computeForeignAcks( const std::vector<Regression>& 
         // inclusion and provenance symmetric.
         if( !scopeCovers( by, r ) )
         {
-            out.push_back( { it->second.kind, it->second.key, StaleAckWhy::ForeignScope, it->second.by } );
+            // M21(a): a foreign-scope row is BUILT from a live Regression, so it names itself — no index
+            // lookup, and no chance of the two disagreeing about the same finding's identity.
+            out.push_back( { it->second.kind, it->second.key, StaleAckWhy::ForeignScope, it->second.by,
+                             r.sym, r.path, r.line } );
         }
     }
     return out;
+}
+
+// ── M21(a) — name the ack that went stale, wherever the tree can still name it ─────────────────────────
+//
+// `<sa kind="complexity" key="4b309450f25c2b44" why="finding-gone"/>` is a 16-hex hash of an identity the
+// reader does not have. To act on the row — retire the ack, or look at why the finding stopped firing —
+// the agent had to open .ripwire_quality_acks and then reverse a hash it cannot reverse. On this repo's own
+// ledger that was ten rows and ten dead ends, in a document every other row family of which
+// (the gating <r> rows) carries sym= and p="path:line".
+//
+// THE RULE IS DERIVABLE, NOT BEST-EFFORT, and it falls straight out of the oracles above:
+//   * why="finding-gone" was REACHED by finding the key IN the current snapshot (that is precisely how each
+//     oracle told finding-gone from target-gone), so the symbol exists right now and can be named.
+//   * why="target-gone" means it is not there. There is nothing to name, and why= already says exactly that
+//     — a fabricated name would be the worse answer.
+//   * the two CLONE kinds key on a member-SET hash (cloneGroupHash) that no single symbol carries, so they
+//     are never nameable from a symbol index. That is a FLOOR, stated in the legend, not papered over.
+//   * why="foreign-scope" rows come from computeForeignAcks, which already holds the Regression — those are
+//     stamped by their caller from r.sym/r.path/r.line and never reach this index.
+// So `sym=` present is equivalent to "this key still names a live symbol", which is the one thing a reader
+// wants to know before deciding what to do with the row.
+//
+// The index is qualityKey's OWN space (pathQualifiedKey), the same space locBySym is built in — not a
+// second keying. Overloads share a key by construction (the key is (path, scope, name)); the lowest node id
+// wins, which is the forward-walk order every other id-choosing site in this tool uses.
+inline gtl::btree_map<std::uint64_t, NodeId> ackIdentityIndex( const IngestResult& ing, std::string_view root )
+{
+    gtl::btree_map<std::uint64_t, NodeId> nodeByKey;
+    for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
+    {
+        if( ing.symbols[i].fileId >= ing.files.size() )
+        {
+            continue;
+        }
+        nodeByKey.try_emplace( qualityKey( ing, i, root ), i );   // first (lowest id) wins
+    }
+    return nodeByKey;
+}
+
+// Fill sym=/p= on every row whose key the index resolves. Rows it cannot resolve are left untouched, which
+// is what makes the emitted attribute mean what the legend says it means.
+inline void stampStaleAckIdentity( std::vector<StaleAck>& rows, const IngestResult& ing, std::string_view root )
+{
+    if( rows.empty() )
+    {
+        return;   // the ledger-free run pays nothing: no walk over ing.symbols at all
+    }
+    const gtl::btree_map<std::uint64_t, NodeId> nodeByKey = ackIdentityIndex( ing, root );
+    for( StaleAck& row : rows )
+    {
+        if( !row.sym.empty() )
+        {
+            continue;   // already named by its own producer (the foreign-scope rows carry a Regression)
+        }
+        const auto found = nodeByKey.find( row.key );
+        if( found == nodeByKey.end() )
+        {
+            continue;
+        }
+        const Symbol& s = ing.symbols[ found->second ];
+        row.sym  = baselineCanonId( ing, found->second, root );   // the SAME display id a Regression carries
+        row.path.assign( relForHash( ing.files[ s.fileId ], root ) );
+        row.line = s.line;
+    }
 }
 
 // The XML `<sa kind= key= why=/>` rows and their JSON `"sa":[...]` sibling, extracted here so neither
@@ -5019,7 +5091,11 @@ inline std::vector<StaleAck> computeForeignAcks( const std::vector<Regression>& 
 // can only make it a different plain token, never markup. JSON's kind IS escaped (rw::jsonesc::escapeMcp,
 // the same posture serialize.h's jsonStr already uses for --json): unlike an XML attribute, one stray `"`
 // in a hand-edited ack line would otherwise emit syntactically invalid JSON, not just an ugly value.
-inline std::string staleAcksXml( const std::vector<StaleAck>& staleAcks )
+// `esc` is the CALLER's XML escaper, passed in rather than included — the same seam testmap.h's runHint
+// uses, and for the same reason: this header sits BELOW serialize.h in the include order, and sym= carries
+// corpus text (a canonical id) that must be escaped, unlike kind=/why=/by=, which are closed vocabularies.
+template<class EscapeFn>
+inline std::string staleAcksXml( const std::vector<StaleAck>& staleAcks, EscapeFn esc )
 {
     std::string out;
     for( const StaleAck& sa : staleAcks )
@@ -5032,6 +5108,20 @@ inline std::string staleAcksXml( const std::vector<StaleAck>& staleAcks )
         out += hex;
         out += "\" why=\"";
         out += staleAckWhyToken( sa.why );
+        // M21(a): sym= / p= — the identity, when the tree can still name it (stampStaleAckIdentity states
+        // exactly when that is). ESCAPED, unlike kind=/by=: a canonical id carries corpus text.
+        if( !sa.sym.empty() )
+        {
+            out += "\" sym=\"";
+            out += esc( sa.sym );
+            if( !sa.path.empty() )
+            {
+                out += "\" p=\"";
+                out += esc( sa.path );
+                out += ":";
+                out += std::to_string( sa.line );
+            }
+        }
         // P1.4: by= is UNESCAPED for the same reason kind= is — it is not free text. A scope spec is
         // character-set-restricted at the flag (scopeSpecIsSpellable) and re-validated on every ledger read,
         // so a hand-edited line can only make it a different plain token, never markup.
@@ -5064,6 +5154,18 @@ inline std::string staleAcksJsonArray( const std::vector<StaleAck>& staleAcks ) 
         out += hex;
         out += "\",\"why\":\"";
         out += staleAckWhyToken( sa.why );
+        if( !sa.sym.empty() )   // M21(a): the XML twin's sym=/p=, key-for-key
+        {
+            out += "\",\"sym\":\"";
+            out += rw::jsonesc::escapeMcp( sa.sym );
+            if( !sa.path.empty() )
+            {
+                out += "\",\"p\":\"";
+                out += rw::jsonesc::escapeMcp( sa.path );
+                out += ":";
+                out += std::to_string( sa.line );
+            }
+        }
         if( !sa.by.empty() )
         {
             out += "\",\"by\":\"";
