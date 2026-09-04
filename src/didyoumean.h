@@ -148,6 +148,10 @@ inline std::string_view nearestNameByEditDistance( It first, It last, std::strin
 // per surface is two suggesters that drift.
 inline std::string_view nearestIndexedFile( const IngestResult& ing, std::string_view typed )
 {
+    if( typed.empty() )
+    {
+        return {};   // F10: the nearest path to "" is the shortest path, which is a suggestion about nothing
+    }
     constexpr int kMaxEditDistance = 3;   // same bandwidth cutoff as didYouMean
     const auto    baseName = []( std::string_view p ) -> std::string_view
     {
@@ -187,8 +191,48 @@ inline std::string nearestIndexedFileClause( const IngestResult& ing, std::strin
     return " (did you mean '" + std::string( best ) + "'? a path SUFFIX is enough)";
 }
 
+// The nearest indexed STRUCT / CLASS / INTERFACE name (F13). --layout and --field-affinity refuse over a
+// pool of 494 aggregates they have already loaded and offered nothing but "try --grep=<what you typed>",
+// while every SYMBOL selector one keystroke away names the symbol. Same core, a different pool — which is
+// exactly what nearestNameByEditDistance exists to make cheap.
+inline std::string nearestAggregateName( const IngestResult& ing, std::string_view typed )
+{
+    if( typed.empty() )
+    {
+        return {};
+    }
+    constexpr int          kMaxEditDistance = 3;
+    const std::string_view best = nearestNameByEditDistance( ing.symbols.begin(), ing.symbols.end(), typed, kMaxEditDistance,
+                                                              []( const Symbol& s ) -> std::string_view
+                                                              {
+                                                                  const bool isAggregate = s.kind == SymKind::Struct || s.kind == SymKind::Class
+                                                                                        || s.kind == SymKind::Interface;
+                                                                  return isAggregate ? std::string_view( s.name ) : std::string_view();
+                                                              } );
+    return best.empty() || best == typed ? std::string() : ( " (did you mean '" + std::string( best ) + "'?)" );
+}
+
+// F10/F14: an EMPTY item inside a comma-separated selector list. Two verbs met it two wrong ways — --path
+// RESOLVED it (and had the suggester answer about ""), --connect and --expand DROPPED it, so a trailing
+// comma, or a shell variable that expanded to nothing, silently changed the question and still exited 0. An
+// empty item is not a selector: say which position is empty, and give the accepted form.
+inline std::string emptyListItemMessage( std::string_view flag, std::size_t oneBasedPosition, std::string_view example )
+{
+    return "ripwire: " + std::string( flag ) + ": item " + std::to_string( oneBasedPosition ) + " of the comma list is empty "
+           "— an empty item names no symbol, and dropping it would silently change the question you asked; "
+           "remove the extra comma, or name a symbol there (e.g. " + std::string( example ) + ")";
+}
+
 inline std::string didYouMean( const IngestResult& ing, std::string_view name )
 {
+    if( name.empty() )
+    {
+        // F10 (capture-audit 2026-09-04): asked for the nearest name to "", the distance metric answers with
+        // the SHORTEST symbol in the corpus — `--path=rankGraphTeleport,` printed "endpoint not found:
+        // (did you mean 'A'?)". An empty query is not a typo of anything. Guarded HERE rather than at the
+        // callers, because every caller that can be handed an empty list item has the same hole.
+        return {};
+    }
     constexpr int kMaxEditDistance = 3;   // bandwidth cutoff (§P12.1): beyond this a "hint" is noise, not help
     const std::string_view best = nearestNameByEditDistance( ing.symbols.begin(), ing.symbols.end(), name, kMaxEditDistance,
                                                               []( const Symbol& s ) -> std::string_view

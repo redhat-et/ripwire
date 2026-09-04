@@ -156,6 +156,14 @@ inline bool parseOp( std::string_view name, mcpedit::Op& op ) noexcept
     return false;
 }
 
+// F15: the op vocabulary, RENDERED from the same table parseOp matches against — it was published nowhere,
+// not in --help and not in the refusal ("unknown edit-plan op 'replace'"), while every other enum in the
+// tool prints "(supported: …)". A closed set the caller cannot enumerate is a guessing game.
+inline std::string supportedOpsList()
+{
+    return "replace_symbol_body, insert_before_symbol, insert_after_symbol";
+}
+
 inline bool editsOverlap( const Edit& a, const Edit& b ) noexcept
 {
     const bool ar = a.op == mcpedit::Op::ReplaceBody;
@@ -175,7 +183,8 @@ inline bool parseEdit( const McpIndex& ix, const std::string& object, const std:
     edit.target   = mcpdetail::findString( object, "target" );
     edit.fileHint = mcpdetail::findString( object, "file" );
     const std::string payloadName = mcpdetail::findString( object, "payload" );
-    if( !parseOp( edit.opName, edit.op ) ) { error = "unknown edit-plan op '" + edit.opName + "'"; return false; }
+    if( !parseOp( edit.opName, edit.op ) )
+    { error = "--edit-plan: unknown op '" + edit.opName + "' (supported: " + supportedOpsList() + ")"; return false; }
     if( edit.target.empty() || payloadName.empty() ) { error = "every edit needs string target and payload fields"; return false; }
     const std::string payloadPath = siblingPath( planPath, payloadName );
     if( !payloadWithinPlanDir( planPath, payloadPath, edit.payloadPath ) )

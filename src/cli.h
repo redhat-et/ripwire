@@ -1482,6 +1482,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               (0 for the two insert verbs, which never overwrite). Follow with --edit-check=SYM and\n"
         "                               --affected=FILE. Single-root only.\n"
         "    --edit-plan=FILE           versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]};\n"
+        "                               op is one of replace_symbol_body, insert_before_symbol, insert_after_symbol\n"
         "                               each target takes the same forms as TARGET above (a name, an @FILE:LINE seed, a handle)\n"
         "      --dry-run | --apply      the plan's explicit mode: --dry-run preflights and prints the receipt without writing,\n"
         "                               --apply commits; exactly one of the two is required. Payload paths are relative to the\n"

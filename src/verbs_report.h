@@ -2015,8 +2015,11 @@ std::optional<int> runLayout( const MainDispatch& d )
         }
         else
         {
-            std::fprintf( stderr, "ripwire: --layout: no indexed struct/class named '%.*s' (try --grep=%.*s to find its spelling)\n",
+            // F13: the struct set is loaded and 494 names wide — offer the near-miss from it, exactly as
+            // every SYMBOL selector one keystroke away does, instead of only "try --grep=<what you typed>".
+            std::fprintf( stderr, "ripwire: --layout: no indexed struct/class named '%.*s'%s (try --grep=%.*s to find its spelling)\n",
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data(),
+                          rw::nearestAggregateName( d.ing, cfg.layoutStruct ).c_str(),
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data() );
         }
         return 1;
@@ -2065,9 +2068,10 @@ std::optional<int> runFieldAffinity( const MainDispatch& d )
     // claim than "this name never resolved to a C-family aggregate body this verb can model".
     if( !cfg.fieldAffinityStruct.empty() && res.rows.empty() && res.structsTotal == 0 )
     {
-        std::fprintf( stderr, "ripwire: --field-affinity: no indexed C-family struct/class named '%.*s' with any attributed "
+        std::fprintf( stderr, "ripwire: --field-affinity: no indexed C-family struct/class named '%.*s'%s with any attributed "
                               "field access (this verb models C/C++/ObjC only; try --layout=%.*s for its declared layout)\n",
                       int( cfg.fieldAffinityStruct.size() ), cfg.fieldAffinityStruct.data(),
+                      rw::nearestAggregateName( d.ing, cfg.fieldAffinityStruct ).c_str(),
                       int( cfg.fieldAffinityStruct.size() ), cfg.fieldAffinityStruct.data() );
         return 1;
     }

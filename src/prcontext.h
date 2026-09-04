@@ -317,7 +317,9 @@ inline DiffAnchor resolveDiffAnchor( const std::string& root, std::string_view b
     out.refSha = resolveBaseRefSha( root, baseRef );
     if( out.refSha.empty() )
     {
-        DEGRADED_PATH_ALERT( "pr-context: the base ref does not resolve to a commit — refusing rather than handing the raw token to git" );
+        // No DEGRADED_PATH_ALERT (F20): the caller REFUSES on badRef, so this stamped a "[math degraded] …"
+        // line — the marker of a run that CONTINUED in a reduced mode — immediately ahead of a refusal that
+        // continued nothing. The sentence it carried is already the caller's user-facing refusal.
         out.badRef = true;
         return out;
     }
