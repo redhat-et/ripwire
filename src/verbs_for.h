@@ -342,6 +342,10 @@ struct ForLensNotes
     const char*        confidence;  // "high" | "low"
     int                marginPct;   // the whole-percent relative drop the confidence derives from (0 = none)
     bool               weak;
+    // M10: gitstamp::stampAt(root) — the raw sha[+dirty] value, "" on multi-root/non-git (never "null" as
+    // a STRING; the JSON emitter below distinguishes empty-string-absent from a real value the same way
+    // every other JSON dialect's at= sibling does — see writeTestGateReportJson/situationDiffJson).
+    const std::string& at;
     // ── HARNESS-FACING instrumentation, JSON dialect ONLY (docs/EVALS.md, "Agent Retrieval Bench —
     // abstention round 2: the adaptive cut's corpus-support facts", PRE-REGISTERED 2026-08-30) ───────
     // The adaptive cut computes these three and, before this, emitted none of them on any surface. They
@@ -378,6 +382,9 @@ struct ForLensHeaderParts
     // scratch (ctxRootOpen below) and would silently shed a fact spliced into the pre-built string.
     std::string_view confidenceAttrs;  // e.g. ` confidence="high" margin_pct="34"` — root facts, every ladder rung
     std::string_view confidenceNote;   // the legend sentence defining the two attributes (legend-coverage contract)
+    std::string_view gitAtAttr;        // M10: ` at="<sha>[+dirty]"` (gitstamp::atAttr) — "" on multi-root/non-git;
+                                        // same ALWAYS-present, never-budget-dropped treatment as confidenceAttrs
+                                        // above, for the same reason (a root fact, not a content row).
     bool             anchor     = false;   // --anchor's EXPERIMENTAL caveat paragraph
     bool             autoBundle = false;   // T3: auto mode is on (cfg.detail==0, no --signatures-only) — appends the bundle=auto legend
     bool             compactBundle = false;   // COMPACT conceptual serving: appends the bundle=compact legend INSTEAD of the auto one — never both, because only one of the two sections can be emitted
@@ -473,7 +480,10 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     }
     h.append( extraNotes );
     h += " -->";
-    h += rw::forRootRelPathsLegendShort( !p.rootArg.empty() );
+    // M10: at= folded into the SAME trailing comment as root= (one wrapper, not two) — the
+    // weak=/dropped_positive=/est_tokens= splice below still targets the LAST comment's closing "-->"
+    // (headerStr.rfind), unchanged from before this attribute existed.
+    h += rw::forRootRelPathsLegendShort( !p.rootArg.empty(), !p.gitAtAttr.empty() );
 }
 
 // T3 — the legend sentence for the terminal-by-default bundle, a named constant so the sigs-budget
@@ -516,10 +526,11 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     std::string h;
     h.reserve( 640 + std::max( kForAutoBundleLegend.size(), kForCompactBundleLegend.size() ) + p.rootOpenStr.size() + p.taskNote.size() + p.adaptiveNote.size()
                + p.mentionNote.size() + p.boostNote.size() + p.docMentionNote.size() + p.floorNote.size()
-               + p.confidenceAttrs.size() + p.confidenceNote.size() + extraNotes.size() );
-    h += rootOpenWithSchema( rootOpenWithExtraAttrs( withRouteAttr ? std::string( p.rootOpenStr )
+               + p.confidenceAttrs.size() + p.confidenceNote.size() + p.gitAtAttr.size() + extraNotes.size() );
+    h += rootOpenWithSchema( rootOpenWithExtraAttrs( rootOpenWithExtraAttrs( withRouteAttr ? std::string( p.rootOpenStr )
                                                                    : rw::ctxRootOpen( p.task, {}, p.rootArg ),
                                                      p.confidenceAttrs ),
+                                                     p.gitAtAttr ),
                              p.compactLegend ? "ripwire.for/v1" : std::string_view() );
     if( p.compactLegend )
     {
@@ -589,14 +600,20 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     // clause is now the FIRST byte of headroom this bundle had left, not eleven tokens past it).
     // `on` is p.rootArg's OWN presence, the same convention rootRelPathsLegend(bool) itself uses elsewhere
     // (never re-derived from withRouteAttr or anything else the ceiling ladder decided above).
-    h += rw::forRootRelPathsLegendShort( !p.rootArg.empty() );
+    // M10: at= folded into the SAME trailing comment as root= (one wrapper, not two) — the
+    // weak=/dropped_positive=/est_tokens= splice above still targets the LAST comment's closing "-->"
+    // (headerStr.rfind), unchanged from before this attribute existed.
+    h += rw::forRootRelPathsLegendShort( !p.rootArg.empty(), !p.gitAtAttr.empty() );
     return h;
 }
 
 inline std::string forLensJsonHeader( std::string_view task, const ForLensNotes& notes )
 {
     using rw::jsonStr;
-    std::string h = "{\"task\":\"" + jsonStr( task ) + "\"";
+    // M10: "at":null (never a fake sha) on multi-root/non-git — same convention as writeTestGateReportJson's
+    // own at= sibling in this tool. A root fact, so it rides first, beside task=.
+    std::string h = "{\"at\":" + ( notes.at.empty() ? std::string( "null" ) : ( "\"" + notes.at + "\"" ) )
+                   + ",\"task\":\"" + jsonStr( task ) + "\"";
     if( !notes.route.empty() )
     {
         h += ",\"route\":\"" + jsonStr( notes.route ) + "\"";
@@ -1504,6 +1521,17 @@ std::optional<int> runForLens( const MainDispatch& d )
         // what the completeness ground needs.
         const ForConfidence forConf = deriveForConfidence( forCut, forTopN );
 
+        // M10: --for reads git for the per-file churn= column (folded onto the bundle below, mined once in
+        // main.cpp's gitCoChangeAndChurnCached pass) and, before this fix, carried no anchor — an agent
+        // quoting churn= into a handoff had nothing checkable to pin it to. Single-root only (same gate
+        // flRootArg itself uses): "" on multi-root or a non-git root, same silence-means-omitted convention
+        // every other stamped verb follows. ALWAYS present when non-empty, like confidence= — a root fact,
+        // never budget-dropped, which is why it rides the SAME byte-exempt reserve as confidence= below.
+        // Computed once as the raw stamp (both dialects need it: XML wraps it as an attribute, JSON quotes
+        // it bare) so a single --token-budget run pays exactly one extra git subprocess, not two.
+        const std::string forAtStamp   = flSingleRoot ? gitstamp::stampAt( root ) : std::string();
+        const std::string forAtAttrStr = forAtStamp.empty() ? std::string() : ( " at=\"" + forAtStamp + "\"" );
+
         // H1 (B0 r2): the bundle is emitted under a GLOBAL payload budget (serialize.h kForPayloadBudgetBytes; an
         // EXPLICIT --token-budget=N overrides it at the same conservative byte rate the --max-tokens fitter uses).
         // Trimming happens inside <sigs> only, so the header is built as a string and the sibling blocks (lego,
@@ -1528,7 +1556,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // turns the disclosure off on EITHER serving shape — test/fordisclosurecheck.sh.
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
                                         mentionNote, boostNote, docMentionNote, floorNote,
-                                        forConf.attrs, forConf.note, cfg.anchor,
+                                        forConf.attrs, forConf.note, forAtAttrStr, cfg.anchor,
                                         plan.autoBodies, plan.compact, cfg.legend == "compact",
                                         /*tailLegend=*/true, flRootArg };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
@@ -1648,6 +1676,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                                                                               docMentionNote, adaptiveNote, floorNote,
                                                                                               forConf.level,
                                                                                               forConf.marginPct, forWeak,
+                                                                                              forAtStamp,
                                                                                               // abstention round 2: forCut is the SAME
                                                                                               // cut the confidence facts above derive
                                                                                               // from, so the counts and the verdict
@@ -1767,7 +1796,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // counts the emitted header verbatim, so leftBytes hands the bodies ~240 B less and the bundle
         // total never crosses the ceiling — charging the sig side as well was double-counting one cost.
         // est_tokens measures the emitted header in both regimes, so nothing under-reports either way.
-        const std::size_t confidenceExemptBytes = forConf.attrs.size() + forConf.note.size();
+        const std::size_t confidenceExemptBytes = forConf.attrs.size() + forConf.note.size() + forAtAttrStr.size();
         // DEEP-TAIL: the tail legend's bytes are exempt from the sig-trim charge in BOTH regimes, the
         // confidence-disclosure precedent verbatim — the tail's contract is that the ranked head is
         // byte-identical with and without it, and charging the clause here would shrink <sigs> to pay for

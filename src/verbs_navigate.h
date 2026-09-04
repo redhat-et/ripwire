@@ -186,10 +186,13 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // already-large dispatcher's own complexity.
         if( !cfg.json )
         {
-            std::printf( "%s%s%s-->%s", rw::callHierarchyLegendOpen( wantCallers ).c_str(),
+            // M12: under multi-root this verb carries no root= at all (correctly — no single root exists)
+            // and, before this, disclosed nothing about the `<label>/` prefix every p= below carries.
+            std::printf( "%s%s%s-->%s%s", rw::callHierarchyLegendOpen( wantCallers ).c_str(),
                          rw::capLegendClause( rw::computePageDisclosure( pw.end - pw.begin, result.size(), pw.end,
                                                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap ).active ),
-                         rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( chSingleRoot ) );
+                         rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( chSingleRoot ),
+                         rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
         }
 
         // --format=columnar (RESEARCH lever 1): the same page window, re-encoded as a path-table + parallel
@@ -250,6 +253,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         std::printf( "%s%s>", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                     cfg.pageLimit, cfg.pageOffset, chDiscloseCap ),
                      rw::graphCountFloorAttrXml( g ).c_str() );
+        rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
         for( std::size_t i = pw.begin; i < pw.end; ++i )
         {
             const Symbol&           s  = ing.symbols[ result[i] ];
@@ -441,8 +445,15 @@ struct UseSite { std::uint32_t fileId; std::uint32_t line; rw::RefRole role; std
 // doc-mentions / wikilinks and HAS-A compose edges are NOT name use-sites (excluded). Returns the rows in the
 // deterministic emission order (file path, line, role, enclosing-id) plus `callSitesOfName` — the call-role
 // total BEFORE the §A6b narrowing, which is what the disclosure attribute reports.
+//
+// M12: `rootForId` is fielduses.h's OWN `rootForId` convention (`singleRoot ? root : {}`) — the caller's
+// single-root spelling, or empty on multi-root/no-root (canonicalIdForEmit's own degrade then emits the
+// stored, already-labeled spelling verbatim). Before this parameter existed, `in` was built from the RAW
+// ing.files[...] path, so a relative-root run's in_id carried a leading "./" (`in_id="./src/eval.h::…"`)
+// that never matched the row's own root-relative p=, the map's id=, or a git path — the M6/L1/M0-5 finding.
 inline std::pair<std::vector<UseSite>, std::size_t>
-collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span<const char> isChosenCaller )
+collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span<const char> isChosenCaller,
+                 std::string_view rootForId = {} )
 {
     using namespace rw;
     std::vector<UseSite> sites;
@@ -475,8 +486,7 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
         std::string in;
         if( r.fromSymbol != kNoNode && r.fromSymbol < ing.symbols.size() )
         {
-            const Symbol& fs = ing.symbols[ r.fromSymbol ];
-            in = canonicalId( ing.files[ fs.fileId ], fs.scope, fs.name );
+            in = canonicalIdForEmit( ing, ing.symbols[ r.fromSymbol ], rootForId );   // M12: root-relative, no leading "./"
         }
         sites.push_back( { r.fileId, r.line, r.role, std::move( in ) } );
     }
@@ -566,7 +576,8 @@ std::optional<int> runUses( const MainDispatch& d )
         const std::vector<char> isChosenCaller = sel.fileQualified ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
 
         // the sorted use-sites, plus the un-narrowed call-role total the disclosure reports.
-        const auto [ sites, callSitesOfName ] = collectUseSites( ing, sel, isChosenCaller );
+        const auto [ sites, callSitesOfName ] = collectUseSites( ing, sel, isChosenCaller,
+                                                                 usSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{} );
 
         // §A6b(ii): a file: qualifier naming a file with NO definition of the name is a WRONG SELECTOR — its
         // three siblings all refuse it, and so does this one now.
@@ -614,10 +625,12 @@ std::optional<int> runUses( const MainDispatch& d )
                      "chosen def (the callers verb's own narrowing, read the other way, so the two agree); read/write/import/extends carry no "
                      "resolution and stay name-matched across every def sharing the name. narrowed_roles= names what narrowed, and "
                      "defs_of_name=/call_sites_of_name= (file: qualifier only) are the un-narrowed totals. "
-                     "%s%s-->%s", rw::kUsesLegendOpen,
+                     "%s%s-->%s%s", rw::kUsesLegendOpen,
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
                                                                     cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
-                     rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( usSingleRoot ) );
+                     rw::graphCountDisclosure().c_str(), rw::rootRelPathsLegend( usSingleRoot ),
+                     // M12: same multi-root roots-table disclosure --callers/--callees gained.
+                     rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
         char              upab[ kPageDisclosureCap ];
         const char* const upage    = pageDisclosure( upab, sizeof( upab ), pageRows, sites.size(), upw.end, cfg.pageLimit, cfg.pageOffset, usDiscloseCap );
 
@@ -643,6 +656,7 @@ std::optional<int> runUses( const MainDispatch& d )
         std::printf( "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s%s%s%s>",
                      ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size(), selectorAttrs.c_str(), usRootAttr.c_str(), upage,
                      rw::graphCountFloorAttrXml( g ).c_str() );
+        rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
         for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
         {
             const UseSite&          u  = sites[ siteIndex ];
@@ -805,8 +819,13 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // own selector grammar, unchanged).
     const UsesSelector        sel            = resolveUsesSelector( ing, cfg.safeDeleteSym, defs.size() );
     const std::vector<char>   isChosenCaller = sel.fileQualified ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
-    const auto                sitesPair      = collectUseSites( ing, sel, isChosenCaller );   // .second (the un-narrowed
-                                                                                               // call-site total) is not read here
+    const auto                sitesPair      = collectUseSites( ing, sel, isChosenCaller,
+                                                                 sdSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{} );
+                                                                                               // .second (the un-narrowed
+                                                                                               // call-site total) is not read here;
+                                                                                               // .in_id is unused on this verb too, root
+                                                                                               // threaded anyway so a future reader of
+                                                                                               // sites gets the correct spelling for free
     const std::vector<UseSite>& sites        = sitesPair.first;
 
     // tested= lens: an indexed test transitively CALLS the symbol — the identical rule computeQMetrics
@@ -1367,11 +1386,23 @@ std::optional<int> runVerify( const MainDispatch& d )
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
 
+    // M12: --verify was the one path-emitting verb with NO root= at all — every p= below printed
+    // ing.files[...] verbatim, "./src/main.cpp:986" on a relative root, while every sibling verb
+    // (--callers/--uses/--path/--graph-query) strips the same leading "./" via rootRelativeUri and
+    // discloses root= on its own element. Same single-root condition every other verb's root= uses.
+    const bool         verSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string  verRootPrefix = verSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
+    const std::string  verRootAttr   = verSingleRoot ? ( " root=\"" + ex( cfg.roots[0] ) + "\"" ) : std::string();
+    const auto          verPathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return verSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ fileId ], verRootPrefix ) : std::string_view( ing.files[ fileId ] );
+    };
+
     // the sibling verbs' own row grammar for symbol evidence (--path/--graph-query rows)
     const auto emitSymRow = [ & ]( NodeId n )
     {
         const Symbol& s = ing.symbols[n];
-        std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( ing.files[ s.fileId ] ).c_str(), s.line );
+        std::printf( "<s t=\"%s\" n=\"%s\" p=\"%s:%u\"/>", symTag( s.kind ), ex( s.name ).c_str(), ex( verPathRel( s.fileId ) ).c_str(), s.line );
     };
 
     // the FILE argument: a path substring over the indexed tree (filePathContains — the file: qualifier's
@@ -1401,13 +1432,15 @@ std::optional<int> runVerify( const MainDispatch& d )
     };
 
     // the root opener, shared by every shape so the attribute ORDER is fixed: claim, shape, verdict,
-    // shape-specific facts, limit=, then the honesty attribute (complete= XOR counts_floor=), then the
-    // disclosure pair. `honesty` is exactly one of kGraphCountFloorAttrXml / " complete=\"1\"" / "".
+    // shape-specific facts, root= (M12), limit=, then the honesty attribute (complete= XOR counts_floor=),
+    // then the disclosure pair. `honesty` is exactly one of kGraphCountFloorAttrXml / " complete=\"1\"" / "".
     const auto openRoot = [ & ]( const char* verdict, const std::string& facts, const char* limit, const char* honesty, const char* pageTail )
     {
         VERIFY( std::size_t( claim.shape ) < std::size( verify::kShapeTags ) );   // the parser is the only producer, every value in range
-        std::printf( "%s<verify claim=\"%s\" shape=\"%s\" verdict=\"%s\"%s", verify::kVerifyLegend,
-                     ex( cfg.verifyClaim ).c_str(), verify::kShapeTags[ std::size_t( claim.shape ) ], verdict, facts.c_str() );
+        std::printf( "%s%s<verify claim=\"%s\" shape=\"%s\" verdict=\"%s\"%s%s", verify::kVerifyLegend,
+                     rw::rootRelPathsLegend( verSingleRoot ),
+                     ex( cfg.verifyClaim ).c_str(), verify::kShapeTags[ std::size_t( claim.shape ) ], verdict, facts.c_str(),
+                     verRootAttr.c_str() );
         if( limit[0] != '\0' )
         {
             std::printf( " limit=\"%s\"", limit );
@@ -1456,7 +1489,8 @@ std::optional<int> runVerify( const MainDispatch& d )
         const std::vector<NodeId> defs = resolveAllByNameQualified( ing, sym );
         const UsesSelector        sel  = resolveUsesSelector( ing, sym, defs.size() );
         const std::vector<char>   isChosenCaller = sel.fileQualified ? usesChosenCallers( ing, g, defs ) : std::vector<char>{};
-        const auto [ sites, callSitesOfName ]    = collectUseSites( ing, sel, isChosenCaller );
+        const auto [ sites, callSitesOfName ]    = collectUseSites( ing, sel, isChosenCaller,
+                                                                     verSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{} );
         (void) callSitesOfName;
         if( defs.empty() && sites.empty() )
         {
@@ -1477,7 +1511,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         for( std::size_t siteIndex = w.begin; siteIndex < w.end; ++siteIndex )
         {
             const UseSite& u = sites[ siteIndex ];
-            std::printf( "<u role=\"%s\" p=\"%s:%u\"", refRoleTag( u.role ), ex( ing.files[ u.fileId ] ).c_str(), u.line );
+            std::printf( "<u role=\"%s\" p=\"%s:%u\"", refRoleTag( u.role ), ex( verPathRel( u.fileId ) ).c_str(), u.line );
             if( !u.in.empty() )
             {
                 std::printf( " in_id=\"%s\"", ex( u.in ).c_str() );
@@ -1516,7 +1550,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         const std::vector<GrepHit> hits = grepEnrich( ing, std::span<const GrepRawHit>( inFile ).subspan( w.begin, w.end - w.begin ) );
         for( const GrepHit& h : hits )
         {
-            std::printf( "<hit p=\"%s:%u\" in=\"%s\"><m><![CDATA[", ex( ing.files[ h.fileId ] ).c_str(), h.line, ex( h.enclosing ).c_str() );
+            std::printf( "<hit p=\"%s:%u\" in=\"%s\"><m><![CDATA[", ex( verPathRel( h.fileId ) ).c_str(), h.line, ex( h.enclosing ).c_str() );
             std::string safe;
             appendCdataSafe( h.text, safe );
             std::fwrite( safe.data(), 1, safe.size(), stdout );
@@ -1579,7 +1613,7 @@ std::optional<int> runVerify( const MainDispatch& d )
             const std::vector<GrepHit> hits = grepEnrich( ing, std::span<const GrepRawHit>( inFile ).subspan( w.begin, w.end - w.begin ) );
             for( const GrepHit& h : hits )
             {
-                std::printf( "<hit p=\"%s:%u\" in=\"%s\"><m><![CDATA[", ex( ing.files[ h.fileId ] ).c_str(), h.line, ex( h.enclosing ).c_str() );
+                std::printf( "<hit p=\"%s:%u\" in=\"%s\"><m><![CDATA[", ex( verPathRel( h.fileId ) ).c_str(), h.line, ex( h.enclosing ).c_str() );
                 std::string safe;
                 appendCdataSafe( h.text, safe );
                 std::fwrite( safe.data(), 1, safe.size(), stdout );

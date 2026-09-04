@@ -16,8 +16,14 @@
 # `edit-check | edit-check@at` was reported closed by the bare-name search because §B11.3's new sentence
 # contains the English word ("defs= is how many DEFINITIONS *at* this site"), while lines 36-38 of THIS file
 # said correctly, in the same wave, that --edit-check still does not define the stamp. The gate now agrees
-# with this file. Same shape on `stray-content | stray-content@head` and `test-gate | test-gate@impacted`;
-# all three are still here, on purpose.
+# with this file. Same shape on `test-gate | test-gate@impacted`; both are still here, on purpose.
+# (`stray-content | stray-content@head` WAS the same kind of false-positive at the time this paragraph was
+# written — the gate agreed with keeping it — but M10 (capture-audit-2026-09-04, lane L9) genuinely closed
+# it: crossref.h's <stray-content> legend now spells `head=` in the house name= convention ("head= is the
+# same commit, bare sha, kept for compatibility"), so the line is gone from this file, deleted in the same
+# commit as that text. `merge-scout | merge-scout@head` and `uses | u@in_id` closed the same way, same
+# commit: mergescout.h's legend now defines head= alongside the new at=, and graphlegend.h's kUsesLegendOpen
+# (verify.h's kVerifyLegend too, for --verify's own <u> rows) now defines in_id=.)
 #
 # What is NOT counted: the seven v1 core row keys (p n t id l k c), which every map legend defines verbatim
 # and every row dictionary restates. Everything else on the root element and on the first instance of every
@@ -180,7 +186,6 @@ lint | rule@name
 mentions | mentions@defs
 merge-scout | arm@ok
 merge-scout | landing@order
-merge-scout | merge-scout@head
 merge-scout | no-work@note
 merge-scout | pair@b
 merge-scout | pair@risks
@@ -210,14 +215,12 @@ stray-content | ref@date
 stray-content | ref@name
 stray-content | ref@tip
 stray-content | stray-content@blobs
-stray-content | stray-content@head
 stray-content | stray-content@head_ref
 test-gate | test-gate@at
 test-gate | test-gate@changed
 test-gate | test-gate@impacted
 test-gate | test-gate@tests_capped
 test-gate | test-gate@untested_capped
-uses | u@in_id
 whereis | hit@date
 whereis | hit@tip
 zoom | zoom@levels

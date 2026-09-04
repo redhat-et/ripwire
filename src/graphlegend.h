@@ -203,7 +203,27 @@ inline constexpr const char* kForRootRelPathsLegendShort =
     "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's "
     "own path, unchanged). -->";
 
-inline const char* forRootRelPathsLegendShort( bool on ) noexcept { return on ? kForRootRelPathsLegendShort : ""; }
+// M10: the SAME clause, plus an at= mention, for the CLI --for path that also stamps at= (single-root AND
+// a git repo — a single-root run over a non-git directory gets root= alone, kForRootRelPathsLegendShort
+// above, never a false at= claim). Folded into ONE comment rather than a second "<!-- -->" pair: at this
+// verb's measured byte ceiling (fornotesbudgetcheck.sh), the 7-byte wrapper overhead was the difference
+// between fitting and not. Kept maximally terse (24 B over the root=-only form, ~10 tokens) — the full
+// kAtStampLegend sentence every other stamped verb affords is not affordable here; see the comment above
+// kForRootRelPathsLegendShort for the same trade-off's original measurement.
+inline constexpr const char* kForRootRelAtLegendShort =
+    "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's "
+    "own path, unchanged); at=this commit(+dirty). -->";
+
+// `rootOn` is the emitter's own root=-present condition; `atOn` is its at=-present condition (gitAtAttr
+// non-empty) — never re-derived from each other, since a non-git single-root run has rootOn without atOn.
+inline const char* forRootRelPathsLegendShort( bool rootOn, bool atOn = false ) noexcept
+{
+    if( !rootOn )
+    {
+        return "";
+    }
+    return atOn ? kForRootRelAtLegendShort : kForRootRelPathsLegendShort;
+}
 
 // ---- the per-verb legend OPENERS that more than one emitter prints -------------------------------------
 // Each of these had TWO byte-identical copies (a CLI one in main.cpp, an MCP one in mcpverbs.h) before this
@@ -225,7 +245,13 @@ inline constexpr const char* kUsesLegendOpen =
     "a name uniquely naming an indexed function-like #define — never role=\"call\" (an expansion is not a plain "
     "call); a name shared with a non-macro definition stays role=\"call\". Rows are ordered SOURCE first, then "
     "test/bench, then docs, by path within a tier. A MEMBER selector (Owner.field) is resolved per site instead of "
-    "name-matched — that run's legend says how. "; // LB-G
+    "name-matched — that run's legend says how. "
+    // M12: in_id= was emitted (here and on --verify's uses()/unused() <u> rows) with no clause anywhere
+    // defining it — a reader had to guess it was the CALLER's canonical id from shape alone. Written to the
+    // shortest honest form, deliberately: test/graphlegendbudgetcheck.sh's ratchet exists to stop the shared
+    // prose essay re-inflating, and a missing honesty fact is not a licence to spend 370 B stating it.
+    "in_id=canonical id (root-relative path::scope::name) of the symbol the site sits INSIDE; a scope-less "
+    "enclosing symbol degrades to its bare name; absent at file scope. "; // LB-G
 
 // The member-variable round (card A3): the clause the `Owner.field` answer appends to the opener above — ONLY
 // on that answer, so the name-matched --uses legend keeps its byte budget (test/graphlegendbudgetcheck.sh) and
@@ -393,5 +419,10 @@ inline const char* capLegendClause( bool active ) noexcept
 {
     return active ? kNeighbourCapLegend : "";
 }
+
+// M12's writeMultiRootTable/multiRootTableLegend (the multi-root roots-table disclosure --callers/--uses
+// reuse from the default map) live in serialize.h, not here: they need escapeXml, and serialize.h includes
+// THIS header (for rootRelPathsLegend) before its own escapeXml definition — putting them here would be
+// circular. See serialize.h, right after escapeXml.
 
 } // namespace rw

@@ -76,6 +76,7 @@
 #include "docparse.h"           // detail::readWholeFile — the canonical whole-file byte read
 #include "infra/jsonesc.h"      // shSingleQuote
 #include "quality.h"            // gitRepoHasHistory
+#include "gitstamp.h"           // atAttr — at="<sha>[+dirty]" root anchor (M10: --naming-calibration read git and carried no anchor)
 #include "serialize.h"          // escapeXml
 #include "infra/Diagnostics.h"  // VERIFY / DEGRADED_PATH_ALERT
 
@@ -677,6 +678,8 @@ inline constexpr const char* kNamingCalibrationLegend =
     "drop_old_skipped=candidates dropped because the lens would skip the old spelling, so no rule could ever have fired on it "
     "truncated=1 when a walk bound was hit, which makes candidates= a FLOOR "
     "probed=0 when there is no history to mine; r= says why "
+    "the root's own at= is the git commit these numbers were computed at (a trailing +dirty means the working "
+    "tree differed from that commit); a p row's at= below is unrelated — a path:line location, not a commit "
     "r rows: n=rule name old=pairs where the rule fired on the ABANDONED spelling new=pairs where it fired on "
     "the CHOSEN spelling fired=old+new proxy=old/fired, the crude precision proxy, absent when fired=0 "
     "(0.50 is exactly chance: a rule that fires equally on both spellings has no signal) "
@@ -716,20 +719,23 @@ inline int writeNamingCalibrationReport( const IngestResult& ing, const std::str
     const CalibrationReport report = scoreRenamePairs( ing, mineRenamePairs( root ) );
 
     std::fputs( kNamingCalibrationLegend, stdout );
+    // M10: this report reads git (mineRenamePairs walks `git log -p`) and, before this fix, carried no
+    // anchor — the same gap --for/--situ had. Splice it onto BOTH exit paths, per gitstamp.h's convention.
+    const std::string atStamp = gitstamp::atAttr( root );
     if( !report.harvest.ok )
     {
-        std::printf( "<naming-calibration probed=\"0\" r=\"%s\"/>",
-                     report.harvest.nonGitRoot ? "not-a-git-repo" : "probe-failed" );
+        std::printf( "<naming-calibration probed=\"0\" r=\"%s\"%s/>",
+                     report.harvest.nonGitRoot ? "not-a-git-repo" : "probe-failed", atStamp.c_str() );
         return 0;
     }
 
     std::printf( "<naming-calibration probed=\"1\" pairs=\"%zu\" candidates=\"%zu\" commits=\"%u\" hunks=\"%llu\" wide_hunks=\"%llu\""
-                 " drop_old_alive=\"%llu\" drop_new_absent=\"%llu\" drop_ambiguous=\"%llu\" drop_old_skipped=\"%llu\"%s>",
+                 " drop_old_alive=\"%llu\" drop_new_absent=\"%llu\" drop_ambiguous=\"%llu\" drop_old_skipped=\"%llu\"%s%s>",
                  report.pairs.size(), report.harvest.candidates.size(), report.harvest.commitsWalked,
                  (unsigned long long)report.harvest.hunksScanned, (unsigned long long)report.harvest.hunksTooWide,
                  (unsigned long long)report.droppedOldStillHere, (unsigned long long)report.droppedNewNotAtHead,
                  (unsigned long long)report.droppedAmbiguous, (unsigned long long)report.droppedOldIneligible,
-                 report.harvest.truncated ? " truncated=\"1\"" : "" );
+                 report.harvest.truncated ? " truncated=\"1\"" : "", atStamp.c_str() );
 
     for( const RuleScore& score : report.rules )
     {

@@ -101,6 +101,7 @@
 #include "layout.h"             // the offset model: modelDefFromSource / findDefBody / findTopLevelDef / diffDefs
 #include "crossref.h"           // the ref/blob sweep: enumerateRefs / diffRaw / streamBlobs / isBlobSha / isNullSha
 #include "quality.h"            // gitRepoHasHistory / gitHeadSha / gitOneLine
+#include "gitstamp.h"           // stampAt — the at="<sha>[+dirty]" anchor (M10: --stray-content --abi had head= with no dirty bit)
 #include "arch.h"               // relForHash — ing.files' root-prefixed path -> the git-relative spelling diffRaw reports
 #include "infra/jsonesc.h"      // shSingleQuote — the merge-base call
 #include "serialize.h"          // escapeXml
@@ -238,6 +239,9 @@ struct AbiResult
     bool           tooManyRefs = false;
     std::string    headSha;
     std::string    headRef;
+    std::string    atStamp;           // M10: gitstamp::stampAt(root) — head= above stays a bare 9-hex sha
+                                       // (gitstampcheck.sh pins that spelling); at= is the new attribute
+                                       // carrying the dirty bit.
     std::size_t    refsScanned = 0;
     std::size_t    distinctBlobs = 0;
     std::size_t    candidates  = 0;   // (path,name) pairs HEAD declares and this module can LOCATE a body for
@@ -692,6 +696,7 @@ inline AbiResult computeAbiCheck( const std::string& root, const IngestResult& i
     if( !quality::gitRepoHasHistory( root ) ) { result.ok = false; result.nonGitRoot = true; return result; }
 
     result.headSha = quality::gitHeadSha( root );
+    result.atStamp = gitstamp::stampAt( root );   // M10: same anchor as every other repo-reading root, dirty bit included
     result.headRef = quality::gitOneLine( root, "rev-parse --abbrev-ref HEAD 2>/dev/null" );
 
     const std::vector<crossref::RefInfo> refs = crossref::enumerateRefs( root, filter, result.headSha );
@@ -928,13 +933,18 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
                        "nested in a class or wrapped in an extern C block reads absent rather than compared; "
                        "the authorship anchor is per PATH, so a branch changing struct S in one file while "
                        "the live line changes S's mirror in another is a merge hazard only layout(S) on the "
-                       "merged result can see. Single-root; read-only (cat-file/diff/merge-base only). -->" );
+                       "merged result can see. Single-root; read-only (cat-file/diff/merge-base only). at= is the git "
+                       "commit these numbers were computed at; a trailing +dirty means the working tree differed from "
+                       "that commit (head= is the same commit, bare sha, kept for compatibility). -->" );
+    // M10: head= stays a bare 9-hex sha (gitstampcheck.sh's existing arm pins that spelling); at= is the new
+    // attribute, carrying the dirty bit this document never disclosed before.
+    const std::string atAttrStr = res.atStamp.empty() ? std::string() : ( " at=\"" + res.atStamp + "\"" );
     std::fprintf( out, "<abi head=\"%.9s\" head_ref=\"%s\" refs=\"%zu\" candidates=\"%zu\" compared=\"%zu\" blobs=\"%zu\""
                        " rows=\"%u\" shown=\"%u\" capped=\"%u\" dropped=\"%u\" excluded=\"%u\" head_only=\"%zu\" unmodelable=\"%zu\""
-                       " unrelated=\"%u\" broken_refs=\"%u\" quiet=\"%u\" excluded_refs=\"%u\"",
+                       " unrelated=\"%u\" broken_refs=\"%u\" quiet=\"%u\" excluded_refs=\"%u\"%s",
                   res.headSha.c_str(), ex( res.headRef ).c_str(), res.refsScanned, res.candidates, res.compared,
                   res.distinctBlobs, res.counts.total(), shownRows, unsigned( droppedRows > 0 ), droppedRows, res.counts.excluded(),
-                  res.headOnly, res.unmodelable, res.unrelated, brokenRefs, res.quietRefs, excludedRefs );
+                  res.headOnly, res.unmodelable, res.unrelated, brokenRefs, res.quietRefs, excludedRefs, atAttrStr.c_str() );
     writeKindAttrs( out, res.counts );
     if( !rootArg.empty() ) { std::fprintf( out, " root=\"%s\"", ex( rootArg ).c_str() ); }
     std::fprintf( out, ">" );

@@ -58,18 +58,30 @@ NORM_FILE_TARGET="${FILE_TARGET#./}"
 NORM_COMPUTE_ID="${COMPUTE_ID#./}"
 
 # ── INERTNESS: capture the pre-notes output of every emitting verb (absent notes file) ─────────────────────
-FOR_ABSENT="$( run --for="widget compute helper lonely" )"
+# M10 follow-up (lane L9, capture-audit-2026-09-04): --for's root now carries the gitstamp anchor
+# at="<sha>[+dirty]", and the dirty bit is defined (gitstamp.h, mergescout.h's precedent) as "tracked changes
+# OR UNTRACKED FILES". Creating .ripwire_notes at all therefore flips it — honestly: the working tree really
+# did change. That is a fact about the TREE, not about notes, so the notes-inertness comparison below masks
+# it and asserts everything else byte-for-byte. The anchor itself is pinned by test/gitstampcheck.sh, which
+# is where a regression in it belongs; leaving it unmasked here would make this gate red for the one thing it
+# is not measuring.
+# est_tokens= rides along: it is an HONEST count of the document's own bytes, and "+dirty" makes the header
+# six bytes longer, so masking the anchor without masking the number it is counted into would just move the
+# same tree-state fact one field to the right. Both are pinned elsewhere (gitstampcheck.sh, the --for budget
+# gates); nothing else in the bundle is masked.
+no_at(){ sed -e 's/ at="[0-9a-f]*\(+dirty\)\{0,1\}"//g' -e 's/est_tokens="[0-9]*"/est_tokens="@N@"/g'; }
+FOR_ABSENT="$( run --for="widget compute helper lonely" | no_at )"
 EXP_ABSENT="$( run --expand=helper )"
 MAP_ABSENT="$( run )"
 
 # an EMPTY notes file must be byte-identical to an absent one
 : > "$WORK/.ripwire_notes"
-[ "$FOR_ABSENT" = "$( run --for="widget compute helper lonely" )" ] && ok "inert: empty notes file → --for byte-identical" || no "empty notes file changed --for output"
+[ "$FOR_ABSENT" = "$( run --for="widget compute helper lonely" | no_at )" ] && ok "inert: empty notes file → --for byte-identical" || no "empty notes file changed --for output"
 [ "$EXP_ABSENT" = "$( run --expand=helper )" ]                       && ok "inert: empty notes file → --expand byte-identical" || no "empty notes file changed --expand output"
 [ "$MAP_ABSENT" = "$( run )" ]                                       && ok "inert: empty notes file → default map byte-identical" || no "empty notes file changed the default map"
 # a header-comment-only file is still empty of notes → still inert
 printf '# ripwire field notes v1 — just the header\n' > "$WORK/.ripwire_notes"
-[ "$FOR_ABSENT" = "$( run --for="widget compute helper lonely" )" ] && ok "inert: comment-only notes file → --for byte-identical" || no "comment-only notes file changed --for output"
+[ "$FOR_ABSENT" = "$( run --for="widget compute helper lonely" | no_at )" ] && ok "inert: comment-only notes file → --for byte-identical" || no "comment-only notes file changed --for output"
 rm -f "$WORK/.ripwire_notes"
 
 # ── --note-add: prints the written line, writes a sorted file, date from git committer clock ───────────────

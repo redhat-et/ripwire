@@ -175,6 +175,133 @@ case "$out" in
     *)                 no "map-diff: <r> was not stamped"; echo "$out" | grep -o '<r[^>]*>' ;;
 esac
 
+# ── M10 (capture-audit 2026-09-04, lens7-sibling Family 4 F-STAMP-1/2): six more repo-reading roots with
+#    NO anchor at all — --for (churn= per row from a git-log pass), --situ (CLI text + MCP JSON), --naming-
+#    calibration (commits=/hunks= from a git-log walk), --merge-scout (head= with no dirty bit despite
+#    computing one), --stray-content bare + --abi (same head=-no-dirty gap), --dmm (base=/target= name the
+#    COMPARED revisions, not when the tool itself ran). Commit the pending dirty edit so these have a real
+#    second commit to diff/compare against, and add a branch off the first commit for merge-scout's REF arg.
+g add -A
+g commit -q -m "second commit (M10 fixture)"
+g branch -q side HEAD~1
+SHA9_2="$( git -C "$R" rev-parse --short=9 HEAD )"
+
+check_at_present()
+{
+    local desc="$1"; shift
+    local out; out="$( "$BIN" "$R" "$@" --no-cache 2>/dev/null )"
+    case "$out" in
+        *"at=\"$SHA9_2\""*|*"at=\"$SHA9_2+dirty\""*) ok "$desc: at= present ($SHA9_2)" ;;
+        *)                                            no "$desc: at= missing"; echo "$out" | grep -o 'at="[^"]*"' | head -3 ;;
+    esac
+}
+check_at_text_present()
+{
+    local desc="$1"; shift
+    local out; out="$( "$BIN" "$R" "$@" --no-cache 2>/dev/null )"
+    case "$out" in
+        *"at: $SHA9_2"*) ok "$desc: at: text line present" ;;
+        *)               no "$desc: at: text line missing"; echo "$out" | head -5 ;;
+    esac
+}
+check_at_json_present()
+{
+    local desc="$1"; shift
+    local out; out="$( "$BIN" "$R" "$@" --no-cache 2>/dev/null )"
+    case "$out" in
+        *"\"at\":\"$SHA9_2\""*|*"\"at\":\"$SHA9_2+dirty\""*) ok "$desc: \"at\" present ($SHA9_2)" ;;
+        *)                                                    no "$desc: \"at\" missing"; echo "$out" | grep -o '"at":[^,]*' | head -3 ;;
+    esac
+}
+
+check_at_present      "for"                 --for="classify" --top-k=3
+check_at_json_present  "for --json"         --for="classify" --json
+check_at_text_present "situ"                --situ
+check_at_present      "naming-calibration"  --naming-calibration
+check_at_present       "merge-scout"        --merge-scout=side
+check_at_present       "stray-content"      --stray-content
+check_at_present       "stray-content --abi" --stray-content --abi
+check_at_present       "dmm"                --dmm=HEAD~1..HEAD
+
+# merge-scout / stray-content / abi keep their PRE-EXISTING head= (bare sha, no dirty) alongside the new at=
+# — this pins that the rename discipline (M10's "keep head= where a gate pins it") actually held.
+out="$( "$BIN" "$R" --merge-scout=side --no-cache 2>/dev/null )"
+case "$out" in
+    *"head=\"$SHA9_2\""*) ok "merge-scout: pre-existing head=\"$SHA9_2\" unchanged" ;;
+    *)                     no "merge-scout: head= missing or changed shape" ;;
+esac
+out="$( "$BIN" "$R" --stray-content --no-cache 2>/dev/null )"
+case "$out" in
+    *"head=\"$SHA9_2\""*) ok "stray-content: pre-existing head=\"$SHA9_2\" unchanged" ;;
+    *)                     no "stray-content: head= missing or changed shape" ;;
+esac
+
+# --handoff: head= was the commit SUBJECT (M0-4's two-meanings-of-head= bug), now subject=; at= is unchanged
+out="$( "$BIN" "$R" --handoff --no-cache 2>/dev/null )"
+case "$out" in
+    *"subject=\"second commit (M10 fixture)\""*) ok "handoff: subject= carries the commit subject" ;;
+    *)                                            no "handoff: subject= missing or wrong"; echo "$out" | grep -o '<handoff[^>]*>' ;;
+esac
+case "$out" in
+    *' head="'*) no "handoff: head= should be GONE (renamed to subject=, M0-4)" ;;
+    *)           ok "handoff: no stray head= left behind" ;;
+esac
+
+# xmllint + determinism on the six new arms
+for flags in "--for=classify --top-k=3" "--situ" "--naming-calibration" "--merge-scout=side" "--stray-content" "--dmm=HEAD~1..HEAD" "--handoff"; do
+    a="$( "$BIN" "$R" $flags --no-cache 2>/dev/null )"
+    b="$( "$BIN" "$R" $flags --no-cache 2>/dev/null )"
+    [ "$a" = "$b" ] && ok "determinism ($flags)" || no "determinism ($flags): two runs differed"
+    if [ "$flags" != "--situ" ]; then   # --situ is plain text, not XML
+        printf '%s' "$a" | xmllint --noout - >/dev/null 2>&1 && ok "xmllint ($flags)" || no "xmllint ($flags) FAILED"
+    fi
+done
+
+# ── MCP dialect: situational_awareness and for both carry "at" (null on a non-git root, a value here) ────
+if command -v python3 >/dev/null 2>&1; then
+    MCP_OUT="$( python3 - "$BIN" "$R" "$SHA9_2" <<'PYEOF'
+import json, subprocess, sys
+binPath, root, sha9 = sys.argv[1], sys.argv[2], sys.argv[3]
+p = subprocess.Popen( [ binPath, "--mcp" ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL )
+def call( method, params ):
+    req = { "jsonrpc": "2.0", "id": 1, "method": method, "params": params }
+    p.stdin.write( json.dumps( req ).encode() + b"\n" ); p.stdin.flush()
+    return json.loads( p.stdout.readline().decode() )
+call( "initialize", {} )
+sa = call( "tools/call", { "name": "situational_awareness", "arguments": { "path": root } } )
+fr = call( "tools/call", { "name": "for", "arguments": { "path": root, "task": "classify" } } )
+p.stdin.close()
+def text_of( r ):
+    try:
+        return r[ "result" ][ "content" ][ 0 ][ "text" ]
+    except Exception:
+        return ""
+sa_txt = text_of( sa )
+fr_txt = text_of( fr )
+sa_ok  = ( '"at":"' + sha9 ) in sa_txt or ( '"at":"' + sha9 + "+dirty" ) in sa_txt
+fr_ok  = ( 'at="' + sha9 ) in fr_txt
+print( "SA_OK=%d FR_OK=%d" % ( int( sa_ok ), int( fr_ok ) ) )
+if not sa_ok:
+    print( "SA_TEXT_HEAD:" + sa_txt[ :200 ], file=sys.stderr )
+# fr_ok has no debug print: MCP `for` lacking at= is a documented, expected scope gap (see the INFO line
+# below), not a failure to diagnose.
+PYEOF
+)"
+    case "$MCP_OUT" in
+        *"SA_OK=1"*) ok "MCP situational_awareness: \"at\":\"$SHA9_2...\" present" ;;
+        *)           no "MCP situational_awareness: \"at\" missing or wrong" ;;
+    esac
+    # MCP `for`'s header is a SEPARATE hand-rolled emitter (mcpverbs.h), not forLensHeaderText/forLensJsonHeader
+    # — CLI --for's at= fix (this round) does not reach it. Reported, not asserted: a scoped-out gap is not a
+    # regression, and failing this arm forever would make the gate lie about what it is protecting.
+    case "$MCP_OUT" in
+        *"FR_OK=1"*) echo "  INFO  MCP for: at= also present (bonus — not required by this gate)" ;;
+        *)           echo "  INFO  MCP for: at= absent — documented scope gap, see lane-L9 report (separate emitter, not fixed this round)" ;;
+    esac
+else
+    echo "gitstampcheck: python3 unavailable — skipping the MCP at= arm"
+fi
+
 # ── non-git directory: at= is OMITTED entirely, never at="none" ─────────────────────────────────────────
 NG="$TMP/nongit"; mkdir -p "$NG"
 cat > "$NG/plain.h" <<'EOF'

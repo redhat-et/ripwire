@@ -84,6 +84,7 @@
 
 #include "model.h"
 #include "quality.h"            // gitOneLine / gitHeadSha / gitRepoHasHistory / popenTrimmed
+#include "gitstamp.h"           // stampAt — the at="<sha>[+dirty]" anchor (M10: --stray-content had head= with no dirty bit)
 #include "gitoracle.h"          // the SHARED name-history oracle — the deleted-from-every-tree lane for whereis
 #include "arch.h"               // fnv1a64
 #include "infra/hashutil.h"     // fnv1aMultiply — the sanitizer-safe wrapping multiply (G1 runs -fsanitize=integer)
@@ -966,6 +967,9 @@ struct StrayResult
     bool                 filterMatchedNothing = false;
     std::string          headSha;
     std::string          headRef;
+    std::string          atStamp;               // M10: gitstamp::stampAt(root) — head= above stays a bare 9-hex sha
+                                                  // (gitstampcheck.sh's --abi/landing-plan arms pin that spelling);
+                                                  // at= is the new attribute carrying the dirty bit.
     std::size_t          distinctBlobs = 0;
     std::size_t          refsScanned   = 0;
     std::uint32_t        mergedRefs    = 0;   // scanned, found fully present on the live line, and OMITTED below
@@ -1202,6 +1206,7 @@ inline StrayResult computeStrayContent( const std::string& root, std::string_vie
     if( !quality::gitRepoHasHistory( root ) ) { result.ok = false; result.nonGitRoot = true; return result; }
 
     result.headSha = quality::gitHeadSha( root );
+    result.atStamp = gitstamp::stampAt( root );   // M10: same anchor as every other repo-reading root, dirty bit included
     result.headRef = quality::gitOneLine( root, "rev-parse --abbrev-ref HEAD 2>/dev/null" );
 
     std::size_t                filterNameHits = 0;
@@ -1974,16 +1979,22 @@ inline void writeStrayContentPage( std::FILE* out, const StrayResult& res, std::
                        "TRUNCATION: a ref row ends with a more element (more files=N) when its own file listing was "
                        "capped; shown plus that number equals the ref's files= total, always. That inner listing is a "
                        "SECONDARY listing (it repeats complete and identical on every page) and is capped by detail, not "
-                       "by limit / offset, which page the OUTER ref listing and report their own shown= / capped=. -->" );
+                       "by limit / offset, which page the OUTER ref listing and report their own shown= / capped=. "
+                       "at= is the git commit these numbers were computed at; a trailing +dirty means the working tree "
+                       "differed from that commit (head= is the same commit, bare sha, kept for compatibility). -->" );
     // §P8: shipped as `head-ref=` while its own --abi sibling (abicheck.h's `<abi head_ref=>`, over the SAME
     // field, reached by the SAME command line) shipped `head_ref=` — the tool's only kebab/snake pair, so a
     // parser written against one half read nothing from the other. Unified onto snake_case: it is the
     // majority (41 vs 8) and the spelling README.md documents. Kebab survives only in docs/captures/*.
     const PageWindow  refPage = pageWindow( res.refs.size(), pageLimit, pageOffset );
     char              srab[ kPageDisclosureCap ];
-    std::fprintf( out, "<stray-content head=\"%.9s\" head_ref=\"%s\" refs=\"%zu\" blobs=\"%zu\" unmerged=\"%u\" superseded=\"%u\" merged=\"%u\" unknown=\"%u\"%s>",
+    // M10: head= stays a bare 9-hex sha (gitstampcheck.sh's existing arm pins that spelling); at= is the
+    // new attribute, carrying the dirty bit this document never disclosed before.
+    const std::string atAttrStr = res.atStamp.empty() ? std::string() : ( " at=\"" + res.atStamp + "\"" );
+    std::fprintf( out, "<stray-content head=\"%.9s\" head_ref=\"%s\" refs=\"%zu\" blobs=\"%zu\" unmerged=\"%u\" superseded=\"%u\" merged=\"%u\" unknown=\"%u\"%s%s>",
                   res.headSha.c_str(), ex( res.headRef ).c_str(), res.refsScanned, res.distinctBlobs, unmerged, superseded, res.mergedRefs, unknown,
-                  pageDisclosure( srab, sizeof( srab ), refPage.end - refPage.begin, res.refs.size(), refPage.end, pageLimit, pageOffset, false ) );
+                  pageDisclosure( srab, sizeof( srab ), refPage.end - refPage.begin, res.refs.size(), refPage.end, pageLimit, pageOffset, false ),
+                  atAttrStr.c_str() );
     for( std::size_t refIndex = refPage.begin; refIndex < refPage.end; ++refIndex )
     {
         writeStrayRef( out, res.refs[refIndex], ex, maxFiles );

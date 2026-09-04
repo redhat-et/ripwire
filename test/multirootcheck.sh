@@ -14,7 +14,7 @@
 #   G-git     per-root history isolation: --owners attributes each root's same-named util.cpp to ITS
 #             OWN repo author, never the sibling's
 #   G-seam    the churn-backed verbs on roots that are SUBDIRS of ONE repo (a second fixture) — git's
-#             repo-relative paths must join across the `<label>/./<rel>` seam: --hotspots ranked>0 with a
+#             repo-relative paths must join across the `<label>/<rel>` seam: --hotspots ranked>0 with a
 #             row from BOTH roots, --cochange exit 0 with pairs>0, --rank-by=churn != the plain map
 #   G-pr      --pr-context multi-root: one <pr-context root=> section per root inside a
 #             <pr-context-workspace> wrapper, labeled changed-file paths, the svc change's blast radius
@@ -86,31 +86,29 @@ grep -q '<root label="cli"' "$TMP/m1.xml" && grep -q '<root label="svc"' "$TMP/m
 grep -q '<root l="' "$TMP/m1.xml" \
   && no "header: the colliding <root l=> spelling is back — l= must mean a LINE NUMBER everywhere" \
   || ok "header: no <root l=> spelling survives (l= is a line number tool-wide)"
-# §P8 (2026-07-28) — SPELLING REPINNED: the merged path is `<label>/./<rel>`, not `<label>/<rel>`.
-# Rationale (workspace.h carries the full note): single-root emits `<crawl-arg>/<rel>`, and the canonical
-# crawl arg is `.`, so a single-root id reads `./src/x.h::S::m`. With the old `<label>/<rel>` spelling a
-# workspace id (`svc/src/x.h::S::m`) had NO relation to it — not even a suffix — so ids captured in a
-# workspace run could not be matched against ids from a single-root run of the same tree (§P8 contract
-# bullet 7). Re-inserting the root-relative `./` makes the labeled path literally `<label>/` + the exact
-# single-root spelling, so the single-root id is an exact SUFFIX of the workspace id at a '/' boundary.
-# The rejected alternative `./<label>/<rel>` is only cosmetically `./`-prefixed: it leaves the two ids
-# unrelatable AND breaks the label-prefix strip in resolve.h's §3.1a disk-shape probe.
-# Nothing structural moves: every path index is keyed through lexicalNormalize(), which drops `.`
-# components, so fileIndex/absIndex and the §3.1 cross-root probes see byte-identical keys.
-grep -q 'p="svc/./include/svc_api.h"' "$TMP/m1.xml" && grep -q 'p="cli/./src/cli_main.cpp"' "$TMP/m1.xml" \
-  && ok "paths: labeled <label>/./<rel> spelling in the merged map" \
+# RE-PINNED 2026-09-04 (M12, capture-audit lane L9): the merged path is PLAIN `<label>/<rel>`, not
+# `<label>/./<rel>`. §P8 (2026-07-28, below is what it argued) inserted the `/./` seam because at the
+# time single-root emitted `<crawl-arg>/<rel>` with the crawl arg left IN (`./src/x.h::S::m`), so a plain
+# `<label>/<rel>` workspace id had no relation to it — not even a suffix. resolve.h's LATER root-relative-
+# emission fix (canonicalIdForEmit) stripped that leading `./` from every single-root EMITTED id/p= —
+# `ripwire .` now reads `src/x.h::S::m`, no `./` — and nothing updated the workspace side to match, so the
+# `/./` seam's own join property silently broke: `svc/./include/svc_api.h` stopped being a suffix of
+# `include/svc_api.h` at a clean boundary (`.\/include`, not `/include`), and `src/./eval.h::rw::runEval`
+# stopped joining a git path or a single-root id from ANY OTHER surface — the lens7-sibling/M6/L1 finding
+# this round fixed. Plain `<label>/<rel>` restores the suffix join against the now-`./`-free single-root
+# spelling, costs nothing structurally (every path index is keyed through lexicalNormalize(), which drops
+# `.` components regardless of which spelling arrives), and matches mergeWorkspaceIngests' OWN header
+# comment, which already promised `<label>/<root-relative-path>` — the code just was not keeping it.
+grep -q 'p="svc/include/svc_api.h"' "$TMP/m1.xml" && grep -q 'p="cli/src/cli_main.cpp"' "$TMP/m1.xml" \
+  && ok "paths: labeled <label>/<rel> spelling in the merged map" \
   || no "paths: labeled spelling missing from the merged map"
-# the point of the spelling: strip the label and you have the single-root `./rel` spelling verbatim
+# the point of the spelling: strip the label and you have the single-root spelling verbatim
 run "$WS/svc" >"$TMP/solosvc.xml" 2>/dev/null
 ( cd "$WS/svc" && TMPDIR="$CACHE" "$BIN" . ) >"$TMP/solosvc2.xml" 2>/dev/null
-# RE-PINNED 2026-08-19 (R-E CORRECTION): a single-root run spells p= ROOT-RELATIVE now, so the "./" the
-# crawl root "." used to contribute is gone — this pattern selected nothing and the suffix arm below could
-# not run at all. The PROPERTY is unchanged and still machine-checked: the workspace id ends with the
-# single-root id at a "/" boundary. What DID change is the exactness of the old §P8 bullet-7 wording above:
-# the workspace spelling is no longer `<label>/` + the single-root spelling verbatim, it is that plus the
-# `/./` seam ("svc/./include/svc_api.h" vs "include/svc_api.h"). Relatable by suffix, not by concatenation.
+# The PROPERTY this arm pins: the workspace id ends with the single-root id at a '/' boundary — still true,
+# now by plain concatenation (`<label>/` + the single-root spelling) rather than by a `/./` seam.
 solo_p="$( grep -o 'p="[^"]*svc_api\.h"' "$TMP/solosvc2.xml" | head -1 )"
-ws_p="$(   grep -o 'p="svc/\./[^"]*svc_api\.h"' "$TMP/m1.xml"    | head -1 )"
+ws_p="$(   grep -o 'p="svc/[^"]*svc_api\.h"' "$TMP/m1.xml"    | head -1 )"
 # machine-checked: strip the `p="` head off both, then the workspace path must END with the solo path.
 solo_tail="${solo_p#p=\"}"; ws_tail="${ws_p#p=\"}"
 { [ -n "$solo_tail" ] && [ -n "$ws_tail" ] && [ "$ws_tail" != "${ws_tail%"$solo_tail"}" ]; } \
@@ -119,6 +117,13 @@ solo_tail="${solo_p#p=\"}"; ws_tail="${ws_p#p=\"}"
 if command -v xmllint >/dev/null 2>&1; then
   xmllint --noout "$TMP/m1.xml" && ok "G4: merged map is well-formed XML" || no "G4: xmllint rejected the merged map"
 else skip "xmllint not installed"; fi
+
+# ── M12 universe arm: NO "/./" survives ANYWHERE in the merged map — not just the two probed p= above ──
+if grep -q '/\./' "$TMP/m1.xml"; then
+  no "M12: a '/./' segment survives in the merged map — $( grep -o '[a-zA-Z0-9_./-]*/\./[a-zA-Z0-9_./-]*' "$TMP/m1.xml" | head -1 )"
+else
+  ok "M12: no '/./' anywhere in the merged map (p= and id= alike)"
+fi
 
 # ── G-order: canonical root order — argv order is irrelevant, byte-identical ×3; warm == cold ───────
 gorder=0
@@ -130,10 +135,10 @@ done
 
 # ── G-edge: the cross-root evidence edge — cli's caller reaches svc's def through the escaped include ─
 run "$WS/svc" "$WS/cli" --callers=svc_handle >"$TMP/callers.xml" 2>/dev/null
-grep -q 'cli/./src/cli_main.cpp' "$TMP/callers.xml" \
+grep -q 'cli/src/cli_main.cpp' "$TMP/callers.xml" \
   && ok "G-edge: cross-root include evidence resolves run_cli -> svc_handle" \
   || no "G-edge: cross-root caller missing from --callers=svc_handle"
-grep -q 'svc/./src/svc_main.cpp' "$TMP/callers.xml" \
+grep -q 'svc/src/svc_main.cpp' "$TMP/callers.xml" \
   && ok "G-edge: svc's own in-root caller intact" \
   || no "G-edge: in-root caller lost in the merge"
 
@@ -141,7 +146,7 @@ grep -q 'svc/./src/svc_main.cpp' "$TMP/callers.xml" \
 run "$WS/svc" "$WS/cli" --callers=same_name_helper >"$TMP/decoy.xml" 2>/dev/null
 # cli_main's bare call must resolve to cli's OWN helper — never to svc's decoy header.
 run "$WS/svc" "$WS/cli" --callees=run_cli >"$TMP/rc.xml" 2>/dev/null
-grep -q 'svc/./include/svc_decoy.h' "$TMP/rc.xml" \
+grep -q 'svc/include/svc_decoy.h' "$TMP/rc.xml" \
   && no "G-forbid: run_cli grew a name-based cross-root edge into svc's decoy" \
   || ok "G-forbid: no cross-root edge without evidence (decoy stays unlinked)"
 
@@ -170,7 +175,7 @@ int run_cli( int request )
 EOF
 rm -f "$MUT/cli/src/cli_helper.cpp"   # remove cli's own def so the decoy is the single evidenced candidate
 run "$MUT/svc" "$MUT/cli" --callees=run_cli >"$TMP/mut.xml" 2>/dev/null
-grep -q 'svc/./include/svc_decoy.h' "$TMP/mut.xml" \
+grep -q 'svc/include/svc_decoy.h' "$TMP/mut.xml" \
   && ok "G-forbid mutation: with include evidence the decoy edge appears (evidence-driven)" \
   || no "G-forbid mutation: evidenced cross-root edge did not appear"
 
@@ -179,8 +184,8 @@ grep -q 'svc/./include/svc_decoy.h' "$TMP/mut.xml" \
 # <uniform/> summary (authors=1 files carry zero per-file identity by default) — pass --detail=1 to get
 # the individual <f/> rows (with top=) this check needs.
 run "$WS/svc" "$WS/cli" --owners --detail=1 >"$TMP/owners.xml" 2>/dev/null
-svc_row="$( tr '<' '\n' <"$TMP/owners.xml" | grep 'p="svc/./src/util.cpp"' || true )"
-cli_row="$( tr '<' '\n' <"$TMP/owners.xml" | grep 'p="cli/./src/util.cpp"' || true )"
+svc_row="$( tr '<' '\n' <"$TMP/owners.xml" | grep 'p="svc/src/util.cpp"' || true )"
+cli_row="$( tr '<' '\n' <"$TMP/owners.xml" | grep 'p="cli/src/util.cpp"' || true )"
 case "$svc_row" in *svc@example.com*) ok "G-git: svc/src/util.cpp owned by svc's author only";;
                    *) no "G-git: svc util.cpp ownership wrong/missing: $svc_row";; esac
 case "$cli_row" in *cli@example.com*) ok "G-git: cli/src/util.cpp owned by cli's author only";;
@@ -188,16 +193,18 @@ case "$cli_row" in *cli@example.com*) ok "G-git: cli/src/util.cpp owned by cli's
 case "$svc_row" in *cli@example.com*) no "G-git: cli history leaked into svc's file";; esac
 case "$cli_row" in *svc@example.com*) no "G-git: svc history leaked into cli's file";; esac
 
-# ── G-seam: roots that are SUBDIRECTORIES of one repo — `<label>/./<rel>` vs git's REPO-relative paths ──
-# §P8.7 (2026-07-28). ea7d7e0 asserted that with the `./` seam restored "git's repo-relative paths still
-# suffix-match at a '/' boundary". That holds only when a workspace root IS its repo's root — the seam then
-# sits entirely LEFT of <rel> and the boundary test never sees it, which is exactly the shape the WS fixture
-# above has, so nothing here noticed. When a root is a SUBDIRECTORY of its repo, git re-spells those leading
-# segments WITHOUT the seam (`src/util.cpp`) and `src/./util.cpp` is not a suffix of it: every churn /
-# co-change / ownership join resolved NOTHING and the verbs degraded SILENTLY — `--hotspots` returned
-# ranked="0" with exit 0, `--rank-by=churn` was byte-identical to the plain map, `--cochange` claimed "git
-# unavailable". This fixture is therefore ONE repo with the two roots as subdirs, and it asserts the three
-# churn-backed verbs the WS fixture never exercised.
+# ── G-seam: roots that are SUBDIRECTORIES of one repo — `<label>/<rel>` vs git's REPO-relative paths ──
+# §P8.7 (2026-07-28) named this shape as the one the main WS fixture above never exercises: when a workspace
+# root IS its repo's root (WS above), git's own paths are already root-relative with no per-root prefix to
+# reconcile. When a root is a SUBDIRECTORY of a shared repo (WS2 below), git spells the SAME file with a
+# leading path segment the plain workspace root fixture never has to strip (`svc/src/util.cpp` from the
+# repo toplevel). The join (gitmine.h::deriveGitPathOffset) derives that offset per root from a disk-path
+# probe rather than assuming any fixed spelling, so it is unaffected by M12's `<label>/<rel>` re-pin above
+# — but it is still the one scenario worth a dedicated fixture, because a derivation bug here failed
+# SILENTLY before this gate existed: `--hotspots` returned ranked="0" with exit 0, `--rank-by=churn` was
+# byte-identical to the plain map, `--cochange` claimed "git unavailable". This fixture is therefore ONE
+# repo with the two roots as subdirs, and it asserts the three churn-backed verbs the WS fixture never
+# exercised.
 WS2="$TMP/ws2"; mkdir -p "$WS2"
 cp -R "$FIX/svc" "$WS2/svc"
 cp -R "$FIX/cli" "$WS2/cli"
@@ -227,11 +234,11 @@ attrNum(){ grep -o "$1=\"[0-9]*\"" "$2" | head -n1 | tr -dc '0-9'; }
 
 run "$WS2/svc" "$WS2/cli" --hotspots >"$TMP/seam.hot" 2>/dev/null
 seamRanked="$( attrNum ranked "$TMP/seam.hot" )"
-if [ "${seamRanked:-0}" -gt 0 ]; then ok "G-seam: --hotspots ranked=$seamRanked (churn joined across the /./ seam)"
+if [ "${seamRanked:-0}" -gt 0 ]; then ok "G-seam: --hotspots ranked=$seamRanked (churn joined across the subdir-root offset)"
 else no "G-seam: --hotspots ranked=\"${seamRanked:-?}\" — subdir-root churn resolved NOTHING (silent zero, exit 0)"; fi
-grep -q 'p="svc/\./' "$TMP/seam.hot" && ok "G-seam: --hotspots has a row from the svc root" \
+grep -q 'p="svc/' "$TMP/seam.hot" && ok "G-seam: --hotspots has a row from the svc root" \
   || no "G-seam: --hotspots has no svc row: $( head -c 400 "$TMP/seam.hot" )"
-grep -q 'p="cli/\./' "$TMP/seam.hot" && ok "G-seam: --hotspots has a row from the cli root" \
+grep -q 'p="cli/' "$TMP/seam.hot" && ok "G-seam: --hotspots has a row from the cli root" \
   || no "G-seam: --hotspots has no cli row: $( head -c 400 "$TMP/seam.hot" )"
 
 run "$WS2/svc" "$WS2/cli" --cochange >"$TMP/seam.cc" 2>"$TMP/seam.cc.err"; seamRc=$?
@@ -312,13 +319,13 @@ grep -q '<pr-context-workspace ' "$TMP/prc.xml" \
 grep -q 'root="svc"' "$TMP/prc.xml" && grep -q 'root="cli"' "$TMP/prc.xml" \
   && ok "G-pr: both roots' <pr-context root=> sections present" \
   || no "G-pr: a per-root <pr-context root=> section is missing"
-grep -q 'p="svc/./include/svc_api.h"' "$TMP/prc.xml" && grep -q 'p="cli/./src/cli_main.cpp"' "$TMP/prc.xml" \
+grep -q 'p="svc/include/svc_api.h"' "$TMP/prc.xml" && grep -q 'p="cli/src/cli_main.cpp"' "$TMP/prc.xml" \
   && ok "G-pr: labeled changed-file paths in each root's section" \
   || no "G-pr: labeled changed-file paths missing"
 # cross-root blast radius: the svc-root change (svc_api.h→svc_handle) must reach cli's run_cli caller
 # via the evidence edge — asserted INSIDE the svc section only (cli_main.cpp is itself changed in cli's).
 svc_sec="$( tr '<' '\n' <"$TMP/prc.xml" | sed -n '/root="svc"/,/\/pr-context/p' )"
-printf '%s\n' "$svc_sec" | grep -q 'f p="cli/./src/cli_main.cpp"' \
+printf '%s\n' "$svc_sec" | grep -q 'f p="cli/src/cli_main.cpp"' \
   && ok "G-pr: svc section blast radius crosses roots (svc_api.h reaches cli_main.cpp)" \
   || no "G-pr: cross-root blast radius absent from the svc section"
 # determinism x2 + reorder-stable + G4 xmllint
@@ -355,7 +362,7 @@ run "$WS/svc" "$WS/cli" --impact=svc_handle >"$TMP/imp1.xml" 2>/dev/null
 run "$WS/cli" "$WS/svc" --impact=svc_handle >"$TMP/imp2.xml" 2>/dev/null
 diff -q "$TMP/imp1.xml" "$TMP/imp2.xml" >/dev/null && ok "--impact: reorder-stable over the merged graph" \
   || no "--impact: differs under root reordering"
-grep -q 'cli/./src/cli_main.cpp' "$TMP/imp1.xml" && ok "--impact: blast radius crosses roots via the evidence edge" \
+grep -q 'cli/src/cli_main.cpp' "$TMP/imp1.xml" && ok "--impact: blast radius crosses roots via the evidence edge" \
   || no "--impact: cross-root blast radius missing"
 
 # ── G-connect: --connect runs on the merged graph like every other read verb above — it was never in
@@ -368,8 +375,8 @@ grep -q 'cli/./src/cli_main.cpp' "$TMP/imp1.xml" && ok "--impact: blast radius c
 #    (the decoy is uncalled; cli's is only reached in-root) — --connect must report them UNCONNECTED,
 #    proving the join is edge-evidence-driven, never a name coincidence.
 run "$WS/svc" "$WS/cli" --connect=run_cli,svc_handle >"$TMP/conn1.xml" 2>/dev/null
-grep -q '<t n="run_cli" t="fn" p="cli/./src/cli_main.cpp' "$TMP/conn1.xml" \
-  && grep -q '<t n="svc_handle" t="fn" p="svc/./include/svc_api.h' "$TMP/conn1.xml" \
+grep -q '<t n="run_cli" t="fn" p="cli/src/cli_main.cpp' "$TMP/conn1.xml" \
+  && grep -q '<t n="svc_handle" t="fn" p="svc/include/svc_api.h' "$TMP/conn1.xml" \
   && grep -q '<e f="run_cli" t="svc_handle"/>' "$TMP/conn1.xml" \
   && grep -q 'groups="1"' "$TMP/conn1.xml" \
   && ok "G-connect: cross-root join spans both roots through the evidence edge (one group)" \
@@ -385,9 +392,9 @@ diff -q "$TMP/conn1.xml" "$TMP/conn2.xml" >/dev/null \
   || no "G-connect: differs under root reordering"
 
 # same-named-decoy NEGATIVE: file:-disambiguated terminals in each root, zero graph path between them.
-# NOTE (§P8 spelling): the terminals are deliberately written in the `<label>/<rel>` form WITHOUT the
-# `/./` seam — graph.h's filePathContains() collapses it, so the natural spelling a reader would type
-# still selects the file even though the tool now PRINTS `<label>/./<rel>`.
+# NOTE (M12 spelling): the terminals below are the plain `<label>/<rel>` form — since M12 that is now
+# EXACTLY what the tool prints (graph.h's filePathContains() substring match needs no collapsing at all
+# any more; before M12 it tolerated a `/./` seam the printed spelling actually carried).
 run "$WS/svc" "$WS/cli" \
   --connect="svc/include/svc_decoy.h:same_name_helper,cli/src/cli_helper.cpp:same_name_helper" \
   >"$TMP/conn3.xml" 2>/dev/null
@@ -404,12 +411,12 @@ grep -q '<e f="' "$TMP/conn3.xml" \
 # resolution — evidence-only (unique-or-degrade, never name-based), exactly like escaping includes.
 #   tsconfig: cli/src/cli_app.ts imports "@svc/api" → paths @svc/* → svc/src/svc_api.ts (svcTsApi)
 run "$WS/svc" "$WS/cli" --callers=svcTsApi >"$TMP/tsalias.xml" 2>/dev/null
-grep -q 'cli/./src/cli_app.ts' "$TMP/tsalias.xml" \
+grep -q 'cli/src/cli_app.ts' "$TMP/tsalias.xml" \
   && ok "B/tsconfig: @svc/* paths alias resolves runTsApp -> svcTsApi across roots" \
   || no "B/tsconfig: cross-root tsconfig-alias edge missing"
 #   go.mod: cli/main.go imports "example.com/svc/pkg" → replace => ../svc → svc/pkg/handle.go (GoHandle)
 run "$WS/svc" "$WS/cli" --callers=GoHandle >"$TMP/goreplace.xml" 2>/dev/null
-grep -q 'cli/./main.go' "$TMP/goreplace.xml" \
+grep -q 'cli/main.go' "$TMP/goreplace.xml" \
   && ok "B/go.mod: replace directive resolves runGoMain -> GoHandle across roots" \
   || no "B/go.mod: cross-root go.mod-replace edge missing"
 # ambiguous= never rises from the config channels: the G-forbid gauge check above already ran on m1.xml
@@ -427,11 +434,11 @@ go 1.21
 replace example.com/svc => ../svc/NONEXISTENT
 EOF
 run "$BMUT/svc" "$BMUT/cli" --callers=svcTsApi >"$TMP/tsmut.xml" 2>/dev/null
-grep -q 'cli/./src/cli_app.ts' "$TMP/tsmut.xml" \
+grep -q 'cli/src/cli_app.ts' "$TMP/tsmut.xml" \
   && no "B/mutation: tsconfig edge survived a bogus alias target (name-driven, not evidence)" \
   || ok "B/mutation: bogus tsconfig target → the cross-root edge disappears (evidence-driven)"
 run "$BMUT/svc" "$BMUT/cli" --callers=GoHandle >"$TMP/gomut.xml" 2>/dev/null
-grep -q 'cli/./main.go' "$TMP/gomut.xml" \
+grep -q 'cli/main.go' "$TMP/gomut.xml" \
   && no "B/mutation: go.mod edge survived a bogus replace target (name-driven, not evidence)" \
   || ok "B/mutation: bogus go.mod replace target → the cross-root edge disappears (evidence-driven)"
 
@@ -445,7 +452,7 @@ AWS="$TMP/aws"; mkdir -p "$AWS"; cp -R "$WS/svc" "$AWS/svc"; cp -R "$WS/cli" "$A
 #      and the edit lands in svc's REAL on-disk file.
 rA1="$( mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
   "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"replace_symbol_body\",\"arguments\":{\"paths\":[\"$AWS/svc\",\"$AWS/cli\"],\"symbol\":\"svc_unique_target\",\"new_body\":\"int svc_unique_target()\\n{\\n    return 2000;\\n}\"}}}" )"
-case "$rA1" in *applied*replace_symbol_body*svc/./src/editme.cpp*) ok "A/paths: unambiguous cross-workspace edit via paths[] returns success";;
+case "$rA1" in *applied*replace_symbol_body*svc/src/editme.cpp*) ok "A/paths: unambiguous cross-workspace edit via paths[] returns success";;
               *) no "A/paths: unambiguous edit failed: $( echo "$rA1" | head -c 180 )";; esac
 grep -q 2000 "$AWS/svc/src/editme.cpp" \
   && ok "A/paths: the svc REAL disk file (not the label) was modified" \
@@ -457,7 +464,7 @@ cp "$AWS/svc/src/editme.cpp" "$TMP/svc_editme.b2"; cp "$AWS/cli/src/editme.cpp" 
 rA2="$( mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
   "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"replace_symbol_body\",\"arguments\":{\"paths\":[\"$AWS/svc\",\"$AWS/cli\"],\"symbol\":\"shared_edit_target\",\"new_body\":\"x\"}}}" )"
 case "$rA2" in
-  *ambiguous*svc/./src/editme.cpp*cli/./src/editme.cpp*|*ambiguous*cli/./src/editme.cpp*svc/./src/editme.cpp*)
+  *ambiguous*svc/src/editme.cpp*cli/src/editme.cpp*|*ambiguous*cli/src/editme.cpp*svc/src/editme.cpp*)
      ok "A/ambiguous: same-named-in-both-roots refused, naming BOTH root-labeled candidates";;
   *ambiguous*) no "A/ambiguous: refused but candidate list incomplete: $( echo "$rA2" | head -c 220 )";;
   *) no "A/ambiguous: expected a cross-root ambiguity refusal, got: $( echo "$rA2" | head -c 220 )";;
@@ -470,7 +477,7 @@ cmp -s "$AWS/svc/src/editme.cpp" "$TMP/svc_editme.b2" && cmp -s "$AWS/cli/src/ed
 cp "$AWS/cli/src/editme.cpp" "$TMP/cli_editme.b3"
 rA3="$( mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
   "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"replace_symbol_body\",\"arguments\":{\"paths\":[\"$AWS/svc\",\"$AWS/cli\"],\"symbol\":\"shared_edit_target\",\"file\":\"svc/\",\"new_body\":\"int shared_edit_target()\\n{\\n    return 5555;\\n}\"}}}" )"
-case "$rA3" in *applied*replace_symbol_body*svc/./src/editme.cpp*) ok "A/labeled: file:'svc/' resolves to svc's def unambiguously";;
+case "$rA3" in *applied*replace_symbol_body*svc/src/editme.cpp*) ok "A/labeled: file:'svc/' resolves to svc's def unambiguously";;
               *) no "A/labeled: labeled edit failed: $( echo "$rA3" | head -c 220 )";; esac
 grep -q 5555 "$AWS/svc/src/editme.cpp" \
   && ok "A/labeled: svc's REAL disk file carries the edit" || no "A/labeled: svc real file not edited"

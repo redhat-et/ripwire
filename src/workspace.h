@@ -180,13 +180,27 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
     return true;
 }
 
-// The §P8 labeled spelling `<label>/./<rel>` shared by every merged-workspace path surface (files below,
-// and the §P0.5d skipped-oversize rows) — the `./` re-insertion rationale lives at the files call site.
+// The labeled spelling `<label>/<rel>` shared by every merged-workspace path surface (files below, and the
+// §P0.5d skipped-oversize rows) — plain `<label>/<rel>`, matching the contract mergeWorkspaceIngests' own
+// comment states two paragraphs down.
+//
+// M12 (capture-audit-2026-09-04, lane L9): this used to insert a literal `/./` — `<label>/./<rel>` — so a
+// workspace id suffix-matched a single-root id that (at the time, §P8, 2026-07-28) was ITSELF stored
+// `./`-prefixed (`ripwire .` emitted `./src/x.h::S::m`). resolve.h's later R-R fix (canonicalIdForEmit)
+// stripped that leading `./` from every single-root EMITTED id/p= — the join property `/./` existed to buy
+// stopped holding the day R-R shipped, and nothing re-derived the multi-root side to match. The result:
+// `ripwire src test` emitted `src/./infra/svector.h::svector::size` while `ripwire src` alone (the same
+// file, the join partner) emits `infra/svector.h::svector::size` — the extra `/./` segment made the
+// SUFFIX MATCH ITSELF FAIL (`.../infra/svector.h` is not a suffix of `.../.\/infra/svector.h` at a clean
+// `/` boundary the way it is of `.../infra/svector.h`), so multi-root ids stopped joining single-root ids
+// or git paths entirely — the opposite of what the `/./` was for. Plain `<label>/<rel>` restores the join
+// against R-R's now-stripped single-root spelling, and is also what a git path or a manually-typed
+// `src/infra/svector.h` selector already looks like — one spelling, not two.
 inline std::string labeledWorkspacePath( const std::string& label, const std::string& rootArg, std::string_view crawlPath )
 {
     std::string labeled = label;
     const std::string_view rel = relForHash( crawlPath, rootArg );
-    if( !rel.empty() ) { labeled.append( "/./" );  labeled.append( rel ); }
+    if( !rel.empty() ) { labeled.append( "/" );  labeled.append( rel ); }
     return labeled;
 }
 
@@ -200,7 +214,7 @@ inline std::string labeledWorkspacePath( const std::string& label, const std::st
 // is a self-contained transfer with its own rules, and inlining it cost mergeWorkspaceIngests 17 points of
 // complexity and 48 lines for facts that have nothing to do with symbol/edge renumbering.
 //
-// Rows relabel exactly like files (`<label>/./<rel>`), so a skipped row speaks the same path vocabulary as
+// Rows relabel exactly like files (`<label>/<rel>`), so a skipped row speaks the same path vocabulary as
 // every other emitted path. Parts arrive in canonical label order and each is already path-sorted, so the
 // concatenation stays sorted. The row vectors were capped PER ROOT, so a merged row set can be SHORT of the
 // merged count — which is what the counts are for, and what the verb's rows_capped= discloses rather than
@@ -331,21 +345,16 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
 
         // labeled + real paths (label applied HERE, never persisted — the per-root cache stays label-free).
         //
-        // §P8 (2026-07-28) — the spelling is `<label>/./<rel>`, NOT `<label>/<rel>`. The audit's finding was
-        // that a workspace `id=` could not be matched against a single-root `id=` of the SAME tree: single
-        // root emits `<crawl-arg>/<rel>`, and the canonical crawl arg is `.`, so the single-root id is
-        // `./src/x.h::S::m` while the workspace id was `lib/src/x.h::S::m` — no relation, not even a suffix.
-        // Re-inserting the root-relative `./` makes the labeled path literally `<label>/` + the single-root
-        // spelling, so `./src/x.h::S::m` is an exact SUFFIX of the workspace id at a '/' boundary and the
-        // two runs join with no normalization step. The rejected alternative `./<label>/<rel>` only makes
-        // the path cosmetically `./`-prefixed — it leaves the two ids just as unrelatable, and it breaks the
-        // label-prefix strip in resolve.h's §3.1a disk-shape probe.
+        // M12 (capture-audit-2026-09-04, lane L9): plain `<label>/<rel>`, not `<label>/./<rel>` — see
+        // labeledWorkspacePath's own header for the full history (the `/./` was §P8's 2026-07-28 fix for a
+        // join property that resolve.h's later R-R change silently broke, restored here by dropping it).
         //
         // Costs nothing structurally: every path index is keyed through lexicalNormalize(), which drops `.`
         // components, so fileIndex/absIndex and the §3.1 cross-root include probes see the SAME keys as
-        // before; git's repo-relative paths still suffix-match at a '/' boundary; `--exclude=<label>/` still
-        // prefix-matches. The one visible change is the spelling a user pastes back — and what the tool
-        // PRINTS is exactly what it now accepts.
+        // before (§3.1a's disk-shape probe strips the label prefix then normalizes, unaffected by the `./`
+        // either way); git's repo-relative paths still suffix-match at a '/' boundary; `--exclude=<label>/`
+        // still prefix-matches. The one visible change is the spelling a user pastes back — and what the
+        // tool PRINTS is exactly what it now accepts.
         for( const std::string& f : p.files )
         {
             m.files.push_back( labeledWorkspacePath( roots[r].label, roots[r].arg, f ) );
@@ -354,7 +363,7 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
         }
 
         // §P0.5d: size-dropped files concatenate across roots, relabeled EXACTLY like files above so a
-        // --skipped row speaks the same `<label>/./<rel>` vocabulary as every other emitted path. Parts
+        // --skipped row speaks the same `<label>/<rel>` vocabulary as every other emitted path. Parts
         // arrive in canonical label order and each part is path-sorted, so the concatenation stays sorted.
         for( SkippedOversize& sk : p.skippedOversize )
         {

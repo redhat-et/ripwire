@@ -42,6 +42,18 @@ namespace rw { namespace gitstamp
 // HEAD (the caller's job is to omit the attribute on empty, never to print a placeholder).
 inline std::string stampAt( const std::string& root )
 {
+    // NO SUBPROCESS ON A NON-GIT ROOT (M10 follow-up, lane L9, capture-audit-2026-09-04). The COST note above
+    // reasons about call sites that already shell out to git — but M10 spliced this stamp onto --for, whose
+    // retrieval path is contractually git-free on a git-less corpus (test/nongitqmetricscheck.sh: "rich
+    // retrieval on a non-git root must not spawn git merely to degrade"), and stampAt then paid TWO popens to
+    // learn there was no repo. hasEnclosingGitRepo is the same filesystem probe (stat for .git, walking up)
+    // that quality::gitCoChangeAndChurnCached already gates its own walk on: it costs no subprocess, changes
+    // no answer — on a non-git root the result was always "" — and makes the property hold for EVERY stamped
+    // verb rather than for whichever one a gate happened to be watching.
+    if( !rw::hasEnclosingGitRepo( root ) )
+    {
+        return {};
+    }
     const std::string sha = quality::gitHeadSha( root );
     if( sha.empty() )
     {

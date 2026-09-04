@@ -665,7 +665,7 @@ struct RouteEdge
 // One otherwise-indexable file the crawl DROPPED for exceeding a size ceiling — the skipped_oversize=
 // population, itemized (the count alone said the corpus was truncated without naming what was absent).
 // `path` is the CRAWL spelling, the same vocabulary result.files uses, so a row joins the map's p=
-// values; the multi-root merge relabels it to `<label>/./<rel>` exactly like files. `limitBytes` is the
+// values; the multi-root merge relabels it to `<label>/<rel>` exactly like files. `limitBytes` is the
 // ceiling that dropped the file (--max-file-size's value, or kMaxJsonConfigBytes for the .json lane),
 // so sizeBytes > limitBytes is self-evident in the row.
 struct SkippedOversize

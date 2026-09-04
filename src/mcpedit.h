@@ -238,7 +238,7 @@ namespace mcpedit
             }
             if( !pathHint.empty() && !editHintMatches( ing, s.fileId, pathHint, frame ) )
             {
-                continue; // `<label>/./<rel>`-tolerant, and absolute-spelling-tolerant
+                continue; // `<label>/<rel>`-matching (post-M12; filePathContains' `/./` fallback is legacy), and absolute-spelling-tolerant
             }
             matches.push_back( s.id );
         }
@@ -697,9 +697,18 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
 
     const Symbol&      s      = ing.symbols[f];
     const std::uint32_t fileId = s.fileId;
-    const std::string& path   = ing.files[ fileId ];             // LABELED identity — user-facing messages / candidate lists
+    // M12 (capture-audit-2026-09-04, lane L9): root-relative, not the raw ingest-stored spelling — before
+    // this fix, every message below and the JSON receipt's "file" field printed "./src/…" on a relative
+    // root, and the CLI's --edit-check=<file>:<sym> stderr hint pasted that same "./"-prefixed spelling
+    // into an argument --edit-check itself never prints that way (src/…, no "./"). Single-root only
+    // (ing.realPaths.empty()); multi-root already carries the correct `<label>/<rel>` identity as-is.
+    const bool         epSingleRoot = ing.realPaths.empty();
+    const std::string  path = epSingleRoot ? std::string( rw::sarif::rootRelativeUri( ing.files[ fileId ], rw::sarif::rootPrefixOf( root ) ) )
+                                           : ing.files[ fileId ];   // LABELED identity — user-facing messages / candidate lists
     // A11 (decided 2026-07-11): all disk I/O goes to the REAL on-disk path via the
-    // diskPath seam, NEVER the labeled spelling. Single-root (realPaths empty) → disk == path, byte-identical.
+    // diskPath seam, NEVER the labeled spelling. `disk` is the RAW ingest spelling regardless of `path`'s
+    // own root-relative cosmetic above — the two can differ by a leading "./" on a single-root run without
+    // affecting I/O, which reads/writes `disk` exclusively.
     // Multi-root writes land in the correct root's file even though the index identity is `<label>/<rel>`.
     const std::string& disk   = diskPath( ing, fileId );
 

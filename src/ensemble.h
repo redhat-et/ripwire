@@ -823,8 +823,13 @@ inline constexpr const char* kEnsembleLegend =
     "which also prints total= has_more= next_offset= offset= limit= -->";
 
 // Emit the report. Returns the process exit code — always 0: this is a lens, not a gate.
+// M12: `singleRoot`/`rootPrefix`/`rootAttr` are the caller's own single-root spelling (verbs_report.h's
+// mvSingleRoot/mvRootPrefix/mvRootAttr, the same variables every OTHER lens this dispatcher serves already
+// threads through) — before this parameter existed, every p= here printed the raw ingest-stored path
+// ("./src/…" on a relative root) and the root open tag carried no root= at all, unlike every sibling verb.
 inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::uint32_t>* churnPerFile,
-                                const std::string& root, int pageLimit, int pageOffset )
+                                const std::string& root, int pageLimit, int pageOffset,
+                                bool singleRoot = false, const std::string& rootPrefix = {}, const std::string& rootAttr = {} )
 {
     const EnsembleScan scan  = computeEnsemble( ing, churnPerFile );
     const std::size_t  total = scan.rows.size();
@@ -856,6 +861,7 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
     const std::string ensUnavailWhyStr      = detail::unavailWhyList( scan );
     const std::string ensUnavailableAttr    = ensUnavailNamesStr.empty() ? std::string() : ( " unavailable=\"" + ensUnavailNamesStr + "\"" );
     const std::string ensUnavailableWhyAttr = ensUnavailWhyStr.empty()   ? std::string() : ( " unavailable_why=\"" + std::string( escapeXml( ensUnavailWhyStr, escUnavail ) ) + "\"" );
+    std::fputs( rw::rootRelPathsLegend( singleRoot ), stdout );   // M12: root= is new below
     std::printf( "<ensemble families=\"%u\" eligible=\"%zu\" ranked=\"%zu\" no_family=\"%zu\"%s%s",
                  unsigned( kFamilyCount ), scan.eligibleCount, total, scan.noFamilyCount,
                  ensUnavailableAttr.c_str(), ensUnavailableWhyAttr.c_str() );
@@ -876,10 +882,10 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
                      kGraphCountFloorAttrXml );   // H8: a floored family floors the root's counts
         // (kGraphCountFloorAttrXml: graphlegend.h — one attribute, one reading, for cap floors and graph floors alike)
     }
-    std::printf( " shown_syms=\"%zu\" syms_capped=\"%s\" shown_files=\"%zu\" files_capped=\"%s\"%s%s>",
+    std::printf( " shown_syms=\"%zu\" syms_capped=\"%s\" shown_files=\"%zu\" files_capped=\"%s\"%s%s%s>",
                  shown, shown < total ? "1" : "0",
                  fileShown, fileShown < scan.files.size() ? "1" : "0",
-                 paging, gitstamp::atAttr( root ).c_str() );
+                 paging, gitstamp::atAttr( root ).c_str(), rootAttr.c_str() );
 
     // TWO scratch buffers, not one reused twice in the same call: escapeXml returns a VIEW into its `out`, so a
     // second call with the same buffer invalidates the first view (readability.h carries the same note).
@@ -894,7 +900,8 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
     {
         const EnsembleRow& row  = scan.rows[rowIndex];
         const Symbol&      s    = ing.symbols[row.id];
-        const std::string  path( escapeXml( ing.files[s.fileId], escPath ) );
+        const std::string_view rp = singleRoot ? rw::sarif::rootRelativeUri( ing.files[s.fileId], rootPrefix ) : std::string_view( ing.files[s.fileId] );
+        const std::string  path( escapeXml( rp, escPath ) );
         const std::string  name( escapeXml( s.name, escName ) );
         std::printf( "<s p=\"%s:%u\" n=\"%s\" fam=\"%u\" of=\"%u\" fired=\"%s\"%s>",
                      path.c_str(), s.line, name.c_str(), unsigned( row.firedCount ), evaluable,
@@ -915,7 +922,8 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
     {
         const EnsembleFileRow& agg  = scan.files[fileIndex];
         const Symbol&          top  = ing.symbols[agg.topSym];
-        const std::string      path( escapeXml( ing.files[agg.fileId], escPath ) );
+        const std::string_view frp  = singleRoot ? rw::sarif::rootRelativeUri( ing.files[agg.fileId], rootPrefix ) : std::string_view( ing.files[agg.fileId] );
+        const std::string      path( escapeXml( frp, escPath ) );
         const std::string      name( escapeXml( top.name, escName ) );
         const std::string      names = familyList( agg.unionMask );
         std::printf( "<f p=\"%s\" top=\"%s\" top_l=\"%u\" top_fam=\"%u\" union_fam=\"%u\" union=\"%s\" syms=\"%u\"/>",

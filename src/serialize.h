@@ -157,6 +157,41 @@ inline std::string_view escapeXml( std::string_view s, std::vector<char>& out )
     return std::string_view( out.data(), out.size() );
 }
 
+// M12 (capture-audit-2026-09-04, lane L9): under multi-root, every one of the graph-count verbs
+// (--callers/--callees/--uses) drops root= (correctly — there IS no single root=) but discloses NOTHING in
+// its place, so a reader of `ripwire src test --callers=SYM` has no way to learn what the `<label>/` prefix
+// on every p=/id= MEANS. The default map's own prologue already prints exactly this table for exactly this
+// reason (below, in serialize()); this is that same shape, factored out so the read verbs can reuse it
+// instead of re-deriving it. Lives here (not graphlegend.h, which is included from ABOVE this point in this
+// very file) because it needs escapeXml, and emits nothing at all under single-root (rootLabels.size() < 2)
+// — this must never move a single byte of single-root output.
+inline void writeMultiRootTable( std::FILE* out, const IngestResult& ing )
+{
+    if( ing.rootLabels.size() < 2 )
+    {
+        return;
+    }
+    std::vector<char> esc;
+    for( std::size_t r = 0; r < ing.rootLabels.size(); ++r )
+    {
+        std::fprintf( out, "<root label=\"%s\" p=\"%s\"/>",
+                      std::string( escapeXml( ing.rootLabels[r], esc ) ).c_str(),
+                      std::string( escapeXml( r < ing.rootPaths.size() ? ing.rootPaths[r] : std::string(), esc ) ).c_str() );
+    }
+}
+
+// The legend clause defining the table above — appended ONLY when it actually rides (multiRoot), the same
+// presence-matches-emission discipline every other conditional clause in this file follows (and the same
+// SEPARATE-comment shape kRootRelPathsLegend uses — graphlegend.h — so a caller just concatenates it).
+inline constexpr const char* kMultiRootTableLegend =
+    "<!-- root rows: label=this workspace root's short identity, the prefix every p=/id= below carries; "
+    "p=the root's own path as passed. -->";
+
+inline const char* multiRootTableLegend( bool multiRoot ) noexcept
+{
+    return multiRoot ? kMultiRootTableLegend : "";
+}
+
 // ── THE FIXED-BUFFER RULE (CA4 §B14) — the one place it is written down ───────────────────────────────────
 // **Never `snprintf` ALREADY-ESCAPED or already-markup text into a fixed `char[]`.** Compose it on
 // `std::string`.

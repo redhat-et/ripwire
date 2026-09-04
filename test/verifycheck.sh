@@ -105,7 +105,9 @@ R="$( root_of <"$TMP/n2.xml" )"
 { [ $rc -eq 0 ] && printf '%s' "$R" | grep -q 'verdict="confirmed"'; } \
     && ok 'contains confirmed: the literal is found' \
     || { no "contains confirmed: expected confirmed (rc=$rc)"; printf '%s\n' "$R"; }
-grep -q '<hit p="test/verifyfix/chain.cpp:' "$TMP/n2.xml" \
+# M12: root-relative, like every sibling verb (--uses on this same fixture prints p="chain.cpp:…", not
+# the root-prefixed "test/verifyfix/chain.cpp:…" this literal pinned before --verify's own root= fix.
+grep -q '<hit p="chain.cpp:' "$TMP/n2.xml" \
     && ok 'contains confirmed: hit rows carry file:line evidence inline' \
     || no 'contains confirmed: no inline hit evidence'
 # a comma INSIDE the quoted literal must parse (the quote scan owns the argument split)
@@ -136,7 +138,8 @@ R="$( root_of <"$TMP/u2.xml" )"
 { [ $rc -eq 0 ] && printf '%s' "$R" | grep -q 'verdict="refuted"'; } \
     && ok 'unused refuted: a witness site refutes the absence claim' \
     || { no "unused refuted: expected refuted (rc=$rc)"; printf '%s\n' "$R"; }
-grep -q '<u role="call" p="test/verifyfix/chain.cpp:' "$TMP/u2.xml" \
+# M12: root-relative, same fix as the contains() arm above.
+grep -q '<u role="call" p="chain.cpp:' "$TMP/u2.xml" \
     && ok 'unused refuted: the witness use-site is inline' \
     || no 'unused refuted: no inline witness'
 

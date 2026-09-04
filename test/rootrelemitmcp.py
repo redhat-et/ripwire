@@ -45,9 +45,19 @@ VERBS = [
     ("whereis", {"symbol": "total_area"}),
     ("doc_drift", {}),
     ("from_trace", {"trace": "at total_area (app.py:8)"}),
-    ("fetch_body", {"symbol": "total_area"}),
+    # M12 (capture-audit-2026-09-04): this entry used to pass {"symbol": ...}, a field fetch_body does not
+    # accept — every call returned `unknown field: 'symbol'`, an error payload with no path in it, so the arm
+    # was INERT and the verb's "file" key (which printed the raw ingest spelling) sailed through green. The
+    # handle is now resolved from find_symbol's own payload just above, which is how a caller gets one.
+    ("fetch_body", {"handle": "@FROM-FIND_SYMBOL@"}),
     ("quality_delta", {}),
 ]
+
+
+def handle_from(text):
+    """The first sym# handle in a JSON-RPC payload (find_symbol mints one for the symbol it resolved)."""
+    m = re.search(r"sym#[0-9a-f]+@[0-9a-f]+", text)
+    return m.group(0) if m else ""
 
 
 def session(root):
@@ -67,6 +77,10 @@ def session(root):
     for i, (verb, extra) in enumerate(VERBS, start=1):
         args = {"path": root}
         args.update(extra)
+        # a lazy-body verb is addressed by HANDLE, and a handle only exists once some ranked verb has minted
+        # one — resolve it from find_symbol's payload rather than inventing a field the schema refuses.
+        if args.get("handle") == "@FROM-FIND_SYMBOL@":
+            args["handle"] = handle_from(out.get("find_symbol", ""))
         try:
             out[verb] = send({"jsonrpc": "2.0", "id": i, "method": "tools/call",
                               "params": {"name": verb, "arguments": args}})
@@ -112,6 +126,15 @@ def main():
         ta, tb = a.get(verb, ""), b.get(verb, "")
         if not ta and not tb:
             print(f"  PASS  mcp:{verb} — no payload (nothing to check)")
+            continue
+
+        # LIVENESS, per verb (M12): an ARGUMENT error returns a payload with no path in it, which every arm
+        # below then passes trivially. That is how the fetch_body entry stayed green for a binary that
+        # printed a raw absolute "file". A refusal is a legitimate ANSWER for some verbs, so this is not a
+        # blanket rule — it is asserted for the verbs whose whole point here is that they name a file.
+        if verb in ("fetch_body", "find_symbol") and '"error"' in tb:
+            print(f"  FAIL  mcp:{verb} LIVENESS the call was refused, so no path was ever emitted: {tb[:160]}")
+            failed = 1
             continue
 
         # ARM 1 — depth independence

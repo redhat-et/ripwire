@@ -292,5 +292,28 @@ echo "$CAP_ROW" | grep -q 'truncated="1"' \
     || { no "L10: over-the-cap cache-dir row DIFFERED run-to-run on a static fixture"; diff <(echo "$CAPOUT1") <(echo "$CAPOUT2"); }
 echo "$CAPOUT1" | xmllint --noout - 2>/dev/null && ok "L10: over-the-cap output is well-formed XML" || no "L10: over-the-cap output malformed XML"
 
+# ── (H) TWO SHAS, LABELLED: built_from= (the binary) vs at= (the tree) ──────────────────────────
+# lens2-crossverb L6 (capture-audit-2026-09-04): --version printed "git <sha>" — the commit this BINARY was
+# compiled from — while --doctor/--test-gate/--handoff printed at="<sha>", the tree's HEAD *now*. In any
+# session that commits without rebuilding (the normal state of a dev tree mid-task) those are DIFFERENT
+# shas, and nothing on either surface said which was which; --doctor's own binary-path check compares
+# mtimes and sizes and never looks at the baked sha at all. --doctor now carries both, under names that say
+# which is which. It deliberately does NOT gate on a mismatch: a binary older than HEAD is the ordinary
+# state between a commit and the next build, and a check that fails there would cry wolf every commit —
+# the FACT is the deliverable, the verdict would be noise. (Owner call if that should ever become a check.)
+HOUT="$( "$BIN" "$REPO" --doctor --no-cache 2>/dev/null )"
+VSTAMP="$( "$BIN" --version 2>/dev/null | sed -n 's/.*git \([^)]*\))$/\1/p' )"
+BUILT="$( printf '%s' "$HOUT" | sed -n 's/.*<doctor[^>]* built_from="\([^"]*\)".*/\1/p' )"
+[ -n "$BUILT" ] \
+    && ok "H: --doctor root carries built_from= (the binary's own commit)" \
+    || { no "H: --doctor root has no built_from= — at= is then the only sha, and unlabelled"; printf '%s\n' "$HOUT" | head -c 200; echo; }
+[ -n "$VSTAMP" ] && [ "$BUILT" = "$VSTAMP" ] \
+    && ok "H: built_from= is byte-identical to the stamp --version prints ($BUILT)" \
+    || no "H: built_from=\"$BUILT\" but --version says \"$VSTAMP\" — two spellings of one fact"
+printf '%s' "$HOUT" | grep -q ' at="' \
+    && ok "H: at= (the tree's HEAD) rides beside it, so the two facts are distinguishable" \
+    || no "H: --doctor lost its at= anchor"
+printf '%s' "$HOUT" | xmllint --noout - 2>/dev/null && ok "H: xmllint clean" || no "H: malformed XML"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "SOME CHECKS FAILED"; exit 1; fi
