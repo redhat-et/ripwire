@@ -1,0 +1,99 @@
+# expect.tsv — the sentinel expectations of test/sliceflowsenscheck.sh, WRITTEN BEFORE the flow-sensitive
+# walk existed (docs/EVALS.md, "Flow-sensitive slice in the small"). One row per USE row (k=use|both) of the
+# sliced variable: rd = the exact set of def LINES that reach that use under the registered rule (comma
+# list ascending, "-" = none inside the definition). reason = required exactly when the source-order
+# (name-based) rule's edge DISAPPEARS under the flow-sensitive one: exit=K (the def's path leaves through
+# the jump at line K before the use), branch=K (the branch head at line K puts the def on a sibling path), or
+# unit=K (the statement starting at line K folds the def and the use into ONE unit — a nested def/lambda/class
+# body — so the use reads the state entering that statement), or try=K (the try at line K: its handler sees
+# the state BEFORE each statement of the body, so the body's last def never reaches the handler). The gate
+# re-derives the source-order edge from the tool's own rows and checks K sits where the reason says
+# (exit/branch: strictly between the vanished def and the use; unit/try: at or before the def, before the
+# use) and reads as that kind of statement in the source.
+# class = the function's primary class.
+# file	fn	var	class	line	rd	reason
+kills.cpp	ck01	x	kill	11	10	
+kills.cpp	ck02	x	kill	20	19	
+kills.cpp	ck02	x	kill	22	16	exit=20
+kills.cpp	ck03	x	kill	34	27	branch=32
+kills.cpp	ck03	x	kill	36	27,30	
+kills.cpp	ck04	x	kill	50	44,48	
+kills.cpp	ck05	x	kill	59	58	
+kills.cpp	ck05	x	kill	62	55,58	
+kills.cpp	ck06	x	kill	70	67,72	
+kills.cpp	ck06	x	kill	74	67,72	
+kills.cpp	ck07	x	kill	92	83,86,89	
+kills.cpp	ck08	x	kill	103	97	exit=101
+kills.cpp	ck09	x	kill	114	111	
+kills.cpp	ck10	x	kill	125	124	
+joins.cpp	cj01	x	join	14	9,12	
+joins.cpp	cj02	x	join	28	22,26	
+joins.cpp	cj02	x	join	30	29	
+joins.cpp	cj03	x	join	38	35,39	
+joins.cpp	cj03	x	join	42	35,39	
+joins.cpp	cj04	x	join	50	47,51	
+joins.cpp	cj04	x	join	53	47,51	
+joins.cpp	cj05	x	join	66	58,63	
+joins.cpp	cj06	x	join	78	71,75	
+joins.cpp	cj07	x	join	91	83,86	try=84
+joins.cpp	cj07	x	join	93	83,86,87	
+joins.cpp	cj08	x	join	102	98,100	
+joins.cpp	cj09	x	join	111	110	
+joins.cpp	cj09	x	join	118	107,110,115	
+joins.cpp	cj10	x	join	132	123,126,130	
+joins.cpp	cj11	x	join	142	137,140	
+joins.cpp	cj11	y	join	143	142	
+straight.cpp	cs01	a	straight	7	5	
+straight.cpp	cs02	x	straight	13	12	
+straight.cpp	cs02	x	straight	14	12	
+straight.cpp	cs03	x	straight	20	19	
+straight.cpp	cs03	x	straight	21	20	
+straight.cpp	cs03	x	straight	22	21	
+straight.cpp	cs04	x	straight	29	28	
+straight.cpp	cs04	x	straight	30	28	
+straight.cpp	cs04	y	straight	30	29	
+straight.cpp	cs05	x	straight	36	35	
+straight.cpp	cs05	x	straight	38	35	
+disclosed.cpp	cd01	x	disclosed	8	7	
+disclosed.cpp	cd02	x	disclosed	16	14	
+disclosed.cpp	cd03	x	disclosed	25	23	
+disclosed.cpp	cd04	x	disclosed	31	30	
+disclosed.cpp	cd04	x	disclosed	33	30	
+disclosed.cpp	cd05	x	disclosed	40	39	
+kills.py	pk01	x	kill	7	6	
+kills.py	pk02	x	kill	14	13	
+kills.py	pk02	x	kill	15	11	exit=14
+kills.py	pk03	x	kill	23	19	branch=22
+kills.py	pk03	x	kill	24	19,21	
+kills.py	pk04	x	kill	30	28,32	
+kills.py	pk04	x	kill	33	28,32	
+kills.py	pk05	x	kill	40	39	
+kills.py	pk05	x	kill	41	37	exit=40
+kills.py	pk06	x	kill	48	47	
+joins.py	pj01	x	join	8	5,7	
+joins.py	pj02	x	join	17	12,14,16	
+joins.py	pj03	x	join	23	21,24	
+joins.py	pj03	x	join	26	21,24	
+joins.py	pj04	x	join	35	30,32	try=31
+joins.py	pj04	x	join	37	30,32,33	
+joins.py	pj04	x	join	38	30,32,33	
+joins.py	pj05	x	join	49	45,48	
+joins.py	pj06	x	join	59	53,56,58	
+straight.py	ps01	a	straight	5	4	
+straight.py	ps02	x	straight	10	9	
+straight.py	ps02	x	straight	11	9	
+straight.py	ps03	x	straight	16	15	
+straight.py	ps03	x	straight	17	16	
+straight.py	ps03	x	straight	18	17	
+straight.py	ps04	x	straight	23	22	
+straight.py	ps04	x	straight	24	22	
+straight.py	ps04	y	straight	24	23	
+straight.py	ps05	x	straight	29	28	
+straight.py	ps05	x	straight	31	28	
+disclosed.py	pd01	G	disclosed	9	8	
+disclosed.py	pd02	x	disclosed	17	13	unit=15
+disclosed.py	pd02	x	disclosed	19	16	
+disclosed.py	pd03	x	disclosed	25	24	
+disclosed.py	pd04	x	disclosed	30	29	
+disclosed.py	pd04	x	disclosed	31	30	
+linear.js	lj01	x	linear	8	6	
