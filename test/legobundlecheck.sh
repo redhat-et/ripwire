@@ -37,7 +37,11 @@
 #      single-root run root-relativizes regardless of whether the root arg was relative or absolute).
 #      This one embedded golden is deliberate — the standalone form is the REFERENCE the bundle is now
 #      required to match, so a change to it beyond the expected root-relative reshaping is exactly what
-#      must be noticed.
+#      must be noticed. RE-PINNED a second time (H6/F2, 2026-09-04): the TARGETED --lego now carries
+#      defs="N" — how many definitions the selector's NAME has — because resolveFocus picks the lowest-id
+#      one and `--lego=size` used to report implementors="0" about a definition the caller never chose.
+#      Shape has exactly one definition here, so the pin gains defs="1" and nothing else; singledefcheck.sh
+#      owns the ambiguous case.
 #   6) determinism (twice → byte-identical) + well-formed XML.
 #   7) mutation-check: an assertion known to be false must FAIL (the gate discriminates).
 #
@@ -150,7 +154,7 @@ fi
 # paths against a root it never named — the one thing --lego's p= exists to let you do (open the file) is
 # undoable without it. Every other byte of the reference is unchanged, which is what this arm is for.
 "$BIN" test/legofix --no-cache --lego=Shape >"$TMP/standalone" 2>/dev/null
-printf '%s' '<ctx root="test/legofix"><lego><iface n="Shape" p="shapes.h" implementors="2"><m pure="1">virtual double area() const = 0</m><m pure="1">virtual void draw() const = 0</m><impl n="Circle" p="shapes.h"/><impl n="Square" p="shapes.h"/></iface></lego></ctx>' >"$TMP/standalone.golden"
+printf '%s' '<ctx root="test/legofix"><lego><iface n="Shape" p="shapes.h" defs="1" implementors="2"><m pure="1">virtual double area() const = 0</m><m pure="1">virtual void draw() const = 0</m><impl n="Circle" p="shapes.h"/><impl n="Square" p="shapes.h"/></iface></lego></ctx>' >"$TMP/standalone.golden"
 cmp -s "$TMP/standalone" "$TMP/standalone.golden" \
     && ok "--lego=Shape standalone byte-identical to the reference output (bundle-only change)" \
     || no "--lego=Shape standalone CHANGED — the §P3 fix must touch the bundle embedding only: $( cat "$TMP/standalone" )"

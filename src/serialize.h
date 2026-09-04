@@ -5,6 +5,7 @@
 
 #include "model.h"
 #include "arch.h"        // P3: builtinLayer() — the file-node layer= tag
+#include "graph.h"     // H6/F2: definitionCountOfName — the ONE resolver behind --lego's defs= single-pick disclosure
 #include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "lintrules.h"   // §P9.4: langOfPath / dependencyCapable — packDeps' dep_files= denominator
 #include "resolve.h"     // S6-C: canonicalId() — the `id=` canonical symbol string (shared with the resolver)
@@ -5477,7 +5478,23 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
 
         const bool  isContractExtracted = legoMethodContractSound( isym.lang );
         const char* caveatAttr          = legoContractCaveat( isContractExtracted, focusId != kNoNode );   // §A9.4
-        char hdr[ 48 ];  std::snprintf( hdr, sizeof( hdr ), "\" implementors=\"%zu\">", implementors[id].size() );
+        // H6/F2 (capture-audit 2026-09-04): the TARGETED form resolves a bare name through resolveFocus,
+        // which picks the LOWEST-ID definition. `--lego=size` (6 definitions in 4 files) therefore answered
+        // implementors="0" about ONE of them with nothing on the row to say a pick had happened, so a
+        // genuine "this interface has no implementors" and a wrong-definition zero rendered identically.
+        // defs= is that fact on the row — the same disclosure --owners and --layout already carry for the
+        // same resolver, and the branch the family gate (singledefcheck.sh) accepts in place of a refusal.
+        // Ranked mode (--for) has no selector to be ambiguous ABOUT, so it stays byte-identical.
+        char hdr[ 64 ];
+        if( focusId != kNoNode )
+        {
+            std::snprintf( hdr, sizeof( hdr ), "\" defs=\"%zu\" implementors=\"%zu\">",
+                           definitionCountOfName( ing, id ), implementors[id].size() );
+        }
+        else
+        {
+            std::snprintf( hdr, sizeof( hdr ), "\" implementors=\"%zu\">", implementors[id].size() );
+        }
         w.write( "<iface n=\"" );  w.write( escapeXml( isym.name, esc ) );
         if( withPaths ) { w.write( "\" p=\"" );  w.write( escapeXml( pathRel( isym.fileId ), esc ) ); }
         w.write( caveatAttr );
