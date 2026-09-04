@@ -46,8 +46,22 @@
 # so every row read here is filtered to `agent="claude"` first, exactly as the hook's own `--observe`
 # arm filters (`.agent // "codex"`).
 #
+# TWO ROUTERS, NEVER POOLED (2026-09-03). hooks/ripwire-claude-toolroute.sh — the second router arm,
+# pre-registered in docs/EVALS.md ("A second router arm — route on the agent's FIRST TOOL CALL") —
+# shares this same log with `router:"toolcall"` on every row; hooks/ripwire-claude-route.sh's own rows
+# now carry `router:"prompt"` (a row written before this field existed has none, and reads as `"prompt"`
+# by ROUTER_OF's default — that router was the only one in the log until this round). Every section
+# below is computed and printed ONCE PER ROUTER: the pre-registered n>=40-per-arm floor is a floor PER
+# ROUTER PER ARM, not on the pooled total, and a KEEP/REWORD/REMOVE verdict for one router says nothing
+# about the other's. `hooks/ripwire-claude-toolroute.sh` does not (in this build) write a
+# `RouteObservation` row of its own — see its header and LANE_REPORT.md for why: the substitution meter
+# (~/.ripwire/substitution.jsonl) already logs every observed tool call in session+seq order, so that
+# arm's adoption-within-two is a session+seq correlation against THAT log, left as follow-up work rather
+# than a second bespoke pending-file chain. A router with zero `RouteObservation` rows in the window
+# prints its recommend/abstain/arm counts and says so explicitly, rather than reporting a fabricated 0%.
+#
 # Usage:
-#   python3 bench/routing_ab_report.py [--routing PATH] [--meter PATH] [--since AT] [--until AT]
+#   python3 bench/routing_ab_report.py [--routing PATH] [--meter PATH] [--since AT] [--until AT] [--router NAME]
 # Exit 0 on a normal readout OR a refusal (refusing below the floor is a correct answer, not a
 # failure); non-zero only when an input file's content cannot be read as this instrument's data at all.
 import argparse
@@ -123,10 +137,36 @@ def filter_window(rows, since, until):
     return rows
 
 
-def split_events(rows):
-    """(prompts, observations) — `agent="claude"` rows only; see header."""
-    prompts = [r for r in rows if r.get("agent") == AGENT and r.get("event") == "UserPromptSubmit"]
-    obs = [r for r in rows if r.get("agent") == AGENT and r.get("event") == "RouteObservation"]
+DEFAULT_ROUTER = "prompt"   # a row written before the `router` field existed belongs to the prompt router
+
+
+def router_of(row):
+    """The row's router, defaulting a pre-2026-09-03 row (no `router` field at all) to "prompt" — that
+    was the only router writing this log before hooks/ripwire-claude-toolroute.sh's `router:"toolcall"`."""
+    return row.get("router") or DEFAULT_ROUTER
+
+
+def routers_present(rows):
+    """Every distinct router named in `agent="claude"` rows, sorted with "prompt" first (the
+    longer-running arm) when both are present — a stable, readable order rather than set iteration order."""
+    found = sorted({router_of(r) for r in rows if r.get("agent") == AGENT})
+    return sorted(found, key=lambda r: (r != "prompt", r))
+
+
+def split_events(rows, router):
+    """(decisions, observations) for ONE router — `agent="claude"` rows only; see header. Never pooled
+    across routers: a caller wanting both must call this once per router in routers_present(rows).
+
+    A "decision" row is identified by carrying a `status` field (`recommend`/`abstain`) rather than by
+    `event == "UserPromptSubmit"` — that event name is specific to the prompt router.
+    hooks/ripwire-claude-toolroute.sh's decision rows carry `event:"ToolCallRoute"` and a different key
+    shape (`tool`/`shape`/`detail_hash` in place of `prompt_bytes`, no `prompt_hash`), but the same
+    `status`/`recommended`/`arm`/`session_hash` fields compute_arm() and the arm table actually read —
+    `status` is the one field every router's decision row is guaranteed to carry, so it is the test,
+    not the event name."""
+    prompts = [r for r in rows if r.get("agent") == AGENT and "status" in r and router_of(r) == router]
+    obs = [r for r in rows if r.get("agent") == AGENT and r.get("event") == "RouteObservation"
+           and router_of(r) == router]
     return prompts, obs
 
 
@@ -198,15 +238,65 @@ def verdict_line(t, c):
             % (label, t["rate"], c["rate"], diff_pp, KEEP_PP, KEEP_PP))
 
 
+# Routers that instrument adoption-within-two at all (write RouteObservation rows). hooks/
+# ripwire-claude-toolroute.sh does not, in this build -- see its header and LANE_REPORT.md. This is a
+# BUILD-TIME fact about the router, not a data fact -- it must not be inferred from "zero observation
+# rows seen", or a genuinely underpowered `prompt` window (zero rows so far, but the mechanism exists)
+# would wrongly print "not instrumented" instead of the correct UNDERPOWERED refusal.
+ROUTERS_WITH_OBSERVATION = frozenset({"prompt"})
+
+
+def report_one_router(router, routing_rows, meter_rows):
+    """Print one router's full section (arm table, join coverage, verdict) and return 0/1 the way
+    main() does — never mixes another router's rows into any number it prints."""
+    prompts, obs = split_events(routing_rows, router)
+
+    print("")
+    print("=== router=%s ===" % router)
+    print("%-10s %8s %12s %10s %8s %9s" % ("arm", "prompts", "recommended", "adopted", "rate", "sessions"))
+    arm_stats = {}
+    for arm in ARMS:
+        st = compute_arm(prompts, obs, arm)
+        arm_stats[arm] = st
+        rate_s = "n/a" if st["rate"] is None else "%.1f%%" % st["rate"]
+        print("%-10s %8d %12d %10d %8s %9d"
+              % (arm, st["prompts"], st["recommended"], st["adopted"], rate_s, st["sessions"]))
+
+    covered, total = join_coverage(prompts, meter_rows)
+    if total:
+        print("join coverage: %d/%d routing row(s) (%.1f%%) have a session with >=1 meter row"
+              % (covered, total, 100.0 * covered / total))
+    else:
+        print("join coverage: no routing rows to join")
+
+    # A router that does not instrument adoption at all (see ROUTERS_WITH_OBSERVATION) has no band to
+    # compute -- printing KEEP/REWORD/REMOVE from an all-zero adoption count would look like real
+    # measurement. Say plainly that there is none instead (a zero means "none found", never "none
+    # exists"). A router THAT DOES instrument observation always gets a verdict line, including the
+    # UNDERPOWERED refusal when it has too few recommended prompts so far -- that is a real answer, not
+    # an absence of instrumentation, and it must not be swallowed by this branch.
+    if router not in ROUTERS_WITH_OBSERVATION:
+        print("router=%s does not instrument adoption-within-two in this build -- recommend/abstain "
+              "counts above are real, no band verdict is computed" % router)
+        return 0
+
+    print(verdict_line(arm_stats["treatment"], arm_stats["control"]))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(
-        description="adoption-within-two A/B readout for the Claude Code prompt router (docs/EVALS.md §4)")
+        description="adoption-within-two A/B readout for the Claude Code routers (docs/EVALS.md §4 and "
+                     "\"A second router arm\") -- reported per router, never pooled")
     ap.add_argument("--routing", default=os.path.join(default_home(), "routing.jsonl"),
                      help="path to routing.jsonl (default: $RIPWIRE_HOME or ~/.ripwire, routing.jsonl)")
     ap.add_argument("--meter", default=os.path.join(default_home(), "substitution.jsonl"),
                      help="path to substitution.jsonl (default: $RIPWIRE_HOME or ~/.ripwire, substitution.jsonl)")
     ap.add_argument("--since", default=None, help="only rows with at >= this ISO8601 timestamp")
     ap.add_argument("--until", default=None, help="only rows with at < this ISO8601 timestamp")
+    ap.add_argument("--router", default=None,
+                     help="report only this router (e.g. prompt, toolcall) instead of every router "
+                          "present in the log")
     args = ap.parse_args()
 
     routing_rows, routing_bad, routing_existed = load_jsonl(args.routing)
@@ -222,7 +312,6 @@ def main():
         return 1
 
     routing_rows = filter_window(routing_rows, args.since, args.until)
-    prompts, obs = split_events(routing_rows)
 
     print("routing_ab_report -- routing=%s meter=%s" % (args.routing, args.meter))
     print("rows read: routing=%d (malformed=%d, %s)  meter=%d (malformed=%d, %s)"
@@ -231,25 +320,15 @@ def main():
     if args.since or args.until:
         print("window: [%s, %s)" % (args.since or "-inf", args.until or "+inf"))
 
-    print("")
-    print("%-10s %8s %12s %10s %8s %9s" % ("arm", "prompts", "recommended", "adopted", "rate", "sessions"))
-    arm_stats = {}
-    for arm in ARMS:
-        st = compute_arm(prompts, obs, arm)
-        arm_stats[arm] = st
-        rate_s = "n/a" if st["rate"] is None else "%.1f%%" % st["rate"]
-        print("%-10s %8d %12d %10d %8s %9d"
-              % (arm, st["prompts"], st["recommended"], st["adopted"], rate_s, st["sessions"]))
-
-    covered, total = join_coverage(prompts, meter_rows)
-    if total:
-        print("\njoin coverage: %d/%d routing row(s) (%.1f%%) have a session with >=1 meter row"
-              % (covered, total, 100.0 * covered / total))
+    if args.router:
+        routers = [args.router]
     else:
-        print("\njoin coverage: no routing rows to join")
+        routers = routers_present(routing_rows)
+        if not routers:
+            routers = [DEFAULT_ROUTER]   # nothing in the log yet -- still show the empty prompt-router table
 
-    print("")
-    print(verdict_line(arm_stats["treatment"], arm_stats["control"]))
+    for router in routers:
+        report_one_router(router, routing_rows, meter_rows)
 
     return 0
 

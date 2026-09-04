@@ -219,6 +219,109 @@ else
     ok "P: script source never reads a prompt or detail field (structurally cannot print prompt text)"
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# router= column / per-router readout (2026-09-03) -- the second router arm
+# (hooks/ripwire-claude-toolroute.sh) shares routing.jsonl with router:"toolcall"; the prompt router's
+# own rows now carry router:"prompt". Every fixture below is written directly (never via build_fixture,
+# and never inside a `<<'HEREDOC'` wrapped in `$(...)` -- see test/toolcallroutefix/score_corpus.py's
+# header for the bash-3.2 parser trap that combination hits).
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+D8="$TMP/d8"; mkdir -p "$D8"
+python3 - "$D8" <<'PYEOF'
+import json, subprocess, sys
+
+outdir = sys.argv[1]
+
+def cksum(s):
+    return subprocess.run(["cksum"], input=s.encode(), stdout=subprocess.PIPE).stdout.decode().split()[0]
+
+rows = []
+
+# 40 "prompt"-router recommend rows, treatment arm, ALL adopted -- a clean KEEP once it clears the floor.
+for i in range(40):
+    sh, ph = cksum("d8-prompt-t-%d" % i), cksum("d8-prompt-tp-%d" % i)
+    rows.append({"v": 2, "at": "2026-09-03T10:00:00Z", "agent": "claude", "router": "prompt",
+                 "event": "UserPromptSubmit", "status": "recommend", "intent": "x",
+                 "recommended": "--for", "arm": "treatment", "session_hash": sh, "prompt_hash": ph,
+                 "prompt_bytes": 40})
+    rows.append({"v": 2, "at": "2026-09-03T10:00:01Z", "agent": "claude", "router": "prompt",
+                 "event": "RouteObservation", "session_hash": sh, "prompt_hash": ph, "intent": "x",
+                 "recommended": "--for", "arm": "treatment", "observed": "--for", "position": 1,
+                 "outcome": "adopted"})
+# 40 "prompt"-router control rows, NONE adopted -- KEEP at +100pp once both clear the floor.
+for i in range(40):
+    sh, ph = cksum("d8-prompt-c-%d" % i), cksum("d8-prompt-cp-%d" % i)
+    rows.append({"v": 2, "at": "2026-09-03T10:00:00Z", "agent": "claude", "router": "prompt",
+                 "event": "UserPromptSubmit", "status": "recommend", "intent": "x",
+                 "recommended": "--for", "arm": "control", "session_hash": sh, "prompt_hash": ph,
+                 "prompt_bytes": 40})
+
+# 50 "toolcall"-router decision rows (ToolCallRoute event, NO RouteObservation rows at all -- this
+# router does not instrument adoption in this build). Split across both arms, well past the floor, so
+# the readout has real recommend/abstain counts to show but must still refuse a verdict.
+for i in range(25):
+    sh = cksum("d8-tool-t-%d" % i)
+    rows.append({"v": 2, "at": "2026-09-03T11:00:00Z", "agent": "claude", "router": "toolcall",
+                 "event": "ToolCallRoute", "tool": "Bash", "shape": "grep", "status": "recommend",
+                 "reason": "", "recommended": "--grep", "arm": "treatment", "session_hash": sh,
+                 "detail_hash": cksum("d8-tool-detail-t-%d" % i)})
+for i in range(25):
+    sh = cksum("d8-tool-c-%d" % i)
+    rows.append({"v": 2, "at": "2026-09-03T11:00:00Z", "agent": "claude", "router": "toolcall",
+                 "event": "ToolCallRoute", "tool": "Read", "shape": "read", "status": "abstain",
+                 "reason": "non-source", "recommended": "", "arm": "control", "session_hash": sh,
+                 "detail_hash": cksum("d8-tool-detail-c-%d" % i)})
+
+# a lone PRE-2026-09-03 row with no `router` field at all -- must fold into the "prompt" section, not
+# vanish or form a phantom third router.
+sh, ph = cksum("d8-legacy"), cksum("d8-legacy-p")
+rows.append({"v": 2, "at": "2026-09-03T09:00:00Z", "agent": "claude", "event": "UserPromptSubmit",
+             "status": "abstain", "intent": "", "recommended": "", "arm": "treatment",
+             "session_hash": sh, "prompt_hash": ph, "prompt_bytes": 10})
+
+with open(outdir + "/routing.jsonl", "w") as fh:
+    fh.write("\n".join(json.dumps(r) for r in rows) + "\n")
+with open(outdir + "/substitution.jsonl", "w") as fh:
+    fh.write("")
+PYEOF
+
+OUT8="$( run "$D8" )"; RC8=$?
+[ "$RC8" = 0 ] && ok "router fixture: exit 0" || no "router fixture: exit $RC8"
+echo "$OUT8" | grep -q '=== router=prompt ===' && ok "router: prints a '=== router=prompt ===' section" \
+    || no "router: no prompt section -- $OUT8"
+echo "$OUT8" | grep -q '=== router=toolcall ===' && ok "router: prints a '=== router=toolcall ===' section" \
+    || no "router: no toolcall section"
+# the legacy no-router row folds into "prompt" -- treatment's prompt-router n is 40 (recommend rows)
+# + 1 (the legacy abstain row) = 41 prompts, still 40 recommended.
+echo "$OUT8" | sed -n '/=== router=prompt ===/,/=== router=toolcall ===/p' \
+    | grep -Eq '^treatment[[:space:]]+41[[:space:]]+40[[:space:]]' \
+    && ok "router: a pre-router-field row folds into router=prompt (41 prompts, 40 recommended)" \
+    || no "router: legacy row did not fold into prompt -- $( echo "$OUT8" | grep '^treatment' | head -1 )"
+echo "$OUT8" | grep -Eq '^KEEP -- treatment 100\.0% - control 0\.0%' \
+    && ok "router: prompt section still computes a real KEEP verdict" \
+    || no "router: prompt verdict wrong -- $( echo "$OUT8" | grep -E 'KEEP|REWORD|REMOVE|UNDERPOWERED' | head -1 )"
+echo "$OUT8" | grep -q 'does not instrument adoption-within-two' \
+    && ok "router: toolcall section states plainly it has no adoption instrument, prints no band verdict" \
+    || no "router: toolcall section did not disclose its missing instrument"
+echo "$OUT8" | sed -n '/=== router=toolcall ===/,$p' | grep -Eq '(KEEP|REWORD|REMOVE|UNDERPOWERED)' \
+    && no "router: toolcall section printed a band verdict despite having no observation rows" \
+    || ok "router: toolcall section never prints a fabricated band verdict"
+echo "$OUT8" | sed -n '/=== router=toolcall ===/,$p' \
+    | grep -Eq '^treatment[[:space:]]+25[[:space:]]+25[[:space:]]' \
+    && ok "router: toolcall treatment arm shows its real recommend count (25/25)" \
+    || no "router: toolcall treatment row wrong"
+echo "$OUT8" | sed -n '/=== router=toolcall ===/,$p' \
+    | grep -Eq '^control[[:space:]]+25[[:space:]]+0[[:space:]]' \
+    && ok "router: toolcall control arm shows 0 recommended (all abstain rows)" \
+    || no "router: toolcall control row wrong"
+
+# --router=toolcall filters to just that section, and never touches the prompt section's numbers.
+OUT8T="$( python3 "$SCRIPT" --routing "$D8/routing.jsonl" --meter "$D8/substitution.jsonl" --router toolcall )"
+echo "$OUT8T" | grep -q '=== router=toolcall ===' && ok "--router=toolcall: shows the toolcall section" \
+    || no "--router=toolcall: missing its own section"
+echo "$OUT8T" | grep -q '=== router=prompt ===' && no "--router=toolcall: leaked the prompt section too" \
+    || ok "--router=toolcall: does not print the prompt section"
+
 echo ""
 if [ "$fail" = 0 ]; then
     echo "ALL PASS"

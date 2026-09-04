@@ -675,13 +675,21 @@ retroactively flip for calls already logged.
 `~/.ripwire/` now holds a second, smaller log written by a different instrument, and the two are
 deliberately separate files rather than one with a `kind` column.
 
-`routing.jsonl` is the **prompt routers'** log — `hooks/ripwire-claude-route.sh` (Claude Code
-`UserPromptSubmit`) and `hooks/ripwire-codex-route.sh` (the Codex equivalent). Its unit is a
-**prompt**, not a tool call; its rows are `UserPromptSubmit` decisions (`status`, `intent`,
-`recommended`, `arm`) and `RouteObservation` outcomes (`adopted` / `missed` / `continued`), and it is
-the instrument the band pre-registered in [`EVALS.md` §4](EVALS.md) ("Claude Code prompt router") is
-measured through. `agent` says which router wrote a row; a row without one predates the field and came
-from the Codex router.
+`routing.jsonl` is the **routers'** log, now shared by THREE hooks: `hooks/ripwire-claude-route.sh`
+(Claude Code `UserPromptSubmit`), `hooks/ripwire-codex-route.sh` (the Codex equivalent), and — as of
+2026-09-03 — `hooks/ripwire-claude-toolroute.sh` (Claude Code `PreToolUse`, the second router arm; see
+"The second router arm — `hooks/ripwire-claude-toolroute.sh`" below). `agent` says which router
+wrote a row; a row without one predates the field and came from the Codex router. **`router`**
+(`"prompt"` or `"toolcall"`) distinguishes the two Claude Code routers that now share this file — a row
+written before this field existed has none and reads as `"prompt"` (that was the only one until this
+round). `bench/routing_ab_report.py` reads `router` and reports each SEPARATELY: the two are never
+pooled into one readout, and the n>=40-recommended-per-arm floor pre-registered in
+[`EVALS.md` §4](EVALS.md) applies PER ROUTER PER ARM.
+
+The **prompt router**'s unit is a prompt; its rows are `UserPromptSubmit` decisions (`status`,
+`intent`, `recommended`, `arm`) and `RouteObservation` outcomes (`adopted` / `missed` / `continued`),
+and it is the instrument the band pre-registered in [`EVALS.md` §4](EVALS.md) ("Claude Code prompt
+router") is measured through.
 
 Three things it shares with this meter, and one it does not:
 
@@ -698,6 +706,65 @@ Three things it shares with this meter, and one it does not:
 
 `bench/substitution_report.py` does not read `routing.jsonl` — different unit, different question, and
 folding them would put prompts and tool calls in one denominator.
+
+### The second router arm — `hooks/ripwire-claude-toolroute.sh` (2026-09-03)
+
+Pre-registered in [`EVALS.md`](EVALS.md) ("A second router arm — route on the agent's FIRST TOOL CALL,
+not the prompt"). Where the prompt router reads the ask before a tool is chosen, this one reads the
+SHAPE of the tool call itself: a `Bash`/`Grep` recursive grep on a source path names `--grep=<pattern>`;
+a `Read` of a source file names `--expand=<symbol>` (only when the symbol resolves — the
+`resolved_symbols` guard, same rule as `--help-task`) or falls back to `--for` with the file already
+known. Advisory-only, same posture as every hook in this file: never blocks, degrades to silence on any
+error, no prompt/command/pattern/path text retained in the log.
+
+**The row.** One per routable event (a Bash command shaped like a recursive grep/rg, a `Grep` tool
+call, or a `Read` tool call — anything else, including `cat`/`sed`/polls/other tools, is not routable
+at all and writes no row), in BOTH arms:
+
+```json
+{"v":2,"at":"2026-09-03T10:00:00Z","agent":"claude","router":"toolcall","event":"ToolCallRoute","tool":"Bash","shape":"grep","status":"recommend","reason":"","recommended":"--grep","arm":"treatment","session_hash":"1179329697","detail_hash":"2426030764"}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `tool` | Raw tool name: `Bash`, `Grep`, `Read`. |
+| `shape` | `grep` or `read` — which half of the mapping decided this row. |
+| `status` | `recommend` or `abstain`. |
+| `reason` | Set on an abstain: `non-source`, `notification`, `cap`, `multi-pattern`, `no-pattern`, `unparseable`, `no-path`, `no-tool`, `no-repo`. Empty on a recommend. |
+| `recommended` | The bare verb only (`--grep`, `--expand`, `--for`) — never the argument. |
+| `detail_hash` | A `cksum` of the pattern/path/file involved, so a future analysis can measure uniqueness without the log ever holding the text itself. |
+
+The per-session cap (three recommendations) and the notification guard (`[SYSTEM NOTIFICATION`,
+`<task-notification>` in the command/pattern/path abstains with `reason="notification"`, unconditionally
+before any other check) are the same design points the retired nudge and the prompt router already
+established: an uncapped hint on every grep is noise, and a harness wake-up marker is not a retrieval
+need. `test/toolcallroutecheck.sh` gates precision >= 0.95 and harmful == 0.000 against a committed
+263-shape corpus (`test/toolcallroutefix/corpus.jsonl`, built by `gen_corpus.py`).
+
+**What this router does NOT do (yet): adoption-within-two.** Unlike the prompt router, this hook does
+not chain a `--observe` pending-file loop to see whether the agent's NEXT tool call used the
+recommended verb. It does not need one to log a decision — but a KEEP/REWORD/REMOVE verdict needs an
+adoption rate, and `bench/routing_ab_report.py` prints `router=toolcall`'s recommend/abstain counts
+while stating plainly that no band verdict is computed for it. The follow-up path (not yet built): this
+hook already sees every tool call, and the substitution meter (`~/.ripwire/substitution.jsonl`) already
+logs every observed call in session+`seq` order — a later reader can correlate a `toolcall` decision row
+against the meter's own sequence for the same session, rather than this hook maintaining a second
+pending-file chain next to the prompt router's.
+
+**Installing it** (opt-in; no installer flag wires this one yet — add the stanza to
+`~/.claude/settings.json` `hooks.PreToolUse` by hand, alongside any existing entries for
+`hooks/ripwire-nudge.sh`):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash|Grep|Read",
+        "hooks": [ { "type": "command", "command": "/absolute/path/to/hooks/ripwire-claude-toolroute.sh" } ] }
+    ]
+  }
+}
+```
 
 ## Reading the log
 
