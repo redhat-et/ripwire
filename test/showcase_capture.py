@@ -57,7 +57,10 @@ lego:Vehicle
 batch_path = os.path.join(AUX, "batch2.txt")
 open(batch_path, "w").write(BATCH)
 
-STRAY_TSV = "# ref<TAB>verdict labels for --eval-stray\nlane-notes\tmerged\nlane-abi\tmerged\nlane-docdrift\tunmerged\n"
+_realRefs = subprocess.run( "git for-each-ref --format='%(refname:short)' refs/heads | grep -v '^main$' | head -3", shell=True, cwd=REPO, capture_output=True ).stdout.decode().split()
+while len( _realRefs ) < 3:
+    _realRefs.append( f"no-such-ref-{len( _realRefs )}" )   # a label naming a ref that does not exist — the eval must not credit it as merged
+STRAY_TSV = "# ref<TAB>verdict labels for --eval-stray (the first three local branches, resolved at capture time; a missing branch is padded with a nonexistent name on purpose)\n" + f"{_realRefs[0]}\tmerged\n{_realRefs[1]}\tunmerged\n{_realRefs[2]}\tmerged\n"
 stray_tsv_path = os.path.join(AUX, "stray_labels2.tsv")
 open(stray_tsv_path, "w").write(STRAY_TSV)
 
@@ -119,6 +122,16 @@ open(os.path.join(AUX, "plan_note.h"), "w").write("// edit-plan payload: placed 
 open(edit_plan_path, "w").write(json.dumps({"version": 1, "edits": [
     {"op": "insert_before_symbol", "target": "nonNegativeFloatDescKey", "payload": "plan_note.h"}]}, indent=1) + "\n")
 empty_payload_path = os.path.join(AUX, "empty_payload.h")
+manifest_py = os.path.join(AUX, "manifest_summary.py")
+open(manifest_py, "w").write('''import sys, json
+r = json.load(sys.stdin)
+ts = r["result"]["tools"]
+blob = json.dumps(r, separators=(",", ":"))
+print("tools=", len(ts), " manifest_bytes=", len(blob), " (~tokens at 4 bytes/token:", len(blob) // 4, ")")
+for t in sorted(ts, key=lambda t: -len(json.dumps(t))):
+    d = t.get("description", ""); sch = json.dumps(t.get("inputSchema", {}), separators=(",", ":"))
+    print(f"{t[\'name\']:28s} desc_bytes={len(d):5d} schema_bytes={len(sch):5d} required={t.get(\'inputSchema\', {}).get(\'required\', [])}")
+''')
 open(empty_payload_path, "w").write("")
 
 import shlex
@@ -160,10 +173,10 @@ add(S1, f'{BIN} . --for="{_batchWord1} {_batchWord2} {_batchWord3} when a file c
 add(S1, f'{BIN} . --for="rankGraphTeleport"', "Name-shaped query: the router picks name-exact BM25 (header says which/why).")
 add(S1, f'{BIN} . --for="rankGraphTeleport" --no-route', "Same query with routing forced OFF (plain subtoken+body BM25) — contrast with the routed run.")
 add(S1, f'{BIN} . --for="rankGraphTeleport" --signatures-only', "T3 opt-out: the signatures-only lens (no auto bodies, no bundle=\"auto\" attribute) — contrast with the terminal default above.")
-add(S1, f'{BIN} . --for="tree-sitter parse of a source file" --adaptive', "Cut the result at the relevance cliff (Adaptive-k).")
+add(S1, f'{BIN} . --for="tree-sitter parse of a source file" --adaptive', "Cut the result at the relevance cliff (Adaptive-k) — on a flat ranking nothing is cut and the header says so ([adaptive: kept N of N]).")
 add(S1, f'{BIN} . --for="why does src/lexical.h chooseForRanker pick name-exact BM25"', "Mention anchoring (default-on): a path and a Symbol literally named in the task get lifted; the header says what anchored.")
 add(S1, f'{BIN} . --for="why does src/lexical.h chooseForRanker pick name-exact BM25" --no-mention-boost', "Same task with the anchor disabled — the contrast the flag exists for.")
-add(S1, f"{BIN} . --lego=Vehicle", "Interface -> implementors view: method contract + every existing impl.")
+add(S1, f"{BIN} . --lego=Vehicle", "Interface -> implementors view: every existing impl of the named interface; the method contract is extracted for the C-family/Java/TS/Python tiers — for a Rust trait (this fixture) it discloses caveat=\"not-extracted-for-lang\" rather than an empty list.")
 add(S1, f'{BIN} . --exemplar="format byte sizes for humans"', "The repo's best-in-class instance to imitate before writing new code (picked by ROLE).")
 add(S1, f'{BIN} . --help-task="calls(runDefaultMap, rankGraphTeleport)"', "Deterministic enhanced help: a closed claim in the task is a structured shape, so the router recommends the ONE command that answers it (--verify) with the evidence behind the pick. Advice only — nothing executes.")
 add(S1, f'{BIN} . --help-task="write a cheerful release announcement"', "The honest half of the contract: a task with no ripwire-shaped evidence ABSTAINS with zero commands rather than guessing.")
@@ -192,8 +205,8 @@ add(S2, f"{BIN} . --test-gate", onTree(
 add(S2, f"{BIN} . --grep=DEGRADED_PATH_ALERT", "Literal trigram-indexed search. CHANGED: each hit now carries the MATCHED line in <m>, plus shown/capped/hits_capped.")
 add(S2, f"{BIN} . --grep=DEGRADED_PATH_ALERT --grep-context=1", "Same search with one line of source context either side.")
 add(S2, f"{BIN} . --regex='fnv1a\\w+'", "Regex search + enclosing symbol.")
-add(S2, f"{BIN} . --match='(if_statement)'", "Tree-sitter structural query WITHOUT a capture — a bare node query gets a capture AUTO-ADDED (auto_captured=\"1\") instead of silently matching nothing.")
-add(S2, f"{BIN} . --match='(if_statement) @i'", "The same shape query WITH a capture — the form that actually matches.")
+add(S2, f"{BIN} . --match='(if_statement)'", "Tree-sitter structural query WITHOUT a capture — a bare node query gets a capture AUTO-ADDED (auto_captured=\"1\") and matches the same nodes the explicit form does.")
+add(S2, f"{BIN} . --match='(if_statement) @i'", "The same shape query WITH an explicit capture — identical hits, no auto_captured= attribute.")
 add(S2, f'{BIN} . --query="teleport pagerank" --top-k=5', "Raw BM25 ranking (debug lens; --for is the real verb).")
 
 S3 = "zoom the detail ladder"
@@ -238,17 +251,17 @@ add(S4, f"{BIN} . --edit-check=rankGraphTeleport", onTree(
 add(S4, f"{BIN} . --pr-context", onTree(
     "No-LLM review-evidence bundle for the working-tree diff (clean tree = empty).",
     "No-LLM review-evidence bundle for the working-tree diff — recorded against a DIRTY tree, so it is populated rather than empty."))
-add(S4, f"{BIN} . --pr-context=main~1", "The BASEREF form: diffed against merge-base(BASEREF, HEAD), never the ref tip — here the previous mainline commit.")
-add(S4, f"{BIN} . --merge-scout=main~2,main~1", "Pairwise cross-arm conflict sites + suggested landing order (any committish works as an arm).", timeout=600)
+add(S4, f"{BIN} . --pr-context=HEAD~1", "The BASEREF form: diffed against merge-base(BASEREF, HEAD), never the ref tip — here the previous commit on the current line (a ref with NO merge base falls back to a disclosed two-dot diff: anchor=\"ref-tip-two-dot\").")
+add(S4, f"{BIN} . --merge-scout=HEAD~2,HEAD~1", "Pairwise cross-arm conflict sites + suggested landing order (any committish sharing a merge base with HEAD works as an arm; one that does not is reported ok=\"0\", never compared).", timeout=600)
 add(S4, f"{BIN} . --stray-content=lane", "Which lane-* refs still hold divergent authored work vs HEAD, with verdicts.", timeout=600)
-add(S4, f"{BIN} . --stray-content=worktree-agent-a1", "A ref family that IS fully merged — the omit-merged-refs contract, with the counters still reconciling against refs=.", timeout=600)
+add(S4, f"{BIN} . --stray-content=worktree-agent-a1", "A second ref family: merged refs are OMITTED from the rows and counted in merged=; refs sharing no merge base with HEAD (a shallow clone, or a pre-rewrite history) land in unknown= with ok=\"0\" — the counters always reconcile against refs=.", timeout=600)
 add(S4, f"{BIN} . --stray-content=r27 --plan", "Select the genuinely-unmerged refs and feed them to merge-scout for a landing order.", timeout=900)
 add(S4, f"{BIN} . --stray-content=lane --abi", "Cross-branch ABI-break gate: struct byte-contract drift on each ref's AUTHORED paths.", timeout=600)
 add(S4, f"{BIN} . --whereis=rankGraphTeleport", "Which ref's tree defines or mentions SYM — HEAD first, then every local branch.", timeout=600)
 add(S4, f"{BIN} . --whereis=computeOnePairOverlap --with-history", "Same, plus a git-history <fate> row (never / removed-by-commit) for names no tree carries.", timeout=600)
 add(S4, f"{BIN} . --flags", "The dark-content dashboard: gates BUILT but OFF. CHANGED: no longer invents gates from comments/heredocs, so the count only reflects real ifndef/define, CMake option(), and getenv gates.")
 add(S4, f"{BIN} . --flags --flip=RIPWIRE_ASAN", "Blast radius of turning ONE gate on: live code, symbols, transitive reach, covering tests.")
-add(S4, f"{BIN} . --flags --flip=NoSuchGate", "Unknown-gate refusal (exit 1) naming the near-misses.")
+add(S4, f"{BIN} . --flags --flip=RIPWIRE_ASA", "Unknown-gate refusal (exit 1) with a did-you-mean from a real edit distance (one character off RIPWIRE_ASAN).")
 add(S4, f'{BIN} . --plan-lanes=3 --task="add a --since filter to the doc-drift verb and cover it with tests"', "NEW VERB: pre-hoc lane plan — which of 3 parallel worktrees would COLLIDE, before a line is written. JSON on stdout.")
 add(S4, f"{BIN} . --plan-lanes --brief={brief_path}", "NEW VERB, explicit form: one line per lane, lane boundaries are the ones you wrote (the defensible mode).", pre=f"cat {brief_path}")
 add(S4, f"{BIN} . --plan-lanes=99 --task=x", "Out-of-range refusal shape for the lane count.")
@@ -260,7 +273,7 @@ add(S4, f"{BIN} . --doc-drift --gateability", "The finishable to-do list: docs w
     post_label="Tail of the same output — the `<gateability>` section:")
 add(S4, f"{BIN} . --doc-drift --with-history", "Same report, with git history splitting stale mentions into deleted-by-commit vs never-existed.", timeout=600)
 add(S4, f"{BIN} . --from-trace=-", "Map a pasted stack trace onto indexed symbols. CHANGED: in_corpus= now reports the real count (was 0).", stdin=trace_path, pre=f"cat {trace_path}")
-add(S4, f"{BIN} . --notes", "List all field notes (write-side memory). This repo still has no .ripwire_notes.")
+add(S4, f"{BIN} . --notes", "List all field notes (write-side memory) — the committed .ripwire_notes at the repo root, each with the sha/branch it was recorded at.")
 add(S4, f'{BIN} . --pack-task="add a new output format flag to the CLI"', "ONE budget-shared bundle: ranking + top bodies + caller sigs + notes + tests_to_run. CHANGED: <d> rows now carry n=/id=.")
 add(S4, f'{BIN} . --pack-task="add a new output format flag to the CLI" --partition=3', "Fan-out form: one shared core + 3 per-agent slices carved along call-graph communities.")
 add(S4, f'{BIN} . --for="pagerank power iteration" --with-graph', "Task lens + a compact Mermaid flowchart of the top anchors' 1-hop edges.")
@@ -295,7 +308,7 @@ add(S7, f"{BIN} . --scip=does_not_exist.scip --callers=rankGraphTeleport", "SCIP
 add(S7, f"{BIN} src test --top-k=5", "Multi-root workspace: ONE merged graph over two roots, paths labeled <root>/<rel>.")
 add(S7, f"{BIN} . --eval", "Self-eval: co-change recall vs BM25.", timeout=900)
 add(S7, f"{BIN} . --eval-retrieval", "Known-item retrieval eval: MRR + recall@k per ranker per query mode.", timeout=900)
-add(S7, f"{BIN} . --eval-stray={stray_tsv_path}", "Labelled verdict-accuracy eval for --stray-content (3 hand-labelled refs).", timeout=900, pre=f"cat {stray_tsv_path}")
+add(S7, f"{BIN} . --eval-stray={stray_tsv_path}", "Labelled verdict-accuracy eval for --stray-content — three labels over REAL local refs (names resolved at capture time). Read got= against v= in the stray-content run: a ref the verb could not analyse (unknown) must never be credited as a merged hit.", timeout=900, pre=f"cat {stray_tsv_path}")
 add(S7, f"{BIN} skills --eval-skills={skills_tsv_path}", "Labelled skill-ROUTING eval over the repo's own skills/ directory (4 hand-labelled prompts).", timeout=600, pre=f"cat {skills_tsv_path}")
 add(S7, f"{BIN} wrap claude", "Print the recipe to wire ripwire into Claude Code as an MCP server.")
 add(S7, f"{BIN} --version", "Version + short build info.")
@@ -316,26 +329,26 @@ add(S2B, f"{BIN} . --slice=rankGraphTeleport:teleport --slice-flow=fwd", "Forwar
 add(S2B, f"{BIN} . --slice=rankGraphTeleport:nosuchvar", "A variable the definition does not bind — the refusal shape, naming the inventory.")
 add(S2B, f"{BIN} . --slice-depth=3", "--slice-depth without --slice-flow is refused loudly rather than silently ignored.")
 add(S2B, f"{BIN} . --slice=rankGraphTeleport:teleport --legend=compact", "The compact legend posture: rows byte-identical, a versioned schema id replaces the repeated explanatory prose — for a many-small-calls loop.")
-add(S2B, f"{BIN} . --pattern='rankGraph($G, $A)'", "Structural search written in CODE: $NAME binds one node, ... is a sibling ellipsis; grammars=/shapes= disclose what the pattern became per grammar.")
+add(S2B, f"{BIN} . --pattern='rankGraphTeleport($A, $B, $C)'", "Structural search written in CODE: $NAME binds one node; grammars=/shapes= disclose what the pattern became per grammar (a 3-argument call shape — the 2-argument spelling has no call site in this repo and correctly reports hits=0).")
 add(S2B, f"{BIN} . --pattern='DEGRADED_PATH_ALERT(...)'", "The ellipsis form over a macro-shaped call site; unsupported= names the families this verb does not serve.")
 add(S2B, f"{BIN} . --pattern='x'", "A pattern that collapses to a bare token is REFUSED — never reported as hits=0.")
 add(S2B, f"{BIN} . --grep=DEGRADED_PATH_ALERT --and=cache", "Boolean grep: hits where BOTH literals share the matched line (--grep-scope=line is the default).")
 add(S2B, f"{BIN} . --grep=DEGRADED_PATH_ALERT --not=test --grep-scope=file", "Drop every hit in a file that ALSO contains the --not literal anywhere (file scope).")
 add(S2B, f"{BIN} . --grep=DEGRADED_PATH_ALERT --grep=cache", "A second --grep= REFUSES and names --and= as the AND spelling — no silent overwrite.")
-add(S2B, f"{BIN} . --grep=deterministic --grep-in=any", "Span tiers off: the exhaustive view — comment and string hits print alongside code hits instead of being held back.")
-add(S2B, f"{BIN} . --grep=deterministic", "The default code tier on the same literal: what it served, and what it disclosed as suppressed_comment=/suppressed_string=.")
+add(S2B, f"{BIN} . --grep=DEGRADED_PATH_ALERT --grep-in=any", "Span tiers off: the exhaustive view — the comment and string hits the default tier held back (suppressed_comment=96 / suppressed_string=29 in the plain --grep block above) now print alongside the code hits; hits= grows accordingly.")
+add(S2B, f"{BIN} . --grep=deterministic", "A literal whose classified hits are all prose: the answer serves tier=\"comment+string\" rather than an empty code tier, and tier_unclassified= says how many hits the fixed parse budget never classified.")
 add(S2B, f"{BIN} . --grep=DEGRADED_PATH_ALERT --handles", "h= on each editable enclosing-symbol row: a freshness-pinned identity an edit verb can target and must refuse on after any file change.")
 add(S2B, f"{BIN} . --grep=DEGRADED_PATH_ALERT --legend=compact", "The grep compact legend (ripwire.grep/v1).")
 add(S2B, f'{BIN} . --for="tree-sitter parse of a source file" --legend=compact', "The --for compact legend (ripwire.for/v1) — every data/completeness attribute kept.")
 add(S2B, f'{BIN} . --for="tree-sitter parse of a source file" --auto-bodies', "Opt OUT of compact conceptual serving: restore the rank-first auto <bodies> walk (bundle=\"auto\").")
-add(S2B, f'{BIN} . --for="quality delta gating exit codes"', "Doc-mention surfacing (default ON): a markdown doc naming a top-resolved symbol in a backtick rides in below that symbol.")
-add(S2B, f'{BIN} . --for="quality delta gating exit codes" --no-doc-mention', "The same task with doc-mention surfacing OFF — the contrast the flag exists for.")
+add(S2B, f'{BIN} . --for="quality delta acks ledger rubber stamp"', "Doc-mention surfacing (default ON): a markdown doc naming a top-resolved symbol in a backtick rides in below that symbol — the legend's [doc mentions: …] clause says it fired.")
+add(S2B, f'{BIN} . --for="quality delta acks ledger rubber stamp" --no-doc-mention', "The same task with doc-mention surfacing OFF — the contrast the flag exists for (no [doc mentions] clause, one fewer row).")
 add(S2B, f"{BIN} . --safe-delete=rankGraphTeleport", "\"Can I delete this?\" — callers + transitive impact + every use site + how much of the radius is tested, composed in ONE call; risk= names what was found, never a verdict.")
 add(S2B, f"{BIN} . --safe-delete=DoesNotExist", "Unknown-symbol refusal shape for --safe-delete.")
 add(S2B, f"{BIN} . --handoff", "The continuation packet for the NEXT session: <verified> disk truth (branch/sha, changed symbols, blast radius, tests) + <heuristic> labeled suggestions. Recorded against " + TREE + ".")
 add(S2B, f"{BIN} . --handoff --token-budget=1200", "The same packet under a hard ceiling: heuristic rows drop tail-first (withheld= disclosed), verified rows never drop.")
 add(S2B, f"{BIN} . --skipped", "WHY a file is not in the index (oversize / excluded / unsupported-ext / gitignored) and which indexed files it cannot vouch for (degraded-parse, minified-suspect), plus the per-language census.")
-add(S2B, f"{BIN} . --no-ignore --top-k=3", "Crawl paths the repo's own .gitignore covers (default honours it and discloses ignored_files=/ignored_dirs=) — compare the header's files= with the default map.")
+add(S2B, f"{BIN} . --no-ignore --top-k=3", "Crawl paths the repo's own .gitignore covers (default honours it and discloses ignored_files=/ignored_dirs= only when it dropped anything — this repo's crawl drops nothing, so the header is identical to the default map's; --skipped's ignore_mode= says which rule applied).")
 add(S2B, f"{BIN} . --no-stable --top-k=3", "--no-stable outside --mcp: what the flag does (or says) when there is no stable-by-default ordering to opt out of.")
 add(S2B, f'{BIN} . --run-trace="cat {trace_path}; exit 1"', "EXEC-MODE --from-trace: run a command, and on a non-zero exit map its captured output onto indexed symbols in the same call — the whole fix-loop entry.")
 add(S2B, f'{BIN} . --run-trace="true"', "A command that exits 0: a minimal success record (exit, measured duration, disclosed output tail) and NO bundle — nothing failed, nothing to map.")
@@ -357,7 +370,8 @@ add(S4B, f"{BIN} . --lint --naming-locals", "The opt-in --lint modifier: naming 
 add(S4B, f"{BIN} . --lint-catalog", "The built-in rule registry — one row per rule with sev=/category=/rationale/lang=/since=; no corpus needed.")
 add(S4B, f"{BIN} . --lint --lint-select=cache-", "Run ONLY one rule family; the root carries selected=\"K of N\" so a filtered zero is never confusable with an unfiltered one.")
 add(S4B, f"{BIN} . --lint --lint-ignore=naming-,cache-", "DROP two families, applied after selection; the raw select=/ignore= you passed rides on the root.")
-add(S4B, f"{BIN} . --lint --lint-select=nosuchfamily", "An unresolvable PREFIX refuses (exit 1), naming the nearest rule/family by edit distance.")
+add(S4B, f"{BIN} . --lint --lint-select=cach-", "An unresolvable PREFIX refuses (exit 1) with a did-you-mean from a real edit distance (one character off cache-).")
+add(S4B, f"{BIN} . --lint --lint-select=nosuchfamily", "A PREFIX with no near miss at all: the refusal points at --lint-catalog instead of guessing.")
 add(S4B, f"{BIN} . --lint --sarif", "The SAME findings as SARIF 2.1.0 (what github/codeql-action/upload-sarif consumes) — pure re-serialization, results count == the native run's.",
     post=f"{BIN} . --lint --sarif 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); r=d[\"runs\"][0]; print(\"sarif\", d[\"version\"], \"rules=\", len(r[\"tool\"][\"driver\"][\"rules\"]), \"results=\", len(r[\"results\"]))'",
     post_label="Parsed summary of the same SARIF (past the display cut):")
@@ -399,9 +413,10 @@ add(S8, f"{D} . --quality-delta --scope=src/graph.h", "OWNERSHIP partition for a
 add(S8, f"{D} . --quality-delta --quality-ack --scope=src/graph.h --ack-only=api-surface", "The rubber-stamp guard: an --ack-only that names an OUT-OF-SCOPE row refuses (exit 1) and writes nothing.", cwd=DIRTY)
 add(S8, f"{D} . --handoff", "The continuation packet with a REAL diff: verified changed symbols + blast radius + tests-to-run, then the heuristic rows.", cwd=DIRTY)
 add(S8, f'{D} . --note-add="lessByScoreDescId: keep this branch-free — it sits inside the PageRank sort comparator"', "Pin a field note (write-side memory) to a symbol; committed to .ripwire_notes in the sandbox.", cwd=DIRTY)
-add(S8, f"{D} . --notes", "The note is now listed — and auto-surfaces whenever --for/--expand later emit that symbol.", cwd=DIRTY)
-add(S8, f"{D} . --expand=lessByScoreDescId --top-k=0", "The note riding along with the symbol's body.", cwd=DIRTY)
-add(S8, f"{D} . --quality-baseline", "Snapshot ccx/clones/dead-code to .ripwire_quality_baseline (the run-BEFORE-a-change half of the baseline workflow).", cwd=DIRTY, post="ls -la .ripwire_quality_baseline && head -c 300 .ripwire_quality_baseline")
+add(S8, f"{D} . --notes", "The note is listed — but a BARE symbol name is stored verbatim and reads dangling=\"1\": it matches no canonical id, so it surfaces nowhere (recorded as found; the help wants path::scope::name).", cwd=DIRTY)
+add(S8, f'{D} . --note-add="src/infra/sortutil.h::rw::sortutil::lessByScoreDescId: chose the flat two-branch compare over the nested ladder because the comparator sits inside the PageRank sort"', "The same note keyed by the CANONICAL id --for/--expand emit — the form that surfaces.", cwd=DIRTY)
+add(S8, f"{D} . --expand=lessByScoreDescId --top-k=0", "The canonical-id note riding along with the symbol's body (the bare-name one does not) — the <note> element follows the body, past the display cut, so it is extracted below.", cwd=DIRTY,
+    post=f"{D} . --expand=lessByScoreDescId --top-k=0 2>/dev/null | sed 's/></>\\n</g' | grep -A2 '<note'", post_label="The <note> element on the same output — past the 30-line display cut above:")
 add(S8, f"{D} . --replace-symbol-body=lessByScoreDescId --edit-payload={empty_payload_path}", "An EMPTY payload refuses — it never implies deletion.", cwd=DIRTY)
 add(S8, f"{D} . --replace-symbol-body=lessByScoreDescId --edit-payload={payload_less_path}", "Whole-symbol replace without a whole-file read: the payload is the ORIGINAL flat body, so this edit undoes the sandbox's deep-nesting regression. The receipt's span is the POST-edit byte range; replaced_bytes counts the old bytes overwritten.", cwd=DIRTY, pre=f"cat {payload_less_path}")
 add(S8, f"{D} . --edit-check=lessByScoreDescId", "The closed loop: contract unchanged (same params, same publicness) after the replace — nothing provably incompatible.", cwd=DIRTY)
@@ -411,11 +426,13 @@ add(S8, f"{D} . --replace-symbol-body=DoesNotExist --edit-payload={payload_note_
 add(S8, f"{D} . --edit-plan={edit_plan_path} --dry-run", "A versioned multi-edit TRANSACTION preflighted without writing: the receipt shows what each op would read and touch.", cwd=DIRTY, pre=f"cat {edit_plan_path}")
 add(S8, f"{D} . --edit-plan={edit_plan_path} --apply", "The same plan committed: per-file locks, re-verify-before-write, atomic rename, rollback on a later failure.", cwd=DIRTY)
 add(S8, f"{D} . --edit-plan={edit_plan_path}", "Neither --dry-run nor --apply: the mode is explicit, so this refuses.", cwd=DIRTY)
-add(S8, f"{D} . --quality-delta", "After the agent's edits: the deep-nesting row is gone (the replace undid it), the rest still gate.", cwd=DIRTY)
+add(S8, f"{D} . --quality-delta", "After the agent's edits: the complexity/nesting rows on lessByScoreDescId are gone (the replace undid them), the rest still gate.", cwd=DIRTY)
+add(S8, f"{D} . --quality-baseline", "Snapshot ccx/clones/dead-code to .ripwire_quality_baseline — the run-BEFORE-a-change half of the baseline workflow (run here LAST, because a baseline pinned on an already-regressed tree would make every later delta read clean).", cwd=DIRTY, post="ls -la .ripwire_quality_baseline && head -c 300 .ripwire_quality_baseline")
+add(S8, f"{D} . --quality-delta", "Against the freshly pinned sidecar baseline the same tree reads regressions=0 — a baseline is a floor YOU chose, and it must be pinned BEFORE the change, not after.", cwd=DIRTY)
 
 S9 = "the MCP dialect — the same verbs over stdio JSON-RPC (one-shot exchange, not a persistent server)"
 add(S9, mcp(MCP_INIT, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'), "initialize + tools/list: the manifest an agent host loads at session start — every verb's name, description and input schema.",
-    post=mcp(MCP_INIT, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}') + " | tail -1 | python3 -c 'import sys,json; r=json.load(sys.stdin); ts=r[\"result\"][\"tools\"]; print(\"tools=\", len(ts)); [print(f\"{t[\\\"name\\\"]:28s} desc_bytes={len(t.get(\\\"description\\\",\\\"\\\"))!s:>5} required={t.get(\\\"inputSchema\\\",{}).get(\\\"required\\\",[])}\") for t in ts]; print(\"manifest_bytes=\", len(json.dumps(r)))'",
+    post=mcp(MCP_INIT, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}') + f" | tail -1 | python3 {manifest_py}",
     post_label="The manifest, summarised (name / description bytes / required args) — what the host pays in context every session:")
 add(S9, mcp(MCP_INIT, mcp_call("for", task="pagerank power iteration")), "MCP `for`: always bundle=sigs (never the CLI's compact route), the same ranked signatures as --for.")
 add(S9, mcp(MCP_INIT, mcp_call("explore", task="add a new output format flag to the CLI", budget_tokens=2000)), "MCP `explore` = --pack-task under a token budget, one call.")
@@ -423,7 +440,8 @@ add(S9, mcp(MCP_INIT, mcp_call("fetch_body", handle="rankGraphTeleport")), "MCP 
 add(S9, mcp(MCP_INIT, mcp_call("grep", pattern="DEGRADED_PATH_ALERT", limit=3)), "MCP `grep` with paging args.")
 add(S9, mcp(MCP_INIT, mcp_call("slice", symbol="rankGraphTeleport", var="teleport", flow="back", depth=3)), "MCP `slice` — the CLI's --slice/--slice-flow/--slice-depth as one verb.")
 add(S9, mcp(MCP_INIT, mcp_call("find_symbol", symbol="DoesNotExist")), "MCP error shape: an unknown symbol comes back as a JSON-RPC error/refusal, not an empty success.")
-add(S9, mcp(MCP_INIT, mcp_call("batch", queries=["for:incremental cache invalidation", "callers:rankGraphTeleport", "grep:DEGRADED_PATH_ALERT"])), "MCP `batch`: three independent read queries answered in ONE round-trip.")
+add(S9, mcp(MCP_INIT, mcp_call("batch", queries=[{"verb": "for", "task": "incremental cache invalidation"}, {"verb": "find_referencing_symbols", "symbol": "rankGraphTeleport"}, {"verb": "grep", "pattern": "DEGRADED_PATH_ALERT", "limit": 2}])), "MCP `batch`: three independent read queries answered in ONE round-trip — NOTE the sub-query grammar is {verb, ...args} objects with MCP verb names, not the CLI --batch file's verb:arg lines.")
+add(S9, mcp(MCP_INIT, mcp_call("batch", queries=["for:incremental cache invalidation", "callers:rankGraphTeleport"])), "The CLI --batch spelling handed to MCP `batch`: refused, with the accepted shape named.")
 add(S9, mcp(MCP_INIT, mcp_call("edit_check", symbol="rankGraphTeleport")), "MCP `edit_check` on " + TREE + ".")
 add(S9, mcp(MCP_INIT, '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"nosuchverb","arguments":{"path":"."}}}'), "An unknown verb name — the JSON-RPC error shape.")
 
