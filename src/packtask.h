@@ -48,6 +48,9 @@ struct LensRanking
     std::string        docMentionNote;             // R5: doc<->code mention-edge surfacing (see mention.h
                                                     // applyDocMentionBoost) — "" unless a resolved symbol's
                                                     // g.mentions docs actually got lifted.
+    std::uint32_t      docMentionCount = 0;        // §L10b: docMentionInfo.docCount, the machine form of the
+                                                    // note above (0 = the boost moved nothing) — the doc_mentions=
+                                                    // root attribute reads this, mirroring anchorLifts below.
     float              maxLexicalScore = 0.0f;    // R4: top raw BM25 score BEFORE --anchor/mention/cochange
                                                    // reshape it — the honest "how much real textual evidence
                                                    // is there" number the weak="1" signal reads.

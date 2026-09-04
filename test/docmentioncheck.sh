@@ -162,5 +162,20 @@ cmp -s "$TMP/f1.xml" "$TMP/f2.xml" && ok "RIPWIRE_NO_DOC_MENTION=1 == --no-doc-m
 "$BIN" "$FIX" --no-doc-mention >/dev/null 2>"$TMP/refuse.err"
 [ $? -ne 0 ] && grep -q 'no-doc-mention' "$TMP/refuse.err" && ok "flag alone refuses loudly" || no "flag alone did not refuse"
 
+# ── §L10b (finding #1): doc_mentions= is a root ATTRIBUTE, not just legend prose — the "doc mentions: N
+#    doc..." note had no machine-readable twin, so a caller that wants the count without parsing prose had
+#    nothing to read. The XML root now carries doc_mentions="N" (N == the note's own doc count, 2 here per
+#    the per-anchor-cap arm above) whenever the note fires, and is ABSENT (never doc_mentions="0") when it
+#    does not — the JSON dialect gets the matching numeric "doc_mentions" key beside its "doc_mention" prose.
+DM_ATTR="$( grep -o 'doc_mentions="[0-9]*"' "$TMP/d1.xml" | head -1 )"
+[ "$DM_ATTR" = 'doc_mentions="2"' ] && ok "L10b: XML root carries doc_mentions=\"2\" (matches the note's own count)" \
+    || no "L10b: XML root doc_mentions= missing or wrong (got '${DM_ATTR:-<absent>}')"
+grep -q 'doc_mentions=' "$TMP/i1.xml" && no "L10b: doc_mentions= present on a query the boost never touched" \
+    || ok "L10b: doc_mentions= absent when the note did not fire (never doc_mentions=\"0\")"
+JSON_HIT="$( "$BIN" "$FIX" --for="$Q" --json --no-cache 2>/dev/null )"
+printf '%s' "$JSON_HIT" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("doc_mentions")==2, d.get("doc_mentions")' \
+    && ok "L10b: --json carries the matching \"doc_mentions\":2" \
+    || no "L10b: --json doc_mentions key missing or wrong"
+
 [ "$fail" = 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'
 exit "$fail"

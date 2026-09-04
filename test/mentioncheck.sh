@@ -163,5 +163,23 @@ cmp -s "$TMP/f1.xml" "$TMP/f2.xml" && ok "RIPWIRE_NO_MENTION=1 == --no-mention-b
 "$BIN" "$FIX" --no-mention-boost >/dev/null 2>"$TMP/refuse.err"
 [ $? -ne 0 ] && grep -q 'no-mention-boost' "$TMP/refuse.err" && ok "flag alone refuses loudly" || no "flag alone did not refuse"
 
+# ── §L10b (finding #1): mention_anchored= is a root ATTRIBUTE, not just legend prose — the "mention
+#    anchor: N file + M symbols..." note had no machine-readable twin. The XML root now carries
+#    mention_anchored="N+M" (N+M read straight out of the note's own counts, so this arm survives a fixture
+#    edit that changes how many files/symbols anchor) whenever the note fires, ABSENT (never
+#    mention_anchored="0") when it does not; the JSON dialect gets the matching numeric key.
+NOTE_COUNTS="$( grep -o 'mention anchor: [0-9]* file[s]\{0,1\} + [0-9]* symbol' "$TMP/d1.xml" | grep -o '[0-9]*' )"
+NOTE_TOTAL="$( printf '%s\n' $NOTE_COUNTS | awk '{s+=$1} END{print s}' )"
+MA_ATTR="$( grep -o 'mention_anchored="[0-9]*"' "$TMP/d1.xml" | head -1 | grep -o '[0-9]*' )"
+[ -n "$NOTE_TOTAL" ] && [ "$MA_ATTR" = "$NOTE_TOTAL" ] \
+    && ok "L10b: XML root carries mention_anchored=\"$MA_ATTR\" (matches the note's own file+symbol count)" \
+    || no "L10b: XML root mention_anchored= missing or disagrees with the note (attr='${MA_ATTR:-<absent>}' note_total='${NOTE_TOTAL:-<none>}')"
+grep -q 'mention_anchored=' "$TMP/p1.xml" && no "L10b: mention_anchored= present on a query nothing anchored" \
+    || ok "L10b: mention_anchored= absent when the note did not fire (never mention_anchored=\"0\")"
+JSON_HIT="$( "$BIN" "$FIX" --for="$QM" --json --no-cache 2>/dev/null )"
+printf '%s' "$JSON_HIT" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d.get('mention_anchored')==$NOTE_TOTAL, d.get('mention_anchored')" \
+    && ok "L10b: --json carries the matching \"mention_anchored\":$NOTE_TOTAL" \
+    || no "L10b: --json mention_anchored key missing or wrong"
+
 [ "$fail" = 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'
 exit "$fail"
