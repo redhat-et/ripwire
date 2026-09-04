@@ -98,7 +98,7 @@ struct Config
                                                            // `<c n="NAME"/>` omits, and the only way an oracle can tell a right locality pin from
                                                            // a wrong one. Under --scip it also carries the index's own covered sites (O rows), so
                                                            // both sides of the join live in one file. stdout is untouched (src/pincensus.h).
-    bool             packSignatures  = false;              // --pack-signatures: body-elided decl skeletons (~59-68% fewer bytes at top-10/50/100, 68% at the default top-50; root-neutralised, since the repeated path prefix is charged in both forms and is not what this elides)
+    bool             packSignatures  = false;              // --pack-signatures: body-elided decl skeletons (~72-90% fewer bytes at top-10/50/100, ~80% at the default top-50; root-neutralised, since the repeated path prefix is charged in both forms and is not what this elides — see test/showcasecapturecheck.sh arm C)
     std::string_view query;                                // --query=TERMS: pure lexical (BM25) retrieval
     std::string_view grep;                                 // --grep=STR: parallel literal scan + enclosing symbol + the matched line
     bool             grepGiven = false;                    // G1/F1: --grep=/--regex= was already given once this run — a SECOND occurrence
@@ -1065,14 +1065,14 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --detail=N                 (with --for) importance-weighted detail: FULL bodies for the top-N ranked symbols +\n"
         "                               signatures for the rest, in ONE call — spend body tokens only on the head the rank\n"
         "                               identifies. Composes with --max-tokens (bounds the bodies) and --adaptive. 0 = off.\n"
-        "    --pack-signatures          body-elided decl skeletons — ~59-68%% fewer element bytes than the same symbols'\n"
-        "                               full --expand bodies (68%% at the top-50 sigs payload cap — the sigs payload is\n"
-        "                               top-50 whatever --top-k is set to, and --top-k's own default is 200),\n"
+        "    --pack-signatures          body-elided decl skeletons — ~72-90%% fewer element bytes than the same symbols'\n"
+        "                               full --expand bodies (roughly 80%% at the top-50 sigs payload cap — the sigs\n"
+        "                               payload is top-50 whatever --top-k is set to, and --top-k's own default is 200),\n"
         "                               measured at top-10/50/100 on this repo with the corpus-root prefix subtracted\n"
         "                               from both sides: that prefix repeats inside every element, is charged in both\n"
         "                               forms, and is not what this elides — count it and the figure becomes a function\n"
-        "                               of how deep your checkout sits (the same corpus reads 60%% from a relative root\n"
-        "                               and 41%% from a 130-byte absolute one). The share RISES with the result size.\n"
+        "                               of how deep your checkout sits. test/showcasecapturecheck.sh (C) re-derives\n"
+        "                               this range from the SAME repo every run and fails on drift. The share RISES with the result size.\n"
         "                               Like the --format=columnar sibling, a small result can invert it — a signature\n"
         "                               plus its doc comment can be bigger than a short body.\n"
         "    --outline=A,B,...          control-flow skeletons of A,B,...  (same selector grammar as --expand, minus the range)\n"

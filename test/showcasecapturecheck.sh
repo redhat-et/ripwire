@@ -263,12 +263,40 @@ print('OK' if not bad else 'DRIFT ' + '; '.join('top-%d caption %.1f%% vs recoun
                 *)   no "(C-recount) $verdict — the caption and its own gate disagree; re-derive with the root-neutralised methodology stated above, and fix BOTH" ;;
             esac
         fi
+        bandLow=72.0; bandHigh=90.0
         pct="$( printf '%s' "$recount" | grep '^RECOUNT_OK top-50' | grep -oE 'reduction_pct=[0-9.-]+' | cut -d= -f2 )"
-        in_band="$( python3 -c "print(1 if 72.0 <= $pct <= 90.0 else 0)" 2>/dev/null || echo 0 )"
+        in_band="$( python3 -c "print(1 if $bandLow <= $pct <= $bandHigh else 0)" 2>/dev/null || echo 0 )"
         if [ "$in_band" = "1" ]; then
-            ok "(C-band) root-neutralised top-50 reduction is ${pct}% — inside the 72-90% regression band (81.4 +/- 9)"
+            ok "(C-band) root-neutralised top-50 reduction is ${pct}% — inside the $bandLow-$bandHigh% regression band (81.4 +/- 9)"
         else
-            no "(C-band) root-neutralised top-50 reduction is ${pct}% — OUTSIDE the 72-90% regression band; --pack-signatures is eliding materially less (or more) than when this was calibrated"
+            no "(C-band) root-neutralised top-50 reduction is ${pct}% — OUTSIDE the $bandLow-$bandHigh% regression band; --pack-signatures is eliding materially less (or more) than when this was calibrated"
+        fi
+
+        # ── (C-help) §H15 — the --help paragraph must state THIS SAME band, not a stale one ────────────────
+        # H15 (capture-audit 2026-09-04, lens3-prose.md H8): --help published "~59-68% (68% at top-50)" while
+        # this arm's own gated recount landed at 84.5/80.2/80.6 with a 72-90% band — the help text was outside
+        # its own gate's band. Per CLAUDE.md, when --help and a document disagree, --help wins and the document
+        # is the bug; here the roles were reversed, so --help itself was the stale one. This parses the SAME
+        # two numbers --help states for --pack-signatures and asserts they equal the C-band bounds above (not
+        # a second hand-copied 72/90 — same $bandLow/$bandHigh variables), so a future recalibration of the
+        # band and a forgotten --help edit cannot silently drift apart again.
+        helpText="$( "$BIN" --help 2>&1 )"
+        helpRange="$( printf '%s' "$helpText" | python3 -c "
+import re, sys
+m = re.search( r'~([0-9]+(?:\.[0-9])?)-([0-9]+(?:\.[0-9])?)% fewer element bytes', sys.stdin.read() )
+print( ( m.group(1) + ' ' + m.group(2) ) if m else '' )
+" 2>/dev/null )"
+        if [ -z "$helpRange" ]; then
+            no "(C-help) --help's --pack-signatures paragraph does not state a '~N-M% fewer element bytes' range — cannot check it against the gated $bandLow-$bandHigh% band"
+        else
+            helpLow="$( printf '%s' "$helpRange" | cut -d' ' -f1 )"
+            helpHigh="$( printf '%s' "$helpRange" | cut -d' ' -f2 )"
+            helpVerdict="$( python3 -c "print('OK' if (float('$helpLow') == float('$bandLow') and float('$helpHigh') == float('$bandHigh')) else 'DRIFT')" 2>/dev/null || echo ERR )"
+            if [ "$helpVerdict" = "OK" ]; then
+                ok "(C-help) --help states ~$helpLow-$helpHigh% fewer element bytes, matching the gated $bandLow-$bandHigh% band exactly"
+            else
+                no "(C-help) --help states ~$helpLow-$helpHigh%, but the gated band (recomputed above, same corpus, same run) is $bandLow-$bandHigh% — update the --pack-signatures paragraph in src/cli.h"
+            fi
         fi
     fi
 fi
