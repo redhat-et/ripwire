@@ -138,11 +138,15 @@ if [ -z "$CR" ]; then
     no "presence guard: --context-ratio emits no row for Derived at c.cpp:$EXTLINE — arm 5 cannot observe anything"
 else
     CENTS="$( printf '%s' "$CR" | grep -oE ' ents="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"; CENTS="${CENTS:-x}"
-    CAMB="$( printf '%s' "$CR" | grep -oE ' amb="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"; CAMB="${CAMB:-x}"
+    # Re-pinned 2026-09-04 (capture-audit lane L4 finding 6, PLAN_CAPTURE_AUDIT §1 M15 "amb= three meanings"):
+    # amb=K now means ONE thing tool-wide — K of a symbol's OWN calls the resolver split over several defs. The
+    # context-ratio row's per-NAME candidate tally, which this arm reads, is spelled amb_names= (contextratio.h;
+    # attrvocabcheck §8 pins the spelling). Same fact, its own name; the expected value is unchanged.
+    CAMB="$( printf '%s' "$CR" | grep -oE ' amb_names="[0-9]+"' | head -1 | grep -oE '[0-9]+' )"; CAMB="${CAMB:-x}"
     if [ "$CENTS" = "1" ] && [ "$CAMB" = "0" ]; then
-        ok "live effect: the Extends base clause at c.cpp:$EXTLINE resolves to ents=$CENTS amb=$CAMB — the free int Handler(int) is NOT a candidate"
+        ok "live effect: the Extends base clause at c.cpp:$EXTLINE resolves to ents=$CENTS amb_names=$CAMB — the free int Handler(int) is NOT a candidate"
     else
-        no "NARROWING GONE: Derived at c.cpp:$EXTLINE reports ents=$CENTS amb=$CAMB (expected 1/0) — the base clause is binding the same-named FUNCTION too"
+        no "NARROWING GONE: Derived at c.cpp:$EXTLINE reports ents=$CENTS amb_names=$CAMB (expected 1/0) — the base clause is binding the same-named FUNCTION too"
         printf '    %s\n' "$CR"
     fi
 fi
