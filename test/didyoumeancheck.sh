@@ -173,5 +173,55 @@ printf '%s' "$secout" | grep -q "did you mean 'hot'" \
     && ok "X9(e): correctly falls back to the real code symbol 'hot' instead" \
     || { no "X9(e): expected a fallback suggestion of 'hot', got: $secout"; }
 
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== M9: the EDIT verbs share the read verbs' near-miss policy (one suggester, not two) ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# capture-audit 2026-09-04, lens 6 F8. The three edit verbs had their OWN candidate ranker — a
+# case-folded shared-prefix score minus length delta — so they answered:
+#     --replace-symbol-body=DoesNotExist  → "nearest: do_snake_one, do_snake_two, docDriftText, …"
+#     --insert-before-symbol=<one-edit typo> → the right name, but buried in four prefix neighbours
+# Prefix neighbours of a name that has no near-miss are noise dressed as help: an agent that acts on
+# `do_snake_one` for `DoesNotExist` edits the wrong function. The read verbs' didYouMean has said for a
+# long time that no plausible candidate is an honest answer. The property below is CONSISTENCY, not
+# "always suggest something": on the SAME input, the read and edit surfaces agree.
+#
+# The other two halves of F8: the refusal names the FLAG (all three verbs said "ripwire edit:", so a log
+# could not tell them apart), and a `--edit-target-file` that matches no indexed file blames the PATH half
+# instead of the symbol ("'size' not found under path 'svectr.h'" for a path that was never indexed).
+EDITFIX="$TMP/editfix"; mkdir -p "$EDITFIX"
+printf 'int rankGraphTeleport( int x ) { return x + 1; }\nint helperTwo( int y ) { return y; }\n' > "$EDITFIX/one.cpp"
+printf 'payload\n' > "$TMP/payload.txt"
+
+for verb in --replace-symbol-body --insert-before-symbol --insert-after-symbol; do
+    # (a) a one-edit typo names the SAME candidate the read verbs name
+    out="$( "$BIN" "$EDITFIX" "$verb=rankGraphTeleporr" --edit-payload="$TMP/payload.txt" --no-cache 2>&1 1>/dev/null )"
+    printf '%s' "$out" | grep -qF "rankGraphTeleport" \
+        && ok "M9 $verb: a one-edit typo names rankGraphTeleport" \
+        || no "M9 $verb: no near-miss for a one-edit typo: $out"
+    # (b) a name with NO plausible near-miss gets NO candidate list (the read verbs' contract)
+    out="$( "$BIN" "$EDITFIX" "$verb=DoesNotExist" --edit-payload="$TMP/payload.txt" --no-cache 2>&1 1>/dev/null )"
+    printf '%s' "$out" | grep -qF "nearest:" \
+        && no "M9 $verb=DoesNotExist: invented a candidate list from prefix neighbours: $out" \
+        || ok "M9 $verb=DoesNotExist: no fabricated candidates (nothing is within edit distance)"
+    # (c) the refusal names the verb's own flag
+    printf '%s' "$out" | grep -qF -- "$verb" \
+        && ok "M9 $verb: the refusal names the flag" \
+        || no "M9 $verb: refusal does not name the flag (three verbs, one indistinguishable prefix): $out"
+done
+
+# (d) a --edit-target-file matching no indexed file diagnoses the PATH half
+out="$( "$BIN" "$EDITFIX" --replace-symbol-body=rankGraphTeleport --edit-target-file=nosuchfile.h \
+        --edit-payload="$TMP/payload.txt" --no-cache 2>&1 1>/dev/null )"
+printf '%s' "$out" | grep -qiE "no indexed file|PATH half" \
+    && ok "M9 --edit-target-file=<unindexed>: the PATH half is named as the fault" \
+    || no "M9 --edit-target-file=<unindexed>: the refusal blames the symbol for a path fault: $out"
+
+# (e) the read verbs are unchanged on the same two inputs (the consistency this arm is really pinning)
+out="$( "$BIN" "$EDITFIX" --callers=DoesNotExist --no-cache 2>&1 1>/dev/null )"
+printf '%s' "$out" | grep -qF "did you mean" \
+    && no "M9 --callers=DoesNotExist: the read verb fabricated a candidate too" \
+    || ok "M9 --callers=DoesNotExist: no candidate — the same answer the edit verbs now give"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

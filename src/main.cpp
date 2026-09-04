@@ -2529,7 +2529,12 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
                                                           std::string( cfg.editTargetFile ), payload );
     if( !outcome.ok )
     {
-        std::fprintf( stderr, "ripwire edit: %s\n", outcome.message.c_str() );
+        // M9 / lens 6 F8: name the VERB, not the family. All three CLI edit verbs printed "ripwire edit:",
+        // so a refusal in a log could not be tied back to the command that produced it — the one thing
+        // every other refusal in this binary does.
+        const char* const editFlag = !cfg.replaceSymbolBody.empty() ? "--replace-symbol-body"
+                                       : !cfg.insertBeforeSymbol.empty() ? "--insert-before-symbol" : "--insert-after-symbol";
+        std::fprintf( stderr, "ripwire: %s: %s\n", editFlag, outcome.message.c_str() );
         return 1;
     }
 

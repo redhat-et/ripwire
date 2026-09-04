@@ -8,7 +8,8 @@
 // included by mcp.h (runMcp dispatches here).
 
 #include "mcpindex.h"
-#include "selectorrefuse.h"   // atSeedFaultClause — the @FILE:LINE at-diagnosis, ONE set of fault sentences on every surface
+#include "didyoumean.h"       // M9: boundedEditDistance / nearestIndexedFileClause — ONE near-miss policy for read and edit
+#include "selectorrefuse.h"   // atSeedFaultClause + indexHasFileMatching — the @FILE:LINE at-diagnosis, ONE set of fault sentences on every surface
 #include "infra/hashutil.h"   // sanitizer-clean modulo-2^64 FNV multiplication
 
 #include <climits>            // PATH_MAX — the AbsHintFrame realpath/getcwd buffers (A2)
@@ -66,33 +67,54 @@ namespace mcpedit
         std::string file;         // on success — the indexed identity of the file that was written
     };
 
-    // the K symbol names closest to `name` by a cheap edit-distance-ish score, for the "0 matches" hint. We
-    // don't need true Levenshtein — a shared-prefix + length-delta ranking surfaces the obvious typo/overload,
-    // which is all the hint is for. Deterministic (id-order stable sort by score then name).
+    // The K symbol names closest to `name`, for the "0 matches" hint — by the SAME bounded edit distance
+    // every read verb's did-you-mean uses (didyoumean.h::boundedEditDistance), and cut off at the same
+    // bandwidth.
+    //
+    // M9 / lens 6 F8 (capture-audit 2026-09-04). This used to be its own ranker: case-folded shared-prefix
+    // length × 4 minus the length delta, over the WHOLE symbol table, with no cutoff — the exact score
+    // §P12.1 replaced on the read side, plus the missing cutoff. So the edit verbs answered
+    // `--replace-symbol-body=DoesNotExist` with "nearest: do_snake_one, do_snake_two, docDriftText,
+    // dogfood-gaps, download_raw" — five alphabetical neighbours of "Do", none of them related to
+    // anything, in front of an agent about to overwrite a function body. A prefix neighbour of a name with
+    // no near-miss is noise dressed as help; the read verbs have long since decided that no plausible
+    // candidate is an honest answer, and this is the surface where acting on a bad guess WRITES.
+    //
+    // The cutoff is what makes the list empty when nothing is close, so the caller drops the "nearest:"
+    // clause entirely rather than printing a header over five wrong names. Deterministic: distance first,
+    // then longer case-insensitive shared prefix, then lexicographic — the tie-break contract
+    // nearestNameByEditDistance states for the single-candidate case, applied to the whole ordered list.
     inline std::vector<std::string> nearestNames( const IngestResult& ing, const std::string& name, std::size_t k )
     {
-        struct Cand { int score; std::string n; };
+        constexpr int     kMaxEditDistance = 3;   // the read verbs' bandwidth (didyoumean.h::didYouMean)
+        struct Cand { int dist; std::size_t prefixLen; std::string n; };
         std::vector<Cand> cands;
-        cands.reserve( ing.symbols.size() );
         for( const Symbol& s : ing.symbols )
         {
-            if( s.name.empty() )
+            if( s.name.empty() || s.kind == SymKind::Section )
+            {
+                continue;   // X9(e): a markdown heading is never the answer to a code-symbol typo
+            }
+            const int dist = boundedEditDistance( s.name, name, kMaxEditDistance );
+            if( dist > kMaxEditDistance )
             {
                 continue;
             }
-            // shared-prefix length (case-insensitive) minus length difference → higher = closer
-            std::size_t pfx = 0;
+            std::size_t       pfx = 0;
             const std::size_t lim = std::min( s.name.size(), name.size() );
             while( pfx < lim && std::tolower( (unsigned char)s.name[pfx] ) == std::tolower( (unsigned char)name[pfx] ) )
             {
                 ++pfx;
             }
-            const int lenDelta = int( s.name.size() ) - int( name.size() );
-            const int score = int( pfx ) * 4 - ( lenDelta < 0 ? -lenDelta : lenDelta );
-            cands.push_back( { score, s.name } );
+            cands.push_back( { dist, pfx, s.name } );
         }
         std::sort( cands.begin(), cands.end(),
-                   []( const Cand& a, const Cand& b ) { return a.score != b.score ? a.score > b.score : a.n < b.n; } );
+                   []( const Cand& a, const Cand& b )
+                   {
+                       if( a.dist != b.dist ) { return a.dist < b.dist; }
+                       if( a.prefixLen != b.prefixLen ) { return a.prefixLen > b.prefixLen; }
+                       return a.n < b.n;
+                   } );
         std::vector<std::string> out;
         for( const Cand& c : cands )
         {
@@ -243,6 +265,18 @@ namespace mcpedit
 
         if( matches.empty() )
         {
+            // M9 / lens 6 F8: when the PATH half names nothing indexed, the path is the fault and nothing
+            // can honestly be said about the symbol — `--edit-target-file=svectr.h` used to report
+            // "symbol 'size' not found under path 'svectr.h'; nearest: sized, size_of, Side, Site, sink",
+            // sending the reader after a rename in a header that was never indexed under that spelling.
+            // Same verdict, same words as the read verbs' file-half diagnosis (selectorrefuse.h).
+            if( !pathHint.empty() && !indexHasFileMatching( ing, pathHint ) )
+            {
+                err = "no indexed file matches '" + pathHint + "' — the PATH half is the fault, so nothing is claimed about '"
+                    + symbol + "'; drop the file qualifier to search every file, or pass a path the map lists"
+                    + nearestIndexedFileClause( ing, pathHint );
+                return kNoNode;
+            }
             std::string m = "symbol '" + symbol + "' not found";
             if( !pathHint.empty() )
             {
