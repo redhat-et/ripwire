@@ -50,7 +50,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,** — [`--scan-skill`](#scan-skill-file) · [`--scan-skills`](#scan-skills-dir) · [`--force`](#force)
 
-**knobs / modes** — [`--rank-by`](#rank-by-pagerank-authority-hub-rrf-churn-churn-decay) · [`--format`](#format-xml-columnar-rows) · [`--format`](#format-candidates) · [`--legend`](#legend-full-compact) · [`--json`](#json) · [`--limit`](#limit-n-offset-m) · [`--exclude`](#exclude-substr) · [`--map-diff`](#map-diff) · [`--cache`](#cache-path) · [`--index-out`](#index-out-base) · [`--no-cache`](#no-cache) · [`--max-file-size`](#max-file-size-n-k-m-g) · [`--refetch`](#refetch) · [`--scip`](#scip-index-scip) · [`--pin-census`](#pin-census-file) · [`--mcp`](#mcp) · [`--listen`](#listen-host-port) · [`--mcp-token`](#mcp-token-t) · [`--allow-remote-edits`](#allow-remote-edits) · [`--eval-stray`](#eval-stray-file) · [`--eval`](#eval) · [`--eval-retrieval`](#eval-retrieval) · [`--eval-mined`](#eval-mined-file) · [`--eval-skills`](#eval-skills-file) · [`-h`](#h-help) · [`-v`](#v-version)
+**knobs / modes** — [`--rank-by`](#rank-by-pagerank-authority-hub-rrf-churn-churn-decay) · [`--format`](#format-xml-columnar-rows) · [`--format`](#format-candidates) · [`--legend`](#legend-full-compact) · [`--json`](#json) · [`--limit`](#limit-n-offset-m) · [`--exclude`](#exclude-substr) · [`--map-diff`](#map-diff) · [`--cache`](#cache-path) · [`--index-out`](#index-out-base) · [`--no-cache`](#no-cache) · [`--no-ignore`](#no-ignore) · [`--max-file-size`](#max-file-size-n-k-m-g) · [`--refetch`](#refetch) · [`--scip`](#scip-index-scip) · [`--pin-census`](#pin-census-file) · [`--mcp`](#mcp) · [`--listen`](#listen-host-port) · [`--mcp-token`](#mcp-token-t) · [`--allow-remote-edits`](#allow-remote-edits) · [`--eval-stray`](#eval-stray-file) · [`--eval`](#eval) · [`--eval-retrieval`](#eval-retrieval) · [`--eval-mined`](#eval-mined-file) · [`--eval-skills`](#eval-skills-file) · [`-h`](#h-help) · [`-v`](#v-version)
 
 ---
 
@@ -3116,6 +3116,8 @@ Read-only; emits fixed repair commands and never prints config contents or shell
 
 <f p= why= bytes=/> per DROPPED file: why=oversize (limit= names the ceiling — --max-file-size, or the fixed .json/.yaml config ceilings it does not raise), why=excluded (--exclude hit), why=unsupported-ext (ext= has no grammar in this build — the class that hides a whole LANGUAGE). <h p= why= err= err_ratio= ws_freq=/> per INDEXED-but-suspect file, nothing dropped: why=degraded-parse (the parse holds ERROR/MISSING nodes — a parser-state fact, never a syntax verdict) and/or why=minified-suspect (ws_freq under 0.070 over the leading 4KB). <e x= files=/> per unindexed extension — what the map header rolls up as unindexed=. <lang n= files= symbols=/> per LANGUAGE this build DID extract from — the mirror of unindexed= (which names what it could NOT read at all); sorted files DESC then name ASC, absent means the language contributed nothing, never a printed zero; files= is a floor (a file with zero extracted symbols is not attributed to any language), symbols= is exact. The root states the ACCOUNTING INVARIANT indexed= + oversize= + excluded= = the enumerated candidate population, plus unsupported_ext=, excluded_dirs= (SUBTREES --exclude pruned: contents UNKNOWN, not zero), pruned_dirs= (SUBTREES this build always prunes by policy — the committed noise/vendor/build denylist and any dir holding a CMakeCache.txt — contents likewise UNKNOWN), degraded_parse=, minified_suspect=, unmeasured= (indexed files this run never parsed) and the effective ceilings, so a zero-row report still states its bounds. rows_capped="1" ⇒ rows are a sample of an exact count. Rows sort by path; composes with --max-file-size/--exclude and multi-root (rows carry the <label>/./<rel> spelling). Read-only; exit 0 always: a report, not a gate.
 
+**Shaped by:** `--no-ignore`
+
 **Caveats (stated by the binary):**
 
 - WHY the index does not contain a file, and which files it DOES contain but cannot vouch for.
@@ -3425,6 +3427,16 @@ $ ./build/ripwire . --no-cache --top-k=3
 </f>
 </r>
 ```
+
+### `--no-ignore`
+
+**Answers:** crawl paths the repository's own .gitignore covers.
+
+DEFAULT: in a git work tree the crawl honours git's ignore rules (node_modules/, .venv/, target/, build/, dist/ — whatever the repo declared), and the header discloses ignored_files= / ignored_dirs= when it dropped anything. A non-git root, a missing git binary, or a root that is ITSELF inside an ignored subtree all keep the full walk; --skipped's ignore_mode= says which of the four applied, and rows the ignored set.
+
+**Caveats (stated by the binary):**
+
+- --skipped's ignore_mode= says which of the four applied, and rows the ignored set.
 
 ### `--max-file-size=N[K|M|G]`
 

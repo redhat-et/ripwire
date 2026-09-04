@@ -1351,6 +1351,82 @@ cold == warm, xmllint, ASan on the crawl. (6) Wall time of the ignore walk is a 
 ledger row, never a red gate. NEGATIVE consequence: if (1) or (5) fail the default stays as today and
 `--respect-gitignore` ships opt-in with the numbers.
 
+### `.gitignore` honoured by default — RUN, measured 2026-09-03 against the bands above
+
+**Verdict: ACCEPT on all six bands. The default ships; `--no-ignore` is the escape hatch, and the
+NEGATIVE consequence (`--respect-gitignore` opt-in) did not trigger.** Bands (1) and (5) — the two the
+registration named as the reject conditions — both passed clean. Every number below came out of the
+plain build of this lane's commits, `test/gitignorecheck.sh` all-pass.
+
+**The walk, and its cost (the decision the registration left to the lane).** Shell out to
+`git -C <root> -c core.quotepath=false ls-files --others --ignored --exclude-standard --directory -z`,
+once per root, rather than write a `.gitignore` matcher. A native matcher has to be bug-compatible with
+git across nested `.gitignore` precedence, negation, `**`, the trailing-slash directory form,
+`core.excludesFile`, `.git/info/exclude` and macOS case folding, and the moment it diverges it deletes
+source from a corpus while claiming the repository asked for that. Shelling to git is exact by
+construction, is not a new dependency (`gitmine.h`, `crossref.h`, `prcontext.h`, `quality.h` and
+`binstale.h` already popen git; G3 is about what the binary LINKS), and degrades exactly as those do —
+no work tree, or no git binary, and the crawl is today's full walk with `ignore_mode="unavailable"`
+saying so on `--skipped`. `--directory` is load-bearing for the cost, not a convenience: a wholly
+ignored directory is one entry and one prune, so a 12,000-file checkout costs what an empty one costs.
+Measured probe time, median of 3: **ugrep 0.020 s, rocksdb 0.030 s, duckdb 0.150 s, this repository's
+root 0.032 s**. `bench/PROFILE.md` carries the ledger row and the `--directory`-vs-full-enumeration
+comparison (3,962 entries / 0.10 s without it, and still only a FLOOR — git stops at a nested `.git`).
+
+| Registered band | Measured | |
+| --- | --- | --- |
+| (1) ignored subtree + loose file leave the map, counted in `ignored_files=`; `--no-ignore` restores them | `test/gitignorecheck.sh` (written RED at `4f6e601`, 15 of 29 assertions failing) is ALL PASS: fixture `files=` 6 → 3, `ignored_files=1 ignored_dirs=1`, `--no-ignore` restores all six symbols and emits no `ignored_*` | **meets** |
+| (2) `test/golden.xml` byte-identical | **byte-identical** — `test/fixture` is fully tracked, so the fixture ignores nothing and no re-derivation commit was needed | **meets** |
+| (3) the four D4 corpora re-pinned with the ignored count beside each | see the table below — all four **unchanged**, `ignored=0 ignored_dirs=0` on every one | **meets** |
+| (4) this repository's root without `--exclude`: `files=` within 5% of the excluded count, warm within 2× | `files=` 8,674 → **1,522**, and the excluded run is **1,522** — a 0.0% delta; warm **0.10 s vs 0.10 s**, ratio 1.00 | **meets** |
+| (5) determinism ×2, cold == warm, xmllint, ASan on the crawl | ×3 byte-identical on the root; cold == warm; `xmllint --noout` clean on the root map, the root `--skipped`, the fixture `--skipped` and `test/fixture`; ASan+UBSan+LSan rc 0 with EMPTY stderr on five arms (root default, fixture `--skipped`, a root-ignored root, multi-root, `--no-ignore`) | **meets** |
+| (6) ignore-walk wall time is a ledger row, never a gate | `bench/PROFILE.md`, 2026-09-03 section. No timing assertion was added to any gate | **meets** |
+
+**Band (3), the D4 re-pins.** Same binary, `ripwire <root> --no-cache`, each external tree verified at
+its pin with a clean `git status`. `ripwire src/` is `git archive d8fa59c src` extracted to a scratch
+directory, which is deliberately NOT a git work tree — so it is also the band's non-git control.
+**Default output is byte-identical to `--no-ignore` on all four**, which is the finding: three clean
+checkouts have nothing ignored to drop, and the disclosure attributes are correctly absent.
+
+| corpus | pin | files | symbols | edges | `ambiguous=` | unresolved | `ignored=` / `ignored_dirs=` | `ignore_mode=` |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| ripwire `src/` | d8fa59c | 148 | 4,810 | 13,119 | 5,632 | 1,508 | 0 / 0 | `unavailable` |
+| ugrep | `550599a6` | 156 | 3,626 | 5,388 | 1,722 | 5 | 0 / 0 | `git` |
+| rocksdb | `0e2801ac` | 1,873 | 53,619 | 210,904 | 45,142 | 1,800 | 0 / 0 | `git` |
+| duckdb | `19864453` | 5,123 | 61,178 | 84,698 | 8,929 | 2,650 | 0 / 0 | `git` |
+
+These differ from the phase-3 table earlier in this document (`be3e1e6`: src 146 / 5,553, ugrep 1,721,
+rocksdb 44,967, duckdb 8,934) by the commits between `be3e1e6` and `d8fa59c`, NOT by this lane — the
+byte-identity of each corpus's default and `--no-ignore` output is the proof, and it is why the column
+is re-pinned rather than the deltas being attributed.
+
+**Band (4), and what could not be measured here.** The registration's 158,202-file figure is the
+development machine's, and it could not be reproduced in this lane's worktree: the largest gitignored
+tranche, `bench/external/swex/snapshots`, had been moved out of the tree for this round, and a fresh
+worktree carries no `bench/external/` at all (its un-excluded root measures `files=1521`, which is a
+tree with nothing to find, not a refutation). The band was therefore measured on a REBUILT stand-in —
+the three D4 checkouts copied into the gitignored `bench/external/`, 18,995 files on disk — and the
+stand-in was removed again before the commits below. The shape reproduces exactly; the magnitude is
+smaller, and the orchestrator re-verifies the band on the full tree once the snapshots are moved back.
+
+**Cache interaction, stated precisely because it was checked rather than assumed.** The ignore mode is
+NOT part of the cache key, and it does not need to be: the auto-cache blob is keyed per FILE
+(`relForHash` path → `FileFacts`), so a `--no-ignore` run writes a SUPERSET blob and a following
+default run can only ever read back the files it actually crawled. `gitignorecheck` arm 10 pins that
+directly — a default run after a `--no-ignore` run is byte-identical to a default run before one. The
+residual is a speed cost, not a correctness one, and it is disclosed in the ledger: the superset blob
+survives (nothing is dirty, so `saveCache` is skipped), and a default warm run after a `--no-ignore`
+run costs 0.18-0.19 s instead of 0.10 s until something invalidates it. This is the same shape
+`--exclude` has always had — it also changes the crawl set and is also not in the key — and adding a
+mode discriminator would trade a measured 0.08 s for a guaranteed full re-parse on every mode switch.
+
+**One defect the bands did not name, found by building the thing.** Pointing ripwire at a directory
+that is ITSELF gitignored (`ripwire build/` inside a repo whose `.gitignore` holds `build/`) makes git
+answer `./` — everything. Honouring that literally returns an EMPTY map for a directory the user
+pointed at deliberately. That answer is now recognised and refused: the full walk runs and `--skipped`
+reports `ignore_mode="root-ignored"`. `gitignorecheck` arm 11 pins it, together with the other three
+modes.
+
 ### A second router arm — route on the agent's FIRST TOOL CALL, not the prompt — PRE-REGISTERED 2026-09-03
 
 **Why a second arm.** Instrument A above found the prompt classifier blind to 98% of labelled ripwire
