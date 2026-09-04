@@ -1827,9 +1827,9 @@ inline void writeStrayEval( std::FILE* out, const EvalReport& rep )
     std::fprintf( out, "<!-- ripwire stray-content eval: labelled verdict accuracy. Each row is one branch whose "
                        "true state was established by hand; want= is the label, got= is what the classifier said. "
                        "A branch absent from the report scores as merged ONLY when it is a real ref this repo has "
-                       "(merged refs are omitted by design) -- a label naming a ref that does not exist is refused, "
+                       "(merged refs are omitted by design); a label naming a ref that does not exist is refused, "
                        "not scored (see badRefs on refusal). unknown= on the root counts cases whose verdict "
-                       "is unknown (no merge-base / unrelated history) -- its own bucket, never folded into merged. "
+                       "is unknown (no merge-base / unrelated history); its own bucket, never folded into merged. "
                        "Use this to MEASURE a threshold change instead of eyeballing it. -->" );
     std::fprintf( out, "<stray-eval cases=\"%zu\" correct=\"%u\" unknown=\"%u\" accuracy=\"%.1f\">", n, rep.correct, rep.unknownCount, acc );
     for( const EvalCase& c : rep.cases )
