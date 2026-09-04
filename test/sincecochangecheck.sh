@@ -190,20 +190,24 @@ echo "=== --since with an empty / minimal repo (no matching commits at all) ==="
 MINI="$( mktemp -d )"
 ( cd "$MINI" && git init -q && git config user.email x@y && git config user.name x
   echo 'int x(){return 1;}' > x.cpp && git add x.cpp && git commit -qm init )
-# HEAD~3 doesn't resolve (only 1 commit exists) -> resolveSinceScope degrades to inactive -> all-history fallback.
+# RE-PINNED 2026-09-04 (capture-audit M8): HEAD~3 does not resolve in a one-commit repo, and these two
+# arms used to require that --cochange / --rank-by=churn quietly fall back to their own default window.
+# That is a boundary the caller NAMED and this repo does not have; measuring under a different window and
+# stamping window="18mo" on the root is the false window --hotspots already refused for the same input.
+# --since is validated once, globally, before any verb runs, so all four consumers now refuse it alike.
 MINI_CC="$( "$BIN" "$MINI" --cochange --since=HEAD~3 --no-cache 2>/dev/null )"; MINI_CC_RC=$?
-[ "$MINI_CC_RC" -eq 0 ] && printf '%s' "$MINI_CC" | grep -q 'pairs="0"' \
-    && ok "minimal repo: --cochange --since=HEAD~3 (unresolvable rev) degrades cleanly to pairs=0, exit 0" \
-    || no "minimal repo --cochange --since=HEAD~3 should degrade cleanly: rc=$MINI_CC_RC out=$MINI_CC"
+[ "$MINI_CC_RC" -ne 0 ] && [ -z "$MINI_CC" ] \
+    && ok "minimal repo: --cochange --since=HEAD~3 (unresolvable rev) REFUSES (exit $MINI_CC_RC, empty stdout)" \
+    || no "minimal repo --cochange --since=HEAD~3 should refuse: rc=$MINI_CC_RC out=$MINI_CC"
 MINI_RB="$( "$BIN" "$MINI" --rank-by=churn --since=HEAD~3 --no-cache 2>/dev/null )"; MINI_RB_RC=$?
 # §P8 (2026-07-28) — REPINNED from '<r>' to '<r[ >]': the map root now carries est_tokens="N" as a real
 # attribute (the flagship map's own size used to be reachable only inside an XML comment). The literal
 # '<r>' match had nothing to do with this gate's subject (an unresolvable --since rev degrading cleanly);
 # it was just the cheapest "a map came out" probe, and it silently became a false FAIL. Attribute-agnostic
 # now, so a future root attribute cannot break it again.
-[ "$MINI_RB_RC" -eq 0 ] && printf '%s' "$MINI_RB" | grep -q '<r[ >]' \
-    && ok "minimal repo: --rank-by=churn --since=HEAD~3 (unresolvable rev) still produces a valid ranked map, exit 0" \
-    || no "minimal repo --rank-by=churn --since=HEAD~3 should degrade cleanly: rc=$MINI_RB_RC"
+[ "$MINI_RB_RC" -ne 0 ] && [ -z "$MINI_RB" ] \
+    && ok "minimal repo: --rank-by=churn --since=HEAD~3 (unresolvable rev) REFUSES (exit $MINI_RB_RC, empty stdout)" \
+    || no "minimal repo --rank-by=churn --since=HEAD~3 should refuse: rc=$MINI_RB_RC"
 rm -rf "$MINI"
 
 # ═══════════════════════════════════════════════════════════════════════════

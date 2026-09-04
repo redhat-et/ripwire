@@ -70,6 +70,54 @@ struct SinceScope
 // word) while every real form still passes: "2 weeks ago", "5 days ago", "yesterday", "Jan 5, 2026",
 // "2026-01-01", "2026-01-01T00:00:00Z" (t/z are the only single letters accepted, as ISO designators),
 // "@1785219969". A value this rejects is one the caller must NOT silently scope by.
+// Is a leading ISO-shaped calendar date REAL? `looksLikeDate` below is a SHAPE test — it accepts anything
+// whose alphabetic runs are date words and which carries a digit — and a shape test cannot tell 2026-01-15
+// from 2026-13-45. git's approxidate silently turns the impossible one into some timestamp, which
+// --hotspots then stamped into window="2026-13-45" and reported as a legitimately empty window
+// (commits="0", "not an error"). Month 13 and day 45 do not exist, so that is a caller error, not a
+// measurement (M8, capture-audit 2026-09-04).
+//
+// Scope, deliberately narrow: ONLY a value that BEGINS with the numeric YYYY-MM[-DD] shape is range-checked.
+// Everything else — "2 weeks ago", "yesterday", "Jan 5, 2026", "@1785219969" — is git's approxidate to
+// parse, and re-implementing that grammar here is the mistake this file's header already warns against.
+inline bool leadingIsoDateIsReal( std::string_view s )
+{
+    const auto digitsAt = []( std::string_view v, std::size_t at, std::size_t count ) -> bool
+    {
+        if( at + count > v.size() ) { return false; }
+        for( std::size_t i = 0; i < count; ++i )
+        {
+            if( v[ at + i ] < '0' || v[ at + i ] > '9' ) { return false; }
+        }
+        return true;
+    };
+    const auto numberAt = []( std::string_view v, std::size_t at, std::size_t count ) -> int
+    {
+        int n = 0;
+        for( std::size_t i = 0; i < count; ++i ) { n = n * 10 + ( v[ at + i ] - '0' ); }
+        return n;
+    };
+
+    if( !digitsAt( s, 0, 4 ) || s.size() < 7 || s[4] != '-' || !digitsAt( s, 5, 2 ) )
+    {
+        return true;   // not the shape this check owns — leave the verdict to looksLikeDate + approxidate
+    }
+    const int year  = numberAt( s, 0, 4 );
+    const int month = numberAt( s, 5, 2 );
+    if( month < 1 || month > 12 )
+    {
+        return false;
+    }
+    if( s.size() < 10 || s[7] != '-' || !digitsAt( s, 8, 2 ) )
+    {
+        return true;   // YYYY-MM with no day half — the month check above is all there is to make
+    }
+    const bool leap   = ( year % 4 == 0 && year % 100 != 0 ) || year % 400 == 0;
+    const int  inMonth[ 13 ] = { 0, 31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    const int  day    = numberAt( s, 8, 2 );
+    return day >= 1 && day <= inMonth[ month ];
+}
+
 inline bool looksLikeDate( std::string_view s )
 {
     static constexpr const char* kWords[] = {
@@ -125,7 +173,17 @@ inline bool looksLikeDate( std::string_view s )
         }
         runBegin = runEnd;
     }
-    return hasDigit || hasDateWord;
+    return ( hasDigit || hasDateWord ) && leadingIsoDateIsReal( s );
+}
+
+// THE ONE unresolvable---since refusal, shared by every host (M8). Four verbs consume --since and the
+// §P0.5c "a window nobody chose is not a measurement" fix landed on one of them; the other three either
+// worded it themselves or did not refuse at all. Hosts print this; nobody re-words it.
+inline std::string sinceUnresolvedRefusal( std::string_view value )
+{
+    return "ripwire: --since='" + std::string( value ) + "' is neither a git revision nor a real calendar date — refusing "
+           "rather than measuring under a window nobody chose (a revision: HEAD~20, v1.2.0, a sha; a date: 2026-01-01, "
+           "'2 weeks ago', yesterday)";
 }
 
 // Resolve a raw --since=VALUE into a SinceScope. Tries VALUE as a revision first (`git rev-parse
@@ -183,19 +241,13 @@ inline SinceScope resolveSinceScope( const std::string& root, std::string_view v
         return scope;
     }
 
-    // 3) neither — degrade cleanly (the caller's own fallback window), never crash.
-    //
-    // W3FIX: the alert still said "falling back to all-history" after §B12.7 corrected the stderr line right
-    // below it — so the two halves of the SAME degrade disagreed, and the alert was the wrong one: no caller
-    // is handed all-history from here. `active=false` makes sinceLogArgs return the caller-supplied
-    // `fallbackSince` verbatim, which for the churn ranker is its 18-month default (its root stamps
-    // window="18mo"). Aligned to the stderr wording, which is the truthful one.
-    DEGRADED_PATH_ALERT( "resolveSinceScope: --since value is neither a resolvable git revision nor a recognizable date; "
-                         "ignoring it — the calling verb's own default window applies" );
-    // §B12.7: this line used to promise "all-history (no scoping)", which is ONE caller's policy — the
-    // churn ranker falls back to its own 18-month default window instead (its root stamps window="18mo").
-    // The scope resolver cannot know its caller, so the message states only what is true from here.
-    std::fprintf( stderr, "ripwire: --since='%s' is not a git revision or recognizable date — ignoring it; the verb's own default window applies\n", val.c_str() );
+    // 3) neither. SILENT here, and both the alert and the stderr note that used to live on this line are
+    // gone (M8 / lens 6 F7b). An unresolvable --since is refused by the caller now — main.cpp validates the
+    // flag once, before any verb runs — so this path printed a "[math degraded] … ignoring it" alert and an
+    // "ignoring it; the verb's own default window applies" note immediately ahead of the host's "refusing
+    // rather than…". Three lines, and only the third was true. `active=false` remains the return contract
+    // (sinceLogArgs then yields the caller's own fallback window verbatim), which is what keeps every
+    // no---since call site byte-identical.
     return scope;   // active=false
 }
 

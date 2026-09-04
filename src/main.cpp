@@ -3204,6 +3204,33 @@ int main( int argc, char** argv )
         }
         std::fclose( probe );
     }
+    // M8 (capture-audit 2026-09-04, lens 6 F7/F7b, lens 7 F-SINCE-1) — --since is a GLOBAL flag with four
+    // consumers (--hotspots, --slice, --cochange, --rank-by=churn[-decay]), and the §P0.5c ruling that "a
+    // window nobody chose is not a measurement" had landed on --hotspots only: --cochange and
+    // --rank-by=churn emitted at exit 0 under window="18mo" with a stderr note, which is precisely the
+    // false window that fix exists to prevent. Validated ONCE here, where the flag is global, rather than
+    // in four verb handlers that would drift the way these two already had. Multi-root: a value that
+    // resolves in ANY root is a real revision, so the refusal needs every root to reject it.
+    if( !cfg.since.empty() )
+    {
+        bool sinceResolvesSomewhere = false;
+        if( multiRoot )
+        {
+            for( const WorkspaceRoot& r : ws )
+            {
+                sinceResolvesSomewhere = sinceResolvesSomewhere || resolveSinceScope( r.arg, cfg.since ).active;
+            }
+        }
+        else
+        {
+            sinceResolvesSomewhere = resolveSinceScope( root, cfg.since ).active;
+        }
+        if( !sinceResolvesSomewhere )
+        {
+            std::fprintf( stderr, "%s\n", sinceUnresolvedRefusal( cfg.since ).c_str() );
+            return 1;
+        }
+    }
     if( !cfg.cacheFile.empty() )
     {
         namespace fs = std::filesystem;
