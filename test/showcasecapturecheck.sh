@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # showcasecapturecheck.sh — gate for test/showcase_capture.py (§B12.8/§B12.9/§B12.10 of the CA4 polish
-# round). Nothing else in the suite runs this generator or unit-tests its formatting helpers, so this file
-# owns three otherwise-unguarded claims the capture script makes about ITSELF and about the binary:
+# round, plus H15/H16 of the 2026-09-04 capture-audit round). Nothing else in the suite runs this generator
+# or unit-tests its formatting helpers, so this file owns otherwise-unguarded claims the capture script
+# makes about ITSELF and about the binary:
 #
 #   (A) §B12.8 — the --compress demo line must actually demonstrate compression (not a silent no-op: the
 #       symbol it picks must have comments/blank runs for --compress to strip). Runs the REAL demo command
@@ -11,11 +12,18 @@
 #       real fmt_block/explode functions out of the live script via `ast` (not a hand-copied re-implementation
 #       that could drift from the real code) and feeds it multi-byte UTF-8 input reproducing the defect shape
 #       the audit found (truncated near a multi-byte char, marker undercounts the remaining bytes).
-#   (C) §B12.9 — the --pack-signatures caption's "~70% fewer tokens" claim must be hedged (not a bare
-#       unqualified figure) and the real, current reduction on this corpus (same methodology as the cited
-#       counterexample: <d> signature+doc element bytes vs the SAME symbols' <b> --expand element bytes) must
-#       land in a broad sanity band — a regression tripwire, not a strict pin, since the true number moves
-#       with the corpus and with N.
+#   (C) §B12.9 / H15 — the --pack-signatures caption's percentage claim must be hedged (not a bare unqualified
+#       figure), the real current reduction on this corpus (same methodology as the cited counterexample: <d>
+#       signature+doc element bytes vs the SAME symbols' <b> --expand element bytes) must land in a broad
+#       sanity band, AND (C-help) --help's own --pack-signatures paragraph must state that SAME band — H15
+#       was exactly this last check missing: --help published a stale 59-68% while the gated band had moved
+#       to 72-90%, and nothing compared the two.
+#   (D)-(G) H16 (capture-audit 2026-09-04, lens0-orchestrator.md) — the capture's OWN coverage and internal
+#       consistency, via test/showcase_coverage_check.py: (D) every --help flag is captured or listed
+#       Not-run; (E) a caption that never says refus/error/exit/timeout must not sit over an error/exit-code
+#       block; (F) a "contrast pair" (two consecutive headings differing by one added flag) must actually
+#       differ; (G) a caption naming a header clause ([doc mentions/[mention anchor/[adaptive) must find it
+#       in the block, unless the caption is describing the clause's ABSENCE. See that file's own docstring.
 #
 # NOTE: the python3 helpers below live in FILES under $TMP, not `<<'PY' ... PY` heredocs inside a `$( )`
 # command substitution — macOS's stock bash (3.2.57, frozen there for licensing reasons) has a long-standing
@@ -299,6 +307,148 @@ print( ( m.group(1) + ' ' + m.group(2) ) if m else '' )
             fi
         fi
     fi
+fi
+
+# ── (D)/(E)/(F)/(G) H16 — capture coverage was ungated (capture-audit 2026-09-04, lens0-orchestrator.md) ──
+# The 2026-08-22 capture exercised 106 of the binary's 160 long flags with nothing asserting coverage at
+# all; the current generator has grown to 235+ cases, but nothing STILL asserts (a) every flag stays
+# covered as new flags land, (b) a caption's own promise about refusal/exit-code/error shape holds, (c) a
+# contrast pair actually contrasts, (d) a caption naming a header clause finds it. All four live in
+# test/showcase_coverage_check.py (kept as a separate file, not a heredoc, for the same bash-3.2 nested-
+# command-substitution parser trap arm (B)'s header above already documents), pointed at either the real
+# capture or a scratch mutant so the SAME logic proves both "this shape is caught" and "the real capture
+# is clean, or here is exactly what remains uncovered".
+COVSCRIPT="$ROOT/test/showcase_coverage_check.py"
+if [ ! -f "$COVSCRIPT" ]; then
+    no "(D-G) missing $COVSCRIPT"
+else
+    newestCapture="$( ls -1 "$ROOT"/docs/captures/COMMANDS_showcase_*.md 2>/dev/null | sort | tail -1 )"
+    if [ -z "$newestCapture" ]; then
+        no "(D-G) no docs/captures/COMMANDS_showcase_*.md found"
+    else
+        realOut="$( python3 "$COVSCRIPT" "$ROOT" "$BIN" "$newestCapture" )"
+        # Real-capture verdicts are reported straight through (PASS/FAIL each becomes an ok/no below) —
+        # this file is one of the two gates the round's own brief allows to stay red until the capture is
+        # regenerated at close; a red (D) or (E) here NAMES an uncovered flag or an undisclosed exit code
+        # for the orchestrator to act on, same as every other disclosed-not-silent finding in this suite.
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in
+                PASS\ *) ok "${line#PASS }" ;;
+                FAIL\ *) no "${line#FAIL }" ;;
+            esac
+        done <<REALOUT
+$realOut
+REALOUT
+    fi
+
+    # ── mutation controls: synthetic fixtures, independent of the real capture's current content ────────
+    MTMP="$( mktemp -d )"; trap 'rm -rf "$TMP" "$MTMP"' EXIT
+
+    # (D) mutation: a capture with NO headings and a vacuous Not-run sentence must be seen as near-total
+    # non-coverage (proves the arm can fail, not just pass-by-construction on an empty diff).
+    cat >"$MTMP/d_empty.md" <<'EOF'
+# empty capture mutant
+
+**Not run (and why):** none.
+EOF
+    dOut="$( python3 "$COVSCRIPT" "$ROOT" "$BIN" "$MTMP/d_empty.md" | grep '^\(PASS\|FAIL\) (D)' )"
+    case "$dOut" in
+        FAIL\ *) ok "(D) mutation control: a heading-free capture is correctly seen as covering nothing ($dOut)" ;;
+        *)       no "(D) mutation control: a heading-free capture was NOT flagged as uncovered — the arm cannot see the thing it exists for ($dOut)" ;;
+    esac
+
+    # (E)/(F)/(G) mutation: one synthetic capture exercising all three shapes AND their negative controls,
+    # so a false-positive on the negation wording ("no [doc mentions]", a caption that DOES say "refuses")
+    # is caught in the same run as the true positives.
+    cat >"$MTMP/efg.md" <<'EOF'
+**Not run (and why):** none.
+
+## `./build/ripwire . --mutant-e-bad`
+
+*A normal caption with no failure words at all.*
+
+**exit code: 1**
+
+`````
+(empty)
+`````
+
+## `./build/ripwire . --mutant-e-good`
+
+*This block properly discloses that it refuses.*
+
+**exit code: 1**
+
+`````
+(empty)
+`````
+
+## `./build/ripwire . --for="x"`
+
+*Doc-mention surfacing: the legend's [doc mentions: …] clause says it fired.*
+
+`````
+<ctx bodies="1"/>
+`````
+
+## `./build/ripwire . --for="x" --no-doc-mention`
+
+*No [doc mentions] clause here — the contrast the flag exists for.*
+
+`````
+<ctx/>
+`````
+
+## `./build/ripwire . --mutant-f-bad`
+
+*Base run.*
+
+`````
+<r a="1"/>
+`````
+
+## `./build/ripwire . --mutant-f-bad --no-extra`
+
+*Modifier contrast — should differ but does not.*
+
+`````
+<r a="1"/>
+`````
+
+## `./build/ripwire . --mutant-f-good`
+
+*Base run showing three rows.*
+
+`````
+<r a="1" b="2" c="3"/>
+`````
+
+## `./build/ripwire . --mutant-f-good --detail=1`
+
+*Same query with detail widened — a real contrast.*
+
+`````
+<r a="1" b="2" c="3" d="4"/>
+`````
+EOF
+    efgOut="$( python3 "$COVSCRIPT" "$ROOT" "$BIN" "$MTMP/efg.md" )"
+    eLine="$( printf '%s\n' "$efgOut" | grep '(E) caption-vs-error' )"
+    fLine="$( printf '%s\n' "$efgOut" | grep '(F) contrast-pair' )"
+    gLine="$( printf '%s\n' "$efgOut" | grep '(G) header-clause' )"
+
+    case "$eLine" in
+        FAIL\ *mutant-e-bad*) ok "(E) mutation control: the undisclosed-exit-code block is caught, and the properly-captioned one (--mutant-e-good) is not: $eLine" ;;
+        *)                    no "(E) mutation control did not catch the undisclosed exit code (or false-flagged the good block): $eLine" ;;
+    esac
+    case "$fLine" in
+        FAIL\ *mutant-f-bad*) ok "(F) mutation control: the byte-identical contrast pair is caught, and the real-contrast pair (--mutant-f-good) is not: $fLine" ;;
+        *)                    no "(F) mutation control did not catch the byte-identical pair (or false-flagged the differing one): $fLine" ;;
+    esac
+    case "$gLine" in
+        FAIL\ *"--for=\"x\""*) ok "(G) mutation control: the unfulfilled [doc mentions claim is caught, and the 'no [doc mentions]' negation is correctly NOT flagged: $gLine" ;;
+        *)                     no "(G) mutation control did not catch the unfulfilled header-clause claim (or false-flagged the negation caption): $gLine" ;;
+    esac
 fi
 
 echo
