@@ -253,6 +253,41 @@ exemplar|chosen by ROLE, NEVER by text similarity|--exemplar=fn|$( call exemplar
 uses|external=|--uses=escapeXml|$( call uses '{"path":"'"$ROOT"'","symbol":"escapeXml"}' )
 EOF
 
+# ── LENS 4 (§L10): HEDGE parity between the CLI legend and the tools/list DESCRIPTION — a different
+# surface from LENS 3's payload comparison. A tool's one-line advertisement is what an agent reads BEFORE
+# ever calling it, so a hedge the CLI legend states as a limit on trust (never a proof, a floor not a
+# total, could be more than shown) has to survive into that description too, or the agent forms an
+# over-confident mental model before the first call. Each row: verb | CLI flag (for the anchor phrase) |
+# CLI legend phrase | the SAME hedge, reworded, that must appear in the tools/list description.
+TOOLS_JSON="$TMP/toolslist.json"
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+    | "$BIN" --mcp 2>/dev/null | tail -1 >"$TOOLS_JSON"
+desc_of() { python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+for t in d["result"]["tools"]:
+    if t["name"] == sys.argv[2]:
+        print(t["description"]); raise SystemExit
+print("__NO_SUCH_TOOL__")
+' "$TOOLS_JSON" "$1"; }
+
+echo
+echo "=== LENS 4 — hedges present in the CLI legend must appear (reworded) in the tools/list description ==="
+while IFS='|' read -r verb cliargs cliphrase descphrase; do
+    [ -z "$verb" ] && continue
+    eval "\"$BIN\" \"$ROOT\" $cliargs" 2>/dev/null >"$TMP/l4.cli"
+    grep -qF "$cliphrase" "$TMP/l4.cli" || { no "LENS4 $verb: the CLI itself no longer states \"$cliphrase\" — the gate's anchor moved, re-derive it"; continue; }
+    D="$( desc_of "$verb" )"
+    printf '%s' "$D" | grep -qF "$descphrase" \
+        && ok "LENS4 $verb: tools/list description carries the CLI's hedge" \
+        || { no "LENS4 $verb: CLI states \"$cliphrase\" but the tools/list description has no \"$descphrase\""; printf '%s\n' "$D"; }
+done <<EOF
+edit_check|--edit-check=escapeXml|call sites worth OPENING, not a verdict|not a proof
+stray_content|--stray-content=main|unmerged plus superseded plus merged plus unknown|unknown=refs
+for|--for="escape xml"|starting point, not an answer|starting point, not an answer
+memory_recall|--recall="escape xml"|max_tokens=8000|max_tokens
+EOF
+
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; fi
 echo "SOME CHECKS FAILED"; exit 1
