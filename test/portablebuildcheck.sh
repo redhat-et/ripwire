@@ -118,6 +118,27 @@ else
     no "CMakeLists.txt does not route through cmake/PortableFlags.cmake"
 fi
 
+# ── #6: no ORDERED STL algorithm over std::string_view with the DEFAULT comparator, anywhere in src/ ──
+# WHY THIS IS A PORTABILITY RULE AND NOT A STYLE ONE. libstdc++'s string_view three-way compare computes
+# `n1 - n2` on size_type and lets it wrap (bits/string_view.h, _S_compare). That wrap is well-defined C++,
+# but the G1 sanitizer stack runs -fsanitize=integer, which reports it, and -fno-sanitize-recover=all turns
+# the report into an abort. libc++ (every macOS leg, including the macOS ASan leg) computes the same answer
+# without the subtraction and never reports. So `std::binary_search( first, last, sv )` is green on this
+# machine, green on the macOS sanitizer leg, and aborts EVERY ranked run on the Linux sanitizer leg.
+# That is exactly what happened at 69a17f9: the external-name veto's two table lookups took main red with
+# `unsigned integer overflow: 3 - 17` inside std::binary_search, on a repository whose own macOS battery
+# and macOS ASan leg were both clean. The rule is therefore mechanical: pass an explicit byte-comparator.
+SVBAD="$( grep -rnE '(binary_search|lower_bound|upper_bound|equal_range)\(' "$ROOT/src" 2>/dev/null \
+          | grep -vE '^\s*[0-9]+:\s*//' \
+          | grep -E 'kPythonBuiltinNames|kCFamilyStdNames|string_view' \
+          | grep -vE 'nameLess|svLess|, *\[' || true )"
+if [ -z "$SVBAD" ]; then
+    ok "#6 no ordered STL search over string_view relies on libstdc++'s wrapping three-way compare"
+else
+    no "#6 ordered STL search over string_view with the DEFAULT comparator — aborts the Linux G1 leg (pass an explicit byte-comparator):"
+    printf '%s\n' "$SVBAD" | sed 's/^/        /'
+fi
+
 # NOTE (what this gate can prove vs what only Linux CI can prove): this machine is Apple-Silicon macOS, so
 # it can prove the FLAG-SELECTION LOGIC never emits an Apple-specific flag once RIPWIRE_IS_APPLE_SILICON is
 # false (checks #2/#3 above, via the RIPWIRE_PRETEND_LINUX hook), and that the real CMakeLists.txt wires
