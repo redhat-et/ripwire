@@ -256,5 +256,41 @@ MRC=$?
 [ "$MRC" -eq 1 ] && ok "multi-root --doctor refuses (exit 1)" || no "multi-root --doctor exit was $MRC, expected 1"
 echo "$MOUT" | grep -qi 'doctor' && ok "multi-root refusal names --doctor" || no "multi-root refusal message missing"
 
+# §L10: a legend, and blobs_floor= when the 4096-blob scan cap fires — blobs="4096" alone cannot say
+# whether that is the TRUE count or a floor (at least that many). Built in an ISOLATED TMPDIR (never the
+# real shared cache) so the fixture cannot be perturbed by some other gate's concurrent cache writes —
+# the same isolation every other arm in this file already uses.
+echo "$OUT" | grep -q '<!-- doctor:' \
+    && ok "L10: --doctor output carries a legend" \
+    || no "L10: --doctor output has no legend comment at all"
+# tag-scoped, not a whole-document grep: the legend text above ITSELF spells "blobs_floor=" in prose to
+# define it, so a document-wide search would match the legend, not the row.
+echo "$CACHE_ROW" | grep -q 'blobs_floor=' \
+    && no "L10: happy path (2 blobs, well under the cap) wrongly carries blobs_floor=: $CACHE_ROW" \
+    || ok "L10: happy path carries no blobs_floor= (under the cap — blobs= is the true count)"
+
+CAPCACHE="$TMP/capcache"; mkdir -p "$CAPCACHE/ripwire"
+( cd "$CAPCACHE/ripwire" && for i in $( seq 1 4100 ); do : >"ripwire-blob-$i.bin"; done )
+CAPOUT1="$( TMPDIR="$CAPCACHE" "$BIN" "$REPO" --doctor --no-cache 2>/dev/null )"
+CAPOUT2="$( TMPDIR="$CAPCACHE" "$BIN" "$REPO" --doctor --no-cache 2>/dev/null )"
+CAP_ROW="$( echo "$CAPOUT1" | grep -oE '<c n="cache-dir"[^<]*/>' )"
+echo "$CAP_ROW" | grep -q 'blobs="4096"' \
+    && ok "L10: over the cap (4100 real blobs) -> blobs=\"4096\" (the scan cap, not the true count)" \
+    || { no "L10: expected blobs=\"4096\" over the cap"; echo "$CAP_ROW"; }
+echo "$CAP_ROW" | grep -q 'blobs_floor="1"' \
+    && ok "L10: over the cap -> blobs_floor=\"1\" (blobs= is now a documented floor)" \
+    || { no "L10: over the cap, blobs_floor=\"1\" is missing"; echo "$CAP_ROW"; }
+echo "$CAP_ROW" | grep -q 'truncated="1"' \
+    && ok "L10: over the cap -> truncated=\"1\" (unchanged, existing contract)" \
+    || no "L10: over the cap, truncated=\"1\" missing"
+# monotone/deterministic: the SAME static (isolated, no concurrent writer) fixture must give the SAME
+# blobs=/blobs_floor=/truncated= on every run — the flip the finding named was two runs against a LIVE,
+# shared, concurrently-mutating cache dir disagreeing; an isolated TMPDIR with nothing else touching it
+# must not.
+[ "$CAPOUT1" = "$CAPOUT2" ] \
+    && ok "L10: over-the-cap cache-dir row is byte-identical run-to-run (truncated is monotone in blobs, not a flake)" \
+    || { no "L10: over-the-cap cache-dir row DIFFERED run-to-run on a static fixture"; diff <(echo "$CAPOUT1") <(echo "$CAPOUT2"); }
+echo "$CAPOUT1" | xmllint --noout - 2>/dev/null && ok "L10: over-the-cap output is well-formed XML" || no "L10: over-the-cap output malformed XML"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "SOME CHECKS FAILED"; exit 1; fi
