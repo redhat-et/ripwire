@@ -263,6 +263,15 @@ const char* grepTierLegend( const rw::GrepTierReport& tier )
     return "SPAN TIERS: each hit is classified by the tree-sitter span it sits in (code/comment/string) and this answer serves "
            "the CODE tier, or — when no hit is code — comment and string TOGETHER; tier= names what was served when it is not "
            "code, so a pattern living only in prose is answered, never emptied. "
+           // M17 (capture-audit 2026-09-04, lens1 F4): the label is a CLAIM, and this sentence is the
+           // difference between a proven one and an unproven one. Deliberately no attribute=value literal
+           // (this verb's own rule — gates parse the header counters by grep).
+           "tier_partial= (value 1, present only then) qualifies that label: it was elected over the CLASSIFIED hits alone while "
+           "tier_unclassified= hits were never classified at all, so read it as the tightest tier PROVEN present, never as proof "
+           "that no hit is code — an unclassified hit may well be. Under tier_budget= exhaustion nothing past the budget was "
+           "suppressed, so the SERVED set is exactly what the exhaustive scan found minus only the classified suppressions: the "
+           "partiality narrows what the LABEL may be read to mean, never which rows you got. Its absence beside a tier= means "
+           "every hit was classified and the label is a fact. "
            "suppressed_comment=/suppressed_string= are the classified hits held back: not in hits=, and the "
            "reason complete= cannot appear. Pass grep-in=any (dashes omitted) for every tier. Hit files are parsed on demand "
            "under a fixed budget: tier_parsed= how many were classified, tier_budget= which ceiling stopped it (files or bytes, "
@@ -291,6 +300,17 @@ std::string grepTierAttrs( const rw::GrepTierReport& tier )
     if( std::strcmp( tier.emittedTier, "code" ) != 0 )
     {
         attrs += std::string( " tier=\"" ) + tier.emittedTier + "\"";
+        // M17: the label was elected over the CLASSIFIED hits only (search.h's grepApplySpanTiers — an
+        // unclassified hit may not vote for a tier nobody proved it belongs to, which is right). What was
+        // wrong is that the RESULT was then stated as a fact about the whole answer: live,
+        // --grep=deterministic said tier="comment+string" — legend-read as "no hit is code" — over 128
+        // classified files while 892 of 1,357 hits were unclassified, and served the code-tier
+        // deterministicShuffle DEFINITION plus three call sites. Emitted exactly when the election was
+        // partial, so a fully classified label still pays nothing and reads as the proof it is.
+        if( tier.unclassifiedHits > 0 )
+        {
+            attrs += " tier_partial=\"1\"";
+        }
     }
     attrs += " tier_parsed=\"" + std::to_string( tier.tieredFileCount ) + "\"";
     if( tier.unclassifiedHits > 0 )
@@ -318,7 +338,8 @@ void emitCompactGrepLegend()
     std::printf( "<!-- ripwire grep ripwire.grep/v1: files group source-ordered hits; l=line, m=matched text, "
                  "in=enclosing name when known. shown/capped disclose the printed window; hits_capped=1 makes hits a floor; "
                  "complete=1 only for an exhaustive literal scan whose whole unfiltered window printed. root anchors relative p; "
-                 "enc callers remain a call-graph floor; tier/suppressed and corpus attrs disclose excluded populations. "
+                 "enc callers remain a call-graph floor; tier/suppressed and corpus attrs disclose excluded populations, and "
+                 "tier_partial=1 means that tier label was elected over a partial classification, not proven over every hit. "
                  "files/hits/shown/total/complete are IN-INDEX only; unindexed_hits sizes the second population and the trailing "
                  "unindexed element carries its own count/shown/capped under the same window. -->" );
 }

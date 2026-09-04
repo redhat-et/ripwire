@@ -179,9 +179,17 @@ fi
 # ── (3d) the verifier's OWN live repro, with a liveness precondition so it can never go vacuously green ──
 # --grep-in=any establishes that both anchors still exist before the default view is judged; if the live
 # text moves, this arm goes RED asking to be re-anchored rather than silently passing on an absent fixture.
-V_ANY="$( "$BIN" "$ROOT" --no-cache --grep="malformed rules line" --grep-in=any --limit=200 2>/dev/null )"
+#
+# --exclude=docs (2026-09-04): docs/COMMANDS.md is generated FROM the capture and now quotes this very
+# error message twice. Markdown has a grammar here, so those quotes classify as CODE tier, the code tier
+# stops being empty, and the collapsed ladder correctly serves them and suppresses BOTH of P4-B's anchors
+# — the arm went red on a corpus fact, not on the inversion it exists to catch. Excluding the generated
+# doc tree restores the two-population corpus the arm is about (a string literal in src/ and a `#` comment
+# in test/) without weakening it: the liveness precondition below still runs on the SAME excluded corpus,
+# so an anchor that moves still reds.
+V_ANY="$( "$BIN" "$ROOT" --no-cache --exclude=docs --grep="malformed rules line" --grep-in=any --limit=200 2>/dev/null )"
 if printf '%s' "$V_ANY" | grep -q 'src/arch\.h' && printf '%s' "$V_ANY" | grep -q 'test/archcheck\.sh'; then
-    V_DEF="$( "$BIN" "$ROOT" --no-cache --grep="malformed rules line" --limit=200 2>/dev/null )"
+    V_DEF="$( "$BIN" "$ROOT" --no-cache --exclude=docs --grep="malformed rules line" --limit=200 2>/dev/null )"
     if printf '%s' "$V_DEF" | grep -q 'src/arch\.h' && printf '%s' "$V_DEF" | grep -q 'test/archcheck\.sh'; then
         ok "(3d) live repro: a pasted error message serves its EMIT SITE (src/arch.h) as well as the gate-script comment"
     else
@@ -372,6 +380,97 @@ fi
 [ "$( jkey total "$V_OK" )" = "$d_hits" ] \
     && ok "(9d-b) an explicit in=\"code\" still answers (the refusal is on unknown values, not on presence)" \
     || no "(9d-b) in=\"code\" was refused or changed the answer — the value check is too broad"
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo "=== (11) M17 — a class label decided under a budget says so ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# M17 (capture-audit 2026-09-04, lens1 F4). The served tier is chosen over the CLASSIFIED hits only —
+# correctly, since an unclassified hit cannot vote for a tier nobody proved it belongs to. But the LABEL
+# was then stated as a fact about the whole answer: live, --grep=deterministic said tier="comment+string",
+# whose legend reading is "no hit is code", decided over 128 classified files while 892 of 1,357 hits were
+# never classified — and the served rows included test/verify_radix.cpp's `deterministicShuffle`
+# DEFINITION plus three of its call sites. Four code-tier rows under a label asserting there are none.
+#
+# The rule: whenever the label was decided over a partial classification, it carries tier_partial="1".
+# Narrow on purpose — a complete classification that lands on comment is a proven fact and pays nothing.
+PB="$TMP/partialbudget"; mkdir -p "$PB"
+python3 - "$PB" <<'PARTIALPY'
+import sys, os
+d = sys.argv[1]
+# 300 hit files so the file budget (128) stops the classification well short, every classified one
+# carrying a COMMENT-ONLY mention — so the label the classified prefix elects is "comment". The ONE
+# code-tier occurrence sits in the LAST file by path order, deep in the unclassified tail: it is served
+# (unclassified is never suppressible) under a label that says no hit is code.
+for i in range( 300 ):
+    with open( os.path.join( d, "f%03d.c" % i ), "w" ) as fh:
+        fh.write( "// PARTIALTOKEN_late in a comment\nint partialHost_%03d( void ) { return %d; }\n" % ( i, i ) )
+with open( os.path.join( d, "f299.c" ), "a" ) as fh:
+    fh.write( "int PARTIALTOKEN_late_fn( void ) { return 0; }\n" )
+PARTIALPY
+PB_OUT="$( "$BIN" "$PB" --no-cache --grep=PARTIALTOKEN_late --limit=1000 2>/dev/null )"
+pb_tier="$( attr tier "$PB_OUT" )"
+pb_budget="$( attr tier_budget "$PB_OUT" )"
+pb_unc="$( attr tier_unclassified "$PB_OUT" )"
+pb_partial="$( attr tier_partial "$PB_OUT" )"
+# (11a) the SETUP is live — without this the marker arm below could pass on a fixture that stopped
+# reproducing the shape (the (3d) lesson: a fixture that quietly stops exercising the case is worse than
+# a red one).
+if [ "$pb_tier" = "comment" ] && [ "$pb_budget" = "files" ] && [ -n "$pb_unc" ] && [ "$pb_unc" != "0" ]; then
+    ok "(11a) the fixture reproduces M17: tier=comment elected over a budget-truncated classification ($pb_unc hits unclassified)"
+else
+    no "(11a) the M17 fixture stopped reproducing the shape: tier=$pb_tier tier_budget=$pb_budget tier_unclassified=$pb_unc — re-anchor it"
+    printf '%s\n' "$PB_OUT" | grep -o '<grep [^>]*>'
+fi
+[ "$pb_partial" = "1" ] \
+    && ok "(11b) the label decided under a partial classification carries tier_partial=1" \
+    || no "(11b) tier=$pb_tier was asserted over $pb_unc unclassified hits with NO partial marker (tier_partial=$pb_partial)"
+# (11c) and the code-tier row the label denies exists IS in the served set — which is what makes the
+# unqualified label a false claim rather than merely an imprecise one.
+printf '%s' "$PB_OUT" | grep -q 'in="PARTIALTOKEN_late_fn"' \
+    && ok "(11c) the unclassified CODE-tier definition is served under the comment label (the claim M17 is about)" \
+    || no "(11c) the fixture's code-tier definition is not in the answer — the arm cannot show the false claim"
+# (11d) NOT blanket noise: a label decided over a COMPLETE classification pays nothing. P_OUT is arm (3)'s
+# comments-only answer on the small sandbox, where every hit file was parsed.
+if [ "$( attr tier "$P_OUT" )" = "comment" ] && [ -z "$( attr tier_partial "$P_OUT" )" ]; then
+    ok "(11d) a fully classified comment label carries no partial marker (the marker is a claim, not decoration)"
+else
+    no "(11d) tier_partial appeared on a fully classified answer — the condition is too broad"
+    printf '%s\n' "$P_OUT" | grep -o '<grep [^>]*>'
+fi
+# (11e) defined where it is met, and mirrored on the other dialect.
+printf '%s' "$PB_OUT" | grep -o '<!--.*-->' | head -1 | grep -qi 'tier_partial' \
+    && ok "(11e) the legend defines tier_partial in the answer that emits it" \
+    || no "(11e) tier_partial was emitted and the legend never says what it means"
+PB_MCP="$( printf '%s\n%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"grep","arguments":{"path":"'"$PB"'","pattern":"PARTIALTOKEN_late","limit":1000}}}' \
+    | "$BIN" "$PB" --mcp --no-cache 2>/dev/null | tail -1 )"
+printf '%s' "$PB_MCP" | grep -q 'tier_partial' \
+    && ok "(11f) the MCP grep twin carries tier_partial too (one collection, one disclosure)" \
+    || { no "(11f) the MCP grep twin dropped tier_partial — the two dialects state different confidence in the same label"; printf '%s\n' "$PB_MCP" | cut -c1-400; }
+# (11g) THE PROPERTY, derived from live answers rather than from a fixture: on ANY answer, a tier= label
+# and a non-zero tier_unclassified= together imply tier_partial="1", and a label with nothing unclassified
+# implies its absence. Runs over the real tree, so a pattern nobody anticipated is still covered.
+for q in deterministic "malformed rules line" TIERTOKEN_prose; do
+    case "$q" in
+        TIERTOKEN_prose) P_CORPUS="$SB" ;;
+        *)               P_CORPUS="$ROOT" ;;
+    esac
+    Q_OUT="$( "$BIN" "$P_CORPUS" --no-cache --grep="$q" 2>/dev/null )"
+    q_tier="$( attr tier "$Q_OUT" )"
+    q_unc="$( attr tier_unclassified "$Q_OUT" )"
+    q_par="$( attr tier_partial "$Q_OUT" )"
+    if [ -z "$q_tier" ]; then
+        ok "(11g) '$q': serves the code tier — no label to qualify"
+    elif [ -n "$q_unc" ] && [ "$q_unc" != "0" ]; then
+        [ "$q_par" = "1" ] && ok "(11g) '$q': tier=$q_tier over $q_unc unclassified hits, marked partial" \
+                           || no "(11g) '$q': tier=$q_tier asserted over $q_unc unclassified hits with no tier_partial"
+    else
+        [ -z "$q_par" ] && ok "(11g) '$q': tier=$q_tier decided over a complete classification, unmarked" \
+                        || no "(11g) '$q': tier_partial=1 on an answer that classified everything"
+    fi
+done
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== (10) determinism + well-formed XML on every tiered surface ==="

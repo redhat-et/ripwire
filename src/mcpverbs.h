@@ -671,6 +671,13 @@ inline std::string grepTierKeys( const GrepTierReport& tier )
     if( std::strcmp( tier.emittedTier, "code" ) != 0 )
     {
         keys += std::string( ",\"tier\":\"" ) + tier.emittedTier + "\"";
+        // M17: the CLI grepTierAttrs() twin — same condition, same name. A confidence qualifier is exactly
+        // the class of fact a dialect may not drop (mcpclidiffcheck's LENS2), and an MCP-only agent has no
+        // CLI to re-ask from before trusting the label.
+        if( tier.unclassifiedHits > 0 )
+        {
+            keys += ",\"tier_partial\":true";
+        }
     }
     keys += ",\"tier_parsed\":" + std::to_string( tier.tieredFileCount );
     if( tier.unclassifiedHits > 0 )
