@@ -10836,3 +10836,148 @@ one, and it is empty for two different reasons that the legend keeps apart: `add
 edges_added="0" edges_removed="0"` means *this variable's def-use edges did not move*, while `comparable="0"`
 means *no comparison was made at all*. Reading the second as the first is the one way this verb can mislead,
 which is why the element never carries both and the legend says so in its own sentence.
+
+### Flow-sensitive slice in the small — reaching definitions with kills and joins, PRE-REGISTERED 2026-09-03 (before the code and before any number)
+
+**What is claimed.** `--slice=SYM:VAR` (and the MCP `slice` verb, the same function) computes the REACHING
+DEFINITIONS of every use of VAR inside ONE definition **flow-sensitively**: a def of VAR is killed by the next
+unconditional def of the same binding on every path, and the defs live on merging paths JOIN — at an
+`if`/`elif`/`else` without a covering branch, a `switch` without `default` (and across a case fall-through),
+a loop's back-edge (a def at the bottom of a loop reaches a use at its top, and a use after the loop sees
+both the pre-loop def and the loop-body def), a `try` body's handlers (every statement of the body may
+raise, BEFORE its own defs apply) and `finally` (walked once on the normal path, once on the exceptional
+one), a Python `for`/`while ... else`, a `match` (the no-case path is always kept), and a build-dependent
+C-family `#ifdef`/`#if EXPR` region (an undecided branch — the existing pp rule, now by structure). A
+`return`/`break`/`continue`/`throw`/`raise` ends its path. The walk is over tree-sitter STATEMENT order
+inside the one definition — no alias analysis (a reference/pointer alias is still invisible, and still
+disclosed), no inter-procedural flow. Today the reaching definition is name-based and source-ordered: the
+last def before the use in the file kills everything above it whatever branch it sits on, and no join
+ever happens; the slice legend says "no flow sensitivity".
+
+**The surface, fixed here.** Every USE row (`k="use"|"both"`) of VAR carries `rd=` — the lines of the defs
+that reach it, ascending, comma-separated, `"-"` when no def inside the definition reaches it — placed LAST
+on the row (after `b=`/`pp=`, the same placement rule `pp=` follows). The root carries `reach="cfg"` where
+the flow-sensitive walk is served (C/C++/ObjC (+CUDA/Metal), Python) and `reach="linear"` where it is
+not yet (JS/TS, Go, Java, Rust keep the linear source-order rule — a later def kills, nothing joins — and
+say so). `--slice-flow` and `--since` consume the SAME per-occurrence reach table the rows print, so the
+flow walk, the dependence diff and `rd=` can never disagree about what an edge is. `counts="as-classified"`
+semantics are unchanged: `defs=`/`uses=` still count occurrences the classifier rowed.
+
+**The unit rule, and the per-construct disclosures (each stated in the legend, never guessed).** The unit
+is the STATEMENT: every use in a statement reads the state ENTERING it, and the statement's defs apply
+after — so `x += 1` / `x++` read the previous def then kill it (exact, `k="both"`), a walrus or an
+assignment inside a condition defs after the condition's reads, and a C++17 `if( init; cond )` walks its
+initializer as its own unit. Consequences, disclosed per construct rather than modelled: (i) control flow
+NESTED INSIDE AN EXPRESSION never branches — `?:`, short-circuit `&&`/`||`, a Python conditional
+expression or comprehension, a lambda / closure / nested `def` / nested class body — the whole enclosing
+statement is one unit and a def inside it applies there, once, unconditionally; (ii) `goto` falls through
+(a label is walked as the statement it labels; the jump is not tracked); (iii) a Python `global`/`nonlocal`
+name is tracked like a local inside the function — a write from outside is invisible; (iv) no alias
+analysis — a write through a reference/pointer alias, or hidden behind a call (limit 2), never defs the
+original; (v) a `try` body's handler sees the state before EVERY statement of the body, at any depth
+(over-includes when only one statement can raise); (vi) a loop iterates to a fixpoint (monotone, always
+terminates), which is exact for reaching definitions.
+
+**Instruments.** (a) A NEW sentinel fixture `test/sliceflowsensfix/` — hand-written functions in C++ and
+Python plus one JS control for the `linear` arm — with the exact expected reaching-def lines of EVERY use
+row in `test/sliceflowsensfix/expect.tsv`, committed with this registration and BEFORE the code, in the
+same commit as the RED gate. Composition as committed: 53 functions — **16 with a kill, 17 with a
+branch/loop join, 10 straight-line controls, 9 disclosed-construct sentinels, 1 linear** (the band asked
+≥10/≥10/≥10 and ≥30 in all); 85 use rows over 56 (file, function, variable) groups; every row's `rd=` is
+an expectation. Where the source-order edge of a use DISAPPEARS under the flow-sensitive rule, `expect.tsv`
+carries a `reason` — `exit=K` (the def's path leaves through the jump at line K), `branch=K` (the branch
+head at K puts the def on a sibling path), `unit=K` (the statement at K folds the def and the use into
+one unit — disclosure (i)) or `try=K` (the try at K: its handler sees the state BEFORE each body statement,
+disclosure (v), so the body's last def never reaches the handler) — and the gate CHECKS it: it re-derives
+the source-order edge from the tool's own rows, requires K to sit where the reason says (exit/branch
+strictly between the vanished def and the use; unit/try at or before the def) and to read as that kind of
+statement in the fixture source. Nine such disappearances are in the committed set (four exits, two
+sibling branches, one nested-body fold, two try-handler entries — and none spurious). (b) The 57 labelled commits of `test/slicediffix/labels.tsv`: `slicediffcheck` arm
+(17) must stay **35/35 and 22/22** with the new edge rule underneath it. (c) Gate
+`test/sliceflowsenscheck.sh`, in `test/regression.sh` in the same commit, RED against the current binary
+(no `rd=`, no `reach=`, joins missing).
+
+**The band, fixed here, verbatim — a miss on ANY conjunct is a registered NEGATIVE with the numbers, and the
+band is never moved after a number.**
+
+| conjunct | requirement |
+| --- | --- |
+| sentinel | **0** use rows whose `rd=` differs from `expect.tsv` (both directions: every use row has an expectation, every expectation is met), across all 53 functions |
+| disappearances | **every** source-order edge that disappears is explained by a `reason` the gate verifies as above — none unexplained, none spurious |
+| composition | ≥10 kill, ≥10 join, ≥10 straight-line functions in the committed fixture (counted by the gate) |
+| labelled set | `slicediffcheck` arm (17): dependence ≥ 32/35 as registered, measured **35/35**; reformat ≥ 21/22, measured **22/22** — must not move |
+| legend | the full legend no longer says "no flow sensitivity"; it defines `rd=` and `reach=`, states the unit rule and each disclosure (i)–(vi) by construct; the `--since` block and the compact tier follow |
+| counts | `counts="as-classified"` unchanged in meaning and placement |
+| inheritance | `--slice-flow=back` on a join reaches BOTH defs at depth 1 (gate arm); `--since` reports the join's added edge (gate arm) |
+| MCP parity | the MCP `slice` payload is byte-identical to the CLI on the fixture (same function — gated) |
+| determinism / well-formedness | ×2 byte-identical; `xmllint --noout` on every emitted shape |
+| ASan | the whole gate green against `asan/ripwire` under `LSAN_OPTIONS=suppressions=lsan_suppressions.txt` |
+| slice family | `slicecheck`, `sliceflowcheck`, `mcpslicecheck`, `slicediffcheck`, `compactlegendcheck`, `legendcoveragecheck` green (their pinned rows updated in the SAME commit where `rd=` lands on a use row — the contract moves with the gate, never after it) |
+
+**The falsifiable claim.** *"Inside one function, a def-use edge the slice prints is one the program can
+actually take: a killed def is gone, a joined def is present, and where the walk cannot know (an alias, a
+goto, a nested body) the legend names the construct instead of guessing."* The sentinel's 0-wrong floor and
+the verified reasons are the two ways that sentence can be false.
+
+### Flow-sensitive slice in the small — MEASURED 2026-09-03 against the band above: **POSITIVE, every conjunct met**
+
+**Verdict: rung 3 SHIPS** (`0f68ece`, registration + fixture + RED gate at `7ba5587`). Scored by
+`bash test/sliceflowsenscheck.sh build/ripwire` and the slice family, then the whole set again against
+`asan/ripwire` under `LSAN_OPTIONS=suppressions=lsan_suppressions.txt`.
+
+| conjunct | registered | measured |
+| --- | --- | --- |
+| sentinel | 0 use rows wrong, both directions | **0 wrong of 85 use rows** over 56 (file, fn, var) groups, **125 edges** checked; every expectation met, no unexpected use row |
+| disappearances | every vanished source-order edge explained by a verified reason, none spurious | **9 explained, 0 unexplained, 0 spurious** — 4 `exit=` (ck02, ck08, pk02, pk05), 2 `branch=` (ck03, pk03), 1 `unit=` (pd02), 2 `try=` (cj07, pj04) |
+| composition | ≥10 kill, ≥10 join, ≥10 straight, ≥30 in all | **16 kill, 17 join, 10 straight, 9 disclosed, 1 linear = 53** |
+| labelled set | slicediffcheck (17) ≥ 32/35 and ≥ 21/22, must not move from 35/35 · 22/22 | **35/35 and 22/22**, 0 skipped — on `build/ripwire` AND `asan/ripwire` |
+| legend | "no flow sensitivity" gone; `rd=`/`reach=` defined; unit rule + each disclosure by construct; since block and compact tier follow | **MET** — gate arms (3), (4), (6); the full block names ?:, short-circuit, conditional expression/comprehension, lambda/closure/nested def/class body, goto, global/nonlocal, try, alias, linear; the since legend says "reaching definitions by the same reach= rule" |
+| counts | `counts="as-classified"` unchanged | **MET** — same marker, same LAST placement; `defs=`/`uses=` still count occurrences (slicecheck green) |
+| inheritance | `--slice-flow=back` reaches both joined defs; `--since` reports the join's added edge | **MET** — arm (5): cj11 back from `y` rows `x` at l=137 and l=140, both d=1 f=142; arm (6): wrapping `x = 2` in an `if` yields `edges_added="1"` `<se op="+" d="0" u="2" dl="3" ul="8"/>` |
+| MCP parity | byte-identical to the CLI on the fixture | **MET** — arm (7), the flow-back payload of cj11:y, rd= and reach= included (one function, `sliceBundleText`) |
+| determinism / xmllint | ×2; every shape | **MET** — arm (8)/(9) on the fixture; ×2 + `xmllint --noout` on `ripwire . --slice=sliceComputeReach:state --slice-flow=both` in this repo |
+| ASan | the gate green under the sanitizer | **MET** — sliceflowsenscheck, slicecheck, sliceflowcheck, mcpslicecheck, slicediffcheck (all 57 replays) ALL PASS on `asan/ripwire`, zero reports |
+| slice family | six gates green with their pins moved in the same commit | **MET** — slicecheck, sliceflowcheck, mcpslicecheck, slicediffcheck, compactlegendcheck, legendcoveragecheck rc=0; plus deckcheck, docscommandscheck (COMMANDS.md regenerated for the `--slice` help text), skilltruthcheck, loopconservationcheck rc=0 |
+
+**What was fixed in the expectations before the code existed, and where.** Three corrections were made
+to `expect.tsv` between writing it and running the implementation, all inside the registration commit
+(`7ba5587`, amended before any number): (a) `cj07` l=91 and `pj04` l=35 — the first draft listed the try
+body's LAST def as reaching the handler, which contradicts the registered rule "every statement may raise
+BEFORE its own defs apply"; the rule stood, the two rows moved to `83,86` / `30,32`; (b) the
+`unit=K` reason kind for `pd02` l=17 (a nested-def fold is neither an exit nor a branch) and (c) the `try=K`
+reason kind for the two rows in (a), both added to the gate's verifier with their own placement and
+keyword checks. The band itself did not move.
+
+**The contract that moved with the gate, disclosed.** `rd=` now lands on every use row, so three pinned
+rows in `sliceflowcheck` (27c, 28b, 28d) carry it, and arm (7)'s "no flow attribute" regex learned that
+`rd=` is a v1 attribute. The v1 legend grew by the per-construct disclosures the band requires: 4523 B
+against a budget that was 3584 B and now is 4608 B (the pre-existing block sat within 14 B of the old
+budget); the flow addendum is 1287 B under its unchanged 1400 B; the compact tier is 1216 B against
+1024 → 1280 B (it is the attribute-vocabulary tier, and `rd=`/`reach=` are first-screen attributes).
+Both moves are in `0f68ece` with the code, with their reasons in the gate. Byte cost on a fixture row:
+`rd="9,12"` + `reach="cfg"` = **22 B** on a 4 836 B document (legend 4 500 B).
+
+**Per-construct disclosures as shipped** (the legend's limit 1, verbatim in spirit): control flow nested
+inside an expression — `?:`, short-circuit, a conditional expression or comprehension, a lambda / closure /
+nested def / class body — folds into its statement and its defs apply there once (sentinels cd01, cd02,
+cd05, pd02, pd03, pd04); `goto` falls through and the jump is untracked (cd03); a Python
+`global`/`nonlocal` name is tracked like a local, an outside write invisible (pd01); a try handler sees
+the state before every statement of its innermost try body (cj07, pj04 — over-includes when only one
+statement can raise; a nested try's statements feed the inner handler only); no alias analysis (cd04, and
+the by-reference call-arg limit 2 unchanged); `x += 1` reads then kills — exact, not a disclosure (cs03,
+ps03); JS/TS, Go, Java, Rust are `reach="linear"` (lj01: the `if` never joins, `rd="6"`) until their
+control tables are fixture-verified the same way.
+
+**Quality-delta.** `ripwire . --quality-delta --scope='src/*'` clean (gating="0") after acking 17 gating
+rows with one reason (`--ack-only=gating`): the `edgesOf` contract change (the point — one edge oracle),
+sliceEmitBody +4 complexity (the rd= emission, its formatting factored into `sliceAppendReachAttr`), three
+duplication rows that are the idiomatic tree-sitter named-child loop / a two-way ternary, eleven
+short-horizon-churn rows on the two files this lane owns, and sliceLegendText +11 lines of registered
+disclosure text. `sliceFlowExpandBack`'s +5 complexity was removed instead (factored into
+`sliceFlowChainUse`).
+
+**What it does not claim.** The linear families are not "flow-insensitive by design" — they are untabled,
+and the root says `reach="linear"` so no reader mistakes source order for a proof. The nested-body fold
+is the one disclosure that can put an edge the program cannot take on a row (cd02: the lambda's def
+"applies" at the lambda line); it is named rather than modelled because a closure's execution point is
+not knowable here.

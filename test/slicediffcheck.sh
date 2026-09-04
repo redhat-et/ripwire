@@ -23,8 +23,8 @@
 #   (10) status="file_absent_at_rev": comparable="0", NO rows, and the legend disclaims the emptiness
 #   (11) a RENAMED file is followed once and disclosed as renamed_from=
 #   (12) refusals: a --since that resolves to no commit, and a non-git root — both exit 1, no XML
-#   (13) the --since legend restates the slice's own limits (name-based / no alias analysis / no flow
-#        sensitivity) plus the statement grain and the comparable="0" reading
+#   (13) the --since legend restates the slice's own limits (name-based / no alias analysis / the root's
+#        reach= reaching-definition rule) plus the statement grain and the comparable="0" reading
 #   (14) determinism x2 byte-identical, and cold (--no-cache) == warm
 #   (15) xmllint well-formedness on a diff-bearing run
 #   (16) a DATE --since resolves to a commit and discloses resolved= (approxidate garbage is refused by 12a)
@@ -358,7 +358,7 @@ else no '(12b) --since on a non-git root did not refuse'; fi
 out="$( "$BIN" "$A" --slice=src/a.cpp:worker:v --since="$C6" --no-cache 2>/dev/null )"
 leg="${out%%<slice *}"
 miss=""
-for phrase in 'no alias analysis' 'no flow sensitivity' 'STATEMENT' 'comparable="0"'; do
+for phrase in 'no alias analysis' 'reach=' 'STATEMENT' 'comparable="0"'; do
   case "$leg" in *"$phrase"*) : ;; *) miss="$miss [$phrase]" ;; esac
 done
 [ -z "$miss" ] && ok '(13) the --since legend restates the slice limits plus its own grain' \

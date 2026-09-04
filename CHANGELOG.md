@@ -69,6 +69,24 @@ Cache blobs from earlier versions are rejected and rebuilt on the next run, as w
 no action needed, one cold parse. `RIPWIRE_CACHE_STATS=1` gains `cached_records=` and `blob_entries=`.
 New gate: `test/cacheoffsetcheck.sh`.
 
+### Added — `--slice` reaching definitions are flow-sensitive inside one definition (C-family, Python)
+
+Every use row of `--slice=SYM:VAR` (and the MCP `slice` verb) now carries `rd=` — the lines of the defs
+that reach it — computed by one structural pass over the definition's statement tree: a def is killed by
+the next unconditional def of its binding on every path, defs join at `if`/`elif`/`else`, `switch` (cases
+fall through, no `default` keeps the no-case path), a loop's back-edge (fixpoint), `try` handlers and
+`finally`, `for`/`while ... else`, `match` and a build-dependent `#ifdef`; `return`/`break`/`continue`/
+`throw`/`raise` end their path. The root says which rule is in force — `reach="cfg"` for C/C++/ObjC and
+Python, `reach="linear"` (source order, nothing joins) for JS/TS, Go, Java, Rust until their control
+tables are fixture-verified. `--slice-flow` and `--since` read the same reach table, so the rows, the flow
+walk and the dependence diff can never disagree about an edge. The unit is the statement (uses read the
+entering state, defs apply after); every construct the walk does not branch on — `?:`, short-circuit,
+conditional expression/comprehension, lambda/closure/nested def/class bodies, `goto`, `global`/`nonlocal`,
+the try handler's entry, aliases — is named in the legend instead of guessed. Registered and measured in
+`docs/EVALS.md` ("Flow-sensitive slice in the small"): 0 wrong of 85 hand-written sentinel use rows across
+53 functions, and the 57-commit `--since` labelled set unchanged at 35/35 and 22/22. Gate:
+`test/sliceflowsenscheck.sh`.
+
 ### Fixed — `--expand` no longer takes minutes on a file whose lines are hundreds of kilobytes
 
 Secret redaction (`redactSecrets`, on by default at every body-emission seam) was quadratic in LINE

@@ -33,7 +33,7 @@
 // diff under it is not evidence of no change. That is the same ruling counts="as-classified" already
 // makes one level up: a number that cannot be a total must not be printed as one.
 
-#include "slice.h"          // SliceScan / SliceOcc / sliceFoldOcc / sliceReachingDefs / sliceScanDefinition
+#include "slice.h"          // SliceScan / SliceOcc / sliceFoldOcc / the rung-3 reach table / sliceScanDefinition
 #include "editpreview.h"    // editpreview::ingestOneFile — the ONE single-file parse path (self-contained by its own header note)
 #include "gitmine.h"        // looksLikeDate — the ONE approxidate-garbage gate --hotspots --since already uses
 #include "quality.h"        // gitRepoHasHistory / gitResolveCommitSha / gitOneLine / gitRenameMap / cacheDirLadder / TmpTreeGuard
@@ -62,7 +62,6 @@ using slicev::SliceFam;
 using slicev::SliceLineRow;
 using slicev::SliceOcc;
 using slicev::SliceScan;
-using slicev::sliceReachingDefs;
 using slicev::sliceScanDefinition;
 using slicev::SliceVarRows;
 
@@ -137,10 +136,13 @@ struct Out
 // (first role then min'd by enum priority, def/use OR'd, pp OR'd, a new row when the binding changes) —
 // only the KEY differs: the statement anchor instead of the line. Kept here rather than parameterizing
 // sliceFoldOcc because the v1 row emission is a byte contract that must not acquire a mode switch.
-inline std::vector<StmtRow> foldStatements( const std::vector<SliceOcc>& occ )
+// Returns the rows AND, per occurrence, the row it folded into (the edge fold below keys on it).
+inline std::pair<std::vector<StmtRow>, std::vector<std::uint32_t>> foldStatements( const std::vector<SliceOcc>& occ )
 {
     std::vector<StmtRow>       rows;
+    std::vector<std::uint32_t> rowOfOcc;
     std::vector<std::uint32_t> groupOf;      // bindingIdx, in first-appearance order — grp is the index here
+    rowOfOcc.reserve( occ.size() );
     for( const SliceOcc& o : occ )
     {
         const std::uint32_t key = o.stmtLine != 0 ? o.stmtLine : o.line;
@@ -169,63 +171,61 @@ inline std::vector<StmtRow> foldStatements( const std::vector<SliceOcc>& occ )
         {
             r.line = o.line;
         }
+        rowOfOcc.push_back( std::uint32_t( rows.size() - 1 ) );
     }
-    return rows;
+    return { rows, rowOfOcc };
 }
 
-// The def-use EDGES of a statement-grain row list, per binding group, by src/slice.h's own reaching-
-// definition rule (sliceReachingDefs: the last unconditional def before the use, plus every pp def after
-// it). Reusing that function rather than restating the rule is the point — the diff and the --slice-flow
-// walk can never disagree about what an edge is.
-inline std::vector<DefUseEdge> edgesOf( const std::vector<StmtRow>& rows )
+// The def-use EDGES of a side, folded to statement grain from src/slice.h's OWN reach table (SliceScan::reach —
+// flow-sensitive kills and joins under reach="cfg", source order under "linear"; the same table the rows
+// print as rd= and the --slice-flow walk expands over). Reading the table rather than restating a rule is
+// the point — the diff, the rows and the flow walk can never disagree about what an edge is. Rows past
+// the cap (rowCount) drop their edges with them.
+inline std::vector<DefUseEdge> edgesOf( const SliceScan& scan, const std::vector<std::uint32_t>& rowOfOcc, std::size_t rowCount )
 {
-    std::vector<DefUseEdge> out;
-    std::uint32_t           maxGrp = 0;
-    for( const StmtRow& r : rows )
+    std::vector<DefUseEdge>    out;
+    std::vector<std::uint32_t> occOfAll( scan.all.size(), kSliceUnbound );   // all-index → index in scan.occ (the VAR view)
+    for( std::uint32_t occIndex = 0; occIndex < scan.occ.size(); ++occIndex )
     {
-        maxGrp = r.grp > maxGrp ? r.grp : maxGrp;
-    }
-    for( std::uint32_t grp = 0; rows.empty() ? false : grp <= maxGrp; ++grp )
-    {
-        SliceVarRows               v;
-        std::vector<std::uint32_t> ordinalOf;   // index inside v.rows → row ordinal in `rows`
-        for( std::uint32_t at = 0; at < rows.size(); ++at )
+        if( scan.occ[ occIndex ].allIdx < occOfAll.size() )
         {
-            if( rows[ at ].grp != grp )
-            {
-                continue;
-            }
-            const StmtRow& r = rows[ at ];
-            v.rows.push_back( SliceLineRow{ r.stmt, r.hasDef, r.hasUse, r.t, r.pp, kSliceUnbound } );
-            ordinalOf.push_back( at );
+            occOfAll[ scan.occ[ occIndex ].allIdx ] = occIndex;
         }
-        for( std::size_t at = 0; at < v.rows.size(); ++at )
+    }
+    for( std::uint32_t useIndex = 0; useIndex < scan.occ.size() && useIndex < rowOfOcc.size(); ++useIndex )
+    {
+        const SliceOcc& u = scan.occ[ useIndex ];
+        if( !u.isUse || u.allIdx >= scan.reach.size() || rowOfOcc[ useIndex ] >= rowCount )
         {
-            if( !v.rows[ at ].hasUse )
+            continue;
+        }
+        for( const std::uint32_t defAll : scan.reach[ u.allIdx ] )
+        {
+            const std::uint32_t defIndex = defAll < occOfAll.size() ? occOfAll[ defAll ] : kSliceUnbound;
+            if( defIndex == kSliceUnbound || defIndex >= rowOfOcc.size() || rowOfOcc[ defIndex ] >= rowCount )
             {
-                continue;
+                continue;   // a reaching def outside the VAR view — unreachable (reach is per binding), guarded not asserted
             }
-            for( std::size_t defAt : sliceReachingDefs( v, v.rows[ at ].line ) )
-            {
-                out.push_back( DefUseEdge{ ordinalOf[ defAt ], ordinalOf[ at ] } );
-            }
+            out.push_back( DefUseEdge{ rowOfOcc[ defIndex ], rowOfOcc[ useIndex ] } );
         }
     }
     std::sort( out.begin(), out.end(), []( const DefUseEdge& a, const DefUseEdge& b )
                { return a.d != b.d ? a.d < b.d : a.u < b.u; } );
+    out.erase( std::unique( out.begin(), out.end(), []( const DefUseEdge& a, const DefUseEdge& b ) { return a.d == b.d && a.u == b.u; } ), out.end() );
     return out;
 }
 
 inline Side sideOf( const SliceScan& scan )
 {
     Side s;
-    s.rows = foldStatements( scan.occ );
+    auto [ rows, rowOfOcc ] = foldStatements( scan.occ );
+    s.rows = std::move( rows );
     if( s.rows.size() > kMaxDiffRows )
     {
         s.rows.resize( kMaxDiffRows );
         s.capped = true;
     }
-    s.edges = edgesOf( s.rows );
+    s.edges = edgesOf( scan, rowOfOcc, s.rows.size() );
     return s;
 }
 
@@ -438,7 +438,8 @@ inline std::string legendText( bool compact )
             "<!-- slice-since ripwire.slice/v1: DEPENDENCE diff of this variable against the tree at rev=, resolved= the "
             "commit it resolved to, p= the definition's path now, renamed_from= the spelling that answered at REV. "
             "<sd op= i= k= t= l= [pp=] [g=]> = one STATEMENT of the variable added or removed; <se op= d= u= dl= ul=/> = one "
-            "def-use EDGE added or removed, by the slice's own reaching-definition rule. UNIT = the STATEMENT, KEY = the ROLE "
+            "def-use EDGE added or removed, by the slice's own reaching-definition table (the rows' rd=, under the root's reach= rule). "
+            "UNIT = the STATEMENT, KEY = the ROLE "
             "— never the line, never the text: a re-wrap, a comment edit, an insertion above the definition, a rename of an "
             "unrelated local and a value-only edit are all EMPTY. EMPTY means no def-use edge of this variable moved, never "
             "that the commit changed nothing. Every limit of the slice legend holds on BOTH sides. status=ok | "
@@ -454,17 +455,18 @@ inline std::string legendText( bool compact )
         "= one STATEMENT of the variable that this change ADDED (op=\"+\", it exists now) or REMOVED "
         "(op=\"-\", it existed at REV); i= is its ordinal in that side's statement order, l= its line on that side, "
         "CDATA that side's text. <se op= d= u= dl= ul=/> = one DEF-USE EDGE added or removed, d=/u= the ordinals of "
-        "its def and its use, dl=/ul= their lines — edges are src/slice.h's own reaching-definition rule (the last "
-        "unconditional def before the use, plus any build-dependent def after it), so this diff and slice-flow can "
-        "never disagree about what an edge is. THE UNIT IS THE STATEMENT, not the line: a statement spanning several "
+        "its def and its use, dl=/ul= their lines — edges are src/slice.h's own reaching-definition table, the one the rows "
+        "print as rd= under the root's reach= rule (cfg: flow-sensitive kills and joins over the statement tree; linear: "
+        "source order), so this diff, the rows and slice-flow can never disagree about what an edge is. THE UNIT IS THE STATEMENT, not the line: a statement spanning several "
         "lines is ONE row, keyed on the chaining anchor, so re-wrapping it moves nothing. THE KEY IS THE ROLE, not "
         "the text and not the line: the two sides are paired by a longest-common-subsequence over (binding, k, t, pp) "
         "in source order. Two consequences, both deliberate: an edit that changes a statement's VALUE but not its role "
         "(`v = 111;` to `v = 222;`) is an EMPTY diff, and so is a comment edit, a re-indent, an insertion above the "
         "definition, or a rename of an unrelated local — none of them moves a def-use edge. EMPTY therefore means "
         "\"no def-use edge of this variable moved\", NEVER \"this commit changed nothing\"; git diff is the verb for "
-        "the second question. EVERY LIMIT OF THE SLICE ABOVE HOLDS ON BOTH SIDES: name-based, no alias analysis, no "
-        "flow sensitivity, intra-procedural, a write hidden behind a call is a use, block scopes separated, C-family "
+        "the second question. EVERY LIMIT OF THE SLICE ABOVE HOLDS ON BOTH SIDES: name-based, no alias analysis, reaching "
+        "definitions by the same reach= rule (its per-construct disclosures included), intra-procedural, a write hidden "
+        "behind a call is a use, block scopes separated, C-family "
         "#if 0 dropped and other conditionals kept+flagged. added=/removed=/edges_added=/edges_removed= are counts of "
         "rows emitted here, governed by the root's counts=\"as-classified\" in both directions. status=\"ok\" both "
         "sides sliced | \"sym_absent_at_rev\" the file was there and the definition was not (every row reads \"+\") | "

@@ -107,7 +107,7 @@ top 1–2 to inspect first, with the evidence trail.
 **Honesty:** the call graph gives *structure*; `--slice=SYM:VAR` (add `--slice-flow=back|fwd|both` for the
 transitive reaching-definition walk) gives *intra-procedural, name-based* data flow — reach for it on a
 wrong-value symptom instead of re-reading the whole function by eye. Its own legend discloses the limits
-that matter here, so trust that over this line: statement/line-granular, source-ordered (not flow-sensitive),
+that matter here, so trust that over this line: statement/line-granular, flow-sensitive reaching definitions inside one function for C-family/Python and source-ordered for JS/Go/Java/Rust (the root's `reach=` says which; each use row's `rd=` lists its reaching def lines),
 no alias analysis, block scopes separated (a shadowed name's rows carry `b=`, the declaration each binds to; `pp="1"` marks a build-dependent `#ifdef` row), and it stops at the function boundary (chain
 `--callers`/`--impact` for the inter-procedural half). For use-after-move / taint / null / type bugs that
 cross that boundary you still need the compiler — use these results to focus *where* to look, not as proof.
