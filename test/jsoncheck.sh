@@ -244,6 +244,97 @@ ERR8C="$( "$BIN" . --for="x" --format=candidates --json --no-cache 2>&1 1>/dev/n
     && ok "--for --format=candidates --json refuses loudly and names the modifier"  \
     || no "--for --format=candidates --json expected exit 1 + the flag named, got exit=$rc8c stderr='$ERR8C'"
 
+# ═══ #8b (capture-audit 2026-09-04, H2) — the UNIVERSE: every flag the binary parses, under --json ═════
+#
+# Arm #8 above probes three verbs by name. That is how twelve verbs (--dmm --handoff --readability
+# --quality-panel --field-affinity --lint-catalog --comment-coherence --context-ratio --ensemble
+# --naming-calibration --naming-consistency --nonlocal-state) shipped emitting XML at exit 0 under --json
+# with nothing on stderr: jsonUnsupportedVerb was a deny CHAIN, and a verb nobody added to the chain was
+# silently allowed. This arm iterates the flag universe DERIVED FROM src/cli.h (test/flaguniverse.py: the
+# three tables plus the hand-written parseArgs arms) and allows exactly two outcomes per flag:
+#     JSON      stdout's first non-blank byte is `{` or `[` (and it parses)
+#     REFUSAL   exit != 0, EMPTY stdout, stderr names the flag
+# A third outcome — XML (or anything else) on stdout — fails by name. The probe VALUE is irrelevant for an
+# unsupported verb (the refusal is pre-dispatch) and only has to clear the parser: the JSON verbs get a real
+# argv on this fixture, parse-time domains get a legal value, everything else a bogus token. --help/--version
+# print usage and exit 0 by contract and are the only two rows not probed.
+UNIV="$TMP/universe.tsv"
+python3 "$ROOT/test/flaguniverse.py" "$ROOT/src/cli.h" > "$UNIV"
+UROWS="$( grep -c . "$UNIV" )"
+[ "$UROWS" -ge 190 ] && ok "#8b: derived $UROWS flag rows from src/cli.h" \
+                     || no "#8b: only $UROWS rows derived — the scrape broke, so the sweep below asserts nothing"
+probeFor()
+{
+    case "$1" in
+        --for=)          printf '%s' '--for=addition' ;;          # one token: the probe is word-split on purpose below
+        --pack-task=)    printf '%s' '--pack-task=addition' ;;
+        --callers=)      printf '%s' '--callers=add' ;;
+        --callees=)      printf '%s' '--callees=add' ;;
+        --impact=)       printf '%s' '--impact=add' ;;
+        --test-gate=)    printf '%s' '--test-gate=src/calc.cpp' ;;
+        --quality-delta=) printf '%s' '--quality-delta=HEAD' ;;
+        --order=)        printf '%s' '--order=stable' ;;
+        --rank-by=)      printf '%s' '--rank-by=churn' ;;
+        --format=)       printf '%s' '--format=columnar' ;;
+        --color-by=)     printf '%s' '--color-by=lang' ;;
+        --grep-scope=)   printf '%s' '--grep-scope=file' ;;
+        --grep-in=)      printf '%s' '--grep-in=any' ;;
+        --legend=)       printf '%s' '--legend=compact' ;;
+        --slice-flow=)   printf '%s' '--slice-flow=back' ;;
+        --agent=)        printf '%s' '--agent=codex' ;;
+        --export=)       printf '%s' '--export=cc.json' ;;
+        --quality-panel=) printf '%s' '--quality-panel=default' ;;
+        --token-budget=) printf '%s' '--token-budget=100' ;;
+        --limit=)        printf '%s' '--limit=3' ;;
+        --offset=)       printf '%s' '--offset=1' ;;
+        --max-file-size=) printf '%s' '--max-file-size=1M' ;;
+        --pack-budget-bytes=) printf '%s' '--pack-budget-bytes=1000' ;;
+        --cache=)        printf '%s' "--cache=$TMP/probe.cache" ;;
+        --index-out=)    printf '%s' "--index-out=$TMP/probe.idx" ;;
+        --pin-census=)   printf '%s' "--pin-census=$TMP/probe.tsv" ;;
+        --run-trace=)    printf '%s' '--run-trace=true' ;;          # a harmless command, should it ever reach exec
+        --listen=)       printf '%s' '--listen=127.0.0.1:1' ;;      # sets --mcp; refused before any socket is bound
+        --note-add=)     printf '%s' '--note-add=add: t' ;;
+        --at=)           printf '%s' '--at=src/calc.cpp:2' ;;
+        --help|--version) return 1 ;;
+        *=)              printf '%s' "${1}zzqq9" ;;                # bogus: the refusal is pre-dispatch, the value never matters
+        *)               printf '%s' "$1" ;;
+    esac
+}
+nJson=0; nRefuse=0; jsonVerbs=""
+while IFS="$( printf '\t' )" read -r flag kind example policy; do
+    [ -n "$flag" ] || continue
+    case "$kind" in int) probe="${flag}3" ;; *) probe="$( probeFor "$flag" )" || continue ;; esac
+    case "$flag" in --max-tokens=) probe="--max-tokens=100000" ;; esac
+    "$BIN" . $probe --json --no-cache >"$TMP/u.out" 2>"$TMP/u.err" </dev/null; rc=$?
+    first="$( tr -d ' \n\t\r' <"$TMP/u.out" | head -c 1 )"
+    name="${flag%%=*}"
+    if [ "$first" = "{" ] || [ "$first" = "[" ]; then
+        if python3 -m json.tool <"$TMP/u.out" >/dev/null 2>&1; then
+            nJson=$(( nJson + 1 )); jsonVerbs="$jsonVerbs $name"
+        else
+            no "#8b: $probe --json put a '$first' on stdout that does not parse as JSON"
+        fi
+    elif [ "$rc" -ne 0 ] && [ ! -s "$TMP/u.out" ] && grep -qF -- "$name" "$TMP/u.err"; then
+        nRefuse=$(( nRefuse + 1 ))
+    else
+        no "#8b: $probe --json — neither JSON nor a refusal naming the flag: exit=$rc stdout starts with '$first' ($( wc -c <"$TMP/u.out" | tr -d ' ' ) B) stderr=[$( head -c 160 "$TMP/u.err" | tr '\n' ' ' )]"
+    fi
+done < "$UNIV"
+[ "$nJson" -ge 9 ] && ok "#8b: $nJson flags answered in JSON:$jsonVerbs" \
+                   || no "#8b: only $nJson flags answered in JSON (want >= 9 — the documented set):$jsonVerbs"
+[ "$nRefuse" -ge 150 ] && ok "#8b: $nRefuse flags refused --json loudly, naming themselves" \
+                       || no "#8b: only $nRefuse flags refused (want >= 150) — the sweep is not covering the universe"
+# --help's supported-set sentence must name every JSON verb the sweep found (it omitted --metrics for a round).
+HELPJSON="$( "$BIN" --help 2>&1 | sed -n '/^    --json /,/refuses loudly/p' | tr '\n' ' ' )"
+for v in $jsonVerbs; do
+    case "$v" in --for|--pack-task|--callers|--callees|--impact|--quality-delta|--test-gate|--metrics)
+        printf '%s' "$HELPJSON" | grep -q -- "$v" || no "#8b: --help's --json paragraph does not name $v, which answers in JSON" ;;
+    esac
+done
+printf '%s' "$HELPJSON" | grep -q -- '--metrics' && ok "#8b: --help's --json paragraph names --metrics" \
+                                                  || no "#8b: --help's --json paragraph omits --metrics"
+
 # ═══ #9 determinism — 2 runs are byte-identical (the det-gate contract applies to --json too) ═══════════
 D1="$( "$BIN" . --json --no-cache 2>/dev/null )"
 D2="$( "$BIN" . --json --no-cache 2>/dev/null )"

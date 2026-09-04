@@ -925,7 +925,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               (highest-rank content emitted last — recency bias for an LLM). Large default\n"
         "                               maps auto-flip to important-last past ~50%% of a nominal 32K window\n"
         "                               (est_tokens>16000) unless MODE is explicitly given.\n"
-        "    --no-stable                opt out of the stable ordering that --mcp enables by default\n\n"
+        "    --no-stable                opt out of the stable ordering that --mcp/--listen enable by default. Read ONLY there:\n"
+        "                               on the CLI it changes nothing and says so on stderr (the map is important-first\n"
+        "                               unless you pass --order=stable)\n\n"
         "  navigate / answer a question\n"
         "    --around=SYM               ego graph around SYM   [--around-depth=N] [--around-fanout=K]\n"
         "    --callers=SYM              who calls SYM (1-hop in-edges). file:name disambiguates a same-named symbol across files (like --around/--lego);\n"
@@ -1114,7 +1116,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --exemplar. Disclosed per bundle as compress=\"1\" on the <bodies> element; without the\n"
         "                               flag, output is byte-identical. String literals survive; the ranked SET never changes.\n"
         "    --pack-top-n=N             pack the N top symbols' bodies  [--pack-budget-bytes=B]\n"
-        "    --no-redact                emit source/doc text VERBATIM, redacting nothing\n"
+        "    --no-redact                emit source/doc text VERBATIM, redacting nothing. Modifies the BODY-serving verbs\n"
+        "                               (--expand, --for, --pack-task, --recall, --slice, --connect, --from-trace, --batch,\n"
+        "                               --mcp); the default map carries no bodies (identifiers and signatures are never\n"
+        "                               redacted), so bare on the map it is refused, naming one of them\n"
         "                               REDACTED by default (high-confidence credential SHAPES only, precision over recall):\n"
         "                               emitted symbol BODIES, doc/markdown bodies and doc-comment excerpts, the --outline\n"
         "                               skeleton, and SIGNATURES — a default argument carries whatever literal was written.\n"
@@ -1245,7 +1250,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               from the corpus rather than invented. propose= is a SUGGESTION, never a safe-to-blind-apply\n"
         "                               rename -- an actual rename needs --uses to prove the complete reference set first. Exit 0\n"
         "                               always: a lens, not a gate. Pages limit=N (offset=M); default 40 rows\n"
-        "    --naming-locals            OPT-IN --lint MODIFIER (requires --lint; a no-op alone), OFF by default:\n"
+        "    --naming-locals            OPT-IN --lint MODIFIER (requires --lint; refused alone), OFF by default:\n"
         "                               local-variable-indexing plan Phase 2 (docs/LOCALS_INDEXING.md). Runs the\n"
         "                               naming-short/naming-wordy/naming-underscore/naming-case predicates (same tags, same rule\n"
         "                               bodies as the existing Symbol-scoped checks) against LOCAL variable names too, C/C++ only,\n"
@@ -1403,7 +1408,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               IT IS A DELTA, NEVER A LEVEL: a unit you edit without changing its size, complexity or parameter count sits in the same bin with the same volume on both sides and contributes NOTHING. Touching bad code is not punished, deliberately, because a gate that punishes it is a gate people route around.\n"
         "                               dmm=\"UNAVAILABLE\" means good+bad was 0 (a rename, a literal edit, a comment reflow): the change is outside what the model measures. That is NEVER to be read as 1.000 or 0.000, and reason= says which case it was. Same token per property.\n"
         "                               VOLUME IS PHYSICAL LINE SPAN (size_metric=\"physical-loc\"), where the reference implementation uses non-comment non-blank lines, so a heavily commented unit crosses the size threshold here earlier. NO THRESHOLD, NO VERDICT, ALWAYS EXIT 0.\n"
-        "    --quality-ack[=REASON]     accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked=\"N\") until one WORSENS past its acked size\n"
+        "    --quality-ack[=REASON]     accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked=\"N\") until one WORSENS past its acked size.\n"
+        "                               =REASON implies the --quality-delta report it acks; the reason-less spelling needs --quality-delta\n"
+        "                               beside it (refused alone). An ack with 0 findings to accept writes nothing and says so.\n"
         "      --ack-only=SUBSTR[,SUBSTR] (with --quality-ack) ack only SOME findings — those whose KIND, canonical id, or\n"
         "                               FACET contains one of these; the pseudo-token 'gating' selects exactly what would\n"
         "                               exit 2. Bare --quality-ack accepts the WHOLE report, so accepting one deliberate\n"
@@ -2031,9 +2038,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               many-small-calls seed loop pays the rules once, not per call. Unsupported verbs refuse.\n"
         "    --json                     machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr\n"
         "                               names 1:1 — supported for the default map, --for, --pack-task, --callers/--callees/\n"
-        "                               --impact, --quality-delta, --test-gate (the CI/scripting verbs). Every other verb\n"
-        "                               (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it)\n"
-        "                               refuses loudly on stderr + exit 1 rather than silently falling back to XML.\n"
+        "                               --impact, --quality-delta, --test-gate, --metrics (the CI/scripting verbs), plus\n"
+        "                               --plan-lanes which is JSON-native. That set is an ALLOW-list: every other verb (and --format=columnar/candidates, --detail,\n"
+        "                               --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than\n"
+        "                               silently falling back to XML — a verb added tomorrow refuses by default.\n"
         "                               Deterministic: same 2-run byte-diff + stable key order contract as the XML.\n"
         "    --limit=N --offset=M       paginate a high-cardinality verb. HONORED by: --deps --callers --callees --tree\n"
         "                               --lint --hotspots --clones --cochange --owners --communities --community --doc-drift\n"
@@ -2444,27 +2452,31 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--regex=",          &Config::grep            , EmptyValue::Refuse, "a regular expression",                             "--regex='parse[A-Z]'",
       &Config::grepRegex, nullptr, &Config::grepGiven, kGrepDupMessage },
 
-    // the bare-or-filter forms: "" is a REAL value here - `--situ=` means exactly `--situ`, and the value is
-    // an OPTIONAL narrowing filter. Recorded rather than silently accepted (that distinction is the column).
-    { "--cochange=",       &Config::cochangeFile    , EmptyValue::Meaningful, nullptr, nullptr, &Config::cochange },
-    { "--situ=",           &Config::situFiles       , EmptyValue::Meaningful, nullptr, nullptr, &Config::situ },
+    // M6 (capture-audit 2026-09-04): the bare-or-filter forms used to be EmptyValue::Meaningful — "" was read
+    // as the bare flag, since the value is an OPTIONAL narrowing. The shell is why that reading was wrong:
+    // `--dead-code=$DIR` with an unset $DIR became a repo-wide scan, `--pr-context=$BASE` the working-tree
+    // default, `--stray-content=$REF` a sweep of every ref, each at exit 0 with an empty stderr — a different
+    // question, answered as if it were the one asked. --test-gate= left the block on 2026-08-24 for exactly
+    // this; the rest follow it now. ONLY the bare spelling selects the default. Gate: emptyvaluerefusecheck.sh.
+    { "--cochange=",       &Config::cochangeFile    , EmptyValue::Refuse, "a changed file path to seed the pair report (bare --cochange ranks every pair)", "--cochange=src/cli.h", &Config::cochange },
+    { "--situ=",           &Config::situFiles       , EmptyValue::Refuse, "changed files, F1,F2 (bare --situ reads git diff)", "--situ=src/cli.h", &Config::situ },
     // `--test-gate=` left the Meaningful block above on 2026-08-24: "" ≡ the bare git-diff form meant an
     // unset shell variable silently gated a DIFFERENT question, on a verb whose exit code gates a merge —
     // the same ruling --dmm=/--quality-delta= below carry for their half-typed ranges. (The unparseable-
     // FILES refusal itself is per-item, in main's --test-gate arm; gate: testgaterefusecheck.sh.)
     { "--test-gate=",      &Config::testGateFiles   , EmptyValue::Refuse, "changed files, F1,F2", "--test-gate=src/cli.h", &Config::testGate },
-    { "--scan-skills=",    &Config::scanSkillsDir   , EmptyValue::Meaningful, nullptr, nullptr, &Config::scanSkills },
-    { "--dead-code=",      &Config::deadCodeDir     , EmptyValue::Meaningful, nullptr, nullptr, &Config::deadCode },
-    { "--pr-context=",     &Config::prContextBase   , EmptyValue::Meaningful, nullptr, nullptr, &Config::prContext },
-    { "--stray-content=",  &Config::strayFilter     , EmptyValue::Meaningful, nullptr, nullptr, &Config::strayContent },
-    { "--flags=",          &Config::darkFlagsFilter , EmptyValue::Meaningful, nullptr, nullptr, &Config::darkFlags },
-    { "--doc-drift=",      &Config::docDriftFilter  , EmptyValue::Meaningful, nullptr, nullptr, &Config::docDrift },
+    { "--scan-skills=",    &Config::scanSkillsDir   , EmptyValue::Refuse, "a skills directory path (bare --scan-skills scans the tree it maps)", "--scan-skills=skills/", &Config::scanSkills },
+    { "--dead-code=",      &Config::deadCodeDir     , EmptyValue::Refuse, "a directory or path substring to scope the candidates (bare --dead-code scans the whole tree)", "--dead-code=src/", &Config::deadCode },
+    { "--pr-context=",     &Config::prContextBase   , EmptyValue::Refuse, "a base ref (bare --pr-context reads the working tree)", "--pr-context=main", &Config::prContext },
+    { "--stray-content=",  &Config::strayFilter     , EmptyValue::Refuse, "a ref-name substring filter (bare --stray-content sweeps every ref)", "--stray-content=lane/", &Config::strayContent },
+    { "--flags=",          &Config::darkFlagsFilter , EmptyValue::Refuse, "a gate-name substring filter (bare --flags lists every gate)", "--flags=RIPWIRE_", &Config::darkFlags },
+    { "--doc-drift=",      &Config::docDriftFilter  , EmptyValue::Refuse, "a document-path substring filter (bare --doc-drift scans every document)", "--doc-drift=README", &Config::docDrift },
     // P3.2: unlike --doc-drift's SUBSTR filter, a bare value here is a real usage error — "" cannot name a
     // plan file, so Refuse (not Meaningful) is the right form, same reasoning --from-trace= already carries.
     { "--plan-lint=",      &Config::planLintFile    , EmptyValue::Refuse, "a plan/design markdown file path", "--plan-lint=wave-plan.md" },
-    // `--field-affinity=` is exactly `--field-affinity`: the value is an OPTIONAL narrowing to one struct,
-    // and the bare form (the whole-repo ranking) is the primary way to ask.
-    { "--field-affinity=", &Config::fieldAffinityStruct, EmptyValue::Meaningful, nullptr, nullptr, &Config::fieldAffinity },
+    // `--field-affinity=STRUCT` narrows to one struct; the bare form (the whole-repo ranking) is the primary way
+    // to ask, and the ONLY spelling that selects it (M6 above).
+    { "--field-affinity=", &Config::fieldAffinityStruct, EmptyValue::Refuse, "a struct or class name (bare --field-affinity ranks every struct)", "--field-affinity=Symbol", &Config::fieldAffinity },
     // --dmm= is Refuse, not Meaningful, even though the BARE --dmm is a real form: `--dmm=` is a half-typed
     // range, and silently running the working-tree comparison for it would answer a question nobody asked.
     { "--dmm=",            &Config::dmmRange, EmptyValue::Refuse, "a commit, or a RANGE A..B (bare --dmm compares the working tree against HEAD)",
@@ -2476,16 +2488,17 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--quality-delta=",  &Config::qualityDeltaRange, EmptyValue::Refuse,
       "a commit, or a RANGE A..B of git refs (bare --quality-delta compares the working tree against the baseline)",
       "--quality-delta=HEAD~1..HEAD", &Config::qualityDelta },
-    // `--quality-panel=` is exactly `--quality-panel`: the value is an OPTIONAL preset selection and the bare
-    // form is the `default` preset. An UNKNOWN value is refused in validateModifierGuards with the supported
+    // `--quality-panel=PRESET` selects a preset; the bare form is the `default` preset and the only spelling
+    // that selects it (M6 above). An UNKNOWN value is refused in validateModifierGuards with the supported
     // list — falling back to a preset the caller did not name would be a silently different report.
-    { "--quality-panel=",  &Config::qualityPanelPreset , EmptyValue::Meaningful, nullptr, nullptr, &Config::qualityPanel },
-    // --html=FILE-or-stdout and --quality-ack=REASON are the same shape for a different reason: the value is
-    // OPTIONAL, so `--html=` is `--html` (write to stdout) and `--quality-ack=` is `--quality-ack` (no
-    // reason). The audit's own enumeration classified both as "already refusing"; neither is. They are
-    // correct-by-design, which is exactly what this column exists to say out loud.
+    { "--quality-panel=",  &Config::qualityPanelPreset , EmptyValue::Refuse, "a preset name (bare --quality-panel is the default preset)", "--quality-panel=default", &Config::qualityPanel },
+    // --html=FILE-or-stdout keeps Meaningful on purpose: `--html=` is `--html` (write to stdout) — a VISIBLE,
+    // harmless answer, not a different question, which is the M6 distinction. --quality-ack=REASON is the
+    // same shape with one more rule (H10): the reason-carrying spelling implies the --quality-delta report it
+    // acks (validateConfig sets it, where the bare arm used to), while `--quality-ack=` — a reason-less ack,
+    // exactly the bare spelling — is refused there without an explicit --quality-delta: HandlerRefuses.
     { "--html=",           &Config::htmlFile        , EmptyValue::Meaningful, nullptr, nullptr, &Config::html },
-    { "--quality-ack=",    &Config::qualityAckReason, EmptyValue::Meaningful, nullptr, nullptr, &Config::qualityAck, &Config::qualityDelta },
+    { "--quality-ack=",    &Config::qualityAckReason, EmptyValue::HandlerRefuses, nullptr, nullptr, &Config::qualityAck },   // validateConfig: "pass --quality-delta with it"
 
     // the handler refuses an empty value with its own verb-specific sentence - byte-identical to before the
     // move, because the row does NOT refuse here. Each names the refusing site so a reader can check it.
@@ -3125,6 +3138,49 @@ inline constexpr ShapingVerb kShapingVerbs[] = {
     { "--connect",      nullptr, &Config::connectSpec,  false, true },   // packConnect takes the budget
     { "--pr-context",   &Config::prContext,    nullptr, false, true },   // writePrContext takes the budget
     { "--from-trace",   nullptr, &Config::fromTrace,    false, true, true },   // FromTraceInputs::bodyBudgetBytes
+    { "--run-trace",    nullptr, &Config::runTrace,     false, false, true },  // runRunTrace takes the budget (exec-mode --from-trace)
+    // ── capture-audit 2026-09-04 (H3): the verbs that were in NEITHER guard table ──────────────────────
+    // Eighteen verbs took all three knobs at exit 0 with byte-identical output and an empty stderr — the
+    // table above closed the family it could see, and these were outside both it and honorsPaging. They are
+    // rows now, and test/shapingflagcheck.sh arm (F) sweeps the whole flag universe (test/flaguniverse.py)
+    // so the next verb outside both tables fails the gate by name instead of shipping silent. Every row here
+    // reads none of the three fields (re-derived from the read sites, as the header says) except --html,
+    // which rides the default map's serialize path and honours --top-k/--max-tokens like the map does.
+    { "--html",              &Config::html,               nullptr, true, true },
+    { "--verify",            nullptr, &Config::verifyClaim },
+    { "--flags",             &Config::darkFlags,          nullptr },
+    { "--layout",            &Config::layoutFlag,         nullptr },
+    { "--field-affinity",    &Config::fieldAffinity,      nullptr },
+    { "--naming-calibration",&Config::namingCalibration,  nullptr },
+    { "--lint-catalog",      &Config::lintCatalog,        nullptr },
+    { "--dmm",               &Config::dmm,                nullptr },
+    { "--quality-delta",     &Config::qualityDelta,       nullptr },   // --quality-ack=REASON implies it and lands here too
+    { "--quality-baseline",  &Config::qualityBaseline,    nullptr },
+    { "--affected",          nullptr, &Config::affectedFiles },
+    { "--plan-lint",         nullptr, &Config::planLintFile },
+    { "--plan-lanes",        &Config::planLanesFlag,      nullptr },
+    { "--help-task",         nullptr, &Config::helpTask },
+    { "--arch",              nullptr, &Config::archRules },
+    { "--mermaid",           &Config::mermaid,            nullptr },   // plain and `--zoom --mermaid` (the one --zoom shape outside honorsPaging)
+    { "--scan-skill",        nullptr, &Config::scanSkillFile },
+    { "--eval",              &Config::eval,               nullptr },
+    { "--eval-retrieval",    &Config::evalRetrieval,      nullptr },
+    { "--eval-mined",        nullptr, &Config::evalMined },
+    { "--eval-skills",       nullptr, &Config::evalSkills },
+    { "--eval-stray",        nullptr, &Config::evalStray },
+    { "--export=cc.json",    &Config::exportCcJson,       nullptr },
+    { "--index-out",         nullptr, &Config::indexOut },
+    { "--batch",             nullptr, &Config::batchFile },   // sub-queries carry their own arguments; the outer knob reaches none of them
+    { "--notes",             &Config::notesList,          nullptr },
+    { "--note-add",          &Config::noteAddFlag,        nullptr },
+    { "--doctor",            &Config::doctor,             nullptr },
+    { "--skipped",           &Config::skippedList,        nullptr },
+    { "--edit-plan",         nullptr, &Config::editPlan },
+    { "--replace-symbol-body",  nullptr, &Config::replaceSymbolBody },
+    { "--insert-before-symbol", nullptr, &Config::insertBeforeSymbol },
+    { "--insert-after-symbol",  nullptr, &Config::insertAfterSymbol },
+    { "--stray-content --plan", &Config::landingPlan,     nullptr },   // the two --stray-content sub-modes honorsPaging excludes
+    { "--stray-content --abi",  &Config::abiFlag,         nullptr },
 };
 
 // which row (if any) does this invocation select? First match wins, which mirrors main()'s own dispatch
@@ -3162,7 +3218,15 @@ inline void noticeShapingFlagIgnored( const Config& c ) noexcept
         return; // the default map (and its riders) honour both
     }
 
-    if( c.topKExplicit && !verb->honorsTopK )
+    // capture-audit 2026-09-04 (H3, lens 4): two false notices, both on --for.
+    //   * `--for --format=candidates --top-k=5` said "--top-k is not read by --for … nothing was dropped" on a
+    //     run the candidates export had just CUT to 5 — the export composes with --for and consumes the flag
+    //     (--help: "Composes with --top-k"), so when it is present the flag was read and the note is a lie.
+    //   * `--for --top-k=0` printed this notice AND the T2 refusal ("--top-k=0 means no ranked map, payload
+    //     only") — two sentences about one flag. The T2 guard owns the zero spelling; this note is for a
+    //     positive K the verb never looked at.
+    const bool isTopKConsumedBeside = c.candidates || c.topK == 0;
+    if( c.topKExplicit && !verb->honorsTopK && !isTopKConsumedBeside )
     {
         std::fprintf( stderr, "ripwire: --top-k is not read by %.*s — it shapes the default map, --query, "
                               "--format=candidates, --recall and --graph-query. %.*s emitted its full result "
@@ -3332,6 +3396,27 @@ inline void validateModifierGuards( Config& c ) noexcept
     {
         std::fprintf( stderr, "ripwire: --run-timeout=SECONDS modifies --run-trace — pass it too (e.g. ripwire <dir> --run-trace=\"make -j\" --run-timeout=60)\n" );
         c.ok = false;
+    }
+
+    // capture-audit 2026-09-04 (M16): --naming-locals is a --lint MODIFIER (the naming-* rules pointed at local
+    // variables; verbs_lint.h's mergeNamingLens is its only reader) and reaches nothing else. --help called it
+    // "a no-op alone"; a documented no-op is still the accept-and-ignore class every sibling here refuses.
+    if( c.namingLocals && !c.lint )
+    {
+        std::fprintf( stderr, "ripwire: --naming-locals modifies --lint (the naming-* rules over local variables) — pass both (e.g. ripwire <dir> --lint --naming-locals)\n" );
+        c.ok = false;
+    }
+
+    // M16, the one modifier here that gets a NOTICE and not a refusal, by decision: --no-stable opts out of
+    // the stable ordering --mcp/--listen turn on (parseArgs' tail) and is read nowhere else, so on the CLI it
+    // changes nothing. test/guardmsgcheck.sh pins bare `--no-stable` and `--order=stable --no-stable` as
+    // accepted CLI spellings and ~70 cache-gate invocations pass it bare — a refusal would break a documented
+    // composition. One line on stderr is the honest floor: a caller can tell a no-op from a typo, and no
+    // output byte moves. (--listen= sets c.mcp, so the server transports are both covered by the one test.)
+    if( c.noStable && !c.mcp )
+    {
+        std::fprintf( stderr, "ripwire: --no-stable is read only by --mcp/--listen (it opts out of the stable ordering the server turns on) — it changed nothing here; "
+                              "the CLI map orders important-first unless you pass --order=stable\n" );
     }
 
     // --with-profile joins measured scope heat onto --lint findings and reaches nothing anywhere else;
@@ -3736,6 +3821,23 @@ inline void validateConfig( Config& c ) noexcept
         c.ok = false;
     }
 
+    // H10 (capture-audit 2026-09-04): bare --quality-ack was the ONE modifier that WRITES when alone — it
+    // implied --quality-delta, acked "0 finding(s)" at exit 0 and re-serialised .ripwire_quality_acks, while
+    // its own --ack-only refuses bare. The reason-carrying spelling keeps implying the report it acks (the
+    // documented form: `--quality-ack="why"` names its own accountability); the reason-less spellings
+    // (`--quality-ack`, `--quality-ack=`) need an explicit --quality-delta beside them, like --ack-only and
+    // --scope below. The implication is set HERE, where --mcp's stable default is, not in the parser arm.
+    if( c.qualityAck && !c.qualityAckReason.empty() )
+    {
+        c.qualityDelta = true;
+    }
+    if( c.qualityAck && !c.qualityDelta )
+    {
+        std::fprintf( stderr, "ripwire: bare --quality-ack accepts EVERY finding of a --quality-delta report with no reason recorded — "
+                              "pass --quality-delta with it, and say why (e.g. ripwire <dir> --quality-delta --quality-ack=\"why this debt is deliberate\")\n" );
+        c.ok = false;
+    }
+
     // --ack-only=SUBSTR narrows WHICH findings --quality-ack accepts; without --quality-ack there is nothing
     // to narrow, so alone it would silently no-op on the plain map — exit 0, print the ordinary default map,
     // stderr empty. That is the exact failure --ack-only exists to prevent: a typo'd narrowing (or a bare
@@ -3894,6 +3996,10 @@ inline Config parseArgs( int argc, char** argv ) noexcept
               { refuseFlagValue( "--max-file-size", "a positive byte size, plain or with a K/M/G suffix", a.data() + 16, "--max-file-size=10MB" );  c.ok = false; return c; } }
             else if( startsWith( a, "--exclude=" ) )
             {
+                // M6: the one hand-written value arm that accepted an empty value silently — `--exclude=$X`
+                // with an unset $X excluded nothing and said nothing. Same refusal as its table siblings.
+                if( a.size() == 10 )
+                { refuseEmptyValue( "--exclude=", "a path substring to drop from the crawl", "--exclude=vendor/" );  c.ok = false; return c; }
                 c.excludes.push_back( std::string( a.substr( 10 ) ) );
                 // r27-emitters T5: a BAD VALUE is not an unknown FLAG. `--rank-by=bogus` used to fall through the
                 // exact-match chain to the generic "unknown flag" arm, which told the agent the flag itself does not
@@ -4078,7 +4184,11 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                     start = comma + 1;
                 }
             }
-            else if( a == "--quality-ack" )                    { c.qualityAck = true; c.qualityDelta = true; }
+            // H10 (capture-audit 2026-09-04): the bare, reason-less spelling no longer IMPLIES --quality-delta —
+            // it used to, and so alone it acked "0 finding(s)" at exit 0 and rewrote the ledger. validateConfig
+            // refuses it without an explicit --quality-delta; --quality-ack=REASON (the kViewFlags row) still
+            // implies the report it acks.
+            else if( a == "--quality-ack" )                    { c.qualityAck = true; }
             else if( startsWith( a, "--export=" ) )
             {
                 // --export=cc.json  or  --export=cc.json:FILE  (mirror --html's FILE-or-stdout convention).

@@ -4203,12 +4203,12 @@ struct SidecarWriteLock
     SidecarWriteLock& operator=( const SidecarWriteLock& ) = delete;
 };
 
-inline bool writeAckRecords( const std::string& path, const gtl::btree_map<std::string, AckRecord>& acks )
+// the ledger's CANONICAL bytes for this map — what writeAckRecords publishes. Exposed on its own (H10,
+// capture-audit 2026-09-04) so an ack with nothing to accept can tell "the file is already canonical, leave
+// it alone" from "the file needs healing (duplicate, legacy or misfiled rows) — rewrite it" by comparing
+// bytes, instead of rewriting unconditionally and moving rows under a run that changed no fact.
+inline std::string renderAckRecords( const gtl::btree_map<std::string, AckRecord>& acks )
 {
-    // F-04: composed into a string and PUBLISHED by tmp+rename (atomicWriteFile) rather than streamed into an
-    // `ofstream(trunc)`. The bytes are identical — same header lines, same btree order, same per-row
-    // formatting — but a reader can no longer observe the file mid-write. That was not hypothetical: one
-    // concurrent run in eight left a single stray character on its own line in the committed ledger.
     std::ostringstream f;
     f << "# ripwire quality acks v1 — written by --quality-ack; a finding stays suppressed until it worsens past its acked magnitude\n";
     f << "# format: ack <kind> <16-hex-key> <ackNow> [cid=<16-hex-content-id>] [by=<scope that acked it>] <reason to end of line> — one per line, kept SORTED by (kind,key) on every write (merge-friendly)\n";
@@ -4235,7 +4235,16 @@ inline bool writeAckRecords( const std::string& path, const gtl::btree_map<std::
         }
         f << ( r.reason.empty() ? "(no reason given)" : r.reason ) << '\n';
     }
-    if( !atomicWriteFile( path, f.str() ) )
+    return f.str();
+}
+
+inline bool writeAckRecords( const std::string& path, const gtl::btree_map<std::string, AckRecord>& acks )
+{
+    // F-04: composed into a string and PUBLISHED by tmp+rename (atomicWriteFile) rather than streamed into an
+    // `ofstream(trunc)`. The bytes are identical — same header lines, same btree order, same per-row
+    // formatting — but a reader can no longer observe the file mid-write. That was not hypothetical: one
+    // concurrent run in eight left a single stray character on its own line in the committed ledger.
+    if( !atomicWriteFile( path, renderAckRecords( acks ) ) )
     {
         DEGRADED_PATH_ALERT( "quality: cannot write acks file" );
         return false;

@@ -536,7 +536,7 @@ printf '%s' "$ODP" | grep -q 'kind="complexity" sym="f"' \
 
 # a rewrite (another --quality-ack call) must collapse the duplicate to ONE canonical line, and it must keep
 # the HIGHER (real) value — not the lower duplicate that happened to sort last.
-( cd "$DP" && "$BIN" . --quality-ack --no-cache >/dev/null 2>&1 )
+( cd "$DP" && "$BIN" . --quality-delta --quality-ack --no-cache >/dev/null 2>&1 )
 [ "$( grep -c "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks" )" = 1 ] \
     && ok "duplicate acks: rewrite collapses the duplicate to a single canonical line" \
     || no "duplicate acks: rewrite left more than one line for the same (kind,key)"
@@ -559,7 +559,7 @@ printf '%s' "$COLLAPSED" | grep -q 'seed | prior: duplicate-lower-should-not-win
 # head ('seed') is kept as the one-hop prior: segment; the older segment falls off (chain cap, same rule as
 # a live re-ack).
 printf 'ack complexity %s %s merge-lane-b-higher\n' "$HEXKEY" "$(( REALNOW + 7 ))" >> "$DP/.ripwire_quality_acks"
-( cd "$DP" && "$BIN" . --quality-ack --no-cache >/dev/null 2>&1 )
+( cd "$DP" && "$BIN" . --quality-delta --quality-ack --no-cache >/dev/null 2>&1 )
 [ "$( grep -c "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks" )" = 1 ] \
     && ok "duplicate reasons: higher-duplicate round still collapses to a single canonical line" \
     || no "duplicate reasons: rewrite left more than one line after the higher duplicate"
@@ -577,7 +577,7 @@ printf '%s' "$COLLAPSED2" | grep -q 'merge-lane-b-higher | prior: seed' \
 # a byte-identical duplicated line (the ordinary both-sides-kept git merge artifact) must be a reason NO-OP:
 # no 'X | prior: X' self-chain, no second hop.
 printf '%s\n' "$COLLAPSED2" >> "$DP/.ripwire_quality_acks"
-( cd "$DP" && "$BIN" . --quality-ack --no-cache >/dev/null 2>&1 )
+( cd "$DP" && "$BIN" . --quality-delta --quality-ack --no-cache >/dev/null 2>&1 )
 [ "$( grep "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks" )" = "$COLLAPSED2" ] \
     && ok "duplicate reasons: byte-identical duplicate line is a no-op (no self-chain, no growth)" \
     || { no "duplicate reasons: identical duplicate mutated the row"; grep "^ack complexity $HEXKEY " "$DP/.ripwire_quality_acks"; }

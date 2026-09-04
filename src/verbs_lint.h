@@ -1813,6 +1813,13 @@ std::optional<int> runLint( const MainDispatch& d )
                 lintRootExtra += " ignore=\"" + ex( cfg.lintIgnore ) + "\"";
             }
         }
+        // capture-audit 2026-09-04 (M16): a modifier's effect is stamped on the root the way --lint-select's
+        // selected=/select= is — `--lint --naming-locals` moved the count 3717 -> 4898 on this repo with no
+        // attribute saying why. Absent when the modifier is off (absent = nothing to say, as with inert_rules=).
+        if( cfg.namingLocals )
+        {
+            lintRootExtra += " naming_locals=\"1\"";
+        }
 
         // §P8 collision, documented not renamed — see the --grep legend above for the full reasoning.
         std::printf( "<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
@@ -1829,6 +1836,8 @@ std::optional<int> runLint( const MainDispatch& d )
                      "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
                      "how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a "
                      "family (e.g. cache-); the root then carries selected=\"K of N\" plus the raw select=/ignore= you passed. "
+                     "naming_locals=\"1\" on the root ⇒ the opt-in naming-locals modifier was on (the naming-* rules also read local "
+                     "variables inside already-flagged functions); absent ⇒ off, and the naming-* counts cover declarations only. "
                      "Each rule row's own shown_rows=/rows_capped= is how many of THAT rule's rows fall inside the printed <f> window "
                      "(the root's shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the "
                      "cut carries shown_rows=\"0\" rows_capped=\"1\" while its count= stays the true total — never confuse a capped-away "
