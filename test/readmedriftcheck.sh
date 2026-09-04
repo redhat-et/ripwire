@@ -33,6 +33,9 @@
 #       ground truth: an advertised number is an ENUMERATED number, so the enumeration is the
 #       authority and the prose is checked against it. Sub-arms E1-E8 below; E4 is (E)'s mutation
 #       control, exactly as (C) is (B)'s, and E6/E7 carry their own.
+#   (F) the GATE-SCRIPT arm — README's "N gate scripts" count vs test/regression.sh's loop (F1-F3)
+#   (G) the COLD-START arm — README's "start here" invocation must carry --max-tokens=N, and that N must
+#       keep the bare map's head under 4,500 est_tokens (G1 presence, G2 property, G3 mutation, G4 promise)
 #
 # WHY E6-E8 EXIST. A count can be arithmetically correct and still be a lie about a SET. LINEAGE.md
 # claims its folded tables and its surveyed table are DISJOINT — that is what makes "27 folded plus
@@ -404,6 +407,85 @@ sys.exit( 'no loop found' ) if not m else print( len( m.group( 1 ).split() ) )
         fi
         rm -rf "$FTMP"
     fi
+fi
+
+# ── (G) the COLD-START arm — README's "start here" invocation must disclose a budget ────────────────
+# README.md teaches two "start here" invocations (the build-from-source block and "Four commands worth
+# learning first"). A bare `ripwire .` is the commonest first call an agent makes in a session (13% of
+# observed calls, capture-audit round 2026-09-04, finding P15) and costs ~9K est_tokens on this repo,
+# where `--max-tokens=3000` serves the SAME head at under a third of that. The binary's own default is
+# deliberately unchanged (owner call — dozens of gates parse the bare map); the guidance is what moves,
+# and this arm keeps it moved. Three sub-arms, same shape as (B)/(C): the property, its mutation
+# control, and a proof that the advertised budget line keeps the promise its comment makes.
+#
+# DERIVATION. A "start here" line is a fenced-bash line (README's own comment idiom marks it with the
+# words "start here") that invokes ripwire on `.`; it is BARE when no `--` flag sits between the root
+# argument and the comment. Anchored on the comment WORDS, not a line number, so a re-order of the
+# Quickstart cannot disarm the arm; presence-guarded (G1) so a rewrite that drops the idiom fails loud
+# instead of passing vacuously — the "green while inert" failure mode CONTRIBUTING.md §2 names.
+start_here_lines(){ grep -nE '^\s*(\./build/)?ripwire[ ]+\.[ ].*#.*start here' "$1" || true; }
+bare_start_here(){  start_here_lines "$1" | grep -vE '^[0-9]+:\s*(\./build/)?ripwire[ ]+\.[ ]+--' || true; }
+
+start_count="$( start_here_lines "$README" | wc -l | tr -d ' ' )"
+if [ "$start_count" -lt 1 ]; then
+    no "(G1) README.md carries no fenced '# … start here' ripwire invocation — the cold-start idiom this arm guards has moved or been reworded"
+else
+    ok "(G1) README.md carries $start_count 'start here' cold-start invocation(s) to check"
+    bare="$( bare_start_here "$README" )"
+    if [ -n "$bare" ]; then
+        no "(G2) README.md recommends a BARE cold-start map (~9K est_tokens here) — add --max-tokens=3000, the head is the same (P15):"
+        printf '%s\n' "$bare" | sed 's/^/          /'
+    else
+        ok "(G2) every 'start here' invocation carries a flag — none is the bare ~9K-token map"
+    fi
+    # (G3) mutation control — a copy with the budget flag stripped from the start-here lines must be caught
+    sed -E '/# .*start here/ s/ripwire[ ]+\.[ ]+--[a-z-]+(=[^ ]+)?/ripwire ./' "$README" > "$TMP/README_bare.md"
+    if [ -z "$( bare_start_here "$TMP/README_bare.md" )" ]; then
+        no "(G3) mutation control is vacuous: stripping the budget flag from the start-here line(s) was NOT detected as bare"
+    else
+        ok "(G3) mutation control: a start-here line with its budget flag stripped is correctly seen as bare"
+    fi
+fi
+
+# (G4) the PROMISE arm — the budget the README recommends must actually keep the head. The comment on
+#      the start-here line says the budgeted call serves the top of the same ranking at a fraction of
+#      the tokens; that is a claim about the binary, so it is re-measured here rather than trusted.
+#      Both maps run with --no-cache so the check cannot pass on a stale sidecar. Three properties:
+#      the budgeted map is not empty (presence guard), it is a SUBSET of the bare map's rows (the head,
+#      not a different ranking), and its est_tokens sits under the finding's 4,500 ceiling while the
+#      bare map's sits above it — otherwise the recommendation saves nothing and the comment is wrong.
+budget_flag="$( start_here_lines "$README" | grep -oE -- '--max-tokens=[0-9]+' | head -1 )"
+if [ -z "$budget_flag" ]; then
+    no "(G4) the start-here line names no --max-tokens=N budget to re-measure"
+else
+    ( cd "$ROOT" && "$BIN" . --no-cache ) > "$TMP/map_bare.xml" 2>/dev/null
+    ( cd "$ROOT" && "$BIN" . --no-cache "$budget_flag" ) > "$TMP/map_budget.xml" 2>/dev/null
+    verdict="$( python3 - "$TMP/map_bare.xml" "$TMP/map_budget.xml" <<'PY'
+import re, sys
+def rows( path ):
+    text = open( path, encoding="utf-8" ).read()
+    est = re.search( r'<r [^>]*est_tokens="(\d+)"', text )
+    keys = set(); cur = ""
+    for m in re.finditer( r'<(f|s) ([^>]*)>', text ):
+        attrs = dict( re.findall( r'([a-z_]+)="([^"]*)"', m.group( 2 ) ) )
+        if m.group( 1 ) == "f":
+            cur = attrs.get( "p", "" ); continue
+        keys.add( attrs.get( "id" ) or f'{cur}::{attrs.get("t")}::{attrs.get("n")}' )
+    return ( int( est.group( 1 ) ) if est else -1 ), keys
+bareEst, bare = rows( sys.argv[ 1 ] )
+budEst,  bud  = rows( sys.argv[ 2 ] )
+problems = []
+if len( bud ) < 20:             problems.append( f"budgeted map has only {len(bud)} rows (presence guard)" )
+if not bud <= bare:             problems.append( f"{len(bud - bare)} budgeted row(s) absent from the bare map — not a head, a different ranking" )
+if not 0 < budEst <= 4500:      problems.append( f"budgeted est_tokens={budEst}, ceiling 4500" )
+if not bareEst > 4500:          problems.append( f"bare est_tokens={bareEst} is already under the 4500 ceiling — the recommendation saves nothing" )
+print( ( "FAIL " + "; ".join( problems ) ) if problems else f"OK bare={bareEst} budgeted={budEst} rows={len(bud)}/{len(bare)}" )
+PY
+)"
+    case "$verdict" in
+        OK*) ok "(G4) $budget_flag keeps the bare map's head under the ceiling (${verdict#OK })" ;;
+        *)   no "(G4) $budget_flag does not keep the promise the start-here comment makes: ${verdict#FAIL }" ;;
+    esac
 fi
 
 if [ "$fail" -eq 0 ]; then

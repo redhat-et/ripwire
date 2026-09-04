@@ -601,7 +601,7 @@ every dependency is vendored in-tree, so the build completes with the network of
 git clone https://github.com/redhat-et/ripwire.git
 cd ripwire
 cmake -S . -B build && cmake --build build -j
-./build/ripwire .          # the ranked map — start here on an unfamiliar repo
+./build/ripwire . --max-tokens=3000   # the ranked map — start here on an unfamiliar repo (bare it is ~22 KB here; this keeps the head at ~6 KB)
 ```
 
 <details>
@@ -647,7 +647,7 @@ skills/install.sh --codex       # Codex CLI: the task-shaped skills that say whe
 Four commands worth learning first:
 
 ```bash
-ripwire .                                          # the ranked map — start here
+ripwire . --max-tokens=3000                        # the ranked map — start here (bare it is ~22 KB / ~9K est_tokens on this repo; this keeps the head at ~6 KB / ~2.5K)
 ripwire . --for="incremental cache invalidation"   # the task lens: what to touch, ranked
 ripwire . --callers=someFunction                   # who calls it
 ripwire . --test-gate                              # before you commit: which tests must run
