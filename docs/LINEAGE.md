@@ -21,8 +21,8 @@ licence in [`THIRD_PARTY.md`](../THIRD_PARTY.md). First-party code under `src/` 
 third-party code lives under `third_party/` and keeps its own licence. Citing a paper means the idea
 was read and applied, not that any of its text or code is here.
 
-**The counts, derived from the tables below:** **34 repositories** and **67 papers** are folded, and
-a labelled survey of **222 tools** contributed nothing and says so. **The two sets are disjoint by
+**The counts, derived from the tables below:** **36 repositories** and **67 papers** are folded, and
+a labelled survey of **231 tools** contributed nothing and says so. **The two sets are disjoint by
 construction, so they add rather than nest:** a tool that contributed a lesson gets a row in §3a and
 is never repeated in §3b, which makes the field study 34 folded *plus* 222 surveyed — not 34 picked
 out of 222. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
@@ -229,6 +229,8 @@ shipped target links, and it is named in the near-miss paragraph below rather th
 | [Spiral / Ronin](https://github.com/casics/spiral) | The conservative heuristic split — case transitions, digit boundaries, separators, ACRONYMWord handling — is fully described in prose, so it can be reimplemented from the description; and it has to be, because the source is GPLv3 while first-party code here is Apache-2.0. | `splitIdentifier()` in `src/naminglens.h`, written from the description and not ported. No Spiral code is in this tree and nothing was added to [`THIRD_PARTY.md`](../THIRD_PARTY.md) — the one row here where the lesson taken is *how to take a lesson without taking the code* |
 | [CHA](https://link.springer.com/chapter/10.1007/3-540-49538-X_5) — Dean, Grove & Chambers, *Optimization of Object-Oriented Programs Using Static Class Hierarchy Analysis*, ECOOP 1995 | A still-ambiguous receiver-typed call narrows by static type alone: intersect the candidate set with the receiver class's transitive subtype cone, no whole-program build. Ripwire's delta: name-based over the extracted symbol graph, not a compiled type hierarchy, and a SOUND prune of an already-ambiguous tier — a receiver type the cone can't resolve stays ambiguous and degrades rather than guessing a candidate. Citation debt: this landed as B2.1 well before this row existed. | B2.1 CHA-lite receiver-type-cone narrowing, in the resolver's ambiguous-tier prune (`src/graph.h`) |
 | [golang.org/x/tools deadcode](https://pkg.go.dev/golang.org/x/tools/cmd/deadcode) | Frame "dead" as NOT-REACHABLE-FROM-a-declared-entry-point: build a call graph via RTA from every `main` and report what it never reaches, so a chain of any length can be dead. Ripwire's delta: `--dead-code` is not this — it is in-degree/linkage-evidence based (zero in-edges plus internal `static` linkage on a free function), no entry-point traversal and no whole-program closure. The reachability framing this row names is planned separately as `--unreachable-from` and is not shipped. | `--dead-code`'s in-degree + `static`-linkage check (`src/main.cpp`) |
+| [SVF](https://github.com/SVF-tools/SVF) | Resolve an indirect call through a variable→function binding table rather than giving up on it — points-to analysis' core move, stripped from IR scale to AST scale: one hop, same-file evidence, and a tombstone on reassignment instead of a merged points-to set. Ripwire's delta: no IR and no whole-program build, so the binding is written-evidence only and the blind spot is disclosed rather than approximated. | `src/ingest_binds.h`; gate `test/fnptrcheck.sh`, whose arm (t) pins the same-file limit as a KNOWN blind spot |
+| [Code Pathfinder](https://github.com/shivasurya/code-pathfinder) | Emit findings in SARIF 2.1.0 so they land in the host's existing code-scanning UI instead of a bespoke format nobody ingests — distribution is part of the tool, not a wrapper around it. | `--sarif` (with `--lint`), `src/sarif.h`; gate `test/sarifcheck.sh` |
 | [vulture](https://github.com/jendrikseipp/vulture) | Attach a CONFIDENCE tier (60-100%) to each dead-code finding instead of one undifferentiated list, so the near-certain findings can be triaged separately from the merely-plausible ones. Ripwire's delta: `--dead-code`'s `confidence="high"` is currently a FIXED literal on every finding, not tiers — tiering by ripwire's own evidence (linkage + in-degree + amb on incoming edges), explicitly NOT vulture's self-described-rough 60/90/100 numbers, is planned and not yet shipped. | the fixed `confidence="high"` literal on every `--dead-code` finding (`src/main.cpp`) |
 
 **Read and not folded, and worth naming because they are the near misses.** A scoped-snippet view
@@ -264,7 +266,7 @@ fails if any name appears twice *within* this table.
 | Code-mod and migration | OpenRewrite, Codemod, comby, jscodeshift, Sourcegraph Batch Changes | 5 |
 | AI pull-request reviewers | CodeRabbit, Greptile, Graphite Diamond, Cursor Bugbot, Qodo Merge, DeepSource, Sourcery, Ellipsis, Bito, Korbit, Cubic, Baz, Entelligence, CodeAnt, Devlo, Trag, Panto, Macroscope | 18 |
 | Deterministic linters and aggregators | ESLint, Biome, oxlint, Pylint, Cppcheck, Bandit, reviewdog, pre-commit, MegaLinter, Trunk, Qlty, ShellCheck | 12 |
-| Compile- or type-required analysis | SonarQube, Clang Static Analyzer, Infer, Clippy, golangci-lint, Staticcheck, SpotBugs, Coverity, Error Prone | 9 |
+| Compile- or type-required analysis | SonarQube, Clang Static Analyzer, Infer, Clippy, golangci-lint, Staticcheck, SpotBugs, Coverity, Error Prone, Doop, Phasar | 11 |
 | Security and supply chain | Snyk, Socket, gitleaks, TruffleHog, Trivy, Checkov, KICS, Grype, Syft, OSV-Scanner, Dependabot, Renovate, sigstore, Pixee, ZeroPath, Mobb, Copilot Autofix | 17 |
 | Type checkers | mypy, pyright, ty, pyrefly, tsgo, Sorbet, PHPStan, Psalm | 8 |
 | Formal methods and contracts | Kani, CBMC, ESBMC, KLEE, Dafny, Verus, Frama-C, Why3, TLA+, Apalache, Alloy, SPARK, Lean, Rocq, JML | 15 |
@@ -272,7 +274,7 @@ fails if any name appears twice *within* this table.
 | Mutation testing and coverage | Stryker, mutmut, PIT, cargo-mutants, coverage.py, llvm-cov, Launchable, BuildPulse | 8 |
 | Sanitizers | AddressSanitizer, UndefinedBehaviorSanitizer, ThreadSanitizer, Valgrind | 4 |
 | AI test generation | Qodo, EarlyAI, Diffblue, TestGen-LLM | 4 |
-| Architecture linters | NDepend, Sonargraph, madge, import-linter, Lattix | 5 |
+| Architecture linters | NDepend, Sonargraph, madge, import-linter, Lattix, ArchUnitNET, jQAssistant, Depends | 8 |
 | Build systems and caching | Bazel, Buck2, Nx, Turborepo, Pants, sccache, ccache, BuildBuddy, Depot | 9 |
 | Agent sandboxes and dev environments | E2B, Modal, Northflank, Daytona, Koyeb, Blaxel, Dev Containers, Codespaces, Gitpod, Nix, devbox | 11 |
 | Version control and release | gh CLI, Graphite, Sapling, jujutsu, git-branchless, semantic-release, changesets | 7 |
@@ -283,6 +285,8 @@ fails if any name appears twice *within* this table.
 | Profilers | perf, py-spy, pprof, Coz, hyperfine, criterion | 6 |
 | Agent memory and context compression | Mem0, Letta, Zep, cognee, headroom, LLMLingua | 6 |
 | Evaluation and observability | LangSmith, Langfuse, Braintrust, Galileo, Arize, AgentOps, Promptfoo, Ragas, DeepEval, OpenTelemetry | 10 |
+| Clone and duplication detection | PMD-CPD, jscpd | 2 |
+| Code metrics and churn | cqmetrics, churn (danmayer) | 2 |
 | Documentation and diagrams | Doxygen, Sphinx, Mintlify, Swimm, Mermaid, CodeSee | 6 |
 
 **CodeGraph is not Code-Graph-RAG.** The r7 head-to-head round's opponent was `@colbymchenry/codegraph`

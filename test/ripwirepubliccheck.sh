@@ -83,11 +83,12 @@ fi
 # Source COMMENTS are exempt on purpose: they are internal engineering notes that a user never sees.
 # What a user sees is (a) string literals the binary prints and (b) the markdown that ships. Only
 # those two are checked, so this arm stays honest instead of drowning in comment noise.
-# OWNER-ACCEPTED ONE-OFF (2026-08-08): the external-tool-survey PLAN was deliberately committed at
-# 7bcd8b0 as a public roadmap — the owner accepted the internal-pattern filename and its §-coordinates
-# on record. EXACTLY this path is exempt here (arm 3) and in arm 6a; any other internal-pattern file
-# or coordinate-carrying doc still fails. Remove the exemption if the file is ever culled.
-ONEOFF_ACCEPTED='PLAN_EXTERNAL_TOOL_SURVEY_2026-08-08.md'
+# The owner-accepted one-off that used to sit here (the external-tool-survey PLAN, committed at
+# 7bcd8b0 as a public roadmap) was culled: its surveyed tools are folded into docs/LINEAGE.md §3b
+# and the two lessons it identified as owed became §3a rows. Its own comment said to remove the
+# exemption if the file was ever culled, so this arm now has NO exemptions — every
+# internal-pattern filename fails, with no exceptions to keep in sync.
+ONEOFF_ACCEPTED=''
 python3 - "$TMP/tracked.z" "$ONEOFF_ACCEPTED" > "$TMP/arm3" <<'PY'
 import re, sys
 paths = open(sys.argv[1], 'rb').read().split(b'\0')
@@ -290,8 +291,8 @@ fi
 
 # ── arm 6: internal-pattern filenames, and docs/ index coverage ───────────────────────────────────
 INTERNAL_NAME='(^|/)(PLAN[._]|AUDIT|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|DESIGN_|RESEARCH_)'
-# ONEOFF_ACCEPTED (arm 3, same rationale): the one owner-accepted PLAN file is exempt by exact path.
-badnames="$( tr '\0' '\n' < "$TMP/tracked.z" | grep -E "$INTERNAL_NAME" | grep -Fxv "$ONEOFF_ACCEPTED" || true )"
+# No exemptions (see arm 3's note): every internal-pattern filename in the tree fails this arm.
+badnames="$( tr '\0' '\n' < "$TMP/tracked.z" | grep -E "$INTERNAL_NAME" || true )"
 if [ -n "$badnames" ]; then
     no "arm 6a — internal-pattern filename committed (pattern $INTERNAL_NAME):"
     printf '%s\n' "$badnames" | sed 's/^/          /'

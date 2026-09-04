@@ -1380,8 +1380,8 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**34 repositories and 67 papers** into one deterministic executable, alongside a labelled
-survey of 222 tools that folded nothing and are catalogued separately — the two sets are disjoint,
+**36 repositories and 67 papers** into one deterministic executable, alongside a labelled
+survey of 231 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
 by `test/readmedriftcheck.sh`, which fails if this sentence and those tables disagree.
