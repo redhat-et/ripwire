@@ -11,17 +11,32 @@
 # fuzz (the real attack surface is "an agent/CI hands ripwire a cache file it doesn't fully trust"),
 # and it means this harness needed NO changes to src/ingest.h / src/ingest.cpp / src/quality.h.
 #
-# ── Part 1: v8 ingest-cache blob (loadCache) — DETERMINISTIC structured mutation table ─────────────
-# Header layout (native-endian, no padding — mirrors ingest.cpp saveCache/loadCache):
-#   [0:4)   u32 magic "CTPK"        [4:8)   u32 version (kCacheVersion=8)
-#   [8:12)  u32 parserVer           [12]    u8  kArtifactArch (endian|pointerWidth<<1)
-#   [13:21) u64 blobWriteNs         [21:25) u32 fileCount
-#   file[0]: u32 pathLen, pathBytes, u64 hash, u64 sizeBytes, u64 mtimeNs, u32 defCount, [def records]...
-#   ... trailer: last 8 bytes = blobChecksum (8-lane FNV-1a64) over everything before it.
-# A python helper (mirroring loadCache's byte-exact layout) generates ~23 named byte-level mutations
-# from one good baseline blob; bash then layers 5 more filesystem-shape mutations (dir/perm/symlink/
-# /dev/null) on top — 28 total. Each mutation is applied via a FIXED table, not a random seed
-# (determinism rule): re-running this script produces the exact same mutated bytes every time.
+# ── Part 1: v15 ingest-cache blob (loadCache) — DETERMINISTIC structured mutation table ────────────
+# Blob layout (native-endian, no padding — mirrors ingest_cache.h saveCache/openCacheFrame/loadCache):
+#   HEADER, 25 B:
+#     [0:4)   u32 magic "CTPK"        [4:8)   u32 version (kCacheVersion)
+#     [8:12)  u32 parserVer           [12]    u8  kArtifactArch (endian|pointerWidth<<1)
+#     [13:21) u64 blobWriteNs         [21:25) u32 entryCount
+#   RECORDS, [25, tableOffset), ascending pathHash:
+#     u32 pathLen, pathBytes, u64 contentHash, u64 sizeBytes, u64 mtimeNs, u64 ctimeNs,
+#     4x u32 FileHealth, [rich: u32 dictCount + dict], u32 defCount, [def records], ...
+#   OFFSET TABLE, entryCount x 32 B at tableOffset:
+#     u64 pathHash, u64 recOffset, u64 contentHash, u32 recLength, u32 recSum
+#   TRAILER, last 24 B: u64 tableOffset, u32 entryCount, u32 reserved, u64 tableSum
+#   tableSum covers HEADER || TABLE; each recSum covers exactly its own record.
+# A python helper (mirroring that byte-exact layout) generates ~26 named byte-level mutations from one
+# good baseline blob; bash then layers 5 more filesystem-shape mutations (dir/perm/symlink//dev/null)
+# on top. Each mutation is applied via a FIXED table, not a random seed (determinism rule): re-running
+# this script produces the exact same mutated bytes every time.
+#
+# WHY THE HELPER REBUILDS THE FRAME. A mutation that leaves a STALE frame stops at the very first
+# guard, and every deeper guard it was written for then passes for the wrong reason — the "green while
+# inert" failure CONTRIBUTING §2 names. So `with_recomputed_trailer` recomputes every record's recSum
+# from the mutated bytes and rewrites a consistent trailer, which is what lets a huge def count, an
+# absurd string length or a garbage record body actually REACH readFileRecord. The mutations that are
+# deliberately about the frame itself (arch_byte_flip_stale, checksum_mismatch_deep_bitflip_stale,
+# trailer_bytes_corrupted, table_offset_past_eof, trailer_entry_count_inflated) leave it stale on
+# purpose, and each names which layer it is aimed at.
 #
 # Each mutation is run under the DEV binary and must: exit 0, and produce output BYTE-IDENTICAL to a
 # `--no-cache` cold parse (the POISON check — a malformed cache must never silently change the answer,
@@ -122,20 +137,38 @@ def blob_checksum(data: bytes) -> int:
         h = ((h ^ lane[k]) * P) & M
     return h
 
-def with_recomputed_trailer(payload: bytearray) -> bytes:
-    csum = blob_checksum(bytes(payload))
-    return bytes(payload) + struct.pack("<Q", csum)
+HDR      = 25   # header bytes: magic4 + ver4 + parserVer4 + arch1 + blobWriteNs8 + entryCount4
+TRAILER  = 24   # trailer bytes: tableOffset8 + entryCount4 + reserved4 + tableSum8
+ENTRY    = 32   # offset-table row: pathHash8 + recOffset8 + contentHash8 + recLength4 + recSum4
 
-# ── locate the fixed-offset fields in file[0]'s record (header is a fixed 25 bytes: magic4+ver4+
-#    parserVer4+arch1+blobWriteNs8+fileCount4) ──────────────────────────────────────────────────────
-HDR = 25
-path_len = struct.unpack_from("<I", good, HDR)[0]
+TABLE_OFF, TABLE_N = struct.unpack_from("<QI", good, len(good) - TRAILER)[0:2]
+payload_len = len(good) - TRAILER   # everything before the trailer: records + offset table
+
+def with_recomputed_trailer(payload: bytearray) -> bytes:
+    """`payload` is records+table (everything before the trailer). Recompute every record's recSum from
+    payload's CURRENT bytes and append a fresh, self-consistent v15 trailer — so a mutation reaches the
+    guard it is aimed at instead of being stopped by a stale frame (see the WHY note in the header)."""
+    b = bytearray(payload)
+    for i in range(TABLE_N):
+        off = TABLE_OFF + i * ENTRY
+        if off + ENTRY > len(b):
+            break
+        rec_off = struct.unpack_from("<Q", b, off + 8)[0]
+        rec_len = struct.unpack_from("<I", b, off + 24)[0]
+        if rec_off + rec_len <= TABLE_OFF and rec_off + rec_len <= len(b):
+            struct.pack_into("<I", b, off + 28, blob_checksum(bytes(b[rec_off:rec_off + rec_len])) & 0xFFFFFFFF)
+    tbl = bytes(b[:HDR]) + bytes(b[TABLE_OFF:TABLE_OFF + TABLE_N * ENTRY])
+    return bytes(b) + struct.pack("<QIIQ", TABLE_OFF, TABLE_N, 0, blob_checksum(tbl))
+
+# ── locate the fixed-offset fields in the FIRST record (records start immediately after the header;
+#    v15 writes them in ascending pathHash order, so record[0] is simply the lowest-hashing file) ────
+path_len  = struct.unpack_from("<I", good, HDR)[0]
 path_off  = HDR + 4
 hash_off  = path_off + path_len
 size_off  = hash_off + 8
 mtime_off = size_off + 8
-nd_off    = mtime_off + 8   # file[0]'s def-record count (u32)
-payload_len = len(good) - 8   # trailer is the last 8 bytes
+ctime_off = mtime_off + 8
+nd_off    = ctime_off + 8 + 16   # past ctimeNs and the four FileHealth u32s: the LEAN def-record count
 
 mutations = {}
 
@@ -173,9 +206,8 @@ def mut_arch_flip_fixed(b):
 mutations["arch_byte_flip_recomputed_checksum"] = mut_arch_flip_fixed
 
 def mut_arch_flip_stale(b):
-    p = bytearray(b[:payload_len]); p[12] ^= 0x01
-    stored = struct.unpack_from("<Q", b, payload_len)[0]      # leave the OLD (now-stale) checksum
-    return bytes(p) + struct.pack("<Q", stored)
+    p = bytearray(b); p[12] ^= 0x01        # the trailer's tableSum covers the header, so it is now stale
+    return bytes(p)
 mutations["arch_byte_flip_stale_checksum"] = mut_arch_flip_stale
 
 # -- huge / overflow / negative record counts and length fields --
@@ -214,26 +246,60 @@ mutations["string_length_wraparound_recomputed_checksum"] = mut_string_len_wrapa
 # -- checksum-valid-but-garbage-payload: corrupt a wide swath of the body with a FIXED (non-random)
 #    deterministic byte pattern, then recompute the trailer over the corrupted body. --
 def mut_garbage_payload(b):
+    # the RECORD region only, with a rebuilt frame: every record digest matches, so each record is
+    # actually handed to readFileRecord and every one of its guards is what has to refuse it.
     p = bytearray(b[:payload_len])
-    lo = min(HDR + 8, payload_len)
-    hi = payload_len
     x = 0x2545F4914F6CDD1D & 0xFF
-    for i in range(lo, hi):
+    for i in range(min(HDR + 8, TABLE_OFF), TABLE_OFF):
         x = (x * 1103515245 + 12345) & 0xFF
         p[i] = x
     return with_recomputed_trailer(p)
 mutations["checksum_valid_garbage_payload"] = mut_garbage_payload
 
+def mut_garbage_table(b):
+    # the OFFSET TABLE, trailer left stale: caught by tableSum, which is the guard that has to hold
+    # before any record offset in it is believed.
+    p = bytearray(b)
+    x = 0x9E3779B9 & 0xFF
+    for i in range(TABLE_OFF, TABLE_OFF + TABLE_N * ENTRY):
+        x = (x * 1103515245 + 12345) & 0xFF
+        p[i] = x
+    return bytes(p)
+mutations["garbage_offset_table_stale_checksum"] = mut_garbage_table
+
+def mut_table_offset_past_eof(b):
+    # the trailer says the table starts past the end of the file: the EXACT-FIT invariant refuses it.
+    p = bytearray(b)
+    struct.pack_into("<Q", p, len(p) - TRAILER, len(p) + 4096)
+    return bytes(p)
+mutations["table_offset_past_eof"] = mut_table_offset_past_eof
+
+def mut_trailer_entry_count_inflated(b):
+    # trailer entryCount disagrees with the header's AND with the file size — both cross-checks fire.
+    p = bytearray(b)
+    struct.pack_into("<I", p, len(p) - TRAILER + 8, TABLE_N + 1000)
+    return bytes(p)
+mutations["trailer_entry_count_inflated"] = mut_trailer_entry_count_inflated
+
+def mut_record_offset_inside_table(b):
+    # a table entry whose record range reaches into the table itself — refused by the per-entry bounds
+    # check, not by any checksum (the frame is rebuilt so the digests all agree).
+    p = bytearray(b[:payload_len])
+    struct.pack_into("<Q", p, TABLE_OFF + 8, TABLE_OFF)
+    struct.pack_into("<I", p, TABLE_OFF + 24, 64)
+    return with_recomputed_trailer(p)
+mutations["record_range_overlaps_table"] = mut_record_offset_inside_table
+
 # -- checksum mismatch only: a single deep bit flip, checksum left STALE (the shallowest guard alone) --
 def mut_deep_bitflip_stale(b):
-    p = bytearray(b[:payload_len])
-    idx = min(HDR + 20, payload_len - 1)
-    p[idx] ^= 0xFF
-    stored = struct.unpack_from("<Q", b, payload_len)[0]
-    return bytes(p) + struct.pack("<Q", stored)
+    # inside record[0], leaving BOTH digests stale: the table is untouched so tableSum still verifies,
+    # and the flip must be caught by that record's own recSum instead (the per-record guard).
+    p = bytearray(b)
+    p[min(HDR + 20, TABLE_OFF - 1)] ^= 0xFF
+    return bytes(p)
 mutations["checksum_mismatch_deep_bitflip_stale"] = mut_deep_bitflip_stale
 
-# -- trailer itself corrupted, payload untouched (tests the trailer-verification path directly) --
+# -- trailer itself corrupted, payload untouched (hits tableSum directly) --
 def mut_trailer_corrupted(b):
     p = bytearray(b)
     p[-1] ^= 0xFF
