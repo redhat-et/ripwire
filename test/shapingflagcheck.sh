@@ -311,6 +311,9 @@ cp -R "$ROOT/test/fixture" "$FCORPUS"
 ( cd "$FCORPUS" && git init -q . && git add -A && git -c user.name=gate -c user.email=gate@gate commit -qm fixture ) >/dev/null 2>&1
 printf 'layer test = /no-such-path-xyz/\ndeny test -> render\n' > "$TMP/arch.txt"
 printf '#0 total_area at geometry.cpp:3\n' > "$TMP/ftrace.txt"
+printf 'not a scip index\n' > "$TMP/fprobe.scip"   # M7 (capture-audit L5): an index that cannot be OPENED now refuses
+                                                    # before the map — a readable-but-undecodable one still degrades to
+                                                    # the name-based map, which is the verb the knobs shape
 python3 "$ROOT/test/flaguniverse.py" "$ROOT/src/cli.h" > "$TMP/universe.tsv"
 UROWS="$( grep -c . "$TMP/universe.tsv" )"
 [ "$UROWS" -ge 190 ] && ok "(F) derived $UROWS flag rows from src/cli.h" \
@@ -332,6 +335,7 @@ fprobeFor()
         --at=)           printf '%s' '--at=geometry.cpp:3' ;;
         --from-trace=)   printf '%s' "--from-trace=$TMP/ftrace.txt" ;;
         --cache=)        printf '%s' "--cache=$TMP/fprobe.cache" ;;
+        --scip=)         printf '%s' "--scip=$TMP/fprobe.scip" ;;
         --index-out=)    printf '%s' "--index-out=$TMP/fprobe.idx" ;;
         --pin-census=)   printf '%s' "--pin-census=$TMP/fprobe.tsv" ;;
         --html=)         printf '%s' "--html=$TMP/fprobe.html" ;;

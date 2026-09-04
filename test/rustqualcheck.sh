@@ -257,8 +257,11 @@ printf '%s' "$EXP" | grep -q 'pub fn new()' \
 # used to report implementors="0" about a definition nobody chose. Shape has exactly one definition in this
 # fixture, so the golden gains defs="1" and NOTHING else; the inherit edge this arm is about (implementors=1,
 # the single Widget impl row) is unmoved, which is the whole claim.
+# RE-PINNED AGAIN at the wave-1 merge (capture-audit L4, H5/M15, floormarkcheck arms (9)/(11)): the targeted
+# <lego> root now carries counts_floor="1" and the resolver gauge pair graph_ambiguous=/graph_unresolved= (the map
+# header's own fold — 2/0 on this fixture); the <iface> row and its one <impl> are byte-identical to the pin above.
 LEGO_NEW="$( run "$FIX" --lego=Shape --no-cache | grep -o '<lego.*</lego>' )"
-[ "$LEGO_NEW" = '<lego><iface n="Shape" p="src/lib.rs" methods="0" caveat="not-extracted-for-lang" defs="1" implementors="1"><impl n="Widget" p="src/lib.rs"/></iface></lego>' ] \
+[ "$LEGO_NEW" = '<lego graph_ambiguous="2" graph_unresolved="0" counts_floor="1"><iface n="Shape" p="src/lib.rs" methods="0" caveat="not-extracted-for-lang" defs="1" implementors="1"><impl n="Widget" p="src/lib.rs"/></iface></lego>' ] \
     && ok "impl Shape for Widget still yields exactly its inherit edge (call qualifiers did not leak in)" \
     || no "inherit edges CHANGED: $LEGO_NEW"
 if [ -d "$ROOT/$LEGO" ]; then

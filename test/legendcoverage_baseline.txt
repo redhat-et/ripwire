@@ -178,7 +178,6 @@ layout | layout@scanned
 layout | layout@sym
 lint | rule@name
 mentions | mentions@defs
-mentions | mentions@of
 merge-scout | arm@ok
 merge-scout | landing@order
 merge-scout | merge-scout@head
@@ -189,12 +188,8 @@ owners | f@share
 owners | f@top
 pack-task | ctx@route
 pack-task | d@pure
-path | path@from
 path | path@from_defs
 path | path@from_p
-path | path@hops
-path | path@reachable
-path | path@to
 path | path@to_defs
 path | path@to_p
 pr-context | cochange@commits
