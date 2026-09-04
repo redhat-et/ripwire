@@ -2328,7 +2328,8 @@ inline constexpr char kConnectHeader[] =
     "<!-- ripwire connect: minimal joining subgraph over N task symbols (metric-closure 2-approx Steiner;"
     " search is undirected so SHARED-CALLER joins are found, every <e f= t=/> keeps its TRUE caller->callee"
     " direction; graph-structured navigation per CodeCompass, arXiv 2602.20048). Call edges are name-based:"
-    " dynamic dispatch / callbacks may hide connections -->";
+    " dynamic dispatch / callbacks may hide connections. defs= on a terminal row = that NAME has N definitions"
+    " and the lowest-id one was used; qualify with file:name to pick another. Steiner rows never carry it -->";
 
 // The root element's own bytes: the <connect ...> start-tag PLUS the </connect> close. It is
 // self-referential (the start-tag's length depends on the digits of the number it carries), so it is
@@ -2472,7 +2473,18 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
             edgeTotal += std::uint32_t( edges.size() );
 
             payload.append( "<g terminals=\"" ).append( std::to_string( grp.terminals.size() ) ).append( "\">" );
-            for( NodeId t : grp.terminals ) { symAttr( payload, "t", t ); payload.append( "/>" ); }
+            for( NodeId t : grp.terminals )
+            {
+                symAttr( payload, "t", t );
+                // M20 (lens 6 F12): a TERMINAL is a caller-typed selector, resolved by resolveFocus's
+                // lowest-id pick. --callers/--uses/--impact/--path/--verify all disclose defs= for the same
+                // name; the Steiner subgraph did not, so `--connect=size,…` was built from one of six `size`
+                // definitions with nothing on the row to say which question was answered. Steiner nodes (the
+                // "s" rows) carry no defs= because nobody selected them — the search found them.
+                const std::size_t terminalDefs = definitionCountOfName( ing, t );
+                if( terminalDefs > 1 ) { payload.append( " defs=\"" ).append( std::to_string( terminalDefs ) ).append( "\"" ); }
+                payload.append( "/>" );
+            }
             for( NodeId sN : steiner )
             {
                 symAttr( payload, "s", sN );

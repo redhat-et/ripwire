@@ -228,5 +228,4 @@ test-gate | test-gate@untested_capped
 uses | u@in_id
 whereis | hit@date
 whereis | hit@tip
-whereis | whereis@sym
 zoom | zoom@levels

@@ -102,38 +102,41 @@ lives --stray-content lane
 echo
 echo "=== D: --whereis is a SYM selector — near-miss suggestion + @FILE:LINE seed resolution ==="
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+# --whereis scans every ref's TREE, so it would find this script's own text if the probes ran against this
+# repo: the typo below is a literal in this file, and the repo IS the corpus. A throwaway git fixture keeps
+# the arm about the verb instead of about the gate.
+WFIX="$( mktemp -d )"
+printf 'int helperOne( int x ) { return x + 1; }\nint sturdyTeleport( int x ) { return helperOne( x ); }\nint tailer( int x ) { return sturdyTeleport( x ); }\n' > "$WFIX/one.cpp"
+( cd "$WFIX" && git init -q . && git add -A && git -c user.email=t@t -c user.name=t commit -qm init ) >/dev/null 2>&1
+
 # (a) a one-edit typo of an indexed symbol names it. The lexical tree scan is a legitimate measurement for a
 #     name this repo never had, so the ZERO stays an answer — but the index knows the near-miss and every
 #     other SYM verb says so, and a hits="0" the reader cannot distinguish from a typo is worth one clause.
-OUT="$( "$BIN" "$ROOT" --whereis=rankGraphTeleporr --no-cache 2>&1 )"
-if printf '%s' "$OUT" | grep -qE "did you mean 'rankGraphTeleport'|retry=\"rankGraphTeleport\""; then
-    ok "D --whereis=rankGraphTeleporr names the near-miss rankGraphTeleport"
+OUT="$( "$BIN" "$WFIX" --whereis=sturdyTeleporr --no-cache 2>&1 )"
+if printf '%s' "$OUT" | grep -qE "did you mean 'sturdyTeleport'|retry=\"sturdyTeleport\""; then
+    ok "D --whereis=<one-edit typo> names the near-miss sturdyTeleport"
 else
-    no "D --whereis=rankGraphTeleporr: hits=0 with no did-you-mean, and the index knows the name: $( printf '%s' "$OUT" | grep -o '<whereis [^>]*>' )"
+    no "D --whereis=<one-edit typo>: hits=0 with no did-you-mean, and the index knows the name: $( printf '%s' "$OUT" | grep -o '<whereis [^>]*>' )"
 fi
 
 # (b) the documented @FILE:LINE seed grammar is RESOLVED, not searched as a literal. A bad line refuses with
 #     the shared seed message (--owners/--mentions/--edit-check already do); it must never come back as a
 #     true-but-useless hits="0" over every blob.
-OUT="$( "$BIN" "$ROOT" '--whereis=@src/graph.h:999999' --no-cache 2>&1 1>/dev/null )"; RC=$?
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "src/graph.h"; then
-    ok "D --whereis=@src/graph.h:999999 refuses on the bad line, naming the file"
+OUT="$( "$BIN" "$WFIX" '--whereis=@one.cpp:999999' --no-cache 2>&1 1>/dev/null )"; RC=$?
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "one.cpp"; then
+    ok "D --whereis=@one.cpp:999999 refuses on the bad line, naming the file"
 else
-    no "D --whereis=@src/graph.h:999999 → exit $RC; the seed was searched as a literal string instead of resolved: $OUT"
+    no "D --whereis=@one.cpp:999999 → exit $RC; the seed was searched as a literal string instead of resolved: $OUT"
 fi
 
 # (c) a REAL @FILE:LINE seed resolves to the enclosing definition and is answered under that name.
-LINE="$( "$BIN" "$ROOT" --outline=rankGraphTeleport --no-cache 2>/dev/null | grep -o 'l="[0-9]*"' | head -1 | tr -dc '0-9' )"
-if [ -n "$LINE" ]; then
-    OUT="$( "$BIN" "$ROOT" "--whereis=@src/graph.h:$LINE" --no-cache 2>/dev/null )"
-    if printf '%s' "$OUT" | grep -qF 'sym="rankGraphTeleport"'; then
-        ok "D --whereis=@src/graph.h:$LINE resolves to sym=\"rankGraphTeleport\""
-    else
-        no "D --whereis=@src/graph.h:$LINE did not resolve the seed: $( printf '%s' "$OUT" | grep -o '<whereis [^>]*>' )"
-    fi
+OUT="$( "$BIN" "$WFIX" '--whereis=@one.cpp:2' --no-cache 2>/dev/null )"
+if printf '%s' "$OUT" | grep -qF 'sym="sturdyTeleport"'; then
+    ok "D --whereis=@one.cpp:2 resolves to sym=\"sturdyTeleport\""
 else
-    no "D could not locate rankGraphTeleport's line — fixture assumption broken"
+    no "D --whereis=@one.cpp:2 did not resolve the seed: $( printf '%s' "$OUT" | grep -o '<whereis [^>]*>' )"
 fi
+rm -rf "$WFIX"
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

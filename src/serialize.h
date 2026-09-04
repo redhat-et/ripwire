@@ -1341,6 +1341,24 @@ struct MapAnnotations
     // query score, a HITS hub/authority map) keeps a byte-identical header by doing nothing. A pointer would
     // make "no PageRank ran" and "the caller forgot to pass it" the same null — the silence this removes.
     RankDisclosure prDisclosure{};
+
+    // M20 (capture-audit 2026-09-04, lens 6 F12, lens 2 L8) — the SEED disclosure, for a map a SEEDED verb
+    // produced. `--around=SYM` renders through this same serializer and came out under the PLAIN map root,
+    // `<r root="." est_tokens="10788">`: the seed was recoverable only by spotting the k="1.0000" row, and
+    // the two BOUNDS that decide what the neighbourhood even contains — --around-depth (default 2) and
+    // --around-fanout (default 32) — were not recoverable at all, from the output or from --help. A reader
+    // handed 189 rows could not tell a 1-hop from a 3-hop answer. defs= is the same single-pick disclosure
+    // --callers/--uses/--impact/--path already carry: resolveFocus takes the lowest-id definition, so a name
+    // with several says so on the root instead of silently answering about one of them.
+    // Held by value with a default that renders NOTHING (empty `of`), so every unseeded map is byte-identical.
+    struct SeedDisclosure
+    {
+        std::string of;             // the RESOLVED seed name (of= — the family's "what this is about" attribute)
+        int         depth  = 0;     // of the ego walk (depth=)
+        int         fanout = 0;     // per-hop neighbour cap (fanout=)
+        std::size_t defs   = 0;     // definitions the seed NAME has; >1 means a pick was made
+    };
+    SeedDisclosure seed{};
 };
 
 // §B2.1 — the ranker-specific legend clause, one per non-default ranker, emitted ONLY on that ranker's map
@@ -1782,6 +1800,14 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += rbLegend;
     }
+    // M20: the seeded-verb clause, emitted only on a seeded map (see MapAnnotations::SeedDisclosure).
+    if( !ann.seed.of.empty() )
+    {
+        legend += "<!-- of= is the resolved SEED this neighbourhood is centred on; depth= call hops walked and fanout= "
+                  "neighbours kept per hop are its whole boundary, so a row's absence means outside them, not nonexistent. "
+                  "defs= (only when >1) = that NAME has N definitions and the lowest-id one was walked; qualify with "
+                  "file:name or @FILE:LINE to pick another. -->";
+    }
     if( metrics )
     {
         legend += kMetricsLegend; // §B7.3, metrics-only (ditto)
@@ -1926,6 +1952,15 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         // R-E: after at= (so gitstampcheck's `<r at="<sha>` byte sequence is unmoved), same slot --grep uses
         // right after its own identifying attributes — the crawl root every <f p=…> below is now RELATIVE to.
         if( !rootArg.empty() ) { h += " root=\"";  h += escapeXml( rootArg, esc );  h += "\""; }
+        // M20: the seeded-verb stanza, after root= and before the ranker attributes. Absent (and therefore
+        // byte-free) on every map that had no seed.
+        if( !ann.seed.of.empty() )
+        {
+            h += " of=\"";      h += escapeXml( ann.seed.of, esc );        h += "\"";
+            h += " depth=\"";   h += std::to_string( ann.seed.depth );     h += "\"";
+            h += " fanout=\"";  h += std::to_string( ann.seed.fanout );    h += "\"";
+            if( ann.seed.defs > 1 ) { h += " defs=\"";  h += std::to_string( ann.seed.defs );  h += "\""; }
+        }
         // §A9.6: after at= (so gitstampcheck's `<r at="<sha>` byte sequence is unmoved) — see MapAnnotations.
         if( churnWindow != nullptr ) { h += " rank_by=\"";  h += ann.churnRankLabel;  h += "\" window=\"";  h += escapeXml( *churnWindow, esc );  h += "\""; }
         // §B2.1: the windowless rankers stamp the same attribute in the same slot. `else if` states the
