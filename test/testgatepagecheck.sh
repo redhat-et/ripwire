@@ -125,15 +125,23 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
-# §A3b — --situ's blast-radius header discloses its 8-row cap once files > 8. Reuses this binary's own repo
-# checkout as the corpus (self.h-heavy files reliably blast-radius past 8 files here) rather than growing a
-# second synthetic fixture just for a file-fanout count.
+# §A3b — --situ's blast-radius header discloses its 8-row cap once files > 8. A synthetic 10-file
+# fan-out keeps this pin independent of the live checkout's size, contents and cold-parse time: using $ROOT
+# here made the 20-second run alarm look like a missing disclosure because stderr was intentionally hidden
+# and command substitution captured an empty string.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 # §B3 knock-on GAP: "full list: --pr-context" was FALSE — pr-context's own per-file
 # <impact> list is capped too (at 20, now disclosed via shown=/capped=), so it never printed a full list
 # either. Reworded to name what pr-context actually gives; this pin follows the new wording — asserting the
 # "(showing 8" cap-disclosure MEANING, not the old false referral text.
-S="$( run "$ROOT" --situ=src/model.h )"
+SITU="$TMP/situ"; mkdir -p "$SITU/src"
+printf 'int target() { return 1; }\n' > "$SITU/src/target.cpp"
+i=0
+while [ "$i" -lt 10 ]; do
+    printf 'int caller%d() { return target(); }\n' "$i" > "$SITU/src/caller$i.cpp"
+    i=$(( i + 1 ))
+done
+S="$( run "$SITU" --situ=src/target.cpp )"
 # §B12.1 PIN UPDATE: "(showing 8" carried no UNIT and no remainder, so the disclosure did not say what 8
 # counted. The pin now asserts the two MEANING halves — the count is qualified by its unit AND by the total
 # it is 8 of — instead of the old bare literal.

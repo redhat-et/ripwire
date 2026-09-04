@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # planlanescheck.sh — gate for --plan-lanes, the PRE-HOC lane plan.
 #
-# Six checks, and the plan is explicit about which one decides the feature:
+# Seven checks, and the plan is explicit about which one decides the feature:
 #   G-A determinism — two runs of the same invocation are BYTE-IDENTICAL, in both modes, at N=2 and N=16,
 #                     and with --no-cache as well as without. A committed plan is only REVIEWABLE if
 #                     re-running the command reproduces it; this fails the moment anything iterates a hash
@@ -26,7 +26,10 @@
 #                     the wrong line count, and a multi-root invocation all exit 1 and write NOTHING to
 #                     stdout (a refusal must not ship a payload).
 #   G-F schema stability — every documented top-level key, every documented key inside lanes[0] and
-#                     pairs[0], and v==1. A schema that drifts silently is worse than no schema.
+#                     pairs[0], and v==1. A schema that drifts silently is worse than no schema. Additive
+#                     lane fields keep v1; the model policy has its own version.
+#   G-H execution recommendation — every lane carries one deterministic Codex model/effort choice with
+#                     the structural rule, exact numeric signals and in-band caveats that produced it.
 #
 # Usage:
 #   test/planlanescheck.sh                          # uses build/ripwire
@@ -363,7 +366,7 @@ TOP = { "v": int, "verb": str, "at": ( str, type( None ) ), "root": str, "task":
         "landing_order": list, "landing_rule": str, "contract_touch_rule": str, "warnings": list }
 for k, t in TOP.items():
     check( k in d and isinstance( d[k], t ), "G-F top-level key present and typed: " + k )
-check( d["v"] == 1,                       "G-F v == 1" )
+check( d["v"] == 1,                       "G-F v == 1 (additive execution field has its own policy version)" )
 check( d["verb"] == "plan-lanes",         "G-F verb == plan-lanes" )
 check( d["claim_key"] == "path+scope+name", "G-F claim_key names the key a consumer joins on" )
 check( d["on_conflict"] == "producing-lane-rebases", "G-F on_conflict states the protocol" )
@@ -376,7 +379,7 @@ check( set( d["core"] ) == { "files", "symbols" }, "G-F core is {files, symbols}
 
 L = d["lanes"][0]
 for k in ( "id", "task", "claims", "blast_radius", "tests_to_run", "tests_total", "tests_capped",
-           "tests_granularity", "untested", "module_span", "notes" ):
+           "tests_granularity", "untested", "module_span", "notes", "execution" ):
     check( k in L, "G-F lanes[0]." + k )
 for k in ( "symbols", "files" ): check( k in L["claims"], "G-F lanes[0].claims." + k )
 for k in ( "reaches", "files_total", "capped", "files" ): check( k in L["blast_radius"], "G-F lanes[0].blast_radius." + k )
@@ -414,6 +417,89 @@ check( "call-SITE" in nbcg_text,
        "G-F name-based-callgraph text names ambiguous as a call-SITE count, distinct from the edge-pair count" )
 check( str( d["corpus"]["ambiguous"] ) in nbcg_text and str( d["corpus"]["edges"] ) in nbcg_text,
        "G-F name-based-callgraph text still cites both corpus.ambiguous and corpus.edges numbers" )
+sys.exit( bad )
+PY
+
+# ── G-H deterministic task-to-model execution recommendation ─────────────────────────────────────────
+assert_json "$TMP/auto.json" <<'PY'
+import json, sys
+d = json.load( open( sys.argv[1] ) )
+bad = 0
+def check( cond, msg ):
+    global bad
+    print( ( "  PASS  " if cond else "  FAIL  " ) + msg )
+    if not cond: bad = 1
+
+MODELS = { "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna" }
+EFFORTS = { "low", "medium", "high", "xhigh" }
+RULES = {
+    "insufficient-claims": ( "gpt-5.6-terra", "medium" ),
+    "wide-contract-work": ( "gpt-5.6-sol", "xhigh" ),
+    "complex-or-wide": ( "gpt-5.6-sol", "high" ),
+    "bounded-low-risk": None,
+    "moderate-cross-module": ( "gpt-5.6-terra", "high" ),
+    "default-balanced": ( "gpt-5.6-terra", "medium" ),
+}
+SIGNALS = { "claims", "files", "module_span", "max_ccx", "sum_ccx", "ambiguous_calls",
+            "blast_reaches", "contract_touches", "conflicts", "untested", "tests_total",
+            "blast_capped", "tests_capped" }
+for lane in d["lanes"]:
+    x = lane["execution"]
+    check( set( x ) == { "policy", "model", "reasoning", "rule", "basis", "signals", "caveats" },
+           "G-H execution has the complete stable key set" )
+    check( x["policy"] == "codex-lane/v1", "G-H policy is versioned independently of the JSON schema" )
+    check( x["model"] in MODELS and x["reasoning"] in EFFORTS,
+           "G-H model and reasoning are executable Codex values" )
+    check( x["rule"] in RULES and
+           ( RULES.get( x["rule"] ) is None or RULES[x["rule"]] == ( x["model"], x["reasoning"] ) ) and
+           ( x["rule"] != "bounded-low-risk" or
+             ( x["model"] == "gpt-5.6-luna" and x["reasoning"] in ( "low", "medium" ) ) ),
+           "G-H selecting rule maps to exactly one model/effort policy arm" )
+    check( x["basis"] == "structural-only" and isinstance( x["rule"], str ) and bool( x["rule"] ),
+           "G-H recommendation names its structural-only basis and selecting rule" )
+    check( set( x["signals"] ) == SIGNALS, "G-H signals have the complete auditable key set" )
+    check( x["signals"]["claims"] == len( lane["claims"]["symbols"] ) and
+           x["signals"]["files"] == len( lane["claims"]["files"] ) and
+           x["signals"]["module_span"] == lane["module_span"] and
+           x["signals"]["blast_reaches"] == lane["blast_radius"]["reaches"] and
+           x["signals"]["untested"] == lane["untested"] and
+           x["signals"]["tests_total"] == lane["tests_total"],
+           "G-H serialized signals mirror the lane facts rather than hidden state" )
+    conflict_count = sum( len( p["conflicts"] ) for p in d["pairs"] if lane["id"] in ( p["a"], p["b"] ) )
+    touches = sum( 1 for p in d["pairs"] for t in p["contract_touch"]
+                   if lane["id"] in ( t["from"], t["to"] ) )
+    check( x["signals"]["conflicts"] == conflict_count and x["signals"]["contract_touches"] == touches,
+           "G-H pair-derived signals reconcile with conflicts and contract_touch rows" )
+    check( isinstance( x["caveats"], list ) and all( isinstance( v, str ) for v in x["caveats"] ),
+           "G-H caveats are an in-band string list" )
+    check( ( x["signals"]["untested"] == 0 ) == ( "untested-is-upper-bound" not in x["caveats"] ) and
+           ( x["signals"]["tests_total"] != 0 ) == ( "coverage-partial" not in x["caveats"] ) and
+           ( not x["signals"]["blast_capped"] and not x["signals"]["tests_capped"] ) ==
+               ( "truncated-evidence" not in x["caveats"] ),
+           "G-H caveats appear exactly when their disclosed limitation applies" )
+check( [ lane["id"] for lane in d["lanes"] ] == d["landing_order"] or
+       set( lane["id"] for lane in d["lanes"] ) == set( d["landing_order"] ),
+       "G-H every landing-order lane has exactly one recommendation" )
+sys.exit( bad )
+PY
+
+python3 - "$TMP/bare.json" "$TMP/touch.json" <<'PY' || fail=1
+import json, sys
+bare = json.load( open( sys.argv[1] ) )
+touch = json.load( open( sys.argv[2] ) )
+bad = 0
+def check( cond, msg ):
+    global bad
+    print( ( "  PASS  " if cond else "  FAIL  " ) + msg )
+    if not cond: bad = 1
+
+check( all( lane["execution"]["rule"] == "bounded-low-risk" and
+            lane["execution"]["model"] == "gpt-5.6-luna" for lane in bare["lanes"] ),
+       "G-H bounded disjoint work reaches Luna" )
+check( all( lane["execution"]["rule"] in ( "complex-or-wide", "wide-contract-work" ) and
+            lane["execution"]["model"] == "gpt-5.6-sol" and
+            lane["execution"]["reasoning"] in ( "high", "xhigh" ) for lane in touch["lanes"] ),
+       "G-H cross-lane contract work reaches Sol" )
 sys.exit( bad )
 PY
 

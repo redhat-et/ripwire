@@ -112,6 +112,10 @@ E="$( route 'I am about to write one helper function for cache keys' )"
 case "$E" in *'status="recommend"'*'intent="reuse-one-symbol"'*'--exemplar='*) ok "one new symbol -> --exemplar";; *) no "reuse route wrong: $E";; esac
 F="$( route 'Find the code responsible for this retry timeout bug' )"
 case "$F" in *'status="recommend"'*'intent="locate-task"'*'--for='*) ok "locate/debug symptom -> --for";; *) no "locate route wrong: $F";; esac
+WT="$( route 'Find a small untested command-line behavior and add a regression gate for it' )"
+case "$WT" in *'status="recommend"'*'intent="write-tests"'*'--seams'*) ok "missing regression coverage -> --seams";; *) no "write-tests route wrong: $WT";; esac
+WT0="$( route 'The quarterly report mentions untested assumptions' )"
+case "$WT0" in *'intent="write-tests"'*) no "untested wording without a test-writing action routed to --seams: $WT0";; *) ok "untested prose alone does not route to --seams";; esac
 
 # ── the five surfaces that shipped without any routing coverage ────────────────────────────────────────
 # Each is asked for close to its own vocabulary, so each needs conjunctive evidence (the surface word AND
@@ -195,7 +199,7 @@ if command -v xmllint >/dev/null 2>&1; then xmllint --noout "$TMP/q1" 2>/dev/nul
 "$BIN" "$REPO" "$ROOT/test/fixture" --help-task='plan a feature' >/dev/null 2>"$TMP/multi.err"; rc=$?
 [ "$rc" -ne 0 ] && grep -qi 'single-root' "$TMP/multi.err" && ok "multi-root routing refuses" || no "multi-root routing did not refuse"
 for f in --verify --connect --expand --grep --grep-context --edit-check --from-trace --situ --pack-task --exemplar --for \
-         --edit-plan --dry-run --handles --legend --doctor --agent=codex --test-gate --slice --slice-flow --at --uses; do "$BIN" --help 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
+         --edit-plan --dry-run --handles --legend --doctor --agent=codex --test-gate --slice --slice-flow --at --uses --seams; do "$BIN" --help 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
 
 # ── byte-compat: the verify-claim template must emit the SHIPPED --verify grammar byte-exactly ─────────
 # (PLAN 2026-08-13 addendum: gate against the real verb's PARSER, never a copy of its syntax.)

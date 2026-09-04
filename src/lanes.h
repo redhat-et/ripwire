@@ -97,6 +97,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -206,6 +207,25 @@ struct LaneFileRow
     std::uint32_t hotspotRank = 0;     // 1-based among files with a non-zero hotspot score; 0 ⇒ emitted as null
 };
 
+struct ExecutionSignals
+{
+    std::size_t claims = 0, files = 0, maxCcx = 0, sumCcx = 0, ambiguousCalls = 0;
+    std::size_t blastReaches = 0, contractTouches = 0, conflicts = 0, untested = 0, testsTotal = 0;
+    std::uint32_t moduleSpan = 0;
+    bool blastCapped = false, testsCapped = false;
+};
+
+struct ExecutionRecommendation
+{
+    const char* policy    = "codex-lane/v1";
+    const char* model     = "gpt-5.6-terra";
+    const char* reasoning = "medium";
+    const char* rule      = "default-balanced";
+    const char* basis     = "structural-only";
+    ExecutionSignals signals;
+    std::vector<std::string> caveats;
+};
+
 struct Lane
 {
     std::string              id;            // "lane-0"… — stable, ordinal, and the landing-order tie-break key
@@ -224,6 +244,7 @@ struct Lane
     std::size_t              untested       = 0;
     std::vector<std::string> notes;
     std::uint32_t            moduleSpan     = 0;    // distinct call-graph modules (or files, for the edgeless)
+    ExecutionRecommendation  execution;             // advisory resource choice; never a semantic task verdict
 };
 
 struct RiskFileRow  { std::string path; std::uint32_t aSymbols = 0, bSymbols = 0; std::size_t pairCount = 0; };
@@ -237,6 +258,103 @@ struct PairRow
     std::vector<TouchRow>       contractTouch;
     std::size_t                 riskPairCount = 0;   // the raw same-file combination count the rows aggregate
 };
+
+inline ExecutionSignals executionSignals( const Lane& lane, const std::vector<PairRow>& pairs )
+{
+    ExecutionSignals out;
+    out.claims        = lane.claims.size();
+    out.files         = lane.files.size();
+    out.moduleSpan    = lane.moduleSpan;
+    out.blastReaches  = lane.blastReaches;
+    out.untested      = lane.untested;
+    out.testsTotal    = lane.testTotal;
+    out.blastCapped   = lane.blastCapped;
+    out.testsCapped   = lane.testsCapped;
+    for( const Claim& claim : lane.claims )
+    {
+        out.maxCcx = std::max( out.maxCcx, std::size_t( claim.ccx ) );
+        out.sumCcx += claim.ccx;
+        out.ambiguousCalls += claim.amb;
+    }
+    for( const PairRow& pair : pairs )
+    {
+        if( pair.a != lane.id && pair.b != lane.id )
+        {
+            continue;
+        }
+        out.conflicts += pair.conflicts.size();
+        for( const TouchRow& touch : pair.contractTouch )
+        {
+            out.contractTouches += std::size_t( touch.from == lane.id || touch.to == lane.id );
+        }
+    }
+    return out;
+}
+
+static inline void appendExecutionCaveats( ExecutionRecommendation& out, const ExecutionSignals& s )
+{
+    if( s.untested > 0 )
+    {
+        out.caveats.emplace_back( "untested-is-upper-bound" );
+    }
+    if( s.testsTotal == 0 )
+    {
+        out.caveats.emplace_back( "coverage-partial" );
+    }
+    if( s.ambiguousCalls > 0 || s.contractTouches > 0 )
+    {
+        out.caveats.emplace_back( "name-based-callgraph" );
+    }
+    if( s.blastCapped || s.testsCapped )
+    {
+        out.caveats.emplace_back( "truncated-evidence" );
+    }
+}
+
+inline ExecutionRecommendation recommendExecution( const ExecutionSignals& s )
+{
+    ExecutionRecommendation out;
+    out.signals = s;
+    const auto satisfied = []( std::initializer_list<bool> conditions )
+    {
+        return std::count( conditions.begin(), conditions.end(), true );
+    };
+
+    if( s.claims == 0 )
+    {
+        out.rule = "insufficient-claims";
+    }
+    else if( satisfied( { s.contractTouches > 0 && satisfied( { s.moduleSpan >= 2, s.blastReaches >= 20, s.untested > 0 } ) > 0,
+                           s.blastCapped, s.testsCapped, s.maxCcx >= 20, s.blastReaches >= 100, s.moduleSpan >= 5 } ) > 0 )
+    {
+        out.model = "gpt-5.6-sol";
+        out.reasoning = "xhigh";
+        out.rule = "wide-contract-work";
+    }
+    else if( satisfied( { s.contractTouches > 0, s.maxCcx >= 15, s.sumCcx >= 80, s.blastReaches >= 50,
+                          s.moduleSpan >= 4, s.ambiguousCalls >= 10 } ) > 0 )
+    {
+        out.model = "gpt-5.6-sol";
+        out.reasoning = "high";
+        out.rule = "complex-or-wide";
+    }
+    else if( satisfied( { s.claims <= 6, s.files <= 2, s.moduleSpan <= 1, s.maxCcx <= 6, s.blastReaches < 10,
+                          s.ambiguousCalls == 0, s.contractTouches == 0, s.conflicts == 0, !s.blastCapped, !s.testsCapped } ) == 10 )
+    {
+        out.model = "gpt-5.6-luna";
+        out.reasoning = s.testsTotal > 0 && s.untested == 0 ? "low" : "medium";
+        out.rule = "bounded-low-risk";
+    }
+    else if( satisfied( { s.moduleSpan >= 2, s.maxCcx >= 10, s.sumCcx >= 40, s.blastReaches >= 20,
+                          s.ambiguousCalls > 0, s.untested > 0, s.conflicts > 0 } ) > 0 )
+    {
+        out.reasoning = "high";
+        out.rule = "moderate-cross-module";
+    }
+
+    appendExecutionCaveats( out, s );
+    return out;
+}
 
 struct Warning
 {
@@ -1054,6 +1172,10 @@ inline PlanLanesResult computePlanLanes( const LanesInputs& in )
     {
         result.landingOrder.push_back( arms[idx].ref );
     }
+    for( Lane& lane : result.lanes )
+    {
+        lane.execution = recommendExecution( executionSignals( lane, result.pairs ) );
+    }
 
     buildWarnings( in, result );
     if( result.lanes.empty() )
@@ -1117,6 +1239,21 @@ inline void writeLaneFileRow( std::FILE* out, const LaneFileRow& f )
     }
 }
 
+inline void writeExecution( std::FILE* out, const ExecutionRecommendation& execution )
+{
+    const ExecutionSignals& s = execution.signals;
+    std::fprintf( out, "{\"policy\":\"%s\",\"model\":\"%s\",\"reasoning\":\"%s\",\"rule\":\"%s\",\"basis\":\"%s\","
+                       "\"signals\":{\"claims\":%zu,\"files\":%zu,\"module_span\":%u,\"max_ccx\":%zu,\"sum_ccx\":%zu,"
+                       "\"ambiguous_calls\":%zu,\"blast_reaches\":%zu,\"contract_touches\":%zu,\"conflicts\":%zu,"
+                       "\"untested\":%zu,\"tests_total\":%zu,\"blast_capped\":%s,\"tests_capped\":%s},\"caveats\":",
+                  execution.policy, execution.model, execution.reasoning, execution.rule, execution.basis,
+                  s.claims, s.files, s.moduleSpan, s.maxCcx, s.sumCcx, s.ambiguousCalls, s.blastReaches,
+                  s.contractTouches, s.conflicts, s.untested, s.testsTotal,
+                  s.blastCapped ? "true" : "false", s.testsCapped ? "true" : "false" );
+    writePathArray( out, execution.caveats );
+    std::fprintf( out, "}" );
+}
+
 inline void writeLane( std::FILE* out, const Lane& lane )
 {
     std::fprintf( out, "{\"id\":\"%s\",\"task\":\"%s\",\"claims\":{\"symbols\":[",
@@ -1147,6 +1284,8 @@ inline void writeLane( std::FILE* out, const Lane& lane )
                        "\"untested\":%zu,\"module_span\":%u,\"notes\":",
                   lane.testTotal, lane.testsCapped ? "true" : "false", lane.untested, lane.moduleSpan );
     writePathArray( out, lane.notes );
+    std::fprintf( out, ",\"execution\":" );
+    writeExecution( out, lane.execution );
     std::fprintf( out, "}" );
 }
 

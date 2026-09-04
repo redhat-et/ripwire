@@ -757,6 +757,12 @@ inline TaskRouteResult classify( std::string_view task, const std::string& root,
     addLexical( candidates, "reuse-one-symbol", "ripwire-reuse-first", "about-to-write one-symbol wording",
                 commandWithValue( root, "--exemplar=", task ), reuseScore, 10, 40 );
 
+    const int writeTestsScore = phraseScore( lower, { { "missing coverage", 8 }, { "no tests", 6 }, { "untested", 5 },
+                                                      { "regression gate", 4 }, { "add", 3 }, { "write", 3 },
+                                                      { "find", 2 }, { "cover", 2 } } );
+    addLexical( candidates, "write-tests", "ripwire-write-tests", "test-gap wording plus a test-writing action",
+                "ripwire " + shSingleQuote( root ) + " --seams", writeTestsScore, 8, 35 );
+
     const int locateScore = phraseScore( lower, { { "find the code", 8 }, { "locate", 7 }, { "responsible", 4 },
                                                   { "bug", 3 }, { "wrong output", 4 }, { "crash", 4 }, { "symptom", 3 } } );
     addLexical( candidates, "locate-task", "ripwire-find-bug", "code-location or symptom wording",

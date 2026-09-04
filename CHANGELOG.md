@@ -15,6 +15,15 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Added — `--plan-lanes` now recommends a Codex model and reasoning effort per lane
+
+Every lane carries an advisory `execution` object with a current Codex model, reasoning effort, the
+deterministic policy rule that selected them, and the complete structural signals used by that rule.
+The recommendation labels itself `basis="structural-only"`; partial test evidence, name-based call-graph
+resolution, and truncated evidence are disclosed as in-band caveats for the orchestrator to override.
+The additive JSON field keeps the top-level schema at `v: 1` and versions its policy independently as
+`codex-lane/v1`.
+
 ### Changed — `.gitignore` is honoured by default; `--no-ignore` restores the old walk
 
 ripwire is named for ripgrep, whose defining default is that ignored files are not searched. The crawl
@@ -86,7 +95,6 @@ the try handler's entry, aliases — is named in the legend instead of guessed. 
 `docs/EVALS.md` ("Flow-sensitive slice in the small"): 0 wrong of 85 hand-written sentinel use rows across
 53 functions, and the 57-commit `--since` labelled set unchanged at 35/35 and 22/22. Gate:
 `test/sliceflowsenscheck.sh`.
-
 ### Fixed — `--expand` no longer takes minutes on a file whose lines are hundreds of kilobytes
 
 Secret redaction (`redactSecrets`, on by default at every body-emission seam) was quadratic in LINE

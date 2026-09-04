@@ -145,7 +145,7 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines()
         "Reach for it BEFORE blind grep + whole-file reads. First call ~1s cold; after that warm, ~0.1s.",
         "- Orient on a task: `ripwire <dir> --for=\"<task in words>\"` — ranked, quality-annotated",
         "  signatures. Paste symbol/file names from the issue verbatim; named mentions get anchored.",
-        "- Everything at once under one token budget: `ripwire <dir> --pack-task=\"<task>\"`.",
+        "- One task: `--pack-task=\"<task>\"`; before parallel agents: `--plan-lanes=N --task=\"<goal>\"`, then read `lanes[].execution`.",
         "- Have a stack trace / build error: `ripwire <dir> --from-trace=FILE` (`-` = stdin) —",
         "  paste the error, don't paraphrase it into a query.",
         "- Who calls X: `--callers=SYM`. \"Is it safe to change X?\" needs the full blast radius:",
