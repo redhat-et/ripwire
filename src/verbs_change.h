@@ -85,9 +85,14 @@ std::optional<int> runAffected( const MainDispatch& d )
             // §M7 (W3FIX): resolveAffectedSeeds accepts file:name and path::scope::name too, so a bad item gets
             // the shared file-half diagnosis appended to this arm's own two-reading sentence (which explains
             // WHY the item was tried twice, and therefore has to come first).
+            // H6/F18: the item was tried as a PATH first, so the PATH near-miss comes first too — the
+            // pre-fix arm offered only selectorFaultClause's symbol suggestion and answered `--affected=tow.c`
+            // with "did you mean 'TOOLS'?" while `two.c` sat in the file list.
+            const std::string affectedNearPath = rw::nearestIndexedFileClause( ing, sel.badItem );
             std::fprintf( stderr, "ripwire: --affected: '%s' matches no indexed file path (as a path pattern) and no indexed "
-                                  "symbol (as a symbol name; file:name and path::scope::name also accepted)%s\n",
-                          sel.badItem.c_str(), rw::selectorFaultClause( ing, sel.badItem, "--affected=" ).c_str() );
+                                  "symbol (as a symbol name; file:name and path::scope::name also accepted)%s%s\n",
+                          sel.badItem.c_str(), affectedNearPath.c_str(),
+                          affectedNearPath.empty() ? rw::selectorFaultClause( ing, sel.badItem, "--affected=" ).c_str() : "" );
             return 1;
         }
         const std::vector<NodeId>& seeds = sel.seeds;
@@ -154,8 +159,9 @@ std::optional<int> runExercises( const MainDispatch& d )
     if( !sel.anyFileMatched )
     {
         std::fprintf( stderr, "ripwire: --exercises: no indexed file path matches '%.*s' (the argument is a path pattern, "
-                              "like --affected's; use --tree or --grep to find its spelling)\n",
-                      int( cfg.exercisesFile.size() ), cfg.exercisesFile.data() );
+                              "like --affected's; use --tree or --grep to find its spelling)%s\n",
+                      int( cfg.exercisesFile.size() ), cfg.exercisesFile.data(),
+                      rw::nearestIndexedFileClause( ing, cfg.exercisesFile ).c_str() );
         return 1;
     }
     if( sel.testFiles.empty() )
@@ -244,6 +250,17 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // lists client-repo impact when an evidence edge exists (per-repo history, joint graph).
         if( multiRoot )
         {
+            // H6: the list is resolved against the ONE merged index, so its validity is a root-independent
+            // fact — check it once, before any root's section is printed, rather than once per root (which
+            // would print the same refusal N times) or not at all (the pre-fix silent all-zero mask).
+            if( !cfg.situFiles.empty() )
+            {
+                const rw::ChangedList list = rw::changedMaskFromListChecked( ing, cfg.situFiles );
+                if( rw::cliRefusesFileList( ing, "--situ", root, cfg.situFiles, list ) )
+                {
+                    return 1;
+                }
+            }
             bool anyGit = false;
             std::vector<std::vector<char>> perRootChanged( ws.size() );
             for( std::uint32_t r = 0; r < ws.size(); ++r )
@@ -292,7 +309,15 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         std::vector<char> changed;
         if( !cfg.situFiles.empty() )
         {
-            changed = rw::changedMaskFromList( ing, cfg.situFiles );
+            // H6: the SAME refusal --test-gate takes over the SAME grammar. --situ used to read an
+            // unresolvable path as an all-zero mask and print "0 changed file(s) — nothing to analyze" at
+            // exit 0 — the false zero that tells an agent its edit has no blast radius.
+            rw::ChangedList list = rw::changedMaskFromListChecked( ing, cfg.situFiles );
+            if( rw::cliRefusesFileList( ing, "--situ", root, cfg.situFiles, list ) )
+            {
+                return 1;
+            }
+            changed = std::move( list.mask );
         }
         else
         {
@@ -315,9 +340,9 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         {
             // An unparseable FILES list REFUSES rather than reading as an all-zero mask ("your change
             // touches nothing") — the silent-zero defect and the refusal's whole argument live on
-            // testGateRefusesFileList in situ.h. Gate: testgaterefusecheck.sh.
+            // cliRefusesFileList in situ.h. Gate: testgaterefusecheck.sh.
             rw::ChangedList list = rw::changedMaskFromListChecked( ing, cfg.testGateFiles );
-            if( rw::testGateRefusesFileList( root, cfg.testGateFiles, list ) )
+            if( rw::cliRefusesFileList( ing, "--test-gate", root, cfg.testGateFiles, list ) )
             {
                 return 1;
             }

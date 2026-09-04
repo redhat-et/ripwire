@@ -950,6 +950,21 @@ inline std::string recallText( const std::string& root, const std::string& task,
 // Hand-rolled JSON (same jsonEscape + manual string-building as the other verbs). `diffOrEmpty` empty ⇒ git
 // diff. Returns "" ONLY when git is genuinely unavailable (not a git repo / git not installed) — a clean
 // working tree (zero changed files) returns a VALID result with all-empty arrays and a note field.
+// H6 (lens 6 F1): the MCP twin of --situ's FILE-list refusal. `situational_awareness{files:"src/nosuch.h"}`
+// used to answer all-empty arrays with a green `_fresh: ok` — the same false zero the CLI arm printed, and
+// the worse of the two, because a JSON result reads as an ANSWER to every caller that only checks for an
+// `error` key. Same text as the CLI (situ.h::fileListRefusalText) with the MCP field name in place of the
+// flag. Empty ⇒ the list is fine (or absent, i.e. the git-diff default).
+inline std::string situationFileListRefusal( const std::string& root, const std::string& diffOrEmpty )
+{
+    if( diffOrEmpty.empty() )
+    {
+        return {};
+    }
+    const IngestResult& ing = getIndex( root ).ing;
+    return fileListRefusalText( ing, "", "files", root, diffOrEmpty, changedMaskFromListChecked( ing, diffOrEmpty ) );
+}
+
 inline std::string situationDiffJson( const std::string& root, const std::string& diffOrEmpty )
 {
     const McpIndex&     ix  = getIndex( root );

@@ -14,6 +14,7 @@
 #include "prcontext.h"   // A3-F17b/A3-F13: reuse the ONE numstat-based mask builder (gitDiffChangedMaskNumstat)
 #include "gitstamp.h"    // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor
 #include "testmap.h"     // §P11.4: TestRunnerIndex / runAttr — the run= hint on a named test row
+#include "didyoumean.h"  // H6: nearestIndexedFileClause — the ONE path near-miss suggester, shared with the MCP arm
 #include "serialize.h"   // L2: jsonStr() — writeTestGateReportJson's escaping (self-contained: don't rely on
                          // include-order in whichever TU pulls situ.h in first)
 #include "pageview.h"    // §A3a: the ONE paging/truncation vocabulary — the
@@ -152,39 +153,64 @@ inline std::vector<char> changedMaskFromList( const IngestResult& ing, std::stri
     return changedMaskFromListChecked( ing, csv ).mask;
 }
 
-// The --test-gate FILES refusal (def-over-decl lane, 2026-08-24): `--test-gate=da61bac..HEAD` — a ref range
-// the verb has no grammar for — used to fall through resolveFileSuffix item by item into an all-zero mask
-// and report changed="0" at exit 0, which a caller reads as "your change touches nothing" and skips every
-// test. Non-negotiable #3: that zero meant "cannot parse", not "none found". House standard is
-// --quality-delta's refusal (qdrefpaircheck arms (C)): exit 1, the offending token NAMED verbatim, an
-// adjacent probe offered. Per-token, so a mixed list cannot hide one bad item behind a good one — the
-// silent-drop variant of the same zero. Returns true when the list was refused (message already on stderr;
-// the caller exits 1). Gate: testgaterefusecheck.sh.
-inline bool testGateRefusesFileList( const std::string& root, std::string_view csv, const ChangedList& list )
+// THE FILE-LIST REFUSAL, for every verb that takes one (def-over-decl lane 2026-08-24, widened to the family
+// by H6 on 2026-09-04). `--test-gate=da61bac..HEAD` — a ref range the verb has no grammar for — used to fall
+// through resolveFileSuffix item by item into an all-zero mask and report changed="0" at exit 0, which a
+// caller reads as "your change touches nothing" and skips every test. Non-negotiable #3: that zero meant
+// "cannot parse", not "none found". House standard is --quality-delta's refusal (qdrefpaircheck arms (C)):
+// exit 1, the offending token NAMED verbatim, an adjacent probe offered. Per-token, so a mixed list cannot
+// hide one bad item behind a good one — the silent-drop variant of the same zero.
+//
+// WHY IT TAKES THE FLAG NAME NOW. --test-gate was the only member wired to it; --situ, running the SAME
+// ChangedList over the SAME grammar, kept the lenient reading and answered `--situ=src/nosuch.h` with
+// "0 changed file(s) — nothing to analyze" at exit 0 while --affected/--test-gate/--exercises refused the
+// identical path (lens 6 F1). That is not a per-verb policy, it is one arm that was never joined up: an
+// agent that misspells the file it just edited must not be told its edit has no blast radius. So the
+// message is parameterised by the flag (or the MCP field) instead of hard-coding one member's spelling, and
+// the returned string is what the MCP twin puts in its -32602 — one refusal, three surfaces.
+//
+// `lead` is the surface's own opening ("ripwire: " on the CLI, "" inside a JSON-RPC error message, which is
+// already attributed by its envelope); `selector` is how THAT surface spells the argument ("--situ",
+// "--test-gate", or the MCP field name "files"). Returns the refusal text (no trailing newline), or "" when
+// the list is fine.
+// Gates: testgaterefusecheck.sh (the --test-gate arms), fileselectorrefusecheck.sh (the family).
+inline std::string fileListRefusalText( const IngestResult& ing, std::string_view lead, std::string_view selector,
+                                        const std::string& root, std::string_view csv, const ChangedList& list )
 {
+    const std::string prefix( lead );
+    const std::string name( selector );
     if( list.itemCount == 0 )
     {
-        std::fprintf( stderr, "ripwire: --test-gate=%.*s names no files — it needs changed files, e.g. --test-gate=src/cli.h\n",
-                      int( csv.size() ), csv.data() );
-        return true;
+        return prefix + name + "=" + std::string( csv ) + " names no files — it needs changed files, e.g. "
+             + name + "=src/cli.h";
     }
     if( list.badItem.empty() )
     {
-        return false;
+        return {};
     }
     if( list.badItem.find( ".." ) != std::string::npos )
     {
         // The found shape: a git ref range (A..B or A...B). The adjacent probe expands the range into the
         // FILES this verb actually takes; echoed verbatim, so both spellings paste back into a working command.
-        std::fprintf( stderr, "ripwire: --test-gate: '%s' matches no indexed file — --test-gate takes FILES (F1,F2), never a git ref range; "
-                              "to gate a COMMITTED range, expand it into its changed files: "
-                              "--test-gate=\"$(git -C %s diff --name-only %s | paste -sd, -)\"\n",
-                      list.badItem.c_str(), root.c_str(), list.badItem.c_str() );
-        return true;
+        return prefix + name + ": '" + list.badItem + "' matches no indexed file — " + name
+             + " takes FILES (F1,F2), never a git ref range; to gate a COMMITTED range, expand it into its changed files: "
+             + name + "=\"$(git -C " + root + " diff --name-only " + list.badItem + " | paste -sd, -)\"";
     }
-    std::fprintf( stderr, "ripwire: --test-gate: '%s' matches no indexed file — FILES are path substrings over the indexed tree; "
-                          "files the ingest skipped are not searchable (the --skipped verb lists exactly which, with reasons)\n",
-                  list.badItem.c_str() );
+    return prefix + name + ": '" + list.badItem + "' matches no indexed file — FILES are path substrings over "
+           "the indexed tree; files the ingest skipped are not searchable (the --skipped verb lists exactly which, with "
+           "reasons)" + nearestIndexedFileClause( ing, list.badItem );
+}
+
+// The CLI wrapper: prints the refusal and returns true when the list was refused (the caller exits 1).
+inline bool cliRefusesFileList( const IngestResult& ing, std::string_view flag, const std::string& root,
+                                std::string_view csv, const ChangedList& list )
+{
+    const std::string message = fileListRefusalText( ing, "ripwire: ", flag, root, csv, list );
+    if( message.empty() )
+    {
+        return false;
+    }
+    std::fprintf( stderr, "%s\n", message.c_str() );
     return true;
 }
 

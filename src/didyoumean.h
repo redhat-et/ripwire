@@ -134,6 +134,59 @@ inline std::string_view nearestNameByEditDistance( It first, It last, std::strin
     return best.n;
 }
 
+// The nearest INDEXED FILE PATH to a typed path, by bounded edit distance over the BASENAME — empty when
+// nothing in the corpus is close enough. The comparison is basename-only on purpose: a caller who got the
+// directory prefix wrong asked a different question (answered by the "a path SUFFIX is enough" clause the
+// callers append), while the fault this suggests over is a mistyped file NAME. The FULL path is what comes
+// back, because the full path is what pastes into a retry.
+//
+// ONE implementation for both surfaces (H6/F11, capture-audit 2026-09-04). The MCP `cochange` refusal grew
+// this first ("file not found: 'src/grap.h' (did you mean './src/graph.h'?)") and the CLI FILE-list
+// selectors — --situ / --test-gate / --affected / --exercises / --cochange — had none at all, so the same
+// typo got a helpful answer over MCP and a bare "file not found" from the CLI. It sits beside didYouMean()
+// rather than inside either surface's refusal header for exactly the reason that header exists: a suggester
+// per surface is two suggesters that drift.
+inline std::string_view nearestIndexedFile( const IngestResult& ing, std::string_view typed )
+{
+    constexpr int kMaxEditDistance = 3;   // same bandwidth cutoff as didYouMean
+    const auto    baseName = []( std::string_view p ) -> std::string_view
+    {
+        const std::size_t slash = p.rfind( '/' );
+        return slash == std::string_view::npos ? p : p.substr( slash + 1 );
+    };
+
+    const std::string_view typedBase = baseName( typed );
+    std::string_view       best;
+    int                    bestDist = kMaxEditDistance + 1;
+    for( const std::string& indexedPath : ing.files )
+    {
+        const int dist = boundedEditDistance( baseName( indexedPath ), typedBase, kMaxEditDistance );
+        if( dist > kMaxEditDistance )
+        {
+            continue;
+        }
+        if( dist < bestDist || ( dist == bestDist && ( best.empty() || indexedPath < best ) ) )   // deterministic tie-break
+        {
+            bestDist = dist;
+            best     = indexedPath;
+        }
+    }
+    return best;
+}
+
+// " (did you mean 'PATH'? a path SUFFIX is enough)" for a FILE selector that matched nothing, or "" when no
+// indexed path is close. Appended by each FILE-selector verb to its OWN sentence — the sentence differs per
+// verb (each explains what its argument grammar is); the suggestion does not.
+inline std::string nearestIndexedFileClause( const IngestResult& ing, std::string_view typed )
+{
+    const std::string_view best = nearestIndexedFile( ing, typed );
+    if( best.empty() || best == typed )
+    {
+        return {};
+    }
+    return " (did you mean '" + std::string( best ) + "'? a path SUFFIX is enough)";
+}
+
 inline std::string didYouMean( const IngestResult& ing, std::string_view name )
 {
     constexpr int kMaxEditDistance = 3;   // bandwidth cutoff (§P12.1): beyond this a "hint" is noise, not help

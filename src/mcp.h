@@ -1342,9 +1342,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // branch runs (the shared shapeRefusal gate above), rather than falling through to that
                     // default — the default is a correct answer to a question the caller did not ask.
                     const std::string src = !diff.empty() ? diff : files;
-                    const std::string j   = situationDiffJson( path, src );
-                    resp = j.empty() ? errResult( -32602, "no changed files given and no git diff" )
-                                     : textResult( j );
+                    // H6: a `files`/`diff` list naming nothing indexed REFUSES here, before the report is
+                    // built — the pre-fix arm answered it with all-empty arrays and a green _fresh, which a
+                    // caller checking only for an `error` key reads as "your edit has no blast radius".
+                    const std::string listRefusal = situationFileListRefusal( path, src );
+                    const std::string j           = listRefusal.empty() ? situationDiffJson( path, src ) : std::string();
+                    resp = !listRefusal.empty() ? errResultMsg( -32602, listRefusal )
+                         : j.empty()            ? errResult( -32602, "no changed files given and no git diff" )
+                                                : textResult( j );
                 }
                 else if( name == "mentions" && !path.empty() && !symbol.empty() )
                 {

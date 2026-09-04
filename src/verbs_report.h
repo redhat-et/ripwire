@@ -1285,7 +1285,17 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         if( !cfg.cochangeFile.empty() )                                    // partners of one file → shared core (gitmine.h)
         {
             const std::uint32_t fid = resolveFileSuffix( ing, cfg.cochangeFile );
-            if( fid == UINT32_MAX ) { std::fprintf( stderr, "ripwire --cochange: file not found: %.*s\n", int( cfg.cochangeFile.size() ), cfg.cochangeFile.data() ); return 1; }
+            if( fid == UINT32_MAX )
+            {
+                // F11: the CLI arm was the thin one — "file not found: src/grap.h" and nothing else, while
+                // the MCP `cochange` twin already named the nearest indexed path and said a suffix is enough.
+                // One suggester (didyoumean.h::nearestIndexedFileClause) now serves both.
+                std::fprintf( stderr, "ripwire --cochange: file not found: %.*s — it takes ONE indexed file path, e.g. "
+                                      "--cochange=src/graph.h%s\n",
+                              int( cfg.cochangeFile.size() ), cfg.cochangeFile.data(),
+                              rw::nearestIndexedFileClause( ing, cfg.cochangeFile ).c_str() );
+                return 1;
+            }
             // multi-root §5: the probed file belongs to exactly ONE root — mine that repo only (co-change is
             // per-repo by construction; partners in another root are undefined and never synthesized).
             const std::uint32_t fidRoot  = multiRoot ? ing.fileRoot[ fid ] : UINT32_MAX;
