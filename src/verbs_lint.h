@@ -1063,7 +1063,7 @@ inline constexpr std::string_view kPatternLegend =
                          "FLOOR, not a total, when EITHER hits_capped=\"1\" (engine match limit reached) or ellipsis_capped=\"1\"; "
                          "the latter means an ellipsis probe gave up on ellipsis_skipped= candidate nodes whose sibling run exceeded "
                          "ellipsis_bound, so a node that would have matched can be missing (ellipsis_skipped= counts ABANDONS and is "
-                         "itself a floor on those nodes). raise the default cap with limit=N (offset=M pages) -->";
+                         "itself a floor on those nodes). raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->";
 
 // R2 — everything ONE pattern run answers with before a byte is emitted, as one structured return (the
 // same shape, and the same reason, as MatchQueryOutcome above). A non-empty `refusal` is the whole result:
@@ -1291,7 +1291,7 @@ std::optional<int> runLint( const MainDispatch& d )
                          "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (engine match limit reached). "
                          "auto_captured=\"1\" ⇒ the query bound no @capture and ripwire appended `@m` to its single top-level pattern. "
                          "grammars= names every grammar the query compiled against; eligible_files=/of_files= are corpus files in that "
-                         "language set vs total indexed files. raise the default cap with limit=N (offset=M pages) -->" );
+                         "language set vs total indexed files. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->" );
             std::printf( "<match hits=\"%zu\"%s hits_capped=\"%d\"%s grammars=\"%s\" eligible_files=\"%zu\" of_files=\"%zu\"%s>",
                          ms.size(),
                          pageDisclosure( mpab, sizeof( mpab ), matchShown, ms.size(), matchPage.end,
@@ -1821,7 +1821,7 @@ std::optional<int> runLint( const MainDispatch& d )
                      "Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. "
                      "A rule that spends its whole budget carries capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
                      "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one rule is a floor. "
-                     "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages). "
+                     "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). "
                      "On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed "
                      "them, absent an explicit limit=) — a different fact from the per-rule capped=\"1\" above, which is a MATCH-BUDGET "
                      "floor on one rule's own count=; findings= is always the true total either way. "

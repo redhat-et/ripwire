@@ -2050,7 +2050,7 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
                        "so with complete= present a ref absent from the rows genuinely lacks the symbol in its committed tree. "
                        "Binary blobs are outside the claim (a text symbol cannot occur in one); an oversized TEXT blob suppresses "
                        "the claim instead of being silently skipped. Its ABSENCE claims nothing. "
-                       "raise the default cap with limit=N (offset=M pages) -->" );
+                       "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->" );
     char pab[ kPageDisclosureCap ];
     // §A7(iii): refs_scanned=, not refs=. --stray-content and --abi both spell the MATCHED set refs=; this one
     // counted every branch the sweep READ (73 here, matched or not) under the same attribute name — one noun,

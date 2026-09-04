@@ -926,7 +926,7 @@ inline constexpr const char* kNonLocalStateLegend =
     "reads the cell and a callee is what writes it "
     "via=the nearest callee whose own body touches the cell (transitive cells; exactly one of at= or via= is present). "
     "cells=cells found in the corpus functions=functions reaching at least one cell "
-    "shown=rows printed capped=1 when rows were dropped; raise the default cap with limit=N (offset=M pages), "
+    "shown=rows printed capped=1 when rows were dropped; raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it), "
     "which also prints total= has_more= next_offset= offset= limit= "
     "unanalyzed_langs=indexed languages this lens does NOT analyse, so their files contribute NO cells and NO "
     "rows; the analysis covers C++, ObjC and Python, the languages whose read and write use sites the index "

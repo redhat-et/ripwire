@@ -203,9 +203,17 @@ page_verb(){
     local shownattr="${SHOWNATTR:-shown}"
     local plain p0 p3 p6 pend n0 n3
 
-    # (E) un-paginated run leaks no paging attribute (byte-neutral posture; see the header's exception).
+    # (E) un-paginated run leaks no paging attribute (byte-neutral posture; see the header's exception) —
+    #     UNLESS its default cap cut rows: M2 (arm (L) below) then REQUIRES the paging half on the cut root,
+    #     so this arm reads the root's capped bit first and asserts the matching posture.
     plain="$( run "$@" )"
-    if printf '%s' "$plain" | head -c 4000 | grep -qE 'has_more="|next_offset="|(^|[[:space:]])offset="'; then
+    local plainroot; plainroot="$( printf '%s' "$plain" | perl -0pe 's#<!--.*?-->##gs' | grep -oE '<[a-zA-Z][a-zA-Z_-]*( [^>]*)?>' | head -1 )"
+    local cappedattr="capped"; [ "$shownattr" != "shown" ] && cappedattr="${shownattr#shown_}_capped"
+    if printf '%s' "$plainroot" | grep -qE " ${cappedattr}=\"1\""; then
+        printf '%s' "$plainroot" | grep -qE 'has_more="|next_offset="' \
+            && ok "$label: un-paginated run is CUT (capped=1) and carries the paging half (M2)" \
+            || no "$label: un-paginated run is CUT (capped=1) but carries no paging half — an agent cannot page from it (M2)"
+    elif printf '%s' "$plain" | head -c 4000 | grep -qE 'has_more="|next_offset="|(^|[[:space:]])offset="'; then
         no "$label: un-paginated run leaked paging attrs (must stay pre-P8 byte-shape)"
     else
         ok "$label: un-paginated run carries no paging attrs"
@@ -547,6 +555,132 @@ for spec in "hotspots:--hotspots" "cochange:--cochange" "whereis:--whereis=main"
         && ok "$label: bare-run legend names the raise flag (§A10.1)" \
         || no "$label: bare-run legend still silent about --limit"
 done
+
+# ── (L) M2 (capture-audit 2026-09-04, lens 2 / lens 8 #5): the paging QUINTET whenever a window CUT rows,
+#     never only under an explicit --limit. Measured on the audited binary: `--impact=X` (default window)
+#     printed `shown="40" capped="1"` and nothing else; only `--impact=X --limit=10` carried
+#     total=/has_more=/next_offset=/offset=/limit=. An agent handed a default-window answer therefore could
+#     not page from it without first guessing the verb's private total name and re-issuing the call with a
+#     --limit it had to invent. The impact/grep/hotspots legends meanwhile described a `limit="0"` root
+#     attribute that the bare run never emitted — a legend clause for a never-emitted attribute.
+#
+#     THE RULE (pageview.h, THE TRUNCATION VOCABULARY rule 3, amended): capped="1" ⇒ the paging half
+#     (total= has_more= next_offset= offset= limit=) is on the SAME element, regardless of how the window
+#     was set; limit="0" is then the documented sentinel for "no explicit --limit". Roots that window a
+#     noun-prefixed PRIMARY listing (<noun>_capped="1", rule 1's exception) carry the same paging half.
+#     And a legend may only describe limit="0" on a document that actually emits it.
+#
+#     FAMILY, NOT INSTANCE: the verb universe is read from the shipped --help's "HONORED by:" paragraph, and
+#     every member must have an invocation in the table below — a verb that joins honorsPaging() without a
+#     row here reds the arm until it is enumerated, which is the whole point of deriving the universe.
+echo "--- (L) capped=\"1\" ⇒ the paging quintet, on the DEFAULT window (M2) ---"
+python3 - "$BIN" "$ROOT" <<'PYL'
+import re, subprocess, sys
+BIN, ROOT = sys.argv[1], sys.argv[2]
+helptxt = subprocess.run( [ BIN, "--help" ], capture_output=True, text=True ).stdout
+m = re.search( r'HONORED by:(.*?)Emit at most', helptxt, re.S )
+if not m:
+    print( "  FAIL  (L) --help has no 'HONORED by: ... Emit at most' paragraph — the verb universe cannot be derived" ); sys.exit( 1 )
+universe = []
+for tok in re.findall( r'--[a-z-]+', m.group( 1 ) ):
+    if tok not in universe: universe.append( tok )
+# invocation per honoring verb (this repo as the corpus); PRIMARY = the noun-prefixed listing the window takes
+TABLE = {
+    "--deps":               ( [ "--deps" ], None ),
+    "--callers":            ( [ "--callers=escapeXml" ], None ),
+    "--callees":            ( [ "--callees=serialize" ], None ),
+    "--tree":               ( [ "--tree" ], None ),
+    "--lint":               ( [ "--lint" ], None ),
+    "--hotspots":           ( [ "--hotspots" ], None ),
+    "--clones":             ( [ "--clones" ], None ),
+    "--cochange":           ( [ "--cochange" ], None ),
+    "--owners":             ( [ "--owners" ], None ),
+    "--communities":        ( [ "--communities" ], "modules" ),
+    "--community":          ( [ "--community=1" ], None ),
+    "--doc-drift":          ( [ "--doc-drift" ], None ),
+    "--whereis":            ( [ "--whereis=escapeXml" ], None ),
+    "--grep":               ( [ "--grep=escapeXml" ], None ),
+    "--regex":              ( [ "--regex=escape\\w+" ], None ),
+    "--match":              ( [ "--match=(call_expression)" ], None ),
+    "--pattern":            ( [ "--pattern=rankGraphTeleport($A, $B, $C)" ], None ),
+    "--impact":             ( [ "--impact=escapeXml" ], None ),
+    "--uses":               ( [ "--uses=escapeXml" ], None ),
+    "--exercises":          ( [ "--exercises=test/clicheck.sh" ], None ),
+    "--seams":              ( [ "--seams" ], None ),
+    "--zoom":               ( [ "--zoom" ], None ),
+    "--external-surface":   ( [ "--external-surface" ], None ),
+    "--dead-code":          ( [ "--dead-code" ], None ),
+    "--mentions":           ( [ "--mentions=escapeXml" ], None ),
+    "--graph-query":        ( [ '--graph-query=name("main")' ], None ),
+    "--stray-content":      ( [ "--stray-content" ], None ),
+    "--test-gate":          ( [ "--test-gate" ], "untested" ),
+    "--readability":        ( [ "--readability" ], None ),
+    "--ensemble":           ( [ "--ensemble" ], "syms" ),
+    "--quality-panel":      ( [ "--quality-panel" ], "syms" ),
+    "--context-ratio":      ( [ "--context-ratio" ], "syms" ),
+    "--nonlocal-state":     ( [ "--nonlocal-state" ], None ),
+    "--comment-coherence":  ( [ "--comment-coherence" ], None ),
+    "--naming-consistency": ( [ "--naming-consistency" ], None ),
+    "--safe-delete":        ( [ "--safe-delete=escapeXml" ], None ),
+}
+fail = 0
+missing = [ v for v in universe if v not in TABLE ]
+if missing:
+    print( "  FAIL  (L) honoring verb(s) in --help with no invocation in this arm's table — enumerate them: " + " ".join( missing ) ); fail = 1
+else:
+    print( f"  PASS  (L) every one of the {len(universe)} --help-listed paging verbs has an invocation in the table" )
+LEAD = re.compile( r'\A(?:\s*<!--.*?-->)+', re.S )
+QUINTET = [ "total", "has_more", "next_offset", "offset", "limit" ]
+checked = 0
+for verb in universe:
+    if verb not in TABLE: continue
+    args, primary = TABLE[ verb ]
+    doc = subprocess.run( [ BIN, ROOT ] + args, capture_output=True, text=True, errors="replace" ).stdout
+    lead = LEAD.match( doc )
+    legend = lead.group( 0 ) if lead else ""
+    body = doc[ len( legend ): ]
+    r = re.search( r'<([a-zA-Z][\w-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*/?>', body )
+    if not r:
+        print( f"  FAIL  (L) {verb}: no root element in the bare run (exit shape changed?)" ); fail = 1; continue
+    tag, attrs = r.group( 1 ), r.group( 2 )
+    def has( a ): return re.search( r'\s' + re.escape( a ) + r'="', attrs ) is not None
+    def val( a ):
+        mm = re.search( r'\s' + re.escape( a ) + r'="([^"]*)"', attrs );  return mm.group( 1 ) if mm else None
+    cut = val( "capped" ) == "1" or ( primary is not None and val( primary + "_capped" ) == "1" )
+    if not cut:
+        # nothing was cut on this corpus: the paging half must then be ABSENT (byte-neutral bare run)
+        leaked = [ a for a in [ "has_more", "next_offset" ] if has( a ) ]
+        if leaked:
+            print( f"  FAIL  (L) {verb}: bare run cut nothing yet leaks {leaked} on <{tag}>" ); fail = 1
+        else:
+            print( f"  ..    (L) {verb}: bare run cut nothing on this corpus — quintet correctly absent" )
+        continue
+    checked += 1
+    lacking = [ a for a in QUINTET if not has( a ) ]
+    if not lacking and val( "has_more" ) != "1":
+        print( f"  FAIL  (L) {verb}: <{tag}> capped on the default window (offset 0) but has_more=\"{val('has_more')}\" — rows were cut, so there IS more" ); fail = 1
+    if lacking:
+        print( f"  FAIL  (L) {verb}: <{tag}> is capped on the default window but lacks {lacking} — an agent cannot page from this answer" ); fail = 1
+    else:
+        print( f"  PASS  (L) {verb}: <{tag}> capped on the default window carries total/has_more/next_offset/offset/limit" )
+    if val( "limit" ) is not None and val( "limit" ) != "0":
+        print( f"  FAIL  (L) {verb}: bare run emits limit=\"{val('limit')}\" — the no-explicit-limit sentinel is limit=\"0\"" ); fail = 1
+    # a legend may describe limit="0" only where the document emits it
+    if 'limit="0"' in legend and val( "limit" ) != "0":
+        print( f"  FAIL  (L) {verb}: legend describes limit=\"0\" but the capped root does not carry it" ); fail = 1
+if checked == 0:
+    print( "  FAIL  (L) no paging verb was capped on this corpus — the arm asserted nothing" ); fail = 1
+else:
+    print( f"  ..    (L) {checked} verb(s) were capped on the default window" )
+# mutation: the assertion shape can fail
+mut = '<impact of="x" shown="40" capped="1">'
+if re.search( r'\sshown="', mut ) and not re.search( r'\snext_offset="', mut ):
+    print( "  PASS  (L) mutation: a capped root without next_offset= IS detected" )
+else:
+    print( "  FAIL  (L) mutation: the quintet assertion cannot see a bare capped root" ); fail = 1
+sys.exit( fail )
+PYL
+[ $? = 0 ] || fail=1
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

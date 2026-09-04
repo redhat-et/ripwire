@@ -304,10 +304,10 @@ inline std::string callHierarchyLegendOpen( bool wantCallers )
 // clause above already follows: a call never pays for vocabulary it cannot emit.
 inline constexpr const char* kNeighbourCapLegend =
     "shown= is how many rows this answer PRINTED and capped=\"1\" says a default display cap dropped some; "
-    "count= above stays the true total, never the page's length. Raise the default cap with limit=N "
-    "(offset=M pages, which also adds total=/has_more=/next_offset= so a paging loop can terminate); on the "
-    "root, limit=\"0\" means no explicit limit was given and the verb's own default page size shaped the "
-    "window — never a zero-row page. ";
+    "count= above stays the true total, never the page's length. A cut answer also carries total=/has_more=/"
+    "next_offset= so a paging loop can continue from it: raise the default cap with limit=N (offset=M pages); "
+    "on the root, limit=\"0\" means no explicit limit was given and the verb's own default page size shaped "
+    "the window — never a zero-row page. ";
 
 // `active` is pageDisclosure()'s own activity decision, passed in rather than re-derived, so the clause and
 // the attributes it defines can never disagree about whether they are present.

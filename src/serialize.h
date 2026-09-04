@@ -5620,7 +5620,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     w.write( "<!-- ripwire deps: file-to-file #include/import view, heaviest transitive cone first. files= (root) = files with "
              "at least one dependency edge (this listing's own denominator); health files= = the whole indexed corpus; "
              "health dep_files= = the dependency-CAPABLE subset of it (the ccd/acd/nccd denominator). "
-             "raise the default cap with limit=N (offset=M pages). -->" );
+             "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
     // --pack-top-n (default 40) while files= counted every file with an include — 40 rows under files="179"

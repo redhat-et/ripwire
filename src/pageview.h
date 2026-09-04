@@ -53,6 +53,14 @@
 //                           never a count (--abi used to print the dropped-row COUNT under this name; that
 //                           count is `dropped=` now). If a verb emits no shown=, it emits no capped= either
 //                           (--skill-scan emits the pair only on a capped scan; that is conformant).
+//                           M2 (capture-audit 2026-09-04): capped="1" ⇒ the paging half (rule 6) is on the
+//                           SAME element, HOWEVER the window was set — a default display cap included. The
+//                           audited binary printed `shown="40" capped="1"` and nothing else on a bare
+//                           --impact, so an agent could not page from the answer it was handed; the quintet
+//                           appeared only once it re-issued the call with a --limit it had to invent. Now a
+//                           cut listing always says total=, has_more=, next_offset= (and limit="0", rule 7).
+//                           On a page PAST THE END (offset ≥ total) shown="0" capped="1" has_more="0": the
+//                           bit compares the page to the total, nothing was cut — the offset skipped it all.
 //
 //   4. <noun>_capped="1"    with NO shown_<noun>= in the element: the TOTAL ITSELF is a floor — the scan or
 //      (floor marker)       budget stopped before it could finish counting, so <noun>= is a lower bound.
@@ -69,11 +77,13 @@
 //                           listing. A secondary listing in the same report never gets paging attributes —
 //                           it discloses through its own shown_<noun>=/<noun>_capped= pair.
 //
-//   7. limit="0" on OUTPUT  (§B12.4) the defined sentinel for "--offset was given WITHOUT --limit": the
-//                           verb's own default page size shaped the window. It is never a zero-row page —
-//                           the INPUT flag refuses --limit=0 — and both dialects share it (the two PageSyntax
-//                           tables print the same value). Documented user-side in --help's --limit paragraph
-//                           and, IN BAND, in kPageRaiseCapClause below.
+//   7. limit="0" on OUTPUT  (§B12.4) the defined sentinel for "no explicit --limit was given": the verb's
+//                           own default page size shaped the window (--offset alone, or — M2 — a bare run
+//                           whose default cap cut rows). It is never a zero-row page — the INPUT flag refuses
+//                           --limit=0 — and both dialects share it (the two PageSyntax tables print the same
+//                           value). Documented user-side in --help's --limit paragraph and, IN BAND, in
+//                           kPageRaiseCapClause below. Before M2 the bare run never emitted it, so three
+//                           legends described an attribute no bare document carried.
 // ============================================================================================================
 
 namespace rw
@@ -89,8 +99,9 @@ namespace rw
 // fragment two verbs SHARE rather than one every verb reads. Anything adopting it gets rule 7 for free.
 // Trailing space-free and punctuation-free so a caller decides whether ". " or " " follows.
 inline constexpr const char* kPageRaiseCapClause =
-    "raise the default cap with limit=N (offset=M pages); on the root, limit=\"0\" means no explicit limit was "
-    "given and the verb's own default page size shaped the window — never a zero-row page";
+    "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a "
+    "paging loop can continue from it); on the root, limit=\"0\" means no explicit limit was given and the verb's "
+    "own default page size shaped the window — never a zero-row page";
 
 // The window over an ALREADY-SORTED result of `total` rows. Half-open [begin,end). Default (limit<=0) is the
 // whole thing from `off`, so an un-paginated caller is byte-unchanged. Deterministic: because the row list is
@@ -164,13 +175,17 @@ struct PageDisclosureValues
 inline PageDisclosureValues computePageDisclosure( std::size_t rowsShown, std::size_t rowTotal, std::size_t windowEnd,
                                                     int limit, int offset, bool discloseCap ) noexcept
 {
-    const bool paging = limit > 0 || offset > 0;
-    if( !paging && !discloseCap )
+    const bool explicitWindow = limit > 0 || offset > 0;
+    if( !explicitWindow && !discloseCap )
     {
         return { false, 0, false, 0, 0, 0, 0 };
     }
 
+    // M2 (capture-audit 2026-09-04, rule 3): the paging half rides whenever the listing was CUT, not only
+    // when the caller spelled a window — a default display cap is a window too, and the agent holding
+    // that answer needs next_offset= exactly as much. `paging` therefore means "emit the paging half".
     const unsigned capped  = rowsShown < rowTotal ? 1u : 0u;
+    const bool     paging  = explicitWindow || capped != 0u;
     const unsigned hasMore = paging && windowEnd < rowTotal ? 1u : 0u;
     return { true, capped, paging, hasMore, hasMore ? windowEnd : rowTotal,
              offset > 0 ? offset : 0, limit > 0 ? limit : 0 };
@@ -184,10 +199,11 @@ inline PageDisclosureValues computePageDisclosure( std::size_t rowsShown, std::s
 //       and it is the ONE deliberate break in a capping verb's pre-§P8 un-paginated byte shape. Pass
 //       `discloseCap=false` on a verb that never capped, to keep its opening tag byte-identical.
 //
-//   paging half — ` total="T" has_more="0|1" next_offset="N" offset="M" limit="L"`, emitted only when
+//   paging half — ` total="T" has_more="0|1" next_offset="N" offset="M" limit="L"`, emitted when
 //       --limit/--offset is active (and then the cap half is forced on too, so `shown=` is never missing
-//       from a page). This is the six-attribute vocabulary --lint established. has_more/next_offset are what
-//       let a paging loop TERMINATE.
+//       from a page) AND — M2 — whenever the cap half says capped="1", so a default-window answer that cut
+//       rows is pageable without a second guessed call (limit="0" then, rule 7). This is the six-attribute
+//       vocabulary --lint established. has_more/next_offset are what let a paging loop TERMINATE.
 //
 // `windowEnd` is the half-open end of the emitted window (pageWindow().end), so next_offset is the exact
 // offset of the next unseen row; with nothing left it reports the total (--lint's convention).
@@ -270,9 +286,11 @@ inline const char* pagingDisclosure( char* buf, std::size_t bufCap, std::size_t 
                                      std::size_t windowEnd, int limit, int offset,
                                      const PageSyntax& syn = kXmlPageSyntax ) noexcept
 {
-    if( limit <= 0 && offset <= 0 ) { buf[0] = '\0';  return buf; }
-
+    // M2: a CUT primary listing (windowEnd < rowTotal — the caller's own <noun>_capped="1") carries the
+    // paging half on a bare run too, for the same reason pageDisclosure's cap half now does.
     const bool hasMore = windowEnd < rowTotal;
+    if( limit <= 0 && offset <= 0 && !hasMore ) { buf[0] = '\0';  return buf; }
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
     std::snprintf( buf, bufCap, syn.pagingOnly, rowTotal, hasMore ? syn.yes : syn.no,

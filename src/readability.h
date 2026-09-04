@@ -237,7 +237,7 @@ inline constexpr const char* kReadabilityLegend =
     "ONE token-class table serves every language, so V is a cross-language APPROXIMATION, not a per-grammar "
     "count. P was fitted on snippets of 20 lines or fewer: read the ORDER, not the number, and never as a grade. "
     "functions=functions and methods measured (a declaration with no body is not measured) "
-    "shown=rows printed capped=1 when rows were dropped; raise the default cap with limit=N (offset=M pages), "
+    "shown=rows printed capped=1 when rows were dropped; raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it), "
     "which also prints total= has_more= next_offset= offset= limit= "
     "unreadable_files=indexed files this pass could not read; their functions are absent, so functions= is a FLOOR -->";
 
