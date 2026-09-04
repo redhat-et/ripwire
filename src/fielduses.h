@@ -6,8 +6,8 @@
 // drift class floormarkcheck/mcpclidiffcheck exist to catch, so there is nothing here for an arm to copy.
 //
 // WHAT IT EMITS. `<uses of= defs="1" external="0" count= member= pinned= amb_sites= owners_of_name= [root=]
-// [page…] counts_floor="1">` and one `<u role= p= [in_id=] [amb=K]/>` per site — the SAME row shape the
-// name-matched --uses answer prints, plus amb=K on a site the resolver could not pin to one owner. The site
+// [page…] counts_floor="1">` and one `<u role= p= [in_id=] [owner_candidates=K]/>` per site — the SAME row shape the
+// name-matched --uses answer prints, plus owner_candidates=K on a site the resolver could not pin to one owner. The site
 // set and the per-site candidate count come from graph.h collectFieldUseSites; this file only orders (tier,
 // then path, then line, then role, then enclosing id — the LB-G order every use-site list shares), pages
 // (pageview.h's vocabulary, the --uses default site cap) and words the answer. Deterministic by construction:
@@ -41,6 +41,7 @@ struct FieldUsesArgs
     std::string_view root;           // the root spelling (p= and in_id= are made relative to it when singleRoot; ignored otherwise)
     int              pageLimit;      // --limit / MCP limit (0 = the verb's default cap)
     int              pageOffset;     // --offset / MCP offset
+    const Graph&     graph;          // M15: the gauge pair on the root (graphCountFloorAttrXml) reads ambOut/unresolvedOut
 };
 
 inline std::string renderFieldUses( const IngestResult& ing, FieldId fieldId, const FieldUsesArgs& args )
@@ -99,7 +100,7 @@ inline std::string renderFieldUses( const IngestResult& ing, FieldId fieldId, co
         out += " root=\"" + ex( args.root ) + "\"";
     }
     out += pageAttrs;
-    out += kGraphCountFloorAttrXml;
+    out += graphCountFloorAttrXml( args.graph );   // M15: gauge + marker
     out += ">";
     for( std::size_t rowIndex = window.begin; rowIndex < window.end; ++rowIndex )
     {
@@ -114,7 +115,9 @@ inline std::string renderFieldUses( const IngestResult& ing, FieldId fieldId, co
         }
         if( u.candidateCount > 1 )
         {
-            out += " amb=\"" + std::to_string( u.candidateCount ) + "\"";
+            // M15 (capture-audit 2026-09-04): owner_candidates=, not amb= — amb= is the map's "K ambiguous CALLS of this
+            // symbol" (g.ambOut); this is "how many owners this ONE site could belong to", a different fact.
+            out += " owner_candidates=\"" + std::to_string( u.candidateCount ) + "\"";
         }
         out += "/>";
     }
@@ -126,7 +129,7 @@ inline std::string renderFieldUses( const IngestResult& ing, FieldId fieldId, co
 // empty — a name that IS a symbol keeps the historic name-matched answer, union included): the member answer
 // (exit 0), the several-owners refusal (exit 1), the unserved-language refusal (exit 1), or nullopt when the
 // selector names no field either and the not-found path proceeds. `root` is roots[0].
-inline std::optional<int> memberUsesArm( const IngestResult& ing, std::span<const NodeId> defs, std::string_view sym,
+inline std::optional<int> memberUsesArm( const IngestResult& ing, const Graph& g, std::span<const NodeId> defs, std::string_view sym,
                                          bool singleRoot, std::string_view root, int pageLimit, int pageOffset )
 {
     if( !defs.empty() )
@@ -136,7 +139,7 @@ inline std::optional<int> memberUsesArm( const IngestResult& ing, std::span<cons
     const std::vector<FieldId> fields = resolveFieldSelector( ing, sym );
     if( fields.size() == 1 )
     {
-        std::fputs( renderFieldUses( ing, fields[ 0 ], FieldUsesArgs{ sym, singleRoot, root, pageLimit, pageOffset } ).c_str(), stdout );
+        std::fputs( renderFieldUses( ing, fields[ 0 ], FieldUsesArgs{ sym, singleRoot, root, pageLimit, pageOffset, g } ).c_str(), stdout );
         return 0;
     }
     if( const std::string refusal = memberOwnerRefusal( ing, fields, sym, "--uses=" ); !refusal.empty() )

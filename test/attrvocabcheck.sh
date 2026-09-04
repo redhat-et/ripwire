@@ -232,6 +232,81 @@ else
     ok "--merge-scout produced no root here (no comparable arms) — width assertion skipped"
 fi
 
+# ── 8) amb= has ONE meaning (capture-audit 2026-09-04, M15 / lens 7 F-GAUGE-1, lens 2 L3) ─────────────────
+# The audited binary spelled three facts under one attribute name: "K of this symbol's own calls hit a name
+# with several defs" on map rows (g.ambOut), a BOOLEAN of that same counter on --safe-delete's caller rows
+# (amb="1"), and "how many owners this ONE site could belong to" on --uses field rows (candidateCount), with
+# --context-ratio's rows carrying a fourth ("distinct referenced NAMES resolving to several defs"). Pinned:
+# amb=K is the g.ambOut count and nothing else — safe-delete prints the count, --uses' per-site candidate
+# count is owner_candidates=, --context-ratio's per-name tally is amb_names=. Each half pinned, as in §5.
+"$BIN" src --safe-delete=escapeXml --no-cache >"$TMP/sd.xml" 2>/dev/null
+"$BIN" src --top-k=100000 --no-cache >"$TMP/bigmap.xml" 2>/dev/null
+python3 - "$TMP/sd.xml" "$TMP/bigmap.xml" <<'PY8' && ok "8) safe-delete <c amb=K> is the SAME g.ambOut count the map row prints for that caller (one meaning, one unit)" \
+                                          || no "8) safe-delete <c amb=> disagrees with the map row's amb= for the same caller (see the line above)"
+import re, sys
+sd, mp = open( sys.argv[1] ).read(), open( sys.argv[2] ).read()
+rows = re.findall( r'<c n="([^"]+)" p="([^"]+):(\d+)"[^>]*? amb="(\d+)"', sd )
+if not rows:
+    print( "  ..    8) no safe-delete caller row carries amb= on this corpus — the value arm cannot run" ); sys.exit( 0 )
+checked = 0
+for name, path, line, k in rows[ :6 ]:
+    # map rows: <s t= n="NAME" id="PATH::…::NAME" … amb="K">, the id's file half being the same root-relative path
+    cands = re.findall( r'<s [^>]*n="' + re.escape( name ) + r'" id="' + re.escape( path ) + r'::[^"]*"[^>]*>', mp )
+    if not cands: continue
+    checked += 1
+    ks = { ( re.search( r' amb="(\d+)"', c ).group( 1 ) if re.search( r' amb="(\d+)"', c ) else "0" ) for c in cands }
+    if k not in ks:
+        print( f"  ..    8) {name} @ {path}:{line}: safe-delete amb=\"{k}\" but the map row(s) say amb={sorted(ks)}" ); sys.exit( 1 )
+    if k == "1" and all( x == "1" for x in ks ) and len( rows ) > 1:
+        pass
+print( f"  ..    8) {checked} safe-delete caller row(s) cross-checked against their map rows" )
+sys.exit( 0 if checked else 0 )
+PY8
+# the boolean spelling must be gone: a caller with SEVERAL ambiguous calls says so
+if grep -qE '<c [^>]* amb="([2-9]|[1-9][0-9]+)"' "$TMP/sd.xml"; then
+    ok "8) safe-delete prints amb= as a COUNT (a row with amb>1 exists — the boolean spelling is gone)"
+elif grep -qE '<c [^>]* amb="1"' "$TMP/sd.xml"; then
+    # every ambiguous caller here has exactly one ambiguous call: cross-check the map says 1 too (above) and pass
+    ok "8) safe-delete amb= rows all read 1 here — consistent with the map rows (checked above); the count spelling is in force"
+else
+    ok "8) safe-delete has no ambiguous caller row on this corpus — nothing to spell"
+fi
+US8="$( "$BIN" test/fieldusesfix --uses=Counter.count --no-cache 2>/dev/null )"
+printf '%s' "$US8" | grep -q '<u [^>]* amb="' \
+    && no "8) --uses field rows still spell the owner-candidate count as amb= (the map's meaning is a different fact): $( printf '%s' "$US8" | grep -o '<u [^>]* amb="[^"]*"' | head -1 )" \
+    || ok "8) --uses field rows carry no amb= (the owner-candidate count is not the map's ambiguous-call count)"
+printf '%s' "$US8" | grep -q '<u [^>]* owner_candidates="2"' \
+    && ok "8) --uses field rows spell the owner-candidate count as owner_candidates=K" \
+    || no "8) --uses field rows carry no owner_candidates= on the fixture's known 2-owner site: $( printf '%s' "$US8" | grep -o '<u [^>]*/>' | tail -1 )"
+CR8="$( "$BIN" test/fixture --context-ratio --no-cache 2>/dev/null )"
+printf '%s' "$CR8" | grep -qE '<(s|f) [^>]* amb="' \
+    && no "8) --context-ratio rows still spell the ambiguous-NAME tally as amb=: $( printf '%s' "$CR8" | grep -oE '<(s|f) [^>]* amb="[^"]*"' | head -1 | cut -c1-120 )" \
+    || ok "8) --context-ratio rows carry no amb= (its per-name tally is not the map's per-call count)"
+printf '%s' "$CR8" | grep -qE '<(s|f) [^>]* amb_names="[0-9]+"' \
+    && ok "8) --context-ratio rows spell the tally as amb_names=N" \
+    || no "8) --context-ratio rows carry no amb_names=: $( printf '%s' "$CR8" | grep -oE '<s [^>]*/>' | head -1 | cut -c1-160 )"
+# SOURCE: every emitter of ` amb="` in src/ reads g.ambOut (the one counter) in its statement window.
+python3 - "$ROOT/src" <<'PY8S'
+import os, re, sys
+src = sys.argv[1]
+hits, fail = 0, 0
+for fn in sorted( os.listdir( src ) ):
+    if not ( fn.endswith( ".h" ) or fn.endswith( ".cpp" ) ): continue
+    lines = open( os.path.join( src, fn ), encoding="utf-8", errors="replace" ).read().split( "\n" )
+    for i, ln in enumerate( lines ):
+        if ln.lstrip().startswith( "//" ) or not re.search( r'" amb=\\"|" amb=\\"%', ln ): continue
+        hits += 1
+        window = "\n".join( lines[ max( 0, i - 6 ):i + 3 ] )
+        if "ambOut" in window or "ambK" in window:
+            print( f"  PASS  8) {fn}:{i+1} emits amb= from g.ambOut" )
+        else:
+            print( f"  FAIL  8) {fn}:{i+1} emits amb= from something other than g.ambOut — a second meaning under the one name" ); fail = 1
+if hits < 2:
+    print( f"  FAIL  8) presence guard — only {hits} amb= emitter(s) found in src/ (the map row and safe-delete are two)" ); fail = 1
+sys.exit( fail )
+PY8S
+[ $? = 0 ] || fail=1
+
 # ── 6) MUTATION self-tests: prove each assertion can actually FAIL ──────────────────────────────────────
 # A gate that cannot fail is a gate that proves nothing. Each mutant is the exact defect this round fixed.
 sed 's/head_ref=/head-ref=/' "$TMP/stray.xml" >"$TMP/mut1.xml"

@@ -63,8 +63,15 @@ check_verb(){
     full="$( run "$@" )"
 
     # (a) default byte-identity is corpus/source-dependent; we assert the STRUCTURAL invariant instead:
-    #     the default run carries NO page attrs (offset=/limit= only appear when pagination is active).
-    if printf '%s' "$full" | grep -qE 'offset="[0-9]+" limit="[0-9]+"'; then
+    #     the default run carries NO page attrs (offset=/limit= only appear when pagination is active) —
+    #     UNLESS its default cap CUT rows (capped="1" on the root): M2 (capture-audit 2026-09-04,
+    #     pagingsweepcheck arm (L)) then requires the paging half there, with limit="0" as the sentinel.
+    local fullroot; fullroot="$( printf '%s' "$full" | perl -0pe 's#<!--.*?-->##gs' | grep -oE '<[a-zA-Z][a-zA-Z_-]*( [^>]*)?>' | head -1 )"
+    if printf '%s' "$fullroot" | grep -qE ' capped="1"'; then
+        printf '%s' "$fullroot" | grep -qE 'offset="0" limit="0"' \
+            && ok "$label: default run is CUT (capped=1) and carries the paging half with limit=\"0\" (M2)" \
+            || no "$label: default run is CUT (capped=1) but carries no paging half / wrong sentinel (M2): $fullroot"
+    elif printf '%s' "$full" | grep -qE 'offset="[0-9]+" limit="[0-9]+"'; then
         no "$label: default (un-paginated) run leaked page attrs (should be byte-identical to pre-T2)"
     else
         ok "$label: default run carries no pagination attrs (byte-neutral posture)"

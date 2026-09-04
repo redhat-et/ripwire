@@ -819,10 +819,14 @@ int emitClonesReport( const rw::Config& cfg, const rw::IngestResult& ing )
     // a paging artefact, not a measurement.
     const CloneGrouping grouping = groupClones( ing, cg, cg3 );
 
-    std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. idiom= on a group names the RECOGNIZED SHAPE every one of its members classifies to, from a CLOSED set of three: threshold-ladder (a chain of if-compare-return and nothing else), switch-name-table (a switch whose every arm is a label plus a literal return), builder-chain (a param-struct initializer chain). demoted=\"1\" additionally means the quality-delta verb's duplication kind reports this group as minor rather than gating on it, which happens only when the WHOLE conjunction holds: every member the same recognized idiom, no two members sharing a single non-keyword identifier, no two members sharing an enclosing context (file plus scope), and the group under 80 normalized tokens. Five cross-domain bucketing ladders that share only the idiom are noise; two ladders over the same enum, or two in one namespace, are a copy. The idiom name is printed precisely so a human can overrule the demotion by reading the members: a demoted row is annotated, never removed. idiom_groups= and demoted_groups= count each of those over ALL groups. FLOOR on the classifier, since a silence here would read as coverage: the shape is read off the body's TOKEN stream and not a parse tree, so a macro-assembled body classifies as whatever its raw tokens spell; the table arm models case-labelled switches only; and builder-chain models the field-assignment spelling, not the fluent chained-call one. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\": the Type-3 pair list is capped upstream, so a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. raise the default cap with limit=N (offset=M pages). -->%s", rw::rootRelPathsLegend( clnSingleRoot ) );
+    std::printf( "<!-- ripwire clones: function bodies with similar normalized token streams (identifiers/literals normalized, so renamed copies match). type=2 exact/renamed (Type-1/2); type=3 gapped near-miss (an inserted/changed statement, similarity in [0.80,1.0)). Reuse don't reimplement; a fix to one likely belongs in all. groups= and type3= are the two GROUP-TYPE totals (each capped independently, so neither is the row count); total= is the true row total (groups + type3-group-count) and is ALWAYS present, paged or not; shown= is the number of group rows that follow this run. capped=\"1\" means rows were dropped. exempt= on a group ⇒ every member is on a path the quality-delta verb's duplication kind deliberately ignores (fixture dirs / shell test-runners repeat boilerplate by convention) — a fact here, never a gate there; exempt_groups= counts them over ALL groups. idiom= on a group names the RECOGNIZED SHAPE every one of its members classifies to, from a CLOSED set of three: threshold-ladder (a chain of if-compare-return and nothing else), switch-name-table (a switch whose every arm is a label plus a literal return), builder-chain (a param-struct initializer chain). demoted=\"1\" additionally means the quality-delta verb's duplication kind reports this group as minor rather than gating on it, which happens only when the WHOLE conjunction holds: every member the same recognized idiom, no two members sharing a single non-keyword identifier, no two members sharing an enclosing context (file plus scope), and the group under 80 normalized tokens. Five cross-domain bucketing ladders that share only the idiom are noise; two ladders over the same enum, or two in one namespace, are a copy. The idiom name is printed precisely so a human can overrule the demotion by reading the members: a demoted row is annotated, never removed. idiom_groups= and demoted_groups= count each of those over ALL groups. FLOOR on the classifier, since a silence here would read as coverage: the shape is read off the body's TOKEN stream and not a parse tree, so a macro-assembled body classifies as whatever its raw tokens spell; the table arm models case-labelled switches only; and builder-chain models the field-assignment spelling, not the fluent chained-call one. gid= on a row is its CLONE COMPONENT: the Type-3 pass reports PAIRS, so three functions that are all near-copies of each other arrive as three rows of two; rows sharing a gid are one cluster, and clone_groups= counts the clusters (union-find over the pair graph, over ALL detected rows, not just the shown ones). dup_pct=duplicated-LOC/total-LOC as a percentage, where duplicated-LOC sums, per cluster, every member's loc EXCEPT the largest member's (one instance is the code you keep, the rest is the redundancy — so a 3-clone cluster counts its lines TWICE) and total-LOC is every function/method body the detector considered; dup_loc= and total_loc= are those two operands. counts_floor=\"1\": the Type-3 pair list is capped upstream, so a dropped pair is a cluster left unmerged — clone_groups/dup_loc/dup_pct are floors, never totals. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->%s", rw::rootRelPathsLegend( clnSingleRoot ) );
     std::printf( "<clones groups=\"%zu\" type3=\"%zu\"%s exempt_groups=\"%zu\" idiom_groups=\"%zu\" demoted_groups=\"%zu\" clone_groups=\"%u\" dup_loc=\"%llu\" total_loc=\"%llu\" dup_pct=\"%.1f\" counts_floor=\"1\"%s%s>",
                  cg.size(), cg3.size(),
-                 cloneUnpagedTotalAttr( clonePaging, cloneTotal ).c_str(), exemptGroupCount,
+                 // M2: pageDisclosure's paging half (which spells total= itself) now also rides on a CUT bare run,
+                 // so the verb's own total= yields to it whenever that half is active — never two total= on one root.
+                 cloneUnpagedTotalAttr( clonePaging || computePageDisclosure( clonePage.end - clonePage.begin, cloneTotal, clonePage.end,
+                                                                             cfg.pageLimit, cfg.pageOffset, true ).paging,
+                                        cloneTotal ).c_str(), exemptGroupCount,
                  idiomTally.classified, idiomTally.demoted,
                  grouping.componentCount,
                  static_cast<unsigned long long>( grouping.duplicatedLoc ), static_cast<unsigned long long>( grouping.totalLoc ),
@@ -908,7 +912,7 @@ inline constexpr const char* kCochangeRepoLegend =
     "surprising= is only defined where BOTH sides could carry a static dependency at all (the same "
     "dependency-capable predicate deps <health dep_files=> uses: source languages yes; sh, md, json, "
     "ruby and binary/unknown files no). A pair with a dep-incapable side keeps its row and carries "
-    "dep_capable=0 instead, because for it \"shares no static dependency\" is vacuously true. raise the default cap with limit=N (offset=M pages) -->";
+    "dep_capable=0 instead, because for it \"shares no static dependency\" is vacuously true. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->";
 
 inline constexpr const char* kCochangeFileLegend =
     "<!-- ripwire cochange: when you edit this file, git history says you also edit these (surprising=1 => no transitive #include either way). "
@@ -920,7 +924,7 @@ inline constexpr const char* kCochangeFileLegend =
     "sub_windows= is that denominator and min_recur= appears when cochange-recur=K (the flag) filtered the list. "
     "window= is the mining window: the default 18 months, or the since=REV|DATE value when one resolved. "
     "surprising= is only defined where BOTH sides could carry a static dependency at all (the dependency-capable "
-    "predicate deps <health dep_files=> uses); a pair with a dep-incapable side carries dep_capable=0 instead. raise the default cap with limit=N (offset=M pages) -->";
+    "predicate deps <health dep_files=> uses); a pair with a dep-incapable side carries dep_capable=0 instead. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->";
 
 // §CLIO — --cochange-groups' own legend. Mo/Cai/Kazman's Modularity Violation Group is the minimal set of
 // GROUPS covering all violating pairs (f_core, f_j), not a pair list: "X co-changes with {A,B,C}, none of
@@ -938,7 +942,7 @@ inline constexpr const char* kCochangeGroupLegend =
     "pairs_covered= is the total membership count and equals the number of surprising=1 pairs, because every violating pair lands in exactly one group. "
     "min_recur= appears when cochange-recur=K (the flag) filtered the pairs BEFORE they were grouped. "
     "Pairs that are not surprising=1, and pairs with a dep-incapable side (dep_capable=0), are not violations and are absent here — "
-    "drop the cochange-groups flag for the full pair list. raise the default cap with limit=N (offset=M pages) -->";
+    "drop the cochange-groups flag for the full pair list. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->";
 
 // §CLIO — min_recur= is emitted by all three --cochange exits and was built three times. One builder, so a
 // later edit cannot teach one exit a spelling the others do not use (§P9.1's lesson, one attribute over).
@@ -1212,7 +1216,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "and one whose path the git-to-index join never bound (a rename, an exclusion, or a spelling the "
                      "join could not match), which scores zero for a reason that is not about the file. Treat it as an "
                      "upper bound on quietness, not a measure of it. "
-                     "raise the default cap with limit=N (offset=M pages) -->%s%s",
+                     "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->%s%s",
                      windowLabelInComment.c_str(), rw::kAtStampLegend, rw::rootRelPathsLegend( mvSingleRoot ) );   // sweep: at= was undefined on this screen
         if( multiRoot )
         { // §5 comparability caveat: churn scales (commit-count conventions) differ per repo
@@ -2182,19 +2186,20 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
                  "drill= names the verb that takes an id= from a row below. On each module row size= is its TRUE member count while "
                  "shown=/capped= describe the member list printed here: this listing is fixed at the 5 top-ranked members and is NOT "
                  "widened by limit=/offset= (those page the MODULE rows). capped=1 means members were dropped; drill= names the verb "
-                 "that pages the full member list of one module. raise the default cap with limit=N (offset=M pages). "
-                 "%s-->%s", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cmSingleRoot ) );
+                 "that pages the full member list of one module. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). "
+                 "%s%s-->%s", rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cmSingleRoot ) );
     // §P11.6 drill=: the id= values below were the only identifiers this tool emitted that no verb took
     // back. The follow-up verb is named ON THE ROOT ELEMENT rather than in the doc comment, because an XML
     // comment may not contain a double hyphen (G4) and its entity escapes are NOT expanded — a caller would
     // read a literal "&#45;&#45;". As an attribute value the flag is exact, parseable and pasteable.
-    std::printf( "<communities drill=\"--community=ID\" modules=\"%u\" shown_modules=\"%u\" modules_capped=\"%u\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" isolated=\"%u\" isolated_decl=\"%u\" isolated_header=\"%u\" isolated_source=\"%u\" isolated_doc=\"%u\" connected_singletons=\"%u\" symbols=\"%u\"%s%s>",
+    std::printf( "<communities drill=\"--community=ID\" modules=\"%u\" shown_modules=\"%u\" modules_capped=\"%u\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" isolated=\"%u\" isolated_decl=\"%u\" isolated_header=\"%u\" isolated_source=\"%u\" isolated_doc=\"%u\" connected_singletons=\"%u\" symbols=\"%u\"%s%s%s>",
                  modules, shownModules, isModulesCapped,
                  bridge.size(), shownBridges, isBridgesCapped, isolates.total, isolates.declaration,
                  isolates.header, isolates.source, isolates.document, isolates.connectedSingletons, N,
                  ( pagingDisclosure( cmab, sizeof( cmab ), moduleOrder.size(), cmpw.end, cfg.pageLimit, cfg.pageOffset )
                    + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
-                 cmRootAttr.c_str() );
+                 cmRootAttr.c_str(),
+                 rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; modules=/bridges=/isolated= partition the name-based CSR
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     for( std::size_t moduleIndex = cmpw.begin; moduleIndex < cmpw.end; ++moduleIndex )
@@ -2341,13 +2346,14 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
                  "other modules. size= is the module's TRUE member count; shown=/capped= are this page. partition= is the FULL label "
                  "space (every id 0..partition-1, incl. isolated singletons) — the range the id= argument ranges over; modules= counts "
                  "the NON-isolated communities (size>=2), the SAME predicate the communities-listing verb's modules= uses, so parent "
-                 "and child agree. %s-->%s", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cdSingleRoot ) );
-    std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" partition=\"%u\" modules=\"%u\"%s%s>",
+                 "and child agree. %s%s-->%s", rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cdSingleRoot ) );
+    std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" partition=\"%u\" modules=\"%u\"%s%s%s>",
                  want, std::size_t( mem.size() ), ex( presentation.directory[ want ] ).c_str(), ex( presentation.label[ want ] ).c_str(),
                  peers.size(), shownBridges, unsigned( shownBridges < peers.size() ), K, modulesNonIsolated,
                  ( pageDisclosure( mpab, sizeof( mpab ), shownMembers, mem.size(), mpw.end, cfg.pageLimit, cfg.pageOffset, true )
                    + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
-                 cdRootAttr.c_str() );
+                 cdRootAttr.c_str(),
+                 rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; size=/bridges= are a partition of the name-based CSR
     for( std::size_t i = mpw.begin; i < mpw.end; ++i )
     {
         const Symbol&           s  = ing.symbols[ mem[i] ];
@@ -2564,8 +2570,8 @@ std::optional<int> runZoom( const MainDispatch& d )
                      "symbols= is the whole corpus; isolated= is the symbols in NO top-level module (a group of one — the same rule that makes top_modules= count only groups of 2 or more), and they reconcile exactly: "
                      "symbols= equals isolated= plus the sum of the TOP-LEVEL size= values, every one of them, including any this page did not print. "
                      "On a level-0 module size= is its true member count and shown=/capped= describe the member list printed here, which is fixed at the 5 top-ranked members and is not widened by limit=/offset= (those page the TOP-LEVEL modules); "
-                     "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. %s-->",
-                     rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+                     "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. %s%s-->",
+                     rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // §P15/§P16: top_modules= is a real, deterministically-ordered row list (size desc, id asc — the same
         // rule --communities' module listing uses) that used to print EVERY top module unconditionally, so a
         // repo with hundreds of top modules had no way to page it. --limit/--offset now window it like --uses
@@ -2574,10 +2580,11 @@ std::optional<int> runZoom( const MainDispatch& d )
         // honorsPaging() excludes the --zoom --mermaid combination for the same reason plain --mermaid refuses).
         const PageWindow  zoomPw = pageWindow( topOrder.size(), cfg.pageLimit, cfg.pageOffset );
         char              zoomAb[ kPageDisclosureCap ];
-        std::printf( "<zoom levels=\"%zu\" top_modules=\"%zu\" symbols=\"%u\" isolated=\"%u\"%s>", L, topOrder.size(), N, isolatedCount,
+        std::printf( "<zoom levels=\"%zu\" top_modules=\"%zu\" symbols=\"%u\" isolated=\"%u\"%s%s>", L, topOrder.size(), N, isolatedCount,
                      ( pageDisclosure( zoomAb, sizeof( zoomAb ), zoomPw.end - zoomPw.begin, topOrder.size(), zoomPw.end,
                                        cfg.pageLimit, cfg.pageOffset, false )
-                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
+                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
+                     rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; isolated=/top_modules= partition the name-based CSR
 
         // a stack-free recursion via an explicit lambda (std::function — not hot). Emits <module> elements
         // nested by level; the finest level emits <member> leaves.
@@ -2746,8 +2753,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // §B12.5 — the UNIT clause is the same sentence on all three verbs that spell `untested=` (see
         // situ.h's kTestGateLegend and flipimpact.h's writeFlipHeader). Each legend was locally honest,
         // which is precisely why a reader comparing two of the numbers is misled.
-        std::printf( "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages). %s-->%s",
-                     rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( stSingleRoot ) );
+        std::printf( "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). %s%s-->%s",
+                     rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( stSingleRoot ) );
         // P2.1: two nested caps, neither previously marked — at most 20 seam PAIRS, and at most 5 example
         // EDGES inside each. Each <seam> gains shown= alongside its true untested= count.
         //
@@ -2766,12 +2773,13 @@ std::optional<int> runStructureText( const MainDispatch& d )
         const PageWindow  seamsPw     = pageWindow( pairs.size(), effectiveRowCap( cfg.pageLimit, 20 ), cfg.pageOffset );
         const std::size_t shownPairs  = seamsPw.end - seamsPw.begin;
         char              seamsAb[ kPageDisclosureCap ];
-        std::printf( "<seams modules=\"%zu\" bridges=\"%u\" untested=\"%u\" test_files=\"%u\" seam_pairs=\"%zu\"%s%s>",
+        std::printf( "<seams modules=\"%zu\" bridges=\"%u\" untested=\"%u\" test_files=\"%u\" seam_pairs=\"%zu\"%s%s%s>",
                      dirName.size(), bridges, untested, testFileCount, pairs.size(),
                      ( pageDisclosure( seamsAb, sizeof( seamsAb ), shownPairs, pairs.size(), seamsPw.end,
                                        cfg.pageLimit, cfg.pageOffset, true )
                        + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
-                     stRootAttr.c_str() );
+                     stRootAttr.c_str(),
+                     rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; bridges=/untested=/seam_pairs= are edges of the name-based CSR
         for( std::size_t pi = seamsPw.begin; pi < seamsPw.end; ++pi )
         {
             const std::uint32_t    cu    = std::uint32_t( pairs[pi].first >> 32 ), cv = std::uint32_t( pairs[pi].first & 0xffffffffu );

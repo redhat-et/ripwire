@@ -947,6 +947,40 @@ inline std::size_t tokensForEmittedBytes( std::size_t emittedBytes, double bytes
     return std::size_t( double( emittedBytes ) / bytesPerToken + 0.5 );
 }
 
+// M11 (capture-audit 2026-09-04, lens 7 F-EST-1): THE PRICED ROOT. Every --token-budget consumer prices the
+// document it delivers ON ITS ROOT ELEMENT, in tokens — the unit budget_tokens=/budget= are in — so a parser
+// that discards comments still reads the number (attrvocabcheck §3 gave the map that; --pack-task/--from-trace/
+// --handoff/--expand --top-k=0 priced nothing, or only in prose). The attribute is part of the document it
+// prices, so the digits are converged the way --for's header splice converges them (≤4 passes). `markupBytes`
+// are priced at `markupRate`, `bodyBytes` at kBytesPerTokenBody. Returns the attribute string; `outTokens`
+// receives the number, so the caller's own --token-budget gate reads the SAME value the root shows.
+inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, std::size_t bodyBytes, std::size_t* outTokens )
+{
+    const std::size_t bodyTokens = bodyBytes > 0 ? tokensForEmittedBytes( bodyBytes, kBytesPerTokenBody ) : 0;
+    std::size_t estTokens = tokensForEmittedBytes( markupBytes, markupRate ) + bodyTokens;
+    std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
+    for( int pass = 0; pass < 4; ++pass )
+    {
+        const std::size_t next = tokensForEmittedBytes( markupBytes + attr.size(), markupRate ) + bodyTokens;
+        if( next == estTokens ) { break; }
+        estTokens = next;
+        attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
+    }
+    if( outTokens ) { *outTokens = estTokens; }
+    return attr;
+}
+// Splices `attrs` into the FIRST start-tag of `doc` (the root — its own attribute values are XML-escaped, so
+// the first '>' closes it). No-op, with a degrade alert, if the document has no start-tag at all.
+inline void spliceRootAttrs( std::string& doc, std::string_view attrs, std::size_t rootTagAt = 0 )
+{
+    const std::size_t lt = doc.find( '<', rootTagAt );
+    const std::size_t gt = lt == std::string::npos ? std::string::npos : doc.find( '>', lt );
+    if( gt == std::string::npos ) { DEGRADED_PATH_ALERT( "pricedRoot: document has no root start-tag — est_tokens= not spliced" );  return; }
+    const bool selfClosing = gt > 0 && doc[ gt - 1 ] == '/';
+    doc.insert( selfClosing ? gt - 1 : gt, attrs );
+}
+
+
 // A header that PRINTS est_tokens is part of the document est_tokens describes, so its own digit count feeds
 // back into the number. Emitters whose header is a plain string iterate that to a fixpoint (serialize(), and
 // recall.h's buildRecall before it); emitters whose header can only be produced by writing to a stream price
@@ -3409,8 +3443,12 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         const bool capped = total > payloadBudgetBytes;
         if( capped )
         {
-            // the marker itself costs bytes — budget the trimmed state INCLUDING it (guard tiny budgets)
-            const std::size_t markerBytes     = sizeof( " capped=\"1\"" ) - 1;
+            // the marker itself costs bytes — budget the trimmed state INCLUDING it (guard tiny budgets).
+            // capture-audit 2026-09-04: the marker is now ` shown="S" total="T" capped="1"` — S ≤ T, so
+            // both numbers fit in T's digit count, and T (entries.size()) is known before the ladder runs.
+            std::size_t totalDigits = 1;
+            for( std::size_t t = entries.size(); t >= 10; t /= 10 ) { ++totalDigits; }
+            const std::size_t markerBytes     = ( sizeof( " shown=\"\" total=\"\" capped=\"1\"" ) - 1 ) + 2 * totalDigits;
             const std::size_t effectiveBudget = payloadBudgetBytes > markerBytes ? payloadBudgetBytes - markerBytes : 0;
 
             // one ladder ACTION on one entry, tail-first; every action re-checks the budget so the ladder
@@ -3436,10 +3474,26 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 5): this marker used to be
         // payload="capped" — a STRING ENUM, the tool's only one, readable solely by string-matching the
         // literal (packtask.h did exactly that). It is now the same boolean capped= every other truncating
-        // element spells, so one parser reads them all. It carries no shown=/total= on purpose: the ladder
-        // trims a BYTE budget, and shrinking a signature or dropping a doc excerpt reduces no row count, so
-        // there is no honest S<T pair to print here — only "this payload was trimmed". Absent = untrimmed.
-        w.write( capped ? "<sigs capped=\"1\">" : "<sigs>" );
+        // element spells, so one parser reads them all.
+        // capture-audit 2026-09-04 (lens 4 / lens 1 F7 / lens 2 L5): it carries shown=/total= too. The
+        // earlier "no honest S<T pair" argument was half right — a ladder step that shrinks a signature drops
+        // no row — but the ladder's LAST steps drop whole entries, and on the audited binary 11 of 40
+        // adaptive-kept rows vanished behind a bare capped="1" while every sibling section (<tail>, <hops>,
+        // <calls>, <bodies>) said how many it was handed. shown= = rows printed, total= = rows handed to the
+        // ladder; capped="1" with shown == total means every row survived but was SHRUNK (doc excerpts /
+        // signature tails cut). Absent = untrimmed. Gate: truncvocabcheck.sh arms (C) + (F).
+        if( capped )
+        {
+            std::size_t shownRows = 0;
+            for( const SigEntry& e : entries ) { if( !e.dropped ) { ++shownRows; } }
+            char open[ 80 ];
+            std::snprintf( open, sizeof( open ), "<sigs shown=\"%zu\" total=\"%zu\" capped=\"1\">", shownRows, entries.size() );
+            w.write( open );
+        }
+        else
+        {
+            w.write( "<sigs>" );
+        }
         for( const SigFile& sf : sigFiles )
         {
             if( capped && sf.liveCount == 0 && sf.entryEnd > sf.entryBegin )
@@ -5459,8 +5513,11 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                       RedactCounts* redact,                       // §B0/W3-N1: REQUIRED — the <m> contract sigs are emitted text
                       const std::vector<char>* impure = nullptr,
                       NodeId focusId = kNoNode, bool withPaths = false,
-                      std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                      std::string_view rootArg = {},    // R-E (2026-08-17): same single-root-only root
                                                         // argument serialize() takes — see its comment.
+                      std::string_view graphCountFloorAttr = {} )   // M15: the TARGETED root's gauge + marker
+                                                        // (graphCountFloorAttrXml( g ) — the caller owns the graph);
+                                                        // the ranked --for section passes nothing and keeps its shape
 {
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
@@ -5513,7 +5570,12 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
     std::vector<char> esc;
     std::string       src;
     std::uint32_t     loadedFile = 0xFFFFFFFFu;
-    w.write( "<lego>" );
+    // H5 (capture-audit 2026-09-04): implementors= is read off the name-based extends/implements edges — a
+    // floor. The marker rides on the TARGETED verb root (--lego=TYPE and its MCP twin); the --for bundle's
+    // ranked <lego> section is described by the bundle's own legend and keeps its byte shape.
+    w.write( "<lego" );
+    if( focusId != kNoNode ) { w.write( graphCountFloorAttr ); }   // graphCountFloorAttrXml( g ): gauge + kGraphCountFloorAttrXml
+    w.write( ">" );
     for( std::size_t k = 0; k < keep; ++k )
     {
         const NodeId  id   = ifaces[k];
@@ -5664,7 +5726,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     w.write( "<!-- ripwire deps: file-to-file #include/import view, heaviest transitive cone first. files= (root) = files with "
              "at least one dependency edge (this listing's own denominator); health files= = the whole indexed corpus; "
              "health dep_files= = the dependency-CAPABLE subset of it (the ccd/acd/nccd denominator). "
-             "raise the default cap with limit=N (offset=M pages). -->" );
+             "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
     // --pack-top-n (default 40) while files= counted every file with an include — 40 rows under files="179"

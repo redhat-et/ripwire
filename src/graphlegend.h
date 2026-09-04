@@ -21,12 +21,57 @@
 // It is a constant "1" today because the tool cannot detect the absence it is disclosing — a 0 would be a
 // claim of exhaustiveness that nothing in the pipeline can support.
 //
+// H8 AMENDMENT (capture-audit 2026-09-04). The READING of counts_floor= is "every count on this element
+// is a floor"; the CAUSE is disclosed beside it, never encoded in the name. On a graph verb the cause is the
+// floor sentence below (the graph misses edges — nothing raises it). On a collection-capped scan (--match /
+// --lint / --grep / --pattern / --ensemble / --quality-panel) the cause is the rule-4 marker on the same root
+// (hits_capped= / findings_capped=) and it IS raisable — narrow the query. Two causes, one reading, one
+// attribute: a parser that treats counts_floor="1" as "do not trust these totals" is right in both cases,
+// which it was not when the capped scans carried no marker at all and printed has_more="0" capped="0" over
+// a floored total (the complete-last-page lie). pageview.h's PageSyntax::floor spells the identical bytes.
+//
 // Gate: test/floormarkcheck.sh (all five verbs, CLI ≡ MCP wording, and the retired absolutism absent).
 
+#include <cstdint>
+#include <cstdio>
 #include <string>
+#include <vector>
 
 namespace rw
 {
+
+// M15 (capture-audit 2026-09-04, lens 7 F-GAUGE-1) — THE GAUGE PAIR. Every graph verb said "floor" and none
+// said HOW MUCH of the graph was guessed; the magnitude lived only in the map header's ambiguous=/unresolved=,
+// on a verb the agent had not run. Every root that carries the graph's counts_floor="1" now carries the same
+// two whole-graph numbers beside it — graph_ambiguous= (calls the resolver split over several in-repo defs,
+// graph.h ambOut) and graph_unresolved= (calls to an in-repo name whose every def was language-filtered,
+// unresolvedOut) — computed by the ONE fold the map header uses, so the pair can never be a second
+// derivation. Gate: test/floormarkcheck.sh arm (11) (value-equal to the map header on the same corpus).
+inline std::string graphGaugeAttrXml( const std::vector<std::uint32_t>& ambOut, const std::vector<std::uint32_t>& unresolvedOut )
+{
+    std::size_t amb = 0, unresolved = 0;
+    for( std::uint32_t k : ambOut )        { amb        += k; }
+    for( std::uint32_t k : unresolvedOut ) { unresolved += k; }
+    char buf[ 96 ];
+    std::snprintf( buf, sizeof( buf ), " graph_ambiguous=\"%zu\" graph_unresolved=\"%zu\"", amb, unresolved );
+    return buf;
+}
+inline std::string graphGaugeAttrJson( const std::vector<std::uint32_t>& ambOut, const std::vector<std::uint32_t>& unresolvedOut )
+{
+    std::size_t amb = 0, unresolved = 0;
+    for( std::uint32_t k : ambOut )        { amb        += k; }
+    for( std::uint32_t k : unresolvedOut ) { unresolved += k; }
+    char buf[ 96 ];
+    std::snprintf( buf, sizeof( buf ), ",\"graph_ambiguous\":%zu,\"graph_unresolved\":%zu", amb, unresolved );
+    return buf;
+}
+
+// The gauge's one-sentence definition, spliced into every floor legend below (and the verify / nonlocal-state /
+// test-gate legends, which carry their own floor sentence). Short on purpose: the shared floor essay sits
+// inside test/graphlegendbudgetcheck.sh's byte budget.
+inline constexpr const char* kGraphGaugeLegend =
+    "graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls "
+    "whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. ";
 
 // The floor sentence. Shared verbatim by all five verbs on every surface that can carry prose. Written with
 // NO "--" digraph anywhere: this string is spliced into an XML comment, where "--" is a well-formedness
@@ -45,7 +90,40 @@ inline constexpr const char* kGraphCountFloorLegend =
     "is missed; auto/template types are read as unpinned, so KEPT). A macro-generated call site is "
     "role=\"macro\" only when its name uniquely names an indexed function-like #define (C-family, t=\"macro\"); "
     "a shared name stays a plain call, an unindexed macro is no edge. Read a zero as \"none found\", never as "
-    "\"none exists\". ";
+    "\"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over "
+    "several defs / calls whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. ";
+
+// H5 (capture-audit 2026-09-04, lens 7 F-FLOOR-1) — the BRIEF floor clause for the graph-count verbs that
+// are not one of the five above: --path / --connect / --affected / --exercises / --seams / --dead-code /
+// --communities / --community / --zoom / --lego, whose roots read reachable=/nodes=/reached=/reaches=/
+// seam_pairs=/implementors=/isolated= off the SAME name-based CSR and said nothing. The full sentence above
+// is ~900 B and those verbs' whole legends are shorter than that; this clause keeps the two anchors the
+// gate matches verbatim ('is a FLOOR, never a total', 'none found') and drops the taxonomy of misses, which
+// the reader can get from any of the five. No "--" digraph (it lands inside XML comments).
+inline constexpr const char* kGraphCountFloorBriefLegend =
+    "counts_floor=\"1\": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from "
+    "source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a "
+    "zero as \"none found\", never as \"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver "
+    "gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's "
+    "ambiguous=/unresolved=. ";
+
+// The same two facts as PROSE, for the one graph-count report that is text (--situ's [1] blast radius).
+inline constexpr const char* kGraphCountFloorTextLine =
+    "        counts_floor=1: every count above is a FLOOR, never a total (call edges are name-based; dynamic dispatch, "
+    "callbacks and macros can be missing) — read a zero as \"none found\", never as \"none exists\"; graph_ambiguous=%zu "
+    "graph_unresolved=%zu is the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs "
+    "were all language-filtered), the map header's ambiguous=/unresolved=\n";   // printf FORMAT: the two gauge totals
+
+// --lego shipped with NO legend at all (a bare <ctx root=><lego>…); one literal for the CLI verb and its MCP
+// twin, so the two dialects cannot describe implementors= differently.
+inline constexpr const char* kLegoLegend =
+    "<!-- ripwire lego: ONE interface/base type — its method contract (<m>, where the language captures it soundly) and every "
+    "implementor (<impl>) the extends/implements edges reach, own-language only; implementors= counts them. "
+    "counts_floor=\"1\": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from "
+    "source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a "
+    "zero as \"none found\", never as \"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver "
+    "gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's "
+    "ambiguous=/unresolved=. -->";
 
 // The COUNTING-UNIT clause (the L-CS routing item).
 //
@@ -157,9 +235,9 @@ inline constexpr const char* kUsesFieldLegend =
     "MEMBER FORM: member=Owner.field is the ONE field this selector resolved to and every row is a use of THAT field, "
     "resolved per site (never the union of every name-alike): this->f, self.f and a bare f inside the owner's own "
     "methods pin to the owner; v.f/v->f pins through v's recorded declared type (a typed local or parameter, or a "
-    "member of the enclosing class); otherwise EVERY owner declaring f is a candidate and the row carries amb=K "
+    "member of the enclosing class); otherwise EVERY owner declaring f is a candidate and the row carries owner_candidates=K "
     "(K candidate owners) — never a silent pin, and no locality tie-break. A chained or unclassifiable receiver "
-    "(a.b.f, g().f) is always amb. pinned=rows resolved to exactly one owner amb_sites=rows carrying amb= "
+    "(a.b.f, g().f) is always ambiguous. pinned=rows resolved to exactly one owner amb_sites=rows carrying owner_candidates= "
     "owners_of_name=fields sharing this name corpus-wide. role=write is an assignment target, compound assignment "
     "or an increment/decrement; pass-by-non-const-reference and address-of are NOT claimed as writes. NOT SEEN (each a disclosed "
     "miss, never a widened definition): a field reached through a copied pointer or reference (no alias analysis), "
@@ -304,10 +382,10 @@ inline std::string callHierarchyLegendOpen( bool wantCallers )
 // clause above already follows: a call never pays for vocabulary it cannot emit.
 inline constexpr const char* kNeighbourCapLegend =
     "shown= is how many rows this answer PRINTED and capped=\"1\" says a default display cap dropped some; "
-    "count= above stays the true total, never the page's length. Raise the default cap with limit=N "
-    "(offset=M pages, which also adds total=/has_more=/next_offset= so a paging loop can terminate); on the "
-    "root, limit=\"0\" means no explicit limit was given and the verb's own default page size shaped the "
-    "window — never a zero-row page. ";
+    "count= above stays the true total, never the page's length. A cut answer also carries total=/has_more=/"
+    "next_offset= so a paging loop can continue from it: raise the default cap with limit=N (offset=M pages); "
+    "on the root, limit=\"0\" means no explicit limit was given and the verb's own default page size shaped "
+    "the window — never a zero-row page. ";
 
 // `active` is pageDisclosure()'s own activity decision, passed in rather than re-derived, so the clause and
 // the attributes it defines can never disagree about whether they are present.

@@ -156,10 +156,19 @@ run --handoff --no-cache >"$TMP/nobudget.xml" 2>/dev/null
 run --handoff --token-budget=400 --no-cache >"$TMP/budget.xml" 2>"$TMP/budget.err"; rc_budget=$?
 SZ_NOBUDGET="$( wc -c <"$TMP/nobudget.xml" | tr -d ' ' )"
 SZ_BUDGET="$( wc -c <"$TMP/budget.xml" | tr -d ' ' )"
-if [ "$rc_budget" -eq 0 ] && [ "$SZ_BUDGET" -lt "$SZ_NOBUDGET" ]; then
-    ok "--token-budget=400 output ($SZ_BUDGET B) is smaller than unbounded ($SZ_NOBUDGET B)"
+# M11 (2026-09-04): the byte comparison was a proxy for "heuristic rows were withheld", and the budgeted root
+# now carries est_tokens=/budget_tokens=/over_ceiling= (~60 B) — on a fixture with ONE small heuristic row the
+# budgeted packet can be a few bytes LARGER than the unbounded one while having withheld everything it may.
+# Assert the property itself: the budgeted packet withheld rows (withheld="1", withheld_rows>=1) and prints
+# fewer <heuristic n=> rows than the unbounded run.
+N_NOBUDGET="$( grep -oE '<heuristic n="[0-9]+"' "$TMP/nobudget.xml" | tr -dc '0-9' )"
+N_BUDGET="$(   grep -oE '<heuristic n="[0-9]+"' "$TMP/budget.xml"   | tr -dc '0-9' )"
+W_BUDGET="$(   grep -oE '<handoff [^>]*>' "$TMP/budget.xml" | grep -oE ' withheld="[01]"' | tr -dc '0-9' )"
+WR_BUDGET="$(  grep -oE '<handoff [^>]*>' "$TMP/budget.xml" | grep -oE ' withheld_rows="[0-9]+"' | tr -dc '0-9' )"
+if [ "$rc_budget" -eq 0 ] && [ "${N_BUDGET:-0}" -lt "${N_NOBUDGET:-0}" ] && [ "$W_BUDGET" = "1" ] && [ "${WR_BUDGET:-0}" -ge 1 ]; then
+    ok "--token-budget=400 withheld heuristic rows: <heuristic n=$N_BUDGET> vs unbounded n=$N_NOBUDGET, withheld=\"1\" withheld_rows=\"$WR_BUDGET\" ($SZ_BUDGET B vs $SZ_NOBUDGET B)"
 else
-    no "--token-budget=400 did not shrink the packet (budget=$SZ_BUDGET B rc=$rc_budget, unbounded=$SZ_NOBUDGET B): $( cat "$TMP/budget.err" )"
+    no "--token-budget=400 did not withhold rows (rc=$rc_budget, heuristic n=$N_BUDGET vs unbounded $N_NOBUDGET, withheld=$W_BUDGET withheld_rows=$WR_BUDGET; $SZ_BUDGET B vs $SZ_NOBUDGET B): $( cat "$TMP/budget.err" )"
 fi
 DISCLOSED="$( cat "$TMP/budget.xml" "$TMP/budget.err" 2>/dev/null )"
 { printf '%s' "$DISCLOSED" | grep -qi 'budget' && printf '%s' "$DISCLOSED" | grep -qiE 'trunc|withheld|omit'; } \

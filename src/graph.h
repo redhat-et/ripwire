@@ -6,6 +6,7 @@
 #include "model.h"
 #include "filter.h"              // isTestPath — for the Q2 tested= post-pass
 #include "pageview.h"            // LB-H: kImportReachRowCap — the import tier's display cap lives with the rest of the truncation vocabulary
+#include "graphlegend.h"         // M15: graphGaugeAttrXml/Json + kGraphCountFloorAttrXml/Json — graphCountFloorAttrXml( g ) below
 #include "lintrules.h"           // §P9.4: langOfPath / dependencyCapable — the file-language classification
                                  // restrictDependencyHealth() needs (owns the extension table, kept in sync
                                  // by hand with ingest.cpp's kLangTable per its own header comment)
@@ -5151,6 +5152,19 @@ inline ZoomHierarchy multiLevelCommunities( const Graph& g, std::uint32_t maxTop
         curCount = parent.count;
     }
     return h;
+}
+
+
+// M15 (capture-audit 2026-09-04): the GAUGE + MARKER a graph-floored root splices — one call, so the pair and
+// the floor can never land separately. graph_ambiguous=/graph_unresolved= are the whole graph's ambOut /
+// unresolvedOut totals (the map header's ambiguous=/unresolved=, same fold); counts_floor="1" stays LAST.
+inline std::string graphCountFloorAttrXml( const Graph& g )
+{
+    return graphGaugeAttrXml( g.ambOut, g.unresolvedOut ) + kGraphCountFloorAttrXml;
+}
+inline std::string graphCountFloorAttrJson( const Graph& g )
+{
+    return graphGaugeAttrJson( g.ambOut, g.unresolvedOut ) + kGraphCountFloorAttrJson;
 }
 
 }   // namespace rw

@@ -49,10 +49,13 @@ EOF
 
 # (a) the ratchet: pre-fix was 1689 B on this exact src/model.h fixture (1dc7b01), post-fix 1332 B. 1500 B
 #     gives headroom for a future honest addition without permitting the essay to grow back toward 1689 B.
-if [ "$legend" -le 1500 ]; then
-    ok "(a) --test-gate legend is $legend B (<= 1500 B budget; total=$total payload=$payload)"
+# RE-PINNED 1500 -> 1750 (2026-09-04, capture-audit M15): the legend gained ONE sentence defining the
+# graph_ambiguous=/graph_unresolved= gauge pair every graph-floored root now carries — new content, not the
+# essay re-inflating (the pre-fix 1689 B was a different, longer essay).
+if [ "$legend" -le 1750 ]; then
+    ok "(a) --test-gate legend is $legend B (<= 1750 B budget; total=$total payload=$payload)"
 else
-    no "(a) --test-gate legend is $legend B (> 1500 B budget) — the essay re-inflated"
+    no "(a) --test-gate legend is $legend B (> 1750 B budget) — the essay re-inflated"
 fi
 
 # (b) the honesty vocabulary + the §B12.5 cross-verb UNIT-collision anchors (test/testgatecheck.sh arm (g)

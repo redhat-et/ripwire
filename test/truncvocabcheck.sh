@@ -309,15 +309,16 @@ untruncated "$TMP/tiny_impact.xml"      impact           shown         capped   
 untruncated "$TMP/tiny_ext.xml"         external-surface shown         capped         x         "(C) --external-surface"
 untruncated "$TMP/tiny_seams.xml"       seams            shown         capped         seam      "(C) --seams"
 
-# --for's <sigs> is rule 5: a BYTE-budget trim, so the marker is a bare capped="1" with no row pair, and
-# it is ABSENT when the payload was not trimmed. Both states must be reachable.
+# --for's <sigs> is rule 5: a BYTE-budget trim — the marker is capped="1" WITH the shown=/total= row pair
+# (capture-audit 2026-09-04, arm (F) below), and it is ABSENT when the payload was not trimmed. Both states
+# must be reachable.
 run "$TINY" --for="add one to a number" > "$TMP/tiny_for.xml"
 grep -q '<sigs>' "$TMP/tiny_for.xml" \
     && ok "(C) --for <sigs> untrimmed: bare <sigs>, no marker (rule 5: absent = untrimmed)" \
     || no "(C) --for <sigs> on a two-symbol corpus is not the bare untrimmed <sigs>"
-grep -q '<sigs capped="1">' "$TMP/sweep_forbudget.xml" \
-    && ok "(C) --for <sigs> trimmed by --token-budget: <sigs capped=\"1\">" \
-    || no "(C) --for --token-budget=800 did not mark its trimmed payload <sigs capped=\"1\">"
+grep -qE '<sigs shown="[0-9]+" total="[0-9]+" capped="1">' "$TMP/sweep_forbudget.xml" \
+    && ok "(C) --for <sigs> trimmed by --token-budget: <sigs shown=N total=M capped=\"1\"> (rule 5, amended: the pair rides on a byte trim too)" \
+    || no "(C) --for --token-budget=800 did not mark its trimmed payload <sigs shown= total= capped=\"1\">: $( grep -oE '<sigs[^>]*>' "$TMP/sweep_forbudget.xml" | head -1 )"
 
 # ---------------------------------------------------------------------------------------------------
 # (D) the retired spellings, named so a revert cannot pass quietly. Each of these three greps is RED
@@ -426,6 +427,58 @@ sys.exit(1 if problems else 0)
 PY
 [ $? = 0 ] && ok "(E) every budgeted section element carries the shown=/total=/capped= triple, arithmetic, no count= collision" \
            || no "(E) a budgeted section element discloses nothing or contradicts itself (listed above)"
+
+# ---------------------------------------------------------------------------------------------------
+# (F) capture-audit 2026-09-04 (lens 4 MEDIUM, lens 1 F7, lens 2 L5): capped="1" NEVER appears without
+#     shown= and a total on the SAME element. The audited binary's --for printed `<sigs capped="1">` — 29
+#     rows, nothing saying how many were eligible — while every sibling listing in the same bundle
+#     (<tail total= shown= capped=>, <hops shown= total=>, <calls total= shown=>, <bodies shown= total=>)
+#     carried the pair, and with --adaptive the header said "kept 40 of 40" over those 29 rows. Rule 5's
+#     "bare capped" exemption is retired: a byte-budget trim still knows how many rows it was handed and
+#     how many it printed, and the pair is exactly what an agent needs to decide whether to widen.
+#
+#     PROPERTY, over every swept document (the same harvest arm (A) parses): an element carrying the bare
+#     capped= bit must carry shown= and a total — total= itself, or one of rule 2's own-name spellings.
+#     A `<noun>_capped=` marker with no `shown_<noun>=` is rule 4 (a FLOOR on the total) and is not a
+#     bare capped=, so it is not in scope here.
+# ---------------------------------------------------------------------------------------------------
+python3 - "$TMP" <<'PYF'
+import glob, os, sys, xml.etree.ElementTree as ET
+# rule 2's own-name totals, plus the per-row spellings the sweep meets: a <seam> row's untested= (the edges it
+# lists a window of), a <module> row's size=, --deps' files=, --lint's findings=, --cochange's pairs=.
+TOTALS = { "total", "hits", "modules", "bridges", "reaches", "seam_pairs", "names", "count", "rows", "size", "files", "groups",
+           "untested", "findings", "pairs" }
+problems, seen = [], 0
+for path in sorted( glob.glob( os.path.join( sys.argv[1], "sweep_*.xml" ) ) ):
+    name = os.path.basename( path )[ len( "sweep_" ):-len( ".xml" ) ]
+    try:
+        root = ET.parse( path ).getroot()
+    except ET.ParseError:
+        continue                                    # arm (A) already reported the parse failure
+    for el in root.iter():
+        a = el.attrib
+        if a.get( "capped" ) != "1":
+            continue
+        seen += 1
+        tag = el.tag if isinstance( el.tag, str ) else "?"
+        if "shown" not in a:
+            problems.append( f'{name}: <{tag} capped="1"> carries no shown= (rules 1+3: a cut needs the printed count)' )
+        if not ( TOTALS & set( a.keys() ) ):
+            problems.append( f'{name}: <{tag} capped="1"> carries no total (total= or a rule-2 own-name spelling) — a reader cannot tell what the cut was against' )
+if seen == 0:
+    problems.append( "no element in the sweep carried capped=\"1\" — the arm asserted nothing (the --for --token-budget and --impact captures should cut)" )
+print( f"  ..    (F) {seen} element(s) carried capped=\"1\" across the sweep" )
+for p in problems: print( "  FAIL  " + p )
+# mutation: the assertion shape can fail
+mut = ET.fromstring( '<sigs capped="1"><f p="x"/></sigs>' ).attrib
+if mut.get( "capped" ) == "1" and "shown" not in mut:
+    print( "  PASS  (F) mutation: a bare <sigs capped=\"1\"> IS detected" )
+else:
+    print( "  FAIL  (F) mutation: the arm cannot see a bare capped element" ); problems.append( "mutation" )
+sys.exit( 1 if problems else 0 )
+PYF
+[ $? = 0 ] && ok "(F) every capped=\"1\" element in the sweep carries shown= and a total" \
+           || no "(F) a capped=\"1\" element discloses no shown=/total (listed above)"
 
 # ---------------------------------------------------------------------------------------------------
 # G4: every document this gate reasoned about is well-formed XML. (A) already parses them, but xmllint

@@ -55,7 +55,7 @@ the tests that reach them. Run on this repository (2026-08-30), that second line
 ```xml
 <ctx task="incremental cache invalidation" confidence="high" margin_pct="22"
      bundle="compact" bodies="0" reason="compact-route">
-  <sigs capped="1">
+  <sigs shown="…" total="…" capped="1">
     <f p="src/ingest_cache.h">
       <d l="106" n="kCacheMagic" cx="0" in="0" churn="1" amp="6" pure="1" r="2">
         <doc>incremental cache (--cache): per-file content hash + raw facts so a
@@ -471,7 +471,7 @@ call a CLI.
 <ctx task="incremental cache invalidation" route="[routed: subtoken+body BM25 — no strong name hit,
      multi-word conceptual query]" confidence="high" margin_pct="22"
      bundle="compact" bodies="0" reason="compact-route">
-  <sigs capped="1">
+  <sigs shown="…" total="…" capped="1">
     <f p="src/ingest_cache.h">
       <d l="106" n="kCacheMagic"   cx="0" ccx="0" in="0" churn="1" amp="6" pure="1" r="2"><doc>incremental cache (--cache): per-file content hash + raw facts so a re-run re-parses ONLY c…</doc>constexpr std::uint32_t kCacheMagic = 0x4b505443</d>
       <d l="118" n="kCacheVersion" cx="0" ccx="0" in="0" churn="1" amp="6" pure="1" r="31">constexpr std::uint32_t kCacheVersion = …</d>
@@ -1507,7 +1507,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **521 gate scripts** and is the authoritative list;
+`test/regression.sh` names **522 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a

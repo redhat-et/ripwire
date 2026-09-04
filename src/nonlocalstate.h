@@ -926,14 +926,16 @@ inline constexpr const char* kNonLocalStateLegend =
     "reads the cell and a callee is what writes it "
     "via=the nearest callee whose own body touches the cell (transitive cells; exactly one of at= or via= is present). "
     "cells=cells found in the corpus functions=functions reaching at least one cell "
-    "shown=rows printed capped=1 when rows were dropped; raise the default cap with limit=N (offset=M pages), "
+    "shown=rows printed capped=1 when rows were dropped; raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it), "
     "which also prints total= has_more= next_offset= offset= limit= "
     "unanalyzed_langs=indexed languages this lens does NOT analyse, so their files contribute NO cells and NO "
     "rows; the analysis covers C++, ObjC and Python, the languages whose read and write use sites the index "
     "carries. Their absence is NOT a measurement of zero. unanalyzed_files=indexed files in those languages "
     "undecided_decls=declarations whose specifiers ran past the text window, so mutability could not be decided; dropped, never guessed "
     "cells_capped=1 on the ROOT when the cell universe hit its ceiling decls_capped=1 when a declaration query hit its match budget. "
-    "counts_floor=1 because this analysis is UNSOUND BY CONSTRUCTION and every count here is a FLOOR. It cannot "
+    "counts_floor=1 because this analysis is UNSOUND BY CONSTRUCTION and every count here is a FLOOR (graph_ambiguous=/"
+    "graph_unresolved= are the whole graph's resolver gauge: calls split over several defs / calls whose in-repo defs were all "
+    "language-filtered, the map header's ambiguous=/unresolved=). It cannot "
     "see: an indirect call (a virtual, an unbound or reassigned function pointer or callback, or a macro "
     "invocation whose #define is not indexed), so the callee "
     "closure stops early; a write through a pointer or reference that ALIASES a cell without naming it; a "
@@ -962,7 +964,7 @@ inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, in
 
     std::fputs( kNonLocalStateLegend, stdout );
     std::printf( "<nonlocal_state cells=\"%zu\" functions=\"%zu\"%s%s", scan.cells.size(), total, disclosure,
-                 rw::kGraphCountFloorAttrXml );
+                 rw::graphCountFloorAttrXml( g ).c_str() );   // M15: gauge + marker
     if( !scan.unanalyzedLangs.empty() )
     {
         std::printf( " unanalyzed_langs=\"%s\" unanalyzed_files=\"%u\"", scan.unanalyzedLangs.c_str(), scan.unanalyzedFileCount );

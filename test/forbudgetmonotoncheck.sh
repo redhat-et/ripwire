@@ -118,7 +118,7 @@ run c8k   "--token-budget=8000"
 grep -q 'anchors: ' "$TMP/def" \
     && no "presence: the query routed name-exact — re-author it, the rank-first body walk is unobservable" \
     || ok "presence: conceptual route (no anchor), the rank-first body walk is live"
-grep -q '<sigs capped="1">' "$TMP/def" \
+grep -qE '<sigs [^>]*capped="1">' "$TMP/def" \
     && ok "presence: the default regime trims the sig section (capped=\"1\") — the ladder is engaged" \
     || no "presence: default <sigs> not capped — the fixture's sig bulk no longer exceeds the default sig budget"
 DATTR=$( bodiesattr "$TMP/def" )

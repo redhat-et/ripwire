@@ -547,7 +547,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // descriptions carried the floor prose but not the counting-unit half, so a JSON caller was pointed at a
     // document that answered one of the two questions. Both halves are in the two descriptions now (mcp.h),
     // and the cross-reference to the XML surfaces is gone, because a JSON client does not read them.
-    out += kGraphCountFloorAttrJson;
+    out += graphCountFloorAttrJson( g );   // M15: gauge + marker
     out += "}";
     return out;
 }
@@ -1063,7 +1063,9 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     // and was the one emitter of the five that withheld the command, so the obligation could not be
     // discharged without guessing a runner. An ABSENT run field means NOT DERIVABLE, never a guessed suite
     // command — that rule lives in testmap.h's runHint and is not re-decided here.
-    out += "],\"tests_to_run\":[";
+    out += "]";
+    out += graphCountFloorAttrJson( ix.g );   // H5/M15: blast_radius[].dependent_symbols is read off the name-based CSR — a floor, with the gauge
+    out += ",\"tests_to_run\":[";
     {
         bool first = true;
         for( std::uint32_t f : facts.tests )
@@ -1527,9 +1529,10 @@ inline std::string legoText( const std::string& root, const std::string& type, R
 
     return captureXml( [ & ]( std::FILE* mem )
     {
-        std::fprintf( mem, "<ctx>" );
+        std::fprintf( mem, "<ctx>%s", kLegoLegend );   // H5: the same legend the CLI --lego prints (graphlegend.h)
         packLego( mem, ing, ix.g.implementors, flat, 1, redact, &impure, focus, /*withPaths=*/true,
-                  ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );   // R-R: root-relative <iface p=>
+                  ing.realPaths.empty() ? std::string_view( root ) : std::string_view(),    // R-R: root-relative <iface p=>
+                  graphCountFloorAttrXml( ix.g ) );                                           // M15: gauge + marker
         std::fprintf( mem, "</ctx>" );
     } );
 }
@@ -1830,7 +1833,7 @@ inline std::string impactText( const std::string& root, const std::string& symbo
                   ex( symbol ).c_str(), seeds.size(), reach.size(),
                   imports.xmlAttrs.c_str(), radiusTested, radiusUntested, imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
-                  kGraphCountFloorAttrXml, renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str() );
+                  graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str() );   // M15: gauge + marker
     for( std::size_t i = ipw.begin; i < ipw.end; ++i )
     { const Symbol& s = ing.symbols[ show[i] ];
       const std::string_view rp = imSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], imRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
@@ -2002,7 +2005,7 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
     // member-variable round (card A3): no symbol but ONE field → the per-site renderer the CLI arm prints (fielduses.h).
     if( const std::vector<FieldId> fields = defs.empty() ? resolveFieldSelector( ing, sym ) : std::vector<FieldId>{}; fields.size() == 1 )
     {
-        return renderFieldUses( ing, fields[ 0 ], FieldUsesArgs{ symbol, ing.realPaths.empty(), root, page.limit, page.offset } );
+        return renderFieldUses( ing, fields[ 0 ], FieldUsesArgs{ symbol, ing.realPaths.empty(), root, page.limit, page.offset, ix.g } );
     }
 
     struct UseSite { std::uint32_t fileId; std::uint32_t line; RefRole role; std::string in; };
@@ -2081,7 +2084,7 @@ inline std::string usesText( const std::string& root, const std::string& symbol,
     const std::string  usRootPrefix = usSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const std::string  usRootAttr   = usSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
     std::fprintf( mem, "<uses of=\"%s\" defs=\"%zu\" external=\"%d\" count=\"%zu\"%s%s%s>",
-                  ex( symbol ).c_str(), defs.size(), external ? 1 : 0, sites.size(), usRootAttr.c_str(), upage, kGraphCountFloorAttrXml );   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
+                  ex( symbol ).c_str(), defs.size(), external ? 1 : 0, sites.size(), usRootAttr.c_str(), upage, graphCountFloorAttrXml( ix.g ).c_str() );   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
     for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
     {
         const UseSite& u = sites[ siteIndex ];
@@ -2146,11 +2149,14 @@ inline std::string pathText( const std::string& root, const std::string& from, c
     const std::string ptRootAttr = ptSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
     // R-E fix (2026-08-19): the same shared root-relative clause the CLI --path twin now leads with — this
     // verb has no legend of its own either, and the two dialects must not differ on what they explain.
-    std::fprintf( mem, "%s", rootRelPathsLegend( ptSingleRoot ) );
-    std::fprintf( mem, "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"%s",
+    // H5: the same brief floor legend + marker the CLI --path prints (verbs_navigate.h) — one wording, two transports.
+    std::fprintf( mem, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
+                       "graph holds none. %s-->%s", kGraphCountFloorBriefLegend, rootRelPathsLegend( ptSingleRoot ) );
+    std::fprintf( mem, "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"%s%s",
                   ex( from ).c_str(), ex( to ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                   srcDefs.size(), dstDefs.size(),
-                  pth.empty() ? 0 : 1, pth.empty() ? std::size_t( 0 ) : pth.size() - 1, ptRootAttr.c_str() );
+                  pth.empty() ? 0 : 1, pth.empty() ? std::size_t( 0 ) : pth.size() - 1, ptRootAttr.c_str(),
+                  graphCountFloorAttrXml( g ).c_str() );   // M15: gauge + marker
     if( pth.empty() )
     {
         std::fprintf( mem, " hint=\"no directed call path — try the connect verb on %s,%s (undirected: finds a shared caller), or uses/impact for non-call references\"",
@@ -2339,14 +2345,17 @@ inline constexpr char kConnectHeader[] =
     "<!-- ripwire connect: minimal joining subgraph over N task symbols (metric-closure 2-approx Steiner;"
     " search is undirected so SHARED-CALLER joins are found, every <e f= t=/> keeps its TRUE caller->callee"
     " direction; graph-structured navigation per CodeCompass, arXiv 2602.20048). Call edges are name-based:"
-    " dynamic dispatch / callbacks may hide connections -->";
+    " dynamic dispatch / callbacks may hide connections. counts_floor=\"1\": every graph-derived count here (nodes=,"
+    " edges=, groups=) is a FLOOR, never a total; read a zero as \"none found\", never as \"none exists\"."
+    " graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls"
+    " whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. -->";
 
 // The root element's own bytes: the <connect ...> start-tag PLUS the </connect> close. It is
 // self-referential (the start-tag's length depends on the digits of the number it carries), so it is
 // BOUNDED rather than measured — a wide start-tag with every counter at five digits and truncated="paths"
 // present, plus the 10-byte close. Over-covering slightly is the safe direction: an estimate that
 // UNDER-reports is the defect being fixed here, one that over-reports merely trims a little earlier.
-inline constexpr std::size_t kConnectRootBytes = 112;
+inline constexpr std::size_t kConnectRootBytes = 200;   // H5/M15: + counts_floor="1" (17 B) + graph_ambiguous=/graph_unresolved= (≤ 59 B), with margin
 
 // The ONE estimator both the trim-loop fit check and the printed est_tokens go through. Never inline the
 // arithmetic at a call site again: two copies of this formula is exactly how the payload-only scope bug
@@ -2364,7 +2373,7 @@ inline std::size_t connectEstTokens( std::size_t payloadBytes, std::size_t extra
     return std::size_t( wholeDocumentBytes / kBytesPerTokenDefault + 0.5 );
 }
 
-inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectResult& res,
+inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g, const ConnectResult& res,
                          RedactCounts* redact,                  // §B0/W3-N1: REQUIRED — the Steiner-node sig= attrs are emitted text
                          int maxTokens = 0,
                          std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
@@ -2536,9 +2545,10 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const ConnectR
     // verb apologises for an estimate being an estimate. Dropped.
     const std::size_t estTokens = connectEstTokens( payload.size(), connectExtraBytes );
     std::fprintf( out, "%s%s", kConnectHeader, rootRelPathsLegend( !rootArg.empty() ) );
-    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s%s>",
+    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s%s%s>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups, estTokens,
-                  truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str() );
+                  truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),
+                  graphCountFloorAttrXml( g ).c_str() );   // H5/M15: nodes=/edges= are read off the name-based CSR — a floor, with the gauge
     std::fwrite( payload.data(), 1, payload.size(), out );
     std::fprintf( out, "</connect>" );
 }
@@ -2570,7 +2580,7 @@ inline std::string connectText( const std::string& root, const std::vector<std::
     std::FILE*  mem = open_memstream( &buf, &sz );
     if( !mem ) { err = "internal error"; return {}; }
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
-    packConnect( mem, ing, res, redact, /*maxTokens=*/0, ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );
+    packConnect( mem, ing, g, res, redact, /*maxTokens=*/0, ing.realPaths.empty() ? std::string_view( root ) : std::string_view() );
     std::fflush( mem );
     std::fclose( mem );
     std::string out = buf ? std::string( buf, sz ) : std::string{};

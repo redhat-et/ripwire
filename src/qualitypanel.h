@@ -581,7 +581,8 @@ inline constexpr const char* kPanelLegend =
     "of= is enabled_n= minus the unavailable (a row never counts a family it could not evaluate); "
     "cut_reachable=0 when the cut exceeds of=, a fact about the corpus, never a clean bill of health. "
     "unreadable_files=files readability could not read (rrank= a floor); findings_capped=1 when a rule "
-    "spent its per-rule budget, floor_rules=naming them (those families are FLOORS); state_floor=1 when the "
+    "spent its per-rule budget, floor_rules=naming them (those families are FLOORS and the root carries "
+    "counts_floor=1); state_floor=1 when the "
     "state lens saturated its budget (a FLOOR too). "
     "join=deep+untested is an annotation, NOT a seventh family (changes nothing: not fam=, not of=, not the "
     "order): deep= structural evidence (a body that SUSTAINS depth at bar_nest) that no indexed test "
@@ -671,7 +672,8 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
     }
     if( !floorRules.empty() )
     {
-        std::printf( " findings_capped=\"1\" floor_rules=\"%s\"", std::string( escapeXml( std::string_view( floorRules ), escFloor ) ).c_str() );
+        std::printf( " findings_capped=\"1\" floor_rules=\"%s\"%s", std::string( escapeXml( std::string_view( floorRules ), escFloor ) ).c_str(),
+                     kGraphCountFloorAttrXml );   // H8: a floored family floors the root's counts
     }
     std::printf( " shown=\"%zu\" capped=\"%s\"%s%s%s>", shown, shown < total ? "1" : "0", paging,
                  qpRootAttr.c_str(), gitstamp::atAttr( root ).c_str() );

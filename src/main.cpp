@@ -1590,7 +1590,10 @@ int runDefaultMap( const MainDispatch& d )
     const std::string  ctxRootAttr = ( mapRootArg.empty() || cfg.json )
                                    ? std::string()
                                    : ( " root=\"" + std::string( rw::escapeXml( mapRootArg, ctxRootEsc ) ) + "\"" );
-    const std::size_t  ctxRootBytesWhenNoMap = ( mapTopK == 0 ) ? ctxRootAttr.size() : 0;
+    // M11: with no map the <ctx> root also carries est_tokens="<payloadTokens>" — priced here so the M6
+    // chooser's reason= figure is the document actually served (expandtopk0check G-b is that identity).
+    const std::size_t  ctxEstBytesWhenNoMap  = ( mapTopK == 0 ) ? ( sizeof( " est_tokens=\"\"" ) - 1 ) + std::to_string( payloadTokens ).size() : 0;
+    const std::size_t  ctxRootBytesWhenNoMap = ( mapTopK == 0 ) ? ctxRootAttr.size() + ctxEstBytesWhenNoMap : 0;
     if( expandAutoServeScope( cfg, !expandRanges.empty(), bodiesSection.isRendered ) )
     {
         // Bundle total = "<ctx>" + the map as it would actually be emitted (payload token digits included)
@@ -1676,11 +1679,18 @@ int runDefaultMap( const MainDispatch& d )
         // M6 whole-file serving: the file IS the complete answer — no map, no <bodies>. The bytes were
         // rendered (and the choice measured) above; --token-budget still gates the real document, charged
         // at the BODY rate because this payload is raw code text, exactly like <src>/<bodies> sections.
+        // M11: no <r> header carries the price here, so the <ctx> root does — the SAME number the gate reads.
+        {
+            const std::size_t fixedBytes = ctxOpenStr.size() + wholeFile.xml.size() + ( sizeof( "</ctx>" ) - 1 );
+            std::size_t       estTokens  = 0;
+            // everything on this path is raw code text, so the whole document is priced at the BODY rate
+            const std::string attr       = rw::pricedRootAttr( fixedBytes, rw::kBytesPerTokenBody, 0, &estTokens );
+            rw::spliceRootAttrs( ctxOpenStr, attr );
+            mapEstTokens = estTokens;
+        }
         std::fwrite( ctxOpenStr.data(), 1, ctxOpenStr.size(), out );
         std::fwrite( wholeFile.xml.data(), 1, wholeFile.xml.size(), out );
         std::fputs( "</ctx>", out );
-        mapEstTokens = rw::tokensForEmittedBytes( ctxOpenStr.size() + wholeFile.xml.size() + ( sizeof( "</ctx>" ) - 1 ),
-                                                  rw::kBytesPerTokenBody );
     }
     else if( mapTopK > 0 )          // --top-k=0: payload only — skip the ranked map entirely (never the payload below)
     {
@@ -1722,6 +1732,9 @@ int runDefaultMap( const MainDispatch& d )
         // M6 auto scope, so ctxOpenStr is the bare "<ctx>" on this path.)
         if( hasExtension )
         {
+            // M11: the <ctx> root prices the payload-only document — the SAME number --token-budget gates on
+            // (mapEstTokens below), so a parser reads the price the map's <r> header would otherwise carry.
+            rw::spliceRootAttrs( ctxOpenStr, " est_tokens=\"" + std::to_string( payloadTokens ) + "\"" );
             std::fwrite( ctxOpenStr.data(), 1, ctxOpenStr.size(), out );
         }
         mapEstTokens = payloadTokens;

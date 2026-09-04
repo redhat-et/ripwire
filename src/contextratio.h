@@ -493,7 +493,8 @@ inline constexpr const char* kContextRatioLegend =
     "nothing to resolve (ents=0), which is not the same claim as a self-contained unit — read ents= first. "
     "ext=distinct referenced names with NO in-corpus definition. Local variables and parameters produce read "
     "and write sites, so they DOMINATE ext= on real code: it is not a count of external dependencies and it "
-    "is excluded from both ratios. amb=distinct referenced names that resolved to more than one definition, "
+    "is excluded from both ratios. amb_names=distinct referenced names that resolved to more than one definition "
+    "(a per-NAME tally; the map row's amb= is a per-CALL count of a different resolver), "
     "each of which is counted as an entity — resolution is NAME-BASED and language-gated, the same heuristic "
     "level the uses verb works at, never the call graph's narrowed resolution, because four of the five "
     "reference roles carry no resolution at all. defs_per_name_cap=the most definitions ONE name may "
@@ -548,7 +549,7 @@ inline int writeContextRatioReport( const IngestResult& ing, int pageLimit, int 
         const std::string path( escapeXml( pathRel( s.fileId ), escPath ) );
         const std::string name( escapeXml( s.name, escName ) );
         std::printf( "<s p=\"%s:%u\" n=\"%s\" t=\"%s\" sites=\"%u\" ents=\"%u\" ents_out=\"%u\" ent_ratio=\"%.3f\""
-                     " files=\"%u\" files_out=\"%u\" rtok=\"%llu\" rtok_out=\"%llu\" read_ratio=\"%.3f\" ext=\"%u\" amb=\"%u\"/>",
+                     " files=\"%u\" files_out=\"%u\" rtok=\"%llu\" rtok_out=\"%llu\" read_ratio=\"%.3f\" ext=\"%u\" amb_names=\"%u\"/>",
                      path.c_str(), s.line, name.c_str(), symTag( s.kind ),
                      row.sites, row.ents, row.entsOut, ratioOf( row.entsOut, row.ents ),
                      row.files, row.filesOut,
@@ -560,7 +561,7 @@ inline int writeContextRatioReport( const IngestResult& ing, int pageLimit, int 
         const Row&        row = scan.files[fileIndex];
         const std::string path( escapeXml( pathRel( row.unitId ), escPath ) );
         std::printf( "<f p=\"%s\" sites=\"%u\" ents=\"%u\" ents_out=\"%u\" ent_ratio=\"%.3f\""
-                     " files=\"%u\" files_out=\"%u\" rtok=\"%llu\" rtok_out=\"%llu\" read_ratio=\"%.3f\" ext=\"%u\" amb=\"%u\"/>",
+                     " files=\"%u\" files_out=\"%u\" rtok=\"%llu\" rtok_out=\"%llu\" read_ratio=\"%.3f\" ext=\"%u\" amb_names=\"%u\"/>",
                      path.c_str(), row.sites, row.ents, row.entsOut, ratioOf( row.entsOut, row.ents ),
                      row.files, row.filesOut,
                      static_cast<unsigned long long>( row.rtok ), static_cast<unsigned long long>( row.rtokOut ),

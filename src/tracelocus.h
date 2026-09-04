@@ -769,7 +769,8 @@ inline std::string renderTraceBlock( const IngestResult& ing, tracein::FrameForm
 // field defaults to "not available" (attribute simply omitted downstream).
 struct FromTraceInputs
 {
-    std::size_t                        bundleBudgetBytes    = kForPayloadBudgetBytes;   // overall <ctx> budget; caller resolves --token-budget/budget_tokens into bytes
+    std::size_t                        bundleBudgetBytes    = kForPayloadBudgetBytes;   // overall <ctx> budget; caller resolves --token-budget/budget
+    std::size_t                        budgetTokens         = 0;                        // M11: the --token-budget as passed (0 = none) — budget_tokens= on the root_tokens into bytes
     std::size_t                        sigLadderBudgetBytes = 0;                        // packSignatures per-doc ladder (0 = unlimited)
     std::size_t                        bodyBudgetBytes      = 0;                        // packBodies budget for the rank-1 full body (0 = unlimited)
     bool                                compress             = false;
@@ -927,7 +928,10 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         // re-expressed against a post-headroom byte budget (serialize.h ceilingAllowanceFromBudgetBytes).
         h += "budget=";  h += std::to_string( bundleBudget );
         h += " bytes (allowance ";  h += std::to_string( ceilingAllowanceFromBudgetBytes( bundleBudget ) );
-        h += " bytes = ceiling + the single-entry overshoot a whole first signature costs).";
+        h += " bytes = ceiling + the single-entry overshoot a whole first signature costs). ";
+        // M11: the root's machine-readable price, defined beside the ledger prose.
+        h += "On the root: est_tokens= prices the delivered bundle in tokens, budget_tokens= is the token target you passed (absent "
+             "when none); over_ceiling= is 1 when the header floor exceeds it (the bundle is then complete, not trimmed).";
         h += extraNotes;
         h += " -->";
         return h;
@@ -985,15 +989,29 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
             " [src_echo: dropped (ceiling)]",   // no route= attribute on this lens: hasRouteAttr=false ⇒ rung (c) is never taken
             " [over_ceiling: the header floor (verbatim src echo + fixed legend) plus the innermost frame's whole"
             " signature exceeds this budget - the bundle is complete and larger than the ceiling, not trimmed]" };
+        // M11: the PRICED ROOT (the whole bundle at the map rate — the rank-1 body is a minority of the bytes,
+        // and the map rate over-prices body text, so the number errs conservative), budget_tokens= when a
+        // --token-budget was passed, over_ceiling="1" when the ladder's last rung fired. Priced INTO the
+        // ladder at their widest spelling (see packtask.h's rootAttrsFor for the reasoning).
+        const auto rootAttrsFor = [ & ]( const std::string& doc, bool overCeiling ) -> std::string
+        {
+            std::string attrs = pricedRootAttr( doc.size(), kBytesPerTokenDefault, 0, nullptr );
+            if( in.budgetTokens > 0 ) { attrs += " budget_tokens=\"" + std::to_string( in.budgetTokens ) + "\""; }
+            if( overCeiling )         { attrs += " over_ceiling=\"1\""; }
+            return attrs;
+        };
+        const std::size_t rootAttrsBound = rootAttrsFor( whole, /*overCeiling=*/true ).size();
         const std::string chosen = climbCeilingLadder( [ & ]( bool, bool withSrcEcho, std::string_view extra )
                                                        { return buildTraceHeader( withSrcEcho, extra ); },
-                                                       headerStr, whole.size() - headerStr.size(),
+                                                       headerStr, whole.size() - headerStr.size() + rootAttrsBound,
                                                        ceilingAllowanceFromBudgetBytes( bundleBudget ),
                                                        /*hasRouteAttr=*/false, kNotes );
         if( chosen != headerStr )
         {
             whole.replace( 0, headerStr.size(), chosen );
         }
+        // the ladder's last rung spells the marker with a colon (kNotes); the legend's definition never does
+        spliceRootAttrs( whole, rootAttrsFor( whole, chosen.find( "over_ceiling:" ) != std::string::npos ) );
     }
 
     res.ok         = true;

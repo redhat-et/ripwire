@@ -350,7 +350,8 @@ inline constexpr const char* kNamingConsistencyLegend =
     "UNAVAILABLE (absent otherwise) "
     "f rows: p=path:line n=name lang= kind=fn|var style=this name's own convention (mixed for the internally "
     "inconsistent case) propose=the mechanically recombined form in the group's dominant style. "
-    "Pages limit=N (offset=M); default 40 rows, shown= capped= disclose the cut. -->";
+    "Pages limit=N (offset=M); default 40 rows, shown= capped= disclose the cut, and a cut listing carries "
+    "total=/has_more=/next_offset= so a paging loop can continue from it. -->";
 
 // Emit the report. Returns the process exit code — always 0: this is a lens, not a gate. `rootPrefix`/
 // `rootAttr` — R-E (2026-08-17 harvest), same convention writeContextRatioReport takes (see contextratio.h).

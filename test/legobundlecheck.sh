@@ -150,7 +150,12 @@ fi
 # paths against a root it never named — the one thing --lego's p= exists to let you do (open the file) is
 # undoable without it. Every other byte of the reference is unchanged, which is what this arm is for.
 "$BIN" test/legofix --no-cache --lego=Shape >"$TMP/standalone" 2>/dev/null
-printf '%s' '<ctx root="test/legofix"><lego><iface n="Shape" p="shapes.h" implementors="2"><m pure="1">virtual double area() const = 0</m><m pure="1">virtual void draw() const = 0</m><impl n="Circle" p="shapes.h"/><impl n="Square" p="shapes.h"/></iface></lego></ctx>' >"$TMP/standalone.golden"
+# RE-PINNED 2026-09-04 (capture-audit H5, floormarkcheck arm (9)): the reference gained the shared lego legend
+# (graphlegend.h kLegoLegend — the verb shipped with none) and counts_floor="1" on <lego> (implementors= is read
+# off the name-based extends/implements edges) plus the M15 gauge pair (0/0 on this fixture: every call resolves).
+# Every other byte is unchanged, which is still what this arm is for.
+LEGO_LEGEND='<!-- ripwire lego: ONE interface/base type — its method contract (<m>, where the language captures it soundly) and every implementor (<impl>) the extends/implements edges reach, own-language only; implementors= counts them. counts_floor="1": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a zero as "none found", never as "none exists". graph_ambiguous=/graph_unresolved= are the whole graph'"'"'s resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header'"'"'s ambiguous=/unresolved=. -->'
+printf '%s' "<ctx root=\"test/legofix\">${LEGO_LEGEND}"'<lego graph_ambiguous="0" graph_unresolved="0" counts_floor="1"><iface n="Shape" p="shapes.h" implementors="2"><m pure="1">virtual double area() const = 0</m><m pure="1">virtual void draw() const = 0</m><impl n="Circle" p="shapes.h"/><impl n="Square" p="shapes.h"/></iface></lego></ctx>' >"$TMP/standalone.golden"
 cmp -s "$TMP/standalone" "$TMP/standalone.golden" \
     && ok "--lego=Shape standalone byte-identical to the reference output (bundle-only change)" \
     || no "--lego=Shape standalone CHANGED — the §P3 fix must touch the bundle embedding only: $( cat "$TMP/standalone" )"

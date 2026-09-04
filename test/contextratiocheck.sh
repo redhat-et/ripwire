@@ -222,31 +222,31 @@ import sys, xml.etree.ElementTree as ET
 # HAND-DERIVED — see the derivation block at the top of this file before touching a number here.
 GOLD = {
     "mostlyRemote": dict( sites= 6, ents=3, ents_out=2, ent_ratio="0.667", files=2, files_out=1,
-                          rtok=71, rtok_out=24, read_ratio="0.338", ext=1, amb=0 ),
+                          rtok=71, rtok_out=24, read_ratio="0.338", ext=1, amb_names=0 ),
     "Holder":       dict( sites= 2, ents=1, ents_out=1, ent_ratio="1.000", files=1, files_out=1,
-                          rtok= 4, rtok_out= 4, read_ratio="1.000", ext=0, amb=0 ),
+                          rtok= 4, rtok_out= 4, read_ratio="1.000", ext=0, amb_names=0 ),
     "allLocal":     dict( sites= 3, ents=2, ents_out=0, ent_ratio="0.000", files=1, files_out=0,
-                          rtok=24, rtok_out= 0, read_ratio="0.000", ext=1, amb=0 ),
+                          rtok=24, rtok_out= 0, read_ratio="0.000", ext=1, amb_names=0 ),
     "Shared":       dict( sites= 0, ents=0, ents_out=0, ent_ratio="0.000", files=0, files_out=0,
-                          rtok= 0, rtok_out= 0, read_ratio="0.000", ext=0, amb=0 ),
+                          rtok= 0, rtok_out= 0, read_ratio="0.000", ext=0, amb_names=0 ),
     "helperOne":    dict( sites= 1, ents=0, ents_out=0, ent_ratio="0.000", files=0, files_out=0,
-                          rtok= 0, rtok_out= 0, read_ratio="0.000", ext=1, amb=0 ),
+                          rtok= 0, rtok_out= 0, read_ratio="0.000", ext=1, amb_names=0 ),
     "helperTwo":    dict( sites= 1, ents=0, ents_out=0, ent_ratio="0.000", files=0, files_out=0,
-                          rtok= 0, rtok_out= 0, read_ratio="0.000", ext=1, amb=0 ),
+                          rtok= 0, rtok_out= 0, read_ratio="0.000", ext=1, amb_names=0 ),
     "siblingHere":  dict( sites=18, ents=0, ents_out=0, ent_ratio="0.000", files=0, files_out=0,
-                          rtok= 0, rtok_out= 0, read_ratio="0.000", ext=2, amb=0 ),
+                          rtok= 0, rtok_out= 0, read_ratio="0.000", ext=2, amb_names=0 ),
 }
 ORDER = [ "mostlyRemote", "Holder", "allLocal", "Shared", "helperOne", "helperTwo", "siblingHere" ]
-INTS  = ( "sites", "ents", "ents_out", "files", "files_out", "rtok", "rtok_out", "ext", "amb" )
+INTS  = ( "sites", "ents", "ents_out", "files", "files_out", "rtok", "rtok_out", "ext", "amb_names" )
 STRS  = ( "ent_ratio", "read_ratio" )
 
 FILEGOLD = {
     "remote.cpp": dict( sites=24, ents=3, ents_out=2, ent_ratio="0.667", files=2, files_out=1,
-                        rtok=71, rtok_out=24, read_ratio="0.338", ext=3, amb=0 ),
+                        rtok=71, rtok_out=24, read_ratio="0.338", ext=3, amb_names=0 ),
     "holder.cpp": dict( sites= 2, ents=1, ents_out=1, ent_ratio="1.000", files=1, files_out=1,
-                        rtok= 4, rtok_out= 4, read_ratio="1.000", ext=0, amb=0 ),
+                        rtok= 4, rtok_out= 4, read_ratio="1.000", ext=0, amb_names=0 ),
     "local.cpp":  dict( sites= 5, ents=2, ents_out=0, ent_ratio="0.000", files=1, files_out=0,
-                        rtok=24, rtok_out= 0, read_ratio="0.000", ext=2, amb=0 ),
+                        rtok=24, rtok_out= 0, read_ratio="0.000", ext=2, amb_names=0 ),
 }
 FILEORDER = [ "remote.cpp", "holder.cpp", "local.cpp" ]
 

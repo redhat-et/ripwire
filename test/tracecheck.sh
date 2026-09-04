@@ -236,7 +236,9 @@ fi
 # §B3: the source label now appears in THREE places, not two — ctxRootOpen's verbatim task= root attribute
 # joined the header echo and <trace src=…>. Normalising only the old two is what made this arm red on the
 # §B3 binary; the arm is doing its job (it caught a real new occurrence of the label it is written to ignore).
-norm(){ printf '%s' "$1" | sed -E 's/src="[^"]*"/src="X"/; s/trace-to-locus for "[^"]*"/trace-to-locus for "X"/; s/<ctx task="[^"]*"/<ctx task="X"/'; }
+# M11 (2026-09-04): the root's est_tokens= prices the document INCLUDING the label's own bytes, so it is the
+# fourth (derived) place the label shows — normalised with it.
+norm(){ printf '%s' "$1" | sed -E 's/src="[^"]*"/src="X"/; s/trace-to-locus for "[^"]*"/trace-to-locus for "X"/; s/<ctx task="[^"]*"/<ctx task="X"/; s/ est_tokens="[0-9]+"//'; }
 STDIN_OUT="$( cd "$WORK" && "$BIN" . --from-trace=- --no-cache < "$WORK/traces/py.txt" 2>/dev/null )"
 FILE_OUT="$( tr_run py.txt )"
 [ "$( norm "$STDIN_OUT" )" = "$( norm "$FILE_OUT" )" ] \
@@ -508,7 +510,7 @@ done
 for tb in 50 100 500; do
     out="$( tb_run "$tb" )";  n=$( printf '%s' "$out" | wc -c | tr -d ' ' );  want="$( allowance_of "$tb" )"
     if [ "$n" -gt "$want" ]; then
-        printf '%s' "$out" | grep -q 'over_ceiling' \
+        printf '%s' "$out" | grep -qE 'over_ceiling(="1"|:)' \
             && ok "(T3) --token-budget=$tb: ${n}B over a ${want}B allowance AND says over_ceiling" \
             || no "(T3) --token-budget=$tb: ${n}B over a ${want}B allowance with NO over_ceiling label"
     else
@@ -519,14 +521,15 @@ done
 # (T4) the label is not unconditional: a budget the bundle FITS under must stay silent (a lens that always
 #      cries over_ceiling is as useless as one that never does). 20000 tokens is ~54 KB of allowance.
 T4="$( tb_run 20000 )";  t4n=$( printf '%s' "$T4" | wc -c | tr -d ' ' );  t4a="$( allowance_of 20000 )"
-{ [ "$t4n" -le "$t4a" ] && ! printf '%s' "$T4" | grep -q 'over_ceiling'; } \
+# M11: the label is the root attribute / the ladder's colon note — the legend now DEFINES the word too
+{ [ "$t4n" -le "$t4a" ] && ! printf '%s' "$T4" | grep -qE 'over_ceiling(="1"|:)'; } \
     && ok "(T4) a bundle that FITS (${t4n}B <= ${t4a}B) carries no over_ceiling label" \
     || no "(T4) over_ceiling fired on a conformant bundle (${t4n}B vs ${t4a}B allowance)"
 
 # (T5) §B1.7 root attrs — the trace SOURCE is this lens's request text and is now carried VERBATIM in the
 #      task= attribute (ctxRootOpen), beside the lossy readable echo in the comment. The bundle opened with a
 #      bare <ctx> before, so a consumer had no machine-readable copy of what it had asked about at all.
-printf '%s' "$T1_DEF" | grep -q '^<ctx task="traces/py.txt">' \
+printf '%s' "$T1_DEF" | grep -q '^<ctx task="traces/py.txt"' \
     && ok "(T5) the bundle root carries the verbatim source (ctxRootOpen task=)" \
     || { no "(T5) <ctx> has no verbatim task= root attribute"; printf '%s' "$T1_DEF" | head -c 80; echo; }
 

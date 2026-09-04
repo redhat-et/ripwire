@@ -177,7 +177,9 @@ for B in 600 1200 6000; do
     # only — the bundle emits source text, and this repo's own sources contain the string "over_ceiling"
     # (trap #15). Measured margin note: at B=600 on this fixture the pre-CA4 binary delivered 1618 B against a
     # 1628 B bar — a 10-byte accident, the same shape as the 28-byte one the fixup above records.
-    OVERLBL="$( sed -n 's/.*<!-- ripwire task bundle\(.*\)-->.*/\1/p' "$TMP/b.$B" | grep -c 'over_ceiling' )"
+    # M11 (2026-09-04): the header comment now also DEFINES over_ceiling= ("over_ceiling=1 when …"); the
+    # label is the ladder's colon note (or the root attribute), never the bare word.
+    OVERLBL="$( sed -n 's/.*<!-- ripwire task bundle\(.*\)-->.*/\1/p' "$TMP/b.$B" | grep -cE 'over_ceiling(="1"|:)' )"
     [ "${OVERLBL:-0}" -gt 0 ] && OVERLBL=1 || OVERLBL=0
     [ "$BYTES" -gt "$CEILTOL" ] && OVERREAL=1 || OVERREAL=0
     if [ -z "$BUDGET" ] || [ -z "$CEIL" ]; then

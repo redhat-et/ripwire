@@ -282,7 +282,7 @@ inline void emitCandidates( std::FILE* out, const rw::IngestResult& ing, const s
 // the XML sibling shrank 4.7x, so the JSON/MCP audience — the one that most needs a budget — had none. It
 // runs the same H1 ladder against the same budget the XML path computes, and SAYS what it did: "capped" is
 // the ladder's own verdict (never inferred by the caller) and "est_tokens" is the delivered size, mirroring
-// the XML `<sigs capped="1">` / header `est_tokens="N"` attributes.
+// the XML `<sigs shown= total= capped="1">` / header `est_tokens="N"` attributes.
 //
 // The sigs array is rendered into memory first for exactly the reason the XML path buffers it: the TRUE
 // delivered byte count must be known before the header that reports it is written. Its own function (not a
@@ -2220,8 +2220,9 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // R-E fix (2026-08-19): the document root DISCLOSES the root its p= are now relative to. The first
         // R-E landing made packLego's p= root-relative and left the root undisclosed, so a --lego bundle
         // carried relative paths against a root the reader could not name — the honesty rule this tool sells.
-        std::printf( "%s", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str() );
-        packLego( stdout, ing, g.implementors, flat, 1, d.redactPtr, &legoImpure, focus, /*withPaths=*/true, tvRootArg );
+        std::printf( "%s%s", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str(), rw::kLegoLegend );   // H5: --lego had no legend at all
+        packLego( stdout, ing, g.implementors, flat, 1, d.redactPtr, &legoImpure, focus, /*withPaths=*/true, tvRootArg,
+                  rw::graphCountFloorAttrXml( g ) );   // M15: gauge + marker on the targeted root
         std::printf( "</ctx>" );
         reportRedactions( stderr, d.redactCounts );      // W3-N1: a contract <m> sig is a redacting seam — disclose the tally
         return 0;

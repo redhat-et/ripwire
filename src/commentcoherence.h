@@ -317,7 +317,7 @@ inline constexpr const char* kCommentCoherenceLegend =
     "input; this verb never checks staleness and doc-drift never checks content. "
     "documented=functions/methods measured (rows emitted) no_comment=eligible symbols with nothing to measure "
     "unreadable_files=indexed files this pass could not read; their functions are absent, so documented= is a FLOOR "
-    "shown=rows printed capped=1 when rows were dropped; raise the default cap with limit=N (offset=M pages), "
+    "shown=rows printed capped=1 when rows were dropped; raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it), "
     "which also prints total= has_more= next_offset= offset= limit= -->";
 
 // R-E (2026-08-17 harvest): rootPrefix/rootAttr — same convention writeContextRatioReport takes (see there).

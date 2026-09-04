@@ -199,7 +199,12 @@ fi
 # shared="1" that would starve a row a smaller-footprint renderer could still afford). budget=950 is the
 # specific rung, on this content-stable fixture, where <callers> is capped (shown < total) rather than empty
 # or fully-fit — confirmed byte-identical against a cd30104 baseline binary 2026-08-21.
-runB --pack-task="anchorSolo" --token-budget=950 > "$TMP/b_tight.xml"
+# RE-PINNED 950 -> 1225 (2026-09-04, capture-audit M11): kPackTaskHeaderReserve went 1024 -> 1600 (the header
+# had outgrown it) and the <ctx> root gained est_tokens=/budget_tokens=, so the section budgets moved by a
+# fixed ~640 B and the capped rung with it — swept 800..2000: empty <= 1205, shown="1" on 1210..1240,
+# shown="2" at 1245, fully fit from 1300. 1225 sits mid-window; the PROPERTY (one row admitted, two withheld,
+# no bytes spent on an uninformative shared="1") is unchanged.
+runB --pack-task="anchorSolo" --token-budget=1225 > "$TMP/b_tight.xml"
 TIGHT_TAG="$( grep -o '<callers[^>]*>' "$TMP/b_tight.xml" )"
 [ "$TIGHT_TAG" = '<callers of_top="1" shown="1" total="3" capped="1">' ] \
     && ok "arm (4b) capped-budget single-anchor callers: shown=\"1\"/total=\"3\"/capped=\"1\" unchanged from the pre-lane rendering" \

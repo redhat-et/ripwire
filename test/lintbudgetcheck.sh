@@ -55,9 +55,9 @@ CAST_LINT="$( ruleCount c-style-cast )"
 grep -q '<lint[^>]* findings_capped="1"' "$TMP/lint.xml" \
     && ok 'root declares findings_capped="1" (a rule saturated its own budget)' \
     || no 'root does NOT declare findings_capped="1" while a rule saturates its budget'
-grep -qE '<rule name="magic-number"[^/]*capped="1"' "$TMP/lint.xml" \
-    && ok 'magic-number row declares capped="1" (count= is a floor)' \
-    || no 'magic-number row does not declare capped="1"'
+grep -qE '<rule name="magic-number"[^/]* count_capped="1"' "$TMP/lint.xml" \
+    && ok 'magic-number row declares count_capped="1" (count= is a floor — rule 4 of the truncation vocabulary)' \
+    || no 'magic-number row does not declare count_capped="1"'
 
 # ── 3. NO-STARVATION, the core invariant: a quiet rule's count must not change when a noisy rule is
 #      added beside it. Exercised through the --lint-rules= path, which shares the same engine/pool.
@@ -113,13 +113,13 @@ crow_user="$(    "$BIN" "$ROOT" --lint --lint-rules="$COLLIDE" 2>/dev/null | gre
 # untracked" case) made it 3, reddening an arm that is about CAP INHERITANCE, not about how many gotos
 # this tree happens to hold.
 case "$crow_builtin" in
-    *' capped='* ) no "built-in goto row inherited the colliding USER rule's cap: $crow_builtin" ;;
+    *' count_capped='* ) no "built-in goto row inherited the colliding USER rule's cap: $crow_builtin" ;;
     *count=\"$GOTO_TRUTH\"* ) ok "built-in goto row stays a clean total ($GOTO_TRUTH) beside a saturating same-named user rule" ;;
     * ) no "built-in goto row unexpected shape: $crow_builtin" ;;
 esac
 case "$crow_user" in
-    *' capped="1"'* ) ok "colliding user rule's own saturation still disclosed: capped=\"1\"" ;;
-    * ) no "user goto rule saturated its budget but carries no capped=: $crow_user" ;;
+    *' count_capped="1"'* ) ok "colliding user rule's own saturation still disclosed: count_capped=\"1\"" ;;
+    * ) no "user goto rule saturated its budget but carries no count_capped=: $crow_user" ;;
 esac
 rm -rf "$COLLIDE"
 

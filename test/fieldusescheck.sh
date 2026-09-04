@@ -63,10 +63,10 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -d "$FIX" ] || { echo "no test/fieldusesfix dir — fixture missing"; exit 2; }
 echo "fieldusescheck: BIN=$BIN  FIX=$FIX"
 
-# one "role basename:line[ amb=K]" line per <u> row, sorted — paths reduced to basenames so the
+# one "role basename:line[ owner_candidates=K]" line per <u> row (M15: the per-site owner-candidate count is owner_candidates=, never amb=), sorted — paths reduced to basenames so the
 # assertions hold wherever the checkout lives.
 rows(){ "$BIN" "$FIX" --uses="$1" --no-cache 2>/dev/null | grep -o '<u [^>]*/>' \
-        | sed -E 's/.*role="([a-z]*)" p="([^"]*\/)?([^"/]*)"( in_id="[^"]*")?( amb="([0-9]+)")?.*/\1 \3 \6/; s/ +$//; s/ ([0-9]+)$/ amb=\1/' | sort; }
+        | sed -E 's/.*role="([a-z]*)" p="([^"]*\/)?([^"/]*)"( in_id="[^"]*")?( owner_candidates="([0-9]+)")?.*/\1 \3 \6/; s/ +$//; s/ ([0-9]+)$/ owner_candidates=\1/' | sort; }
 attr(){ printf '%s' "$2" | grep -o "<uses [^>]*>" | grep -o " $1=\"[^\"]*\"" | head -1 | sed -E 's/.*="([^"]*)"/\1/'; }
 expect_rows(){  # $1 selector, $2 label, $3.. expected lines
     sel="$1"; label="$2"; shift 2
@@ -102,8 +102,8 @@ grep -q 'declared by 2 owners' "$TMP/label.err" && ok "(A) bare label: exactly o
 # ── (B) golden ───────────────────────────────────────────────────────────────────────────────────────────
 expect_rows Counter.count "(B) Counter.count" \
     "write shapes.cpp:11" "write shapes.cpp:12" "write shapes.cpp:17" "read shapes.cpp:22" "write shapes.cpp:33" \
-    "write shapes.cpp:38" "read shapes.cpp:41" "read shapes.cpp:48" "read shapes.cpp:54 amb=2"
-expect_rows Gauge.count   "(B) Gauge.count"   "write shapes.cpp:28" "write shapes.cpp:39" "read shapes.cpp:48" "read shapes.cpp:54 amb=2"
+    "write shapes.cpp:38" "read shapes.cpp:41" "read shapes.cpp:48" "read shapes.cpp:54 owner_candidates=2"
+expect_rows Gauge.count   "(B) Gauge.count"   "write shapes.cpp:28" "write shapes.cpp:39" "read shapes.cpp:48" "read shapes.cpp:54 owner_candidates=2"
 expect_rows Gauge.level   "(B) Gauge.level"   "write shapes.cpp:27" "read shapes.cpp:27" "read shapes.cpp:43"
 expect_rows Counter.step  "(B) Counter.step"  "read shapes.cpp:11"
 expect_rows Counter.label "(B) Counter.label" "write shapes.cpp:40"
@@ -142,8 +142,8 @@ CANON="shapes.h::Counter::count"   # the path::Owner::field spelling (a path TAI
 [ "$( rows "$CANON" )" = "$( rows Counter.count )" ] && ok "(E) canonical id rows == Counter.count rows" || no "(E) canonical id '$CANON' disagrees with Counter.count"
 
 # ── (F) python ───────────────────────────────────────────────────────────────────────────────────────────
-expect_rows Tally.total "(F) Tally.total" "write tally.py:13" "read tally.py:17" "read tally.py:25 amb=2"
-expect_rows Meter.total "(F) Meter.total" "write tally.py:25" "read tally.py:25 amb=2"
+expect_rows Tally.total "(F) Tally.total" "write tally.py:13" "read tally.py:17" "read tally.py:25 owner_candidates=2"
+expect_rows Meter.total "(F) Meter.total" "write tally.py:25" "read tally.py:25 owner_candidates=2"
 expect_rows Tally.hits  "(F) Tally.hits"  "read tally.py:14"
 rows Tally.total | grep -q 'tally.py:9' && no "(F) the defining assignment (line 9) counted as a use of Tally.total" || ok "(F) defining assignment (line 9) is a def, not a use"
 LIM="$( "$BIN" "$FIX" --uses=Tally::limit --no-cache 2>/dev/null )"; rc=$?   # the SYMBOL spelling — Owner.attr is the member form's, and this is not a member
@@ -176,7 +176,7 @@ fi
 
 # ── (I) legend ───────────────────────────────────────────────────────────────────────────────────────────
 LEG="$( printf '%s' "$CC" | sed 's/-->.*//' )"
-for a in amb pinned amb_sites owners_of_name; do
+for a in owner_candidates pinned amb_sites owners_of_name; do
     printf '%s' "$LEG" | grep -q "$a=" && ok "(I) legend defines $a=" || no "(I) legend does not define $a="
 done
 printf '%s' "$LEG" | grep -qi 'alias' && ok "(I) legend states the no-alias-analysis limit" || no "(I) legend does not state the alias limit"

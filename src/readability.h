@@ -240,7 +240,7 @@ inline constexpr const char* kReadabilityLegend =
     "so several head rows can print posnett=\"0.000\" alike; those ties (and every tie) break by vol= "
     "descending, so the ORDER stays real even where P itself has run out of visible precision. "
     "functions=functions and methods measured (a declaration with no body is not measured) "
-    "shown=rows printed capped=1 when rows were dropped; raise the default cap with limit=N (offset=M pages), "
+    "shown=rows printed capped=1 when rows were dropped; raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it), "
     "which also prints total= has_more= next_offset= offset= limit= "
     "unreadable_files=indexed files this pass could not read; their functions are absent, so functions= is a FLOOR -->";
 
