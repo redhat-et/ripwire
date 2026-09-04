@@ -2121,10 +2121,19 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
     }
 
     // The history lane, when it was asked for: what the probe did, then this symbol's own verdict.
+    // §L10: the oracle answers "did any line carrying this name ever leave the tree", and a doc that merely
+    // QUOTED the symbol (a stale capture file, a plan) counts as a line carrying the name — so a symbol very
+    // much alive on HEAD could still get v="removed", citing the doc's deletion rather than the symbol's.
+    // The fix is narrower than "suppress whenever on-head=1": a doc-only mention (a design doc quoting a name
+    // whose code WAS deleted) also sets on-head=1 lexically, and that IS real rot the fate row must still
+    // name — suppressing on plain on-head= would silence exactly that true positive. What distinguishes the
+    // two is head_labels=: "index" means the PARSED index confirmed a real definition on HEAD (not just a
+    // text hit), which is a claim strong enough to override the line-removal oracle outright. So the fate
+    // row is printed unless the index itself already proved the symbol is defined on HEAD.
     if( res.history != nullptr )
     {
         gitoracle::writeHistoryProbe( out, *res.history, ex );
-        if( res.history->ok )
+        if( res.history->ok && !( res.onHead && res.headLabelsFromIndex ) )
         {
             gitoracle::writeNameFate( out, res.sym, res.fate, ex );
         }

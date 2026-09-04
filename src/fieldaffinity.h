@@ -225,6 +225,8 @@ struct AffStruct
     std::uint32_t size       = 0;
     std::uint32_t align      = 1;
     bool          modeled    = false;  // layout.h could compute the geometry; false ⇒ affinity only, no findings
+    std::string   why;                 // §L10: !modeled only — layout.h's own caveat kind(s), comma-joined;
+                                        //   the legend explains the CLASS of refusal, this names the INSTANCE
     std::size_t   declared   = 0;      // declared field count (before the touched-only display filter)
     std::uint32_t touchedFns = 0;
     double        sepCost    = 0.0;    // sum over measured pairs of fns * ( 1 - wt ) — the ranking key
@@ -738,6 +740,21 @@ inline AffStruct buildStructRow( layout::ModelCtx& ctx, const ModeledAgg& agg, c
     row.line       = agg.line;
     row.aggregate  = def.aggregate;
     row.modeled    = def.modeled;
+    if( !row.modeled )
+    {
+        // §L10: layout.h's own caveats ARE the reason modeled= went false — every modeled=false site calls
+        // addCaveat() with a kind (bitfield/virtual/base-class/template/unparsed-alignas/…) before setting
+        // it. Dropped here before this fix, so a reader saw modeled="0" with no way to tell WHICH of the
+        // legend's several reasons applied without re-running --layout on the same symbol.
+        for( const layout::Caveat& c : def.caveats )
+        {
+            if( !row.why.empty() )
+            {
+                row.why += ',';
+            }
+            row.why += c.kind;
+        }
+    }
     row.size       = def.size;
     row.align      = def.align;
     row.declared   = def.fields.size();
@@ -1016,7 +1033,9 @@ inline void writeFieldAffinity( std::FILE* out, const AffResult& res, std::strin
         "method is not, because a local of the same name is indistinguishable here. (2) True sizeof and alignment are "
         "unknowable from source under templates, virtuals, bases and the target ABI: all geometry is the layout verb's "
         "LP64 standard-layout MODEL, model=\"lp64-approx\", and a definition it refused (modeled=\"0\") contributes its "
-        "affinity graph and NO geometry finding. Exactly two findings fire, both with a defensible direction: "
+        "affinity graph and NO geometry finding; why=names layout's own refusal kind(s) for THIS definition "
+        "(bitfield/virtual/base-class/template/…, the layout verb's own legend names the class, this the instance). "
+        "Exactly two findings fire, both with a defensible direction: "
         "split-line (co-accessed by 2+ functions at wt 0.00, so no field order can share a line) and straddle (one "
         "co-accessed field crossing a line boundary). Pack-tighter and sort-by-size advice is deliberately ABSENT: "
         "tight packing can induce false sharing, which is why the Go team keeps fieldalignment out of vet and gopls. "
@@ -1085,6 +1104,12 @@ inline void writeFieldAffinity( std::FILE* out, const AffResult& res, std::strin
         {
             std::fprintf( out, " size=\"%u\" align=\"%u\" lines=\"%u\"",
                           s.size, s.align, ( s.size + kCacheBlockBytes - 1 ) / kCacheBlockBytes );
+        }
+        else if( !s.why.empty() )
+        {
+            // §L10: the legend explains the CLASS of refusal (bitfield/virtual/base-class/…); this names
+            // the INSTANCE's own reason(s), same spelling --layout's own caveat rows already use.
+            std::fprintf( out, " why=\"%s\"", ex( s.why ).c_str() );
         }
         std::fprintf( out, ">" );
 

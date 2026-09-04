@@ -637,10 +637,18 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
                  sel.name, unsigned( kPanelFamilyCount ), familyList( sel.enabled ).c_str(),
                  unsigned( std::popcount( sel.enabled ) ), unsigned( sel.cut ),
                  unsigned( sel.cut ) <= evaluable ? "1" : "0" );
-    std::printf( " eligible=\"%zu\" ranked=\"%zu\" below_cut=\"%zu\" no_family=\"%zu\" unavailable=\"%s\" unavailable_why=\"%s\"",
+    // §L10: the house convention is absent-means-none — an optional attribute with nothing to say is
+    // OMITTED, never printed as ="". unavailable=/unavailable_why= used to print unconditionally, so a
+    // panel where every family was available still carried unavailable="" unavailable_why="" — a
+    // syntactically-present, semantically-empty pair indistinguishable at a glance from a real (short)
+    // list. Built conditionally here, the same way state_floor=/findings_capped= already are below.
+    const std::string unavailNamesStr = familyList( scan.unavailMask );
+    const std::string unavailWhyStr   = detail::unavailWhyList( scan );
+    const std::string unavailableAttr    = unavailNamesStr.empty() ? std::string() : ( " unavailable=\"" + unavailNamesStr + "\"" );
+    const std::string unavailableWhyAttr = unavailWhyStr.empty()   ? std::string() : ( " unavailable_why=\"" + std::string( escapeXml( unavailWhyStr, escUnavail ) ) + "\"" );
+    std::printf( " eligible=\"%zu\" ranked=\"%zu\" below_cut=\"%zu\" no_family=\"%zu\"%s%s",
                  scan.eligibleCount, total, scan.belowCutCount, scan.noFamilyCount,
-                 familyList( scan.unavailMask ).c_str(),
-                 std::string( escapeXml( detail::unavailWhyList( scan ), escUnavail ) ).c_str() );
+                 unavailableAttr.c_str(), unavailableWhyAttr.c_str() );
     std::printf( " bar_ccx=\"%u\" bar_loc=\"%u\" bar_nest=\"%u\" bar_params=\"%u\"",
                  quality::kCcxBar, quality::kLocBar, quality::kNestBar, quality::kParamBar );
     std::printf( " rcut=\"%zu\" rmeasured=\"%zu\" hcut=\"%zu\" hranked=\"%zu\" window=\"%s\" ccut=\"%zu\" cranked=\"%zu\"",
@@ -682,11 +690,16 @@ inline int writePanelReport( const IngestResult& ing, const Graph& g, const std:
         const std::string name( escapeXml( s.name, escName ) );
         // The annotation rides LAST on the row and is omitted when it does not hold — "absent = did not
         // hold", the same posture as every other optional attribute in this tool, never join="" or join="0".
-        std::printf( "<s p=\"%s:%u\" n=\"%s\" fam=\"%u\" of=\"%u\" fired=\"%s\" uncounted=\"%s\" unavail=\"%s\"%s>",
+        // §L10: uncounted=/unavail= are the SAME absent-means-none convention as the root's unavailable=
+        // above — a row with nothing uncounted and no unavailable family used to print uncounted=""
+        // unavail="" rather than omitting them.
+        const std::string uncountedStr  = familyList( std::uint8_t( row.firedMask & ~row.countedMask ) );
+        const std::string uncountedAttr = uncountedStr.empty() ? std::string() : ( " uncounted=\"" + uncountedStr + "\"" );
+        const std::string unavailAttr   = unavailNames.empty() ? std::string() : ( " unavail=\"" + unavailNames + "\"" );
+        std::printf( "<s p=\"%s:%u\" n=\"%s\" fam=\"%u\" of=\"%u\" fired=\"%s\"%s%s%s>",
                      path.c_str(), s.line, name.c_str(), unsigned( row.firedCount ), evaluable,
                      familyList( row.countedMask ).c_str(),
-                     familyList( std::uint8_t( row.firedMask & ~row.countedMask ) ).c_str(),
-                     unavailNames.c_str(),
+                     uncountedAttr.c_str(), unavailAttr.c_str(),
                      row.deepUntested ? " join=\"deep+untested\"" : "" );
         for( std::uint8_t family = 0; family < kPanelFamilyCount; ++family )
         {

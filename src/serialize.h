@@ -1414,21 +1414,36 @@ inline std::string evWhyString( const Symbol& s )
     return why;
 }
 
+// §L10 (2026-09-04): the old wording claimed "the same corpus ranked by pagerank orders differently" as a
+// blanket fact. It is not one — churn ranking IS PageRank, power-iterated over a teleport BIASED by git
+// change-frequency instead of the uniform one; call-graph structure still shapes k=, so on a corpus where
+// structure and churn point the same way the two orders coincide (measured on this repo's own top ranks,
+// 2026-09-04: --rank-by=churn and the default pagerank ranking agreed on the top 4 symbols, in order, with
+// only the k= values differing). What is always true, and what the mechanism actually guarantees, is stated
+// instead: it is a teleport swap, not a wholesale re-ranking, and the two provably diverge exactly where the
+// teleport differs from uniform enough to matter — a heavily-churned symbol with little call-graph support.
 inline constexpr const char* kChurnRankLegend =
-    "<!-- rank_by=churn: k= is a git CHANGE-FREQUENCY prior over window=, not call-graph importance; "
-    "the same corpus ranked by pagerank orders differently -->";
+    "<!-- rank_by=churn: k= is PageRank re-run with the teleport BIASED by git CHANGE-FREQUENCY over window= "
+    "(a churn-weighted PageRank, not a raw frequency count), so call-graph structure still shapes k=; top "
+    "ranks can coincide with rank_by=pagerank when structure and churn agree, and diverge where a "
+    "heavily-churned symbol has little call-graph support -->";
 
 // P0-4 — the decayed sibling. It has MORE to disclose than plain churn, not less: the half-life is a chosen
 // constant (a conventional 90-day default, not a measurement on this corpus), and the age clock is HEAD's own
 // commit timestamp rather than the wall clock, which is the property that makes the default run reproducible
 // on a different day. Both facts change how a k= here should be read, so both are stated where k= is read.
 // G4: no "--" anywhere inside an XML comment ⇒ flag names written bare.
+// §L10: same correction as kChurnRankLegend — "orders differently" is not a fact this ranker can promise
+// either, for the same reason (it is still PageRank, still shaped by structure).
 inline constexpr const char* kChurnDecayRankLegend =
     "<!-- rank_by=churn-decay: k= is a TIME-DECAYED git change-frequency prior, not call-graph importance. Each commit is "
     "weighted 0.5^(age_days/half_life) with the half-life in window= (90d default, a conventional choice, not a measurement "
     "on this corpus); age is measured from HEAD commit timestamp, never the system clock, so the same tree at the same HEAD "
     "ranks identically on any day or machine. window= names the mined span (all-history by default: the decay is the window). "
-    "The same corpus ranked by pagerank, or by undecayed churn, orders differently -->";
+    "k= is PageRank re-run with the teleport biased by this decayed prior instead of the uniform one "
+    "rank_by=pagerank uses, or the undecayed one rank_by=churn uses; top ranks can coincide with either "
+    "sibling when structure and recent churn agree, and diverge where a stale-but-central symbol meets a "
+    "fresh, sparsely-called one -->";
 
 // Which churn legend belongs to which churn ranker — the table-driven form the sibling rankBy lookup uses,
 // so a third churn variant adds a row and not a branch.
@@ -1459,6 +1474,26 @@ inline const char* churnRankLegendFor( const char* label ) noexcept
 inline constexpr const char* kIgnoredLegend =
     "<!-- hdr:ignored_files=files-git's-own-ignore-rules-covered(exact;would-otherwise-be-indexed;the-no-ignore-flag-restores-them)"
     " hdr:ignored_dirs=SUBTREES-those-rules-pruned(walk-stopped-there:contents-UNKNOWN-not-zero;the-skipped-verb-rows-both) -->";
+
+// §L10: sibs=/inc=/<calls> on an --expand <b> body (withFileContext=true — --expand's own two call sites,
+// never packBodies' other callers) had NO in-band definition anywhere — only in --help prose, which a
+// reader of the XML never sees. Printed once, right inside <bodies ...>, before the first <b> child, on
+// EVERY packBodies call that turns withFileContext on — including --top-k=0's payload-only "lean" mode,
+// which used to carry no legend at all (no ranked map ⇒ no kMapLegend either, and this one is independent
+// of that map legend by design for exactly that reason). Flowing through packBodies (not a separate
+// main.cpp fwrite) means it is priced by the SAME rw::chargeSection call that already charges every other
+// byte packBodies emits — no separate byte-accounting to keep in sync with the M6 cheapest-answer pricing.
+// NOTE for future edits: never spell a literal "<calls" (or any other real element name right after "<")
+// inside this string. A tag-scoped extractor elsewhere (grep -oE '<calls[^>]*>' | head -1, in
+// test/expandcallscheck.sh) matches the FIRST such substring in the document, comment or not, and this
+// legend is written before the real <calls ...> child — a bare "<calls...>" example here would shadow it.
+inline constexpr const char* kBodiesLegend =
+    "<!-- a body's sibs=\"a,b,...\" sibs_total=N are the file's OTHER indexed symbols (this body's own name "
+    "excluded), source order, capped at 40 (sibs_capped=\"1\" when the cap fired); inc=\"x.h,...\" inc_total=N "
+    "are the file's own #include/import targets, source order, capped at 24 (inc_capped=\"1\" when the cap "
+    "fired) — both absent when the count is 0 (a documented zero, not a degrade). Each body's own calls "
+    "child (1-hop callee signatures) carries total=/shown=/capped=\"1\" the usual way: capped=\"1\" only "
+    "when shown is below total. -->";
 
 inline constexpr const char* kMetricsLegend =
     "<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=MAX-depth "
@@ -4491,6 +4526,15 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     std::snprintf( open, sizeof( open ), "<bodies shown=\"%zu\" total=\"%zu\" capped=\"%d\"%s>",
                    shownCount, requestedCount, shownCount < requestedCount ? 1 : 0,
                    compress ? " compress=\"1\"" : "" );
+    // §L10: sibs=/inc=/<calls> are only ever emitted when withFileContext is on (--expand's own call sites),
+    // so the legend that defines them rides the SAME gate — every other packBodies caller (--for auto-body,
+    // --pack-task, --detail, --around, MCP exemplar) stays byte-identical, as withFileContext's own contract
+    // already promises. Written through the same XmlWriter as everything else here, so it is priced by the
+    // one rw::chargeSection call the caller already makes — no separate byte count to keep in sync.
+    if( withFileContext )
+    {
+        w.write( kBodiesLegend );
+    }
     w.write( open );
     w.write( children );
     w.write( "</bodies>" );

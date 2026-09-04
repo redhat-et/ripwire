@@ -64,6 +64,18 @@ grep -Eq 'malformed.yaml:[0-9]+' "$TMP/err" && ok "malformed alert names a line 
 grep -q 'rule="broken-query"' <(grep '<f ' "$OUT") && no "broken-query wrongly produced a finding" || ok "bad query produced no findings (skipped)"
 grep -q 'rule="bad-shape"'    "$OUT"               && no "malformed file's rule wrongly loaded"      || ok "malformed file skipped whole (bad-shape absent)"
 
+# §L10: a compile-FAILED query's tally row must not read like a well-formed query that legitimately found
+# nothing — before this fix count="0" was the ONLY signal, indistinguishable from no-printf run on a tree
+# with no printf() call, with the compile failure disclosed on stderr alone. compiled="0" makes it part of
+# the row a machine reader of stdout actually sees; the well-formed rows must NOT carry it.
+BROKEN_ROW="$( grep -o '<rule name="broken-query"[^/]*/>' "$OUT" )"
+printf '%s' "$BROKEN_ROW" | grep -q 'compiled="0"' \
+    && ok "L10: broken-query's tally row carries compiled=\"0\" (count=\"0\" is now distinguishable from a real zero)" \
+    || { no "L10: broken-query's tally row has no compiled=\"0\" marker"; printf '%s\n' "$BROKEN_ROW"; }
+grep -o '<rule name="no-printf"[^/]*/>' "$OUT" | grep -q 'compiled="0"' \
+    && no "L10: the WELL-FORMED no-printf rule wrongly carries compiled=\"0\"" \
+    || ok "L10: a well-formed rule's row carries no compiled= at all (absent = compiled)"
+
 # 5. xmllint-clean
 "$BIN" "$CORPUS" --lint-rules="$RULES" --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null \
     && ok "xmllint clean" || no "xmllint reported malformed XML"

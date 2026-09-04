@@ -200,5 +200,34 @@ else
     no "(F) the flagless map is not additive-clean (differs across runs, or leaks posnett=)"
 fi
 
+# ── §L10: the SATURATION disclosure — on a real, large corpus (this repo's own source), several of the
+# least-readable head rows genuinely print posnett="0.000" alike (the sigmoid has run out of visible
+# precision at 3 decimals for a high-volume function). The legend must say so, AND the ORDER must still be
+# real: among the saturated rows, vol= (the documented tie-break) must be non-increasing — proof the ranking
+# did not collapse into an arbitrary/ID-order tie just because P itself is illegible.
+REAL_OUT="$( "$BIN" "$ROOT" --readability --limit=10 --no-cache 2>/dev/null )"
+printf '%s' "$REAL_OUT" | grep -q 'sigmoid SATURATES at the least-readable extreme' \
+    && ok "(G) legend discloses sigmoid saturation at the least-readable extreme" \
+    || no "(G) legend does not disclose sigmoid saturation"
+printf '%s' "$REAL_OUT" | grep -q 'ties (and every tie) break by vol= descending' \
+    && ok "(G) legend states the tie-break (vol= descending)" \
+    || no "(G) legend does not state the tie-break"
+# One <fn ...> tag per line (minified single-line XML otherwise), so each saturated row's own vol= can be
+# read in the SAME order the tool emitted the rows — exactly the technique test/mergescoutcheck.sh uses to
+# isolate one element's own attributes from its neighbours on the same line.
+FN_LINES="$( printf '%s' "$REAL_OUT" | sed 's/<fn /\n<fn /g' | grep '^<fn ' )"
+ZERO_LINES="$( printf '%s\n' "$FN_LINES" | grep 'posnett="0\.000"' )"
+ZERO_ROWS="$( printf '%s\n' "$ZERO_LINES" | grep -c '^<fn ' )"
+if [ "$ZERO_ROWS" -ge 2 ]; then
+    ok "(G) reproduced the saturation on this repo's own corpus: $ZERO_ROWS head rows read posnett=\"0.000\""
+    VOLS="$( printf '%s\n' "$ZERO_LINES" | grep -oE 'vol="[0-9.]+"' | grep -oE '[0-9.]+' )"
+    SORTED_DESC="$( printf '%s\n' "$VOLS" | sort -rn )"
+    [ "$VOLS" = "$SORTED_DESC" ] \
+        && ok "(G) among the saturated (posnett=\"0.000\") rows, vol= is still non-increasing — the order is real" \
+        || no "(G) among the saturated rows, vol= is NOT non-increasing: got [$( printf '%s' "$VOLS" | tr '\n' ' ' )], want [$( printf '%s' "$SORTED_DESC" | tr '\n' ' ' )]"
+else
+    ok "(G) fewer than 2 saturated rows in this run (SKIP — the corpus/build moved; not this gate's contract to pin the exact count)"
+fi
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "readabilitycheck: FAILURES ABOVE"
 exit "$fail"

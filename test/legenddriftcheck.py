@@ -175,7 +175,11 @@ def extract_flag_tokens_from_legend(legend_text):
     # RESOLVED callee found", there is no --noedge flag and there never will be, and admitting it makes
     # the live arm cry wolf on correct legend text. Note the same legend's "the auto-bodies flag" IS a
     # real flag and is correctly matched by pattern 4 — the two shapes are doing different jobs.
-    placeholder_exclude = {"bodies", "overloads", "files", "hits", "toks", "noedge"}
+    # §L10 (2026-09-04): kBodiesLegend (src/serialize.h) defines --expand's sibs_total=N/inc_total=N and
+    # its <calls total=N shown=M ...> child in the same "word=N"/"word=M" placeholder prose this pattern
+    # is built to catch — "total" and "shown" are OUTPUT ATTRIBUTES (rides the same shown=/total= pair
+    # THE TRUNCATION VOCABULARY, src/pageview.h, already uses on a dozen other elements), never CLI flags.
+    placeholder_exclude = {"bodies", "overloads", "files", "hits", "toks", "noedge", "total", "shown"}
     for match in re.finditer(r'\b([a-z][a-z0-9\-]*)=[NM]\b', legend_text):
         word = match.group(1)
         if word not in placeholder_exclude:

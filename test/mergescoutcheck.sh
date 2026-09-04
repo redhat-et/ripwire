@@ -151,6 +151,31 @@ echo "$FOUT" | grep -oE '<landing order="[^"]*"' | grep -q 'F' \
     && no "landing= still names F despite it having no divergent work" \
     || ok "landing= does not name F"
 
+# ── §L10: G — an UNRELATED-HISTORY branch (no merge-base with HEAD at all) — ok="0" AND changed="0",
+# but for a completely different reason than F: F was COMPARED and found nothing divergent; G was NEVER
+# compared (the merge-base itself is unresolvable). <no-work> is a claim about a comparison that ran —
+# it must not appear on an ok="0" arm, or it reads as "compared, found nothing" on an arm this verb
+# structurally could not compare at all. Every git command below is -C "$REPO" — this fixture must never
+# touch the actual worktree.
+git -C "$REPO" checkout -q --orphan G
+git -C "$REPO" rm -rf -q . >/dev/null 2>&1 || true
+cat >"$REPO/orphan.cpp" <<'EOF'
+int orphanFn() { return 900; }
+EOF
+git -C "$REPO" add -A
+GIT_AUTHOR_DATE="2026-06-01T17:00:00" GIT_COMMITTER_DATE="2026-06-01T17:00:00" \
+    git -C "$REPO" commit -qm "G: unrelated history root" >/dev/null
+git -C "$REPO" checkout -q "$MAIN"
+
+GOUT="$( "$BIN" "$REPO" --merge-scout=A,G --no-cache 2>/dev/null )"
+ARM_G="$( printf '%s' "$GOUT" | sed 's/<arm /\n<arm /g; s/<pair /\n<pair /g; s/<landing /\n<landing /g' | grep '^<arm ref="G"' )"
+echo "$ARM_G" | grep -q 'ok="0"' && ok "arm G (unrelated history) reports ok=\"0\"" || no "arm G did not report ok=0: $ARM_G"
+echo "$ARM_G" | grep -q 'changed="0"' && ok "arm G reports changed=\"0\" (never compared, not compared-and-clean)" || no "arm G did not report changed=0: $ARM_G"
+echo "$ARM_G" | grep -q '<no-work' \
+    && no "arm G (ok=\"0\", never compared) wrongly carries <no-work> — reads as compared-and-clean" \
+    || ok "arm G (ok=\"0\") carries no <no-work> — the comparison never ran, so no verdict is claimed"
+echo "$GOUT" | xmllint --noout - 2>/dev/null && ok "xmllint clean (G fixture)" || no "xmllint reported malformed XML (G fixture)"
+
 # ── xmllint ─────────────────────────────────────────────────────────────────────────────────────────
 echo "$OUT" | xmllint --noout - 2>/dev/null \
     && ok "xmllint clean" \

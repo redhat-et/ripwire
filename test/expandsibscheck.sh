@@ -57,14 +57,19 @@ printf '%s' "$BTAG" | grep -q 'inc_capped=' \
     || ok "(A) no inc_capped= — the uncapped case stays undecorated"
 
 # ── (B) lonely.c: zero siblings, zero includes — BOTH attributes absent (a documented zero) ────────────
+# §L10: scoped to the <b ...> TAG itself, not grepped over the whole document — kBodiesLegend (added this
+# lane) defines sibs=/inc= in PROSE right beside this element ('sibs="a,b,..."' as example syntax), and a
+# document-wide grep for the bare attribute spelling matches that prose too. Same tag-isolation technique
+# arm (A) already uses (BTAG) so the two arms drift together, not apart.
 "$BIN" "$FIX" --expand=lonelyFn --top-k=0 --no-cache >"$TMP/lonely.xml" 2>/dev/null
-if grep -q 'sibs=' "$TMP/lonely.xml"; then
-    no "(B) lonelyFn (the only def in its file) still carries sibs= — should be absent"
+LONELY_BTAG="$( grep -oE '<b [^>]*>' "$TMP/lonely.xml" | head -1 )"
+if printf '%s' "$LONELY_BTAG" | grep -q 'sibs='; then
+    no "(B) lonelyFn (the only def in its file) still carries sibs= — should be absent: $LONELY_BTAG"
 else
     ok "(B) lonelyFn: no sibs= (zero siblings, documented by absence)"
 fi
-if grep -q ' inc=' "$TMP/lonely.xml"; then
-    no "(B) lonely.c (no #include) still carries inc= — should be absent"
+if printf '%s' "$LONELY_BTAG" | grep -q ' inc='; then
+    no "(B) lonely.c (no #include) still carries inc= — should be absent: $LONELY_BTAG"
 else
     ok "(B) lonely.c: no inc= (zero includes, documented by absence)"
 fi
@@ -135,6 +140,20 @@ fi
 diff -q "$TMP/many.xml" "$TMP/many2.xml" >/dev/null \
     && ok "(E) sibs=/inc= output byte-identical across two runs" \
     || no "(E) sibs=/inc= output non-deterministic"
+
+# ── (F) §L10: sibs=/inc=/<calls> had no IN-BAND definition anywhere — only in --help prose. kBodiesLegend
+# (src/serialize.h) must appear both in the payload-only "lean" --top-k=0 form (which used to carry no
+# legend at all — no ranked map, no kMapLegend either) and in the WITH-MAP bundle form.
+printf '%s' "$( cat "$TMP/basic.xml" )" | grep -q 'sibs_total=N' \
+    && ok "(F) --top-k=0 payload-only mode carries the sibs=/inc=/calls legend" \
+    || no "(F) --top-k=0 payload-only mode has no sibs=/inc=/calls legend (basic.xml)"
+WITHMAP_XML="$( "$BIN" "$FIX" --top-k=5 --expand=alphaFn --no-cache 2>/dev/null )"
+printf '%s' "$WITHMAP_XML" | grep -q 'sibs_total=N' \
+    && ok "(F) with-map bundle mode ALSO carries the sibs=/inc=/calls legend" \
+    || no "(F) with-map bundle mode has no sibs=/inc=/calls legend"
+printf '%s' "$WITHMAP_XML" | xmllint --noout - 2>/dev/null \
+    && ok "(F) with-map + legend output is well-formed XML" \
+    || no "(F) with-map + legend output is malformed XML"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

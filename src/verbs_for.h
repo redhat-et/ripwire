@@ -131,7 +131,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         if( applyMentionBoost( ing, task, lensRank, &mentionInfo ) )
         {
             char nb[ 160 ];
-            std::snprintf( nb, sizeof( nb ), " [mention anchor: %u file%s + %u symbols named in the task lifted near the top]",
+            std::snprintf( nb, sizeof( nb ), " [mention anchor: %u file%s + %u symbols named in the task, score lifted to within 5%% of the top score]",
                            mentionInfo.fileCount, mentionInfo.fileCount == 1 ? "" : "s", mentionInfo.symbolCount );
             out.mentionNote  = nb;
             out.anchorLifts  = mentionInfo.fileCount + mentionInfo.symbolCount;   // §A4f: the count the candidates root emits

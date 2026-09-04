@@ -193,6 +193,22 @@ else
     no "(C) $cOf C row(s) do not report of=\"4\""
     grep -o '<s [^>]*>' "$TMP/cfix.xml" | head -3 | sed 's/^/        /'
 fi
+
+# §L10: house convention is absent-means-none — a fully-available corpus (this C fixture) must OMIT
+# unavailable=/unavailable_why= entirely, never print them as ="". Same convention for the per-row
+# unavail= (checked on the same corpus's rows, where every family is available).
+CROOT="$( grep -o '<ensemble [^>]*>' "$TMP/cfix.xml" | head -1 )"
+printf '%s' "$CROOT" | grep -q 'unavailable=""' \
+    && no "(L10) fully-available root wrongly prints unavailable=\"\" instead of omitting it: $CROOT" \
+    || ok "(L10) fully-available root omits unavailable= entirely (absent, not =\"\")"
+printf '%s' "$CROOT" | grep -q 'unavailable_why=""' \
+    && no "(L10) fully-available root wrongly prints unavailable_why=\"\" instead of omitting it: $CROOT" \
+    || ok "(L10) fully-available root omits unavailable_why= entirely (absent, not =\"\")"
+CROW_BAD="$( grep -o '<s [^>]*>' "$TMP/cfix.xml" | grep -c 'unavail=""' )"
+[ "$CROW_BAD" -eq 0 ] \
+    && ok "(L10) every C row omits unavail= entirely (absent, not =\"\")" \
+    || no "(L10) $CROW_BAD C row(s) wrongly print unavail=\"\""
+
 if grep -q 'f="confusion" why="[^"]*atom-nested-ternary' "$TMP/cfix.xml"; then
     ok "(C) the confusion family FIRES on the C fixture (atom-nested-ternary) — availability is not vacuous"
 else

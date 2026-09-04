@@ -211,5 +211,33 @@ else
     no "--field-affinity on src/ failed (exit $rc)"
 fi
 
+
+# ── 18) §L10: an unmodeled struct's why= names layout's own refusal reason for THIS definition ─────────
+# Isolated fixture (never the shared fieldaffinityfix corpus — its amb_skipped=2 and every hand-computed
+# offset are pinned by earlier arms, and a new struct there risks perturbing them). Derived inherits from
+# Base, so layout.h's own base-class refusal fires (readHeadAttributes, src/layout.h) — the same reason
+# --layout itself reports on this struct via its own <caveat k="base-class" .../> row.
+WHYFIX="$TMP/whyfix"; mkdir -p "$WHYFIX"
+cat >"$WHYFIX/a.cpp" <<'EOF2'
+struct Base { int x; };
+struct Derived : Base { int y; int z; };
+int touchY( Derived& d ) { return d.y; }
+int touchZ( Derived& d ) { return d.y + d.z; }
+EOF2
+WHY_OUT="$( "$BIN" "$WHYFIX" --field-affinity=Derived --no-cache 2>/dev/null )"
+DERIVED_TAG="$( printf '%s' "$WHY_OUT" | grep -oE '<s [^>]*n="Derived"[^>]*>' | head -1 )"
+printf '%s' "$DERIVED_TAG" | grep -q 'modeled="0"' \
+    && ok "18) the base-class fixture is genuinely unmodeled (modeled=\"0\")" \
+    || { no "18) fixture broken: expected modeled=\"0\": $DERIVED_TAG"; }
+printf '%s' "$DERIVED_TAG" | grep -q 'why="base-class"' \
+    && ok "18) why=\"base-class\" names layout's own refusal reason (was silently absent before this fix)" \
+    || { no "18) why= missing or wrong on the unmodeled row: $DERIVED_TAG"; }
+LAYOUT_CAVEAT="$( "$BIN" "$WHYFIX" --layout=Derived --no-cache 2>/dev/null | grep -oE 'k="[^"]*"' | head -1 )"
+[ "$LAYOUT_CAVEAT" = 'k="base-class"' ] \
+    && ok "18) field-affinity's why= agrees with --layout's own caveat kind for the same struct" \
+    || no "18) field-affinity why= and --layout's caveat kind disagree: layout says $LAYOUT_CAVEAT"
+printf '%s' "$WHY_OUT" | xmllint --noout - 2>/dev/null \
+    && ok "18) why= output is well-formed XML" || no "18) why= output is malformed XML"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES"
 exit "$fail"

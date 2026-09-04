@@ -223,8 +223,11 @@ else:
             bad.append( f"(B) {name}: fired expected '{fired}', got '{node.get('fired')}'" )
         if node.get( "of" ) != "4":
             bad.append( f"(B) {name}: of expected 4 on a corpus where every family is measurable, got {node.get('of')}" )
-        if node.get( "unavail" ) != "":
-            bad.append( f"(B) {name}: unavail expected empty on a git corpus, got '{node.get('unavail')}'" )
+        # §L10: house convention is absent-means-none — unavail= is now OMITTED (not ="") when nothing is
+        # unavailable, so ElementTree's .get() returns None, not "". Falsy covers both the old shape and
+        # the new one, so this stays a real assertion (a NAMED family would fail it either way).
+        if node.get( "unavail" ):
+            bad.append( f"(B) {name}: unavail expected absent/empty on a git corpus, got '{node.get('unavail')}'" )
         got = evidenceOf( node )
         if sorted( got ) != sorted( ev ):
             bad.append( f"(B) {name}: evidence elements for {sorted(got)}, expected {sorted(ev)}" )

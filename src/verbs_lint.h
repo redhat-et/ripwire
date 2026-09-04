@@ -419,7 +419,13 @@ struct LintOut { std::uint32_t fileId, startByte, line; std::string rule, sev, t
 // capped="1" mean "match-budget floor" on one row and "row-window cut" on the next, indistinguishably;
 // shown_rows=/rows_capped= is its own pair (truncvocabcheck.sh rules 1+3) so the two facts stay legible
 // side by side rather than colliding under one bit.
-void printLintRuleTallyRow( const std::string& name, const std::string* sev, std::uint32_t count, std::uint32_t shown, bool capped, bool applicable )
+// §L10: `compiled` (default true — every built-in query is checked at compile time by test/lintcheck.sh's
+// own fixture sweep, never user text) is false only for a USER rule whose tree-sitter query compiled for
+// NO linked grammar at all. Before this, that row was a bare count="0" — byte-identical to a well-formed
+// query that legitimately matched nothing, with the ONLY tell being a one-line stderr alert a machine
+// reader of stdout never sees. compiled="0" makes the distinction part of the row itself.
+void printLintRuleTallyRow( const std::string& name, const std::string* sev, std::uint32_t count, std::uint32_t shown, bool capped, bool applicable,
+                            bool compiled = true )
 {
     const char* sevPart        = "";
     std::string sevBuf;
@@ -428,8 +434,9 @@ void printLintRuleTallyRow( const std::string& name, const std::string* sev, std
         sevBuf   = " sev=\"" + *sev + "\"";
         sevPart  = sevBuf.c_str();
     }
-    std::printf( "<rule name=\"%s\"%s count=\"%u\" shown_rows=\"%u\" rows_capped=\"%u\"%s%s/>", name.c_str(), sevPart, count, shown,
-                 shown < count ? 1u : 0u, capped ? " capped=\"1\"" : "", applicable ? "" : " applicable=\"0\"" );
+    std::printf( "<rule name=\"%s\"%s count=\"%u\" shown_rows=\"%u\" rows_capped=\"%u\"%s%s%s/>", name.c_str(), sevPart, count, shown,
+                 shown < count ? 1u : 0u, capped ? " capped=\"1\"" : "", applicable ? "" : " applicable=\"0\"",
+                 compiled ? "" : " compiled=\"0\"" );
 }
 
 // wave-4 item 12: the (count, shown-inside-`lintPage`) pair for ONE rule's rows in the already-sorted
@@ -1651,7 +1658,8 @@ std::optional<int> runLint( const MainDispatch& d )
         // --lint-rules=DIR: load user YAML rules and run them through the SAME astQuery engine. Malformed
         // files alert+skip inside the loader; a bad ts query alert+skips inside astQuery. Exit 1 ONLY if the
         // flag was given but zero rules loaded (nothing to run = a user mistake worth surfacing).
-        std::vector<LintRule> userRules;
+        std::vector<LintRule>    userRules;
+        std::vector<std::string> uncompiledUserRuleIds;   // §L10: main query compiled for NO grammar
         if( !cfg.lintRulesDir.empty() )
         {
             userRules = loadLintRules( std::string( cfg.lintRulesDir ) );
@@ -1660,7 +1668,7 @@ std::optional<int> runLint( const MainDispatch& d )
                 std::fprintf( stderr, "ripwire: --lint-rules=%.*s: no rules loaded\n", int( cfg.lintRulesDir.size() ), cfg.lintRulesDir.data() );
                 return 1;
             }
-            const auto [ userFindings, saturatedUserRuleIds ] = runLintRules( ing, userRules );
+            const auto [ userFindings, saturatedUserRuleIds, uncompiledIds ] = runLintRules( ing, userRules );
             for( const LintFinding& f : userFindings )
             {
                 outs.push_back( { f.fileId, f.startByte, f.line, f.id, f.severity, f.message } );
@@ -1669,6 +1677,7 @@ std::optional<int> runLint( const MainDispatch& d )
             {
                 saturatedRules.push_back( { id, true } );
             }
+            uncompiledUserRuleIds = uncompiledIds;
         }
 
         // --lint-select=PREFIX[,...] / --lint-ignore=PREFIX[,...]: resolved HERE, not in validateConfig,
@@ -1842,7 +1851,11 @@ std::optional<int> runLint( const MainDispatch& d )
                      "(the root's shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the "
                      "cut carries shown_rows=\"0\" rows_capped=\"1\" while its count= stays the true total — never confuse a capped-away "
                      "rule with one that measured zero); this is a DIFFERENT fact from the row's own bare capped=\"1\" above (that rule's "
-                     "own raw-capture stream hit its per-rule match budget) — the two can disagree on the same row. -->" );
+                     "own raw-capture stream hit its per-rule match budget) — the two can disagree on the same row. "
+                     "A lint-rules row's compiled=\"0\" ⇒ that rule's tree-sitter QUERY failed to compile for every linked grammar (a "
+                     "malformed or misspelled pattern) — its count=\"0\" never ran at all, a different claim from applicable=\"0\" above "
+                     "(a well-formed query whose declared language just is not in this corpus) and from an ordinary count=\"0\" (a "
+                     "well-formed query that ran and found nothing); absent ⇒ the query compiled. -->" );
         if( !cfg.withProfile.empty() )
         {
             std::printf( "<!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest "
@@ -1890,8 +1903,9 @@ std::optional<int> runLint( const MainDispatch& d )
             }
             const RuleTally rt = tallyLintRule( outs, r.id, /*wantSevEmpty=*/false, lintPage );
             const bool  applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
+            const bool  compiled   = std::find( uncompiledUserRuleIds.begin(), uncompiledUserRuleIds.end(), r.id ) == uncompiledUserRuleIds.end();
             const std::string sevEx = ex( r.severity );
-            printLintRuleTallyRow( ex( r.id ), &sevEx, rt.count, rt.shown, capOf( r.id, true ) != nullptr, applicable );
+            printLintRuleTallyRow( ex( r.id ), &sevEx, rt.count, rt.shown, capOf( r.id, true ) != nullptr, applicable, compiled );
         }
         for( std::size_t findingIndex = lintPage.begin; findingIndex < lintPage.end; ++findingIndex )
         {

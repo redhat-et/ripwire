@@ -253,7 +253,14 @@ inline DoctorGrammarProbe doctorProbeGrammars()
     return out;
 }
 
-struct DoctorCacheStats { std::size_t blobCount = 0; std::uintmax_t totalBytes = 0; bool truncated = false; };
+// §L10: `capHit` is a NARROWER fact than `truncated` — truncated is "count and/or bytes may be short for
+// SOME reason" (an I/O error mid-scan counts too), while capHit is specifically "we stopped counting at
+// kMaxCacheBlobCount because there may be more, not because anything failed". blobCount lands on EXACTLY
+// the same value (kMaxCacheBlobCount) whether the true count is exactly that many or far more, so
+// blobs="4096" alone cannot tell a reader which; blobs_floor= (emitted only when capHit) closes that gap
+// the same way counts_floor= does everywhere else in this tool. An I/O-error truncation never sets capHit,
+// so it never gets a floor label it cannot back — the count it stopped at there IS the true count so far.
+struct DoctorCacheStats { std::size_t blobCount = 0; std::uintmax_t totalBytes = 0; bool truncated = false; bool capHit = false; };
 
 // Count legacy flat blobs plus the current one-level, two-hex shard layout. The 4K cap matches cache
 // hygiene's retained-blob cap; truncated= makes an I/O error or over-cap result an honest floor.
@@ -267,7 +274,7 @@ inline DoctorCacheStats doctorCacheStats( const std::string& dir )
         if( name.rfind( "ripwire-", 0 ) != 0 ) { return; }
         std::error_code ec;
         if( !entry.is_regular_file( ec ) ) { if( ec ) { out.truncated = true; } return; }
-        if( out.blobCount >= rw::quality::kMaxCacheBlobCount ) { out.truncated = true; return; }
+        if( out.blobCount >= rw::quality::kMaxCacheBlobCount ) { out.truncated = true; out.capHit = true; return; }
         ++out.blobCount;
         const auto byteSize = entry.file_size( ec );
         if( ec ) { out.truncated = true; return; }
@@ -470,6 +477,10 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
         const DoctorCacheStats stats = doctorCacheStats( dir );
         std::string attrs = "dir=\"" + std::string( escapeXml( dir, esc ) ) + "\"";
         attrs += " blobs=\"" + std::to_string( stats.blobCount ) + "\"";
+        if( stats.capHit )
+        {
+            attrs += " blobs_floor=\"1\"";   // §L10: blobs= landed on the scan cap — could be exactly that many, could be more
+        }
         attrs += " bytes=\"" + std::to_string( stats.totalBytes ) + "\"";
         attrs += " many=\"" + std::string( stats.blobCount > 50 ? "1" : "0" ) + "\"";   // eviction sanity flag, informational (never fails the check)
         attrs += " truncated=\"" + std::string( stats.truncated ? "1" : "0" ) + "\"";
@@ -561,7 +572,19 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
     // BOOL `ok=` — two meanings on adjacent lines of one document. Renamed per the index-vs-count rule;
     // `passed=` pairs with the `checks=` denominator beside it. The count had ZERO parsers (doctorcheck.sh's
     // 8 assertions all read the CHILD bool), so the half with readers keeps its name.
-    std::string out = "<doctor checks=\"" + std::to_string( checks ) + "\" passed=\"" + std::to_string( okCount ) + "\"" + agentRows.rootAttr + doctorAt + ">";
+    // §L10: --doctor had NO legend at all — every row's attributes were --help-only prose. checks=/passed=
+    // and each <c ok=> are self-explaining; what is not is the pair the cache-dir row's own comment above
+    // already knew was confusing (blobs= landing on the scan cap either means "exactly that many" or
+    // "at least that many" and the bare number cannot say which), so the legend names exactly that one,
+    // plus the one other zero-vs-unmeasured ambiguity on this document (tracked-binaries' truncated=)
+    // rather than restating every attribute's --help sentence here.
+    std::string out = "<!-- doctor: checks=/passed= are the row count/how many passed; each <c name= ok=> is one check, its OTHER "
+                       "attributes are check-specific (see help). cache-dir's blobs= is capped at 4096 (kMaxCacheBlobCount); "
+                       "blobs_floor=\"1\" means the cap fired and blobs= is AT LEAST that many, not exactly (absent = the true "
+                       "count); truncated=\"1\" covers that AND an I/O error mid-scan, so blobs_floor= is the narrower, more "
+                       "useful claim when both matter. tracked-binaries' truncated=\"1\" means the git-history scan was SKIPPED "
+                       "entirely (too many tracked files), so its stale=\"0\" there means unmeasured, never a clean scan. -->"
+                       "<doctor checks=\"" + std::to_string( checks ) + "\" passed=\"" + std::to_string( okCount ) + "\"" + agentRows.rootAttr + doctorAt + ">";
     out += rows;
     out += "</doctor>";
     std::fputs( out.c_str(), stdout );
