@@ -243,5 +243,54 @@ else
 fi
 [ "$( grep -c '' "$TMP/hist" )" -le 1 ] && ok "output is minified (no stray newlines)" || no "output contains newlines outside CDATA"
 
+# ── 8) L10: a symbol still on HEAD must never carry <fate v="removed"> ─────────────────────────────────
+# The oracle's line-removal walk cannot tell "the SYMBOL left" from "a DOC QUOTING the symbol left" — both
+# are a removed line carrying the name. A stale capture/plan file that once quoted a live helper and was
+# later deleted is exactly that: the symbol is untouched on HEAD, but the oracle's newest removal is the
+# doc's deletion, and it used to be printed verbatim as v="removed" underneath on-head="1" — a symbol that
+# plainly still exists reported as gone. --whereis's own TREE scan already knows better (on-head=); the fix
+# makes the fate row defer to it instead of contradicting it.
+R2="$TMP/repo2"; mkdir -p "$R2"
+export GIT_AUTHOR_DATE="2026-02-03T00:00:00Z" GIT_COMMITTER_DATE="2026-02-03T00:00:00Z"
+git -C "$R2" init -q -b main
+git -C "$R2" config commit.gpgsign false
+cat > "$R2/relief.h" <<'EOF'
+inline int stableOnHeadHelper( int value )
+{
+    return value + 1;
+}
+EOF
+cat > "$R2/docs_capture.md" <<'EOF'
+`stableOnHeadHelper` shows up in the capture as a quoted example.
+EOF
+git -C "$R2" add -A >/dev/null
+git -C "$R2" commit -qm "base: helper + a doc quoting it"
+export GIT_AUTHOR_DATE="2026-02-09T00:00:00Z" GIT_COMMITTER_DATE="2026-02-09T00:00:00Z"
+rm "$R2/docs_capture.md"
+git -C "$R2" commit -qam "drop the stale capture doc (the helper itself is untouched)"
+
+C6="$TMP/t6"; mkdir -p "$C6"
+TMPDIR="$C6" "$BIN" "$R2" --whereis=stableOnHeadHelper --with-history >"$TMP/w4" 2>/dev/null
+grep -q 'on-head="1"' "$TMP/w4" \
+    && ok "L10 fixture sanity: stableOnHeadHelper is on-head=1 (it is still defined in relief.h)" \
+    || { no "L10 fixture broken: expected on-head=1"; cat "$TMP/w4"; }
+grep -q 'head_labels="index"' "$TMP/w4" \
+    && ok "L10 fixture sanity: head_labels=\"index\" (the parsed index, not just text, confirms the def)" \
+    || { no "L10 fixture broken: expected head_labels=\"index\""; cat "$TMP/w4"; }
+grep -q '<fate ' "$TMP/w4" \
+    && { no "whereis emitted <fate> for an index-confirmed HEAD definition (the doc deletion was mistaken for the symbol's)"; tr '<' '\n' < "$TMP/w4" | grep fate; } \
+    || ok "L10: no <fate> row for an index-confirmed HEAD definition"
+
+# …and the ORIGINAL fixture's true positive (vanishedContourWalker: deleted from relief.h, only a still-live
+# PLAN doc quotes it — on-head=1 lexically, but the index confirms no def) must still fire, unchanged: this
+# is real rot (a plan pointing at dead code) and the fix must not silence it along with the false positive.
+grep -q 'head_labels="lexical"' "$TMP/w1" \
+    && ok "L10 regression check: the PLAN-doc-only fixture stays head_labels=\"lexical\" (no index-confirmed def)" \
+    || { no "L10 regression check: expected head_labels=\"lexical\" on the PLAN-doc-only fixture"; cat "$TMP/w1"; }
+
+if command -v xmllint >/dev/null 2>&1; then
+    xmllint --noout "$TMP/w4" 2>/dev/null && ok "L10 fixture: whereis --with-history XML well-formed" || no "L10 fixture: whereis --with-history XML malformed"
+fi
+
 [ $fail -eq 0 ] && echo "historyoraclecheck: ALL PASS" || echo "historyoraclecheck: FAILURES"
 exit $fail
