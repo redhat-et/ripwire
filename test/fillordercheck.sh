@@ -104,9 +104,15 @@ est_of(){   "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | 
 # 2026-09-03 (round 4, Phase 4 lpin= disclosure): 769 -> 822. The legend gained the lpin=/locality_pinned= entry
 # (test/golden.xml re-derived in its own commit on lane/n4-a, now 2053 bytes); the fixture's emit order is still
 # important-first and #1b below still asserts byte-identity with the golden, so only the pin moved.
+# 2026-09-03 (round 5 merge, three legend additions in one tree): 822 -> 884. The legend gained `external=`
+# (Phase 5's external-name veto counter), `ignored_files=`/`ignored_dirs=`/`ignore_mode=` (.gitignore honoured
+# by default) and the slice's `reach=`/`rd=` entries; test/golden.xml grew 2053 -> 2208 bytes and is byte-
+# identical to this binary's `test/fixture` map, which arm #1b re-asserts. The fixture's emit ORDER is
+# unchanged (important-first) and the auto-flip threshold (16000) is still >18x this number, so only the
+# pin moved -- no contract did.
 EFIX="$( est_of test/fixture )"
 OFIX="$( order_of test/fixture )"
-{ [ "$EFIX" = "822" ] && [ "$OFIX" = "important-first" ]; } \
+{ [ "$EFIX" = "884" ] && [ "$OFIX" = "important-first" ]; } \
     && ok "test/fixture (est_tokens=$EFIX) does NOT auto-flip — order=$OFIX (golden neutral)" \
     || no "test/fixture unexpectedly changed order or est_tokens (est=$EFIX order=$OFIX)"
 
