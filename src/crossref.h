@@ -681,7 +681,13 @@ struct RefInfo
 // currently on (a branch cannot be stray from itself). `filter` (from --stray-content=SUBSTR) keeps only
 // refs whose name contains it. Remote-tracking refs are deliberately EXCLUDED: they mirror local ones and
 // would double every row.
-inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_view filter, const std::string& headSha )
+// `filterNameHits` (optional out): how many refs/heads names CONTAIN the filter, counted before the
+// "a branch cannot be stray from itself" exclusion of HEAD's own ref. H7 needs that number and not
+// out.size(): a filter matching only the checked-out branch has SELECTED something (the answer is "nothing
+// but the ref you are on"), while a filter matching no branch name at all has selected nothing and must
+// refuse rather than report refs="0" — which reads as "no branch carries stray work".
+inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_view filter, const std::string& headSha,
+                                           std::size_t* filterNameHits = nullptr )
 {
     const std::string raw = gitCapture( root, "for-each-ref --sort=refname --format='%(refname:short)|%(objectname)|%(committerdate:short)' refs/heads 2>/dev/null" );
     std::vector<RefInfo> out;
@@ -707,6 +713,10 @@ inline std::vector<RefInfo> enumerateRefs( const std::string& root, std::string_
         const std::string_view name = line.substr( 0, firstPipe );
         const std::string_view tip  = line.substr( firstPipe + 1, lastPipe - firstPipe - 1 );
         const std::string_view date = line.substr( lastPipe + 1 );
+        if( filterNameHits != nullptr && !name.empty() && ( filter.empty() || name.find( filter ) != std::string_view::npos ) )
+        {
+            ++*filterNameHits;
+        }
         if( name.empty() || tip == headSha )
         {
             continue; // the ref HEAD is on
@@ -950,6 +960,10 @@ struct StrayResult
     bool                 ok = true;
     bool                 nonGitRoot = false;
     bool                 tooManyRefs = false;
+    // H7 (capture-audit 2026-09-04): the --stray-content=SUBSTR filter named no local ref at all. refs="0"
+    // unknown="0" at exit 0 reads as "no branch carries stray work" — the most reassuring possible answer,
+    // from a sweep that never happened. ok=false, so the caller refuses in the --doc-drift/--dead-code words.
+    bool                 filterMatchedNothing = false;
     std::string          headSha;
     std::string          headRef;
     std::size_t          distinctBlobs = 0;
@@ -1190,7 +1204,10 @@ inline StrayResult computeStrayContent( const std::string& root, std::string_vie
     result.headSha = quality::gitHeadSha( root );
     result.headRef = quality::gitOneLine( root, "rev-parse --abbrev-ref HEAD 2>/dev/null" );
 
-    const std::vector<RefInfo> refs = enumerateRefs( root, filter, result.headSha );
+    std::size_t                filterNameHits = 0;
+    const std::vector<RefInfo> refs = enumerateRefs( root, filter, result.headSha, &filterNameHits );
+    result.filterMatchedNothing = !filter.empty() && filterNameHits == 0;
+    if( result.filterMatchedNothing ) { result.ok = false; return result; }
     if( refs.size() > kMaxRefs ) { result.ok = false; result.tooManyRefs = true; return result; }
 
     // ── phase 1: the merge-base probe, one git call per ref, ACROSS THE POOL ────────────────────────────
@@ -1277,6 +1294,20 @@ struct WhereResult
     // it: the claim is text-scoped, and a text symbol cannot occur in one. The writer ANDs this with
     // "every hit printed" before emitting complete= on the root.
     bool                  scanExhaustive = false;
+
+    // H7 / lens 6 F5 — the two SELECTOR facts this verb used to swallow, both filled by the caller (they are
+    // index questions, and this module is deliberately index-free: it reads git trees, not symbols).
+    //   seedSpec  the raw @FILE:LINE spelling, when the selector was a line seed. `--whereis=@src/graph.h:2500`
+    //             used to be searched as the LITERAL string "@src/graph.h:2500" across every blob, giving a
+    //             true and useless hits="0" shaped exactly like a name this repo never had — while
+    //             --owners/--mentions/--edit-check resolve that same grammar. The seed is now resolved to the
+    //             enclosing definition's name BEFORE the scan; this echoes what was typed so the answer can
+    //             still be tied to the command.
+    //   nearMiss  the nearest indexed name, when the scan found nothing and the index knows one. The lexical
+    //             zero stays a measurement (a name this repo never had is a real answer); the near-miss is
+    //             what tells the reader which of the two zeros they are holding.
+    std::string           seedSpec;
+    std::string           nearMiss;
 
     // The --with-history lane: a non-owning view of the caller's oracle index (nullptr ⇒ not asked for) plus
     // THIS symbol's verdict, resolved once at compute time so emission stays a pure print. Views at the seam:
@@ -2028,7 +2059,12 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
                        "impact, around, lego and edit_check accept. A file:name spelling is searched as a LITERAL "
                        "string, no tree contains it, and the result is a true but useless hits=\"0\" shaped exactly "
                        "like a name this repo never had. When that is what happened, a selector-note element says so "
-                       "and its retry= is the bare name to re-run with. Its absence beside hits=\"0\" means the zero "
+                       "and its retry= is the bare name to re-run with. That element has three reasons, and r= names which: "
+                       "qualified-selector (a file:name spelling was searched literally), line-seed (an @FILE:LINE selector "
+                       "was RESOLVED to the definition enclosing that line before the scan, so sym= is that definition's "
+                       "name and spec= is what you typed), and near-miss (the scan found nothing and the INDEX holds a name "
+                       "one or two edits away — the tree zero is still a measurement, the note only says which zero it is). "
+                       "Its absence beside hits=\"0\" means the zero "
                        "IS a measurement. "
                        // §B12.2 — the SCOPE of "every ref", stated in the payload. Only the help text said "local".
                        "SCOPE: refs/heads only, which is every local branch (worktree branches included). "
@@ -2075,6 +2111,18 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
     {
         std::fprintf( out, "<selector-note r=\"qualified-selector\" spec=\"%s\" retry=\"%s\"/>",
                       ex( res.sym ).c_str(), ex( whereisBareNameOf( res.sym ) ).c_str() );
+    }
+    // H7: the same element, two more reasons — the line seed that was RESOLVED before the scan (so sym= is a
+    // name and not the raw @spec), and the near-miss beside a zero the index can explain.
+    if( !res.seedSpec.empty() )
+    {
+        std::fprintf( out, "<selector-note r=\"line-seed\" spec=\"%s\" retry=\"%s\"/>",
+                      ex( res.seedSpec ).c_str(), ex( res.sym ).c_str() );
+    }
+    if( res.hits.empty() && !res.nearMiss.empty() )
+    {
+        std::fprintf( out, "<selector-note r=\"near-miss\" spec=\"%s\" retry=\"%s\"/>",
+                      ex( res.sym ).c_str(), ex( res.nearMiss ).c_str() );
     }
 
     // The history lane, when it was asked for: what the probe did, then this symbol's own verdict.

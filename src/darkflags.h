@@ -807,6 +807,13 @@ struct FlagsResult
     std::uint32_t     dark = 0;
     std::uint32_t     compileCount = 0, cmakeCount = 0, envCount = 0;
     std::size_t       filesScanned = 0;
+    // H7 (capture-audit 2026-09-04): true when --flags=SUBSTR names no DECLARED gate at all. `gates="0"`
+    // beside `files="1550"` reads exactly like the true and interesting fact "this repo has no dark gates",
+    // so a filter that owns nothing has to refuse instead — the ruling --dead-code / --doc-drift / --scope
+    // already apply to their own filters. Set on the DECLARED name set, before the dead-name drop: a filter
+    // that names a real gate which then failed the has-a-reader test HAS selected something, and its zero is
+    // a measurement.
+    bool              filterMatchedNothing = false;
 };
 
 // Fold one harvested definition into the gate table, applying the cmake-beats-compile override rule.
@@ -979,12 +986,14 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
 
     FlagsResult res;
     res.filesScanned = harvest.size();
+    std::size_t filterNameHits = 0;
     for( auto& [ name, g ] : gates )
     {
         if( !filter.empty() && name.find( filter ) == std::string::npos )
         {
             continue;
         }
+        ++filterNameHits;
         // A declaration with no reader is a dead name, not a gate — the getenv lane especially would
         // otherwise report every one-off environment probe as a repo-wide switch.
         if( g.reads.empty() && !keepUnreadGates )
@@ -1034,6 +1043,7 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
         }
         return a.name < b.name;
     } );
+    res.filterMatchedNothing = !filter.empty() && filterNameHits == 0;
     return res;
 }
 
