@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# naminglocalscheck.sh — Phase 2 of the local-variable-indexing plan (PLAN.md, "2026-08-06 (evening) —
-# local-variable-indexing plan, orchestrated"): `--naming-locals`, an OPT-IN --lint modifier (default OFF)
+# naminglocalscheck.sh — Phase 2 of the local-variable-indexing plan (docs/LOCALS_INDEXING.md): `--naming-locals`, an OPT-IN --lint modifier (default OFF)
 # that runs the naming-short/naming-wordy/naming-underscore/naming-case predicates against LOCAL variable
 # names too — C/C++ only, and only inside a function that already clears naminglens.h's namingLocalsGate
 # (the shipped large-function/deep-nesting/quality.h-kCcxBar thresholds, reused unchanged, AND
@@ -28,7 +27,7 @@
 #                     otherwise-gated function does NOT fire naming-short, while naming-case (no depth gate)
 #                     still fires on a top-level local in the SAME function — proving the depth gate is
 #                     scoped to naming-short specifically, not applied uniformly by accident.
-#   5. TAG-REUSE    — findings ride the EXISTING naming-* tags (Open Question 3, PLAN.md) — no `-local`
+#   5. TAG-REUSE    — findings ride the EXISTING naming-* tags (docs/LOCALS_INDEXING.md §4 (3)) — no `-local`
 #                     suffixed tag family appears in the rule listing.
 #   6. HYGIENE      — determinism (two runs byte-identical) and well-formed XML.
 #   7. MUTATION     — the gate has real teeth: the SAME smallFunction body, padded past namingLocalsGate's
@@ -246,7 +245,7 @@ fi
 
 # ══ 5. TAG-REUSE ═════════════════════════════════════════════════════════════════════════════════════
 if printf '%s' "$ON" | grep -qi 'naming-short-local\|naming-.*-local"'; then
-    no "tag-reuse: a NEW '-local'-suffixed tag appeared — Open Question 3 (PLAN.md) says reuse, not extend"
+    no "tag-reuse: a NEW '-local'-suffixed tag appeared — docs/LOCALS_INDEXING.md §4 (3) says reuse, not extend"
 else
     ok "tag-reuse: no new '-local'-suffixed tag — findings ride the existing naming-* tags"
 fi

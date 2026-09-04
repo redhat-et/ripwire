@@ -523,7 +523,7 @@ inline bool isPythonDunder( std::string_view name ) noexcept
     return name.size() > 4 && name.substr( 0, 2 ) == "__" && name.substr( name.size() - 2 ) == "__";
 }
 
-// local-variable-indexing plan, Phase 2 (2026-08-06 evening, PLAN.md): the four NAME-SHAPE facts
+// local-variable-indexing plan, Phase 2 (docs/LOCALS_INDEXING.md): the four NAME-SHAPE facts
 // checkNameShape computes, as booleans — pure function of (name, lang, toks), no Symbol/RuleSink
 // dependency, so it is equally usable for an indexed Symbol OR an un-indexed local variable name. This is
 // the checkNameShapeCore extraction the plan specifies; `reservedForm` disambiguates naming-underscore's
@@ -642,14 +642,14 @@ PROFILE_SCOPE_DESCRIBE( "naminglens/sym: checkNameShape" );
     }
 }
 
-// local-variable-indexing plan, Phase 2 (2026-08-06 evening, PLAN.md): checkNameShapeCore applied to an
+// local-variable-indexing plan, Phase 2 (docs/LOCALS_INDEXING.md): checkNameShapeCore applied to an
 // UN-INDEXED local variable name. Deliberately breaks this file's own stated invariant ("an un-indexed
 // loop local can never be flagged") — see the WITHDRAWN note atop this file for the precedent this design
 // exists to avoid repeating (a plausible-but-unaudited rule that shipped and was wrong on real code).
 // naming-short gets an EXTRA per-local gate (declDepth>=2, i.e. nested — not the function's own outermost
 // block): gating only at the function level reproduces the withdrawn naming-body-mismatch rule's failure
 // shape (plausible, wrong axis) — a top-level loop-adjacent local like a single accumulator is exactly the
-// idiomatic-short-name case Open Question 8 (PLAN.md) says this gate does not fully solve; declDepth>=2
+// idiomatic-short-name case docs/LOCALS_INDEXING.md §4 (8) says this gate does not fully solve; declDepth>=2
 // narrows to the class most likely to be a REAL problem (a short name reused several control-structure
 // levels deep, far from its declaration) without pretending to solve the axis entirely.
 // The idiomatic-loop-counter axis, MEASURED (2026-08-06, probe fixture + naminglocalscheck.sh arm 4b):
@@ -661,7 +661,7 @@ PROFILE_SCOPE_DESCRIBE( "naminglens/sym: checkNameShape" );
 // i/j/k name whitelist or a used-as-loop-counter heuristic: either would be exactly the
 // plausible-but-unaudited guard the WITHDRAWN note warns about; the plan's default-enable blocker (a
 // real-corpus manual audit) is where that class gets quantified before any further narrowing ships.
-// Findings ride the SAME tags as the Symbol-scoped rule (Open Question 3, PLAN.md: reuse over a new
+// Findings ride the SAME tags as the Symbol-scoped rule (docs/LOCALS_INDEXING.md §4 (3): reuse over a new
 // `-local`-suffixed tag family, which would extend renamemine.h's position-pinned tallies[9]) — the
 // enclosing FUNCTION symbol supplies the finding's byte span (a local has none of its own), the LOCAL's
 // own declaration line is the anchor, and the message text names the enclosing function so a reader is
@@ -707,7 +707,7 @@ inline void checkLocalNameShape( const Symbol& enclosingFn, const LocalNameFact&
 inline constexpr std::uint32_t kNamingLocalsSizeLocBar  = 80;   // matches main.cpp's large-function bar
 inline constexpr std::uint8_t  kNamingLocalsSizeNestBar = 4;    // matches main.cpp's deep-nesting bar
 inline constexpr std::uint32_t kNamingLocalsSizeCcxBar  = 15;   // matches quality.h's kCcxBar (SonarSource)
-// locals>=8 (Open Question 1, PLAN.md) — MEASURED, not invented: on ripwire's own src/ at the commit this
+// locals>=8 (docs/LOCALS_INDEXING.md §4 (1)) — MEASURED, not invented: on ripwire's own src/ at the commit this
 // landed, 377 functions clear the trio above; among THOSE, locals= has median=9, p25=6, p75=18 (histogram
 // in this session's own report). 8 sits just below the median of the population it gates within — high
 // enough to skip the smallest-locals gated functions (where a handful of names would dominate the noise),
@@ -1051,7 +1051,7 @@ PROFILE_SCOPE_DESCRIBE( "naminglens: checkScopeGroups (series + confusable)" );
 // through the same sort/dedupe/tally/paging as the other built-ins. maxHitsPerRule is the caller's
 // per-rule lint budget (kLintMaxPerRule) — same floor semantics as the query-based rules. `namingLocals`
 // (default false ⇒ byte-identical to before Phase 2 existed) is --naming-locals, the local-variable-
-// indexing plan Phase 2 opt-in (PLAN.md 2026-08-06 evening) — see cli.h's own comment for why it defaults
+// indexing plan Phase 2 opt-in (docs/LOCALS_INDEXING.md) — see cli.h's own comment for why it defaults
 // off.
 // preRead (optional): bytes the caller ALREADY holds for a file, indexed by fileId — astQueryGrouped's
 // keptBytesOut (src/ingest.h), when the caller ran that walk first. `--lint` does, so the naming lens no

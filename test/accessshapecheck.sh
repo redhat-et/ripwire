@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # accessshapecheck.sh — gate for src/accessshape.h (Phase A of the access-shape / chase-pointer
-# colocation design, PLAN.md "2026-08-06 (evening, cont.)"), exercised through --field-affinity (Phase A
+# colocation design, docs/FIELDAFFINITY.md §9), exercised through --field-affinity (Phase A
 # ships no CLI flag of its own — see fieldaffinity.h's file-header addendum for why).
 #
 # Fixture test/accessshapefix/ pins the FOUR discriminating traps the design's correctness review named
@@ -11,7 +11,7 @@
 #   chaseWalk    for(LinkedNode* p=head; p; p=p->next) p->payload=0;            -> chase  (next IS the
 #                enclosing struct's own type -> shape_conf="self-ref")
 #   iteratorWalk for(auto it=v; it!=v+n; ++it) it->payload=0;                   -> unknown (auto has no
-#                pointer_declarator -> fails closed, PLAN.md Open Question 2's stated default)
+#                pointer_declarator -> fails closed, docs/FIELDAFFINITY.md §9.6 (2)'s stated default)
 #   mixedWalk    for(LinkedNode* p=head,*idx=first; p; p=p->next,++idx) …       -> mixed  (ONE loop, BOTH
 #                signals, via a comma-expression update clause)
 #   stepperWalk  for(; s; s=s->step) s->val=0;  (StepperA::step, but StepperB ALSO declares `step`)      ->
@@ -107,7 +107,7 @@ then ok 'sepcost=0.25 is the UNBOOSTED Chilimbi number (kChaseSepCostBoostApplie
 else no 'sepcost/wt arithmetic wrong — Phase B may have silently started affecting ranking'; printf '%s\n' "$L" | grep '^pair\|^s n'
 fi
 
-# ── 5) no CLI surface: Phase A ships no new flag (PLAN.md's "extend, don't ship a new flag") ────────────
+# ── 5) no CLI surface: Phase A ships no new flag (docs/FIELDAFFINITY.md §9.1's "extend, don't ship a new flag") ────────────
 if "$BIN" --help 2>&1 | grep -qi -- '--access-shape'
 then no '--access-shape appeared in --help — the plan calls for extending --field-affinity, not a new flag'
 else ok 'no --access-shape flag exists — Phase A is --field-affinity-only, per the plan'

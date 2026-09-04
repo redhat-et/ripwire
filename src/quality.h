@@ -1525,8 +1525,8 @@ constexpr std::uint32_t kIngestParserVerMirror    = 77;   // MUST equal ingest.c
                                                           // body-climb no longer adopts an ancestor whose body
                                                           // CONTAINS the def — cached JS/TS spans/metrics for
                                                           // nested closures were wrong, old blobs must miss.
-                                                          // 41 = Phase 1 local-variable-indexing (PLAN.md
-                                                          // 2026-08-06 evening): Symbol/RawDef gained a `locals`
+                                                          // 41 = Phase 1 local-variable-indexing
+                                                          // (docs/LOCALS_INDEXING.md): Symbol/RawDef gained a `locals`
                                                           // FLOOR field (C/C++ only), a per-file RawDef cache blob
                                                           // FORMAT change — old caches must be rejected.
                                                           // 40 = captureIncludes descends into import CONTAINERS: a

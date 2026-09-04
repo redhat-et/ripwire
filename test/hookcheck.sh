@@ -1234,7 +1234,7 @@ clscase()
 TC4="$TMP/tw1"; mkdir -p "$TC4"; LC4="$TMP/w1.jsonl"
 C4BAD=""
 i=0
-for pair in 'echo "=== docs ==="; grep -n E1 PLAN.md@@grep' \
+for pair in 'echo "=== docs ==="; grep -n E1 docs/COMMANDS.md@@grep' \
             'mkdir -p /tmp/d; ls -R /tmp/d@@find' \
             'D=/tmp/d; cd /tmp/d && cat notes.txt@@read' \
             'git status --porcelain && git diff --stat@@git-diff' \

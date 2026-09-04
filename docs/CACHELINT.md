@@ -85,7 +85,7 @@ silent; templates cost nothing (Agner). These are why `--lint` has no "branch in
 
 ## 3. Wave 2 — the checks that need real analysis (specs)
 
-Each follows the access-shape plan's validation discipline (PLAN.md 2026-08-06): fixture gate with
+Each follows the access-shape plan's validation discipline ([`FIELDAFFINITY.md`](FIELDAFFINITY.md) §9.4): fixture gate with
 labelled discriminating pairs, a blind real-corpus precision pass, and a declared precision floor
 before anything leaves report-only status.
 

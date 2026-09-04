@@ -1444,7 +1444,7 @@ inline const char* churnRankLegendFor( const char* label ) noexcept
 // the one that can actively mislead — here it is a fan-in THRESHOLD with a single value, while the same
 // attribute name on the use-site verb carries call|read|write|import|extends, and that verb discloses its
 // own vocabulary in-legend. Absence is meaningful for five of these (locals= joined the group at Phase 1,
-// local-variable-indexing, PLAN.md 2026-08-06 evening: absent for every non-C/C++ def, model.h
+// local-variable-indexing, docs/LOCALS_INDEXING.md: absent for every non-C/C++ def, model.h
 // localsCountedLang) and is stated rather than left to be inferred from a missing attribute.
 // G4: no "--" anywhere inside an XML comment ⇒ flag names written bare.
 // Kept TERSE for kMaxTokensFitLegend's reason — it rides on every --metrics map and is charged. A 715 B
@@ -2049,7 +2049,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             // (kind guard) so a class/sec never carries a 0 it can't have; lcom4 only for class-kinds with
             // methods (kLcom4NA sentinel omits) — mutually exclusive with the fn/method group, which is why
             // the buffer sizing below only has to cover ONE of the two groups' worst case, not both summed.
-            // 96 -> 160 (Phase 1, local-variable-indexing, PLAN.md 2026-08-06 evening): the fn/method worst
+            // 96 -> 160 (Phase 1, local-variable-indexing, docs/LOCALS_INDEXING.md): the fn/method worst
             // case grew by locals="4294967295" locals_floor="1" (38 B) on top of the pre-existing
             // loc+params+nest+cbo+amp+tested run (~88 B) — 96 would silently TRUNCATE (appendf's qe-clamp
             // makes truncation safe from a buffer-overrun standpoint, but a truncated attr run is malformed
@@ -2096,7 +2096,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                     {
                         appendf( " humps=\"%u\" deep=\"%u\" deep_floor=\"1\"", unsigned( s.humps ), unsigned( s.deepLoc ) );
                     }
-                    // Phase 1 (local-variable-indexing, PLAN.md 2026-08-06 evening): locals= is ABSENT — never
+                    // Phase 1 (local-variable-indexing, docs/LOCALS_INDEXING.md): locals= is ABSENT — never
                     // a bare "0" — for every def outside model.h's localsCountedLang (MVP: C/C++ only), so a
                     // reader never mistakes "not counted for this language" for "counted, and there are none".
                     // locals_floor="1" always rides alongside a present locals=: `int a,b;` counts as ONE
@@ -5925,7 +5925,7 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
     {
         std::snprintf( num, sizeof( num ), ",\"params\":%u,\"nest\":%u", unsigned( s.params ), unsigned( s.maxNest ) );
         w.write( num );
-        // Phase 1 (local-variable-indexing, PLAN.md 2026-08-06 evening): the JSON sibling of the XML
+        // Phase 1 (local-variable-indexing, docs/LOCALS_INDEXING.md): the JSON sibling of the XML
         // locals=/locals_floor= pair — omitted key (never a fabricated 0) outside model.h's
         // localsCountedLang (MVP: C/C++ only). "locals_floor" mirrors the XML boolean-flag convention
         // as JSON `true`, matching how `tested` is spelled two lines below.

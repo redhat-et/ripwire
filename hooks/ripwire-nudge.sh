@@ -587,7 +587,7 @@ meter_lead()
 #      2026-08-12 (S2c — THE CLASSIFIER-GAP ROUND): three structural gaps, all read off the live log's
 #      post-isolation-deploy window rather than imagined, plus one new class:
 #
-#        - THE FIRST WORD IS NOT THE COMMAND. `echo "=== x ==="; grep -n E1 PLAN.md`,
+#        - THE FIRST WORD IS NOT THE COMMAND. `echo "=== x ==="; grep -n E1 docs/COMMANDS.md`,
 #          `mkdir -p $D; ls -R $D`, `for g in …check; do bash test/$g.sh; done` — the command the
 #          agent actually ran sits in a LATER segment, and the classifier only ever looked at the
 #          first. `meter_classify_walk` walks the sequenced segments; see the reasoning there for why

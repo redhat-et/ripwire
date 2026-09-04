@@ -12,7 +12,7 @@ Design source: the Phase B4 research and R4 eval-methodology notes ("Minimal age
 ripwire arms use the CLI through a logging shim. Codex and opencode runs get fully isolated homes,
 `--resume` skips already-completed cells so an interruption cannot re-spend money, and `--concurrency`
 runs N cells at once in separate checkout lanes. One locked Astropy pair plus one post-skill-fix
-treatment rerun completed on 2026-08-04; see [`PLAN.md`](../../PLAN.md).
+treatment rerun completed on 2026-08-04; see [`docs/EVALS.md`](../../docs/EVALS.md).
 
 **The headline metric has now been produced.** Stage 1 tranche 1 completed 2026-08-21: `--evaluator
 swebench` ran end to end against the official SWE-bench harness, every run reached `status=ok`, and

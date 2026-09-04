@@ -197,7 +197,7 @@ names.
 
 ### 8.1 Why this ships REPORT-ONLY, not ranking-affecting
 
-PLAN.md's Phase B section sets an explicit shipping floor: `>=85%` precision on the `shape_conf="self-ref"`
+§9.4's validation methodology sets an explicit shipping floor: `>=85%` precision on the `shape_conf="self-ref"`
 flagged set, measured against **three** real corpora (a chase-heavy positive corpus, ripwire's own `src/`
 as a negative control, and a THIRD corpus specifically chosen to stress the false-positive boundary a
 SoA-heavy codebase like this one's own `src/` cannot), reviewed **BLIND** — the classifier's own label
@@ -253,4 +253,133 @@ floor the split arm's second fetch barely moves. This is a genuinely measured re
 and it is the SECOND independent reason (beyond the unmet validation floor in §8.1) `kChaseSepCostBoostApplied`
 stays at `1.00`: the mechanism itself has not shown a strong effect in the one regime measured here. A
 smaller (LLC-resident) working set, or an unshuffled (allocation-order) chain, are both open regimes this
-session did not measure — see PLAN.md's Open Questions.
+session did not measure — see §9.6.
+
+## 9. The Phase A/B design record
+
+The design §8 implements, kept here so the source comments and gates that cite it by section have
+something in the repository to cite. Phase A ships; Phase B's boost multiplier is locked at a
+documented no-op for the two reasons §8.1 and §8.3 give.
+
+### 9.1 Extend `--field-affinity`; do not ship a new flag
+
+Stage 1 (aggregate modeling) and Stage 2 (member-access enumeration) already do the expensive part
+this needs. A second verb would either double the modeling cost or import `fieldaffinity.h` as a
+dependency of itself.
+
+### 9.2 Phase A — access-shape classification
+
+`src/accessshape.h` classifies each loop or recursive traversal as `index` / `chase` / `mixed` /
+`unknown`, via declarative `TSQuery` patterns run through the existing re-query mechanism
+(`astQuery()` — already backing `--lint`, the atoms-of-confusion pack, and `--nonlocal-state`'s cell
+discovery). Not a hand-rolled byte scanner, and not a false reuse of parse-tree state: ingest calls
+`ts_tree_delete` at every parse site, so no tree survives to reuse.
+
+Self-referential chase-field detection — does a field's declared type contain the enclosing struct's
+own name — handles seven cases including typedef aliases, templates, smart-pointer unwrapping, and
+cross-aggregate multi-hop links. An ambiguous stem matching two or more modeled aggregates is
+REFUSED and disclosed (`stem_ambiguous=`), matching the file's existing `ambSkipped` "refuse rather
+than guess" convention, never a first-seen-order guess. **`unknown` fails closed by construction** —
+a query that does not match emits no signal, never a wrong one.
+
+**The precision traps this fixtures rather than merely describes.** A constant-stride pointer walk
+over a flat buffer with an arrow-deref body — `for( Node* p = first; p != first + n; ++p ) p->touch();`
+— must classify `index`: the advance is pointer arithmetic on `p`, not a field read, despite the `->`
+in the body. Its near-twin differing only in the advance expression —
+`for( Node* p = head; p; p = p->next ) p->touch();` — must classify `chase`. An STL iterator's `++it`
+must not collapse into the chase shape (`operator++`, not a field read). A single loop carrying both
+an index signal and a chase signal at once — one loop, not two — must classify `mixed`. These are the
+minimal discriminating pairs, not decorative ones; `test/accessshapecheck.sh` and
+`test/accessshapefix/walks.cpp` hold them.
+
+**A required, explicit cost ceiling.** A `kMaxAggsModeled`-style skip threshold above a stated
+complexity band, disclosed via a floor counter and hooked into the existing
+`perfharnesscheck`/`spectimingcheck` gates. A reference-corpus wall-clock number is REQUIRED before
+Phase A leaves report-only status — not shipped unmeasured.
+
+### 9.3 Phase B — chase-pointer colocation
+
+Not a new finding kind: `--field-affinity`'s existing two-finding-kind contract
+(`split-line`/`straddle`) stays untouched. A chase-target field's `sepCost` contribution gets a
+named, disclosed boost multiplier (`kChaseSepCostBoost`) applied inline at the exact accumulation
+point, **before** the existing `sepCost desc → findings.size() desc → name asc → path asc` sort —
+stated explicitly so the boost cannot silently break the determinism contract §0 names.
+
+The boost's numeric value is explicitly NOT claimed as measured until `bench/bench_chase_ab.cpp`
+produces a real number under a real `p = p->next` traversal — citing §5.3's own precedent, where the
+split-arm hypothesis inverted at stride 1, as the reason to distrust an unmeasured constant here too.
+§8.3 records what that harness actually measured: a null-to-weak result in the one regime tested.
+
+### 9.4 Validation methodology — three required elements
+
+1. **Fixture gate** (`test/accessshapecheck.sh`) — exact-match against every labelled trap case
+   above, in `fieldaffinitycheck.sh`'s assertion style.
+2. **A required, NOT optional, real-corpus precision/recall session** against THREE corpora: a
+   chase-heavy positive corpus (intrusive-list/tree-style C/C++), ripwire's own `src/` as a negative
+   control, and a third corpus added specifically because this repository's SoA-heavy source is a
+   WEAK adversarial test for the false-positive risk that matters — G2 keeps `->` density low here,
+   so a near-zero chase rate does not stress the index/chase boundary. An ordinary
+   iterator/pointer-arithmetic-heavy modern-C++ codebase is the actual precision stressor. Reviewed
+   **BLIND** — the classifier's own label hidden until the reviewer records an independent judgment —
+   closing the exact "did I validate this, or just confirm my own heuristic" trap the withdrawn
+   naming rule fell into.
+3. **A declared shipping floor**: `>=85%` precision on the `shape_conf="self-ref"` flagged set before
+   Phase B may consume it for anything ranking-affecting. Missing the floor keeps Phase A permanently
+   report-only — no all-or-nothing kill decision, and no silent promotion past a floor nobody checked.
+
+That session has not run, which is why §8.1 holds `kChaseSepCostBoostApplied` at `1.00`.
+
+### 9.5 Novelty — rare but real, and the wording that is safe
+
+The engineering INSIGHT — colocate a linked structure's chase/next pointer near its hot payload
+fields, since the cache-line fetch to dereference it is unavoidable — is **commodity**: settled
+practitioner folklore (Boost.Intrusive's performance docs; Chandler Carruth, CppCon 2014; CMU's
+unpublished "Object Fusion" course project names the exact failure mode). Cited, not claimed,
+matching how §1 already handles Chilimbi and Hundt.
+
+The DETECTION-AND-PRIVILEGING MECHANISM — static, no-execution, source-level classification of a
+traversal's access shape that then privileges the specific chase-pointer field in an automated
+field-colocation check, surfaced as compile-time review advice — was **not found** by two independent
+multi-angle searches. The first (14 academic queries, 8 industrial tool catalogs, a patent search)
+found the two closest structural cousins: **Marmoset** (ECOOP 2024, arXiv:2405.17590 — a static
+compiler that auto-synthesizes packed ADT layouts, but an automatic transform rather than developer
+advice, and functional-ADT-scoped rather than general C/C++), and the unpublished **Object Fusion**
+project (names the exact problem, but requires manual annotation of key/next accessors, not
+detection). A second search — a dedicated refuter told to kill the claim rather than confirm it, run
+against a non-overlapping source set — additionally checked DMon (OSDI '21), DINAMITE, Intel Advisor,
+PerfLint, and Lattner's LLVM Data Structure Analysis / Automatic Pool Allocation. All fail at least
+one of the two required prongs: they require execution, or they do generic/uniform field colocation
+with no chase-pointer-distinguished case, or they classify for a different consumer such as hardware
+prefetcher design.
+
+Both searches are hedged, deliberately: **a genuine search that failed to find a counter-example is
+not a formal clearance.** No full ACM DL / IEEE Xplore pass was run, and no USPTO
+classification-code search.
+
+The wording that survives that hedge, for `LINEAGE.md` if Phase B ever ships ranking-affecting:
+
+> No shipping static-analysis tool, and no published academic work found in a multi-angle search
+> (independently repeated by a second search covering a non-overlapping source set), combines (a) a
+> purely static, no-execution, no-debug-info classification of a loop or traversal function's access
+> shape as index/handle-based versus pointer-chase-based with (b) a chase-pointer-specific
+> field-colocation check that treats the traversal pointer as a distinguished, higher-priority case
+> of pairwise field affinity, surfaced as compile-time code-review advice.
+
+### 9.6 Open questions
+
+1. The perf ceiling's exact threshold value — mechanism specified, number needs a real bench run.
+2. **Should a bare iterator loop (`for( auto it = v.begin(); …; ++it )`) ever classify `index`
+   rather than `unknown`?** Default: `unknown` — it fails closed. Revisit only if real-corpus recall
+   numbers show this is a material miss. *(This is the default `src/accessshape.h` and
+   `test/accessshapefix/walks.cpp` cite when they say a shape fails closed.)*
+3. Indirect range-for targets (`for( auto& x : *getItems() )`) — safe default is `unknown`; deeper
+   resolution through call returns or view adaptors is explicitly out of scope for v1.
+4. `kChaseSepCostBoost`'s value — needs `bench/bench_chase_ab.cpp`, not a guess. See §8.3 for what it
+   measured, and why the answer so far is "no strong effect in the regime tested".
+5. Whether the disclosed template-self-ref false-positive gap (`Node<Key>* cachedLookup`, unrelated
+   to traversal, still labelled self-ref under `tmpl_approx="1"`) should be narrowed in v1 or shipped
+   disclosed — flagged as worth a second opinion given its parallel to the withdrawn naming rule's
+   failure shape, and deliberately not decided unilaterally.
+6. The regimes `bench_chase_ab.cpp` did not cover: a smaller (LLC-resident) working set, and an
+   unshuffled (allocation-order) chain. §8.3's null-to-weak result is honest about being one regime,
+   not the whole space.

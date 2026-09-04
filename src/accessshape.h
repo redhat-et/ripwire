@@ -1,7 +1,7 @@
 #pragma once
 
-// accessshape.h — Phase A of the access-shape / chase-pointer colocation design (PLAN.md, "2026-08-06
-// (evening, cont.) — access-shape / chase-pointer colocation plan, orchestrated"). Consumed ONLY by
+// accessshape.h — Phase A of the access-shape / chase-pointer colocation design
+// (docs/FIELDAFFINITY.md §9 — the Phase A/B design record). Consumed ONLY by
 // `--field-affinity` (src/fieldaffinity.h): classifies each `for`-loop's UPDATE clause as `index` (bare
 // pointer/counter arithmetic advance) / `chase` (advance by reading the loop variable's own field, the
 // classic `p = p->next` traversal shape) / `mixed` (both signals in the SAME loop) / `unknown` (neither —
@@ -42,7 +42,7 @@
 //                                                              chases an unrelated pointer inside) can
 //                                                              never be misread as this loop's advance.
 //                                                              Verified against exactly that trap in this
-//                                                              session (t2.cpp fixture, see PLAN.md).
+//                                                              session (t2.cpp fixture, see docs/FIELDAFFINITY.md §9).
 //   as-ptrvar  for_statement initializer: … pointer_declarator … (identifier) @c
 //                                                            — a loop variable declared with an EXPLICIT
 //                                                              pointer type (`Node* p = …`). This is the

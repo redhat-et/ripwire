@@ -30,7 +30,7 @@ struct RawDef
     std::uint32_t cx        = 0;   // cyclomatic complexity (1 + decision points); functions/methods only
     std::uint32_t ccx       = 0;   // cognitive complexity (nesting-weighted); functions/methods only
     std::uint32_t loc       = 0;   // Q4: physical line span of the def (end line − start line + 1)
-    std::uint32_t locals    = 0;   // Phase 1 (local-variable-indexing, PLAN.md 2026-08-06 evening): local-decl
+    std::uint32_t locals    = 0;   // Phase 1 (local-variable-indexing, docs/LOCALS_INDEXING.md): local-decl
                                    // count from cc_walk; C/C++ only (see model.h localsCountedLang), 0 elsewhere
     std::uint16_t ppAlt     = 0;   // preproc alternative branches (#else/#elif) inside the def (see model.h Symbol::ppAlt)
     std::uint16_t humps     = 0;   // nesting profile: regions reaching quality::kNestBar (see model.h Symbol::humps)
@@ -604,8 +604,8 @@ constexpr std::uint32_t kParserVer    = 77;           // bump on any grammar/.sc
                                                       //    a function stole the encloser's whole span, so their
                                                       //    cached startByte/endByte/loc/cx/params are wrong) →
                                                       //    old blobs carry the bad spans and must be rejected.
-                                                      // 41: Phase 1 (local-variable-indexing, PLAN.md 2026-08-06
-                                                      //    evening): RawDef/Symbol gained a `locals` uint32_t
+                                                      // 41: Phase 1 (local-variable-indexing,
+                                                      //    docs/LOCALS_INDEXING.md): RawDef/Symbol gained a `locals` uint32_t
                                                       //    FLOOR field, populated inside the existing fused cc_walk
                                                       //    DFS (C/C++ only — model.h localsCountedLang). A FORMAT
                                                       //    change to the per-file RawDef cache blob (new u32 between
@@ -1209,7 +1209,7 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // an allocator. The minima below are named + pinned here (not hand-recounted inline at the call site) so
 // they sit next to the writer functions whose field list they must match. A LEAN def record is 14 u32 +
 // 13 u8 + 2 empty str(len u32) fields = 14*4 + 13*1 + 2*4 = 77 bytes (Phase 1, local-variable-indexing,
-// PLAN.md 2026-08-06 evening: `locals` u32 joined the run — 9 -> 10; the ppalt disclosure added `ppAlt`,
+// docs/LOCALS_INDEXING.md: `locals` u32 joined the run — 9 -> 10; the ppalt disclosure added `ppAlt`,
 // written as a u32 — 10 -> 11; the nesting profile then added `humps` and `deepLoc`, written as u32 each —
 // 11 -> 13; essential complexity then added `ev` as a u32 in the run plus the 8×u8 evWhy tag counters
 // after the strings — 13 -> 14 u32 and 4 -> 12 u8, so 56 + 12 + 8 = 76; L8's in-file `testScope` then

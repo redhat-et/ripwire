@@ -289,7 +289,7 @@ else
 fi
 
 # ── arm 6: internal-pattern filenames, and docs/ index coverage ───────────────────────────────────
-INTERNAL_NAME='(^|/)(PLAN_|AUDIT|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|DESIGN_|RESEARCH_)'
+INTERNAL_NAME='(^|/)(PLAN[._]|AUDIT|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|DESIGN_|RESEARCH_)'
 # ONEOFF_ACCEPTED (arm 3, same rationale): the one owner-accepted PLAN file is exempt by exact path.
 badnames="$( tr '\0' '\n' < "$TMP/tracked.z" | grep -E "$INTERNAL_NAME" | grep -Fxv "$ONEOFF_ACCEPTED" || true )"
 if [ -n "$badnames" ]; then
@@ -419,7 +419,23 @@ fi
 #                                 file — SPEC.md — that was never exported here). The SAME patch also
 #                                 carries the BARE "SPEC §" shape (no ".md") that the second pattern
 #                                 below catches, for the same never-rewrite-history reason.
+#   RECORDED-RUN pairs (added when PLAN.md was culled and arm 8's pattern widened to catch a bare
+#                       "PLAN.md" citation, not only "PLAN_x.md"): docs/captures/*.md and
+#                       docs/COMMANDS.md's sample blocks are VERBATIM recordings of real runs made
+#                       while PLAN.md still shipped, and bench/recalleval/snapshot.mdpack is a frozen
+#                       corpus. Each contains PLAN.md only as a path INSIDE recorded tool output.
+#                       Editing them would falsify the recording — the same never-rewrite-a-record
+#                       rationale as the archived patches above. Self-limiting: a capture regenerated
+#                       after the cull cannot contain the row, so this list does not grow.
 ARM8_EXEMPT_PAIRS='test/docmentioncheck.sh|DESIGN_widgetTotals.md
+bench/recalleval/snapshot.mdpack|PLAN.md
+docs/COMMANDS.md|PLAN.md
+docs/captures/COMMANDS_showcase_2026-08-10.md|PLAN.md
+docs/captures/COMMANDS_showcase_2026-08-14.md|PLAN.md
+docs/captures/COMMANDS_showcase_2026-08-15.md|PLAN.md
+docs/captures/COMMANDS_showcase_2026-08-20.md|PLAN.md
+docs/captures/COMMANDS_showcase_2026-08-21.md|PLAN.md
+docs/captures/COMMANDS_showcase_2026-08-22.md|PLAN.md
 test/historyoraclecheck.sh|PLAN_relief.md
 bench/locbench/results/r1_anchorhop/r1_candidate_implementation.patch|SPEC.md
 bench/locbench/results/r1cpp_anchorhop/r1cpp_candidate_implementation.patch|SPEC.md
@@ -444,7 +460,7 @@ for line in sys.argv[2].splitlines():
     path, name = line.split('|', 1)
     exempt_pairs.add((path, name))
 # (1) NAMED-FILE shape: a citation of a specific culled .md filename (PLAN_x.md, SPEC.md, ...).
-pat_named = re.compile(r'\b(?:PLAN_|AUDIT|DESIGN_|RESEARCH_|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|SPEC)[A-Za-z0-9_.-]*\.md\b')
+pat_named = re.compile(r'\b(?:PLAN|AUDIT|DESIGN_|RESEARCH_|NEXT_SESSION|KICKOFF_|HANDOFF_|IDEAS_|REPORT_|SPEC)[A-Za-z0-9_.-]*\.md\b')
 # (2) BARE-NAME shape: no ".md" at all, e.g. "RESEARCH §2d", "PLAN §Execution", "SPEC §6/§8" — the 19
 # residual dangling citations V3 found (pattern_named requires the ".md" suffix, so it silently missed
 # these). Requiring the DOC WORD immediately before "§" is what keeps this narrow: a bare round label

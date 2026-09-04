@@ -1,5 +1,5 @@
 // bench_chase_ab.cpp — the VALIDATION HALF of Phase B (src/fieldaffinity.h's chase-pointer colocation
-// refinement, PLAN.md "2026-08-06 (evening, cont.)"): the SAME A/B-and-alternate methodology
+// refinement, docs/FIELDAFFINITY.md §9): the SAME A/B-and-alternate methodology
 // bench_field_ab.cpp already uses for the general split-line hypothesis, applied to the ONE shape Phase B
 // singles out — a chase-pointer field (`next`) colocated with the hot payload field a traversal ALSO
 // reads on every step.
@@ -33,7 +33,7 @@
 // still reports timing; a null result (the two arms measure the same) is printed as a null result, not
 // suppressed. THE NUMBER THIS PRODUCES IS NOT WIRED INTO src/fieldaffinity.h's sepCost ARITHMETIC — see
 // kChaseSepCostBoostMeasured / kChaseSepCostBoostApplied in that file and docs/FIELDAFFINITY.md §8 for why
-// a REAL measured number here still does not clear PLAN.md's required real-corpus, blind-reviewed
+// a REAL measured number here still does not clear docs/FIELDAFFINITY.md §9.4's real-corpus, blind-reviewed
 // precision floor before Phase B may consume anything ranking-affecting.
 
 #include "infra/profilePmc.h"
@@ -246,7 +246,7 @@ int main()
                      "  §5.3: a static separation cost is a hypothesis, not a defect.\n", -delta * 100.0 );
     }
     std::printf( "\n  NOT WIRED IN: this number is NOT applied to src/fieldaffinity.h's sepCost arithmetic\n"
-                 "  (kChaseSepCostBoostApplied is locked at 1.0) until PLAN.md's real-corpus, blind-reviewed\n"
-                 "  precision floor clears. See docs/FIELDAFFINITY.md sec 8.\n" );
+                 "  (kChaseSepCostBoostApplied is locked at 1.0) until the required real-corpus, blind-reviewed\n"
+                 "  precision floor clears. See docs/FIELDAFFINITY.md sec 8 and 9.4.\n" );
     return 0;
 }

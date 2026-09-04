@@ -605,7 +605,7 @@ inline AstQueryShape astQueryShape( std::string_view query )
     return shape;
 }
 
-// ---- local-variable-indexing plan, Phase 2 (PLAN.md 2026-08-06 evening) ----
+// ---- local-variable-indexing plan, Phase 2 (docs/LOCALS_INDEXING.md) ----
 // On-demand re-parse of ONE already-gated function's own byte span [sigStartByte, endByte) — reusing
 // Phase 1's cc_isCountableLocalDecl/cc_declHasStructuredBinding predicates so the SET of declarations this
 // walk visits is provably the same set Phase 1's `locals=` count already covers (no second, silently

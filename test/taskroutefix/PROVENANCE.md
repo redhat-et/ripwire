@@ -1,6 +1,6 @@
 # taskroutefix corpus provenance
 
-Charter: the PLAN.md taskroute ledger's Orchestrator review addendum (2026-08-13, first row).
+Charter: the taskroute round's orchestrator review addendum (2026-08-13, first row).
 The original 50-row corpus scored held-out 1.000 by self-quotation — its fixtures templated the
 intent cards' own vocabulary — so those floors were declared NOT discharged until the corpus was
 rebuilt from real agent phrasing under a contamination screen and a content-hash split seal.

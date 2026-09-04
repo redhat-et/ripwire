@@ -237,7 +237,7 @@ inline bool cc_declHasStructuredBinding( TSNode n, int depth ) noexcept
     return false;
 }
 
-// Phase 1 (local-variable-indexing, PLAN.md 2026-08-06 evening): is `n` a LOCAL-VARIABLE declaration
+// Phase 1 (local-variable-indexing, docs/LOCALS_INDEXING.md): is `n` a LOCAL-VARIABLE declaration
 // statement that cc_walk's own fused DFS should count? `declaration` node whose PARENT is the enclosing
 // `compound_statement` (a direct block-statement local) — one rule that, WITHOUT any per-shape special
 // case, naturally excludes an if-init (`if(int x=f())`)/switch-condition/for-init declarator (parent is
@@ -1191,7 +1191,7 @@ inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )  
     return out;
 }
 
-// ── local-variable-indexing plan, Phase 2 (PLAN.md 2026-08-06 evening) ─────────────────────────────────
+// ── local-variable-indexing plan, Phase 2 (docs/LOCALS_INDEXING.md) ─────────────────────────────────
 //
 // bounded-depth: the identifier(s) a DECLARATOR subtree ultimately names, following ONLY the grammar's
 // "declarator:" field at each wrapper level (never "value:"/"size:"/"type:" — those hold an initializer

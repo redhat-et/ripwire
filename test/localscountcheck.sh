@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# localscountcheck.sh — Phase 1 of the local-variable-indexing plan (PLAN.md, "2026-08-06 (evening) —
-# local-variable-indexing plan, orchestrated"): Symbol/RawDef gained a `locals` uint32_t FLOOR count,
+# localscountcheck.sh — Phase 1 of the local-variable-indexing plan (docs/LOCALS_INDEXING.md): Symbol/RawDef gained a `locals` uint32_t FLOOR count,
 # populated inside the ALREADY-EXISTING fused cc_walk complexity DFS (ingest.cpp) — C/C++ only (MVP scope,
 # model.h::localsCountedLang). Emitted on `--metrics` as `locals="N" locals_floor="1"` (XML) /
 # `"locals":N,"locals_floor":true` (JSON), NEVER a bare `locals="0"` for a language Phase 1 doesn't cover.

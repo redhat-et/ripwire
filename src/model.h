@@ -242,7 +242,7 @@ struct Symbol
     // ALL descriptive facts on --metrics ONLY, never a gate. `params`/`maxNest` are meaningful for
     // functions/methods; 0 for other kinds. `loc` is the def's physical line span (body-inclusive).
     std::uint32_t loc          = 0;    // physical lines the def spans = 1-based end line − start line + 1; --metrics loc=
-    // local-variable-indexing plan, Phase 1 (2026-08-06 evening, PLAN.md): a FLOOR count of the def's own
+    // local-variable-indexing plan, Phase 1 (docs/LOCALS_INDEXING.md): a FLOOR count of the def's own
     // local-variable DECLARATORS, populated by the SAME fused-DFS complexity walk that computes cx/ccx/
     // maxNest (ingest.cpp complexityOf/cc_walk) — zero new tree-sitter queries. MVP scope is C/C++ only
     // (see localsCountedLang below); meaningful for fns/methods only (0 for other kinds, same convention
@@ -347,7 +347,7 @@ struct Symbol
 // Two std::string members dominate; the scalars pack into what their alignment leaves. If this fires after a
 // field add, re-check you used the smallest type and grouped it — don't just bump N (a size regression is a
 // real signal here). libc++/libstdc++ std::string is 24 B (3 words); adjust N per-toolchain if it ever differs.
-// `locals` (Phase 1 local-variable-indexing, PLAN.md 2026-08-06 evening) added as a uint32_t grouped with
+// `locals` (Phase 1 local-variable-indexing, docs/LOCALS_INDEXING.md) added as a uint32_t grouped with
 // the other Q4 size-smell scalars, right before `loc`/`params`/`maxNest`/`arityExact` — measured (not
 // assumed): sizeof(Symbol) is UNCHANGED at 48 + 2*sizeof(std::string). The scalar run before the two
 // std::string members already carried 4 B of trailing alignment padding (std::string needs 8-B alignment
@@ -378,7 +378,7 @@ struct Symbol
 static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
 
-// local-variable-indexing plan Phase 1 MVP scope (PLAN.md 2026-08-06 evening): C/C++ only — highest
+// local-variable-indexing plan Phase 1 MVP scope (docs/LOCALS_INDEXING.md): C/C++ only — highest
 // locals/function ratio in the survey (5-15/fn vs 3:1 Python, 0.2-0.8 Go/Rust) and `locals` is threaded
 // through ingest.cpp's ALREADY C-family-only large-function/deep-nesting complexity walk, so this extends
 // shipped code rather than building a new cross-language subsystem. ObjC/ObjC++ is a named fast-follow
@@ -411,7 +411,7 @@ inline bool evCountedLang( Lang lang ) noexcept
            || lang == Lang::Swift || lang == Lang::Java || lang == Lang::Ruby || lang == Lang::CSharp;
 }
 
-// local-variable-indexing plan Phase 2 (PLAN.md 2026-08-06 evening): one CAPTURED local-variable NAME,
+// local-variable-indexing plan Phase 2 (docs/LOCALS_INDEXING.md): one CAPTURED local-variable NAME,
 // from the on-demand re-parse ingest.cpp's collectGatedLocalNames runs ONLY for a function that already
 // cleared BOTH the existing size/complexity gate AND locals>=kNamingLocalsGateFloor (naminglens.h) — never
 // promoted to a Symbol/NodeId, never entering the call graph, never cached (recomputed fresh every time a

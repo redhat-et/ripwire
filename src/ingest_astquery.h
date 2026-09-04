@@ -1770,7 +1770,7 @@ inline void ur_walkTree( TSNode root, std::uint32_t fileId, std::string_view src
     }
 }
 
-// local-variable-indexing plan, Phase 2 (PLAN.md 2026-08-06 evening) — see ingest.h's own comment for the
+// local-variable-indexing plan, Phase 2 (docs/LOCALS_INDEXING.md) — see ingest.h's own comment for the
 // full contract. Definition lives HERE (outside the anonymous namespace above) purely for LINKAGE — it
 // must be externally callable to satisfy ingest.h's declaration — while every helper it calls
 // (ln_extractDeclaratorIdentifiers / ln_declaratorIdentifiers / ln_declDepth / ln_collectLocalDecls) stays

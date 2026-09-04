@@ -100,7 +100,7 @@
 // provably cannot be a raw-pointer chase target (`as_stem_nonptr=`) — all three refused-with-a-count, the
 // same "refuse rather than guess" convention `amb_skipped=` already uses above. (2) `kChaseSepCostBoostApplied`
 // is wired inline at the EXACT sepCost accumulation point a chase-target pair would be boosted at, and is
-// pinned at 1.0 (a documented no-op) — PLAN.md's shipping floor for anything RANKING-affecting is >=85%
+// pinned at 1.0 (a documented no-op) — docs/FIELDAFFINITY.md §9.4's shipping floor for anything RANKING-affecting is >=85%
 // precision on the shape_conf="self-ref" set, measured against real corpora with BLIND human review, which
 // has not run. See docs/FIELDAFFINITY.md §8 and src/accessshape.h's own header for the full accounting.
 
@@ -147,7 +147,7 @@ constexpr std::size_t   kMaxScopeChars    = 120;    // displayed prefix of a PRO
 // exact run); kChaseSepCostBoostApplied is what buildStructRow ACTUALLY multiplies by, pinned at 1.0 (a
 // provable no-op) until the plan's required real-corpus, blind-reviewed precision floor
 // (shape_conf="self-ref" >= 85%) clears. Wiring the measured constant into the arithmetic before that
-// floor clears would be exactly the unearned promotion PLAN.md's Phase B section forbids ("no silent
+// floor clears would be exactly the unearned promotion docs/FIELDAFFINITY.md §9.4 forbids ("no silent
 // promotion past a floor nobody checked"). Keep these separate; do not fold one into the other.
 // MEASURED (2026-08-06, this session, Apple M5 Pro, unprivileged — counters UNAVAILABLE, same disclosed
 // gap bench_field_ab.cpp's own §5.1 has without root): bench/bench_chase_ab.cpp, a shuffled 64 MB /
@@ -815,7 +815,7 @@ inline AffStruct buildStructRow( layout::ModelCtx& ctx, const ModeledAgg& agg, c
         p.dist     = ( fa.offset > fb.offset ) ? ( fa.offset - fb.offset ) : ( fb.offset - fa.offset );
         p.wt       = separationWeight( p.dist );
         // Phase B's boost, applied at the EXACT accumulation point, BEFORE the sepCost-desc sort below —
-        // stated explicitly so this can never silently break the file's determinism contract (PLAN.md).
+        // stated explicitly so this can never silently break the file's determinism contract (docs/FIELDAFFINITY.md §9.3).
         // kChaseSepCostBoostApplied is LOCKED at 1.0 (a provable no-op): see the tuning-constants comment
         // and the file header addendum for why the measured value is not wired in yet.
         const double boost = ( fa.chaseLoops > 0 || fb.chaseLoops > 0 ) ? kChaseSepCostBoostApplied : 1.0;

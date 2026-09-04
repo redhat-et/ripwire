@@ -209,8 +209,8 @@ struct Config
                                                             // DECIDED group gets propose=, its own subtokens mechanically
                                                             // recombined into the dominant style. A lens, exit 0 always
                                                             // (namingconsistency.h)
-    bool             namingLocals      = false;            // --naming-locals: local-variable-indexing plan Phase 2 (PLAN.md
-                                                            // 2026-08-06 evening) — an OPT-IN --lint extension only, folded into
+    bool             namingLocals      = false;            // --naming-locals: local-variable-indexing plan Phase 2
+                                                            // (docs/LOCALS_INDEXING.md) — an OPT-IN --lint extension only, folded into
                                                             // the naming lens's existing naming-short/-wordy/-underscore/-case
                                                             // tags for LOCAL variable names inside large/deep/complex C/C++
                                                             // functions (naminglens.h). DEFAULT-OFF, and NOT wired into a plain
@@ -1246,7 +1246,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               rename -- an actual rename needs --uses to prove the complete reference set first. Exit 0\n"
         "                               always: a lens, not a gate. Pages limit=N (offset=M); default 40 rows\n"
         "    --naming-locals            OPT-IN --lint MODIFIER (requires --lint; a no-op alone), OFF by default:\n"
-        "                               local-variable-indexing plan Phase 2 (PLAN.md 2026-08-06 evening). Runs the\n"
+        "                               local-variable-indexing plan Phase 2 (docs/LOCALS_INDEXING.md). Runs the\n"
         "                               naming-short/naming-wordy/naming-underscore/naming-case predicates (same tags, same rule\n"
         "                               bodies as the existing Symbol-scoped checks) against LOCAL variable names too, C/C++ only,\n"
         "                               but ONLY inside a function that already clears an EXISTING\n"

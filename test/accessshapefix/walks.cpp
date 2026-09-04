@@ -1,4 +1,4 @@
-// accessshapefix/walks.cpp — the four discriminating traps PLAN.md's Phase A design named as REQUIRED
+// accessshapefix/walks.cpp — the four discriminating traps docs/FIELDAFFINITY.md §9.2's Phase A design named as REQUIRED
 // (its "correctness review" minimal set), plus the three refusal demos (ambiguous / zero-owner /
 // non-pointer-sole-owner chase fields — one per disclosed refusal cause). Every function ALSO
 // performs a normal field access so --field-affinity has a co-access observation to attribute (Phase A
@@ -29,7 +29,7 @@ void chaseWalk( LinkedNode* head )
 
 // TRAP 3 — unknown. `it` has NO explicit pointer type (auto), so it cannot satisfy the as-ptrvar
 // pointer_declarator gate; ++it is syntactically identical to a raw-pointer increment but this design
-// fails closed rather than guess (PLAN.md Open Question 2's stated default).
+// fails closed rather than guess (docs/FIELDAFFINITY.md §9.6 (2)'s stated default).
 void iteratorWalk( LinkedNode* v, int n )
 {
     for( auto it = v; it != v + n; ++it )
