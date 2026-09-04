@@ -185,8 +185,18 @@ r1="$("$BIN" "$REPO" --quality-delta --no-cache 2>/dev/null)"; r2="$("$BIN" "$RE
 # Before 2026-08-01 the NDEBUG case took the FAIL branch, which made CI's Release leg unconditionally red —
 # the 2026-07-27 trap from the other side: a leg that always fails proves exactly as little as one that
 # always passes.
+#
+# RE-POINTED 2026-09-04 (capture-audit L5, M8). The probe used to be `--rank-by=churn --since=notadate`,
+# which no longer degrades at all: --since is validated once, globally, and an unresolvable value REFUSES
+# for all four of its consumers instead of quietly falling back to the verb's own window (lens 6 F7 / lens 7
+# F-SINCE-1). That is the correct outcome for --since and a broken proxy for this probe — a probe that reads
+# "no alert fired" from a path that was deliberately turned into a refusal would red arms 7 and 8c forever.
+# The replacement is a path that still genuinely degrades and is unrelated to baselines: a --scip index that
+# OPENS and fails to DECODE. It must be readable-but-unparseable, not missing — a missing one is now a
+# refusal too (capture-audit M7), and that distinction is exactly the one the probe has to respect.
 alerts_observable=0
-"$BIN" "$REPO" --rank-by=churn --since=notadate >/dev/null 2>"$REPO/.probe.err"
+printf 'not a scip index at all\n' > "$REPO/.probe.scip"
+"$BIN" "$REPO" --scip="$REPO/.probe.scip" --top-k=1 >/dev/null 2>"$REPO/.probe.err"
 grep -q 'math degraded' "$REPO/.probe.err" && alerts_observable=1
 rm -f "$REPO/.probe.err"
 BUILD_FLAVOUR="$( "$BIN" --version 2>/dev/null | sed -nE 's/^[^(]*\(([^,)]*).*/\1/p' )"

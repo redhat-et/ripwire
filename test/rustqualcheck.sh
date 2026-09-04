@@ -252,8 +252,13 @@ printf '%s' "$EXP" | grep -q 'pub fn new()' \
 # ingest stashes an `impl Trait for T` implementor in RawRef::qualifier, and graph.h reads it behind
 # `if( !ir.isInherit ) continue;`. A CALL ref now also carries a qualifier, so prove the two cannot leak
 # into one another: the inherit-derived --lego output must be byte-identical to the pre-lane binary's.
+# RE-PINNED 2026-09-04 (capture-audit L5, H6/F2): the TARGETED --lego now carries defs= — how many
+# definitions the SELECTOR's name has — because resolveFocus picks the lowest-id one and `--lego=size`
+# used to report implementors="0" about a definition nobody chose. Shape has exactly one definition in this
+# fixture, so the golden gains defs="1" and NOTHING else; the inherit edge this arm is about (implementors=1,
+# the single Widget impl row) is unmoved, which is the whole claim.
 LEGO_NEW="$( run "$FIX" --lego=Shape --no-cache | grep -o '<lego.*</lego>' )"
-[ "$LEGO_NEW" = '<lego><iface n="Shape" p="src/lib.rs" methods="0" caveat="not-extracted-for-lang" implementors="1"><impl n="Widget" p="src/lib.rs"/></iface></lego>' ] \
+[ "$LEGO_NEW" = '<lego><iface n="Shape" p="src/lib.rs" methods="0" caveat="not-extracted-for-lang" defs="1" implementors="1"><impl n="Widget" p="src/lib.rs"/></iface></lego>' ] \
     && ok "impl Shape for Widget still yields exactly its inherit edge (call qualifiers did not leak in)" \
     || no "inherit edges CHANGED: $LEGO_NEW"
 if [ -d "$ROOT/$LEGO" ]; then
