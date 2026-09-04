@@ -2390,7 +2390,12 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
                                                           std::string( cfg.editTargetFile ), payload );
     if( !outcome.ok )
     {
-        std::fprintf( stderr, "ripwire edit: %s\n", outcome.message.c_str() );
+        // M9 / lens 6 F8: name the VERB, not the family. All three CLI edit verbs printed "ripwire edit:",
+        // so a refusal in a log could not be tied back to the command that produced it — the one thing
+        // every other refusal in this binary does.
+        const char* const editFlag = !cfg.replaceSymbolBody.empty() ? "--replace-symbol-body"
+                                       : !cfg.insertBeforeSymbol.empty() ? "--insert-before-symbol" : "--insert-after-symbol";
+        std::fprintf( stderr, "ripwire: %s: %s\n", editFlag, outcome.message.c_str() );
         return 1;
     }
 
@@ -3050,6 +3055,75 @@ int main( int argc, char** argv )
     }
     const bool        multiRoot = ws.size() >= 2;
     const std::string root( multiRoot ? ws[0].arg : resolvedRoots[0] );   // single-root alias; multi-root sites branch on `ws`
+
+    // M7 (capture-audit 2026-09-04, lens 6 F6/F21) — a file the USER NAMED that cannot be opened is a
+    // REFUSAL, and it is decided HERE, before the crawl, so it costs nothing and cannot be mistaken for a
+    // result. --scip and --cache were the family's two degraders:
+    //   --scip=nosuch.scip  served the NAME-BASED map at exit 0 under a stderr note — i.e. the answer the
+    //                       caller named a precision index to improve on, silently.
+    //   --cache=/nope/x.bin served the map at exit 0 and never wrote the path, so every later run paid a
+    //                       cold parse while the caller believed a cache existed.
+    // Eight siblings (--from-trace --batch --arch --plan-lint --lint-rules --with-profile --edit-plan
+    // --scan-skill) already refused. Degrade-and-continue stays the contract for inputs the tool DISCOVERED
+    // (the default cache path, the default skill homes) and for a --scip index that opens but does not
+    // DECODE — that file exists, and scipcheck.sh's corrupt/fuzz arms depend on the byte-identical degrade.
+    // Gate: namedfileinputcheck.sh.
+    if( !cfg.scipIndex.empty() )
+    {
+        const std::string scipPath( cfg.scipIndex );
+        std::FILE*        probe = std::fopen( scipPath.c_str(), "rb" );
+        if( probe == nullptr )
+        {
+            std::fprintf( stderr, "ripwire: --scip=%s: cannot open the index — refusing rather than serving the name-based map "
+                                  "you named a precision index to improve on (generate one with scip-clang/scip-python, or drop --scip)\n",
+                          scipPath.c_str() );
+            return 1;
+        }
+        std::fclose( probe );
+    }
+    // M8 (capture-audit 2026-09-04, lens 6 F7/F7b, lens 7 F-SINCE-1) — --since is a GLOBAL flag with four
+    // consumers (--hotspots, --slice, --cochange, --rank-by=churn[-decay]), and the §P0.5c ruling that "a
+    // window nobody chose is not a measurement" had landed on --hotspots only: --cochange and
+    // --rank-by=churn emitted at exit 0 under window="18mo" with a stderr note, which is precisely the
+    // false window that fix exists to prevent. Validated ONCE here, where the flag is global, rather than
+    // in four verb handlers that would drift the way these two already had. Multi-root: a value that
+    // resolves in ANY root is a real revision, so the refusal needs every root to reject it.
+    if( !cfg.since.empty() )
+    {
+        bool sinceResolvesSomewhere = false;
+        if( multiRoot )
+        {
+            for( const WorkspaceRoot& r : ws )
+            {
+                sinceResolvesSomewhere = sinceResolvesSomewhere || resolveSinceScope( r.arg, cfg.since ).active;
+            }
+        }
+        else
+        {
+            sinceResolvesSomewhere = resolveSinceScope( root, cfg.since ).active;
+        }
+        if( !sinceResolvesSomewhere )
+        {
+            std::fprintf( stderr, "%s\n", sinceUnresolvedRefusal( cfg.since ).c_str() );
+            return 1;
+        }
+    }
+    if( !cfg.cacheFile.empty() )
+    {
+        namespace fs = std::filesystem;
+        const std::string cachePath( cfg.cacheFile );
+        std::error_code   cacheEc;
+        // The file need not EXIST — a cold first run is the normal case — but the directory that would hold
+        // it must, or the write at the end of the run silently does nothing.
+        const fs::path    cacheDir = fs::path( cachePath ).parent_path();
+        if( !cacheDir.empty() && !fs::is_directory( cacheDir, cacheEc ) )
+        {
+            std::fprintf( stderr, "ripwire: --cache=%s: the directory '%s' does not exist, so nothing could ever be written there "
+                                  "(the map would be served and the cache silently lost); create it, or pass a path under an existing directory\n",
+                          cachePath.c_str(), cacheDir.string().c_str() );
+            return 1;
+        }
+    }
 
     // --index-out=BASE (both-families amendment): the CI generate-and-exit path.
     // Cold-parse the tree TWICE — once lean, once rich — writing BASE.lean.ripwirecache and

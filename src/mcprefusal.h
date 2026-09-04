@@ -868,31 +868,13 @@ inline std::string notFound( const IngestResult& ing, std::string_view noun, std
     return msg;
 }
 
-// The FILE-spelling variant (`cochange`). didYouMean's pool is symbol names, which can only ever suggest
-// nonsense for a path, so this one scores against the indexed file paths — matching on the BASENAME (the
-// half a caller mistypes) while suggesting the full path (the half that resolves).
+// The FILE-spelling variant (`cochange`, `situational_awareness`). didYouMean's pool is symbol names, which
+// can only ever suggest nonsense for a path, so the candidate search runs over the indexed file paths —
+// didyoumean.h::nearestIndexedFile, which the CLI FILE-list selectors now call too (H6/F11): this refusal
+// was the ONE surface that had the suggestion, and a second copy on the CLI side would be a second tuning.
 inline std::string fileNotFound( const IngestResult& ing, std::string_view spelling )
 {
-    constexpr int    kMaxEditDistance = 3;             // same bandwidth cutoff as didYouMean
-    const auto       baseName = []( std::string_view p ) -> std::string_view
-    {
-        const std::size_t slash = p.rfind( '/' );
-        return slash == std::string_view::npos ? p : p.substr( slash + 1 );
-    };
-
-    const std::string_view typedBase = baseName( spelling );
-    std::string_view       best;
-    int                    bestDist = kMaxEditDistance + 1;
-    for( const std::string& f : ing.files )
-    {
-        const int dist = boundedEditDistance( baseName( f ), typedBase, kMaxEditDistance );
-        if( dist > kMaxEditDistance )
-        {
-            continue;
-        }
-        if( dist < bestDist || ( dist == bestDist && ( best.empty() || f < best ) ) )   // deterministic tie-break
-        { bestDist = dist; best = f; }
-    }
+    const std::string_view best = nearestIndexedFile( ing, spelling );
 
     std::string msg = "file not found: '" + cappedEcho( spelling ) + "'";
     if( !best.empty() && best != spelling )

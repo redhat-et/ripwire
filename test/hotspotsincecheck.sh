@@ -64,21 +64,22 @@ grep -q '(window=12mo)' "$TMP/ok" && no 'header comment still hardcodes (window=
     && ok 'default --hotspots: window="12mo" in both attribute and comment' \
     || no "default --hotspots: exit $rcd, window/comment not both 12mo"
 
-# ── adversarial-round extension: the shared looksLikeDate() tightening reaches the DEGRADE verbs too ─
-# --cochange/--rank-by=churn keep their documented degrade-to-all-history policy on a bad --since, but
-# the tightening changed WHAT degrades: a digit-bearing garbage value (notaref9z) used to be handed to
-# git approxidate as a "date" and produced a nonsense window. Pin the corrected behavior: garbage now
-# degrades to all-history, i.e. output equals the bare invocation.
-"$BIN" "$ROOT" --cochange --since=notaref9z > "$TMP/cs_garbage.out" 2>/dev/null
-"$BIN" "$ROOT" --cochange                   > "$TMP/cs_bare.out"    2>/dev/null
-cmp -s "$TMP/cs_garbage.out" "$TMP/cs_bare.out" \
-    && ok "--cochange --since=<garbage> degrades to all-history (equals bare --cochange, no fabricated window)" \
-    || no "--cochange --since=<garbage> differs from bare --cochange — a garbage value still shapes the window"
-"$BIN" "$ROOT" --rank-by=churn --since=notaref9z --top-k=5 > "$TMP/rb_garbage.out" 2>/dev/null
-"$BIN" "$ROOT" --rank-by=churn                   --top-k=5 > "$TMP/rb_bare.out"    2>/dev/null
-cmp -s "$TMP/rb_garbage.out" "$TMP/rb_bare.out" \
-    && ok "--rank-by=churn --since=<garbage> degrades to all-history (equals bare form)" \
-    || no "--rank-by=churn --since=<garbage> differs from bare form — a garbage value still shapes the window"
+# ── RE-PINNED 2026-09-04 (capture-audit M8, lens 7 F-SINCE-1) ────────────────────────────────────────
+# These two arms used to assert that --cochange / --rank-by=churn DEGRADE to all-history on a garbage
+# --since (output byte-equal to the bare invocation). That was the surviving half of the very policy
+# §P0.5c removed from --hotspots: an unresolvable value is not a request for the default window, and the
+# only signal the caller got was a stderr note under an exit 0 root stamped window="18mo". --since is one
+# GLOBAL flag; it now refuses ONCE, before any verb runs, for all four of its consumers. What survives
+# from the old arms is the fact they were really protecting — that a digit-bearing garbage value
+# (notaref9z) is never handed to git approxidate as a "date" — which a refusal states more plainly than a
+# byte-comparison did.
+# (--top-k rides only on the ranked-map arm; --cochange refuses it, which would mask the subject.)
+for host in "--cochange" "--rank-by=churn --top-k=5"; do
+    "$BIN" "$ROOT" $host --since=notaref9z > "$TMP/since_garbage.out" 2>"$TMP/since_garbage.err"; rcg=$?
+    [ "$rcg" -ne 0 ] && [ ! -s "$TMP/since_garbage.out" ] && grep -q 'notaref9z' "$TMP/since_garbage.err" \
+        && ok "$host --since=<garbage>: refuses (exit $rcg, empty stdout, names the value) — never a fabricated window" \
+        || no "$host --since=<garbage>: exit $rcg with $( wc -c <"$TMP/since_garbage.out" | tr -d ' ' ) B on stdout — a garbage value still shapes the window"
+done
 
 # ── ranked= RECONCILES AGAINST A DENOMINATOR ─────────────────────────────────────────────────────────
 # ranked="209" was emitted with nothing to divide it by, and the two ways a file misses the ranking — no

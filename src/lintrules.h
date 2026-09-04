@@ -515,8 +515,10 @@ inline std::vector<LintRule> loadLintRules( const std::string& dir )
     std::error_code ec;
     if( !fs::is_directory( dir, ec ) )
     {
+        // No DEGRADED_PATH_ALERT (M7/F20): the caller REFUSES on an empty rule list, so the alert stamped a
+        // "this run continued in a reduced mode" notice on stderr in front of a refusal that continued
+        // nothing. The user-facing sentence is the whole message.
         std::fprintf( stderr, "ripwire: --lint-rules: not a directory: %s\n", dir.c_str() );
-        DEGRADED_PATH_ALERT( "lint-rules: dir missing" );
         return rules;
     }
 

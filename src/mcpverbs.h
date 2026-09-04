@@ -976,6 +976,21 @@ inline std::string recallText( const std::string& root, const std::string& task,
 // Hand-rolled JSON (same jsonEscape + manual string-building as the other verbs). `diffOrEmpty` empty ⇒ git
 // diff. Returns "" ONLY when git is genuinely unavailable (not a git repo / git not installed) — a clean
 // working tree (zero changed files) returns a VALID result with all-empty arrays and a note field.
+// H6 (lens 6 F1): the MCP twin of --situ's FILE-list refusal. `situational_awareness{files:"src/nosuch.h"}`
+// used to answer all-empty arrays with a green `_fresh: ok` — the same false zero the CLI arm printed, and
+// the worse of the two, because a JSON result reads as an ANSWER to every caller that only checks for an
+// `error` key. Same text as the CLI (situ.h::fileListRefusalText) with the MCP field name in place of the
+// flag. Empty ⇒ the list is fine (or absent, i.e. the git-diff default).
+inline std::string situationFileListRefusal( const std::string& root, const std::string& diffOrEmpty )
+{
+    if( diffOrEmpty.empty() )
+    {
+        return {};
+    }
+    const IngestResult& ing = getIndex( root ).ing;
+    return fileListRefusalText( ing, "", "files", root, diffOrEmpty, changedMaskFromListChecked( ing, diffOrEmpty ) );
+}
+
 inline std::string situationDiffJson( const std::string& root, const std::string& diffOrEmpty )
 {
     const McpIndex&     ix  = getIndex( root );
@@ -2348,7 +2363,9 @@ inline constexpr char kConnectHeader[] =
     " dynamic dispatch / callbacks may hide connections. counts_floor=\"1\": every graph-derived count here (nodes=,"
     " edges=, groups=) is a FLOOR, never a total; read a zero as \"none found\", never as \"none exists\"."
     " graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls"
-    " whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. -->";
+    " whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=."
+    " defs= on a terminal row = that NAME has N definitions and the lowest-id one was used; qualify with file:name"
+    " to pick another. Steiner rows never carry it -->";
 
 // The root element's own bytes: the <connect ...> start-tag PLUS the </connect> close. It is
 // self-referential (the start-tag's length depends on the digits of the number it carries), so it is
@@ -2492,7 +2509,18 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
             edgeTotal += std::uint32_t( edges.size() );
 
             payload.append( "<g terminals=\"" ).append( std::to_string( grp.terminals.size() ) ).append( "\">" );
-            for( NodeId t : grp.terminals ) { symAttr( payload, "t", t ); payload.append( "/>" ); }
+            for( NodeId t : grp.terminals )
+            {
+                symAttr( payload, "t", t );
+                // M20 (lens 6 F12): a TERMINAL is a caller-typed selector, resolved by resolveFocus's
+                // lowest-id pick. --callers/--uses/--impact/--path/--verify all disclose defs= for the same
+                // name; the Steiner subgraph did not, so `--connect=size,…` was built from one of six `size`
+                // definitions with nothing on the row to say which question was answered. Steiner nodes (the
+                // "s" rows) carry no defs= because nobody selected them — the search found them.
+                const std::size_t terminalDefs = definitionCountOfName( ing, t );
+                if( terminalDefs > 1 ) { payload.append( " defs=\"" ).append( std::to_string( terminalDefs ) ).append( "\"" ); }
+                payload.append( "/>" );
+            }
             for( NodeId sN : steiner )
             {
                 symAttr( payload, "s", sN );

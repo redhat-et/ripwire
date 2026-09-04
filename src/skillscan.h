@@ -772,25 +772,28 @@ struct SkillFileReadResult
     std::vector<SkillFinding>   findings;            // valid only when readable == true
 };
 
+// NO DEGRADED_PATH_ALERT on the unreadable paths here, deliberately, and it is not an omission (M7/F20,
+// capture-audit 2026-09-04). That log line means "this run CONTINUED in a reduced mode"; every caller of
+// THIS function refuses instead, so printing it stamped a degrade notice on stderr immediately before a
+// refusal that had degraded nothing — "[math degraded] skillscan: cannot read skill file (skillscan.h:786,
+// …)" ahead of "cannot read '…' — no scan performed". The alert belongs to scanSkillFile() above, which is
+// the entry point that really does swallow the failure and return an empty finding list to wrap.h.
 inline SkillFileReadResult scanSkillFileChecked( const std::string& path )
 {
     std::error_code ec;
     if( std::filesystem::is_directory( path, ec ) )
     {
-        DEGRADED_PATH_ALERT( "skillscan: path is a directory, not a skill file" );
         return {};
     }
     std::ifstream f( path );
     if( !f )
     {
-        DEGRADED_PATH_ALERT( "skillscan: cannot read skill file" );
         return {};
     }
     std::ostringstream buf;
     buf << f.rdbuf();
     if( f.bad() )
     {
-        DEGRADED_PATH_ALERT( "skillscan: I/O error reading skill file" );
         return {};
     }
     return { true, scanSkillText( buf.str() ) };   // empty file → empty findings → a legitimate clean scan

@@ -103,10 +103,16 @@ diff -q <(printf '%s' "$NOSCIP") "$TMP/corrupt.out" >/dev/null && ok "corrupt in
     || { no "corrupt index changed the map"; diff <(printf '%s' "$NOSCIP") "$TMP/corrupt.out" | head; }
 grep -qi 'scip' "$TMP/corrupt.err" && ok "corrupt index → stderr alert emitted" || no "corrupt index → no stderr alert"
 
-# 5b) MISSING index → same degrade contract.
+# 5b) MISSING index → a REFUSAL, not a degrade. RE-PINNED 2026-09-04 (capture-audit M7, lens 6 F6): this
+#     arm used to assert "exit 0, output identical, alert emitted", i.e. the caller who named a precision
+#     index by path was handed the NAME-BASED map they were trying to improve on, under a stderr note no
+#     pipeline reads. A path that cannot be OPENED is a caller mistake, and the eight sibling FILE inputs
+#     all refuse it. Arm 5 above is untouched and is the reason the two cases are separated: a file that
+#     opens and fails to DECODE still degrades byte-identically, which is what arm 6's fuzz depends on.
 "$BIN" "$CORPUS" --scip="$TMP/does_not_exist.scip" $EXC --no-cache >"$TMP/miss.out" 2>"$TMP/miss.err"; rcm=$?
-[ $rcm -eq 0 ] && diff -q <(printf '%s' "$NOSCIP") "$TMP/miss.out" >/dev/null && grep -qi 'scip' "$TMP/miss.err" \
-    && ok "missing index → exit 0, output identical, alert emitted" || no "missing index degrade contract broken"
+[ $rcm -eq 1 ] && [ ! -s "$TMP/miss.out" ] && grep -qi 'scip' "$TMP/miss.err" \
+    && ok "missing index → exit 1, stdout empty, the refusal names --scip" \
+    || no "missing index: expected a refusal (exit 1, empty stdout), got exit $rcm with $( wc -c <"$TMP/miss.out" ) B on stdout"
 
 # 6) FUZZ — 20 random truncations / byte-flips of the index must never crash ripwire (it degrades).
 SZ="$( wc -c <"$IDX" | tr -d ' ' )"

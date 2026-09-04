@@ -1289,7 +1289,17 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         if( !cfg.cochangeFile.empty() )                                    // partners of one file → shared core (gitmine.h)
         {
             const std::uint32_t fid = resolveFileSuffix( ing, cfg.cochangeFile );
-            if( fid == UINT32_MAX ) { std::fprintf( stderr, "ripwire --cochange: file not found: %.*s\n", int( cfg.cochangeFile.size() ), cfg.cochangeFile.data() ); return 1; }
+            if( fid == UINT32_MAX )
+            {
+                // F11: the CLI arm was the thin one — "file not found: src/grap.h" and nothing else, while
+                // the MCP `cochange` twin already named the nearest indexed path and said a suffix is enough.
+                // One suggester (didyoumean.h::nearestIndexedFileClause) now serves both.
+                std::fprintf( stderr, "ripwire --cochange: file not found: %.*s — it takes ONE indexed file path, e.g. "
+                                      "--cochange=src/graph.h%s\n",
+                              int( cfg.cochangeFile.size() ), cfg.cochangeFile.data(),
+                              rw::nearestIndexedFileClause( ing, cfg.cochangeFile ).c_str() );
+                return 1;
+            }
             // multi-root §5: the probed file belongs to exactly ONE root — mine that repo only (co-change is
             // per-repo by construction; partners in another root are undefined and never synthesized).
             const std::uint32_t fidRoot  = multiRoot ? ing.fileRoot[ fid ] : UINT32_MAX;
@@ -2009,8 +2019,11 @@ std::optional<int> runLayout( const MainDispatch& d )
         }
         else
         {
-            std::fprintf( stderr, "ripwire: --layout: no indexed struct/class named '%.*s' (try --grep=%.*s to find its spelling)\n",
+            // F13: the struct set is loaded and 494 names wide — offer the near-miss from it, exactly as
+            // every SYMBOL selector one keystroke away does, instead of only "try --grep=<what you typed>".
+            std::fprintf( stderr, "ripwire: --layout: no indexed struct/class named '%.*s'%s (try --grep=%.*s to find its spelling)\n",
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data(),
+                          rw::nearestAggregateName( d.ing, cfg.layoutStruct ).c_str(),
                           int( cfg.layoutStruct.size() ), cfg.layoutStruct.data() );
         }
         return 1;
@@ -2059,9 +2072,10 @@ std::optional<int> runFieldAffinity( const MainDispatch& d )
     // claim than "this name never resolved to a C-family aggregate body this verb can model".
     if( !cfg.fieldAffinityStruct.empty() && res.rows.empty() && res.structsTotal == 0 )
     {
-        std::fprintf( stderr, "ripwire: --field-affinity: no indexed C-family struct/class named '%.*s' with any attributed "
+        std::fprintf( stderr, "ripwire: --field-affinity: no indexed C-family struct/class named '%.*s'%s with any attributed "
                               "field access (this verb models C/C++/ObjC only; try --layout=%.*s for its declared layout)\n",
                       int( cfg.fieldAffinityStruct.size() ), cfg.fieldAffinityStruct.data(),
+                      rw::nearestAggregateName( d.ing, cfg.fieldAffinityStruct ).c_str(),
                       int( cfg.fieldAffinityStruct.size() ), cfg.fieldAffinityStruct.data() );
         return 1;
     }

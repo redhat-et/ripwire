@@ -3159,6 +3159,16 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
     return out;
 }
 
+// The number of definitions the NAME of `focus` has — what a single-pick verb must disclose when it
+// resolved a BARE name through resolveFocus's lowest-id pick (H6/F2). Named for the disclosure rather than
+// the mechanism, because the mechanism is only resolveAllByName: the point is that the count printed on the
+// row and the pick printed on the row come from ONE resolver, so `defs="6"` beside `p="…/dynamic_map.hpp"`
+// can never disagree about which definitions exist. kNoNode (the ranked, selector-free mode) counts 0.
+inline std::size_t definitionCountOfName( const IngestResult& ing, NodeId focus )
+{
+    return focus == kNoNode ? 0 : resolveAllByName( ing, ing.symbols[ focus ].name ).size();
+}
+
 // X9(b): qualified "file:name" variant of resolveAllByName, for --callers/--callees/--impact — a same-
 // named symbol living in more than one file (a common overload/shadow shape) previously had no way to
 // disambiguate on these verbs even though --around/--lego/--edit-check already could (resolveFocus). Uses

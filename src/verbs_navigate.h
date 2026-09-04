@@ -1807,6 +1807,14 @@ std::optional<int> runPath( const MainDispatch& d )
         if( comma == std::string_view::npos )
         { rw::refuseFlagValue( "--path", "two symbol names, FROM,TO", spec, "--path=main,rankGraph" );  return 1; }
         const std::string_view srcN = spec.substr( 0, comma ), dstN = spec.substr( comma + 1 );
+        // F10: an EMPTY endpoint used to be RESOLVED — and the near-miss suggester, asked for the closest
+        // name to "", answered with the shortest symbol in the corpus ("endpoint not found:  (did you mean
+        // 'A'?)"). An empty item is not a selector; say which one is empty before anything is resolved.
+        if( srcN.empty() || dstN.empty() )
+        {
+            std::fprintf( stderr, "%s\n", rw::emptyListItemMessage( "--path", srcN.empty() ? 1 : 2, "--path=main,rankGraph" ).c_str() );
+            return 1;
+        }
 
         // r27-emitters T4: resolve EVERY def of each endpoint, not just the lowest-id one. `--path=main,X` used
         // to bind `main` to whichever def happened to hold the lowest NodeId (a bench script, a CMake stub, a
@@ -1894,14 +1902,20 @@ std::optional<int> runConnect( const MainDispatch& d )
         std::vector<std::string_view> specs;
         {
             std::string_view s = cfg.connectSpec;
-            for( ;; )
+            for( std::size_t position = 1; ; ++position )
             {
                 const std::size_t comma = s.find( ',' );
                 const std::string_view tok = s.substr( 0, comma );
-                if( !tok.empty() )
+                // F14: an empty token used to be DROPPED, so `--connect=A,B,` ran as a 2-terminal connect at
+                // exit 0 — a trailing comma, or a shell variable that expanded to nothing, silently changed
+                // the question. Same ruling and same sentence as --path's empty endpoint.
+                if( tok.empty() )
                 {
-                    specs.push_back( tok );
+                    std::fprintf( stderr, "%s\n",
+                                  rw::emptyListItemMessage( "--connect", position, "--connect=parseArgs,serialize,rankGraph" ).c_str() );
+                    return 1;
                 }
+                specs.push_back( tok );
                 if( comma == std::string_view::npos )
                 {
                     break;
@@ -2288,7 +2302,13 @@ std::optional<int> runAround( const MainDispatch& d )
             std::fputs( "<ctx>", stdout );
         }
 
-        serialize( stdout, ing, rank, g.outOff, g.outTargets, int( eg.nodes.size() ), cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, false, g.outProv.empty() ? nullptr : &g.outProv, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, /*autoOrder=*/false, /*outEstTokens=*/nullptr, aroundCompose.tokens + aroundRoutes.tokens + wrap.tokens, /*ann=*/{}, /*statsFirstScreen=*/false, aroundRootArg, &g.locPinOut, g.externalCalls );
+        // M20: --around renders through the shared map serializer, so its root used to be the PLAIN map
+        // root — no of=, no depth=, no fanout=. The seed and the two bounds that decide what the
+        // neighbourhood contains now ride on it (serialize.h::MapAnnotations::SeedDisclosure).
+        rw::MapAnnotations aroundAnn;
+        aroundAnn.seed = { ing.symbols[ focus ].name, cfg.aroundDepth, cfg.aroundFanout, definitionCountOfName( ing, focus ) };
+
+        serialize( stdout, ing, rank, g.outOff, g.outTargets, int( eg.nodes.size() ), cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, false, g.outProv.empty() ? nullptr : &g.outProv, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, /*autoOrder=*/false, /*outEstTokens=*/nullptr, aroundCompose.tokens + aroundRoutes.tokens + wrap.tokens, aroundAnn, /*statsFirstScreen=*/false, aroundRootArg, &g.locPinOut, g.externalCalls );
 
         if( !g.composeEdges.empty() )
         {

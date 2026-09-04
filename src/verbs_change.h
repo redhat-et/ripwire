@@ -85,9 +85,14 @@ std::optional<int> runAffected( const MainDispatch& d )
             // §M7 (W3FIX): resolveAffectedSeeds accepts file:name and path::scope::name too, so a bad item gets
             // the shared file-half diagnosis appended to this arm's own two-reading sentence (which explains
             // WHY the item was tried twice, and therefore has to come first).
+            // H6/F18: the item was tried as a PATH first, so the PATH near-miss comes first too — the
+            // pre-fix arm offered only selectorFaultClause's symbol suggestion and answered `--affected=tow.c`
+            // with "did you mean 'TOOLS'?" while `two.c` sat in the file list.
+            const std::string affectedNearPath = rw::nearestIndexedFileClause( ing, sel.badItem );
             std::fprintf( stderr, "ripwire: --affected: '%s' matches no indexed file path (as a path pattern) and no indexed "
-                                  "symbol (as a symbol name; file:name and path::scope::name also accepted)%s\n",
-                          sel.badItem.c_str(), rw::selectorFaultClause( ing, sel.badItem, "--affected=" ).c_str() );
+                                  "symbol (as a symbol name; file:name and path::scope::name also accepted)%s%s\n",
+                          sel.badItem.c_str(), affectedNearPath.c_str(),
+                          affectedNearPath.empty() ? rw::selectorFaultClause( ing, sel.badItem, "--affected=" ).c_str() : "" );
             return 1;
         }
         const std::vector<NodeId>& seeds = sel.seeds;
@@ -156,8 +161,9 @@ std::optional<int> runExercises( const MainDispatch& d )
     if( !sel.anyFileMatched )
     {
         std::fprintf( stderr, "ripwire: --exercises: no indexed file path matches '%.*s' (the argument is a path pattern, "
-                              "like --affected's; use --tree or --grep to find its spelling)\n",
-                      int( cfg.exercisesFile.size() ), cfg.exercisesFile.data() );
+                              "like --affected's; use --tree or --grep to find its spelling)%s\n",
+                      int( cfg.exercisesFile.size() ), cfg.exercisesFile.data(),
+                      rw::nearestIndexedFileClause( ing, cfg.exercisesFile ).c_str() );
         return 1;
     }
     if( sel.testFiles.empty() )
@@ -247,6 +253,17 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // lists client-repo impact when an evidence edge exists (per-repo history, joint graph).
         if( multiRoot )
         {
+            // H6: the list is resolved against the ONE merged index, so its validity is a root-independent
+            // fact — check it once, before any root's section is printed, rather than once per root (which
+            // would print the same refusal N times) or not at all (the pre-fix silent all-zero mask).
+            if( !cfg.situFiles.empty() )
+            {
+                const rw::ChangedList list = rw::changedMaskFromListChecked( ing, cfg.situFiles );
+                if( rw::cliRefusesFileList( ing, "--situ", root, cfg.situFiles, list ) )
+                {
+                    return 1;
+                }
+            }
             bool anyGit = false;
             std::vector<std::vector<char>> perRootChanged( ws.size() );
             for( std::uint32_t r = 0; r < ws.size(); ++r )
@@ -295,7 +312,15 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         std::vector<char> changed;
         if( !cfg.situFiles.empty() )
         {
-            changed = rw::changedMaskFromList( ing, cfg.situFiles );
+            // H6: the SAME refusal --test-gate takes over the SAME grammar. --situ used to read an
+            // unresolvable path as an all-zero mask and print "0 changed file(s) — nothing to analyze" at
+            // exit 0 — the false zero that tells an agent its edit has no blast radius.
+            rw::ChangedList list = rw::changedMaskFromListChecked( ing, cfg.situFiles );
+            if( rw::cliRefusesFileList( ing, "--situ", root, cfg.situFiles, list ) )
+            {
+                return 1;
+            }
+            changed = std::move( list.mask );
         }
         else
         {
@@ -318,9 +343,9 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         {
             // An unparseable FILES list REFUSES rather than reading as an all-zero mask ("your change
             // touches nothing") — the silent-zero defect and the refusal's whole argument live on
-            // testGateRefusesFileList in situ.h. Gate: testgaterefusecheck.sh.
+            // cliRefusesFileList in situ.h. Gate: testgaterefusecheck.sh.
             rw::ChangedList list = rw::changedMaskFromListChecked( ing, cfg.testGateFiles );
-            if( rw::testGateRefusesFileList( root, cfg.testGateFiles, list ) )
+            if( rw::cliRefusesFileList( ing, "--test-gate", root, cfg.testGateFiles, list ) )
             {
                 return 1;
             }
@@ -1407,6 +1432,15 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             {
                 std::fprintf( stderr, "ripwire: --stray-content: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
             }
+            else if( result.filterMatchedNothing )
+            {
+                // H7: refs="0" unknown="0" at exit 0 is the most reassuring answer this verb can give — "no
+                // branch carries stray work" — from a sweep that matched no branch NAME at all.
+                std::fprintf( stderr, "ripwire: --stray-content=%.*s matches no local ref — a zero here would be a failure, not a "
+                                      "measurement\n  (the filter is a substring match against refs/heads names; run bare "
+                                      "--stray-content to list them, e.g. --stray-content=feat/)\n",
+                              int( cfg.strayFilter.size() ), cfg.strayFilter.data() );
+            }
             else
             {
                 std::fprintf( stderr, "ripwire: --stray-content: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
@@ -1456,6 +1490,17 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             return runFlip( d ); // --flags --flip=NAME: one gate's radius
         }
         const darkflags::FlagsResult result = darkflags::computeFlags( d.ing, root, cfg.excludes, cfg.darkFlagsFilter );
+        // H7: a NAME filter that owns no declared gate refuses, in the wording --doc-drift/--dead-code set —
+        // `gates="0" dark_gates="0" files="1550"` reads as "this repo has no dark gates", and the scan
+        // denominator beside it makes the false zero look measured.
+        if( result.filterMatchedNothing )
+        {
+            std::fprintf( stderr, "ripwire: --flags=%.*s matches no declared gate — a zero here would be a failure, not a "
+                                  "measurement\n  (the filter is a substring match against GATE NAMES; run bare --flags to "
+                                  "list them, e.g. --flags=RIPWIRE)\n",
+                          int( cfg.darkFlagsFilter.size() ), cfg.darkFlagsFilter.data() );
+            return 1;
+        }
         darkflags::writeFlags( stdout, result, cfg.detail ? SIZE_MAX : darkflags::kMaxSitesShown );
         return 0;
     }
@@ -1472,20 +1517,48 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             std::fprintf( stderr, "ripwire: --whereis is single-root only (one repo = one ref namespace) — run it per root\n" );
             return 1;
         }
+        // H7 / lens 6 F5: the documented @FILE:LINE seed grammar is RESOLVED here, before anything is
+        // scanned. It used to fall through as a literal string — `--whereis=@src/graph.h:999999` grepped
+        // "@src/graph.h:999999" across 4,617 blobs and reported a true, useless hits="0" shaped exactly like
+        // a name this repo never had, while --owners/--mentions/--edit-check resolve the same spelling and
+        // refuse a bad line with the shared seed message. resolveAllByNameQualified is that resolver, and
+        // selectorNotFoundMessage speaks its per-fault diagnosis, so neither is a second opinion.
+        std::string whereisSel( cfg.whereis );
+        std::string whereisSeed;
+        if( whereisSel.front() == '@' )
+        {
+            const std::vector<NodeId> seeded = resolveAllByNameQualified( d.ing, whereisSel );
+            if( seeded.empty() )
+            {
+                std::fprintf( stderr, "%s\n", selectorNotFoundMessage( d.ing, "ripwire: --whereis: ", cfg.whereis, "--whereis=" ).c_str() );
+                return 1;
+            }
+            whereisSeed = whereisSel;
+            whereisSel  = d.ing.symbols[ seeded.front() ].name;
+        }
+
         // --with-history: ONE git-history walk (memoized per repo+HEAD sha), giving --whereis the lane a tree
         // scan structurally cannot have — whether HEAD's history ever REMOVED this name. Owned here, in the
         // handler, so the index outlives both the compute and the write that hold non-owning views of it.
         const gitoracle::HistoryIndex history = buildHistoryIndex( cfg, root, "the fate lane reports probed=\"0\"" );
 
         // §A7: HEAD's rows are documented as the PARSED answer, so hand the tree scan what the index knows.
-        const std::vector<crossref::IndexDefSite> indexDefs = whereisIndexDefSites( d.ing, cfg.whereis, root );
+        const std::vector<crossref::IndexDefSite> indexDefs = whereisIndexDefSites( d.ing, whereisSel, root );
 
-        const crossref::WhereResult result = crossref::computeWhereis( root, cfg.whereis, cfg.strayFilter,
-                                                                       crossref::WhereisEvidence{ cfg.withHistory ? &history : nullptr, indexDefs } );
+        crossref::WhereResult result = crossref::computeWhereis( root, whereisSel, cfg.strayFilter,
+                                                                 crossref::WhereisEvidence{ cfg.withHistory ? &history : nullptr, indexDefs } );
         if( !result.ok )
         {
             std::fprintf( stderr, "ripwire: --whereis: %s is not a git repository (or has no HEAD commit) — no refs to search\n", root.c_str() );
             return 1;
+        }
+        result.seedSpec = std::move( whereisSeed );
+        // The tree zero stays an answer; the near-miss only says WHICH zero it is (a name this repo never
+        // had, or a keystroke away from one it has). Computed only on the zero, so a real hit list is
+        // byte-identical.
+        if( result.hits.empty() )
+        {
+            result.nearMiss = didYouMean( d.ing, whereisSel );
         }
         crossref::writeWhereisPage( stdout, result, cfg.detail ? SIZE_MAX : crossref::kWhereisHits, cfg.pageLimit, cfg.pageOffset );
         return 0;
