@@ -52,7 +52,10 @@
 //       <charconv>             to_chars from_chars
 //       <optional>/<variant>   make_optional visit get_if holds_alternative
 //     459 names.
+#include "infra/sortutil.h"
+
 #include <algorithm>
+#include <cstddef>
 #include <iterator>
 #include <string_view>
 namespace rw
@@ -122,20 +125,25 @@ inline constexpr std::string_view kCFamilyStdNames[] = {
 
 // compile-time sortedness proof — the lookups below binary-search, so an unsorted insert would be a
 // silent miss, not a compile error, without this. Strict: a duplicate is as wrong as a swap.
-static_assert( std::is_sorted( std::begin( kPythonBuiltinNames ), std::end( kPythonBuiltinNames ) )
+// The lookups and the static_asserts below share ONE comparator, rw::sortutil::svLess — never
+// string_view's operator<, which aborts the Linux G1 leg (the full reason is in infra/sortutil.h, and
+// test/portablebuildcheck.sh arm #6 enforces it). A table sorted under one comparator and searched under
+// another is the second bug that shape invites, so both sides name the same function here.
+
+static_assert( std::is_sorted( std::begin( kPythonBuiltinNames ), std::end( kPythonBuiltinNames ), rw::sortutil::svLess )
                && std::adjacent_find( std::begin( kPythonBuiltinNames ), std::end( kPythonBuiltinNames ) ) == std::end( kPythonBuiltinNames ),
                "kPythonBuiltinNames must be strictly sorted (binary search)" );
-static_assert( std::is_sorted( std::begin( kCFamilyStdNames ), std::end( kCFamilyStdNames ) )
+static_assert( std::is_sorted( std::begin( kCFamilyStdNames ), std::end( kCFamilyStdNames ), rw::sortutil::svLess )
                && std::adjacent_find( std::begin( kCFamilyStdNames ), std::end( kCFamilyStdNames ) ) == std::end( kCFamilyStdNames ),
                "kCFamilyStdNames must be strictly sorted (binary search)" );
 
 inline bool isPythonBuiltin( std::string_view name ) noexcept
 {
-    return std::binary_search( std::begin( kPythonBuiltinNames ), std::end( kPythonBuiltinNames ), name );
+    return std::binary_search( std::begin( kPythonBuiltinNames ), std::end( kPythonBuiltinNames ), name, rw::sortutil::svLess );
 }
 inline bool isCFamilyStdName( std::string_view name ) noexcept
 {
-    return std::binary_search( std::begin( kCFamilyStdNames ), std::end( kCFamilyStdNames ), name );
+    return std::binary_search( std::begin( kCFamilyStdNames ), std::end( kCFamilyStdNames ), name, rw::sortutil::svLess );
 }
 
 }   // namespace externalnames

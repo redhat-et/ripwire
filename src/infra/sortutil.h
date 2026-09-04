@@ -5,11 +5,46 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 namespace rw::sortutil
 {
+
+// SORTING AND SEARCHING std::string_view: ALWAYS THROUGH THIS, NEVER THROUGH operator<.
+// libstdc++'s string_view three-way compare computes `n1 - n2` on size_type and lets it wrap
+// (bits/string_view.h, _S_compare). That wrap is well-defined C++, but the G1 sanitizer stack runs
+// -fsanitize=integer, which REPORTS it, and -fno-sanitize-recover=all turns the report into an abort.
+// libc++ computes the same answer without the subtraction and never reports — so a default-comparator
+// std::sort / std::binary_search / std::lower_bound over string_view is green on macOS (including the
+// macOS ASan leg) and kills EVERY run on the Linux sanitizer leg the moment two compared views differ
+// in length. That is not hypothetical: it took main red at 69a17f9 with `unsigned integer overflow:
+// 3 - 17` raised from inside std::binary_search over the external-name veto's table.
+//
+// svLess is the SAME total order operator< defines, so a table already sorted under operator< stays
+// sorted under this, and any container may switch to it without re-ordering. It is constexpr because
+// the tables that use it prove their own sortedness in a static_assert, and std::memcmp cannot be used
+// in a constant expression. test/portablebuildcheck.sh arm #6 keeps the default comparator from
+// coming back.
+constexpr bool svLess( std::string_view a, std::string_view b ) noexcept
+{
+    const std::size_t n = a.size() < b.size() ? a.size() : b.size();
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        // char_traits<char>::compare is memcmp, so the order is UNSIGNED-byte order. Comparing as plain
+        // char would sort a byte >= 0x80 before 'a' on a signed-char target and silently reorder a table.
+        const unsigned char ca = static_cast<unsigned char>( a[ i ] );
+        const unsigned char cb = static_cast<unsigned char>( b[ i ] );
+        if( ca != cb )
+        {
+            return ca < cb;
+        }
+    }
+    return a.size() < b.size();
+}
+
 
 inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept
 {

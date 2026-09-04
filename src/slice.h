@@ -47,6 +47,7 @@
 // Node-kind and field-name strings below are VERIFIED against the vendored parsers (third_party/deps/
 // */src/parser.c), not assumed from upstream docs.
 
+#include "infra/sortutil.h"
 #include "model.h"
 #include "ingest.h"        // sliceGrammarForFile — path → grammar, ingest's one table
 #include "serialize.h"     // escapeXml / appendCdataSafe / symTag / diskPath
@@ -167,7 +168,7 @@ static_assert( std::is_sorted( std::begin( kSliceRustReserved ), std::end( kSlic
 
 inline bool sliceIsReservedName( std::string_view text, Lang lang ) noexcept
 {
-    const auto in = []( const auto& tbl, std::string_view t ) noexcept { return std::binary_search( std::begin( tbl ), std::end( tbl ), t ); };
+    const auto in = []( const auto& tbl, std::string_view t ) noexcept { return std::binary_search( std::begin( tbl ), std::end( tbl ), t, rw::sortutil::svLess ); };
     switch( lang )
     {
         case Lang::Cpp:        return in( kSliceCppReserved, text );    // CUDA/Metal ride Lang::Cpp (kLangTable)
@@ -1943,7 +1944,9 @@ inline void sliceComputeReach( SliceScan& scan, TSNode root, const SliceWalkCtx&
     {
         if( no.occ.bindingIdx == kSliceUnbound ) { unboundNames.push_back( no.name ); }
     }
-    std::sort( unboundNames.begin(), unboundNames.end() );
+    // svLess, not operator<: see infra/sortutil.h. The sort and the lower_bound below MUST name the same
+    // comparator, or the slot numbering silently stops being a pure function of the scan.
+    std::sort( unboundNames.begin(), unboundNames.end(), rw::sortutil::svLess );
     unboundNames.erase( std::unique( unboundNames.begin(), unboundNames.end() ), unboundNames.end() );
     w.slotOf.resize( scan.all.size() );
     for( std::uint32_t occIndex = 0; occIndex < scan.all.size(); ++occIndex )
@@ -1955,7 +1958,7 @@ inline void sliceComputeReach( SliceScan& scan, TSNode root, const SliceWalkCtx&
         }
         else
         {
-            const auto at = std::lower_bound( unboundNames.begin(), unboundNames.end(), std::string_view( no.name ) );
+            const auto at = std::lower_bound( unboundNames.begin(), unboundNames.end(), std::string_view( no.name ), rw::sortutil::svLess );
             w.slotOf[ occIndex ] = std::uint32_t( scan.bindings.size() + std::size_t( at - unboundNames.begin() ) );
         }
     }

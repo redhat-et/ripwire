@@ -178,7 +178,7 @@ std::string communityVerbSuffix( const rw::IngestResult& ing, const rw::SmallVec
             continue;
         }
         const std::string first = rw::naminglens::toLowerAscii( splitScratch.front() );
-        if( !std::binary_search( rw::verbtable::kKnownVerbs.begin(), rw::verbtable::kKnownVerbs.end(), std::string_view( first ) ) )
+        if( !std::binary_search( rw::verbtable::kKnownVerbs.begin(), rw::verbtable::kKnownVerbs.end(), std::string_view( first ), rw::sortutil::svLess ) )
         {
             continue;
         }
