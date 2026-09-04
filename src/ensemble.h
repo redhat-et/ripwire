@@ -799,8 +799,9 @@ inline constexpr const char* kEnsembleLegend =
     "The historical family ranks by churn ALONE, not by the hotspots score (churn x complexity), because half of "
     "that product is the structural family and two families that cannot disagree are one family counted twice. "
     "unavailable=families that could not be evaluated at all, with unavailable_why= saying why, one reason per "
-    "unavailable family. UNAVAILABLE is "
-    "never the same as silent: an empty unavailable= means every family was measured, and a family listed there "
+    "unavailable family (§L10: both absent, never =\"\", when every family was measured — house convention, "
+    "absent means none). UNAVAILABLE is "
+    "never the same as silent: an ABSENT unavailable= means every family was measured, and a family listed there "
     "was NOT measured, so its absence from fired= is not evidence of health. An EMPTY ranking counts as not "
     "measured, so hranked=0 makes the historical family unavailable: a corpus scanned from outside the "
     "repository that tracks it mines zero churn for every file, and that silence is not a fact about the code. "
@@ -847,10 +848,16 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
 
     std::fputs( kEnsembleLegend, stdout );
     std::fputs( rw::kAtStampLegend, stdout );
-    std::printf( "<ensemble families=\"%u\" eligible=\"%zu\" ranked=\"%zu\" no_family=\"%zu\" unavailable=\"%s\" unavailable_why=\"%s\"",
+    // §L10: absent-means-none — unavailable=/unavailable_why= used to print unconditionally, so a run
+    // where every family was available still carried unavailable="" unavailable_why="" (qualitypanel.h's
+    // twin of this same emitter carries the identical fix).
+    const std::string ensUnavailNamesStr    = familyList( scan.unavailMask );
+    const std::string ensUnavailWhyStr      = detail::unavailWhyList( scan );
+    const std::string ensUnavailableAttr    = ensUnavailNamesStr.empty() ? std::string() : ( " unavailable=\"" + ensUnavailNamesStr + "\"" );
+    const std::string ensUnavailableWhyAttr = ensUnavailWhyStr.empty()   ? std::string() : ( " unavailable_why=\"" + std::string( escapeXml( ensUnavailWhyStr, escUnavail ) ) + "\"" );
+    std::printf( "<ensemble families=\"%u\" eligible=\"%zu\" ranked=\"%zu\" no_family=\"%zu\"%s%s",
                  unsigned( kFamilyCount ), scan.eligibleCount, total, scan.noFamilyCount,
-                 familyList( scan.unavailMask ).c_str(),
-                 std::string( escapeXml( detail::unavailWhyList( scan ), escUnavail ) ).c_str() );
+                 ensUnavailableAttr.c_str(), ensUnavailableWhyAttr.c_str() );
     std::printf( " bar_ccx=\"%u\" bar_loc=\"%u\" bar_nest=\"%u\" bar_params=\"%u\"",
                  quality::kCcxBar, quality::kLocBar, quality::kNestBar, quality::kParamBar );
     std::printf( " rcut=\"%zu\" rmeasured=\"%zu\" hcut=\"%zu\" hranked=\"%zu\" window=\"%s\"",
@@ -876,6 +883,9 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
     std::vector<char>  escPath;
     std::vector<char>  escName;
     const std::string  unavailNames = familyList( scan.unavailMask );
+    // §L10: same absent-means-none convention as the root's unavailable= above — per-row unavail= must
+    // not print ="" when nothing is unavailable (loop-invariant, so computed once, not per row).
+    const std::string  unavailAttr  = unavailNames.empty() ? std::string() : ( " unavail=\"" + unavailNames + "\"" );
     const unsigned     evaluable    = unsigned( kFamilyCount ) - detail::familyCountOf( scan.unavailMask );
     for( std::size_t rowIndex = page.begin; rowIndex < page.end; ++rowIndex )
     {
@@ -883,9 +893,9 @@ inline int writeEnsembleReport( const IngestResult& ing, const std::vector<std::
         const Symbol&      s    = ing.symbols[row.id];
         const std::string  path( escapeXml( ing.files[s.fileId], escPath ) );
         const std::string  name( escapeXml( s.name, escName ) );
-        std::printf( "<s p=\"%s:%u\" n=\"%s\" fam=\"%u\" of=\"%u\" fired=\"%s\" unavail=\"%s\">",
+        std::printf( "<s p=\"%s:%u\" n=\"%s\" fam=\"%u\" of=\"%u\" fired=\"%s\"%s>",
                      path.c_str(), s.line, name.c_str(), unsigned( row.firedCount ), evaluable,
-                     familyList( row.firedMask ).c_str(), unavailNames.c_str() );
+                     familyList( row.firedMask ).c_str(), unavailAttr.c_str() );
         for( std::uint8_t family = 0; family < kFamilyCount; ++family )
         {
             if( ( ( row.firedMask >> family ) & 1u ) == 0 )
