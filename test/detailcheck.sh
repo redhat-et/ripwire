@@ -32,7 +32,11 @@ bodies(){ grep -o '<b t=' "$1" | wc -l | tr -d ' '; }
 # H1: the budgeted --for bundle may mark the trimmed payload. §P8 vocabulary: that marker was
 # payload="capped" (a string enum) and is now the tool-wide boolean capped="1" — see src/pageview.h,
 # THE TRUNCATION VOCABULARY, rule 5.
-sigblocks(){ grep -oE '<sigs( capped="1")?>' "$1" | wc -l | tr -d ' '; }
+# Re-pinned 2026-09-04 (capture-audit lane L4 finding 4, PLAN_CAPTURE_AUDIT §1 "--for <sigs capped=\"1\"> with no
+# shown=/total="): a TRIMMED sigs block is `<sigs shown="S" total="T" capped="1">` — S rows printed of the T the
+# rank-adaptive ladder was handed (src/serialize.h; pageview.h rule 5 / truncvocabcheck arm (F): every capped="1"
+# carries shown= and a total). An untrimmed block is still the bare `<sigs>`. Nothing else counts as a sigs block.
+sigblocks(){ grep -oE '<sigs( shown="[0-9]+" total="[0-9]+" capped="1")?>' "$1" | wc -l | tr -d ' '; }
 
 # ── #1: --detail=0 == no --detail (byte-identical, golden-neutral) ──────────────────────────────────────
 "$BIN" src --for="$TASK" --no-cache >"$TMP/plain" 2>/dev/null
