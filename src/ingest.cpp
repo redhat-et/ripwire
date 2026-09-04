@@ -14,6 +14,7 @@
 #include "embedded_queries.h"  // configure-generated constexpr tags.scm table; no runtime source-tree dependency
 #include "infra/hashutil.h"    // sanitizer-clean modulo-2^64 FNV multiplication
 #include "infra/namesplit.h"   // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
+#include "infra/jsonesc.h"     // rw::shSingleQuote - the git ignore probe quotes its root the same way every other git popen does
 #include "infra/fixedStr.h"    // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
 #include "lexindex.h"          // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
 #include "didyoumean.h"        // octocode F3: boundedEditDistance/nearestNameByEditDistance — the ONE near-miss
@@ -187,7 +188,7 @@ namespace rw
 
 
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr, std::string_view cacheFile,
-                     std::size_t maxFileBytes, bool captureValueUses, std::string_view excludeLabel )
+                     std::size_t maxFileBytes, bool captureValueUses, std::string_view excludeLabel, bool respectGitignore )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: total (crawl + parse + model)" );
     // Cheap (a handful of bytes serialized twice) and runs once per invocation — catches a
@@ -213,7 +214,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // 1) deterministic crawl -> sorted file list (this list IS result.files / the fileId space)
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: crawl (collectSources)" );
-        auto [ crawledPaths, oversizeSkipped, taxonomySkips ] = collectSources( rootDir, excludeSubstr, maxFileBytes, excludeLabel );
+        auto [ crawledPaths, oversizeSkipped, taxonomySkips ] = collectSources( rootDir, excludeSubstr, maxFileBytes, excludeLabel, respectGitignore );
         result.files           = std::move( crawledPaths );
         result.skippedOversize = std::move( oversizeSkipped );
         result.crawlSkips      = std::move( taxonomySkips );   // §L1: excluded / unsupported-ext / unindexed exts

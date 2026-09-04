@@ -931,3 +931,52 @@ the recorded ctime closes it for free and keeps the cached parse of a file that 
 (`statgatecheck` (e)). The A3 ledger's ~13× figure for a whole-tree re-read on the MCP path stands
 unchallenged; this row prices the same idea on the CLI, where the facts-reuse makes it far cheaper than 13×
 and still the wrong trade.
+
+---
+
+## 2026-09-03 — the `.gitignore` ignore probe: what one `git ls-files` per root costs, and what it buys
+
+A LEDGER ROW, never a gate (the standing no-perf-budget-gates rule). Plain build at `4f6e601 + this
+lane`, Apple Silicon, warm page cache, `--no-cache` for every cold number and the second run of an
+auto-cached pair for every warm one. The corpora are the four D4 trees plus this repository's own root.
+
+**What the probe itself costs.** One `git -C <root> -c core.quotepath=false ls-files --others
+--ignored --exclude-standard --directory -z` per root, once, before the walk:
+
+| tree | ignored entries returned | probe wall time (median of 3) |
+| --- | ---: | ---: |
+| ugrep `550599a6` | 0 | 0.020 s |
+| rocksdb `0e2801ac` | 0 | 0.030 s |
+| duckdb `19864453` | 0 | 0.150 s |
+| this repository's root (12 top-level ignored entries + 3 checkouts under `bench/external/`) | 4 | 0.032 s |
+
+`--directory` is what keeps that column flat: a wholly-ignored directory is ONE entry and ONE prune,
+never an enumeration, so a 12,000-file checkout under `bench/external/` costs the same as an empty one.
+Without it the same probe on this repository returns 3,962 entries and takes 0.10 s — still cheap, but
+it scales with the ignored population instead of with the number of ignored ROOTS, and it cannot count
+the files inside a nested checkout anyway (git stops at a nested `.git`), so the exact-count it appears
+to buy is a floor, not a total.
+
+**What it buys, on this repository's root with no `--exclude`.** The dev box's 158,202-file population
+could not be reproduced in this lane's worktree (the `bench/external/swex/snapshots` tranche had been
+moved out of the tree for the round), so the row below is a REBUILT stand-in: the three D4 checkouts
+copied into the (gitignored) `bench/external/`, giving 18,995 files on disk and 8,674 crawlable ones.
+The shape is the one the registration describes; the magnitude is smaller.
+
+| `ripwire . <args>` | `files=` | cold | warm |
+| --- | ---: | ---: | ---: |
+| `--no-ignore` (the pre-2026-09-03 walk) | 8,674 | 2.81 s | 0.63 s |
+| default (ignore rules honoured) | **1,522** | **0.52 s** | **0.10 s** |
+| `--exclude=bench/external` (the workaround it replaces) | 1,522 | 0.41 s | 0.10 s |
+
+The default and the hand-written `--exclude` agree to the file, so the flag that every gate and every
+agent invocation had to remember is now the tool's own behaviour, and the 0.032 s probe replaces 2.3 s
+of crawling and parsing on a cold run.
+
+**One cost this does NOT remove, stated because it is real.** Alternating modes leaves a SUPERSET blob
+behind: a `--no-ignore` run writes 8,674 file records, the next default run reads that blob, finds
+nothing dirty and never rewrites it, so a default warm run after a `--no-ignore` run costs 0.18-0.19 s
+instead of 0.10 s until something invalidates the blob. Correctness is unaffected — the blob is keyed
+per FILE, so a default run can only ever read back the files it actually crawled (`gitignorecheck`
+arm 10 pins exactly that) — and this is the same shape `--exclude` has always had, which is why the
+ignore mode is deliberately NOT part of the cache key.

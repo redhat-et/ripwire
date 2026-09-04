@@ -3234,7 +3234,7 @@ int main( int argc, char** argv )
                 cachePath = defaultCachePath( r.arg, needsValueUses );
             }
             parts.push_back( ingest( r.arg.c_str(), cfg.excludes, cachePath, cfg.maxFileBytes, needsValueUses,
-                                     /*excludeLabel=*/r.label ) );
+                                     /*excludeLabel=*/r.label, /*respectGitignore=*/!cfg.noIgnore ) );
         }
         ing = mergeWorkspaceIngests( ws, parts );
     }
@@ -3247,7 +3247,8 @@ int main( int argc, char** argv )
             autoCache = defaultCachePath( root, needsValueUses );
             cacheArg  = autoCache;
         }
-        ing = ingest( root.c_str(), cfg.excludes, cacheArg, cfg.maxFileBytes, needsValueUses );
+        ing = ingest( root.c_str(), cfg.excludes, cacheArg, cfg.maxFileBytes, needsValueUses,
+                      /*excludeLabel=*/{}, /*respectGitignore=*/!cfg.noIgnore );
     }
     if( cfg.ignoreTests )
     {

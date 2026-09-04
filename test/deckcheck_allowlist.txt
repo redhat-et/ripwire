@@ -97,8 +97,7 @@
 --until	bench/routing_ab_report.py's own window flag ("--since/--until", the readout window), same paragraph — the ripwire --since exists but --until is the script's — not a ripwire flag
 --self-test	bench/agentloop/followup_calls.py and bench/arise-h2h/followup_calls.py's own flag (the counters' synthetic-fixture self-check), quoted in docs/EVALS.md's follow-up-call-count registration — not a ripwire flag
 --results	bench/agentloop/followup_calls.py's own flag ("--results FILE", the agentloop pilot json it counts), same registration — not a ripwire flag
---no-ignore	ripwire flag PRE-REGISTERED in docs/EVALS.md (".gitignore honoured by default", 2026-09-03), not yet in --help; deckcheck's stale-allowlist arm retires this row the day the lane lands it
---respect-gitignore	the opt-in fallback spelling named by the same registration's NEGATIVE consequence — pre-registered, not yet in --help; retired by the stale-allowlist arm when either flag ships
+--respect-gitignore	the opt-in fallback spelling named by the same registration's NEGATIVE consequence; the RUN (2026-09-03) met bands (1) and (5), so the default shipped and this flag was never needed — the row stays only because the pre-registration prose still names it
 --others	git's own ls-files option ("git ls-files --others --ignored --exclude-standard --directory"), quoted in the .gitignore registration as the candidate ignore walk — a foreign tool flag, not a ripwire flag
 --ignored	git's own ls-files option, same quoted command — not a ripwire flag
 --exclude-standard	git's own ls-files option, same quoted command — not a ripwire flag

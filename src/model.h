@@ -705,6 +705,22 @@ inline bool lessUnindexedExt( const UnindexedExt& a, const UnindexedExt& b ) noe
 // Deliberately NOT merged into IngestResult::skippedOversize: that vector's SIZE is the map header's
 // skipped_oversize= count, and one accounting number must keep one meaning (the "one source, never two
 // counters" rule above).
+// §N6-C — WHICH ignore rules the crawl actually consulted for this root. The map narrows a corpus only
+// where it can explain the narrowing, so the four states stay apart rather than collapsing into a bool: a
+// reader whose symbol vanished needs to tell "the repository declares that file ignored" from "the walk
+// never asked" from "you turned the rule off".
+enum class IgnoreMode : std::uint8_t
+{
+    Unavailable = 0,   // no git work tree at this root, or no git binary — TODAY'S FULL WALK, nothing ignored
+    Git         = 1,   // git's own ignore rules were consulted and applied
+    Off         = 2,   // --no-ignore: the caller asked for the full walk
+    // The root ITSELF sits inside an ignored subtree (`ripwire build/` in a repo whose .gitignore holds
+    // `build/`). git answers "./" — everything — and honouring that would hand back an EMPTY map for a
+    // directory the user pointed at deliberately. Full walk, and the mode says why: a silent empty map is
+    // the worst available reading of "map this".
+    RootIgnored = 3
+};
+
 struct CrawlSkips
 {
     std::vector<SkippedFile>  excluded;             // capped rows, path-sorted
@@ -722,6 +738,19 @@ struct CrawlSkips
     // tree with node_modules/ reported EVERY counter zero while whole subtrees had been dropped.
     std::uint64_t             prunedDirs      = 0;
     std::vector<UnindexedExt> unindexedExts;        // EXACT histogram, sorted files desc then ext asc
+
+    // §N6-C — the .gitignore lane. TWO counters for the same reason excludedDirs and prunedDirs are two:
+    // an ignored FILE is an exact drop the walk saw and counted, an ignored SUBTREE stops the walk at the
+    // directory and leaves its contents UNKNOWN rather than zero. Both classes are tested LAST, after the
+    // extension classification, the --exclude match and the built-in denylist, so every existing counter
+    // keeps exactly the meaning it had: ignoredFiles counts files that would OTHERWISE HAVE BEEN INDEXED
+    // (which is what makes it the number the header's accounting invariant can carry), and ignoredDirs
+    // counts only the subtrees no other rule had already pruned.
+    std::vector<SkippedFile>  ignored;              // capped rows, path-sorted — the individual ignored files
+    std::vector<SkippedFile>  ignoredDirRows;       // capped rows, path-sorted — the pruned subtrees (bytes 0, ext "")
+    std::uint64_t             ignoredFiles    = 0;  // EXACT count (rows may be fewer)
+    std::uint64_t             ignoredDirs     = 0;  // subtrees pruned by git's ignore rules: contents NEVER enumerated
+    IgnoreMode                ignoreMode      = IgnoreMode::Unavailable;   // NOT-ASKED is the honest default
 };
 
 // §L1 — PARSE HEALTH: a per-indexed-file record of how much of the file the parser actually understood,

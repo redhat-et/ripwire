@@ -15,6 +15,32 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — `.gitignore` is honoured by default; `--no-ignore` restores the old walk
+
+ripwire is named for ripgrep, whose defining default is that ignored files are not searched. The crawl
+walked them. In a git work tree it now consults git's own ignore rules and skips what the repository
+already declared uninteresting — `node_modules/`, `.venv/`, `target/`, `build/`, `dist/`, whatever the
+repo says — and **`--no-ignore` restores the previous behaviour exactly**.
+
+Measured on this repository's own root with no `--exclude`, three checkouts under a gitignored
+`bench/external/`: `files=` 8,674 → **1,522**, cold 2.81 s → **0.52 s**, warm 0.63 s → **0.10 s**, and
+the result agrees to the file with the hand-written `--exclude=bench/external` the tool used to need.
+The ignore lookup is one `git ls-files ... --directory` per root: 0.020 s (ugrep), 0.030 s (rocksdb),
+0.150 s (duckdb), 0.032 s (this root) — `bench/PROFILE.md` carries the ledger.
+
+Nothing is dropped silently. The map header states `ignored_files=` (files the rules covered, exact)
+and `ignored_dirs=` (subtrees they pruned — the walk stopped there, so their contents are UNKNOWN, not
+zero); both are ABSENT when the rules dropped nothing, so a tree with nothing ignored is byte-identical
+to what it produced before. `--skipped` rows the ignored set and names the mode in `ignore_mode=`.
+`--exclude` composes on top, and a multi-root run applies the rules per root.
+
+Four situations keep the full walk, and `--skipped`'s `ignore_mode=` says which applied: `git` (rules
+consulted), `off` (`--no-ignore`), `unavailable` (no git work tree at this root, or no git binary), and
+`root-ignored` — the root is ITSELF inside an ignored subtree (`ripwire build/` in a repo that ignores
+`build/`), where honouring the rules literally would hand back an empty map for a directory you pointed
+at on purpose. A tracked file that happens to match a `.gitignore` pattern stays indexed, because git
+ignores nothing it tracks.
+
 ### Fixed — `--expand` no longer takes minutes on a file whose lines are hundreds of kilobytes
 
 Secret redaction (`redactSecrets`, on by default at every body-emission seam) was quadratic in LINE
