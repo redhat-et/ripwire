@@ -308,8 +308,11 @@ python3 - "$TMP/tools.json" <<'PY' >"$TMP/m14.res" 2>&1
 import sys, json, re
 d = { t["name"]: t for t in json.load(open(sys.argv[1]))["result"]["tools"] }
 b = d["batch"]["description"]
+# P17 (capture-audit 2026-09-04): slice and edit_check joined the served set — the two READ verbs an agent
+# most wants in the same turn as callers/uses. Re-pinned to the NEW served set, not loosened.
 served = { "for","grep","find_symbol","find_referencing_symbols","impact","uses","mentions",
-           "analyze","lego","owners","cochange","path_between","exemplar","fetch_body" }
+           "analyze","lego","owners","cochange","path_between","exemplar","fetch_body",
+           "slice","edit_check" }
 # verifier N1: this line used to carry the SAME `- 1` the shipped formula did ("minus batch itself"), which
 # double-subtracts `batch` — it is advertised and is NOT in `served`, so the first subtraction already
 # excluded it. A gate that restates the formula cannot catch the formula, so this arm passed on 15 while 16

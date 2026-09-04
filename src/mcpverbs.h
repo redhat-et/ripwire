@@ -3779,6 +3779,14 @@ inline constexpr std::size_t kBatchCap = 16;   // max sub-queries processed per 
 inline constexpr std::string_view kBatchServedVerbs[] = {
     "for", "grep", "find_symbol", "find_referencing_symbols", "impact", "uses", "mentions",
     "analyze", "lego", "owners", "cochange", "path_between", "exemplar", "fetch_body",
+    // P17 (capture-audit 2026-09-04, lens 8 #17): slice and edit_check. Both are READ-ONLY, and they are
+    // the two an agent most wants in the SAME turn as callers/uses — "what did I just change, who calls it,
+    // where does the value flow, did the contract move". slice was excluded as "a per-definition on-disk
+    // re-parse"; that is one file read, cheaper than the grep sub-query already in the set. edit_check is a
+    // qheadsnap cache read on a warm tree. The PREVIEW half of edit_check stays out: new_body is not in
+    // kBatchSubQueryFields, so a batched preview refuses as an undeclared field rather than quietly
+    // building a spliced tree inside a fast sweep.
+    "slice", "edit_check",
 };
 
 // Dispatch-only synonyms: `callers` == find_referencing_symbols, `callees` == find_symbol. They are NOT
@@ -3879,6 +3887,8 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
     const std::string handle  = strArg( "handle" );
     const std::string kind    = strArg( "kind" );
     const std::string grepInTyped = strArg( "in" );   // P3-4: the grep sub-query's span-tier hatch
+    const std::string var     = strArg( "var" );      // P17: the slice sub-query's variable half
+    const std::string flow    = strArg( "flow" );     // P17: back|fwd|both — validated inside sliceText
     const std::string from    = strArg( "from" );
     const std::string to      = strArg( "to" );
     const std::string file    = strArg( "file" );
@@ -3895,6 +3905,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         }
         return a;
     };
+    const McpIntArg depthArg  = intArg( "depth", 1, 32 );   // P17: the slice flow walk's bound (sliceText pairs it with flow)
     const McpIntArg startArg  = intArg( "start_line", 1, kMcpPageValueMax );
     const McpIntArg endArg    = intArg( "end_line",   1, kMcpPageValueMax );
     const long long startLine = startArg.value;
@@ -4120,6 +4131,35 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( "no matching exemplar (no symbol of that kind, or the task matched nothing)" );
         }
+    }
+    else if( r.verb == "slice" )
+    {
+        if( symbol.empty() )
+        {
+            return bad( missingField( "slice" ) );
+        }
+        // sliceText owns the WHOLE contract (resolution, the @FILE:LINE seed, flow/depth pairing, every
+        // refusal) — the same call the live arm makes, so a batched slice cannot become a second slice.
+        const SliceReply sr = sliceText( root, symbol, var, flow, depthArg.isPresent ? int( depthArg.value ) : 0, redactPtr );
+        if( sr.payload.empty() )
+        {
+            return bad( sr.refusal );
+        }
+        r.payload = sr.payload;
+    }
+    else if( r.verb == "edit_check" )
+    {
+        if( symbol.empty() )
+        {
+            return bad( missingField( "edit_check" ) );
+        }
+        // No new_body: the batched form is the post-hoc question only (see kBatchServedVerbs).
+        const EditCheckReply er = editCheckText( root, symbol );
+        if( er.payload.empty() )
+        {
+            return bad( er.refusal );
+        }
+        r.payload = er.payload;
     }
     else if( r.verb == "fetch_body" )
     {

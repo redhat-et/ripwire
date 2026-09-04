@@ -182,9 +182,14 @@ case "$E5" in
     __ERROR__*"did you mean"*) no "N5 [live]: suggests but drops the guidance clause: $E5";;
     *)                         no "N5 [live]: still the pre-fix dialect: $E5";;
 esac
-case "$( batch_sub '{"verb":"edit_check","symbol":"parsArgs"}' )" in
-    __ERROR__*"unknown sub-verb 'edit_check'"*) ok "N5 [batch]: edit_check is not batch-served — one not-found seam, and it is the shared one";;
-    *) no "N5 [batch]: the batch arm answered edit_check — a SECOND not-found seam exists";;
+# P17 (capture-audit 2026-09-04) RE-PIN: edit_check is now batch-served, so "one not-found seam" can no
+# longer be asserted by the batch arm refusing the VERB. It is asserted directly instead, which is the
+# stronger form of the same property: the batch arm's refusal must be the LIVE arm's, character for
+# character — that is what "one seam" means, and it is exactly what a second seam would break.
+E5B="$( batch_sub '{"verb":"edit_check","symbol":"parsArgs"}' )"
+case "$E5B" in
+    "$E5") ok "N5 [batch]: the batched edit_check not-found is byte-identical to the live one — one seam, shared";;
+    *)     no "N5 [batch]: the batch arm words edit_check's not-found differently — a SECOND seam exists: $E5B";;
 esac
 
 echo

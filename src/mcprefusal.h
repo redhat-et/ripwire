@@ -1086,6 +1086,11 @@ inline std::string unknownFieldRefusal( std::string_view verb, std::string_view 
 inline constexpr std::string_view kBatchSubQueryFields[] = {
     "verb", "symbol", "pattern", "task", "type", "file", "from", "to",
     "handle", "kind", "start_line", "end_line", "limit", "offset",
+    // P17 (capture-audit 2026-09-04): the slice sub-query's own three. Declared rather than left out, so a
+    // batched slice is the SAME verb as the standalone one — an accepted-and-ignored `flow` would be the
+    // exact defect class this round exists to remove. `new_body` is deliberately NOT here: that field turns
+    // edit_check into the pre-apply preview, which builds a spliced tree and has no place in a fast sweep.
+    "var", "flow", "depth",
     // Wave-3 verifier P3-4/P6-1: `in` on the batch grep sub-query. R-H's own reason for putting the hatch
     // on the live MCP verb — an MCP-only agent that reads suppressed_comment= has no CLI to re-ask from —
     // applies verbatim here, and this was the surface that had NO fallback at all.

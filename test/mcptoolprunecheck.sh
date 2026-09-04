@@ -204,8 +204,10 @@ echo "=== (C) [red] batch's exclusion arithmetic moves with the omission ==="
 python3 - "$TMP/nogit.list" <<'PY' > "$TMP/m14p.res" 2>&1
 import sys, json, re
 d = { t["name"]: t for t in json.load(open(sys.argv[1]))["result"]["tools"] }
+# P17 (capture-audit 2026-09-04): slice and edit_check joined the served set. Re-pinned to the NEW set.
 served = { "for","grep","find_symbol","find_referencing_symbols","impact","uses","mentions",
-           "analyze","lego","owners","cochange","path_between","exemplar","fetch_body" }
+           "analyze","lego","owners","cochange","path_between","exemplar","fetch_body",
+           "slice","edit_check" }
 truth = len(d) - len(served & set(d))          # advertised, minus what batch serves AND advertises
 b = d.get("batch", {}).get("description", "")
 problems = []
