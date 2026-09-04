@@ -733,7 +733,11 @@ inline void writeScoutArm( std::FILE* out, const Arm& arm, const XmlEscaper& ex 
     // wrapper tag), listed alongside the other advisory facts (<sym>/<head-conflict>) rather than crowding
     // the fixed header run above. --stray-content is the verb that answers "is this ref stale / already
     // superseded" — this row just points there instead of re-deriving that itself.
-    if( arm.changed.empty() )
+    // §L10: <no-work> is a claim about a COMPARISON that ran and found nothing — it must not fire when
+    // ok="0", where changed="0" means the comparison never happened at all (no merge-base, unrelated
+    // histories). Printing it there read as "compared, nothing divergent" on an arm this verb never
+    // compared; DEGRADED_PATH_ALERT already says so on stderr, but nothing said so in-band before this.
+    if( arm.changed.empty() && arm.ok )
     {
         std::fprintf( out, "<no-work note=\"no divergent work vs merge-base — see --stray-content\"/>" );
     }
