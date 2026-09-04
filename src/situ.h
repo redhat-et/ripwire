@@ -283,8 +283,9 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     {
         blastNote.insert( blastNote.size() - 1, "; --pr-context's own per-file blast-radius list is also capped, at 20" );
     }
-    std::fprintf( out, "  [1] blast radius: %zu symbols across %zu files transitively depend on these changes%s\n",
-                  reach.size(), affected.size(), blastNote.c_str() );
+    std::fprintf( out, "  [1] blast radius: %zu symbols across %zu files transitively depend on these changes%s\n%s",
+                  reach.size(), affected.size(), blastNote.c_str(),
+                  kGraphCountFloorTextLine );   // H5: the same floor the XML graph verbs mark, in this report's prose
     for( std::size_t i = 0; i < affected.size() && i < kSituBlastFilesShown; ++i )
     {
         const std::string_view rp = situPathRel( affected[i] );

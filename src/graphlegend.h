@@ -56,6 +56,32 @@ inline constexpr const char* kGraphCountFloorLegend =
     "a shared name stays a plain call, an unindexed macro is no edge. Read a zero as \"none found\", never as "
     "\"none exists\". ";
 
+// H5 (capture-audit 2026-09-04, lens 7 F-FLOOR-1) — the BRIEF floor clause for the graph-count verbs that
+// are not one of the five above: --path / --connect / --affected / --exercises / --seams / --dead-code /
+// --communities / --community / --zoom / --lego, whose roots read reachable=/nodes=/reached=/reaches=/
+// seam_pairs=/implementors=/isolated= off the SAME name-based CSR and said nothing. The full sentence above
+// is ~900 B and those verbs' whole legends are shorter than that; this clause keeps the two anchors the
+// gate matches verbatim ('is a FLOOR, never a total', 'none found') and drops the taxonomy of misses, which
+// the reader can get from any of the five. No "--" digraph (it lands inside XML comments).
+inline constexpr const char* kGraphCountFloorBriefLegend =
+    "counts_floor=\"1\": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from "
+    "source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a "
+    "zero as \"none found\", never as \"none exists\". ";
+
+// The same two facts as PROSE, for the one graph-count report that is text (--situ's [1] blast radius).
+inline constexpr const char* kGraphCountFloorTextLine =
+    "        counts_floor=1: every count above is a FLOOR, never a total (call edges are name-based; dynamic dispatch, "
+    "callbacks and macros can be missing) — read a zero as \"none found\", never as \"none exists\"\n";
+
+// --lego shipped with NO legend at all (a bare <ctx root=><lego>…); one literal for the CLI verb and its MCP
+// twin, so the two dialects cannot describe implementors= differently.
+inline constexpr const char* kLegoLegend =
+    "<!-- ripwire lego: ONE interface/base type — its method contract (<m>, where the language captures it soundly) and every "
+    "implementor (<impl>) the extends/implements edges reach, own-language only; implementors= counts them. "
+    "counts_floor=\"1\": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from "
+    "source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a "
+    "zero as \"none found\", never as \"none exists\". -->";
+
 // The COUNTING-UNIT clause (the L-CS routing item).
 //
 // V3 H-1 REWRITE, and the reason it is worth reading before touching this string. The first version said all

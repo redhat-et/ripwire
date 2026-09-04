@@ -5489,7 +5489,12 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
     std::vector<char> esc;
     std::string       src;
     std::uint32_t     loadedFile = 0xFFFFFFFFu;
-    w.write( "<lego>" );
+    // H5 (capture-audit 2026-09-04): implementors= is read off the name-based extends/implements edges — a
+    // floor. The marker rides on the TARGETED verb root (--lego=TYPE and its MCP twin); the --for bundle's
+    // ranked <lego> section is described by the bundle's own legend and keeps its byte shape.
+    w.write( "<lego" );
+    if( focusId != kNoNode ) { w.write( kGraphCountFloorAttrXml ); }
+    w.write( ">" );
     for( std::size_t k = 0; k < keep; ++k )
     {
         const NodeId  id   = ifaces[k];

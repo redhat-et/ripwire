@@ -2187,18 +2187,19 @@ int emitCommunitiesReport( const rw::Config& cfg, const rw::IngestResult& ing, c
                  "shown=/capped= describe the member list printed here: this listing is fixed at the 5 top-ranked members and is NOT "
                  "widened by limit=/offset= (those page the MODULE rows). capped=1 means members were dropped; drill= names the verb "
                  "that pages the full member list of one module. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). "
-                 "%s-->%s", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cmSingleRoot ) );
+                 "%s%s-->%s", rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cmSingleRoot ) );
     // §P11.6 drill=: the id= values below were the only identifiers this tool emitted that no verb took
     // back. The follow-up verb is named ON THE ROOT ELEMENT rather than in the doc comment, because an XML
     // comment may not contain a double hyphen (G4) and its entity escapes are NOT expanded — a caller would
     // read a literal "&#45;&#45;". As an attribute value the flag is exact, parseable and pasteable.
-    std::printf( "<communities drill=\"--community=ID\" modules=\"%u\" shown_modules=\"%u\" modules_capped=\"%u\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" isolated=\"%u\" isolated_decl=\"%u\" isolated_header=\"%u\" isolated_source=\"%u\" isolated_doc=\"%u\" connected_singletons=\"%u\" symbols=\"%u\"%s%s>",
+    std::printf( "<communities drill=\"--community=ID\" modules=\"%u\" shown_modules=\"%u\" modules_capped=\"%u\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" isolated=\"%u\" isolated_decl=\"%u\" isolated_header=\"%u\" isolated_source=\"%u\" isolated_doc=\"%u\" connected_singletons=\"%u\" symbols=\"%u\"%s%s%s>",
                  modules, shownModules, isModulesCapped,
                  bridge.size(), shownBridges, isBridgesCapped, isolates.total, isolates.declaration,
                  isolates.header, isolates.source, isolates.document, isolates.connectedSingletons, N,
                  ( pagingDisclosure( cmab, sizeof( cmab ), moduleOrder.size(), cmpw.end, cfg.pageLimit, cfg.pageOffset )
                    + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
-                 cmRootAttr.c_str() );
+                 cmRootAttr.c_str(),
+                 rw::kGraphCountFloorAttrXml );   // H5: modules=/bridges=/isolated= partition the name-based CSR
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     for( std::size_t moduleIndex = cmpw.begin; moduleIndex < cmpw.end; ++moduleIndex )
@@ -2345,13 +2346,14 @@ int emitCommunityDrill( const rw::Config& cfg, const rw::IngestResult& ing, cons
                  "other modules. size= is the module's TRUE member count; shown=/capped= are this page. partition= is the FULL label "
                  "space (every id 0..partition-1, incl. isolated singletons) — the range the id= argument ranges over; modules= counts "
                  "the NON-isolated communities (size>=2), the SAME predicate the communities-listing verb's modules= uses, so parent "
-                 "and child agree. %s-->%s", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cdSingleRoot ) );
-    std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" partition=\"%u\" modules=\"%u\"%s%s>",
+                 "and child agree. %s%s-->%s", rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( cdSingleRoot ) );
+    std::printf( "<community id=\"%u\" size=\"%zu\" dir=\"%s\" label=\"%s\" bridges=\"%zu\" shown_bridges=\"%zu\" bridges_capped=\"%u\" partition=\"%u\" modules=\"%u\"%s%s%s>",
                  want, std::size_t( mem.size() ), ex( presentation.directory[ want ] ).c_str(), ex( presentation.label[ want ] ).c_str(),
                  peers.size(), shownBridges, unsigned( shownBridges < peers.size() ), K, modulesNonIsolated,
                  ( pageDisclosure( mpab, sizeof( mpab ), shownMembers, mem.size(), mpw.end, cfg.pageLimit, cfg.pageOffset, true )
                    + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
-                 cdRootAttr.c_str() );
+                 cdRootAttr.c_str(),
+                 rw::kGraphCountFloorAttrXml );   // H5: size=/bridges= are a partition of the name-based CSR
     for( std::size_t i = mpw.begin; i < mpw.end; ++i )
     {
         const Symbol&           s  = ing.symbols[ mem[i] ];
@@ -2568,8 +2570,8 @@ std::optional<int> runZoom( const MainDispatch& d )
                      "symbols= is the whole corpus; isolated= is the symbols in NO top-level module (a group of one — the same rule that makes top_modules= count only groups of 2 or more), and they reconcile exactly: "
                      "symbols= equals isolated= plus the sum of the TOP-LEVEL size= values, every one of them, including any this page did not print. "
                      "On a level-0 module size= is its true member count and shown=/capped= describe the member list printed here, which is fixed at the 5 top-ranked members and is not widened by limit=/offset= (those page the TOP-LEVEL modules); "
-                     "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. %s-->",
-                     rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
+                     "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. %s%s-->",
+                     rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // §P15/§P16: top_modules= is a real, deterministically-ordered row list (size desc, id asc — the same
         // rule --communities' module listing uses) that used to print EVERY top module unconditionally, so a
         // repo with hundreds of top modules had no way to page it. --limit/--offset now window it like --uses
@@ -2578,10 +2580,11 @@ std::optional<int> runZoom( const MainDispatch& d )
         // honorsPaging() excludes the --zoom --mermaid combination for the same reason plain --mermaid refuses).
         const PageWindow  zoomPw = pageWindow( topOrder.size(), cfg.pageLimit, cfg.pageOffset );
         char              zoomAb[ kPageDisclosureCap ];
-        std::printf( "<zoom levels=\"%zu\" top_modules=\"%zu\" symbols=\"%u\" isolated=\"%u\"%s>", L, topOrder.size(), N, isolatedCount,
+        std::printf( "<zoom levels=\"%zu\" top_modules=\"%zu\" symbols=\"%u\" isolated=\"%u\"%s%s>", L, topOrder.size(), N, isolatedCount,
                      ( pageDisclosure( zoomAb, sizeof( zoomAb ), zoomPw.end - zoomPw.begin, topOrder.size(), zoomPw.end,
                                        cfg.pageLimit, cfg.pageOffset, false )
-                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str() );
+                       + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
+                     rw::kGraphCountFloorAttrXml );   // H5: isolated=/top_modules= partition the name-based CSR
 
         // a stack-free recursion via an explicit lambda (std::function — not hot). Emits <module> elements
         // nested by level; the finest level emits <member> leaves.
@@ -2750,8 +2753,8 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // §B12.5 — the UNIT clause is the same sentence on all three verbs that spell `untested=` (see
         // situ.h's kTestGateLegend and flipimpact.h's writeFlipHeader). Each legend was locally honest,
         // which is precisely why a reader comparing two of the numbers is misled.
-        std::printf( "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). %s-->%s",
-                     rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( stSingleRoot ) );
+        std::printf( "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). %s%s-->%s",
+                     rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( stSingleRoot ) );
         // P2.1: two nested caps, neither previously marked — at most 20 seam PAIRS, and at most 5 example
         // EDGES inside each. Each <seam> gains shown= alongside its true untested= count.
         //
@@ -2770,12 +2773,13 @@ std::optional<int> runStructureText( const MainDispatch& d )
         const PageWindow  seamsPw     = pageWindow( pairs.size(), effectiveRowCap( cfg.pageLimit, 20 ), cfg.pageOffset );
         const std::size_t shownPairs  = seamsPw.end - seamsPw.begin;
         char              seamsAb[ kPageDisclosureCap ];
-        std::printf( "<seams modules=\"%zu\" bridges=\"%u\" untested=\"%u\" test_files=\"%u\" seam_pairs=\"%zu\"%s%s>",
+        std::printf( "<seams modules=\"%zu\" bridges=\"%u\" untested=\"%u\" test_files=\"%u\" seam_pairs=\"%zu\"%s%s%s>",
                      dirName.size(), bridges, untested, testFileCount, pairs.size(),
                      ( pageDisclosure( seamsAb, sizeof( seamsAb ), shownPairs, pairs.size(), seamsPw.end,
                                        cfg.pageLimit, cfg.pageOffset, true )
                        + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
-                     stRootAttr.c_str() );
+                     stRootAttr.c_str(),
+                     rw::kGraphCountFloorAttrXml );   // H5: bridges=/untested=/seam_pairs= are edges of the name-based CSR
         for( std::size_t pi = seamsPw.begin; pi < seamsPw.end; ++pi )
         {
             const std::uint32_t    cu    = std::uint32_t( pairs[pi].first >> 32 ), cv = std::uint32_t( pairs[pi].first & 0xffffffffu );

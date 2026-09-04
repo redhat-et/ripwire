@@ -1675,7 +1675,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      "config-warnings= counts two DISCLOSED .ripwire_config problems, each also written to stderr — an "
                      "unrecognized key, and a register_macros= name matching no indexed symbol — never gating, present "
                      "only when non-zero. "
-                     "Graph evidence is local to the indexed tree; verify before deleting -->" );
+                     "Graph evidence is local to the indexed tree; verify before deleting. %s-->", rw::kGraphCountFloorBriefLegend );
         // §P15/§P16: candidates is already deterministically sorted (path asc, line asc, name asc) and used to
         // print every candidate unconditionally — completeness was the whole contract, matching --uses' shape,
         // so it pages the same way: no historic display cap, discloseCap=false (un-paginated tag byte-identical).
@@ -1690,12 +1690,13 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             std::vector<char> dcFiltEsc;
             dcFilterAttr = " filter=\"" + std::string( escapeXml( cfg.deadCodeDir, dcFiltEsc ) ) + "\"";
         }
-        std::printf( "<dead-code count=\"%zu\" confidence=\"high\" evidence=\"internal-linkage+zero-callers\" register-macro-excluded=\"%zu\"%s%s%s%s>",
+        std::printf( "<dead-code count=\"%zu\" confidence=\"high\" evidence=\"internal-linkage+zero-callers\" register-macro-excluded=\"%zu\"%s%s%s%s%s>",
                      candidates.size(), registerMacroExcluded,
                      dcFilterAttr.c_str(),
                      pageDisclosure( dcAb, sizeof( dcAb ), dcPw.end - dcPw.begin, candidates.size(), dcPw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),
-                     qvRootAttr.c_str(), dcConfigWarn.c_str() );
+                     qvRootAttr.c_str(), dcConfigWarn.c_str(),
+                     rw::kGraphCountFloorAttrXml );   // H5: "zero callers" is a claim about the name-based CSR — a floor
         std::vector<char> dcEsc;
         for( std::size_t candidateIndex = dcPw.begin; candidateIndex < dcPw.end; ++candidateIndex )
         {

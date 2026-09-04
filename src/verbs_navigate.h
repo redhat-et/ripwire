@@ -1843,11 +1843,16 @@ std::optional<int> runPath( const MainDispatch& d )
         // R-E fix (2026-08-19): --path ships no legend of its own, so the shared root-relative clause IS its
         // whole first-screen legend here — root= would otherwise be the one attribute on this document with
         // nothing anywhere saying what it means. Same text, same helper, as every other verb's.
-        std::printf( "%s", rw::rootRelPathsLegend( pthSingleRoot ) );
-        std::printf( "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"%s",
+        // H5 (capture-audit 2026-09-04): reachable="0" hops="0" is a zero read off the name-based graph — the
+        // same question --verify=calls(A,B) answers `not-established` + counts_floor="1" for. Same marker,
+        // same brief sentence, on both transports (mcpverbs.h path_between mirrors this line).
+        std::printf( "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
+                     "graph holds none. %s-->%s", rw::kGraphCountFloorBriefLegend, rw::rootRelPathsLegend( pthSingleRoot ) );
+        std::printf( "<path from=\"%s\" to=\"%s\" from_p=\"%s\" to_p=\"%s\" from_defs=\"%zu\" to_defs=\"%zu\" reachable=\"%d\" hops=\"%zu\"%s%s",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), loc( srcUsed ).c_str(), loc( dstUsed ).c_str(),
                      srcDefs.size(), dstDefs.size(),
-                     path.empty() ? 0 : 1, path.empty() ? std::size_t( 0 ) : path.size() - 1, pthRootAttr.c_str() );
+                     path.empty() ? 0 : 1, path.empty() ? std::size_t( 0 ) : path.size() - 1, pthRootAttr.c_str(),
+                     rw::kGraphCountFloorAttrXml );
         // P2.10: a dead end is exactly the moment to name the next verb. --path is DIRECTED; --connect searches
         // undirected and finds the shared-caller join a directed walk can never see.
         if( path.empty() )

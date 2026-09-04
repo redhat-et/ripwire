@@ -562,6 +562,128 @@ fi
     || no "(8) the default map no longer gates on --token-budget (rc=$rc) — the refusals above would then be a blanket ban, not a boundary"
 
 echo
+echo "=== (9) H5 (capture-audit 2026-09-04) — the NINE more CSR-derived roots carry the marker + the floor sentence ==="
+# lens 7 F-FLOOR-1: `--path … reachable="0" hops="0"` is a zero read off the same name-based call graph
+# (ambiguous=5838 unresolved=2928 on this corpus) that --verify=calls(A,B) answers `not-established` +
+# counts_floor="1" for — and neither it nor --connect (nodes=/edges=), --affected (reached=), --seams
+# (seam_pairs=), --lego (implementors=), --exercises (reaches=), --dead-code (evidence=zero-callers IS a floor
+# claim), --communities/--community/--zoom (isolated=/bridges=) or --situ (both transports) said floor. The
+# seven-verb list above was the §B4 echo-site class again: the verbs someone remembered. Enumerated BY NAME
+# here, and arm (10) below derives the same list from src/ so a tenth cannot land unmarked.
+BRIEF_ANCHOR='is a FLOOR, never a total'
+cap path9.xml        .    --path=rankGraphTeleport,main
+cap connect9.xml     src  --connect=serialize,escapeXml,rankGraph
+cap affected9.xml    .    --affected=src/cli.h
+cap exercises9.xml   .    --exercises=test/clicheck.sh
+cap seams9.xml       src  --seams
+cap deadcode9.xml    src  --dead-code
+cap communities9.xml src  --communities
+cap community9.xml   src  --community=1
+cap zoom9.xml        src  --zoom
+cap lego9.xml        .    --lego=XmlWriter
+for spec in "path9:path" "connect9:connect" "affected9:affected" "exercises9:exercises" "seams9:seams" "deadcode9:dead-code" \
+            "communities9:communities" "community9:community" "zoom9:zoom" "lego9:lego"; do
+    f="${spec%%:*}"; el="${spec#*:}"
+    ROOTTAG="$( perl -0pe 's#<!--.*?-->##gs' "$TMP/$f.xml" | grep -oE "<$el( [^>]*)?>" | head -1 )"
+    case "$ROOTTAG" in
+        *"$MARK_XML"*) ok "(9) $el root carries $MARK_XML" ;;
+        *)             no "(9) $el root has NO $MARK_XML: ${ROOTTAG:-<no root element>}" ;;
+    esac
+    # the floor SENTENCE where the reader meets the marker: the leading legend, or (lego: the <ctx>-wrapped
+    # legend) any comment in the document
+    if [ "$el" = "lego" ]; then L="$( grep -oE '<!--.*?-->' "$TMP/$f.xml" | head -3 )"; else L="$( leadComment "$TMP/$f.xml" )"; fi
+    case "$L" in
+        *"$BRIEF_ANCHOR"*) ok "(9) $el legend states: $BRIEF_ANCHOR" ;;
+        *)                 no "(9) $el legend does NOT state: $BRIEF_ANCHOR" ;;
+    esac
+done
+# --situ is prose: the same two facts in text, where the [1] blast-radius count is printed.
+"$BIN" . --situ=src/graph.h >"$TMP/situ9.txt" 2>/dev/null
+grep -q 'counts_floor=1' "$TMP/situ9.txt" && grep -q "$BRIEF_ANCHOR" "$TMP/situ9.txt" \
+    && ok "(9) situ (CLI text) states counts_floor=1 and: $BRIEF_ANCHOR" \
+    || no "(9) situ (CLI text) reports a blast radius with no floor statement: $( grep -m1 'blast radius' "$TMP/situ9.txt" | cut -c1-120 )"
+# the MCP twins: situational_awareness (JSON key), path_between / connect / lego (XML marker)
+mcp_text situational_awareness "{\"path\":\"$ROOT\",\"files\":\"src/graph.h\"}" >"$TMP/mcp_situ9.json"
+python3 -c '
+import json, sys
+d = json.loads(open(sys.argv[1]).read())
+sys.exit(0 if d.get("counts_floor") is True else 1)
+' "$TMP/mcp_situ9.json" \
+    && ok "(9) MCP situational_awareness carries counts_floor:true" \
+    || no "(9) MCP situational_awareness has no counts_floor:true — the blast_radius[].dependent_symbols counts read as exact: $( head -c 160 "$TMP/mcp_situ9.json" )"
+mcp_text path_between "{\"path\":\"$SRC\",\"from\":\"serialize\",\"to\":\"escapeXml\"}" >"$TMP/mcp_path9.xml"
+mcp_text connect      "{\"path\":\"$SRC\",\"symbols\":[\"serialize\",\"escapeXml\",\"rankGraph\"]}" >"$TMP/mcp_connect9.xml"
+mcp_text lego         "{\"path\":\"$ROOT\",\"type\":\"XmlWriter\"}" >"$TMP/mcp_lego9.xml"
+for spec in "mcp_path9:path" "mcp_connect9:connect" "mcp_lego9:lego"; do
+    f="${spec%%:*}"; el="${spec#*:}"
+    ROOTTAG="$( perl -0pe 's#<!--.*?-->##gs' "$TMP/$f.xml" | grep -oE "<$el( [^>]*)?>" | head -1 )"
+    case "$ROOTTAG" in
+        *"$MARK_XML"*) ok "(9) MCP $el payload root carries $MARK_XML" ;;
+        *)             no "(9) MCP $el payload has NO $MARK_XML: $( head -c 160 "$TMP/$f.xml" )" ;;
+    esac
+done
+if command -v xmllint >/dev/null 2>&1; then
+    for f in path9 connect9 affected9 exercises9 seams9 deadcode9 communities9 community9 zoom9 lego9 mcp_path9 mcp_connect9 mcp_lego9; do
+        [ -s "$TMP/$f.xml" ] || { no "(9) $f.xml is empty — nothing was validated"; continue; }
+        xmllint --noout "$TMP/$f.xml" 2>"$TMP/xl9.err" && ok "(9) $f.xml is well-formed" || no "(9) $f.xml FAILED xmllint: $( head -1 "$TMP/xl9.err" )"
+    done
+fi
+
+echo
+echo "=== (10) PROPERTY — every emitter of a CSR-derived root in src/ splices the floor constant in the same statement ==="
+# Derived from src/, not from the list above: the root-element opener of every graph-count verb (and the
+# situ prose line + the MCP JSON key) must splice kGraphCountFloorAttrXml/Json — or, for the prose, the
+# text constant — in the SAME statement. Presence-guarded per pattern: a pattern that matches nothing is a
+# broken guard, never a pass.
+python3 - "$ROOT/src" <<'PY10'
+import os, re, sys
+src = sys.argv[1]
+# ROOT openers only: `<impact of=` (not pr-context's nested per-file <impact dependents=>), `<pr-context%s` (not
+# the not-a-git-repo `<pr-context base= files="0"/>` stub), and `<community id=` with partition= (the drill root,
+# not the member row the communities listing prints under the same tag).
+# `<uses` (fielduses.h / columnar.h) and `<edit-check` (editcheck.h) are 40-line `out +=` builders whose marker
+# lands far past any statement window; arm (1) pins them LIVE, so they are deliberately not re-derived here.
+PATTERNS = [ r'"<path ', r'"<connect ', r'"<affected ', r'"<exercises ', r'"<seams ', r'"<dead-code ', r'"<communities ',
+             r'"<community id=', r'"<zoom ', r'"<lego', r'\\"dependent_symbols\\"', r'blast radius: %zu symbols',
+             r'"<impact of=', r'"<query ', r'"<pr-context%s', r'"<safe-delete ', r'"<test-gate' ]
+fail, found = 0, { p: 0 for p in PATTERNS }
+for fn in sorted( os.listdir( src ) ):
+    if not ( fn.endswith( ".h" ) or fn.endswith( ".cpp" ) ): continue
+    lines = open( os.path.join( src, fn ), encoding="utf-8", errors="replace" ).read().split( "\n" )
+    for i, ln in enumerate( lines ):
+        if ln.lstrip().startswith( "//" ): continue
+        for pat in PATTERNS:
+            if not re.search( pat, ln ): continue
+            # the emitter's own statement: back to its opening call/assignment, forward to the ';'
+            b = i
+            while b > 0 and not re.search( r'(printf|snprintf|fprintf|write|append)\s*\(|\+=|=\s*"|=\s*\(', lines[ b ] ): b -= 1
+            e = i
+            while e < len( lines ) - 1 and not lines[ e ].rstrip().endswith( ";" ): e += 1
+            # the emitter's statement PLUS the next 14 lines: a root built by `out +=` splices the marker in a
+            # sibling statement a few lines on (fielduses.h, editcheck.h, situ.h's test-gate), which is still
+            # "the same element" — the window is what makes that legible to a source grep
+            stmt = "\n".join( lines[ b:e + 1 ] )
+            window = "\n".join( lines[ b:min( len( lines ), e + 15 ) ] )
+            # a legend's worded example ("<callers of= ...>" inside a comment string) is not an emitter: an
+            # emitter statement carries a format directive or a live concatenation on that same tag line
+            if "%" not in stmt and "+" not in stmt and "write(" not in stmt: continue
+            if pat == r'"<community id=' and "partition=" not in stmt: continue
+            found[ pat ] += 1
+            stmt = window
+            # the constant by name, or its exact literal spelling (situ.h's test-gate root writes the literal)
+            if "kGraphCountFloorAttr" in stmt or "kGraphCountFloorText" in stmt or 'counts_floor=\\"1\\"' in stmt or '\\"counts_floor\\":true' in stmt:
+                print( f"  PASS  (10) {fn}:{i+1} {pat} splices the floor in the same statement" )
+            else:
+                print( f"  FAIL  (10) {fn}:{i+1} {pat} opens a CSR-derived root with NO floor constant in the statement" ); fail = 1
+for pat, n in found.items():
+    if n == 0:
+        print( f"  FAIL  (10) presence guard — {pat} matched no emitter in src/ (the pattern is stale; fix the guard, do not delete it)" ); fail = 1
+print( f"  ..    (10) {sum(found.values())} emitter statement(s) inspected across {len(PATTERNS)} root patterns" )
+sys.exit( fail )
+PY10
+[ $? = 0 ] || fail=1
+
+echo
 echo "=== (7) MUTATION — each assertion shape can actually fail ==="
 printf '<callers of="x" count="3">' >"$TMP/mut_root.xml"
 grep -q "$MARK_XML" "$TMP/mut_root.xml" \

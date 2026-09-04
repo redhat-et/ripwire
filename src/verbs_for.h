@@ -2220,7 +2220,7 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // R-E fix (2026-08-19): the document root DISCLOSES the root its p= are now relative to. The first
         // R-E landing made packLego's p= root-relative and left the root undisclosed, so a --lego bundle
         // carried relative paths against a root the reader could not name — the honesty rule this tool sells.
-        std::printf( "%s", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str() );
+        std::printf( "%s%s", rw::ctxRootOpen( {}, {}, tvRootArg ).c_str(), rw::kLegoLegend );   // H5: --lego had no legend at all
         packLego( stdout, ing, g.implementors, flat, 1, d.redactPtr, &legoImpure, focus, /*withPaths=*/true, tvRootArg );
         std::printf( "</ctx>" );
         reportRedactions( stderr, d.redactCounts );      // W3-N1: a contract <m> sig is a redacting seam — disclose the tally
