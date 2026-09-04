@@ -282,7 +282,7 @@ inline void emitCandidates( std::FILE* out, const rw::IngestResult& ing, const s
 // the XML sibling shrank 4.7x, so the JSON/MCP audience — the one that most needs a budget — had none. It
 // runs the same H1 ladder against the same budget the XML path computes, and SAYS what it did: "capped" is
 // the ladder's own verdict (never inferred by the caller) and "est_tokens" is the delivered size, mirroring
-// the XML `<sigs capped="1">` / header `est_tokens="N"` attributes.
+// the XML `<sigs shown= total= capped="1">` / header `est_tokens="N"` attributes.
 //
 // The sigs array is rendered into memory first for exactly the reason the XML path buffers it: the TRUE
 // delivered byte count must be known before the header that reports it is written. Its own function (not a

@@ -68,10 +68,13 @@
 //                           ABSENT ⇒ the total is exact (--lint's §P0.2 legend: "Absent = nothing was
 //                           capped and every count= is a total").
 //
-//   5. bare capped="1"      a payload trimmed by a BYTE budget rather than a row cap, on the trimmed element
-//      with no shown=       itself: there is no row total to disclose, only "this was trimmed". --for's
-//                           <sigs capped="1"> (the rank-adaptive ladder). Absent ⇒ untrimmed. This replaced
-//                           payload="capped", a string enum only string-matching could read.
+//   5. capped="1" on a      a payload trimmed by a BYTE budget rather than a row cap, on the trimmed element
+//      byte-trimmed element itself, WITH shown=/total= (capture-audit 2026-09-04): --for's <sigs shown="S"
+//                           total="T" capped="1"> (the rank-adaptive ladder) — T rows handed to the ladder, S
+//                           printed; S == T means every row survived but was shrunk. Absent ⇒ untrimmed.
+//                           This replaced payload="capped", a string enum only string-matching could read,
+//                           and then a BARE capped="1" that said "trimmed" without saying how much — the
+//                           one element in the tool whose capped= rode without its pair (truncvocabcheck (F)).
 //
 //   6. the paging half      (below) always describes the report's PRIMARY, --limit/--offset-windowed
 //                           listing. A secondary listing in the same report never gets paging attributes —

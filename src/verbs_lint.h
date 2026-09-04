@@ -428,8 +428,11 @@ void printLintRuleTallyRow( const std::string& name, const std::string* sev, std
         sevBuf   = " sev=\"" + *sev + "\"";
         sevPart  = sevBuf.c_str();
     }
+    // capture-audit 2026-09-04 (truncvocabcheck arm (F)): the match-budget floor is rule 4's marker on the
+    // count= it floors — count_capped="1" — not a BARE capped="1" with no shown= beside it, which read as
+    // rule 3's window bit missing its pair. Same fact, the vocabulary's own spelling for it.
     std::printf( "<rule name=\"%s\"%s count=\"%u\" shown_rows=\"%u\" rows_capped=\"%u\"%s%s/>", name.c_str(), sevPart, count, shown,
-                 shown < count ? 1u : 0u, capped ? " capped=\"1\"" : "", applicable ? "" : " applicable=\"0\"" );
+                 shown < count ? 1u : 0u, capped ? " count_capped=\"1\"" : "", applicable ? "" : " applicable=\"0\"" );
 }
 
 // wave-4 item 12: the (count, shown-inside-`lintPage`) pair for ONE rule's rows in the already-sorted
@@ -1819,11 +1822,11 @@ std::optional<int> runLint( const MainDispatch& d )
                      "in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
                      "A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. "
                      "Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. "
-                     "A rule that spends its whole budget carries capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
+                     "A rule that spends its whole budget carries count_capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
                      "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one rule is a floor. "
                      "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). "
                      "On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed "
-                     "them, absent an explicit limit=) — a different fact from the per-rule capped=\"1\" above, which is a MATCH-BUDGET "
+                     "them, absent an explicit limit=) — a different fact from the per-rule count_capped=\"1\" above, which is a MATCH-BUDGET "
                      "floor on one rule's own count=; findings= is always the true total either way. "
                      "A rule row's applicable=\"0\" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this "
                      "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
@@ -1832,7 +1835,7 @@ std::optional<int> runLint( const MainDispatch& d )
                      "Each rule row's own shown_rows=/rows_capped= is how many of THAT rule's rows fall inside the printed <f> window "
                      "(the root's shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the "
                      "cut carries shown_rows=\"0\" rows_capped=\"1\" while its count= stays the true total — never confuse a capped-away "
-                     "rule with one that measured zero); this is a DIFFERENT fact from the row's own bare capped=\"1\" above (that rule's "
+                     "rule with one that measured zero); this is a DIFFERENT fact from the row's own count_capped=\"1\" above (that rule's "
                      "own raw-capture stream hit its per-rule match budget) — the two can disagree on the same row. -->" );
         if( !cfg.withProfile.empty() )
         {

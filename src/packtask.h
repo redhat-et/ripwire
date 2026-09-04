@@ -713,11 +713,15 @@ inline RankingSection renderRankingWithFar( const IngestResult& ing, const Ranki
                                                      //   rank>0 per symbol regardless, so this is unaffected either way
                         &out.droppedPositive );      // A2: exact count, see droppedPositiveCount (serialize.h)
     } );
-    // §P8 vocabulary: the ladder's marker is now `<sigs capped="1">` (src/pageview.h, THE TRUNCATION
-    // VOCABULARY, rule 5) — it was payload="capped", and THIS was the string-match that made a string enum
-    // load-bearing. Matched with the element name attached so a capped= on any nested child can never be
-    // read as the ranking section's own verdict.
-    out.capped = out.sigsStr.find( "<sigs capped=\"1\">" ) != std::string::npos;
+    // §P8 vocabulary: the ladder's marker is `<sigs shown="S" total="T" capped="1">` (src/pageview.h, THE
+    // TRUNCATION VOCABULARY, rule 5) — it was payload="capped", and THIS was the string-match that made a
+    // string enum load-bearing. Read off the OPENING TAG only, so a capped= on any nested child can never
+    // be read as the ranking section's own verdict.
+    {
+        const std::size_t tagEnd = out.sigsStr.find( '>' );
+        out.capped = tagEnd != std::string::npos && out.sigsStr.compare( 0, 6, "<sigs " ) == 0
+                  && out.sigsStr.substr( 0, tagEnd ).find( " capped=\"1\"" ) != std::string::npos;
+    }
 
     const std::vector<std::string> farRows = renderNameOnlyRows( ing, *ri.d2plusIds, ex, ri.in->rootArg );
     char farAttr[ 32 ];  std::snprintf( farAttr, sizeof( farAttr ), " of_top=\"%zu\"", ri.topRanked->size() );

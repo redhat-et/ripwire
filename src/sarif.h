@@ -13,7 +13,7 @@
 //
 // HONESTY (the project's non-negotiable #3: no surface quietly omits). Two things the XML <lint>
 // carries that have no SARIF-standard field:
-//   - a rule's per-run "spent its whole capture budget" floor (XML: <rule name=".." capped="1"/>)
+//   - a rule's per-run "spent its whole capture budget" floor (XML: <rule name=".." count_capped="1"/>)
 //   - a finding's enclosing symbol NAME (XML: <f ... in="..">)
 // Both ride in `properties` rather than being dropped. The raw ripwire severity string (empty for
 // a built-in fact, else info|warn|error) also rides there, alongside the SARIF `level` it was
@@ -73,7 +73,7 @@ struct SarifRuleDecl
     std::string id;                  // built-in tag ("c-style-cast", ...) or user rule id
     bool        isUserRule = false;
     bool        capped     = false;  // this rule's raw capture stream spent its whole per-rule budget
-                                      // (XML twin: <rule name=".." capped="1"/> — its count is a FLOOR)
+                                      // (XML twin: <rule name=".." count_capped="1"/> — its count is a FLOOR)
     bool        selected   = true;   // kept by --lint-select=/--lint-ignore= (XML twin: the row exists at all)
     bool        applicable = true;   // at least one of its registered languages is in this corpus
                                       // (XML twin: the ABSENCE of applicable="0" on the row)

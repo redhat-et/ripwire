@@ -821,8 +821,9 @@ inline void printUsage( std::FILE* out ) noexcept
         // replaced with the boolean capped="1" every other truncating element spells (serialize.h's own
         // comment records the rename). No output the tool can emit has contained payload= since; --help was
         // the last place the dead spelling survived, and a reader grepping their bundle for it finds nothing.
-        "                               ~7.5KB default payload budget (tail entries trim first; <sigs capped=\"1\"> marks\n"
-        "                               it) — an explicit --token-budget=N overrides the default at the conservative byte rate\n"
+        "                               ~7.5KB default payload budget (tail entries trim first; <sigs shown=S total=T\n"
+        "                               capped=\"1\"> marks it: T rows handed to the trim, S printed) — an explicit\n"
+        "                               --token-budget=N overrides the default at the conservative byte rate\n"
         "                               (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens.\n"
         "                               TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride\n"
         "                               inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance —\n"

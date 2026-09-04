@@ -3374,8 +3374,12 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         const bool capped = total > payloadBudgetBytes;
         if( capped )
         {
-            // the marker itself costs bytes — budget the trimmed state INCLUDING it (guard tiny budgets)
-            const std::size_t markerBytes     = sizeof( " capped=\"1\"" ) - 1;
+            // the marker itself costs bytes — budget the trimmed state INCLUDING it (guard tiny budgets).
+            // capture-audit 2026-09-04: the marker is now ` shown="S" total="T" capped="1"` — S ≤ T, so
+            // both numbers fit in T's digit count, and T (entries.size()) is known before the ladder runs.
+            std::size_t totalDigits = 1;
+            for( std::size_t t = entries.size(); t >= 10; t /= 10 ) { ++totalDigits; }
+            const std::size_t markerBytes     = ( sizeof( " shown=\"\" total=\"\" capped=\"1\"" ) - 1 ) + 2 * totalDigits;
             const std::size_t effectiveBudget = payloadBudgetBytes > markerBytes ? payloadBudgetBytes - markerBytes : 0;
 
             // one ladder ACTION on one entry, tail-first; every action re-checks the budget so the ladder
@@ -3401,10 +3405,26 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 5): this marker used to be
         // payload="capped" — a STRING ENUM, the tool's only one, readable solely by string-matching the
         // literal (packtask.h did exactly that). It is now the same boolean capped= every other truncating
-        // element spells, so one parser reads them all. It carries no shown=/total= on purpose: the ladder
-        // trims a BYTE budget, and shrinking a signature or dropping a doc excerpt reduces no row count, so
-        // there is no honest S<T pair to print here — only "this payload was trimmed". Absent = untrimmed.
-        w.write( capped ? "<sigs capped=\"1\">" : "<sigs>" );
+        // element spells, so one parser reads them all.
+        // capture-audit 2026-09-04 (lens 4 / lens 1 F7 / lens 2 L5): it carries shown=/total= too. The
+        // earlier "no honest S<T pair" argument was half right — a ladder step that shrinks a signature drops
+        // no row — but the ladder's LAST steps drop whole entries, and on the audited binary 11 of 40
+        // adaptive-kept rows vanished behind a bare capped="1" while every sibling section (<tail>, <hops>,
+        // <calls>, <bodies>) said how many it was handed. shown= = rows printed, total= = rows handed to the
+        // ladder; capped="1" with shown == total means every row survived but was SHRUNK (doc excerpts /
+        // signature tails cut). Absent = untrimmed. Gate: truncvocabcheck.sh arms (C) + (F).
+        if( capped )
+        {
+            std::size_t shownRows = 0;
+            for( const SigEntry& e : entries ) { if( !e.dropped ) { ++shownRows; } }
+            char open[ 80 ];
+            std::snprintf( open, sizeof( open ), "<sigs shown=\"%zu\" total=\"%zu\" capped=\"1\">", shownRows, entries.size() );
+            w.write( open );
+        }
+        else
+        {
+            w.write( "<sigs>" );
+        }
         for( const SigFile& sf : sigFiles )
         {
             if( capped && sf.liveCount == 0 && sf.entryEnd > sf.entryBegin )
