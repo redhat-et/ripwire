@@ -125,7 +125,27 @@ inline constexpr const char* kForRootRelPathsLegendShort =
     "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's "
     "own path, unchanged). -->";
 
-inline const char* forRootRelPathsLegendShort( bool on ) noexcept { return on ? kForRootRelPathsLegendShort : ""; }
+// M10: the SAME clause, plus an at= mention, for the CLI --for path that also stamps at= (single-root AND
+// a git repo — a single-root run over a non-git directory gets root= alone, kForRootRelPathsLegendShort
+// above, never a false at= claim). Folded into ONE comment rather than a second "<!-- -->" pair: at this
+// verb's measured byte ceiling (fornotesbudgetcheck.sh), the 7-byte wrapper overhead was the difference
+// between fitting and not. Kept maximally terse (24 B over the root=-only form, ~10 tokens) — the full
+// kAtStampLegend sentence every other stamped verb affords is not affordable here; see the comment above
+// kForRootRelPathsLegendShort for the same trade-off's original measurement.
+inline constexpr const char* kForRootRelAtLegendShort =
+    "<!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's "
+    "own path, unchanged); at=this commit(+dirty). -->";
+
+// `rootOn` is the emitter's own root=-present condition; `atOn` is its at=-present condition (gitAtAttr
+// non-empty) — never re-derived from each other, since a non-git single-root run has rootOn without atOn.
+inline const char* forRootRelPathsLegendShort( bool rootOn, bool atOn = false ) noexcept
+{
+    if( !rootOn )
+    {
+        return "";
+    }
+    return atOn ? kForRootRelAtLegendShort : kForRootRelPathsLegendShort;
+}
 
 // ---- the per-verb legend OPENERS that more than one emitter prints -------------------------------------
 // Each of these had TWO byte-identical copies (a CLI one in main.cpp, an MCP one in mcpverbs.h) before this

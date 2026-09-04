@@ -56,6 +56,7 @@
 
 #include "model.h"
 #include "quality.h"            // materializeCommitTree / TmpTreeGuard / gitResolveCommitSha / gitHeadSha / the HEAD ingest-cache keys
+#include "gitstamp.h"           // stampAt — the at="<sha>[+dirty]" anchor (M10: --dmm read git and carried no anchor)
 #include "ingest.h"             // ingest — the second side is a real parse of a materialized tree
 #include "serialize.h"          // escapeXml
 #include "infra/Diagnostics.h"  // DEGRADED_PATH_ALERT — every failure here degrades to UNAVAILABLE, never aborts
@@ -119,6 +120,8 @@ struct Result
     std::string   reason;                // the sentence the report prints when there is no score
     std::string   baseSha;               // resolved, full
     std::string   targetSha;             // resolved, full; empty ⇔ the target is the working tree
+    std::string   atStamp;               // M10: gitstamp::stampAt(root) — the tool's OWN anchor (HEAD+dirty),
+                                          // distinct from base=/target= (the compared revisions); "" on a non-git root
     bool          targetIsWorkingTree = false;
     SideProfile   base;
     SideProfile   target;
@@ -281,6 +284,7 @@ inline Result computeDmm( const std::string& root, std::string_view spec, const 
                           const std::vector<std::string>& excludes, std::size_t maxFileBytes )
 {
     Result r;
+    r.atStamp = gitstamp::stampAt( root );   // M10: the tool's own anchor (HEAD+dirty) — independent of base/target, which name the COMPARED revisions, not when the comparison ran
 
     const quality::RefSpec ref = quality::resolveRefSpec( root, spec );
     switch( ref.status )
@@ -355,6 +359,8 @@ inline constexpr const char* kDmmLegend =
     "publishes the three separately and no aggregate, so this one is ripwire's) "
     "size_metric=physical-loc: volume is the definition's PHYSICAL line span, where the reference implementation "
     "uses non-comment non-blank lines, so a heavily commented unit crosses the size threshold here earlier "
+    "at= is the git commit this comparison RAN at (HEAD, not base/target — those name what was compared); a "
+    "trailing +dirty means the working tree differed from that commit "
     "available=0 when no score could be produced at all "
     "p=one property row k=its name (size|complexity|interfacing) d_low=change in low-risk volume d_high=change in "
     "high-risk volume. Every indexed language and every indexed path counts, tests and fixtures included; params "
@@ -387,18 +393,21 @@ inline int writeDmmReport( const Result& r )
 
     std::fputs( kDmmLegend, stdout );
     std::fputs( "<dmm", stdout );
+    // M10: at= is the tool's OWN anchor (HEAD+dirty), independent of base=/target= below (the compared
+    // revisions) — omitted entirely on a non-git root, same convention as every other stamped verb.
+    const std::string atAttrStr = r.atStamp.empty() ? std::string() : ( " at=\"" + r.atStamp + "\"" );
 
     if( r.status != Status::Ok )
     {
         const std::string reason( escapeXml( r.reason, escReason ) );
-        std::printf( " available=\"0\" dmm=\"UNAVAILABLE\" reason=\"%s\"/>", reason.c_str() );
+        std::printf( " available=\"0\" dmm=\"UNAVAILABLE\" reason=\"%s\"%s/>", reason.c_str(), atAttrStr.c_str() );
         return 0;
     }
 
     const std::string base( escapeXml( r.baseSha, escBase ) );
     const std::string target( escapeXml( r.targetIsWorkingTree ? std::string( "working-tree" ) : r.targetSha, escTarget ) );
-    std::printf( " base=\"%s\" target=\"%s\" available=\"%d\" combine=\"pooled\" size_metric=\"physical-loc\"",
-                 base.c_str(), target.c_str(), r.available ? 1 : 0 );
+    std::printf( " base=\"%s\" target=\"%s\"%s available=\"%d\" combine=\"pooled\" size_metric=\"physical-loc\"",
+                 base.c_str(), target.c_str(), atAttrStr.c_str(), r.available ? 1 : 0 );
     printScoreAttr( "dmm", r.available, r.score );
     std::printf( " good=\"%llu\" bad=\"%llu\"", static_cast<unsigned long long>( r.good ), static_cast<unsigned long long>( r.bad ) );
     std::printf( " base_units=\"%llu\" base_volume=\"%llu\" target_units=\"%llu\" target_volume=\"%llu\"",

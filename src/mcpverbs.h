@@ -995,7 +995,13 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     const TestRunnerIndex runners( ing );
     const auto            jsonEsc = []( std::string_view sv ) { return mcpdetail::jsonEscape( std::string( sv ) ); };
 
-    std::string out = "{";
+    // M10: this verb reads git (the diff itself, plus an 18-month co-change mine below) and, before this
+    // fix, carried no anchor at all — same gap the CLI text twin (writeSituation) had. "at":null (never a
+    // fake sha) on a non-git root, mirroring writeTestGateReportJson's own at= convention in this file.
+    const std::string situJAtVal  = gitstamp::stampAt( root );
+    const std::string situJAtJson = situJAtVal.empty() ? std::string( "null" ) : ( "\"" + situJAtVal + "\"" );
+
+    std::string out = "{\"at\":" + situJAtJson + ",";
     if( situJSingleRoot )
     {
         out += "\"root\":\"" + mcpdetail::jsonEscape( root ) + "\",";

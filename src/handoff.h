@@ -194,7 +194,8 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     const auto assemble = [ & ]( std::size_t keepRows, std::size_t withheld )
     {
         std::string doc = "<!-- ripwire handoff: the continuation packet for the NEXT session. <verified> is disk truth "
-                          "(branch/sha, changed files+symbols via git numstat, blast_files=transitive dependent files, tests-to-run); "
+                          "(branch=/at=<sha>[+dirty]/subject=<commit subject text>, changed files+symbols via git numstat, "
+                          "blast_files=transitive dependent files, tests-to-run); "
                           "<heuristic> is labeled non-verified suggestion (cochange=usually-edited-together deg=degree, note=committed "
                           ".ripwire_notes row, doc=plan/design pointer s=lexical score for the branch+commit-subject query). "
                           "budget= is the token-budget cap and withheld= counts heuristic rows dropped to fit it — verified rows are "
@@ -205,7 +206,10 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
         doc += " root=\"";  doc += escapeXml( root, esc );  doc += "\"";
         doc += " branch=\"";
         doc += escapeXml( branch, esc );
-        doc += "\" head=\"";
+        doc += "\" subject=\"";   // M10 (M0-4): was `head=`, but this holds the commit SUBJECT text, not a
+                                  // sha — `head=` means a sha on --merge-scout/--stray-content/--stray-content
+                                  // --abi; the sha is `at=` above, so this is the one true rename, not a
+                                  // second spelling of the same fact.
         doc += escapeXml( subject, esc );
         doc += "\" gitok=\"" + std::string( gitOk ? "1" : "0" ) + "\"";
         if( tokenBudget > 0 )

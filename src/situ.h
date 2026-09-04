@@ -245,6 +245,15 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     {
         std::fprintf( out, "root: %s\n", root.c_str() );
     }
+    // M10: this report reads git (the diff itself, plus an 18-month co-change mine below) and, before this
+    // fix, carried no anchor at all — an agent quoting its numbers into a handoff had nothing checkable to
+    // pin them to. Plain text, so this is a line, not an attribute; "" (non-git root) omits the line
+    // entirely, same convention as every XML sibling's at= omission.
+    const std::string situAtStamp = gitstamp::stampAt( root );
+    if( !situAtStamp.empty() )
+    {
+        std::fprintf( out, "at: %s\n", situAtStamp.c_str() );
+    }
     if( changedSyms.empty() )
     { std::fprintf( out, "  (no indexed symbols in the changed files — nothing to analyze)\n" ); return; }
 

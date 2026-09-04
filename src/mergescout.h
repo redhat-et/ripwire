@@ -77,6 +77,7 @@
 #include "model.h"
 #include "ingest.h"
 #include "quality.h"            // materializeCommitTree / TmpTreeGuard / bodyHashesBySym / gitOneLine / gitHeadSha / gitRepoHasHistory
+#include "gitstamp.h"           // stampAt — the at="<sha>[+dirty]" anchor (M10)
 #include "resolve.h"            // canonicalId
 #include "arch.h"               // relForHash, fnv1a64
 #include "infra/jsonesc.h"      // shSingleQuote
@@ -311,6 +312,10 @@ struct ScoutResult
                                              // its message off this flag instead of guessing from badRef=="".
     std::string       badRef;        // set when ok==false && !nonGitRoot: the offending ref token
     std::string       headSha;
+    std::string       atStamp;       // M10: gitstamp::stampAt(root) — "" on a non-git root (r26-stamp Task A convention,
+                                      // docdrift.h/landingplan.h precedent). head= above stays a bare 9-hex sha (no dirty
+                                      // bit) because gitstampcheck.sh's landing-plan arm already pins that spelling
+                                      // elsewhere; this is the NEW at= that carries the dirty bit merge-scout already computes.
     std::vector<Arm>  arms;          // one per REF (declaration order), + the working-tree arm last when dirty
 };
 
@@ -520,6 +525,7 @@ inline ScoutResult computeMergeScout( const std::string& root, std::string_view 
     if( refs.empty() ) { result.ok = false; result.badRef = std::string( refsCsv ); return result; }
 
     result.headSha = quality::gitHeadSha( root );
+    result.atStamp = gitstamp::stampAt( root );   // M10: same anchor as every other repo-reading root, dirty bit included
 
     auto [ refShas, badRef ] = resolveAllRefs( root, refs );
     if( !badRef.empty() ) { result.ok = false; result.badRef = std::move( badRef ); return result; }
@@ -796,11 +802,17 @@ inline void writeMergeScout( std::FILE* out, const ScoutResult& result )
                        "merge fight no pairwise ARM comparison can see because HEAD is not an arm. A row carrying "
                        "anchoring=file-level is a whole-file fallback for a file with zero real-body symbols (no "
                        "tree-sitter symbol spans it) — counted and conflict-checked like any other row, just not "
-                       "attributed to a symbol inside it. -->", result.arms.size() );
+                       "attributed to a symbol inside it. at= is the git commit these numbers were computed at; a "
+                       "trailing +dirty means the working tree differed from that commit (head= is the same commit, "
+                       "bare sha, kept for compatibility). -->", result.arms.size() );
     // §P8: head= was a FULL 40 here vs 9 hex in <abi>/<stray-content>/<landing-plan>/<history> — one name,
     // two widths. Aligned to the majority; nothing reads this one. (`base=` on the <arm> rows is still full
     // against <stray-content>'s 9-char base= — a second split, documented, not widened into this change.)
-    std::fprintf( out, "<merge-scout arms=\"%zu\" head=\"%.9s\">", result.arms.size(), ex( result.headSha ).c_str() );
+    // M10: head= stays exactly as it was (gitstampcheck.sh's existing arms pin the bare-sha spelling
+    // elsewhere in this family) — at= is the NEW attribute, carrying the +dirty bit this verb already
+    // computes (the `dirty` local above) but never disclosed.
+    const std::string atAttrStr = result.atStamp.empty() ? std::string() : ( " at=\"" + result.atStamp + "\"" );
+    std::fprintf( out, "<merge-scout arms=\"%zu\" head=\"%.9s\"%s>", result.arms.size(), ex( result.headSha ).c_str(), atAttrStr.c_str() );
 
     for( const Arm& arm : result.arms )
     {
