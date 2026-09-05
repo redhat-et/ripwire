@@ -1594,13 +1594,41 @@ inline constexpr const char* kIgnoredLegend =
 // inside this string. A tag-scoped extractor elsewhere (grep -oE '<calls[^>]*>' | head -1, in
 // test/expandcallscheck.sh) matches the FIRST such substring in the document, comment or not, and this
 // legend is written before the real <calls ...> child — a bare "<calls...>" example here would shadow it.
+// E1 (terminality round A, 2026-09-05): redactInPlace, plus the answer to "did THIS body change?" read off the
+// tally delta — an agent about to paste the body back needs that on the element (<b redacted="1">), not in the
+// stderr summary it never sees. Its own function so packBodies' complexity does not carry the bookkeeping.
+inline bool redactBodyDisclosed( std::string& body, RedactCounts* redact )
+{
+    const std::uint32_t before = redact ? redact->total() : 0u;
+    redactInPlace( body, redact );
+    return redact != nullptr && redact->total() != before;
+}
+
+// the two "this CDATA is not the bytes on disk" markers a <b> can carry — absent means paste-back is byte-exact.
+// scrubbed="1": appendCdataSafe split a ]]> or replaced a C0/invalid-UTF-8 byte; redacted="1": a credential shape
+// was rewritten (kBodiesLegend defines both where the reader meets them).
+inline void appendBodyFidelityAttrs( std::string& children, bool bodyScrubbed, bool bodyRedacted )
+{
+    if( bodyScrubbed )
+    {
+        children += " scrubbed=\"1\"";
+    }
+    if( bodyRedacted )
+    {
+        children += " redacted=\"1\"";
+    }
+}
+
 inline constexpr const char* kBodiesLegend =
     "<!-- a body's sibs=\"a,b,...\" sibs_total=N are the file's OTHER indexed symbols (this body's own name "
     "excluded), source order, capped at 8 (sibs_capped=\"1\" when the cap fired); inc=\"x.h,...\" inc_total=N "
     "are the file's own #include/import targets, source order, capped at 24 (inc_capped=\"1\" when the cap "
     "fired) — both absent when the count is 0 (a documented zero, not a degrade). Each body's own calls "
     "child (1-hop callee signatures) carries total=/shown=/capped=\"1\" the usual way: capped=\"1\" only "
-    "when shown is below total. -->";
+    "when shown is below total. A body's CDATA is the bytes on disk unless the element says otherwise: "
+    "scrubbed=\"1\" = a ]]> was split (]]]]><![CDATA[>, rejoin it) or a C0/invalid-UTF-8 byte was replaced; "
+    "redacted=\"1\" = a credential shape was rewritten to a [REDACTED:kind] marker (the no-redact flag serves the "
+    "bytes; the edit verbs refuse a payload carrying the marker). Absent = paste-back is byte-exact. -->";
 
 inline constexpr const char* kMetricsLegend =
     "<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=MAX-depth "
@@ -4613,7 +4641,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
 
             // Redact credential shapes from the def body (a full-body emission seam). After compress /
             // truncation so those size-based decisions see the un-redacted bytes; no-op under --no-redact.
-            redactInPlace( body, redact );
+            const bool bodyRedacted = redactBodyDisclosed( body, redact );
 
             std::string safe;  safe.reserve( body.size() );        // split ]]>; scrub C0 controls (G4) + invalid UTF-8 (A4-F20)
             appendCdataSafe( body, safe );
@@ -4628,10 +4656,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
             children += hdr;  children += escapeXml( pathRel( f ), esc );
             children += "\" n=\"";  children += escapeXml( s.name, esc );  children += "\"";
             children += partAttr;                                 // octocode partial-fetch: lines="lo-hi/total" (empty on the whole-body path)
-            if( bodyScrubbed )
-            {
-                children += " scrubbed=\"1\""; // absent = the CDATA is byte-equal to the JSON twin
-            }
+            appendBodyFidelityAttrs( children, bodyScrubbed, bodyRedacted );
             // V1 (octocode F2): sibs=/inc= — the file-context lookup an --expand caller used to need a
             // second --outline call for. `fileCtx` is empty when withFileContext is false, so this is a
             // single failed HashMap::find per body (no-op) on every other packBodies caller. The actual

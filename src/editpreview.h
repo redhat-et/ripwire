@@ -111,6 +111,11 @@ inline bool readPayload( std::string_view spec, std::size_t maxFileBytes, std::s
         err = "--edit-payload " + std::string( rw::mcpedit::kBinaryPayloadRefusal );
         return false;
     }
+    if( out.find( rw::mcpedit::kRedactionMarker ) != std::string::npos )
+    {   // E1: a body copied from a REDACTED --expand — the marker must never reach source
+        err = "--edit-payload " + std::string( rw::mcpedit::kRedactionMarkerRefusal );
+        return false;
+    }
     return true;
 }
 
@@ -322,7 +327,8 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     const std::string       editText      = eolNormalized ? mcpedit::normalizeToCrlf( payload ) : payload;
 
     std::size_t       newStart = 0, newEnd = 0;
-    const std::string newBytes = mcpedit::applyEdit( mcpedit::Op::ReplaceBody, src, a, b, editText, newStart, newEnd );
+    mcpedit::SeamInfo seam;   // the preview measures the same bytes an apply would write, seam rules included
+    const std::string newBytes = mcpedit::applyEdit( mcpedit::Op::ReplaceBody, src, a, b, editText, newStart, newEnd, seam );
 
     const std::string relPath = std::string( rw::sarif::rootRelativeUri( path, rw::sarif::rootPrefixOf( root ) ) );
     std::error_code   ec;

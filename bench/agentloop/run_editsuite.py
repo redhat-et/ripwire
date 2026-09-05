@@ -246,15 +246,19 @@ def classify_call( call, target_files, target_symbols ):
         return "shell-misc", "other", ""
     return "unclassified", "other", ""
 
-def edit_call_index( classified, arm, target_files ):
-    """Index of THE edit call the window hangs off: the first ripwire edit verb (ripwire arm) or the first
-    native edit of a target file (native arm). None when the agent never edited."""
-    for i, c in enumerate( classified ):
-        if arm == "ripwire_edit" and c["class"] == "ripwire-edit":
-            return i
-        if arm == "native_edit" and c["class"] == "native-edit" and c["target"]:
-            return i
-    return None
+def edit_call_index( classified, arm, target_files, ops=1 ):
+    """Index of THE edit call the window hangs off. A task of N ops is one edit either way: the ripwire arm
+    lands it as one --edit-plan (one call) or N single verbs, the native arm as N edit-tool calls — so the
+    window opens after the N-th edit call of the arm's own kind (or the last one, when fewer were made).
+    Counting from the FIRST call would charge a multi-op task's own later edits as "re-edits". A single-op
+    task is the N=1 case. None when the agent never edited."""
+    want = "ripwire-edit" if arm == "ripwire_edit" else "native-edit"
+    hits = [ i for i, c in enumerate( classified ) if c["class"] == want and ( arm == "ripwire_edit" or c["target"] ) ]
+    if not hits:
+        return None
+    if arm == "ripwire_edit" and any( "--edit-plan" in classified[i]["detail"] for i in hits ):
+        return hits[ [ "--edit-plan" in classified[i]["detail"] for i in hits ].index( True ) ]   # the plan IS the N ops
+    return hits[ min( len( hits ), max( 1, ops ) ) - 1 ]
 
 def window_verdict( classified, edit_idx ):
     """The post-edit window, classified per docs/EVALS.md T2:
@@ -307,7 +311,7 @@ def meter_rows( record, classified ):
     """One row per tool call, in the meter row shape (bench/substitution_report.py): v, ts, seq, session,
     repo, tag, tool, class, family, agent, surface, target, detail. `agent` is the runner, `surface` is cli
     (these runners drive ripwire through the shell shim; no MCP)."""
-    ts = datetime.datetime.utcfromtimestamp( record.get( "started_unix" ) or time.time() ).strftime( "%Y-%m-%dT%H:%M:%SZ" )
+    ts = datetime.datetime.fromtimestamp( record.get( "started_unix" ) or time.time(), datetime.timezone.utc ).strftime( "%Y-%m-%dT%H:%M:%SZ" )
     rows = []
     for seq, c in enumerate( classified, 1 ):
         rows.append( { "v": METER_V, "ts": ts, "seq": seq, "session": record["run_id"], "repo": record["repo_dir"],
@@ -374,7 +378,7 @@ def run_one_edit( task, arm, seed, harness, model, *, work_dir, ripwire_bin, tim
     rec.update( ripwire_calls=shim_calls, ripwire_commands=shim_cmds )
     calls      = walk_tool_calls( harness, stdout )
     classified = classify_all( calls, rec["target_files"], rec["target_symbols"] )
-    idx        = edit_call_index( classified, arm, rec["target_files"] )
+    idx        = edit_call_index( classified, arm, rec["target_files"], len( task_ops( task ) ) )
     rec["tool_calls"] = len( classified ); rec["edit_call_index"] = idx
     rec["window"] = window_verdict( classified, idx )
     if arm == "native_edit" and shim_calls:
@@ -382,6 +386,21 @@ def run_one_edit( task, arm, seed, harness, model, *, work_dir, ripwire_bin, tim
     rec["oracle"], rec["oracle_note"] = oracle( task["id"], repo )
     rec["finished_unix"] = time.time()
     return rec, meter_rows( rec, classified )
+
+def reclassify( records ):
+    """Re-derive every record's window from its retained events with the classifier as it is NOW, so two
+    result files produced under different versions of this script are read by ONE instrument. A record
+    whose events file is gone keeps the window it recorded."""
+    tasks = { t["id"]: t for t in load_tasks() }
+    for rec in records:
+        ev = rec.get( "events_path" )
+        if not ev or not pathlib.Path( ev ).exists() or rec["task_id"] not in tasks:
+            continue
+        calls      = walk_tool_calls( rec["harness"], pathlib.Path( ev ).read_text() )
+        classified = classify_all( calls, rec["target_files"], rec["target_symbols"] )
+        idx        = edit_call_index( classified, rec["arm"], rec["target_files"], len( task_ops( tasks[ rec["task_id"] ] ) ) )
+        rec["tool_calls"], rec["edit_call_index"], rec["window"] = len( classified ), idx, window_verdict( classified, idx )
+    return records
 
 # ── summary ───────────────────────────────────────────────────────────────────────────────────────────
 def summarize( records ):
@@ -461,7 +480,7 @@ def main():
         records = []
         for path in a.summarize.split( "," ):   # a matrix run in chunks: several results files, one table
             records.extend( json.loads( pathlib.Path( path ).read_text() )["records"] )
-        print_summary( records )
+        print_summary( reclassify( records ) )
         return 0
 
     tasks = load_tasks()

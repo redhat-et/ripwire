@@ -36,6 +36,7 @@ struct Edit
     // receipt named the target as the caller SPELLED it and the payload path it would read, and stopped —
     // so "is this the definition I meant, and who breaks if it moves" was still one --edit-check per op
     // after the fact. Resolved at prepare time, where the index is already open and the node already known.
+    mcpedit::SeamInfo seam;                // E1: what applyEdit's seam rules did to this op's payload
     std::string   symName;                 // the RESOLVED definition name (a seed/handle target says nothing)
     std::uint32_t line = 0;                // its 1-based defining line — emitted with the file as at="file:line"
     std::vector<NodeId> callers;           // its 1-hop callers, deduped and sorted (the union feeds the root)
@@ -207,6 +208,7 @@ inline bool parseEdit( const McpIndex& ix, const std::string& object, const std:
     // A1: the plan path does not route through runEditVerb, so it carries the same third payload arm itself.
     // Preflight, like every other plan refusal — no file in the plan is written when any one edit is bad.
     if( looksBinary( edit.payload ) ) { error = "payload '" + payloadPath + "' " + std::string( mcpedit::kBinaryPayloadRefusal ); return false; }
+    if( edit.payload.find( mcpedit::kRedactionMarker ) != std::string::npos ) { error = "payload '" + payloadPath + "' " + std::string( mcpedit::kRedactionMarkerRefusal ); return false; }
     const mcpedit::EditTarget target = mcpedit::resolveTarget( ix, edit.target, edit.fileHint );
     if( target.id == kNoNode || target.id >= ix.ing.symbols.size() ) { error = target.error; return false; }
     edit.node = target.id;
@@ -258,8 +260,8 @@ inline bool stageEdits( std::vector<Edit>& edits, std::vector<FileStage>& files,
         for( const std::size_t index : file.edits )
         {
             std::size_t start = 0, end = 0;
-            const Edit& edit = edits[index];
-            file.edited = mcpedit::applyEdit( edit.op, file.edited, edit.a, edit.b, edit.payload, start, end );
+            Edit&       edit  = edits[index];
+            file.edited = mcpedit::applyEdit( edit.op, file.edited, edit.a, edit.b, edit.payload, start, end, edit.seam );
         }
     }
     return true;
@@ -331,7 +333,8 @@ inline std::string receiptOperation( const Edit& edit, const FileStage* file, bo
                     + "\",\"sym\":\"" + mcpdetail::jsonEscape( edit.symName )
                     + "\",\"at\":\"" + mcpdetail::jsonEscape( identity ) + ":" + std::to_string( edit.line )
                     + "\",\"callers\":" + std::to_string( edit.callers.size() )
-                    + ",\"payload_path\":\"" + mcpdetail::jsonEscape( edit.payloadPath ) + "\"";
+                    + ",\"payload_path\":\"" + mcpdetail::jsonEscape( edit.payloadPath ) + "\""
+                    + mcpedit::seamDisclosureJson( edit.seam );   // E1: per op, the same two keys the single-edit receipt carries
     // …and on an APPLY, the contract question answered against the tree as it now stands — the same fold
     // the single-edit receipt carries, per op (mcpedit::postCheckJson, withTests=false: a plan's ops can
     // touch several files, so the tests half would be one list repeated N times).

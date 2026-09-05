@@ -53,11 +53,16 @@ printf '// inserted marker' | "$BIN" "$W2" --insert-before-symbol=beta --edit-pa
 python3 - "$W2/a.cpp" <<'PY' >"$TMP/stdin.check"
 import sys
 s = open(sys.argv[1], encoding="utf-8").read()
-print("OK" if "// inserted marker\nint beta" in s else "BAD")
+# E1 seam rule (test/editroundtripcheck.sh): the template keeps ONE blank line between definitions, so a bare
+# marker inserted before beta is padded to "marker\n\nint beta" — separated like its neighbours, never glued.
+print("OK" if "// inserted marker\n\nint beta" in s and "}\n\n// inserted marker" in s else "BAD")
 PY
 [ "$( cat "$TMP/stdin.check" )" = OK ] \
-    && ok "stdin payload is inserted with the documented newline seam" \
-    || no "stdin payload/newline seam is wrong"
+    && ok "stdin payload is inserted with the documented seam rule (padded to the file's one-blank-line separator)" \
+    || no "stdin payload/seam rule is wrong"
+grep -q '"separator_padded":2' "$TMP/stdin.out" \
+    && ok "the receipt discloses separator_padded:2" \
+    || no "the receipt does not disclose separator_padded:2"
 
 W2b="$TMP/after"; cp -R "$TMP/template" "$W2b"
 printf '// tail marker' | "$BIN" "$W2b" --insert-after-symbol=alpha --edit-payload=- >"$TMP/after.out" 2>"$TMP/after.err"

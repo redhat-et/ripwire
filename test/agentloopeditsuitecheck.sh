@@ -158,6 +158,12 @@ w4 = E.window_verdict( cl[ :1 ], E.edit_call_index( cl[ :1 ], "ripwire_edit", fi
 # native arm: the window hangs off the native edit of the target
 cln = E.classify_all( E.walk_tool_calls( "opencode", stream( [ oc( "read", filePath="/w/r/geometry.cpp" ), oc( "edit", filePath="/w/r/geometry.cpp", oldString="a", newString="b" ), oc( "bash", command="cat geometry.cpp" ) ] ) ), files, syms )
 ( ok if E.edit_call_index( cln, "native_edit", files ) == 1 and E.window_verdict( cln, 1 )["policy_read_total"] == 1 else no )( "(4) native arm: window hangs off the native edit; a cat of the target after it is a policy read" )
+# a 2-op task: the window opens after the SECOND edit of the arm's kind (the task's own second op is not a re-edit)
+cl2op = E.classify_all( E.walk_tool_calls( "opencode", stream( [ oc( "edit", filePath="/w/r/geometry.cpp", oldString="a", newString="b" ), oc( "edit", filePath="/w/r/geometry.cpp", oldString="c", newString="d" ), oc( "read", filePath="/w/r/geometry.cpp" ) ] ) ), files, syms )
+( ok if E.edit_call_index( cl2op, "native_edit", files, ops=2 ) == 1 and E.window_verdict( cl2op, 1 )["native_edit_after"] == 0 and E.window_verdict( cl2op, 1 )["policy_read_total"] == 1 else no )(
+    "(4) a 2-op task's window opens after the 2nd native edit: no self re-edit counted, the read after it is" )
+clpl = E.classify_all( E.walk_tool_calls( "opencode", stream( [ oc( "bash", command="%s . --edit-plan=/tmp/p/plan.json --apply" % SHIM ), oc( "read", filePath="/w/r/geometry.cpp" ) ] ) ), files, syms )
+( ok if E.edit_call_index( clpl, "ripwire_edit", files, ops=3 ) == 0 else no )( "(4) one --edit-plan --apply is the whole N-op edit: the window opens right after it" )
 # codex stream: shell-only, cat/sed -n of the target is a read
 cx = [ { "type": "item.completed", "item": { "type": "command_execution", "command": "%s . --insert-after-symbol=trace --edit-target-file=matrix.cpp --edit-payload=/tmp/p" % SHIM } },
        { "type": "item.completed", "item": { "type": "command_execution", "command": [ "bash", "-lc", "sed -n '20,40p' matrix.cpp" ] } },

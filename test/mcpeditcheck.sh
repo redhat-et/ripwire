@@ -8,9 +8,11 @@
 #   1. replace_symbol_body: splice a function body → re-read shows the exact splice, and the bytes
 #      OUTSIDE the def span (the prefix before the def and the suffix after it) are byte-identical to
 #      the original (cmp the prefix/suffix regions).
-#   2. insert_before_symbol / insert_after_symbol: correct placement + the newline rule
-#      (before: a trailing '\n' is appended to text iff it lacks one; after: a leading '\n' is
-#      prepended iff it lacks one; the byte at endByte is preserved exactly).
+#   2. insert_before_symbol / insert_after_symbol: correct placement + the SEAM rule (E1, terminality
+#      round A 2026-09-05, test/editroundtripcheck.sh): the inserted block is padded — newlines only, never
+#      removed — until it is separated from the anchor by the same blank-line run the file already has at
+#      that seam (geometry.cpp separates definitions by ONE blank line, so the pad is "\n\n" each way); a
+#      payload already carrying its separator is not padded again; the byte at endByte is preserved exactly.
 #   3. ambiguous symbol (same name in a second file) → error listing BOTH candidates as file:line;
 #      file unchanged.
 #   4. not-found symbol → error listing nearest names; file unchanged.
@@ -199,11 +201,14 @@ src = open(sys.argv[1], "rb").read().decode()
 i = src.find("// INSERTED-BEFORE")
 # exactly one '\n' between the marker and the following 'double distance'
 seg = src[i:]
-print("OK" if seg.startswith("// INSERTED-BEFORE\ndouble distance") else "BAD:" + repr(seg[:60]))
+print("OK" if seg.startswith("// INSERTED-BEFORE\n\ndouble distance") else "BAD:" + repr(seg[:60]))
 PY
 [ "$( cat "$TMP/r2b_chk" )" = "OK" ] \
-    && ok "insert_before_symbol: newline rule — single '\\n' appended (text lacked one)" \
-    || no "insert_before_symbol: newline rule wrong: $( cat "$TMP/r2b_chk" )"
+    && ok "insert_before_symbol: seam rule — padded to the file's one-blank-line separator (separator_padded=2)" \
+    || no "insert_before_symbol: seam rule wrong: $( cat "$TMP/r2b_chk" )"
+grep -q 'separator_padded[^0-9]*2' "$TMP/r2b" \
+    && ok "insert_before_symbol: the receipt discloses separator_padded:2" \
+    || no "insert_before_symbol: the receipt does not disclose separator_padded:2"
 
 # insert_after distance (text WITHOUT leading newline) → closing '}', '\n', text; byte at endByte preserved.
 W2b="$( fresh_copy )"
@@ -220,14 +225,15 @@ src = open(sys.argv[1], "rb").read().decode()
 i = src.find("// INSERTED-AFTER")
 # the marker must be immediately preceded by "}\n" (def's closing brace, then the prepended newline),
 # and the byte at endByte (the original '\n' after '}') must be preserved right before it.
-before = src[i-2:i]
-print("OK" if before == "}\n" else "BAD:" + repr(src[i-8:i+20]))
+before = src[i-3:i]
+print("OK" if before == "}\n\n" else "BAD:" + repr(src[i-8:i+20]))
 PY
 [ "$( cat "$TMP/r2a_chk" )" = "OK" ] \
-    && ok "insert_after_symbol: newline rule — single leading '\\n', endByte byte preserved" \
-    || no "insert_after_symbol: newline rule wrong: $( cat "$TMP/r2a_chk" )"
+    && ok "insert_after_symbol: seam rule — padded to the file's one-blank-line separator, endByte byte preserved" \
+    || no "insert_after_symbol: seam rule wrong: $( cat "$TMP/r2a_chk" )"
 
-# newline rule NON-doubling: text that ALREADY ends with '\n' (before) must not gain a second one.
+# seam rule pads to the separator and no further: text that ALREADY ends with '\n' gains exactly one more (the
+# blank line), never two; text carrying "\n\n" is left alone (editroundtripcheck (G) pins the zero-pad case).
 W2c="$( fresh_copy )"
 mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
@@ -238,11 +244,11 @@ import sys
 src = open(sys.argv[1], "rb").read().decode()
 i = src.find("// PRENL")
 seg = src[i:]
-print("OK" if seg.startswith("// PRENL\ndouble distance") else "BAD:" + repr(seg[:40]))
+print("OK" if seg.startswith("// PRENL\n\ndouble distance") else "BAD:" + repr(seg[:40]))
 PY
 [ "$( cat "$TMP/r2c_chk" )" = "OK" ] \
-    && ok "insert_before_symbol: newline rule does NOT double an existing trailing '\\n'" \
-    || no "insert_before_symbol: doubled the newline: $( cat "$TMP/r2c_chk" )"
+    && ok "insert_before_symbol: an existing trailing '\\n' is padded by exactly one more, to the separator" \
+    || no "insert_before_symbol: pad past the separator: $( cat "$TMP/r2c_chk" )"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -405,7 +411,8 @@ echo "=== 8. full sequence → final state == an expected file we construct (cmp
 # ═══════════════════════════════════════════════════════════════════════════
 # Apply a deterministic sequence to a fresh copy of geometry.cpp and cmp against a hand-built expected file.
 #   (i)  replace_symbol_body distance  -> a fixed 3-line body
-#   (ii) insert_after_symbol  distance -> a one-line comment (no leading newline in text)
+#   (ii) insert_after_symbol  distance -> a one-line comment (no leading newline in text; the seam rule pads
+#        it to the fixture's one-blank-line separator, "\n\n")
 W8="$( fresh_copy )"
 mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
@@ -436,9 +443,10 @@ new_def = ('double distance( Point a, Point b )\n'
 assert old_def in orig, "fixture distance def shape changed — update the gate"
 i = orig.index(old_def)
 end = i + len(old_def)
-# replace_symbol_body: swap the def; insert_after_symbol: a leading '\n' is prepended (text lacked one),
-# inserted at the new def's endByte, preserving the byte that followed the def (the original '\n').
-expected = orig[:i] + new_def + '\n// tail-comment' + orig[end:]
+# replace_symbol_body: swap the def; insert_after_symbol: padded to the separator after the def ("\n\n" —
+# the fixture keeps one blank line between definitions), inserted at the new def's endByte, preserving the
+# byte that followed the def (the original '\n').
+expected = orig[:i] + new_def + '\n\n// tail-comment' + orig[end:]
 open(sys.argv[2], "w").write(expected)
 PY
 cmp -s "$W8/geometry.cpp" "$TMP/expected8.cpp" \

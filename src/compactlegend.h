@@ -206,6 +206,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "dangling",          "dangling=1: matches nothing indexed", true },
     { "amb",               "amb=K: K calls split over several defs", true },
     { "next",              "next=: the one pasteable follow-up", true },
+    { "scrubbed",          "scrubbed=1: this CDATA is not the bytes (]]> split or C0 replaced)", true },
+    { "redacted",          "redacted=1: a credential shape rewritten to [REDACTED:kind]; the no-redact flag serves the bytes", true },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are
