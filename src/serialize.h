@@ -1596,7 +1596,7 @@ inline constexpr const char* kIgnoredLegend =
 // legend is written before the real <calls ...> child — a bare "<calls...>" example here would shadow it.
 inline constexpr const char* kBodiesLegend =
     "<!-- a body's sibs=\"a,b,...\" sibs_total=N are the file's OTHER indexed symbols (this body's own name "
-    "excluded), source order, capped at 40 (sibs_capped=\"1\" when the cap fired); inc=\"x.h,...\" inc_total=N "
+    "excluded), source order, capped at 8 (sibs_capped=\"1\" when the cap fired); inc=\"x.h,...\" inc_total=N "
     "are the file's own #include/import targets, source order, capped at 24 (inc_capped=\"1\" when the cap "
     "fired) — both absent when the count is 0 (a documented zero, not a degrade). Each body's own calls "
     "child (1-hop callee signatures) carries total=/shown=/capped=\"1\" the usual way: capped=\"1\" only "
@@ -4301,7 +4301,7 @@ struct FileExpandContext
     std::vector<std::string_view>                     includes;   // this file's #include/import targets, source order
 };
 
-inline constexpr std::size_t kMaxExpandSibs     = 40;   // sibs= cap — a giant file's sibling list must not dwarf the body
+inline constexpr std::size_t kMaxExpandSibs     = 8;    // sibs= cap — P16 (L7): 40 names were 582 B of a 3,067 B --expand answer (19%; ~3.5 KB per --pack-task bundle); sibs_total= keeps the true count
 inline constexpr std::size_t kMaxExpandIncludes = 24;   // inc= cap
 
 inline HashMap<std::uint32_t, FileExpandContext> buildFileExpandContexts(
