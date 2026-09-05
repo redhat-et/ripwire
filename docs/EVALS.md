@@ -11045,3 +11045,104 @@ and the root says `reach="linear"` so no reader mistakes source order for a proo
 is the one disclosure that can put an edge the program cannot take on a row (cd02: the lambda's def
 "applies" at the lambda line); it is named rather than modelled because a closure's execution point is
 not knowable here.
+
+## Terminality round A (2026-09-05) — PRE-REGISTERED (before any measurement, before any lane starts)
+
+**What this registers.** The follow-up METHODOLOGY §9 principle 1 owes: a per-verb terminality LEDGER for the
+FIND verbs as the meter measures it today, a definition of an EDIT band the meter cannot yet measure, and the
+acceptance band of every lane in the round. Numbers below never move after this commit; a later section under
+this heading reports against them.
+
+**Owner ruling that shapes the EDIT band (2026-09-05, recorded so the metric is not "fixed" back).** Claude
+Code's harness reads a file before it edits it (the Read-before-edit policy). That Read is a harness tax, not a
+verdict on the ripwire edit receipt; other runners (codex, opencode, aider) do not carry it and Claude's policy
+may change. The edit verbs are therefore improved regardless of that policy, the metric NEVER charges the policy
+Read against the edit verb, and the edit path is measured on runners without the policy (bench/agentloop codex /
+opencode) as the primary arm. The live meter's EDIT band is the uncontrolled, secondary number.
+
+### FIND band — the baseline ledger (`bench/substitution_report.py` §5 as of 8eb669ff)
+
+Instrument: window = the calls after a ripwire call up to the next ripwire call, the session end, or 5 calls;
+sweep = `grep read glob find git-diff git-log git-show-stat`; `--tag ripwire`; verbs with n ≥ 10. Log snapshot
+frozen 2026-09-05 17:12 (51,002 rows, 478 sessions); every "unchanged" claim in this round is judged on that
+frozen file, never on the live log.
+
+| verb | n | terminal % | verb | n | terminal % |
+|---|---:|---:|---|---:|---:|
+| `--quality-delta` | 591 | 43.7 | `--pack-task` | 42 | 35.7 |
+| (map) | 395 | 40.3 | `--slice` | 30 | 46.7 |
+| `--for` | 139 | 24.5 | `--uses` | 26 | 15.4 |
+| `--grep` | 100 | 29.0 | `--impact` | 19 | 36.8 |
+| `--edit-check` | 77 | 39.0 | `--recall` | 17 | 5.9 |
+| `--callers` | 65 | 33.8 | `--whereis` | 13 | 15.4 |
+| `--expand` | 56 | 32.1 | `--lego` | 10 | 10.0 |
+
+**Disclosed with the numbers, and inseparable from them.** Single operator; non-randomized; the log is
+dominated by ORCHESTRATOR sessions (an operator that greps for a living, so absolute levels are deflated);
+Claude Code only (the hook is a Claude Code PreToolUse hook — codex and opencode never write rows); and **MCP
+rows are ZERO** across the whole log (0 of 51,002; lane T1 below). A ledger, not a claim: it says which verbs
+to enrich, not that the tool works.
+
+### EDIT band — the definition (lane T2), registered before the first readout
+
+A second §5 table, `terminality by EDIT verb`, for `--replace-symbol-body`, `--insert-before-symbol`,
+`--insert-after-symbol`, `--edit-plan`, `--safe-delete` and their MCP twins (`replace_symbol_body`,
+`insert_before_symbol`, `insert_after_symbol`). Same 5-call window. The sweep set is split into THREE columns
+and none is silently folded into another:
+
+- **(a) `policy-read`** — a Read/grep whose path is the edit's TARGET FILE. The hook records the target for edit
+  rows (`--edit-target-file=`, the file named in the receipt's span, or the MCP `file`/`target` argument; the
+  Read row already carries `file_path`). This is the harness tax: REPORTED, never counted against the verb.
+- **(b) `sweep`** — a Read/grep of any OTHER file, or a native edit (`Edit|Write|MultiEdit|NotebookEdit`, class
+  `native-edit`, family `edit`, never nudged) of the SAME target inside the window: the ripwire edit did not land
+  what the agent wanted.
+- **(c) `redundant-check`** — an `--edit-check` / `edit_check` on the same symbol right after an edit whose
+  receipt already carried the folded post-check: the receipt failed to be believed. This is the number lane E
+  must move.
+
+**TERMINAL = neither (b) nor (c).** Printed per agent (`agent` field: `claude` from the hook; agentloop rows
+carry their runner) and per surface (`cli` / `mcp`). `meterdisclosurecheck` gains arms for the three columns
+and for the agent/surface split. Row counts across the hook version that makes MCP and native-edit rows visible
+are NOT comparable with earlier rows, exactly as v1/v2 were not; the boundary is disclosed in
+docs/SUBSTITUTION_METER.md.
+
+### Lane acceptance bands (each written here before its lane started)
+
+- **Lane T (instrument v2).** `test/hookcheck.sh` gains a LIVE-SHAPE payload arm (the real desktop payload:
+  `session_id, transcript_path, cwd, scratchpad_dir, prompt_id, permission_mode, effort, hook_event_name,
+  tool_name, tool_input, tool_use_id`) that is RED on the pre-fix hook/installer and GREEN after; a REAL MCP
+  call from a Claude Code session writes a `ripwire-mcp` row (the log line is the proof); the EDIT table prints
+  all three columns on lane E's agentloop transcripts; the FIND table on the frozen snapshot is byte-identical
+  before and after. METHODOLOGY §9 principle 1 gains one dated paragraph stating the harness-policy exclusion.
+- **Lane E (edit-path terminality, agentloop codex/opencode, no Read-before-edit policy).** A 12-task edit suite
+  (6 replace-body, 3 insert, 3 multi-edit plan), each with a deterministic oracle (post-edit file bytes + a gate
+  that must pass); two arms per task (ripwire edit verbs vs native edit tools), arm order alternating per task.
+  Recorded per run: tool calls after the edit, bytes/tokens, whether a Read of the target followed, whether an
+  edit_check followed, task pass. **ACCEPT: ripwire arm ≥ 80% of post-edit windows with ZERO reads of the
+  target AND ZERO redundant checks; task pass not below the native arm.** E1: for every fixture language,
+  `--expand` → `--replace-symbol-body` with the same bytes → `git diff --exit-code` is clean (byte exactness; if
+  the body is escaped the path can never be terminal). E2: the receipt carries the post-edit region (default
+  span ±3, `context=` disclosed), the file's new sha, the folded verdict, tests_to_run, ONE `next=`; same shape
+  on the MCP twins. E3: `--edit-check --edit-payload --dry-run` returns the exact bytes it will overwrite + the
+  contract delta, and preview+apply costs fewer tokens than Read+Edit+Read on the suite. Ten-verb edit-loop
+  legend bill ≤ 3,791 B compact; `--eval-retrieval` unchanged. No new verb.
+- **Lane R (P7 rank order).** `r=` strictly increasing down the bundle on CLI, `--json` and MCP `for`; growth
+  ≤ 4% bytes on ten reference queries fixed here (full legend, this repo at 8eb669ff): `rank graph teleport`
+  9,981 · `compact legend rewrite` 9,961 · `edit receipt post-check` 9,784 · `substitution meter hook` 9,968 ·
+  `pagerank power iteration` 9,362 · `tree-sitter ingest cache` 9,949 · `merge scout conflict` 9,909 · `quality
+  delta acks` 9,745 · `MCP manifest tools list` 9,613 · `test gate affected tests` 9,806; `--eval-retrieval`
+  byte-identical (name-exact MRR 0.829 / r@1 75.3 / r@5 94.7 / r@10 98.0; subtoken 0.600 / 49.3 / 74.0 / 82.7).
+- **Lane M (MCP dialect).** Parity gates (`mcpattrparitycheck`, `mcpforparitycheck`, `jsonparitycheck`)
+  compare compact↔compact and are green; the MCP legend default is compact and every tool description says so
+  and names `legend:"full"`; the manifest ceiling is pinned with a six-line pros/cons the owner can overrule;
+  `--for` with an explicit `--token-budget` either counts the root width or carries `over_ceiling="1"` — never
+  a silent overshoot (the `fornotesbudgetcheck` 1600 rung's ~1610 edge is the fixture).
+- **Lane F (battery hygiene).** `scripts/formatcheck.sh` runs from `test/regression.sh` and SKIPS with a
+  disclosed reason when clang-format 22 is absent; `pargates.py` prints a failing gate's last 5 lines;
+  `--affected=<pattern>` that matches a test file refuses with a did-you-mean or answers; `--pr-context` on an
+  empty diff carries its budget tail; MCP `for` declares rather than prices `est_tokens=`; `--doctor` has no
+  field that changes under machine load without saying so. Each gate-first, as an arm of an existing gate.
+
+**NEGATIVE consequence, pre-committed.** A lane that misses its band ships the gate and the fixture, reverts the
+feature code, and records the negative under this heading. Lane E below 80% or with task pass under native
+ships E1's exactness fix (a correctness fix, not a band) and nothing else from E2–E4.
