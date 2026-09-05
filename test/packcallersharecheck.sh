@@ -208,7 +208,12 @@ fi
 # (nextverb.h), 45 B the rank section spends first; at 1225 that pushed the callers quota under one row and the
 # SECTION was omitted (the pre-existing zeroed-section shape — recorded in lane-L7.md), at 1235 the pinned
 # shown="1"/total="3"/capped="1" row is back. Measured on this fixture: base 1225 -> shown=1; new 1225 -> none, 1235 -> shown=1.
-runB --pack-task="anchorSolo" --token-budget=1235 > "$TMP/b_tight.xml"
+# RE-PINNED 1235 -> 1255 (2026-09-05, terminality round A, lane R, P7): the ranking section is FLAT now — every <d>
+# row carries p= (+16..20 B apiece) and the <f> wrappers are gone (-24 B apiece) — so on this fixture the rank
+# section grew by a few dozen bytes and the callers quota moved with it. Swept 1225..1400 on the new binary:
+# section omitted <= 1235, shown="1" on 1240..1270, shown="2" on 1275..1300, fully fit from 1320. 1255 sits
+# mid-window; the PROPERTY (one row admitted, two withheld, no bytes spent on an uninformative shared="1") is unchanged.
+runB --pack-task="anchorSolo" --token-budget=1255 > "$TMP/b_tight.xml"
 TIGHT_TAG="$( grep -o '<callers[^>]*>' "$TMP/b_tight.xml" )"
 [ "$TIGHT_TAG" = '<callers of_top="1" shown="1" total="3" capped="1">' ] \
     && ok "arm (4b) capped-budget single-anchor callers: shown=\"1\"/total=\"3\"/capped=\"1\" unchanged from the pre-lane rendering" \

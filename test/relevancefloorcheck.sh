@@ -92,8 +92,9 @@ with open( os.path.join( d, ".ci-hidden", "workflows", "ci.yml" ), "w" ) as fh:
 PY
 
 rw(){ "$BIN" "$SB" --no-cache "$@" 2>/dev/null; }
-# every `<f p="...">` path in a --for bundle, one per line
-bundleFiles(){ printf '%s' "$1" | grep -oE '<f p="[^"]*"' | sed -E 's/^<f p="//; s/"$//'; }
+# every ranked row's p= in a --for bundle, one per DISTINCT file in first-seen (rank) order — RE-PINNED,
+# P7 (terminality round A, lane R, 2026-09-05): the lens <sigs> is FLAT — <d … p="FILE" … r=N> rows in rank order, no <f p=> wrapper (test/forrankordercheck.sh)
+bundleFiles(){ printf '%s' "$1" | grep -oE '<d [^>]*>' | grep -oE ' p="[^"]*"' | sed -E 's/^ p="//; s/"$//' | awk '!seen[$0]++'; }
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== (0) presence guard: the padding material is real, and the anchor scores alone ==="

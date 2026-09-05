@@ -115,11 +115,15 @@ DATA="$( grep -v '^#' "$WORK/.ripwire_notes" )"
 run --note-add="helper: off-by-one lives here" >/dev/null
 [ "$( grep -c 'off-by-one lives here' "$WORK/.ripwire_notes" )" = 1 ] && ok "--note-add is idempotent (no duplicate line for an identical triple)" || no "--note-add duplicated an identical note"
 
-# ── surfacing in --for: file note on <f>, symbol note on <d> — both stamped, so both carry sha=/branch= ────
+# ── surfacing in --for: file note on the file's first ranked <d> row (P7: <note … p="FILE">), symbol note on
+#    <d> — both stamped, so both carry sha=/branch=. RE-PINNED 2026-09-05 (terminality round A, lane R): the
+#    lens <sigs> is flat, no <f> wrapper; a file note rides the file's best-ranked live row and names its
+#    target with p= (test/forrankordercheck.sh arm 4). ────────────────────────────────────────────────────
 NOTE_OPEN='<note d="'"$GIT_DATE"'" sha="'"$GIT_SHA"'" branch="'"$GIT_BRANCH"'">'   # abbreviated (7-hex) sha at surfacing, full sha only on disk
+FILE_NOTE_OPEN='<note d="'"$GIT_DATE"'" sha="'"$GIT_SHA"'" branch="'"$GIT_BRANCH"'" p="'"$NORM_FILE_TARGET"'">'   # P7: the target file, named
 FOR_OUT="$( run --for="widget compute helper lonely" )"
-printf '%s' "$FOR_OUT" | grep -qF "$NOTE_OPEN"'<![CDATA[watch the arena lifetime here]]></note>' \
-    && ok "--for surfaces the FILE note as a <note> child (CDATA-wrapped, dated, sha/branch-stamped)" || { no "--for did not surface the file note"; printf '%s\n' "$FOR_OUT" | head -c 600; echo; }
+printf '%s' "$FOR_OUT" | grep -qF "$FILE_NOTE_OPEN"'<![CDATA[watch the arena lifetime here]]></note>' \
+    && ok "--for surfaces the FILE note as a <note p=\"$NORM_FILE_TARGET\"> child of the file's first ranked row (CDATA-wrapped, dated, sha/branch-stamped)" || { no "--for did not surface the file note"; printf '%s\n' "$FOR_OUT" | head -c 600; echo; }
 printf '%s' "$FOR_OUT" | grep -qF "$NOTE_OPEN"'<![CDATA[off-by-one lives here]]></note>' \
     && ok "--for surfaces the SYMBOL note (helper) as a <note> child, sha/branch-stamped" || { no "--for did not surface the symbol note"; printf '%s\n' "$FOR_OUT" | head -c 600; echo; }
 printf '%s' "$FOR_OUT" | xmllint --noout - 2>/dev/null && ok "--for with notes is xmllint-clean" || no "--for with notes is not well-formed"
@@ -228,7 +232,7 @@ runAbs(){ ( cd "$WORK" && "$BIN" "$WORK" --no-cache "$@" 2>/dev/null ); }
 # (1) a root-relative file target (no leading "./") is accepted as-is, surfaces on --for, and is NOT dangling.
 run --note-add="src/a.cpp: D5 root-relative file note" >/dev/null
 D5_FOR="$( run --for="widget compute helper lonely" )"
-printf '%s' "$D5_FOR" | grep -qF "$NOTE_OPEN"'<![CDATA[D5 root-relative file note]]></note>' \
+printf '%s' "$D5_FOR" | grep -qF "$FILE_NOTE_OPEN"'<![CDATA[D5 root-relative file note]]></note>' \
     && ok "D5(1): a root-relative file target (src/a.cpp) surfaces on --for" || { no "D5(1): root-relative file target did not surface"; printf '%s\n' "$D5_FOR" | head -c 400; echo; }
 D5_NOTES="$( run --notes )"
 printf '%s' "$D5_NOTES" | grep -qF '<target id="src/a.cpp" dangling="0">' \
@@ -241,7 +245,7 @@ printf '%s' "$LINE_ABS" | grep -qE '^src/a\.cpp[[:space:]]' \
     && ok "D5(2): an absolute in-root target normalizes to root-relative (src/a.cpp) on write" \
     || { no "D5(2): absolute in-root target did not normalize to src/a.cpp"; printf '%s\n' "$LINE_ABS"; }
 D5_FOR_ABS="$( runAbs --for="widget compute helper lonely" )"
-printf '%s' "$D5_FOR_ABS" | grep -qF "$NOTE_OPEN"'<![CDATA[D5 absolute in-root note]]></note>' \
+printf '%s' "$D5_FOR_ABS" | grep -qF "$FILE_NOTE_OPEN"'<![CDATA[D5 absolute in-root note]]></note>' \
     && ok "D5(2): the normalized absolute-in-root note surfaces on --for" || { no "D5(2): absolute-in-root note did not surface"; printf '%s\n' "$D5_FOR_ABS" | head -c 400; echo; }
 
 # (3) an OUTSIDE-root target refuses loudly: non-zero exit, names the offending path/root, writes nothing.
@@ -271,7 +275,7 @@ printf '%s' "$D5_LEGACY_NOTES" | grep -qF '<target id="src/a.cpp" dangling="0">'
 printf '%s' "$D5_LEGACY" | grep -qE '<note d="2020-01-01"[^>]*sha=' \
     && no "D5(4b): the legacy 3-field note wrongly surfaced with a sha= attribute" \
     || ok "D5(4b): the legacy 3-field note surfaces with NO sha/branch attribute (backward-compat)"
-printf '%s' "$D5_LEGACY" | grep -qF '<note d="2020-01-01"><![CDATA[D5 legacy absolute note]]></note>' \
+printf '%s' "$D5_LEGACY" | grep -qF '<note d="2020-01-01" p="src/a.cpp"><![CDATA[D5 legacy absolute note]]></note>' \
     && ok "D5(4b): the legacy note's exact unstamped <note> shape is byte-for-byte the pre-provenance form" \
     || { no "D5(4b): legacy note shape changed"; printf '%s\n' "$D5_LEGACY" | head -c 400; echo; }
 # the mixed file (legacy 3-field lines alongside 5-field stamped ones) round-trips through a re-sort/write

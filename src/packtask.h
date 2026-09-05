@@ -191,7 +191,7 @@ inline constexpr const char* kPackTaskBundleLegendBody =
          // (the full deep-tail contract lives in the --for legend's own clause, docs/EVALS.md registration).
          "Row keys: n=name (chain it), id=canonical(when scoped), in=reuse-count (absent = not measured, never a false 0)"
          ", l=line, p=path, t=kind, cx=cyclomatic, ccx=cognitive, rel=caller|callee, r=rank in this ranking "
-         "(sort by r= for true ranker order); far=ranked but over 1 hop out; "
+         "(rows in r= order); far=ranked but over 1 hop out; "
          "of_top denominator is per-section. "
          // graphrag-recon.md idea #1 (2026-08-20, S-effort harvest pick): callers corroborated by SEVERAL
          // top-K anchors outrank one tied to a single anchor — a pure re-sort of the SAME d1 edges, no new

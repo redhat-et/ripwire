@@ -158,11 +158,11 @@ JTASK="$( printf '%s' "$JSON2" | jget task )"
 [ "$JTASK" = "add two numbers" ] \
     && ok "--for: task= parity ($JTASK)" \
     || no "--for: task mismatch (got '$JTASK')"
-JSIG0="$( printf '%s' "$JSON2" | jget 'sigs[0].symbols[0].sig' )"
+JSIG0="$( printf '%s' "$JSON2" | jget 'sigs[0].sig' )"
 printf '%s' "$XML2" | grep -qF "$JSIG0" \
     && ok "--for: first sig text appears verbatim in the XML sibling" \
     || no "--for: first sig text ('$JSIG0') not found in the XML sibling"
-JADD="$( printf '%s' "$JSON2" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any("add" in (s.get("sig","")) for f in d["sigs"] for s in f["symbols"]))' 2>/dev/null )"
+JADD="$( printf '%s' "$JSON2" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any("add" in (s.get("sig","")) for s in d["sigs"]))' 2>/dev/null )"
 [ "$JADD" = "True" ] \
     && ok "--for: ranked set includes add() (relevance sanity)" \
     || no "--for: ranked set did not surface add() for an 'add two numbers' query"

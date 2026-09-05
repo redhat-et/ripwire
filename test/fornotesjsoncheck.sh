@@ -67,22 +67,24 @@ import json, sys
 d    = json.load( open( sys.argv[1] ) )
 want = sys.argv[2]
 
-# every "notes" array reachable in the bundle, wherever it hangs
+# every "notes" array reachable in the bundle, wherever it hangs. P7 (terminality round A, lane R, 2026-09-05):
+# the sigs array is FLAT — a symbol row is the object that carries "sig"; a FILE note rides the file's first
+# row as "file_notes" (a key of its own), so "notes" on a row is always the symbol's own.
 found_text = 0
 on_symbol  = 0
-def walk( node, insym ):
+def walk( node ):
     global found_text, on_symbol
     if isinstance( node, dict ):
         if "notes" in node and isinstance( node["notes"], list ):
             for n in node["notes"]:
                 if isinstance( n, dict ) and n.get( "text" ) == want:
                     found_text += 1
-                    if insym: on_symbol += 1
-        for k, v in node.items():
-            walk( v, insym or ( k == "symbols" ) )
+                    if "sig" in node: on_symbol += 1
+        for v in node.values():
+            walk( v )
     elif isinstance( node, list ):
-        for v in node: walk( v, insym )
-walk( d, False )
+        for v in node: walk( v )
+walk( d )
 
 print( "TOTAL="      + str( d.get( "notes_total", "ABSENT" ) ) )
 print( "KEPT="       + str( d.get( "notes_kept",  "ABSENT" ) ) )

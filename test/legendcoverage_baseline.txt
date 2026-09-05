@@ -228,3 +228,8 @@ zoom | zoom@levels
 # vocabulary, NOT in the --for header: every header byte is un-charged by the token ladder and fornotesbudgetcheck's
 # rungs leave ~0 tokens of headroom (V1 N1) — a 115 B clause blew --token-budget=950 by 29 tokens.
 for-auto | d@next
+# P7 (lane R, 2026-09-05): the lens rows are served in RANK order now, so the r=1 row (next=) and a pure="1" row
+# land on the conceptual roster document's FIRST SCREEN too; same definitions (next= in --help and the compact
+# vocabulary; pure= in the map legend), same un-charged-header reason as the for-auto line above.
+for | d@next
+for | d@pure

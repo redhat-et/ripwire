@@ -943,7 +943,7 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         // §B7.5 (CA4): the <sigs> rows this verb emits carry the same ranking-row vocabulary --pack-task
         // spells out, and this legend defined only the frame half — a reader met cx=/ccx=/in= on the
         // signature rows with nothing to read them against, the identical gap on the identical rows.
-        h += "On a <sigs> row: n=name, id=canonical(when scoped), t=kind, cx=cyclomatic complexity, "
+        h += "On a <sigs> row (rows in r= order): n=name, id=canonical(when scoped), p=file, t=kind, cx=cyclomatic complexity, "
              "ccx=cognitive complexity, in=reuse-count (absent = not measured, never a false 0). ";
         h += "rank 1 = the innermost in-corpus frame; its FULL body follows, other suspects as signatures. ";
         h += hopLegendOf( hop );                      // LB-A: empty unless the hop fired (byte-identical otherwise)

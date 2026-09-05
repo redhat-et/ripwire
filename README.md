@@ -38,11 +38,11 @@ One deterministic, token-budgeted answer: the relevant symbols, their callers, t
 the tests that reach them. Run on this repository (2026-08-30), that second line answers in about
 4.3K tokens with:
 
-- **The ranked symbols** — `spanTierMemoPath` (the cache-path composer) first, then the cache-header
-  constants `kCacheMagic`/`kCacheVersion` with their doc comment quoted in place, `ingestCommitTree`,
-  `ingest` — each with its file, line, and signature.
-- **Risk, annotated in place** — complexity, git churn (`ingest` shows 23 recent edits),
-  change amplification (touch `ingest` and 55 graph nodes feel it), purity and test coverage. The
+- **The ranked symbols, in rank order** — the cache-header constant `kCacheMagic` first (with its doc
+  comment quoted in place and the one `next=` call that opens it), then `spanTierMemoPath` (the
+  cache-path composer), `ingestCommitTree`, … `ingest` — each row with its file, line, and signature.
+- **Risk, annotated in place** — complexity, git churn (`ingest` shows 128 recent edits),
+  change amplification (touch `ingest` and 266 graph nodes feel it), purity and test coverage. The
   fragile spots are visible *before* anything touches them.
 - **One-hop call context** — `spanTierMemoPath` calls `shaKeyedCachePath`, `headSnapRepoHex`,
   `exclConfigHex`; no second query needed to see the neighbourhood.
@@ -53,33 +53,33 @@ the tests that reach them. Run on this repository (2026-08-30), that second line
 <summary>The actual wire format — what your agent reads (minified XML; trimmed and line-wrapped here)</summary>
 
 ```xml
-<ctx task="incremental cache invalidation" confidence="high" margin_pct="22"
-     bundle="compact" bodies="0" reason="compact-route">
-  <sigs shown="…" total="…" capped="1">
-    <f p="src/ingest_cache.h">
-      <d l="106" n="kCacheMagic" cx="0" in="0" churn="1" amp="6" pure="1" r="2">
-        <doc>incremental cache (--cache): per-file content hash + raw facts so a
-             re-run re-parses ONLY …</doc>constexpr std::uint32_t kCacheMagic = …</d> …</f>
-    <f p="src/dmm.h">
-      <d l="244" n="ingestCommitTree" cx="6" in="1" churn="4" amp="15" r="3"> … </d></f>
-    <f p="src/ingest.h">
-      <d l="262" n="ingest" cx="1" in="0" churn="23" amp="55" r="4"> … </d></f>
+<ctx task="incremental cache invalidation" confidence="high" margin_pct="20"
+     bundle="compact" bodies="0" reason="compact-route" est_tokens="3995">
+  <sigs shown="23" total="40" capped="1">
+    <d l="106" n="kCacheMagic" p="src/ingest_cache.h" cx="0" in="0" churn="11" amp="71" pure="1" r="1"
+       next="--expand=src/ingest_cache.h:kCacheMagic">
+      <doc>incremental cache (--cache): per-file content hash + raw facts so a
+           re-run re-parses ONLY …</doc>constexpr std::uint32_t kCacheMagic = …</d>
+    <d l="1307" n="spanTierMemoPath" p="src/ingest_astquery.h" cx="1" in="2" churn="5" amp="44" r="2"> … </d>
+    <d l="247" n="ingestCommitTree" p="src/dmm.h" cx="6" in="1" churn="6" amp="27" r="3"> … </d>
+    …
+    <d l="191" n="ingest" p="src/ingest.cpp" cx="4" in="14" churn="128" amp="266" tested="1" r="13"> … </d>
     … </sigs>
-  <hops shown="2" total="6" capped="1" noedge="3">
-    <h l="1304" p="src/ingest_astquery.h" n="spanTierMemoPath">
-      <calls total="3"><c n="shaKeyedCachePath" l="1570"/> … </calls></h> … </hops>
+  <hops shown="2" total="6" capped="1" noedge="2">
+    <h l="1307" p="src/ingest_astquery.h" n="spanTierMemoPath">
+      <calls total="3"><c n="shaKeyedCachePath" l="1621"/> … </calls></h> … </hops>
 </ctx>
 ```
 
 `cx=` complexity, `churn=` git edit frequency, `amp=` change amplification, `r=` rank; `<hops>` rows
 carry the one-hop call context, caps disclosed. Every attribute is defined in the one legend at the
-top of the real output, which also self-reports the bundle's cost — `est_tokens="4263"` here.
+top of the real output, which also self-reports the bundle's cost — `est_tokens="3995"` here.
 
 </details>
 
 | The agent without a map | The agent with ripwire |
 | --- | --- |
-| greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="4263"` on this repository (re-derived 2026-08-30, the run above) |
+| greps a common word, gets hundreds of hits across dozens of files | one ranked answer — `est_tokens="3995"` on this repository (re-derived 2026-09-05, the run above) |
 | reads whole files to find the symbols that matter | those symbols, with complexity, churn and test coverage inline |
 | finds the callers only if it thinks to grep for them too | callers, blast radius and the tests to run, in the same bundle |
 | pays for every line it read, right or wrong | measured at **5.0%** of what that grep-and-read pass spends (re-derived 2026-08-23) |
@@ -465,29 +465,26 @@ Built for **Codex, Claude Code, Cursor, Windsurf, Gemini, opencode, aider**, and
 call a CLI.
 
 <details>
-<summary><b>What comes back</b> — real output from this repository, pretty-printed and trimmed (re-captured 2026-08-30)</summary>
+<summary><b>What comes back</b> — real output from this repository, pretty-printed and trimmed (re-captured 2026-09-05; rows are served in rank order, each naming its file)</summary>
 
 ```xml
-<ctx task="incremental cache invalidation" route="[routed: subtoken+body BM25 — no strong name hit,
-     multi-word conceptual query]" confidence="high" margin_pct="22"
-     bundle="compact" bodies="0" reason="compact-route">
-  <sigs shown="…" total="…" capped="1">
-    <f p="src/ingest_cache.h">
-      <d l="106" n="kCacheMagic"   cx="0" ccx="0" in="0" churn="1" amp="6" pure="1" r="2"><doc>incremental cache (--cache): per-file content hash + raw facts so a re-run re-parses ONLY c…</doc>constexpr std::uint32_t kCacheMagic = 0x4b505443</d>
-      <d l="118" n="kCacheVersion" cx="0" ccx="0" in="0" churn="1" amp="6" pure="1" r="31">constexpr std::uint32_t kCacheVersion = …</d>
-    </f>
-    <f p="src/mcpindex.h">
-      <d l="554" n="mcpCachePath" cx="2" ccx="1" in="1" churn="18" amp="34" r="13">inline std::string mcpCachePath( const std::string&amp; root )</d>
-      <d l="950" n="getIndex"     cx="22" ccx="39" in="27" churn="18" amp="60" r="9">inline const McpIndex&amp; getIndex( const std::string&amp; root )</d>
-    </f>
+<ctx task="incremental cache invalidation" route="routed: subtoken+body BM25 (--for's default) — no strong
+     name hit, multi-word conceptual query" confidence="high" margin_pct="20"
+     bundle="compact" bodies="0" reason="compact-route" est_tokens="3995">
+  <sigs shown="23" total="40" capped="1">
+    <d l="106" n="kCacheMagic" p="src/ingest_cache.h" cx="0" ccx="0" in="0" churn="11" amp="71" pure="1" r="1"
+       next="--expand=src/ingest_cache.h:kCacheMagic"><doc>incremental cache (--cache): per-file content hash + raw facts so a re-run re-parses ONLY c…</doc>constexpr std::uint32_t kCacheMagic = 0x4b505443</d>
+    <d l="1307" n="spanTierMemoPath" id="src/ingest_astquery.h::rw::spanTierMemoPath" p="src/ingest_astquery.h" cx="1" ccx="0" in="2" churn="5" amp="44" r="2"><doc>Composed exactly the way every OTHER blob family is (quality.h): one fixed-width identity hex pe…</doc>inline std::string spanTierMemoPath( const std::string&amp; diskPath )</d>
+    <d l="247" n="ingestCommitTree" id="src/dmm.h::rw::dmm::ingestCommitTree" p="src/dmm.h" cx="6" ccx="5" in="1" churn="6" amp="27" r="3"><doc>Ingest the tree at `sha`, materialized out of `root`&apos;s object store. …</doc>inline bool ingestCommitTree( const std::string&amp; root, const std::string&amp; sha, … )</d>
+    <d l="841" n="mcpRefreshedThisRequest" id="src/mcpindex.h::rw::mcpRefreshedThisRequest" p="src/mcpindex.h" cx="1" ccx="0" in="2" churn="20" amp="43" r="4"><doc>P1-15 — the `_reingest` envelope field for a response whose handling ran an INCREMENTAL pass, …</doc>inline bool mcpRefreshedThisRequest( std::uint64_t passesAtEntry )</d>
     …
   </sigs>
-  <hops shown="2" total="6" capped="1" noedge="3">
-    <h l="244" p="src/dmm.h" n="ingestCommitTree">
-      <calls total="11" shown="7" capped="1">
-        <c n="ingest" l="189"/><c n="headSnapCachePath" l="1579"/><c n="headSnapRepoHex" l="1311"/>
-        <c n="materializeCommitTree" l="2239"/><c n="headSnapExclHex" l="1518"/>…
-      </calls>
+  <hops shown="2" total="6" capped="1" noedge="2">
+    <h l="1307" p="src/ingest_astquery.h" n="spanTierMemoPath">
+      <calls total="3"><c n="shaKeyedCachePath" l="1621"/><c n="headSnapRepoHex" l="1359"/><c n="exclConfigHex" l="1554"/></calls>
+    </h>
+    <h l="247" p="src/dmm.h" n="ingestCommitTree">
+      <calls total="10" shown="7" capped="1">…</calls>
     </h>
   </hops>
 </ctx>
@@ -495,7 +492,7 @@ call a CLI.
 
 The cache cluster, ranked and annotated in place: `cx`/`ccx` complexity, `in` reuse count, `churn`
 recent commits, `amp` change amplification, `tested` coverage — the fragile spots are visible
-*before* the agent touches them, in a few thousand tokens (`est_tokens="4263"`, self-reported in the
+*before* the agent touches them, in a few thousand tokens (`est_tokens="3995"`, self-reported in the
 header) instead of five whole files. This is a *conceptual* query, so the bundle is the **compact**
 shape: the ranked map plus one-hop callee edges, no inline bodies, and the root says so rather than
 leaving you to notice. Read the map, then `--expand=SYM` the one you want — or pass `--auto-bodies`
@@ -1507,7 +1504,7 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 
 ### In the tests
 
-`test/regression.sh` names **538 gate scripts** and is the authoritative list;
+`test/regression.sh` names **539 gate scripts** and is the authoritative list;
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
