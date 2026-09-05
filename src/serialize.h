@@ -1646,7 +1646,8 @@ inline constexpr const char* kBodiesLegend =
     "when shown is below total. A body's CDATA is the bytes on disk unless the element says otherwise: "
     "scrubbed=\"1\" = a ]]> was split (]]]]><![CDATA[>, rejoin it) or a C0/invalid-UTF-8 byte was replaced; "
     "redacted=\"1\" = a credential shape was rewritten to a [REDACTED:kind] marker (the no-redact flag serves the "
-    "bytes; the edit verbs refuse a payload carrying the marker). Absent = paste-back is byte-exact. -->";
+    "bytes; the edit verbs refuse a payload carrying MORE such markers than the bytes it would replace already "
+    "do, so source that spells one round-trips). Absent = paste-back is byte-exact. -->";
 
 inline constexpr const char* kMetricsLegend =
     "<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=MAX-depth "

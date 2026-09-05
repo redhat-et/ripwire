@@ -111,11 +111,11 @@ inline bool readPayload( std::string_view spec, std::size_t maxFileBytes, std::s
         err = "--edit-payload " + std::string( rw::mcpedit::kBinaryPayloadRefusal );
         return false;
     }
-    if( out.find( rw::mcpedit::kRedactionMarker ) != std::string::npos )
-    {   // E1: a body copied from a REDACTED --expand — the marker must never reach source
-        err = "--edit-payload " + std::string( rw::mcpedit::kRedactionMarkerRefusal );
-        return false;
-    }
+    // R1 (V3): the redaction-marker gate is deliberately NOT here any more. It was — and that is precisely
+    // what made it a bare substring scan: this function has no target, so it had no bytes to compare the
+    // payload against and could only ask "does the text contain the marker", which source that legitimately
+    // spells the marker answers yes to just as loudly. It now lives in run() below and in runEditVerb, the
+    // two places that hold the span the payload would replace. Nothing between here and there writes.
     return true;
 }
 
@@ -350,6 +350,15 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     {
         return refuse( "the recorded span for '" + std::string( selector ) + "' no longer contains the name '" + fsym.name
                      + "' in '" + path + "' — the file changed since the index was built; re-run to refresh it" );
+    }
+
+    // R1 (V3): the same redaction-marker gate the write path applies, through the same function and the same
+    // denominator, so the preview and the apply refuse the same payloads in the same words.
+    const std::string redactionRefusal = mcpedit::redactionMarkerRefusalFor( mcpedit::Op::ReplaceBody, payload, src,
+                                                                             std::string_view( src ).substr( a, b - a ), path );
+    if( !redactionRefusal.empty() )
+    {
+        return refuse( "edit payload " + redactionRefusal );
     }
 
     // F-07, mirrored from the write path: harmonise the payload to the TARGET's own dominant line ending

@@ -67,14 +67,22 @@ files = {
  "cdata.cpp":   ("pick",        '#include <vector>\n\nint pick( const std::vector<std::vector<int>>& a, int i )\n{\n    return a[0][a[1][i]]>0 ? 1 : 0;\n}\n\nint other_pick() { return 2; }\n'),
  # a credential-shaped literal — redacted by default, and the redaction must be visible on the element
  "cred.py":     ("connect",     'import os\n\n\ndef connect():\n    key = "AKIAIOSFODNN7EXAMPLEX"\n    return os.environ.get("X", key)\n\n\ndef other_cred():\n    return 1\n'),
+ # R1 (V3, wave-2 verifier) — source that LEGITIMATELY spells the marker: the TRUE NEGATIVE the true
+ # positive above must not be bought with. legend_doc carries the bare "[REDACTED:" substring the way a
+ # legend documents it; legend_real quotes the FULL artefact a redacted serve emits, verbatim (U+2026 +
+ # one of redact.h's own marker strings); legend_cred carries that artefact AND a real credential, so a
+ # served copy of it has exactly one marker MORE than the bytes on disk. Nothing here is itself a
+ # credential shape: "AKIA" followed by U+2026 does not match AKIA[0-9A-Z]{16}, and no line carries the
+ # 32-char keyword-gated run the generic rule needs.
+ "legend.py":   ("legend_doc",  'def legend_doc():\n    # a legend line: a credential shape is rewritten to a [REDACTED:kind] marker\n    return 0\n\n\ndef legend_real():\n    # the emitted artefact, verbatim: AKIA…[REDACTED:aws-key]\n    return 1\n\n\ndef legend_cred():\n    # AKIA…[REDACTED:aws-key] is what the tool writes here\n    k = "AKIAIOSFODNN7EXAMPLEX"\n    return k\n\n\ndef other_legend():\n    return 2\n'),
  # the seam fixtures: C++ (one blank line between definitions) and Python (two)
  "seam.cpp":    ("seam_a",      'int seam_a( int x )\n{\n    return x + 1;\n}\n\nint seam_b( int x )\n{\n    return x + 2;\n}\n\nint seam_c( int x )\n{\n    return x + 3;\n}\n'),
  "seam.py":     ("seam_a",      'def seam_a(x):\n    return x + 1\n\n\ndef seam_b(x):\n    return x + 2\n\n\ndef seam_c(x):\n    return x + 3\n'),
 }
 for name, (sym, text) in files.items():
-    open(os.path.join(c, name), "w", newline="").write(text)
+    open(os.path.join(c, name), "w", newline="", encoding="utf-8").write(text)
 # CRLF: the whole file with \r\n line endings
-open(os.path.join(c, "crlf.py"), "w", newline="").write('def probe_crlf(n):\r\n    if n < 3:\r\n        return "<a> & b"\r\n    return ""\r\n\r\n\r\ndef other_crlf():\r\n    return 1\r\n')
+open(os.path.join(c, "crlf.py"), "w", newline="", encoding="utf-8").write('def probe_crlf(n):\r\n    if n < 3:\r\n        return "<a> & b"\r\n    return ""\r\n\r\n\r\ndef other_crlf():\r\n    return 1\r\n')
 PY
 ( cd "$C" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init ) >/dev/null 2>&1
 fresh(){ rm -rf "$TMP/w"; git clone --local -q "$C" "$TMP/w" 2>/dev/null; }
@@ -91,9 +99,9 @@ sym = sys.argv[2]
 m = re.search(r'<b ([^>]*\bn="%s"[^>]*)><!\[CDATA\[(.*?)\]\]></b>' % re.escape(sym), doc, re.S)
 assert m, "no <b n=%r> in the document" % sym
 raw = m.group(2)
-open(sys.argv[4], "w", newline="").write(raw)
-open(sys.argv[3], "w", newline="").write(raw.replace("]]]]><![CDATA[>", "]]>"))
-open(sys.argv[5], "w").write(" ".join('%s=%s' % (k, v) for k, v in re.findall(r'([\w-]+)="([^"]*)"', m.group(1))))
+open(sys.argv[4], "w", newline="", encoding="utf-8").write(raw)
+open(sys.argv[3], "w", newline="", encoding="utf-8").write(raw.replace("]]]]><![CDATA[>", "]]>"))
+open(sys.argv[5], "w", encoding="utf-8").write(" ".join('%s=%s' % (k, v) for k, v in re.findall(r'([\w-]+)="([^"]*)"', m.group(1))))
 PY
 }
 
@@ -243,6 +251,90 @@ fresh
 extract "$TMP/nored.xml" connect "$TMP/body" "$TMP/raw" "$TMP/attrs" 2>/dev/null
 ( cd "$TMP/w" && "$BIN" . --replace-symbol-body=connect --edit-target-file=cred.py --edit-payload="$TMP/body" ) >/dev/null 2>&1
 clean && ! grep -q 'redacted=1' "$TMP/attrs" && ok "(F) --no-redact serves the bytes (no redacted= on the element) and they round-trip byte-exact" || no "(F) the --no-redact body does not round-trip"
+
+# ── ARM F2 — the TRUE NEGATIVE: source that legitimately spells the marker still round-trips ───────────
+# R1, wave-2 verifier, 2026-09-05. ARM F above only ever exercised the true positive, and the guard it
+# passed was a bare "[REDACTED:" substring scan of the payload. That scan cannot tell "this payload came
+# from a REDACTED serve" from "this payload's own source spells the marker", so every symbol whose real
+# bytes carry the text became permanently unwritable on EVERY write surface — five files under ripwire's
+# own src/ among them — while the refusal asserted the body "was served REDACTED" (it was not: the element
+# said scrubbed="1" with no redacted="1") and named --no-redact, which returns byte-identical bytes and is
+# refused identically. A closed loop built on a false claim, which is the exact anti-terminality this
+# round removes. The honest predicate compares against the bytes ALREADY THERE: a redaction only ever ADDS
+# markers, so a payload is refused only when it carries MORE than the span it would replace already does.
+# This arm asserts all three halves — bare substring, full artefact, and the count.
+for s in legend_doc legend_real; do
+    fresh
+    ( cd "$TMP/w" && "$BIN" . --expand="legend.py:$s" --top-k=0 --no-cache ) >"$TMP/f2.xml" 2>/dev/null
+    if ! extract "$TMP/f2.xml" "$s" "$TMP/f2body" "$TMP/raw" "$TMP/attrs" 2>"$TMP/x.err"; then
+        no "(F2) could not extract <b n=\"$s\"> from --expand ($( head -c 160 "$TMP/x.err" ))"; continue
+    fi
+    grep -q 'redacted=1' "$TMP/attrs" && no "(F2) $s: nothing in this body is a credential, yet the element claims redacted=\"1\" (attrs: $( cat "$TMP/attrs" ))"
+    # (F2a) the CLI write verb
+    ( cd "$TMP/w" && "$BIN" . --replace-symbol-body="$s" --edit-target-file=legend.py --edit-payload="$TMP/f2body" ) >"$TMP/f2.json" 2>"$TMP/f2.err"; rc=$?
+    { [ "$rc" = 0 ] && clean; } \
+        && ok "(F2) legend.py:$s — source that spells the marker round-trips through --replace-symbol-body (git diff clean)" \
+        || no "(F2) legend.py:$s — a body whose REAL source carries the marker text cannot be written back (rc=$rc: $( head -c 200 "$TMP/f2.err" ))"
+    # (F2b) the --dry-run preview
+    fresh
+    ( cd "$TMP/w" && "$BIN" . --edit-check="$s" --edit-target-file=legend.py --edit-payload="$TMP/f2body" --dry-run ) >"$TMP/f2p.xml" 2>"$TMP/f2p.err"; rc=$?
+    { [ "$rc" = 0 ] && grep -q '<overwrite ' "$TMP/f2p.xml"; } \
+        && ok "(F2) legend.py:$s — the --dry-run preview accepts the same payload and shows the span" \
+        || no "(F2) legend.py:$s — the preview refuses a payload the source itself carries (rc=$rc: $( head -c 200 "$TMP/f2p.err" ))"
+    # (F2c) --edit-plan --apply
+    fresh; mkdir -p "$TMP/w/plans"; cp "$TMP/f2body" "$TMP/w/plans/f2.txt"
+    printf '{"version":1,"edits":[{"op":"replace_symbol_body","target":"%s","file":"legend.py","payload":"f2.txt"}]}\n' "$s" > "$TMP/w/plans/f2.json"
+    ( cd "$TMP/w" && "$BIN" . --edit-plan=plans/f2.json --apply ) >"$TMP/f2pl.json" 2>"$TMP/f2pl.err"; rc=$?
+    { [ "$rc" = 0 ] && ( cd "$TMP/w" && git diff --exit-code --quiet -- legend.py ); } \
+        && ok "(F2) legend.py:$s — --edit-plan --apply accepts it too (git diff clean)" \
+        || no "(F2) legend.py:$s — --edit-plan refuses a payload the source itself carries (rc=$rc: $( head -c 200 "$TMP/f2pl.err" ))"
+    # (F2d) the MCP twins
+    fresh
+    FB="$( mcp '{"name":"fetch_body","arguments":{"path":".","handle":"legend.py:'"$s"'"}}' )"
+    BODY_JSON="$( printf '%s' "$FB" | python3 -c 'import sys,json; print(json.dumps(json.load(sys.stdin)["body"]))' 2>/dev/null )"
+    if [ -n "$BODY_JSON" ]; then
+        RS="$( mcp '{"name":"replace_symbol_body","arguments":{"path":".","symbol":"'"$s"'","file":"legend.py","new_body":'"$BODY_JSON"'}}' )"
+        case "$RS" in
+            __ERROR__*) no "(F2) legend.py:$s — MCP replace_symbol_body refused the body it just served: $( printf '%s' "$RS" | head -c 200 )";;
+            *) clean && ok "(F2) legend.py:$s — MCP fetch_body → replace_symbol_body is byte-exact" || no "(F2) legend.py:$s — the MCP round trip is not byte-identical";;
+        esac
+    else
+        no "(F2) legend.py:$s — fetch_body returned no body ($( printf '%s' "$FB" | head -c 160 ))"
+    fi
+done
+# (F2e) the COUNT, not mere presence: legend_cred's real source already carries ONE artefact, and a
+# redacted serve of it carries TWO. The extra one is the credential, and it must still be refused — on
+# every surface — with a message that names --no-redact and leaves the file byte-identical.
+fresh
+( cd "$TMP/w" && "$BIN" . --expand=legend.py:legend_cred --top-k=0 --no-cache ) >"$TMP/f2c.xml" 2>/dev/null
+extract "$TMP/f2c.xml" legend_cred "$TMP/f2cbody" "$TMP/raw" "$TMP/attrs" 2>/dev/null
+grep -q 'redacted=1' "$TMP/attrs" || no "(F2) fixture degenerate: legend_cred's credential was not redacted (attrs: $( cat "$TMP/attrs" ))"
+( cd "$TMP/w" && "$BIN" . --replace-symbol-body=legend_cred --edit-target-file=legend.py --edit-payload="$TMP/f2cbody" ) >"$TMP/f2c.json" 2>"$TMP/f2c.err"; rc=$?
+{ [ "$rc" != 0 ] && clean && grep -q -- '--no-redact' "$TMP/f2c.err"; } \
+    && ok "(F2) a body that ALREADY carried one marker is still refused when the serve added a second (count, not presence)" \
+    || no "(F2) a redacted serve of a body that already carried a marker was written into source (rc=$rc: $( head -c 200 "$TMP/f2c.err" ))"
+fresh
+( cd "$TMP/w" && "$BIN" . --edit-check=legend_cred --edit-target-file=legend.py --edit-payload="$TMP/f2cbody" --dry-run ) >"$TMP/f2cp.xml" 2>"$TMP/f2cp.err"; rc=$?
+{ [ "$rc" != 0 ] && grep -q -- '--no-redact' "$TMP/f2cp.err"; } \
+    && ok "(F2) the --dry-run preview refuses the added marker in the same words" \
+    || no "(F2) the preview does not refuse a payload carrying an added redaction marker (rc=$rc: $( head -c 200 "$TMP/f2cp.err" ))"
+fresh; mkdir -p "$TMP/w/plans"; cp "$TMP/f2cbody" "$TMP/w/plans/f2c.txt"
+printf '{"version":1,"edits":[{"op":"replace_symbol_body","target":"legend_cred","file":"legend.py","payload":"f2c.txt"}]}\n' > "$TMP/w/plans/f2c.json"
+( cd "$TMP/w" && "$BIN" . --edit-plan=plans/f2c.json --apply ) >/dev/null 2>"$TMP/f2cl.err"; rc=$?
+{ [ "$rc" != 0 ] && ( cd "$TMP/w" && git diff --exit-code --quiet -- legend.py ) && grep -q -- '--no-redact' "$TMP/f2cl.err"; } \
+    && ok "(F2) --edit-plan refuses the added marker in the same words, nothing written" \
+    || no "(F2) --edit-plan wrote an added redaction marker into source (rc=$rc: $( head -c 200 "$TMP/f2cl.err" ))"
+# (F2f) the refusal must not ASSERT what the tool did not do: no sentence may claim the body WAS served
+# redacted, because the write surface cannot know that and the element it served says otherwise.
+grep -qi 'was served REDACTED' "$TMP/f2c.err" \
+    && no "(F2) the refusal asserts 'the body ... was served REDACTED' — a claim the write surface cannot make ($( head -c 200 "$TMP/f2c.err" ))" \
+    || ok "(F2) the refusal states what it measured and asserts nothing about how the payload was served"
+# (F2g) an INSERT of a payload carrying an artefact the target file does not have is refused too
+fresh; printf 'def inserted():\n    # AKIA…[REDACTED:aws-key]\n    return 3\n' > "$TMP/f2ins.py"
+( cd "$TMP/w" && "$BIN" . --insert-after-symbol=other_py --edit-target-file=probe.py --edit-payload="$TMP/f2ins.py" ) >/dev/null 2>"$TMP/f2i.err"; rc=$?
+{ [ "$rc" != 0 ] && clean; } \
+    && ok "(F2) --insert-after-symbol refuses a payload carrying an artefact its target file does not have" \
+    || no "(F2) an insert wrote a redaction marker into a file that had none (rc=$rc: $( head -c 200 "$TMP/f2i.err" ))"
 
 [ "$fail" = 0 ] && echo "editroundtripcheck: ALL PASS" || echo "editroundtripcheck: FAILURES ABOVE"
 exit "$fail"

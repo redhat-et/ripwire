@@ -209,7 +209,9 @@ inline bool parseEdit( const McpIndex& ix, const std::string& object, const std:
     // A1: the plan path does not route through runEditVerb, so it carries the same third payload arm itself.
     // Preflight, like every other plan refusal — no file in the plan is written when any one edit is bad.
     if( looksBinary( edit.payload ) ) { error = "payload '" + payloadPath + "' " + std::string( mcpedit::kBinaryPayloadRefusal ); return false; }
-    if( edit.payload.find( mcpedit::kRedactionMarker ) != std::string::npos ) { error = "payload '" + payloadPath + "' " + std::string( mcpedit::kRedactionMarkerRefusal ); return false; }
+    // R1 (V3): the redaction-marker arm is NOT here beside the NUL one — its honest predicate needs the bytes
+    // the edit would replace, and this function has resolved no file yet. It runs in prepare() below, still
+    // preflight: every edit is parsed, staged and checked before the first byte of the plan is written.
     const mcpedit::EditTarget target = mcpedit::resolveTarget( ix, edit.target, edit.fileHint );
     if( target.id == kNoNode || target.id >= ix.ing.symbols.size() ) { error = target.error; return false; }
     edit.node = target.id;
@@ -296,6 +298,13 @@ inline Outcome prepare( const std::string& root, const std::string& planPath, st
         FileStage* file = ensureStage( ix, edit, files, root, out.message );
         if( file == nullptr ) { return out; }
         if( !( edit.a < edit.b && edit.b <= file->original.size() ) ) { out.message = "invalid definition span for '" + edit.target + "'"; return out; }
+        // R1 (V3): parseEdit's third payload arm, moved here — the first point that holds the bytes the edit
+        // would replace. Same function, same sentence, same denominators as the single verbs. Still preflight:
+        // `original` is the file as it is on disk and nothing has been written.
+        const std::string redactionRefusal =
+            mcpedit::redactionMarkerRefusalFor( edit.op, edit.payload, file->original,
+                                                std::string_view( file->original ).substr( edit.a, edit.b - edit.a ), file->identity );
+        if( !redactionRefusal.empty() ) { out.message = "payload '" + edit.payloadPath + "' " + redactionRefusal; return out; }
         // P9: the resolved identity + its 1-hop callers, from the index this loop already holds open. The
         // caller walk is editcheck.h's OWN (editCheckCallers over the overload set), so the number a
         // dry-run shows and the number an --apply's per-op edit_check shows are one walk, not two.

@@ -15,6 +15,7 @@
 #include "infra/hashutil.h"   // sanitizer-clean modulo-2^64 FNV multiplication
 #include "infra/gitblob.h"    // E2: the receipt's blob_sha — the git id of the bytes it wrote
 #include "nextverb.h"         // E2: ONE next= on the receipt (nextFlag / nextFieldJson)
+#include "redact.h"           // R1 (V3): kRedactRules — the marker table the write gate's predicate is derived FROM
 
 #include <climits>            // PATH_MAX — the AbsHintFrame realpath/getcwd buffers (A2)
 
@@ -55,11 +56,110 @@ namespace mcpedit
     // E1 (terminality round A, 2026-09-05): a body served by --expand / fetch_body with a credential-shaped
     // literal carries an inline redaction marker in place of the secret. Pasting that body back would write
     // the marker into source — a silent corruption the receipt would then report as applied. Refused on every
-    // write surface (CLI ladder, engine, edit-plan) with ONE sentence; the marker spelling is redact.h's.
-    inline constexpr std::string_view kRedactionMarker        = "[REDACTED:";
-    inline constexpr std::string_view kRedactionMarkerRefusal =
-        "contains a redaction marker ('[REDACTED:…]') — the body it was copied from was served REDACTED; re-fetch it with "
-        "--no-redact (MCP: redact:false) and paste the real bytes. Nothing was written";
+    // write surface (CLI ladder, engine, edit-plan, the pre-apply preview) with ONE sentence.
+    //
+    // V3 (wave-2 verifier finding R1, same round) — WHAT THE PREDICATE IS, and why it is not a substring scan.
+    //
+    // redact.h's splice is fixed and length-independent: keepPrefix bytes of the matched credential, then
+    // U+2026, then one of kRedactRules' own `marker` strings. So the artefact a redacted serve leaves in a
+    // body is exactly "…[REDACTED:<kind>]" with <kind> drawn from that table — never a bare "[REDACTED:",
+    // never an invented kind. countRedactionMarkers derives the shape FROM the table, the same discipline
+    // the NUL rule above takes from rw::looksBinary: the refusal's claim is exactly the condition that
+    // produced the bytes, and the two cannot drift.
+    //
+    // AND carrying one is not enough. The first spelling of this rule refused any payload containing
+    // "[REDACTED:" anywhere, in a sentence asserting "the body it was copied from was served REDACTED" and
+    // naming --no-redact as the way out. Five files under src/ carry that substring — the legends that
+    // DOCUMENT redaction — so their own symbols became permanently unwritable on every write surface; the
+    // sentence asserted something the tool had not done (those bodies are served scrubbed="1", with no
+    // redacted="1" on the element); and the named next step returns byte-identical bytes and is refused
+    // identically. A closed loop resting on a false claim, which is the shape this round exists to remove.
+    //
+    // The fix is the comparison the substring scan never made — against the bytes ALREADY THERE. A redaction
+    // only ever ADDS markers to what is on disk, so a payload is refused only when it carries MORE of them
+    // than the bytes it would replace already carry. A body whose real source spells the marker round-trips
+    // untouched on every surface; a genuinely redacted body still cannot be written. No new flag, no opt-out
+    // to know about: the provenance question is answered from the target's own current bytes.
+    inline constexpr std::string_view kRedactionMarkerOpen = "[REDACTED:";
+    inline constexpr std::string_view kRedactionEllipsis   = "\xe2\x80\xa6";   // U+2026 — redact.h's splice, byte for byte
+
+    // how many COMPLETE emitted redaction artefacts `text` carries. `firstOut`, when non-null, receives the
+    // first one's full spelling, so the refusal quotes the real bytes rather than a schematic.
+    inline std::size_t countRedactionMarkers( std::string_view text, std::string* firstOut = nullptr )
+    {
+        std::size_t count = 0;
+        for( std::size_t at = text.find( kRedactionMarkerOpen ); at != std::string_view::npos; at = text.find( kRedactionMarkerOpen, at + 1 ) )
+        {
+            if( at < kRedactionEllipsis.size() || text.compare( at - kRedactionEllipsis.size(), kRedactionEllipsis.size(), kRedactionEllipsis ) != 0 )
+            {
+                continue;   // a bare "[REDACTED:" in prose, a legend or a doc comment is not what a serve writes
+            }
+            for( const rw::RedactRule& rule : rw::kRedactRules )
+            {
+                const std::string_view marker( rule.marker );
+                if( text.compare( at, marker.size(), marker ) != 0 )
+                {
+                    continue;
+                }
+                if( count == 0 && firstOut != nullptr )
+                {
+                    *firstOut = std::string( kRedactionEllipsis ) + std::string( marker );
+                }
+                ++count;
+                break;
+            }
+        }
+        return count;
+    }
+
+    // The refusal TAIL for a payload that introduces a marker, or "" when it introduces none. `existing` is
+    // the bytes this edit would replace — the definition span for a replace; for an insert, which replaces
+    // nothing, the target FILE as it is on disk, the only honest denominator an insert has. `existingName`
+    // names that denominator in the sentence, so the number the refusal reports is attributable. Each call
+    // site supplies its own subject in front ("--edit-payload", "payload", "payload '<path>'"), exactly the
+    // way kBinaryPayloadRefusal above is used, so no site reads doubled.
+    //
+    // The sentence states what was MEASURED and asserts nothing about how the payload was served — the write
+    // surface cannot know that, and the previous sentence's claim that it could was finding R1's first half.
+    // It names two next steps and both are real: --no-redact resolves it when the payload did come from a
+    // redacted serve (the re-fetch then carries no marker, and the same call is accepted); and when it did
+    // not, the honest answer is that these verbs will not introduce the marker at all, so the bytes go in
+    // through the caller's own file write. Neither is a guess the agent has to test to find out.
+    inline std::string redactionMarkerRefusal( std::string_view payload, std::string_view existing, const std::string& existingName )
+    {
+        std::string       first;
+        const std::size_t inPayload = countRedactionMarkers( payload, &first );
+        if( inPayload == 0 )
+        {
+            return {};
+        }
+        const std::size_t inExisting = countRedactionMarkers( existing );
+        if( inPayload <= inExisting )
+        {
+            return {};
+        }
+        return "carries " + std::to_string( inPayload ) + " redaction marker(s) of the shape a redacted serve writes (first: '"
+             + first + "') where the " + existingName + " carries " + std::to_string( inExisting ) + " — writing it would put "
+             + std::to_string( inPayload - inExisting ) + " of them into source. That shape is what --expand / fetch_body splices "
+               "in place of a credential, and it says so on the element it serves (redacted=\"1\"): if this payload came from such "
+               "a serve, re-fetch that body with --no-redact (MCP: redact:false) and paste the real bytes. If it did not, the "
+               "markers are the payload's own and these verbs will not introduce them — write those bytes with your own file "
+               "write instead. Nothing was written";
+    }
+
+    // The same gate, keyed by op, so each of the three write surfaces reads as ONE call instead of repeating
+    // the same choice of denominator. `src` is the target file exactly as it is on disk and `span` is the
+    // definition span inside it; a ReplaceBody is measured against that span, the two inserts against the
+    // whole file, because an insert replaces nothing and the file is the only honest denominator it has.
+    inline std::string redactionMarkerRefusalFor( Op op, std::string_view payload, std::string_view src,
+                                                  std::string_view span, const std::string& fileIdentity )
+    {
+        if( op == Op::ReplaceBody )
+        {
+            return redactionMarkerRefusal( payload, span, "definition span it would replace" );
+        }
+        return redactionMarkerRefusal( payload, src, "target file '" + fileIdentity + "'" );
+    }
 
     // the outcome of an edit attempt: either a success JSON payload, or a JSON-RPC error {code,message}.
     struct Outcome
@@ -1047,12 +1147,8 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
         oc.message = "payload " + std::string( mcpedit::kBinaryPayloadRefusal );
         return oc;
     }
-    if( text.find( mcpedit::kRedactionMarker ) != std::string::npos )
-    {
-        oc.ok = false; oc.errCode = -32602;
-        oc.message = "payload " + std::string( mcpedit::kRedactionMarkerRefusal );
-        return oc;
-    }
+    // R1 (V3): the redaction-marker gate is NOT here beside the NUL rule — it needs the bytes this edit
+    // would replace, so it sits after the span is resolved below. Nothing between here and there writes.
 
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
@@ -1136,6 +1232,18 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
         oc.ok = false; oc.errCode = -32603;
         oc.message = "definition span for '" + symbol + "' is invalid (a=" + std::to_string( a )
                    + " b=" + std::to_string( b ) + " size=" + std::to_string( src.size() ) + ")";
+        return oc;
+    }
+
+    // R1 (V3): the redaction-marker gate, here rather than at the top beside the NUL rule, because the honest
+    // predicate needs the bytes this edit would replace (see redactionMarkerRefusal). Measured on `text`, the
+    // payload exactly as handed in — the CRLF harmonisation below can neither add nor remove a marker.
+    const std::string redactionRefusal =
+        mcpedit::redactionMarkerRefusalFor( op, text, src, std::string_view( src ).substr( a, b - a ), path );
+    if( !redactionRefusal.empty() )
+    {
+        oc.ok = false; oc.errCode = -32602;
+        oc.message = "payload " + redactionRefusal;
         return oc;
     }
 
