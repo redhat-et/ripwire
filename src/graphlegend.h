@@ -50,18 +50,18 @@ namespace rw
 inline std::string graphGaugeAttrXml( const std::vector<std::uint32_t>& ambOut, const std::vector<std::uint32_t>& unresolvedOut )
 {
     std::size_t amb = 0, unresolved = 0;
-    for( std::uint32_t k : ambOut )        { amb        += k; }
+    for( std::uint32_t k : ambOut ) { amb += k; }
     for( std::uint32_t k : unresolvedOut ) { unresolved += k; }
-    char buf[ 96 ];
+    char buf[96];
     std::snprintf( buf, sizeof( buf ), " graph_ambiguous=\"%zu\" graph_unresolved=\"%zu\"", amb, unresolved );
     return buf;
 }
 inline std::string graphGaugeAttrJson( const std::vector<std::uint32_t>& ambOut, const std::vector<std::uint32_t>& unresolvedOut )
 {
     std::size_t amb = 0, unresolved = 0;
-    for( std::uint32_t k : ambOut )        { amb        += k; }
+    for( std::uint32_t k : ambOut ) { amb += k; }
     for( std::uint32_t k : unresolvedOut ) { unresolved += k; }
-    char buf[ 96 ];
+    char buf[96];
     std::snprintf( buf, sizeof( buf ), ",\"graph_ambiguous\":%zu,\"graph_unresolved\":%zu", amb, unresolved );
     return buf;
 }
@@ -112,7 +112,7 @@ inline constexpr const char* kGraphCountFloorTextLine =
     "        counts_floor=1: every count above is a FLOOR, never a total (call edges are name-based; dynamic dispatch, "
     "callbacks and macros can be missing) — read a zero as \"none found\", never as \"none exists\"; graph_ambiguous=%zu "
     "graph_unresolved=%zu is the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs "
-    "were all language-filtered), the map header's ambiguous=/unresolved=\n";   // printf FORMAT: the two gauge totals
+    "were all language-filtered), the map header's ambiguous=/unresolved=\n"; // printf FORMAT: the two gauge totals
 
 // --lego shipped with NO legend at all (a bare <ctx root=><lego>…); one literal for the CLI verb and its MCP
 // twin, so the two dialects cannot describe implementors= differently.
@@ -394,10 +394,8 @@ inline std::string callHierarchyLegendOpen( bool wantCallers )
     // F-02: the blind-spot clause rides with hop_tested=/hop_untested=, which both forms always carry.
     // P3 (L7): next= defined where the reader meets it — callers hand over the SITES (the uses verb on the same
     // selector, its @FILE:LINE spelling mirrored), callees the BODY whose callees these are (expand).
-    return wantCallers ? std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend
-                         + "next= is the one pasteable follow-up (the uses verb on this selector: the call sites). "
-                       : std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend + kCallHierarchyLegendCalleesOnly
-                         + "next= is the one pasteable follow-up (expand on this selector: the body). ";
+    return wantCallers ? std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend + "next= is the one pasteable follow-up (the uses verb on this selector: the call sites). "
+                       : std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend + kCallHierarchyLegendCalleesOnly + "next= is the one pasteable follow-up (expand on this selector: the body). ";
 }
 
 // ── LB-G (r10 GitNexus round) — the DISPLAY-CAP clause the neighbour verbs share ─────────────────────────
