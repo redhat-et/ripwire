@@ -113,6 +113,41 @@ grep -q 'return 2$' "$D2/corpus/b/two.py" \
     || no "the failing file was modified"
 
 echo
+echo "=== 2b. E4 (terminality round A 2026-09-05): each failure names the ONE call that shows the state ==="
+# The message says what happened to the tree; an agent that has to CHECK still goes and diffs by hand. So the
+# message ends with exactly one `next: <cmd>` — `git -C <root> diff --exit-code -- <every file the plan touches>`,
+# the files spelled ROOT-relative as every receipt spells them and -C <root> making it pasteable from wherever
+# ripwire was invoked — whose exit 0 IS the proof of the claim ("no files were written" / "N prior files rolled
+# back"). The gate EXECUTES it from the directory the plan was run from.
+for tag in first second; do
+    NX="$( sed -n 's/.*next: //p' "$TMP/$tag.err" | head -1 )"
+    NNEXT="$( grep -o 'next: ' "$TMP/$tag.err" | wc -l | tr -d ' ' )"
+    [ "$NNEXT" = 1 ] && ok "($tag) the message carries exactly one next:" || no "($tag) the message carries $NNEXT 'next:' clauses (want 1): $( head -c 200 "$TMP/$tag.err" )"
+    case "$NX" in
+        "git -C corpus diff --exit-code -- "*) ok "($tag) next: is git -C <root> diff --exit-code over the plan's files ($NX)";;
+        *) no "($tag) next: is not 'git -C <root> diff --exit-code -- <files>': '$NX'";;
+    esac
+    printf '%s' "$NX" | grep -q -- '-- a/one.py b/two.py\|-- b/two.py a/one.py' \
+        && ok "($tag) next: names BOTH files the plan touches, root-relative" || no "($tag) next: does not name both plan files root-relative: '$NX'"
+done
+# the EXECUTION arm needs the corpus committed BEFORE the plan runs, so the diff has a baseline — rebuild both
+# scenarios on git-backed corpora and run the printed command.
+for tag in first second; do
+    case "$tag" in first) ro=corpus/a;; second) ro=corpus/b;; esac
+    D="$TMP/git-$tag"; build_corpus "$D"
+    ( cd "$D/corpus" && git init -q && git -c user.email=t@t -c user.name=t add -A && git -c user.email=t@t -c user.name=t commit -qm base ) >/dev/null 2>&1
+    run_with_readonly "$D" "$ro" "git-$tag"
+    NX="$( sed -n 's/.*next: //p' "$TMP/git-$tag.err" | head -1 )"
+    if [ -z "$NX" ]; then
+        no "($tag) no next: to execute"
+    elif ( cd "$D" && sh -c "$NX" >/dev/null 2>&1 ); then
+        ok "($tag) running the printed next: from the corpus root exits 0 — the claimed state is the real state"
+    else
+        no "($tag) the printed next: ($NX) exits non-zero from the corpus root — the message's claim is not what git sees"
+    fi
+done
+
+echo
 echo "=== 3. the two messages are distinguishable ==="
 if [ "$( cat "$TMP/first.err" )" = "$( cat "$TMP/second.err" )" ]; then
     no "both failure modes still emit the identical message"
