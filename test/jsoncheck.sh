@@ -12,6 +12,11 @@
 #   (4) determinism: 2 runs of --json are byte-identical (the det-gate contract applies to JSON too)
 #   (5) G5: --json is additive — plain XML output (no --json) is untouched (spot-checked here, not
 #       re-litigating the full det-gate golden which regression.sh already runs)
+#   (10) NO DUPLICATE KEYS (verify-wave1 R2): every JSON object any surface emits spells each key once —
+#       the CLI --json verbs (#1-#7 and the #8b universe), every MCP tools/call payload and envelope over
+#       every tools/list verb, and the CLI --batch CDATA payloads. RFC 8259 names SHOULD be unique; Python
+#       and Go keep the last value, strict parsers error. MCP grep on a cut default window spelled
+#       "total" twice (its own row count plus M2's paging quintet) on e3b52d3 — this arm is RED there.
 #
 # A self-contained tmp git repo fixture (not test/fixture — that one is shared by other goldens and isn't
 # its own git repo) gives --quality-delta/--test-gate a real, controlled HEAD + working-tree diff so this
@@ -64,12 +69,38 @@ EOF
   && git config user.email "t@example.com" && git config user.name "t" \
   && git add -A && git commit -q -m "initial" )
 
+# #10 — nodupes FILE: exit 0 when every object in the JSON text spells each key once; prints the first
+# duplicate otherwise. json.loads with an object_pairs_hook sees every pair BEFORE dict() collapses them —
+# `python3 -m json.tool` alone keeps the last value and would call a duplicate-keyed payload valid.
+nodupes(){
+    python3 - "$1" <<'PY'
+import json, sys
+text = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
+def hook( pairs ):
+    seen = set()
+    for k, _ in pairs:
+        if k in seen:
+            raise ValueError( "duplicate key %r" % k )
+        seen.add( k )
+    return dict( pairs )
+try:
+    json.loads( text, object_pairs_hook = hook )
+except ValueError as e:
+    print( e ); sys.exit( 1 )
+PY
+}
+
 # a parses as JSON via python3 -m json.tool; prints nothing on success. Fails the check on parse error.
+# #10: and spells every key once (nodupes) — a parse that keeps the last value is not a parity check.
 parses(){
     local desc="$1"; shift
     local out; out="$( "$@" 2>/dev/null )"
     if printf '%s' "$out" | python3 -m json.tool >/dev/null 2>&1; then
         ok "$desc: --json parses (python3 -m json.tool)"
+        printf '%s' "$out" >"$TMP/parses.json"
+        local dup; dup="$( nodupes "$TMP/parses.json" )" \
+            && ok "#10 $desc: no duplicate keys" \
+            || no "#10 $desc: duplicate JSON key — $dup"
     else
         no "$desc: --json did NOT parse as valid JSON"
         printf '%s\n' "$out" | head -c 300
@@ -312,6 +343,7 @@ while IFS="$( printf '\t' )" read -r flag kind example policy; do
     if [ "$first" = "{" ] || [ "$first" = "[" ]; then
         if python3 -m json.tool <"$TMP/u.out" >/dev/null 2>&1; then
             nJson=$(( nJson + 1 )); jsonVerbs="$jsonVerbs $name"
+            dup="$( nodupes "$TMP/u.out" )" || no "#10 #8b: $probe --json spells a key twice — $dup"
         else
             no "#8b: $probe --json put a '$first' on stdout that does not parse as JSON"
         fi
@@ -334,6 +366,108 @@ for v in $jsonVerbs; do
 done
 printf '%s' "$HELPJSON" | grep -q -- '--metrics' && ok "#8b: --help's --json paragraph names --metrics" \
                                                   || no "#8b: --help's --json paragraph omits --metrics"
+
+# ═══ #10 NO DUPLICATE KEYS on every MCP payload + envelope, and on the CLI --batch CDATA payloads ═════════
+# The alpha fixture mcpcontractprobe.py's baseArgs() make every verb ANSWER on (a refusal carries no payload
+# to check), plus a file with >100 `int` hits so grep's DEFAULT window is cut — the shape on which the
+# duplicate lived (a --limit spells the own-name total once by construction). Every verb tools/list
+# advertises is driven, edit verbs against a throwaway copy; the sweep must see a JSON payload from the
+# JSON-answering verbs (11 measured on this fixture: find_symbol find_referencing_symbols grep cochange
+# mentions quality_baseline whereis stray_content + the three edit verbs; the rest answer XML/prose, which
+# is not this arm's question) or it asserts nothing — floor 8. The envelope line itself is checked too.
+ALPHA="$TMP/alpha"; mkdir -p "$ALPHA"
+printf '// alphaOne does a thing.\nint alphaOne( int x ) { return x + 1; }\nint alphaTwo( int x ) { return alphaOne( x ) * 2; }\nint alphaThree() { return alphaTwo( 1 ); }\n' >"$ALPHA/alpha.cpp"
+printf '# Notes\n`alphaOne` is the entry point.\n' >"$ALPHA/notes.md"
+for i in $( seq 1 120 ); do printf 'int v%d = %d;\n' "$i" "$i"; done >"$ALPHA/many.cpp"
+( cd "$ALPHA" && git init -q && git config user.email "t@example.com" && git config user.name "t" \
+  && git add -A && git commit -q -m "alpha" )
+python3 - "$BIN" "$ALPHA" "$ROOT/test" <<'PY' >"$TMP/mcpdup.out" 2>&1
+import json, os, shutil, sys, tempfile
+binPath, root, testDir = sys.argv[ 1 ], sys.argv[ 2 ], sys.argv[ 3 ]
+sys.path.insert( 0, testDir )
+from mcpcontractprobe import Server, baseArgs, EDIT_VERBS
+def hook( pairs ):
+    seen = set()
+    for k, _ in pairs:
+        if k in seen:
+            raise ValueError( "duplicate key %r" % k )
+        seen.add( k )
+    return dict( pairs )
+def dupOf( text ):
+    try:
+        json.loads( text, object_pairs_hook = hook )
+    except ValueError as e:
+        return str( e )
+    except Exception:
+        return None            # not JSON at all: not this arm's question
+    return ""
+srv = Server( binPath )
+tools = srv.call( "tools/list", {} )[ "result" ][ "tools" ]
+payloads = 0; answered = 0; bad = []
+for t in tools:
+    verb = t[ "name" ]
+    args = dict( baseArgs( verb ) )
+    scratch = None
+    if verb in EDIT_VERBS:
+        scratch = tempfile.mkdtemp(); shutil.copytree( root, os.path.join( scratch, "c" ) ); args[ "path" ] = os.path.join( scratch, "c" )
+    else:
+        args[ "path" ] = root
+    srv.n += 1
+    req = { "jsonrpc": "2.0", "id": srv.n, "method": "tools/call", "params": { "name": verb, "arguments": args } }
+    srv.p.stdin.write( json.dumps( req ).encode() + b"\n" ); srv.p.stdin.flush()
+    line = srv.p.stdout.readline().decode( "utf-8", "replace" )
+    if scratch: shutil.rmtree( scratch, ignore_errors = True )
+    d = dupOf( line )
+    if d: bad.append( "%s envelope: %s" % ( verb, d ) )
+    try:
+        env = json.loads( line )
+    except Exception:
+        bad.append( "%s: envelope is not JSON" % verb ); continue
+    if "error" in env: continue
+    answered += 1
+    for c in env.get( "result", {} ).get( "content", [] ):
+        text = c.get( "text", "" )
+        if text.lstrip()[ :1 ] in ( "{", "[" ):
+            payloads += 1
+            d = dupOf( text )
+            if d: bad.append( "%s payload: %s" % ( verb, d ) )
+srv.close()
+print( "TOOLS=%d ANSWERED=%d PAYLOADS=%d" % ( len( tools ), answered, payloads ) )
+for b in bad: print( "DUP " + b )
+PY
+mcpStats="$( grep '^TOOLS=' "$TMP/mcpdup.out" )"
+mcpPayloads="$( printf '%s' "$mcpStats" | sed -E 's/.*PAYLOADS=([0-9]+).*/\1/' )"
+[ -n "$mcpPayloads" ] && [ "$mcpPayloads" -ge 8 ] \
+    && ok "#10 MCP sweep is live: $mcpStats" \
+    || no "#10 MCP sweep inert: [$mcpStats] $( grep -v '^TOOLS=' "$TMP/mcpdup.out" | head -3 | tr '\n' ' ' )"
+if grep -q '^DUP ' "$TMP/mcpdup.out"; then
+    while IFS= read -r line; do no "#10 MCP ${line#DUP }"; done < <( grep '^DUP ' "$TMP/mcpdup.out" )
+else
+    ok "#10 MCP: no verb's envelope or payload spells a key twice"
+fi
+# the CLI --batch form rides the SAME emitters inside CDATA: extract every JSON payload and check each.
+printf 'grep:int\ncallers:alphaOne\nfor:add a thing\n' >"$TMP/batch.txt"
+"$BIN" "$ALPHA" --batch="$TMP/batch.txt" --no-cache >"$TMP/batch.xml" 2>/dev/null
+python3 - "$TMP/batch.xml" <<'PY' >"$TMP/batchdup.out"
+import re, sys
+t = open( sys.argv[ 1 ], encoding = "utf-8", errors = "replace" ).read()
+n = 0
+for m in re.finditer( r"<!\[CDATA\[(.*?)\]\]>", t, re.S ):
+    body = m.group( 1 ).lstrip()
+    if body[ :1 ] in ( "{", "[" ):
+        n += 1
+        print( "PAYLOAD " + body )
+print( "N=%d" % n )
+PY
+nb="$( grep -o '^N=[0-9]*' "$TMP/batchdup.out" | cut -d= -f2 )"
+[ -n "$nb" ] && [ "$nb" -ge 1 ] && ok "#10 --batch: $nb JSON payload(s) in CDATA to check" \
+                                || no "#10 --batch: no JSON payload found in the batch document — the arm asserts nothing"
+batchDups=0
+while IFS= read -r payload; do
+    printf '%s' "$payload" >"$TMP/batchpayload.json"
+    dup="$( nodupes "$TMP/batchpayload.json" )" || { no "#10 --batch payload spells a key twice — $dup"; batchDups=$(( batchDups + 1 )); }
+done < <( grep '^PAYLOAD ' "$TMP/batchdup.out" | sed 's/^PAYLOAD //' )
+[ "$batchDups" = 0 ] && ok "#10 --batch: every CDATA JSON payload spells each key once"
 
 # ═══ #9 determinism — 2 runs are byte-identical (the det-gate contract applies to --json too) ═══════════
 D1="$( "$BIN" . --json --no-cache 2>/dev/null )"

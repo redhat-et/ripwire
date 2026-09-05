@@ -807,8 +807,13 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     // `total` is emitted here only when the disclosure will NOT — un-paged it is grep's own row count and
     // must stay (the CLI's <grep hits="T"> twin); paged, the disclosure carries it, and JSON cannot spell
     // the same key twice the way the CLI's XML root spells both hits= and total=.
+    // R2 (capture-audit verify-wave1 2026-09-04): "paged" is the DISCLOSURE's own decision, asked of
+    // computePageDisclosure — not `limit/offset given`. M2 made the paging half ride whenever the listing
+    // was CUT (a default window that dropped rows is a page too), so the old spelling emitted `total` here
+    // AND inside the quintet on every bare cut answer: the duplicate key jsoncheck.sh #10 pins.
     char       pagebuf[ kPageDisclosureCap ];
-    const bool isPaging = page.limit > 0 || page.offset > 0;
+    const bool isPaging = computePageDisclosure( rowCount, collected.raw.size(), grepPage.end, page.limit, page.offset,
+                                                 /*discloseCap=*/true ).paging;
 
     // T1: the completeness claim, the SAME four conditions as the CLI emitter (main.cpp's emitGrepReport)
     // minus the regex arm — this verb is literal-only, so every scan is a full end-to-end read. Appended
