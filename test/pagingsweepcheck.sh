@@ -625,6 +625,7 @@ TABLE = {
     "--comment-coherence":  ( [ "--comment-coherence" ], None ),
     "--naming-consistency": ( [ "--naming-consistency" ], None ),
     "--safe-delete":        ( [ "--safe-delete=escapeXml" ], None ),
+    "--pr-context":         ( [ "--pr-context" ], None ),   # P4 (L7): the changed-file window pages (plain quintet on the root)
 }
 fail = 0
 missing = [ v for v in universe if v not in TABLE ]

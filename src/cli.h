@@ -1631,7 +1631,7 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               or --max-tokens=N set it explicitly): per-file structural counts survive first, the deep\n"
         "                               detail (caller/co-change lists, per-symbol rows) trims deepest-first, truncated= names what\n"
         "                               was dropped and est_tokens= reports the fit. When even the structural floor of every changed\n"
-        "                               file exceeds the budget, the FILES (blast-radius order) are windowed: files_shown=/capped=/\n"
+        "                               file exceeds the budget, the FILES (blast-radius order) are windowed: shown=/capped=/total=/\n"
         "                               next_offset= disclose the cut and next= pastes the next page (--offset=N / --limit=N window\n"
         "                               them explicitly).\n"
         "                               ANCHORING: the BASEREF form diffs against merge-base(BASEREF,HEAD), never BASEREF's tip —\n"

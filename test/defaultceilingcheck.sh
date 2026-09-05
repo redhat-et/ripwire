@@ -17,8 +17,8 @@
 #   --external-surface  100 rows (shown= capped= next=); sh builtins dropped and COUNTED (builtins_excluded=);
 #                       --include-builtins keeps them; the first 30 rows equal the uncapped listing's first 30
 #   --pr-context[=REF]  budget_tokens="8000" budget_default="1" unless --token-budget/--max-tokens; est_tokens <=
-#                       the budget; when even the structural floor exceeds it the FILES are windowed (files_shown=
-#                       capped="1" next="--pr-context[=REF] --offset=N") and --offset=N continues the page
+#                       the budget; when even the structural floor exceeds it the FILES are windowed (the plain quintet:
+#                       shown= capped="1" total= … next="--pr-context[=REF] --offset=N") and --offset=N continues the page
 #   each answer at defaults is <= 12,000 B on this repo (pr-context: <= the 8000-token allowance)
 # Every next= is run through the argv parser (exit 0 or 4). RED on the wave-2 binary: no ceiling, no attribute.
 #
@@ -128,11 +128,11 @@ prrun --pr-context >"$TMP/p1"
     && ok "(5) default root: budget_tokens=\"8000\" budget_default=\"1\"" \
     || no "(5) default root lacks the default budget (budget_tokens='$( rootattr "$TMP/p1" pr-context budget_tokens )' budget_default='$( rootattr "$TMP/p1" pr-context budget_default )')"
 est="$( rootattr "$TMP/p1" pr-context est_tokens )"; [ -n "$est" ] && [ "$est" -le 8000 ] && ok "(5) est_tokens=\"$est\" <= 8000" || no "(5) est_tokens='$est' exceeds the default budget"
-fs="$( rootattr "$TMP/p1" pr-context files_shown )"; tot="$( rootattr "$TMP/p1" pr-context files )"
+fs="$( rootattr "$TMP/p1" pr-context shown )"; tot="$( rootattr "$TMP/p1" pr-context files )"
 [ -n "$fs" ] && [ "$fs" -lt "$tot" ] && [ "$( rootattr "$TMP/p1" pr-context capped )" = 1 ] \
-    && ok "(5) 120-file floor over budget: files_shown=\"$fs\" of files=\"$tot\", capped=\"1\" next_offset=\"$( rootattr "$TMP/p1" pr-context next_offset )\"" \
-    || no "(5) the file window did not fire (files_shown='$fs' files='$tot' capped='$( rootattr "$TMP/p1" pr-context capped )')"
-[ "$( grep -o '<file p=' "$TMP/p1" | wc -l | tr -d ' ' )" = "$fs" ] && ok "(5) <file> rows == files_shown" || no "(5) <file> rows != files_shown"
+    && ok "(5) 120-file floor over budget: shown=\"$fs\" of files=\"$tot\", capped=\"1\" next_offset=\"$( rootattr "$TMP/p1" pr-context next_offset )\"" \
+    || no "(5) the file window did not fire (shown='$fs' files='$tot' capped='$( rootattr "$TMP/p1" pr-context capped )')"
+[ "$( grep -o '<file p=' "$TMP/p1" | wc -l | tr -d ' ' )" = "$fs" ] && ok "(5) <file> rows == shown" || no "(5) <file> rows != shown"
 np="$( nextof "$TMP/p1" pr-context )"; [ "$np" = "--pr-context --offset=$fs" ] && ok "(5) next=\"$np\"" || no "(5) next='$np' (want --pr-context --offset=$fs)"
 prrun --pr-context --offset="$fs" >"$TMP/p2"
 [ "$( rootattr "$TMP/p2" pr-context offset )" = "$fs" ] && [ "$( grep -o '<file p=' "$TMP/p2" | wc -l | tr -d ' ' )" -gt 0 ] \

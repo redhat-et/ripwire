@@ -443,8 +443,8 @@ struct PrTrim
 // 659,824 B (~165K tokens, 217 files, 3,590 <s> + 3,367 <caller> rows) with no ceiling in force. The default is
 // kPrDefaultBudgetTokens, disclosed as budget_default="1" on the root; --token-budget=N / --max-tokens=N set it
 // explicitly. The trim ladder below runs first (detail, never files); when even the structural FLOOR of every
-// changed file exceeds the budget, the files themselves — blast-radius order — are windowed: files_shown=/capped=/
-// has_more=/next_offset=/offset=/limit= on the root and next= pastes the next page (--offset=N / --limit=N are the
+// changed file exceeds the budget, the files themselves — blast-radius order — are windowed: the plain paging quintet
+// (shown=/capped=/total=/has_more=/next_offset=/offset=/limit=) on the root and next= pastes the next page (--offset=N / --limit=N are the
 // explicit window; --pr-context joined cli.h's paging-honoring set for it).
 inline constexpr std::size_t kPrDefaultBudgetTokens = 8000;
 
@@ -784,7 +784,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                  // P4 (L7): the default budget and the file window, defined where the reader meets them
                  "BUDGET: the bundle is budgeted by default — budget_tokens= is the ceiling in force (8000 unless token-budget/max-tokens set it; "
                  "budget_default=1 says the default applied), est_tokens= the fit, trim_level=/truncated= what the ladder dropped. When even the "
-                 "structural floor of every changed file exceeds it, the FILES are windowed in blast-radius order: files_shown= of files=, "
+                 "structural floor of every changed file exceeds it, the FILES are windowed in blast-radius order: shown= of files=, "
                  "capped=1 with total=/has_more=/next_offset=/offset=/limit= (limit=0 = the default window), and next= is the one pasteable "
                  "follow-up (the next page). "
                  // §H4 §3.4 / V4 MED-3: the SEVENTH graph-count surface. Every per-symbol callers= here is read
@@ -1073,8 +1073,10 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
         fileEnd = filePw.begin + lo;
         chosen  = pickPrTrimLevel( emitFiles, budgetTokens );
     }
+    // the changed files are this root's PRIMARY listing, so a cut speaks the plain quintet (shown=/capped=/total=/
+    // has_more=/next_offset=/offset=/limit=, pageview.h) — never a noun-prefixed twin beside it (one fact, one name)
     const std::size_t filesShown = fileEnd - filePw.begin;
-    std::string       windowAttrs = " files_shown=\"" + std::to_string( filesShown ) + "\"";
+    std::string       windowAttrs;
     if( filesShown < changed.size() )
     {
         char pab[ kPageDisclosureCap ];

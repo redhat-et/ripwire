@@ -90,13 +90,13 @@ for T in 20000 8000 4000 2000; do
     "$BIN" "$ROOT" --pr-context="$BASE" --max-tokens=$T --no-cache >"$TMP/c_$T" 2>/dev/null
     E=$( attr "$TMP/c_$T" est_tokens ); TR=$( attr "$TMP/c_$T" truncated ); FC=$( filecount "$TMP/c_$T" )
     # RE-PINNED (P4, L7): files are windowed ONLY when even the structural floor exceeds the budget, and then the
-    # cut is disclosed — files_shown= equals the <file> count and capped="1" + next= ride the root. Otherwise every
-    # changed file is present, as before.
-    FS=$( attr "$TMP/c_$T" files_shown ); ALLF=$( attr "$TMP/c_$T" files )
+    # cut is disclosed — shown= (the plain quintet) equals the <file> count and capped="1" + next= ride the root.
+    # Otherwise every changed file is present, as before.
+    FS=$( attr "$TMP/c_$T" shown ); ALLF=$( attr "$TMP/c_$T" files )
     if [ "$FC" = "$ALLF" ]; then :;
     elif [ "$FC" = "$FS" ] && [ "$( attr "$TMP/c_$T" capped )" = 1 ] && grep -q ' next="--pr-context' "$TMP/c_$T"; then
-        echo "    budget=$T: floor over budget — files windowed and disclosed (files_shown=$FS of $ALLF, next= present)";
-    else echo "    budget=$T dropped files silently ($FC of $ALLF; files_shown='$FS' capped='$( attr "$TMP/c_$T" capped )')"; filesok=0; fi
+        echo "    budget=$T: floor over budget — files windowed and disclosed (shown=$FS of $ALLF, next= present)";
+    else echo "    budget=$T dropped files silently ($FC of $ALLF; shown='$FS' capped='$( attr "$TMP/c_$T" capped )')"; filesok=0; fi
     # est must be <= budget UNLESS the floor itself overflows (then truncated says budget-floor-exceeded)
     if [ -n "$E" ] && [ "$E" -le "$T" ]; then :;
     elif printf '%s' "$TR" | grep -q 'budget-floor-exceeded'; then :;   # honest floor overflow
@@ -104,8 +104,8 @@ for T in 20000 8000 4000 2000; do
 done
 [ "$underok" = 1 ] && ok "budgeted est_tokens <= budget at every tested budget (or honest floor-exceeded)" \
     || no "a budgeted run exceeded its budget without the floor-exceeded marker"
-[ "$filesok" = 1 ] && ok "every changed file present at every budget, or the file window disclosed (files_shown=/capped=1/next=) when the floor exceeded it" \
-    || no "a budgeted run dropped a changed file SILENTLY (a cut must be disclosed with files_shown=/capped=1/next=)"
+[ "$filesok" = 1 ] && ok "every changed file present at every budget, or the file window disclosed (shown=/capped=1/next=) when the floor exceeded it" \
+    || no "a budgeted run dropped a changed file SILENTLY (a cut must be disclosed with shown=/capped=1/next=)"
 
 # ── #4: truncation marker HONEST — a trimmed run names a non-"none" drop; a level-0 run says "none" ─────
 TT=$( attr "$TMP/c_2000" truncated ); TL=$( attr "$TMP/c_2000" trim_level )
