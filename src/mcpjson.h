@@ -421,6 +421,74 @@ namespace mcpdetail
         return out;
     }
 
+    // F8 (capture-audit verify-wave2 2026-09-05): the array's TOP-LEVEL elements, raw and untrimmed of their
+    // own structure — the one thing neither arrayObjects (which finds every brace-balanced object at any
+    // nesting) nor arrayStrings (which finds every quoted string, INCLUDING the keys and values inside those
+    // objects) can answer. Both were sound for their own callers and neither could tell a MIXED array from a
+    // uniform one: an all-object `[{"verb":"callers","symbol":"escapeXml"}]` yields four "strings" to
+    // arrayStrings, so a mixed-array check built on it refuses every object array. Depth-aware, string-aware,
+    // and it classifies nothing — the caller reads the first byte of each element and decides.
+    inline std::vector<std::string> arrayTopLevelElements( const std::string& arr )
+    {
+        std::vector<std::string> out;
+        // The span a caller hands us includes its own brackets. Enter the container first, or every element
+        // sits at depth 1 and the scan finds no top-level comma at all (measured: a mixed array read as zero
+        // elements, i.e. the check silently never fired).
+        std::size_t first = arr.find_first_not_of( " \t\n\r" );
+        std::size_t begin = ( first != std::string::npos && arr[ first ] == '[' ) ? first + 1 : 0;
+        int         depth = 0;
+        std::size_t start = std::string::npos;
+        const auto  flush = [ & ]( std::size_t end )
+        {
+            if( start == std::string::npos ) { return; }
+            std::string_view e( arr.data() + start, end - start );
+            while( !e.empty() && ( e.back() == ' ' || e.back() == '\t' || e.back() == '\n' || e.back() == '\r' ) )
+            {
+                e.remove_suffix( 1 );
+            }
+            if( !e.empty() ) { out.emplace_back( e ); }
+            start = std::string::npos;
+        };
+        for( std::size_t p = begin; p < arr.size(); ++p )
+        {
+            const char c = arr[p];
+            if( c == ']' && depth == 0 )
+            {
+                break;   // the container's own close — anything after it is not an element
+            }
+            if( c == '"' )
+            {
+                if( depth == 0 && start == std::string::npos ) { start = p; }
+                const std::size_t close = stringEnd( arr, p );
+                if( close == std::string::npos ) { break; }   // unterminated ⇒ nothing past it parses
+                p = close;
+                continue;
+            }
+            if( c == '{' || c == '[' )
+            {
+                if( depth == 0 && start == std::string::npos ) { start = p; }
+                ++depth;
+                continue;
+            }
+            if( c == '}' || c == ']' )
+            {
+                if( depth > 0 ) { --depth; }
+                continue;
+            }
+            if( depth == 0 && c == ',' )
+            {
+                flush( p );
+                continue;
+            }
+            if( depth == 0 && start == std::string::npos && c != ' ' && c != '\t' && c != '\n' && c != '\r' )
+            {
+                start = p;
+            }
+        }
+        flush( arr.size() );
+        return out;
+    }
+
     // ─── §H3: the FRAMING gate — is this frame ONE COMPLETE JSON-RPC request object? ──────────────────────
     //
     // THE INCIDENT. Nothing sat between the stdio read loop (mcp.h's readByteSafeLine) and the key-position

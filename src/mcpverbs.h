@@ -4103,9 +4103,22 @@ inline std::string batchObjectFromCliSpec( std::string_view spec )
     {
         return {};   // comment
     }
+    // F11 (capture-audit verify-wave2 2026-09-05, recorded by wave 1 and unowned until M5 took this grammar):
+    // the colon is a SEPARATOR, and `callers: rankGraphTeleport` is how a human writes one. Untrimmed, the
+    // leading space rode into the symbol and came back as
+    //   symbol not found: ' rankGraphTeleport' (did you mean 'rankGraphTeleport'?)
+    // — a did-you-mean whose suggestion is the string the caller typed, which is the shape of a tool blaming
+    // a user for its own parse. Trimmed on both sides of the colon, the same trim this function already runs
+    // on the whole line. isBatchCliSpec already trimmed the VERB half, so the two halves now agree.
+    const auto trimEnds = []( std::string_view t )
+    {
+        const std::size_t f = t.find_first_not_of( " \t\r" );
+        if( f == std::string_view::npos ) { return std::string{}; }
+        return std::string( t.substr( f, t.find_last_not_of( " \t\r" ) - f + 1 ) );
+    };
     const std::size_t colon = line.find( ':' );
-    const std::string verb  = ( colon == std::string::npos ) ? line : line.substr( 0, colon );
-    const std::string arg   = ( colon == std::string::npos ) ? std::string{} : line.substr( colon + 1 );
+    const std::string verb  = ( colon == std::string::npos ) ? line : trimEnds( std::string_view( line ).substr( 0, colon ) );
+    const std::string arg   = ( colon == std::string::npos ) ? std::string{} : trimEnds( std::string_view( line ).substr( colon + 1 ) );
 
     const auto  j   = []( const std::string& v ) { return mcpdetail::jsonEscape( v ); };
     std::string obj = "{\"verb\":\"" + j( verb ) + "\"";
@@ -4292,7 +4305,12 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
     {
         return bad( verbErr );
     }
-    if( const std::string fieldErr = mcpUnknownFieldRefusal( obj, r.verb, mcprefuse::kBatchSubQueryFields );
+    // F7 (verify-wave2): the sub-query IS refused here — verified inline on 2d40209 — but the sentence used
+    // to read "slice accepts: verb, symbol, pattern, task, …", naming the batch ITEM schema under the
+    // SUB-VERB's name. slice accepts no `pattern` and no `from`, so the recovery list was false for the verb
+    // it named. The schema is still the right one to judge against (mcprefusal.h kBatchSubQueryFields says
+    // why); it is the ATTRIBUTION that was wrong, so the sentence names the schema it actually applied.
+    if( const std::string fieldErr = mcpUnknownFieldRefusal( obj, "batch sub-queries", mcprefuse::kBatchSubQueryFields );
         !fieldErr.empty() )
     {
         return bad( fieldErr );
