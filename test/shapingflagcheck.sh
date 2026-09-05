@@ -59,6 +59,26 @@ fnorm(){ stripDoctorVolatile "$1" | sed -E 's/ duration_ms="[0-9]+"//g'; }
 . "$ROOT/test/lib/doctorvolatile.sh"                  # F6: the ONE --doctor strip list, read out of the document
 cd "$ROOT"
 echo "shapingflagcheck: BIN=$BIN"
+
+# ── ONE INGEST FOR THE WHOLE GATE (2026-09-05, terminality round A lane V2) ───────────────────────────────
+# The (F) universe sweep ran every probe with --no-cache — up to three COLD PARSES per flag row (warm-up,
+# plain, knob, sometimes a second plain), ~190 rows. Measured on this machine, this gate's fixture corpus:
+# 0.09 s cold vs 0.01 s warm per invocation. That is the whole reason this gate's pargates budget had to go
+# to 1200 s (pargates.py, 525ce39a), which registered "one ingest shared across probes" as the fix.
+#
+# TWO changes, and the second is what makes the first safe:
+#   1. TMPDIR is redirected into this gate's own scratch dir, so quality::cacheDirLadder()'s per-root blobs
+#      are PRIVATE to this run and die with the trap. This gate's whole method is byte-identity between two
+#      runs of the same argv; sharing $TMPDIR/ripwire with the gates pargates runs beside it would let a
+#      sibling's blob write move a cache-reporting row (--doctor's cache-dir bytes=) between them. The
+#      per-probe warm-up below already existed for the same class of reading — this removes the other half.
+#   2. The two roots this gate probes are parsed ONCE, here. $FCORPUS is warmed where it is built, below.
+# The per-probe warm-up at the (F) sweep is KEPT and is now cheap: it covers verb-specific first-run state,
+# which a shared ingest does not. No probe is deliberately cold — --no-cache and --cache= are both rows in
+# the swept universe, so the cold and restore paths are still exercised as the probe VALUES they are.
+export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
+"$BIN" . >/dev/null 2>&1 || true                       # the repo root: the (B)/(D)/anchor/hotspots arms
+
 git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/status.before"
 
 # ── (A) the SOURCE side: the read sites, re-derived ────────────────────────────────────────────────────
@@ -331,6 +351,7 @@ cmp -s "$TMP/fp.out" "$TMP/fd.out" \
 FCORPUS="$TMP/fcorpus"
 cp -R "$ROOT/test/fixture" "$FCORPUS"
 ( cd "$FCORPUS" && git init -q . && git add -A && git -c user.name=gate -c user.email=gate@gate commit -qm fixture ) >/dev/null 2>&1
+( cd "$FCORPUS" && "$BIN" . >/dev/null 2>&1 ) || true   # THE ONE INGEST for the (F) sweep's corpus (see the header block above)
 printf 'layer test = /no-such-path-xyz/\ndeny test -> render\n' > "$TMP/arch.txt"
 printf '#0 total_area at geometry.cpp:3\n' > "$TMP/ftrace.txt"
 printf 'not a scip index\n' > "$TMP/fprobe.scip"   # M7 (capture-audit L5): an index that cannot be OPENED now refuses
@@ -423,8 +444,8 @@ while IFS="$( printf '\t' )" read -r flag kind example policy; do
     [ -n "$flag" ] || continue
     case "$kind" in int) probe="${flag}2" ;; *) probe="$( fprobeFor "$flag" )" || continue ;; esac
     case "$flag" in --top-k=|--max-tokens=|--token-budget=) continue ;; esac
-    ( cd "$FCORPUS" && "$BIN" . $probe --no-cache >/dev/null 2>/dev/null </dev/null )   # warm-up: cold-vs-warm state is not a knob
-    ( cd "$FCORPUS" && "$BIN" . $probe --no-cache >"$TMP/f.plain" 2>"$TMP/f.plain.err" </dev/null ); rcP=$?
+    ( cd "$FCORPUS" && "$BIN" . $probe >/dev/null 2>/dev/null </dev/null )   # warm-up: verb-specific first-run state is not a knob
+    ( cd "$FCORPUS" && "$BIN" . $probe >"$TMP/f.plain" 2>"$TMP/f.plain.err" </dev/null ); rcP=$?
     if [ "$rcP" -ne 0 ] && [ ! -s "$TMP/f.plain" ] && grep -qE "$MODIFIERPAT" "$TMP/f.plain.err"; then
         fModifier=$(( fModifier + 1 )); continue         # a lone modifier: no verb answered, nothing to shape
     fi
@@ -433,7 +454,7 @@ while IFS="$( printf '\t' )" read -r flag kind example policy; do
     # must be on stderr whether or not the verb then answered. A silent verb cannot hide behind a bad probe —
     # it lands in the fourth bucket below by name.
     for knob in --top-k=1 --max-tokens=10 --token-budget=1; do
-        ( cd "$FCORPUS" && "$BIN" . $probe "$knob" --no-cache >"$TMP/f.knob" 2>"$TMP/f.knob.err" </dev/null ); rcK=$?
+        ( cd "$FCORPUS" && "$BIN" . $probe "$knob" >"$TMP/f.knob" 2>"$TMP/f.knob.err" </dev/null ); rcK=$?
         isRefuse=0; isNotice=0
         grep -qE "$REFUSEPAT" "$TMP/f.knob.err" && isRefuse=1
         grep -qE "$NOTICEPAT" "$TMP/f.knob.err" && isNotice=1
@@ -448,7 +469,7 @@ while IFS="$( printf '\t' )" read -r flag kind example policy; do
                 # byte-stable to begin with even after the warm-up and the mask. A second plain run tells the
                 # two apart; the nondeterminism is DISCLOSED by name, never asserted away, and is its own
                 # defect for the determinism lane (M14), not evidence about the knob.
-                ( cd "$FCORPUS" && "$BIN" . $probe --no-cache >"$TMP/f.plain2" 2>/dev/null </dev/null )
+                ( cd "$FCORPUS" && "$BIN" . $probe >"$TMP/f.plain2" 2>/dev/null </dev/null )
                 if [ "$( fnorm "$TMP/f.plain" )" = "$( fnorm "$TMP/f.plain2" )" ]; then
                     fBad=$(( fBad + 1 )); no "(F) $probe $knob: the notice says the knob is not read, yet stdout CHANGED (and two plain runs agree, so the knob did it)"
                 else

@@ -37,7 +37,29 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-run(){ "$BIN" "$FIX" "$@" --no-cache 2>"$TMP/err"; }
+
+# ── ONE INGEST FOR THE WHOLE GATE (2026-09-05, terminality round A lane V2) ───────────────────────────────
+# Every probe below used to carry --no-cache, so this gate paid a COLD PARSE per invocation — 23 verb rows in
+# the (A)/(F)/(L) arms plus two runs of every XML flag in the (U) universe sweep, and each one re-parsed the
+# same six-file fixture from scratch. Measured on this machine, test/fixture, one verb: 0.09 s cold vs 0.01 s
+# warm. That is the whole reason this gate's pargates budget had to go to 1200 s (pargates.py, 525ce39a),
+# which registered "one ingest shared across probes" as the fix; this is it.
+#
+# TWO changes, and the second is what makes the first safe:
+#   1. TMPDIR is redirected into this gate's own scratch dir. quality::cacheDirLadder() honours $TMPDIR, so
+#      the per-root cache blobs land HERE, are private to this run, and die with the trap above. Without it a
+#      warm gate would share $TMPDIR/ripwire with every other gate pargates runs beside it — and this gate's
+#      (U) arm compares a verb's FULL and COMPACT payloads byte-for-byte, so a sibling gate writing a blob
+#      between those two runs could move a cache-reporting row (--doctor's cache-dir bytes=) underneath it.
+#      Private TMPDIR removes that coupling outright rather than accepting a flake window.
+#   2. Both roots are warmed ONCE, here, before any arm asserts. Every later invocation reads that blob.
+# No probe is deliberately cold: --no-cache is itself a flag in the (U) universe, so the cold path is still
+# exercised — as a probe VALUE, on the one row whose contract it is, which is where it belongs.
+# The restore-equivalence contract (a --cache restore == a cold parse) is what makes warm probes legitimate
+# here; if it ever breaks, this gate goes red, which is the correct place for that news to arrive.
+export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
+
+run(){ "$BIN" "$FIX" "$@" 2>"$TMP/err"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found — required by the universe arm"; exit 2; }
@@ -118,7 +140,14 @@ REPO="$TMP/repo"; mkdir -p "$REPO"; cp -R "$FIX"/. "$REPO"/
   && printf '\n// three\n' >> geometry.cpp && git commit -q -am "three" ) || { echo "fixture git setup failed"; exit 2; }
 printf 'at distance (geometry.cpp:5)\n' > "$TMP/trace.txt"
 printf 'callers: distance\nuses: distance\n' > "$TMP/batch.txt"
-rrun(){ ( cd "$REPO" && "$BIN" . "$@" --no-cache 2>"$TMP/rerr" ); }
+rrun(){ ( cd "$REPO" && "$BIN" . "$@" 2>"$TMP/rerr" ); }
+
+# THE ONE INGEST (see the header block above): both roots parsed once, here, into this gate's private
+# TMPDIR cache. Placed after the git fixture is built so the blob is keyed to the tree the arms actually
+# probe. A failure to warm is NOT fatal — the arms below still answer, just cold — so this never turns a
+# cache problem into a false red about the legend; the arms themselves are what report.
+"$BIN" "$FIX" >/dev/null 2>&1 || true
+( cd "$REPO" && "$BIN" . >/dev/null 2>&1 ) || true
 
 echo "=== (A) the original four: default == --legend=full; schema ids; shrink; completeness attributes ==="
 run --for='geometry distance' >"$TMP/for.default"
@@ -276,12 +305,12 @@ nXml=0; nXmlBad=0; nRefuse=0; nSkip=0; loopBytes=0; xmlVerbs=""
 while IFS="$( printf '\t' )" read -r flag kind example policy; do
     [ -n "$flag" ] || continue
     case "$kind" in int) probe="${flag}3" ;; *) probe="$( probeFor "$flag" )" || { nSkip=$(( nSkip + 1 )); continue; } ;; esac
-    ( cd "$REPO" && "$BIN" . "$probe" --no-cache >"$TMP/u.full" 2>"$TMP/u.fullerr" </dev/null ); rcFull=$?
+    ( cd "$REPO" && "$BIN" . "$probe" >"$TMP/u.full" 2>"$TMP/u.fullerr" </dev/null ); rcFull=$?
     isxml="$( leg isxml "$TMP/u.full" )"
     if [ "$isxml" != "1" ]; then
         # not an XML answer (a refusal, text, JSON, html): compact must refuse — or, when the default itself
         # refused, refuse for its own reason (compact must not turn a refusal into an answer)
-        ( cd "$REPO" && "$BIN" . "$probe" --legend=compact --no-cache >"$TMP/u.c" 2>"$TMP/u.cerr" </dev/null ); rcC=$?
+        ( cd "$REPO" && "$BIN" . "$probe" --legend=compact >"$TMP/u.c" 2>"$TMP/u.cerr" </dev/null ); rcC=$?
         if [ "$rcC" -ne 0 ] && [ ! -s "$TMP/u.c" ]; then
             nRefuse=$(( nRefuse + 1 ))
         else
@@ -290,7 +319,7 @@ while IFS="$( printf '\t' )" read -r flag kind example policy; do
         continue
     fi
     nXml=$(( nXml + 1 )); name="${flag%%=*}"; xmlVerbs="$xmlVerbs $name"
-    ( cd "$REPO" && "$BIN" . "$probe" --legend=compact --no-cache >"$TMP/u.c" 2>"$TMP/u.cerr" </dev/null ); rcC=$?
+    ( cd "$REPO" && "$BIN" . "$probe" --legend=compact >"$TMP/u.c" 2>"$TMP/u.cerr" </dev/null ); rcC=$?
     if [ "$rcC" -ne "$rcFull" ] || [ ! -s "$TMP/u.c" ]; then
         no "(U) $probe --legend=compact: exit $rcC (full: $rcFull), $( wc -c <"$TMP/u.c" | tr -d ' ' ) B — stderr=[$( head -c 140 "$TMP/u.cerr" | tr '\n' ' ' )]"
         nXmlBad=$(( nXmlBad + 1 ))

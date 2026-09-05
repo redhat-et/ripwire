@@ -1033,6 +1033,15 @@ inline std::string pricedRootAttr( std::size_t markupBytes, double markupRate, s
     if( outTokens ) { *outTokens = estTokens; }
     return attr;
 }
+// R1 (terminality round A 2026-09-05): the ONE definition of over_ceiling=, hoisted to sit beside the
+// estimator whose number it qualifies. It was a function-local constant in verbs_for.h, which is why the
+// MCP `for` twin — priced at the same wave-2 merge (mcpverbs.h F5) — could serve est_tokens past a stated
+// budget_tokens with no attribute and no legend clause: the wording was not reachable from there, so the
+// rule was not either. Both --for dialects and the MCP twin splice THIS string, so the sentence a reader is
+// given and the predicate the surfaces apply cannot drift apart. No "--" in it: it rides inside an XML
+// comment, where a double hyphen is ill-formed (G4).
+inline constexpr std::string_view kOverCeilingLegend = " over_ceiling=1 says est_tokens exceeds budget_tokens";
+
 // Splices `attrs` into the FIRST start-tag of `doc` (the root — its own attribute values are XML-escaped, so
 // the first '>' closes it). No-op, with a degrade alert, if the document has no start-tag at all.
 inline void spliceRootAttrs( std::string& doc, std::string_view attrs, std::size_t rootTagAt = 0 )

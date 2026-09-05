@@ -147,8 +147,33 @@ GATE_BUDGET_SEC = {
     # take the 1200 that cppbenchcheck/regexbombcheck already use; collectioncapcheck takes 900 like pagingsweep.
     # Making the two sweeps cheaper (one ingest shared across probes) is registered for the terminality round's
     # battery-hygiene lane; a budget here is the hang tripwire, never the perf bar.
-    "compactlegendcheck.sh":     1200,
-    "shapingflagcheck.sh":       1200,
+    #
+    # 2026-09-05, LATER (terminality round A, lane V2): that registered work LANDED, and these two rows come
+    # DOWN 1200 -> 900. Both gates now redirect $TMPDIR into their own scratch dir and warm each root they
+    # probe ONCE, instead of passing --no-cache on every probe; the private TMPDIR is what makes a warm probe
+    # safe beside a parallel battery, because both gates assert byte-identity between two runs of the same
+    # argv and a sibling gate's blob write would otherwise move a cache-reporting row (--doctor's cache-dir
+    # bytes=) between them. Identical arm sets before and after, ALL PASS both ways.
+    #
+    # THE ARITHMETIC, measured the same way the paragraph above measured it -- the three gates running
+    # concurrently on the dev machine, before and after, same machine, same binary:
+    #     compactlegendcheck  74.1 s -> 53.9 s   (-27%)      solo: 68.6 s -> 49.4 s
+    #     shapingflagcheck   107.2 s -> 71.1 s   (-34%)      solo: 105.6 s -> 66.5 s
+    #     collectioncapcheck   8.8 s ->  9.6 s   (untouched; the noise band on this measurement)
+    # Scaling the budget by the measured ratio: 1200 x 53.9/74.1 = 873 and 1200 x 71.1/107.2 = 796 -- both
+    # land on the 900 tier pagingsweep/collectioncap already use. Cross-checked against the runner factor
+    # this file's own rows are derived from: at 6-11x, 53.9 s projects to 323-593 s and 71.1 s to 427-782 s,
+    # so 900 still clears the SLOWEST projection with headroom, which is the property a hang tripwire needs.
+    # NOT taken: 4x the local wall (216 s / 284 s). That is below the flat 300 s default and would re-create
+    # exactly the rc=124 reds these rows were added to fix -- these gates got ~30% cheaper, not 4x cheaper,
+    # and a budget has to survive the slowest leg, not the machine it was measured on.
+    # WHERE THE REST OF THE TIME IS, so the next lane does not re-run this experiment: profiled with a
+    # timing shim, shapingflagcheck makes 890 binary invocations totalling well under a third of its wall.
+    # The binary is no longer the dominant cost of either gate -- the residual is the per-row shell/awk/
+    # python glue of the universe sweeps. Another round of ingest-sharing buys nothing; only fewer
+    # subprocesses per row would.
+    "compactlegendcheck.sh":      900,
+    "shapingflagcheck.sh":        900,
     "collectioncapcheck.sh":      900,
                                           # under -j6, rc=124 at the flat cap on both ubuntu PLAIN legs of run
                                           # 33762934972 (Release legs and macOS fit). Warm replay landed with this row.
