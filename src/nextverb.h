@@ -59,7 +59,7 @@ inline std::string nextAttrXml( std::string_view invocation )
             default:
                 if( static_cast<unsigned char>( c ) < 0x20 || c == 0x7f ) { a += '?'; ++i; }
                 else if( static_cast<unsigned char>( c ) < 0x80 ) { a += c; ++i; }
-                else if( const int len = rw::utf8SeqLen( d, i, n ); len == 0 ) { a += '?'; ++i; }
+                else if( const int len = rw::jsonesc::utf8SeqLen( d, i, n ); len == 0 ) { a += '?'; ++i; }
                 else { a.append( d + i, std::size_t( len ) ); i += std::size_t( len ); }
                 break;
         }
