@@ -119,4 +119,70 @@ echo "$outB" | grep -q 'TIMEOUT' \
 [ "$rcB" -eq 0 ] && ok "functional: pargates.py exits 0 once the override covers the gate's real runtime" \
     || no "functional: pargates.py exited $rcB even though the overridden gate should have passed"
 
+# ── F2 (terminality round A, 2026-09-05): a failing gate's report must NAME the arm that failed ─────────
+# The summary used to print a failing gate's last 12 non-blank lines. This repo's gates announce a failure
+# where it happens (`  FAIL  arm (X) …`) and then keep running their remaining arms, so those last 12 lines
+# are a wall of PASS rows plus a closing `SOME CHECKS FAILED` and the one line a reader needs is gone.
+# That is not a hypothesis: V1, V2 and the capture-audit close each recorded the same loss for
+# `gitstampcheck`, three rounds running, and the failing arm was never identified. Note that printing FEWER
+# trailing lines cannot fix it — the fix is SELECTING the failure-carrying lines, and these arms assert the
+# selection, the retained full log, and the tail, over the REAL script (no reimplementation).
+#
+# The fixture is built to be exactly the shape that used to defeat the report: the needle is line 1 and 41
+# lines of noise follow it.
+cat > "$CORPUSROOT/test/probefaillinegate.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "  FAIL  arm (Z) NEEDLE-4f2a the line that names the failing arm"
+for i in $( seq 1 40 ); do echo "  PASS  filler arm $i"; done
+echo "probefaillinegate: SOME CHECKS FAILED"
+exit 1
+EOF
+chmod +x "$CORPUSROOT/test/probefaillinegate.sh"
+
+grep -qE '^FAIL_TAIL_LINES = 5$' "$PARGATES" \
+    && ok "static: FAIL_TAIL_LINES is the declared 5 (the tail a failing gate always shows)" \
+    || no "static: FAIL_TAIL_LINES is not the declared 5 — the failing-gate report contract moved"
+
+outC="$( python3 "$PARGATES" "$CORPUSROOT" "$FAKEBIN" --only probefaillinegate 2>&1 )"
+rcC=$?
+echo "$outC" | grep -q 'NEEDLE-4f2a' \
+    && ok "functional: the failing arm's own line survives into the report, 41 noise lines below it" \
+    || { no "functional: the FAILING ARM'S LINE IS MISSING from the report — the reader is left with the tail only:"; echo "$outC" | sed -n '/FAILURES/,$p' | sed 's/^/    /'; }
+echo "$outC" | grep -qE '^ +L[0-9]+: ' \
+    && ok "functional: reported lines carry their transcript line number" \
+    || no "functional: the report has no L<n>: line numbers — a reader cannot find the line in the full log"
+echo "$outC" | grep -q 'probefaillinegate: SOME CHECKS FAILED' \
+    && ok "functional: the transcript's last lines are still shown alongside the failure lines" \
+    || no "functional: the report dropped the gate's closing lines"
+[ "$rcC" -ne 0 ] && ok "functional: pargates.py still exits non-zero for a failing gate" \
+    || no "functional: pargates.py exited 0 for a gate that exited 1 (rc=$rcC)"
+
+# the FULL transcript is kept on disk and the report says where — the summary destroys nothing
+fullLog="$( echo "$outC" | sed -n 's/.*full output: \(.*\)$/\1/p' | tail -1 )"
+if [ -n "${fullLog:-}" ] && [ -f "$fullLog" ]; then
+    logLines="$( wc -l <"$fullLog" | tr -d ' ' )"
+    if [ "$logLines" -ge 42 ] && grep -q 'NEEDLE-4f2a' "$fullLog" && grep -q 'filler arm 40' "$fullLog"; then
+        ok "functional: the failing gate's FULL output ($logLines lines) is retained at the path the report names"
+    else
+        no "functional: the retained log at $fullLog is not the full transcript ($logLines lines)"
+    fi
+else
+    no "functional: the report names no readable full-output path (got '${fullLog:-}')"
+fi
+
+# a gate KILLED at its budget keeps what it printed before the kill — the TIMEOUT line used to be the
+# ENTIRE report, so an arm that had already failed at 30 s was invisible at 300 s.
+cat > "$CORPUSROOT/test/probeslowfailgate.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "  FAIL  arm (Y) NEEDLE-9c17 printed before the budget expired"
+sleep 5
+EOF
+chmod +x "$CORPUSROOT/test/probeslowfailgate.sh"
+COPYD="$TMP/pargates_d.py"
+patchPargates "$COPYD" ""
+outD="$( python3 "$COPYD" "$CORPUSROOT" "$FAKEBIN" --only probeslowfailgate 2>&1 )"
+echo "$outD" | grep -q 'TIMEOUT after 2s' && echo "$outD" | grep -q 'NEEDLE-9c17' \
+    && ok "functional: a gate killed at its budget still reports what it printed before the kill" \
+    || { no "functional: the timeout report lost the gate's own pre-kill output:"; echo "$outD" | sed -n '/FAILURES/,$p' | sed 's/^/    /'; }
+
 [ "$fail" -eq 0 ] && echo "pargatescheck: ALL PASS" || { echo "pargatescheck: SOME CHECKS FAILED"; exit 1; }
