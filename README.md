@@ -23,7 +23,8 @@ declarative table.
 ### No API key. No embeddings. No index server. No daemon.
 
 One self-contained binary on your own machine, offline, installed in one line — and the same line
-ships the task-shaped skills that teach your agent *when* to reach for it, not just how. If your
+installs *and activates* the task-shaped skills that teach your agent *when* to reach for it, not
+just how, for every agent it finds on the machine. If your
 agent can run shell commands — Claude Code, Codex, Cursor, Windsurf, Gemini, opencode, aider — it is
 set up the moment the install finishes; [the MCP server is the optional second
 interface](#set-it-up-in-your-coding-agent). Install it and ask it something before you finish
@@ -584,8 +585,11 @@ ranking, bodies, callers and tests in one budgeted bundle.
 every release is smoke-tested on a RHEL 9 userland before it publishes). Downloads the latest
 [GitHub Release](https://github.com/redhat-et/ripwire/releases), verifies its SHA-256, and installs
 to `~/.local/bin`. From v0.2.2 the release tarball also ships the seventeen agent skills, and the
-installer stages them under `~/.local/share/ripwire/skills` — the activation one-liner is printed
-at the end of the install:
+installer stages them under `~/.local/share/ripwire/skills` **and activates them for every agent it
+detects** (Claude Code, Codex), printing one line per agent saying what it did. An agent that is not
+installed is never given a skills directory, hooks are never registered without an explicit `--hook`,
+and `RIPWIRE_NO_ACTIVATE=1` stages without activating for image builds. When no agent is detected the
+activation one-liner is printed instead:
 
 ```bash
 RIPWIRE_REPO=redhat-et/ripwire bash -c "$(curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh)"

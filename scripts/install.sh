@@ -173,9 +173,53 @@ if [ -d "$extractedDir/skills" ]; then
     chmod +x "$skillsShareDir/install.sh" 2>/dev/null || true
 
     echo "install.sh: staged agent skills at $skillsShareDir"
-    echo "  Activate them (symlinks into the agent's skill dir, safe to re-run):"
-    echo "    Claude Code: bash \"$skillsShareDir/install.sh\""
-    echo "    Codex:       bash \"$skillsShareDir/install.sh\" --codex"
+
+    # ── ACTIVATE, don't hand the user a menu (2026-09-06) ──────────────────────────────────────────
+    # This block used to print four commands and stop: activate for Claude Code, or for Codex, then
+    # optionally hooks for either. A new user finished the one-liner facing a decision rather than a
+    # working setup, and the README's headline — the same line "ships the task-shaped skills that
+    # teach your agent WHEN to reach for it" — was carrying its weight on the word "ships". Skills
+    # that sit staged teach nothing.
+    #
+    # So: activate for each agent actually PRESENT on this machine, and print one receipt line each.
+    # Detection is the agent's own home directory, which is the same signal `ripwire wrap --all` uses
+    # and the only one available before the binary is on PATH. An agent that is not installed is
+    # never given a skills directory — inventing ~/.claude on a machine with no Claude Code would be
+    # this installer writing somebody else's config.
+    #
+    # TWO THINGS THIS DELIBERATELY DOES NOT DO. It never registers HOOKS: those carry a data-capture
+    # disclosure (raw paths, patterns and commands into a local log with no retention limit) that a
+    # user must read and accept, and no amount of convenience justifies arming that silently — they
+    # stay behind an explicit `--hook`. And it never fails the install over an activation: the binary
+    # is the product, so a symlink that cannot be written degrades to the manual line, exactly like a
+    # release with no bundled skills does.
+    #
+    # RIPWIRE_NO_ACTIVATE=1 stages without activating, for image builds and scripted installs that
+    # provision agent homes later. test/releaseinstallcheck.sh arms (E1)-(E6) pin all of it.
+    activated=0
+    if [ -z "${RIPWIRE_NO_ACTIVATE:-}" ]; then
+        if [ -d "$HOME/.claude" ]; then
+            if bash "$skillsShareDir/install.sh" >/dev/null 2>&1; then
+                echo "install.sh: activated the ripwire skills for Claude Code ($HOME/.claude/skills)"
+                activated=$(( activated + 1 ))
+            else
+                echo "install.sh: could not activate the Claude Code skills; run: bash \"$skillsShareDir/install.sh\"" >&2
+            fi
+        fi
+        if [ -d "${CODEX_HOME:-$HOME/.codex}" ] || [ -d "${AGENTS_HOME:-$HOME/.agents}" ]; then
+            if bash "$skillsShareDir/install.sh" --codex >/dev/null 2>&1; then
+                echo "install.sh: activated the ripwire skills for Codex (${AGENTS_HOME:-$HOME/.agents}/skills)"
+                activated=$(( activated + 1 ))
+            else
+                echo "install.sh: could not activate the Codex skills; run: bash \"$skillsShareDir/install.sh\" --codex" >&2
+            fi
+        fi
+    fi
+    if [ "$activated" -eq 0 ]; then
+        echo "  Activate them (symlinks into the agent's skill dir, safe to re-run):"
+        echo "    Claude Code: bash \"$skillsShareDir/install.sh\""
+        echo "    Codex:       bash \"$skillsShareDir/install.sh\" --codex"
+    fi
     if [ -d "$extractedDir/hooks" ]; then
         rm -rf "$hooksShareDir"
         cp -R "$extractedDir/hooks" "$hooksShareDir"
