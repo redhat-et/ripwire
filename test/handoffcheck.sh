@@ -60,6 +60,13 @@ cat > "$WORK/test/test_engine.cpp" <<'EOF'
 int engineRun( int x );
 int testEngine() { return engineRun( 1 ); }
 EOF
+# M4(b) (capture-audit 2026-09-04): a runner script whose basename STEM matches the test file, so
+# testmap.h's runAttr has real evidence to derive `run="bash test/test_engine.sh"` from. Without it the
+# run= arm below is vacuous — "absent means not derivable" would be the honest answer for every emitter.
+cat > "$WORK/test/test_engine.sh" <<'EOF'
+#!/usr/bin/env bash
+exec ./test_engine
+EOF
 cat > "$WORK/docs/engine_rework_notes.md" <<'EOF'
 # PLAN: engine rework
 Notes on reworking the engine/scheduler pipeline for the handoff.
@@ -174,6 +181,105 @@ DISCLOSED="$( cat "$TMP/budget.xml" "$TMP/budget.err" 2>/dev/null )"
 { printf '%s' "$DISCLOSED" | grep -qi 'budget' && printf '%s' "$DISCLOSED" | grep -qiE 'trunc|withheld|omit'; } \
     && ok "the header discloses the budget and a truncation note" \
     || no "no budget/truncation disclosure found in --token-budget=400 output"
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+# M4 (capture-audit 2026-09-04, lens 2 M5 / lens 4 / lens 0) — THE THREE GAPS IN THE PACKET
+#
+# (a) NOTES DROPPED WITH withheld="0". In the capture's sandbox a non-dangling note sat on a symbol in
+#     handoff's OWN <verified> set and no <note> row appeared, while the header said nothing had been
+#     withheld. Root cause: the match tested `n.target.rfind( ing.files[f], 0 ) == 0` — a note target is
+#     stored ROOT-RELATIVE (notes.h::normalizeNoteTarget) and ing.files[] is CRAWL-ROOT-PREFIXED, so the
+#     prefix test could only ever match by accident. The rule this gate asserts:
+#         notes( non-dangling, target ∈ changed ∪ blast ) ⊆ handoff.<note> rows ∪ what the header accounts for
+#     — i.e. a matching note is either IN the packet or COUNTED as dropped. Never silently absent.
+# (b) NO run= ON <t> ROWS. --situ / --test-gate / --pr-context all print run="bash test/…" for the SAME
+#     test file (testmap.h::runAttr is the ONE spelling); handoff, whose whole audience is an agent about
+#     to resume, made the recipient re-derive it.
+# (c) branch="HEAD" ON A DETACHED HEAD. That is git's answer, not a branch; the packet's "disk truth" half
+#     read as if a branch named HEAD existed. detached="1" says what the state actually is (the sha is
+#     already on at=).
+#
+# RED-FIRST: every arm below fails on the pre-fix binary.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+echo
+echo "── M4(a) — a note on a changed/blast target is a row, or it is accounted for ────────────────────"
+NOTEREPO="$TMP/noterepo"
+cp -R "$WORK" "$NOTEREPO"
+# a note on a symbol in the CHANGED file, and one on a symbol in the BLAST radius (scheduler.cpp calls
+# engineRun, so it is a dependent, not a changed, file) — both non-dangling by construction.
+# engineRun is DECLARED in three files, so the bare name is ambiguous and H1 refuses it (notecanoncheck) —
+# the file-qualified spelling is what picks the definition, and both notes are then canonicalised to the id
+# the note index actually keys on.
+"$BIN" "$NOTEREPO" --no-cache --note-add="src/engine.cpp:engineRun: the +2 is deliberate, do not revert" >/dev/null 2>&1
+"$BIN" "$NOTEREPO" --no-cache --note-add="schedRun: this caller assumes engineRun is pure" >/dev/null 2>&1
+NOTES_XML="$( "$BIN" "$NOTEREPO" --no-cache --notes 2>/dev/null )"
+DANGLING_BEFORE="$( printf '%s' "$NOTES_XML" | grep -c 'dangling="1"' )"
+TARGETS_BEFORE="$( printf '%s' "$NOTES_XML" | grep -o '<target ' | wc -l | tr -d ' ' )"
+{ [ "$DANGLING_BEFORE" = "0" ] && [ "$TARGETS_BEFORE" = "2" ]; } \
+    && ok "M4(a): both fixture notes were written and are non-dangling (the arm is not measuring dead notes)" \
+    || no "M4(a): expected 2 non-dangling fixture notes, got targets=$TARGETS_BEFORE dangling=$DANGLING_BEFORE — the arms below would be vacuous"
+"$BIN" "$NOTEREPO" --no-cache --handoff >"$TMP/note.xml" 2>/dev/null
+NOTE_ROWS="$( grep -o '<note ' "$TMP/note.xml" | wc -l | tr -d ' ' )"
+[ "$NOTE_ROWS" -ge 1 ] \
+    && ok "M4(a): the packet carries the note on the CHANGED file's symbol ($NOTE_ROWS <note> row(s))" \
+    || no "M4(a): a non-dangling note on handoff's own verified symbol produced NO <note> row"
+grep -q 'do not revert' "$TMP/note.xml" \
+    && ok "M4(a): it is the right note (the changed symbol's text is in the packet)" \
+    || no "M4(a): the changed symbol's note text is absent from the packet"
+grep -q 'assumes engineRun is pure' "$TMP/note.xml" \
+    && ok "M4(a): the BLAST-radius symbol's note is in the packet too (changed ∪ blast, not changed alone)" \
+    || no "M4(a): a note on a blast-radius symbol was dropped"
+# the ACCOUNTING half: <heuristic> discloses how many candidate rows there were and whether a cap fired,
+# so a dropped note is never invisible.
+HROOT="$( grep -oE '<heuristic [^>]*>' "$TMP/note.xml" | head -1 )"
+{ printf '%s' "$HROOT" | grep -q 'candidates="' && printf '%s' "$HROOT" | grep -q 'capped="'; } \
+    && ok "M4(a): <heuristic> accounts for its own row population ($HROOT)" \
+    || no "M4(a): <heuristic> carries no candidates=/capped= accounting: [$HROOT]"
+grep -q 'candidates=' "$TMP/note.xml" && grep -q 'capped=' "$TMP/note.xml" \
+    && ok "M4(a): the legend defines them (legendcoveragecheck's rule)" \
+    || no "M4(a): candidates=/capped= are emitted with no legend definition"
+
+echo
+echo "── M4(b) — <t> rows carry run=, the same spelling situ/test-gate/pr-context print ──────────────"
+run --handoff >"$TMP/hb.xml" 2>/dev/null
+TROW="$( grep -oE '<t p="[^>]*/>' "$TMP/hb.xml" | head -1 )"
+[ -n "$TROW" ] && ok "M4(b): the packet has a <t> row to check ($TROW)" \
+               || no "M4(b): no <t> row in the packet — the arm would be vacuous"
+# the sibling that already prints it, on the SAME fixture and the SAME file: if --test-gate can derive a
+# runner here, handoff has no excuse not to.
+run --test-gate >"$TMP/tg.xml" 2>/dev/null
+SIB_RUN="$( grep -oE '<t [^>]*run="[^"]*"' "$TMP/tg.xml" | head -1 | sed -E 's/.*run="([^"]*)".*/\1/' )"
+if [ -n "$SIB_RUN" ]; then
+    ok "M4(b): the sibling --test-gate derives a runner on this fixture (run=\"$SIB_RUN\")"
+    printf '%s' "$TROW" | grep -q 'run="' \
+        && ok "M4(b): --handoff's <t> row carries run= too" \
+        || no "M4(b): --handoff's <t> row carries no run= while --test-gate prints run=\"$SIB_RUN\" for it"
+else
+    ok "M4(b): no runner derivable on this fixture — nothing to compare (absent means not derivable)"
+fi
+
+echo
+echo "── M4(c) — a DETACHED head says so, instead of naming a branch called HEAD ─────────────────────"
+DET="$TMP/detached"
+cp -R "$CLEAN" "$DET"
+( cd "$DET" && git checkout -q --detach HEAD )
+"$BIN" "$DET" --no-cache --handoff >"$TMP/det.xml" 2>/dev/null
+DROOT="$( grep -oE '<handoff [^>]*>' "$TMP/det.xml" | head -1 )"
+printf '%s' "$DROOT" | grep -q 'detached="1"' \
+    && ok "M4(c): a detached head is disclosed as detached=\"1\"" \
+    || no "M4(c): a detached head reports branch=\"HEAD\" with no detached= marker: [$DROOT]"
+printf '%s' "$DROOT" | grep -qE 'at="[0-9a-f]{7}' \
+    && ok "M4(c): and the sha is on the root (at=), so the state is fully named" \
+    || no "M4(c): no sha on the detached-head packet: [$DROOT]"
+# the control: an ATTACHED head must NOT carry the marker (absent means none).
+grep -oE '<handoff [^>]*>' "$TMP/clean.xml" | head -1 | grep -q 'detached=' \
+    && no "M4(c): an attached head carries detached= — absent means none" \
+    || ok "M4(c): an attached head carries no detached= (absent means none)"
+if command -v xmllint >/dev/null 2>&1; then
+    xmllint --noout "$TMP/note.xml" 2>/dev/null && xmllint --noout "$TMP/det.xml" 2>/dev/null \
+        && ok "M4: the note-carrying and detached packets are both well-formed XML" \
+        || no "M4: a packet is not well-formed XML"
+fi
 
 [ "$fail" = 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'
 exit "$fail"

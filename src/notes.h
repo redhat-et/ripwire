@@ -196,6 +196,41 @@ inline bool isDecisionShaped( std::string_view text )
     return false;
 }
 
+// ── H1 (capture-audit 2026-09-04): IS THIS TARGET A PATH, OR A SYMBOL SELECTOR THAT MISSED? ────────────
+//
+// The write side now resolves a target through the SAME resolver the read verbs use, and has to decide what
+// a target that resolved to NOTHING is: a file the caller has not created yet (legal — the "leave this for
+// the file I am about to add" note, which stays dangling until that path exists), or a symbol selector with
+// a typo in it (a dead note, refused with a did-you-mean). Only the SHAPE of the string can say, and the
+// three shapes that are unambiguously NOT a path come first — every one of them is a spelling the resolver
+// itself defines:
+//
+//   "::"          a canonical id or a Scope::name — no crawled path carries a literal "::" (the same fact
+//                 normalizeNoteTarget's split below rests on), so a mistyped canonical id is a mistyped
+//                 SYMBOL and must not slip through as "a file that does not exist yet" merely because it
+//                 holds a '/'.
+//   a leading '@' the @FILE:LINE line seed (graph.h::resolveAtSeed).
+//   ':'           the file:name / file:line:name qualified selector (splitQualifiedSpec). A POSIX path may
+//                 legally contain a colon; one that does is indistinguishable from that selector here, and
+//                 the honest degrade is the refusal (which names the near-miss) rather than a silent guess.
+//
+// What is left is a path iff it looks like one: it has a directory separator, or its last segment carries an
+// extension. A bare, extension-less, colon-free word is a NAME — that is the spelling the whole finding is
+// about, and treating it as a path is exactly the silent-dead-note behaviour being removed. Pure and
+// lexical; the caller ORs this with an on-disk existence test, which is I/O and does not belong here.
+inline bool noteTargetIsPathShaped( std::string_view target ) noexcept
+{
+    if( target.empty() || target.front() == '@' || target.find( ':' ) != std::string_view::npos )
+    {
+        return false;
+    }
+    if( target.find( '/' ) != std::string_view::npos )
+    {
+        return true;
+    }
+    return target.find( '.' ) != std::string_view::npos;   // no directory part — an extension is the only path tell left
+}
+
 // ── D5: root-relative target normalization (the portable-notes seam) ───────────────────────────────────
 //
 // A target is either a bare file path (no "::") or a canonical id `path::scope::name`. A file path never

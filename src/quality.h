@@ -2948,7 +2948,13 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
     return snap;
 }
 
-inline bool writeBaseline( const Snapshot& s, const std::string& path, std::string_view headSha = {} )
+// `absorbedGating` (H11, capture-audit 2026-09-04) is the number of GATING findings this tree already held
+// against HEAD when the pin was taken. Non-zero only under --allow-dirty — the bare form REFUSES rather
+// than absorb — and it is written as two records the snapshot reader skips as unknown kinds (`dirty 1`,
+// `absorbed N`), exactly like the `head` stamp above: the fact has to outlive the process that knew it,
+// because the report it changes the meaning of is every LATER --quality-delta, not this run.
+inline bool writeBaseline( const Snapshot& s, const std::string& path, std::string_view headSha = {},
+                           std::size_t absorbedGating = 0 )
 {
     std::ofstream f( path, std::ios::trunc );
     if( !f ) { DEGRADED_PATH_ALERT( "quality: cannot write baseline file" ); return false; }
@@ -2975,6 +2981,11 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     if( !headSha.empty() )
     {
         f << "head " << headSha << '\n';
+    }
+    if( absorbedGating > 0 )
+    {
+        f << "dirty 1\n";
+        f << "absorbed " << absorbedGating << '\n';
     }
     for( const auto& [h, v] : s.ccxBySym )
     {
@@ -3180,6 +3191,46 @@ inline std::string readBaselineHeadSha( const std::string& path )
         }
     }
     return {};
+}
+
+// H11 — the absorbed-debt stamp a --allow-dirty pin left behind, or 0 (absent, unstamped, or malformed).
+// Same posture as readBaselineHeadSha above and for the same reason: the sidecar is a COMMITTED file, so a
+// value read out of it is DATA, never trusted structure — anything that is not a plain positive decimal is
+// dropped to 0, which routes into the "no absorbed stamp" story rather than into a fabricated count. The
+// `dirty 1` companion record is deliberately NOT consulted: one fact, one reader, and `absorbed N` is the
+// one the report has something to say about.
+inline std::size_t readBaselineAbsorbed( const std::string& path )
+{
+    std::ifstream f( path );
+    if( !f )
+    {
+        return 0;
+    }
+    std::string line;
+    while( std::getline( f, line ) )
+    {
+        if( line.rfind( "absorbed ", 0 ) != 0 )
+        {
+            continue;
+        }
+        std::size_t n     = 0;
+        bool        anyDigit = false;
+        for( const char c : std::string_view( line ).substr( 9 ) )
+        {
+            if( c == '\r' || c == ' ' || c == '\t' )
+            {
+                break;
+            }
+            if( c < '0' || c > '9' || n > 100000000u )
+            {
+                return 0;   // not a plain count — distrust it, exactly as a non-sha head stamp is distrusted
+            }
+            n = n * 10 + std::size_t( c - '0' );
+            anyDigit = true;
+        }
+        return anyDigit ? n : 0;
+    }
+    return 0;
 }
 
 // ─── R3 (owner ruling, 2026-07-29) — the ONE baseline-selection seam, shared by BOTH arms ───────────────

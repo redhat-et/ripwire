@@ -210,5 +210,33 @@ else
     ok "(6) no committed ledger in this tree — nothing to keep in order"
 fi
 
+# ── (7) H10, END TO END: the BINARY's own read+rewrite of the COMMITTED ledger is byte-identical ─────────
+# Arm (6) asserts the INVARIANT a byte-identical rewrite needs (sorted keys, no duplicates, the tool's
+# header) — in python, i.e. a PROXY for the property, re-derived from a reading of writeAckRecords. This arm
+# is the property itself: the shipping binary reads the repo's real ledger, renders it, and either leaves the
+# file alone or heals it, and the file is compared byte-for-byte afterwards. A drift between the python model
+# and the C++ writer would pass (6) and fail here, which is the whole reason it exists.
+#
+# It runs against the CLEAN fixture rather than a clone of this repo on purpose: ackNothingToAccept's decision
+# reads the ledger bytes and nothing else about the tree, so the fixture exercises the identical path in a
+# fraction of the time — and its own git HEAD guarantees the "0 findings" precondition the path needs.
+if [ -f "$COMMITTED" ]; then
+    rm -f "$CLEAN/.ripwire_quality_acks"
+    cp "$COMMITTED" "$CLEAN/.ripwire_quality_acks"
+    ( cd "$CLEAN" && "$BIN" . --quality-delta --quality-ack="H10 round-trip probe" >/dev/null 2>"$WORK/rt.err" ); rcRT=$?
+    if cmp -s "$COMMITTED" "$CLEAN/.ripwire_quality_acks"; then
+        ok "(7) the binary's read+rewrite of the committed ledger is byte-identical (exit $rcRT)"
+    else
+        no "(7) the binary REWROTE the committed ledger on a run that accepted nothing (exit $rcRT)"
+        diff "$COMMITTED" "$CLEAN/.ripwire_quality_acks" | head -6 | sed 's/^/        /'
+    fi
+    grep -q 'left untouched' "$WORK/rt.err" \
+        && ok "(7) and it SAYS the ledger was left untouched" \
+        || no "(7) the run did not disclose what it did to the ledger: [$( head -c 200 "$WORK/rt.err" | tr '\n' ' ' )]"
+    rm -f "$CLEAN/.ripwire_quality_acks"
+else
+    ok "(7) no committed ledger in this tree — nothing to round-trip"
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"
