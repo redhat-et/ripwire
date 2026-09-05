@@ -314,22 +314,60 @@ inline Outcome prepare( const std::string& root, const std::string& planPath, st
     return out;
 }
 
+// ONE operation's receipt object. Split out of receipt() rather than grown inside it: P9 took that body
+// from ccx 9 to 19, past the kCcxBar=15 --quality-delta gates on, and the split is the honest fix rather
+// than an ack — the loop above is "for each op, emit one object", and this is the object.
+inline std::string receiptOperation( const Edit& edit, const FileStage* file, bool apply, const std::string& root )
+{
+    // A5: the resolved payload path, so a human reviewing a --dry-run before --apply can see which bytes
+    // each operation will READ. The plan names a spelling; this is what that spelling resolved to.
+    // P9: `target` is what the CALLER SPELLED (possibly a seed or a handle); `sym` and `at` are what it
+    // RESOLVED TO, so a dry-run can be judged without a second --edit-check per op, and `callers` says who
+    // is downstream of this one op.
+    const std::string identity = file == nullptr ? std::string() : file->identity;
+    std::string out = "{\"op\":\"" + mcpdetail::jsonEscape( edit.opName )
+                    + "\",\"target\":\"" + mcpdetail::jsonEscape( edit.target )
+                    + "\",\"file\":\"" + mcpdetail::jsonEscape( identity )
+                    + "\",\"sym\":\"" + mcpdetail::jsonEscape( edit.symName )
+                    + "\",\"at\":\"" + mcpdetail::jsonEscape( identity ) + ":" + std::to_string( edit.line )
+                    + "\",\"callers\":" + std::to_string( edit.callers.size() )
+                    + ",\"payload_path\":\"" + mcpdetail::jsonEscape( edit.payloadPath ) + "\"";
+    // …and on an APPLY, the contract question answered against the tree as it now stands — the same fold
+    // the single-edit receipt carries, per op (mcpedit::postCheckJson, withTests=false: a plan's ops can
+    // touch several files, so the tests half would be one list repeated N times).
+    if( apply && !root.empty() && file != nullptr && !edit.symName.empty() )
+    {
+        if( const std::string postCheck = mcpedit::postCheckJson( root, file->identity, edit.symName, false );
+            !postCheck.empty() && postCheck.front() == ',' )
+        {
+            out += postCheck;
+        }
+    }
+    return out + "}";
+}
+
+// The DISTINCT 1-hop callers across every op — the blast radius of the whole transaction, which is the
+// number a reviewer judges an --apply by and which no per-op count adds up to (two ops on the same hot
+// helper share most of their callers).
+inline std::size_t callersUnionSize( const std::vector<Edit>& edits )
+{
+    std::vector<NodeId> union_;
+    for( const Edit& e : edits )
+    {
+        union_.insert( union_.end(), e.callers.begin(), e.callers.end() );
+    }
+    std::sort( union_.begin(), union_.end() );
+    union_.erase( std::unique( union_.begin(), union_.end() ), union_.end() );
+    return union_.size();
+}
+
 inline std::string receipt( const std::vector<Edit>& edits, const std::vector<FileStage>& files, bool apply,
                             const std::string& root = {} )
 {
     std::string out = "{\"schema\":\"ripwire.edit-plan/v1\",\"mode\":\"";
     out += apply ? "apply" : "dry-run";
     out += "\",\"edits\":" + std::to_string( edits.size() ) + ",\"files\":" + std::to_string( files.size() );
-    // P9: the DISTINCT 1-hop callers across every op — the blast radius of the whole transaction, which is
-    // the number a reviewer judges an --apply by and which no per-op count adds up to (two ops on the same
-    // hot helper share most of their callers).
-    {
-        std::vector<NodeId> union_;
-        for( const Edit& e : edits ) { union_.insert( union_.end(), e.callers.begin(), e.callers.end() ); }
-        std::sort( union_.begin(), union_.end() );
-        union_.erase( std::unique( union_.begin(), union_.end() ), union_.end() );
-        out += ",\"callers_union\":" + std::to_string( union_.size() );
-    }
+    out += ",\"callers_union\":" + std::to_string( callersUnionSize( edits ) );   // P9, see above
     if( apply ) { out += ",\"applied\":" + std::to_string( edits.size() ) + ",\"atomic_files\":" + std::to_string( files.size() ); }
     // recheck_before_each_write: every file's indexed byte-hash is re-verified immediately before ITS OWN
     // write, not once for all files up front (A6). It is the observable half of a contract whose race a
@@ -342,27 +380,7 @@ inline std::string receipt( const std::vector<Edit>& edits, const std::vector<Fi
         if( i ) { out += ','; }
         const auto staged = std::find_if( files.begin(), files.end(), [ & ]( const FileStage& file ) { return file.fileId == edits[i].fileId; } );
         const FileStage* file = staged == files.end() ? nullptr : &*staged;
-        // A5: the resolved payload path, so a human reviewing a --dry-run before --apply can see which bytes
-        // each operation will READ. The plan names a spelling; this is what that spelling resolved to.
-        out += "{\"op\":\"" + mcpdetail::jsonEscape( edits[i].opName ) + "\",\"target\":\"" + mcpdetail::jsonEscape( edits[i].target )
-             + "\",\"file\":\"" + mcpdetail::jsonEscape( file == nullptr ? std::string() : file->identity )
-             // P9: `target` is what the CALLER SPELLED (possibly a seed or a handle); `at` and `sym` are what
-             // it RESOLVED TO, so a dry-run can be judged without a second --edit-check per op, and `callers`
-             // says who is downstream of this one op.
-             + "\",\"sym\":\"" + mcpdetail::jsonEscape( edits[i].symName )
-             + "\",\"at\":\"" + mcpdetail::jsonEscape( file == nullptr ? std::string() : file->identity )
-             + ":" + std::to_string( edits[i].line )
-             + "\",\"callers\":" + std::to_string( edits[i].callers.size() )
-             + ",\"payload_path\":\"" + mcpdetail::jsonEscape( edits[i].payloadPath ) + "\"";
-        // …and on an APPLY, the contract question answered against the tree as it now stands — the same
-        // fold the single-edit receipt carries, per op (mcpedit::postCheckJson, withTests=false: a plan's
-        // ops can touch several files, so the tests half would be one list repeated N times).
-        if( apply && !root.empty() && file != nullptr && !edits[i].symName.empty() )
-        {
-            std::string pc = mcpedit::postCheckJson( root, file->identity, edits[i].symName, false );
-            if( !pc.empty() && pc.front() == ',' ) { out += pc; }
-        }
-        out += "}";
+        out += receiptOperation( edits[i], file, apply, root );
     }
     return out + "]}";
 }
