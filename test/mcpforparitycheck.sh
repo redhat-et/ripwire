@@ -172,6 +172,52 @@ cmp -s "$TMP/ck5.xml" "$TMP/ck400.xml" \
     && ok "(4) CLI --for: --top-k is inert too (the documented behavior the MCP twin now matches)" \
     || no "(4) CLI --for moved with --top-k — the reference this parity is measured against is not what it claims"
 
+# ── (5) budget_tokens on this twin is never a SILENT overshoot — the CLI rule, stated for the dialect ─────
+# THE FAMILY RULE (METHODOLOGY §9 #2 + #4, and the CLI half of it: fornotesbudgetcheck arm 6). A caller who
+# states a ceiling gets one of exactly two honest answers, never a third:
+#   • the price is SERVED — est_tokens= on the root — and then est_tokens <= budget_tokens, or the root
+#     carries over_ceiling="1" saying it does not (the CLI's rule, verbs_for.h, F2);
+#   • the price is DECLARED ABSENT — est_tokens named in this dialect's lens= list — which is the posture
+#     this twin holds today: it is shaped by the server's payload byte cap, not priced against the caller's
+#     ceiling, so it says so on the root instead of printing a number it did not compute.
+# Silence is the third answer and the one this arm forbids: no price, no declaration, and a budget_tokens=
+# the caller cannot check the answer against. The disjunction is written so lane F's F5 (pricing this bundle
+# rather than declaring it) LANDS THROUGH this gate instead of needing it rewritten — the day est_tokens is
+# served here, the first clause takes over and the overshoot must be labelled exactly as the CLI labels it.
+# Also asserted: the stated ceiling is echoed at all (H9's budget_tokens= on the root); a bundle shaped
+# against a ceiling nobody can read is the defect H9 closed on the CLI and this twin inherited.
+# RED, MEASURED, three ways: on 77004e5c (pre-F2) the served-price clause fails the moment a price is served
+# unlabelled; dropping the lens= declaration while still not serving the number fails the second clause; and
+# removing the budget_tokens= splice (mcpverbs.h, the H9 insert) fails the echo clause on every rung.
+mcp_for_budget(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s","budget_tokens":%s}}}\n' \
+                         "$CORPUS" "$1" "$2" | "$BIN" --mcp 2>/dev/null | python3 "$TMP/mcptext.py"; }
+for tb in 900 1200 1600 2000 6000; do
+    b="$( mcp_for_budget "$INERT_Q" "$tb" )"
+    root="$( printf '%s' "$b" | sed -n 's/^\(<[^>]*>\).*/\1/p' | head -1 )"
+    if [ -z "$root" ]; then
+        no "(5) budget_tokens=$tb: the MCP for verb produced no root element — nothing to check the ceiling against"
+        continue
+    fi
+    case "$root" in
+        *"budget_tokens=\"$tb\""*) ;;
+        *) no "(5) budget_tokens=$tb: the stated ceiling is not echoed on the root — a bundle shaped against a ceiling nobody can read (H9)"; continue ;;
+    esac
+    est="$( printf '%s' "$root" | grep -o 'est_tokens="[0-9]*"' | head -1 | tr -dc '0-9' )"
+    if [ -n "$est" ]; then
+        case "$root" in *'over_ceiling="1"'*) lab=1 ;; *) lab=0 ;; esac
+        if [ "$est" -le "$tb" ] || [ "$lab" -eq 1 ]; then
+            ok "(5) budget_tokens=$tb: price SERVED and honest (est_tokens=$est, over_ceiling=$lab)"
+        else
+            no "(5) budget_tokens=$tb: est_tokens=$est exceeds the stated ceiling by $(( est - tb )) with NO over_ceiling — a silent overshoot on the MCP twin"
+        fi
+    else
+        case "$root" in
+            *'lens="'*'est_tokens'*'"'*) ok "(5) budget_tokens=$tb: price DECLARED ABSENT in lens= (shaped by the server's byte cap, not priced) — not silent" ;;
+            *) no "(5) budget_tokens=$tb: no est_tokens= and no est_tokens in lens= — the caller cannot tell the bundle fits the ceiling it stated" ;;
+        esac
+    fi
+done
+
 # ── determinism + well-formedness on the MCP dialect ─────────────────────────────────────────────────────
 mcp_for "$INERT_Q" >"$TMP/d1.xml"; mcp_for "$INERT_Q" >"$TMP/d2.xml"
 cmp -s "$TMP/d1.xml" "$TMP/d2.xml" \

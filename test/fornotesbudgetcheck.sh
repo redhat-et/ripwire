@@ -210,6 +210,76 @@ fullText="$( printf '%s' "$OUT800" | grep -c "stage table downstream" )"
 if [ "$fullText" -ge 1 ]; then ok "a surviving note carries its FULL text (no note-level truncation)"
 else no "a surviving note lost its tail — notes must be charged, never trimmed"; fi
 
+# ── arm 6: an explicit ceiling is NEVER silently overshot — every dialect, every rung in the band ──
+# PLACED HERE, before arm 4, deliberately: this arm needs the NOTE-BEARING corpus (notes are the exempt-
+# adjacent bytes that make the ladder's rungs tight enough to overshoot at all), and arm 4 deletes
+# .ripwire_notes to test inertness. Moving it below arm 4 would make it green for the wrong reason.
+#
+# WHAT IT PINS, and why a sweep rather than one rung. --for's ceiling ladder chooses a rung on its CHARGED
+# arithmetic, but a set of root bytes is EXEMPT from the sig-trim charge by design (verbs_for.h
+# confidenceExemptBytes: confidence=/margin_pct=, at=, the adaptive note, the auto/compact legend, the tail
+# legend — each exempt because a disclosure's contract is disclosure ONLY, and charging it against the ranked
+# head would drop a <d> row to pay for a label). Those exempt bytes RIDE OVER the ceiling: whenever the
+# ladder admits one more row, est_tokens can land past the budget the caller stated. That is a real,
+# reproducible, per-rung behaviour of this fixture, not a corner case — in the 900..2000 band it happens on
+# roughly half the rungs (the arm prints the count).
+#
+# The RULE this pins is the one METHODOLOGY §9 #2 and #4 decide between: a ceiling bounds the TAIL, never
+# the HEAD, so the answer is NOT to trim the head row down to the byte — it is that an overshoot is never
+# SILENT. `over_ceiling="1"` on the root, in the same unit as budget_tokens= and est_tokens=, on EVERY rung
+# that exceeds the stated budget. Absent means inside it. So the assertion is a disjunction, per rung:
+#
+#     est_tokens <= --token-budget   OR   over_ceiling="1" on the root
+#
+# and it holds in all THREE emitting dialects (XML full legend, XML --legend=compact, --json), because a
+# budget promise that means one thing in one dialect and another in the next is the two-meanings-of-budget
+# defect this whole gate was written for.
+#
+# RED, MEASURED. On the pre-fix binary (77004e5c, the commit before 02b4ff57 "over_ceiling= is a property of
+# the document, not of a rung") over_ceiling= was set from forOverCeiling ALONE — the ladder's LAST rung —
+# so a bundle that overshot by a lot was labelled and one that overshot by a little was not. That binary
+# fails this arm at the FIRST rung of the band it overshoots on: budget 1150, est_tokens=1266 (116 over,
+# 10.1%), no label; and again at 1260, 1380, 1530, 1680, 1820, 1970 (XML full), and at the same rungs under
+# --legend=compact. This arm is the regression lock on that rule, swept rather than sampled, because the
+# rung a single sample happens to sit on is exactly what made the defect survive four earlier re-anchors of
+# the middle rung above: 1550 and 1600 are both inside a FLAT stretch, and the edge is at ~1610.
+sweepFail=0; sweepOver=0; sweepFirstRed=""; sweepRungs=0
+tb=900
+while [ "$tb" -le 2000 ]; do
+  sweepRungs=$(( sweepRungs + 1 ))
+  for dialect in xml compact json; do
+    case "$dialect" in
+      xml)     out="$( "$BIN" "$CORPUS" --for="$TASK" --token-budget="$tb" 2>/dev/null )" ;;
+      compact) out="$( "$BIN" "$CORPUS" --for="$TASK" --token-budget="$tb" --legend=compact 2>/dev/null )" ;;
+      json)    out="$( "$BIN" "$CORPUS" --for="$TASK" --token-budget="$tb" --json 2>/dev/null )" ;;
+    esac
+    case "$dialect" in
+      json) est="$( printf '%s' "$out" | grep -o '"est_tokens":[0-9]*' | head -1 | tr -dc '0-9' )"
+            case "$out" in *'"over_ceiling":true'*) lab=1 ;; *) lab=0 ;; esac ;;
+      *)    est="$( printf '%s' "$out" | grep -o 'est_tokens="[0-9]*"' | head -1 | tr -dc '0-9' )"
+            case "$out" in *'over_ceiling="1"'*)    lab=1 ;; *) lab=0 ;; esac ;;
+    esac
+    if [ -z "$est" ]; then
+      no "sweep budget=$tb ($dialect): no est_tokens in the answer — the price a budget shapes against must always be served"
+      sweepFail=$(( sweepFail + 1 ))
+      continue
+    fi
+    if [ "$est" -gt "$tb" ]; then
+      sweepOver=$(( sweepOver + 1 ))
+      if [ "$lab" -eq 0 ]; then
+        sweepFail=$(( sweepFail + 1 ))
+        [ -z "$sweepFirstRed" ] && sweepFirstRed="budget=$tb ($dialect) est_tokens=$est, $(( est - tb )) over, NO over_ceiling"
+      fi
+    fi
+  done
+  tb=$(( tb + 10 ))
+done
+if [ "$sweepFail" -eq 0 ]; then
+  ok "sweep 900..2000 step 10 x 3 dialects ($(( sweepRungs * 3 )) runs): every overshoot is LABELLED ($sweepOver of $(( sweepRungs * 3 )) rungs ran over the stated ceiling, every one carrying over_ceiling)"
+else
+  no "sweep 900..2000 step 10 x 3 dialects: $sweepFail SILENT overshoot(s) — first: $sweepFirstRed"
+fi
+
 # ── arm 4: L3 inertness — a tree with no notes is unaffected by any of this ────────────────────────
 rm -f "$CORPUS/.ripwire_notes"
 bare="$( "$BIN" "$CORPUS" --for="$TASK" --token-budget=800 2>/dev/null )"
