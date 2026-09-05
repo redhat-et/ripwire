@@ -11063,7 +11063,7 @@ opencode) as the primary arm. The live meter's EDIT band is the uncontrolled, se
 ### FIND band — the baseline ledger (`bench/substitution_report.py` §5 as of 8eb669ff)
 
 Instrument: window = the calls after a ripwire call up to the next ripwire call, the session end, or 5 calls;
-sweep = `grep read glob find git-diff git-log git-show-stat`; `--tag ripwire`; verbs with n ≥ 10. Log snapshot
+sweep = `grep read glob find git-diff git-log git-show-stat`; rows tagged `ripwire` (the report's tag filter); verbs with n ≥ 10. Log snapshot
 frozen 2026-09-05 17:12 (51,002 rows, 478 sessions); every "unchanged" claim in this round is judged on that
 frozen file, never on the live log.
 
@@ -11120,7 +11120,7 @@ docs/SUBSTITUTION_METER.md.
   Recorded per run: tool calls after the edit, bytes/tokens, whether a Read of the target followed, whether an
   edit_check followed, task pass. **ACCEPT: ripwire arm ≥ 80% of post-edit windows with ZERO reads of the
   target AND ZERO redundant checks; task pass not below the native arm.** E1: for every fixture language,
-  `--expand` → `--replace-symbol-body` with the same bytes → `git diff --exit-code` is clean (byte exactness; if
+  `--expand` → `--replace-symbol-body` with the same bytes → `git diff` is EMPTY (byte exactness; if
   the body is escaped the path can never be terminal). E2: the receipt carries the post-edit region (default
   span ±3, `context=` disclosed), the file's new sha, the folded verdict, tests_to_run, ONE `next=`; same shape
   on the MCP twins. E3: `--edit-check --edit-payload --dry-run` returns the exact bytes it will overwrite + the
