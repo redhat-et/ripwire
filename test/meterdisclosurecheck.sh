@@ -69,7 +69,19 @@ printf '%s' "$COUNTING_LINE" | grep -qiE 'no (automatic )?retention|unbounded|do
 # still carry the same raw-path-capture disclosure it always has, so the banner's short summary and
 # the doc's long-form explanation do not diverge.
 DOC="$ROOT/docs/SUBSTITUTION_METER.md"
-if [ -f "$DOC" ]; then
+# R3 (V1, wave-1 verifier 2026-09-05): the two blocks below were `if [ -f "$DOC" ]` with NO else and
+# nothing asserting the doc exists, so moving or renaming docs/SUBSTITUTION_METER.md deleted NINE of this
+# gate's fifteen arms — including the eight that are the ONLY gate on the EDIT band's column definitions,
+# every one of them a doc-text grep — and the run still printed ALL PASS at rc=0. A disclosure contract
+# whose gate disarms itself when the disclosure disappears is not a gate. hookcheck's shape is the one to
+# copy: a missing bench/substitution_report.py makes it RED, it does not make it quiet. The doc is a
+# required artifact of this contract, so its absence is the loudest failure available, never a skip.
+DOC_PRESENT=1
+if [ ! -f "$DOC" ]; then
+    DOC_PRESENT=0
+    no "docs/SUBSTITUTION_METER.md is MISSING at $DOC — the raw-path-capture disclosure and the EDIT band's eight column definitions (policy-read / sweep / redundant-check / unattrib / agent+surface / v2->v3 boundary / v3 example row) are UNGATED; this gate is their only gate"
+fi
+if [ "$DOC_PRESENT" = 1 ]; then
     # the doc's own sentence wraps across two source lines; match on the substrings that survive that
     grep -q 'Full local paths are' "$DOC" && grep -q 'this log never leaves the machine' "$DOC" \
         && ok "docs/SUBSTITUTION_METER.md still documents raw-path capture (unchanged claim, D2 doesn't touch capture)" \
@@ -80,7 +92,7 @@ fi
 # whose three columns are named and DEFINED, none silently folded into another, printed per agent and
 # per surface. The definitions live in docs/SUBSTITUTION_METER.md, and this gate pins that they do —
 # a percentage whose columns are not defined where the reader looks is a number somebody quotes wrong.
-if [ -f "$DOC" ]; then
+if [ "$DOC_PRESENT" = 1 ]; then
     EB="$( sed -n '/^## Terminality/,$p' "$DOC" )"
     printf '%s' "$EB" | grep -q 'policy-read' && printf '%s' "$EB" | grep -qiE 'never counted|reported, never' \
         && ok "doc defines (a) policy-read as the harness Read of the edit's TARGET FILE — reported, never counted against the verb" \
