@@ -224,3 +224,7 @@ test-gate | test-gate@untested_capped
 whereis | hit@date
 whereis | hit@tip
 zoom | zoom@levels
+# P3 (L7, 2026-09-05): the r=1 <d> row's next= (a pasteable --expand=FILE:NAME) is defined in --help and the compact
+# vocabulary, NOT in the --for header: every header byte is un-charged by the token ladder and fornotesbudgetcheck's
+# rungs leave ~0 tokens of headroom (V1 N1) — a 115 B clause blew --token-budget=950 by 29 tokens.
+for-auto | d@next

@@ -92,7 +92,15 @@ done
 # C file and a Bash file (e.g. printf) must NOT merge into one row; each language gets its own <x>,
 # and the per-lang refs must sum back to what a single merged row would have shown pre-fix.
 LANGFIX="$ROOT/test/extsurflangfix"
-LSURF="$( "$BIN" "$LANGFIX" --external-surface --no-cache 2>/dev/null )"
+# RE-PINNED 2026-09-05 (capture-audit P4, lane L7): printf is a sh BUILTIN, and the default --external-surface now
+# drops the sh builtin rows (counted as builtins_excluded=). The per-language SPLIT contract below is asserted with
+# --include-builtins (the flag that keeps them); the default's drop is asserted right after it.
+LSURF="$( "$BIN" "$LANGFIX" --external-surface --include-builtins --no-cache 2>/dev/null )"
+LDEF="$( "$BIN" "$LANGFIX" --external-surface --no-cache 2>/dev/null )"
+printf '%s' "$LDEF" | grep -q '<x n="printf" lang="sh"' && no "--external-surface (default): the sh builtin printf row is still listed" \
+                                                       || ok "--external-surface (default): the sh builtin printf row is dropped (P4)"
+printf '%s' "$LDEF" | grep -qE '<external-surface [^>]*builtins_excluded="[1-9][0-9]*"' && ok "--external-surface (default): builtins_excluded= counts the drop" \
+                                                                                          || no "--external-surface (default): no builtins_excluded= on the root: $( printf '%s' "$LDEF" | grep -o '<external-surface [^>]*>' )"
 printf '%s' "$LSURF" | xmllint --noout - >/dev/null 2>&1 && ok "extsurflangfix xml well-formed" || no "extsurflangfix xml malformed: $LSURF"
 PRINTF_ROWS="$( printf '%s' "$LSURF" | grep -oE '<x n="printf"[^/]*/>' )"
 PRINTF_ROW_COUNT="$( printf '%s\n' "$PRINTF_ROWS" | grep -c '<x ' || true )"

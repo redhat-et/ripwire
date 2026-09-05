@@ -56,7 +56,8 @@ though it's the tempting first instinct.
    honest copies).
 
 ## Before you add a dependency
-5. **Is it already here?** — `ripwire <dir> --external-surface` (what the tree already depends on) and
+5. **Is it already here?** — `ripwire <dir> --external-surface` (what the tree already depends on; the default is a
+   100-row window with the sh builtins dropped and counted as `builtins_excluded=` — `--include-builtins` keeps them) and
    `--uses=NAME` (the import role). Reuse an in-tree dependency before adding a new one: a new dep is build
    weight, supply-chain surface, and one more thing every reader must learn — it has to earn its place.
 6. **Before adding/vendoring a NEW dependency, map the candidate repo first** — `ripwire <git-url>` (https://

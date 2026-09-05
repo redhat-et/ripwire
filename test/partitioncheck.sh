@@ -279,5 +279,31 @@ if command -v python3 >/dev/null 2>&1; then
         || no "tools/list inputSchema for explore is missing the partition argument"
 fi
 
+# ── P10 (capture-audit 2026-09-04, lane L7): ONE outer legend. The partitioned document used to repeat the bundle
+#    legend per slice (lens 8: 23 <!-- blocks, 9,646 B = 28% of 34,164 B; the single bundle's legend was 1,392 B).
+#    Now the outer legend states the partition vocabulary + the bundle legend ONCE and every inner ctx carries no
+#    legend. Contract: the PROSE legend bytes (every comment except the data ones — "<!-- body omitted", "<!-- slice ",
+#    "<!-- truncated -->") of the partitioned document are <= 1.3x the single bundle's legend bytes, and no inner ctx
+#    opens a "<!-- ripwire task bundle for" comment.
+"$BIN" "$ROOT" --pack-task="$TASK" --partition=3 --no-cache >"$TMP/p10.part" 2>/dev/null
+"$BIN" "$ROOT" --pack-task="$TASK" --no-cache >"$TMP/p10.single" 2>/dev/null
+read -r P10_PART P10_SINGLE P10_INNER <<EOF2
+$( python3 - "$TMP/p10.part" "$TMP/p10.single" <<'PY'
+import re, sys
+def comments( p ): return re.findall( r"<!--.*?-->", open( p, encoding = "utf-8", errors = "replace" ).read(), re.S )
+def prose( cs ): return sum( len( c ) for c in cs if not ( c.startswith( "<!-- body omitted" ) or c.startswith( "<!-- slice " ) or c == "<!-- truncated -->" ) )
+part, single = comments( sys.argv[1] ), comments( sys.argv[2] )
+inner = sum( 1 for c in part if c.startswith( "<!-- ripwire task bundle for" ) )
+print( prose( part ), prose( single ), inner )
+PY
+)
+EOF2
+if [ -n "$P10_SINGLE" ] && [ "$P10_SINGLE" -gt 0 ] && [ $(( P10_PART * 10 )) -le $(( P10_SINGLE * 13 )) ]; then
+    ok "P10: partitioned prose legend $P10_PART B <= 1.3x the single bundle's $P10_SINGLE B"
+else
+    no "P10: partitioned prose legend $P10_PART B exceeds 1.3x the single bundle's ${P10_SINGLE:-?} B"
+fi
+[ "$P10_INNER" = 0 ] && ok "P10: no inner ctx repeats the task-bundle legend" || no "P10: $P10_INNER inner ctx document(s) still open a task-bundle legend"
+
 [ $fail -eq 0 ] && echo "partitioncheck: ALL PASS" || echo "partitioncheck: FAILURES"
 exit $fail

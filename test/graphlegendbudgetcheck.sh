@@ -75,8 +75,12 @@ budgetFor(){
         # RE-PINNED +200 (2026-09-04, capture-audit M15): the shared floor essay grew ONE sentence defining the
         # graph_ambiguous=/graph_unresolved= gauge pair every graph-floored root now carries (the magnitude of
         # the floor, which no graph verb disclosed). New content on every first screen, not the essay re-inflating.
+        # RE-PINNED impact +70 (2026-09-05, capture-audit wave-3, lane L7 P3): kImpactLegendOpen grew ONE sentence
+        # defining next= (68 B: the safe-delete read of SYM — the one pasteable follow-up every impact root now
+        # carries). Measured 3674 B against 3650; 3720 leaves 46 B, the posture the previous pin held. callers'
+        # own next= sentence (87 B) fits its 3250 unchanged.
         callers) echo 3250 ;;
-        impact)  echo 3650 ;;
+        impact)  echo 3720 ;;
         uses)    echo 3800 ;;
     esac
 }

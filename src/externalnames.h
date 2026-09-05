@@ -80,6 +80,28 @@ inline constexpr std::string_view kPythonBuiltinNames[] = {
     "type", "vars", "zip"
 };
 
+// P4 (capture-audit 2026-09-04, lane L7): the POSIX sh special + regular builtins and bash's builtins — the names a
+// shell script "calls" that are the interpreter itself, not a dependency (--external-surface drops them by default;
+// --include-builtins keeps them; builtins_excluded= counts the drop). Source: POSIX.1-2024 XCU 2.14 (special
+// builtins) + 2.9.1 intrinsic utilities, and bash 5.2 `compgen -b`. NOT here on purpose: grep/sed/awk/git/python3 —
+// external programs a script really depends on, which is exactly what the surface is for.
+inline constexpr std::string_view kShellBuiltinNames[] = {
+    ".", ":", "[", "alias", "bg", "bind", "break", "builtin", "caller", "cd", "command", "compgen", "complete", "compopt",
+    "continue", "declare", "dirs", "disown", "echo", "enable", "eval", "exec", "exit", "export", "false", "fc", "fg",
+    "getopts", "hash", "help", "history", "jobs", "kill", "let", "local", "logout", "mapfile", "popd", "printf", "pushd",
+    "pwd", "read", "readarray", "readonly", "return", "set", "shift", "shopt", "source", "suspend", "test", "times",
+    "trap", "true", "type", "typeset", "ulimit", "umask", "unalias", "unset", "wait",
+};
+
+inline bool isShellBuiltinName( std::string_view name ) noexcept
+{
+    for( std::string_view b : kShellBuiltinNames )
+    {
+        if( b == name ) { return true; }
+    }
+    return false;
+}
+
 inline constexpr std::string_view kCFamilyStdNames[] = {
     "_Exit", "abort", "abs", "accumulate", "acos", "acosh", "addressof", "adjacent_difference", "adjacent_find", "advance", "aligned_alloc",
     "all_of", "allocate_shared", "any_of", "apply", "as_const", "asctime", "asin", "asinh", "assert", "assume_aligned", "at_quick_exit", "atan",

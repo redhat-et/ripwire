@@ -430,6 +430,7 @@ inline BundleOut renderMaskedBundle( const BundleRenderCtx& ctx, const std::vect
 
     PackTaskInputs in = *ctx.in;
     in.budgetTokens   = budgetTokens;
+    in.innerBundle    = true;   // P10 (L7): one outer legend for the whole document
     in.rankTopN       = std::min( std::size_t( kPackTaskRankTopN ), keep.size() );   // never widen the window past the slice
 
     out.xml = packTaskBundleText( *ctx.ing, *ctx.g, *ctx.task, masked, in, ctx.wantJson ? &out.json : nullptr, &out.surface );
@@ -463,37 +464,17 @@ inline std::string partitionSummaryAttrs( const PartitionPlan& plan, const Parti
 // kTestGateLegend: it is a paragraph, not control flow. Inlined, ~27 lines of prose sat inside
 // packTaskPartitionText and made the driver read long when none of its LOGIC had grown.
 inline constexpr const char* kPartitionLegend =
-    "<!-- ripwire partitioned task bundle: ONE shared common core plus N minimally overlapping per agent slices, "
-    "carved along the call graph's own community structure. Each bundle wraps one ctx document, exactly what a standalone "
-    "pack task call with that slice would emit, so an orchestrator hands one bundle to one agent verbatim. budget_per_agent_tokens is "
-    "the budget for core PLUS one partition, not the whole document; total_bytes is the bundles' combined size. "
-    "overlap_mean/overlap_max are pairwise Jaccard over the ids each partition names (ranking window, bodies, and their "
-    "1 hop neighbors), measured BEFORE budget trimming, so they are a ceiling. shared_symbols counts the ids TWO OR "
-    "MORE partitions name — NOT the ids every partition names; an id two of sixteen slices both carry is already "
-    "duplicated work — and union_symbols the ids ANY partition names: one GLOBAL at-least-two over at-least-one "
-    "pair, not an average. That ratio and overlap_mean (an average of PAIRWISE Jaccard) therefore answer different "
-    "questions. They COINCIDE at partitions=2, where there is one pair and at-least-two IS its intersection while "
-    "at-least-one IS its union, so the ratio equals that pair's Jaccard by identity; from 3 partitions on the two "
-    "genuinely diverge, and neither is wrong. The remaining root counters, one clause each. requested= is the "
-    "partition count N asked for and partitions= the bundles actually carved; partitions is lower only where the plan "
-    "could not reach N, which is either a ranked surface that fit entirely in the shared core (partitions=0, nothing "
-    "left to carve) or a surface holding fewer separable modules than N even after splitting. modules= is the distinct "
-    "groups found on the assignable surface BEFORE any cut (a call-graph community, or the FILE where that surface "
-    "carries no call edges), and split= the community cuts forced because those modules numbered fewer than N, so "
-    "modules + split is the group count the bundles were packed from and split=0 means no cut was needed. "
-    "core_symbols= is the shared core's size — the body anchors a plain pack task would have expanded, held out of "
-    "every partition — and surface= is core_symbols plus the assignable remainder, i.e. the whole positive-rank "
-    "window this plan carved up. core_budget_tokens= and partition_budget_tokens= are budget_per_agent_tokens split "
-    "between the two halves one agent receives, and they sum to it. core_overlap is the share of the core "
-    "bundle's own surface a partition reaches anyway. On each bundle, est_tokens and tokens are the SAME number: "
-    "tokens is the original name kept for compatibility, est_tokens is the spelling the rest of the tool uses and "
-    "the one to read. Both are that bundle's own bytes= divided by 2.36 B/tok — the DENSEST calibrated language "
-    "rate — which is a different (deliberately conservative) currency from the default map's est_tokens, where "
-    "the divisor is that corpus's own language-weighted rate: measured over real emitted bytes either way, but a "
-    "bundle's number reads slightly HIGH, which is the safe direction for a per-agent budget. On this root "
-    "element the unit is carried in the NAME instead (budget_per_agent_tokens, total_bytes) rather than by a "
-    "separate unit attribute, which is a deliberate exception to the est_tokens convention and not a second "
-    "estimator. -->";
+    // P10 (L7): restated at its shortest honest form — the attribute vocabulary, one clause each; the reasoning that
+    // used to live here (why two overlap measures differ, why tokens==est_tokens) is in --help --pack-task and
+    // docs/COMMANDS.md. Lens 8 table 1: the partitioned answer spent 28% of its bytes on legend (4 copies of the
+    // bundle legend); the gate is partitioncheck's P10 arm — prose legend <= 1.3x a single bundle's.
+    "<!-- ripwire partitioned task bundle: ONE shared core plus N minimally overlapping slices along call-graph communities; each "
+    "<bundle> is one agent's ctx. requested=N asked, partitions= carved; modules=/split= groups found / cuts forced; core_symbols= the "
+    "shared core, surface= core plus the assignable remainder; budget_per_agent_tokens= core plus ONE partition (= core_budget_tokens + "
+    "partition_budget_tokens), total_bytes= all bundles; overlap_mean=/overlap_max= pairwise Jaccard over the ids partitions name, "
+    "pre-trim; shared_symbols= the ids TWO OR MORE partitions name, union_symbols= ids any names (their ratio and overlap_mean COINCIDE at "
+    "partitions=2 only); core_overlap= the core surface a partition reaches anyway; tokens= = est_tokens= (bytes / 2.36). Each ctx "
+    "carries NO legend of its own: the task-bundle legend follows once; a trimmed slice carries one data comment. -->";
 
 // THE verb: `--pack-task="TASK" --partition=N`. Returns the whole <ctx-partitions>…</ctx-partitions> document
 // (never touches stdout — the caller owns the sink, exactly like packTaskBundleText). `jsonOut`, when given,
@@ -593,6 +574,7 @@ inline std::string packTaskPartitionText( const IngestResult& ing, const Graph& 
     whole += partitionSummaryAttrs( plan, sum, ov );
     whole += ">";
     whole += kPartitionLegend;
+    whole += "<!-- ripwire task bundle (every ctx below)";  whole += kPackTaskBundleLegendBody;  whole += " -->";   // P10 (L7): stated once
     whole += bundleOpen( "core", -1, core );
     whole += core.xml;
     whole += "</bundle>";

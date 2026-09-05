@@ -63,7 +63,7 @@ namespace quality
 
 inline const char*        kBaselineFile  = ".ripwire_quality_baseline";
 constexpr std::uint32_t   kMinCloneTokens = 18;     // matches the --clones default (so both verbs see the same clones)
-constexpr std::uint32_t   kCcxBar         = 15;     // SonarSource cognitive-complexity bar — a regression must end up OVER this
+constexpr std::uint32_t   kCcxBar         = 15;     // P8 (L7): situ.h spells this as kTestGateCcxBarMirror (test-gate root ccx_bar=) — the static_assert below the constants keeps them equal     // SonarSource cognitive-complexity bar — a regression must end up OVER this
 
 // Q1 — bars for the MEASURED agent-code failure modes: agent code runs 2.3×
 // verbose, erodes structure in 77% of trajectories, drifts contracts. Each per-symbol kind mirrors ccx's

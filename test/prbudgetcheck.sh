@@ -63,28 +63,40 @@ if [ "$UNC_RC" -ne 0 ] || ! grep -q '<pr-context' "$TMP/unc"; then
     exit "$fail"
 fi
 
-# ── #1: UNBUDGETED == byte-identical to no-budget path (no est_tokens/truncated attrs) ──────────────────
-if grep -q 'est_tokens=' "$TMP/unc"; then
-    no "unbudgeted --pr-context leaked budget attributes (should be byte-identical to pre-budget output)"
-else
-    ok "unbudgeted --pr-context carries NO budget attrs (est_tokens/truncated absent)"
-fi
+# ── #1: RE-PINNED 2026-09-05 (capture-audit P4, lane L7): a run with NO explicit budget is budgeted by DEFAULT
+#    (src/prcontext.h kPrDefaultBudgetTokens = 8000) and says so — budget_tokens="8000" budget_default="1" plus the
+#    est_tokens=/trim_level=/truncated= ledger every budgeted run carries. The pre-P4 contract ("unbudgeted ==
+#    byte-identical to the pre-budget output") is what let a 217-file diff answer with 660 KB at exit 0. ──────────
+UROOT="$( grep -oE '<pr-context [^>]*>' "$TMP/unc" | head -1 )"
+case "$UROOT" in
+    *'budget_tokens="8000"'*'budget_default="1"'*) ok "no explicit budget: the default 8000-token ceiling is in force and disclosed (budget_default=\"1\")";;
+    *) no "no explicit budget: root lacks budget_tokens=\"8000\" budget_default=\"1\": $UROOT";;
+esac
+grep -q 'est_tokens=' "$TMP/unc" && ok "default-budget run carries the est_tokens=/truncated= ledger" || no "default-budget run carries no est_tokens="
 UNC_FILES=$( filecount "$TMP/unc" )
 [ "$UNC_FILES" -gt 0 ] || { echo "  SKIP  prbudgetcheck (no changed indexed files vs $BASE)"; exit 0; }
 
 # ── #2: a LARGE budget fits at level 0: truncated="none", est<=budget, files all present ────────────────
 "$BIN" "$ROOT" --pr-context="$BASE" --max-tokens=100000 --no-cache >"$TMP/big" 2>/dev/null
 BE=$( attr "$TMP/big" est_tokens ); BT=$( attr "$TMP/big" truncated ); BF=$( filecount "$TMP/big" )
-{ [ -n "$BE" ] && [ "$BE" -le 100000 ] && [ "$BT" = "none" ] && [ "$BF" = "$UNC_FILES" ]; } \
-    && ok "large budget: level 0, truncated=none, est=${BE}<=100000, all $BF files present" \
-    || no "large budget mishandled (est=$BE truncated=$BT files=$BF vs $UNC_FILES)"
+ALL_FILES=$( attr "$TMP/big" files )
+{ [ -n "$BE" ] && [ "$BE" -le 100000 ] && [ "$BT" = "none" ] && [ "$BF" = "$ALL_FILES" ] && [ -z "$( attr "$TMP/big" budget_default )" ]; } \
+    && ok "large budget: level 0, truncated=none, est=${BE}<=100000, all $BF files present, no budget_default=" \
+    || no "large budget mishandled (est=$BE truncated=$BT files=$BF vs files=$ALL_FILES)"
 
 # ── #3: SMALL budgets — est_tokens <= budget AND all files still present structurally ───────────────────
 underok=1; filesok=1
 for T in 20000 8000 4000 2000; do
     "$BIN" "$ROOT" --pr-context="$BASE" --max-tokens=$T --no-cache >"$TMP/c_$T" 2>/dev/null
     E=$( attr "$TMP/c_$T" est_tokens ); TR=$( attr "$TMP/c_$T" truncated ); FC=$( filecount "$TMP/c_$T" )
-    [ "$FC" = "$UNC_FILES" ] || { echo "    budget=$T dropped files ($FC vs $UNC_FILES)"; filesok=0; }
+    # RE-PINNED (P4, L7): files are windowed ONLY when even the structural floor exceeds the budget, and then the
+    # cut is disclosed — shown= (the plain quintet) equals the <file> count and capped="1" + next= ride the root.
+    # Otherwise every changed file is present, as before.
+    FS=$( attr "$TMP/c_$T" shown ); ALLF=$( attr "$TMP/c_$T" files )
+    if [ "$FC" = "$ALLF" ]; then :;
+    elif [ "$FC" = "$FS" ] && [ "$( attr "$TMP/c_$T" capped )" = 1 ] && grep -q ' next="--pr-context' "$TMP/c_$T"; then
+        echo "    budget=$T: floor over budget — files windowed and disclosed (shown=$FS of $ALLF, next= present)";
+    else echo "    budget=$T dropped files silently ($FC of $ALLF; shown='$FS' capped='$( attr "$TMP/c_$T" capped )')"; filesok=0; fi
     # est must be <= budget UNLESS the floor itself overflows (then truncated says budget-floor-exceeded)
     if [ -n "$E" ] && [ "$E" -le "$T" ]; then :;
     elif printf '%s' "$TR" | grep -q 'budget-floor-exceeded'; then :;   # honest floor overflow
@@ -92,8 +104,8 @@ for T in 20000 8000 4000 2000; do
 done
 [ "$underok" = 1 ] && ok "budgeted est_tokens <= budget at every tested budget (or honest floor-exceeded)" \
     || no "a budgeted run exceeded its budget without the floor-exceeded marker"
-[ "$filesok" = 1 ] && ok "every changed file present structurally at every budget (depth trimmed, files never dropped)" \
-    || no "a budgeted run dropped a changed file (forbidden — structural facts must survive)"
+[ "$filesok" = 1 ] && ok "every changed file present at every budget, or the file window disclosed (shown=/capped=1/next=) when the floor exceeded it" \
+    || no "a budgeted run dropped a changed file SILENTLY (a cut must be disclosed with shown=/capped=1/next=)"
 
 # ── #4: truncation marker HONEST — a trimmed run names a non-"none" drop; a level-0 run says "none" ─────
 TT=$( attr "$TMP/c_2000" truncated ); TL=$( attr "$TMP/c_2000" trim_level )

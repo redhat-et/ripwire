@@ -477,13 +477,17 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             // per-root token budget = proportional split of --max-tokens; remainder → ws[0] (lexicographically-first
             // label). A changed-but-rounded-to-0 root is clamped to 1 so it still runs the ladder (0 = UNLIMITED
             // sentinel in writePrContext, which would wrongly un-cap that root).
+            // P4 (L7): the effective budget — explicit --token-budget / --max-tokens, else the default 8K
+            const std::size_t prBudgetTokens = cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget )
+                                             : cfg.maxTokens > 0  ? std::size_t( cfg.maxTokens ) : rw::kPrDefaultBudgetTokens;
+            const bool        prBudgetDefault = cfg.tokenBudget == 0 && cfg.maxTokens == 0;
             std::vector<std::size_t> rootBudget( ws.size(), 0 );
-            if( cfg.maxTokens > 0 && totalChanged > 0 )
+            if( totalChanged > 0 )
             {
                 std::size_t assigned = 0;
                 for( std::uint32_t r = 0; r < ws.size(); ++r )
-                { rootBudget[r] = std::size_t( cfg.maxTokens ) * changedCount[r] / totalChanged; assigned += rootBudget[r]; }
-                rootBudget[0] += std::size_t( cfg.maxTokens ) - assigned;   // remainder → canonical-first label
+                { rootBudget[r] = prBudgetTokens * changedCount[r] / totalChanged; assigned += rootBudget[r]; }
+                rootBudget[0] += prBudgetTokens - assigned;   // remainder → canonical-first label
                 for( std::uint32_t r = 0; r < ws.size(); ++r )
                 {
                     if( changedCount[r] > 0 && rootBudget[r] == 0 )
@@ -502,7 +506,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
             for( std::uint32_t r = 0; r < ws.size(); ++r )
             {
                 rw::writePrContext( stdout, ws[r].arg, ing, g, masks[r].mask, baseLabel, masks[r].skippedModeOnly,
-                                     rootBudget[r], r, ws[r].label, masks[r] );
+                                     rw::PrBudget{ rootBudget[r], prBudgetDefault, cfg.pageLimit, cfg.pageOffset }, r, ws[r].label, masks[r] );
             }
             std::printf( "</pr-context-workspace>" );
             return 0;
@@ -533,8 +537,11 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // R4 / lever 4: --max-tokens caps the (previously unbounded) bundle. 0 = no cap
         // → byte-identical to the pre-budget output; >0 → degrade DEPTH-first per file, structural counts kept
         // for ALL changed files, est_tokens/truncated= reported on the <pr-context> header (see writePrContext).
-        return rw::writePrContext( stdout, root, ing, g, pcm.mask, baseLabel, pcm.skippedModeOnly,
-                                    cfg.maxTokens > 0 ? std::size_t( cfg.maxTokens ) : 0,
+        // P4 (L7): budgeted BY DEFAULT (kPrDefaultBudgetTokens); --token-budget / --max-tokens set the ceiling explicitly.
+        const rw::PrBudget prBudget{ cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget )
+                                   : cfg.maxTokens > 0  ? std::size_t( cfg.maxTokens ) : rw::kPrDefaultBudgetTokens,
+                                     cfg.tokenBudget == 0 && cfg.maxTokens == 0, cfg.pageLimit, cfg.pageOffset };
+        return rw::writePrContext( stdout, root, ing, g, pcm.mask, baseLabel, pcm.skippedModeOnly, prBudget,
                                     UINT32_MAX, std::string_view(), pcm );
     }
 

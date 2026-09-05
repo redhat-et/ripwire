@@ -7,6 +7,7 @@
 // mcp.h/main.cpp concern-split). Includes mcpindex.h; included by mcp.h (runMcp dispatches here).
 
 #include "mcpindex.h"
+#include "nextverb.h"       // P3 (L7): next= on the MCP impact root (CLI parity)
 #include "gitmine.h"       // B3: gitRecentCommitFileSets + applyCoChangeBoost — the `for` verb's co-change prior (same boost as CLI --for)
 #include "ownersview.h"    // §P6.4: countUniformOwnership/ownershipRowsToPrint — shared with main.cpp's --owners CLI path
 #include "gitstamp.h"      // §P8: gitstamp::atAttr/stampAt — the at="<sha>[+dirty]" anchor on the git-history verbs
@@ -630,7 +631,8 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     out += ",\"defs\":" + std::to_string( chRows.matches.size() )
          + ",\"count\":" + std::to_string( rowTotal )
          + ",\"hop_tested\":" + std::to_string( chTested.tested )
-         + ",\"hop_untested\":" + std::to_string( chTested.untested );
+         + ",\"hop_untested\":" + std::to_string( chTested.untested )
+         + nextFieldJson( nextFlag( referencingOnly ? "--uses=" : "--expand=", name ) );   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
     if( !referencingOnly && chRows.bodylessDefs > 0 )
     {
         out += ",\"bodyless_defs\":" + std::to_string( chRows.bodylessDefs );
@@ -957,6 +959,12 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
                                       /*collectionCapped=*/collected.isBudgetReached )   // H8/N2: the cap hits_capped names floors this root (CLI parity)
                     + ",\"hits_capped\":" + ( collected.isBudgetReached ? "true" : "false" )
                     + ( scanExhaustive && windowWhole && nothingHeldBack ? ",\"complete\":true" : "" )
+                    // P3 (L7): the CLI grep root's next= — the same three-way rule (verbs_grep.h), mcpclidiffcheck LENS2
+                    + nextFieldJson( ( grepPage.end < collected.raw.size() || collected.isBudgetReached )
+                                         ? nextFlag( "--grep=", pattern ) + " --offset=" + std::to_string( grepPage.end ) + " --legend=compact"
+                                     : !collected.raw.empty() && grepPage.begin < collected.raw.size()
+                                         ? nextFlag( "--at=", std::string( pathForJ( collected.raw[ grepPage.begin ].fileId ) ) + ":" + std::to_string( collected.raw[ grepPage.begin ].line ) )
+                                         : nextFlag( "--for=", pattern ) )
                     + tierKeys
                     // G4 (2026-08-15 harvest, report-ugrep §F6): the CLI's corpus_excluded=/corpus_oversize=
                     // twins — present only when non-zero, same condition as the CLI emitter.
@@ -2072,11 +2080,12 @@ inline std::string impactText( const std::string& root, const std::string& symbo
     // LB-H: ONE derivation, shared with the CLI arm (graph.h::impactImportTier) — mcpclidiffcheck compares
     // the two surfaces' attribute sets, and an honesty marker that lands on one of them is the §B4 class.
     const ImportTier imports = impactImportTier( ing, seeds );
-    std::fprintf( mem, "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s radius_tested=\"%zu\" radius_untested=\"%zu\"%s%s%s%s>",
+    std::fprintf( mem, "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s radius_tested=\"%zu\" radius_untested=\"%zu\"%s%s%s%s%s>",
                   ex( symbol ).c_str(), seeds.size(), reach.size(),
                   imports.xmlAttrs.c_str(), radiusTested, radiusUntested, imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
-                  graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str() );   // M15: gauge + marker
+                  graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
+                  nextAttrXml( nextFlag( "--safe-delete=", symbol ) ).c_str() );   // P3 (L7): the CLI twin's next=, same root attribute set (mcpclidiffcheck)
     for( std::size_t i = ipw.begin; i < ipw.end; ++i )
     { const Symbol& s = ing.symbols[ show[i] ];
       const std::string_view rp = imSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], imRootPrefix ) : std::string_view( ing.files[ s.fileId ] );

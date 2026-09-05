@@ -145,25 +145,11 @@ struct PackTaskHeaderParts
                                         // must carry the SAME root as the pre-built rootOpenStr did.
 };
 
-// One spelling of --pack-task's header, three shapes of it. `withTaskEcho=false` replaces the comment's echo
-// with a note pointing at the task= attribute that still holds the verbatim copy — nothing is lost, only the
-// duplicate. Byte-identical to the pre-ladder header when both flags are true and extraNotes is empty.
-inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRouteAttr, bool withTaskEcho,
-                                       std::string_view extraNotes )
-{
-    std::string h = withRouteAttr ? std::string( p.rootOpenStr ) : ctxRootOpen( p.task, {}, p.rootArg );
-    h += "<!-- ripwire task bundle for ";
-    if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
-    else
-    {
-        h += "[task_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
-    }
-    // L1 (density audit 2026-08-08): the scrubbed route-note echo that rode here duplicated the verbatim
-    // route= attribute byte-for-byte in meaning; the attribute is the one copy (test/routeoncecheck.sh).
-    h.append( p.mentionNote );
-    h.append( p.boostNote );
-    h.append( p.docMentionNote );
-    h += ": one-call orientation under ONE budget — sections in FIXED order ranking > bodies > callers > notes > tests, "
+// P10 (L7): the bundle legend's BODY, one constant, spliced by the standalone header (packTaskHeaderText) and
+// stated ONCE by the partitioned document's outer legend (partition.h) — inner bundles carry no legend of their
+// own (--pack-task --partition=3 used to print it 4x: 9,646 B of a 34,164 B answer, lens 8 table 1).
+inline constexpr const char* kPackTaskBundleLegendBody =
+    ": one-call orientation under ONE budget — sections in FIXED order ranking > bodies > callers > notes > tests, "
          // F1 (graphrag harvest 2026-08-15): each section holds a FIXED, up-front proportional quota of the
          // budget rather than competing for whatever a strict cascade left it — the old shape let ranking
          // (the first section) swallow the WHOLE remaining budget at small --token-budget values, zeroing
@@ -214,6 +200,26 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
          // M11: the root's machine-readable price, defined where the ledger prose below states the byte figures.
          "On the root: est_tokens= prices the delivered bundle in tokens (markup at the map rate, bodies at the body rate), "
          "budget_tokens= is the token target; over_ceiling= is 1 when the header floor alone exceeds it (the bundle is then complete, not trimmed). ";
+
+// One spelling of --pack-task's header, three shapes of it. `withTaskEcho=false` replaces the comment's echo
+// with a note pointing at the task= attribute that still holds the verbatim copy — nothing is lost, only the
+// duplicate. Byte-identical to the pre-ladder header when both flags are true and extraNotes is empty.
+inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRouteAttr, bool withTaskEcho,
+                                       std::string_view extraNotes )
+{
+    std::string h = withRouteAttr ? std::string( p.rootOpenStr ) : ctxRootOpen( p.task, {}, p.rootArg );
+    h += "<!-- ripwire task bundle for ";
+    if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
+    else
+    {
+        h += "[task_echo: dropped (ceiling) - the verbatim copy is the task= attribute above]";
+    }
+    // L1 (density audit 2026-08-08): the scrubbed route-note echo that rode here duplicated the verbatim
+    // route= attribute byte-for-byte in meaning; the attribute is the one copy (test/routeoncecheck.sh).
+    h.append( p.mentionNote );
+    h.append( p.boostNote );
+    h.append( p.docMentionNote );
+    h += kPackTaskBundleLegendBody;   // P10 (L7): the body is ONE constant — the partitioned document states it once for all slices
     h.append( p.report );
     h.append( extraNotes );
     h += " -->";
@@ -322,6 +328,10 @@ struct PackTaskInputs
     // rank vector is masked to its own slice, so a window wider than the slice would pull in zero-score
     // symbols the bundle was never about. 0 ⇒ kPackTaskRankTopN (every existing caller, unchanged).
     std::size_t                        rankTopN = 0;
+
+    // P10 (L7): this bundle is one slice of a --partition=N document — emit its <ctx> root with NO legend comment
+    // (the outer legend states the bundle legend once); ceiling/dropped notes ride one short data comment.
+    bool                               innerBundle = false;
 
     // §F1 (CA4 wave-1 verifier): bytes the CALLER will splice in before this bundle's own "</ctx>" — today
     // exactly one thing, the CLI's --with-graph mermaid block (main.cpp runPackTask). It was appended AFTER
@@ -1599,7 +1609,18 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     const PackTaskHeaderParts headerParts{ task, rootOpenStr, taskNote, mentionNote, boostNote,
                                             docMentionNote, report, in.rootArg };
     const auto buildHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
-    { return packTaskHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
+    {
+        if( in.innerBundle )   // P10 (L7): a partition slice — the outer <ctx-partitions> legend speaks once for all of them
+        {
+            std::string h = withRouteAttr ? std::string( rootOpenStr ) : ctxRootOpen( task, {}, in.rootArg );
+            if( !report.empty() || !extraNotes.empty() )
+            {
+                h += "<!-- slice ";  h.append( report );  h.append( extraNotes );  h += " -->";   // data only (the budget ledger, dropped_positive=, ceiling notes)
+            }
+            return h;
+        }
+        return packTaskHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes );
+    };
     const std::string headerStr = buildHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
 
     std::string whole;

@@ -2585,7 +2585,11 @@ std::optional<int> runZoom( const MainDispatch& d )
                      "symbols= is the whole corpus; isolated= is the symbols in NO top-level module (a group of one — the same rule that makes top_modules= count only groups of 2 or more), and they reconcile exactly: "
                      "symbols= equals isolated= plus the sum of the TOP-LEVEL size= values, every one of them, including any this page did not print. "
                      "On a level-0 module size= is its true member count and shown=/capped= describe the member list printed here, which is fixed at the 5 top-ranked members and is not widened by limit=/offset= (those page the TOP-LEVEL modules); "
-                     "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. %s%s-->",
+                     "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. "
+                     // P4 (L7): the two default ceilings, defined where the reader meets them
+                     "levels_shown= is how many of the levels= this document prints from the top (default 2; the zoom-levels flag sets it, 0 = all): a module AT the cut "
+                     "carries children= (its child modules, none printed) instead of nesting. The top-level module rows are a WINDOW (shown=/capped=/total=/next_offset=, "
+                     "default 40 largest; limit=/offset= page it) and next= pastes the next page. %s%s-->",
                      rw::kGraphCountFloorBriefLegend, rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
         // §P15/§P16: top_modules= is a real, deterministically-ordered row list (size desc, id asc — the same
         // rule --communities' module listing uses) that used to print EVERY top module unconditionally, so a
@@ -2593,13 +2597,22 @@ std::optional<int> runZoom( const MainDispatch& d )
         // (no historic display cap, discloseCap=false ⇒ the un-paginated tag is byte-identical). --mermaid is
         // a fixed-shape diagram, not a row list (its own hard-coded top-10/top-8/top-5 caps are unaffected —
         // honorsPaging() excludes the --zoom --mermaid combination for the same reason plain --mermaid refuses).
-        const PageWindow  zoomPw = pageWindow( topOrder.size(), cfg.pageLimit, cfg.pageOffset );
+        // P4 (L7): the default window over the top modules (kZoomTopModuleCap; --limit raises it) and the printed
+        // depth (levels_shown=, default 2; --zoom-levels=N sets it, 0 = every level). Both cuts are disclosed on the
+        // root and next= pastes the next page; a module AT the depth cut carries children= instead of nesting.
+        const PageWindow  zoomPw = pageWindow( topOrder.size(), effectiveRowCap( cfg.pageLimit, kZoomTopModuleCap ), cfg.pageOffset );
+        const std::size_t levelsShown = cfg.zoomLevelsSet ? ( cfg.zoomLevels > 0 ? std::min<std::size_t>( L, std::size_t( cfg.zoomLevels ) ) : L )
+                                                          : std::min<std::size_t>( L, 2 );
+        const std::size_t cutLevel    = topL + 1 - levelsShown;   // the deepest level printed; its rows carry children= when l > 0
+        const bool        zoomCut     = zoomPw.end - zoomPw.begin < topOrder.size();
+        const std::string zoomNext    = zoomCut ? rw::nextAttrXml( "--zoom --offset=" + std::to_string( zoomPw.end ) ) : std::string();
         char              zoomAb[ kPageDisclosureCap ];
-        std::printf( "<zoom levels=\"%zu\" top_modules=\"%zu\" symbols=\"%u\" isolated=\"%u\"%s%s>", L, topOrder.size(), N, isolatedCount,
+        std::printf( "<zoom levels=\"%zu\" levels_shown=\"%zu\" top_modules=\"%zu\" symbols=\"%u\" isolated=\"%u\"%s%s%s>", L, levelsShown, topOrder.size(), N, isolatedCount,
                      ( pageDisclosure( zoomAb, sizeof( zoomAb ), zoomPw.end - zoomPw.begin, topOrder.size(), zoomPw.end,
-                                       cfg.pageLimit, cfg.pageOffset, false )
+                                       cfg.pageLimit, cfg.pageOffset, zoomCut )
                        + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
-                     rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; isolated=/top_modules= partition the name-based CSR
+                     rw::graphCountFloorAttrXml( g ).c_str(),   // H5/M15: gauge + marker; isolated=/top_modules= partition the name-based CSR
+                     zoomNext.c_str() );
 
         // a stack-free recursion via an explicit lambda (std::function — not hot). Emits <module> elements
         // nested by level; the finest level emits <member> leaves.
@@ -2610,13 +2623,22 @@ std::optional<int> runZoom( const MainDispatch& d )
             // shown=, it emits no capped= either") it stays a bare size= row, and the legend says which is
             // which rather than leaving a reader to infer it from an absent attribute.
             const std::size_t leafShown = ( l == 0 ) ? std::min<std::size_t>( 5, members[0][gid].size() ) : 0;
+            const bool        atCut     = l > 0 && l == cutLevel;   // P4: printed, but its children are not
             std::printf( "<module level=\"%zu\" id=\"%u\" size=\"%zu\" dir=\"%s\"", l, gid, std::size_t( members[l][gid].size() ), ex( domDirOf( l, gid ) ).c_str() );
             if( l == 0 )
             {
                 std::printf( " shown=\"%zu\" capped=\"%u\"", leafShown, unsigned( leafShown < members[0][gid].size() ) );
             }
+            if( atCut )
+            {
+                std::printf( " children=\"%zu\"", std::size_t( children[l][gid].size() ) );
+            }
             std::printf( ">" );
-            if( l == 0 )   // finest community → list its top-ranked symbols
+            if( atCut )
+            {
+                // the depth ceiling: nothing below this row is printed (levels_shown= on the root says so)
+            }
+            else if( l == 0 )   // finest community → list its top-ranked symbols
             {
                 rw::SmallVec<NodeId, 2> mem = members[0][gid];
                 std::sort( mem.begin(), mem.end(), [ & ]( NodeId a, NodeId b ) { return rank[a] != rank[b] ? rank[a] > rank[b] : a < b; } );
@@ -3165,6 +3187,9 @@ std::optional<int> runStructureText( const MainDispatch& d )
                      "— files equals files_unlisted plus the LISTABLE file set, which is what the rows below "
                      "enumerate before any paging window is applied; under explicit paging (limit=/offset=) that "
                      "listable count is emitted as total= and shown= says how many of it these rows are. "
+                     // P4 (L7): the default window, defined where the reader meets it
+                     "The rows are a WINDOW even without explicit paging: the default prints the 80 files with the best-ranked symbols "
+                     "(shown=/capped=/total=/has_more=/next_offset= disclose the cut) and next= pastes the next page; limit= raises it. "
                      "%s-->%s", rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(),
                      rw::rootRelPathsLegend( trSingleRoot ) );
         // T2 + §P8 G1: --limit/--offset paginate over the (sorted) non-empty file set. files= stays the TRUE
@@ -3173,13 +3198,17 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // toward. The two therefore differ on any tree with symbol-less files, which is why total= is the one
         // pageview emits and files= is left exactly as it was. discloseCap=false: --tree has no display cap,
         // so the un-paginated tag is byte-identical. See src/pageview.h, THE TRUNCATION VOCABULARY.
-        const PageWindow  pw = pageWindow( ford.size(), cfg.pageLimit, cfg.pageOffset );
+        // P4 (L7): kTreeRowCap is the DEFAULT window now (187,209 B / 3,773 rows on this repo before); --limit=N
+        // raises it. discloseCap fires exactly when the window cut the list, so a tree that fits stays byte-identical.
+        const PageWindow  pw = pageWindow( ford.size(), effectiveRowCap( cfg.pageLimit, kTreeRowCap ), cfg.pageOffset );
+        const bool        treeCut  = pw.end - pw.begin < ford.size();
+        const std::string treeNext = treeCut ? rw::nextAttrXml( "--tree --offset=" + std::to_string( pw.end ) ) : std::string();
         char              pab[ kPageDisclosureCap ];
-        std::printf( "<tree files=\"%u\" files_unlisted=\"%u\"%s%s>", F, filesUnlisted,
+        std::printf( "<tree files=\"%u\" files_unlisted=\"%u\"%s%s%s>", F, filesUnlisted,
                      ( pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, ford.size(), pw.end,
-                                       cfg.pageLimit, cfg.pageOffset, false )
+                                       cfg.pageLimit, cfg.pageOffset, treeCut )
                        + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
-                     trRootAttr.c_str() );
+                     trRootAttr.c_str(), treeNext.c_str() );
         std::vector<char> trEsc;
         for( std::size_t fi = pw.begin; fi < pw.end; ++fi )
         {

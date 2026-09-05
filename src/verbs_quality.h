@@ -458,6 +458,10 @@ std::optional<int> refuseForeignAckSelection( const rw::Config& cfg, const rw::q
 // Always. The verb, the ten kinds, the three axes, the exit predicate, and the two counters that are
 // printed even at zero. Every row in the document — finding rows and stale-ack rows alike — carries
 // kind=, so it is defined here rather than in either conditional row dictionary.
+// P8 (L7): the bar= literals in emitRow mirror quality.h's constants — pinned here so a moved bar cannot drift the row
+static_assert( rw::quality::kCcxBar == 15 && rw::quality::kLocBar == 60 && rw::quality::kNestBar == 4 && rw::quality::kParamBar == 5,
+               "verbs_quality.h emitRow spells the four bars as literals — update them with quality.h" );
+
 inline constexpr const char* kQdLegendCore =
     "<!-- ripwire quality-delta: only what a change made WORSE against the floor baseline= names below. "
     "Descriptive: weigh and fix the real ones, do not game the number (a wrong abstraction beats a low "
@@ -477,7 +481,11 @@ inline constexpr const char* kQdLegendCore =
     "register-macro-excluded= is a FLOOR, not a finding: symbols this run excluded from the dead-code kind "
     "because their own definition is a registered self-registering test/benchmark macro call. Never gates, "
     "never counted in regressions=, printed even at zero (zero means none excluded, not that the check did "
-    "not run). ";
+    "not run). "
+    // P3 (L7): next= on gating rows, defined where the reader meets it
+    "A gating row's next= is the one pasteable follow-up: expand on FILE:NAME, the body to fix (a duplication row names a SET and carries none). "
+    // P8 (L7): the threshold beside the number
+    "bar= on a complexity/verbosity/nesting/params row is the threshold now= is judged against (ccx 15, loc 60, nest 4, params 5). ";
 
 // The macro FAMILIES, and why a member of one cannot be judged dead — printed only when the run actually
 // excluded something, because on a repo with no such macro the roster explains an empty set.
@@ -1429,13 +1437,27 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 locAttr = " p=\"" + ex( r.path ) + ":" + std::to_string( r.line ) + "\"";
             }
             const char* gatingAttr = ( gatingAllowed && !r.isNewSymbol && !r.isMinor ) ? " gating=\"1\"" : "";
+            // P8 (L7): the threshold beside the number it judges — bar= on the four numeric kinds (quality.h's
+            // kCcxBar/kLocBar/kNestBar/kParamBar), so was=/now= read without the legend.
+            const char* barAttr = r.kind == "complexity" ? " bar=\"15\"" : r.kind == "verbosity" ? " bar=\"60\""
+                                : r.kind == "nesting"    ? " bar=\"4\""  : r.kind == "params"    ? " bar=\"5\""  : "";
+            // P3 (L7, nextverb.h): a GATING row hands the agent the body to fix — --expand=FILE:NAME (the file-qualified
+            // selector, so a same-named symbol elsewhere cannot answer). The name is the sym key's last :: segment;
+            // duplication rows name a SET (members=) and carry no single body to open.
+            std::string nextAttr;
+            if( *gatingAttr && !r.path.empty() && r.kind != "duplication" )
+            {
+                const std::size_t    sep  = r.sym.rfind( "::" );
+                const std::string    bare = sep == std::string::npos ? r.sym : r.sym.substr( sep + 2 );
+                nextAttr = rw::nextAttrXml( rw::nextFlag( "--expand=", r.path + ":" + bare ) );
+            }
             if( r.kind == "duplication" )
             {
                 std::printf( "<r kind=\"duplication\" members=\"%s\" tokens=\"%u\"%s%s%s%s%s/>", ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
             }
             else if( r.kind == "dead-code" )
             {
-                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, nextAttr.c_str() );
             // B10.2e: api-surface now carries two shapes — a brand-new/newly-public symbol (was=now=0, no
             // param comparison to show) and a param-count contract-change (was/now = the real counts). Print
             // was/now whenever they differ from each other so the contract-change case's was=/now= is visible
@@ -1443,11 +1465,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             else if( r.kind == "api-surface" && r.was == r.now )
             {
-                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, nextAttr.c_str() );
             }
             else
             {
-                std::printf( "<r kind=\"%s\" sym=\"%s\" was=\"%u\" now=\"%u\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.was, r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+                std::printf( "<r kind=\"%s\" sym=\"%s\" was=\"%u\" now=\"%u\"%s%s%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.was, r.now, barAttr, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, nextAttr.c_str() );
             }
         };
         for( const quality::Regression& r : regs )

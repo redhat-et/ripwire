@@ -4,6 +4,7 @@
 // buffer (no whole-document string), terse schema, every name/path XML-escaped.
 
 #include "model.h"
+#include "nextverb.h"   // P3 (L7): next= on the top-ranked <d> row
 #include "arch.h"        // P3: builtinLayer() — the file-node layer= tag
 #include "graph.h"     // H6/F2: definitionCountOfName — the ONE resolver behind --lego's defs= single-pick disclosure
 #include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
@@ -904,6 +905,11 @@ inline constexpr std::string_view kForFileTailLegend =
     "files with a positive score, best-symbol rank order; rows are t p=file; total=candidate files, "
     "shown=printed, capped=1 when they differ. r= on a ranked row is its 1-based rank in this lens ranking "
     "(sort by r= for true ranker order; a gap = a budget-trimmed row)";
+// P1 (L7): the same two definitions for the compact dialect (verbs_for.h appendCompactForLegend) — nothing dropped,
+// the sentences shortened: the tail is file-grain and weaker, its counts are total/shown/capped, r= is the rank.
+inline constexpr std::string_view kForFileTailLegendCompact =
+    "; tail: file-grain tail (paths only, WEAKER than the ranked rows): <t p=> rows, total=/shown=/capped=1 when cut; "
+    "r= = a ranked row's 1-based lens rank (a gap = a budget-trimmed row)";
 
 // Explicit-budget row fit: the largest shown count whose rendered XML fits `budgetBytes` (0 rows always
 // "fits" — the shell is reserved by the caller). Walks down from the collected count; deterministic.
@@ -1590,7 +1596,7 @@ inline constexpr const char* kIgnoredLegend =
 // legend is written before the real <calls ...> child — a bare "<calls...>" example here would shadow it.
 inline constexpr const char* kBodiesLegend =
     "<!-- a body's sibs=\"a,b,...\" sibs_total=N are the file's OTHER indexed symbols (this body's own name "
-    "excluded), source order, capped at 40 (sibs_capped=\"1\" when the cap fired); inc=\"x.h,...\" inc_total=N "
+    "excluded), source order, capped at 8 (sibs_capped=\"1\" when the cap fired); inc=\"x.h,...\" inc_total=N "
     "are the file's own #include/import targets, source order, capped at 24 (inc_capped=\"1\" when the cap "
     "fired) — both absent when the count is 0 (a documented zero, not a degrade). Each body's own calls "
     "child (1-hop callee signatures) carries total=/shown=/capped=\"1\" the usual way: capped=\"1\" only "
@@ -3036,6 +3042,17 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
         std::snprintf( tail, sizeof( tail ), "%s%s%s>", facts.lens, facts.pure, rankAttr );
     }
     head += tail;
+    // P3 (L7, nextverb.h): the TOP-ranked row hands the agent the body to read — --expand=FILE:NAME, the
+    // file-qualified selector (a same-named def elsewhere cannot answer), spelled with the same root-relative
+    // path the <f p=> wrapper above it carries. Only r=1: one next per document, the one that ends the search.
+    if( facts.rank == 1 )
+    {
+        const std::string rel = rootArg.empty() ? std::string( ing.files[ s.fileId ] )
+                                                : std::string( rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rw::sarif::rootPrefixOf( rootArg ) ) );
+        head.pop_back();   // the '>'
+        head += nextAttrXml( nextFlag( "--expand=", rel + ":" + s.name ) );
+        head += '>';
+    }
     return head;
 }
 
@@ -4284,7 +4301,7 @@ struct FileExpandContext
     std::vector<std::string_view>                     includes;   // this file's #include/import targets, source order
 };
 
-inline constexpr std::size_t kMaxExpandSibs     = 40;   // sibs= cap — a giant file's sibling list must not dwarf the body
+inline constexpr std::size_t kMaxExpandSibs     = 8;    // sibs= cap — P16 (L7): 40 names were 582 B of a 3,067 B --expand answer (19%; ~3.5 KB per --pack-task bundle); sibs_total= keeps the true count
 inline constexpr std::size_t kMaxExpandIncludes = 24;   // inc= cap
 
 inline HashMap<std::uint32_t, FileExpandContext> buildFileExpandContexts(

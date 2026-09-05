@@ -142,6 +142,11 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                          rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
         }
 
+        // P3 (L7, nextverb.h): the one follow-up on this root, on both dialects. callers → --uses=SELECTOR (the
+        // call SITES; the @FILE:LINE spelling the caller typed is mirrored, so the paste resolves the same
+        // definition); callees → --expand=SELECTOR (the body whose callees these are, with their signatures inline).
+        const std::string chNextAttr = rw::nextAttrXml( rw::nextFlag( wantCallers ? "--uses=" : "--expand=", sym ) );
+
         // --format=columnar (RESEARCH lever 1): the same page window, re-encoded as a path-table + parallel
         // arrays (dedups the repeated per-row markup + paths). Default --format=xml is byte-identical below.
         if( cfg.columnar )
@@ -161,7 +166,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                                    + chRootAttr   // R-E: same root= the XML/JSON branches carry
                                    + pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                                      cfg.pageLimit, cfg.pageOffset, chDiscloseCap )
-                                   + rw::graphCountFloorAttrXml( g );   // §H4 §3.4 — every dialect carries the marker
+                                   + rw::graphCountFloorAttrXml( g )    // §H4 §3.4 — every dialect carries the marker
+                                   + chNextAttr;                         // P3 (L7): the same next= on the columnar root
             emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix, &chTested.testReach );
             return 0;
         }
@@ -197,9 +203,10 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             std::printf( " bodyless_defs=\"%zu\"", bodylessDefsCount );
         }
         std::printf( "%s", chTested.xmlAttr.c_str() );   // A6: hop_tested=/hop_untested=
-        std::printf( "%s%s>", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
+        std::printf( "%s%s%s>", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                     cfg.pageLimit, cfg.pageOffset, chDiscloseCap ),
-                     rw::graphCountFloorAttrXml( g ).c_str() );
+                     rw::graphCountFloorAttrXml( g ).c_str(),
+                     chNextAttr.c_str() );   // P3 (L7): callers → the SITES (--uses=SELECTOR, spelling mirrored); callees → the body (--expand=SYM)
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
         for( std::size_t i = pw.begin; i < pw.end; ++i )
         {
@@ -1737,23 +1744,42 @@ std::optional<int> runExternalSurface( const MainDispatch& d )
         }
 
         const auto ext   = accumulateExternalSurface( ing, defined );
-        const auto names = buildExternalSurfaceRows( ext );
+        auto       names = buildExternalSurfaceRows( ext );
+        // P4 (L7): a shell script "calls" echo/printf/cd/exit — the interpreter, not a dependency. Dropped by
+        // default (externalnames.h kShellBuiltinNames), COUNTED on the root, kept under --include-builtins. Lens 8
+        // measured the default at 67,862 B / 1,422 rows led by exactly these.
+        std::size_t builtinsExcluded = 0;
+        if( !cfg.includeBuiltins )
+        {
+            const auto isBuiltinRow = [ & ]( const auto& r ) { return std::string_view( langTag( r.lang ) ) == "sh" && rw::externalnames::isShellBuiltinName( r.name ); };
+            builtinsExcluded = std::size_t( std::count_if( names.begin(), names.end(), isBuiltinRow ) );
+            names.erase( std::remove_if( names.begin(), names.end(), isBuiltinRow ), names.end() );
+        }
 
         // §P15/§P16: names is deterministically sorted (refs desc, name asc, lang asc — buildExternalSurfaceRows
         // above). --pack-top-n was the only cap and had no --offset partner; --limit now overrides it exactly
         // like --deps' packTopN/pageLimit composition (src/serialize.h::packDeps), and --offset finally pages.
-        const int         histCap = cfg.packTopN > 0 ? cfg.packTopN : int( names.size() );
+        // P4 (L7): the DEFAULT window is kExternalSurfaceRowCap rows (it was "everything"); --limit=N raises it.
+        const int         histCap = cfg.packTopN > 0 ? cfg.packTopN : kExternalSurfaceRowCap;
         const PageWindow  extPw   = pageWindow( names.size(), effectiveRowCap( cfg.pageLimit, histCap ), cfg.pageOffset );
         std::vector<char> esc;
         const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
         std::printf( "<!-- ripwire external-surface: names CALLED/IMPORTED/EXTENDED but never defined in the indexed "
-                     "tree = the stdlib/third-party surface the code depends on (refs=use-sites, calls=of-which-calls) -->" );
+                     "tree = the stdlib/third-party surface the code depends on (refs=use-sites, calls=of-which-calls). "
+                     // P4 (L7): the two defaults, defined where the reader meets them
+                     "builtins_excluded= counts the sh BUILTIN rows (echo printf cd exit test …) dropped from names= by default — the interpreter, "
+                     "not a dependency; the include-builtins flag keeps them. The rows are a WINDOW (default 100; shown=/capped=/total=/"
+                     "has_more=/next_offset= disclose the cut, limit=/offset= page it) and next= pastes the next page. -->" );
         // P2.1: --pack-top-n caps the listing; names= is the true total, shown=/capped= the printed slice.
         const std::size_t extShown = extPw.end - extPw.begin;
+        const bool        extCut   = extShown < names.size();
+        const std::string extNext  = extCut ? rw::nextAttrXml( "--external-surface --offset=" + std::to_string( extPw.end ) ) : std::string();
+        const std::string extBuiltinsAttr = builtinsExcluded > 0 ? " builtins_excluded=\"" + std::to_string( builtinsExcluded ) + "\"" : std::string();
         char              extAb[ kPageDisclosureCap ];
-        std::printf( "<external-surface names=\"%zu\"%s>", names.size(),
+        std::printf( "<external-surface names=\"%zu\"%s%s%s>", names.size(), extBuiltinsAttr.c_str(),
                      pageDisclosure( extAb, sizeof( extAb ), extShown, names.size(), extPw.end,
-                                     cfg.pageLimit, cfg.pageOffset, true ) );
+                                     cfg.pageLimit, cfg.pageOffset, true ),
+                     extNext.c_str() );
         for( std::size_t i = extPw.begin; i < extPw.end; ++i )
         {
             std::printf( "<x n=\"%s\" lang=\"%s\" refs=\"%u\" calls=\"%u\"/>",
@@ -2005,7 +2031,8 @@ int emitImpactColumnar( const ImpactView& v )
                                  // and turns a silent difference into a stated one. Gate:
                                  // test/mcpattrparitycheck.sh (which also fails if a name here IS emitted).
                                  + " lens=\"shown_importers,importers_capped\""
-                                 + rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs );  // W2-F
+                                 + rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs )   // W2-F
+                                 + rw::nextAttrXml( rw::nextFlag( "--safe-delete=", v.sym ) );   // P3 (L7): the XML root's next=, same set
     emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix, v.testReach );
     return 0;
 }
@@ -2050,12 +2077,13 @@ int emitImpactXml( const ImpactView& v )
     const auto        ex        = [ & ]( std::string_view t ) -> std::string { return std::string( escapeXml( t, esc ) ); };
     char              ipab[ kPageDisclosureCap ];
     const std::size_t shownRows = v.page.end - v.page.begin;
-    std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s radius_tested=\"%zu\" radius_untested=\"%zu\"%s%s%s%s>",
+    std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s radius_tested=\"%zu\" radius_untested=\"%zu\"%s%s%s%s%s>",
                  ex( v.sym ).c_str(), v.defs, v.reaches, v.imports.xmlAttrs.c_str(), v.radiusTested, v.radiusUntested,
                  std::string( v.rootAttr ).c_str(),
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true ),
-                 rw::graphCountFloorAttrXml( v.g ).c_str(), rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str() );
+                 rw::graphCountFloorAttrXml( v.g ).c_str(), rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str(),
+                 rw::nextAttrXml( rw::nextFlag( "--safe-delete=", v.sym ) ).c_str() );   // P3 (L7): "is it safe to change" → "can it go"
     for( std::size_t i = v.page.begin; i < v.page.end; ++i )
     {
         const Symbol&          s  = v.ing.symbols[ v.show[i] ];

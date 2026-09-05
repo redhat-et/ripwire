@@ -435,10 +435,19 @@ fi
 echo "── 7. external-surface caption"
 "$BIN" "$ROOT" --external-surface >"$TMP/xs" 2>/dev/null
 XSROOT="$( grep -oE '<external-surface[^>]*>' "$TMP/xs" )"
+# RE-PINNED 2026-09-05 (capture-audit P4, lane L7): the DEFAULT --external-surface is a 100-row window now (pageview.h
+# kExternalSurfaceRowCap), so on this repo the default root carries the whole quintet (shown=/capped="1"/total=/
+# has_more=/next_offset=) plus next=; the no-total shape survives only where nothing was cut (--limit=100000).
 case "$XSROOT" in
-    *' total='*) no "the UNPAGED external-surface root carries total= after all — the caption claim needs revisiting";;
-    *' names="'*' shown="'*' capped="'*) ok "unpaged root emits names=/shown=/capped= and no total= ($XSROOT)";;
-    *) no "unexpected external-surface root shape: $XSROOT";;
+    *' names="'*' shown="'*' capped="1"'*' total='*' next="'*) ok "default root is a disclosed window: names=/shown=/capped=1/total=/next= ($XSROOT)";;
+    *) no "unexpected external-surface default root shape (want the P4 window quintet + next=): $XSROOT";;
+esac
+XSALL="$( "$BIN" "$ROOT" --external-surface --limit=100000 2>/dev/null | grep -oE '<external-surface[^>]*>' )"
+XSS="$( printf '%s' "$XSALL" | attr shown )"; XST="$( printf '%s' "$XSALL" | attr total )"
+case "$XSALL" in
+    *' capped="0"'*) [ "$XSS" = "$XST" ] && ok "--limit=100000 lifts the window: capped=0, shown($XSS) == total($XST) (the explicit-limit quintet)" \
+                                          || no "--limit=100000: capped=0 but shown($XSS) != total($XST): $XSALL";;
+    *) no "--limit=100000 external-surface root still capped: $XSALL";;
 esac
 XSPAGE="$( "$BIN" "$ROOT" --external-surface --limit=3 2>/dev/null | grep -oE '<external-surface[^>]*>' )"
 case "$XSPAGE" in
@@ -551,10 +560,13 @@ done
 echo "── 11. tree files identity"
 TU="$( "$BIN" "$ROOT" --tree 2>/dev/null | grep -oE '<tree [^>]*>' )"
 TF="$( printf '%s' "$TU" | attr files )"; TUL="$( printf '%s' "$TU" | attr files_unlisted )"
+# RE-PINNED 2026-09-05 (capture-audit P4, lane L7): the default --tree is an 80-row window, so the identity reads
+# files_unlisted + total (the listable set the root now discloses) == files; the rows are shown= of that total.
+TTOT="$( printf '%s' "$TU" | attr total )"; TSHOWN="$( printf '%s' "$TU" | attr shown )"
 TROWS="$( "$BIN" "$ROOT" --tree 2>/dev/null | grep -o '<file p=' | wc -l | tr -d ' ' )"   # minified: count occurrences
-[ "$(( TUL + TROWS ))" = "$TF" ] \
-    && ok "unpaged: files_unlisted($TUL) + rows($TROWS) == files($TF)" \
-    || no "unpaged tree identity broken: $TUL + ${TROWS:-0} != $TF"
+[ -n "$TTOT" ] && [ "$(( TUL + TTOT ))" = "$TF" ] && [ "$TROWS" = "$TSHOWN" ] \
+    && ok "default window: files_unlisted($TUL) + total($TTOT) == files($TF); rows($TROWS) == shown($TSHOWN)" \
+    || no "default tree identity broken: $TUL + ${TTOT:-<none>} != $TF or rows $TROWS != shown ${TSHOWN:-<none>}"
 TP="$( "$BIN" "$ROOT" --tree --limit=2 2>/dev/null | grep -oE '<tree [^>]*>' )"
 TPT="$( printf '%s' "$TP" | attr total )"; TPS="$( printf '%s' "$TP" | attr shown )"
 if [ "$(( TUL + TPT ))" = "$TF" ] && [ "${TPS:-0}" = 2 ]; then

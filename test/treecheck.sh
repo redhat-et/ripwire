@@ -152,14 +152,21 @@ if [ -n "$REPO_TREE" ]; then
         && ok "--tree(repo): zero root-level markdown files in the first 20 rows (was all of them)" \
         || no "--tree(repo): $firstScreenDocs root-level markdown files still on the first screen"
 
-    # ordering must not lose a file: the emitted row count equals the paging total=. total= only appears
-    # when paging was asked for (un-paginated --tree has no display cap and stays byte-identical), so ask.
+    # ordering must not lose a file: the emitted row count equals the paging total=. RE-PINNED 2026-09-05
+    # (capture-audit P4, lane L7): the DEFAULT --tree is now an 80-row window (pageview.h kTreeRowCap, disclosed as
+    # shown=/capped=/total=/next_offset= + next=), so "drops nothing" is asserted on the explicit whole-tree window
+    # (--limit=1000000), and the default is asserted to print exactly min(80, total) rows.
     emitted="$( printf '%s\n' "$REPO_FILES" | grep -c . )"
     PAGED="$( perl -e 'alarm 120; exec @ARGV' "$BIN" "$ROOT" --tree --limit=1000000 2>/dev/null )"
     total="$( printf '%s' "$PAGED" | grep -oE '<tree [^>]*>' | grep -oE 'total="[0-9]+"' | grep -oE '[0-9]+' )"
-    { [ -n "$total" ] && [ "$emitted" = "$total" ]; } \
-        && ok "--tree(repo): all $emitted non-empty files still emitted (ordering drops nothing)" \
-        || no "--tree(repo): emitted $emitted rows but total=$total"
+    allrows="$( printf '%s' "$PAGED" | grep -o '<file p=' | wc -l | tr -d ' ' )"
+    { [ -n "$total" ] && [ "$allrows" = "$total" ]; } \
+        && ok "--tree(repo): all $allrows non-empty files emitted under --limit=1000000 (ordering drops nothing)" \
+        || no "--tree(repo): --limit=1000000 emitted $allrows rows but total=$total"
+    want=$(( total < 80 ? total : 80 ))
+    [ "$emitted" = "$want" ] \
+        && ok "--tree(repo): the default window prints $emitted rows (min(80, total=$total)) — P4" \
+        || no "--tree(repo): the default window printed $emitted rows (want min(80, $total) = $want)"
 
     # §A8.5: files= (the TRUE indexed corpus) used to exceed the complete row set (total=, above) with the
     # divergence documented only in a source comment. files_unlisted= closes it: files == total +

@@ -362,6 +362,8 @@ inline constexpr const char* kDmmLegend =
     "at= is the git commit this comparison RAN at (HEAD, not base/target — those name what was compared); a "
     "trailing +dirty means the working tree differed from that commit "
     "available=0 when no score could be produced at all "
+    // P8 (L7): the thresholds are on the root, not only in this prose
+    "low_loc=/low_cx=/low_params= are the low-risk ceilings a unit is judged against (lines / cyclomatic complexity / parameters). "
     "p=one property row k=its name (size|complexity|interfacing) d_low=change in low-risk volume d_high=change in "
     "high-risk volume. Every indexed language and every indexed path counts, tests and fixtures included; params "
     "and cyclomatic complexity come from the index, so a definition whose grammar exposes no parameter list "
@@ -406,8 +408,9 @@ inline int writeDmmReport( const Result& r )
 
     const std::string base( escapeXml( r.baseSha, escBase ) );
     const std::string target( escapeXml( r.targetIsWorkingTree ? std::string( "working-tree" ) : r.targetSha, escTarget ) );
-    std::printf( " base=\"%s\" target=\"%s\"%s available=\"%d\" combine=\"pooled\" size_metric=\"physical-loc\"",
-                 base.c_str(), target.c_str(), atAttrStr.c_str(), r.available ? 1 : 0 );
+    // P8 (L7): the three low-risk thresholds beside the numbers they judge (PyDriller's, verbatim — see the constants)
+    std::printf( " base=\"%s\" target=\"%s\"%s available=\"%d\" combine=\"pooled\" size_metric=\"physical-loc\" low_loc=\"%u\" low_cx=\"%u\" low_params=\"%u\"",
+                 base.c_str(), target.c_str(), atAttrStr.c_str(), r.available ? 1 : 0, kUnitSizeLowRiskMax, kUnitComplexityLowRiskMax, kUnitInterfacingLowRiskMax );
     printScoreAttr( "dmm", r.available, r.score );
     std::printf( " good=\"%llu\" bad=\"%llu\"", static_cast<unsigned long long>( r.good ), static_cast<unsigned long long>( r.bad ) );
     std::printf( " base_units=\"%llu\" base_volume=\"%llu\" target_units=\"%llu\" target_volume=\"%llu\"",

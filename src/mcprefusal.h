@@ -956,7 +956,7 @@ struct McpVerbFields
 
 inline constexpr McpVerbFields kMcpVerbFields[] = {
     // ── read verbs ──
-    { "analyze",                  "path paths" },
+    { "analyze",                  "path paths legend" },
     // M13: limit/offset are DECLARED because these two now HONOR them (symbolQueryJson takes an
     // McpPageArgs) — their CLI twins --callees/--callers are both in cli.h's honorsPaging set, and a verb
     // that pages on one surface and is pinned to page 1 on the other is the parity gap this closed.
@@ -975,31 +975,35 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "situational_awareness",    "path diff files" },
     { "mentions",                 "path paths symbol limit offset" },
     { "for",                      "path paths task budget_tokens" },
-    { "lego",                     "path paths type" },
-    { "owners",                   "path symbol limit offset" },
+    { "lego",                     "path paths type legend" },
+    { "owners",                   "path symbol limit offset legend" },
     { "fetch_body",               "path handle start_line end_line" },
-    { "batch",                    "path queries" },
+    { "batch",                    "path queries legend" },
     // ── flagship-reflex verbs ──
-    { "exemplar",                 "path paths kind task" },
+    { "exemplar",                 "path paths kind task legend" },
     { "quality_delta",            "path" },
     { "quality_baseline",         "path", McpVerbFields::Effect::Writes },
-    { "impact",                   "path paths symbol limit offset" },
+    { "impact",                   "path paths symbol limit offset legend" },
     // LB-G (r10 GitNexus round): limit/offset are DECLARED here because the verb now HONORS them
     // (mcpPageArgs -> pageWindow), exactly as `impact` one row up. `uses` grew a default site cap in the
     // same round, so a caller that wants the whole footprint needs the hatch the CLI --uses already had.
-    { "uses",                     "path paths symbol limit offset" },
-    { "path_between",             "path paths from to" },
-    { "connect",                  "path paths symbols radius" },
-    { "explore",                  "path paths task budget_tokens partition" },
-    { "from_trace",               "path paths trace budget_tokens" },
-    { "edit_check",               "path paths symbol new_body" },
-    { "whereis",                  "path symbol kind limit offset" },
-    { "stray_content",            "path kind limit offset" },
-    { "flags",                    "path kind symbol" },
-    { "doc_drift",                "path kind limit offset" },
+    { "uses",                     "path paths symbol limit offset legend" },
+    { "path_between",             "path paths from to legend" },
+    { "connect",                  "path paths symbols radius legend" },
+    { "explore",                  "path paths task budget_tokens partition legend" },
+    { "from_trace",               "path paths trace budget_tokens legend" },
+    { "edit_check",               "path paths symbol new_body legend" },
+    { "whereis",                  "path symbol kind limit offset legend" },
+    { "stray_content",            "path kind limit offset legend" },
+    { "flags",                    "path kind symbol legend" },
+    { "doc_drift",                "path kind limit offset legend" },
     // lane/tc-sliceat: the ARISE def-use slice — var/flow/depth mirror the CLI's :VAR / --slice-flow /
     // --slice-depth knobs; single-root by kMcpSingleRootVerbs (a per-definition on-disk re-parse).
     // §5a decision 3: `legend` — the opt-in compact posture (the CLI --legend=compact), default full.
+    // P1 (L7): the same argument on every verb above that answers XML (analyze/lego/owners/batch/exemplar/impact/uses/
+    // path_between/connect/explore/from_trace/edit_check/whereis/stray_content/flags/doc_drift) — mcp.h's textResult
+    // applies compactlegend.h's rewrite; the JSON/text verbs (find_*/grep/cochange/mentions/quality_delta/
+    // situational_awareness/memory_recall/fetch_body) do not declare it and refuse it as an unknown field.
     { "slice",                    "path symbol var flow depth legend" },
     // ── edit verbs ──
     { "replace_symbol_body",      "path paths symbol file new_body post_check", McpVerbFields::Effect::Destructive },

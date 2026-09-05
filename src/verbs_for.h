@@ -459,6 +459,11 @@ inline std::string rootOpenWithSchema( std::string rootOpen, std::string_view sc
 using rw::ForConfidence;
 using rw::deriveForConfidence;
 
+// P1 (L7): the compact dialect's confidence clause — ONE constant, because runForLens exempts its bytes from the sig
+// trim by size (the full dialect exempts forConf.note the same way); a second spelling would desynchronize the ledger.
+inline constexpr std::string_view kForCompactConfidenceClause =
+    " [confidence=/margin_pct=: the ranked head's largest relative score drop; low = flat ranking, a starting point]";
+
 inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p, std::string_view extraNotes )
 {
     h += "<!-- ripwire for ripwire.for/v1: task/route/root and bundle/bodies/reason are root facts; "
@@ -469,10 +474,15 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     h.append( p.boostNote );
     h.append( p.docMentionNote );
     h.append( p.floorNote );
-    h.append( p.confidenceNote );   // the compact dialect's reader meets the same two root facts
+    // P1 (L7): the compact dialect's reader meets the same two root facts (confidence=/margin_pct=) — in the
+    // SHORT form; the full sentence rides the default dialect only (forcompresscheck/mcpclidiffcheck pin it there).
+    if( !p.confidenceNote.empty() )
+    {
+        h += kForCompactConfidenceClause;
+    }
     if( p.tailLegend )
     {
-        h.append( rw::kForFileTailLegend );   // deep-tail: r= + <tail> definitions ride the compact legend too
+        h += rw::kForFileTailLegendCompact;   // deep-tail: r= + <tail> definitions ride the compact legend too, short form
     }
     h.append( extraNotes );
     h += " -->";
@@ -559,6 +569,10 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     h += ": reusable building blocks + quality facts for what you're about to touch "
          "(cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) "
          "— prefer composing/reusing these; watch the high-churn/high-amp/cloned ones";
+    // P3 (L7): the r=1 <d> row carries next= (nextverb.h). NOT defined here on purpose: every byte of this header
+    // is un-charged by the token ladder, and fornotesbudgetcheck's tight rungs leave it ~0 tokens of headroom
+    // (V1 N1) — a 115 B clause blew --token-budget=950 by 29 tokens. The definition lives in --help (--for) and
+    // in test/legendcoverage_baseline.txt with this reason; the attribute's value is a pasteable invocation.
     if( p.compactBundle )
     {
         h.append( kForCompactBundleLegend );   // COMPACT: replaces the auto legend on the conceptual route — never both
@@ -1533,6 +1547,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         // The confidence pair's own bytes, captured BEFORE the budget clause below is appended — see the
         // charging note there for why the two disclosures are charged differently.
         const std::size_t confidenceOwnBytes = forConf.attrs.size() + forConf.note.size();
+        // P1 (L7): the two halves separately, captured at the SAME early point — the compact dialect emits its own
+        // short clause (kForCompactConfidenceClause) in place of the early note, and the exemption below must
+        // subtract what that dialect emitted, never the appended budget clause (which is charged, see below).
+        const std::size_t confidenceEarlyAttrsBytes = forConf.attrs.size();
+        const std::size_t confidenceEarlyNoteBytes  = forConf.note.size();
 
         // H9 (capture-audit 2026-09-04): the CEILING this bundle was shaped against, named on the root.
         // `--for --token-budget=1500` re-shapes the whole answer — the root goes `bundle="compact"
@@ -1860,14 +1879,25 @@ std::optional<int> runForLens( const MainDispatch& d )
         // counts the emitted header verbatim, so leftBytes hands the bodies ~240 B less and the bundle
         // total never crosses the ceiling — charging the sig side as well was double-counting one cost.
         // est_tokens measures the emitted header in both regimes, so nothing under-reports either way.
-        const std::size_t confidenceExemptBytes = confidenceOwnBytes + forAtAttrStr.size();
+        // P1 (L7): under --legend=compact the header carries the SHORT confidence clause and the compact tail legend
+        // (appendCompactForLegend), so the exemption must subtract what was emitted — the full constants left the
+        // ledger 64 B short and the subtraction below underflowed (UBSan: "297 - 361 cannot be represented").
+        const bool        compactLegendOn      = cfg.legend == "compact";
+        const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : kForCompactConfidenceClause.size() )
+                                                                 : confidenceEarlyNoteBytes;
+        const std::size_t confidenceExemptBytes = confidenceEarlyAttrsBytes + confidenceEmitted + forAtAttrStr.size();   // == confidenceOwnBytes + at= in the full dialect
+        const std::size_t tailLegendEmitted    = compactLegendOn ? rw::kForFileTailLegendCompact.size() : rw::kForFileTailLegend.size();
         // DEEP-TAIL: the tail legend's bytes are exempt from the sig-trim charge in BOTH regimes, the
         // confidence-disclosure precedent verbatim — the tail's contract is that the ranked head is
         // byte-identical with and without it, and charging the clause here would shrink <sigs> to pay for
         // a disclosure. The bytes stay real everywhere downstream: est_tokens measures the emitted header,
         // and the explicit regime's tail rows are funded from the RESIDUAL (below), never from the sigs.
-        const std::size_t fixedBytes = headerStr.size() - adaptiveNote.size() - autoLegendBytes
-                                     - confidenceExemptBytes - rw::kForFileTailLegend.size()
+        const std::size_t exemptBytes = adaptiveNote.size() + autoLegendBytes + confidenceExemptBytes + tailLegendEmitted;
+        if( exemptBytes > headerStr.size() )
+        {
+            DEGRADED_PATH_ALERT( "runForLens: header exemptions exceed the emitted header — the sig ledger would underflow; charging the header whole" );
+        }
+        const std::size_t fixedBytes = ( exemptBytes > headerStr.size() ? headerStr.size() : headerStr.size() - exemptBytes )
                                      + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
         // the auto bundle's SECTION SPLIT — the sig side's claim is capped so an explicit ceiling wider
         // than the default cannot re-inflate the trimmed sig tail at the bodies' expense (the rule, its

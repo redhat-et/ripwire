@@ -236,9 +236,9 @@ void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, const rw::PageW
             const GrepAuxHit& h = hits[j];
             std::string        safe;
             appendCdataSafe( h.text, safe );
-            std::printf( "<hit l=\"%u\"><m><![CDATA[", h.line );
+            std::printf( "<hit l=\"%u\"><![CDATA[", h.line );   // P12 (L7): no <m> wrapper here either
             std::fwrite( safe.data(), 1, safe.size(), stdout );
-            std::printf( "]]></m></hit>" );
+            std::printf( "]]></hit>" );
         }
         std::printf( "</f>" );
         i = j;
@@ -648,7 +648,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     else
     {
     std::printf( "<!-- ripwire grep: parallel literal/regex scan; hits GROUP by file under <f p=\"…\">, each <hit> carrying its LINE "
-                 "(l=), matched text (m) and enclosing symbol (in=, a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar; "
+                 "(l=), its matched text as the hit's own CDATA and enclosing symbol (in=, a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar; "
                  "ABSENT (never an empty in= value) when no symbol encloses the hit, which is NOT the same claim as file scope — and "
                  "on a file row carrying parse_degraded=\"1\" it is NO CLAIM AT ALL: that file's parse holds ERROR/MISSING nodes "
                  "(the skipped verb itemizes err=/err_ratio=), symbols there may be unextracted, so read in= absence inside it as "
@@ -745,6 +745,9 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "corpus_oversize= counts files the crawl SAW but dropped for exceeding the size ceiling. Both answer what an "
                  "otherwise-empty answer alone cannot: not in this repo, or in a file that was never scanned — the skipped "
                  "verb itemizes the rows behind either count. "
+                 // P3 (L7): next= on the root, defined where the reader meets it
+                 "next= is the one pasteable follow-up: the at verb on the top hit; the next page (compact legend) when cut; "
+                 "the conceptual lens on a zero-hit answer. "
                  "%s -->", rw::kPageRaiseCapClause );
     }
     emitGrepHandleLegend( cfg.grepHandles );
@@ -761,12 +764,29 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= (helper above).
     const std::string auxAttr = grepUnindexedAttrs( aux );
     const char* schemaAttr = cfg.legend == "compact" ? " schema=\"ripwire.grep/v1\"" : "";
-    std::printf( "<grep pattern=\"%s\"%s%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s%s%s>",
+    // P3 (L7, nextverb.h): the one follow-up. A CUT answer → the next page, under the compact legend (the page
+    // is what the agent wants, not the prose it has already read); a hit → the enclosing-definition chain at the
+    // top hit (--at=FILE:LINE, the grep→at→expand chain lens 8 named); zero hits → the conceptual fallback.
+    std::string grepNext;
+    if( grepPage.end < hitCount || hitsCapped != 0 )
+    {
+        grepNext = rw::nextFlag( cfg.grepRegex ? "--regex=" : "--grep=", pat ) + " --offset=" + std::to_string( grepPage.end ) + " --legend=compact";
+    }
+    else if( !hits.empty() )
+    {
+        grepNext = rw::nextFlag( "--at=", std::string( pathFor( hits[ 0 ].fileId ) ) + ":" + std::to_string( hits[ 0 ].line ) );
+    }
+    else
+    {
+        grepNext = rw::nextFlag( "--for=", pat );
+    }
+    std::printf( "<grep pattern=\"%s\"%s%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s%s%s%s>",
                  ex( pat ).c_str(), schemaAttr, rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
                                  cfg.pageLimit, cfg.pageOffset, true, kXmlPageSyntax,
                                  /*collectionCapped=*/ hitsCapped != 0 ),   // H8: the cap hits_capped= names floors the root
-                 hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str() );
+                 hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str(),
+                 rw::nextAttrXml( grepNext ).c_str() );
     // G1 (2026-08-15 harvest): hits GROUP by file under <f p="…">, root-relative when this is a single-root
     // run (report-memgraph §F6: the absolute root prefix alone was 42.5% of a real --grep payload; the
     // repeated-per-hit path was report-octocode §F1's 31.4%). Byte-identical text within one file's group
@@ -805,9 +825,11 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                 std::printf( "<b><![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]></b>" );
             }
             {
+                // P12 (L7): the matched line is the hit's OWN text — no <m> wrapper (9 B/hit, ~900 B on a 100-row page);
+                // with context on, the reading order is <b>…</b> then this CDATA then <a>…</a>
                 std::string safe;
                 appendCdataSafe( h.text, safe );
-                std::printf( "<m><![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]></m>" );
+                std::printf( "<![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]>" );
             }
             if( !h.after.empty() )
             {

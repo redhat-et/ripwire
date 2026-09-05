@@ -276,7 +276,9 @@ inline constexpr const char* kUsesFieldLegend =
 
 // --impact's opener, identical on both surfaces before this header.
 inline constexpr const char* kImpactLegendOpen =
-    "<!-- ripwire impact: transitive blast radius — symbols that reach SYM via calls (review before changing SYM). ";
+    "<!-- ripwire impact: transitive blast radius — symbols that reach SYM via calls (review before changing SYM). "
+    // P3 (L7): next= defined where the reader meets it (nextverb.h kNextLegendClause is the shared half)
+    "next= is the one pasteable follow-up (the safe-delete read of SYM). ";
 
 // ── LB-H (r10 GitNexus round) — the IMPORT TIER's own definition ─────────────────────────────────────────
 // --impact answered "what breaks if I change this" with CALL reach only. On webpack, --impact=ChunkGraph
@@ -390,8 +392,12 @@ inline constexpr const char* kCallHierarchyLegendCalleesOnly =
 inline std::string callHierarchyLegendOpen( bool wantCallers )
 {
     // F-02: the blind-spot clause rides with hop_tested=/hop_untested=, which both forms always carry.
+    // P3 (L7): next= defined where the reader meets it — callers hand over the SITES (the uses verb on the same
+    // selector, its @FILE:LINE spelling mirrored), callees the BODY whose callees these are (expand).
     return wantCallers ? std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend
-                       : std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend + kCallHierarchyLegendCalleesOnly;
+                         + "next= is the one pasteable follow-up (the uses verb on this selector: the call sites). "
+                       : std::string( kCallHierarchyLegendOpen ) + kTestedRowLegend + kTestedLensBlindSpotLegend + kCallHierarchyLegendCalleesOnly
+                         + "next= is the one pasteable follow-up (expand on this selector: the body). ";
 }
 
 // ── LB-G (r10 GitNexus round) — the DISPLAY-CAP clause the neighbour verbs share ─────────────────────────

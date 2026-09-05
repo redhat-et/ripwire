@@ -7,7 +7,7 @@
 #
 # THE CONTRACT:
 #   - sibs="a,b,c" sibs_total="N" [sibs_capped="1"]  — every OTHER def in the file (self excluded), capped
-#     at kMaxExpandSibs=40, sibs_total is the TRUE count (never affected by the cap).
+#     at kMaxExpandSibs=8 (was 40 until P16, 2026-09-05), sibs_total is the TRUE count (never affected by the cap).
 #   - inc="x.h,y.h" inc_total="N" [inc_capped="1"]    — the file's own #include/import targets, capped at
 #     kMaxExpandIncludes=24, inc_total the TRUE count.
 #   - BOTH absent when the count is 0 — a documented zero (model.h's skippedOversize convention: absence
@@ -74,7 +74,7 @@ else
     ok "(B) lonely.c: no inc= (zero includes, documented by absence)"
 fi
 
-# ── (C) manyfn.c: 44 siblings (cap 40) / 30 includes (cap 24) — BOTH capped, BOTH totals true ───────────
+# ── (C) manyfn.c: 44 siblings (cap 8) / 30 includes (cap 24) — BOTH capped, BOTH totals true ────────────
 "$BIN" "$FIX" --expand=manyFn000 --top-k=0 --no-cache >"$TMP/many.xml" 2>/dev/null
 MTAG="$( grep -oE '<b [^>]*>' "$TMP/many.xml" | head -1 )"
 printf '%s' "$MTAG" | grep -q 'sibs_total="44"' \
@@ -82,8 +82,11 @@ printf '%s' "$MTAG" | grep -q 'sibs_total="44"' \
 printf '%s' "$MTAG" | grep -q 'sibs_capped="1"' \
     && ok "(C) sibs_capped=\"1\" discloses the truncation" || no "(C) sibs_capped=\"1\" missing: $MTAG"
 SIBS_SHOWN="$( printf '%s' "$MTAG" | grep -oE 'sibs="[^"]*"' | tr ',' '\n' | grep -c . )"
-[ "$SIBS_SHOWN" = 40 ] && ok "(C) exactly 40 sibling names shown (kMaxExpandSibs)" \
-                       || no "(C) sibs= shows $SIBS_SHOWN names, want exactly 40"
+# RE-PINNED 2026-09-05 (capture-audit P16, lane L7): kMaxExpandSibs 40 -> 8. Lens 8 measured sibs= at 582 B of a
+# 3,067 B --expand answer (19%) and ~3.5 KB per --pack-task bundle; sibs_total= stays the TRUE count, sibs_capped=1
+# the disclosure, so the reader loses no fact — only 32 names they can page with --at/--tree.
+[ "$SIBS_SHOWN" = 8 ] && ok "(C) exactly 8 sibling names shown (kMaxExpandSibs)" \
+                      || no "(C) sibs= shows $SIBS_SHOWN names, want exactly 8"
 SIBS_VALUE="$( printf '%s' "$MTAG" | grep -oE 'sibs="[^"]*"' )"
 printf '%s' "$SIBS_VALUE" | grep -qE '(^|,)manyFn000(,|$)' \
     && no "(C) manyFn000 lists ITSELF as a sibling (self-exclusion broken): $SIBS_VALUE" \

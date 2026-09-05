@@ -3,6 +3,7 @@
 // ingest() comes from ingest.cpp (real, tree-sitter) or stub_ingest.cpp (test).
 
 #include "model.h"
+#include "nextverb.h"              // P3 (L7): next= on every enumerated root (the verbs_*.h fragments read it from here)
 #include "infra/stdinline.h"       // R4: readByteSafeLine — the ONE byte-safe stdin line reader (--from-trace=- / --batch=-)
 #include "ingest.h"
 #include "workspace.h"             // multi-root workspaces: root hygiene + labels + the id-offset merge
@@ -41,9 +42,14 @@
                                    //   is what lets the MCP edit_check verb mirror it from mcpverbs.h
 #include "slicediff.h"            // card A4: --slice=SYM:VAR --since=REV — the def-use slice as a DEPENDENCE diff
 #include "mcp.h"
+#include "compactlegend.h"         // P1 (L7): the --legend=compact dialect layer for every XML verb (runWithCompactLegend)
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
 #include "editplan.h"              // CLI-first versioned multi-edit transactions
 #include "wrap.h"
+
+// P8 (L7): the test-gate root's ccx_bar= (situ.h kTestGateCcxBarMirror) is quality.h's kCcxBar — one bar, two spellings,
+// pinned equal in the one TU that sees both (quality.h is also compiled standalone by the bench/probe targets).
+static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestGateCcxBarMirror must equal quality.h kCcxBar" );
 #include "infra/profileScope.h"    // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "arch.h"
 #include "search.h"
@@ -2524,6 +2530,105 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
 
 }   // namespace
 
+// ── P1 (capture-audit 2026-09-04, lane L7): the --legend=compact dialect on every XML verb ────────────────
+//
+// --for/--grep/--slice compact their own legend (each emitter branches on cfg.legend); every other XML verb
+// is compacted HERE, after the fact: the run's stdout is captured into an anonymous tmpfile, the finished
+// document is rewritten once by compactlegend.h (prose comments out, ONE ≤400 B legend + schema= in, every
+// payload byte untouched), and written to the real stdout. Exit codes pass through unchanged. A run that
+// produced no XML root (a refusal already happened, or a text verb slipped past validateLegendModifier's
+// list) is refused here naming the flag — never served as if the posture had applied.
+static int dispatchMain( const rw::Config& cfg, char** argv );
+
+// the key for a SHARED root (`r` = the map family, `ctx` = the bundle family), from the flags that shaped it
+static std::string_view compactLegendHint( const rw::Config& c ) noexcept
+{
+    if( c.mapDiff )                { return "map-diff"; }
+    if( c.metrics )                { return "metrics"; }
+    if( !c.around.empty() )        { return "around"; }
+    if( !c.query.empty() )         { return "query"; }
+    if( c.skippedList )            { return "skipped"; }
+    if( c.notesList )              { return "notes"; }
+    if( !c.legoType.empty() )      { return "lego"; }
+    if( !c.expand.empty() )        { return "expand"; }
+    if( c.packTaskFlag || !c.packTask.empty() ) { return "pack-task"; }
+    if( !c.fromTrace.empty() || !c.runTrace.empty() ) { return "from-trace"; }
+    if( !c.exemplar.empty() )      { return "exemplar"; }
+    if( c.packSignatures )         { return "pack-signatures"; }
+    if( c.packTopN > 0 )           { return "pack-top-n"; }
+    return {};
+}
+
+// --for's compact legend is its own (verbs_for.h): it splices est_tokens=/dropped_positive=/weak= and the
+// adaptive/relevance-floor counts INTO its comments (estchargecheck A10 pins the form), so the layer would strip
+// data there. It is the one verb the layer skips. --grep/--slice compact natively too, but their compact
+// legends are pure prose — the layer restates them at ≤400 B and keeps their schema id.
+static bool nativeCompactLegendVerb( const rw::Config& c ) noexcept
+{
+    return !c.forTask.empty();
+}
+
+static int runWithCompactLegend( const rw::Config& cfg, char** argv )
+{
+    if( cfg.legend != "compact" || nativeCompactLegendVerb( cfg ) )
+    {
+        return dispatchMain( cfg, argv );
+    }
+    std::fflush( stdout );
+    std::FILE* capture = std::tmpfile();
+    if( capture == nullptr )
+    {
+        DEGRADED_PATH_ALERT( "runWithCompactLegend: tmpfile() failed — the FULL legend is emitted where compact was asked for" );
+        std::fputs( "ripwire: --legend=compact: could not open a capture buffer — emitting the full legend instead\n", stderr );
+        return dispatchMain( cfg, argv );
+    }
+    const int savedStdout = dup( STDOUT_FILENO );
+    if( savedStdout < 0 || dup2( fileno( capture ), STDOUT_FILENO ) < 0 )
+    {
+        DEGRADED_PATH_ALERT( "runWithCompactLegend: dup/dup2 failed — the FULL legend is emitted where compact was asked for" );
+        std::fputs( "ripwire: --legend=compact: could not redirect stdout — emitting the full legend instead\n", stderr );
+        if( savedStdout >= 0 ) { close( savedStdout ); }
+        std::fclose( capture );
+        return dispatchMain( cfg, argv );
+    }
+    const int rc = dispatchMain( cfg, argv );
+    std::fflush( stdout );
+    dup2( savedStdout, STDOUT_FILENO );
+    close( savedStdout );
+
+    std::string doc;
+    std::rewind( capture );
+    char buf[ 65536 ];
+    for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), capture ) ) > 0; )
+    {
+        doc.append( buf, got );
+    }
+    std::fclose( capture );
+    if( doc.empty() )
+    {
+        return rc;   // a refusal (or an empty answer) — nothing to rewrite, the exit code says what happened
+    }
+    switch( rw::applyCompactDialect( doc, compactLegendHint( cfg ) ) )
+    {
+        case rw::CompactOutcome::Rewritten:
+        case rw::CompactOutcome::AlreadyCompact:
+            std::fwrite( doc.data(), 1, doc.size(), stdout );
+            std::fflush( stdout );
+            return rc;
+        case rw::CompactOutcome::NotXml:
+            std::fputs( "ripwire: --legend=compact applies to the XML verbs only — this run's output carries no XML legend to compact "
+                        "(text/JSON/markdown); rerun without --legend (e.g. ripwire <dir> --callers=SYM --legend=compact)\n", stderr );
+            return 1;
+        case rw::CompactOutcome::UnknownRoot:
+            break;
+    }
+    const rw::CompactRootInfo root = rw::findCompactRoot( doc );
+    std::fprintf( stderr, "ripwire: --legend=compact has no compact legend for this verb's root element <%.*s> yet — rerun without "
+                          "--legend (the full legend is the documented form; add the root to kCompactLegendSpecs to extend the dialect)\n",
+                  int( root.tag.size() ), root.tag.data() );
+    return 1;
+}
+
 int main( int argc, char** argv )
 {
     using namespace rw;
@@ -2538,6 +2643,14 @@ int main( int argc, char** argv )
     {
         return 1;
     }
+    return runWithCompactLegend( cfg, argv );
+}
+
+// Everything main() did after parseArgs — the verb dispatch — behind one seam so --legend=compact can wrap the
+// run's stdout once (runWithCompactLegend above) instead of teaching ~60 emitters a second dialect.
+static int dispatchMain( const rw::Config& cfg, char** argv )
+{
+    using namespace rw;
 
     // L2: --json refuses LOUDLY for any verb it doesn't (yet) support — see jsonUnsupportedVerb's ALLOW-list
     // rationale. Checked before ANY dispatch — including the CLI edit bridge below, which used to run AHEAD of

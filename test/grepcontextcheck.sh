@@ -73,7 +73,7 @@ e_top=$?
 # line 1 has no lines before it AND --grep-after wasn't requested ⇒ before=after=empty ⇒ the hit carries
 # its matched line and nothing else (same degrade-to-no-context shape as the no-flag path) — 0
 # before-lines, no <b> emitted, no OOB.
-grep -q '<hit l="1" in="widget"><m>' "$TMP/top" && ! grep -q '<b>' "$TMP/top" \
+grep -q '<hit l="1" in="widget"><!\[CDATA\[' "$TMP/top" && ! grep -q '<b>' "$TMP/top" \
     && ok "clamp at file start: 0 before-lines, no <b> emitted, no OOB" \
     || { no "clamp at file start failed"; cat "$TMP/top"; }
 
@@ -89,7 +89,7 @@ GEOM="$ROOT/test/fixture"
 # (no --grep-before) ⇒ before=after=empty ⇒ the hit carries only its <m> matched line — 0 after-lines, no OOB.
 # (other hits in this run legitimately DO carry <a> blocks — assert on THIS hit's own children only:
 #  it must close right after its <m>, with no <a> of its own.)
-perl -0777 -ne 'exit( /<hit l="13" in="perimeter"><m><!\[CDATA\[.*?\]\]><\/m><\/hit>/s ? 0 : 1 )' "$TMP/end" \
+perl -0777 -ne 'exit( /<hit l="13" in="perimeter"><!\[CDATA\[.*?\]\]><\/hit>/s ? 0 : 1 )' "$TMP/end" \
     && ok "clamp at file end: 0 after-lines on the last-line hit, no OOB" \
     || { no "clamp at file end failed"; cat "$TMP/end"; }
 
@@ -138,8 +138,8 @@ a_context="$(    grep -o '<a>.*</a>' "$TMP/mid" )"
 
 "$BIN" "$CORPUS" --no-cache --grep=NEEDLE_MID_ONCE >"$TMP/nocontext" 2>/dev/null
 
-grep -q '<hit l="16" in="widget"><m><!\[CDATA\[    int hitline = NEEDLE_MID_ONCE;\]\]></m></hit>' "$TMP/nocontext" \
-    && ok "--grep with no context flag emits exactly <hit ...><m>matched line</m></hit>" \
+grep -q '<hit l="16" in="widget"><!\[CDATA\[    int hitline = NEEDLE_MID_ONCE;\]\]></hit>' "$TMP/nocontext" \
+    && ok "--grep with no context flag emits exactly <hit ...>matched line</hit> (P12: no <m> wrapper)" \
     || { no "--grep with no context flag changed shape"; cat "$TMP/nocontext"; }
 
 ! grep -q '<b>\|<a>' "$TMP/nocontext" \

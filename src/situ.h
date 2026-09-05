@@ -8,6 +8,7 @@
 // Pure synthesis of transitiveCallers + isTestPath + cochangePartners — the daily-driver agent call. Text out.
 
 #include "model.h"
+#include "nextverb.h"     // P3 (L7): next= on the test-gate root, the situ next: line
 #include "graph.h"
 #include "filter.h"
 #include "gitmine.h"
@@ -419,6 +420,9 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
         const std::string_view rp = situPathRel( partners[i].first );
         std::fprintf( out, "        %.*s  (co-edited in %.0f%% of commits)\n", int( rp.size() ), rp.data(), partners[i].second * 100.0 );
     }
+    // P3 (L7): the one follow-up — the gate that turns [2] into an exit code (4 while tests or the untested blast
+    // radius are non-empty), on the same tree.
+    std::fprintf( out, "  next: --test-gate\n" );
 }
 
 // ---- structured situational awareness for a DIFF (S5-D) — the same analyses as writeSituation, returned as
@@ -793,6 +797,9 @@ inline constexpr const char* kTestGateLegend =
     "defs / calls whose in-repo defs were all language-filtered). "
     // §B12.5 — the cross-verb UNIT collision, disclosed on each verb that spells it. Each legend was
     // locally honest and the three numbers are not comparable, which is exactly how a reader gets it wrong.
+    // P3 (L7): next= defined where the reader meets it
+    "next= is the one pasteable follow-up: the first <t> row's run= (a shell line), else a ripwire invocation. "
+    "ccx_bar= is the cognitive-complexity bar a <u> row's ccx= is read against (quality-delta's own). "
     "UNIT: untested= here counts impacted SYMBOLS. The seams verb spells untested= over cross-directory "
     "call EDGES and the flip verb over the defs a gate lights — three different things, never compared or "
     "summed across verbs. ";
@@ -827,6 +834,31 @@ inline const std::string kTestGateRunLegend{ rw::kRunHintLegendClause };
 // and a single shown="25" claimed to describe all of them while measuring only the second listing. The two
 // counts are now separate names, and the paging half (pagingDisclosure) attaches to the <u> listing, which
 // is the only one --limit/--offset windows.
+//
+// P3 (L7, nextverb.h): the test-gate root's one follow-up — the FIRST runnable test's command (the row's run=),
+// else the first registered shell gate's, else (an untested blast radius and no runner) the callers of its
+// worst untested symbol, else --situ. A shell line is what the gate exits 4 for; the agent pastes it.
+// P8 (L7): the cognitive-complexity bar the <u> rows' ccx= is read against — a MIRROR of quality.h's kCcxBar
+// (quality.h is included after this header; the static_assert beside kCcxBar keeps the two in step).
+inline constexpr std::uint32_t kTestGateCcxBarMirror = 15;
+
+inline std::string testGateNextInvocation( const IngestResult& ing, const TestGateResult& r, const TestRunnerIndex& runners )
+{
+    for( const std::uint32_t f : r.tests )
+    {
+        if( const std::string& cmd = runners.commandFor( f ); !cmd.empty() ) { return cmd; }
+    }
+    for( const ShellGateObligation& gate : r.shellGates.obligations )
+    {
+        if( const std::string cmd = runners.commandForScript( gate.fileId ); !cmd.empty() ) { return cmd; }
+    }
+    if( !r.untested.empty() && r.untested[ 0 ] < ing.symbols.size() )
+    {
+        return nextFlag( "--callers=", ing.symbols[ r.untested[ 0 ] ].name );
+    }
+    return "--situ";
+}
+
 inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const Graph& g, const TestGateResult& r,
                                  const std::string& root = {}, int pageLimit = 0, int pageOffset = 0 )
 {
@@ -859,20 +891,21 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     std::fprintf( out, "<!-- %s%s%s-->%s", kTestGateLegend,
                   tgHasRows ? kTestGateRowLegend : "", tgHasRows ? kTestGateRunLegend.c_str() : "",
                   rw::rootRelPathsLegend( !tgRootAttr.empty() ) );
-    std::fprintf( out, "<test-gate changed=\"%u\" impacted=\"%zu\" tests=\"%zu\" untested=\"%zu\""
-                       " shown_tests=\"%zu\" tests_capped=\"0\" shown_untested=\"%zu\" untested_capped=\"%d\""
-                       " script_gates_unmodelled=\"%zu\" script_gates_registered=\"%zu\" script_gates_mapped=\"%zu\""
-                       " script_gates_unresolved_dynamic=\"%zu\"%s%s%s%s>",
-                  r.changedFiles, r.impactedSymbols, testRows, r.untested.size(),
-                  testRows, shownRows, shownRows < r.untested.size() ? 1 : 0,
-                  scriptGatesUnmodelledCount( ing ),
-                  r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic,
-                  graphCountFloorAttrXml( g ).c_str(),   // M15: gauge + counts_floor="1", the one splice every graph-floored root shares
-                  pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
-                  gitstamp::atAttr( root ).c_str(), tgRootAttr.c_str() );
     // §P11.4: this gate EXITS 4 on the obligation, so its rows carry the command that discharges it — where
     // one is derivable. Absent run= = not derivable (testmap.h states why a fallback would be a lie).
     const TestRunnerIndex gateRunners( ing );
+    std::fprintf( out, "<test-gate changed=\"%u\" impacted=\"%zu\" tests=\"%zu\" untested=\"%zu\""
+                       " shown_tests=\"%zu\" tests_capped=\"0\" shown_untested=\"%zu\" untested_capped=\"%d\""
+                       " script_gates_unmodelled=\"%zu\" script_gates_registered=\"%zu\" script_gates_mapped=\"%zu\""
+                       " script_gates_unresolved_dynamic=\"%zu\" ccx_bar=\"%u\"%s%s%s%s%s>",
+                  r.changedFiles, r.impactedSymbols, testRows, r.untested.size(),
+                  testRows, shownRows, shownRows < r.untested.size() ? 1 : 0,
+                  scriptGatesUnmodelledCount( ing ),
+                  r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic, kTestGateCcxBarMirror,   // P8 (L7): ccx_bar=
+                  graphCountFloorAttrXml( g ).c_str(),   // M15: gauge + counts_floor="1", the one splice every graph-floored root shares
+                  pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
+                  gitstamp::atAttr( root ).c_str(), tgRootAttr.c_str(),
+                  nextAttrXml( testGateNextInvocation( ing, r, gateRunners ) ).c_str() );   // P3 (L7)
     for( std::uint32_t f : r.tests )
     {
         std::fprintf( out, "<t p=\"%s\"%s/>", ex( tgPathRel( f ) ).c_str(), runAttrDisclosed( gateRunners, f, ex ).c_str() );
@@ -927,17 +960,19 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     const std::size_t testRows = r.tests.size() + r.shellGates.obligations.size();
     // same rows-gate as the XML twin, so the two dialects disclose the SAME facts about the same run rather
     // than one carrying a root the other omits (test/mcpclidiffcheck.sh's parity question).
+    const TestRunnerIndex gateRunnersJ( ing );   // P3 (L7): the root's next= needs the runner index before the rows
     const bool         tgJHasRows  = ( testRows > 0 || !r.untested.empty() );
     const std::string  tgJRootJson = ( root.empty() || !tgJHasRows ) ? std::string() : ( ",\"root\":\"" + jsonStr( root ) + "\"" );
     std::fprintf( out, "{\"changed\":%u,\"impacted\":%zu,\"tests\":%zu,\"untested\":%zu"
                        ",\"shown_tests\":%zu,\"tests_capped\":false,\"shown_untested\":%zu,\"untested_capped\":%s"
                        ",\"script_gates_unmodelled\":%zu,\"script_gates_registered\":%zu,\"script_gates_mapped\":%zu"
-                       ",\"script_gates_unresolved_dynamic\":%zu%s%s,\"at\":%s%s,\"tests_to_run\":[",
+                       ",\"script_gates_unresolved_dynamic\":%zu,\"ccx_bar\":%u%s%s,\"at\":%s%s%s,\"tests_to_run\":[",
                  r.changedFiles, r.impactedSymbols, testRows, r.untested.size(),
                  testRows, shownRows, shownRows < r.untested.size() ? "true" : "false",
-                 scriptGatesUnmodelledCount( ing ), r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic,
+                 scriptGatesUnmodelledCount( ing ), r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic, kTestGateCcxBarMirror,
                  graphCountFloorAttrJson( g ).c_str(),   // M15: the JSON twin's gauge + "counts_floor":true
-                 pageJson, atJson.c_str(), tgJRootJson.c_str() );   // M12: root= rides only when the document has rows (same gate as the XML twin)
+                 pageJson, atJson.c_str(), tgJRootJson.c_str(),   // M12: root= rides only when the document has rows (same gate as the XML twin)
+                 nextFieldJson( testGateNextInvocation( ing, r, gateRunnersJ ) ).c_str() );   // P3 (L7): the XML twin's next=
     const TestRunnerIndex gateRunners( ing );                       // §P11.4, the JSON sibling of the XML run=
     const auto            jesc = []( std::string_view s ) { return jsonStr( s ); };
     for( std::size_t i = 0; i < r.tests.size(); ++i )

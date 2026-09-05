@@ -123,9 +123,11 @@ done
 # and root= — the 1-hop tested/untested counts, a partition of count= (0+1 == 1 here). Moved ONCE, deliberately.
 # RE-PINNED 2026-09-04 (capture-audit M15): the header gained graph_ambiguous=/graph_unresolved= before counts_floor=
 # (the whole graph's resolver gauge; its VALUES are the sandbox's, split around like root=). Moved ONCE, deliberately.
+# RE-PINNED 2026-09-05 (capture-audit P3, lane L7): the header gained next="--uses=beta" between counts_floor= and
+# format= — the one pasteable follow-up every callers root carries (nextverb.h; the SITES of the selector). Moved ONCE.
 short="$( "$BIN" "$SBX" --callers=beta --format=columnar --limit=1 --offset=0 2>/dev/null )"
 case "$short" in
-    *'<callers of="beta" defs="1" count="1" hop_tested="0" hop_untested="1" root="'*'" shown="1" capped="0" total="1" has_more="0" next_offset="1" offset="0" limit="1" graph_ambiguous="'*'" graph_unresolved="'*'" counts_floor="1" format="columnar">'*)
+    *'<callers of="beta" defs="1" count="1" hop_tested="0" hop_untested="1" root="'*'" shown="1" capped="0" total="1" has_more="0" next_offset="1" offset="0" limit="1" graph_ambiguous="'*'" graph_unresolved="'*'" counts_floor="1" next="--uses=beta" format="columnar">'*)
         ok "short-name columnar header byte-identical to the pre-fix shape (+ counts_floor, root and the hop_tested pair)" ;;
     *)  no "short-name columnar header CHANGED shape: $( printf '%s' "$short" | head -c 200 )" ;;
 esac

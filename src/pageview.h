@@ -175,6 +175,13 @@ inline constexpr int kCochangePartnerCap  = 30;
 // shown_importers=/importers_capped= and nothing else. Nothing is hidden by that: importers= on the root
 // is always the full count, and --uses=SYM lists the import SITES under its own, separate cap.
 inline constexpr int kImportReachRowCap   = 40;
+// P4 (capture-audit 2026-09-04, lane L7): default windows for the three verbs that had none. Lens 8 measured the
+// defaults on the ripwire tree: --tree 187,209 B (3,773 rows), --zoom 433,867 B (390 top modules x 6 levels),
+// --external-surface 67,862 B (1,422 rows led by sh builtins). Each is a first screen ≤ ~12 KB here, paged with the
+// house quintet + next=. Explicit --limit=N raises any of them (effectiveRowCap).
+inline constexpr int kTreeRowCap            = 80;    // files, by best symbol's rank: 80 rows ≈ 11.5 KB on this repo (100 = 14.3 KB)
+inline constexpr int kZoomTopModuleCap      = 40;    // top-level modules, size desc (their children ride along: levels_shown=2)
+inline constexpr int kExternalSurfaceRowCap = 100;   // names, by ref count (≈ 5.2 KB on this repo)
 
 // The values pageDisclosure() renders under EVERY PageSyntax (XML attrs and §A3a/§A4c JSON keys) — hoisted
 // so every format's rendering shares the ONE isCapped/hasMore/paging decision instead of re-deriving it
