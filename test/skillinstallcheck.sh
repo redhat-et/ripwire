@@ -63,7 +63,7 @@ HOME="$CODEX_FALLBACK_HOME" AGENTS_HOME="$AGENTS_ROOT" bash "$SK/install.sh" --c
 CODEX_HOOKS="$CODEX_FALLBACK_HOME/.codex/hooks.json"
 if [ -f "$CODEX_HOOKS" ]; then
     jq -e '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-codex-nudge")) |
-           .matcher == "^(Bash|Read|Glob|Grep|mcp__ripwire__.*)$"' "$CODEX_HOOKS" >/dev/null \
+           .matcher == "^(Bash|Read|Glob|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$"' "$CODEX_HOOKS" >/dev/null \
         && ok "--codex --hook installs the Codex-native PreToolUse adapter" \
         || no "--codex --hook wrote the wrong PreToolUse command or matcher"
     jq -e '(.hooks.SessionStart // [])[] | select(.hooks[]?.command | test("ripwire-codex-nudge.*--session-start")) |
