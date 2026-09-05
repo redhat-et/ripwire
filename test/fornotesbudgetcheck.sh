@@ -58,6 +58,33 @@
 # (est_tokens 815 > 800), which is the re-anchor earning its keep rather than an argument against it.
 # The corpus is a generated temp fixture, not the live tree, so the number does NOT move with repo growth.
 #
+# ── RE-ANCHORED 2026-09-04 (capture-audit wave-2 merge): the MIDDLE rung 1550 → 1600. ──
+# Three lanes each added to --for's <ctx> root, each fit the 1550 rung ALONE, and their sum does not. The gate
+# itself read est_tokens=1563 at 1550 on the merged tree (this fixture; --token-budget=1550 is at the compact
+# floor here: bundle="compact" bodies="0" reason="budget", nothing left for the ladder to trim). Attributed
+# binary by binary on one copy of this fixture (same corpus, same root path, so only the binary varies;
+# absolute numbers there are 23 higher than the gate's because the copy's root= path is longer):
+#   e3b52d3 (wave-1 head) 1531 → V1 alone 1547 (+16: N1's est_tokens="N" on the root plus its 41 B "prices this
+#   bundle" clause, exact-counted in the fixpoint) → L10b alone 1530 (−1: the route= leading " [" trim) → L2
+#   alone 1531 (0) → L6 alone 1571 (+40: H9's budget_tokens="N" on the root plus the "budget_tokens=/max_tokens=:
+#   the token ceiling this bundle was shaped against" clause, CHARGED — which is why L6 alone still fit: it
+#   spent the 43 tokens of headroom the wave-1 close left) → merged 1586 (+55 = 16 − 1 + 40, additive).
+# At 1600 the merged binary reads 1563 (37 tokens of headroom, the 33–43 band every earlier anchor left), FLAT
+# from 1550 through 1600; 950 (938 merged) and 3000 (2846 merged) did not move. **The history is NOT green at
+# every step this time, and the reason is a pre-existing defect, not the re-anchor**: the pre-merge binaries
+# (e3b52d3, V1, L10b, L2) are flat at 1507–1524 through 1550 and then JUMP at 1560 to 1632/1648 — one more row
+# fits the ladder's CHARGED arithmetic, and the exempt root width (at=, confidence=) then carries est_tokens
+# past the explicit ceiling with nothing on the root saying so (bundle="compact" bodies="0", no over_ceiling=).
+# That is the wave-1 close's found-not-fixed ("an exempt root attribute on a body-less bundle has nothing to
+# absorb it") measured on a rung, and the merged binary has the same edge one row later: 1563 through 1600,
+# 1687 at 1620 (over a 1620 ceiling by 67, unlabelled). So this rung has a HARD UPPER EDGE at ~1610 on the
+# merged binary — a future re-anchor UP will land in the overshoot band and read as a note-charging red when
+# it is the exemption; the fix that removes the edge is charging the exempt width in the explicit regime
+# (verbs_for.h confidenceExemptBytes), which is a ladder-behaviour change across every --for byte gate and
+# was not taken at merge time. Not taken either: trimming a lane's clause (the gate's own instruction below) —
+# L7's compaction lane is where --for's always-on header bytes get bought back, and this is the rung it
+# should re-anchor DOWN.
+#
 # ── RE-ANCHORED 2026-09-04 (capture-audit wave-1 close): the MIDDLE rung 1500 → 1550. ──
 # ONE identified change: lane L9's M10 at="<sha>[+dirty]" on --for's <ctx> root plus its at= clause in the
 # root= trailer comment (kForRootRelAtLegendShort), which rides the confidence-disclosure's sig-trim
@@ -151,7 +178,7 @@ jsonRows(){ "$BIN" "$CORPUS" --for="$TASK" --token-budget="$1" --json 2>/dev/nul
 
 # ── arm 1: est_tokens must fit the ceiling the user asked for, in BOTH dialects ────────────────────
 # (tight budget 950, re-anchored 2026-08-28 — see the CEILING MARGIN block above for the arithmetic)
-for tb in 950 1550 3000; do
+for tb in 950 1600 3000; do
   xe="$( xmlEst "$tb" )"; je="$( jsonEst "$tb" )"
   if [ -z "$xe" ] || [ -z "$je" ]; then no "budget=$tb: could not read est_tokens from one of the dialects (xml='$xe' json='$je')"; continue; fi
   if [ "$xe" -le "$tb" ]; then ok "budget=$tb: XML est_tokens=$xe fits the ceiling"
@@ -162,7 +189,7 @@ done
 
 # ── arm 2: the two dialects select COMPARABLE row counts (they need not be equal) ──────────────────
 # Before the fix the XML lens bought 2-2.4x the rows with the same budget, because notes were free.
-for tb in 950 1550 3000; do
+for tb in 950 1600 3000; do
   xr="$( xmlRows "$tb" )"; jr="$( jsonRows "$tb" )"
   if [ -z "$jr" ] || [ "$jr" -eq 0 ]; then no "budget=$tb: JSON selected no rows — the comparison has no denominator"; continue; fi
   if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge $(( jr * 7 / 10 )) ]; then

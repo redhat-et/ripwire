@@ -1433,16 +1433,19 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // competitor-win bucket; bench/headtohead). Pure string extraction + in-memory matching (no I/O),
     // inert (byte-identical) when the text names nothing indexed. RIPWIRE_NO_MENTION=1 (the shared
     // ablation env) disables it here too. Runs BEFORE the co-change prior, same as the CLI.
-    std::string mentionNote;
+    std::string   mentionNote;
+    std::uint32_t mentionAnchored = 0;   // §L10b (wave-2 merge): the CLI twin's lr.anchorLifts — mention_anchored= on the root
     if( !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
         MentionBoostInfo mentionInfo;
         if( applyMentionBoost( ing, task, lensRank, &mentionInfo ) )
         {
-            char nb[ 160 ];
-            std::snprintf( nb, sizeof( nb ), " [mention anchor: %u file%s + %u symbols named in the task, score lifted to within 5%% of the top score]",
+            char nb[ 220 ];
+            std::snprintf( nb, sizeof( nb ), " [mention anchor: %u file%s + %u symbols named in the task, score lifted to within 5%% of the top score; "
+                           "mention_anchored= on the root repeats this total]",
                            mentionInfo.fileCount, mentionInfo.fileCount == 1 ? "" : "s", mentionInfo.symbolCount );
-            mentionNote = nb;
+            mentionNote     = nb;
+            mentionAnchored = mentionInfo.fileCount + mentionInfo.symbolCount;   // §A4f: the same count the CLI candidates root emits
         }
     }
 
@@ -1472,17 +1475,19 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // that names one of the task's top-resolved symbols in a `backtick` (g.mentions, the same edges the
     // `mentions` MCP verb reads) is lifted into the bundle, strictly below that symbol's own score.
     // RIPWIRE_NO_DOC_MENTION=1 disables it here too (the shared ablation env, same as RIPWIRE_NO_MENTION).
-    std::string docMentionNote;
+    std::string   docMentionNote;
+    std::uint32_t docMentions = 0;   // §L10b (wave-2 merge): the CLI twin's lr.docMentionCount — doc_mentions= on the root
     if( !std::getenv( "RIPWIRE_NO_DOC_MENTION" ) )
     {
         DocMentionBoostInfo docMentionInfo;
         if( applyDocMentionBoost( ix.g, lensRank, &docMentionInfo ) )
         {
-            char nb[ 160 ];
-            std::snprintf( nb, sizeof( nb ), " [doc mentions: %u doc%s discussing %u top-ranked symbol%s surfaced]",
+            char nb[ 220 ];
+            std::snprintf( nb, sizeof( nb ), " [doc mentions: %u doc%s discussing %u top-ranked symbol%s surfaced; doc_mentions= on the root repeats the doc count]",
                            docMentionInfo.docCount, docMentionInfo.docCount == 1 ? "" : "s",
                            docMentionInfo.anchorCount, docMentionInfo.anchorCount == 1 ? "" : "s" );
             docMentionNote = nb;
+            docMentions    = docMentionInfo.docCount;
         }
     }
 
@@ -1548,13 +1553,26 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // cannot tell "no bodies exist for this task" from "this dialect never serves them".
     // §L10b: same trim as the CLI --for twin (verbs_for.h) — no leading " [", the value lands only in
     // route=; trailing "]" kept as the stop-anchor test helpers grep against.
+    const std::string mcpForAtAttrStr = gitstamp::atAttr( root );   // M10's at=, computed once: spliced onto the root AND exempted from the sigs charge below
     std::string rootOpenStr = ctxRootOpen( task, "routed: " + rc.reason + shapeDemotionNote( shape ) + "]", flRootArg );   // §B1.7: same root attrs as the CLI twin
     if( !rootOpenStr.empty() && rootOpenStr.back() == '>' )
     {
         // Attribute ORDER matches the CLI twin's: confidence/margin_pct, then at=, then this dialect's own
         // bundle=/budget_tokens= — the §P8 "one element name, one attribute order, both surfaces" rule.
         rootOpenStr.insert( rootOpenStr.size() - 1, mcpForConf.attrs );
-        rootOpenStr.insert( rootOpenStr.size() - 1, gitstamp::atAttr( root ) );
+        rootOpenStr.insert( rootOpenStr.size() - 1, mcpForAtAttrStr );
+        // §L10b (landed on this twin at the wave-2 merge, lane-L10b.md "found, not fixed" #1): the machine
+        // form of mentionNote/docMentionNote, EACH present only when its own note fired — the CLI twin's
+        // exact rule and attribute order (verbs_for.h mentionDocAttrsStr), so test/mcpattrparitycheck.sh
+        // sees the same root on both surfaces.
+        if( !mentionNote.empty() )
+        {
+            rootOpenStr.insert( rootOpenStr.size() - 1, " mention_anchored=\"" + std::to_string( mentionAnchored ) + "\"" );
+        }
+        if( !docMentionNote.empty() )
+        {
+            rootOpenStr.insert( rootOpenStr.size() - 1, " doc_mentions=\"" + std::to_string( docMentions ) + "\"" );
+        }
         rootOpenStr.insert( rootOpenStr.size() - 1, " bundle=\"sigs\"" );
         if( budgetTokens > 0 )   // M13/H9: the ceiling this bundle was shaped against, named where the CLI names it
         {
@@ -1566,7 +1584,11 @@ inline std::string forTaskText( const std::string& root, const std::string& task
         // under the same byte cap, with nothing on the screen saying why. Naming them is the contract:
         // absent-and-declared is an answer, absent-and-silent is a hole. Gate: test/mcpattrparitycheck.sh,
         // whose lens= arm ALSO fails if a name here is one this dialect does emit.
-        rootOpenStr.insert( rootOpenStr.size() - 1, " lens=\"churn,amp,tested\"" );
+        // est_tokens= joined the declaration at the wave-2 merge (V1's N1 put the CLI root's price on <ctx>):
+        // that number is the CLI's budget-ladder fixpoint over ITS bytes; this bundle is shaped by the
+        // server's payload byte cap and is never priced, so the attribute is declared absent, not served
+        // — the same posture MCP analyze takes for k= (lens="k,est_tokens").
+        rootOpenStr.insert( rootOpenStr.size() - 1, " lens=\"churn,amp,tested,est_tokens\"" );
     }
     std::string headerStr = rootOpenStr
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote + floorNote
@@ -1575,9 +1597,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
                           + std::string( mcpForConf.note )
                           // No "--" anywhere in this clause: it rides inside an XML comment, where a double
                           // hyphen is ill-formed (G4), so the CLI verb is named without its dashes.
-                          + "; lens=\"churn,amp,tested\": the three per-row quality columns the CLI for lens carries and this dialect"
-                            " does NOT (they need a git and a quality pass this server does not run per request); an absent column"
-                            " here means NOT MEASURED, never measured-and-zero"
+                          + "; lens=\"churn,amp,tested,est_tokens\": the three per-row quality columns the CLI for lens carries and this dialect"
+                            " does NOT (they need a git and a quality pass this server does not run per request), and the CLI root's"
+                            " est_tokens= (this bundle is capped by the server, not priced); an absent column here means NOT MEASURED,"
+                            " never measured-and-zero"
                           + std::string( rw::kForFileTailLegend )   // deep-tail: r= + <tail> definitions, the CLI twin's exact clause (sigs-charge-exempt below)
                           + " -->"
                           + rw::forRootRelPathsLegendShort( !flRootArg.empty() );   // W3-S item 5: closes the gap this comment used to record
@@ -1615,7 +1638,15 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     }
     // deep-tail: the tail legend's bytes are exempt from the sigs charge, exactly as the CLI twin exempts
     // them — charging a disclosure against the ranked head is what the D2/confidence precedents forbid.
-    const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size()
+    // CONFIDENCE + at= (wave-2 merge, capture-audit 2026-09-04): the CLI twin's exemption (verbs_for.h
+    // confidenceExemptBytes), applied here for the CLI's own reason — a disclosure's contract is DISCLOSURE
+    // ONLY, and charging its bytes against the ranked head drops a tail <d> row to pay for it. Measured at
+    // the merge: two lanes' root disclosures (mention_anchored=/doc_mentions= with their note wording, and
+    // the est_tokens= lens declaration) grew this header by 125 B on this repo's src, and the bundle lost one
+    // ranked row the CLI still served (test/mcpforparitycheck.sh (2), two of four conceptual tasks). The
+    // header bytes stay real downstream (the payload is what it is); only the sigs allowance stops paying.
+    const std::size_t mcpConfidenceExemptBytes = mcpForConf.attrs.size() + mcpForConf.note.size() + mcpForAtAttrStr.size();
+    const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpConfidenceExemptBytes
                                  + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = forBudgetBytes > fixedBytes ? forBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
 
