@@ -469,10 +469,15 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     h.append( p.boostNote );
     h.append( p.docMentionNote );
     h.append( p.floorNote );
-    h.append( p.confidenceNote );   // the compact dialect's reader meets the same two root facts
+    // P1 (L7): the compact dialect's reader meets the same two root facts (confidence=/margin_pct=) — in the
+    // SHORT form; the full sentence rides the default dialect only (forcompresscheck/mcpclidiffcheck pin it there).
+    if( !p.confidenceNote.empty() )
+    {
+        h += " [confidence=/margin_pct=: the ranked head's largest relative score drop; low = flat ranking, a starting point]";
+    }
     if( p.tailLegend )
     {
-        h.append( rw::kForFileTailLegend );   // deep-tail: r= + <tail> definitions ride the compact legend too
+        h += rw::kForFileTailLegendCompact;   // deep-tail: r= + <tail> definitions ride the compact legend too, short form
     }
     h.append( extraNotes );
     h += " -->";

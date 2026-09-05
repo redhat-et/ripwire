@@ -773,10 +773,16 @@ fi
 [ "$( run --slice=pipeline:out --legend=full )" = "$FV" ] && [ "$( rc --slice=pipeline --legend=compact )" = 0 ] \
     && ok "(30c) explicit --legend=full is byte-identical to the default; compact serves the bare inventory too" \
     || no "(30c) --legend=full must not change output, and compact must serve the inventory form"
-E30="$( err --callers=pipeline --legend=compact )"
-[ "$( rc --callers=pipeline --legend=compact )" != 0 ] && printf '%s' "$E30" | grep -q -- '--legend=compact.*--for.*--grep.*--regex.*--slice' \
-    && ok "(30c) an unsupported verb still refuses compact, and the refusal names --slice among the served verbs" \
-    || { no "(30c) the compact refusal must still fire for --callers and list --slice"; printf '%s\n' "$E30"; }
+# P1 (capture-audit 2026-09-04, lane L7): --legend=compact is honored by EVERY XML verb — --callers now answers
+# with schema="ripwire.callers/v1" — and the refusal contract belongs to the verbs with nothing to compact
+# (text/markdown/JSON answers, writers). Re-pinned to that contract: callers serves, --situ refuses naming --legend.
+[ "$( rc --callers=pipeline --legend=compact )" = 0 ] && ( cd "$WORK" && "$BIN" . --callers=pipeline --legend=compact --no-cache 2>/dev/null ) | grep -q '<callers [^>]*schema="ripwire.callers/v1"' \
+    && ok "(30c) --callers serves --legend=compact with schema=\"ripwire.callers/v1\" (P1: every XML verb)" \
+    || no "(30c) --callers must serve --legend=compact with the ripwire.callers/v1 schema id (P1)"
+E30="$( err --situ --legend=compact )"
+[ "$( rc --situ --legend=compact )" != 0 ] && printf '%s' "$E30" | grep -q -- '--legend=compact' \
+    && ok "(30c) a non-XML verb (--situ) still refuses compact, naming the flag" \
+    || { no "(30c) the compact refusal must still fire for the non-XML --situ"; printf '%s\n' "$E30"; }
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

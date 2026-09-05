@@ -54,7 +54,7 @@ struct Config
     bool             json            = false;              // --json (L2): the SAME content as the XML, machine-parseable, for the
                                                            // CORE verbs ONLY (default map, --for, --pack-task, --callers/--callees/
                                                            // --impact, --quality-delta, --test-gate). Keys mirror the XML attr names
-    std::string_view legend;                               // --legend=full|compact: opt-in schema prose posture for --for/--grep/--slice
+    std::string_view legend;                               // --legend=full|compact: opt-in compact legend dialect on every XML verb (P1, compactlegend.h)
                                                            // 1:1. Every other verb refuses loudly (stderr + exit 1) rather than
                                                            // silently emitting XML — see main.cpp's jsonUnsupportedVerb().
     int              detail          = 0;                  // --detail=N (RESEARCH lever 3): with --for, emit FULL bodies for the
@@ -2070,10 +2070,17 @@ inline void printUsage( std::FILE* out ) noexcept
         "    --format=candidates        (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
-        "    --legend=full|compact     output legend posture for --for, --grep/--regex and --slice (+--slice-flow) only. full is\n" "                               byte-identical to the default; compact keeps every data/completeness attribute, adds a\n"
-        "                               versioned schema id (ripwire.for/v1, ripwire.grep/v1, ripwire.slice/v1), and shortens\n"
-        "                               repeated explanatory prose — the slice rows are byte-identical to the full form, so the\n"
-        "                               many-small-calls seed loop pays the rules once, not per call. Unsupported verbs refuse.\n"
+        "    --legend=full|compact     output legend posture for EVERY XML verb. full is byte-identical to the default. compact\n"
+        "                               keeps every row byte and every data/completeness attribute (counts_floor= capped= shown=\n"
+        "                               total= has_more= next_offset= est_tokens= at= root= graph_ambiguous= …), adds a versioned\n"
+        "                               schema id on the root (schema=\"ripwire.<verb>/v1\") and replaces the explanatory prose\n"
+        "                               with ONE <=400 B legend naming those attributes — the meanings live here and in the full\n"
+        "                               legend. DATA comments stay (the map header, pack-task's body-omitted rows, +more). Per\n"
+        "                               call this drops 2.9-5.2 KB on the navigation verbs (--edit-check 5.2 KB -> <0.4 KB);\n"
+        "                               the MCP twin is the per-call argument legend:\"compact\" on every XML-answering verb.\n"
+        "                               Runs with nothing to compact refuse it, naming the verb: prose/markdown/JSON answers\n"
+        "                               (--situ --recall --report --mermaid --html --plan-lanes --sarif --eval*) and the writers\n"
+        "                               (edit verbs, --note-add, --quality-baseline/--quality-ack, --index-out, --export).\n"
         "    --json                     machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every\n"
         "                               ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES\n"
         "                               them in lens= on the root (--for --json: lens=\"compose,lego,routes,docs\" — their\n"
@@ -3388,10 +3395,34 @@ static inline void validateLegendModifier( Config& c ) noexcept
                       int( c.legend.size() ), c.legend.data() );
         c.ok = false;
     }
-    if( c.forTask.empty() && c.grep.empty() && c.sliceSpec.empty() )
+    // P1 (capture-audit 2026-09-04, L7): every XML verb honors --legend=compact (main.cpp's runWithCompactLegend
+    // + compactlegend.h; --for/--grep/--slice compact natively). The refusal now belongs to the runs with nothing to
+    // compact — text/markdown/JSON-native answers — and to the runs that WRITE or SERVE (a posture flag must never
+    // be the reason an edit, a note, a baseline or a server starts). test/compactlegendcheck.sh (U) sweeps the
+    // whole flag universe: XML at defaults ⇒ compact honored, anything else ⇒ this refusal.
+    const char* nonXml = nullptr;
+    if( c.situ || !c.situFiles.empty() )      { nonXml = "--situ (prose)"; }
+    else if( !c.recall.empty() )              { nonXml = "--recall (markdown bodies)"; }
+    else if( c.report )                       { nonXml = "--report (markdown)"; }
+    else if( c.mermaid )                      { nonXml = "--mermaid"; }
+    else if( c.html || !c.htmlFile.empty() )  { nonXml = "--html"; }
+    else if( c.planLanesFlag )                { nonXml = "--plan-lanes (JSON-native)"; }
+    else if( c.sarif )                        { nonXml = "--sarif (JSON)"; }
+    else if( c.eval || c.evalRetrieval || !c.evalMined.empty() || !c.evalSkills.empty() || !c.evalStray.empty() ) { nonXml = "--eval* (text tables)"; }
+    else if( c.exportCcJson || !c.exportFile.empty() ) { nonXml = "--export (writes a file)"; }
+    else if( !c.noteAdd.empty() )             { nonXml = "--note-add (writes .ripwire_notes)"; }
+    else if( c.qualityBaseline )              { nonXml = "--quality-baseline (writes the sidecar)"; }
+    else if( c.qualityAck || !c.qualityAckReason.empty() || !c.qualityAckOnly.empty() ) { nonXml = "--quality-ack (writes the ledger)"; }
+    else if( !c.indexOut.empty() )            { nonXml = "--index-out (writes an index)"; }
+    else if( !c.pinCensus.empty() )           { nonXml = "--pin-census (writes a census)"; }
+    else if( c.baseline || c.baselineUpdate ) { nonXml = "--arch --baseline (writes the baseline)"; }
+    else if( !c.replaceSymbolBody.empty() || !c.insertBeforeSymbol.empty() || !c.insertAfterSymbol.empty() || !c.editPlan.empty() ) { nonXml = "the edit verbs (JSON receipts)"; }
+    else if( c.mcp || !c.listen.empty() )     { nonXml = "--mcp/--listen (pass legend:\"compact\" per call instead)"; }
+    if( nonXml != nullptr )
     {
-        std::fprintf( stderr, "ripwire: --legend=%.*s is supported by --for, --grep, --regex and --slice only — pass one of those verbs\n",
-                      int( c.legend.size() ), c.legend.data() );
+        std::fprintf( stderr, "ripwire: --legend=%.*s applies to the XML verbs only — %s has no XML legend to compact; drop --legend "
+                              "(e.g. ripwire <dir> --callers=SYM --legend=compact)\n",
+                      int( c.legend.size() ), c.legend.data(), nonXml );
         c.ok = false;
     }
 }

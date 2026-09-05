@@ -93,7 +93,15 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # one precision: a ceiling moves UP only for a DECLARED argument the contract obliges to carry a description,
 # in the commit that lands it, with its bytes attributed here — never for prose. The new ceiling keeps the
 # same posture (177 B of headroom, one more argument entry); L7's compaction lane is where it goes back DOWN.
-CEILING = 39450
+#
+# RE-ANCHORED 2026-09-05 (lane L7, P1): 39,450 → 41,000, measured 40,841 (from 39,273). ONE declared optional
+# argument, `legend` (the opt-in compact posture, §5a decision 3), on each of the SIXTEEN verbs that answer XML:
+# analyze lego owners batch exemplar impact uses path_between connect explore from_trace edit_check whereis
+# stray_content flags doc_drift — +98 B apiece (the ~35 B schema envelope plus the 63 B description the contract
+# obliges), +1,568 B in all; nothing else moved. The same rule (a DECLARED argument, its bytes attributed, never
+# prose) and the same posture (159 B of headroom). What this buys back per session: every XML answer under
+# legend:"compact" drops 2.9–5.2 KB of repeated legend (compactlegendcheck (M): edit_check 5,561 → 582 B).
+CEILING = 41000
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )

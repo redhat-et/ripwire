@@ -15,6 +15,7 @@
 // Include direction is strictly one-way: mcpjson → mcpindex → {mcpverbs, mcpedit} → mcp. No cycles.
 
 #include "mcpverbs.h"      // the read/flagship verb builders runMcp dispatches to (pulls mcpindex.h → mcpjson.h)
+#include "compactlegend.h"   // P1 (L7): the legend:"compact" rewrite applied in textResult
 #include "mcpedit.h"       // the edit verbs + runEditVerb runMcp dispatches to
 
 #include "infra/stdinline.h"     // R4: readByteSafeLine — the byte-safe stdin line reader the request loop runs on
@@ -96,6 +97,18 @@ inline constexpr McpVerbInfo kMcpVerbTable[] = {
     { "insert_before_symbol",    "insert text immediately before a symbol's definition",                   McpVerbGroup::Edit },
     { "insert_after_symbol",     "insert text immediately after a symbol's definition",                    McpVerbGroup::Edit },
 };
+
+// P1 (L7): the compact-legend KEY for an MCP verb whose XML root is shared (`ctx`, `r`) — the twin of
+// main.cpp's compactLegendHint, keyed by verb name instead of by flag. Verbs with a unique root need none.
+inline std::string_view mcpCompactLegendHint( std::string_view verb ) noexcept
+{
+    if( verb == "analyze" )                            { return "map"; }
+    if( verb == "explore" || verb == "pack_task" )     { return "pack-task"; }
+    if( verb == "from_trace" )                         { return "from-trace"; }
+    if( verb == "lego" )                               { return "lego"; }
+    if( verb == "exemplar" )                           { return "exemplar"; }
+    return {};
+}
 
 inline constexpr std::size_t kMcpVerbCount = 31;   // +1 lane/tc-sliceat: the `slice` read verb
 static_assert( sizeof( kMcpVerbTable ) / sizeof( kMcpVerbTable[0] ) == kMcpVerbCount,
@@ -955,8 +968,19 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // means nothing alone; a cost means nothing without knowing a pass ran). `_fresh` is
                 // self-contained by construction, and it is placed after the stamp for the same sequencing
                 // reason — it reads the pass count that building the stamp may have moved.
+                // P1 (L7): the opt-in compact posture — one rewrite of the finished XML payload (compactlegend.h),
+                // the same layer the CLI applies; a JSON/text payload has no root and passes through untouched,
+                // a natively compact payload (slice) already carries schema= and is left alone.
+                std::string compacted;
+                const std::string* body = &text;
+                if( legendArg == "compact" )
+                {
+                    compacted = text;
+                    rw::applyCompactDialect( compacted, mcpCompactLegendHint( name ) );
+                    body = &compacted;
+                }
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
-                     + mcpdetail::jsonEscape( text ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
+                     + mcpdetail::jsonEscape( *body ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
                      + mcpAssumedRootField( assumedRootNote ) + "}}";
             };
@@ -1140,6 +1164,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             {
                 resp = errResultMsg( -32602, shapeRefusal );
                 pathsUsageError = true;   // reuse the skip-flag: no dispatch, no getIndex(), and for an edit verb no byte written
+            }
+            // P1 (L7): `legend` is a closed set on every verb that declares it — an unknown value is refused,
+            // never read as the default (decision 3's rule, lifted out of the slice arm to cover all of them).
+            if( !pathsUsageError && !legendArg.empty() && legendArg != "compact" && legendArg != "full" )
+            {
+                resp = errResultMsg( -32602, mcprefuse::badValueRefusal( "legend", legendArg ) );
+                pathsUsageError = true;
             }
 
             // D3 / §B6 M7: the per-verb "missing required field" message. It used to be a hand-written
@@ -1631,17 +1662,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // the @FILE:LINE seed, flow/depth pairing, every refusal), mirroring the CLI runSlice.
                 else if( name == "slice" && !path.empty() && !symbol.empty() )
                 {
-                    if( !legendArg.empty() && legendArg != "compact" && legendArg != "full" )
-                    {
-                        resp = errResultMsg( -32602, mcprefuse::badValueRefusal( "legend", legendArg ) );
-                    }
-                    else
-                    {
+                    // the legend VALUE was judged pre-dispatch with every other verb's (P1); slice compacts natively
                     const SliceReply r = sliceText( path, symbol, var, flow,
                                                     sliceDepthArg.isPresent ? int( sliceDepthArg.value ) : 0, redactPtr,
                                                     legendArg == "compact" );
                     resp = r.payload.empty() ? errResultMsg( -32602, r.refusal ) : textResult( r.payload );
-                    }
                 }
                 // EDIT verbs — `file` (optional) is the disambiguating file-path substring for a same-named
                 // symbol; the PAYLOAD is non-empty by the §H2 write-verb gate above (see isMcpEditVerb).
