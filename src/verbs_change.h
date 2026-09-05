@@ -319,7 +319,38 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                         break;
                     }
                 }
-                if( !any ) { std::fprintf( stdout, "  (no changed files in this root)\n" ); continue; }
+                if( !any )
+                {
+                    if( cfg.situFiles.empty() )
+                    {
+                        // the git-diff form: an empty diff under this root is a MEASUREMENT — say so as before
+                        std::fprintf( stdout, "  (no changed files in this root)\n" );
+                        continue;
+                    }
+                    // N3 (capture-audit verify-wave1 2026-09-04): with an explicit FILE list the refusal ran over the
+                    // UNION of roots (H6) while the answer prints per root, so a root the selector names nothing in
+                    // printed the empty-diff sentence — the false zero H6 was opened to kill, one level down. One
+                    // refusal-or-answer per SELECTOR: the selector resolved (or the union refusal above fired), so
+                    // this root gets a selector fact — which root(s) the matches live under — never "no changed files".
+                    std::string elsewhere;
+                    for( std::uint32_t o = 0; o < ws.size(); ++o )
+                    {
+                        if( o == r ) { continue; }
+                        for( char c : perRootChanged[o] )
+                        {
+                            if( c )
+                            {
+                                if( !elsewhere.empty() ) { elsewhere += ", "; }
+                                elsewhere += ws[o].label;
+                                break;
+                            }
+                        }
+                    }
+                    std::fprintf( stdout, "  (--situ=%.*s names no indexed file under this root — its matches live under root(s) %s; "
+                                          "a selector fact, not an empty diff)\n",
+                                  int( cfg.situFiles.size() ), cfg.situFiles.data(), elsewhere.c_str() );
+                    continue;
+                }
                 rw::writeSituation( stdout, ws[r].arg, ing, g, perRootChanged[r], r );
             }
             return 0;
