@@ -59,8 +59,13 @@ the table below is what you reach for *instead*.
   name the complete definition with `ripwire ROOT --replace-symbol-body=SYM --edit-payload=FILE|-` (or
   `--insert-before-symbol` / `--insert-after-symbol`). It uses ripwire's ambiguity, freshness, symlink,
   mode-preservation and atomic-rename checks, so no preparatory whole-file Read is needed. Add
-  `--edit-target-file=PATH` only to disambiguate. If an MCP session is already warm, its same-named edit
-  verbs use the same engine; see ripwire-mcp. For several edits, put 1–64 operations in one JSON manifest
+  `--edit-target-file=PATH` only to disambiguate. **The receipt closes the loop by itself**: it carries the
+  applied `lines={start,end}` (not just a byte span), an `edit_check` — status, callers, incompatible, and
+  each broken caller's call LINES — and `tests_to_run` with the run recipe, i.e. exactly what a separate
+  `--edit-check` and `--affected` would have told you. Read those instead of making two more calls; pass
+  `--no-post-check` (MCP `post_check:false`) only when you are about to edit again immediately and will
+  verify at the end. If an MCP session is already warm, its same-named edit verbs use the same engine; see
+  ripwire-mcp. For several edits, put 1–64 operations in one JSON manifest
   and preflight the whole transaction with `--edit-plan=FILE --dry-run`; use the same plan with `--apply`
   only after the receipt is right. Every target and payload is checked before the first per-file atomic
   write, same-file spans may not overlap, and the receipt explicitly discloses that a crash between files

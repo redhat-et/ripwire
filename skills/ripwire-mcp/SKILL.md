@@ -180,6 +180,12 @@ a symbol's definition in the parsed index and splices text at its byte span: `re
 swaps signature-through-closing-brace verbatim, `insert_before_symbol`/`insert_after_symbol` splice text at
 the def's first/final byte (auto-adding the separating newline so you don't have to guess).
 
+**The receipt already answers "what now?"** — it carries `lines={start,end}` for the applied text,
+`edit_check` (status / callers / incompatible / each broken caller's call lines) and `tests_to_run` with the
+run recipe: the same answers a separate `edit_check` verb and `--affected` would give, computed on the index
+the edit just refreshed. Do not spend two more calls on them. `post_check:false` (CLI `--no-post-check`)
+opts out — reach for it only when the next thing you do is another edit to the same tree.
+
 Read **[`mcp-reference.md`](mcp-reference.md)** before calling one of these 3 (full args table + the exact
 newline rule + the safety contract for not-found / ambiguous / stale-index / insane-span failures + the
 atomic-write guarantee) or when you need server internals (`--mcp` implies `--stable`, `_index` staleness
