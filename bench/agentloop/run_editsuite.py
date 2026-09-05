@@ -457,6 +457,65 @@ def print_summary( records ):
             w.get( "native_edit_after", 0 ), w.get( "terminal_band" ), ",".join( c["class"] for c in w.get( "post_edit_calls", [] ) ) ) )
     return summ
 
+# ── E3 cost arithmetic: Read+Edit+Read vs preview+apply, per task ─────────────────────────────────────
+def cost_arithmetic( ripwire_bin, work_dir ):
+    """Bytes an agent moves through its context per task, two ways, on a fresh fixture copy each:
+       native   = Read(target) + Edit(payload) + Read(target again)      — the pattern the baseline measured
+       ripwire  = preview bytes (--edit-check --edit-payload --dry-run, replace tasks only: the preview is a
+                  body-replacement preview) + apply receipt bytes (the receipt carries the post-edit region)
+    Insert and plan tasks have no preview: their ripwire column is the apply receipt alone (or the plan
+    receipt), which already holds the region an agent would otherwise Read. Returned as rows; printed as a
+    table by main(). Bytes, not tokens — the honest unit (docs/EVALS.md keeps raw bytes)."""
+    rows = []
+    for task in load_tasks():
+        repo = checkout_fixture( work_dir, task["id"], "cost", 0, "-cost" )
+        ops = task_ops( task )
+        native = 0
+        for op in ops:
+            size = ( repo / op["file"] ).stat().st_size
+            native += 2 * size + len( op["new_text"].encode() )
+        preview_b = preview_c = apply_b = 0
+        scratch = pathlib.Path( work_dir ) / "cost-payloads" / task["id"]; scratch.mkdir( parents=True, exist_ok=True )
+        if task["kind"] == "plan":
+            plan = { "version": 1, "edits": [] }
+            for i, op in enumerate( ops ):
+                ( scratch / ( "%d.txt" % ( i + 1 ) ) ).write_text( op["new_text"] )
+                plan["edits"].append( { "op": { "replace": "replace_symbol_body", "insert_before": "insert_before_symbol", "insert_after": "insert_after_symbol" }[ op["op"] ],
+                                        "target": op["symbol"], "file": op["file"], "payload": "%d.txt" % ( i + 1 ) } )
+            ( scratch / "plan.json" ).write_text( json.dumps( plan ) )
+            r = subprocess.run( [ ripwire_bin, ".", "--edit-plan=%s" % ( scratch / "plan.json" ), "--apply" ], cwd=repo, capture_output=True, text=True )
+            apply_b = len( r.stdout.encode() )
+        else:
+            op = ops[0]; pay = scratch / "payload.txt"; pay.write_text( op["new_text"] )
+            if task["kind"] == "replace":
+                r = subprocess.run( [ ripwire_bin, ".", "--edit-check=%s:%s" % ( op["file"], op["symbol"] ), "--edit-payload=%s" % pay, "--dry-run" ],
+                                    cwd=repo, capture_output=True, text=True )
+                preview_b = len( r.stdout.encode() )
+                # the same preview under the compact legend — the dialect an agent's loop should run in (lane L7)
+                rc = subprocess.run( [ ripwire_bin, ".", "--edit-check=%s:%s" % ( op["file"], op["symbol"] ), "--edit-payload=%s" % pay, "--dry-run", "--legend=compact" ],
+                                     cwd=repo, capture_output=True, text=True )
+                preview_c = len( rc.stdout.encode() )
+            flag = { "replace": "--replace-symbol-body", "insert_before": "--insert-before-symbol", "insert_after": "--insert-after-symbol" }[ task["kind"] ]
+            r = subprocess.run( [ ripwire_bin, ".", "%s=%s" % ( flag, op["symbol"] ), "--edit-target-file=%s" % op["file"], "--edit-payload=%s" % pay ],
+                                cwd=repo, capture_output=True, text=True )
+            apply_b = len( r.stdout.encode() )
+        verdict, _ = oracle( task["id"], repo )
+        rows.append( { "task": task["id"], "kind": task["kind"], "native_bytes": native, "preview_bytes": preview_b,
+                       "preview_compact_bytes": preview_c, "apply_bytes": apply_b, "ripwire_bytes": preview_b + apply_b,
+                       "ripwire_compact_bytes": preview_c + apply_b, "oracle": verdict } )
+    return rows
+
+def print_cost_table( rows ):
+    print( "cost arithmetic (bytes through the agent's context): native = Read+Edit+Read of the target(s); ripwire = preview (+) apply receipt;"
+           " 'full'/'compact' = the preview's legend dialect (the JSON receipt has none)" )
+    print( "  %-4s %-13s %8s %8s %8s %8s %8s %7s %7s  %s" % ( "task", "kind", "native", "prev.full", "prev.cmp", "apply", "rw.full", "rw.cmp", "ratio.c", "oracle(ripwire bytes)" ) )
+    tn = tr = tc = 0
+    for r in rows:
+        tn += r["native_bytes"]; tr += r["ripwire_bytes"]; tc += r["ripwire_compact_bytes"]
+        print( "  %-4s %-13s %8d %8d %8d %8d %8d %7d %7.2f  %s" % ( r["task"], r["kind"], r["native_bytes"], r["preview_bytes"], r["preview_compact_bytes"], r["apply_bytes"],
+                                                                   r["ripwire_bytes"], r["ripwire_compact_bytes"], r["ripwire_compact_bytes"] / max( 1, r["native_bytes"] ), r["oracle"] ) )
+    print( "  %-4s %-13s %8d %8s %8s %8s %8d %7d %7.2f" % ( "ALL", "", tn, "", "", "", tr, tc, tc / max( 1, tn ) ) )
+
 # ── main ──────────────────────────────────────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser( description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter )
@@ -474,7 +533,13 @@ def main():
     ap.add_argument( "--live", action="store_true", help="actually invoke the runner (otherwise print the matrix)" )
     ap.add_argument( "--live-one", action="store_true", help="run exactly the first cell and print its record" )
     ap.add_argument( "--summarize", default="", help="print the summary table for an existing results file and exit" )
+    ap.add_argument( "--cost-arith", action="store_true", help="E3: per task, Read+Edit+Read bytes vs preview+apply bytes (no runner)" )
     a = ap.parse_args()
+
+    if a.cost_arith:
+        work_dir = pathlib.Path( a.work_dir ); work_dir.mkdir( parents=True, exist_ok=True )
+        print_cost_table( cost_arithmetic( str( pathlib.Path( a.ripwire_bin ).resolve() ), str( work_dir ) ) )
+        return 0
 
     if a.summarize:
         records = []

@@ -207,6 +207,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "amb",               "amb=K: K calls split over several defs", true },
     { "next",              "next=: the one pasteable follow-up", true },
     { "scrubbed",          "scrubbed=1: this CDATA is not the bytes (]]> split or C0 replaced)", true },
+    { "preview",           "preview=1: an UNWRITTEN payload; <overwrite l= end= bytes=> = the span an apply replaces, CDATA as on disk (shown=/capped=1/elided_lines= when cut)" },
     { "redacted",          "redacted=1: a credential shape rewritten to [REDACTED:kind]; the no-redact flag serves the bytes", true },
 };
 

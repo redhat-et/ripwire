@@ -277,6 +277,38 @@ inline IngestResult ingestOneFile( const std::string& tmpDir, const std::string&
     return ingest( tmpDir.c_str(), {}, {}, maxFileBytes, captureValueUses );
 }
 
+// E3: `<overwrite l= end= bytes=>CDATA</overwrite>` — src[a,b) as on disk, budgeted by WHOLE LINES: over
+// kPreviewOverwriteBudgetBytes the CDATA is the head, with shown= its size, capped="1" and elided_lines= the rest.
+// The CDATA goes through appendCdataSafe like every served body (a ]]> inside the span is split, never broken).
+inline constexpr std::size_t kPreviewOverwriteBudgetBytes = 4096;
+
+inline std::string overwriteChildXml( const std::string& src, std::size_t a, std::size_t b )
+{
+    const std::string_view      span  = std::string_view( src ).substr( a, b - a );
+    const mcpedit::LineRange    lines = mcpedit::lineRangeOf( src, a, b );
+    std::size_t                 shown = span.size();
+    std::uint32_t               elidedLines = 0;
+    if( span.size() > kPreviewOverwriteBudgetBytes )
+    {
+        shown = span.rfind( '\n', kPreviewOverwriteBudgetBytes );   // the last whole line under the budget
+        if( shown == std::string_view::npos ) { shown = kPreviewOverwriteBudgetBytes; }
+        for( std::size_t i = shown; i < span.size(); ++i )
+        {
+            if( span[i] == '\n' ) { ++elidedLines; }
+        }
+    }
+    std::string out = "<overwrite l=\"" + std::to_string( lines.start ) + "\" end=\"" + std::to_string( lines.end )
+                    + "\" bytes=\"" + std::to_string( span.size() ) + "\"";
+    if( shown < span.size() )
+    {
+        out += " shown=\"" + std::to_string( shown ) + "\" capped=\"1\" elided_lines=\"" + std::to_string( elidedLines ) + "\"";
+    }
+    out += "><![CDATA[";
+    appendCdataSafe( span.substr( 0, shown ), out );
+    out += "]]></overwrite>";
+    return out;
+}
+
 // THE entry point. `focus` is the definition the CLI's own resolver picked on the CURRENT tree (so the
 // span is the one an apply would splice); `selector` is the caller's spec verbatim, RE-RESOLVED on the
 // merged tree through the same resolver + the same §A6a ambiguity refusal, which is what makes the
@@ -387,6 +419,14 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     Outcome oc;
     oc.ok  = true;
     oc.xml = editCheckBundleText( merged, mg, root, maxFileBytes, excludes, groups[0].lowestNode, ni, true );
+    // E3 (terminality round A, 2026-09-05): the CURRENT span an apply would replace, as the bytes are on disk, so
+    // the Read an agent makes before an edit "to see what I am about to overwrite" is already in the preview.
+    // Appended as the last child of the preview's own root — the post-hoc document cannot carry it (after the
+    // apply that span no longer exists), and test/editpreviewcheck.sh's pre==post sweep strips it by name.
+    if( const std::size_t close = oc.xml.rfind( "</edit-check>" ); close != std::string::npos )
+    {
+        oc.xml.insert( close, overwriteChildXml( src, a, b ) );
+    }
     return oc;
 }
 
