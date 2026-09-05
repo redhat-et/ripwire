@@ -200,3 +200,57 @@ different and weaker claim, and the two must never be reported as if they were t
 
 *See `CONTRIBUTING.md` for how these rules land as concrete requirements on a change, and
 `docs/EVALS.md` for the instruments and the numbers.*
+
+---
+
+## 9. Terminality versus ceilings — the principles that resolve them
+
+Two goals pull at every default in this tool. The first is **terminality**: an agent asks one question and the
+answer carries everything it needs, so no grep-and-read follows. The second is the **ceiling**: no answer may blow
+the agent's context, so outputs are bounded. They look like a conflict — a complete answer wants to be long, a
+bounded answer wants to be short — and a round that optimises only one of them makes the tool worse. The 2026-09-04
+capture-audit round measured both sides (the meter's post-call sweep for terminality; bytes and legend share for
+the ceiling) and settled on six principles. They are stated here because they decide defaults, legends and cuts,
+which is where the two goals meet.
+
+1. **Terminality is the objective; the ceiling is a constraint.** Maximise the probability that the agent needs
+   no further native read after the call, subject to output ≤ budget. The substitution meter yields that
+   probability per verb (a call followed by a native read or grep within the next three tool calls is
+   non-terminal). A default changed without that number is a guess; the round's own budget proposal for the cold
+   map was one, and the data said the budget flag does not make an answer more terminal — it trims a ranking from
+   the tail and cannot know which row would have ended the search.
+
+2. **Cut at the content cliff, not at a byte count.** The ranker knows where relevance drops (`--adaptive`, the
+   compact route that ships edges instead of bodies). A ceiling is the backstop for when no cliff is found. The
+   ceiling bounds the tail, never the head: when a ceiling would cut something above the cliff, compress first,
+   move prose into attributes second, and if it still does not fit, exceed the ceiling with `over_ceiling="1"`
+   rather than drop the row that would have terminated the search.
+
+3. **Never cut silently; a disclosed cut is still terminal.** A small answer that states exactly what it left out
+   and hands over the one deterministic call that fetches it (`shown= total= capped="1" next="…"`) ends the
+   search. What breaks terminality is not a second call, it is a second call the agent has to guess at. Two known
+   calls beat one call followed by three greps.
+
+4. **Honesty lives in attributes, not prose.** `shown`, `total`, `capped`, `counts_floor`, `over_ceiling`, `next`
+   cost tens of bytes; a legend paragraph costs thousands. This is what lets a compact answer be complete about
+   its own incompleteness. The round's compact legend dialect cut the ten-verb edit loop's legend bill from
+   32,684 to 3,791 bytes with every completeness attribute kept — honesty and compactness stopped competing once
+   the honesty moved out of the sentences.
+
+5. **Compose on the server so the agent does not chain.** `--pack-task`, `--safe-delete`, `--handoff`, and the
+   edit receipt that carries its own contract check and tests-to-run turn the three calls an agent would make
+   into one, and because the composed verb shares one legend and one symbol table the output grows far less than
+   three answers would. When two verbs are always run back to back, that is a composition the tool owes, not a
+   habit the agent should keep.
+
+6. **Separate finding from measuring, and give each its own instrument.** Finding (ranking, retrieval) is judged
+   by recall at k on held-out tasks and by the terminality band; measuring (counts, floors, blast radius,
+   budgets) by re-derivation gates that recompute the number from another verb or from the source. Neither may
+   lie: a count that cannot be a total is a floor, a cut says how much it dropped, a ceiling attribute names the
+   ceiling actually applied. "Algorithmic" means exactly this — every number has an instrument, every cut has a
+   disclosure, and every default has an eval behind it, so the conflict between complete and bounded is decided
+   by a measurement rather than by argument.
+
+The practical order when an answer is bigger than its ceiling: rank; cut below the cliff and disclose the cut with
+`next=`; if the head alone exceeds the ceiling, compress the legend, then the rows, then exceed with
+`over_ceiling="1"`. Silence is the only option not on the list.

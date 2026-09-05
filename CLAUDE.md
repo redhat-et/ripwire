@@ -16,6 +16,7 @@ can call them mid-task.
 | What does the tool do? Which flag answers which question? | `README.md`, `docs/COMMANDS.md`, `./build/ripwire --help` |
 | How is it built internally? Pipeline, data model, determinism contract | `docs/ARCHITECTURE.md` |
 | How is any published number measured? | `docs/EVALS.md` |
+| Changing a DEFAULT, a legend, a ceiling or a cut? Read this first | `docs/METHODOLOGY.md` §9 — terminality is the objective, the ceiling is a constraint, honesty lives in attributes |
 | C++ style, guardrails, gate discipline, submission checklist | `CONTRIBUTING.md` |
 | Index of everything under `docs/` | `docs/README.md` |
 
