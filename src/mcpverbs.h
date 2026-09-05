@@ -1421,6 +1421,45 @@ inline std::string mentionsJson( const std::string& root, const std::string& sym
 // default (kForPayloadBudgetBytes) and the answer byte-identical; a value converts through the SAME
 // tokens-to-bytes rate the CLI --for uses, and is disclosed as budget_tokens= on the root exactly as the
 // CLI now discloses it (H9).
+// R1 (terminality round A, verify-wave1) — PRICE THE `for` BUNDLE, AND LABEL AN OVERSHOT CEILING.
+// F5 (see the lens= declaration inside forTaskText) moved this twin from "est_tokens DECLARED ABSENT" to
+// "est_tokens SERVED", and a served price makes the second half of the family rule bind: a caller who states
+// a ceiling gets the price and, when the price exceeds it, the attribute saying so — never a number it is
+// left to compare on its own. mcpforparitycheck arm (5) wrote that disjunction for exactly this landing and
+// was RED on 4b722433 at four of its five rungs (budget_tokens=900 → est_tokens=1997, 1097 over, no label).
+// The predicate is the CLI twin's (verbs_for.h F2: est_tokens > budget_tokens) and the JSON twin's, in this
+// dialect's own spelling; the legend sentence is the shared rw::kOverCeilingLegend, so no third wording.
+//
+// WHY IT DISCLOSES RATHER THAN TRIMS. This bundle is shaped by budgetBytesForTokens( budgetTokens ) — a
+// kMinBytesPerToken(2.36) allowance — and priced at kBytesPerTokenDefault(2.50), so a bundle that genuinely
+// fills its byte budget prices ~6% past the token ceiling. METHODOLOGY §9 #2: a ceiling bounds the tail,
+// never the head; dropping a ranked row to fund the label that describes the ranked rows is the inversion.
+// Charged AFTER the sigs budget for the same reason the pricing itself is (mcpConfidenceExemptBytes).
+// The legend clause rides ONLY on a labelled document, so a bundle inside its budget keeps every byte it
+// had, and the re-price after the insert is monotone — the clause widens a document that is already over
+// and can never bring it back under. A free function, not inline code: forTaskText is one of the largest
+// bodies in this file and this step is a whole contract of its own.
+inline void priceForTaskRoot( std::string& doc, std::size_t budgetTokens )
+{
+    if( doc.empty() )
+    {
+        return;
+    }
+    std::size_t estTokens = 0;
+    std::string rootAttrs = rw::pricedRootAttr( doc.size(), rw::kBytesPerTokenDefault, 0, &estTokens );
+    if( budgetTokens > 0 && estTokens > budgetTokens )
+    {
+        const std::size_t legendEnd = doc.find( " -->" );
+        if( legendEnd != std::string::npos )
+        {
+            doc.insert( legendEnd, rw::kOverCeilingLegend );
+            rootAttrs = rw::pricedRootAttr( doc.size(), rw::kBytesPerTokenDefault, 0, &estTokens );
+        }
+        rootAttrs += " over_ceiling=\"1\"";
+    }
+    rw::spliceRootAttrs( doc, rootAttrs );
+}
+
 inline std::string forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0 )
 {
@@ -1751,11 +1790,7 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // reason the CLI's could disagree with itself. Charged AFTER the sigs budget on purpose: a disclosure's
     // contract is disclosure only, and charging its ~18 bytes against the ranked head would drop a row to pay
     // for the attribute that describes the head — the same exemption mcpConfidenceExemptBytes already makes.
-    if( !out.empty() )
-    {
-        std::size_t mcpForEstTokens = 0;
-        rw::spliceRootAttrs( out, rw::pricedRootAttr( out.size(), rw::kBytesPerTokenDefault, 0, &mcpForEstTokens ) );
-    }
+    priceForTaskRoot( out, budgetTokens );   // R1: est_tokens=, and over_ceiling="1" when it exceeds budgetTokens
     return out;
 }
 

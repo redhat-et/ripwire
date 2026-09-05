@@ -338,6 +338,56 @@ XML_ROUTES="$( "$BIN" "$ROOT/test/routeedgefix" --for="$RQ" --no-cache 2>/dev/nu
     && ok "§B1.4: routes_total ($ROUTES_TOTAL) matches the XML sibling's <route> row count exactly, and is > 0" \
     || no "§B1.4: routes_total ($ROUTES_TOTAL) != XML sibling's <route> count ($XML_ROUTES), or both zero"
 
+# ── R1 (terminality round A, verify-wave1): the BUDGET keys reach this dialect too ────────────────────────
+# This gate's whole premise is that the XML honesty ladder must reach every MACHINE mode. The ladder's
+# budget rung had reached only the XML one. `--for --token-budget=N --json` carried NO budget_tokens key at
+# all — a caller could not even perform the comparison itself — and labelled over_ceiling on a DIFFERENT
+# unit from its twin: bytes against ceilingAllowanceBytes (N x 2.36 x 1.15 = 2.714 N) while est_tokens
+# prices at bytes / 2.50, so every document in 2.50 N < bytes <= 2.714 N printed est_tokens > N with nothing
+# on the root. RED, MEASURED on 4b722433, this repo's own src/: at --token-budget=880 the JSON root reads
+# "est_tokens":886 — 6 over the stated ceiling, no over_ceiling — and at EVERY rung that root carries no
+# budget_tokens key at all, beside an XML root reading budget_tokens="880" est_tokens=… over_ceiling="1".
+# 880 is carried as a rung BECAUSE it is where this corpus sits inside the silent band today; the durable,
+# corpus-independent statement of the same rule is fornotesbudgetcheck arm 6's 700..2000 sweep over a
+# GENERATED fixture. Should src/ grow past this rung the clause here goes vacuous (never falsely red) and
+# that sweep is what still holds the line. Three clauses, per rung:
+#   • budget_tokens is on the JSON root whenever it is on the XML root, and names the SAME N;
+#   • est_tokens is served in both (the price a budget shapes against is never withheld);
+#   • est_tokens > N implies over_ceiling in that dialect's own spelling — ONE unit, both dialects.
+# The XML side is asserted here too rather than assumed: this is a PARITY arm, and a parity that only ever
+# reads one side cannot tell a fixed dialect from a regressed reference.
+echo
+echo "=== R1 --for --token-budget: the budget keys are the same in both dialects ==="
+for BTB in 880 900 1500; do
+    BX="$( "$BIN" "$ROOT/src" --for="parse arguments" --token-budget="$BTB" --no-cache 2>/dev/null )"
+    BJ="$( "$BIN" "$ROOT/src" --for="parse arguments" --token-budget="$BTB" --json --no-cache 2>/dev/null \
+           | jsonok "--for --json --token-budget=$BTB" )"
+    XE="$( printf '%s' "$BX" | grep -o 'est_tokens="[0-9]*"' | head -1 | tr -dc '0-9' )"
+    JE="$( printf '%s' "$BJ" | jget est_tokens )"
+    case "$BX" in *"budget_tokens=\"$BTB\""*) XB=1 ;; *) XB=0 ;; esac
+    case "$BJ" in *"\"budget_tokens\":$BTB"*)  JB=1 ;; *) JB=0 ;; esac
+    case "$BX" in *'over_ceiling="1"'*)        XL=1 ;; *) XL=0 ;; esac
+    case "$BJ" in *'"over_ceiling":true'*)     JL=1 ;; *) JL=0 ;; esac
+    if [ "$XB" -eq 0 ]; then
+        no "R1: the XML root does not echo budget_tokens=\"$BTB\" — the reference this parity is measured against is gone"
+    elif [ "$JB" -eq 1 ]; then
+        ok "R1: budget_tokens=$BTB is on BOTH roots (the ceiling the bundle was shaped against is readable in either dialect)"
+    else
+        no "R1: budget_tokens=$BTB rides the XML root and is ABSENT from the JSON root — a machine caller cannot check the answer against the ceiling it stated"
+    fi
+    if [ -n "$XE" ] && [ -n "$JE" ]; then
+        ok "R1: budget=$BTB — the price is SERVED in both dialects (xml est_tokens=$XE, json est_tokens=$JE)"
+    else
+        no "R1: budget=$BTB — est_tokens missing (xml='$XE' json='$JE'); a budget that shapes a bundle must price it"
+    fi
+    { [ -n "$XE" ] && { [ "$XE" -le "$BTB" ] || [ "$XL" -eq 1 ]; }; } 2>/dev/null \
+        && ok "R1: budget=$BTB xml — est_tokens=$XE is inside the ceiling or labelled (over_ceiling=$XL)" \
+        || no "R1: budget=$BTB xml — est_tokens=$XE exceeds the stated ceiling with NO over_ceiling"
+    { [ -n "$JE" ] && { [ "$JE" -le "$BTB" ] || [ "$JL" -eq 1 ]; }; } 2>/dev/null \
+        && ok "R1: budget=$BTB json — est_tokens=$JE is inside the ceiling or labelled (over_ceiling=$JL)" \
+        || no "R1: budget=$BTB json — est_tokens=$JE exceeds the stated ceiling with NO over_ceiling — the XML twin's unit did not reach this dialect"
+done
+
 echo
 if [ -s "$PARSEFAIL" ]; then
     fail=1

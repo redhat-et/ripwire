@@ -691,6 +691,45 @@ inline std::string forLensNotesStanza( const rw::JsonSigNoteCounts& counts, bool
     return ",\"notes_total\":" + std::to_string( counts.total ) + ",\"notes_kept\":" + std::to_string( counts.kept );
 }
 
+// R1 (terminality round A, verify-wave1) — the CEILING THIS BUNDLE WAS SHAPED AGAINST, in the dialect whose
+// whole audience is machines. H9 put budget_tokens= on the XML root and this twin never got it, so a --json
+// caller could see a bundle that had plainly been re-shaped (`capped`, a shorter sigs array) and could not
+// read WHICH ceiling did it, nor check est_tokens against the number it had itself passed. Present exactly
+// when the XML twin's is (an explicit --token-budget), absent otherwise — an attribute on a run where the
+// flag was inert would be its own false disclosure — and CHARGED like every other byte here, for the reason
+// the XML twin's H9 comment gives at length: a budget disclosure that pushed the bundle past its own budget
+// would be the funniest possible way to fail this finding. A free function over emitForLensJson's locals,
+// the forLensNotesStanza / forLensJsonTailStanza precedent directly above and below.
+inline std::string forLensJsonBudgetStanza( std::size_t tokenBudget )
+{
+    if( tokenBudget == 0 )
+    {
+        return {};
+    }
+    return ",\"budget_tokens\":" + std::to_string( tokenBudget );
+}
+
+// R1 — the OVER-CEILING PREDICATE for the JSON dialect: ONE unit, and the same one the XML twin uses.
+// This side used to compare BYTES against ceilingAllowanceBytes (N x kMinBytesPerToken(2.36) x
+// kCeilingFirstEntryTolerance(1.15) = 2.714 N) while the number it prints, est_tokens, prices those same
+// bytes at kBytesPerTokenDefault (2.50). So a document in the band 2.50 N < bytes <= 2.714 N printed
+// est_tokens > budget_tokens and said nothing — an 8.6%-wide silent band that any bundle saturating the
+// ladder passes straight through (MEASURED on 4b722433: six rungs of fornotesbudgetcheck's own fixture).
+// The XML twin (verbs_for.h F2) labels on estTokens > cfg.tokenBudget, and the legend both dialects answer
+// to says "over_ceiling=1 says est_tokens exceeds budget_tokens": one sentence, so one predicate.
+// The byte clause is KEPT rather than replaced — it is the header-floor case emitForLensJson's W3FIX H2
+// note describes, where a user-length task echo cannot be trimmed under the ceiling at all. Bytes past the
+// allowance always price past the budget (2.714 / 2.50 = 1.086), so keeping it costs nothing, and dropping
+// it would quietly narrow what this key means.
+// A FREE FUNCTION rather than a lambda so the emitter's fixpoint reservation and its emitted key are
+// literally the same expression — the pre-2026-09-05 shape wrote those as two separate comparisons, which
+// is exactly how both halves of §C2's own bug got in.
+inline bool forLensJsonOverCeiling( std::size_t tokenBudget, std::size_t ceilingAllowance,
+                                    std::size_t bundleBytes, std::size_t estTokens )
+{
+    return tokenBudget > 0 && ( bundleBytes > ceilingAllowance || estTokens > tokenBudget );
+}
+
 // DEEP-TAIL d2, JSON dialect — the tail stanza and its explicit-regime fit, as a free function over
 // emitForLensJson's locals (the forSigSideCeiling/ForLensHeaderParts precedent: that emitter is already
 // carrying the whole envelope fixpoint). Default regime: the full row cap. Explicit regime: the hard
@@ -842,21 +881,30 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     const std::size_t envelopeTextBytes = cappedClauseBytes + 14u + 8u + 1u + kJsonBundleSigsKey.size();   // + ,"est_tokens": + ,"sigs": + } + ,"bundle":"sigs"
     const std::size_t ceilingAllowance  = in.tokenBudget > 0 ? ceilingAllowanceBytes( in.tokenBudget ) : 0;
 
+    const std::string budgetStanza      = forLensJsonBudgetStanza( in.tokenBudget );   // R1
+
     // DEEP-TAIL, explicit-regime fit (forLensJsonTailStanza above): residual-funded, sigs untouched.
     tailStanza = forLensJsonTailStanza( *in.fileTail, in.tokenBudget, ceilingAllowance,
                                         header.size() + sigsJson.size() + notesStanza.size()
-                                            + surfaceCountsStanza.size() + envelopeTextBytes );
+                                            + surfaceCountsStanza.size() + envelopeTextBytes
+                                            + budgetStanza.size() );
     const std::size_t bundleBytesBase   = header.size() + sigsJson.size() + notesStanza.size()
                                         + surfaceCountsStanza.size() + tailStanza.size() + envelopeTextBytes
-                                        + droppedPositiveStanza.size();   // A2: 0 bytes on the (overwhelming) no-drop path
+                                        + droppedPositiveStanza.size()   // A2: 0 bytes on the (overwhelming) no-drop path
+                                        + budgetStanza.size();           // R1: 0 bytes without an explicit --token-budget
 
     std::size_t estTokens   = 0;
     std::size_t bundleBytes = bundleBytesBase;
     for( int solvePass = 0; solvePass < 4; ++solvePass )
     {
         const std::size_t digits    = std::to_string( estTokens ).size() - ( estTokens == 0 ? 1 : 0 );
-        const bool        isOver    = in.tokenBudget > 0 && ( bundleBytesBase + digits ) > ceilingAllowance;
-        const std::size_t withKey   = bundleBytesBase + digits + ( isOver ? 20u : 0u );   // ,"over_ceiling":true
+        const std::size_t baseBytes = bundleBytesBase + digits;
+        // R1: the same predicate on the same pair the post-loop emission reads — when isOver is false,
+        // withKey == baseBytes and baseTokens == the settled estTokens, so the reservation and the key can
+        // never disagree; when it is true the 20 bytes only make the document more over, never less.
+        const std::size_t baseTokens = std::size_t( double( baseBytes ) / kBytesPerTokenDefault + 0.5 );
+        const bool        isOver    = forLensJsonOverCeiling( in.tokenBudget, ceilingAllowance, baseBytes, baseTokens );
+        const std::size_t withKey   = baseBytes + ( isOver ? 20u : 0u );   // ,"over_ceiling":true
         const std::size_t nextTokens = std::size_t( double( withKey ) / kBytesPerTokenDefault + 0.5 );
         bundleBytes = withKey;
         if( nextTokens == estTokens )
@@ -875,7 +923,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     // written and the bytes that were charged can never disagree (they used to be two separate comparisons,
     // one of which did not count the key it was deciding to emit).
     std::string overCeiling;
-    if( in.tokenBudget > 0 && bundleBytes > ceilingAllowance )
+    if( forLensJsonOverCeiling( in.tokenBudget, ceilingAllowance, bundleBytes, estTokens ) )
     {
         overCeiling = ",\"over_ceiling\":true";
     }
@@ -886,6 +934,7 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     std::fwrite( tailStanza.data(), 1, tailStanza.size(), out );
     std::fwrite( notesStanza.data(), 1, notesStanza.size(), out );
     std::fwrite( droppedPositiveStanza.data(), 1, droppedPositiveStanza.size(), out );   // A2
+    std::fwrite( budgetStanza.data(), 1, budgetStanza.size(), out );                     // R1: beside the label it is compared against
     std::fwrite( overCeiling.data(), 1, overCeiling.size(), out );
     std::fprintf( out, ",\"capped\":%s,\"est_tokens\":%zu,\"sigs\":", sigsCapped ? "true" : "false", estTokens );
     std::fwrite( sigsJson.data(), 1, sigsJson.size(), out );
@@ -1926,7 +1975,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // F2: spliced ONLY onto a document that actually carries over_ceiling="1" (the attribute is now
         // reachable from every rung, not just the ladder's last), so a bundle inside its budget keeps every
         // byte it had. Defines the attribute in the same unit the root prints both numbers in.
-        constexpr std::string_view kForOverCeilingLegend = " over_ceiling=1 says est_tokens exceeds budget_tokens";
+        // R1: the wording lives in serialize.h beside pricedRootAttr now — the MCP `for` twin needs the SAME
+        // sentence and could not reach a constant local to this function. Bound to a local name unchanged so
+        // the byte arithmetic in this block still reads against one identifier.
+        constexpr std::string_view kForOverCeilingLegend = rw::kOverCeilingLegend;
         const std::size_t     headerSpliceReserve   = kEstTokensAttrReserve + kForEstTokensLegend.size() + ( forWeak ? kWeakAttrBytes : 0u );
         bool                  forOverCeiling        = false;   // N1: set when the ladder's last rung fired (root over_ceiling="1")
 

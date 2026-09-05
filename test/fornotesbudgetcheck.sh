@@ -248,7 +248,26 @@ else no "a surviving note lost its tail — notes must be charged, never trimmed
 #
 # and it holds in all THREE emitting dialects (XML full legend, XML --legend=compact, --json), because a
 # budget promise that means one thing in one dialect and another in the next is the two-meanings-of-budget
-# defect this whole gate was written for.
+# defect this whole gate was written for. Stated together with it, per rung and per dialect: the stated
+# ceiling is ECHOED on the root (budget_tokens). A price a caller cannot compare against the ceiling it
+# named is the same silence one step earlier — it is what makes the disjunction above checkable at all.
+#
+# ── BAND RE-ANCHORED 2026-09-05 (terminality round A, lane V2, verify-wave1 finding R1): 900 → 700. ──
+# The band's LOWER edge sat above the only place the --json dialect's silent overshoot is observable on this
+# fixture, so the arm swept that third dialect and could not see it. Two units, not one:
+#   XML   labels on   est_tokens > budget_tokens                                  (verbs_for.h F2)
+#   JSON  labelled on bundle_bytes > ceilingAllowanceBytes = N x 2.36 x 1.15 = 2.714 N bytes
+# and est_tokens prices at bytes / 2.50, so every document in 2.50 N < bytes <= 2.714 N priced OVER the
+# stated ceiling and said nothing. That silent band is 8.6% wide and a document only enters it while it is
+# SATURATING the ladder; this fixture's JSON bundle saturates at est_tokens=765 (its ranked set is exhausted
+# at ~17 rows, which is why it reads 765 flat from 710 upward and never comes near a 900+ ceiling again).
+# MEASURED on 4b722433, this fixture, 660..920 step 10 x 3 dialects: SIX silent rungs, all --json, all in
+# 710..760 (est_tokens=765, 5..55 over, no over_ceiling), and ZERO in the old 900..2000 band. The band
+# therefore starts at 700 — one rung below the first observable one — and 131 rungs x 3 dialects = 393 runs
+# is the cost paid. Widening DOWN rather than adding a fourth dialect is deliberate: the missing coverage was
+# never a missing dialect, it was the assumption that one band's rungs exercise every dialect's saturation
+# point. A change that moves this fixture's JSON floor must re-derive the lower edge the same way — sweep,
+# then set it one rung below the first silent rung — never lift it back to a round number.
 #
 # RED, MEASURED. On the pre-fix binary (77004e5c, the commit before 02b4ff57 "over_ceiling= is a property of
 # the document, not of a rung") over_ceiling= was set from forOverCeiling ALONE — the ladder's LAST rung —
@@ -258,8 +277,8 @@ else no "a surviving note lost its tail — notes must be charged, never trimmed
 # --legend=compact. This arm is the regression lock on that rule, swept rather than sampled, because the
 # rung a single sample happens to sit on is exactly what made the defect survive four earlier re-anchors of
 # the middle rung above: 1550 and 1600 are both inside a FLAT stretch, and the edge is at ~1610.
-sweepFail=0; sweepOver=0; sweepFirstRed=""; sweepRungs=0
-tb=900
+sweepFail=0; sweepOver=0; sweepFirstRed=""; sweepRungs=0; sweepEchoFail=0; sweepEchoFirst=""
+tb=700
 while [ "$tb" -le 2000 ]; do
   sweepRungs=$(( sweepRungs + 1 ))
   for dialect in xml compact json; do
@@ -270,10 +289,16 @@ while [ "$tb" -le 2000 ]; do
     esac
     case "$dialect" in
       json) est="$( printf '%s' "$out" | grep -o '"est_tokens":[0-9]*' | head -1 | tr -dc '0-9' )"
-            case "$out" in *'"over_ceiling":true'*) lab=1 ;; *) lab=0 ;; esac ;;
+            case "$out" in *'"over_ceiling":true'*)     lab=1 ;; *) lab=0 ;; esac
+            case "$out" in *"\"budget_tokens\":$tb"*)   echoed=1 ;; *) echoed=0 ;; esac ;;
       *)    est="$( printf '%s' "$out" | grep -o 'est_tokens="[0-9]*"' | head -1 | tr -dc '0-9' )"
-            case "$out" in *'over_ceiling="1"'*)    lab=1 ;; *) lab=0 ;; esac ;;
+            case "$out" in *'over_ceiling="1"'*)        lab=1 ;; *) lab=0 ;; esac
+            case "$out" in *"budget_tokens=\"$tb\""*)   echoed=1 ;; *) echoed=0 ;; esac ;;
     esac
+    if [ "$echoed" -eq 0 ]; then
+      sweepEchoFail=$(( sweepEchoFail + 1 ))
+      [ -z "$sweepEchoFirst" ] && sweepEchoFirst="budget=$tb ($dialect)"
+    fi
     if [ -z "$est" ]; then
       no "sweep budget=$tb ($dialect): no est_tokens in the answer — the price a budget shapes against must always be served"
       sweepFail=$(( sweepFail + 1 ))
@@ -290,9 +315,14 @@ while [ "$tb" -le 2000 ]; do
   tb=$(( tb + 10 ))
 done
 if [ "$sweepFail" -eq 0 ]; then
-  ok "sweep 900..2000 step 10 x 3 dialects ($(( sweepRungs * 3 )) runs): every overshoot is LABELLED ($sweepOver of $(( sweepRungs * 3 )) rungs ran over the stated ceiling, every one carrying over_ceiling)"
+  ok "sweep 700..2000 step 10 x 3 dialects ($(( sweepRungs * 3 )) runs): every overshoot is LABELLED ($sweepOver of $(( sweepRungs * 3 )) rungs ran over the stated ceiling, every one carrying over_ceiling)"
 else
-  no "sweep 900..2000 step 10 x 3 dialects: $sweepFail SILENT overshoot(s) — first: $sweepFirstRed"
+  no "sweep 700..2000 step 10 x 3 dialects: $sweepFail SILENT overshoot(s) — first: $sweepFirstRed"
+fi
+if [ "$sweepEchoFail" -eq 0 ]; then
+  ok "sweep 700..2000 step 10 x 3 dialects: every rung ECHOES the ceiling it was shaped against (budget_tokens on the root)"
+else
+  no "sweep 700..2000 step 10 x 3 dialects: $sweepEchoFail run(s) never named the stated ceiling — first: $sweepEchoFirst"
 fi
 
 # ── arm 4: L3 inertness — a tree with no notes is unaffected by any of this ────────────────────────
