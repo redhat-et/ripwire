@@ -11,6 +11,7 @@ import concurrent.futures as cf
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -52,9 +53,12 @@ if only:
 # $TMPDIR first, same as the binary's own cacheDirLadder(), so this is the same convention the
 # rest of the repo already uses for scratch state. Keyed by the repo root's absolute path (hashed,
 # so worktrees/checkouts of the same repo at different paths don't collide or share a stale file).
+def _root_key():
+    return hashlib.sha1(root.encode("utf-8")).hexdigest()[:16]
+
+
 def _timings_path():
-    key = hashlib.sha1(root.encode("utf-8")).hexdigest()[:16]
-    return os.path.join(tempfile.gettempdir(), f"ripwire-pargates-timings-{key}.json")
+    return os.path.join(tempfile.gettempdir(), f"ripwire-pargates-timings-{_root_key()}.json")
 
 
 def _load_timings(path):
@@ -155,6 +159,72 @@ parallel_gates = [g for g in gates if g not in exclusive]
 exclusive_gates = [g for g in gates if g in exclusive]
 
 
+# --- a failing gate's output: kept whole, and summarised by the line that FAILED ------------------
+# (F1/F2, terminality round A 2026-09-05.) The summary used to print a failing gate's last 12 non-blank
+# lines out of a 2500-char tail, which is the wrong 12 lines for the way this repo's gates are written:
+# a gate prints `  FAIL  arm (X) ...` at the moment the arm fails and then keeps going through its
+# remaining arms, so the tail is a wall of PASS rows and a closing `SOME CHECKS FAILED`. That is
+# literally what three rounds of readers saw -- V1 ("eleven PASS lines then SOME FAILED"), V2 and the
+# capture-audit close all recorded the same loss, each time for `gitstampcheck`, and each time the arm
+# that failed stayed unknown. Printing FEWER trailing lines would not have helped; the fix is to select
+# the failure-carrying lines, not to move the window.
+#
+# Three changes, all in service of "a red names what failed":
+#   1. stdout and stderr are captured MERGED, in the order the gate wrote them (stderr=STDOUT), instead
+#      of concatenated after the fact -- a message written to stderr next to the FAIL row it explains
+#      no longer teleports to the end of the transcript.
+#   2. A failing gate's FULL output is written to FAIL_LOG_DIR/<gate>.log and the path is printed. The
+#      summary is a summary; nothing is destroyed by it any more.
+#   3. The summary prints, in this order: the failure-shaped lines with their line numbers, then the
+#      LAST 5 lines of the transcript. Failure shapes are the repo's own markers first, anchored and
+#      case-sensitive (`  FAIL  `, `FAILURES ABOVE`, `SOME CHECKS FAILED`, `TIMEOUT after`) exactly as
+#      regression.sh's absorb window does it, so a PASS row whose prose contains the word "fail" cannot
+#      hijack the selection; only if a gate produced none of those (it died before its own reporting)
+#      do the loose shapes -- `error:`, `fatal`, `Sanitizer`, a Python traceback, a missing binary --
+#      get a turn.
+FAIL_TAIL_LINES = 5
+FAIL_MARK_LINES = 10
+_MARKER_RE = re.compile(r"^\s*FAIL\b|^FAILURES ABOVE|SOME CHECKS FAILED|^\s*TIMEOUT after")
+_LOOSE_RE = re.compile(r"error:|fatal|Sanitizer|Traceback|command not found|no ripwire binary|required$")
+
+
+def _fail_log_dir():
+    return os.path.join(tempfile.gettempdir(), f"ripwire-pargates-fails-{_root_key()}")
+
+
+def failure_lines(out):
+    """The lines a reader needs: the markers this repo's gates print when an arm fails."""
+    lines = out.splitlines()
+    marked = [(i + 1, ln) for i, ln in enumerate(lines) if ln.strip() and _MARKER_RE.search(ln)]
+    if not marked:
+        marked = [(i + 1, ln) for i, ln in enumerate(lines) if ln.strip() and _LOOSE_RE.search(ln)]
+    return marked
+
+
+def failure_report(out, logpath):
+    """The block printed under FAILURES for one gate: what failed, then how it ended, then where the
+    whole thing is. Composed here so the run's result rows stay small -- only this summary is carried
+    back from the worker, never every gate's full transcript."""
+    lines = out.splitlines()
+    total = len(lines)
+    marked = failure_lines(out)
+    block = []
+    if marked:
+        block.append(f"what failed ({len(marked)} failure-shaped line(s)):")
+        for lineno, ln in marked[:FAIL_MARK_LINES]:
+            block.append(f"  L{lineno}: {ln}")
+        if len(marked) > FAIL_MARK_LINES:
+            block.append(f"  ... {len(marked) - FAIL_MARK_LINES} more — see the full log")
+    else:
+        block.append("what failed: no failure-shaped line in the transcript (the gate died before its own reporting)")
+    tail = [(i + 1, ln) for i, ln in enumerate(lines) if ln.strip()][-FAIL_TAIL_LINES:]
+    block.append(f"last {len(tail)} line(s) of {total}:")
+    for lineno, ln in tail:
+        block.append(f"  L{lineno}: {ln}")
+    block.append(f"full output: {logpath}")
+    return "\n".join(block)
+
+
 def run(g):
     env = dict(os.environ, RIPWIRE_BIN=binp)
     limit = GATE_BUDGET_SEC.get(g, DEFAULT_TIMEOUT_SEC)
@@ -162,18 +232,36 @@ def run(g):
     try:
         p = subprocess.run(
             ["bash", os.path.join(testdir, g)],
-            cwd=root, env=env, capture_output=True, timeout=limit,
+            cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=limit,
         )
-        rc, out = p.returncode, (p.stdout + p.stderr).decode("utf-8", "replace")
-    except subprocess.TimeoutExpired:
+        rc, out = p.returncode, p.stdout.decode("utf-8", "replace")
+    except subprocess.TimeoutExpired as e:
         # the budget itself is part of the message -- a red names its own declared budget instead of
-        # making the reader go look it up in GATE_BUDGET_SEC.
-        rc, out = 124, f"TIMEOUT after {limit}s (declared budget={limit}s)"
+        # making the reader go look it up in GATE_BUDGET_SEC. Whatever the gate managed to print before
+        # the budget expired is kept ahead of it: a gate killed at 300 s that had already announced a
+        # failing arm used to report ONLY the word TIMEOUT.
+        partial = (e.stdout or b"").decode("utf-8", "replace") if isinstance(e.stdout, (bytes, bytearray)) else (e.stdout or "")
+        rc, out = 124, partial + f"\nTIMEOUT after {limit}s (declared budget={limit}s)"
     # A gate that SKIPS is not a gate that PASSED. argvdiffcheck skips without a RIPWIRE_BASE
     # reference binary, and reporting that as a pass is exactly the green-while-inert failure this
     # suite exists to catch elsewhere (the CI/NDEBUG blindness is the same family).
     skipped = rc == 0 and "SKIP" in out[:400]
-    return g, rc, round(time.time() - t0, 1), out[-2500:], skipped
+    report = ""
+    if skipped:
+        report = out[:2000]                      # enough for the caller to quote the SKIP's own reason
+    elif rc != 0:
+        # best-effort: a full-output write that fails must never turn the report into a second failure.
+        logpath = "(not written)"
+        try:
+            d = _fail_log_dir()
+            os.makedirs(d, exist_ok=True)
+            logpath = os.path.join(d, g + ".log")
+            with open(logpath, "w") as fh:
+                fh.write(out)
+        except OSError:
+            logpath = "(not written)"
+        report = failure_report(out, logpath)
+    return g, rc, round(time.time() - t0, 1), report, skipped
 
 
 # --- shared-binary tripwire ---------------------------------------------------------------------
@@ -266,10 +354,9 @@ if tripwire:
         print(f"  {g}  {prev:.1f}s -> {dt:.1f}s")
 if fails:
     print("\nFAILURES:")
-    for g, rc, dt, out, _sk in fails:
+    for g, rc, dt, report, _sk in fails:
         print(f"\n=== {g} (rc={rc}, {dt}s) ===")
-        tail = [ln for ln in out.splitlines() if ln.strip()][-12:]
-        print("\n".join("    " + ln for ln in tail))
+        print("\n".join("    " + ln for ln in report.splitlines()))
 else:
     print("\nALL PASS")
 

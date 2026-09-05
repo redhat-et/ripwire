@@ -44,13 +44,27 @@ namespace rw
 //
 // A refusal is per-ITEM, not "the whole list resolved to nothing": before this, `--affected=src/x.cpp,typo`
 // silently dropped the typo and answered confidently for the half it understood (§P0's class exactly).
+// F3 (terminality round A 2026-09-05) — the TEST PARTITION of the seed set, and why it is not optional.
+// The path reading is a substring PATTERN, so one item can match several files: `geo.py` also matches
+// `test/check_geo.py`. Every matched file's symbols used to become seeds, and transitiveCallers returns
+// "reached, MINUS the seeds" — so the very tests that reach the change were subtracted out of their own
+// answer. `--affected=geo.py` reported seeds="6" tests="0" reached="0" on a corpus where `--affected=./geo.py`
+// reported reached="1" (lane-L8.md 2026-09-04, found-not-fixed #1): a confidently wrong ZERO in the verb
+// whose whole job is telling an agent which tests to run, with the reason it was wrong nowhere in the output.
+//
+// The two facts are DIFFERENT and are kept apart now. A test file cannot "reach" a change it is part of, so
+// it is no seed of the caller walk (walkSeeds); it is in the ANSWER because the argument MATCHED it — it
+// changed, so run it — and its row says so with seed_kind="test". The walk itself is unchanged: dropping a
+// symbol from the seed SET never hides it from the traversal, which still finds it as a caller.
 struct AffectedSeeds
 {
-    std::vector<NodeId> seeds;                  // deduped seed symbols, id asc
-    bool                sawFileItem   = false;  // at least one item read as a path pattern
-    bool                sawSymbolItem = false;  // at least one item read as a symbol
-    bool                ok            = true;   // false ⇒ badItem resolved under NEITHER reading
-    std::string         badItem;                // the offending item, for the caller's did-you-mean refusal
+    std::vector<NodeId>        seeds;                  // deduped seed symbols, id asc (both readings)
+    std::vector<NodeId>        walkSeeds;              // seeds OUTSIDE test paths — the caller walk's roots
+    std::vector<std::uint32_t> seedTestFiles;          // matched TEST files, file id asc, deduped
+    bool                       sawFileItem   = false;  // at least one item read as a path pattern
+    bool                       sawSymbolItem = false;  // at least one item read as a symbol
+    bool                       ok            = true;   // false ⇒ badItem resolved under NEITHER reading
+    std::string                badItem;                // the offending item, for the caller's did-you-mean refusal
 };
 
 // seeded_by= — which reading fired. A fact about the measurement (the two readings return different test
@@ -62,6 +76,27 @@ inline const char* affectedSeededBy( const AffectedSeeds& sel ) noexcept
         return "mixed";
     }
     return sel.sawSymbolItem ? "symbol" : "file";
+}
+
+// The partition itself, over the DEDUPED seed set and therefore over both readings: a bare symbol name that
+// resolves into a test file is the same fact as a path pattern that matched one — the symbol changed, its
+// test must be run, and nothing that test "reaches" answers the question asked.
+inline void partitionAffectedSeedsByTestPath( const IngestResult& ing, AffectedSeeds& sel )
+{
+    for( NodeId n : sel.seeds )
+    {
+        const std::uint32_t fileId = ing.symbols[n].fileId;
+        if( isTestPath( ing.files[fileId] ) )
+        {
+            sel.seedTestFiles.push_back( fileId );
+        }
+        else
+        {
+            sel.walkSeeds.push_back( n );
+        }
+    }
+    std::sort( sel.seedTestFiles.begin(), sel.seedTestFiles.end() );
+    sel.seedTestFiles.erase( std::unique( sel.seedTestFiles.begin(), sel.seedTestFiles.end() ), sel.seedTestFiles.end() );
 }
 
 inline AffectedSeeds resolveAffectedSeeds( const IngestResult& ing, std::string_view spec )
@@ -114,7 +149,45 @@ inline AffectedSeeds resolveAffectedSeeds( const IngestResult& ing, std::string_
     }
     std::sort( sel.seeds.begin(), sel.seeds.end() );
     sel.seeds.erase( std::unique( sel.seeds.begin(), sel.seeds.end() ), sel.seeds.end() );
+    partitionAffectedSeedsByTestPath( ing, sel );
     return sel;
+}
+
+// The ANSWER for one resolved argument, assembled from the two DIFFERENT facts that put a test file in it —
+// kept out of the emitter for the same reason the seeding is (more than one reader, and the reasoning above
+// belongs next to the walk it constrains, not next to the printf).
+//
+//   reached  — the caller walk over the NON-test seeds. transitiveCallers returns "reached, minus the seeds",
+//              so seeding it with a matched test file's own symbols subtracted the very tests that reach the
+//              change. Excluding them from the seed SET does not hide them from the traversal: they are still
+//              found as callers, which is why the answer is unchanged for every argument that matches no test.
+//   matched  — a matched TEST file is in the answer on its own evidence: the argument named it, so it changed,
+//              so run it. isSeedTestFile marks those rows, which the emitter labels seed_kind="test".
+struct AffectedAnswer
+{
+    std::vector<NodeId>        reach;           // symbols the caller walk found (the seeds are not in it)
+    std::vector<std::uint32_t> testFiles;       // the answer rows, path ascending
+    std::vector<char>          isSeedTestFile;  // per file: matched by the argument AND a test path
+};
+
+inline AffectedAnswer affectedAnswer( const IngestResult& ing, const Graph& g, const AffectedSeeds& sel )
+{
+    AffectedAnswer    out;
+    std::vector<char> seen( ing.files.size(), 0 );
+    out.isSeedTestFile.assign( ing.files.size(), 0 );
+    out.reach = transitiveCallers( g, sel.walkSeeds );
+    for( NodeId n : out.reach )
+    {
+        const std::uint32_t fileId = ing.symbols[n].fileId;
+        if( !seen[fileId] && isTestPath( ing.files[fileId] ) ) { seen[fileId] = 1;  out.testFiles.push_back( fileId ); }
+    }
+    for( std::uint32_t fileId : sel.seedTestFiles )
+    {
+        out.isSeedTestFile[fileId] = 1;
+        if( !seen[fileId] ) { seen[fileId] = 1;  out.testFiles.push_back( fileId ); }
+    }
+    std::sort( out.testFiles.begin(), out.testFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
+    return out;
 }
 
 // ── §P11.2b — the INVERSE: what does this test exercise? ─────────────────────────────────────────────

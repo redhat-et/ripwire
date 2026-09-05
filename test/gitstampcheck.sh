@@ -38,6 +38,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+. "$ROOT/test/lib/doctorvolatile.sh"                  # F6: the ONE --doctor strip list, read out of the document
 command -v git >/dev/null 2>&1 || { echo "gitstampcheck: git unavailable — skipping"; exit 0; }
 
 echo "gitstampcheck: BIN=$BIN"
@@ -333,25 +334,24 @@ for flags in "--doctor" "--doc-drift" "--hotspots" "--quality-delta" "--pr-conte
     b="$( "$BIN" "$R" $flags --no-cache 2>/dev/null )"
     cmp_a="$a"; cmp_b="$b"
     if [ "$flags" = "--doctor" ]; then
-        # --doctor's cache-dir check reports LIVE counters (blobs=/bytes=) of the shared per-user temp
-        # cache dir. That dir is machine-global, so any concurrent ripwire activity (another agent
-        # session, another worktree's test run) can grow those counters between these two back-to-back
-        # runs even though the binary itself is perfectly deterministic. This arm asserts output-SHAPE
-        # determinism of the binary, not that the whole machine held still — so normalize the volatile
-        # attributes out of BOTH sides before comparing; everything else still has to match byte-for-byte.
+        # RE-PINNED 2026-09-05 (F6) to the NEW contract. --doctor's cache-dir row now DECLARES which of its
+        # own attributes read live machine state (volatile="blobs,blobs_floor,bytes,many,truncated"), and the
+        # strip is driven by that declaration through test/lib/doctorvolatile.sh — the ONE place this gate and
+        # shapingflagcheck both read. This arm asserts output-SHAPE determinism of the BINARY, not that the
+        # whole machine held still: the cache dir is per-USER, so any concurrent ripwire run (another agent
+        # session, another worktree's suite) moves those counters between two back-to-back runs.
         #
-        # many= and truncated= are normalized for exactly the same reason and were the hole this arm
-        # flaked through under `pargates.py -j 6`: they are not independent facts, they are DERIVED from
-        # the very same live scan as blobs=/bytes=, so scrubbing the counters while still comparing the
-        # flags computed from them left the arm as machine-sensitive as before. Measured on a loaded
-        # machine (load average ~38, suite running at -j 6): 1 pair in ~3 flipped truncated="0" ->
-        # truncated="1" between two back-to-back runs, and the arm reported it as a determinism failure
-        # of the BINARY. Anchored on the cache-dir row so a truncated= belonging to any other <c> row is
-        # still compared verbatim; if that row's shape ever changes the substitution simply no-ops and
-        # the arm goes back to being strict, which is the safe direction for it to fail in.
-        scrubCacheDir(){ sed -E 's/(n="cache-dir"[^>]*)blobs="[0-9]+" bytes="[0-9]+" many="[01]" truncated="[01]"/\1blobs="N" bytes="N" many="N" truncated="N"/'; }
-        cmp_a="$( printf '%s' "$a" | scrubCacheDir )"
-        cmp_b="$( printf '%s' "$b" | scrubCacheDir )"
+        # What the private sed that used to live here got wrong, and why the list moved into the OUTPUT: it
+        # matched `blobs="N" bytes="N" many="N" truncated="N"` as one CONTIGUOUS pattern. When the scan cap
+        # fires the row reads `blobs="…" blobs_floor="1" bytes="…" …`, the pattern does not match, NOTHING is
+        # scrubbed, and this arm reports a determinism failure of the binary — the residual flake recorded
+        # three rounds running (lane-L7, merge-wave2 §4, the 2026-09-04 close). Reproduced on a QUIET machine
+        # in 6 consecutive runs: bytes= moved every time and blobs_floor=/truncated= flipped in 3 of 6. The
+        # helper strips per attribute, order-independently, and only what the document itself names — a row
+        # with no volatile= is still compared byte for byte, which is the safe direction to fail in.
+        printf '%s' "$a" >"$TMP/det_a.xml";  printf '%s' "$b" >"$TMP/det_b.xml"
+        cmp_a="$( stripDoctorVolatile "$TMP/det_a.xml" )"
+        cmp_b="$( stripDoctorVolatile "$TMP/det_b.xml" )"
     fi
     [ "$cmp_a" = "$cmp_b" ] && ok "determinism ($flags)" || no "determinism ($flags): two runs differed"
     printf '%s' "$a" | xmllint --noout - >/dev/null 2>&1 && ok "xmllint ($flags)" || no "xmllint ($flags) FAILED"

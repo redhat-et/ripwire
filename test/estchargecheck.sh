@@ -875,16 +875,16 @@ done
 #    IDENTITY only where the number is by construction the one --token-budget gates on. ──────────────────
 root_est(){ perl -0pe 's#<!--.*?-->##gs' "$1" | grep -oE "<$2( [^>]*)?>" | head -1 | grep -oE ' est_tokens="[0-9]+"' | head -1 | tr -dc '0-9'; }
 root_attr(){ perl -0pe 's#<!--.*?-->##gs' "$1" | grep -oE "<$2( [^>]*)?>" | head -1 | grep -oE " $3=\"[^\"]*\"" | head -1 | sed -E 's/.*="([^"]*)"/\1/'; }
-band15(){   # $1 label $2 file $3 root-element $4 hi*100
-    local label="$1" f="$2" el="$3" hi="$4" E B R
+band15(){   # $1 label $2 file $3 root-element $4 hi*100 [$5 arm tag, default #15]
+    local label="$1" f="$2" el="$3" hi="$4" tag="${5:-#15}" E B R
     E="$( root_est "$f" "$el" )"; B="$( bytes_of "$f" )"
     if [ -z "$E" ] || [ "$E" -eq 0 ] 2>/dev/null; then
-        no "#15 $label: <$el> root carries no est_tokens= ($( perl -0pe 's#<!--.*?-->##gs' "$f" | grep -oE "<$el( [^>]*)?>" | head -1 | cut -c1-140 ))"; return
+        no "$tag $label: <$el> root carries no est_tokens= ($( perl -0pe 's#<!--.*?-->##gs' "$f" | grep -oE "<$el( [^>]*)?>" | head -1 | cut -c1-140 ))"; return
     fi
     R=$(( B * 100 / E ))
     { [ "$R" -ge 200 ] && [ "$R" -le "$hi" ]; } \
-        && ok "#15 $label: $B B / est_tokens=$E = $(( R / 100 )).$(( R % 100 )) B/tok — inside the 2.00-$(( hi / 100 )).$(( hi % 100 )) band" \
-        || no "#15 $label: $B B / est_tokens=$E = $(( R / 100 )).$(( R % 100 )) B/tok — OUTSIDE the band (the root's number does not price the delivered document)"
+        && ok "$tag $label: $B B / est_tokens=$E = $(( R / 100 )).$(( R % 100 )) B/tok — inside the 2.00-$(( hi / 100 )).$(( hi % 100 )) band" \
+        || no "$tag $label: $B B / est_tokens=$E = $(( R / 100 )).$(( R % 100 )) B/tok — OUTSIDE the band (the root's number does not price the delivered document)"
 }
 # (a) --pack-task: a comfortable budget prices; a tiny one labels over_ceiling on the ROOT, not only in prose
 "$BIN" src --pack-task="$FOR_TASK" --token-budget=1500 --no-cache >"$TMP/p15_pt.xml" 2>/dev/null
@@ -1016,6 +1016,54 @@ if command -v xmllint >/dev/null 2>&1; then
         [ -s "$TMP/$f.xml" ] || continue
         xmllint --noout "$TMP/$f.xml" 2>/dev/null && ok "#15 $f.xml is well-formed" || no "#15 $f.xml FAILED xmllint"
     done
+fi
+
+# ── #16 (F5, terminality round A 2026-09-05): the MCP `for` bundle PRICES itself ────────────────────────
+# The MCP twin used to DECLARE est_tokens absent — `lens="churn,amp,tested,est_tokens"`, with a legend
+# sentence saying "this bundle is capped by the server, not priced". Declaring an absence is honest about
+# a hole; it is not an answer. The bundle is fully rendered in memory before it is returned, so it can be
+# priced, and a client that gets no number cannot budget the call it just paid for (capture-audit
+# merge-wave2 "found, not fixed" #2). Same property this whole gate asserts everywhere else: the reported
+# est_tokens must PRICE the delivered document, checked as a byte-rate band, never as a pinned number.
+#
+# `legend` is passed only if the server accepts it (lane M is adding it in parallel): the arm must not
+# depend on whichever legend dialect is the default on the day it runs, and must not fail on a server that
+# has no such field yet.
+mcp_for_text(){   # $1 task, $2 extra JSON arguments (may be empty) → the tool's text payload on stdout
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+                  "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"for\",\"arguments\":{\"task\":\"$1\"$2}}}" \
+        | ( cd "$ROOT" && "$BIN" --mcp 2>/dev/null ) | tail -1 | python3 -c '
+import sys, json
+r = json.load( sys.stdin )
+sys.stdout.write( r["result"]["content"][0]["text"] if "result" in r else "" )
+'
+}
+LEGARG=""
+[ -n "$( mcp_for_text "rank graph teleport" ',"legend":"full"' )" ] && LEGARG=',"legend":"full"'
+mcp_for_text "rank graph teleport" "$LEGARG" >"$TMP/f5_mcp.xml"
+if [ ! -s "$TMP/f5_mcp.xml" ]; then
+    no "#16 MCP for returned nothing (legend arg '${LEGARG:-none}') — the arm cannot measure what it cannot fetch"
+else
+    ok "#16 MCP for answered $( bytes_of "$TMP/f5_mcp.xml" ) B (legend arg: ${LEGARG:-none})"
+    band15 "MCP for (server-side bundle)" "$TMP/f5_mcp.xml" ctx 320 "#16"
+    # the declaration must go when the thing is served: an attribute named as NOT MEASURED while the root
+    # carries it is worse than either state alone (a reader believes the declaration).
+    LENS="$( root_attr "$TMP/f5_mcp.xml" ctx lens )"
+    case "$LENS" in
+        *est_tokens*) no "#16 MCP for still declares est_tokens absent (lens=\"$LENS\") while the root serves it — the declaration contradicts the document" ;;
+        *)            ok "#16 MCP for's lens= declaration no longer names est_tokens (lens=\"$LENS\") — it is served, not declared" ;;
+    esac
+    grep -q 'this bundle is capped by the server, not priced' "$TMP/f5_mcp.xml" \
+        && no "#16 MCP for's legend still says the bundle is 'not priced' while the root prices it" \
+        || ok "#16 MCP for's legend no longer claims the bundle is unpriced"
+    # CLI/MCP agreement in KIND, not in bytes: the two dialects deliberately serve different payload (the
+    # CLI folds the git/clone lens columns, the server runs no such pass), so the assertion is that both
+    # numbers are the same estimator applied to their own bytes — i.e. both land in the same markup band.
+    "$BIN" "$ROOT" --for="rank graph teleport" --no-cache >"$TMP/f5_cli.xml" 2>/dev/null
+    band15 "CLI --for (same task, same repo)" "$TMP/f5_cli.xml" ctx 320 "#16"
+    if command -v xmllint >/dev/null 2>&1; then
+        xmllint --noout "$TMP/f5_mcp.xml" 2>/dev/null && ok "#16 the priced MCP for bundle is well-formed XML" || no "#16 the priced MCP for bundle is malformed XML"
+    fi
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

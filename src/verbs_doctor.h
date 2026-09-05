@@ -484,6 +484,16 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
         attrs += " bytes=\"" + std::to_string( stats.totalBytes ) + "\"";
         attrs += " many=\"" + std::string( stats.blobCount > 50 ? "1" : "0" ) + "\"";   // eviction sanity flag, informational (never fails the check)
         attrs += " truncated=\"" + std::string( stats.truncated ? "1" : "0" ) + "\"";
+        // F6 (2026-09-05): THE ROW NAMES ITS OWN LIVE-STATE FIELDS. cacheDirLadder() is a per-USER directory
+        // every ripwire process writes into, so this scan measures a moving object — two back-to-back runs of
+        // a deterministic binary legitimately disagree on blobs=/bytes= and on the flags derived from the same
+        // scan. Three rounds read that as a determinism failure of the BINARY (lane-L7's shapingflagcheck (F)
+        // and gitstampcheck --doctor, both green alone; merge-wave2 §4; the 2026-09-04 close), each time
+        // answered by another private scrub in whichever gate noticed — and gitstampcheck's was order-
+        // dependent, so it silently stopped scrubbing once the scan cap spliced blobs_floor= mid-row.
+        // Declaring the list HERE makes it a fact of the output that test/lib/doctorvolatile.sh reads; no gate
+        // keeps a copy. Removing the fields instead is worse: cache size is this check's whole content.
+        attrs += " volatile=\"blobs,blobs_floor,bytes,many,truncated\"";
         attrs += doctorCacheDirHint( writable, dir, esc );
         row( "cache-dir", writable, attrs );
     }
@@ -593,8 +603,12 @@ int runDoctor( const rw::Config& cfg, const char* argv0 )
                        "attributes are check-specific (see help). cache-dir's blobs= is capped at 4096 (kMaxCacheBlobCount); "
                        "blobs_floor=\"1\" means the cap fired and blobs= is AT LEAST that many, not exactly (absent = the true "
                        "count); truncated=\"1\" covers that AND an I/O error mid-scan, so blobs_floor= is the narrower, more "
-                       "useful claim when both matter. tracked-binaries' truncated=\"1\" means the git-history scan was SKIPPED "
-                       "entirely (too many tracked files), so its stale=\"0\" there means unmeasured, never a clean scan. -->"
+                       "useful claim when both matter. volatile= on a row NAMES that row's own attributes that read LIVE machine "
+                       "state — cache-dir scans a per-user directory every ripwire process writes into, so two runs of this "
+                       "deterministic binary legitimately differ in exactly those fields and in nothing else; a determinism "
+                       "comparison strips the named attributes, never the row. tracked-binaries' truncated=\"1\" means the "
+                       "git-history scan was SKIPPED entirely (too many tracked files), so its stale=\"0\" there means "
+                       "unmeasured, never a clean scan. -->"
                        "<doctor checks=\"" + std::to_string( checks ) + "\" passed=\"" + std::to_string( okCount ) + "\"" + agentRows.rootAttr + doctorAt + doctorBuiltFrom + ">";
     out += rows;
     out += "</doctor>";

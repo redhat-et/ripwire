@@ -542,6 +542,14 @@ struct PrTrimRender
     std::string truncated   = "none";
 };
 
+// ONE estimator for every --pr-context root, never two counters (serialize.h's standing rule, the one
+// attrvocabcheck pins for the map's est_tokens). The trim ladder below and the empty-diff root (F4) both
+// price a rendered body through this, so the number on a clean tree means what it means on a 200-file diff.
+inline std::size_t prEstTokens( std::size_t bodyBytes ) noexcept
+{
+    return std::size_t( std::ceil( double( bodyBytes + kPrHeaderOverheadBytes ) / kMinBytesPerToken ) );
+}
+
 template< typename EmitFn >
 inline PrTrimRender pickPrTrimLevel( const EmitFn& emitFiles, std::size_t budgetTokens )
 {
@@ -564,7 +572,7 @@ inline PrTrimRender pickPrTrimLevel( const EmitFn& emitFiles, std::size_t budget
             }
         }
         std::free( buf );
-        const std::size_t est = std::size_t( std::ceil( double( rendered.size() + kPrHeaderOverheadBytes ) / kMinBytesPerToken ) );
+        const std::size_t est = prEstTokens( rendered.size() );
         out.level     = li;
         out.estTokens = est;
         out.body      = std::move( rendered );
@@ -588,8 +596,8 @@ inline PrTrimRender pickPrTrimLevel( const EmitFn& emitFiles, std::size_t budget
     return out;
 }
 
-// The budgeted root's site-specific attribute tail (the plain and empty forms build theirs inline — they
-// are two attributes each).
+// The budgeted root's site-specific attribute tail (the no-budget sub-bundle form builds its own — it has no
+// budget to report). F4 gave the EMPTY-DIFF root this same tail; see prEmptyRootTail below.
 inline std::string prBudgetTail( std::size_t changedFiles, std::uint32_t skippedModeOnly, std::size_t budgetTokens,
                                  const PrTrimRender& chosen, const std::string& truncatedEscaped )
 {
@@ -597,6 +605,26 @@ inline std::string prBudgetTail( std::size_t changedFiles, std::uint32_t skipped
     std::snprintf( tail, sizeof( tail ), " files=\"%zu\" skipped_mode_only=\"%u\" budget_tokens=\"%zu\" est_tokens=\"%zu\" trim_level=\"%zu\" truncated=\"%s\"",
                    changedFiles, skippedModeOnly, budgetTokens, chosen.estTokens, chosen.level, truncatedEscaped.c_str() );
     return tail;
+}
+
+// F4 (terminality round A 2026-09-05) — the EMPTY-DIFF root's tail, which is the budgeted root's tail.
+//
+// This root used to be built inline from two attributes, so a clean tree was the ONE --pr-context answer with
+// no budget_tokens=, est_tokens=, trim_level= or truncated=: the ledger every other root carries, missing in
+// exactly the case a caller cannot tell apart from a crash, and against writePrRootOpen's own rule that the
+// three forms must not drift on which disclosures they carry. Nothing was cut here, so it reports
+// trim_level="0" truncated="none" — and it PRICES the document it actually emits through the ladder's own
+// estimator (prEstTokens) rather than declaring a number, because a document that ships a legend does not
+// cost nothing.
+inline constexpr std::string_view kPrEmptyDiffBody =
+    "<!-- no changed files in the index (clean tree, or the diff touched only non-indexed files) -->";
+
+inline std::string prEmptyRootTail( std::uint32_t skippedModeOnly, std::size_t budgetTokens, bool isDefaultBudget )
+{
+    PrTrimRender empty;                                        // level 0, truncated "none": nothing was cut
+    empty.estTokens = prEstTokens( kPrEmptyDiffBody.size() );
+    return prBudgetTail( 0, skippedModeOnly, budgetTokens, empty, empty.truncated )
+           + ( isDefaultBudget ? " budget_default=\"1\"" : "" );
 }
 
 // Open the <pr-context> root: the attributes EVERY form shares, this site's own tail, and the one remark row
@@ -797,8 +825,8 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
 
     if( changed.empty() )
     {
-        writePrRootOpen( out, g, sharedAttrs, " files=\"0\" skipped_mode_only=\"" + std::to_string( skippedModeOnly ) + "\"" + atAttrStr, anchor, escBase );
-        std::fprintf( out, "<!-- no changed files in the index (clean tree, or the diff touched only non-indexed files) -->" );
+        writePrRootOpen( out, g, sharedAttrs, prEmptyRootTail( skippedModeOnly, budgetTokens, budget.isDefault ) + atAttrStr, anchor, escBase );
+        std::fwrite( kPrEmptyDiffBody.data(), 1, kPrEmptyDiffBody.size(), out );
         std::fprintf( out, "</pr-context>" );
         return 0;
     }

@@ -29,6 +29,7 @@ ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+. "$ROOT/test/lib/doctorvolatile.sh"                  # F6: the ONE strip list, read out of the document itself
 echo "doctorcheck: BIN=$BIN"
 
 # A small ad-hoc target dir (git repo, one file) — --doctor needs a root positional.
@@ -314,6 +315,89 @@ printf '%s' "$HOUT" | grep -q ' at="' \
     && ok "H: at= (the tree's HEAD) rides beside it, so the two facts are distinguishable" \
     || no "H: --doctor lost its at= anchor"
 printf '%s' "$HOUT" | xmllint --noout - 2>/dev/null && ok "H: xmllint clean" || no "H: malformed XML"
+
+
+# ── (V) F6 — the machine-dependent fields are NAMED, and everything else is deterministic under load ─────
+# --doctor's cache-dir check scans $TMPDIR/ripwire, a per-USER directory every ripwire process writes into,
+# so blobs=/bytes= (and many=/blobs_floor=/truncated=, derived from the same scan) legitimately move between
+# two back-to-back runs of a perfectly deterministic binary. Three rounds read that as a determinism failure
+# of the BINARY — capture-audit lane-L7 (shapingflagcheck (F) and gitstampcheck determinism (--doctor), both
+# green when run alone), merge-wave2 §4, the 2026-09-04 close — and each time the fix was another private
+# scrub in the gate that noticed. This arm asserts the disclosure instead: the row DECLARES which of its own
+# attributes are a live reading, and the two determinism gates strip exactly what the document names, through
+# one shared helper (test/lib/doctorvolatile.sh). See that file for why a hard-coded list was not enough.
+echo
+VOUT="$TMP/v_doctor.xml"
+"$BIN" "$REPO" --doctor >"$VOUT" 2>/dev/null
+VLIST="$( grep -oE '<c n="cache-dir"[^>]*>' "$VOUT" | head -1 | grep -oE ' volatile="[^"]*"' | sed -E 's/.*="([^"]*)"/\1/' )"
+if [ -z "$VLIST" ]; then
+    no "(V) the cache-dir row does not declare volatile= — the fields that read live machine state are unnamed, so every reader has to guess (and two gates guessed differently)"
+else
+    ok "(V) the cache-dir row declares volatile=\"$VLIST\""
+    vmissing=""
+    for a in $( printf '%s' "$VLIST" | tr ',' ' ' ); do
+        case "$a" in blobs_floor ) continue ;; esac      # emitted only when the scan cap fired — presence is itself volatile
+        grep -oE '<c n="cache-dir"[^>]*>' "$VOUT" | grep -q " $a=\"" || vmissing="$vmissing $a"
+    done
+    [ -z "$vmissing" ] \
+        && ok "(V) every attribute volatile= names is actually on the row (no phantom declaration)" \
+        || no "(V) volatile= names attribute(s) the row does not carry:$vmissing"
+    case "$VLIST" in
+        *blobs*) case "$VLIST" in *bytes*) ok "(V) the declaration covers the two live counters (blobs, bytes)" ;; *) no "(V) volatile= does not name bytes=" ;; esac ;;
+        *)       no "(V) volatile= does not name blobs=" ;;
+    esac
+fi
+
+# the strip must actually do work — otherwise the determinism arm below is vacuous
+if [ -n "$VLIST" ]; then
+    stripDoctorVolatile "$VOUT" >"$TMP/v_stripped.xml"
+    if cmp -s "$VOUT" "$TMP/v_stripped.xml"; then
+        no "(V) stripDoctorVolatile removed NOTHING — the helper cannot see the declared fields, so the arm below proves nothing"
+    else
+        ok "(V) stripDoctorVolatile removes the declared fields ($( wc -c <"$VOUT" | tr -d ' ' ) B -> $( wc -c <"$TMP/v_stripped.xml" | tr -d ' ' ) B)"
+    fi
+    # the ORDER-INDEPENDENCE the old hand-rolled sed did not have: the same row with blobs_floor= spliced in
+    # between blobs= and bytes= (the shape the scan cap actually emits) must strip to the same text.
+    printf '<doctor><c n="cache-dir" ok="1" dir="/d" blobs="4096" bytes="7" many="1" truncated="0" volatile="blobs,blobs_floor,bytes,many,truncated"/></doctor>' >"$TMP/v_a.xml"
+    printf '<doctor><c n="cache-dir" ok="1" dir="/d" blobs="4096" blobs_floor="1" bytes="9" many="1" truncated="1" volatile="blobs,blobs_floor,bytes,many,truncated"/></doctor>' >"$TMP/v_b.xml"
+    [ "$( stripDoctorVolatile "$TMP/v_a.xml" )" = "$( stripDoctorVolatile "$TMP/v_b.xml" )" ] \
+        && ok "(V) the strip is ORDER-INDEPENDENT: the capped shape (blobs_floor= spliced mid-row) strips to the same text as the uncapped one" \
+        || no "(V) the capped cache-dir shape does not strip to the same text — the exact residual that kept gitstampcheck flaking"
+fi
+
+# determinism under ARTIFICIAL LOAD: saturate the machine, and churn the shared cache dir between the two
+# runs (which is the real disturbance, not CPU), then compare the stripped documents byte for byte.
+loadpids=""
+for _i in 1 2 3 4; do ( while :; do :; done ) >/dev/null 2>&1 & loadpids="$loadpids $!"; done
+"$BIN" "$ROOT" --top-k=5 >/dev/null 2>&1                       # writes blobs into the shared cache dir
+"$BIN" "$REPO" --doctor >"$TMP/v_load1.xml" 2>/dev/null
+"$BIN" "$ROOT/src" --top-k=5 >/dev/null 2>&1                   # …and more, between the two doctor runs
+"$BIN" "$REPO" --doctor >"$TMP/v_load2.xml" 2>/dev/null
+for p in $loadpids; do kill "$p" 2>/dev/null; done
+wait 2>/dev/null
+stripDoctorVolatile "$TMP/v_load1.xml" >"$TMP/v_load1.stripped"
+stripDoctorVolatile "$TMP/v_load2.xml" >"$TMP/v_load2.stripped"
+cmp -s "$TMP/v_load1.stripped" "$TMP/v_load2.stripped" \
+    && ok "(V) two --doctor runs under load, with the shared cache dir churned between them, are byte-identical once the DECLARED fields are stripped" \
+    || { no "(V) --doctor is non-deterministic in a field it does NOT declare volatile:"; diff "$TMP/v_load1.stripped" "$TMP/v_load2.stripped" | head -6 | sed 's/^/        /'; }
+
+# the legend has to define the attribute a reader meets on the first screen
+printf '%s' "$( sed 's/-->.*//' "$VOUT" )" | grep -q 'volatile=' \
+    && ok "(V) the doctor legend defines volatile=" \
+    || no "(V) volatile= is emitted but undefined in the legend"
+
+# ONE strip list, not three: both determinism gates must go through the shared helper and carry no private
+# cache-dir attribute list of their own. This is the assertion that keeps the fix from being re-forked.
+for g in gitstampcheck shapingflagcheck; do
+    grep -q 'test/lib/doctorvolatile.sh' "$ROOT/test/$g.sh" \
+        && ok "(V) test/$g.sh reads the strip list through the shared helper" \
+        || no "(V) test/$g.sh does not source test/lib/doctorvolatile.sh — a second, driftable strip list"
+    # CODE lines only: both gates now explain in PROSE what the old contiguous pattern got wrong, and that
+    # explanation quotes it. A comment describing a retired defect is not a second strip list.
+    grep -vE '^[[:space:]]*#' "$ROOT/test/$g.sh" | grep -qE 'blobs="[0-9N]+" bytes=' \
+        && no "(V) test/$g.sh still carries its own hard-coded cache-dir attribute list in code" \
+        || ok "(V) test/$g.sh carries no private cache-dir attribute list in code"
+done
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "SOME CHECKS FAILED"; exit 1; fi

@@ -97,11 +97,12 @@ std::optional<int> runAffected( const MainDispatch& d )
         }
         const std::vector<NodeId>& seeds = sel.seeds;
         if( seeds.empty() ) { std::fprintf( stderr, "ripwire: --affected matched no symbols: %.*s\n", int( cfg.affectedFiles.size() ), cfg.affectedFiles.data() ); return 1; }
-        const std::vector<NodeId>  reach = rw::transitiveCallers( g, seeds );
-        std::vector<char>          fseen( ing.files.size(), 0 );
-        std::vector<std::uint32_t> testFiles;
-        for( NodeId n : reach ) { const std::uint32_t f = ing.symbols[n].fileId; if( !fseen[f] && rw::isTestPath( ing.files[f] ) ) { fseen[f] = 1; testFiles.push_back( f ); } }
-        std::sort( testFiles.begin(), testFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
+        // F3: the caller walk and the matched-test rows are assembled in testmap.h::affectedAnswer, next to the
+        // seeding whose test partition constrains them (lane-L8 found-not-fixed #1: seeding the walk with a
+        // matched test file's own symbols subtracted the very tests that reach the change).
+        const rw::AffectedAnswer          answer    = rw::affectedAnswer( ing, g, sel );
+        const std::vector<NodeId>&        reach     = answer.reach;
+        const std::vector<std::uint32_t>& testFiles = answer.testFiles;
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
         // M12: --affected carried no root= at all and printed every <test p=> row as the raw ingest-stored
@@ -124,11 +125,13 @@ std::optional<int> runAffected( const MainDispatch& d )
         // measurement, not a detail. seeds= is the resolved seed-symbol count (1 for a lone function, ~84
         // for a header), which is what makes the two readings comparable at a glance.
         std::printf( "<!-- ripwire affected: test files that transitively reach the changed files/symbols (run these); seeded_by= says which reading the argument took. "
+                     "seed_test_files= how many of the matched files are TEST files: a test cannot reach a change it is part of, so its own symbols are not seeds of the "
+                     "caller walk and its row carries seed_kind=\"test\" — it is listed because the argument matched it (it changed, run it), not because it reaches the change. "
                      "script_gates_unmodelled= counts test/*.sh runners in the corpus (a path count; not every one invokes the binary) — "
                      "script-to-binary edges are NOT modelled, so those gates are invisible to this walk and never counted in tests=/reached=. "
                      "%s-->%s", rw::kGraphCountFloorBriefLegend, rw::rootRelPathsLegend( afSingleRoot ) );
-        std::printf( "<affected changed=\"%s\" seeded_by=\"%s\" seeds=\"%zu\" tests=\"%zu\" reached=\"%zu\" script_gates_unmodelled=\"%zu\"%s%s>",
-                     ex( cfg.affectedFiles ).c_str(), rw::affectedSeededBy( sel ), seeds.size(), testFiles.size(), reach.size(), scriptGatesUnmodelledCount( ing ),
+        std::printf( "<affected changed=\"%s\" seeded_by=\"%s\" seeds=\"%zu\" seed_test_files=\"%zu\" tests=\"%zu\" reached=\"%zu\" script_gates_unmodelled=\"%zu\"%s%s>",
+                     ex( cfg.affectedFiles ).c_str(), rw::affectedSeededBy( sel ), seeds.size(), sel.seedTestFiles.size(), testFiles.size(), reach.size(), scriptGatesUnmodelledCount( ing ),
                      afRootAttr.c_str(),                          // M12: root= says what every <test p=> below is relative to
                      rw::graphCountFloorAttrXml( g ).c_str() );   // H5/M15: gauge + marker; tests=/reached= are a transitive-caller walk over the name-based CSR
         // §P11.4: run= where a REAL runner is derivable, absent where it is not. The index is constructed
@@ -136,7 +139,8 @@ std::optional<int> runAffected( const MainDispatch& d )
         const rw::TestRunnerIndex runners( ing );
         for( std::uint32_t f : testFiles )
         {
-            std::printf( "<test p=\"%s\"%s/>", ex( afPathRel( f ) ).c_str(), rw::runAttrDisclosed( runners, f, ex ).c_str() );
+            std::printf( "<test p=\"%s\"%s%s/>", ex( afPathRel( f ) ).c_str(), answer.isSeedTestFile[f] ? " seed_kind=\"test\"" : "",
+                         rw::runAttrDisclosed( runners, f, ex ).c_str() );
         }
         std::printf( "</affected>" );
         return 0;

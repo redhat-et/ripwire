@@ -1614,11 +1614,14 @@ inline std::string forTaskText( const std::string& root, const std::string& task
         // under the same byte cap, with nothing on the screen saying why. Naming them is the contract:
         // absent-and-declared is an answer, absent-and-silent is a hole. Gate: test/mcpattrparitycheck.sh,
         // whose lens= arm ALSO fails if a name here is one this dialect does emit.
-        // est_tokens= joined the declaration at the wave-2 merge (V1's N1 put the CLI root's price on <ctx>):
-        // that number is the CLI's budget-ladder fixpoint over ITS bytes; this bundle is shaped by the
-        // server's payload byte cap and is never priced, so the attribute is declared absent, not served
-        // — the same posture MCP analyze takes for k= (lens="k,est_tokens").
-        rootOpenStr.insert( rootOpenStr.size() - 1, " lens=\"churn,amp,tested,est_tokens\"" );
+        // F5 (terminality round A 2026-09-05): est_tokens= is NO LONGER on this declaration. It joined it at
+        // the wave-2 merge on the reasoning "this bundle is shaped by the server's payload byte cap and is
+        // never priced" — but the bundle is fully rendered in memory before it is returned, so it CAN be
+        // priced, and declaring an absence is honest about a hole, not an answer: a client handed no number
+        // cannot budget the call it just paid for (merge-wave2 "found, not fixed" #2). It is now served, on
+        // the delivered bytes, through the same pricedRootAttr fixpoint every other priced root uses — see
+        // the splice at the end of this function.
+        rootOpenStr.insert( rootOpenStr.size() - 1, " lens=\"churn,amp,tested\"" );
     }
     std::string headerStr = rootOpenStr
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote + floorNote
@@ -1627,10 +1630,9 @@ inline std::string forTaskText( const std::string& root, const std::string& task
                           + std::string( mcpForConf.note )
                           // No "--" anywhere in this clause: it rides inside an XML comment, where a double
                           // hyphen is ill-formed (G4), so the CLI verb is named without its dashes.
-                          + "; lens=\"churn,amp,tested,est_tokens\": the three per-row quality columns the CLI for lens carries and this dialect"
-                            " does NOT (they need a git and a quality pass this server does not run per request), and the CLI root's"
-                            " est_tokens= (this bundle is capped by the server, not priced); an absent column here means NOT MEASURED,"
-                            " never measured-and-zero"
+                          + "; lens=\"churn,amp,tested\": the three per-row quality columns the CLI for lens carries and this dialect"
+                            " does NOT (they need a git and a quality pass this server does not run per request); an absent column here"
+                            " means NOT MEASURED, never measured-and-zero; est_tokens= prices this bundle in tokens"
                           + std::string( rw::kForFileTailLegend )   // deep-tail: r= + <tail> definitions, the CLI twin's exact clause (sigs-charge-exempt below)
                           + " -->"
                           + rw::forRootRelPathsLegendShort( !flRootArg.empty() );   // W3-S item 5: closes the gap this comment used to record
@@ -1741,6 +1743,18 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     std::fclose( mem );
     std::string out = buf ? std::string( buf, sz ) : std::string{};
     std::free( buf );
+    // F5 (terminality round A 2026-09-05): PRICE the bundle instead of declaring it unpriced. The document is
+    // complete here, so this is the same measurement the CLI twin makes over its own (deliberately different)
+    // bytes: pricedRootAttr's ≤4-pass fixpoint at kBytesPerTokenDefault, spliced onto the <ctx> root by the
+    // shared splicer — no second estimator, and no number that could disagree with the CLI's for the same
+    // reason the CLI's could disagree with itself. Charged AFTER the sigs budget on purpose: a disclosure's
+    // contract is disclosure only, and charging its ~18 bytes against the ranked head would drop a row to pay
+    // for the attribute that describes the head — the same exemption mcpConfidenceExemptBytes already makes.
+    if( !out.empty() )
+    {
+        std::size_t mcpForEstTokens = 0;
+        rw::spliceRootAttrs( out, rw::pricedRootAttr( out.size(), rw::kBytesPerTokenDefault, 0, &mcpForEstTokens ) );
+    }
     return out;
 }
 

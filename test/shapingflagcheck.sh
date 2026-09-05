@@ -41,14 +41,22 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-# fnorm FILE — stdout with --run-trace's MEASURED duration_ms= masked (verbs_change.h "Determinism, honestly
-# scoped"), the ONE documented non-determinism the (B) and (F) byte-identity arms may not blame on a knob.
+# fnorm FILE — stdout with the DOCUMENTED machine-dependent readings masked. Those are the only
+# non-determinisms the (B) and (F) byte-identity arms may not blame on a knob:
+#   • --run-trace's MEASURED duration_ms= (verbs_change.h "Determinism, honestly scoped");
+#   • RE-PINNED 2026-09-05 (F6): whatever a --doctor row DECLARES as volatile=. Its cache-dir check scans a
+#     per-USER directory every ripwire process writes into, so blobs=/bytes= (and blobs_floor=/many=/
+#     truncated=, derived from the same scan) move under a parallel battery. This gate's (F) arm was red on a
+#     loaded machine and green alone for exactly that reason, three rounds running (capture-audit lane-L7).
+#     The strip list is NOT written here: it is read out of the document by test/lib/doctorvolatile.sh — the
+#     one place gitstampcheck's determinism arm reads it too, so the two cannot drift apart again.
 # Defined HERE, above every caller: verify-wave1 I1 found it defined below the (B) loop, where bash's
 # run-time resolution made both `$( fnorm … )` comparands expand EMPTY and the arm compare "" to "" — a
 # permanently green byte-identity assertion (manifestcheck.sh's used-before-definition arm now pins this).
-fnorm(){ sed -E 's/ duration_ms="[0-9]+"//g' "$1"; }
+fnorm(){ stripDoctorVolatile "$1" | sed -E 's/ duration_ms="[0-9]+"//g'; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
+. "$ROOT/test/lib/doctorvolatile.sh"                  # F6: the ONE --doctor strip list, read out of the document
 cd "$ROOT"
 echo "shapingflagcheck: BIN=$BIN"
 git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' > "$TMP/status.before"

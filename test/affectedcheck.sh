@@ -49,6 +49,11 @@ printf '#!/usr/bin/env bash\necho ok\n'                              > "$R/test/
 printf 'int frobnicate() { return 7; }\nint quux() { return frobnicate(); }\n' > "$R/src/widget.cpp"
 printf 'void test_one() { frobnicate(); }\n'                        > "$R/test/test_a.cpp"
 printf 'void test_two() { quux(); }\n'                              > "$R/test/test_b.cpp"
+# F3 (terminality round A, 2026-09-05) — the SUBSTRING-COLLISION half of the fixture. The file reading is a
+# path PATTERN (filePathContains), so `geo.cpp` matches BOTH src/geo.cpp and test/check_geo.cpp. Named so the
+# collision is unavoidable, and so no OTHER arm's pattern can reach these two files.
+printf 'double deg2rad(double d) { return d; }\ndouble haversine(double a) { return deg2rad(a); }\n' > "$R/src/geo.cpp"
+printf 'void spec_hav() { haversine(1); }\nvoid spec_deg() { deg2rad(2); }\n'                        > "$R/test/check_geo.cpp"
 
 run(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" "$@" --no-cache 2>/dev/null; }
 runec(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" "$@" --no-cache >/dev/null 2>"$TMP/err.txt"; }
@@ -194,6 +199,60 @@ printf '%s' "$A" | grep -q 'script_gates_unmodelled=' \
 printf '%s' "$A" | grep -q 'a path count; not every one invokes the binary' \
     && ok "script_gates_unmodelled= legend matches the code (path count, not content-checked) (§A10.7)" \
     || no "script_gates_unmodelled= legend still overclaims content inspection the code does not do"
+
+# ── F3) a pattern that also matches a TEST file must not swallow the answer ──────────────────────────
+# The file reading is a substring PATTERN, so one item can match several files. When one of them is a TEST
+# file, its own symbols used to enter the seed set — and transitiveCallers returns "reached, minus the
+# seeds", so the very tests that reach the change were subtracted out of their own answer. `--affected=geo.py`
+# reported seeds="6" tests="0" reached="0" on a corpus where `--affected=./geo.py` reported reached="1"
+# (lane-L8 2026-09-04, found-not-fixed #1): a confidently wrong ZERO, in the verb whose entire job is telling
+# an agent which tests to run. A test file cannot "reach" a change it is part of; it is in the answer because
+# the argument MATCHED it, which is a different fact and is labelled as one.
+CTRL="$( run --affected=src/geo.cpp )"       # unambiguous: matches src/geo.cpp only
+COLL="$( run --affected=geo.cpp )"           # matches src/geo.cpp AND test/check_geo.cpp
+ONLYT="$( run --affected=check_geo.cpp )"    # matches the TEST file alone
+attr(){ printf '%s' "$2" | grep -oE "$1=\"[0-9]+\"" | head -1 | grep -oE '[0-9]+'; }
+
+[ "$( cnt "$CTRL" )" = 1 ] && [ "$( tset "$CTRL" )" = "check_geo.cpp," ] \
+    && ok "(F3 control) --affected=src/geo.cpp: tests=1 {check_geo.cpp}, reached=$( attr reached "$CTRL" )" \
+    || no "(F3 control) --affected=src/geo.cpp wrong (tests=$( cnt "$CTRL" ) set=$( tset "$CTRL" )) — the fixture itself is broken"
+
+{ [ "$( cnt "$COLL" )" = "$( cnt "$CTRL" )" ] && [ "$( tset "$COLL" )" = "$( tset "$CTRL" )" ] && [ "$( attr reached "$COLL" )" = "$( attr reached "$CTRL" )" ]; } \
+    && ok "(F3) --affected=geo.cpp answers the same tests/reached as the unambiguous spelling (the test-file match no longer absorbs the seeds)" \
+    || no "(F3) --affected=geo.cpp disagrees with --affected=src/geo.cpp: tests=$( cnt "$COLL" )/$( cnt "$CTRL" ) reached=$( attr reached "$COLL" )/$( attr reached "$CTRL" ) set=$( tset "$COLL" )/$( tset "$CTRL" )"
+
+{ [ -n "$( attr seeds "$COLL" )" ] && [ "$( attr seeds "$COLL" )" -gt "$( attr seeds "$CTRL" )" ]; } \
+    && ok "(F3 non-vacuity) the collision spelling really does match more files (seeds=$( attr seeds "$COLL" ) vs $( attr seeds "$CTRL" ))" \
+    || no "(F3 non-vacuity) seeds= did not grow under the colliding pattern (=$( attr seeds "$COLL" )) — the arm above proves nothing"
+
+[ "$( attr seed_test_files "$COLL" )" = "1" ] \
+    && ok "(F3 disclosure) the root says seed_test_files=\"1\" — the argument matched a test file" \
+    || no "(F3 disclosure) root carries no honest seed_test_files= (got '$( attr seed_test_files "$COLL" )')"
+[ "$( attr seed_test_files "$CTRL" )" = "0" ] \
+    && ok "(F3 disclosure) the unambiguous spelling says seed_test_files=\"0\" (a zero that means none matched)" \
+    || no "(F3 disclosure) seed_test_files= is not 0 on a pattern that matches no test file (got '$( attr seed_test_files "$CTRL" )')"
+
+printf '%s' "$COLL" | grep -q '<test p="[^"]*check_geo\.cpp" seed_kind="test"' \
+    && ok "(F3 row) the matched test file's row carries seed_kind=\"test\" — it is here because it CHANGED, not because it reaches the change" \
+    || no "(F3 row) the matched test file's row has no seed_kind=\"test\" label"
+printf '%s' "$CTRL" | grep -q '<test [^>]*seed_kind=' \
+    && no "(F3 row) a row that was only REACHED wrongly carries seed_kind=" \
+    || ok "(F3 row) a merely-reached test row carries no seed_kind= (the label means matched-as-a-seed)"
+
+{ [ "$( cnt "$ONLYT" )" = 1 ] && [ "$( attr reached "$ONLYT" )" = "0" ]; } \
+    && ok "(F3 test-only) a pattern matching ONLY a test file answers tests=1 (run it — it changed), reached=0" \
+    || no "(F3 test-only) --affected=check_geo.cpp answered tests=$( cnt "$ONLYT" ) reached=$( attr reached "$ONLYT" ) — a changed test that must be run reported as no tests"
+
+# the honesty rule this whole arm exists for: tests="0" while a test file absorbed the seeds is the silent zero.
+{ [ "$( cnt "$COLL" )" = "0" ] && [ "$( attr seed_test_files "$COLL" )" != "0" ]; } \
+    && no "(F3 silent zero) tests=\"0\" on an argument that matched a test file — exactly the confidently-wrong zero this arm gates" \
+    || ok "(F3 silent zero) no tests=\"0\" answer while seed_test_files= is non-zero"
+
+for a in seed_test_files seed_kind; do
+    printf '%s' "$COLL" | sed 's/-->.*//' | grep -q "$a=" \
+        && ok "(F3 legend) the first-screen legend defines $a=" \
+        || no "(F3 legend) $a= is emitted but undefined in the legend a reader meets first"
+done
 
 # ── 6) xml well-formed ───────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
