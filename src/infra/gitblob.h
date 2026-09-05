@@ -7,8 +7,12 @@
 // which is why it is hand-rolled (zero dependencies, G3) and why the lint catalog's weak-crypto rule (a CALL to
 // a function named sha1/md5) has nothing to flag: the compression step is named for what it is.
 //
-// Pure, allocation-free apart from the returned string; sanitizer-clean (every shift is on uint32_t, every
-// rotate masks to 32 bits). Verified against `git hash-object` by test/receiptpostcheck.sh (11).
+// Pure, allocation-free apart from the returned string. SANITIZER-CLEAN UNDER -fsanitize=integer, which flags
+// an unsigned left shift that discards bits and an unsigned add that wraps as overflow even though C++ defines
+// both — so the rotate masks the bits it is about to shift out, and every modular add is done in uint64_t and
+// masked back (the same posture infra/hashutil.h's multiplyModulo64 takes). Found by the asan tree on the first
+// receipt (rotl32 fired, the process aborted, the receipt never flushed). Verified against `git hash-object` by
+// test/receiptpostcheck.sh (11).
 
 #include <array>
 #include <cstddef>
@@ -19,9 +23,18 @@
 namespace rw::gitblob
 {
 
+inline constexpr std::uint32_t kMask32 = 0xFFFFFFFFu;
+
+// a + b (mod 2^32), computed in 64 bits so no unsigned wrap is ever executed in 32
+inline constexpr std::uint32_t addModulo32( std::uint32_t a, std::uint32_t b ) noexcept
+{
+    return static_cast<std::uint32_t>( ( std::uint64_t( a ) + std::uint64_t( b ) ) & kMask32 );
+}
+
+// rotate left by r in [1,31]: the bits about to leave the top are masked off BEFORE the shift
 inline constexpr std::uint32_t rotl32( std::uint32_t v, unsigned r ) noexcept
 {
-    return ( v << r ) | ( v >> ( 32u - r ) );
+    return ( ( v & ( kMask32 >> r ) ) << r ) | ( v >> ( 32u - r ) );
 }
 
 // one 64-byte block folded into the running state
@@ -45,10 +58,11 @@ inline void sha1CompressBlock( std::array<std::uint32_t, 5>& h, const unsigned c
         else if( i < 40 ) { f = b ^ c ^ d;                         k = 0x6ED9EBA1u; }
         else if( i < 60 ) { f = ( b & c ) | ( b & d ) | ( c & d ); k = 0x8F1BBCDCu; }
         else              { f = b ^ c ^ d;                         k = 0xCA62C1D6u; }
-        const std::uint32_t t = rotl32( a, 5 ) + f + e + k + w[ i ];
+        const std::uint32_t t = addModulo32( addModulo32( addModulo32( addModulo32( rotl32( a, 5 ), f ), e ), k ), w[ i ] );
         e = d;  d = c;  c = rotl32( b, 30 );  b = a;  a = t;
     }
-    h[ 0 ] += a;  h[ 1 ] += b;  h[ 2 ] += c;  h[ 3 ] += d;  h[ 4 ] += e;
+    h[ 0 ] = addModulo32( h[ 0 ], a );  h[ 1 ] = addModulo32( h[ 1 ], b );  h[ 2 ] = addModulo32( h[ 2 ], c );
+    h[ 3 ] = addModulo32( h[ 3 ], d );  h[ 4 ] = addModulo32( h[ 4 ], e );
 }
 
 // SHA-1 over the concatenation of `parts`, as 40 lowercase hex characters
