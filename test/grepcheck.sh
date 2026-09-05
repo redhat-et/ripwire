@@ -105,8 +105,8 @@ grep -q '<hit l="13" in="perimeter">' "$TMP/perimeter" \
 
 # (1c2) …and the matched line itself is emitted with the hit (the P5 fix: a hit that shows WHERE but not
 #       WHAT cost the agent a follow-up file read)
-grep -q '<f p="[^"]*geometry\.cpp"><hit l="11" in="perimeter"><m><!\[CDATA\[double perimeter(' "$TMP/perimeter" \
-    && ok "geometry.cpp:11 hit carries its matched line in <m>" \
+grep -q '<f p="[^"]*geometry\.cpp"><hit l="11" in="perimeter"><!\[CDATA\[double perimeter(' "$TMP/perimeter" \
+    && ok "geometry.cpp:11 hit carries its matched line as its own CDATA (P12: no <m> wrapper)" \
     || { no "geometry.cpp:11 hit has no/incorrect <m> matched line"; head -20 "$TMP/perimeter"; }
 
 # (1d) Output is valid XML

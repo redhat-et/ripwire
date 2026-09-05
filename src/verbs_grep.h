@@ -236,9 +236,9 @@ void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, const rw::PageW
             const GrepAuxHit& h = hits[j];
             std::string        safe;
             appendCdataSafe( h.text, safe );
-            std::printf( "<hit l=\"%u\"><m><![CDATA[", h.line );
+            std::printf( "<hit l=\"%u\"><![CDATA[", h.line );   // P12 (L7): no <m> wrapper here either
             std::fwrite( safe.data(), 1, safe.size(), stdout );
-            std::printf( "]]></m></hit>" );
+            std::printf( "]]></hit>" );
         }
         std::printf( "</f>" );
         i = j;
@@ -648,7 +648,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     else
     {
     std::printf( "<!-- ripwire grep: parallel literal/regex scan; hits GROUP by file under <f p=\"…\">, each <hit> carrying its LINE "
-                 "(l=), matched text (m) and enclosing symbol (in=, a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar; "
+                 "(l=), its matched text as the hit's own CDATA and enclosing symbol (in=, a NAME here; the same spelling is a fan-in COUNT in for/pack-task/exemplar; "
                  "ABSENT (never an empty in= value) when no symbol encloses the hit, which is NOT the same claim as file scope — and "
                  "on a file row carrying parse_degraded=\"1\" it is NO CLAIM AT ALL: that file's parse holds ERROR/MISSING nodes "
                  "(the skipped verb itemizes err=/err_ratio=), symbols there may be unextracted, so read in= absence inside it as "
@@ -825,9 +825,11 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                 std::printf( "<b><![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]></b>" );
             }
             {
+                // P12 (L7): the matched line is the hit's OWN text — no <m> wrapper (9 B/hit, ~900 B on a 100-row page);
+                // with context on, the reading order is <b>…</b> then this CDATA then <a>…</a>
                 std::string safe;
                 appendCdataSafe( h.text, safe );
-                std::printf( "<m><![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]></m>" );
+                std::printf( "<![CDATA[" );  std::fwrite( safe.data(), 1, safe.size(), stdout );  std::printf( "]]>" );
             }
             if( !h.after.empty() )
             {

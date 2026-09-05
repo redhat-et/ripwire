@@ -77,7 +77,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "verify",      "verify",      "ONE structured claim, verdict=confirmed|refuted|unknown, its witness rows <s t= n= p=> inline" },
     { "query",       "graph-query", "graph-query expression over the symbol graph: <s t= n= p=> matching rows" },
     { "match",       "match",       "tree-sitter structural query: <m p= in=> captured nodes with their enclosing symbol; grammars=/eligible_files= the scope" },
-    { "grep",        "grep",        "literal/regex scan grouped by file: <f p=><hit l= in=><m>text</m></hit>; complete=1 only for an exhaustive literal scan; <unindexed> is the off-index population" },
+    { "grep",        "grep",        "literal/regex scan grouped by file: <f p=><hit l= in=>CDATA text</hit> (<b>/<a> context around it); complete=1 only for an exhaustive literal scan; <unindexed> = off-index" },
     { "exemplar",    "exemplar",    "the best-in-class instance of kind= for the task, chosen by role: n= p= in= ccx= tested=, <bodies><b> to imitate" },
     { "batch",       "batch",       "n= read sub-queries in one sweep (requested=, cap=): each <q> wraps one sub-answer verbatim in CDATA" },
     { "task-route",  "help-task",   "which verb answers this task: status=recommend|abstain confidence= score= margin=, <facts> the evidence" },

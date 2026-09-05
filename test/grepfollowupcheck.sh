@@ -171,8 +171,8 @@ grep -q 'callers=.*FLOOR' "$TMP/dist.xml" \
 #      G1 (2026-08-15) moved the path onto the wrapping <f p=…> and the hit itself now carries l="LINE" —
 #      that shape change is pinned in test/grepcheck.sh; this check's OWN concern (R1's enrichment must
 #      not touch the hit row at all) still holds on the l=/in=/<m> shape.
-grep -q '<f p="[^"]*geometry\.cpp"><hit l="11" in="perimeter"><m><!\[CDATA\[' "$TMP/peri.xml" \
-    && ok "(11) <hit> rows keep their exact pre-G1 (l=/in=/<m>) shape (enrichment is additive-after)" \
+grep -q '<f p="[^"]*geometry\.cpp"><hit l="11" in="perimeter"><!\[CDATA\[' "$TMP/peri.xml" \
+    && ok "(11) <hit> rows keep their exact shape (l=/in=/own CDATA — P12 dropped the <m> wrapper) (enrichment is additive-after)" \
     || no "(11) <hit> row shape changed — enrichment must not touch hit rows"
 
 # (12) --metrics co-run: lens attrs may appear, nothing crashes, still well-formed; plain grep never

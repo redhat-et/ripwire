@@ -8,15 +8,15 @@
 #        Which hits survive the `--top-n × 4` budget truncation must be a pure function of the corpus,
 #        never of which worker finished first. A budget-saturating pattern over the repo's own src/ is
 #        the stress case (thousands of hits, dozens of files, truncation guaranteed).
-#   (P5) every <hit> now carries <m><![CDATA[the matched line]]></m> — before this, --grep printed WHERE
+#   (P5) every <hit> now carries its matched line as its own <![CDATA[…]]> (P12, 2026-09-05: the <m> wrapper is gone) — before this, --grep printed WHERE
 #        the pattern was but never WHAT it matched, and --grep-context printed the lines AROUND the hit
 #        while skipping the hit's own line. So in either mode the agent never saw the text it searched for.
 #
 # Asserts:
-#   (1) EVERY hit has exactly one <m> child, with or without context flags, and <hit> is never self-closing
-#   (2) the <m> text is EXACTLY the file's line at p="FILE:LINE" — checked against the file on disk, for
+#   (1) EVERY hit has exactly one matched-line CDATA, with or without context flags, and <hit> is never self-closing
+#   (2) the matched-line text is EXACTLY the file's line at p="FILE:LINE" — checked against the file on disk, for
 #       every hit of a multi-file run (this is what makes <m> trustworthy rather than plausible)
-#   (3) child ORDER is <b> → <m> → <a> (reading order) when context flags are on
+#   (3) reading ORDER is <b> → the matched CDATA → <a> when context flags are on
 #   (4) DETERMINISM ×5 on a budget-saturating parallel scan over src/, byte-identical
 #   (5) DETERMINISM ×3 of the same scan under heavy background CPU load (a thread-order bug shows up as a
 #       different truncation set / a different sort tie-break, which only reproduces under contention)
@@ -71,7 +71,8 @@ print( "HITS:%d" % len( hits ) )
 print( "SELFCLOSING:%d" % len( selfclosing ) )
 bad = 0
 for path, line, body in hits:
-    ms = re.findall( r'<m><!\[CDATA\[(.*?)\]\]></m>', body, re.S )
+    # P12 (L7, 2026-09-05): the matched line is the hit's OWN CDATA (no <m> wrapper) — the one not inside <b>/<a>
+    ms = re.findall( r'(?:^|</b>)<!\[CDATA\[(.*?)\]\]>(?=<a>|<at |$)', body, re.S )
     if len( ms ) != 1:
         print( "NO_M:%s:%s" % ( path, line ) ); bad += 1; continue
     src = open( path if path.startswith( '/' ) else root + '/' + path, encoding = 'utf-8', errors = 'replace' ).read().split( '\n' )
@@ -93,13 +94,13 @@ B1="$( grep -o '^BAD:[0-9]*'         "$TMP/verify1" | cut -d: -f2 )"
 
 # same, with context flags on (the <m> must be there in BOTH modes — that was the P5 bug)
 "$BIN" "$ROOT/test/grepcontextfix" --no-cache --grep=NEEDLE_MID_ONCE --grep-context=2 >"$TMP/ctx" 2>/dev/null
-grep -q '<m><!\[CDATA\[    int hitline = NEEDLE_MID_ONCE;\]\]></m>' "$TMP/ctx" \
+grep -q '</b><!\[CDATA\[    int hitline = NEEDLE_MID_ONCE;\]\]><a>' "$TMP/ctx" \
     && ok "(1b) --grep-context=2 also emits the matched line itself" \
     || { no "(1b) --grep-context=2 still hides the matched line"; cat "$TMP/ctx"; }
 
 # ── (3) child order is before → matched → after ──────────────────────────────────────────────────────
-perl -0777 -ne 'exit( /<hit [^>]*>\s*<b>.*?<\/b><m>.*?<\/m><a>.*?<\/a><\/hit>/s ? 0 : 1 )' "$TMP/ctx" \
-    && ok "(3) child order is <b> → <m> → <a> (reading order)" \
+perl -0777 -ne 'exit( /<hit [^>]*>\s*<b>.*?<\/b><!\[CDATA\[.*?\]\]><a>.*?<\/a><\/hit>/s ? 0 : 1 )' "$TMP/ctx" \
+    && ok "(3) reading order is <b> → the hit's own CDATA → <a> (P12: no <m> wrapper)" \
     || { no "(3) context children are out of order"; cat "$TMP/ctx"; }
 
 xmllint --noout "$TMP/ctx" 2>/dev/null && ok "(3b) context+matched-line output is well-formed XML" || no "(3b) malformed XML with context + <m>"
@@ -147,7 +148,7 @@ for fm in re.finditer( r"<f p=\"([^\"]*)\">(.*?)</f>", xml, re.S ):
         print( path + ":" + hm.group( 1 ) + " in=\"" + inattr + "\"" )
 ' "$1"
 }
-mrows(){ sed 's/></>\n</g' "$1" | grep -oE '<m><!\[CDATA\[.*'; }
+mrows(){ sed 's/></>\n</g' "$1" | grep -oE '<hit [^>]*><!\[CDATA\[.*'; }   # P12: the hit's own CDATA
 rows     "$TMP/solo.xml" >"$TMP/solo.rows"
 rows     "$TMP/lit"      | grep 'geometry.cpp' >"$TMP/par.rows"
 { [ -s "$TMP/solo.rows" ] && diff -q "$TMP/solo.rows" "$TMP/par.rows" >/dev/null; } \
@@ -201,7 +202,7 @@ mkdir -p "$TMP/long"
 python3 - "$TMP/long.xml" >"$TMP/longv" 2>&1 <<'PY'
 import re, sys
 xml = open( sys.argv[1], 'rb' ).read().decode( 'utf-8', errors = 'strict' )   # strict: a split codepoint raises
-ms  = re.findall( r'<m><!\[CDATA\[(.*?)\]\]></m>', xml, re.S )
+ms  = re.findall( r'<hit [^>]*><!\[CDATA\[(.*?)\]\]>', xml, re.S )   # P12: no <m> wrapper
 print( "M:%d MAXBYTES:%d" % ( len( ms ), max( [ len( m.encode() ) for m in ms ] or [ 0 ] ) ) )
 PY
 cat "$TMP/longv"
@@ -214,7 +215,7 @@ xmllint --noout "$TMP/long.xml" 2>/dev/null && ok "(8b) capped long-line output 
 # ── (9) the regex path emits <m> too, and the per-file trigram reject is still sound ──────────────────
 "$BIN" "$ROOT/test/regexfix" --no-cache --regex='comp.te'                 >"$TMP/rx.pf" 2>/dev/null
 "$BIN" "$ROOT/test/regexfix" --no-cache --regex='comp.te' --no-prefilter  >"$TMP/rx.fs" 2>/dev/null
-grep -q '<m><!\[CDATA\[' "$TMP/rx.pf" \
+grep -q '<hit [^>]*><!\[CDATA\[' "$TMP/rx.pf" \
     && ok "(9) --regex hits carry their matched line" \
     || { no "(9) --regex hits have no <m>"; head -3 "$TMP/rx.pf"; }
 diff -q "$TMP/rx.pf" "$TMP/rx.fs" >/dev/null \
