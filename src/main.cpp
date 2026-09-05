@@ -34,6 +34,7 @@
 #include "partition.h"             // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
                                    //   BEFORE mcp.h so mcpverbs.h's explore verb can reach packTaskPartitionText (same rule packtask.h follows).
 #include "tracelocus.h"            // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
+#include "callhierarchy.h"        // H14/M13: the shared --callers/--callees / MCP find_* 1-hop computation (CLI == MCP rows)
 #include "editcheck.h"             // L4: the shared --edit-check / MCP edit_check contract-comparison core (editCheckBundleText)
 #include "slice.h"                 // lane/paper-slice: --slice=SYM[:VAR] — the ARISE-motivated def-use slice core (sliceBundleText)
 #include "editpreview.h"           // card A1: the PRE-APPLY contract preview (editpreview::run) — BEFORE mcp.h, which

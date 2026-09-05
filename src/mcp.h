@@ -1290,9 +1290,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
                 else if( ( name == "find_symbol" || name == "find_referencing_symbols" ) && !path.empty() && !symbol.empty() )
                 {
-                    const std::string j = symbolQueryJson( path, symbol, name == "find_referencing_symbols" );
-                    resp = j.empty() ? errResultMsg( -32602, notFoundSym( symbol ) )
-                                     : textResult( j );
+                    // M13: these two page like their CLI twins (--callers/--callees are both in
+                    // honorsPaging), through the same mcpPageArgs window grep/impact/uses/whereis use.
+                    resp = pagedResult( [ & ]( McpPageArgs pg )
+                    {
+                        const std::string j = symbolQueryJson( path, symbol, name == "find_referencing_symbols", pg );
+                        return j.empty() ? errResultMsg( -32602, notFoundSym( symbol ) ) : textResult( j );
+                    } );
                 }
                 else if( name == "grep" && !path.empty() && !pattern.empty() )
                 {
@@ -1317,9 +1321,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
                 else if( name == "cochange" && !path.empty() && !file.empty() )
                 {
-                    const std::string j = cochangePartnersJson( path, file );
-                    resp = j.empty() ? errResultMsg( -32602, mcprefuse::fileNotFound( getIndex( path ).ing, file ) )
-                                     : textResult( j );
+                    // M13: pages like the CLI --cochange twin (a honorsPaging member).
+                    resp = pagedResult( [ & ]( McpPageArgs pg )
+                    {
+                        const std::string j = cochangePartnersJson( path, file, pg );
+                        return j.empty() ? errResultMsg( -32602, mcprefuse::fileNotFound( getIndex( path ).ing, file ) )
+                                         : textResult( j );
+                    } );
                 }
                 else if( name == "memory_recall" && !path.empty() && !task.empty() )
                 {
@@ -1365,14 +1373,18 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     }
                     else
                     {
-                        const std::string j = mentionsJson( path, symbol );
-                        resp = j.empty() ? errResultMsg( -32602, notFoundSym( symbol ) )
-                                         : textResult( j );
+                        resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
+                        {
+                            const std::string j = mentionsJson( path, symbol, pg );
+                            return j.empty() ? errResultMsg( -32602, notFoundSym( symbol ) ) : textResult( j );
+                        } );
                     }
                 }
                 else if( name == "for" && !path.empty() && !task.empty() )
                 {
-                    const std::string t = forTaskText( path, task, redactPtr );
+                    // M13: `budget_tokens` — the same knob the CLI --for takes, absent here until now.
+                    const std::string t = forTaskText( path, task, redactPtr,
+                                                       budgetArg.isPresent ? std::size_t( budgetArg.value ) : 0 );
                     resp = t.empty() ? errResult( -32602, "no symbols found" ) : textResult( t );
                 }
                 else if( name == "lego" && !path.empty() && !type.empty() )
@@ -1395,8 +1407,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 else if( name == "stray_content" && !path.empty() )
                 {
                     // `kind` doubles as the optional ref-name substring filter (no dedicated arg needed).
-                    const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef );
-                    resp = t.empty() ? errResult( -32602, "not a git repository (or no HEAD commit) — no refs to compare" ) : textResult( t );
+                    resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
+                    {
+                        const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg );
+                        return t.empty() ? errResult( -32602, "not a git repository (or no HEAD commit) — no refs to compare" ) : textResult( t );
+                    } );
                 }
                 else if( name == "flags" && !path.empty() )
                 {
@@ -1431,8 +1446,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 else if( name == "doc_drift" && !path.empty() )
                 {
                     // `kind` doubles as the optional doc-path substring filter.
-                    const std::string t = docDriftText( path, kind, docdrift::kMaxAnchorsShown );
-                    resp = t.empty() ? errResult( -32603, "internal error" ) : textResult( t );
+                    resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
+                    {
+                        const std::string t = docDriftText( path, kind, docdrift::kMaxAnchorsShown, pg );
+                        return t.empty() ? errResult( -32603, "internal error" ) : textResult( t );
+                    } );
                 }
                 else if( name == "owners" && !path.empty() )
                 {
@@ -1445,11 +1463,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     if( !refusal.empty() ) { resp = errResultMsg( -32602, refusal ); }
                     else
                     {
-                    const std::string t = ownersText( path, symbol );
-                    resp = t.empty() ? errResultMsg( -32602, symbol.empty()
-                                            ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
-                                            : notFoundSym( symbol ) )
-                                     : textResult( t );
+                    resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
+                    {
+                        const std::string t = ownersText( path, symbol, pg );
+                        return t.empty() ? errResultMsg( -32602, symbol.empty()
+                                                ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
+                                                : notFoundSym( symbol ) )
+                                         : textResult( t );
+                    } );
                     }
                 }
                 // ─── flagship-reflex verbs ───

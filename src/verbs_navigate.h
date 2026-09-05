@@ -54,25 +54,12 @@ inline const char* macroRoleAttr( rw::SymKind k ) noexcept
     return k == rw::SymKind::Macro ? " role=\"macro\"" : "";
 }
 
-// A6: --callers/--callees' 1-hop tested/untested partition, bundled into one call so runCallHierarchy
-// (already this file's largest dispatcher) pays ONE statement instead of separately naming testReach/
-// tested/untested/attr — the counting loop itself lives in graph.h::countTestedIn, shared with --impact.
-struct HopTestedPartition
-{
-    std::vector<char> testReach;
-    std::size_t       tested;
-    std::size_t       untested;
-    std::string       xmlAttr;   // " hop_tested=\"N\" hop_untested=\"M\""
-};
-
-inline HopTestedPartition computeHopTestedPartition( const rw::IngestResult& ing, const rw::Graph& g, const std::vector<rw::NodeId>& rows )
-{
-    std::vector<char> testReach = rw::testSymbolForwardReach( ing, g );
-    const std::size_t tested    = rw::countTestedIn( ing, testReach, rows );
-    const std::size_t untested  = rows.size() - tested;
-    std::string        attr     = " hop_tested=\"" + std::to_string( tested ) + "\" hop_untested=\"" + std::to_string( untested ) + "\"";
-    return { std::move( testReach ), tested, untested, std::move( attr ) };
-}
+// A6's HopTestedPartition + computeHopTestedPartition, and the row COLLECTION this dispatcher used to do
+// inline, now live in callhierarchy.h — the MCP twins (find_referencing_symbols / find_symbol) call the
+// same code rather than walking the CSR their own way and losing defs=/hop_tested=/tested= on the way out.
+// See that file's header for the drift this closed.
+using rw::CallHierarchyRows;
+using rw::HopTestedPartition;
 
 std::optional<int> runCallHierarchy( const MainDispatch& d )
 {
@@ -92,10 +79,11 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
     {
         const bool             wantCallers = !cfg.callers.empty();
         const std::string_view sym         = wantCallers ? cfg.callers : cfg.callees;
-        // X9(b): "file:name" now disambiguates here too (same rule as --around/--lego/--edit-check via
-        // resolveFocus) — a same-named symbol living in more than one file previously had no way to pick
-        // one side on --callers/--callees.
-        const std::vector<NodeId> matches  = resolveAllByNameQualified( ing, sym );
+        // callhierarchy.h owns the resolution, the neighbour union, the bodyless-def count and the
+        // tier-then-path order — the MCP twins run the identical call, so the two surfaces cannot disagree
+        // about WHICH rows the question has.
+        const CallHierarchyRows   chRows  = rw::callHierarchyRows( ing, g, sym, wantCallers );
+        const std::vector<NodeId>& matches = chRows.matches;
         if( matches.empty() )
         {
             const std::string verb = std::string( wantCallers ? "--callers" : "--callees" );   // one arm, two spellings
@@ -103,39 +91,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                                                                    sym, verb + "=" ).c_str() );   // §B4.2 shared refusal
             return 1;
         }
-        std::vector<char>   seen( ing.symbols.size(), 0 );
-        std::vector<NodeId> result;
-        for( NodeId x : matches )
-        {
-            if( wantCallers )
-            {
-                const auto* ro = g.inEdges.rowOffsets();
-                const auto* ci = g.inEdges.colIndices();
-                for( std::uint32_t k = ro[x]; k < ro[x + 1]; ++k )
-                {
-                    if( NodeId c = ci[k]; c < seen.size() && !seen[c] ) { seen[c] = 1; result.push_back( c ); }
-                }
-            }
-            else
-            {
-                for( std::uint32_t k = g.outOff[x]; k < g.outOff[x + 1]; ++k )
-                {
-                    if( NodeId c = g.outTargets[k]; c < seen.size() && !seen[c] ) { seen[c] = 1; result.push_back( c ); }
-                }
-            }
-        }
-        // LB-G (r10 §5): TIER before path — filter.h states the key once and --uses shares it. Plain path
-        // order put 171 `tests/` rows ahead of nothing on django's `--callers=bulk_create`.
-        const std::vector<std::uint8_t> tierOfFile = rw::pathTierIndexOver( ing, result, [ & ]( NodeId r ) { return ing.symbols[r].fileId; } );
-        std::sort( result.begin(), result.end(), [ & ]( NodeId a, NodeId b )
-        {
-            const Symbol& sa = ing.symbols[a];  const Symbol& sb = ing.symbols[b];
-            if( const int c = rw::compareTierThenPath( ing, tierOfFile, sa.fileId, sb.fileId ); c != 0 )
-            {
-                return c < 0;
-            }
-            return sa.line != sb.line ? sa.line < sb.line : sa.name < sb.name;
-        } );
+        const std::vector<NodeId>& result = chRows.rows;
+
         const char*       tag = wantCallers ? "callers" : "callees";
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -147,19 +104,9 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // same convention reaches=/impact_reaches= already use for radius_tested=/radius_untested=.
         const HopTestedPartition chTested = computeHopTestedPartition( ing, g, result );
 
-        // Count bodyless definitions (declarations with no body): sigEndByte == endByte means no body
-        std::size_t bodylessDefsCount = 0;
-        if( !wantCallers )  // Only relevant for callees; callers don't have this concern
-        {
-            for( NodeId x : matches )
-            {
-                const Symbol& sym = ing.symbols[x];
-                if( sym.sigEndByte == sym.endByte )
-                {
-                    ++bodylessDefsCount;
-                }
-            }
-        }
+        // Bodyless definitions (a declaration with no body) are counted by callhierarchy.h, callees-only.
+        const std::size_t bodylessDefsCount = chRows.bodylessDefs;
+
         // T2 + §P8 G1: paginate the sorted result. count= stays the un-windowed total (V3 L-4: "TRUE" is the
         // word this comment used, and it contradicts the counts_floor= marker the emitter ten lines below now
         // prints — the total is true of the PAGE, never of the world); the disclosure appears only

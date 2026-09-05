@@ -936,16 +936,26 @@ struct McpVerbFields
 inline constexpr McpVerbFields kMcpVerbFields[] = {
     // ── read verbs ──
     { "analyze",                  "path paths" },
-    { "find_symbol",              "path paths symbol" },
-    { "find_referencing_symbols", "path paths symbol" },
+    // M13: limit/offset are DECLARED because these two now HONOR them (symbolQueryJson takes an
+    // McpPageArgs) — their CLI twins --callees/--callers are both in cli.h's honorsPaging set, and a verb
+    // that pages on one surface and is pinned to page 1 on the other is the parity gap this closed.
+    { "find_symbol",              "path paths symbol limit offset" },
+    { "find_referencing_symbols", "path paths symbol limit offset" },
     { "grep",                     "path paths pattern in limit offset" },
-    { "cochange",                 "path file" },
+    // M13 (capture-audit 2026-09-04): every verb whose CLI twin sits in cli.h's honorsPaging set now
+    // declares limit+offset here, and every verb whose CLI twin honors --token-budget declares
+    // budget_tokens. Before this, only grep/impact/uses/whereis paged over MCP while their CLI twins all
+    // did — the refusal was loud, but "loud" is not the same as "answerable", and an MCP-only agent had no
+    // page 2 for cochange/owners/doc_drift/stray_content/mentions/find_*. Gate: mcpcontractcheck.sh's
+    // paging arm, which derives the CLI set from kPagingHonoringVerbs rather than trusting this table.
+    // --cochange is in that set, so its twin declares the same window.
+    { "cochange",                 "path file limit offset" },
     { "memory_recall",            "path task top_k budget_tokens" },
     { "situational_awareness",    "path diff files" },
-    { "mentions",                 "path paths symbol" },
-    { "for",                      "path paths task" },
+    { "mentions",                 "path paths symbol limit offset" },
+    { "for",                      "path paths task budget_tokens" },
     { "lego",                     "path paths type" },
-    { "owners",                   "path symbol" },
+    { "owners",                   "path symbol limit offset" },
     { "fetch_body",               "path handle start_line end_line" },
     { "batch",                    "path queries" },
     // ── flagship-reflex verbs ──
@@ -963,9 +973,9 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "from_trace",               "path paths trace budget_tokens" },
     { "edit_check",               "path paths symbol new_body" },
     { "whereis",                  "path symbol kind limit offset" },
-    { "stray_content",            "path kind" },
+    { "stray_content",            "path kind limit offset" },
     { "flags",                    "path kind symbol" },
-    { "doc_drift",                "path kind" },
+    { "doc_drift",                "path kind limit offset" },
     // lane/tc-sliceat: the ARISE def-use slice — var/flow/depth mirror the CLI's :VAR / --slice-flow /
     // --slice-depth knobs; single-root by kMcpSingleRootVerbs (a per-definition on-disk re-parse).
     { "slice",                    "path symbol var flow depth" },
