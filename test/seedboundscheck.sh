@@ -59,7 +59,8 @@ echo "=== --around: the root echoes of= and BOTH bounds, always ==="
 ROOTEL(){ "$BIN" "$R" "$@" --no-cache 2>/dev/null | sed 's/<!--[^>]*-->//g' | grep -o '<r [^>]*>' | head -1; }
 
 EL="$( ROOTEL --around=mid )"
-for attr in 'of="mid"' 'depth="2"' 'fanout="32"'; do
+# RE-PINNED 2026-09-05 (capture-audit P4, lane L7): the default depth is 1 (cli.h aroundDepth; --around-depth=2 restores).
+for attr in 'of="mid"' 'depth="1"' 'fanout="32"'; do
     printf '%s' "$EL" | grep -qF "$attr" \
       && ok "--around=mid root carries $attr" \
       || no "--around=mid root has no $attr — the answer's scope is unreadable: $EL"
@@ -123,7 +124,7 @@ echo "=== --help names the defaults the root now echoes ==="
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 HELP="$TMP/help.txt"
 "$BIN" --help >"$HELP" 2>/dev/null
-grep -qF -- '--around-depth=N, default 2' "$HELP" \
+grep -qF -- '--around-depth=N, default 1' "$HELP" \
   && ok "--help names --around-depth's default" || no "--help still gives no default for --around-depth"
 grep -qF -- '--around-fanout=K, default 32' "$HELP" \
   && ok "--help names --around-fanout's default" || no "--help still gives no default for --around-fanout"

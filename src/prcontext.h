@@ -49,6 +49,8 @@
 // rather than silent.
 
 #include "model.h"
+#include "nextverb.h"      // P4 (L7): next= on a windowed pr-context root
+#include "pageview.h"     // P4 (L7): pageWindow/pageDisclosure over the changed files
 #include "graph.h"
 #include "filter.h"             // isTestPath
 #include "gitmine.h"            // shSingleQuote, cochangePartners, gitFileAuthors, FileOwnership
@@ -437,6 +439,23 @@ struct PrTrim
     const char* dropped;          // honest, cumulative summary of what a consumer is NOT seeing at this level
 };
 
+// P4 (capture-audit 2026-09-04, lane L7): the bundle is budgeted BY DEFAULT. Lens 8 measured --pr-context=main~1 at
+// 659,824 B (~165K tokens, 217 files, 3,590 <s> + 3,367 <caller> rows) with no ceiling in force. The default is
+// kPrDefaultBudgetTokens, disclosed as budget_default="1" on the root; --token-budget=N / --max-tokens=N set it
+// explicitly. The trim ladder below runs first (detail, never files); when even the structural FLOOR of every
+// changed file exceeds the budget, the files themselves — blast-radius order — are windowed: files_shown=/capped=/
+// has_more=/next_offset=/offset=/limit= on the root and next= pastes the next page (--offset=N / --limit=N are the
+// explicit window; --pr-context joined cli.h's paging-honoring set for it).
+inline constexpr std::size_t kPrDefaultBudgetTokens = 8000;
+
+struct PrBudget
+{
+    std::size_t tokens     = 0;       // the ceiling in force (0 = none — only the multi-root sub-bundles ever pass 0)
+    bool        isDefault  = false;   // kPrDefaultBudgetTokens applied because the caller named none
+    int         pageLimit  = 0;       // --limit=N over the changed files (0 = none)
+    int         pageOffset = 0;       // --offset=M over the changed files
+};
+
 inline constexpr PrTrim kPrTrims[] = {
     { 20, 40, 12, true,  12, 5, "none" },                                                        // L0 = pre-budget output (byte-identical)
     {  8, 12,  4, true,   4, 3, "list-caps-reduced" },                                            // L1
@@ -704,10 +723,11 @@ inline std::pair<std::string, std::vector<NodeId>> splitDocSections( const Inges
 // still renders byte-identically.
 inline int writePrContext( std::FILE* out, const std::string& root, const IngestResult& ing, const Graph& g,
                            const std::vector<char>& changedFile, std::string_view baseLabel,
-                           std::uint32_t skippedModeOnly = 0, std::size_t budgetTokens = 0,
+                           std::uint32_t skippedModeOnly = 0, const PrBudget& budget = PrBudget{},
                            std::uint32_t onlyRoot = UINT32_MAX, std::string_view rootLabel = std::string_view(),
                            const PrContextMask& anchor = PrContextMask{} )
 {
+    const std::size_t budgetTokens = budget.tokens;
     const std::uint32_t F = std::uint32_t( ing.files.size() );
     const std::uint32_t N = std::uint32_t( ing.symbols.size() );
 
@@ -761,6 +781,12 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                  "max-tokens only lowers these further via the trim ladder, nothing raises them past L0): each capped element carries its own shown=/capped= pair so the cut is never silent — for the untrimmed list use impact=SYM/callers=SYM "
                  "(blast radius/callers), affected=FILE or situ (tests), cochange (partners), or owners (authors) instead. direction= names which SIDE this bundle reviews (worktree-since-head, head-since-fork, head-since-ref-tip); "
                  "a no-ref-work row says the base ref's tip IS the merge base, i.e. it carries no divergent work of its own. deterministic. "
+                 // P4 (L7): the default budget and the file window, defined where the reader meets them
+                 "BUDGET: the bundle is budgeted by default — budget_tokens= is the ceiling in force (8000 unless token-budget/max-tokens set it; "
+                 "budget_default=1 says the default applied), est_tokens= the fit, trim_level=/truncated= what the ladder dropped. When even the "
+                 "structural floor of every changed file exceeds it, the FILES are windowed in blast-radius order: files_shown= of files=, "
+                 "capped=1 with total=/has_more=/next_offset=/offset=/limit= (limit=0 = the default window), and next= is the one pasteable "
+                 "follow-up (the next page). "
                  // §H4 §3.4 / V4 MED-3: the SEVENTH graph-count surface. Every per-symbol callers= here is read
                  // from the in-edge CSR --callers reads, and <impact dependents=> is the same transitive reach
                  // --impact reports, so the same floor applies to hundreds of attributes in this one document.
@@ -805,10 +831,11 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     // The per-file body emitter, parameterized by a trim level so the budget path can render it at several
     // depths into a memstream to measure, then re-render the chosen one to `out`. At the deepest trim it is
     // still one <file> element PER changed file (counts intact) — files are never dropped, only detail is.
-    const auto emitFiles = [ & ]( std::FILE* o, const PrTrim& trim )
+    const auto emitFilesRange = [ & ]( std::FILE* o, const PrTrim& trim, std::size_t begin, std::size_t end )
     {
-        for( std::uint32_t f : changed )
+        for( std::size_t ci = begin; ci < end; ++ci )
         {
+            const std::uint32_t f = changed[ ci ];
             // this file's defined symbols, in id order (== file/line order by the ingest sort).
             const FileSymbols& fileSyms = symsByFile[f];
 
@@ -1014,8 +1041,12 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
         }
     };
 
-    // NO budget (the default): emit at level 0 (byte-identical to the pre-budget output) with no est_tokens/
-    // truncated attributes — every existing consumer and gate is unaffected.
+    // P4 (L7): the changed-file WINDOW — --limit/--offset when given, else every file (the budget may still cut it below)
+    const PageWindow  filePw    = pageWindow( changed.size(), budget.pageLimit, budget.pageOffset );
+    std::size_t       fileEnd   = filePw.end;
+    const auto        emitFiles = [ & ]( std::FILE* o, const PrTrim& trim ) { emitFilesRange( o, trim, filePw.begin, fileEnd ); };
+
+    // NO budget at all (only a multi-root sub-bundle handed 0): level 0, no budget attributes.
     if( budgetTokens == 0 )
     {
         writePrRootOpen( out, g, sharedAttrs, " files=\"" + std::to_string( changed.size() ) + "\" skipped_mode_only=\"" + std::to_string( skippedModeOnly ) + "\"" + atAttrStr, anchor, escBase );
@@ -1024,9 +1055,37 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
         return 0;
     }
 
-    // BUDGETED (--max-tokens) — see pickPrTrimLevel: render each candidate level, keep the least-trimmed fit.
-    const PrTrimRender chosen = pickPrTrimLevel( emitFiles, budgetTokens );
-    writePrRootOpen( out, g, sharedAttrs, prBudgetTail( changed.size(), skippedModeOnly, budgetTokens, chosen, ex( chosen.truncated ) ) + atAttrStr, anchor, escBase );
+    // BUDGETED (the default 8K, or --token-budget/--max-tokens) — see pickPrTrimLevel: render each candidate level,
+    // keep the least-trimmed fit. P4: when even the FLOOR of the whole window is over, shrink the window to the
+    // largest file prefix whose floor fits (binary search on the floor render; at least one file), then pick the
+    // level for that prefix — the cut is disclosed below and next= pastes the page that starts where this one stopped.
+    PrTrimRender chosen = pickPrTrimLevel( emitFiles, budgetTokens );
+    if( chosen.truncated.find( "budget-floor-exceeded" ) != std::string::npos && fileEnd - filePw.begin > 1 )
+    {
+        std::size_t lo = 1, hi = fileEnd - filePw.begin;   // prefix lengths: lo fits (assumed for 1), hi does not
+        while( hi - lo > 1 )
+        {
+            const std::size_t mid = lo + ( hi - lo ) / 2;
+            fileEnd = filePw.begin + mid;
+            const PrTrimRender probe = pickPrTrimLevel( emitFiles, budgetTokens );
+            if( probe.truncated.find( "budget-floor-exceeded" ) == std::string::npos ) { lo = mid; } else { hi = mid; }
+        }
+        fileEnd = filePw.begin + lo;
+        chosen  = pickPrTrimLevel( emitFiles, budgetTokens );
+    }
+    const std::size_t filesShown = fileEnd - filePw.begin;
+    std::string       windowAttrs = " files_shown=\"" + std::to_string( filesShown ) + "\"";
+    if( filesShown < changed.size() )
+    {
+        char pab[ kPageDisclosureCap ];
+        windowAttrs += pageDisclosure( pab, sizeof( pab ), filesShown, changed.size(), fileEnd, budget.pageLimit, budget.pageOffset, true );
+        windowAttrs += nextAttrXml( std::string( "--pr-context" ) + ( baseLabel == "working-tree" ? std::string() : "=" + std::string( baseLabel ) )
+                                    + " --offset=" + std::to_string( fileEnd ) );
+    }
+    writePrRootOpen( out, g, sharedAttrs,
+                     prBudgetTail( changed.size(), skippedModeOnly, budgetTokens, chosen, ex( chosen.truncated ) )
+                         + ( budget.isDefault ? " budget_default=\"1\"" : "" ) + windowAttrs + atAttrStr,
+                     anchor, escBase );
     std::fwrite( chosen.body.data(), 1, chosen.body.size(), out );
     std::fprintf( out, "</pr-context>" );
     return 0;

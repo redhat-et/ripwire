@@ -89,7 +89,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "test-gate",    "test-gate",    "tests to run <t p= run=> + the UNTESTED blast radius <u sym= p= l= ccx=>; exit 4 while either exists" },
     { "affected",     "affected",     "test files that transitively reach the changed files/symbols: <test p= run=>; seeded_by= the reading taken" },
     { "exercises",    "exercises",    "NON-TEST symbols this test transitively calls (what it covers): <t p= run=>; the inverse of affected" },
-    { "pr-context",   "pr-context",   "review bundle per changed file vs base=: symbols, callers, blast radius, tests, co-change, owners" },
+    { "pr-context",   "pr-context",   "review bundle per changed file vs base=: symbols, callers, blast radius, tests, owners" },
     { "dmm",          "dmm",          "Delta Maintainability Model base=→target=: dmm= good/(good+bad) units by size_metric=; <p k= dmm= good= bad= d_low= d_high=>" },
     { "handoff",      "handoff",      "continuation packet for the NEXT session: <verified changed= blast_files=>, <tests n=>, <heuristic n= candidates=>, <note>, <doc p=>" },
     { "merge-scout",  "merge-scout",  "cross-branch overlap of arms= refs: <arm ref= base= changed= head_conflicts=>, <pair a= b= conflicts= risks=>, <landing order=>" },

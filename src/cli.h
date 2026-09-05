@@ -68,7 +68,9 @@ struct Config
     std::string_view verifyClaim;                          // --verify=CLAIM (G4): one structured claim in, a three-valued verdict + inline evidence out (src/verify.h owns the closed grammar)
     std::string_view helpTask;                             // --help-task=TASK: deterministic task -> one recommended Ripwire command (or honest abstention)
     bool             externalSurface = false;              // --external-surface: names referenced but never defined in-corpus (stdlib/3p surface)
-    int              aroundDepth     = 2;                  // --around-depth=
+    int              aroundDepth     = 1;                  // --around-depth= — P4 (L7): default 1 hop (was 2: 61,891 B / 24,973
+                                                           // tokens on --around=rankGraphTeleport vs 5,860 B at depth 1; the root's
+                                                           // depth= discloses it, --around-depth=2 restores the old neighbourhood)
     int              aroundFanout    = 32;                 // --around-fanout=
     bool             eval            = false;              // --eval: self-eval (co-change recall vs BM25)
     bool             evalRetrieval   = false;              // --eval-retrieval: KNOWN-ITEM retrieval eval — validates
@@ -243,6 +245,10 @@ struct Config
                                                             // identifiers in the tool that no verb accepted.
     bool             zoom        = false;                   // --zoom[=depth]: NESTED module hierarchy (multi-level Louvain) + top-level bridges (S5-D)
     int              zoomDepth   = 0;                       // --zoom=depth: cap the hierarchy at `depth` levels (0 = auto: contract until ≤10 top modules)
+    int              zoomLevels  = 0;                       // --zoom-levels=N (P4, L7): how many levels the document PRINTS from the top
+                                                            // (0 = every level); the default prints 2 (levels_shown= discloses it)
+    bool             zoomLevelsSet = false;                 // did the caller pass --zoom-levels=? (the guard: it modifies --zoom only)
+    bool             includeBuiltins = false;               // --include-builtins (P4, L7): --external-surface lists the sh builtins it drops by default
     bool             report      = false;                  // --report: auto architecture summary (markdown)
     bool             tree        = false;                  // --tree: file-level orientation map (top symbols per file)
     bool             seams       = false;                  // --seams: cross-module bridges no test reaches (untested integration seams)
@@ -927,7 +933,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               output (a capture/API dump quotes every term, so BM25 hands it every query). Never\n"
         "                               dropped: it still wins when nothing else matches. Each one says [generated_demoted:\n"
         "                               marker|size+fences] on its own line and the header tallies generated_demoted=N\n"
-        "    --tree                     file-by-file orientation map (top symbols per file)\n"
+        "    --tree                     file-by-file orientation map (top symbols per file). Default window: the 80 files with the\n"
+        "                               best-ranked symbols (shown=/capped=/total=/next_offset= disclose the cut, next= pastes the\n"
+        "                               next page); --limit=N/--offset=M window it explicitly (--limit=100000 = every file)\n"
         "    --html[=FILE]              self-contained HTML force-directed call graph (no CDN — redirect or write FILE)\n"
         "    --color-by=MODE            (with --html) node colour: lang (default) | community | cx | churn | tested — the page embeds all\n"
         "                               five and keeps a live selector; the flag only sets the initial mode\n"
@@ -940,7 +948,9 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               on the CLI it changes nothing and says so on stderr (the map is important-first\n"
         "                               unless you pass --order=stable)\n\n"
         "  navigate / answer a question\n"
-        "    --around=SYM               ego graph around SYM   [--around-depth=N, default 2] [--around-fanout=K, default 32]\n"
+        "    --around=SYM               ego graph around SYM   [--around-depth=N, default 1] [--around-fanout=K, default 32]\n"
+        "                               (default depth 1 since 2026-09-05: depth 2 was 3x the whole default map on this repo; the\n"
+        "                               root's depth= says which; --around-depth=2 restores the 2-hop neighbourhood)\n"
         "                               the root echoes all three (of= depth= fanout=), so the boundary of what could appear is readable\n"
         "    --callers=SYM              who calls SYM (1-hop in-edges). file:name disambiguates a same-named symbol across files (like --around/--lego);\n"
         "                               Scope::name picks one scope's definition — the sym= spelling edit-check prints resolves everywhere\n"
@@ -969,7 +979,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               --offset pages past it — see --limit=N --offset=M above\n"
         "    --external-surface         names referenced but never defined in-corpus (the stdlib/third-party surface), by ref count;\n"
         "                               each row's lang= is the REFERENCING file's language — a name called from several languages\n"
-        "                               (e.g. printf: C stdio call vs Bash builtin) gets one row PER language, not a merged count\n"
+        "                               (e.g. printf: C stdio call vs Bash builtin) gets one row PER language, not a merged count.\n"
+        "                               Default window: 100 rows (shown=/capped=/next_offset=, next= pastes the next page; --limit=N\n"
+        "                               raises it) and the sh BUILTINS (echo printf cd exit test …) are dropped — builtins_excluded=\n"
+        "                               counts them; --include-builtins keeps them\n"
         "    --path=SRC,DST             shortest directed call-path SRC -> DST\n"
         "    --connect=A,B,C            minimal connecting subgraph over 2..16 symbols: terminals + fewest joining intermediaries +\n"
         "                               call edges in TRUE direction (finds the shared-caller join a directed --path can't)   [--connect-radius=N (1..12, default 6)]\n"
@@ -1366,7 +1379,10 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               and reports size=\"1\". modules= counts the non-isolated communities (same number as the\n"
         "                               parent's modules=). An id outside 0..partition-1 REFUSES, naming the valid range and the\n"
         "                               nearest legal id -- a bad id is a typo, not an empty module\n"
-        "    --zoom[=depth]             NESTED module hierarchy (multi-level Louvain) + cross-module bridges; --zoom --mermaid = nested diagram\n"
+        "    --zoom[=depth]             NESTED module hierarchy (multi-level Louvain) + cross-module bridges; --zoom --mermaid = nested diagram.\n"
+        "                               Default window: the top 2 levels (levels_shown=; a module at the cut carries children= for its\n"
+        "                               unprinted child modules; --zoom-levels=N prints N, 0 = all) over the 40 largest top modules\n"
+        "                               (shown=/capped=/next_offset=, next= pastes the next page; --limit=N/--offset=M window them)\n"
         "    --report                   architecture summary (modules, god-files, cycles) as markdown\n"
         "    --seams                    cross-module call seams no test reaches (untested integration seams)\n"
         "    --mermaid                  module (directory) dependency graph as a Mermaid diagram (paste/render)\n"
@@ -1611,9 +1627,13 @@ inline void printUsage( std::FILE* out ) noexcept
         "                               1) — never a guess, never an empty chain.\n"
         "    --pr-context[=BASEREF]     no-LLM review-evidence bundle for the diff (working-tree, or vs BASEREF): per changed file,\n"
         "                               its symbols + callers + blast radius + affected tests + co-change partners + owners.\n"
-        "                               With --max-tokens=N the bundle degrades to fit: per-file structural counts survive for\n"
-        "                               ALL changed files, the deep detail (caller/co-change lists, per-symbol rows) trims\n"
-        "                               deepest-first, and truncated= names what was dropped (est_tokens= reports the fit).\n"
+        "                               The bundle is BUDGETED by default (8000 tokens, budget_default=\"1\" on the root; --token-budget=N\n"
+        "                               or --max-tokens=N set it explicitly): per-file structural counts survive first, the deep\n"
+        "                               detail (caller/co-change lists, per-symbol rows) trims deepest-first, truncated= names what\n"
+        "                               was dropped and est_tokens= reports the fit. When even the structural floor of every changed\n"
+        "                               file exceeds the budget, the FILES (blast-radius order) are windowed: files_shown=/capped=/\n"
+        "                               next_offset= disclose the cut and next= pastes the next page (--offset=N / --limit=N window\n"
+        "                               them explicitly).\n"
         "                               ANCHORING: the BASEREF form diffs against merge-base(BASEREF,HEAD), never BASEREF's tip —\n"
         "                               \"what did THIS work change since it forked\", not \"how do the two trees differ today\".\n"
         "                               base_moved= counts the paths BASEREF moved since the fork that this work never touched\n"
@@ -2362,6 +2382,7 @@ inline constexpr BoolFlag kBoolFlags[] =
 
     // graph surface
     { "--external-surface",   &Config::externalSurface    },
+    { "--include-builtins",   &Config::includeBuiltins    },   // P4 (L7): --external-surface keeps the sh builtins (echo/printf/cd/…) it drops by default
 
     // skills, reports, redaction
     { "--scan-skills",        &Config::scanSkills         },
@@ -2631,6 +2652,10 @@ inline constexpr IntFlag kIntFlags[] =
     // graph shaping
     { "--zoom=",             &Config::zoomDepth,     false, kIntFlagMax,       "a positive integer depth",   "--zoom=2",
       nullptr, nullptr, &Config::zoom },
+    // P4 (L7): how many hierarchy levels --zoom PRINTS from the top (the default is 2, disclosed as levels_shown=);
+    // 0 = every level. isSetFlag records explicitness so the bare modifier can be refused (it shapes --zoom only).
+    { "--zoom-levels=",      &Config::zoomLevels,    true,  kIntFlagMax,       "a non-negative integer (0 = every level)", "--zoom-levels=0",
+      nullptr, nullptr, &Config::zoomLevelsSet },
     { "--connect-radius=",   &Config::connectRadius, false, kConnectRadiusMax, "an integer in 1..12",        "--connect-radius=6" },
 
     // budgets + the ranked head
@@ -2697,7 +2722,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              warn once per RUN, not per flag — state a BoolFlag row has nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 22;   // +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=)
-inline constexpr std::size_t kTotalFlagArms = 207;  // +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
+inline constexpr std::size_t kTotalFlagArms = 209;  // +2 P4 (capture-audit 2026-09-04, lane L7): --zoom-levels= (kIntFlags row, the printed-levels ceiling) and --include-builtins (kBoolFlags row, the external-surface builtin opt-in); +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -2898,7 +2923,7 @@ constexpr const char* kPagingHonoringVerbs =
     "--communities --community --whereis --grep/--regex --match --pattern --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
     "--readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence "
-    "--naming-consistency --safe-delete";
+    "--naming-consistency --safe-delete --pr-context";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -2909,7 +2934,7 @@ inline bool honorsPaging( const Config& c ) noexcept
         || c.seams || ( c.zoom && !c.mermaid ) || c.externalSurface || c.deadCode || !c.mentionsSym.empty()
         || !c.graphQuery.empty() || ( c.strayContent && !c.landingPlan && !c.abiFlag ) || c.testGate
         || c.readability || c.ensemble || c.qualityPanel || c.contextRatio || c.nonlocalState || c.commentCoherence
-        || c.namingConsistency || !c.safeDeleteSym.empty();
+        || c.namingConsistency || !c.safeDeleteSym.empty() || c.prContext;   // P4 (L7): the changed-file window
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in
@@ -3075,7 +3100,7 @@ inline constexpr PagingFamilyFlagGuard kTopKGuard
 inline constexpr PagingFamilyFlagGuard kMaxTokensGuard
 {
     "--max-tokens is honored by the default map (and --html, which renders it), --recall, --connect, "
-    "--pr-context, --from-trace and --for --detail=N — none of them in the --limit/--offset-honoring set (",
+    "--pr-context, --from-trace and --for --detail=N — none of them, --pr-context aside (it pages AND shapes by budget), in the --limit/--offset-honoring set (",
     ")",
     "no byte budget to shape",
     "ripwire <dir> --hotspots --limit=3"
@@ -3083,7 +3108,8 @@ inline constexpr PagingFamilyFlagGuard kMaxTokensGuard
 inline constexpr PagingFamilyFlagGuard kTokenBudgetGuard
 {
     "--token-budget is honored by the default map (the CI gate), --for, --pack-task, --recall, "
-    "--handoff, --from-trace and --run-trace — none of them in the --limit/--offset-honoring set (",
+    "--handoff, --from-trace, --run-trace and --pr-context — none of them, --pr-context aside (it pages AND shapes by budget), "
+    "in the --limit/--offset-honoring set (",
     ")",
     "no byte budget to gate",
     "ripwire <dir> --callers=SYM --limit=3"
@@ -3107,15 +3133,17 @@ inline void validateShapingFlagsHonored( Config& c ) noexcept
         return;
     }
 
-    if( c.topKExplicit && !honorsTopK( c ) )
+    if( c.topKExplicit && !honorsTopK( c ) && !c.prContext )   // P4: pr-context's kShapingVerbs row owns its --top-k notice
     {
         refusePagingFamilyFlag( c, kTopKGuard );
     }
-    if( c.maxTokens > 0 )
+    // P4 (L7): --pr-context is the one member of the paging set that ALSO shapes by budget (its trim ladder has
+    // taken --max-tokens since R4, and --token-budget since the default 8K ceiling) — the two budget refusals skip it.
+    if( c.maxTokens > 0 && !c.prContext )
     {
         refusePagingFamilyFlag( c, kMaxTokensGuard );
     }
-    if( c.tokenBudget != 0 )
+    if( c.tokenBudget != 0 && !c.prContext )
     {
         refusePagingFamilyFlag( c, kTokenBudgetGuard );
     }
@@ -3199,7 +3227,7 @@ inline constexpr ShapingVerb kShapingVerbs[] = {
     { "--scan-skills",  &Config::scanSkills,   nullptr },
     { "--merge-scout",  &Config::mergeScoutFlag, nullptr },
     { "--connect",      nullptr, &Config::connectSpec,  false, true },   // packConnect takes the budget
-    { "--pr-context",   &Config::prContext,    nullptr, false, true },   // writePrContext takes the budget
+    { "--pr-context",   &Config::prContext,    nullptr, false, true, true },   // writePrContext takes the budget; P4 (L7): --token-budget too (the default 8K ceiling's explicit form)
     { "--from-trace",   nullptr, &Config::fromTrace,    false, true, true },   // FromTraceInputs::bodyBudgetBytes
     { "--run-trace",    nullptr, &Config::runTrace,     false, false, true },  // runRunTrace takes the budget (exec-mode --from-trace)
     // ── capture-audit 2026-09-04 (H3): the verbs that were in NEITHER guard table ──────────────────────
@@ -3266,7 +3294,7 @@ inline const ShapingVerb* selectedShapingVerb( const Config& c ) noexcept
 
 inline void noticeShapingFlagIgnored( const Config& c ) noexcept
 {
-    if( c.mcp || honorsPaging( c ) )
+    if( c.mcp || ( honorsPaging( c ) && !c.prContext ) )   // P4 (L7): pr-context pages AND shapes — its row below speaks
     {
         return; // that family REFUSES; two messages would be noise
     }
@@ -3430,6 +3458,22 @@ static inline void validateLegendModifier( Config& c ) noexcept
     }
 }
 
+// P4 (capture-audit 2026-09-04, L7): the two default-ceiling modifiers are inert without their verb — refused,
+// naming the pairing (M16's rule: a bare modifier never emits the default map at exit 0).
+static inline void validateDefaultCeilingModifiers( Config& c ) noexcept
+{
+    if( c.zoomLevelsSet && !c.zoom )
+    {
+        std::fprintf( stderr, "ripwire: --zoom-levels=N modifies --zoom — pass it too (e.g. ripwire <dir> --zoom --zoom-levels=0 prints every level)\n" );
+        c.ok = false;
+    }
+    if( c.includeBuiltins && !c.externalSurface )
+    {
+        std::fprintf( stderr, "ripwire: --include-builtins modifies --external-surface — pass it too (e.g. ripwire <dir> --external-surface --include-builtins)\n" );
+        c.ok = false;
+    }
+}
+
 static inline void validateGrepHandleModifier( Config& c ) noexcept
 {
     if( c.grepHandles && c.grep.empty() )
@@ -3450,6 +3494,7 @@ inline void validateModifierGuards( Config& c ) noexcept
 
     validateLegendModifier( c );
     validateGrepHandleModifier( c );
+    validateDefaultCeilingModifiers( c );   // P4 (L7): --zoom-levels / --include-builtins ride their verb only
 
     // --mcp-token/--allow-remote-edits are read ONLY inside the --listen HTTP branch (main.cpp's
     // McpHttpConfig assembly) — the stdio --mcp path never touches either member, so bare `--mcp --mcp-token=…`

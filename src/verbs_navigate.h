@@ -1744,23 +1744,42 @@ std::optional<int> runExternalSurface( const MainDispatch& d )
         }
 
         const auto ext   = accumulateExternalSurface( ing, defined );
-        const auto names = buildExternalSurfaceRows( ext );
+        auto       names = buildExternalSurfaceRows( ext );
+        // P4 (L7): a shell script "calls" echo/printf/cd/exit — the interpreter, not a dependency. Dropped by
+        // default (externalnames.h kShellBuiltinNames), COUNTED on the root, kept under --include-builtins. Lens 8
+        // measured the default at 67,862 B / 1,422 rows led by exactly these.
+        std::size_t builtinsExcluded = 0;
+        if( !cfg.includeBuiltins )
+        {
+            const auto isBuiltinRow = [ & ]( const auto& r ) { return std::string_view( langTag( r.lang ) ) == "sh" && rw::externalnames::isShellBuiltinName( r.name ); };
+            builtinsExcluded = std::size_t( std::count_if( names.begin(), names.end(), isBuiltinRow ) );
+            names.erase( std::remove_if( names.begin(), names.end(), isBuiltinRow ), names.end() );
+        }
 
         // §P15/§P16: names is deterministically sorted (refs desc, name asc, lang asc — buildExternalSurfaceRows
         // above). --pack-top-n was the only cap and had no --offset partner; --limit now overrides it exactly
         // like --deps' packTopN/pageLimit composition (src/serialize.h::packDeps), and --offset finally pages.
-        const int         histCap = cfg.packTopN > 0 ? cfg.packTopN : int( names.size() );
+        // P4 (L7): the DEFAULT window is kExternalSurfaceRowCap rows (it was "everything"); --limit=N raises it.
+        const int         histCap = cfg.packTopN > 0 ? cfg.packTopN : kExternalSurfaceRowCap;
         const PageWindow  extPw   = pageWindow( names.size(), effectiveRowCap( cfg.pageLimit, histCap ), cfg.pageOffset );
         std::vector<char> esc;
         const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
         std::printf( "<!-- ripwire external-surface: names CALLED/IMPORTED/EXTENDED but never defined in the indexed "
-                     "tree = the stdlib/third-party surface the code depends on (refs=use-sites, calls=of-which-calls) -->" );
+                     "tree = the stdlib/third-party surface the code depends on (refs=use-sites, calls=of-which-calls). "
+                     // P4 (L7): the two defaults, defined where the reader meets them
+                     "builtins_excluded= counts the sh BUILTIN rows (echo printf cd exit test …) dropped from names= by default — the interpreter, "
+                     "not a dependency; the include-builtins flag keeps them. The rows are a WINDOW (default 100; shown=/capped=/total=/"
+                     "has_more=/next_offset= disclose the cut, limit=/offset= page it) and next= pastes the next page. -->" );
         // P2.1: --pack-top-n caps the listing; names= is the true total, shown=/capped= the printed slice.
         const std::size_t extShown = extPw.end - extPw.begin;
+        const bool        extCut   = extShown < names.size();
+        const std::string extNext  = extCut ? rw::nextAttrXml( "--external-surface --offset=" + std::to_string( extPw.end ) ) : std::string();
+        const std::string extBuiltinsAttr = builtinsExcluded > 0 ? " builtins_excluded=\"" + std::to_string( builtinsExcluded ) + "\"" : std::string();
         char              extAb[ kPageDisclosureCap ];
-        std::printf( "<external-surface names=\"%zu\"%s>", names.size(),
+        std::printf( "<external-surface names=\"%zu\"%s%s%s>", names.size(), extBuiltinsAttr.c_str(),
                      pageDisclosure( extAb, sizeof( extAb ), extShown, names.size(), extPw.end,
-                                     cfg.pageLimit, cfg.pageOffset, true ) );
+                                     cfg.pageLimit, cfg.pageOffset, true ),
+                     extNext.c_str() );
         for( std::size_t i = extPw.begin; i < extPw.end; ++i )
         {
             std::printf( "<x n=\"%s\" lang=\"%s\" refs=\"%u\" calls=\"%u\"/>",
