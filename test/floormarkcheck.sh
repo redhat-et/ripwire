@@ -609,7 +609,7 @@ grep -q 'counts_floor=1' "$TMP/situ9.txt" && grep -q "$BRIEF_ANCHOR" "$TMP/situ9
 # JSON twin (mcpverbs.h) already split these; the CLI text form did not.
 if command -v git >/dev/null 2>&1; then
     SITUZ="$TMP/situzero"; mkdir -p "$SITUZ"
-    git -C "$SITUZ" init -q; git -C "$SITUZ" config user.email a@a.com; git -C "$SITUZ" config user.name a
+    git -C "$SITUZ" init -q; git -C "$SITUZ" config user.email a@x.com; git -C "$SITUZ" config user.name a
     printf 'def foo():\n    pass\n' > "$SITUZ/a.py"
     printf '// just a comment\n' > "$SITUZ/b.c"
     git -C "$SITUZ" add -A; git -C "$SITUZ" commit -qm init

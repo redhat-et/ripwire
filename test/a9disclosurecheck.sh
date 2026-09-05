@@ -136,9 +136,14 @@ esac
 case "$V" in *'<impl n="Car"'*) ok '§A9.4 --lego=Vehicle still lists its implementors' ;;
              *) no '§A9.4 the caveat cost Vehicle its <impl> rows' ;; esac
 S="$( perl -e 'alarm 120; exec @ARGV' "$BIN" "$ROOT" --lego=Shape 2>/dev/null )"
-case "$S" in
-    *'caveat='*) no '§A9.4 --lego=Shape (C++, contract IS extracted) wrongly carries a caveat' ;;
-    *)           ok '§A9.4 --lego=Shape carries NO caveat' ;;
+# RE-PINNED 2026-09-04 (capture-audit wave-2 merge, lane L10b finding 12): the lego LEGEND now DEFINES
+# caveat="not-extracted-for-lang" (it was emitted undefined), so the whole-document substring test above
+# matched the definition and read a C++ interface as carrying the caveat. The contract is about the
+# <iface> ELEMENT: the attribute must be absent from the open tag, while the legend may — must — name it.
+S_IFACE="$( printf '%s' "$S" | sed -e 's/<!--.*-->//g' | grep -o '<iface [^>]*>' | head -1 )"
+case "$S_IFACE" in
+    ''|*'caveat='*) no "§A9.4 --lego=Shape (C++, contract IS extracted) wrongly carries a caveat on <iface>: ${S_IFACE:-<no iface tag>}" ;;
+    *)              ok '§A9.4 --lego=Shape carries NO caveat on its <iface> element (the legend defines the attribute, the element does not carry it)' ;;
 esac
 case "$S" in *'<m pure="1">'*) ok '§A9.4 --lego=Shape keeps its <m> contract rows' ;;
              *) no '§A9.4 --lego=Shape lost its <m> rows' ;; esac
