@@ -634,7 +634,9 @@ inline std::string prLegendText( const std::string& baseEscaped )
                  "and IS the number the ladder fits, so recounting the delivered bytes reproduces it; trim_level=/truncated= what the ladder dropped. When even the "
                  "structural floor of every changed file exceeds it, the FILES are windowed in blast-radius order: shown= of files=, "
                  "capped=1 with total=/has_more=/next_offset=/offset=/limit= (limit=0 = the default window), and next= is the one pasteable "
-                 "follow-up (the next page). "
+                 "follow-up (the next page). truncated= carrying budget-floor-exceeded means the smallest document this bundle can render is "
+                 "STILL over budget_tokens= — including on a clean tree, whose whole document is this legend and has no ladder to descend; "
+                 "est_tokens= is then the honest ceiling, never a silent overshoot. "
                  // §H4 §3.4 / V4 MED-3: the SEVENTH graph-count surface. Every per-symbol callers= here is read
                  // from the in-edge CSR --callers reads, and <impact dependents=> is the same transitive reach
                  // --impact reports, so the same floor applies to hundreds of attributes in this one document.
@@ -646,12 +648,40 @@ inline constexpr std::string_view kPrEmptyDiffBody =
     "<!-- no changed files in the index (clean tree, or the diff touched only non-indexed files) -->";
 
 inline std::string prEmptyRootTail( std::uint32_t skippedModeOnly, std::size_t budgetTokens, bool isDefaultBudget,
-                                    std::size_t estTokens )
+                                    std::size_t estTokens, const std::string& truncated )
 {
-    PrTrimRender empty;                                        // level 0, truncated "none": nothing was cut
+    PrTrimRender empty;                                        // level 0: this root has no ladder, so nothing was cut
     empty.estTokens = estTokens;                               // R2: the caller's prPriceDocument, never a second formula
+    empty.truncated = truncated;                               // R2 (V3): "none", or the floor label when the price is over
     return prBudgetTail( 0, skippedModeOnly, budgetTokens, empty, empty.truncated )
            + ( isDefaultBudget ? " budget_default=\"1\"" : "" );
+}
+
+// R2 (V3, wave-2 verifier, 2026-09-05) — the empty-diff root's PRICE and its truncated=, decided together
+// because the second changes the first.
+//
+// V1 made est_tokens price this document exactly, and that is what made the gap legible: the number is now
+// true, it is visibly LARGER than the ceiling a caller stated, and the root said truncated="none".
+// `--pr-context --max-tokens=500` on a clean tree answered est_tokens="2002" trim_level="0"
+// truncated="none" — a silent 4x overshoot, on the one root that has no ladder to descend, because its
+// whole document is the legend. The NON-empty root labels the identical condition at pickPrTrimLevel's last
+// rung, so the vocabulary already existed; this root simply never reached it. Same rule V2 closed on --for.
+//
+// Level 0 IS the floor here, so the label is applied and the document RE-PRICED once — pickPrTrimLevel's own
+// reason: the suffix lengthens truncated=, hence the root tag, and a document already over budget cannot
+// come back under by growing, so one pass is the fixpoint and the printed est_tokens is the delivered
+// document's real price either way. budgetTokens == 0 is UNLIMITED (see writePrContext), and no ceiling can
+// be exceeded against it. `price` is the caller's prPriceDocument closure — never a second formula.
+template< typename PriceFn >
+inline std::pair<std::size_t, std::string> prEmptyRootPrice( const PriceFn& price, std::size_t budgetTokens )
+{
+    const std::size_t plain = price( kPrEmptyDiffBody.size(), 0, std::string( "none" ), std::string() );
+    if( budgetTokens == 0 || plain <= budgetTokens )
+    {
+        return { plain, std::string( "none" ) };
+    }
+    const std::string labelled( "budget-floor-exceeded" );
+    return { price( kPrEmptyDiffBody.size(), 0, labelled, std::string() ), labelled };
 }
 
 // Open the <pr-context> root: the attributes EVERY form shares, this site's own tail, and the one remark row
@@ -907,9 +937,9 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
 
     if( changed.empty() )
     {
-        const std::size_t emptyEst = priceOf( kPrEmptyDiffBody.size(), 0, "none", std::string() );
+        const auto [ emptyEst, emptyTruncated ] = prEmptyRootPrice( priceOf, budgetTokens );
         const std::string rootOpen = prRootOpenText( g, sharedAttrs,
-                                                     prEmptyRootTail( skippedModeOnly, budgetTokens, budget.isDefault, emptyEst ) + atAttrStr,
+                                                     prEmptyRootTail( skippedModeOnly, budgetTokens, budget.isDefault, emptyEst, ex( emptyTruncated ) ) + atAttrStr,
                                                      anchor, escBase );
         std::fwrite( rootOpen.data(), 1, rootOpen.size(), out );
         std::fwrite( kPrEmptyDiffBody.data(), 1, kPrEmptyDiffBody.size(), out );

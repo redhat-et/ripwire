@@ -235,5 +235,69 @@ else
     no "(#9) the legend does not define est_tokens as the price of the whole emitted document — the number and its definition disagree"
 fi
 
+# ── #10 (V3 / wave-2 verifier R2, 2026-09-05): a stated --max-tokens is NEVER a SILENT overshoot ────────
+# V1 made est_tokens price the document exactly (#9 above), which is what made this legible: the number is
+# now true, and on a clean tree it is visibly LARGER than the ceiling the caller stated, with nothing on the
+# root saying so. Measured at fc716401 on ripwire's own tree:
+#     --pr-context --max-tokens=500  ->  budget_tokens="500" est_tokens="2002" trim_level="0"
+#                                        truncated="none"                              *** SILENT, 4.0x ***
+# The NON-EMPTY root labels the identical condition ("…;budget-floor-exceeded", pickPrTrimLevel's last rung),
+# so the vocabulary already exists — the empty root simply never reached it, because its whole document is
+# the legend and it has no ladder to descend. Same rule lane V2 closed on --for this round.
+#
+# #3 above already asserts this for the =BASE root only, and only at the four budgets it sweeps; F4's
+# empty-root budget arm (:175 before this commit) read the DEFAULT-budget root, where 2002 <= 8000 passes
+# and the floor is never reached. This arm is the property stated over BOTH root emitters and swept across
+# budgets that straddle the floor, in both directions:
+#     est_tokens > budget_tokens  =>  truncated= contains budget-floor-exceeded   (no silent overshoot)
+#     est_tokens <= budget_tokens =>  truncated= does NOT                          (no false label)
+# and it refuses to pass vacuously: at least one rung of the sweep must actually go over.
+overshoot=0; falselabel=0; over_seen=0; under_seen=0; rungs=0
+sweep_root(){   # $1 label, $2... argv after the binary and root
+    local label="$1"; shift
+    local T E B TR
+    for T in 100 500 1000 2000 2500 3000 8000 20000; do
+        "$BIN" "$ROOT" "$@" --max-tokens=$T --no-cache >"$TMP/s_$T" 2>/dev/null
+        E=$( attr "$TMP/s_$T" est_tokens ); B=$( attr "$TMP/s_$T" budget_tokens ); TR=$( attr "$TMP/s_$T" truncated )
+        rungs=$(( rungs + 1 ))
+        if [ -z "$E" ] || [ -z "$B" ]; then
+            echo "    $label budget=$T: root carries no est_tokens=/budget_tokens= (est='$E' budget='$B')"; overshoot=1; continue
+        fi
+        [ "$B" = "$T" ] || { echo "    $label budget=$T: the root echoes budget_tokens=\"$B\", not the budget stated"; overshoot=1; }
+        if [ "$E" -gt "$B" ]; then
+            over_seen=1
+            printf '%s' "$TR" | grep -q 'budget-floor-exceeded' \
+                || { echo "    $label budget=$T: est=$E > budget=$B and truncated=\"$TR\" says nothing (SILENT $(( E * 10 / B ))/10 x overshoot)"; overshoot=1; }
+        else
+            under_seen=1
+            printf '%s' "$TR" | grep -q 'budget-floor-exceeded' \
+                && { echo "    $label budget=$T: est=$E is INSIDE budget=$B yet truncated=\"$TR\" claims the floor was exceeded"; falselabel=1; }
+        fi
+    done
+}
+printf 'int probeSweepRoot() { return 1; }\n' >> "$ROOT/src/mod4.cpp"
+sweep_root "working-tree root (non-empty)" --pr-context
+( cd "$ROOT" && git checkout -- src/mod4.cpp )
+sweep_root "empty-diff root (clean tree)"  --pr-context
+sweep_root "base root (=$BASE)"            --pr-context="$BASE"
+[ "$over_seen" = 1 ] && [ "$under_seen" = 1 ] \
+    && ok "(#10 fixture) the $rungs-rung sweep straddles the floor on both sides (at least one over, one inside)" \
+    || no "(#10) the sweep never straddled the budget floor (over_seen=$over_seen under_seen=$under_seen) — the arm would pass vacuously"
+[ "$overshoot" = 0 ] \
+    && ok "(#10) no --pr-context root exceeds a stated --max-tokens SILENTLY: every over-budget rung carries budget-floor-exceeded, every rung echoes its budget" \
+    || no "(#10) a --pr-context root exceeded its stated --max-tokens with nothing on the root saying so"
+[ "$falselabel" = 0 ] \
+    && ok "(#10) no root claims budget-floor-exceeded while it is inside its budget" \
+    || no "(#10) a --pr-context root claimed budget-floor-exceeded on a document that fits its budget"
+# and the legend must DEFINE the label on the root that now carries it, or the attribute is undefined prose
+"$BIN" "$ROOT" --pr-context --max-tokens=500 --no-cache >"$TMP/s_lbl" 2>/dev/null
+if grep -q 'budget-floor-exceeded' "$TMP/s_lbl"; then
+    grep -q 'budget-floor-exceeded' "$TMP/s_lbl" && grep -q 'structural floor of every changed file exceeds it' "$TMP/s_lbl" \
+        && ok "(#10) the labelled empty-diff root ships the legend clause that defines budget-floor-exceeded" \
+        || no "(#10) the empty-diff root emits budget-floor-exceeded but its legend never defines the term"
+else
+    no "(#10) --pr-context --max-tokens=500 on a clean tree carries no budget-floor-exceeded label"
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
