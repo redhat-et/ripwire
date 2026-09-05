@@ -99,7 +99,7 @@ if not lego:
     print("ABSENT no <lego> block (the honest empty-surface shape)")
     sys.exit(0)
 sigs   = re.search(r'<sigs.*?</sigs>', xml, re.S)
-ranked = set( re.findall(r'<f p="([^"]+)"', sigs.group(0) if sigs else '') )
+ranked = set( re.findall(r'<d [^>]*?\bp="([^"]+)"', sigs.group(0) if sigs else '') )   # P7: p= rides each <d> row, no <f> wrapper
 rows   = re.findall(r'<(?:iface|impl)\b[^>]*>', lego.group(0))
 if not rows:
     print("FAIL <lego> present but has no iface/impl rows")

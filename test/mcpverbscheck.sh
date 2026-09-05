@@ -165,13 +165,15 @@ else
     no "for verb: result does NOT contain <sigs> — got: $( echo "$FOR_INNER" | head -c 200 )"
 fi
 
-# A3-F1 gate: <sigs> must carry an actual signature PAYLOAD — at least one <f> file bucket holding a
-# <d> declaration block. The 0-budget sentinel bug emitted a bare <sigs></sigs> (rank/fanIn computed,
-# then discarded by the immediate budget break), and the presence-only grep above still passed.
-if echo "$FOR_INNER" | grep -q "<sigs><f " && echo "$FOR_INNER" | grep -q "<d "; then
-    ok "for verb: <sigs> is NON-EMPTY (has <f>/<d> signature blocks — A3-F1)"
+# A3-F1 gate: <sigs> must carry an actual signature PAYLOAD — at least one <d> declaration row. The 0-budget
+# sentinel bug emitted a bare <sigs></sigs> (rank/fanIn computed, then discarded by the immediate budget
+# break), and the presence-only grep above still passed. RE-PINNED 2026-09-05 (terminality round A, lane R,
+# P7): the lens <sigs> is FLAT — <d … p="FILE" … r=N> rows in rank order, no <f p=> wrapper — so the payload
+# is the first <d> row directly inside <sigs> (test/forrankordercheck.sh).
+if echo "$FOR_INNER" | grep -qE "<sigs[^>]*><d [^>]* p=\"" ; then
+    ok "for verb: <sigs> is NON-EMPTY (has <d … p=> signature rows — A3-F1)"
 else
-    no "for verb: <sigs> is EMPTY (no <f>/<d> payload — A3-F1 0-budget sentinel) — got: $( echo "$FOR_INNER" | head -c 200 )"
+    no "for verb: <sigs> is EMPTY (no <d> payload — A3-F1 0-budget sentinel) — got: $( echo "$FOR_INNER" | head -c 200 )"
 fi
 
 # Assert the result wraps in <ctx>

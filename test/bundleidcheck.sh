@@ -99,14 +99,11 @@ import re, sys
 def rows( path ):
     text = open( path, encoding = 'utf-8' ).read()
     out  = {}
-    # <d …> rows are grouped under <f p="…"> — track the enclosing file so the key is unambiguous
-    fileNow = ''
-    for m in re.finditer( r'<f p="([^"]*)"|<d ([^>]*)>', text ):
-        if m.group( 1 ) is not None:
-            fileNow = m.group( 1 );  continue
-        attrs = dict( re.findall( r'(\w+)="([^"]*)"', m.group( 2 ) ) )
+    # RE-PINNED: P7 (terminality round A, lane R, 2026-09-05): the lens <sigs> is FLAT — <d … p="FILE" … r=N> rows in rank order, no <f p=> wrapper (test/forrankordercheck.sh) — every <d> row carries its own p=, so the key reads it off the row
+    for m in re.finditer( r'<d ([^>]*)>', text ):
+        attrs = dict( re.findall( r'(\w+)="([^"]*)"', m.group( 1 ) ) )
         if 'n' not in attrs or 'l' not in attrs: continue
-        out[ ( fileNow, attrs['l'], attrs['n'] ) ] = attrs.get( 'in' )
+        out[ ( attrs.get( 'p', '' ), attrs['l'], attrs['n'] ) ] = attrs.get( 'in' )
     return out
 
 a, b   = rows( sys.argv[1] ), rows( sys.argv[2] )
@@ -140,15 +137,19 @@ TRACE_IN="$( drows "$TMP/trace.xml" | grep -c ' in="' )"
 if [ "$TRACE_IN" = "0" ]; then
     ok "--from-trace omits in= (no fan-in source) instead of asserting in=\"0\""
 else
-    # every in= it DOES print must match the --for value for the same symbol name
+    # every in= it DOES print must match the --for value for the same symbol — keyed by (name, FILE): the
+    # fixture defines `distance`/`perimeter` twice (geometry.h decl, geometry.cpp def) with different fan-in,
+    # and a name-only lookup picked whichever row --for printed FIRST. RE-PINNED 2026-09-05 (terminality
+    # round A, lane R, P7): --for's rows are in RANK order now (the file-grouped order happened to put the
+    # matching row first), and every <d> row carries its own p=, so the key can finally be exact.
     mism=0
-    while read -r nm val; do
+    while read -r nm fp val; do
         [ -n "$nm" ] || continue
-        ref="$( drows "$TMP/for.xml" | grep -oE "n=\"$nm\"[^>]* in=\"[0-9]+\"" | grep -oE 'in="[0-9]+"' | head -1 | tr -cd '0-9' )"
+        ref="$( drows "$TMP/for.xml" | grep -oE "n=\"$nm\"[^>]* p=\"$fp\"[^>]* in=\"[0-9]+\"" | grep -oE 'in="[0-9]+"' | head -1 | tr -cd '0-9' )"
         [ -n "$ref" ] || continue
-        [ "$val" = "$ref" ] || { mism=$(( mism + 1 )); echo "    mismatch $nm: trace=$val for=$ref"; }
-    done <<< "$( drows "$TMP/trace.xml" | grep -oE 'n="[A-Za-z_][A-Za-z0-9_]*"[^>]* in="[0-9]+"' \
-                 | sed -E 's/n="([^"]*)".* in="([0-9]+)"/\1 \2/' )"
+        [ "$val" = "$ref" ] || { mism=$(( mism + 1 )); echo "    mismatch $nm ($fp): trace=$val for=$ref"; }
+    done <<< "$( drows "$TMP/trace.xml" | grep -oE 'n="[A-Za-z_][A-Za-z0-9_]*"[^>]* p="[^"]*"[^>]* in="[0-9]+"' \
+                 | sed -E 's/n="([^"]*)".* p="([^"]*)".* in="([0-9]+)"/\1 \2 \3/' )"
     [ "$mism" = "0" ] \
         && ok "--from-trace in= agrees with --for on every shared symbol ($TRACE_IN row(s), $TRACE_ZEROS zero)" \
         || no "--from-trace in= disagrees with --for on $mism row(s) — one of them is lying"

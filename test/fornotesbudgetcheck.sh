@@ -58,6 +58,21 @@
 # (est_tokens 815 > 800), which is the re-anchor earning its keep rather than an argument against it.
 # The corpus is a generated temp fixture, not the live tree, so the number does NOT move with repo growth.
 #
+# ── RE-ANCHORED 2026-09-05 (terminality round A, lane R, P7 rank order): the MIDDLE rung 1600 → 1640. ──
+# The lens <sigs> is FLAT now: rows in rank order, each carrying p="src/modN.py" (16 B), no <f p=> wrapper (24 B
+# each). At this fixture's 7-row state that is 7 × 16 − 2 × 24 = +64 B = +26 tokens at the conservative rate.
+# MEASURED (both binaries, this corpus in a mktemp dir, --token-budget swept 1500..1700): the pre-P7 binary's 7-row
+# state reads est_tokens=1580 at 1580..1639 and admits row 8 at 1640 (1733); the P7 binary's 7-row state reads
+# 1606 — it fits at 1610..1660 and admits row 8 at 1665 (1764). At the OLD rung 1600 the P7 binary prints the
+# SAME 7 rows, 1606 > 1600, and (verbs_for.h F2) labels the root over_ceiling="1" — the legend clause and label
+# add 70 B, so the document reads 1634: an honest overshoot, not a silent one, and the reason the rung moves
+# rather than the rows. 1640 sits mid-window with 34 tokens of headroom (the 33–43 band every earlier anchor
+# left) and 25 tokens under the 8th-row edge. The row SET changed too, deliberately: the old file-major drop
+# kept ranks 1–4 plus three source-order rows of the best file; the new rank-major drop keeps ranks 1–7 (rows 5–7
+# carry doc excerpts, which is why the same row COUNT costs more bytes). The tight rung 950 did not move but its
+# floor grew by the same arithmetic — 4 rows × 16 B − 1 wrapper = +40 B: 932 → 948 of 950, TWO tokens of headroom.
+# The next change that adds a byte to --for's floor at 950 must re-anchor that rung with its own arithmetic.
+# 3000: 2840 → 2788 (16 rows vs 17 — the rank-major drop again).
 # ── RE-ANCHORED 2026-09-04 (capture-audit wave-2 merge): the MIDDLE rung 1550 → 1600. ──
 # Three lanes each added to --for's <ctx> root, each fit the 1550 rung ALONE, and their sum does not. The gate
 # itself read est_tokens=1563 at 1550 on the merged tree (this fixture; --token-budget=1550 is at the compact
@@ -174,11 +189,11 @@ xmlRows(){ "$BIN" "$CORPUS" --for="$TASK" --token-budget="$1" 2>/dev/null | grep
 jsonEst(){ "$BIN" "$CORPUS" --for="$TASK" --token-budget="$1" --json 2>/dev/null \
            | python3 -c 'import sys,json; print(json.load(sys.stdin)["est_tokens"])' 2>/dev/null; }
 jsonRows(){ "$BIN" "$CORPUS" --for="$TASK" --token-budget="$1" --json 2>/dev/null \
-            | python3 -c 'import sys,json; d=json.load(sys.stdin); print(sum(len(f["symbols"]) for f in d["sigs"]))' 2>/dev/null; }
+            | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d["sigs"]))' 2>/dev/null; }   # P7: flat sigs array
 
 # ── arm 1: est_tokens must fit the ceiling the user asked for, in BOTH dialects ────────────────────
 # (tight budget 950, re-anchored 2026-08-28 — see the CEILING MARGIN block above for the arithmetic)
-for tb in 950 1600 3000; do
+for tb in 950 1640 3000; do
   xe="$( xmlEst "$tb" )"; je="$( jsonEst "$tb" )"
   if [ -z "$xe" ] || [ -z "$je" ]; then no "budget=$tb: could not read est_tokens from one of the dialects (xml='$xe' json='$je')"; continue; fi
   if [ "$xe" -le "$tb" ]; then ok "budget=$tb: XML est_tokens=$xe fits the ceiling"
@@ -189,7 +204,7 @@ done
 
 # ── arm 2: the two dialects select COMPARABLE row counts (they need not be equal) ──────────────────
 # Before the fix the XML lens bought 2-2.4x the rows with the same budget, because notes were free.
-for tb in 950 1600 3000; do
+for tb in 950 1640 3000; do
   xr="$( xmlRows "$tb" )"; jr="$( jsonRows "$tb" )"
   if [ -z "$jr" ] || [ "$jr" -eq 0 ]; then no "budget=$tb: JSON selected no rows — the comparison has no denominator"; continue; fi
   if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge $(( jr * 7 / 10 )) ]; then

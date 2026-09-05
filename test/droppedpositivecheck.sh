@@ -71,10 +71,9 @@ else:
     refd = json.loads(ref); capd = json.loads(cap)
     def ranks(doc):
         out = []
-        for f in doc.get('sigs', []):
-            for s in f.get('symbols', []):
-                if 'r' in s:
-                    out.append(s['r'])
+        for s in doc.get('sigs', []):          # P7: the JSON sigs array is FLAT (one row object per ranked symbol)
+            if 'r' in s:
+                out.append(s['r'])
         return out
     ref_ranks = sorted(ranks(refd))
     cap_ranks = sorted(ranks(capd))

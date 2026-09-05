@@ -215,7 +215,8 @@ EOF
 fi
 
 # ── (D) the CLI arm: the shipped --for path must reach an acronym-only word ──────────────────────────
-# topFile prints the FIRST <f p="..."> of the bundle — --for emits files in rank order — REJOINED with
+# topFile prints the p= of the FIRST <d> row of the bundle — --for emits rows in rank order (RE-PINNED
+# P7 (terminality round A, lane R, 2026-09-05): the lens <sigs> is FLAT — <d … p="FILE" … r=N> rows in rank order, no <f p=> wrapper (test/forrankordercheck.sh)) — REJOINED with
 # the bundle's root=, so what this arm compares is the repo-relative path it names below.
 #
 # The rejoin is a MERGE-TIME correction, recorded rather than quietly applied (2026-08-19, integrating
@@ -229,7 +230,7 @@ fi
 topFile(){ python3 -c "
 import os, re, sys
 s = open(sys.argv[1]).read()
-m = re.search(r'<f p=\"([^\"]+)\"', s)
+m = re.search(r'<d [^>]*?\bp=\"([^\"]+)\"', s)
 if not m:
     print('(none)')
     raise SystemExit

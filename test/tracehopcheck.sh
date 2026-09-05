@@ -132,9 +132,10 @@ if grep -q 'p="src/listeners.py"' "$WORK/out.callee"; then ok "(H1c) the SOURCE 
 else no "(H1c) the SOURCE file now appears in the bundle's <sigs>"; fi
 
 # the hop must be ranked ahead of nothing it should not be: the source file has to precede any
-# remaining frame file, which on this fixture means it is the SECOND <f> block, right after the test.
-if [ "$( sed 's/<f /\n<f /g' "$WORK/out.callee" | grep -c '^<f ' )" -ge 2 ]; then ok "(H1d) the bundle carries more than one <sigs> file block"
-else no "(H1d) the bundle carries more than one <sigs> file block"; fi
+# remaining frame file, which on this fixture means the <sigs> rows span at least two files.
+# RE-PINNED: P7 (terminality round A, lane R, 2026-09-05): the lens <sigs> is FLAT — <d … p="FILE" … r=N> rows in rank order, no <f p=> wrapper (test/forrankordercheck.sh) — count DISTINCT p= over the <d> rows, not <f> blocks.
+if [ "$( grep -o '<d [^>]*>' "$WORK/out.callee" | grep -o ' p="[^"]*"' | sort -u | wc -l | tr -d ' ' )" -ge 2 ]; then ok "(H1d) the bundle's <sigs> rows span more than one file"
+else no "(H1d) the bundle's <sigs> rows span more than one file"; fi
 
 # ── (H2) the basename pair ─────────────────────────────────────────────────────────────────────────
 if grep -q '<hop [^>]*via="basename"' "$WORK/out.basename"; then ok "(H2a) a runner-mediated test pairs its source by basename"

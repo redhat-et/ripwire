@@ -60,11 +60,11 @@ case "$TAILTAG" in
 esac
 TROWS="$( printf '%s' "$XML" | grep -o '<t p="[^"]*"/>' | wc -l | tr -d ' ' )"
 [ "$TROWS" = "11" ] && ok "tail serves 11 <t p= rows" || no "tail rows: $TROWS (expected 11)"
-# disjoint: no tail path may also be a head <f p= wrapper
+# disjoint: no tail path may also be a head row's p= (P7: the head is flat <d … p=> rows, no <f> wrapper)
 DUP="$( printf '%s' "$XML" | python3 -c '
 import re, sys
 s = sys.stdin.read()
-head  = set( re.findall( r"<f p=\"([^\"]*)\"", s ) )
+head  = set( re.findall( r"<d [^>]*?\bp=\"([^\"]*)\"", s ) )
 tails = re.findall( r"<t p=\"([^\"]*)\"/>", s )
 print( sum( 1 for t in tails if t in head ) )
 ' )"
@@ -89,7 +89,7 @@ JV="$( python3 - "$TMP/for.json" "$TMP/for_default.xml" <<'EOF'
 import json, re, sys
 d = json.load( open( sys.argv[1] ) )
 xml = open( sys.argv[2] ).read()
-rs = sorted( s.get( "r", 0 ) for f in d.get( "sigs", [] ) for s in f["symbols"] )
+rs = sorted( s.get( "r", 0 ) for s in d.get( "sigs", [] ) )   # P7: flat sigs array
 tail = d.get( "tail" )
 xtails = re.findall( r"<t p=\"([^\"]*)\"/>", xml )
 checks = [
@@ -111,7 +111,7 @@ printf '%s' "$PT" | grep -q '<d l="[^>]*r="1"' && ok "pack-task XML ranking rows
 PTJ="$( "$BIN" "$CORPUS" --no-cache --pack-task="$Q" --json 2>/dev/null | python3 -c '
 import json, sys
 d = json.load( sys.stdin )
-rs = [ s.get( "r", 0 ) for f in d.get( "ranking", [] ) for s in f.get( "symbols", [] ) ]
+rs = [ s.get( "r", 0 ) for s in d.get( "ranking", [] ) ]   # P7: flat ranking array
 print( "Y" if rs and all( r > 0 for r in rs ) else "N" )
 ' )"
 [ "$PTJ" = "Y" ] && ok "pack-task JSON ranking rows carry r" || no "pack-task JSON ranking rows carry no r"

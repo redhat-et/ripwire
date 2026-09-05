@@ -61,19 +61,19 @@ ok "shared cap read from source: kForLensDefaultTopN=$CAP"
 # ── the two dialects, and the two facts read off each ────────────────────────────────────────────────────
 # The served set is (file, line, name) per <d> row inside <sigs> — NOT id=, which the emitter omits whenever
 # it would equal the bare name, so an id-keyed comparison silently undercounts the scope-less rows (measured
-# while writing this gate: 24 of 29 CLI rows on one task).
+# while writing this gate: 24 of 29 CLI rows on one task). RE-PINNED: P7 (terminality round A, lane R, 2026-09-05): the lens <sigs> is FLAT — <d … p="FILE" … r=N> rows in rank order, no <f p=> wrapper (test/forrankordercheck.sh) — the file is the row's own p=.
 cat > "$TMP/rows.py" <<'PY'
 import re, sys
 s = sys.stdin.read()
 m = re.search( r'<sigs[^>]*>(.*?)</sigs>', s, re.S )
 body = m.group( 1 ) if m else ''
 out = []
-for fm in re.finditer( r'<f p="([^"]*)"[^>]*>(.*?)</f>', body, re.S ):
-    for d in re.finditer( r'<d ([^>]*)>', fm.group( 2 ) ):
-        a = d.group( 1 )
-        n = re.search( r'\bn="([^"]*)"', a )
-        l = re.search( r'\bl="([^"]*)"', a )
-        out.append( fm.group( 1 ) + ":" + ( l.group( 1 ) if l else "?" ) + ":" + ( n.group( 1 ) if n else "?" ) )
+for d in re.finditer( r'<d ([^>]*)>', body ):
+    a = d.group( 1 )
+    p = re.search( r'\bp="([^"]*)"', a )
+    n = re.search( r'\bn="([^"]*)"', a )
+    l = re.search( r'\bl="([^"]*)"', a )
+    out.append( ( p.group( 1 ) if p else "?" ) + ":" + ( l.group( 1 ) if l else "?" ) + ":" + ( n.group( 1 ) if n else "?" ) )
 print( "\n".join( sorted( out ) ) )
 PY
 cat > "$TMP/mcptext.py" <<'PY'

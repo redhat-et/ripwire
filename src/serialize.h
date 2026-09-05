@@ -434,13 +434,21 @@ private:
 // rather than emitted empty — an absent attribute is unambiguously "no provenance recorded", never confused
 // with a resolvable-but-empty one. The sha is shown ABBREVIATED (notes::shortSha, 7 hex — terse, matching
 // git's own --abbrev default); the full sha lives only in .ripwire_notes on disk.
-inline void appendOneNote( std::string& out, const notes::Note& n, std::vector<char>& esc )
+// P7 (terminality round A, lane R, 2026-09-05): `onPath` names the note's TARGET FILE when the note rides a
+// <d> row rather than an <f> wrapper — the lens serving is flat now (rank order, no wrapper), so a file
+// note sits on the file's best-ranked live row and p= is what keeps it from reading as that symbol's own
+// note. Empty (every symbol note, every non-lens caller) ⇒ absent, byte-identical.
+inline void appendOneNote( std::string& out, const notes::Note& n, std::vector<char>& esc, std::string_view onPath = {} )
 {
     out += "<note d=\"";  out += escapeXml( n.date, esc );  out += "\"";
     if( !n.sha.empty() )
     {
         out += " sha=\"";  out += escapeXml( notes::shortSha( n.sha ), esc );  out += "\"";
         if( !n.branch.empty() ) { out += " branch=\"";  out += escapeXml( n.branch, esc );  out += "\""; }
+    }
+    if( !onPath.empty() )
+    {
+        out += " p=\"";  out += escapeXml( onPath, esc );  out += "\"";
     }
     out += ">";
     std::string safe;  safe.reserve( n.text.size() );
@@ -459,7 +467,8 @@ inline void appendOneNote( XmlWriter& w, const notes::Note& n, std::vector<char>
 // pre-rendered and jsonSigEntryCost adds `e.notes.size()`); the XML side emitted them for free, which put
 // a note-heavy tree measurably over a tight --token-budget while JSON honored the same ceiling. Returns ""
 // for a null index / no hits, so the wrapper below stays byte-identical on a tree with no notes.
-inline std::string renderNoteChildren( const notes::NoteIndex* ni, const std::string& target, std::vector<char>& esc )
+inline std::string renderNoteChildren( const notes::NoteIndex* ni, const std::string& target, std::vector<char>& esc,
+                                       std::string_view onPath = {} )   // P7: the file-note target, see appendOneNote
 {
     std::string out;
     if( !ni )
@@ -473,7 +482,7 @@ inline std::string renderNoteChildren( const notes::NoteIndex* ni, const std::st
     }
     for( std::uint32_t i : *hits )
     {
-        appendOneNote( out, ni->notes[i], esc );
+        appendOneNote( out, ni->notes[i], esc, onPath );
     }
     return out;
 }
@@ -903,13 +912,13 @@ inline std::string renderFileTailJson( const FileTail& t, std::size_t shownCap )
 inline constexpr std::string_view kForFileTailLegend =
     "; tail: file-grain tail, WEAKER evidence than the ranked rows (paths only): the remaining candidate "
     "files with a positive score, best-symbol rank order; rows are t p=file; total=candidate files, "
-    "shown=printed, capped=1 when they differ. r= on a ranked row is its 1-based rank in this lens ranking "
-    "(sort by r= for true ranker order; a gap = a budget-trimmed row)";
+    "shown=printed, capped=1 when they differ. r= on a ranked row is its 1-based rank in this lens ranking, "
+    "rows in r= order, p= the file (a gap = a budget-trimmed row)";
 // P1 (L7): the same two definitions for the compact dialect (verbs_for.h appendCompactForLegend) — nothing dropped,
 // the sentences shortened: the tail is file-grain and weaker, its counts are total/shown/capped, r= is the rank.
 inline constexpr std::string_view kForFileTailLegendCompact =
     "; tail: file-grain tail (paths only, WEAKER than the ranked rows): <t p=> rows, total=/shown=/capped=1 when cut; "
-    "r= = a ranked row's 1-based lens rank (a gap = a budget-trimmed row)";
+    "r= = a ranked row's 1-based lens rank, rows in r= order, p= the file (a gap = a budget-trimmed row)";
 
 // Explicit-budget row fit: the largest shown count whose rendered XML fits `budgetBytes` (0 rows always
 // "fits" — the shell is reserved by the caller). Walks down from the collected count; deterministic.
@@ -2993,6 +3002,14 @@ struct SigRowFacts
                                                            //   <cand r=> flat export — one rank vocabulary, two shapes.
 };
 
+// P7 (terminality round A, lane R, 2026-09-05): a lens row's own file, spelled root-relative exactly as the
+// <f p=> wrapper it replaced was — the ONE spelling both dialects' rows (p= / "p") and the r=1 next= use.
+inline std::string lensRowPath( const IngestResult& ing, std::uint32_t fileId, std::string_view rootArg )
+{
+    return rootArg.empty() ? std::string( ing.files[ fileId ] )
+                           : std::string( rw::sarif::rootRelativeUri( ing.files[ fileId ], rw::sarif::rootPrefixOf( rootArg ) ) );
+}
+
 // P2.3/P2.4 — the exact "<d …>" opening tag of ONE signature row, defined once so the two-phase (globally
 // budgeted) emitter and the streaming emitter can never drift by a byte: the budget ledger measures exactly
 // the string this returns.
@@ -3019,6 +3036,15 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
     head += "\"";
     if( const std::string canon = scopedCanonicalId( ing, s, rootArg ); !canon.empty() )
     { head += " id=\"";  head += escapeXml( canon, esc );  head += "\""; }
+    // P7 (terminality round A, lane R, 2026-09-05): p= (and layer= when the file sits in a builtin layer) ride
+    // EVERY row that carries r= — the lens serving is FLAT now (rows in rank order, no <f p=> wrapper), so the
+    // row itself names its file; the non-lens serving (rank 0: --pack-signatures) keeps the wrapper and no p=.
+    // Same root-relative spelling the wrapper used and the r=1 next= below uses.
+    if( facts.rank > 0 )
+    {
+        head += " p=\"";  head += escapeXml( lensRowPath( ing, s.fileId, rootArg ), esc );  head += "\"";
+        if( const char* fl = builtinLayer( ing.files[ s.fileId ] ); *fl ) { head += " layer=\"";  head += fl;  head += "\""; }
+    }
 
     // descriptive facts — cx/ccx/in only under metrics; the Q3 lens + pure ride along either way.
     // deep-tail d1: r= (the row's 1-based global lens rank) closes the run — see SigRowFacts::rank.
@@ -3044,13 +3070,11 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
     head += tail;
     // P3 (L7, nextverb.h): the TOP-ranked row hands the agent the body to read — --expand=FILE:NAME, the
     // file-qualified selector (a same-named def elsewhere cannot answer), spelled with the same root-relative
-    // path the <f p=> wrapper above it carries. Only r=1: one next per document, the one that ends the search.
+    // path the row's own p= carries. Only r=1: one next per document, the one that ends the search.
     if( facts.rank == 1 )
     {
-        const std::string rel = rootArg.empty() ? std::string( ing.files[ s.fileId ] )
-                                                : std::string( rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rw::sarif::rootPrefixOf( rootArg ) ) );
         head.pop_back();   // the '>'
-        head += nextAttrXml( nextFlag( "--expand=", rel + ":" + s.name ) );
+        head += nextAttrXml( nextFlag( "--expand=", lensRowPath( ing, s.fileId, rootArg ) + ":" + s.name ) );
         head += '>';
     }
     return head;
@@ -3161,8 +3185,8 @@ inline std::size_t droppedPositiveCount( std::size_t candidatePositives, std::si
 // ladder is exactly the "new clone of a reused helper" --quality-delta gates on, and two copies is how the
 // XML and JSON trims would silently diverge one round from now.
 //
-// Format-agnostic by construction: every decision it makes reads only (globalRank, doc, sig, dropped) on an
-// entry and (wrapBytes, entryBegin, entryEnd, liveCount) on its file — never a tag, brace, or quote. The
+// Format-agnostic by construction: every decision it makes reads only (globalRank, doc, sig, dropped, fileSlot)
+// on an entry and (wrapBytes, liveCount) on its file — never a tag, brace, or quote. The
 // FORMAT lives entirely in the caller's `entryCost`, which reports the exact emitted byte cost of one entry
 // in that caller's own serialization (0 for a dropped entry). Templated on the caller's own row structs
 // (duck-typed on those member names) so neither emitter has to reshape its rows to call this.
@@ -3218,22 +3242,24 @@ inline void trimSigLadder( std::vector<EntryT>& entries, std::vector<FileT>& fil
             shrinkSig( entries[k], kForTailSigBytes );
         }
     }
-    for( std::size_t fi = files.size(); fi > 0 && !fits(); )                 // F: drop whole entries, tail file first
+    // F: drop whole entries, LOWEST RANK first. P7 (terminality round A, lane R, 2026-09-05): `entries` is in
+    // rank order (both callers sort it before the ladder runs), so the tail walk IS the rank walk — the old
+    // file-major form ("tail file first, source order inside it") could drop a rank-5 row in the last file
+    // while a rank-39 row in the first file survived. A file's wrapBytes (its file notes now — the <f>
+    // wrapper is gone) go with the file's last live row, exactly as before.
+    for( std::size_t k = entries.size(); k > 0 && !fits(); )
     {
-        FileT& sf = files[ --fi ];
-        for( std::size_t k = sf.entryEnd; k > sf.entryBegin && !fits(); )
+        EntryT& e = entries[ --k ];
+        if( e.dropped || e.globalRank <= 4 )
         {
-            EntryT& e = entries[ --k ];
-            if( e.dropped || e.globalRank <= 4 )
-            {
-                continue; // rank 1..4 always survive (the floor)
-            }
-            total -= entryCost( e );
-            e.dropped = true;
-            if( --sf.liveCount == 0 && sf.entryEnd > sf.entryBegin )
-            {
-                total -= sf.wrapBytes; // wrapper goes with its last entry
-            }
+            continue; // rank 1..4 always survive (the floor)
+        }
+        total -= entryCost( e );
+        e.dropped = true;
+        FileT& sf = files[ e.fileSlot ];
+        if( --sf.liveCount == 0 )
+        {
+            total -= sf.wrapBytes; // the file's notes go with its last live row
         }
     }
 }
@@ -3328,8 +3354,9 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         buckets[f].push_back( order[k] );
     }
 
-    // B0.3: the payload rule keys on each kept symbol's GLOBAL rank (emission below is file-grouped and
-    // source-ordered, so the rank must be recorded before the per-file re-sort). 1-based; 0 = not kept.
+    // B0.3: the payload rule keys on each kept symbol's GLOBAL rank (collection below is file-major and
+    // source-ordered inside a file, so the rank must be recorded before the per-file re-sort; P7 then sorts
+    // the collected rows back into this order for emission). 1-based; 0 = not kept.
     std::vector<std::uint32_t> globalRankOf;
     if( rankAdaptivePayload )
     {
@@ -3344,26 +3371,38 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
     std::vector<char> esc;
     std::size_t       used = 0;
 
-    // ── H1 (B0 round 2): two-phase GLOBALLY-BUDGETED emission for the --for lens ─────────────────────
+    // ── H1 (B0 round 2): two-phase GLOBALLY-BUDGETED emission for the lens serving ───────────────────
     // Derive every entry exactly as the streaming loop below would (same gates, same rank tiers, same
     // budgetBytes accounting, same redaction order) but into memory; then, if the exact emitted byte
-    // count exceeds payloadBudgetBytes, walk the deterministic trim LADDER (kForPayloadBudgetBytes doc
-    // above) until it fits; then emit. When nothing trims, the emitted bytes are identical to the
-    // streaming path by construction (same strings, same order).
-    if( rankAdaptivePayload && payloadBudgetBytes > 0 )
+    // count exceeds payloadBudgetBytes (0 = no ladder), walk the deterministic trim LADDER
+    // (kForPayloadBudgetBytes doc above) until it fits; then emit.
+    //
+    // P7 (terminality round A, lane R, 2026-09-05): EVERY rank-adaptive caller (--for, --for --json's XML
+    // twin, MCP for, --pack-task's ranking, --from-trace) takes this path now, budgeted or not, and the
+    // emission is FLAT IN RANK ORDER — `<d l= n= [id=] p= … r=>` rows with r= strictly increasing, no
+    // <f p=> wrapper. The old shape bucketed the kept head by file (files in first-seen-rank order, rows in
+    // SOURCE order inside each wrapper), so this repo's `--for="rank graph teleport"` read `r= 15 8 5 2 7 1
+    // …` — the r=1 row sixth, under a file whose best row was r=15 — and the legend told the reader to
+    // "sort by r=", i.e. to do the tool's job. An agent reads a bundle top-down; the first row is the one
+    // it opens, so rank order is what makes the first row the terminating one (METHODOLOGY §9 #1). The
+    // collection loop below is still file-major (a file is read once, its rows cut from one buffer); only
+    // the emission order and the ladder's drop order (trimSigLadder step F) changed. Each row's p= (and
+    // layer=) is rendered by sigRowHead; a FILE note rides the file's best-ranked live row as a
+    // <note … p="FILE"> child (appendOneNote), charged once as the file's wrapBytes and released with its
+    // last live row — the wrapper's old accounting, minus the wrapper. Gate: test/forrankordercheck.sh.
+    if( rankAdaptivePayload )
     {
         struct SigFile
         {
             std::uint32_t fileId     = 0;
-            std::size_t   wrapBytes  = 0;   // exact emitted bytes of the <f …> wrapper + </f> + its note children
-            std::string   notes;            // W3-N2: file notes, PRE-RENDERED so wrapBytes is exact
-            std::size_t   entryBegin = 0;   // [entryBegin, entryEnd) rows in `entries`
-            std::size_t   entryEnd   = 0;
-            std::size_t   liveCount  = 0;   // non-dropped entries (wrapper is dropped when this hits 0)
+            std::size_t   wrapBytes  = 0;   // exact emitted bytes of the file's note children (nothing else is per-file now)
+            std::string   notes;            // W3-N2: file notes, PRE-RENDERED so wrapBytes is exact (P7: each carries p="FILE")
+            std::size_t   liveCount  = 0;   // non-dropped entries (the notes are dropped when this hits 0)
         };
         struct SigEntry
         {
             std::uint32_t globalRank = 0;   // 1-based global rank — the ladder's only rank input
+            std::size_t   fileSlot   = 0;   // index into sigFiles (P7: the ladder releases the file's notes at liveCount 0)
             std::string   head;             // the exact "<d …>" opening tag
             std::string   doc;              // RAW doc text after the rank tiers ("" ⇒ no <doc> child)
             std::string   sig;              // RAW one-line signature after the rank tiers
@@ -3416,18 +3455,10 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
 
             SigFile sf;
-            sf.fileId     = f;
-            sf.entryBegin = entries.size();
-            {
-                // exact wrapper bytes: <f p="…"> [+ layer="…"] + </f>
-                sf.wrapBytes = 6 + escapeXml( pathRel( f ), esc ).size() + 1 + 1 + 4;
-                if( const char* fl = builtinLayer( ing.files[f] ); *fl )
-                {
-                    sf.wrapBytes += 8 + std::strlen( fl ) + 1;
-                }
-                sf.notes      = renderNoteChildren( noteIndex, fileNoteTarget( noteIndex, ing.files[f] ), esc );   // W3-N2
-                sf.wrapBytes += sf.notes.size();                                                                   //   charged, never trimmed
-            }
+            sf.fileId    = f;
+            sf.notes     = renderNoteChildren( noteIndex, fileNoteTarget( noteIndex, ing.files[f] ), esc, pathRel( f ) );   // W3-N2 + P7 (p="FILE")
+            sf.wrapBytes = sf.notes.size();                                                                              //   charged, never trimmed
+            const std::size_t fileSlot = sigFiles.size();
             for( NodeId id : syms )
             {
                 if( used >= budgetBytes )
@@ -3511,17 +3542,20 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
 
                 SigEntry e;
                 e.globalRank = globalRank;
+                e.fileSlot   = fileSlot;
                 e.head       = std::move( head );
                 e.doc        = std::move( doc );
                 e.sig        = std::move( sig );
                 e.notes      = renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );   // L3/D5 key + W3-N2 pre-render
                 e.positive   = rank[id] > 0.0f;   // A2: this symbol's own score, at collection time
                 entries.push_back( std::move( e ) );
+                ++sf.liveCount;
             }
-            sf.entryEnd  = entries.size();
-            sf.liveCount = sf.entryEnd - sf.entryBegin;
-            sigFiles.push_back( sf );
+            sigFiles.push_back( std::move( sf ) );
         }
+        // P7: rank order — the emission order AND the ladder's drop order (globalRank is unique per entry,
+        // so the sort is a total order and the output stays deterministic)
+        std::stable_sort( entries.begin(), entries.end(), []( const SigEntry& a, const SigEntry& b ) { return a.globalRank < b.globalRank; } );
 
         // exact emitted byte count of the block as collected
         const auto entryCost = [ & ]( const SigEntry& e ) -> std::size_t
@@ -3549,7 +3583,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             total += entryCost( e );
         }
 
-        const bool capped = total > payloadBudgetBytes;
+        const bool capped = payloadBudgetBytes > 0 && total > payloadBudgetBytes;   // 0 = no ladder (MCP's unbudgeted twin)
         if( capped )
         {
             // the marker itself costs bytes — budget the trimmed state INCLUDING it (guard tiny budgets).
@@ -3603,36 +3637,32 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         {
             w.write( "<sigs>" );
         }
-        for( const SigFile& sf : sigFiles )
+        std::vector<char> fileNotesPending( sigFiles.size(), 1 );   // P7: a file's notes ride its FIRST live row
+        for( const SigEntry& e : entries )
         {
-            if( capped && sf.liveCount == 0 && sf.entryEnd > sf.entryBegin )
+            if( e.dropped )
             {
-                continue; // every entry dropped → wrapper too
+                continue;
             }
-            w.write( "<f p=\"" );  w.write( escapeXml( pathRel( sf.fileId ), esc ) );  w.write( "\"" );
-            if( const char* fl = builtinLayer( ing.files[ sf.fileId ] ); *fl ) { w.write( " layer=\"" );  w.write( fl );  w.write( "\"" ); }
-            w.write( ">" );
-            w.write( sf.notes );                                               // L3/D5: file notes on this <f> (rendered in phase 1)
-            for( std::size_t k = sf.entryBegin; k < sf.entryEnd; ++k )
+            w.write( e.head.c_str() );
+            if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
+            w.write( escapeXml( e.sig, esc ) );
+            w.write( e.notes );                                                // L3: symbol notes on this <d> (inert when null)
+            if( fileNotesPending[ e.fileSlot ] )
             {
-                const SigEntry& e = entries[k];
-                if( e.dropped )
-                {
-                    continue;
-                }
-                w.write( e.head.c_str() );
-                if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
-                w.write( escapeXml( e.sig, esc ) );
-                w.write( e.notes );                                            // L3: symbol notes on this <d> (inert when null)
-                w.write( "</d>" );
+                fileNotesPending[ e.fileSlot ] = 0;
+                w.write( sigFiles[ e.fileSlot ].notes );                       // L3/D5 + P7: the file's notes, <note p="FILE"> (rendered in phase 1)
             }
-            w.write( "</f>" );
+            w.write( "</d>" );
         }
         w.write( "</sigs>" );
         w.flush();
         return;
     }
 
+    // ── the NON-lens serving (--pack-signatures on the map): file-grouped <f p=> wrappers, source order inside,
+    // no r= — P7 left this shape alone (nothing here carries a rank to order by); every rank-adaptive caller
+    // returned from the flat path above, so the tiers this loop used to apply under rankAdaptivePayload are gone.
     w.write( "<sigs>" );
     for( std::uint32_t f : fileOrder )
     {
@@ -3688,14 +3718,6 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 continue;
             }
 
-            // B0.3 rank-adaptive payload: a pure function of (global rank, fixed byte limits) — see the
-            // kForDoc*/kForTailSig constants. Top ranks are untouched; the tail is signature-only.
-            const std::uint32_t globalRank = rankAdaptivePayload ? globalRankOf[ id ] : 0u;
-            if( rankAdaptivePayload && globalRank > kForDocExcerptRankCount )
-            {
-                truncateUtf8WithEllipsis( sig, kForTailSigBytes );
-            }
-
             const bool  pureSig = pureFromSig( sig, s.lang ) && !( impure && id < impure->size() && (*impure)[id] );   // const/non-mutating AND no transitive side-effects
             const char* pure    = pureSig ? " pure=\"1\"" : "";
 
@@ -3740,21 +3762,10 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             }
 
             // identity (n=/id=) + descriptive facts (cx=complexity, ccx=cognitive, in=reuse-count, Q3 lens, pure)
-            // d1: globalRank is 0 when !rankAdaptivePayload (non-lens serving) — r= absent there by contract.
-            w.write( sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure, globalRank }, esc, rootArg ) );
+            // d1: rank 0 = non-lens serving — r= (and P7's p=) absent by contract.
+            w.write( sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure, /*rank=*/0u }, esc, rootArg ) );
             std::string doc = docCommentBefore( src, a );   // L2: the human-written intent, if any
             redactInPlace( doc, redact );                    // a doc-comment body can hold a pasted secret
-            if( rankAdaptivePayload )                        // B0.3: tail entries carry a trimmed excerpt / no doc
-            {
-                if( globalRank > kForDocExcerptRankCount )
-                {
-                    doc.clear();
-                }
-                else if( globalRank > kForDocFullRankCount )
-                {
-                    truncateUtf8WithEllipsis( doc, kForDocExcerptBytes );
-                }
-            }
             if( !doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( doc, esc ) );  w.write( "</doc>" );  used += doc.size() + 12; }
             w.write( escapeXml( sig, esc ) );
             const std::string symNotes = renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );   // L3/D5
@@ -5525,7 +5536,7 @@ inline std::vector<std::vector<NodeId>> legoImplementorsOnSurface( const IngestR
 // computed from the cap-N lens surface, so a lego row could carry a p= the rendered sigs no longer shows —
 // an identity the reader cannot tie back to the bundle's own surface (legobundlecheck rule 2; latent before
 // §P4 because the fixture files that host most interfaces also used to dominate the sigs head). Narrow
-// `legoScoped` to files literally present in the RENDERED sigs (its `<f p="…"` rows, compared in escaped
+// `legoScoped` to files literally present in the RENDERED sigs (its rows' ` p="…"`, compared in escaped
 // form exactly as serialized — the same naive scan the gate applies, so the two always agree): an interface
 // whose own file was trimmed is dropped (packLego's name-dedup then falls to the next-ranked same-named
 // interface, if any survives), and an implementor row in a trimmed file leaves its list. Returns true when
@@ -5544,10 +5555,13 @@ inline std::vector<std::vector<NodeId>> legoImplementorsOnSurface( const IngestR
 inline bool narrowLegoToRenderedSigs( const IngestResult& ing, std::vector<std::vector<NodeId>>& legoScoped,
                                       std::string_view sigsRendered, std::string_view rootPrefix = {} )
 {
+    // P7 (terminality round A, lane R, 2026-09-05): the lens <sigs> is flat — every <d> row (and a file note's
+    // <note p=>) carries its own ` p="…"`; there is no <f p=> wrapper to scan. Attribute values are entity-
+    // escaped, so ` p="` can only open an attribute (and " amp=\"" does not match: it is preceded by 'm').
     HashMap<std::string, char> renderedFilePaths;
-    for( std::size_t at = sigsRendered.find( "<f p=\"" ); at != std::string_view::npos; at = sigsRendered.find( "<f p=\"", at + 6 ) )
+    for( std::size_t at = sigsRendered.find( " p=\"" ); at != std::string_view::npos; at = sigsRendered.find( " p=\"", at + 4 ) )
     {
-        const std::size_t open  = at + 6;
+        const std::size_t open  = at + 4;
         const std::size_t close = sigsRendered.find( '"', open );
         if( close == std::string_view::npos )
         {
@@ -6708,19 +6722,22 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
 // SAME ladder (trimSigLadder above — one ladder, two serializations). These are its row structs; the member
 // NAMES are the ladder's duck-typed contract (globalRank/doc/sig/dropped and wrapBytes/entryBegin/entryEnd/
 // liveCount), so they deliberately match the XML path's local structs field for field.
+// P7 (terminality round A, lane R, 2026-09-05): the array is FLAT now — one `{"l":…,"n":…,"p":…,…,"r":N}` object
+// per row in rank order, no `{"p":…,"symbols":[…]}` wrapper (the XML twin's own change; test/forrankordercheck.sh).
+// A file's notes ride its first live row as that row's `"file_notes":[…]` (a key of its own, so they can never be
+// mistaken for the row's `"notes"`), charged once as the file's wrapBytes and released with its last live row.
 struct JsonSigFile
 {
     std::uint32_t fileId     = 0;
-    std::size_t   wrapBytes  = 0;   // exact emitted bytes of the {"p":…,"symbols":[…]} wrapper (+ its separating comma)
-    std::size_t   entryBegin = 0;   // [entryBegin, entryEnd) rows in the entries vector
-    std::size_t   entryEnd   = 0;
-    std::size_t   liveCount  = 0;   // non-dropped entries (the wrapper is dropped when this hits 0)
-    std::string   notes;            // §B1.3: the rendered `,"notes":[…]` for FILE-level notes ("" ⇒ none)
+    std::size_t   wrapBytes  = 0;   // exact emitted bytes of the file's `,"file_notes":[…]` (nothing else is per-file now)
+    std::size_t   liveCount  = 0;   // non-dropped entries (the file notes are dropped when this hits 0)
+    std::string   notes;            // §B1.3: the rendered `,"file_notes":[…]` for FILE-level notes ("" ⇒ none)
     std::size_t   noteCount = 0;    //         how many notes that array holds (the countable fact)
 };
 struct JsonSigEntry
 {
     std::uint32_t globalRank = 0;   // 1-based global rank — the ladder's only rank input
+    std::size_t   fileSlot   = 0;   // index into the files vector (P7: the ladder releases the file's notes at liveCount 0)
     std::string   head;             // the exact `{"l":…,"n":…` prefix through the flag fields
     std::string   doc;              // RAW doc text after the rank tiers ("" ⇒ no "doc" key)
     std::string   sig;              // RAW one-line signature after the rank tiers
@@ -6744,7 +6761,8 @@ struct JsonSigNoteCounts
 // recorded rule for the provenance pair (`sha`/`branch` omitted entirely on a legacy unstamped note, never
 // emitted empty). Returns the number of notes rendered; appends NOTHING when there are none, so a tree
 // with no NoteIndex keeps the pre-feature bytes exactly (the L3 inertness contract).
-inline std::size_t appendJsonNoteArray( std::string& out, const notes::NoteIndex* ni, const std::string& target )
+inline std::size_t appendJsonNoteArray( std::string& out, const notes::NoteIndex* ni, const std::string& target,
+                                        const char* key = ",\"notes\":[" )   // P7: `,"file_notes":[` for a file's notes
 {
     if( !ni )
     {
@@ -6756,7 +6774,7 @@ inline std::size_t appendJsonNoteArray( std::string& out, const notes::NoteIndex
         return 0;
     }
 
-    out += ",\"notes\":[";
+    out += key;
     for( std::size_t i = 0; i < hits->size(); ++i )
     {
         const notes::Note& n = ni->notes[ (*hits)[i] ];
@@ -6818,6 +6836,12 @@ inline std::string jsonSigRowHead( const IngestResult& ing, NodeId id, std::uint
     if( const std::string canon = scopedCanonicalId( ing, s, rootArg ); !canon.empty() )
     {
         appendJsonStrField( head, ",\"id\":", canon );
+    }
+    // P7: the row names its file (and its builtin layer) — the XML sibling's p=/layer=, same root-relative spelling
+    appendJsonStrField( head, ",\"p\":", lensRowPath( ing, fileId, rootArg ) );
+    if( const char* fl = builtinLayer( ing.files[ fileId ] ); *fl )
+    {
+        appendJsonStrField( head, ",\"layer\":", fl );
     }
     if( lens.metrics )
     {
@@ -6883,36 +6907,6 @@ inline std::size_t collectedJsonNoteTotal( const std::vector<JsonSigFile>& files
     return total;
 }
 
-// Phase 2's per-file symbol array, as ONE string: the live rows of `sf`, comma-joined, in collection order.
-// Returns "" when every row was skipped or dropped, which is the signal phase 2 uses to spend no file
-// wrapper and no separating comma. `outKeptNotes` accumulates the notes that survived onto those rows.
-inline std::string renderJsonSigRows( const std::vector<JsonSigEntry>& entries, const JsonSigFile& sf, std::size_t& outKeptNotes )
-{
-    std::string rows;
-    for( std::size_t k = sf.entryBegin; k < sf.entryEnd; ++k )
-    {
-        const JsonSigEntry& e = entries[k];
-        if( e.dropped )
-        {
-            continue;
-        }
-        if( !rows.empty() )
-        {
-            rows += ",";
-        }
-        rows += e.head;
-        if( !e.doc.empty() )
-        {
-            appendJsonStrField( rows, ",\"doc\":", e.doc );
-        }
-        appendJsonStrField( rows, ",\"sig\":", e.sig );
-        rows         += e.notes;      // §B1.3: pre-rendered, after `sig` — the XML order of <d>'s children
-        outKeptNotes += e.noteCount;
-        rows += "}";
-    }
-    return rows;
-}
-
 // Phase 1 — derive every row exactly as the pre-§A4a streaming loop did (same skip gates, same rank tiers,
 // same budgetBytes accounting), into memory. Per-file emission is a variable-skip loop (an unreadable span
 // or an empty cleaned signature drops a symbol entirely), so whether a file contributes anything is only
@@ -6941,11 +6935,6 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
                                    std::size_t* positivesContentSkippedOut = nullptr ) // A2: accumulates alongside
                                                                                        //   `rank` (both null together)
 {
-    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
-    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
-    {
-        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
-    };
     std::size_t used = 0;
     for( std::uint32_t f : fileOrder )
     {
@@ -6981,17 +6970,11 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
 
         JsonSigFile sf;
         sf.fileId     = f;
-        sf.entryBegin = outEntries.size();
-        // exact wrapper bytes: `,` + `{"p":"…"` [+ `,"layer":"…"`] + `,"symbols":[` + `]}`
-        sf.wrapBytes  = 1 + 6 + jsonStr( pathRel( f ) ).size() + 1 + 12 + 2;
-        if( const char* fl = builtinLayer( ing.files[f] ); *fl )
-        {
-            sf.wrapBytes += 10 + std::strlen( fl ) + 1;
-        }
-        // §B1.3: FILE-level notes ride the wrapper, exactly as the XML <f> child does — rendered here so the
-        // wrapper's byte cost stays EXACT (the ladder trims against these numbers).
-        sf.noteCount  = appendJsonNoteArray( sf.notes, lens.noteIndex, fileNoteTarget( lens.noteIndex, ing.files[f] ) );
-        sf.wrapBytes += sf.notes.size();
+        // §B1.3 + P7: FILE-level notes ride the file's first live row as its `file_notes` — rendered here so the
+        // byte cost stays EXACT (the ladder trims against these numbers); the file has no wrapper of its own now.
+        sf.noteCount  = appendJsonNoteArray( sf.notes, lens.noteIndex, fileNoteTarget( lens.noteIndex, ing.files[f] ), ",\"file_notes\":[" );
+        sf.wrapBytes  = sf.notes.size();
+        const std::size_t fileSlot = outFiles.size();
 
         for( NodeId id : syms )
         {
@@ -7042,17 +7025,19 @@ inline void collectJsonSigEntries( const IngestResult& ing, const std::vector<st
 
             JsonSigEntry e;
             e.globalRank = globalRank;
+            e.fileSlot   = fileSlot;
             e.head       = jsonSigRowHead( ing, id, f, lens, pureSig, rootArg, globalRank );   // d1: rank fact rides the row
             e.doc        = std::move( doc );
             e.sig        = std::move( sig );
             e.noteCount  = appendJsonNoteArray( e.notes, lens.noteIndex, symbolNoteTarget( lens.noteIndex, ing, s ) );   // §B1.3
             e.positive   = rank && (*rank)[id] > 0.0f;   // A2: the XML sibling's own field, same definition
             outEntries.push_back( std::move( e ) );
+            ++sf.liveCount;
         }
-        sf.entryEnd  = outEntries.size();
-        sf.liveCount = sf.entryEnd - sf.entryBegin;
-        outFiles.push_back( sf );
+        outFiles.push_back( std::move( sf ) );
     }
+    // P7: rank order — the emission order AND the ladder's drop order (the XML twin's own sort)
+    std::stable_sort( outEntries.begin(), outEntries.end(), []( const JsonSigEntry& a, const JsonSigEntry& b ) { return a.globalRank < b.globalRank; } );
 }
 
 // The --for/--pack-task JSON ranking sibling of packSignatures. Writes JUST the array value
@@ -7187,37 +7172,41 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         outNotes->total = collectedJsonNoteTotal( sigFiles, entries ); // §B1.3 — see its header
     }
 
-    // phase 2 — emit (identical write shapes to the pre-§A4a streaming path)
+    // phase 2 — emit: P7, one flat array of rows in rank order (the XML twin's own shape)
     JsonWriter  w( out );
-    std::string esc;
-    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
-    const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
-    {
-        return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
-    };
     w.write( "[" );
-    bool firstFile = true;
-    for( const JsonSigFile& sf : sigFiles )
+    bool              first = true;
+    std::vector<char> fileNotesPending( sigFiles.size(), 1 );   // a file's notes ride its FIRST live row
+    for( const JsonSigEntry& e : entries )
     {
-        std::size_t       fileKeptNotes = 0;
-        const std::string fileSyms      = renderJsonSigRows( entries, sf, fileKeptNotes );
-        if( fileSyms.empty() )
+        if( e.dropped )
         {
-            continue; // every symbol in this file skipped/dropped — no wrapper, no comma spent
+            continue;
         }
-
-        if( !firstFile )
+        if( !first )
         {
             w.write( "," );
         }
-        firstFile = false;
-        w.write( "{\"p\":" );  writeJsonStr( w, pathRel( sf.fileId ), esc );
-        if( const char* fl = builtinLayer( ing.files[ sf.fileId ] ); *fl ) { w.write( ",\"layer\":" );  writeJsonStr( w, fl, esc ); }
-        w.write( sf.notes );               // §B1.3: file-level notes, where the XML puts them on <f>
-        w.write( ",\"symbols\":[" );  w.write( fileSyms );  w.write( "]}" );
+        first = false;
+        std::string row = e.head;
+        if( !e.doc.empty() )
+        {
+            appendJsonStrField( row, ",\"doc\":", e.doc );
+        }
+        appendJsonStrField( row, ",\"sig\":", e.sig );
+        row += e.notes;      // §B1.3: pre-rendered, after `sig` — the XML order of <d>'s children
+        std::size_t kept = e.noteCount;
+        if( fileNotesPending[ e.fileSlot ] )
+        {
+            fileNotesPending[ e.fileSlot ] = 0;
+            row  += sigFiles[ e.fileSlot ].notes;       // P7: `"file_notes":[…]`, the XML <note p="FILE"> children
+            kept += sigFiles[ e.fileSlot ].noteCount;
+        }
+        row += "}";
+        w.write( row );
         if( outNotes )
         {
-            outNotes->kept += sf.noteCount + fileKeptNotes;
+            outNotes->kept += kept;
         }
     }
     w.write( "]" );

@@ -247,7 +247,8 @@ run_lens(){                                    # $1 = tag, $2… = the flags; se
     "$BIN" "$ROOT/src" --no-cache "$@" >"$TMP/$tag.xml" 2>"$TMP/$tag.err"
     printf '%s' "$?"
 }
-top_file(){ grep -oE '<sigs[^>]*><f p="[^"]*"' "$1" | head -1 | sed -E 's/.*<f p="([^"]*)"/\1/'; }
+# RE-PINNED: P7 (terminality round A, lane R, 2026-09-05): the lens <sigs> is FLAT — <d … p="FILE" … r=N> rows in rank order, no <f p=> wrapper (test/forrankordercheck.sh) — the top file is the r=1 row's p=
+top_file(){ grep -oE '<sigs[^>]*><d [^>]*>' "$1" | head -1 | grep -oE ' p="[^"]*"' | head -1 | sed -E 's/^ p="//; s/"$//'; }
 lens_evidence(){                               # the four-way discriminator, printed only on failure
     local tag="$1" rc="$2"
     printf '    [%s] rc=%s  bytes=%s\n' "$tag" "$rc" "$( wc -c <"$TMP/$tag.xml" | tr -d ' ' )"

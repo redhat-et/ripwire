@@ -129,8 +129,8 @@ for seg in segs:
     sigs = seg.split( '<sigs' )[1].split( '</sigs>' )[0] if '<sigs' in seg else ''
     sigs = sigs.split( '<far' )[0]                      # the <far> name-only tier is nested inside </sigs>
     ids  = set()
-    for fm in re.finditer( r'<f p="([^"]+)"[^>]*>(.*?)</f>', sigs, re.S ):
-        for lm in re.finditer( r'<d l="(\d+)"', fm.group( 2 ) ): ids.add( ( fm.group( 1 ), lm.group( 1 ) ) )
+    # P7: the lens <sigs> is flat — every <d> row carries its own p= (test/forrankordercheck.sh)
+    for dm in re.finditer( r'<d l="(\d+)"[^>]*?\bp="([^"]+)"', sigs ): ids.add( ( dm.group( 2 ), dm.group( 1 ) ) )
     sets[ cur ] = ids;  cur = None
 keys  = list( sets )
 worst = 0
