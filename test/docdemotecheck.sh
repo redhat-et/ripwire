@@ -99,6 +99,11 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-09-04 (capture-audit wave-2 merge): docdemotegolden_for.xml 5236 -> 5234 B (-2 B, est_tokens
+# 2096 -> 2095). ONE identified change: lane L10b's route= trim (finding 9 — the value no longer starts with
+# " [", verbs_for.h computeLensRanking), which landed AFTER lane V1 re-pinned this golden on its own tree.
+# Verified before re-pinning: with `route=" [routed:` -> `route="routed:` and est_tokens= normalised, the
+# live document and the previous golden are byte-identical — no ranking, demotion or route byte moved.
 # RE-PIN 2026-09-04 (capture-audit verify-wave1 N1, lane V1): docdemotegolden_for.xml 5195 -> 5236 B (+41 B,
 # est_tokens="2080" -> "2096") and docdemotegolden_noroute.xml 9188 -> 9229 B (+41 B, est_tokens="3240" -> "3257").
 # CAUSE: --for now prices its ROOT — est_tokens= moved from the header comment onto <ctx> and the legend gained
