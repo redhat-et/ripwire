@@ -430,7 +430,7 @@ add(S8, f"{D} . --edit-plan={edit_plan_path} --apply", "The same plan committed:
 add(S8, f"{D} . --edit-plan={edit_plan_path}", "Neither --dry-run nor --apply: the mode is explicit, so this refuses.", cwd=DIRTY)
 add(S8, f"{D} . --quality-delta", "After the agent's edits: the complexity/nesting rows on lessByScoreDescId are gone (the replace undid them), the rest still gate.", cwd=DIRTY)
 add(S8, f"{D} . --quality-baseline", "REFUSES, exit 1: this sandbox tree is already regressed, and pinning here would swallow that debt into the floor so every later delta read clean. It names how many gating findings it would absorb, the first of them, and the way forward.", cwd=DIRTY)
-add(S8, f"{D} . --quality-baseline --allow-dirty", "The consent form: pin anyway. The sidecar is stamped with the dirty pin and the absorbed count, so the fact outlives the process that knew it.", cwd=DIRTY, post="ls -la .ripwire_quality_baseline && head -c 300 .ripwire_quality_baseline")
+add(S8, f"{D} . --quality-baseline --allow-dirty", "The consent form: pin anyway. The sidecar is stamped with the dirty pin and the absorbed count, so the fact outlives the process that knew it.", cwd=DIRTY, post="wc -c .ripwire_quality_baseline && head -c 300 .ripwire_quality_baseline")
 add(S8, f"{D} . --quality-delta", "Against that sidecar the same tree reads regressions=0 — but baseline_absorbed= is on the root, so this green means clean SINCE THE PIN, never clean. A baseline is a floor YOU chose, and it belongs BEFORE the change.", cwd=DIRTY)
 
 S9 = "the MCP dialect — the same verbs over stdio JSON-RPC (one-shot exchange, not a persistent server)"
