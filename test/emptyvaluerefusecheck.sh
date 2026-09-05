@@ -239,6 +239,46 @@ fi
     && ok "control: the plain default map still exits 0 with $( wc -c <"$TMP/plain" | tr -d ' ' ) bytes" \
     || no "control: the plain default map exits $rc — this gate is passing for the wrong reason"
 
+# ── THE MCP HALF (capture-audit verify-wave2 F9, 2026-09-05) ───────────────────────────────────────────
+# M6's empty-value rule was applied to the 60 CLI table flags and stopped at the CLI. The MCP server reads
+# its string arguments with `if( arg.empty() )` — which collapses ABSENT and PRESENT-BUT-EMPTY, the exact
+# distinction this gate exists to hold — so `legend:""` was read as the default and answered 5,090 bytes at
+# exit 0 where `--legend=` refuses. One transport, one rule: an explicitly empty value refuses on BOTH
+# surfaces, naming the field and the accepted set, and an ABSENT one still means "the default".
+command -v python3 >/dev/null 2>&1 || { echo "python3 required for the MCP arm"; exit 2; }
+mcp_reply() {   # $1 = verb  $2 = arguments-object JSON
+    printf '%s\n%s\n' \
+        '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" \
+        | "$BIN" --mcp 2>/dev/null | tail -1
+}
+MFIX="$ROOT/test/fixture"
+# the CLI twin first, so the arm observes the rule it is holding the MCP surface to
+"$BIN" "$MFIX" --legend= --slice=geometry.cpp:distance >/dev/null 2>"$TMP/cli.legend.err"; cliRc=$?
+{ [ "$cliRc" -ne 0 ] && grep -q 'legend' "$TMP/cli.legend.err"; } \
+    && ok "MCP-half premise: the CLI --legend= refuses (exit $cliRc), which is the rule the MCP field must match" \
+    || no "MCP-half premise: --legend= did not refuse (exit $cliRc) — the CLI rule moved, fix this arm before the MCP one"
+EMPTY="$( mcp_reply slice "{\"path\":\"$MFIX\",\"symbol\":\"geometry.cpp:distance\",\"legend\":\"\"}" )"
+printf '%s' "$EMPTY" | python3 -c '
+import sys, json
+r = json.load( sys.stdin )
+if "error" not in r:
+    print( "ANSWERED" ); raise SystemExit( 1 )
+msg = r[ "error" ].get( "message", "" )
+print( "OK" if "legend" in msg else "UNNAMED: " + msg[ :120 ] )
+raise SystemExit( 0 if "legend" in msg else 1 )
+' >"$TMP/mcp.legend.res" 2>&1 \
+    && ok "MCP slice legend=\"\": refused by name, never silently read as the default" \
+    || no "MCP slice legend=\"\": $( cat "$TMP/mcp.legend.res" ) — an empty value read as the default is M6's own defect on the newer surface"
+# and the two shapes that must NOT have moved: absent = the default, an explicit valid value still works
+for probe in 'absent|{"path":"MFIX","symbol":"geometry.cpp:distance"}' 'full|{"path":"MFIX","symbol":"geometry.cpp:distance","legend":"full"}' 'compact|{"path":"MFIX","symbol":"geometry.cpp:distance","legend":"compact"}'; do
+    label="${probe%%|*}"; body="${probe#*|}"
+    body="$( printf '%s' "$body" | sed "s|MFIX|$MFIX|" )"
+    printf '%s' "$( mcp_reply slice "$body" )" | grep -q '"error"' \
+        && no "MCP slice legend=$label was refused — the empty-value rule swallowed a working posture" \
+        || ok "MCP slice legend=$label still answers (the refusal is for the EMPTY value only)"
+done
+
 # ── the harness must not mutate the tree it tests ──────────────────────────────────────────────────────
 # Compared against the status captured at the top of the run, not against a clean checkout: this gate is
 # normally run mid-change with the tree already dirty.

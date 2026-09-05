@@ -98,12 +98,15 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul );
-        // §L10b: no leading space+"[" — this string lands ONLY in the route= attribute value (and its JSON
-        // "route" twin) now, never spliced into free comment prose, so the bracket that used to visually
-        // demarcate it inside a sentence just made the attribute value start with a stray " [". The
-        // trailing "]" stays: test/adaptivecheck.sh and test/routecheck.sh's routeof()/reasonOf() helpers
-        // use it as a stop-anchor (grep -oE 'routed: [^]]*').
-        out.routeNote  = "routed: " + rc.reason + shapeDemotionNote( shape ) + "]";
+        // §L10b + verify-wave2 F6: no leading space+"[" AND no trailing "]". This string lands ONLY in the
+        // route= attribute value (and its JSON "route" twin) now, never spliced into free comment prose, so
+        // the brackets that used to demarcate it inside a sentence just left the value opening with a stray
+        // " [" and closing on an unbalanced "]". L10b took the leading half only, so every route value on
+        // every dialect shipped one dangling bracket. A bracket is a PAIR or it is neither; the ATTRIBUTE
+        // QUOTE is the delimiter here. The two stop-anchor helpers that grepped `routed: [^]]*`
+        // (test/adaptivecheck.sh routeof(), test/routecheck.sh reasonOf()) are re-pinned to `[^"]*` in the
+        // same commit — the quote is the real end of the value and was all along.
+        out.routeNote  = "routed: " + rc.reason + shapeDemotionNote( shape );
         out.docTierTag = shapeDocTierTag( shape );   // §A4f: the machine form of the same fact, for --format=candidates
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
         out.anchorDefs = std::move( const_cast<RouteChoice&>( rc ).anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
@@ -1920,6 +1923,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // exact-counted below. over_ceiling="1" rides the root only on the ladder's last rung, where the
         // ceiling is already exceeded by the floor — its 17 bytes are not reserved (nothing is left to trim).
         constexpr std::string_view kForEstTokensLegend = " est_tokens= prices this bundle in tokens";
+        // F2: spliced ONLY onto a document that actually carries over_ceiling="1" (the attribute is now
+        // reachable from every rung, not just the ladder's last), so a bundle inside its budget keeps every
+        // byte it had. Defines the attribute in the same unit the root prints both numbers in.
+        constexpr std::string_view kForOverCeilingLegend = " over_ceiling=1 says est_tokens exceeds budget_tokens";
         const std::size_t     headerSpliceReserve   = kEstTokensAttrReserve + kForEstTokensLegend.size() + ( forWeak ? kWeakAttrBytes : 0u );
         bool                  forOverCeiling        = false;   // N1: set when the ladder's last rung fired (root over_ceiling="1")
 
@@ -2226,25 +2233,74 @@ std::optional<int> runForLens( const MainDispatch& d )
                     headerStr.insert( legendAt, kForEstTokensLegend ); // else: unexpected shape, header left as-is
                 }
             }
-            const std::size_t markupBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
-                                          + routeStr.size() + graphSection.xml.size() + enrich.markupBytes
-                                          + tailStr.size() + 6;   // + "</ctx>" (deep-tail: the tail's bytes are measured at the markup rate)
+            // F2: everything OUTSIDE the header, fixed for the rest of this block — the header itself still
+            // grows by the over_ceiling legend clause below, so it is added separately.
+            const std::size_t nonHeaderBytes = sigsStr.size() + legoStr.size() + composeStr.size()
+                                             + routeStr.size() + graphSection.xml.size() + enrich.markupBytes
+                                             + tailStr.size() + 6;   // + "</ctx>" (deep-tail: the tail's bytes are measured at the markup rate)
+            std::size_t       markupBytes    = headerStr.size() + nonHeaderBytes;
             // T3: the auto bodies at the body rate — def-body text BPE-merges differently from markup, which
             // is why this sum splits by kind. enrich.bodyTokens is zero on the compact route (markup, above).
             const std::size_t bodyTokens  = detailSection.tokens + enrich.bodyTokens;
-            // N1: both root attributes are inside the number — over_ceiling="1" is a fixed 17 bytes on the last rung.
-            const std::string overAttr    = forOverCeiling ? std::string( " over_ceiling=\"1\"" ) : std::string();
-            std::size_t estTokens = rw::tokensForEmittedBytes( markupBytes + overAttr.size(), kBytesPerTokenDefault ) + bodyTokens;
-            std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
-            for( int pass = 0; pass < 4; ++pass )
+            // N1: both root attributes are inside the number — over_ceiling="1" is a fixed 17 bytes.
+            //
+            // F2 (capture-audit verify-wave2 2026-09-05): over_ceiling= is a PROPERTY OF THE EMITTED DOCUMENT,
+            // not a property of a rung. N1 set it from forOverCeiling alone — the ceiling ladder's LAST rung —
+            // so a bundle that overshot by a lot was labelled and one that overshot by a little was not:
+            //   --token-budget=1500 → budget_tokens="1500" est_tokens="1725" over_ceiling="1"
+            //   --token-budget=1600 → budget_tokens="1600" est_tokens="1665"      (65 over, NO label)
+            // Both numbers sit on ONE root in ONE unit, so a reader can subtract them; withholding the
+            // attribute that reconciles them is worse than the pre-N1 silence, because the wave's own
+            // cross-verb rule says over_ceiling= names an overshoot. THE RULE: over_ceiling="1" whenever
+            // est_tokens exceeds the budget the caller stated, on every rung; absent means inside it.
+            //
+            // The label is decided INSIDE the fixpoint because its own 17 bytes are part of the document the
+            // number prices. Convergence: adding the attribute only RAISES est_tokens, so a document already
+            // over the budget stays over — the flag never oscillates. A document that lands exactly ON the
+            // budget stays unlabelled and its printed number is exactly the budget, which is honest.
+            const bool  budgeted = cfg.tokenBudget > 0;
+            std::string overAttr;
+            // The est_tokens fixpoint, run once WITHOUT the label and — only if the label is owed — once more
+            // WITH it and with the legend clause that defines it. Two stages rather than one flag inside the
+            // loop, because the DEFINITION is header bytes: splicing it unconditionally would charge every
+            // budgeted bundle ~50 B for an attribute it does not carry (fornotesbudgetcheck's rungs are that
+            // tight), and an attribute whose legend does not define it is the §B7 defect in the other
+            // direction. Monotone, so one extra stage is exact: adding bytes only RAISES est_tokens, so a
+            // document over its budget without the label is still over it with the label.
+            const auto priceFixpoint = [ & ]( std::size_t markup, std::size_t overBytes )
             {
-                const std::size_t next = rw::tokensForEmittedBytes( markupBytes + attr.size() + overAttr.size(), kBytesPerTokenDefault ) + bodyTokens;
-                if( next == estTokens )
+                std::size_t est  = rw::tokensForEmittedBytes( markup + overBytes, kBytesPerTokenDefault ) + bodyTokens;
+                std::string a    = " est_tokens=\"" + std::to_string( est ) + "\"";
+                for( int pass = 0; pass < 4; ++pass )
                 {
-                    break;
+                    const std::size_t next = rw::tokensForEmittedBytes( markup + a.size() + overBytes, kBytesPerTokenDefault ) + bodyTokens;
+                    if( next == est )
+                    {
+                        break;
+                    }
+                    est = next;
+                    a   = " est_tokens=\"" + std::to_string( est ) + "\"";
                 }
-                estTokens = next;
-                attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
+                return std::pair<std::size_t, std::string>{ est, a };
+            };
+            auto              priced    = priceFixpoint( markupBytes, 0 );
+            std::size_t       estTokens = priced.first;
+            std::string       attr      = priced.second;
+            if( forOverCeiling || ( budgeted && estTokens > std::size_t( cfg.tokenBudget ) ) )
+            {
+                // The attribute rides the root, so its definition rides the legend of the document that
+                // carries it. On the ladder's last rung the bracket note explains the RUNG; this clause
+                // defines the ATTRIBUTE, which is now reachable from every rung.
+                const std::size_t overLegendAt = headerStr.rfind( " -->" );
+                if( overLegendAt != std::string::npos )
+                {
+                    headerStr.insert( overLegendAt, kForOverCeilingLegend );
+                    markupBytes = headerStr.size() + nonHeaderBytes;
+                }
+                overAttr  = " over_ceiling=\"1\"";
+                priced    = priceFixpoint( markupBytes, overAttr.size() );
+                estTokens = priced.first;
+                attr      = priced.second;
             }
             // N1: onto the <ctx> root — the same "><!--" boundary the bundle= attributes above use — where
             // --pack-task / --from-trace / --handoff / --expand put theirs (M11), not inside the comment.
@@ -2478,8 +2534,11 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // recallFor (recall.h) is the ONE rank-then-build call MCP `memory_recall` also makes — the recall
         // lens's pathFieldDefaultW=1 and its root-prefix derivation live there, so the two front doors cannot
         // drift apart again (gate: test/recallparitycheck.sh).
+        // F4: --token-budget's GATING ceiling travels to the header too, so both ceilings this run applied are
+        // named where an attribute reader finds them (it used to live only in the withheld prose and stderr).
         const RecallBundle       bundle = recallFor( ing, g.outOff, g.outTargets, cfg.recall, recallK, recallMaxTokens,
-                                                     redactPtr, recallRootArg );   // docs only; R-R
+                                                     redactPtr, recallRootArg,     // docs only; R-R
+                                                     cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0u );
 
         const int                rc     = emitRecallBudgeted( stdout, bundle, cfg.tokenBudget );
         reportRedactions( stderr, redactCounts );

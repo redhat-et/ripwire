@@ -348,8 +348,15 @@ case "$( mcp_text "$( call analyze '{"path":"'"$ROOT"'","task":"x"}' )" )" in
 esac
 # the batch arm, against the batch ITEM schema — and the sub-VERB must be judged first (an unknown verb has
 # no schema for the field check to use).
+#
+# RE-PIN 2026-09-05 (capture-audit verify-wave2 F7, lane V2), to the new contract stated precisely: this arm
+# used to require the sentence to read "grep accepts: …" while listing the batch ITEM schema — which credits
+# the sub-verb with fields it does not accept (grep takes no `var`, no `flow`, no `from`). The comment above
+# already said the judgement is against the item schema; the SENTENCE now says so too, so the arm asserts the
+# attribution rather than pinning the wrong one. The near-miss half is unchanged, which is what this arm is
+# really for.
 case "$( batch_sub '{"verb":"grep","pattern":"x","limitt":3}' )" in
-    __ERROR__:"unknown field: 'limitt' (did you mean 'limit'?)"*"grep accepts:"*) ok "M4 [batch] limitt: refused against the batch item schema, with the near-miss";;
+    __ERROR__:"unknown field: 'limitt' (did you mean 'limit'?)"*"batch sub-queries accepts:"*) ok "M4 [batch] limitt: refused against the batch item schema, named as such, with the near-miss";;
     *) no "M4 [batch] limitt: $( batch_sub '{"verb":"grep","pattern":"x","limitt":3}' )";;
 esac
 case "$( batch_sub '{"verb":"connect","symbols":["main","parseArgs"],"radius":6}' )" in

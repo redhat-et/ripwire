@@ -955,9 +955,11 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         h += " bytes (allowance ";  h += std::to_string( ceilingAllowanceFromBudgetBytes( bundleBudget ) );
         h += " bytes = ceiling + the single-entry overshoot a whole first signature costs). ";
         // M11: the root's machine-readable price, defined beside the ledger prose.
+        // F5: "it" used to have three possible referents on this root. over_ceiling= names the ONE comparison
+        // it is: est_tokens against the smallest ceiling this root prints.
         h += "On the root: est_tokens= prices the delivered bundle in tokens, budget_tokens= is the token target you passed (absent "
-             "when none), max_tokens= is the body ceiling you passed via the max_tokens flag (absent when none); over_ceiling= is 1 when the "
-             "header floor exceeds it (the bundle is then complete, not trimmed).";
+             "when none), max_tokens= is the body ceiling you passed via the max_tokens flag (absent when none); over_ceiling= is 1 when "
+             "est_tokens exceeds the smallest ceiling named here (the bundle is then complete, not trimmed).";
         h += extraNotes;
         // P3 (L7): next= defined where the reader meets it
         h += " next= is the one pasteable follow-up: the slice at the innermost in-corpus frame (@FILE:LINE); absent when none landed.";
@@ -1012,11 +1014,23 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
     // the bar is the delivered bytes, not an estimate; the payload was rendered against the pre-ladder
     // `fixedBytes`, so a shortened header only ever leaves the bundle further UNDER its allowance — never over.
     {
-        static constexpr CeilingLadderNotes kNotes{
+        // F5 (capture-audit verify-wave2 2026-09-05): the last rung's note may only spell the MARKER WORD on a
+        // document whose root can actually carry the attribute — i.e. one where the caller named a ceiling.
+        // The unnamed variant states the same trim fact against the working budget the ledger prose above
+        // already prints in bytes, so nothing is hidden; what is removed is a marker pointing at an attribute
+        // the root does not have.
+        static constexpr CeilingLadderNotes kNotesNamedCeiling{
             " [src_echo: dropped (ceiling)]",
             " [src_echo: dropped (ceiling)]",   // no route= attribute on this lens: hasRouteAttr=false ⇒ rung (c) is never taken
             " [over_ceiling: the header floor (verbatim src echo + fixed legend) plus the innermost frame's whole"
             " signature exceeds this budget - the bundle is complete and larger than the ceiling, not trimmed]" };
+        static constexpr CeilingLadderNotes kNotesDefaultCeiling{
+            " [src_echo: dropped (ceiling)]",
+            " [src_echo: dropped (ceiling)]",
+            " [ceiling: the header floor (verbatim src echo + fixed legend) plus the innermost frame's whole"
+            " signature exceeds the working budget above - the bundle is complete and larger than it, not trimmed]" };
+        const bool namedACeiling = in.budgetTokens > 0 || in.maxTokens > 0;
+        const CeilingLadderNotes& kNotes = namedACeiling ? kNotesNamedCeiling : kNotesDefaultCeiling;
         // M11: the PRICED ROOT (the whole bundle at the map rate — the rank-1 body is a minority of the bytes,
         // and the map rate over-prices body text, so the number errs conservative), budget_tokens= when a
         // --token-budget was passed, over_ceiling="1" when the ladder's last rung fired. Priced INTO the
@@ -1028,19 +1042,33 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
             if( in.preludeMeasuredDigits == 0 ) { return docBytes; }
             return docBytes - std::min( docBytes, in.preludeMeasuredDigits ) + kMeasuredDigitsPricedWidth;
         };
-        const auto rootAttrsFor = [ & ]( const std::string& doc, bool overCeiling ) -> std::string
+        // F5: the SMALLEST ceiling this root will actually print. over_ceiling= is measured against it and
+        // nothing else, so the attribute and the numbers beside it can always be reconciled by subtraction.
+        // 0 = the caller named none (the working budget is the lens's own default, stated in the ledger prose
+        // in bytes) and the label is then withheld rather than pointed at a number the root does not carry.
+        std::size_t namedCeiling = 0;
+        if( in.budgetTokens > 0 ) { namedCeiling = in.budgetTokens; }
+        if( in.maxTokens > 0 )    { namedCeiling = namedCeiling > 0 ? std::min( namedCeiling, in.maxTokens ) : in.maxTokens; }
+        const auto rootAttrsFor = [ & ]( const std::string& doc, bool widestSpelling ) -> std::string
         {
-            std::string attrs = pricedRootAttr( pricedBytesOf( doc.size() ), kBytesPerTokenDefault, 0, nullptr );
+            std::size_t est   = 0;
+            std::string attrs = pricedRootAttr( pricedBytesOf( doc.size() ), kBytesPerTokenDefault, 0, &est );
             if( in.budgetTokens > 0 ) { attrs += " budget_tokens=\"" + std::to_string( in.budgetTokens ) + "\""; }
             // H9: --max-tokens bounds the rank-1 BODY here, and the bundle really does shrink for it
             // (13.6 KB -> 2.6 KB on the audit's probe) — so the ceiling gets named, exactly as
             // budget_tokens= names --token-budget's. The two flags are separate columns in cli.h's
             // kShapingVerbs and --from-trace is the one verb whose row sets both, so both can appear.
             if( in.maxTokens > 0 )    { attrs += " max_tokens=\"" + std::to_string( in.maxTokens ) + "\""; }
-            if( overCeiling )         { attrs += " over_ceiling=\"1\""; }
+            // F5: the PROPERTY, not the rung. The old test was `the ladder's last rung fired`, and the ladder
+            // climbs against the BUNDLE budget — so `--max-tokens=200` delivered 1090 tokens beside
+            // `max_tokens="200"` in silence, while `--max-tokens=8000` on a bundle over the lens's own default
+            // wore over_ceiling="1" at 4471 tokens, comfortably inside the ceiling it named. Both readings
+            // came from measuring against a ceiling other than the one printed. One rule now: the delivered
+            // document exceeds a ceiling named on this root, or the attribute is absent.
+            if( widestSpelling || ( namedCeiling > 0 && est > namedCeiling ) ) { attrs += " over_ceiling=\"1\""; }
             return attrs;
         };
-        const std::size_t rootAttrsBound = rootAttrsFor( whole, /*overCeiling=*/true ).size();
+        const std::size_t rootAttrsBound = rootAttrsFor( whole, /*widestSpelling=*/true ).size();
         const std::string chosen = climbCeilingLadder( [ & ]( bool, bool withSrcEcho, std::string_view extra )
                                                        { return buildTraceHeader( withSrcEcho, extra ); },
                                                        headerStr, pricedBytesOf( whole.size() ) - headerStr.size() + rootAttrsBound,
@@ -1050,8 +1078,10 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         {
             whole.replace( 0, headerStr.size(), chosen );
         }
-        // the ladder's last rung spells the marker with a colon (kNotes); the legend's definition never does
-        spliceRootAttrs( whole, rootAttrsFor( whole, chosen.find( "over_ceiling:" ) != std::string::npos ) );
+        // F5: no marker sniff any more — the decision is the property above, read off the number the root
+        // will print. (The ladder's last rung implies it whenever --token-budget set the bundle budget:
+        // the rung fires past budget x 2.36 x 1.15 bytes, i.e. past 1.085 x budget tokens.)
+        spliceRootAttrs( whole, rootAttrsFor( whole, /*widestSpelling=*/false ) );
     }
 
     res.ok         = true;

@@ -1581,10 +1581,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // reserved for the caller-CHOSEN opt-out (--signatures-only, pre-T3 byte-identical by registration);
     // a posture the TOOL chose for the caller must be disclosed, or an MCP agent reading this bundle
     // cannot tell "no bodies exist for this task" from "this dialect never serves them".
-    // §L10b: same trim as the CLI --for twin (verbs_for.h) — no leading " [", the value lands only in
-    // route=; trailing "]" kept as the stop-anchor test helpers grep against.
+    // §L10b + verify-wave2 F6: same trim as the CLI --for twin (verbs_for.h) — no leading " [" and no
+    // trailing "]"; the value lands only in route=, where the attribute quote is the delimiter.
     const std::string mcpForAtAttrStr = gitstamp::atAttr( root );   // M10's at=, computed once: spliced onto the root AND exempted from the sigs charge below
-    std::string rootOpenStr = ctxRootOpen( task, "routed: " + rc.reason + shapeDemotionNote( shape ) + "]", flRootArg );   // §B1.7: same root attrs as the CLI twin
+    std::string rootOpenStr = ctxRootOpen( task, "routed: " + rc.reason + shapeDemotionNote( shape ), flRootArg );   // §B1.7: same root attrs as the CLI twin
     if( !rootOpenStr.empty() && rootOpenStr.back() == '>' )
     {
         // Attribute ORDER matches the CLI twin's: confidence/margin_pct, then at=, then this dialect's own
@@ -2604,7 +2604,9 @@ inline constexpr char kConnectHeader[] =
     " defs= on a terminal row = that NAME has N definitions and the lowest-id one was used; qualify with file:name"
     " to pick another. Steiner rows never carry it."
     " max_tokens= is the token ceiling this bundle was SHAPED against (the max_tokens flag; absent = none"
-    " was asked for); est_tokens= is what it cost, and truncated=\"paths\" says the shaping had to cut -->";
+    " was asked for); est_tokens= is what it cost, truncated=\"paths\" says the shaping had to cut, and"
+    " over_ceiling=\"1\" says est_tokens exceeds max_tokens anyway (the trim ran out of things to drop before it"
+    " reached the ceiling; the bundle is then complete, not further trimmed) -->";
 
 // The root element's own bytes: the <connect ...> start-tag PLUS the </connect> close. It is
 // self-referential (the start-tag's length depends on the digits of the number it carries), so it is
@@ -2810,7 +2812,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     // §P8 vocabulary: `est_tokens="~191"` was the tool's only NON-NUMERIC token estimate — the `~` made
     // `int(...)` throw in the one field whose whole purpose is arithmetic against a budget, and no other
     // verb apologises for an estimate being an estimate. Dropped.
-    const std::size_t estTokens = connectEstTokens( payload.size(), connectExtraBytes );
+    std::size_t estTokens = connectEstTokens( payload.size(), connectExtraBytes );
     // H9: the ceiling this bundle was SHAPED against, named on the root. The trim loop above really does
     // drop sigs and then whole legs to fit `maxTokens`, and until this attribute existed the only evidence
     // was `truncated="paths"` — which says something was cut but not what it was cut to. Absent when no
@@ -2821,10 +2823,22 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         std::snprintf( connectCeiling, sizeof( connectCeiling ), " max_tokens=\"%d\"", maxTokens );
     }
+    // F5 sibling (capture-audit verify-wave2 2026-09-05, budgetpolicycheck (D)): the trim loop above has
+    // exactly two moves — sigs off, then legs dropped — and then it BREAKS whether or not the bundle fits.
+    // `--connect=… --max-tokens=200` therefore delivered 656 tokens beside max_tokens="200" wearing only
+    // truncated="paths", which says something was cut and not that the cut fell short. A ceiling named is a
+    // ceiling measured against: over_ceiling="1" when the delivered document still exceeds it. Its own 17
+    // bytes are charged back through the same estimator, so the number and the label describe one document.
+    const bool        connectOver     = maxTokens > 0 && estTokens > std::size_t( maxTokens );
+    const char* const connectOverAttr = connectOver ? " over_ceiling=\"1\"" : "";
+    if( connectOver )
+    {
+        estTokens = connectEstTokens( payload.size(), connectExtraBytes + std::strlen( connectOverAttr ) );
+    }
     std::fprintf( out, "%s%s", kConnectHeader, rootRelPathsLegend( !rootArg.empty() ) );
-    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s%s%s%s>",
+    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s%s%s%s%s>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups, estTokens,
-                  connectCeiling,
+                  connectCeiling, connectOverAttr,
                   truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),
                   graphCountFloorAttrXml( g ).c_str() );   // H5/M15: nodes=/edges= are read off the name-based CSR — a floor, with the gauge
     std::fwrite( payload.data(), 1, payload.size(), out );
@@ -3208,8 +3222,8 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     const std::vector<float>  tierMul = rankTierSymbolMultipliersShaped( ing, shape.fires() );
     lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                        : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul );
-    // §L10b: same trim as the other two route= construction sites — no leading " [".
-    lr.routeNote = "routed: " + rc.reason + shapeDemotionNote( shape ) + "]";
+    // §L10b + verify-wave2 F6: same trim as the other route= construction sites — neither bracket.
+    lr.routeNote = "routed: " + rc.reason + shapeDemotionNote( shape );
 
     if( !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
@@ -4098,9 +4112,22 @@ inline std::string batchObjectFromCliSpec( std::string_view spec )
     {
         return {};   // comment
     }
+    // F11 (capture-audit verify-wave2 2026-09-05, recorded by wave 1 and unowned until M5 took this grammar):
+    // the colon is a SEPARATOR, and `callers: rankGraphTeleport` is how a human writes one. Untrimmed, the
+    // leading space rode into the symbol and came back as
+    //   symbol not found: ' rankGraphTeleport' (did you mean 'rankGraphTeleport'?)
+    // — a did-you-mean whose suggestion is the string the caller typed, which is the shape of a tool blaming
+    // a user for its own parse. Trimmed on both sides of the colon, the same trim this function already runs
+    // on the whole line. isBatchCliSpec already trimmed the VERB half, so the two halves now agree.
+    const auto trimEnds = []( std::string_view t )
+    {
+        const std::size_t f = t.find_first_not_of( " \t\r" );
+        if( f == std::string_view::npos ) { return std::string{}; }
+        return std::string( t.substr( f, t.find_last_not_of( " \t\r" ) - f + 1 ) );
+    };
     const std::size_t colon = line.find( ':' );
-    const std::string verb  = ( colon == std::string::npos ) ? line : line.substr( 0, colon );
-    const std::string arg   = ( colon == std::string::npos ) ? std::string{} : line.substr( colon + 1 );
+    const std::string verb  = ( colon == std::string::npos ) ? line : trimEnds( std::string_view( line ).substr( 0, colon ) );
+    const std::string arg   = ( colon == std::string::npos ) ? std::string{} : trimEnds( std::string_view( line ).substr( colon + 1 ) );
 
     const auto  j   = []( const std::string& v ) { return mcpdetail::jsonEscape( v ); };
     std::string obj = "{\"verb\":\"" + j( verb ) + "\"";
@@ -4287,7 +4314,12 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
     {
         return bad( verbErr );
     }
-    if( const std::string fieldErr = mcpUnknownFieldRefusal( obj, r.verb, mcprefuse::kBatchSubQueryFields );
+    // F7 (verify-wave2): the sub-query IS refused here — verified inline on 2d40209 — but the sentence used
+    // to read "slice accepts: verb, symbol, pattern, task, …", naming the batch ITEM schema under the
+    // SUB-VERB's name. slice accepts no `pattern` and no `from`, so the recovery list was false for the verb
+    // it named. The schema is still the right one to judge against (mcprefusal.h kBatchSubQueryFields says
+    // why); it is the ATTRIBUTION that was wrong, so the sentence names the schema it actually applied.
+    if( const std::string fieldErr = mcpUnknownFieldRefusal( obj, "batch sub-queries", mcprefuse::kBatchSubQueryFields );
         !fieldErr.empty() )
     {
         return bad( fieldErr );

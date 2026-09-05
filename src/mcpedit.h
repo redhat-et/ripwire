@@ -743,7 +743,16 @@ namespace mcpedit
             }
             out += "]}";
         }
-        out += "]}";
+        out += "]";
+        // F3 (capture-audit verify-wave2 2026-09-05): the COMPLETENESS KEYS the standalone twin carries.
+        // The fold was measured equal to `--edit-check` field for field on the fields it COPIES, and that was
+        // the gap — the standalone root carries the resolver gauge and the floor marker and the fold did not,
+        // so `"callers":2` read as a total where `<edit-check … callers="2" graph_ambiguous="5923"
+        // graph_unresolved="2952" counts_floor="1">` says it is a floor off a name-based call graph. Same
+        // helper, same JSON spelling every other folded surface uses: a disclosure survives into every
+        // sibling surface or is DECLARED, and this one had been neither.
+        out += graphCountFloorAttrJson( g );
+        out += "}";
         (void) pathRel;
         return out;
     }
@@ -763,7 +772,18 @@ namespace mcpedit
             out += "{\"p\":\"" + mcpdetail::jsonEscape( std::string( rw::sarif::rootRelativeUri( ing.files[ testFiles[i] ], prefix ) ) ) + "\""
                  + rw::runFieldJsonDisclosed( runners, testFiles[i], jesc ) + "}";
         }
-        return out + "]";
+        out += "]";
+        // F3: `"tests_to_run":[]` was an UNLABELLED ZERO. Its twin says "0 modelled tests, N shell gates the
+        // call-graph walk cannot see, counts are floors"; the fold said `[]`, which a reader takes for
+        // "nothing tests this" rather than "nothing that is a CALL EDGE tests this" (a shell harness runs the
+        // compiled binary as a subprocess, which is not an edge). An ARRAY cannot carry attributes, so the
+        // keys ride beside it — the same place --affected puts them relative to its own <test> rows, the same
+        // counter (testmap.h::scriptGatesUnmodelledCount) and the same key names writeTestGateReportJson and
+        // MCP situational_awareness already use. Never a second number.
+        out += ",\"tests\":" + std::to_string( testFiles.size() );
+        out += ",\"script_gates_unmodelled\":" + std::to_string( scriptGatesUnmodelledCount( ing ) );
+        out += graphCountFloorAttrJson( g );
+        return out;
     }
 
     // The whole post-check, for a file that has just been written: rebuild the index (the invalidation the

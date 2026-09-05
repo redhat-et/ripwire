@@ -134,6 +134,80 @@ else
   no "N4 source: main.cpp does not read SinceScope::baselineSha — the resolve-to-no-commit decision is not beside the M8 validation"
 fi
 
+# ── N4b (verify-wave2): EVERY host, driven off cli.h's kSinceHosts table — one declaration, one policy ────
+# verify-wave2 re-opened N4: wave 1 closed it at the SOURCE (one resolver, one sentence) while the four hosts
+# still answered a bad value differently, and the arms above pinned THREE named hosts by hand plus --slice —
+# which is a list, not a policy, and a list is what a fifth consumer joins without anyone noticing. cli.h now
+# DECLARES each host's class in kSinceHosts, both decisions read it (the alone-refusal in checkFlagPairings,
+# the no-baseline refusal in main.cpp), and this arm re-derives the rows FROM THAT TABLE. A host added to the
+# source without a probe here is caught by the enumeration; a host given the wrong class is caught by the
+# behaviour. `--rank-by=churn-decay` is exactly such a host — a --since consumer since P0-4, never once
+# asserted by the hand-written list above.
+SINCE_ROWS="$( python3 - "$SRCDIR/cli.h" <<'N4_EOF'
+import re, sys
+src = open( sys.argv[1] ).read()
+m = re.search( r"inline constexpr SinceHost kSinceHosts\[\]\s*=\s*\{(.*?)\n\};", src, re.S )
+if not m:
+    print( "__NOTABLE__" ); raise SystemExit
+for line in m.group( 1 ).splitlines():
+    row = line.split( "//" )[ 0 ].strip()
+    g = re.match( r'\{\s*"([^"]+)"\s*,\s*(true|false)\s*\},?', row )
+    if g:
+        print( "%s %s" % ( g.group( 1 ), g.group( 2 ) ) )
+N4_EOF
+)"
+case "$SINCE_ROWS" in
+  *__NOTABLE__*|"") no "N4b: kSinceHosts is unreadable in src/cli.h — fix this gate's parser before trusting any arm below" ;;
+  *)
+    nRows="$( printf '%s\n' "$SINCE_ROWS" | grep -c . )"
+    [ "$nRows" -ge 5 ] \
+      && ok "N4b: read $nRows --since host rows off cli.h's kSinceHosts table" \
+      || no "N4b: only $nRows host row(s) parsed — the table shrank or the parser drifted"
+    printf '%s\n' "$SINCE_ROWS" | while read -r flag needsBaseline; do
+      [ -z "$flag" ] && continue
+      # the argv that SELECTS this host (the table names the flag; a value-taking flag needs one)
+      case "$flag" in
+        --slice)     argv="--slice=a:x" ;;
+        --cochange)  argv="--cochange" ;;
+        *)           argv="$flag" ;;
+      esac
+      # (i) a REACHABLE value: every host, both classes, answers
+      "$BIN" "$REPO" $argv --since=HEAD~1 --no-cache >/dev/null 2>&1 \
+        && ok "N4b $flag --since=HEAD~1 (reachable): answers, whatever its class" \
+        || no "N4b $flag --since=HEAD~1 (reachable) was refused — the baseline rule swallowed a working case"
+      # (ii) an IMPOSSIBLE value: every host, both classes, refuses with the SAME shape sentence
+      err="$( mktemp )"
+      "$BIN" "$REPO" $argv --since=2026-13-45 --no-cache >/dev/null 2>"$err"; rc=$?
+      { [ "$rc" -ne 0 ] && grep -q 'neither a git revision nor a real calendar date' "$err"; } \
+        && ok "N4b $flag --since=2026-13-45 (impossible): refuses with the ONE shape sentence" \
+        || no "N4b $flag --since=2026-13-45: exit $rc / stderr=$( head -c 140 "$err" ) — the hosts do not answer a bad value the same way"
+      rm -f "$err"
+      # (iii) an UNREACHABLE-but-real value: the answer is decided by the host's DECLARED CLASS, and by
+      #       nothing else. This is the half wave 1 left behaviourally split.
+      err="$( mktemp )"
+      out="$( "$BIN" "$REPO" $argv --since=1999-01-01 --no-cache 2>"$err" )"; rc=$?
+      if [ "$needsBaseline" = "true" ]; then
+        { [ "$rc" -eq 1 ] && [ -z "$out" ] && grep -q 'resolves to no commit' "$err" && grep -q '1999-01-01' "$err"; } \
+          && ok "N4b $flag (BASELINE class) --since=1999-01-01: refuses with the shared no-baseline sentence naming the value" \
+          || no "N4b $flag is declared needsBaseline=true but --since=1999-01-01 gave exit $rc / stderr=$( head -c 140 "$err" ) — declared class and behaviour disagree"
+      else
+        { [ "$rc" -eq 0 ] && printf '%s' "$out" | perl -0pe 's#<!--.*?-->##gs' | grep -q 'window="1999-01-01'; } \
+          && ok "N4b $flag (WINDOW class) --since=1999-01-01: answers with the window stamped as given (1999.. is all of history)" \
+          || no "N4b $flag is declared needsBaseline=false but --since=1999-01-01 gave exit $rc, window=$( printf '%s' "$out" | grep -o 'window=\"[^\"]*\"' | head -1 ) — declared class and behaviour disagree"
+      fi
+      rm -f "$err"
+    done
+    ;;
+esac
+# SOURCE: the host list is spelled ONCE. main.cpp used to carry its own copy (`!cfg.sliceSpec.empty()`), which
+# is how "one policy" could mean "one resolver" while a sixth consumer inherited the window class by omission.
+grep -q 'activeSinceHostNeedsBaseline' "$SRCDIR/main.cpp" \
+  && ok "N4b source: main.cpp reads the class off kSinceHosts (no second copy of the host list)" \
+  || no "N4b source: main.cpp decides the baseline class without kSinceHosts — the host list is spelled twice again"
+grep -qE '!c\.since\.empty\(\) && !anySinceHostActive' "$SRCDIR/cli.h" \
+  && ok "N4b source: the alone-refusal reads the same table (one enumeration, two decisions)" \
+  || no "N4b source: checkFlagPairings re-spells the host list instead of reading kSinceHosts"
+
 # ── M8: an impossible calendar date is not a date ────────────────────────────────────────────────────────
 for badday in 2026-13-45 2026-02-30 2026-00-10; do
   err="$(mktemp)"

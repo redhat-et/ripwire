@@ -254,6 +254,106 @@ PY
     && ok "(C) the memory_recall description names --max-tokens, the CLI flag budget_tokens maps to" \
     || no "(C) the memory_recall description does not name the CLI flag budget_tokens maps to"
 
+# ── (D) a ceiling NAMED is a ceiling MEASURED AGAINST — the labelling half of (B) ──────────────────────
+# verify-wave2 F2/F4/F5. Arm (B) proves the ceiling attribute EXISTS and carries the value that was applied.
+# It says nothing about whether the document then honoured it, and `grep -n over_ceiling budgetpolicycheck.sh`
+# was empty — so H9's fix made a pre-existing labelling bug LEGIBLE without catching it:
+#   --from-trace --max-tokens=200  → est_tokens="1090" max_tokens="200"                (5.4x over, SILENT)
+#   --from-trace --max-tokens=8000 → est_tokens="4471" max_tokens="8000" over_ceiling="1"  (UNDER, labelled)
+#   --for --token-budget=1600      → budget_tokens="1600" est_tokens="1665"            (65 over, SILENT)
+#
+# THE CONTRACT, one sentence for the whole family: over_ceiling="1" exactly when the delivered document's
+# est_tokens exceeds a ceiling NAMED ON THE SAME ROOT; absent means no ceiling was named, or the document is
+# inside every ceiling that was. Both directions — a label with no overshoot behind it is as dishonest as an
+# overshoot with no label, and the pre-fix binary produced one of each. The ceilings are read off the root
+# itself (max_tokens=/budget_tokens=/budget=), never assumed from the argv, so the arm cannot drift from what
+# the document actually claims.
+echo
+echo "=== (D) over_ceiling= is 1 exactly when est_tokens exceeds a ceiling named on the same root ==="
+# root_nums FILE — prints "EST CEIL OVER" for the first root element: the priced tokens, the SMALLEST ceiling
+# named on that root, and whether it says over_ceiling. Comments are stripped: a legend DEFINES these names
+# and a definition is not a measurement. Prints nothing when the document names no ceiling at all.
+root_nums() {
+    python3 - "$1" <<'PY_EOF'
+import re, sys
+t = re.sub( r"<!--.*?-->", "", open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read(), flags = re.S )
+# XML dialects put every root attribute in the first start-tag; --recall's is a PROSE header line, and its
+# markdown bodies are full of angle brackets, so the dialect is decided by the first byte of the document
+# rather than by whichever "<" happens to appear first.
+if t.lstrip().startswith( "<" ):
+    m    = re.search( r"<[a-z-]+(?: [^>]*)?>", t )
+    root = m.group( 0 ) if m else ""
+else:
+    root = t.split( "\n" )[ 0 ] if t else ""
+def num( name ):
+    g = re.search( r'\b%s="?(\d+)"?' % name, root )
+    return int( g.group( 1 ) ) if g else None
+est   = num( "est_tokens" )
+ceils = [ c for c in ( num( "max_tokens" ), num( "budget_tokens" ), num( "budget" ) ) if c ]
+over  = 1 if re.search( r'\bover_ceiling="?1"?', root ) else 0
+if est is None or not ceils:
+    raise SystemExit
+print( "%d %d %d" % ( est, min( ceils ), over ) )
+PY_EOF
+}
+label_probe() {   # label_probe LABEL ARGS...
+    local label="$1"; shift
+    "$BIN" . "$@" >"$TMP/lab.out" 2>/dev/null
+    local nums; nums="$( root_nums "$TMP/lab.out" )"
+    if [ -z "$nums" ]; then
+        no "(D) $label: the root names no ceiling and no price — arm (B)'s subject vanished, fix this probe"
+        return
+    fi
+    # shellcheck disable=SC2086
+    set -- $nums
+    local est="$1" ceil="$2" over="$3"
+    if [ "$est" -gt "$ceil" ] && [ "$over" = 0 ]; then
+        no "(D) $label: root prices $est tokens against a ceiling of $ceil and says NOTHING (over_ceiling absent)"
+    elif [ "$est" -le "$ceil" ] && [ "$over" = 1 ]; then
+        no "(D) $label: root says over_ceiling=\"1\" but $est tokens is inside the $ceil it names"
+    else
+        ok "(D) $label: est=$est ceiling=$ceil over_ceiling=$over — the label and the numbers agree"
+    fi
+}
+# Every budgeted verb, through BOTH front doors where it has two, at a ceiling that BINDS and one that does
+# not — the pair is the point: a verb that labels everything passes the first half and fails the second.
+label_probe "--for --token-budget=600"                  '--for=pagerank power iteration' --token-budget=600
+label_probe "--for --token-budget=1600"                 '--for=pagerank power iteration' --token-budget=1600
+label_probe "--for --token-budget=8000"                 '--for=pagerank power iteration' --token-budget=8000
+label_probe "--pack-task --token-budget=600"            '--pack-task=pagerank power iteration' --token-budget=600
+label_probe "--pack-task --token-budget=8000"           '--pack-task=pagerank power iteration' --token-budget=8000
+label_probe "--from-trace --token-budget=200"           "--from-trace=$TMP/trace.txt" --token-budget=200
+label_probe "--from-trace --token-budget=8000"          "--from-trace=$TMP/trace.txt" --token-budget=8000
+label_probe "--from-trace --max-tokens=200"             "--from-trace=$TMP/trace.txt" --max-tokens=200
+label_probe "--from-trace --max-tokens=8000"            "--from-trace=$TMP/trace.txt" --max-tokens=8000
+label_probe "--handoff --token-budget=100"              --handoff --token-budget=100
+label_probe "--handoff --token-budget=100000"           --handoff --token-budget=100000
+label_probe "--recall --max-tokens=300"                 '--recall=quality delta gating exit codes' --max-tokens=300
+label_probe "--recall --max-tokens=8000"                '--recall=quality delta gating exit codes' --max-tokens=8000
+label_probe "--connect --max-tokens=200"                '--connect=main,parseArgs,escapeXml' --max-tokens=200
+label_probe "--connect --max-tokens=8000"               '--connect=main,parseArgs,escapeXml' --max-tokens=8000
+# F4: --recall's SECOND front door. --token-budget GATES this verb (D10) rather than shaping it, and the
+# header named only the 8000-token SHAPING default — the ceiling that decided the run appeared nowhere an
+# attribute reader can find it, on either side of the decision:
+#   --recall --token-budget=1500 → over_ceiling=1 max_tokens=8000 est_tokens=182   (+ stderr: budget=1500)
+#   --recall --token-budget=6000 → max_tokens=8000                                 (still the default)
+for tb in 1500 6000 60000; do
+    "$BIN" . '--recall=quality delta gating exit codes' --token-budget=$tb >"$TMP/rtb.out" 2>/dev/null
+    head -1 "$TMP/rtb.out" | grep -qE "budget_tokens=$tb( |\$)" \
+        && ok "(D) --recall --token-budget=$tb: the header names the ceiling that decided the run" \
+        || no "(D) --recall --token-budget=$tb: applied a $tb-token gate and named only [$( head -1 "$TMP/rtb.out" | grep -oE '(max_tokens|budget_tokens)=[0-9]+' | tr '\n' ' ' )]"
+done
+# and the GATE path obeys (D)'s own property: est_tokens there prices the refusal header, so a label carried
+# over from the shaping stage would claim a 200-token document busted an 8000-token ceiling.
+label_probe "--recall --token-budget=1500 (refused)"  '--recall=quality delta gating exit codes' --token-budget=1500
+label_probe "--recall --token-budget=60000 (honoured)" '--recall=quality delta gating exit codes' --token-budget=60000
+# and the withheld number the label refers to is an ATTRIBUTE, not only prose (arm (C) asserts it is in the
+# payload at all; this asserts a parser can read it beside the budget it lost to)
+"$BIN" . '--recall=quality delta gating exit codes' --token-budget=1500 >"$TMP/rtb.out" 2>/dev/null
+head -1 "$TMP/rtb.out" | grep -qE 'withheld_est_tokens=[0-9]+' \
+    && ok "(D) --recall --token-budget=1500: withheld_est_tokens= rides the header beside the budget it lost to" \
+    || no "(D) --recall --token-budget=1500: the withheld estimate is prose only — the header states a budget nothing on it exceeds"
+
 echo
 [ "$fail" = 0 ] && { echo "ALL PASS"; exit 0; }
 echo "FAILURES — see above"; exit 1

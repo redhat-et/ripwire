@@ -918,7 +918,14 @@ band15 "--from-trace --token-budget=1500" "$TMP/p15_ft.xml" ctx 420
 #     fixed floor dominates): the root carries est_tokens=; delivered bytes sit inside the ladder's own
 #     allowance (N x kMinBytesPerToken x kCeilingFirstEntryTolerance = N x 2.36 x 1.15, serialize.h) OR the
 #     root says over_ceiling="1"; and a labelled root's est_tokens exceeds N (the label and the number agree).
-for N in 100 300 400 600 800 1200 1500 3000; do
+#     verify-wave2 F2: the byte half above cannot see the defect it was written for. At --token-budget=1600
+#     the bundle is 3,485 B against a 4,342 B allowance — so the allowance arm PASSES — while the very same
+#     root says budget_tokens="1600" est_tokens="1665" and withholds the one attribute that reconciles them.
+#     over_ceiling= fired only on the ladder's LAST RUNG, so a bundle that overshoots by a little (the common
+#     case) was silently unlabelled while one that overshoots by a lot was labelled. The property is about the
+#     two NUMBERS the root itself prints, in the unit it prints them in: est_tokens <= N OR over_ceiling="1",
+#     on EVERY rung. 1600/1700 are in the sweep because they are the rungs that were red.
+for N in 100 300 400 600 800 1200 1500 1600 1700 2000 2500 3000; do
     "$BIN" src --for="$FOR_TASK" --token-budget=$N --no-cache >"$TMP/p15_for$N.xml" 2>/dev/null
     FB="$( bytes_of "$TMP/p15_for$N.xml" )"
     FE="$( root_est "$TMP/p15_for$N.xml" ctx )"
@@ -938,6 +945,18 @@ for N in 100 300 400 600 800 1200 1500 3000; do
             || no "#15 --for --token-budget=$N: root over_ceiling=\"1\" but est_tokens='$FE' does not exceed the budget it is labelled over"
     else
         no "#15 --for --token-budget=$N: $FB B EXCEEDS the $FLIM B allowance with NO over_ceiling=\"1\" on the root (over_ceiling on root='$FO')"
+    fi
+    # F2 — the TOKEN property, independent of the byte allowance above: the root prints budget_tokens= and
+    # est_tokens= in the same unit, so a reader can subtract them. Whenever it does and the answer is
+    # positive, the root must say over_ceiling="1"; silence there means "inside the budget".
+    if [ -n "$FE" ] && [ "$FE" -gt "$N" ] 2>/dev/null; then
+        [ "$FO" = "1" ] \
+            && ok "#15 --for --token-budget=$N: est_tokens=$FE > $N and the root says over_ceiling=\"1\"" \
+            || no "#15 --for --token-budget=$N: root prints budget_tokens=$N est_tokens=$FE (over by $(( FE - N ))) with NO over_ceiling= — the two numbers contradict each other on one root"
+    elif [ -n "$FE" ]; then
+        [ "$FO" = "1" ] \
+            && no "#15 --for --token-budget=$N: root says over_ceiling=\"1\" but est_tokens=$FE is inside the $N budget — the label is a lie in the other direction" \
+            || ok "#15 --for --token-budget=$N: est_tokens=$FE <= $N and the root is silent (absent = inside the budget)"
     fi
 done
 # the two root attributes must be DEFINED by the legend of the document that carries them (§B7 class)

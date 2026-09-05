@@ -161,7 +161,9 @@ fi
 # ── (f) ANCHOR DISCLOSURE: a name-exact reason says WHERE each anchoring word matched ──────────────────
 # The whole reason string, up to the closing bracket of the header note. Read back from the binary; never
 # reconstructed from what the assertion expects.
-reasonOf(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'routed: [^]]*' | head -1; }
+# verify-wave2 F6 re-pin: stop on the attribute quote. The trailing "]" this used to anchor on was the
+# unbalanced half of a bracket pair L10b half-trimmed; route= is delimited by its own quotes.
+reasonOf(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'routed: [^"]*' | head -1; }
 routeOf(){  reasonOf "$@" | grep -oE 'name-exact|subtoken\+body' | head -1; }
 
 # (f1) the fixture's identifier query: buildGraph is defined once, in routefix/graph.cpp.

@@ -99,6 +99,17 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-09-05 (capture-audit wave-3 merge, L7 + V2): docdemotegolden_for.xml 5280 -> 5279 B (-1 B,
+# est_tokens="2112" UNCHANGED). Both lanes re-pinned this golden on their own trees: L7 (e2bbf64) for P3's
+# top-row next= (+43 B, est_tokens 2095 -> 2112) and V2 (77004e5) for F6's trailing "]" trim (-1 B). The merged
+# document is L7's golden with V2's one bracket removed — verified byte-identical to L7's after normalising the
+# route= trailing bracket and est_tokens=; regenerated from a git-less temp copy of the fixture as this gate runs it.
+# RE-PIN 2026-09-05 (capture-audit verify-wave2 F6, lane V2): docdemotegolden_for.xml 5238 -> 5237 B (-1 B,
+# est_tokens="2095" UNCHANGED). ONE identified change: the route= value's TRAILING "]" — the unbalanced half
+# L10b's finding-9 trim left behind (it took the leading " [" only, so every route value on every dialect
+# shipped a dangling bracket). Verified before re-pinning: with est_tokens= and that one trailing bracket
+# normalised out, the live document and the previous golden are byte-identical — no ranking, demotion or
+# route byte moved. Gate: routeoncecheck (a1)/(b)/(c)/(c2), which now assert BOTH ends on all five surfaces.
 # RE-PIN 2026-09-04 (capture-audit wave-2 merge): docdemotegolden_for.xml 5236 -> 5234 B (-2 B, est_tokens
 # 2096 -> 2095). ONE identified change: lane L10b's route= trim (finding 9 — the value no longer starts with
 # " [", verbs_for.h computeLensRanking), which landed AFTER lane V1 re-pinned this golden on its own tree.

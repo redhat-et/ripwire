@@ -199,7 +199,9 @@ inline constexpr const char* kPackTaskBundleLegendBody =
          "callers: sorted by shared desc (ties=site order); shared=# of top-K anchors reached, omitted at 1. "
          // M11: the root's machine-readable price, defined where the ledger prose below states the byte figures.
          "On the root: est_tokens= prices the delivered bundle in tokens (markup at the map rate, bodies at the body rate), "
-         "budget_tokens= is the token target; over_ceiling= is 1 when the header floor alone exceeds it (the bundle is then complete, not trimmed). ";
+         // F2: over_ceiling= is now the property those two numbers state, on every rung — not only the
+         // last-rung case the old wording described. Same length class, one clause, unconditional as before.
+         "budget_tokens= is the token target; over_ceiling= is 1 when est_tokens exceeds it (the bundle is then complete, not trimmed). ";
 
 // One spelling of --pack-task's header, three shapes of it. `withTaskEcho=false` replaces the comment's echo
 // with a note pointing at the task= attribute that still holds the verbatim copy — nothing is lost, only the
@@ -1657,15 +1659,23 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // ladder only shrinks the header — plus the two optional attributes) rides in the measured bytes, so
         // a bundle the ladder calls conformant is conformant WITH its root attributes on (packtaskcheck's
         // ceiling arm caught the 4-byte overshoot of the first, unpriced version).
-        const auto rootAttrsFor = [ & ]( const std::string& doc, bool overCeiling ) -> std::string
+        // F2 (capture-audit verify-wave2 2026-09-05): over_ceiling= is no longer "the ladder's last rung
+        // fired" — it is the PROPERTY the root's own two numbers state. --pack-task carried the same defect
+        // --for did, measured on w3fixbudgetcheck's corpus: `budget_tokens="1200" est_tokens="1215"` and
+        // `budget_tokens="1600" est_tokens="1713"`, both unlabelled, because the last rung had not fired.
+        // Same rule, same unit, both task lenses: over_ceiling="1" whenever est_tokens > budget_tokens.
+        // The number is read back through pricedRootAttr's outTokens, so the decision is made from the
+        // number the root will PRINT and never from a second estimate.
+        const auto rootAttrsFor = [ & ]( const std::string& doc, bool lastRungFired ) -> std::string
         {
             const std::size_t markupBytes = doc.size() + in.trailingSectionBytes - std::min( bodiesStr.size(), doc.size() );
-            std::string       attrs       = rw::pricedRootAttr( markupBytes, rw::kBytesPerTokenDefault, bodiesStr.size(), nullptr );
+            std::size_t       estTokens   = 0;
+            std::string       attrs       = rw::pricedRootAttr( markupBytes, rw::kBytesPerTokenDefault, bodiesStr.size(), &estTokens );
             attrs += " budget_tokens=\"" + std::to_string( budgetTokens ) + "\"";
-            if( overCeiling ) { attrs += " over_ceiling=\"1\""; }
+            if( lastRungFired || ( budgetTokens > 0 && estTokens > budgetTokens ) ) { attrs += " over_ceiling=\"1\""; }
             return attrs;
         };
-        const std::size_t rootAttrsBound = rootAttrsFor( whole, /*overCeiling=*/true ).size();
+        const std::size_t rootAttrsBound = rootAttrsFor( whole, /*lastRungFired=*/true ).size();
         const std::string chosen = climbCeilingLadder( buildHeader, headerStr,
                                                        whole.size() - headerStr.size() + in.trailingSectionBytes + rootAttrsBound,
                                                        rw::ceilingAllowanceBytes( budgetTokens ),

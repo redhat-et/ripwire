@@ -879,6 +879,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // completeness attribute alone. A value outside the set is refused, never read as the default —
             // the closed-set rule the `in` argument's own history (P6-2) established for this server.
             const std::string legendArg = strArg( "legend" );
+            // F9 (capture-audit verify-wave2 2026-09-05): ABSENT and PRESENT-BUT-EMPTY are two different
+            // requests, and `legendArg.empty()` collapsed them — `legend:""` was read as the default and
+            // answered 5,090 bytes at exit 0, where the CLI's own `--legend=` refuses ("--legend= is empty —
+            // it needs full or compact"). M6's empty-value rule was applied to the 60 CLI flags and missed
+            // the field this wave added. The presence bit comes from the same raw reader every other MCP
+            // argument's shape check uses.
+            const bool legendIsPresent = mcpdetail::findRawValue( args, "legend" ).isPresent;
 
             // ── W3FIX H4/M5: every NUMERIC argument through the ONE guarded reader ─────────────────────────
             //
@@ -1167,7 +1174,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             }
             // P1 (L7): `legend` is a closed set on every verb that declares it — an unknown value is refused,
             // never read as the default (decision 3's rule, lifted out of the slice arm to cover all of them).
-            if( !pathsUsageError && !legendArg.empty() && legendArg != "compact" && legendArg != "full" )
+            // F9/F11 (V2): ABSENT and PRESENT-BUT-EMPTY are two different requests — `legend:""` is refused
+            // here with the unknown-value case, the way the CLI's own `--legend=` refuses (M6's empty-value rule).
+            if( !pathsUsageError && ( ( legendIsPresent && legendArg.empty() )
+                                      || ( !legendArg.empty() && legendArg != "compact" && legendArg != "full" ) ) )
             {
                 resp = errResultMsg( -32602, mcprefuse::badValueRefusal( "legend", legendArg ) );
                 pathsUsageError = true;
@@ -1663,6 +1673,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 else if( name == "slice" && !path.empty() && !symbol.empty() )
                 {
                     // the legend VALUE was judged pre-dispatch with every other verb's (P1); slice compacts natively
+                    // (F9/F11: the present-but-empty `legend:""` is refused there too, with the unknown-value case)
                     const SliceReply r = sliceText( path, symbol, var, flow,
                                                     sliceDepthArg.isPresent ? int( sliceDepthArg.value ) : 0, redactPtr,
                                                     legendArg == "compact" );
@@ -1728,7 +1739,39 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         // refusal instead of being reinterpreted as a sub-query named "x". Objects win a
                         // mixed array: an array that already parses as objects is answered as one.
                         std::vector<std::string> objs = mcpdetail::arrayObjects( arr );
-                        if( objs.empty() )
+                        // F8 (capture-audit verify-wave2 2026-09-05): a MIXED array used to fall through to
+                        // the object reader, which discards the strings — two sub-queries in, one answered,
+                        // and `requested="1"` telling the caller they asked for one:
+                        //   queries:["callers:rankGraphTeleport", {"verb":"slice","symbol":"…"}]
+                        //   → <batch n="1" requested="1" cap="16">…  exit 0, isError unset
+                        // requested= is the CALLER'S array length or it is not a disclosure, and dropping a
+                        // member in silence is the HIGH class this round exists to remove. M5 is what makes
+                        // mixing a natural mistake — both grammars are now documented as accepted — so the
+                        // two are accepted separately and never blended: an array is all objects or all
+                        // served-verb strings, and anything else is refused NAMING the count that would have
+                        // been dropped. (Objects still win nothing by default: an all-object array parses as
+                        // objects, an all-string array as specs, exactly as before.)
+                        // the TOP-LEVEL elements — not arrayStrings, which also finds the keys and values
+                        // INSIDE each object and would call every object array "mixed" (measured: an
+                        // all-object one-element array read as 1 object + 4 strings).
+                        const std::vector<std::string> elems = mcpdetail::arrayTopLevelElements( arr );
+                        std::size_t nObjElems = 0, nStrElems = 0;
+                        for( const std::string& e : elems )
+                        {
+                            if( !e.empty() && e.front() == '{' ) { ++nObjElems; }
+                            else if( !e.empty() && e.front() == '"' ) { ++nStrElems; }
+                        }
+                        if( nObjElems > 0 && nStrElems > 0 )
+                        {
+                            resp = errResultMsg( -32602,
+                                       "queries mixes the two grammars: " + std::to_string( nObjElems )
+                                     + " sub-query object(s) and " + std::to_string( nStrElems )
+                                     + " \"verb:arg\" string(s). Send one or the other — a mixed array can only be "
+                                       "answered by dropping members, and this verb does not drop members silently "
+                                       "(e.g. [{\"verb\":\"callers\",\"symbol\":\"parseArgs\"}] or [\"callers:parseArgs\"])" );
+                            objs.clear();
+                        }
+                        else if( objs.empty() )
                         {
                             const std::vector<std::string> specs = mcpdetail::arrayStrings( args, "queries" );
                             const bool allServed = !specs.empty()
@@ -1746,7 +1789,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             }
                         }
                         const std::size_t               requested = objs.size();
-                        if( requested == 0 )
+                        if( !resp.empty() )
+                        {
+                            // the mixed-array refusal above already answered this request
+                        }
+                        else if( requested == 0 )
                         {
                             resp = errResultMsg( -32602, mcprefuse::badValueRefusal( "queries", arr ) );
                         }

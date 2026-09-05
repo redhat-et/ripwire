@@ -300,6 +300,70 @@ still_excl = ("slice" in excluded) or ("edit_check" in excluded)
 sys.exit(0 if (served_ok and not still_excl) else 1)
 '     && ok "(h) tools/list names slice and edit_check as SERVED and no longer as excluded"     || { no "(h) the batch tools/list stanza still contradicts what batch dispatches"; }
 
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== (i) verify-wave2 F8/F11: a MIXED queries array is refused, not silently reduced ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# M5 made both grammars legal, which made MIXING them a natural mistake — and the object reader wins a mixed
+# array by discarding every string in it:
+#   queries:["callers:distance", {"verb":"impact","symbol":"distance"}]
+#   → <batch n="1" requested="1" cap="16">…   exit 0, isError unset
+# Two sub-queries in, one answered, and requested="1" telling the caller they asked for one. requested= is
+# the CALLER'S array length or it is not a disclosure. Both uniform grammars must keep working unchanged —
+# that is the half a "just refuse arrays with objects in them" fix would break.
+MIX="$( call_batch '["callers:distance",{"verb":"impact","symbol":"distance"}]' )"
+case "$MIX" in
+    __ERR__*mixes\ the\ two\ grammars*)
+        ok "(i) a mixed queries array is refused, naming both counts" ;;
+    __ERR__*)
+        no "(i) a mixed queries array was refused for the wrong reason: $( printf '%s' "$MIX" | head -c 160 )" ;;
+    *)
+        n="$(  printf '%s' "$MIX" | grep -oE '<batch n="[0-9]+"' | grep -oE '[0-9]+' )"
+        req="$( printf '%s' "$MIX" | grep -oE 'requested="[0-9]+"' | grep -oE '[0-9]+' )"
+        no "(i) a mixed queries array answered n=$n requested=$req for a 2-element array — a member was dropped in silence" ;;
+esac
+# the two uniform grammars are untouched: same two sub-queries, each spelled one way
+for label in objects strings; do
+    case "$label" in
+        objects) Q='[{"verb":"callers","symbol":"distance"},{"verb":"impact","symbol":"distance"}]' ;;
+        strings) Q='["callers:distance","impact:distance"]' ;;
+    esac
+    U="$( call_batch "$Q" )"
+    printf '%s' "$U" | grep -q '<batch n="2" requested="2"' \
+        && ok "(i) an all-$label array still answers both sub-queries (n=2 requested=2)" \
+        || no "(i) an all-$label array broke: $( printf '%s' "$U" | head -c 160 )"
+done
+# F11: the colon is a SEPARATOR. `callers: distance` is how a human writes one, and the untrimmed space used
+# to ride into the symbol and come back as a did-you-mean whose suggestion was the string the caller typed.
+SP="$( call_batch '["callers: distance"]' )"
+printf '%s' "$SP" | grep -q '<q i="0" verb="callers" ok="1"' \
+    && ok "(i) F11: whitespace after the sub-verb colon is trimmed — 'callers: distance' resolves" \
+    || no "(i) F11: 'callers: distance' did not resolve: $( printf '%s' "$SP" | grep -oE 'err="[^"]*"' | head -c 200 )"
+# and the same parser on the CLI front door, which shares it (main.cpp reads batchObjectFromCliSpec too)
+printf 'callers: distance\n' | "$BIN" "$FIX" --batch=- 2>/dev/null | grep -q '<q i="0" verb="callers" ok="1"' \
+    && ok "(i) F11: --batch=- trims it too (one parser, two front doors)" \
+    || no "(i) F11: the CLI --batch front door still passes the leading space into the symbol"
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== (j) verify-wave2 F7: a refused sub-query names the schema it was actually judged against ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# The sub-query IS refused (measured on 2d40209: ok="0" with the unknown-field sentence) — what was wrong is
+# the ATTRIBUTION. It read "slice accepts: verb, symbol, pattern, task, …", which is the batch ITEM schema
+# under the sub-verb's name; slice accepts no `pattern` and no `from`, so the recovery list was false for the
+# verb it named. Judging against the item schema is correct and documented (mcprefusal.h kBatchSubQueryFields).
+BADF="$( call_batch '[{"verb":"slice","symbol":"distance","zzz":1}]' )"
+printf '%s' "$BADF" | grep -q 'ok="0"' \
+    && ok "(j) an undeclared sub-query field is refused inline, never accepted-and-ignored" \
+    || no "(j) an undeclared sub-query field was ANSWERED: $( printf '%s' "$BADF" | head -c 200 )"
+printf '%s' "$BADF" | grep -q 'batch sub-queries accepts' \
+    && ok "(j) the refusal names the batch item schema, not the sub-verb, as the set it applied" \
+    || no "(j) the refusal attributes the batch item schema to the sub-verb: $( printf '%s' "$BADF" | grep -oE 'err="[^"]*"' | head -c 220 )"
+printf '%s' "$BADF" | grep -qE 'err="[^"]*(slice|edit_check|grep) accepts' \
+    && no "(j) the refusal still says '<verb> accepts:' while listing fields that verb does not accept" \
+    || ok "(j) no sub-verb is credited with the item schema's fields"
+
+
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME CHECKS FAILED"
 exit "$fail"

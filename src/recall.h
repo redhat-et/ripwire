@@ -282,6 +282,11 @@ struct RecallShape
     std::size_t maxTokens      = 0;       // H9: the ceiling ACTUALLY APPLIED, in tokens (0 = unbounded). Disclosed
                                           // whenever it is non-zero — see recallBytesForTokens for why this used
                                           // to read "8000 or nothing" and what that cost.
+    std::size_t budgetTokens   = 0;       // F4: --token-budget's GATING ceiling in tokens (0 = none). A SECOND
+                                          // ceiling applied to this run, and until verify-wave2 the header
+                                          // named only the shaping one — so the number the run actually turned
+                                          // on lived in prose and on stderr. Priced through the same header
+                                          // fixpoint as max_tokens=, so est_tokens covers its own bytes.
 };
 
 struct RecallBundle
@@ -584,6 +589,11 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     const std::string maxTokensAttr = shape.maxTokens > 0
         ? " max_tokens=" + std::to_string( shape.maxTokens )
         : std::string();
+    // F4: the GATE's ceiling beside the SHAPING one, in the same unit. Absent when no --token-budget was
+    // passed, so every document that never had one is byte-identical.
+    const std::string budgetTokensAttr = shape.budgetTokens > 0
+        ? " budget_tokens=" + std::to_string( shape.budgetTokens )
+        : std::string();
     std::string truncAttr;
     std::string linesNote;   // §L4.3 — see the header comment for why it is conditional and why it trails
     if( shape.truncatedCount > 0 )
@@ -610,7 +620,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     // --doc-drift's docs= (markdown by extension), and the two must not share a noun.
     std::string line;
     line.reserve( 160 + task.size() + truncAttr.size() + demotedAttr.size() + overCeilingAttr.size()
-                  + maxTokensAttr.size() + linesNote.size() );
+                  + maxTokensAttr.size() + budgetTokensAttr.size() + linesNote.size() );
     line += "ripwire recall — \"";
     line += task;
     line += "\" — ";
@@ -627,6 +637,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     line += demotedAttr;
     line += overCeilingAttr;
     line += maxTokensAttr;
+    line += budgetTokensAttr;
     line += " est_tokens=";
     line += std::to_string( estTokens );
     line += linesNote;
@@ -840,7 +851,8 @@ inline std::optional<std::pair<std::string, std::string>> buildSectionGranularBo
 inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<float>& scores,
                                  std::string_view task, int k, std::size_t maxTokens, bool docsOnly,
                                  RedactCounts* redact,
-                                 std::string_view rootArg = {} )   // R-R: the separator line's path root
+                                 std::string_view rootArg = {},        // R-R: the separator line's path root
+                                 std::size_t budgetTokens = 0 )        // F4: --token-budget's GATING ceiling, named on the header
 {
     const std::size_t maxBytes = recallBytesForTokens( maxTokens );
     // R-R: same convention every other lens's pathRel uses — the "━━ <path>" separator is a DISPLAY path and
@@ -863,6 +875,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
     shape.selectedCount = top.size();             // post-top-k, pre-budget (bookkeeping for the capped note)
     shape.demotedCount  = selected.demotedMatchCount;
     shape.maxTokens     = maxTokens;              // H9: the ceiling applied, whatever it is (0 = unbounded)
+    shape.budgetTokens  = budgetTokens;           // F4: the GATING ceiling beside the shaping one (0 = none)
 
     for( const Recalled& r : top )
     {
@@ -1010,22 +1023,57 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
 //
 // `field` includes its own leading space and trailing '=' (" shown=", " est_tokens="), which is what makes
 // the match unambiguous against a header whose task text is arbitrary user input.
-inline std::string withHeaderField( std::string_view fullHeaderLine, std::string_view field, std::size_t value )
+// The digit run belonging to `field` in a header line, as [start, end); {npos, npos} when the field is not
+// there. Both writers below need exactly this and nothing else — written twice first, and --quality-delta
+// called the second a 122-token clone of the first, which it was.
+inline std::pair<std::size_t, std::size_t> headerFieldDigits( const std::string& line, std::string_view field )
 {
-    std::string       line( fullHeaderLine );
     const std::size_t pos = line.find( field );
     if( pos == std::string::npos )
     {
-        return line; // defensive: header shape changed elsewhere — leave it be
+        return { std::string::npos, std::string::npos };   // defensive: header shape changed elsewhere
     }
-
-    const std::size_t digitsStart = pos + field.size();
-    std::size_t       digitsEnd   = digitsStart;
-    while( digitsEnd < line.size() && line[digitsEnd] >= '0' && line[digitsEnd] <= '9' )
+    const std::size_t start = pos + field.size();
+    std::size_t       end   = start;
+    while( end < line.size() && line[end] >= '0' && line[end] <= '9' )
     {
-        ++digitsEnd;
+        ++end;
     }
-    line.replace( digitsStart, digitsEnd - digitsStart, std::to_string( value ) );
+    return { start, end };
+}
+
+inline std::string withHeaderField( std::string_view fullHeaderLine, std::string_view field, std::size_t value )
+{
+    std::string line( fullHeaderLine );
+    const auto [ start, end ] = headerFieldDigits( line, field );
+    if( start != std::string::npos )
+    {
+        line.replace( start, end - start, std::to_string( value ) );
+    }
+    return line;
+}
+
+// F4 (capture-audit verify-wave2 2026-09-05) — INSERT an attribute after a numeric header field, rather
+// than substituting a field that is already there. `--recall --token-budget=N` applies a second, GATING
+// ceiling (D10) on top of the 8000-token SHAPING default, and the header named only the first:
+//
+//   --recall="…" --token-budget=1500 → over_ceiling=1 max_tokens=8000 est_tokens=182
+//                            (stderr)  ripwire: --token-budget exceeded: withheld_est_tokens=6669 > budget=1500
+//   --recall="…" --token-budget=6000 → max_tokens=8000                    (still the default)
+//
+// The ceiling that decided the run appeared nowhere an attribute reader could find it, on either side of the
+// decision — H9's own rule ("a ceiling applied is a ceiling named") missed on the verb H9 was written for,
+// because only the --max-tokens front door was walked. The GATE personality itself is not touched: this
+// names the number, it does not turn --token-budget into a shaper (the artifact it rejected is still never
+// streamed — recallbudgetcheck §2, budgetpolicycheck (C)).
+inline std::string withHeaderAttrAfter( std::string_view fullHeaderLine, std::string_view afterField, std::string_view attr )
+{
+    std::string line( fullHeaderLine );
+    const auto [ start, end ] = headerFieldDigits( line, afterField );
+    if( start != std::string::npos )
+    {
+        line.insert( end, attr );
+    }
     return line;
 }
 
@@ -1056,6 +1104,24 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
         if( headerEnd != std::string::npos )
         {
             std::string honest = withHeaderField( std::string_view( bundle.text ).substr( 0, headerEnd + 1 ), " shown=", 0 );
+            // F4/F5: over_ceiling= is a statement ABOUT est_tokens, and on this branch est_tokens is rewritten
+            // to price the refusal header — the only thing that was emitted. The flag arrived from the SHAPING
+            // stage, where it described the artifact this gate then withheld, so leaving it here puts a label
+            // on a 200-token document claiming it busted a 8000-token ceiling. The withheld artifact's own
+            // price is disclosed beside it (withheld_est_tokens=) and in the note, so nothing is lost; what
+            // goes is a marker no number on this line can confirm. (Measured on the audit's own probe:
+            // `over_ceiling=1 max_tokens=8000 budget_tokens=1500 est_tokens=200 withheld_est_tokens=6677` —
+            // three ceilings and a price, none of which the flag was about.)
+            const std::size_t ocAt = honest.find( " over_ceiling=1" );
+            if( ocAt != std::string::npos )
+            {
+                honest.erase( ocAt, std::string_view( " over_ceiling=1" ).size() );
+            }
+            // F4: the two numbers the refusal turns on, beside each other and beside the price of what WAS
+            // printed — est_tokens= stays normatively about this run's own output (182 tokens of header and
+            // note), so the estimate that lost to the budget rides under the name that says what it is.
+            honest = withHeaderAttrAfter( honest, " est_tokens=",
+                                          " withheld_est_tokens=" + std::to_string( bundle.shape.estTokens ) );
             for( int pass = 0; pass < 3; ++pass )
             {
                 const std::size_t est  = std::size_t( double( honest.size() + noteBytes ) / kBytesPerTokenDefault + 0.5 );
@@ -1073,6 +1139,8 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
                       bundle.shape.estTokens, budgetTokens );
         return 3;
     }
+    // The honoured side needs nothing here: budget_tokens= is part of the header buildRecall already built
+    // and priced through its own fixpoint (RecallShape::budgetTokens), so the artifact streams unchanged.
     std::fwrite( bundle.text.data(), 1, bundle.text.size(), out );
     return 0;
 }
@@ -1097,7 +1165,8 @@ inline int emitRecallBudgeted( std::FILE* out, const RecallBundle& bundle, std::
 // gated by test/recallparitycheck.sh, which asserts the two doors return the same bundle byte for byte.
 inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                const std::vector<NodeId>& outTargets, std::string_view task, int k,
-                               std::size_t maxTokens, RedactCounts* redact, std::string_view rootArg )   // R-R
+                               std::size_t maxTokens, RedactCounts* redact, std::string_view rootArg,   // R-R
+                               std::size_t budgetTokens = 0 )   // F4: --token-budget's GATING ceiling (CLI only; MCP has no such door)
 {
     // R-R: one root fact, spent twice — the ranker scores the root-relative path spelling, buildRecall
     // prints it. Unguarded because rootPrefixOf( "" ) is "" (its trailing-slash loop needs size() > 1), so
@@ -1105,7 +1174,7 @@ inline RecallBundle recallFor( const IngestResult& ing, const std::vector<std::u
     const std::string        prefix = rw::sarif::rootPrefixOf( rootArg );
     const std::vector<float> scores = lexicalScores( ing, outOff, outTargets, task, /*pruneTopK=*/0,
                                                      /*alwaysExact=*/nullptr, /*pathFieldDefaultW=*/1, prefix );
-    return buildRecall( ing, scores, task, k, maxTokens, /*docsOnly=*/true, redact, rootArg );
+    return buildRecall( ing, scores, task, k, maxTokens, /*docsOnly=*/true, redact, rootArg, budgetTokens );
 }
 
 // (`writeRecall( out, ing, scores, … )` used to live here — a "render it and hand it over" wrapper that took

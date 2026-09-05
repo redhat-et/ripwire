@@ -368,6 +368,17 @@ inline std::string receipt( const std::vector<Edit>& edits, const std::vector<Fi
     out += apply ? "apply" : "dry-run";
     out += "\",\"edits\":" + std::to_string( edits.size() ) + ",\"files\":" + std::to_string( files.size() );
     out += ",\"callers_union\":" + std::to_string( callersUnionSize( edits ) );   // P9, see above
+    // F3 (capture-audit verify-wave2 2026-09-05): callers_union= and every per-op callers= are read off the
+    // SAME name-based CSR --edit-check's callers= is, so they are FLOORS and carry the same gauge and marker
+    // their standalone twin carries. `"callers_union":2` on a bare root read as a total; the twin says
+    // `counts_floor="1"` with graph_ambiguous=/graph_unresolved= beside it. One helper for the pair, so the
+    // gauge and the floor can never land separately (graph.h graphCountFloorAttrJson). Root-scoped: it
+    // qualifies every count in this receipt, per-op ones included. The index is already warm here — the
+    // dry-run path never invalidated it, and on an apply each op's postCheckJson has just rebuilt it.
+    if( !root.empty() )
+    {
+        out += rw::graphCountFloorAttrJson( getIndex( root ).g );
+    }
     if( apply ) { out += ",\"applied\":" + std::to_string( edits.size() ) + ",\"atomic_files\":" + std::to_string( files.size() ); }
     // recheck_before_each_write: every file's indexed byte-hash is re-verified immediately before ITS OWN
     // write, not once for all files up front (A6). It is the observable half of a contract whose race a
