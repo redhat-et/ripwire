@@ -260,8 +260,22 @@ add(S4, f"{BIN} . --pr-context", onTree(
 add(S4, f"{BIN} . --pr-context=HEAD~1", "The BASEREF form: diffed against merge-base(BASEREF, HEAD), never the ref tip — here the previous commit on the current line (a ref with NO merge base falls back to a disclosed two-dot diff: anchor=\"ref-tip-two-dot\").")
 add(S4, f"{BIN} . --merge-scout=HEAD~2,HEAD~1", "Pairwise cross-arm conflict sites + suggested landing order (any committish sharing a merge base with HEAD works as an arm; one that does not is reported ok=\"0\", never compared).", timeout=600)
 add(S4, f"{BIN} . --stray-content=lane", "Which lane-* refs still hold divergent authored work vs HEAD, with verdicts.", timeout=600)
-add(S4, f"{BIN} . --stray-content=worktree-agent-a1", "A second ref family: merged refs are OMITTED from the rows and counted in merged=; refs sharing no merge base with HEAD (a shallow clone, or a pre-rewrite history) land in unknown= with ok=\"0\" — the counters always reconcile against refs=.", timeout=600)
-add(S4, f"{BIN} . --stray-content=r27 --plan", "Select the genuinely-unmerged refs and feed them to merge-scout for a landing order.", timeout=900)
+# wave-3 close (2026-09-05): the two ref-family substrings used to be hard-coded (`worktree-agent-a1`, `r27`) and
+# matched nothing on this checkout — both blocks recorded a refusal under a caption describing the healthy path
+# (showcasecapturecheck arm E). A family substring is now the first of a preferred list that selects >= 1 local
+# ref, else the first real ref itself; the caption follows the choice, so a checkout with none of the families
+# still records an honest block (a REAL ref, caption saying so) rather than a refusal captioned as a measurement.
+_localRefs = subprocess.run( "git for-each-ref --format='%(refname:short)' refs/heads", shell=True, cwd=REPO, capture_output=True ).stdout.decode().split()
+def _refFamily( preferred ):
+    for sub in preferred:
+        if any( sub in r for r in _localRefs ):
+            return sub, True
+    return ( _localRefs[0] if _localRefs else "no-such-ref" ), False
+_famA, _famAIsFamily = _refFamily( [ "worktree-agent-", "feat/", "fix/", "lane/" ] )
+_famB, _famBIsFamily = _refFamily( [ "lane/", "feat/", "fix/", "worktree-agent-" ] )
+add(S4, f"{BIN} . --stray-content={_famA}", ( "A second ref family (the substring picked at capture time from the refs this checkout really has): merged refs are OMITTED from the rows and counted in merged=; refs sharing no merge base with HEAD (a shallow clone, or a pre-rewrite history) land in unknown= with ok=\"0\" — the counters always reconcile against refs=." if _famAIsFamily else "A single real ref (no ref family exists on this checkout, so the substring is one branch name): the counters still reconcile against refs=." ), timeout=600)
+add(S4, f"{BIN} . --stray-content={_famB} --plan", ( "Select the genuinely-unmerged refs of one family and feed them to merge-scout for a landing order (a merged family yields an empty landing set — still a measurement, disclosed on the root)." if _famBIsFamily else "The landing plan over a single real ref." ), timeout=900)
+add(S4, f"{BIN} . --stray-content=zzzz-no-such-ref --plan", "A --plan filter that selects NO ref REFUSES (exit 1) naming the substring — before the wave-3 close this fell through to the '>512 refs match' sentence, and --abi under the same filter answered an empty measurement at exit 0.")
 add(S4, f"{BIN} . --stray-content=lane --abi", "Cross-branch ABI-break gate: struct byte-contract drift on each ref's AUTHORED paths.", timeout=600)
 add(S4, f"{BIN} . --whereis=rankGraphTeleport", "Which ref's tree defines or mentions SYM — HEAD first, then every local branch.", timeout=600)
 add(S4, f"{BIN} . --whereis=computeOnePairOverlap --with-history", "Same, plus a git-history <fate> row (never / removed-by-commit) for names no tree carries.", timeout=600)
@@ -310,7 +324,7 @@ add(S7, f"{BIN} . --map-diff --top-k=5", onTree(
 add(S7, f"{BIN} . --no-cache --top-k=3", "Force a cold parse (bypass the warm TMPDIR cache) — shows the cold-vs-warm cost.", timeout=600)
 add(S7, f"{BIN} . --cache={cache_out} --top-k=3", "Explicit incremental cache at a path OUTSIDE the repo (first call writes it).", post=f"wc -c {cache_out}")
 add(S7, f"{BIN} . --max-file-size=8K --top-k=3", "Skip files above a size bound before parsing (note the corpus shrink in the header).")
-add(S7, f"{BIN} . --scip=does_not_exist.scip --callers=rankGraphTeleport", "SCIP overlay with a missing index: degrades to name-based, never fails.")
+add(S7, f"{BIN} . --scip=does_not_exist.scip --callers=rankGraphTeleport", "SCIP overlay with a missing index REFUSES (exit 1) naming the file — never silently serves the name-based map you named a precision index to improve on (it used to degrade in silence).")
 add(S7, f"{BIN} src test --top-k=5", "Multi-root workspace: ONE merged graph over two roots, paths labeled <root>/<rel>.")
 add(S7, f"{BIN} . --eval", "Self-eval: co-change recall vs BM25.", timeout=900)
 add(S7, f"{BIN} . --eval-retrieval", "Known-item retrieval eval: MRR + recall@k per ranker per query mode.", timeout=900)
@@ -407,7 +421,7 @@ add(S8, f"{D} . --quality-delta --legend=compact", "The same gating report under
 add(S8, f"{D} . --quality-delta --json", "The same findings as JSON (one of the CI/scripting verbs --json supports) — same exit 2 as the XML form.", cwd=DIRTY)
 add(S8, f"{D} . --quality-delta --quality-ack --ack-only=zzznope", "NEW FLAG: --ack-only matching nothing REFUSES rather than falling back to acking everything.", cwd=DIRTY)
 add(S8, f"{D} . --quality-delta --quality-ack --ack-only=api-surface", "NEW FLAG: ack only the api-surface findings — a per-finding ratchet instead of a rubber stamp.", cwd=DIRTY)
-add(S8, f"{D} . --quality-delta", "Re-run after the partial ack: acked=3, the rest still gate.", cwd=DIRTY)
+add(S8, f"{D} . --quality-delta", "Re-run after the partial ack: acked=3, the rest still gate (exit 2).", cwd=DIRTY)
 add(S8, f"{D} . --ack-only=gating", "--ack-only WITHOUT --quality-ack REFUSES loudly (exit 1, the pairing named) — it used to be silently ignored.", cwd=DIRTY)
 add(S8, f"{D} . --edit-check=nonNegativeFloatDescKey", "A real contract-change: was=1 now=2 params, with the call sites that are now provably incompatible, and a pasteable next= (--uses=SYM) on the root.", cwd=DIRTY)
 add(S8, f"{D} . --edit-check=nonNegativeFloatDescKey --legend=compact", "The same verdict under --legend=compact: ~5.7 KB of legend becomes one comment, every <c incompatible=> row identical — the post-edit reflex at its cheapest.", cwd=DIRTY)
@@ -437,7 +451,7 @@ add(S8, f"{D} . --replace-symbol-body=DoesNotExist --edit-payload={payload_note_
 add(S8, f"{D} . --edit-plan={edit_plan_path} --dry-run", "A versioned multi-edit TRANSACTION preflighted without writing: the receipt shows what each op would read and touch.", cwd=DIRTY, pre=f"cat {edit_plan_path}")
 add(S8, f"{D} . --edit-plan={edit_plan_path} --apply", "The same plan committed: per-file locks, re-verify-before-write, atomic rename, rollback on a later failure.", cwd=DIRTY)
 add(S8, f"{D} . --edit-plan={edit_plan_path}", "Neither --dry-run nor --apply: the mode is explicit, so this refuses.", cwd=DIRTY)
-add(S8, f"{D} . --quality-delta", "After the agent's edits: the complexity/nesting rows on lessByScoreDescId are gone (the replace undid them), the rest still gate.", cwd=DIRTY)
+add(S8, f"{D} . --quality-delta", "After the agent's edits: the complexity/nesting rows on lessByScoreDescId are gone (the replace undid them), the rest still gate (exit 2).", cwd=DIRTY)
 add(S8, f"{D} . --quality-baseline", "REFUSES, exit 1: this sandbox tree is already regressed, and pinning here would swallow that debt into the floor so every later delta read clean. It names how many gating findings it would absorb, the first of them, and the way forward.", cwd=DIRTY)
 add(S8, f"{D} . --quality-baseline --allow-dirty", "The consent form: pin anyway. The sidecar is stamped with the dirty pin and the absorbed count, so the fact outlives the process that knew it.", cwd=DIRTY, post="wc -c .ripwire_quality_baseline && head -c 300 .ripwire_quality_baseline")
 add(S8, f"{D} . --quality-delta", "Against that sidecar the same tree reads regressions=0 — but baseline_absorbed= is on the root, so this green means clean SINCE THE PIN, never clean. A baseline is a floor YOU chose, and it belongs BEFORE the change.", cwd=DIRTY)

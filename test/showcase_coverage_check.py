@@ -72,20 +72,28 @@ def caption_of(rawChunk):
 
 
 def body_of(rawChunk):
-    """The FIRST fenced block's content only — not the caption or the `**exit code:` line, so two
-    blocks whose CAPTIONS differ (as any two consecutive headings almost always do) but whose real
-    OUTPUT is byte-identical are correctly seen as identical by (F)."""
+    """Every fenced block's content (stdout, stderr, artifact, post-command) plus the `**exit code:` line —
+    NOT the caption or the wall time — so two blocks whose CAPTIONS differ (as any two consecutive headings
+    almost always do) but whose real OUTPUT is byte-identical are correctly seen as identical by (F).
+    wave-3 close (2026-09-05): the first fence ALONE was the old reading, and it flagged the
+    `--quality-baseline` -> `+--allow-dirty` pair as identical because both leave stdout empty — the whole
+    contrast of a refusal-vs-consent pair lives in the exit code, stderr and the artifact it did or did not
+    write. A refusal IS output."""
     lines = rawChunk.split('\n')
-    i = 0
-    while i < len(lines) and not lines[i].startswith('```'):
-        i += 1
-    if i >= len(lines):
-        return ''
-    fence = lines[i].rstrip()
-    i += 1
     body = []
-    while i < len(lines) and lines[i].rstrip() != fence:
-        body.append(lines[i])
+    i = 0
+    while i < len(lines):
+        if lines[i].startswith('```'):
+            fence = lines[i].rstrip()
+            i += 1
+            while i < len(lines) and lines[i].rstrip() != fence:
+                body.append(lines[i])
+                i += 1
+            body.append('')   # fence boundary — two blocks are not one
+        else:
+            m = re.match(r'\*\*exit code: (\d+)\*\*', lines[i].strip())
+            if m:
+                body.append('exit code: ' + m.group(1))
         i += 1
     return '\n'.join(body).strip()
 
