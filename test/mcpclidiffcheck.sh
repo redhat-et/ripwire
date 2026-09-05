@@ -273,8 +273,8 @@ print("__NO_SUCH_TOOL__")
 
 # R3 (verify-wave1): the stray_content row ran `--stray-content=main` against THIS checkout and anchored on a
 # legend the verb only emits when it answers — green only where a `main` head existed. Each row now names its
-# corpus: `.` is this repo, `SFIX` a throwaway repo with a known lane/probe ref (test/strayfixture.sh).
-. "$ROOT/test/strayfixture.sh"
+# corpus: `.` is this repo, `SFIX` a throwaway repo with a known lane/probe ref (test/lib/strayfixture.sh).
+. "$ROOT/test/lib/strayfixture.sh"
 SFIX="$TMP/strayfix"
 mkStrayFixture "$SFIX"
 strayFixtureHasRef "$SFIX" \

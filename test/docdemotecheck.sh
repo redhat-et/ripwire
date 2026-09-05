@@ -99,6 +99,13 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-09-04 (capture-audit verify-wave1 N1, lane V1): docdemotegolden_for.xml 5195 -> 5236 B (+41 B,
+# est_tokens="2080" -> "2096") and docdemotegolden_noroute.xml 9188 -> 9229 B (+41 B, est_tokens="3240" -> "3257").
+# CAUSE: --for now prices its ROOT — est_tokens= moved from the header comment onto <ctx> and the legend gained
+# the 41-byte clause defining it (over_ceiling="1" rides the root only under a --token-budget; none here).
+# Verified before re-pinning: with est_tokens= and that one clause normalized out, old and new documents are
+# byte-identical — no ranking, demotion or route byte moved (gate: estchargecheck #15 d; same re-pin as
+# anchorcheck/routecheck the same day).
 "$BIN" docdemotefix --for="$CONCEPTQ" --no-cache >"$TMP/concept.xml"   2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ" --no-route --no-cache >"$TMP/noroutefor.xml" 2>/dev/null
 "$BIN" docdemotefix --recall="$BUGQ" --no-cache >"$TMP/recall.xml" 2>/dev/null

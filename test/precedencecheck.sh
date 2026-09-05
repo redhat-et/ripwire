@@ -32,10 +32,10 @@ command -v python3 >/dev/null 2>&1 || { echo "precedencecheck: python3 is requir
 
 echo "precedencecheck: BIN=$BIN"
 
-# R3 (verify-wave1): the probes run against a THROWAWAY repo with a known `lane/probe` ref (test/strayfixture.sh),
+# R3 (verify-wave1): the probes run against a THROWAWAY repo with a known `lane/probe` ref (test/lib/strayfixture.sh),
 # never against this checkout — `--stray-content=lane` on the operator's own branches was green only where a
 # lane/* head happened to exist. Presence-guarded: no ref, nothing below asserts anything.
-. "$ROOT/test/strayfixture.sh"
+. "$ROOT/test/lib/strayfixture.sh"
 SFIX="$( mktemp -d )"; trap 'rm -rf "$SFIX"' EXIT
 mkStrayFixture "$SFIX"
 strayFixtureHasRef "$SFIX" \

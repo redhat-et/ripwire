@@ -104,9 +104,14 @@ def heredocLines( lines ):
         if m:
             tag = m.group( 1 )
     return inside
-for name in sorted( os.listdir( testDir ) ):
-    if not name.endswith( ".sh" ):
-        continue
+# the gates themselves plus the sourced helpers under test/lib/ (helper functions are defined before any gate
+# sources them, but a helper can still call a sibling above its definition). NOTE: no apostrophes in this
+# heredoc — it sits inside "$( … )" and the bash quote scanner reads a lone one as an open quote.
+scripts = [ n for n in sorted( os.listdir( testDir ) ) if n.endswith( ".sh" ) ]
+libDir  = os.path.join( testDir, "lib" )
+if os.path.isdir( libDir ):
+    scripts += [ os.path.join( "lib", n ) for n in sorted( os.listdir( libDir ) ) if n.endswith( ".sh" ) ]
+for name in scripts:
     path  = os.path.join( testDir, name )
     lines = open( path, encoding = "utf-8", errors = "replace" ).read().split( "\n" )
     inHere = heredocLines( lines )

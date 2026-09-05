@@ -1,6 +1,8 @@
 # strayfixture.sh — a throwaway git repo with KNOWN refs for the --stray-content / cross-ref probes.
 #
-# Sourced (not executed) by precedencecheck.sh, substrfiltercheck.sh and mcpclidiffcheck.sh. verify-wave1 R3
+# Sourced (not executed) by precedencecheck.sh, substrfiltercheck.sh and mcpclidiffcheck.sh — it lives under
+# test/lib/ because every gate-conformance sweep (binoverridecheck, gateexitcheck, pargates.py) treats a top-level
+# test/*.sh as a GATE with a gate's exit contract, which a definitions-only helper cannot honour. verify-wave1 R3
 # (capture-audit 2026-09-04): those three probed `--stray-content=lane` / `=main` against the OPERATOR'S OWN
 # checkout, so they were green only on a machine that happened to carry a `lane/*` branch and a `main` head —
 # red on every fresh clone, in CI, and on this repo the day the round's lane/ca-* heads were pruned. A probe

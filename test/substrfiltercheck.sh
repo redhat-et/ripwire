@@ -48,10 +48,10 @@ echo "substrfiltercheck: BIN=$BIN  CORPUS=$ROOT"
 MISS="zzzznosuchfilterxyz"
 
 # R3 (verify-wave1): the --stray-content probes run against a THROWAWAY repo with a known `lane/probe` ref
-# (test/strayfixture.sh), never against this checkout — `lives --stray-content lane` on the operator's own
+# (test/lib/strayfixture.sh), never against this checkout — `lives --stray-content lane` on the operator's own
 # branches was green only where a lane/* head happened to exist. refuses_empty/lives take the corpus from
 # $CORPUS, which defaults to this repo and is pointed at the fixture for that one flag.
-. "$ROOT/test/strayfixture.sh"
+. "$ROOT/test/lib/strayfixture.sh"
 SFIX="$( mktemp -d )"; trap 'rm -rf "$SFIX"' EXIT
 mkStrayFixture "$SFIX"
 strayFixtureHasRef "$SFIX" \
