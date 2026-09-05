@@ -50,7 +50,7 @@ else:            print(r["result"]["content"][0]["text"])
 
 batch_sub() {
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
-        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"batch","arguments":{"path":"'"$ROOT"'","queries":['"$1"']}}}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"batch","arguments":{"path":"'"$ROOT"'","legend":"full","queries":['"$1"']}}}' \
         | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
 import sys, json, re, html
 r = json.load(sys.stdin)
@@ -63,7 +63,21 @@ print(m.group(1) if m else "__NOPAYLOAD__")
 '
 }
 
-call() { printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$1" "$2"; }
+# M1 RE-PIN (terminality round A, 2026-09-05): the MCP legend DEFAULT moved to compact, so every call this
+# gate makes to an XML verb asks for `legend:"full"` and the comparison this file makes stays full <-> full.
+# That is deliberate and is not gate inertia: what this file asserts is DATA parity (attribute sets, values,
+# windows, legend clauses) between the CLI and the server, and both operands have to be the same dialect for
+# the comparison to mean anything. compact <-> compact is pinned per verb, on the default path, by
+# compactlegendcheck (N) — default == compact, legend:"full" restorable, payload byte-identical.
+# The family list is the seventeen verbs that DECLARE `legend` (src/mcprefusal.h kMcpVerbFields); passing it
+# to a verb that does not declare it is refused as an unknown field, so the injection is gated on membership.
+call() {
+    _cargs="$2"
+    case " analyze lego owners batch exemplar impact uses path_between connect explore from_trace edit_check whereis stray_content flags doc_drift slice " in
+        *" $1 "*) _cargs="${_cargs%\}},\"legend\":\"full\"}" ;;
+    esac
+    printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$1" "$_cargs"
+}
 
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
     | "$BIN" --mcp 2>/dev/null | tail -1 >"$TMP/tools.json"

@@ -105,9 +105,21 @@ SYMC=pageDisclosure        # has callees
 cap(){ local name="$1"; shift; "$BIN" "$@" >"$TMP/$name" 2>"$TMP/$name.err"; }
 
 # MCP: one tools/call, payload text extracted from the last JSON-RPC line (the mcpclidiffcheck pattern).
+# M1 RE-PIN (terminality round A, 2026-09-05): the MCP legend DEFAULT moved to compact. This gate compares
+# the CLI's and the server's DISCLOSURE TAILS — the floor-marker sentence and the clauses around it — and
+# those clauses live in the full legend on both surfaces, so the comparison stays full <-> full and the MCP
+# operand asks for the posture it means. Compact is not un-gated by this: the compact dialect carries the
+# floormark anchor "is a FLOOR, never a total" verbatim (compactlegend.h), which is compactlegendcheck's
+# arm, and the default path per verb is pinned by compactlegendcheck (N).
+# The family list is the seventeen verbs that DECLARE `legend` (src/mcprefusal.h kMcpVerbFields); passing it
+# to a verb that does not declare it is refused as an unknown field, so the injection is gated on membership.
 mcp_text(){
+    _margs="$2"
+    case " analyze lego owners batch exemplar impact uses path_between connect explore from_trace edit_check whereis stray_content flags doc_drift slice " in
+        *" $1 "*) _margs="${_margs%\}},\"legend\":\"full\"}" ;;
+    esac
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
-        "$( printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$1" "$2" )" \
+        "$( printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$1" "$_margs" )" \
         | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)

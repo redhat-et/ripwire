@@ -123,7 +123,16 @@ echo "=== (d) oversized array → capped honestly (n<requested, capped=1) ==="
 # ═══════════════════════════════════════════════════════════════════════════
 QBIG="$( python3 -c 'import json;print(json.dumps([{"verb":"uses","symbol":"distance"} for _ in range(20)]))' )"
 BD="$( call_batch "$QBIG" )"
-echo "$BD" | grep -q '<batch n="16" requested="20" cap="16" capped="1"' \
+# M1 RE-PIN (terminality round A, 2026-09-05): the MCP legend default is compact, so the batch root now
+# opens `<batch schema="ripwire.batch/v1" n="…" …>` and every assertion below that pinned the root by
+# ADJACENCY (`<batch n="16" requested="20" …`) was pinning attribute ORDER, not the facts. Each is re-pinned
+# to the facts it meant: the attributes are asserted individually, on the batch root, in any order. That is
+# strictly stronger than a substring — the old spelling would also have passed if two of those numbers had
+# swapped places.
+echo "$BD" | grep -oE '<batch [^>]*>' | head -1 | grep -q 'n="16"' \
+    && printf '%s' "$BD" | grep -oE '<batch [^>]*>' | head -1 | grep -q 'requested="20"' \
+    && printf '%s' "$BD" | grep -oE '<batch [^>]*>' | head -1 | grep -q 'cap="16"' \
+    && printf '%s' "$BD" | grep -oE '<batch [^>]*>' | head -1 | grep -q 'capped="1"' \
     && ok "(d) 20 sub-queries capped to 16, requested=20 reported, capped=1 (not silently dropped)" \
     || { no "(d) over-cap batch not reported honestly"; echo "     head: $( printf '%s' "$BD" | head -c 120 )"; }
 
@@ -181,7 +190,8 @@ assert_err "\"path\":\"$FIX\",\"queries\":\"nope\""   "queries not an array (str
 
 # server still alive after the hostile calls (fresh process, one normal batch)
 STILL="$( call_batch '[{"verb":"uses","symbol":"distance"}]' )"
-printf '%s' "$STILL" | grep -q '<batch n="1"' \
+# M1: order-independent, see the re-pin note above
+printf '%s' "$STILL" | grep -oE '<batch [^>]*>' | head -1 | grep -q 'n="1"' \
     && ok "hostile: a normal batch still works after malformed inputs" \
     || no "hostile: server broken after malformed inputs: $STILL"
 
@@ -329,7 +339,7 @@ for label in objects strings; do
         strings) Q='["callers:distance","impact:distance"]' ;;
     esac
     U="$( call_batch "$Q" )"
-    printf '%s' "$U" | grep -q '<batch n="2" requested="2"' \
+    printf '%s' "$U" | grep -oE '<batch [^>]*>' | head -1 | grep -q 'n="2"' && printf '%s' "$U" | grep -oE '<batch [^>]*>' | head -1 | grep -q 'requested="2"' \
         && ok "(i) an all-$label array still answers both sub-queries (n=2 requested=2)" \
         || no "(i) an all-$label array broke: $( printf '%s' "$U" | head -c 160 )"
 done

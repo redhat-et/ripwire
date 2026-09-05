@@ -3175,9 +3175,19 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                 continue; // count, don't process past the cap
             }
 
-            subs.push_back( runBatchSub( root, rw::batchObjectFromCliSpec( line ), cfg.topK, cfg.stable, rp ) );
+            subs.push_back( runBatchSub( root, rw::batchObjectFromCliSpec( line ), cfg.topK, cfg.stable, rp,
+                                         cfg.legend == "compact" ) );
         }
 
+        // M1 (terminality round A): --batch --legend=compact reached the batch envelope's own legend and
+        // stopped at the CDATA boundary, so a compacted batch still shipped every sub-answer's FULL legend
+        // (measured on the fixture, uses+slice: 8,840 B full, 8,645 B outer-only, 4,478 B with the subs). The
+        // whole-stdout layer cannot do it — it must not rewrite inside CDATA — so the batch assembler does,
+        // through the SAME helper the MCP twin calls. Gate: batchcheck (a)/(h) and compactlegendcheck.
+        if( cfg.legend == "compact" )
+        {
+            rw::applyCompactToBatchSubs( subs );
+        }
         std::fputs( batchText( subs, requested, kBatchCap ).c_str(), stdout );
         std::fputc( '\n', stdout );
         reportRedactions( stderr, rc );

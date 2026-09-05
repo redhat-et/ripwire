@@ -101,6 +101,38 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # obliges), +1,568 B in all; nothing else moved. The same rule (a DECLARED argument, its bytes attributed, never
 # prose) and the same posture (159 B of headroom). What this buys back per session: every XML answer under
 # legend:"compact" drops 2.9–5.2 KB of repeated legend (compactlegendcheck (M): edit_check 5,561 → 582 B).
+# ── THE CEILING, DECIDED 2026-09-05 (terminality round A, lane M / M2): IT STAYS 41,000. ─────────────
+# Registered as an OWNER DECISION with the arithmetic, so it can be overruled with numbers rather than
+# re-litigated. Measured on this tree at the M1 commit: manifest 40,841 B (~10,210 tokens), descriptions
+# 19,353 B over 31 tools (mean 624), schemas 17,061 B — of which 7,190 B are the 157 declared properties'
+# descriptions (mean 45) and 9,871 B is irreducible JSON Schema STRUCTURE (types, required, property names,
+# braces) — plus a 4,427 B envelope (tool names, annotations, the tools array). Headroom: 159 B.
+#
+# THE SIX LINES.
+#  1. COST. tools/list is 40,841 B ~ 10,210 tokens, paid ONCE per session, before the first call.
+#  2. IT IS NOT WHERE THE RECURRING COST LIVES. M1 (the compact MCP legend default) cut the per-CALL legend
+#     bill on a ten-verb edit loop from 30,839 B to 2,866 B: ONE loop now saves 27,973 B, 68% of the whole
+#     manifest, and it saves it again on the next loop. The manifest amortizes; the legend never did.
+#  3. 25,000 IS NOT AVAILABLE AT THE STATED QUALITY, and here is the subtraction rather than an assertion:
+#     deleting ALL 157 property descriptions saves 7,190 B and lands at 33,651 — still 8,651 B over — so
+#     25,000 additionally requires cutting ~45% of the tool descriptions.
+#  4. WHAT THOSE BYTES BUY. The property descriptions ARE the bad-value refusals ("invalid value for field:
+#     limit — needs a positive integer (omit for the default window)"), read exactly when a caller is stuck,
+#     and arm (A/M12) of mcpcontractcheck requires every declared property to carry one. The tool
+#     descriptions are what the router scores: --eval-skills is 25/26 today (arm 3 below), so a cut there is
+#     measured as routing loss, immediately, in this gate.
+#  5. THE HEADROOM IS THE DISCIPLINE. 159 B is LESS than one declared argument on one verb (~98-134 B: the
+#     ~65 B schema envelope plus the description the contract obliges), so the next lane that declares an
+#     argument re-anchors deliberately, in its own commit, with its bytes attributed here. That is the rule
+#     working, not a ceiling set too tight.
+#  6. DECISION: KEEP 41,000. Nothing dropped this round to ratchet against — M1 cost ZERO manifest bytes,
+#     because the flip is stated in the `legend` FIELD description ("compact (the default) or full"), spliced
+#     into all seventeen declaring stanzas, in the same 54 bytes the old wording spent; a clause in seventeen
+#     tool descriptions would have cost ~680 B against 159 B of headroom and would have been prose, which the
+#     rule above forbids raising for. The owner may overrule toward ~33,650 (drop every property description,
+#     lose the refusals) or ~25,000 (that, plus 45% of the routing text, with the routing score as the
+#     receipt). Also recorded for the owner in the round's local plan notes, which are never tracked here.
+#
 CEILING = 41000
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )

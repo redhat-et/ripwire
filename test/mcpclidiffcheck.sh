@@ -62,7 +62,7 @@ print("__ERROR__:" + r["error"].get("message","") if "error" in r else r["result
 }
 batch_sub() {
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
-        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"batch","arguments":{"path":"'"$ROOT"'","queries":['"$1"']}}}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"batch","arguments":{"path":"'"$ROOT"'","legend":"full","queries":['"$1"']}}}' \
         | "$BIN" --mcp 2>/dev/null | tail -1 | python3 -c '
 import sys, json, re, html
 r = json.load(sys.stdin)
@@ -74,7 +74,24 @@ m = re.search(r"<!\[CDATA\[(.*)\]\]>", t, re.S)
 print(m.group(1) if m else "__NOPAYLOAD__")
 '
 }
-call() { printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$1" "$2"; }
+# M1 RE-PIN (terminality round A, 2026-09-05): every MCP call in this file that reaches an XML verb now
+# asks for `legend:"full"`. The server's legend DEFAULT moved to compact, and this gate's two lenses cannot
+# be re-pinned to compact <-> compact the way the slice parity gates were — they read the FULL document by
+# construction. LENS 1 extracts the first `<ELEMENT attr="…">` tag in each payload, and a compact legend
+# names its elements in bare shorthand (`<iface n= p= defs=>`), which the extractor sees as an element with
+# ZERO attributes: compact on BOTH sides makes the probe compare nothing, and the gate's own "the probe is
+# broken" guard would fire. LENS 3 quotes a CLI legend CLAUSE and requires the MCP payload to state it — a
+# clause the compact dialect deliberately does not carry. So the honest pin is full <-> full, and what pins
+# the compact path per verb is compactlegendcheck (N): default == compact, payload byte-identical to full.
+# The family list is the seventeen verbs that DECLARE `legend` (src/mcprefusal.h kMcpVerbFields); passing it
+# to a verb that does not declare it is refused as an unknown field, so the injection is gated on membership.
+call() {
+    _cargs="$2"
+    case " analyze lego owners batch exemplar impact uses path_between connect explore from_trace edit_check whereis stray_content flags doc_drift slice " in
+        *" $1 "*) _cargs="${_cargs%\}},\"legend\":\"full\"}" ;;
+    esac
+    printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$1" "$_cargs"
+}
 
 # attrs ELEMENT FILE — the attribute NAMES on the first <ELEMENT …> tag, sorted, space-separated.
 # Names only: a value difference between surfaces is often legitimate, a missing NAME never is.

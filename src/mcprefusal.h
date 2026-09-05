@@ -325,7 +325,15 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // §5a decision 3: a CLOSED set, so the sentence names it — an unknown value is refused, never read as
     // the default (the rule the `in` row above records, for the same reason: a typo must not silently
     // change the shape of the answer).
-    { "legend",        "a STRING legend posture: full (the default) or compact",                      "legend=\"compact\"" },
+    // M1 (terminality round A, 2026-09-05): the default moved full → COMPACT (mcp.h, legendCompactPosture).
+    // This one string is where every declaring tool's schema states it — it is spliced into all seventeen
+    // inputSchema stanzas, so it is the per-tool sentence an MCP client actually reads, and it names both
+    // values and which one is the default in the SAME 54 bytes the old wording spent (compact is 3 longer
+    // than full, and the two swapped places). Deliberately NOT a clause added to seventeen tool
+    // DESCRIPTIONS: mcpmanifestcheck's own registered rule is that the ceiling moves for a declared
+    // argument's obliged description and never for prose, and prose there would cost ~680 B against 159 B
+    // of headroom. The refusal example names the NON-default value, which is the one a caller has to type.
+    { "legend",        "a STRING legend posture: compact (the default) or full",                      "legend=\"full\"" },
     // ── the ENVELOPE, outside `params` (§B6 M6/M7) ──
     // These four were read through the bare findString/findObject path, which collapses "absent" onto
     // "present but not the shape I read" — so `"method":5` became `-32700 "parse error"` (a JSON that parsed

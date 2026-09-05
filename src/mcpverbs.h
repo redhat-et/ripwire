@@ -26,6 +26,7 @@
 #include "docdrift.h"      // the shared doc-anchor verifier (doc_drift)
 #include "exemplar.h"      // §B6 M2: selectExemplar + kExemplarSelectionRule — the ONE selector/wording both surfaces use
 #include "mcprefusal.h"    // §B6 M7/M8/M9: the shared verb+field refusal table both MCP arms speak
+#include "compactlegend.h" // M1: applyCompactDialect — the batch sub-answer compaction (applyCompactToBatchSubs)
 #include "sarif.h"         // G1 (2026-08-15): rw::sarif::rootRelativeUri/rootPrefixOf — grepHitsJson's root-relative `file` (CLI ≡ MCP, no re-derivation)
 #include "slice.h"         // lane/tc-sliceat: the shared --slice / MCP slice def-use core (sliceBundleText — ONE emitter, two surfaces)
 #include "fielduses.h"     // the member-variable round: the ONE --uses=Owner.field renderer (renderFieldUses — CLI ≡ MCP)
@@ -3414,13 +3415,16 @@ inline EditCheckReply editCheckText( const std::string& root, const std::string&
 // which a merged multi-root graph cannot address unambiguously.
 struct SliceReply { std::string payload; std::string refusal; };
 
-// §5a decision 3 (capture-audit 2026-09-04): `legend` is the OPT-IN compact posture, the MCP twin of the
-// CLI's --legend=compact. `compact` swaps the explanatory prose for a versioned schema id
-// (ripwire.slice/v1) and leaves every DATA and COMPLETENESS attribute — and, for slice, every row byte —
-// untouched; "" or "full" is the default and byte-identical to what this verb always emitted, so nothing
-// changes for a caller who does not ask. The flip of the DEFAULT is deliberately NOT taken here: the
-// CLI==MCP byte-parity gates compare full<->full today, and a default flip means re-pinning those against
-// the compact form — registered as the follow-up, with this plumbing already in place for it.
+// §5a decision 3 (capture-audit 2026-09-04): `legend` is the compact posture, the MCP twin of the CLI's
+// --legend=compact. `compact` swaps the explanatory prose for a versioned schema id (ripwire.slice/v1) and
+// leaves every DATA and COMPLETENESS attribute — and, for slice, every row byte — untouched.
+//
+// M1 (terminality round A, 2026-09-05): the follow-up this comment registered is TAKEN — `compactLegend` is
+// now true by DEFAULT on this surface (mcp.h decides it once as legendCompactPosture and passes it here),
+// and `legend:"full"` is how a caller asks for the historic legend. The parity gates the old comment named
+// as the blocker were re-pinned in the same commit; the one thing that had to move with the default is this
+// verb's CALL SITE, because slice is the only verb that builds its compact form itself instead of taking
+// the textResult rewrite — two spellings of "compact" that differ in root attribute order.
 inline SliceReply sliceText( const std::string& root, const std::string& symbol, const std::string& var,
                              const std::string& flow, int depth, RedactCounts* redact,
                              bool compactLegend = false )
@@ -4224,7 +4228,8 @@ struct BatchSub
 // builder. `topK`/`stable` mirror the server's run params; `redactPtr` threads the per-request redaction
 // tally into the body/doc-emitting verbs exactly as the standalone dispatch does. Never throws for a
 // resolvable-but-empty result — that becomes ok=false with an explanatory err, never a whole-batch failure.
-inline BatchSub runBatchSub( const std::string& root, const std::string& obj, int topK, bool stable, RedactCounts* redactPtr )
+inline BatchSub runBatchSub( const std::string& root, const std::string& obj, int topK, bool stable, RedactCounts* redactPtr,
+                            bool compactLegend = false )
 {
     using mcpdetail::findString;
 
@@ -4512,7 +4517,13 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         }
         // sliceText owns the WHOLE contract (resolution, the @FILE:LINE seed, flow/depth pairing, every
         // refusal) — the same call the live arm makes, so a batched slice cannot become a second slice.
-        const SliceReply sr = sliceText( root, symbol, var, flow, depthArg.isPresent ? int( depthArg.value ) : 0, redactPtr );
+        // M1: the POSTURE reaches the sub-answer. slice builds its compact form in its own emitter (it is the
+        // one verb that does), so a batched slice has to be told — compacting it afterwards with the
+        // compactlegend.h layer would produce the layer's spelling of the root (schema= first) against the
+        // standalone verb's native spelling (schema= after lang=), and batchcheck (h)'s contract is that a
+        // sub-answer reproduces its standalone output byte-for-byte.
+        const SliceReply sr = sliceText( root, symbol, var, flow, depthArg.isPresent ? int( depthArg.value ) : 0, redactPtr,
+                                         compactLegend );
         if( sr.payload.empty() )
         {
             return bad( sr.refusal );
@@ -4590,6 +4601,73 @@ inline std::string batchCdata( const std::string& s )
 // payload only), deterministic (first earlier match wins), and it never mis-references (only an exact
 // byte match dedups). `requested` is the sub-query count BEFORE the cap (so an over-cap batch is honest:
 // n < requested with capped="1"); `cap` is kBatchCap.
+// M1 (terminality round A, 2026-09-05): is VERB in the compact-legend family — i.e. does it DECLARE the
+// `legend` argument? Read from kMcpVerbFields, the same table the unknown-field refusal dispatches from, so
+// a verb joining the family needs one edit and gets the default, the argument, the refusal and the batch
+// behaviour together. Used by the live dispatch (mcp.h, legendCompactPosture) and by the batch assembler.
+//
+// It is what keeps the DEFAULT from leaking onto verbs the argument was never offered for: `for` carries a
+// header that is already its own short legend whose comments are DATA (A10), grep/cochange/find_* answer
+// JSON, the edit verbs answer receipts. Inside a batch that distinction is load-bearing rather than
+// cosmetic — batchcheck (a) asserts every sub-answer is byte-identical to its STANDALONE verb, and
+// compacting a sub-answer whose standalone twin is full breaks exactly that.
+inline bool mcpVerbDeclaresLegend( std::string_view verb ) noexcept
+{
+    for( const std::string_view f : mcprefuse::declaredFieldsFor( verb ) )
+    {
+        if( f == "legend" )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// P1 (L7): the compact-legend KEY for an MCP verb whose XML root is shared (`ctx`, `r`) — the twin of
+// main.cpp's compactLegendHint, keyed by verb name instead of by flag. Verbs with a unique root need none.
+inline std::string_view mcpCompactLegendHint( std::string_view verb ) noexcept
+{
+    if( verb == "analyze" )                            { return "map"; }
+    if( verb == "explore" || verb == "pack_task" )     { return "pack-task"; }
+    if( verb == "from_trace" )                         { return "from-trace"; }
+    if( verb == "lego" )                               { return "lego"; }
+    if( verb == "exemplar" )                           { return "exemplar"; }
+    return {};
+}
+
+// M1 (terminality round A, 2026-09-05): the compact posture, applied to a batch's SUB-ANSWERS.
+//
+// WHY IT CANNOT RIDE THE ORDINARY REWRITE. Both surfaces apply the compact dialect to the finished document
+// — main.cpp's runWithCompactLegend for the CLI, mcp.h's textResult for the server — and both deliberately
+// leave CDATA sections alone, because a CDATA section is DATA and a sub-answer inside one may be JSON or
+// plain text that a legend rewrite would corrupt. So a batch compacted only at the top level shipped its own
+// legend short and sixteen sub-answers' legends long, on the one verb where legend duplication costs the
+// most. Measured on this repo's fixture, a two-query batch (uses + slice): 8,840 B full, 8,645 B with the
+// outer legend compacted alone (−195 B), 4,478 B with the sub-answers compacted too (−49%).
+//
+// slice takes BOTH steps, in the same order the standalone dispatch takes them, and that is the whole
+// subtlety of this helper. It is the one verb with a native compact emitter, so runBatchSub asks it for the
+// compact form (compactLegend) — which decides where schema= sits on the root — and then the layer runs over
+// the result and replaces its legend TEXT with the shared spec, exactly as textResult does for a standalone
+// slice. Doing only the first step (an earlier cut of this change) gave a batched slice the native legend,
+// 1,542 B against the standalone verb's 606 B: byte-identical rows and a different legend, which is precisely
+// the divergence batchcheck (h) exists to catch, and it caught it.
+//
+// The batchText contract is UNCHANGED by this and is the reason it is done at all: a <q>'s CDATA still
+// reproduces its standalone-verb output byte-for-byte — under the same posture, which is now the default on
+// both sides. Gate: batchcheck (a) and (h), re-pinned to the compact standalone.
+inline void applyCompactToBatchSubs( std::vector<BatchSub>& subs )
+{
+    for( BatchSub& s : subs )
+    {
+        if( !mcpVerbDeclaresLegend( s.verb ) )
+        {
+            continue;   // not in the family — its standalone twin is not compacted either. See above.
+        }
+        rw::applyCompactDialect( s.payload, mcpCompactLegendHint( s.verb ) );
+    }
+}
+
 inline std::string batchText( const std::vector<BatchSub>& subs, std::size_t requested, std::size_t cap )
 {
     std::vector<char> esc;

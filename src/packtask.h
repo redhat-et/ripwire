@@ -140,6 +140,10 @@ struct PackTaskHeaderParts
     std::string_view taskNote;         // the comment's scrubbed echo of `task` (xmlCommentText)
     std::string_view mentionNote, boostNote, docMentionNote;   // L1: no routeNote — route= is the one copy
     std::string_view report;           // the per-section truncation ledger
+    // M1 (terminality round A, 2026-09-05): root attributes this bundle owes, spliced onto BOTH root
+    // spellings below (the pre-built one and the ladder's route-dropped rebuild). Today that is exactly
+    // dropped_positive= — see its comment at the emission site for why it moved out of `report`.
+    std::string_view rootExtraAttrs;
     std::string_view rootArg;          // R-E (2026-08-17): the single-root run's own root= — the ladder's
                                         // route-dropped rebuild below calls ctxRootOpen a second time and
                                         // must carry the SAME root as the pre-built rootOpenStr did.
@@ -206,10 +210,24 @@ inline constexpr const char* kPackTaskBundleLegendBody =
 // One spelling of --pack-task's header, three shapes of it. `withTaskEcho=false` replaces the comment's echo
 // with a note pointing at the task= attribute that still holds the verbatim copy — nothing is lost, only the
 // duplicate. Byte-identical to the pre-ladder header when both flags are true and extraNotes is empty.
+// M1: splice the bundle's owed root attributes onto whichever <ctx …> spelling this header ended up with.
+// Both spellings must carry them — the ladder's route-dropped rung rebuilds the root from scratch, and a
+// completeness fact that disappears on the rung where the ceiling bit is the exact shape of dishonesty this
+// tool forbids. A root that is not an open tag is left alone (the degrade path stays byte-identical).
+inline void appendPackTaskRootExtras( std::string& rootOpen, std::string_view extras )
+{
+    if( extras.empty() || rootOpen.empty() || rootOpen.back() != '>' )
+    {
+        return;
+    }
+    rootOpen.insert( rootOpen.size() - 1, extras );
+}
+
 inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRouteAttr, bool withTaskEcho,
                                        std::string_view extraNotes )
 {
     std::string h = withRouteAttr ? std::string( p.rootOpenStr ) : ctxRootOpen( p.task, {}, p.rootArg );
+    appendPackTaskRootExtras( h, p.rootExtraAttrs );
     h += "<!-- ripwire task bundle for ";
     if( withTaskEcho ) { h += "\"";  h.append( p.taskNote );  h += "\""; }
     else
@@ -1599,25 +1617,37 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     report += " | far: "  + listStatus( farTotal,      rankOut.farXml, farKept );   // R2: d2plus name-only tier (nested in <sigs>)
     // A2 (survey card, 2026-09-03) — the pack-task twin of --for's dropped_positive= root fact: how many
     // rank>0 eligibleIds the section-1 ladder cut. Emitted ONLY when nonzero (the pr_converged precedent,
-    // src/prconverge.h) — the report string's own bytes are already absorbed by kPackTaskHeaderReserve's
-    // generous fixed allowance (see its own comment), so this costs no separate budget accounting, and the
-    // no-drop path (rankOut.droppedPositive == 0) is byte-identical to the pre-A2 report exactly as before.
+    // src/prconverge.h) — its bytes are absorbed by kPackTaskHeaderReserve's generous fixed allowance (see
+    // its own comment), so this costs no separate budget accounting, and the no-drop path
+    // (rankOut.droppedPositive == 0) is byte-identical to the pre-A2 header exactly as before.
+    //
+    // M1 (terminality round A, 2026-09-05): it rides the <ctx> ROOT, not the ledger comment. A2 put it in
+    // `report` while its --for twin put it on the root (verbs_for.h droppedPositiveNote), and the asymmetry
+    // stayed invisible until the MCP legend default became compact: the compact dialect strips prose
+    // comments, so a COMPLETENESS fact living in prose vanished from the default answer — measured on
+    // src/ at budget_tokens=300, dropped_positive="2" under legend:"full" and NOTHING under the default
+    // (test/droppedpositivecheck.sh #6). METHODOLOGY §9 #4: honesty lives in attributes, precisely so a
+    // legend posture can never decide whether a caller is told. Same spelling as the --for twin, so
+    // mcpattrparitycheck sees one name on both roots; the ledger prose keeps the per-section counts, which
+    // ARE legend and which compact is entitled to drop.
+    std::string droppedPositiveAttr;
     if( rankOut.droppedPositive > 0 )
     {
-        char b[ 96 ];  std::snprintf( b, sizeof( b ), " | dropped_positive=\"%zu\"", rankOut.droppedPositive );
-        report += b;
+        char b[ 96 ];  std::snprintf( b, sizeof( b ), " dropped_positive=\"%zu\"", rankOut.droppedPositive );
+        droppedPositiveAttr = b;
     }
 
     const PackTaskHeaderParts headerParts{ task, rootOpenStr, taskNote, mentionNote, boostNote,
-                                            docMentionNote, report, in.rootArg };
+                                            docMentionNote, report, droppedPositiveAttr, in.rootArg };
     const auto buildHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
     {
         if( in.innerBundle )   // P10 (L7): a partition slice — the outer <ctx-partitions> legend speaks once for all of them
         {
             std::string h = withRouteAttr ? std::string( rootOpenStr ) : ctxRootOpen( task, {}, in.rootArg );
+            appendPackTaskRootExtras( h, droppedPositiveAttr );   // M1: the partition slice owes it too
             if( !report.empty() || !extraNotes.empty() )
             {
-                h += "<!-- slice ";  h.append( report );  h.append( extraNotes );  h += " -->";   // data only (the budget ledger, dropped_positive=, ceiling notes)
+                h += "<!-- slice ";  h.append( report );  h.append( extraNotes );  h += " -->";   // data only (the budget ledger + ceiling notes; dropped_positive= is on the root, M1)
             }
             return h;
         }
