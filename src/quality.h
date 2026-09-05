@@ -1002,27 +1002,10 @@ inline std::string cacheDirLadder()
 }
 
 // popen a shell command and return its trimmed stdout ("" on any failure — never crashes). THE one copy of
-// the popen-trim shape: the git one-liners below and main.cpp's doctor probes (doctorPopenTrim) all call this.
-inline std::string popenTrimmed( const std::string& cmd )
-{
-    std::FILE* pipe = popen( cmd.c_str(), "r" );
-    if( !pipe )
-    {
-        return {};
-    }
-    char        buf[ 4096 ];
-    std::string out;
-    while( std::fgets( buf, sizeof( buf ), pipe ) )
-    {
-        out += buf;
-    }
-    pclose( pipe );
-    while( !out.empty() && ( out.back() == '\n' || out.back() == '\r' || out.back() == ' ' ) )
-    {
-        out.pop_back();
-    }
-    return out;
-}
+// the popen-trim shape is rw::popenTrimmed in gitmine.h (the lower header; moved 2026-09-04 when resolveSinceScope
+// needed it too) — the git one-liners below, crossref.h, binstale.h and the doctor probes (doctorPopenTrim) all
+// still spell quality::popenTrimmed, which this using-declaration resolves. Not a wrapper: one definition.
+using rw::popenTrimmed;
 
 // Run one short git query against `root` and return its whitespace-trimmed output (expected single-line), or
 // "" on any failure. The shared shape behind gitHeadSha / gitWindowRefSha — `tail` is everything after

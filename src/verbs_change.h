@@ -242,6 +242,24 @@ std::optional<int> runExercises( const MainDispatch& d )
     return 0;
 }
 
+// N3 (capture-audit verify-wave1 2026-09-04): the labels of every OTHER root the explicit --situ selector matched
+// under — what an empty root's selector sentence names. Lifted out of runChangeViews so the per-root loop keeps
+// its nesting (a --quality-delta pass read the inline form as +2 nesting / +37 complexity on the dispatcher).
+inline std::string situRootsHoldingMatches( const std::vector<rw::WorkspaceRoot>& ws, const std::vector<std::vector<char>>& perRootChanged,
+                                            std::uint32_t self )
+{
+    std::string labels;
+    for( std::uint32_t o = 0; o < ws.size(); ++o )
+    {
+        if( o != self && std::any_of( perRootChanged[o].begin(), perRootChanged[o].end(), []( char c ) { return c != 0; } ) )
+        {
+            if( !labels.empty() ) { labels += ", "; }
+            labels += ws[o].label;
+        }
+    }
+    return labels;
+}
+
 std::optional<int> runChangeViews( const MainDispatch& d )
 {
     using namespace rw;
@@ -332,20 +350,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                     // printed the empty-diff sentence — the false zero H6 was opened to kill, one level down. One
                     // refusal-or-answer per SELECTOR: the selector resolved (or the union refusal above fired), so
                     // this root gets a selector fact — which root(s) the matches live under — never "no changed files".
-                    std::string elsewhere;
-                    for( std::uint32_t o = 0; o < ws.size(); ++o )
-                    {
-                        if( o == r ) { continue; }
-                        for( char c : perRootChanged[o] )
-                        {
-                            if( c )
-                            {
-                                if( !elsewhere.empty() ) { elsewhere += ", "; }
-                                elsewhere += ws[o].label;
-                                break;
-                            }
-                        }
-                    }
+                    const std::string elsewhere = situRootsHoldingMatches( ws, perRootChanged, r );
                     std::fprintf( stdout, "  (--situ=%.*s names no indexed file under this root — its matches live under root(s) %s; "
                                           "a selector fact, not an empty diff)\n",
                                   int( cfg.situFiles.size() ), cfg.situFiles.data(), elsewhere.c_str() );
