@@ -672,6 +672,18 @@ inline HistoryIndex probeNameHistory( const std::string& root )
 // Both consumers print the same evidence in the same shape, so the shape lives here once. G4: an XML comment
 // may not contain a double hyphen, so flag names are written WITHOUT their leading dashes.
 
+// §L10b LOW tail: the `<history>` element's own attributes had no clause on EITHER consumer's legend
+// (--whereis --with-history / --doc-drift --with-history) — a reader could see `commits="1205"` with no
+// idea what was counted. ONE sentence, shared here so the two legends cannot drift on the wording; each
+// caller splices it into its own legend text. `probed="0"` (with r=) is the refusal-shaped case; the rest
+// only apply when probed="1".
+inline constexpr const char* kHistoryProbeLegend =
+    "history probed=\"1\" means the git-log name-history walk ran: commits= is how many it read (runProbe's "
+    "own no-merges log, so a name deleted only inside a merge commit is invisible and not counted either), "
+    "removed-names= how many distinct names it saw deleted at least once, and truncated=\"1\" (absent = not "
+    "hit) means the walk stopped at its own commit ceiling before reaching the root. probed=\"0\" r= says why "
+    "it did not run at all (not-a-git-repo or probe-failed) — none of the other attributes are then present. ";
+
 // The `<history .../>` element a verb emits to state what the probe did (or why it did nothing). `escape` is
 // the caller's own escaper, so this header needs no dependency on serialize.h's buffer discipline.
 template<class Escape>

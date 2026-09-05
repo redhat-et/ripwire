@@ -2140,7 +2140,16 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
                        "so with complete= present a ref absent from the rows genuinely lacks the symbol in its committed tree. "
                        "Binary blobs are outside the claim (a text symbol cannot occur in one); an oversized TEXT blob suppresses "
                        "the claim instead of being silently skipped. Its ABSENCE claims nothing. "
-                       "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->" );
+                       "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). " );
+    // §L10b: the with_history lane's own <history> element, previously undefined on this legend — shared
+    // verbatim with --doc-drift's copy (gitoracle.h kHistoryProbeLegend) so the two cannot drift. Only
+    // when res.history actually made that element reachable — an unconditional splice would cost every
+    // plain --whereis run bytes describing an absent element.
+    if( res.history != nullptr )
+    {
+        std::fputs( gitoracle::kHistoryProbeLegend, out );
+    }
+    std::fputs( "-->", out );
     char pab[ kPageDisclosureCap ];
     // §A7(iii): refs_scanned=, not refs=. --stray-content and --abi both spell the MATCHED set refs=; this one
     // counted every branch the sweep READ (73 here, matched or not) under the same attribute name — one noun,

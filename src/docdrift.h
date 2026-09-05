@@ -2639,7 +2639,10 @@ inline constexpr const char* kDocDriftLegend =
     "Neither number is "
     "wrong. corpus=\"0\" means the corpus scan never ran at all, which happens only when the docs raised "
     "no anchor SHAPE whatsoever — prose ones included — so anchors=\"0\" beside a non-zero prose= still "
-    "scanned, and still reports the corpus it scanned. -->";
+    "scanned, and still reports the corpus it scanned. ";
+    // §L10b: the trailing "-->" moved to this constant's ONE call site (below), which now splices in
+    // gitoracle::kHistoryProbeLegend first — the with_history lane's own <history> element, previously
+    // undefined on this legend, shared verbatim with --whereis's copy so the two cannot drift.
 
 // weak-file-line DISCLOSURE, grouped by doc — independent of the <doc> loop in writeDocDriftPage, so a doc
 // that is otherwise "clean" (drift="0") can still carry this section (the F5 finding's own repro: a doc
@@ -2691,6 +2694,13 @@ inline void writeDocDriftPage( std::FILE* out, const DriftResult& res, std::size
     const PageWindow docPage = pageWindow( res.docs.size(), pageLimit, pageOffset );
 
     std::fputs( kDocDriftLegend, out );
+    // §L10b: the <history> clause only when --with-history actually made that element reachable — an
+    // unconditional splice would cost every plain --doc-drift run bytes describing an absent element.
+    if( res.history != nullptr )
+    {
+        std::fputs( gitoracle::kHistoryProbeLegend, out );
+    }
+    std::fputs( "-->", out );
     std::fprintf( out, "<doc-drift docs=\"%u\" clean=\"%u\" anchors=\"%u\" checked=\"%u\" unchecked=\"%u\" drift=\"%u\" dated=\"%u\" prose=\"%u\" corpus=\"%zu\"",
                   res.docsScanned, res.cleanDocs, res.anchors, res.checked, unchecked, res.drift, res.dated, res.prose, res.corpusFiles );
     if( !res.filter.empty() )
