@@ -134,9 +134,28 @@ baseline recomputation actually needs.
 Rerun `bench/substitution_report.py` against the cleaned copy; any baseline taken before the scrub is
 a reading off a contaminated instrument.
 
-## The row schema (v2)
+## The row schema (v3)
 
 One JSON object per line. Field order is stable; new fields are added at the end and bump `v`.
+
+**v2 → v3 (2026-09-05, terminality round A).** Three fields added at the end — `agent`, `surface`,
+`target` — and two things became VISIBLE that no v2 row could see, which is the real boundary:
+
+- **MCP rows.** Every v2 log has zero `ripwire-mcp` rows, and not because nobody used the MCP server:
+  the installer's matcher `Read|Glob|Grep|Bash|mcp__ripwire__` holds only exact-list characters, so
+  Claude Code compared `mcp__ripwire__` as a whole tool name and never showed the hook an MCP call
+  (see [Known undercount](#known-undercount-what-the-meter-cannot-see)). A v3 hook installed with the
+  current matcher (`^(…|mcp__ripwire__.*)$`) sees them. A v3 row written under a `settings.json` that
+  was never refreshed still does not — `v` says which hook wrote the row, not which matcher showed it.
+- **Native-edit rows.** `Edit` / `Write` / `MultiEdit` / `NotebookEdit` now write a row (class
+  `native-edit`, family `edit`, never in the rate, never nudged) so the EDIT band can see a native
+  edit of the file a ripwire edit verb just wrote.
+
+So **row counts across the v2/v3 boundary are not comparable**, exactly as v1/v2 were not: a v3 log
+holds classes of call a v2 log dropped, and the substitution numerator gains its MCP half. Compare
+across the boundary only within one family and one surface, and read the `SCHEMA MIX` line the report
+prints. Older rows without the three fields read as `agent=claude` (no other runner ever had a hook),
+`surface` derived from the tool name, `target` re-read from a CLI row's own `--edit-target-file=`.
 
 **v1 → v2 (2026-08-12).** Added `post_sweep`, added the `sweep<N>` value of `nudge`, and widened the
 classifier (below). The widening means **row counts are not comparable across the boundary** — a v2
@@ -147,23 +166,34 @@ guess.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `v` | int | Schema version. `2`. |
+| `v` | int | Schema version. `3`. |
 | `ts` | string | ISO-8601 UTC, **second** resolution. Not a tiebreaker — see `seq`. |
 | `seq` | int | Per-session monotonic counter, 1-based. The ordering key. |
 | `session` | string | The agent's session id, or `ppid<N>` when the payload carries none. |
 | `repo` | string | Git top level of the call's `cwd`, or the `cwd` itself outside a repo. |
 | `tag` | string | The **repository** to group by — see the note below. Not simply the basename of `repo`. |
-| `tool` | string | Raw tool name: `Bash`, `Read`, `Grep`, `Glob`, `mcp__ripwire__…`, `SessionStart`. |
+| `tool` | string | Raw tool name: `Bash`, `Read`, `Grep`, `Glob`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `mcp__ripwire__…`, `SessionStart`. |
 | `class` | string | Fine classification — the table below. |
-| `family` | string | `ripwire` · `native` · `git` · `other` · `meta`. |
+| `family` | string | `ripwire` · `native` · `edit` · `git` · `other` · `meta`. |
 | `nudged` | 0/1 | A nudge was actually **delivered** (text emitted) on this call. Always 0 in the `control` arm. |
 | `nudge` | string | Why it did or did not: `fired` · `sweep<N>` · `dedup` · `gated` · `control` · `suppressed-control` · `none`. `control`/`suppressed-control` are the control arm's **counterfactual** — see below. |
 | `post_nudge` | 0/1 | A nudge had **already** fired (or, in the control arm, would-have-fired) earlier in this session, before this call. |
 | `post_sweep` | 0/1 | A **sweep escalation** had already fired (or would-have-fired) earlier in this session. |
 | `arm` | string | `treatment` (default) or `control`. See [The A/B toggle](#the-ab-toggle) for how a session lands on one or the other. |
-| `detail` | string | The command line, file path, or pattern — control characters stripped, 200 chars. |
+| `detail` | string | The command line, file path, or pattern — control characters stripped, 200 chars. An MCP row: the verb's `symbol` (else `task` / `query` / `pattern`) argument, with ` post_check=0` appended when an edit twin was called with `post_check:false` — the MCP spelling of `--no-post-check`. |
+| `agent` | string | v3. The runner that drove the hook: `claude` (the Claude Code hook's default), `codex` (`hooks/ripwire-codex-nudge.sh` exports `RIPWIRE_METER_AGENT=codex`), or whatever `RIPWIRE_METER_AGENT` names — `bench/agentloop` rows carry their runner (`codex`, `opencode`, `claude`). |
+| `surface` | string | v3. How the call was made: `cli` (the Bash tool), `mcp` (a `mcp__ripwire__*` verb), `native` (a built-in file tool: Read/Grep/Glob/Edit/…), `meta` (a session boundary). |
+| `target` | string | v3. The FILE an EDIT row names: a CLI edit verb's `--edit-target-file=` value (unquoted), an MCP edit twin's `file=` (or `target=`) argument, a native edit tool's `file_path` / `notebook_path`. **Empty** when the row is not an edit, or when the edit named no file — a bare symbol target is resolved inside the binary and a PreToolUse hook sees only the input, so the row records what the call carried and never guesses the file. 200 chars. |
 
-Example:
+Example — a native Read, then a CLI edit verb naming its target, then an MCP edit twin:
+
+```json
+{"v":3,"ts":"2026-09-05T17:29:20Z","seq":1,"session":"a1b2","repo":"/src/ripwire","tag":"ripwire","tool":"Read","class":"read","family":"native","nudged":0,"nudge":"retired","post_nudge":0,"post_sweep":0,"arm":"treatment","detail":"/src/ripwire/src/a.cpp","agent":"claude","surface":"native","target":""}
+{"v":3,"ts":"2026-09-05T17:29:20Z","seq":2,"session":"a1b2","repo":"/src/ripwire","tag":"ripwire","tool":"Bash","class":"ripwire-cli","family":"ripwire","nudged":0,"nudge":"none","post_nudge":0,"post_sweep":0,"arm":"treatment","detail":"./build/ripwire . --replace-symbol-body=foo --edit-target-file=src/a.cpp --edit-payload=-","agent":"claude","surface":"cli","target":"src/a.cpp"}
+{"v":3,"ts":"2026-09-05T17:29:21Z","seq":3,"session":"a1b2","repo":"/src/ripwire","tag":"ripwire","tool":"mcp__ripwire__replace_symbol_body","class":"ripwire-mcp","family":"ripwire","nudged":0,"nudge":"none","post_nudge":0,"post_sweep":0,"arm":"treatment","detail":"foo post_check=0","agent":"claude","surface":"mcp","target":"src/a.cpp"}
+```
+
+The pre-v3 example, for the shape older rows have:
 
 ```json
 {"v":2,"ts":"2026-08-11T15:29:17Z","seq":1,"session":"a1b2","repo":"/src/ripwire","tag":"ripwire","tool":"Grep","class":"grep","family":"native","nudged":1,"nudge":"fired","post_nudge":0,"post_sweep":0,"arm":"treatment","detail":"needle"}
@@ -328,6 +358,7 @@ Two inputs: the tool name, and (for `Bash`) the command line.
 | `Grep` | `grep` | native |
 | `Glob` | `glob` | native |
 | `mcp__ripwire__*` | `ripwire-mcp` | ripwire |
+| `Edit` `Write` `MultiEdit` `NotebookEdit` | `native-edit` | edit (v3; never in the rate, never nudged; `target` = the file) |
 | `Bash` | see below | see below |
 | anything else | *no row* | — |
 
@@ -534,13 +565,22 @@ an unstated one makes it untrustworthy:
 
 - **MCP verbs are visible only through the matcher, and only in Claude Code.** A PreToolUse hook sees
   a tool call only if the registered matcher names it, so the installer writes
-  `Read|Glob|Grep|Bash|mcp__ripwire__`. Two gaps follow. A `settings.json` written by an **older
-  installer** carries the narrower matcher and will miss every MCP call until `--hook` is re-run —
-  which is why re-running now refreshes a stale matcher in place. And Cursor, Codex, Windsurf, aider
-  and the rest have **no equivalent hook at all**: for those clients both the numerator and the
-  denominator are entirely unobserved, and no row is better than a wrong row.
-- **Only the four matched tool families are observed.** A retrieval that happens inside a subagent, a
-  slash command, or a tool this matcher does not name is invisible.
+  `^(Read|Glob|Grep|Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$`. **Every matcher the
+  installer wrote before 2026-09-05 showed the hook NO MCP call at all.** Claude Code reads a matcher
+  made only of letters, digits, `_`, `-`, spaces, `,` and `|` as a list of EXACT tool names, and only
+  a matcher containing any other character as a (JavaScript, unanchored) regular expression; the
+  earlier `Read|Glob|Grep|Bash|mcp__ripwire__` therefore compared `mcp__ripwire__` as a whole tool
+  name and matched nothing. The evidence was a live tee on the installed hook (2026-09-05): it saw
+  the Bash and Read calls around a real `mcp__ripwire__whereis` and never the MCP call, and the
+  frozen log of that day holds 0 MCP rows in 51,002. So the MCP half of the numerator is absent
+  from every row written before a `settings.json` carries the current matcher — `--hook` refreshes
+  a stale matcher in place, and `test/hookcheck.sh` section (14) evaluates the installed string
+  exactly as Claude Code does. Cursor, Codex, Windsurf, aider and the rest have **no equivalent hook
+  at all**: for those clients both the numerator and the denominator are entirely unobserved, and no
+  row is better than a wrong row.
+- **Only the matched tool families are observed.** A retrieval that happens inside a subagent, a
+  slash command, or a tool this matcher does not name is invisible. Native edit rows exist only from
+  v3 (2026-09-05) on; a v2 log has none, not because no edit happened.
 - **Classification is lexical, not semantic.** It reads two words and a few flags. It does not know
   whether a `cat` was a retrieval or a heredoc, and it never executes anything.
 - **`detail` is truncated at 200 characters**, so a very long pipeline is recorded in part. Without
@@ -858,7 +898,69 @@ without its n and its window rule is a number somebody will quote wrong.
 As everywhere else in this document, the mechanism is public and the **levels are not**: concrete
 readings are operator telemetry and live in the local ledger, not in the repository.
 
+### The EDIT band (§5b, terminality round A, 2026-09-05)
+
+§5 asks whether a FIND verb ended the question. The edit path has a follow-up §5 cannot see and one
+it must not charge, so `bench/substitution_report.py` prints a second table, **terminality by EDIT
+verb**, for `--replace-symbol-body`, `--insert-before-symbol`, `--insert-after-symbol`, `--edit-plan`,
+`--safe-delete` and the MCP twins `replace_symbol_body` / `insert_before_symbol` /
+`insert_after_symbol`. Same window as §5. The sweep set is split into THREE columns and none is
+silently folded into another:
+
+| Column | Definition | Counted? |
+| --- | --- | --- |
+| **(a) `policy-read`** | A `read`/`grep` row whose text names the edit's **target file** (`target`, or a v2 CLI row's own `--edit-target-file=`). This is the harness tax — Claude Code reads a file before it edits it, whatever the receipt said. | **Reported, never counted** against the verb (owner ruling 2026-09-05; `docs/METHODOLOGY.md` §9 principle 1). |
+| **(b) `sweep`** | A `read`/`grep` of any OTHER file, a `glob`/`find`/git-history call, or a `native-edit` of the **same** target inside the window: the ripwire edit did not land what the agent wanted. A `Grep` tool row carries only its pattern, so it can name the target only through the pattern; otherwise it is a sweep. | Counted. |
+| **(c) `redundant-check`** | An `--edit-check` / `edit_check` on the **same symbol** that is the next ripwire call after an edit whose receipt already carried the folded post-check — any edit row without `--no-post-check` (CLI) or without ` post_check=0` in `detail` (MCP). The receipt failed to be believed. An edit that skipped its post-check is never charged for the check it asked for. | Counted. |
+| `unattrib` | The edit row recorded **no target** (a bare symbol target, `--edit-plan`, `--safe-delete`) and a read/grep or native edit followed: (a) and (b) cannot be told apart. | **Excluded from `terminal%`**, printed beside it — never folded either way. |
+
+**TERMINAL = neither (b) nor (c).** `terminal%` is over the rows the metric could decide (`n` minus
+`unattrib`); `n/a` when none could be. Symbols are compared after one normalisation — quotes off,
+`sym#handle` → `sym`, `FILE:SYM` → `SYM`, an `@FILE:LINE` seed kept whole. The table is printed
+**per agent** (`agent`; a row without one is `claude`) and **per surface** (`cli` / `mcp`; a row
+without one is `mcp` when its tool is `mcp__ripwire__*`, else `cli`), because the band's primary
+arm is a runner WITHOUT the read-before-edit policy and the two must never be pooled. Empty windows
+are disclosed under the table as in §5. Levels stay local, as everywhere here.
+
+### Rows from other runners (`bench/agentloop`, lane E)
+
+The hook writes rows only for Claude Code (and Codex through its wrapper). An agentloop run that
+replays a transcript into meter rows emits the **same v3 row**, one per tool call, in `seq` order
+per session, with these fields load-bearing for §5b:
+
+```json
+{"v":3,"ts":"2026-09-05T18:00:00Z","seq":4,"session":"agentloop-codex-inst12-s1","repo":"/tmp/agentloop/inst12","tag":"agentloop-inst12","tool":"shell","class":"ripwire-cli","family":"ripwire","nudged":0,"nudge":"none","post_nudge":0,"post_sweep":0,"arm":"treatment","detail":"ripwire . --replace-symbol-body=parseHeader --edit-target-file=src/parse.c --edit-payload=-","agent":"codex","surface":"cli","target":"src/parse.c"}
+```
+
+- `agent` = the runner (`codex`, `opencode`, `claude`); `surface` = `cli` for a ripwire command run
+  through the runner's shell tool, `mcp` for an MCP verb (`tool` = `mcp__ripwire__<verb>`, `detail` =
+  the symbol, ` post_check=0` appended when `post_check:false`), `native` for the runner's own
+  read/search/edit tools.
+- `class`/`family` follow the classifier tables above: a ripwire command is `ripwire-cli`/`ripwire`,
+  a file read is `read`/`native` with the path in `detail`, a native edit (Claude's `Edit`, Codex's
+  `apply_patch`, opencode's `edit`/`write`) is `native-edit`/`edit` with the file in `target`.
+- `target` on an edit row is the file the harness KNOWS — from `--edit-target-file=`, from the MCP
+  `file=` argument, or from the receipt's own `file` field, which the harness can read and the hook
+  cannot; an agentloop converter should prefer the receipt.
+- `nudged`/`nudge`/`post_nudge`/`post_sweep`/`arm` are the hook's fields; a converter writes
+  `0` / `"none"` / `0` / `0` / `"treatment"`.
+
+No converter exists yet: `bench/agentloop/backfill_claude_transcripts.py` attaches transcripts and
+counts calls, it does not emit meter rows. Lane E's converter emits the shape above, and the report
+reads it unchanged.
+
 ## Gate
+
+`test/hookcheck.sh` section (14), arms V1–V5 and E1–E9 (2026-09-05): the INSTALLED matcher evaluated exactly as
+Claude Code evaluates it (exact-list versus regex) fires on every metered tool and nothing else; the real desktop
+payload shape (every extra key) yields the same rows as the four-key fixture; an MCP verb writes a `ripwire-mcp`
+row with its symbol and surface; the four native edit tools write `native-edit` rows naming the target; every row
+is v3 with `agent`/`surface`; a stale exact-list matcher is refreshed by a re-run of `--hook`; `target` is read
+from `--edit-target-file=` and `file=`; and §5b is pinned on a synthetic fixture covering all three columns,
+`unattrib`, both surfaces and two agents, with a MUTATION CONTROL (re-pointing the policy Read at another file
+must move the row) so the policy-read column is proven live rather than constant.
+`test/meterdisclosurecheck.sh` pins that this document defines the three columns, `unattrib`, the agent/surface
+split and the v2 → v3 boundary.
 
 `test/hookcheck.sh` section (11), arms M1–M27b and T1–T11: a row is written at the default global path with the
 full field set; the rtk unwrap; the `unclassified` fallback; out-of-scope calls writing no row; the

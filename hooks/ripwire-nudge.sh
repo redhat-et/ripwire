@@ -241,6 +241,19 @@ meter_post=0
 meter_postsweep=0
 meter_repo=""
 meter_tag=""
+# ---- row schema v3 (2026-09-05, terminality round A): `agent` names the runner that drove this hook
+#      (the Codex wrapper exports RIPWIRE_METER_AGENT=codex; the Claude hook defaults to claude),
+#      `surface` says how the observed call was made (cli = the Bash tool, mcp = a ripwire MCP verb,
+#      native = a built-in file tool, meta = a session boundary), and `target` is the FILE an EDIT
+#      row names — the CLI's --edit-target-file= value, an MCP edit twin's file= argument, or a
+#      native edit tool's file_path/notebook_path. Empty when the row is not an edit or the edit
+#      named no file: a bare symbol target resolves inside the binary, and a PreToolUse hook sees
+#      only the input, so it records what the command line carried and nothing it would have to
+#      guess. The EDIT band in bench/substitution_report.py §5b is built from these three fields;
+#      docs/SUBSTITUTION_METER.md is the schema. ----
+meter_agent="${RIPWIRE_METER_AGENT:-claude}"
+msurface=""
+mtarget=""
 sweep_on=1
 sweep_n=3
 dedup_cooldown=20
@@ -479,11 +492,11 @@ meter_log()
             --arg class "$_mclass" --arg family "$_mfamily" --argjson nudged "$_mnudged" \
             --arg nudge "$_mreason" --argjson post_nudge "$meter_post" \
             --argjson post_sweep "$meter_postsweep" --arg arm "$meter_arm" \
-            --arg detail "$_mdetail" \
-            '{v:2,ts:$ts,seq:$seq,session:$session,repo:$repo,tag:$tag,tool:$tool,class:$class,family:$family,nudged:$nudged,nudge:$nudge,post_nudge:$post_nudge,post_sweep:$post_sweep,arm:$arm,detail:($detail|.[0:200])}' \
+            --arg detail "$_mdetail" --arg agent "$meter_agent" --arg surface "$msurface" --arg target "$mtarget" \
+            '{v:3,ts:$ts,seq:$seq,session:$session,repo:$repo,tag:$tag,tool:$tool,class:$class,family:$family,nudged:$nudged,nudge:$nudge,post_nudge:$post_nudge,post_sweep:$post_sweep,arm:$arm,detail:($detail|.[0:200]),agent:$agent,surface:$surface,target:($target|.[0:200])}' \
             2>/dev/null )" || _mrow=""
     else
-        _mrow="{\"v\":2,\"ts\":\"$( meter_esc "$_mts" )\",\"seq\":$_mseq,\"session\":\"$( meter_esc "$session" )\",\"repo\":\"$( meter_esc "$meter_repo" )\",\"tag\":\"$( meter_esc "$meter_tag" )\",\"tool\":\"$( meter_esc "$tool_name" )\",\"class\":\"$_mclass\",\"family\":\"$_mfamily\",\"nudged\":$_mnudged,\"nudge\":\"$_mreason\",\"post_nudge\":$meter_post,\"post_sweep\":$meter_postsweep,\"arm\":\"$meter_arm\",\"detail\":\"$( meter_esc "$_mdetail" )\"}"
+        _mrow="{\"v\":3,\"ts\":\"$( meter_esc "$_mts" )\",\"seq\":$_mseq,\"session\":\"$( meter_esc "$session" )\",\"repo\":\"$( meter_esc "$meter_repo" )\",\"tag\":\"$( meter_esc "$meter_tag" )\",\"tool\":\"$( meter_esc "$tool_name" )\",\"class\":\"$_mclass\",\"family\":\"$_mfamily\",\"nudged\":$_mnudged,\"nudge\":\"$_mreason\",\"post_nudge\":$meter_post,\"post_sweep\":$meter_postsweep,\"arm\":\"$meter_arm\",\"detail\":\"$( meter_esc "$_mdetail" )\",\"agent\":\"$( meter_esc "$meter_agent" )\",\"surface\":\"$( meter_esc "$msurface" )\",\"target\":\"$( meter_esc "$mtarget" )\"}"
     fi
     [ -n "$_mrow" ] || return 0
     { printf '%s\n' "$_mrow" >>"$meter_file"; } 2>/dev/null || true
@@ -933,6 +946,7 @@ meter_family()
     case "$1" in
         ripwire-cli|ripwire-mcp)        printf 'ripwire' ;;
         grep|find|read|glob)            printf 'native' ;;
+        native-edit)                    printf 'edit' ;;
         git-diff|git-log|git-show-stat) printf 'git' ;;
         git-remote|git-misc)            printf 'git' ;;
         session-start|gate-run)         printf 'meta' ;;
@@ -966,6 +980,7 @@ then
     # qualified for a nudge still counts as a session. This hook is registered for startup|resume|
     # clear, so a long session can legitimately produce more than one of these rows.
     tool_name="SessionStart"
+    msurface="meta"
     meter_set_repo "$dir"
     meter_init
     meter_log "session-start" "meta" 0 "none" "${dir}"
@@ -1003,21 +1018,29 @@ fi
 
 input="$( cat )"
 
-# ---- fast bail: only Grep, Glob, Read and Bash can ever match; every other tool (Edit/Write/...)
-#      exits here after a single grep over stdin, before spawning anything. ----
+# ---- fast bail: only Grep, Glob, Read, Bash, the four native edit tools and ripwire's own MCP verbs
+#      can ever match; every other tool exits here after a single grep over stdin, before spawning
+#      anything. Whether the hook is SHOWN a call at all is the installer's matcher (skills/install.sh
+#      hookMatcher) — a name that is not in both places is invisible to the meter. ----
 tool_name=$( printf '%s' "$input" | grep -o '"tool_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 \
     | sed -E 's/^[^:]*:[[:space:]]*"//; s/"$//' )
 
 case "$tool_name" in
-    Grep) category="grep"; mclass="grep" ;;
-    Read) category="read"; mclass="read" ;;
-    Glob) category="glob"; mclass="glob" ;;
-    Bash) category="";     mclass="" ;;    # both decided below, once the command text is available
+    Grep) category="grep"; mclass="grep"; msurface="native" ;;
+    Read) category="read"; mclass="read"; msurface="native" ;;
+    Glob) category="glob"; mclass="glob"; msurface="native" ;;
+    Bash) category="";     mclass=""; msurface="cli" ;;    # both decided below, once the command text is available
+    # §METER v3 (2026-09-05): the native edit tools. Class `native-edit`, family `edit` — NEVER in the
+    # substitution rate and NEVER nudged (the meter does not change the agent's behaviour); they exist
+    # so the EDIT band (bench/substitution_report.py §5b) can see a native edit of the same file that a
+    # ripwire edit verb just wrote, which is the one follow-up that says the verb did not land what the
+    # agent wanted. `target` carries the file; `detail` is the same path.
+    Edit|Write|MultiEdit|NotebookEdit) category=""; mclass="native-edit"; msurface="native" ;;
     # §METER: ripwire's own MCP verbs. Never nudged (nudging a ripwire call toward ripwire is noise) —
     # they are here purely so the NUMERATOR is not silently missing every agent that prefers the MCP
     # server to the CLI. This only works for a settings.json whose matcher was written by the current
     # installer; see the disclosure in docs/SUBSTITUTION_METER.md for what stays invisible.
-    mcp__ripwire__*) category=""; mclass="ripwire-mcp" ;;
+    mcp__ripwire__*) category=""; mclass="ripwire-mcp"; msurface="mcp" ;;
     *) exit 0 ;;
 esac
 
@@ -1095,6 +1118,44 @@ fields3()
 $_f3
 EOF2
     IFS="$_oIFS"
+    return 0
+}
+
+# ---- fieldsmcp — cwd, session_id, and an MCP verb's salient arguments in ONE jq spawn: `detail`
+#      becomes the symbol (or task/query/pattern for the retrieval verbs), `mtarget` the file= (or
+#      target=) argument an edit twin names, and a `post_check:false` on an edit twin is recorded as a
+#      ` post_check=0` suffix on detail — the MCP spelling of the CLI's --no-post-check, which the EDIT
+#      band reads to decide whether a following edit_check was redundant. Same @tsv discipline as
+#      fields3. Without jq the flat extractor is asked one key at a time. ----
+fieldsmcp()
+{
+    _mpc=""
+    if ! command -v jq >/dev/null 2>&1
+    then
+        f3_cwd="$( field cwd )"
+        f3_session="$( field session_id )"
+        f3_detail="$( field symbol )"
+        [ -n "$f3_detail" ] || f3_detail="$( field task )"
+        [ -n "$f3_detail" ] || f3_detail="$( field query )"
+        [ -n "$f3_detail" ] || f3_detail="$( field pattern )"
+        mtarget="$( field file )"
+        [ -n "$mtarget" ] || mtarget="$( field target )"
+        case "$input" in
+            *'"post_check"'*false*) _mpc="0" ;;
+        esac
+    else
+        _fm="$( printf '%s' "$input" \
+            | jq -r '[(.cwd // ""), (.session_id // ""), ((.tool_input.symbol // .tool_input.task // .tool_input.query // .tool_input.pattern // "") | tostring), ((.tool_input.file // .tool_input.target // "") | tostring), (if (.tool_input.post_check == false) or (.tool_input.post_check == "false") then "0" else "" end)] | @tsv' \
+            2>/dev/null )"
+        _oIFS="$IFS"
+        IFS="$( printf '\t' )"
+        # shellcheck disable=SC2086
+        read -r f3_cwd f3_session f3_detail mtarget _mpc <<EOF3
+$_fm
+EOF3
+        IFS="$_oIFS"
+    fi
+    [ "$_mpc" = "0" ] && f3_detail="${f3_detail} post_check=0"
     return 0
 }
 
@@ -1197,6 +1258,22 @@ then
     # predates the meter: `ripwire . --grep=…` matched the recursive-grep regex above (`--grep` clears
     # \bgrep\b, and `-grep` clears the [rR]-flag test), so the tool nudged itself.
     [ "$mclass" = "ripwire-cli" ] && category=""
+    # §METER v3: an EDIT verb's target file, when the command line names one. Only --edit-target-file=
+    # is knowable here — a bare symbol target is resolved inside the binary, and a PreToolUse hook
+    # sees the input, never the receipt. Quoted values are unquoted; an unquoted one ends at the next
+    # blank. No fork: parameter expansion only, on the fast path every Bash call takes.
+    if [ "$mclass" = "ripwire-cli" ]
+    then
+        case "$cmdx" in
+            *--edit-target-file=*)
+                mtarget="${cmdx#*--edit-target-file=}"
+                case "$mtarget" in
+                    \"*) mtarget="${mtarget#\"}"; mtarget="${mtarget%%\"*}" ;;
+                    \'*) mtarget="${mtarget#\'}"; mtarget="${mtarget%%\'*}" ;;
+                    *)   mtarget="${mtarget%%[[:space:]]*}" ;;
+                esac ;;
+        esac
+    fi
 
     # Nothing this meter has a name for (`npx foo`, `python3 -c …` with no retrieval word in it):
     # out of scope for both jobs, and the fast bail stays fast — one grep more than before, no
@@ -1211,6 +1288,9 @@ case "$tool_name" in
     Bash)      ;;                       # already fetched, with `command` as the detail key
     Read)      fields3 file_path ;;
     Grep|Glob) fields3 pattern ;;
+    Edit|Write|MultiEdit) fields3 file_path; mtarget="$f3_detail" ;;
+    NotebookEdit)         fields3 notebook_path; mtarget="$f3_detail" ;;
+    mcp__ripwire__*)      fieldsmcp ;;
     *)         fields3 ;;
 esac
 mdetail="$f3_detail"
