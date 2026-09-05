@@ -134,20 +134,43 @@ grep -q 'withheld: withheld_est_tokens=' "$TMP/tb.out" \
     && ok "--token-budget=2000: stdout carries a 'withheld: withheld_est_tokens=...' clause (distinct name)" \
     || no "--token-budget=2000: stdout is missing the withheld: withheld_est_tokens= clause"
 TB_BYTES=$( wc -c < "$TMP/tb.out" | tr -d ' ' )
-TB_EST="$( printf '%s' "$TB_HEADER" | grep -oE 'est_tokens=[0-9]+' | grep -oE '[0-9]+' )"
+# verify-wave2 F4 PROBE RE-PIN: withheld_est_tokens= moved from the note ONTO the header line (so a parser
+# reads the budget, the withheld price and the emitted price side by side), and `est_tokens=` is a SUFFIX of
+# it — the old unanchored grep started returning TWO numbers and every numeric test after it silently broke.
+# Anchored on the leading space, the same disambiguation withHeaderField uses in recall.h.
+TB_EST="$( printf '%s' "$TB_HEADER" | grep -oE ' est_tokens=[0-9]+' | grep -oE '[0-9]+' )"
 { [ -n "$TB_EST" ] && [ "$TB_EST" -le $(( TB_BYTES * 10 / 25 * 2 )) ]; } \
     && ok "N3: withheld header's est_tokens=$TB_EST describes the EMITTED payload ($TB_BYTES bytes, <=2x bytes/2.5)" \
     || no "N3: withheld header's est_tokens=$TB_EST is not a measurement of the $TB_BYTES bytes actually emitted"
-WITHHELD_EST="$( grep -oE 'withheld_est_tokens=[0-9]+' "$TMP/tb.out" | grep -oE '[0-9]+' )"
+# F4: the same number now appears TWICE in the document — as a header ATTRIBUTE (for a parser) and in the
+# withheld PROSE clause (for a reader). head -1 takes the header's; the arm below pins that they agree.
+WITHHELD_EST="$( grep -oE 'withheld_est_tokens=[0-9]+' "$TMP/tb.out" | grep -oE '[0-9]+' | head -1 )"
+WITHHELD_N="$(   grep -oE 'withheld_est_tokens=[0-9]+' "$TMP/tb.out" | sort -u | wc -l | tr -d ' ' )"
+[ "$WITHHELD_N" = 1 ] \
+    && ok "N3: the header attribute and the withheld clause state ONE withheld number, not two" \
+    || no "N3: withheld_est_tokens= is spelled with $WITHHELD_N different values in one document"
 { [ -n "$WITHHELD_EST" ] && [ -n "$TB_EST" ] && [ "$WITHHELD_EST" -gt "$TB_EST" ]; } \
     && ok "N3: the PRE-cut estimate survives under its own name ($WITHHELD_EST) and is distinct from the emitted one" \
     || no "N3: withheld_est_tokens=$WITHHELD_EST vs emitted est_tokens=$TB_EST — the two numbers are not distinguished"
 
-# ── 3. a budget above the artifact is INERT ─────────────────────────────────────────────────────────
+# ── 3. a budget above the artifact TRIMS NOTHING ────────────────────────────────────────────────────
+# RE-PIN 2026-09-05 (capture-audit verify-wave2 F4, lane V2) — to the new contract stated precisely, not to a
+# loosened assertion. This arm used to demand BYTE-IDENTICAL, which was a stronger claim than the invariant
+# it names: --token-budget is a ceiling the run APPLIED and passed, and H9's rule ("a ceiling applied is a
+# ceiling named") makes it a header attribute exactly as --for/--pack-task/--from-trace already name theirs
+# when they are inside them. What must not change is the ARTIFACT: same exit, same payload, no trim. So the
+# comparison normalises away the one attribute the flag legitimately adds and asserts byte-identity on
+# everything else — which is strictly more than the old arm, because it now also pins that the attribute
+# carries the value that was passed and that NOTHING ELSE moved.
 run --max-tokens=1000000 --token-budget=1000000 > "$TMP/tbbig.out"; TBB_RC=$?
-[ "$TBB_RC" = 0 ] && cmp -s "$TMP/tbbig.out" "$TMP/plain.out" \
-    && ok "--token-budget=1000000: exit 0, byte-identical to the explicit-full run (inert when within budget)" \
-    || no "--token-budget=1000000: exit=$TBB_RC / output differs from the explicit-full run"
+grep -q ' budget_tokens=1000000' "$TMP/tbbig.out" \
+    && ok "--token-budget=1000000: the header names the ceiling it applied and passed" \
+    || no "--token-budget=1000000: applied a ceiling and named none (H9: a ceiling applied is a ceiling named)"
+sed -E 's/ budget_tokens=[0-9]+//; s/ est_tokens=[0-9]+//' "$TMP/tbbig.out" >"$TMP/tbbig.norm"
+sed -E 's/ est_tokens=[0-9]+//'                             "$TMP/plain.out" >"$TMP/plain.norm"
+[ "$TBB_RC" = 0 ] && cmp -s "$TMP/tbbig.norm" "$TMP/plain.norm" \
+    && ok "--token-budget=1000000: exit 0 and the ARTIFACT is byte-identical to the explicit-full run (nothing trimmed)" \
+    || no "--token-budget=1000000: exit=$TBB_RC / the artifact differs from the explicit-full run beyond the budget_tokens= attribute"
 
 # ── 4. est_tokens is present and honest over the WHOLE payload ──────────────────────────────────────
 est_of(){ head -1 "$1" | grep -oE 'est_tokens=[0-9]+' | grep -oE '[0-9]+'; }

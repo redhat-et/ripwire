@@ -2504,8 +2504,11 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // recallFor (recall.h) is the ONE rank-then-build call MCP `memory_recall` also makes — the recall
         // lens's pathFieldDefaultW=1 and its root-prefix derivation live there, so the two front doors cannot
         // drift apart again (gate: test/recallparitycheck.sh).
+        // F4: --token-budget's GATING ceiling travels to the header too, so both ceilings this run applied are
+        // named where an attribute reader finds them (it used to live only in the withheld prose and stderr).
         const RecallBundle       bundle = recallFor( ing, g.outOff, g.outTargets, cfg.recall, recallK, recallMaxTokens,
-                                                     redactPtr, recallRootArg );   // docs only; R-R
+                                                     redactPtr, recallRootArg,     // docs only; R-R
+                                                     cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0u );
 
         const int                rc     = emitRecallBudgeted( stdout, bundle, cfg.tokenBudget );
         reportRedactions( stderr, redactCounts );

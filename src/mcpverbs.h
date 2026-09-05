@@ -2595,7 +2595,9 @@ inline constexpr char kConnectHeader[] =
     " defs= on a terminal row = that NAME has N definitions and the lowest-id one was used; qualify with file:name"
     " to pick another. Steiner rows never carry it."
     " max_tokens= is the token ceiling this bundle was SHAPED against (the max_tokens flag; absent = none"
-    " was asked for); est_tokens= is what it cost, and truncated=\"paths\" says the shaping had to cut -->";
+    " was asked for); est_tokens= is what it cost, truncated=\"paths\" says the shaping had to cut, and"
+    " over_ceiling=\"1\" says est_tokens exceeds max_tokens anyway (the trim ran out of things to drop before it"
+    " reached the ceiling; the bundle is then complete, not further trimmed) -->";
 
 // The root element's own bytes: the <connect ...> start-tag PLUS the </connect> close. It is
 // self-referential (the start-tag's length depends on the digits of the number it carries), so it is
@@ -2801,7 +2803,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     // §P8 vocabulary: `est_tokens="~191"` was the tool's only NON-NUMERIC token estimate — the `~` made
     // `int(...)` throw in the one field whose whole purpose is arithmetic against a budget, and no other
     // verb apologises for an estimate being an estimate. Dropped.
-    const std::size_t estTokens = connectEstTokens( payload.size(), connectExtraBytes );
+    std::size_t estTokens = connectEstTokens( payload.size(), connectExtraBytes );
     // H9: the ceiling this bundle was SHAPED against, named on the root. The trim loop above really does
     // drop sigs and then whole legs to fit `maxTokens`, and until this attribute existed the only evidence
     // was `truncated="paths"` — which says something was cut but not what it was cut to. Absent when no
@@ -2812,10 +2814,22 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
     {
         std::snprintf( connectCeiling, sizeof( connectCeiling ), " max_tokens=\"%d\"", maxTokens );
     }
+    // F5 sibling (capture-audit verify-wave2 2026-09-05, budgetpolicycheck (D)): the trim loop above has
+    // exactly two moves — sigs off, then legs dropped — and then it BREAKS whether or not the bundle fits.
+    // `--connect=… --max-tokens=200` therefore delivered 656 tokens beside max_tokens="200" wearing only
+    // truncated="paths", which says something was cut and not that the cut fell short. A ceiling named is a
+    // ceiling measured against: over_ceiling="1" when the delivered document still exceeds it. Its own 17
+    // bytes are charged back through the same estimator, so the number and the label describe one document.
+    const bool        connectOver     = maxTokens > 0 && estTokens > std::size_t( maxTokens );
+    const char* const connectOverAttr = connectOver ? " over_ceiling=\"1\"" : "";
+    if( connectOver )
+    {
+        estTokens = connectEstTokens( payload.size(), connectExtraBytes + std::strlen( connectOverAttr ) );
+    }
     std::fprintf( out, "%s%s", kConnectHeader, rootRelPathsLegend( !rootArg.empty() ) );
-    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s%s%s%s>",
+    std::fprintf( out, "<connect terminals=\"%zu\" nodes=\"%u\" edges=\"%u\" radius=\"%u\" groups=\"%u\" est_tokens=\"%zu\"%s%s%s%s%s>",
                   res.terminals.size(), nodeTotal, edgeTotal, res.radius, connectedGroups, estTokens,
-                  connectCeiling,
+                  connectCeiling, connectOverAttr,
                   truncated ? " truncated=\"paths\"" : "", connectRootAttr.c_str(),
                   graphCountFloorAttrXml( g ).c_str() );   // H5/M15: nodes=/edges= are read off the name-based CSR — a floor, with the gauge
     std::fwrite( payload.data(), 1, payload.size(), out );
