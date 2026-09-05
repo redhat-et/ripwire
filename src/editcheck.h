@@ -13,6 +13,7 @@
 // #includes only) so include ORDER elsewhere in main.cpp never matters to it.
 
 #include "model.h"
+#include "nextverb.h"     // P3 (L7): next= on the root
 #include "graph.h"
 #include "serialize.h"     // escapeXml / symTag
 #include "quality.h"        // computeHeadSnapshot / isPublicApi / baselineCanonId — the SAME qheadsnap/qsnap cache family --quality-delta uses
@@ -627,7 +628,10 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
                        "p= is the definition the selector resolved to; when defs is above 1 EVERY folded "
                        "definition is listed as its own def row (p=, t=, params=), which is what tells a widened single "
                        "definition apart from an added overload. At defs=\"1\" no def row is emitted: the root's own p=/t= "
-                       "is that definition, and params_now is its parameter count. ";
+                       "is that definition, and params_now is its parameter count. "
+                       // P3 (L7): next= defined where the reader meets it
+                       "next= is the one pasteable follow-up: on a contract-change the uses verb on SYM (the call sites), "
+                       "otherwise the test gate on the definition's file. ";
     // §H4 §3.4: the shared floor + counting-unit tail, appended from the ONE constant every graph-count verb
     // splices. It is load-bearing HERE more than anywhere: callers="1" on a symbol with an unmodelled second
     // caller is the exact shape §H4 measured, and this legend's own "the tree as it stands" paragraph reads
@@ -687,6 +691,10 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // reason (no attribute-adjacency assertion anywhere in test/ can break on an attribute appended past the
     // end of every group). Absent, not "0", when the document is the ordinary post-hoc answer.
     if( preview ) { out += " preview=\"1\""; }
+    // P3 (L7, nextverb.h): the one follow-up — a contract-change wants the call SITES (--uses), anything else the
+    // tests that reach the definition's file (--test-gate=FILE).
+    out += nextAttrXml( std::string_view( verdict.status ) == "contract-change" ? nextFlag( "--uses=", fsym.name )
+                                                                                : nextFlag( "--test-gate=", ecPathRel( fsym.fileId ) ) );
     out += ">";
     // L3/D5 note surfacing (paper-noteedit): a note targeting THIS symbol (its canonical id) or the FILE it
     // is defined in rides as a <note> child of <edit-check>, same shape/order/escaping renderNoteChildren

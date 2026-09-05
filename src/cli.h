@@ -827,7 +827,10 @@ inline void printUsage( std::FILE* out ) noexcept
         // comment records the rename). No output the tool can emit has contained payload= since; --help was
         // the last place the dead spelling survived, and a reader grepping their bundle for it finds nothing.
         "                               ~7.5KB default payload budget (tail entries trim first; <sigs shown=S total=T\n"
-        "                               capped=\"1\"> marks it: T rows handed to the trim, S printed) — an explicit\n"
+        "                               capped=\"1\"> marks it: T rows handed to the trim, S printed). The r=1 (top-ranked)\n"
+        "                               <d> row carries next=\"--expand=FILE:NAME\" — the one pasteable follow-up, the body\n"
+        "                               that ends the search (defined here, not in the bundle's own header, which the\n"
+        "                               token ladder does not charge). An explicit\n"
         "                               --token-budget=N overrides the default at the conservative byte rate\n"
         "                               (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens.\n"
         "                               TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride\n"

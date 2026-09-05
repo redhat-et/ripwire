@@ -745,6 +745,9 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                  "corpus_oversize= counts files the crawl SAW but dropped for exceeding the size ceiling. Both answer what an "
                  "otherwise-empty answer alone cannot: not in this repo, or in a file that was never scanned — the skipped "
                  "verb itemizes the rows behind either count. "
+                 // P3 (L7): next= on the root, defined where the reader meets it
+                 "next= is the one pasteable follow-up: the at verb on the top hit; the next page (compact legend) when cut; "
+                 "the conceptual lens on a zero-hit answer. "
                  "%s -->", rw::kPageRaiseCapClause );
     }
     emitGrepHandleLegend( cfg.grepHandles );
@@ -761,12 +764,29 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= (helper above).
     const std::string auxAttr = grepUnindexedAttrs( aux );
     const char* schemaAttr = cfg.legend == "compact" ? " schema=\"ripwire.grep/v1\"" : "";
-    std::printf( "<grep pattern=\"%s\"%s%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s%s%s>",
+    // P3 (L7, nextverb.h): the one follow-up. A CUT answer → the next page, under the compact legend (the page
+    // is what the agent wants, not the prose it has already read); a hit → the enclosing-definition chain at the
+    // top hit (--at=FILE:LINE, the grep→at→expand chain lens 8 named); zero hits → the conceptual fallback.
+    std::string grepNext;
+    if( grepPage.end < hitCount || hitsCapped != 0 )
+    {
+        grepNext = rw::nextFlag( cfg.grepRegex ? "--regex=" : "--grep=", pat ) + " --offset=" + std::to_string( grepPage.end ) + " --legend=compact";
+    }
+    else if( !hits.empty() )
+    {
+        grepNext = rw::nextFlag( "--at=", std::string( pathFor( hits[ 0 ].fileId ) ) + ":" + std::to_string( hits[ 0 ].line ) );
+    }
+    else
+    {
+        grepNext = rw::nextFlag( "--for=", pat );
+    }
+    std::printf( "<grep pattern=\"%s\"%s%s%s files=\"%d\" hits=\"%zu\"%s hits_capped=\"%d\"%s%s%s%s%s>",
                  ex( pat ).c_str(), schemaAttr, rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
                                  cfg.pageLimit, cfg.pageOffset, true, kXmlPageSyntax,
                                  /*collectionCapped=*/ hitsCapped != 0 ),   // H8: the cap hits_capped= names floors the root
-                 hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str() );
+                 hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str(),
+                 rw::nextAttrXml( grepNext ).c_str() );
     // G1 (2026-08-15 harvest): hits GROUP by file under <f p="…">, root-relative when this is a single-root
     // run (report-memgraph §F6: the absolute root prefix alone was 42.5% of a real --grep payload; the
     // repeated-per-hit path was report-octocode §F1's 31.4%). Byte-identical text within one file's group

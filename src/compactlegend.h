@@ -68,7 +68,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "callers",     "callers",     "1-hop CALLERS of of= (defs= matched, count= distinct symbols): <s t= n= p=>; hop_tested=/hop_untested=" },
     { "callees",     "callees",     "1-hop CALLEES of of= (defs= matched, count= distinct symbols): <s t= n= p= role= tested=>" },
     { "uses",        "uses",        "resolvable use-sites of of=: <u role=call|macro|read|write|import|extends|type p=file:line in_id=>" },
-    { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f via= p= lazy=> importers" },
+    { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f via= p=> importers" },
     { "path",        "path",        "one DIRECTED call path from= to to=, each <s t= n= p=> a hop; reachable=0 hops=0 when none" },
     { "connect",     "connect",     "minimal joining subgraph over the terminals: <g> groups, <t n= p=> nodes, <e f= t=> edges, <unconnected>" },
     { "at",          "at",          "enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans" },
@@ -86,7 +86,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "edit-check",   "edit-check",   "sym='s contract NOW vs HEAD: status=unchanged|new-symbol|contract-change; <c n= p= incompatible=1 sites_l=> callers" },
     { "safe-delete",  "safe-delete",  "can sym= go, a READ never a verdict: callers= impact_reaches= uses= tested_self= risk=; <c n= p= amb=>" },
     { "quality-delta","quality-delta","only what the change made WORSE vs baseline=: regressions= minor= gating=; <r kind= sym= p= was= now= gating= bar=>, <sa> acked" },
-    { "test-gate",    "test-gate",    "tests to run <t p= run=> + the UNTESTED blast radius <u sym= p= l= ccx=>; exit 4 while either is non-empty" },
+    { "test-gate",    "test-gate",    "tests to run <t p= run=> + the UNTESTED blast radius <u sym= p= l= ccx=>; exit 4 while either exists" },
     { "affected",     "affected",     "test files that transitively reach the changed files/symbols: <test p= run=>; seeded_by= the reading taken" },
     { "exercises",    "exercises",    "NON-TEST symbols this test transitively calls (what it covers): <t p= run=>; the inverse of affected" },
     { "pr-context",   "pr-context",   "review bundle per changed file vs base=: symbols, callers, blast radius, tests, co-change, owners" },
@@ -198,8 +198,8 @@ struct CompactCompletenessTerm
 
 inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
 {
-    { "counts_floor",      "counts_floor=1: every count here is a FLOOR, never a total" },
-    { "graph_ambiguous",   "graph_ambiguous=/graph_unresolved=: the resolver gauge" },
+    { "counts_floor",      "counts_floor=1: every count is a FLOOR, never a total" },
+    { "graph_ambiguous",   "graph_ambiguous=/graph_unresolved=: resolver gauge" },
     { "hits_capped",       "hits_capped=1: hits= is a floor" },
     { "est_tokens",        "est_tokens=: price as emitted (an upper bound under compact)" },
     { "over_ceiling",      "over_ceiling=1: budget not met" },
@@ -210,6 +210,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "tier_partial",      "tier_partial=1: tier elected under a partial classification" },
     { "dangling",          "dangling=1: matches nothing indexed", true },
     { "amb",               "amb=K: K calls split over several defs", true },
+    { "next",              "next=: the one pasteable follow-up", true },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are
@@ -441,7 +442,7 @@ inline std::string compactLegendText( const CompactLegendSpec& spec, std::string
     {
         out += ' ';
         out += subcaps;
-        out += ": 1 = that sub-list cut.";
+        out += ": 1 = cut.";
     }
     for( const CompactCompletenessTerm& t : kCompactCompletenessTerms )
     {
@@ -452,7 +453,7 @@ inline std::string compactLegendText( const CompactLegendSpec& spec, std::string
             out += '.';
         }
     }
-    out += " (full: legend=full) -->";
+    out += " -->";
     return out;
 }
 

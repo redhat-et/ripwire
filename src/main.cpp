@@ -3,6 +3,7 @@
 // ingest() comes from ingest.cpp (real, tree-sitter) or stub_ingest.cpp (test).
 
 #include "model.h"
+#include "nextverb.h"              // P3 (L7): next= on every enumerated root (the verbs_*.h fragments read it from here)
 #include "infra/stdinline.h"       // R4: readByteSafeLine — the ONE byte-safe stdin line reader (--from-trace=- / --batch=-)
 #include "ingest.h"
 #include "workspace.h"             // multi-root workspaces: root hygiene + labels + the id-offset merge

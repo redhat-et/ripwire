@@ -4,6 +4,7 @@
 // buffer (no whole-document string), terse schema, every name/path XML-escaped.
 
 #include "model.h"
+#include "nextverb.h"   // P3 (L7): next= on the top-ranked <d> row
 #include "arch.h"        // P3: builtinLayer() — the file-node layer= tag
 #include "graph.h"     // H6/F2: definitionCountOfName — the ONE resolver behind --lego's defs= single-pick disclosure
 #include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
@@ -3041,6 +3042,17 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
         std::snprintf( tail, sizeof( tail ), "%s%s%s>", facts.lens, facts.pure, rankAttr );
     }
     head += tail;
+    // P3 (L7, nextverb.h): the TOP-ranked row hands the agent the body to read — --expand=FILE:NAME, the
+    // file-qualified selector (a same-named def elsewhere cannot answer), spelled with the same root-relative
+    // path the <f p=> wrapper above it carries. Only r=1: one next per document, the one that ends the search.
+    if( facts.rank == 1 )
+    {
+        const std::string rel = rootArg.empty() ? std::string( ing.files[ s.fileId ] )
+                                                : std::string( rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rw::sarif::rootPrefixOf( rootArg ) ) );
+        head.pop_back();   // the '>'
+        head += nextAttrXml( nextFlag( "--expand=", rel + ":" + s.name ) );
+        head += '>';
+    }
     return head;
 }
 

@@ -477,7 +477,9 @@ inline constexpr const char* kQdLegendCore =
     "register-macro-excluded= is a FLOOR, not a finding: symbols this run excluded from the dead-code kind "
     "because their own definition is a registered self-registering test/benchmark macro call. Never gates, "
     "never counted in regressions=, printed even at zero (zero means none excluded, not that the check did "
-    "not run). ";
+    "not run). "
+    // P3 (L7): next= on gating rows, defined where the reader meets it
+    "A gating row's next= is the one pasteable follow-up: expand on FILE:NAME, the body to fix (a duplication row names a SET and carries none). ";
 
 // The macro FAMILIES, and why a member of one cannot be judged dead — printed only when the run actually
 // excluded something, because on a repo with no such macro the roster explains an empty set.
@@ -1429,13 +1431,23 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 locAttr = " p=\"" + ex( r.path ) + ":" + std::to_string( r.line ) + "\"";
             }
             const char* gatingAttr = ( gatingAllowed && !r.isNewSymbol && !r.isMinor ) ? " gating=\"1\"" : "";
+            // P3 (L7, nextverb.h): a GATING row hands the agent the body to fix — --expand=FILE:NAME (the file-qualified
+            // selector, so a same-named symbol elsewhere cannot answer). The name is the sym key's last :: segment;
+            // duplication rows name a SET (members=) and carry no single body to open.
+            std::string nextAttr;
+            if( *gatingAttr && !r.path.empty() && r.kind != "duplication" )
+            {
+                const std::size_t    sep  = r.sym.rfind( "::" );
+                const std::string    bare = sep == std::string::npos ? r.sym : r.sym.substr( sep + 2 );
+                nextAttr = rw::nextAttrXml( rw::nextFlag( "--expand=", r.path + ":" + bare ) );
+            }
             if( r.kind == "duplication" )
             {
                 std::printf( "<r kind=\"duplication\" members=\"%s\" tokens=\"%u\"%s%s%s%s%s/>", ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
             }
             else if( r.kind == "dead-code" )
             {
-                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, nextAttr.c_str() );
             // B10.2e: api-surface now carries two shapes — a brand-new/newly-public symbol (was=now=0, no
             // param comparison to show) and a param-count contract-change (was/now = the real counts). Print
             // was/now whenever they differ from each other so the contract-change case's was=/now= is visible
@@ -1443,11 +1455,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             else if( r.kind == "api-surface" && r.was == r.now )
             {
-                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+                std::printf( "<r kind=\"%s\" sym=\"%s\"%s%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, nextAttr.c_str() );
             }
             else
             {
-                std::printf( "<r kind=\"%s\" sym=\"%s\" was=\"%u\" now=\"%u\"%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.was, r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+                std::printf( "<r kind=\"%s\" sym=\"%s\" was=\"%u\" now=\"%u\"%s%s%s%s%s%s/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.was, r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, nextAttr.c_str() );
             }
         };
         for( const quality::Regression& r : regs )

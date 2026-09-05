@@ -66,7 +66,12 @@ EOF
 #           have always had) — legendcoveragecheck.sh forbids an attribute no legend defines.
 # Measured on this fixture: 1752 -> 2002 B. Both clauses were written long, measured, and cut to the
 # shortest honest form before the pin moved; 2050 leaves ~48 B and still forbids the 1689 B essay.
-if [ "$legend" -le 2050 ]; then
+# RE-PINNED 2050 -> 2170 (2026-09-05, capture-audit wave-3, lane L7 P3). ONE new FACT on every test-gate root:
+#   +106 B  next= — the one pasteable follow-up (the first <t> row's run=, else a ripwire invocation), defined
+#           where the reader meets it (legendcoveragecheck). Written long, measured, cut to the shortest honest
+#           form (nextverb.h owns the shared half; this is the verb's own reading).
+# Measured on this fixture: 2002 -> 2108 B. 2170 leaves ~62 B — the same posture as the 2050 pin.
+if [ "$legend" -le 2170 ]; then
     ok "(a) --test-gate legend is $legend B (<= 2050 B budget; total=$total payload=$payload)"
 else
     no "(a) --test-gate legend is $legend B (> 2050 B budget) — the essay re-inflated"

@@ -564,6 +564,10 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     h += ": reusable building blocks + quality facts for what you're about to touch "
          "(cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) "
          "— prefer composing/reusing these; watch the high-churn/high-amp/cloned ones";
+    // P3 (L7): the r=1 <d> row carries next= (nextverb.h). NOT defined here on purpose: every byte of this header
+    // is un-charged by the token ladder, and fornotesbudgetcheck's tight rungs leave it ~0 tokens of headroom
+    // (V1 N1) — a 115 B clause blew --token-budget=950 by 29 tokens. The definition lives in --help (--for) and
+    // in test/legendcoverage_baseline.txt with this reason; the attribute's value is a pasteable invocation.
     if( p.compactBundle )
     {
         h.append( kForCompactBundleLegend );   // COMPACT: replaces the auto legend on the conceptual route — never both

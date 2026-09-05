@@ -165,7 +165,10 @@ run_budget sd_none        3800  4112  "$FX"  --safe-delete=tangle
 # 186 B on a legend that was 1111 B, so 1200 cannot hold any wording of it. L4's M2 <u>-paging clause, which had
 # landed in the unconditional half too, moved into kTestGateRowLegend (a rule about rows; tg_empty pays nothing).
 # Measured post-fix 1297 B; 1400 is the ~8% headroom this table's own rule gives one future honest addition.
-run_budget tg_empty       1400  1332  "$FXC" --test-gate
+# tg_empty 1400 -> 1510 (2026-09-05, capture-audit wave-3, lane L7 P3): that one addition arrived — next= on the
+# root (106 B, unconditional: an empty gate still names its follow-up, --situ). Measured 1403 B; 1510 is the same
+# ~8% headroom rule applied once more.
+run_budget tg_empty       1510  1332  "$FXC" --test-gate
 # The ref-pair form — the only shape that lights the ref-pair marker, omits at= and reports churn as
 # unavailable. Measured on the FIXTURE, with the same edit committed as a second commit, NOT on this repo's
 # own HEAD~1..HEAD: that range means a different diff after every landing, so a budget on it would be a

@@ -142,6 +142,11 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                          rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
         }
 
+        // P3 (L7, nextverb.h): the one follow-up on this root, on both dialects. callers → --uses=SELECTOR (the
+        // call SITES; the @FILE:LINE spelling the caller typed is mirrored, so the paste resolves the same
+        // definition); callees → --expand=SELECTOR (the body whose callees these are, with their signatures inline).
+        const std::string chNextAttr = rw::nextAttrXml( rw::nextFlag( wantCallers ? "--uses=" : "--expand=", sym ) );
+
         // --format=columnar (RESEARCH lever 1): the same page window, re-encoded as a path-table + parallel
         // arrays (dedups the repeated per-row markup + paths). Default --format=xml is byte-identical below.
         if( cfg.columnar )
@@ -161,7 +166,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                                    + chRootAttr   // R-E: same root= the XML/JSON branches carry
                                    + pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                                      cfg.pageLimit, cfg.pageOffset, chDiscloseCap )
-                                   + rw::graphCountFloorAttrXml( g );   // §H4 §3.4 — every dialect carries the marker
+                                   + rw::graphCountFloorAttrXml( g )    // §H4 §3.4 — every dialect carries the marker
+                                   + chNextAttr;                         // P3 (L7): the same next= on the columnar root
             emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix, &chTested.testReach );
             return 0;
         }
@@ -197,9 +203,10 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             std::printf( " bodyless_defs=\"%zu\"", bodylessDefsCount );
         }
         std::printf( "%s", chTested.xmlAttr.c_str() );   // A6: hop_tested=/hop_untested=
-        std::printf( "%s%s>", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
+        std::printf( "%s%s%s>", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                     cfg.pageLimit, cfg.pageOffset, chDiscloseCap ),
-                     rw::graphCountFloorAttrXml( g ).c_str() );
+                     rw::graphCountFloorAttrXml( g ).c_str(),
+                     chNextAttr.c_str() );   // P3 (L7): callers → the SITES (--uses=SELECTOR, spelling mirrored); callees → the body (--expand=SYM)
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
         for( std::size_t i = pw.begin; i < pw.end; ++i )
         {
@@ -2005,7 +2012,8 @@ int emitImpactColumnar( const ImpactView& v )
                                  // and turns a silent difference into a stated one. Gate:
                                  // test/mcpattrparitycheck.sh (which also fails if a name here IS emitted).
                                  + " lens=\"shown_importers,importers_capped\""
-                                 + rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs );  // W2-F
+                                 + rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs )   // W2-F
+                                 + rw::nextAttrXml( rw::nextFlag( "--safe-delete=", v.sym ) );   // P3 (L7): the XML root's next=, same set
     emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix, v.testReach );
     return 0;
 }
@@ -2050,12 +2058,13 @@ int emitImpactXml( const ImpactView& v )
     const auto        ex        = [ & ]( std::string_view t ) -> std::string { return std::string( escapeXml( t, esc ) ); };
     char              ipab[ kPageDisclosureCap ];
     const std::size_t shownRows = v.page.end - v.page.begin;
-    std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s radius_tested=\"%zu\" radius_untested=\"%zu\"%s%s%s%s>",
+    std::printf( "<impact of=\"%s\" defs=\"%zu\" reaches=\"%zu\"%s radius_tested=\"%zu\" radius_untested=\"%zu\"%s%s%s%s%s>",
                  ex( v.sym ).c_str(), v.defs, v.reaches, v.imports.xmlAttrs.c_str(), v.radiusTested, v.radiusUntested,
                  std::string( v.rootAttr ).c_str(),
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true ),
-                 rw::graphCountFloorAttrXml( v.g ).c_str(), rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str() );
+                 rw::graphCountFloorAttrXml( v.g ).c_str(), rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str(),
+                 rw::nextAttrXml( rw::nextFlag( "--safe-delete=", v.sym ) ).c_str() );   // P3 (L7): "is it safe to change" → "can it go"
     for( std::size_t i = v.page.begin; i < v.page.end; ++i )
     {
         const Symbol&          s  = v.ing.symbols[ v.show[i] ];

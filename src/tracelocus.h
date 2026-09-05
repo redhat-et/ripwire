@@ -20,6 +20,7 @@
 // #includes only) so include ORDER elsewhere in main.cpp never matters to it.
 
 #include "model.h"
+#include "nextverb.h"     // P3 (L7): next= on the trace bundle root
 #include "graph.h"
 #include "filter.h"        // LB-A: isTestPath / isTestSymbol — the SHARED test partition the hop below asks
 #include "serialize.h"     // packSignatures / packBodies / escapeXml / kForPayloadBudgetBytes
@@ -898,6 +899,16 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         // the user's query in — so it is machine-readable and VERBATIM (escapeXml + M2 character references),
         // beside the lossy readable echo in the comment. This lens emitted a bare `<ctx>` and had neither.
         std::string h = ctxRootOpen( srcNoteIn, {} );
+        // P3 (L7, nextverb.h): the one follow-up — the def-use slice AT the innermost in-corpus frame's line
+        // (--slice=@FILE:LINE, FILE as the index spells it); absent when no frame landed in the corpus.
+        if( !part.suspects.empty() && h.size() > 1 && h.back() == '>' )
+        {
+            const TraceSuspect& top  = part.suspects[ 0 ];
+            const std::string_view file = ing.files[ ing.symbols[ top.symbolId ].fileId ];
+            const std::string   loc  = std::string( inArg.rootArg.empty() ? file : rw::sarif::rootRelativeUri( file, rw::sarif::rootPrefixOf( inArg.rootArg ) ) )
+                                     + ":" + std::to_string( top.frame->line );
+            h.insert( h.size() - 1, nextAttrXml( nextFlag( "--slice=@", loc ) ) );
+        }
         h += "<!-- ripwire trace-to-locus for ";
         if( withSrcEcho ) { h += "\"";  h += srcNote;  h += "\""; }
         else
@@ -948,6 +959,8 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
              "when none), max_tokens= is the body ceiling you passed via the max_tokens flag (absent when none); over_ceiling= is 1 when the "
              "header floor exceeds it (the bundle is then complete, not trimmed).";
         h += extraNotes;
+        // P3 (L7): next= defined where the reader meets it
+        h += " next= is the one pasteable follow-up: the slice at the innermost in-corpus frame (@FILE:LINE); absent when none landed.";
         h += " -->";
         return h;
     };
