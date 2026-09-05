@@ -272,7 +272,12 @@ private:
         const std::string& target = ing_->files[ fileId ];
         if( runnerVerb( target ) != nullptr )
         {
-            return {}; // a runner script IS the command; no hint to add
+            // M21(b) (capture-audit 2026-09-04): a runner script IS the command, and this used to return ""
+            // — which was harmless while "" meant only "nothing to ADD to p=". It stopped being harmless the
+            // moment "" acquired a MEANING: run_unknown="1" asserts no runner is derivable, and for a row
+            // whose own path is directly runnable that assertion is simply false. So the self-runnable case
+            // now spells its own command, exactly as commandForScript already does for a shell gate.
+            return spell( fileId );
         }
 
         for( std::uint32_t r : runners_ )
