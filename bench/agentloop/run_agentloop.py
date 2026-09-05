@@ -190,6 +190,17 @@ def limit_tasks_repo_round_robin( tasks, limit ):
 
 # ── shell + repo checkout (adapted from bench/locbench/run_locbench.py) ──────────────────────────────
 def sh( args, cwd=None, timeout=1800, env=None ):
+    """subprocess.run with the child's cwd AND its $PWD agreeing.
+
+    Found by the edit suite (terminality round A, 2026-09-05): subprocess.run( cwd=X ) changes the child's
+    working directory but leaves the inherited PWD environment variable pointing at the PARENT's directory,
+    and opencode roots its NATIVE tools (read / glob / edit / write) at $PWD while its bash tool runs in the
+    real cwd. A run launched from this checkout therefore had the agent's bash in the task repo and its
+    read/glob/edit tools in THIS repository — the suite's first live run edited the committed fixture through
+    that split. Set explicitly, once, here, for every harness (a shell started by codex or claude inherits
+    the same variable)."""
+    if cwd is not None:
+        env = dict( env if env is not None else os.environ, PWD=str( cwd ) )
     return subprocess.run( args, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env )
 
 def checkout_repo( repo, base_commit, repos_dir ):
@@ -438,9 +449,20 @@ def classify_native_read( tool_name=None, command=None ):
     if not command:
         return False
     text = command if isinstance( command, str ) else " ".join( map( str, command ) )
-    if "ripwire" in text:
+    if invokes_ripwire( text ):
         return False
     return bool( SHELL_READ_RE.search( text ) )
+
+def invokes_ripwire( text ):
+    """True when a shell command INVOKES ripwire: some command word's basename is `ripwire` (the shim, the
+    real binary, or a bare PATH lookup). This used to be `"ripwire" in text`, which also matched a PATH
+    containing the word — this repository's own checkouts, and the scratch directories the edit suite runs
+    in — so `ls /…/ripwire-wt-x/` was silently dropped from the native-read count (terminality round A,
+    2026-09-05). Same rule as bench/substitution_report.py's ripwire_token()."""
+    for tok in ( text or "" ).split():
+        if os.path.basename( tok.strip( "'\"" ) ) == "ripwire":
+            return True
+    return False
 
 # ── contamination gate (2026-08-20 outcome-harness-fixes lane, arm-isolation fix) ─────────────────────
 # The isolated per-harness environments (prepare_claude_environment / prepare_codex_environment /
