@@ -98,12 +98,15 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul );
-        // §L10b: no leading space+"[" — this string lands ONLY in the route= attribute value (and its JSON
-        // "route" twin) now, never spliced into free comment prose, so the bracket that used to visually
-        // demarcate it inside a sentence just made the attribute value start with a stray " [". The
-        // trailing "]" stays: test/adaptivecheck.sh and test/routecheck.sh's routeof()/reasonOf() helpers
-        // use it as a stop-anchor (grep -oE 'routed: [^]]*').
-        out.routeNote  = "routed: " + rc.reason + shapeDemotionNote( shape ) + "]";
+        // §L10b + verify-wave2 F6: no leading space+"[" AND no trailing "]". This string lands ONLY in the
+        // route= attribute value (and its JSON "route" twin) now, never spliced into free comment prose, so
+        // the brackets that used to demarcate it inside a sentence just left the value opening with a stray
+        // " [" and closing on an unbalanced "]". L10b took the leading half only, so every route value on
+        // every dialect shipped one dangling bracket. A bracket is a PAIR or it is neither; the ATTRIBUTE
+        // QUOTE is the delimiter here. The two stop-anchor helpers that grepped `routed: [^]]*`
+        // (test/adaptivecheck.sh routeof(), test/routecheck.sh reasonOf()) are re-pinned to `[^"]*` in the
+        // same commit — the quote is the real end of the value and was all along.
+        out.routeNote  = "routed: " + rc.reason + shapeDemotionNote( shape );
         out.docTierTag = shapeDocTierTag( shape );   // §A4f: the machine form of the same fact, for --format=candidates
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
         out.anchorDefs = std::move( const_cast<RouteChoice&>( rc ).anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)

@@ -51,6 +51,12 @@ grep -q 'route="' "$TMP/for.xml" \
 grep -oE 'route="[^"]*"' "$TMP/for.xml" | grep -q '^route=" \[' \
     && no "--for route= still starts with a stray space+bracket" \
     || ok "--for route= no longer starts with a stray space+bracket"
+# verify-wave2 F6: L10b trimmed the LEADING " [" and left the TRAILING "]", so every route value on every
+# dialect ended in an unbalanced bracket — and this gate asserted only the leading half, so it stayed green
+# on a value it should reject. Both ends are asserted now; a bracket is a PAIR or it is neither.
+grep -oE 'route="[^"]*"' "$TMP/for.xml" | grep -q ']"$' \
+    && no "--for route= still ends with a stray unbalanced bracket" \
+    || ok "--for route= ends with the route reason, not a bracket"
 grep -oE 'route="routed: ' "$TMP/for.xml" >/dev/null \
     && ok "--for route= starts directly with 'routed: ' (no leading filler)" \
     || no "--for route= does not start with 'routed: ' — the trim moved the anchor, not just the space"
@@ -80,6 +86,9 @@ grep -q 'route="' "$TMP/pt.xml" \
 grep -oE 'route="[^"]*"' "$TMP/pt.xml" | grep -q '^route=" \[' \
     && no "--pack-task route= still starts with a stray space+bracket" \
     || ok "--pack-task route= no longer starts with a stray space+bracket"
+grep -oE 'route="[^"]*"' "$TMP/pt.xml" | grep -q ']"$' \
+    && no "--pack-task route= still ends with a stray unbalanced bracket" \
+    || ok "--pack-task route= ends with the route reason, not a bracket"
 
 # (c) JSON dialect: exactly one "route" key.
 "$BIN" fix --for="buildGraph" --json --no-cache >"$TMP/for.json" 2>/dev/null
@@ -88,6 +97,36 @@ if [ "$n" = 1 ]; then ok '--for --json carries one "route" key'; else no "--for 
 grep -o '"route":"[^"]*"' "$TMP/for.json" | grep -q '"route":" \[' \
     && no "--for --json \"route\" value still starts with a stray space+bracket" \
     || ok "--for --json \"route\" value no longer starts with a stray space+bracket (same raw string as route=)"
+grep -o '"route":"[^"]*"' "$TMP/for.json" | grep -q ']"$' \
+    && no "--for --json \"route\" value still ends with a stray unbalanced bracket" \
+    || ok "--for --json \"route\" value ends with the route reason, not a bracket"
+
+# (c2) THE FOURTH DIALECT (verify-wave2 F6, rule 4 — family, not instance). route= is built at THREE sites:
+# verbs_for.h (CLI --for), packtask.h's consumer of the same LensRanking (--pack-task), and mcpverbs.h TWICE
+# (MCP `for`, MCP `pack_task`). This gate covered the CLI three and never the MCP pair, which is why the
+# leading-bracket trim landed on four surfaces and was gated on three. Both ends, both MCP verbs.
+mcp_route()   # $1 = verb name; prints the route value, empty if the payload carries none
+{
+    printf '%s\n%s\n' \
+        '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"'"$1"'","arguments":{"path":"'"$TMP/fix"'","task":"buildGraph"}}}' \
+        | "$BIN" --mcp 2>/dev/null | grep -o 'route=\\"[^\\"]*\\"' | head -1
+}
+for v in for pack_task; do
+    r="$( mcp_route "$v" )"
+    if [ -z "$r" ]; then
+        no "MCP $v: no route= in the payload — the probe is stale (this verb routes and must echo it)"
+    else
+        case "$r" in
+            'route=\" \['*) no "MCP $v route= still starts with a stray space+bracket" ;;
+            *)              ok "MCP $v route= does not start with a stray space+bracket" ;;
+        esac
+        case "$r" in
+            *']\"')  no "MCP $v route= still ends with a stray unbalanced bracket" ;;
+            *)       ok "MCP $v route= ends with the route reason, not a bracket" ;;
+        esac
+    fi
+done
 
 # (d) --query's leading routed comment is the ONLY copy there (no route= attribute on the default map) — keep it.
 "$BIN" fix --query="buildGraph" --no-cache >"$TMP/q.xml" 2>/dev/null

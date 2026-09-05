@@ -105,7 +105,9 @@ FIXN=$( ls "$FIX" | wc -l | tr -d ' ' )
     || no "PHASE3 premise: the cliff corpus is $FIXN files, expected 76 — every assertion below is void"
 
 hdrcut(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'adaptive: kept [0-9]+ of [0-9]+[^]]*' | head -1; }
-routeof(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'routed: [^]]*' | head -1; }
+# verify-wave2 F6 re-pin: the route value's stop-anchor is the ATTRIBUTE QUOTE, not a trailing "]" — that
+# bracket was the unbalanced half L10b left behind and is now trimmed at all three construction sites.
+routeof(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -oE 'routed: [^"]*' | head -1; }
 SHARPQ="zorbulator telemetry pump"
 BROADQ="widget"
 

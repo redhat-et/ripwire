@@ -1573,10 +1573,10 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     // reserved for the caller-CHOSEN opt-out (--signatures-only, pre-T3 byte-identical by registration);
     // a posture the TOOL chose for the caller must be disclosed, or an MCP agent reading this bundle
     // cannot tell "no bodies exist for this task" from "this dialect never serves them".
-    // §L10b: same trim as the CLI --for twin (verbs_for.h) — no leading " [", the value lands only in
-    // route=; trailing "]" kept as the stop-anchor test helpers grep against.
+    // §L10b + verify-wave2 F6: same trim as the CLI --for twin (verbs_for.h) — no leading " [" and no
+    // trailing "]"; the value lands only in route=, where the attribute quote is the delimiter.
     const std::string mcpForAtAttrStr = gitstamp::atAttr( root );   // M10's at=, computed once: spliced onto the root AND exempted from the sigs charge below
-    std::string rootOpenStr = ctxRootOpen( task, "routed: " + rc.reason + shapeDemotionNote( shape ) + "]", flRootArg );   // §B1.7: same root attrs as the CLI twin
+    std::string rootOpenStr = ctxRootOpen( task, "routed: " + rc.reason + shapeDemotionNote( shape ), flRootArg );   // §B1.7: same root attrs as the CLI twin
     if( !rootOpenStr.empty() && rootOpenStr.back() == '>' )
     {
         // Attribute ORDER matches the CLI twin's: confidence/margin_pct, then at=, then this dialect's own
@@ -3199,8 +3199,8 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     const std::vector<float>  tierMul = rankTierSymbolMultipliersShaped( ing, shape.fires() );
     lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                        : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul );
-    // §L10b: same trim as the other two route= construction sites — no leading " [".
-    lr.routeNote = "routed: " + rc.reason + shapeDemotionNote( shape ) + "]";
+    // §L10b + verify-wave2 F6: same trim as the other route= construction sites — neither bracket.
+    lr.routeNote = "routed: " + rc.reason + shapeDemotionNote( shape );
 
     if( !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
