@@ -4,6 +4,9 @@
 set -u
 
 dir="$( cd "$( dirname "$0" )" && pwd )"
+# §METER v3: rows written through this wrapper are Codex's, and the shared hook's `agent` field
+# defaults to claude — name the runner unless the operator already did.
+export RIPWIRE_METER_AGENT="${RIPWIRE_METER_AGENT:-codex}"
 input="$( cat )" || exit 0
 out="$( printf '%s' "$input" | "$dir/ripwire-nudge.sh" "$@" )"
 rc=$?

@@ -76,4 +76,34 @@ if [ -f "$DOC" ]; then
         || no "docs/SUBSTITUTION_METER.md's raw-path-capture disclosure went missing"
 fi
 
+# ── the EDIT band (terminality round A, 2026-09-05, lane T2). docs/EVALS.md registers a second §5 table
+# whose three columns are named and DEFINED, none silently folded into another, printed per agent and
+# per surface. The definitions live in docs/SUBSTITUTION_METER.md, and this gate pins that they do —
+# a percentage whose columns are not defined where the reader looks is a number somebody quotes wrong.
+if [ -f "$DOC" ]; then
+    EB="$( sed -n '/^## Terminality/,$p' "$DOC" )"
+    printf '%s' "$EB" | grep -q 'policy-read' && printf '%s' "$EB" | grep -qiE 'never counted|reported, never' \
+        && ok "doc defines (a) policy-read as the harness Read of the edit's TARGET FILE — reported, never counted against the verb" \
+        || no "docs/SUBSTITUTION_METER.md does not define the policy-read column (or does not say it is never counted)"
+    printf '%s' "$EB" | grep -q 'native-edit' && printf '%s' "$EB" | grep -qiE 'sweep' \
+        && ok "doc defines (b) sweep as a Read/grep of another file or a native-edit of the same target" \
+        || no "docs/SUBSTITUTION_METER.md does not define the sweep column of the EDIT band"
+    printf '%s' "$EB" | grep -q 'redundant-check' && printf '%s' "$EB" | grep -q 'no-post-check' \
+        && ok "doc defines (c) redundant-check as an edit-check on the same symbol after an edit whose receipt carried the folded post-check" \
+        || no "docs/SUBSTITUTION_METER.md does not define the redundant-check column (and its --no-post-check exception)"
+    printf '%s' "$EB" | grep -q 'unattrib' \
+        && ok "doc discloses the unattrib count (no recorded target: (a) and (b) cannot be told apart, excluded from terminal%)" \
+        || no "docs/SUBSTITUTION_METER.md does not disclose how an edit row with no recorded target is counted"
+    printf '%s' "$EB" | grep -q '`agent`' && printf '%s' "$EB" | grep -q '`surface`' \
+        && printf '%s' "$EB" | grep -qE 'cli.*mcp|mcp.*cli' \
+        && ok "doc says the EDIT table is printed per agent and per surface (cli / mcp)" \
+        || no "docs/SUBSTITUTION_METER.md does not define the agent/surface split of the EDIT band"
+    grep -q 'v2 → v3\|v2 -> v3' "$DOC" && grep -qE 'native-edit' "$DOC" && grep -qiE 'not comparable' "$DOC" \
+        && ok "doc discloses the v2 -> v3 boundary: MCP and native-edit rows become visible, counts across it are not comparable" \
+        || no "docs/SUBSTITUTION_METER.md does not disclose the v2 -> v3 schema boundary"
+    grep -q '"agent"' "$DOC" && grep -q '"target"' "$DOC" && grep -q '"surface"' "$DOC" \
+        && ok "doc carries a v3 example row with agent, surface and target (the shape agentloop rows must emit)" \
+        || no "docs/SUBSTITUTION_METER.md has no v3 example row naming agent/surface/target"
+fi
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

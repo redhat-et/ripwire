@@ -10,11 +10,22 @@ src="$( cd "$( dirname "$0" )" && pwd )"
 
 # ── the PreToolUse matcher, in one place. It is not cosmetic: a matcher decides which tool calls the
 #    hook is ever SHOWN. Read/Glob are here because the whole-file read is the largest token sink in an
-#    agent loop and the one default a skill description cannot intercept; mcp__ripwire__ is here for the
-#    hook's other job, the substitution meter (docs/SUBSTITUTION_METER.md), whose numerator would
-#    otherwise miss every agent that prefers the MCP server to the CLI.
-hookMatcher="Read|Glob|Grep|Bash|mcp__ripwire__"
-codexHookMatcher="^(Bash|Read|Glob|Grep|mcp__ripwire__.*)$"
+#    agent loop and the one default a skill description cannot intercept; mcp__ripwire__.* is here for
+#    the hook's other job, the substitution meter (docs/SUBSTITUTION_METER.md), whose numerator would
+#    otherwise miss every agent that prefers the MCP server to the CLI; Edit/Write/MultiEdit/
+#    NotebookEdit are the `native-edit` class the EDIT band needs (never nudged, never in the rate).
+#
+#    THE SHAPE IS LOAD-BEARING (2026-09-05, terminality round A, lane T). Claude Code reads a matcher
+#    made only of letters, digits, `_`, `-`, spaces, `,` and `|` as a LIST OF EXACT TOOL NAMES; only a
+#    matcher holding any other character is a (JavaScript, unanchored) regular expression. The
+#    2026-09-04 form `Read|Glob|Grep|Bash|mcp__ripwire__` therefore compared `mcp__ripwire__` as a
+#    whole tool name and matched NO MCP call, ever — 0 MCP rows in 51,002 on the frozen snapshot, and
+#    a live tee on the installed hook saw the Bash and Read calls around an mcp__ripwire__whereis and
+#    never the call itself. The `.*` puts the matcher on the regex path; the `^(...)$` keeps it a
+#    whole-name match there, so `Edit` cannot also fire for NotebookEdit through the unanchored test.
+#    test/hookcheck.sh section (14) evaluates this string exactly as Claude Code does.
+hookMatcher="^(Read|Glob|Grep|Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$"
+codexHookMatcher="^(Bash|Read|Glob|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$"
 
 # ── refresh_hook_matcher SETTINGS HOOKSCRIPT — bring an ALREADY-registered entry's matcher up to date.
 # An entry written by an older installer carries an older matcher, and a stale one undercounts forever,
@@ -119,9 +130,10 @@ install_claude_hook()
     # an agent loop and the one default a skill description cannot intercept (a skill fires only if the
     # agent first recognizes a moment AND spends a call to load it; Read needs neither). SessionStart
     # is the proactive half — the PreToolUse nudges only speak after a default has already been chosen.
-    # mcp__ripwire__ is in the matcher for the OTHER job this hook does: the substitution meter counts
+    # mcp__ripwire__.* is in the matcher for the OTHER job this hook does: the substitution meter counts
     # ripwire's own calls as the numerator, and an agent that prefers the MCP server to the CLI would
-    # otherwise be a pure undercount (docs/SUBSTITUTION_METER.md). The hook never nudges those calls.
+    # otherwise be a pure undercount (docs/SUBSTITUTION_METER.md). The hook never nudges those calls,
+    # nor the native edit tools, which are metered only so the EDIT band can see them.
     echo "skills/install.sh --hook will add these OPT-IN, advisory-only entries to $settings:"
     echo "  hooks.PreToolUse  += [{ matcher: \"$hookMatcher\", hooks: [{ type: \"command\", command: \"$hookScript\" }] }]"
     echo "  hooks.SessionStart += [{ matcher: \"startup|resume|clear\", hooks: [{ type: \"command\", command: \"$hookScript --session-start\" }] }]"
@@ -130,8 +142,9 @@ install_claude_hook()
     echo "            What remains on PreToolUse is the substitution meter and the router's adoption"
     echo "            observation. The SessionStart entry still injects the use-when guidance."
     echo "  counting: appends one JSONL row per observed call to ~/.ripwire/substitution.jsonl, and that row"
-    echo "            carries the RAW file path (Read), RAW grep/glob pattern, or the first 200 B of the RAW"
-    echo "            command (Bash) you just ran, plus the absolute repo path and session id — in cleartext."
+    echo "            carries the RAW file path (Read, and the Edit/Write/MultiEdit/NotebookEdit target), RAW"
+    echo "            grep/glob pattern, the first 200 B of the RAW command (Bash), or an MCP verb's symbol/file"
+    echo "            arguments you just passed, plus the absolute repo path and session id — in cleartext."
     echo "            Local-only: this file is never transmitted anywhere, but it has no automatic retention"
     echo "            limit and grows for as long as counting stays on. RIPWIRE_METER=0 opts out of counting"
     echo "            (the nudge itself keeps working). Details: docs/SUBSTITUTION_METER.md."

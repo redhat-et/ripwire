@@ -95,6 +95,20 @@ WINDOW2_FROM = "2026-08-19T12"
 WINDOW2_TO = "2026-09-02T00"
 
 MCP_PREFIX = "mcp__ripwire__"
+
+# ── §5b the EDIT band (terminality round A, 2026-09-05; registered in docs/EVALS.md before any lane ran) ──
+# The edit verbs, CLI spellings and MCP twins, exactly as the band names them. `--edit-plan` and
+# `--safe-delete` have no MCP twin. A row's verb comes from ripwire_verb() above, so the same lexical
+# read (and the same truncation labels) serve both tables.
+EDIT_VERBS = frozenset((
+    "--replace-symbol-body", "--insert-before-symbol", "--insert-after-symbol", "--edit-plan", "--safe-delete",
+    "mcp:replace_symbol_body", "mcp:insert_before_symbol", "mcp:insert_after_symbol",
+))
+CHECK_VERBS = frozenset(("--edit-check", "mcp:edit_check"))
+NATIVE_EDIT_CLASS = "native-edit"
+# The classes a POLICY read can be: the harness's Read-before-edit is a `read`; a `grep -n sym file`
+# of the same file is the same tax by another tool. glob/find/git-history can never be a policy read.
+POLICY_CLASSES = frozenset(("read", "grep"))
 # The hook caps `detail` at 200 characters, so a long command line can be cut mid-flag. Such a row is
 # LABELLED as truncated rather than counted under whatever prefix survived: silently filing `--qualit`
 # apart from `--quality-delta` would split one verb's n across two rows and understate both.
@@ -142,6 +156,165 @@ def ripwire_verb(row):
         if m and m.group(1) not in NON_VERB_FLAGS:
             return m.group(1) + ("..." if capped and i == len(toks) - 1 else "")
     return "(truncated)" if capped else "(map)"
+
+
+def row_agent(row):
+    """The runner that produced the row. v3 hook rows carry `agent`; every older row was written by the
+    Claude Code hook (no other runner ever had one), so absent reads as claude — a fact, not a guess."""
+    return str(row.get("agent") or "claude")
+
+
+def row_surface(row):
+    """cli or mcp. v3 rows carry `surface`; for older rows the tool name decides — an MCP verb is
+    `mcp__ripwire__…`, everything else ripwire-family reached the binary through a shell."""
+    surface = row.get("surface")
+    if surface in ("cli", "mcp"):
+        return surface
+    return "mcp" if str(row.get("tool") or "").startswith(MCP_PREFIX) else "cli"
+
+
+def cli_flag_value(detail, flag):
+    """The VALUE of `flag=VALUE` in a command line, unquoted; '' when absent. A quoted value runs to
+    its closing quote (spaces kept); an unquoted one ends at the next blank."""
+    at = detail.find(flag + "=")
+    if at < 0:
+        return ""
+    rest = detail[at + len(flag) + 1:]
+    if rest[:1] in ("'", '"'):
+        end = rest.find(rest[0], 1)
+        return rest[1:end] if end > 0 else rest[1:]
+    parts = rest.split()
+    return parts[0] if parts else ""
+
+
+def norm_symbol(spelling):
+    """One comparable name for the edit's target and a later check's target: quotes stripped, a
+    `sym#handle` reduced to `sym`, a `FILE:SYM` to `SYM`. An `@FILE:LINE` seed is kept whole — two
+    seeds are the same edit only if they are the same seed."""
+    s = spelling.strip("'\"")
+    if s.startswith("@"):
+        return s
+    s = s.split("#", 1)[0]
+    if ":" in s:
+        s = s.rsplit(":", 1)[1]
+    return s
+
+
+def norm_path(path):
+    """A file spelling comparable by substring: a leading `./` dropped, nothing else guessed."""
+    p = path.strip("'\"")
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+
+def edit_symbol(row, verb):
+    detail = str(row.get("detail") or "")
+    if verb.startswith("mcp:"):
+        return norm_symbol(detail.split(" post_check=", 1)[0])
+    return norm_symbol(cli_flag_value(detail, verb))
+
+
+def edit_target(row, verb):
+    """The edit's TARGET FILE, or '' when the row could not carry one. v3 rows carry `target` (the
+    hook reads --edit-target-file= / file=); a v2 CLI row is re-read here from its own detail so the
+    band is measurable on rows written before the field existed. A bare symbol target resolves inside
+    the binary and is not knowable from the call — that is the `unattrib` column, not a guess."""
+    target = str(row.get("target") or "")
+    if not target and not verb.startswith("mcp:"):
+        target = cli_flag_value(str(row.get("detail") or ""), "--edit-target-file")
+    return norm_path(target)
+
+
+def post_check_skipped(row, verb):
+    detail = str(row.get("detail") or "")
+    return ("post_check=0" in detail) if verb.startswith("mcp:") else ("--no-post-check" in detail)
+
+
+def check_symbol(row, verb):
+    detail = str(row.get("detail") or "")
+    return norm_symbol(cli_flag_value(detail, "--edit-check")) if verb == "--edit-check" else norm_symbol(detail)
+
+
+def follow_kind(nxt, target):
+    """What ONE non-ripwire call inside an edit's window is: `policy` (a read/grep naming the target
+    file), `sweep`, `unattrib` (a read/grep or native edit after an edit that recorded no target), or
+    None (a build, a git-state call — nothing the band counts)."""
+    cls = nxt.get("class")
+    text = norm_path(str(nxt.get("detail") or "")) + " " + norm_path(str(nxt.get("target") or ""))
+    if cls == NATIVE_EDIT_CLASS:
+        if not target:
+            return "unattrib"
+        return "sweep" if target in text else None
+    if cls not in SWEEP_CLASSES:
+        return None
+    if cls in POLICY_CLASSES and not target:
+        return "unattrib"
+    if cls in POLICY_CLASSES and target in text:
+        return "policy"
+    return "sweep"
+
+
+def edit_verdict(seq_rows, idx, verb):
+    """The stat vector one EDIT row contributes — (n, terminal, policy, sweep, redundant, unattrib) —
+    and the calls seen in its window.
+
+    Same window as §5. Inside it: a read/grep whose text names the edit's target file is (a) a
+    POLICY read — reported, never counted; a read/grep of anything else, a glob/find/git-history
+    call, or a native edit of the SAME target is (b) a SWEEP; and the ripwire call that ENDS the
+    window is (c) a REDUNDANT CHECK when it is an edit-check on the same symbol and the edit did
+    not skip its folded post-check. A read/grep or a native edit after an edit that recorded NO
+    target cannot be told (a) from (b): when nothing else decided the row, it is `unattrib` and
+    excluded from the rate. TERMINAL = neither (b) nor (c)."""
+    row = seq_rows[idx]
+    symbol = edit_symbol(row, verb)
+    target = edit_target(row, verb)
+    skipped = post_check_skipped(row, verb)
+    kinds = collections.Counter()
+    redundant = 0
+    seen = 0
+    for nxt in seq_rows[idx + 1:idx + 1 + TERMINALITY_WINDOW]:
+        if nxt.get("family") == RIPWIRE_FAMILY:
+            nverb = ripwire_verb(nxt)
+            if nverb in CHECK_VERBS and not skipped and symbol and check_symbol(nxt, nverb) == symbol:
+                redundant = 1
+            break
+        seen += 1
+        kinds[follow_kind(nxt, target)] += 1
+    policy, sweep = int(kinds["policy"] > 0), int(kinds["sweep"] > 0)
+    counted = sweep or redundant
+    unattrib = int(not counted and kinds["unattrib"] > 0)
+    terminal = int(not counted and not unattrib)
+    return (1, terminal, policy, sweep, redundant, unattrib), seen
+
+
+def edit_terminality(rows):
+    """{(agent, surface): {verb: [n, terminal, policy, sweep, redundant, unattrib]}}, plus the number
+    of EMPTY windows, disclosed for the same reason §5 discloses them."""
+    stats = {}
+    empty = 0
+    for seq_rows in session_order(rows):
+        for idx, r in enumerate(seq_rows):
+            if r.get("family") != RIPWIRE_FAMILY:
+                continue
+            verb = ripwire_verb(r)
+            if verb not in EDIT_VERBS:
+                continue
+            st = stats.setdefault((row_agent(r), row_surface(r)), {}).setdefault(verb, [0, 0, 0, 0, 0, 0])
+            vec, seen = edit_verdict(seq_rows, idx, verb)
+            empty += int(seen == 0)
+            for i, v in enumerate(vec):
+                st[i] += v
+    return stats, empty
+
+
+def edit_row(verb, st):
+    n, term, policy, sweep, redundant, unattrib = st
+    decidable = n - unattrib
+    pct = "%.1f%%" % (100.0 * term / decidable) if decidable else "n/a"
+    print("    %-24s %6d %10s %12d %6d %16d %9d" % (verb, n, pct, policy, sweep, redundant, unattrib))
+    if 0 < decidable < SMALL_N:
+        print("      NOTE: n=%d (<%d) -- too few calls to read as a rate" % (decidable, SMALL_N))
 
 
 def session_order(rows):
@@ -386,6 +559,68 @@ def arm_section(rows):
     print("      not an effect of anything the hook said. That is what retired both tiers on 2026-09-02.")
 
 
+def edit_section(rows):
+    # ── §5b terminality by EDIT verb ────────────────────────────────────────────────────────────────
+    # The edit path has a follow-up §5 cannot see and one it must not charge. Claude Code's harness
+    # READS a file before it edits it; that Read is a tax on the runner, not a verdict on the receipt,
+    # and the owner ruling of 2026-09-05 (docs/EVALS.md "Terminality round A"; docs/METHODOLOGY.md §9
+    # principle 1) says it is REPORTED and never counted. What the edit verbs are judged on is the
+    # sweep of some OTHER file, a native edit of the same file (the verb did not land what the agent
+    # wanted), and the edit-check that distrusts a receipt which already carried the check.
+    section("5b. terminality by EDIT verb (did the receipt END the edit, or spawn a read, a re-edit, a re-check?)")
+    print("  window   : as in 5 -- the calls after the edit, up to the next ripwire call, the session end,")
+    print("             or %d calls" % TERMINALITY_WINDOW)
+    print("  verbs    : --replace-symbol-body --insert-before-symbol --insert-after-symbol --edit-plan --safe-delete")
+    print("             and the MCP twins replace_symbol_body / insert_before_symbol / insert_after_symbol")
+    print("  (a) policy-read     : a Read/grep of the edit's TARGET FILE -- the harness tax (Claude Code reads")
+    print("                        before it edits). REPORTED, never counted against the verb.")
+    print("  (b) sweep           : a Read/grep of any OTHER file, a glob/find/git-history call, or a")
+    print("                        native-edit of the SAME target, inside the window")
+    print("  (c) redundant-check : an --edit-check / edit_check on the same symbol right after an edit whose")
+    print("                        receipt carried the folded post-check (no --no-post-check / post_check=0)")
+    print("  TERMINAL = neither (b) nor (c).")
+    print("  unattrib : the edit recorded no target file and a read/grep (or native edit) followed -- (a) and")
+    print("             (b) cannot be told apart, so the row is EXCLUDED from terminal%, never folded either way")
+    print("  printed per agent (`agent`; rows without one are claude) and per surface (cli / mcp)")
+    estats, eempty = edit_terminality(rows)
+    if not estats:
+        print("")
+        print("  (no EDIT-verb calls in this log -- nothing to measure)")
+        return
+    etotal = 0
+    for (agent, surface), verbs in sorted(estats.items()):
+        print("")
+        print("  agent=%s surface=%s" % (agent, surface))
+        print("    %-24s %6s %10s %12s %6s %16s %9s"
+              % ("verb", "n", "terminal%", "policy-read", "sweep", "redundant-check", "unattrib"))
+        for verb, st in sorted(verbs.items(), key=lambda kv: (-kv[1][0], kv[0])):
+            edit_row(verb, st)
+            etotal += st[0]
+        if len(verbs) > 1:
+            edit_row("(all)", [sum(s[i] for s in verbs.values()) for i in range(6)])
+    print("")
+    print("  empty windows: %d of %d -- the next observed call was another ripwire call, or the session"
+          % (eempty, etotal))
+    print("                 ended. These count TERMINAL, as in 5.")
+
+
+
+def schema_mix_note(rows):
+    """One line per schema boundary the log straddles. Each boundary widened what the hook could see
+    (v2: the classifier; v3: MCP verbs and native edits), so counts across it are not comparable and
+    the report says so beside the numbers rather than in a footnote."""
+    byv = collections.Counter(r.get("v", "?") for r in rows)
+    if len(byv) < 2:
+        return
+    print("    %-27s %s" % ("SCHEMA MIX", ", ".join("v%s=%d" % (k, n) for k, n in sorted(byv.items(), key=str))))
+    if 1 in byv:
+        print("      counts are NOT comparable across the v1/v2 boundary — the classifier widened.")
+        print("      Replay the v1 rows' `detail` through the current hook before comparing rates.")
+    if 3 in byv:
+        print("      counts are NOT comparable across the v2/v3 boundary — v3 rows (2026-09-05) see the")
+        print("      MCP verbs and the native edit tools that no v2 row could (docs/SUBSTITUTION_METER.md).")
+
+
 def section(title):
     print("")
     print(title)
@@ -462,12 +697,7 @@ def main():
     esc = [r for r in rows if str(r.get("nudge", "")).startswith("sweep")]
     print("    %-27s %d  in %d session(s)"
           % ("escalations fired", len(esc), len({r.get("session") for r in esc})))
-    byv = collections.Counter(r.get("v", "?") for r in rows)
-    if len(byv) > 1:
-        print("    %-27s %s" % ("SCHEMA MIX", ", ".join("v%s=%d" % (k, n) for k, n in sorted(byv.items(),
-                                                                                            key=str))))
-        print("      counts are NOT comparable across the v1/v2 boundary — the classifier widened.")
-        print("      Replay the v1 rows' `detail` through the current hook before comparing rates.")
+    schema_mix_note(rows)
 
     arm_section(rows)
 
@@ -475,7 +705,7 @@ def main():
     section("2. calls by class (what the rate is made of)")
     byclass = collections.Counter(r.get("class", "?") for r in rows)
     byfamily = collections.Counter(r.get("family", "?") for r in rows)
-    for fam in ("ripwire", "native", "git", "other", "meta"):
+    for fam in ("ripwire", "native", "edit", "git", "other", "meta"):
         if not byfamily.get(fam):
             continue
         print("  %-8s %6d" % (fam, byfamily[fam]))
@@ -554,6 +784,8 @@ def main():
     print("  empty windows: %d of %d -- the next observed call was another ripwire call, or the"
           % (empty, sum(s[0] for s in stats.values())))
     print("                 session ended. These count TERMINAL by the definition above.")
+
+    edit_section(rows)
 
     return 0
 

@@ -364,13 +364,16 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
     jq -e --arg cmd "$HOOK" 'any((.hooks.PreToolUse // [])[]?.hooks[]?; .command == $cmd)' "$SETTINGS" >/dev/null 2>&1 \
         && ok "settings.json references hooks/ripwire-nudge.sh" \
         || no "settings.json does not reference the hook script"
-    jq -e '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher == "Read|Glob|Grep|Bash|mcp__ripwire__"' \
+    # Re-pinned 2026-09-05 (lane T): the matcher is a whole-name REGEX now. The 2026-09-04 form
+    # `Read|Glob|Grep|Bash|mcp__ripwire__` held only exact-list characters, so Claude Code compared
+    # `mcp__ripwire__` as a whole tool name and no MCP call ever reached the hook — section (14).
+    jq -e '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher == "^(Read|Glob|Grep|Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)$"' \
         "$SETTINGS" >/dev/null 2>&1 \
-        && ok "settings.json PreToolUse matcher is Read|Glob|Grep|Bash|mcp__ripwire__" || no "settings.json PreToolUse matcher missing/wrong"
+        && ok "settings.json PreToolUse matcher is ^(Read|Glob|Grep|Bash|Edit|Write|MultiEdit|NotebookEdit|mcp__ripwire__.*)\$" || no "settings.json PreToolUse matcher missing/wrong"
     # Read/Glob are load-bearing, not incidental: the whole-file read is the largest token sink in the
     # loop and the one default no skill description can intercept. Assert them by NAME so a future
     # matcher edit that quietly drops them fails here.
-    for m in Read Glob Grep Bash; do
+    for m in Read Glob Grep Bash Edit Write MultiEdit NotebookEdit; do
         jq -e --arg m "$m" '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher | test($m)' \
             "$SETTINGS" >/dev/null 2>&1 \
             && ok "PreToolUse matcher covers $m" || no "PreToolUse matcher lost $m"
@@ -715,9 +718,16 @@ fi
 TERMLOG="$TMP/terminality.jsonl"
 termrow()
 {
-    # termrow SEQ SESSION TOOL CLASS FAMILY DETAIL
-    printf '{"v":2,"ts":"2026-08-12T00:00:00Z","seq":%s,"session":"%s","repo":"/x/repo","tag":"repo","tool":"%s","class":"%s","family":"%s","nudged":0,"nudge":"none","post_nudge":0,"post_sweep":0,"arm":"treatment","detail":"%s"}\n' \
-        "$1" "$2" "$3" "$4" "$5" "$6" >>"$TERMLOG"
+    # termrow SEQ SESSION TOOL CLASS FAMILY DETAIL [AGENT SURFACE TARGET]
+    # Six arguments write a v2 row (the shape every row before 2026-09-05 has, so the FIND fixture
+    # keeps proving the report reads them); nine write a v3 row with agent/surface/target for §5b.
+    if [ "$#" -ge 9 ]; then
+        printf '{"v":3,"ts":"2026-09-05T00:00:00Z","seq":%s,"session":"%s","repo":"/x/repo","tag":"repo","tool":"%s","class":"%s","family":"%s","nudged":0,"nudge":"none","post_nudge":0,"post_sweep":0,"arm":"treatment","detail":"%s","agent":"%s","surface":"%s","target":"%s"}\n' \
+            "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" >>"$TERMLOG"
+    else
+        printf '{"v":2,"ts":"2026-08-12T00:00:00Z","seq":%s,"session":"%s","repo":"/x/repo","tag":"repo","tool":"%s","class":"%s","family":"%s","nudged":0,"nudge":"none","post_nudge":0,"post_sweep":0,"arm":"treatment","detail":"%s"}\n' \
+            "$1" "$2" "$3" "$4" "$5" "$6" >>"$TERMLOG"
+    fi
 }
 termrip() { termrow "$1" "$2" Bash ripwire-cli ripwire "$3"; }
 termbuild() { termrow "$1" "$2" Bash build other 'cmake --build build -j'; }
@@ -1554,6 +1564,296 @@ if [ -f "$SCHEMADOC" ]; then
     done
     [ -z "$PB7MISS" ] && ok "PB7 docs: SUBSTITUTION_METER.md documents the poll classes and the tag derivation" \
         || no "PB7 docs: SUBSTITUTION_METER.md is missing:$PB7MISS"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# (14) LIVE SHAPE, MATCHER SEMANTICS, NATIVE-EDIT ROWS, ROW SCHEMA v3 AND THE EDIT BAND
+#      (terminality round A, 2026-09-05, lane T)
+#
+# WHY THIS SECTION EXISTS. A live probe on 2026-09-05 (the installed hook shimmed with a stdin tee for
+# two tool calls): a REAL `mcp__ripwire__whereis` call from a Claude Code desktop session produced NO
+# PreToolUse payload at all under the installed matcher `Read|Glob|Grep|Bash|mcp__ripwire__` — the tee
+# saw the Bash and Read calls around it and never the MCP call. The reason is the documented matcher
+# contract (code.claude.com/docs/en/hooks, "Matcher patterns"): a matcher made ONLY of letters, digits,
+# `_`, `-`, spaces, `,` and `|` is an EXACT-STRING LIST, so `mcp__ripwire__` was compared as a whole
+# tool name and matched nothing; only a matcher containing any other character is evaluated as a
+# JavaScript regular expression (unanchored, `RegExp.prototype.test`). Every MCP row was therefore
+# invisible for as long as the meter has existed — 0 of 51,002 rows on the frozen 2026-09-05 snapshot —
+# and the two arms that were supposed to guard it passed for the wrong reason: M12 feeds the hook a
+# payload directly (never through the matcher) and M25 greps the matcher for a SUBSTRING.
+#
+# V1 models the documented contract exactly and evaluates the INSTALLED matcher against whole tool
+# names. V2 feeds the real desktop payload shape (every extra key the live payload carries). V3 proves
+# a settings.json written by the OLD installer is refreshed to the new matcher by a re-run of --hook.
+# V4 pins the new `native-edit` class and the v3 row fields (`agent`, `surface`, `target`). V5 pins the
+# target field on the CLI/MCP EDIT verbs. E1-E9 pin §5b of bench/substitution_report.py — the EDIT band
+# registered in docs/EVALS.md ("Terminality round A") — on a synthetic fixture whose right answer is
+# known by construction, including a MUTATION CONTROL that proves the policy-read column is live.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+# ── matcher_fires MATCHER NAME... — prints "NAME fires" / "NAME silent" per name, under the DOCUMENTED
+#    Claude Code contract: exact-string list when the matcher holds only [A-Za-z0-9_ ,|-], else an
+#    unanchored regex. `*`/empty match everything. ──
+matcher_fires()
+{
+    python3 - "$@" <<'PY'
+import re, sys
+m = sys.argv[1]
+names = sys.argv[2:]
+if m in ("", "*"):
+    fires = lambda n: True
+elif re.fullmatch(r"[A-Za-z0-9_\- ,|]*", m):
+    alts = [a.strip() for a in re.split(r"[|,]", m)]
+    fires = lambda n: n in alts
+else:
+    rx = re.compile(m)
+    fires = lambda n: rx.search(n) is not None
+for n in names:
+    print("%s %s" % (n, "fires" if fires(n) else "silent"))
+PY
+}
+
+# ── V1: the INSTALLED Claude matcher fires on every tool the meter needs, and on nothing else ───────
+if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+    INSTMATCH="$( jq -r '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher' "$SETTINGS" | head -n1 )"
+    echo "-- installed Claude PreToolUse matcher: [$INSTMATCH] --"
+    V1OUT="$( matcher_fires "$INSTMATCH" mcp__ripwire__whereis mcp__ripwire__replace_symbol_body Read Glob Grep Bash Edit Write MultiEdit NotebookEdit Task WebFetch TodoWrite )"
+    echo "$V1OUT"
+    V1BAD=""
+    for n in mcp__ripwire__whereis mcp__ripwire__replace_symbol_body Read Glob Grep Bash Edit Write MultiEdit NotebookEdit; do
+        printf '%s\n' "$V1OUT" | grep -qx "$n fires" || V1BAD="$V1BAD $n"
+    done
+    [ -z "$V1BAD" ] \
+        && ok "V1 matcher: the installed matcher, evaluated as Claude Code evaluates it, fires on every metered tool (MCP verbs, Read/Glob/Grep/Bash, the four native edit tools)" \
+        || no "V1 matcher: [$INSTMATCH] never fires for:$V1BAD (an exact-string list matches a whole tool name — a prefix matches nothing)"
+    V1OVER=""
+    for n in Task WebFetch TodoWrite; do
+        printf '%s\n' "$V1OUT" | grep -qx "$n silent" || V1OVER="$V1OVER $n"
+    done
+    [ -z "$V1OVER" ] \
+        && ok "V1b matcher: the installed matcher is silent on tools the meter has no rule for (no fork per Task/WebFetch/TodoWrite call)" \
+        || no "V1b matcher: [$INSTMATCH] also fires on:$V1OVER — every one of those is a wasted fork per call"
+    # The Codex installer writes its own matcher; same contract, same whole-name evaluation.
+    CODEXMATCH="$( grep -E '^codexHookMatcher=' "$INSTALL" | head -n1 | sed -E 's/^codexHookMatcher="(.*)"$/\1/' )"
+    V1COUT="$( matcher_fires "$CODEXMATCH" mcp__ripwire__whereis Read Glob Grep Bash Edit Write MultiEdit NotebookEdit )"
+    V1CBAD=""
+    for n in mcp__ripwire__whereis Read Glob Grep Bash Edit Write MultiEdit NotebookEdit; do
+        printf '%s\n' "$V1COUT" | grep -qx "$n fires" || V1CBAD="$V1CBAD $n"
+    done
+    [ -z "$V1CBAD" ] \
+        && ok "V1c matcher: the Codex matcher [$CODEXMATCH] fires on the same whole tool names" \
+        || no "V1c matcher: the Codex matcher [$CODEXMATCH] never fires for:$V1CBAD"
+fi
+
+# ── V2: the LIVE payload shape — every key a real desktop session sends, not the four-key fixture ───
+# livejson SESSION TOOL TOOL_INPUT_JSON — the shape captured from a Claude Code desktop session on
+# 2026-09-05: session_id, transcript_path, cwd, scratchpad_dir, prompt_id, permission_mode, effort
+# (an OBJECT), hook_event_name, tool_name, tool_input, tool_use_id.
+livejson()
+{
+    printf '{"session_id":"%s","transcript_path":"/home/op/.claude/projects/-home-op-repo/%s.jsonl","cwd":"%s","scratchpad_dir":"/private/tmp/claude-501/-home-op-repo/%s/scratchpad","prompt_id":"prompt-%s","permission_mode":"auto","effort":{"level":"high"},"hook_event_name":"PreToolUse","tool_name":"%s","tool_input":%s,"tool_use_id":"toolu_01%s"}' \
+        "$1" "$1" "$REPO" "$1" "$1" "$2" "$3" "$1"
+}
+TV2="$TMP/tv2"; mkdir -p "$TV2"; LV2="$TMP/v2.jsonl"
+OUTV2A="$( run_meter "$LV2" "$( livejson live1 Bash '{"command":"grep -rn needle src","description":"search"}' )" "$TV2" )"; RCV2A=$?
+OUTV2B="$( run_meter "$LV2" "$( livejson live1 Read '{"file_path":"/x/repo/src/a.cpp","limit":80}' )" "$TV2" )"; RCV2B=$?
+OUTV2C="$( run_meter "$LV2" "$( livejson live1 mcp__ripwire__whereis '{"path":"'"$REPO"'","symbol":"meter_log"}' )" "$TV2" )"; RCV2C=$?
+OUTV2D="$( run_meter "$LV2" "$( livejson live1 Edit '{"file_path":"/x/repo/src/a.cpp","old_string":"a","new_string":"b"}' )" "$TV2" )"; RCV2D=$?
+echo "-- live-shape rows --"; [ -f "$LV2" ] && cat "$LV2"
+[ "$RCV2A" -eq 0 ] && [ "$RCV2B" -eq 0 ] && [ "$RCV2C" -eq 0 ] && [ "$RCV2D" -eq 0 ] \
+    && [ -z "$OUTV2A$OUTV2B$OUTV2C$OUTV2D" ] \
+    && ok "V2 live-shape: Bash, Read, an MCP verb and Edit under the real payload shape all exit 0 and say nothing" \
+    || no "V2 live-shape: exits $RCV2A/$RCV2B/$RCV2C/$RCV2D, stdout=[$OUTV2A$OUTV2B$OUTV2C$OUTV2D]"
+[ "$( meterrowget "$LV2" 1 class )" = "grep" ] && [ "$( meterrowget "$LV2" 2 class )" = "read" ] \
+    && ok "V2a live-shape: the Bash grep and the Read row classify exactly as under the four-key fixture" \
+    || no "V2a live-shape: classes [$( meterrowget "$LV2" 1 class )] [$( meterrowget "$LV2" 2 class )], expected grep, read"
+[ "$( meterrowget "$LV2" 3 class )" = "ripwire-mcp" ] && [ "$( meterrowget "$LV2" 3 family )" = "ripwire" ] \
+    && [ "$( meterrowget "$LV2" 3 tool )" = "mcp__ripwire__whereis" ] \
+    && ok "V2b live-shape: mcp__ripwire__whereis writes a ripwire-mcp/ripwire row (the numerator's MCP half exists)" \
+    || no "V2b live-shape: MCP row = [$( meterrowget "$LV2" 3 class )/$( meterrowget "$LV2" 3 family )] tool=[$( meterrowget "$LV2" 3 tool )]"
+[ "$( meterrowget "$LV2" 3 detail )" = "meter_log" ] && [ "$( meterrowget "$LV2" 3 surface )" = "mcp" ] \
+    && ok "V2c live-shape: the MCP row's detail is the symbol argument and its surface is mcp" \
+    || no "V2c live-shape: MCP row detail=[$( meterrowget "$LV2" 3 detail )] surface=[$( meterrowget "$LV2" 3 surface )]"
+[ "$( meterrowget "$LV2" 4 class )" = "native-edit" ] && [ "$( meterrowget "$LV2" 4 family )" = "edit" ] \
+    && [ "$( meterrowget "$LV2" 4 target )" = "/x/repo/src/a.cpp" ] && [ "$( meterrowget "$LV2" 4 nudged )" = "0" ] \
+    && [ "$( meterrowget "$LV2" 4 nudge )" = "none" ] \
+    && ok "V2d live-shape: Edit writes a native-edit/edit row carrying target=file_path, never nudged" \
+    || no "V2d live-shape: Edit row = [$( meterrowget "$LV2" 4 class )/$( meterrowget "$LV2" 4 family )] target=[$( meterrowget "$LV2" 4 target )] nudged=[$( meterrowget "$LV2" 4 nudged )] nudge=[$( meterrowget "$LV2" 4 nudge )]"
+V2E_BAD=""
+for i in 1 2 3 4; do
+    [ "$( meterrowget "$LV2" "$i" v )" = "3" ] || V2E_BAD="$V2E_BAD v[$i]=$( meterrowget "$LV2" "$i" v )"
+    [ "$( meterrowget "$LV2" "$i" agent )" = "claude" ] || V2E_BAD="$V2E_BAD agent[$i]=$( meterrowget "$LV2" "$i" agent )"
+    [ "$( meterrowget "$LV2" "$i" session )" = "live1" ] || V2E_BAD="$V2E_BAD session[$i]=$( meterrowget "$LV2" "$i" session )"
+done
+[ "$( meterrowget "$LV2" 1 surface )" = "cli" ] && [ "$( meterrowget "$LV2" 2 surface )" = "native" ] \
+    && [ "$( meterrowget "$LV2" 4 surface )" = "native" ] || V2E_BAD="$V2E_BAD surface=[$( meterrowget "$LV2" 1 surface )/$( meterrowget "$LV2" 2 surface )/$( meterrowget "$LV2" 4 surface )]"
+[ -z "$V2E_BAD" ] \
+    && ok "V2e schema v3: every row carries v=3, agent=claude, the live session id, and surface cli/native/mcp" \
+    || no "V2e schema v3:$V2E_BAD"
+# The other three native edit tools, and NotebookEdit's differently-named path key.
+LV2F="$TMP/v2f.jsonl"; TV2F="$TMP/tv2f"; mkdir -p "$TV2F"
+run_meter "$LV2F" "$( livejson live2 Write '{"file_path":"/x/repo/docs/new.md","content":"hi"}' )" "$TV2F" >/dev/null 2>&1
+run_meter "$LV2F" "$( livejson live2 MultiEdit '{"file_path":"/x/repo/src/b.cpp","edits":[{"old_string":"a","new_string":"b"}]}' )" "$TV2F" >/dev/null 2>&1
+run_meter "$LV2F" "$( livejson live2 NotebookEdit '{"notebook_path":"/x/repo/nb.ipynb","new_source":"x"}' )" "$TV2F" >/dev/null 2>&1
+[ "$( meterrowget "$LV2F" 1 target )" = "/x/repo/docs/new.md" ] && [ "$( meterrowget "$LV2F" 2 target )" = "/x/repo/src/b.cpp" ] \
+    && [ "$( meterrowget "$LV2F" 3 target )" = "/x/repo/nb.ipynb" ] \
+    && [ "$( meterrowget "$LV2F" 1 class )$( meterrowget "$LV2F" 2 class )$( meterrowget "$LV2F" 3 class )" = "native-editnative-editnative-edit" ] \
+    && ok "V2f native-edit: Write, MultiEdit and NotebookEdit (notebook_path) each write a native-edit row naming the target" \
+    || no "V2f native-edit: targets [$( meterrowget "$LV2F" 1 target )] [$( meterrowget "$LV2F" 2 target )] [$( meterrowget "$LV2F" 3 target )]"
+# The agent field is the runner's, not a constant: the Codex wrapper names itself through the env.
+LV2G="$TMP/v2g.jsonl"; TV2G="$TMP/tv2g"; mkdir -p "$TV2G"
+run_meter "$LV2G" "$( livejson live3 Read '{"file_path":"/x/repo/src/a.cpp"}' )" "$TV2G" RIPWIRE_METER_AGENT=codex >/dev/null 2>&1
+[ "$( meterrowget "$LV2G" 1 agent )" = "codex" ] \
+    && ok "V2g schema v3: RIPWIRE_METER_AGENT names the runner (the Codex wrapper's contract)" \
+    || no "V2g schema v3: agent=[$( meterrowget "$LV2G" 1 agent )] under RIPWIRE_METER_AGENT=codex"
+grep -q 'RIPWIRE_METER_AGENT' "$ROOT/hooks/ripwire-codex-nudge.sh" \
+    && ok "V2h schema v3: hooks/ripwire-codex-nudge.sh sets RIPWIRE_METER_AGENT so Codex rows are attributed" \
+    || no "V2h schema v3: hooks/ripwire-codex-nudge.sh never sets RIPWIRE_METER_AGENT — Codex rows would read as claude"
+
+# ── V3: a settings.json carrying the OLD (exact-list) matcher is REFRESHED by a re-run of --hook ────
+STALE_HOME="$TMP/stalehome"; mkdir -p "$STALE_HOME/.claude"
+printf '{"hooks":{"PreToolUse":[{"matcher":"Read|Glob|Grep|Bash|mcp__ripwire__","hooks":[{"type":"command","command":"%s"}]}],"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"%s --session-start"}]}]}}\n' \
+    "$HOOK" "$HOOK" >"$STALE_HOME/.claude/settings.json"
+STALEOUT="$( HOME="$STALE_HOME" bash "$INSTALL" --hook 2>&1 )"; STALERC=$?
+STALEMATCH="$( jq -r '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher' "$STALE_HOME/.claude/settings.json" 2>/dev/null | head -n1 )"
+echo "-- --hook over a stale matcher: [$STALEMATCH] --"; echo "$STALEOUT" | head -n 3
+[ "$STALERC" -eq 0 ] && [ "$STALEMATCH" = "$INSTMATCH" ] \
+    && matcher_fires "$STALEMATCH" mcp__ripwire__whereis | grep -qx "mcp__ripwire__whereis fires" \
+    && ok "V3 refresh: re-running --hook rewrites the 2026-09-04 exact-list matcher to the current one (an operator who re-runs --hook is repaired)" \
+    || no "V3 refresh: exit=$STALERC matcher after re-run=[$STALEMATCH] expected [$INSTMATCH]"
+STALECOUNT="$( jq '[(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge"))] | length' "$STALE_HOME/.claude/settings.json" 2>/dev/null )"
+[ "$STALECOUNT" = "1" ] \
+    && ok "V3b refresh: the refresh edits the entry in place (still exactly one PreToolUse entry)" \
+    || no "V3b refresh: $STALECOUNT PreToolUse entries after the refresh"
+
+# ── V5: the TARGET field on the EDIT verbs — CLI (from the command line) and MCP (from tool_input) ──
+LV5="$TMP/v5.jsonl"; TV5="$TMP/tv5"; mkdir -p "$TV5"
+run_meter "$LV5" "$( bashjson v5a './build/ripwire . --replace-symbol-body=foo --edit-target-file=src/a.cpp --edit-payload=-' )" "$TV5" >/dev/null 2>&1
+run_meter "$LV5" "$( bashjson v5a './build/ripwire . --edit-plan=plan.json --apply' )" "$TV5" >/dev/null 2>&1
+run_meter "$LV5" "$( bashjson v5a 'ripwire . --insert-after-symbol=bar --edit-target-file=\"src/b b.cpp\" --edit-payload=p.txt --no-post-check' )" "$TV5" >/dev/null 2>&1
+run_meter "$LV5" "$( livejson v5a mcp__ripwire__replace_symbol_body '{"path":"'"$REPO"'","symbol":"foo","file":"src/a.cpp","new_body":"int foo(){}","post_check":false}' )" "$TV5" >/dev/null 2>&1
+run_meter "$LV5" "$( livejson v5a mcp__ripwire__insert_before_symbol '{"path":"'"$REPO"'","symbol":"bar","text":"// x"}' )" "$TV5" >/dev/null 2>&1
+echo "-- edit-target rows --"; [ -f "$LV5" ] && cat "$LV5"
+[ "$( meterrowget "$LV5" 1 class )" = "ripwire-cli" ] && [ "$( meterrowget "$LV5" 1 target )" = "src/a.cpp" ] \
+    && ok "V5a target: a CLI edit verb records --edit-target-file= as the row's target" \
+    || no "V5a target: class=[$( meterrowget "$LV5" 1 class )] target=[$( meterrowget "$LV5" 1 target )]"
+[ "$( meterrowget "$LV5" 2 class )" = "ripwire-cli" ] && [ "$( meterrowget "$LV5" 2 target )" = "" ] \
+    && ok "V5b target: a CLI edit with no --edit-target-file= records an EMPTY target (the hook cannot know the file a bare name resolves to)" \
+    || no "V5b target: class=[$( meterrowget "$LV5" 2 class )] target=[$( meterrowget "$LV5" 2 target )] expected empty"
+[ "$( meterrowget "$LV5" 3 target )" = "src/b b.cpp" ] \
+    && ok "V5c target: a quoted --edit-target-file= value is recorded unquoted, spaces kept" \
+    || no "V5c target: target=[$( meterrowget "$LV5" 3 target )] expected [src/b b.cpp]"
+[ "$( meterrowget "$LV5" 4 class )" = "ripwire-mcp" ] && [ "$( meterrowget "$LV5" 4 target )" = "src/a.cpp" ] \
+    && [ "$( meterrowget "$LV5" 4 detail )" = "foo post_check=0" ] \
+    && ok "V5d target: an MCP edit twin records file= as target, symbol as detail, and a skipped post-check as ' post_check=0'" \
+    || no "V5d target: class=[$( meterrowget "$LV5" 4 class )] target=[$( meterrowget "$LV5" 4 target )] detail=[$( meterrowget "$LV5" 4 detail )]"
+[ "$( meterrowget "$LV5" 5 target )" = "" ] && [ "$( meterrowget "$LV5" 5 detail )" = "bar" ] \
+    && ok "V5e target: an MCP edit twin without file= records an empty target and no post_check suffix" \
+    || no "V5e target: target=[$( meterrowget "$LV5" 5 target )] detail=[$( meterrowget "$LV5" 5 detail )]"
+
+# ── E1-E9: §5b, terminality by EDIT verb, pinned on a SYNTHETIC v3 fixture ──────────────────────────
+#
+# The band's three columns, from docs/EVALS.md ("Terminality round A", EDIT band): (a) policy-read — a
+# Read/grep of the edit's TARGET FILE, reported and never counted; (b) sweep — a Read/grep of any OTHER
+# file, or a native edit of the SAME target, in the window; (c) redundant-check — an --edit-check /
+# edit_check on the same symbol right after an edit whose receipt carried the folded post-check.
+# TERMINAL = neither (b) nor (c). Printed per agent and per surface. An edit row that recorded no
+# target and was followed by a read cannot be told (a) from (b): it is counted under `unattrib`,
+# excluded from terminal%, never folded either way.
+#
+# The fixture, one session per case so each row of the table is traceable to one line here:
+#   e-a  CLI replace, Read of the TARGET, build                -> TERMINAL, policy-read
+#   e-b  CLI replace, Read of ANOTHER file                     -> sweep
+#   e-c  CLI replace, build, --edit-check on the SAME symbol   -> redundant-check
+#   e-d  CLI replace --no-post-check, --edit-check same symbol -> TERMINAL (no folded check to distrust)
+#   e-e  CLI insert-after, native Edit of the SAME target      -> sweep
+#   e-f  CLI --edit-plan (no target), Read of some file        -> unattrib
+#   e-g  CLI --safe-delete, build                              -> TERMINAL
+#   e-h  MCP replace (file=src/a.cpp), Read of the target      -> TERMINAL, policy-read
+#   e-i  MCP replace, MCP edit_check same symbol               -> redundant-check
+#   e-j  MCP insert-before, Grep tool (pattern names no file)  -> sweep
+#   e-k  codex CLI replace, build                              -> TERMINAL
+#   e-l  codex CLI replace, Read of another file               -> sweep
+EDITLOG="$TMP/editband.jsonl"
+# v3 rows through the same writer as the FIND fixture (termrow's nine-argument form), into their own log.
+editrow() { TERMLOG="$EDITLOG" termrow "$@"; }
+ecli()   { editrow "$1" "$2" Bash ripwire-cli ripwire "$3" "${4:-claude}" cli "${5:-}"; }
+emcp()   { editrow "$1" "$2" "mcp__ripwire__$3" ripwire-mcp ripwire "$4" claude mcp "${5:-}"; }
+eread()  { editrow "$1" "$2" Read read native "$3" "${4:-claude}" native ''; }
+ebuild() { editrow "$1" "$2" Bash build other 'cmake --build build -j' "${3:-claude}" cli ''; }
+: >"$EDITLOG"
+ecli   1 e-a './build/ripwire . --replace-symbol-body=foo --edit-target-file=src/a.cpp --edit-payload=-' claude src/a.cpp
+eread  2 e-a '/x/repo/src/a.cpp'
+ebuild 3 e-a
+ecli   1 e-b './build/ripwire . --replace-symbol-body=bar --edit-target-file=src/b.cpp --edit-payload=-' claude src/b.cpp
+eread  2 e-b '/x/repo/src/other.cpp'
+ecli   1 e-c './build/ripwire . --replace-symbol-body=baz --edit-target-file=src/c.cpp --edit-payload=-' claude src/c.cpp
+ebuild 2 e-c
+ecli   3 e-c './build/ripwire . --edit-check=baz'
+ecli   1 e-d './build/ripwire . --replace-symbol-body=qux --edit-target-file=src/d.cpp --edit-payload=- --no-post-check' claude src/d.cpp
+ecli   2 e-d './build/ripwire . --edit-check=src/d.cpp:qux'
+ecli   1 e-e './build/ripwire . --insert-after-symbol=foo --edit-target-file=src/a.cpp --edit-payload=-' claude src/a.cpp
+editrow 2 e-e Edit native-edit edit '/x/repo/src/a.cpp' claude native '/x/repo/src/a.cpp'
+ecli   1 e-f './build/ripwire . --edit-plan=plan.json --apply' claude ''
+eread  2 e-f '/x/repo/src/z.cpp'
+ecli   1 e-g './build/ripwire . --safe-delete=dead' claude ''
+ebuild 2 e-g
+emcp   1 e-h replace_symbol_body 'foo' src/a.cpp
+eread  2 e-h '/x/repo/src/a.cpp'
+emcp   1 e-i replace_symbol_body 'bar' src/b.cpp
+emcp   2 e-i edit_check 'bar'
+emcp   1 e-j insert_before_symbol 'foo' src/a.cpp
+editrow 2 e-j Grep grep native 'needle' claude native ''
+ecli   1 e-k 'ripwire . --replace-symbol-body=foo --edit-target-file=src/a.cpp --edit-payload=-' codex src/a.cpp
+ebuild 2 e-k codex
+ecli   1 e-l 'ripwire . --replace-symbol-body=bar --edit-target-file=src/b.cpp --edit-payload=-' codex src/b.cpp
+eread  2 e-l '/x/repo/src/other.cpp' codex
+
+if [ -f "$REPORT" ]; then
+    python3 "$REPORT" "$EDITLOG" >"$TMP/edit.out" 2>&1; RCE=$?
+    tr -s ' ' <"$TMP/edit.out" >"$TMP/edit.sq"
+    echo "-- substitution_report.py §5b on the EDIT-band fixture --"
+    sed -n '/^5b\./,$p' "$TMP/edit.out"
+    edithas()
+    {
+        # edithas ARMID EXPECTED-SQUEEZED-LINE DESCRIPTION
+        grep -Fqx " $2" "$TMP/edit.sq" \
+            && ok "$1 edit-band: $3" \
+            || no "$1 edit-band: expected the row [$2] — see $TMP/edit.out"
+    }
+    [ "$RCE" -eq 0 ] && grep -qi 'terminality by EDIT verb' "$TMP/edit.out" \
+        && ok "E1 edit-band: the report prints a §5b terminality-by-EDIT-verb section" \
+        || no "E1 edit-band: exit=$RCE and/or no §5b section — see $TMP/edit.out"
+    # The three columns are DEFINED above the table, by name, so a percentage is never read without them.
+    grep -q 'policy-read' "$TMP/edit.out" && grep -q 'redundant-check' "$TMP/edit.out" \
+        && grep -qi 'never counted' "$TMP/edit.out" && grep -q 'unattrib' "$TMP/edit.out" \
+        && ok "E2 edit-band: §5b defines policy-read (never counted), sweep, redundant-check and unattrib above the table" \
+        || no "E2 edit-band: §5b does not define its columns — see $TMP/edit.out"
+    grep -q 'agent=claude surface=cli' "$TMP/edit.out" && grep -q 'agent=claude surface=mcp' "$TMP/edit.out" \
+        && grep -q 'agent=codex surface=cli' "$TMP/edit.out" \
+        && ok "E3 edit-band: the table is printed per agent and per surface (claude/cli, claude/mcp, codex/cli)" \
+        || no "E3 edit-band: missing an agent/surface block — see $TMP/edit.out"
+    # claude/cli: --replace-symbol-body n=4 -> e-a terminal (policy-read), e-b sweep, e-c redundant, e-d terminal.
+    edithas E4 "--replace-symbol-body 4 50.0% 1 1 1 0" \
+        "claude/cli --replace-symbol-body: 4 calls, 2 terminal, policy-read 1 (reported, not counted), sweep 1, redundant-check 1"
+    edithas E5 "--insert-after-symbol 1 0.0% 0 1 0 0" \
+        "a native Edit of the SAME target inside the window is a sweep"
+    edithas E6 "--edit-plan 1 n/a 0 0 0 1" \
+        "an edit with no recorded target followed by a read is unattrib, excluded from terminal% (n/a), never folded"
+    edithas E6b "--safe-delete 1 100.0% 0 0 0 0" "--safe-delete followed by a build is terminal"
+    # claude/mcp: replace n=2 -> e-h terminal (policy-read), e-i redundant; insert-before -> e-j sweep.
+    edithas E7 "mcp:replace_symbol_body 2 50.0% 1 0 1 0" \
+        "claude/mcp replace_symbol_body: a Read of file= is policy-read; an edit_check on the same symbol is redundant"
+    edithas E7b "mcp:insert_before_symbol 1 0.0% 0 1 0 0" "a Grep-tool call (pattern only, names no file) is a sweep"
+    # codex/cli: n=2 -> e-k terminal, e-l sweep.
+    edithas E8 "--replace-symbol-body 2 50.0% 0 1 0 0" "codex/cli --replace-symbol-body: 2 calls, 1 terminal, 1 sweep"
+    # E9: THE MUTATION CONTROL. Move e-a's policy Read to another file: the row it feeds must change
+    # (policy-read 1->0, sweep 1->2, terminal 50.0%->25.0%). A column that never moves is not a column.
+    sed '/"session":"e-a".*"tool":"Read"/ s#"detail":"/x/repo/src/a.cpp"#"detail":"/x/repo/src/zzz.cpp"#' "$EDITLOG" >"$TMP/editmut.jsonl"
+    python3 "$REPORT" "$TMP/editmut.jsonl" 2>&1 | tr -s ' ' >"$TMP/editmut.sq"
+    grep -Fqx " --replace-symbol-body 4 25.0% 0 2 1 0" "$TMP/editmut.sq" \
+        && ok "E9 edit-band: MUTATION CONTROL — re-pointing the policy Read at another file moves the row (50.0% -> 25.0%, policy-read 1 -> 0, sweep 1 -> 2): the column is live" \
+        || no "E9 edit-band: the mutated fixture did not move the row — see $TMP/editmut.sq"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
