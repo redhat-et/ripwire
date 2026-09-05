@@ -166,7 +166,7 @@ S1 = "understand a codebase cold"
 add(S1, f"{BIN} .", "The default ranked symbol map — start here when landing cold in a repo.")
 add(S1, f"{BIN} . --top-k=5", "Same map, capped to the 5 highest-ranked symbols.")
 add(S1, f"{BIN} . --top-k=0 --expand=rankGraphTeleport", "NEW since the last capture: --top-k=0 means PAYLOAD-ONLY — no ranked map rides along with the body you asked for.")
-add(S1, f"{BIN} . --top-k=0", "--top-k=0 with NO payload verb asked for — what an empty request emits.")
+add(S1, f"{BIN} . --top-k=0", "--top-k=0 with NO payload verb asked for — REFUSES (exit 1) naming the payload verbs, never an empty map.")
 add(S1, f"{BIN} . --max-tokens=1500", "SHAPE the map to fit ~1500 tokens (binary-search top-K).")
 add(S1, f"{BIN} . --token-budget=100", "GATE form: exit 3 if the map's own est_tokens exceeds the budget (over-budget failure shape).")
 add(S1, f'{BIN} . --for="{_batchWord1} {_batchWord2} {_batchWord3} when a file content hash changes"', "The task lens: ranked signatures + quality metrics framed for the task.")   # §A10.9/V2-8: same split as BATCH — no contiguous source quote of the demo phrase
@@ -186,13 +186,17 @@ add(S1, f"{BIN} . --html={html_out}", "Self-contained HTML force-directed call g
 add(S1, f"{BIN} . --order=stable --top-k=5", "Stable (path/id) emit order — provider KV-cache hits across re-runs.")
 
 S2 = "navigate / answer a question"
-add(S2, f"{BIN} . --around=rankGraphTeleport", "Ego graph around one symbol.")
+add(S2, f"{BIN} . --around=rankGraphTeleport", "Ego graph around one symbol — depth 1 BY DEFAULT now (the root's depth= says so): ~6 KB where the 2-hop neighbourhood is ~64 KB on this repo.")
+add(S2, f"{BIN} . --around=rankGraphTeleport --around-depth=2", "The restoring knob: --around-depth=2 brings back the whole 2-hop neighbourhood (depth=\"2\" on the root) — pay for it only when the 1-hop view was not enough.")
+add(S2, f"{BIN} . --around=rankGraphTeleport --around-fanout=4", "The other knob: --around-fanout=4 keeps only the 4 strongest edges per node (default 32) — the same 1-hop depth, a quarter of the rows.")
 add(S2, f"{BIN} . --callers=rankGraphTeleport", "Who calls SYM (1-hop in-edges).")
-add(S2, f"{BIN} . --callers=DoesNotExist", "Unknown-symbol failure shape.")
+add(S2, f"{BIN} . --callers=rankGraphTeleport --legend=compact", "The same rows under --legend=compact: the prose legend becomes one <=400 B comment plus schema=\"ripwire.callers/v1\" on the root — every row byte and every completeness attribute (counts_floor=, graph_ambiguous=, next=) identical, ~3 KB of legend gone. Works on EVERY XML verb now, not four.")
+add(S2, f"{BIN} . --callers=DoesNotExist", "Unknown-symbol REFUSAL shape (exit 1) with a did-you-mean from real edit distance.")
 add(S2, f"{BIN} . --callees=rankGraphTeleport", "What SYM calls (1-hop out-edges).")
 add(S2, f"{BIN} . --uses=rankGraphTeleport", "The resolvable use-sites (call/read/write/import/extends) with file:line; count= is a floor.")
 add(S2, f"""{BIN} . --graph-query='and(callers(name("rankGraphTeleport"),2),kind(all,fn))'""", "Composable node-set query: functions within 2 caller-hops of rankGraphTeleport.")
-add(S2, f"{BIN} . --external-surface", "Names referenced but never defined in-corpus (stdlib/third-party surface). NOW carries names/shown/capped (total= joins them only under --limit/--offset).")
+add(S2, f"{BIN} . --external-surface", "Names referenced but never defined in-corpus (stdlib/third-party surface). Default ceiling of 100 rows now (capped=\"1\" + a pasteable next= when it bites), and the sh BUILTINS (cd/echo/set…) are dropped and COUNTED as builtins_excluded= — grep/sed/git stay, they ARE the surface.")
+add(S2, f"{BIN} . --external-surface --include-builtins", "The restoring knob: --include-builtins keeps the shell builtins in the same 100-row window (they now compete for rows, so the window's tail differs).")
 add(S2, f"{BIN} . --path=main,rankGraphTeleport", "Shortest directed call-path SRC -> DST. CHANGED: now reports from_p/to_p/from_defs and resolves the right `main` (was reachable=\"0\").")
 add(S2, f"{BIN} . --connect=rankGraphTeleport,runEval,getIndex", "Minimal connecting subgraph over 3 symbols (finds shared-caller joins).")
 add(S2, f"{BIN} . --impact=rankGraphTeleport", "Transitive blast radius — everything that reaches SYM. NOW carries shown/capped.")
@@ -202,7 +206,7 @@ add(S2, f"{BIN} . --situ", f"Mid-task situational report for the current git dif
 add(S2, f"{BIN} . --test-gate", onTree(
     "Pre-PR gate on a CLEAN tree: no obligations, exit 0.",
     "Pre-PR gate recorded against a DIRTY tree, so the obligations below are the working copy's real ones — the recorded exit code says which way it went."))
-add(S2, f"{BIN} . --grep=DEGRADED_PATH_ALERT", "Literal trigram-indexed search. CHANGED: each hit now carries the MATCHED line in <m>, plus shown/capped/hits_capped.")
+add(S2, f"{BIN} . --grep=DEGRADED_PATH_ALERT", "Literal trigram-indexed search. Each hit carries its MATCHED line as the <hit> element's own CDATA (the <m> wrapper is gone), plus shown/capped/hits_capped and a pasteable next= on the root.")
 add(S2, f"{BIN} . --grep=DEGRADED_PATH_ALERT --grep-context=1", "Same search with one line of source context either side.")
 add(S2, f"{BIN} . --grep=DEGRADED_PATH_ALERT --grep-before=1 --grep-after=2 --limit=3", "The asymmetric spelling of the same context: one line before and two after each hit (ripgrep's -B/-A), on a three-hit window.")
 add(S2, f"{BIN} . --regex='fnv1a\\w+'", "Regex search + enclosing symbol.")
@@ -235,7 +239,8 @@ add(S4, f"{ABIN} . --lint --with-profile=report.txt", "Join MEASURED heat onto -
     post=f"{ABIN} . --lint --with-profile=report.txt 2>/dev/null | grep -o '<f rule=[^<]*</f>'",
     post_label="The joined finding — past the display cut above, extracted so the join is visible:")
 add(S4, f"{BIN} . --communities", "Cluster the call graph into cohesive modules.")
-add(S4, f"{BIN} . --zoom", "Nested module hierarchy (multi-level Louvain) + cross-module bridges.")
+add(S4, f"{BIN} . --zoom", "Nested module hierarchy (multi-level Louvain) + cross-module bridges — levels_shown=\"2\" of levels= BY DEFAULT over the 40 largest top modules (~8 KB, where the whole tree is ~220 KB); a module AT the cut carries children=.")
+add(S4, f"{BIN} . --zoom --zoom-levels=3", "The restoring knob: --zoom-levels=N prints N levels (0 = the whole tree); here three, ~11 KB.")
 add(S4, f"{BIN} . --report", "Architecture summary (modules, god-files, cycles) as markdown.")
 add(S4, f"{BIN} . --seams", "Cross-module call seams no test reaches. NOW carries seam_pairs/shown/capped.")
 add(S4, f"{BIN} . --mermaid", "Module (directory) dependency graph as a Mermaid diagram.")
@@ -267,7 +272,7 @@ add(S4, f'{BIN} . --plan-lanes=3 --task="add a --since filter to the doc-drift v
 add(S4, f"{BIN} . --plan-lanes --brief={brief_path}", "NEW VERB, explicit form: one line per lane, lane boundaries are the ones you wrote (the defensible mode).", pre=f"cat {brief_path}")
 add(S4, f"{BIN} . --plan-lanes=99 --task=x", "Out-of-range refusal shape for the lane count.")
 add(S4, f"{BIN} . --layout=Symbol", "CPU/GPU contract view of one struct: computed offsets/sizes/padding + mirror check.")
-add(S4, f"{BIN} . --layout=Lang", "The honest-degrade case: Lang is an `enum class`, not a struct.")
+add(S4, f"{BIN} . --layout=Lang", "The honest refusal (exit 1): Lang is an `enum class`, not a struct — no offsets are fabricated.")
 add(S4, f"{BIN} . --doc-drift", "Which of this repo's doc claims are now false. CHANGED: row attribute at= renamed to tgt= (at= is now only the root sha stamp).", timeout=600)
 add(S4, f"{BIN} . --doc-drift --gateability", "The finishable to-do list: docs whose LIVE failing anchors a date-stamp would reclassify.", timeout=600,
     post=f"{BIN} . --doc-drift --gateability 2>/dev/null | grep -o '<gateability.*' | sed 's/></>\\n</g' | head -25",
@@ -282,7 +287,7 @@ add(S4, f"{BIN} . --export=cc.json:{cc_out}", "Per-file metrics as CodeCharta cc
 add(S4, f"{BIN} . --batch={batch_path}", "One-turn sweep: 4 newline-delimited verb:arg sub-queries answered in ONE deduped <batch>.", pre=f"cat {batch_path}")
 
 S5 = "self-diagnosis"
-add(S5, f"{BIN} . --doctor", "Environment self-check: binary staleness, grammars, cache dir, git, tracked-binary staleness.")
+add(S5, f"{BIN} . --doctor", "Environment self-check: binary staleness, grammars, cache dir, git, tracked-binary staleness — exit 1 when any check fails (here: the PATH install is older than ./build).")
 
 S6 = "security"
 add(S6, f"{BIN} --scan-skill=skills/ripwire-orient/SKILL.md", "Scan a single skill file for injection/exfiltration patterns before installing.")
@@ -290,10 +295,10 @@ add(S6, f"{BIN} --scan-skills=skills", "Scan a whole skills directory (exit 2 = 
 
 S7 = "knobs / modes"
 add(S7, f"{BIN} . --rank-by=churn --top-k=5", "Rank by git change-frequency prior instead of PageRank.")
-add(S7, f"{BIN} . --rank-by=bogus --top-k=5", "CHANGED: an unknown value is now NAMED, with the supported set listed.")
+add(S7, f"{BIN} . --rank-by=bogus --top-k=5", "An unknown value REFUSES (exit 1), NAMED, with the supported set listed.")
 add(S7, f"{BIN} . --callers=rankGraphTeleport --format=columnar", "Columnar output: paths table + parallel arrays, ~15-60% fewer tokens on MANY-row lists — small results can be LARGER (the columnar legend is a fixed cost).")
 add(S7, f'{BIN} . --for="cache invalidation" --format=candidates --top-k=5', "Flat top-K export for an external reranker.")
-add(S7, f"{BIN} . --callers=rankGraphTeleport --format=bogus", "CHANGED: unknown --format value named + supported set listed.")
+add(S7, f"{BIN} . --callers=rankGraphTeleport --format=bogus", "An unknown --format value REFUSES (exit 1), named, with the supported set listed.")
 add(S7, f"{BIN} . --callers=rankGraphTeleport --json", "Machine-parseable JSON, same content, keys mirror the XML attrs.")
 add(S7, f"{BIN} . --hotspots --json", "JSON refusal shape: an unsupported verb refuses loudly instead of silently falling back to XML.")
 add(S7, f"{BIN} . --hotspots --limit=3 --offset=3", "Pagination: 3 items, skipping the first 3 (deterministic seams).")
@@ -309,7 +314,7 @@ add(S7, f"{BIN} . --scip=does_not_exist.scip --callers=rankGraphTeleport", "SCIP
 add(S7, f"{BIN} src test --top-k=5", "Multi-root workspace: ONE merged graph over two roots, paths labeled <root>/<rel>.")
 add(S7, f"{BIN} . --eval", "Self-eval: co-change recall vs BM25.", timeout=900)
 add(S7, f"{BIN} . --eval-retrieval", "Known-item retrieval eval: MRR + recall@k per ranker per query mode.", timeout=900)
-add(S7, f"{BIN} . --eval-stray={stray_tsv_path}", "Labelled verdict-accuracy eval for --stray-content — three labels over REAL local refs (names resolved at capture time). Read got= against v= in the stray-content run: a ref the verb could not analyse (unknown) must never be credited as a merged hit.", timeout=900, pre=f"cat {stray_tsv_path}")
+add(S7, f"{BIN} . --eval-stray={stray_tsv_path}", "Labelled verdict-accuracy eval for --stray-content — three labels over REAL local refs (names resolved at capture time); exit 3 when accuracy is under the floor. Read got= against v= in the stray-content run: a ref the verb could not analyse (unknown) must never be credited as a merged hit.", timeout=900, pre=f"cat {stray_tsv_path}")
 add(S7, f"{BIN} skills --eval-skills={skills_tsv_path}", "Labelled skill-ROUTING eval over the repo's own skills/ directory (4 hand-labelled prompts).", timeout=600, pre=f"cat {skills_tsv_path}")
 add(S7, f"{BIN} wrap claude", "Print the recipe to wire ripwire into Claude Code as an MCP server.")
 add(S7, f"{BIN} --version", "Version + short build info.")
@@ -387,9 +392,9 @@ add(S4B, f"{BIN} . --index-out={idx_out}", "CI generate-and-exit: cold-parse and
     post=f"wc -c {idx_out}.lean.ripwirecache {idx_out}.rich.ripwirecache")   # sizes only — an `ls -l` here leaked the owner column into the public capture (ripwirepubliccheck arm 5)
 add(S4B, f"{BIN} . --cache={idx_out}.lean.ripwirecache --top-k=3", "Consume the lean artifact in a PR job: restore-equivalence, never blob-byte-identity.")
 add(S4B, f"{BIN} . --pin-census={census_out} --top-k=3", "Eval-only: a per-call-site census of WHICH mechanism resolved each call, and the canonical id of every surviving target.", post=f"head -8 {census_out}; wc -l {census_out}")
-add(S4B, f"{BIN} . --plan-lint=test/planlintfix/wave.md", "The house PLAN/DESIGN format's STRUCTURE check — never semantics.")
-add(S4B, f"{BIN} . --plan-lint=test/planlintfix/wave_ledger.md", "The ledger-shaped fixture through the same check.")
-add(S4B, f"{BIN} . --doctor --agent=claude", "--doctor plus a LIVE integration inspection for one agent: PATH binary, installed-skill manifest parity, hook executability, MCP wiring — read-only, fixed repair commands, never config contents.")
+add(S4B, f"{BIN} . --plan-lint=test/planlintfix/wave.md", "The house PLAN/DESIGN format's STRUCTURE check — never semantics; exit 2 when a card or ledger row gates.")
+add(S4B, f"{BIN} . --plan-lint=test/planlintfix/wave_ledger.md", "The ledger-shaped fixture through the same check (exit 2: one gating card).")
+add(S4B, f"{BIN} . --doctor --agent=claude", "--doctor plus a LIVE integration inspection for one agent: PATH binary, installed-skill manifest parity, hook executability, MCP wiring — read-only, fixed repair commands, never config contents; exit 1 when any check fails.")
 add(S4B, f"{BIN} . --doctor --agent=nosuch", "Other --agent values refuse.")
 
 # --- the sandbox clone: verbs that need a DIRTY tree -------------------
@@ -397,13 +402,15 @@ S8 = "the dirty-tree verbs (throwaway clone, NOT the read-only repo)"
 D = ABIN
 add(S8, f"{D} . --situ", "Situational report for a real diff: blast radius + tests + co-change + forgotten co-change partners.", cwd=DIRTY)
 add(S8, f"{D} . --test-gate", "The pre-PR gate with real obligations — exit 4 when tests-to-run or untested blast radius is non-empty.", cwd=DIRTY)
-add(S8, f"{D} . --quality-delta", "CHANGED: every row now carries p=\"file:line\", the gating rows are marked gating=\"1\", and exit 2 prints a naming line on stderr.", cwd=DIRTY)
-add(S8, f"{D} . --quality-delta --json", "The same findings as JSON (one of the CI/scripting verbs --json supports).", cwd=DIRTY)
+add(S8, f"{D} . --quality-delta", "Every row carries p=\"file:line\", the gating rows are marked gating=\"1\" and now bar= (the threshold each numeric row is judged against), and the exit-2 refusal prints a naming line on stderr; a gating row carries a pasteable next=.", cwd=DIRTY)
+add(S8, f"{D} . --quality-delta --legend=compact", "The same gating report under --legend=compact — same rows, same exit 2, schema=\"ripwire.quality-delta/v1\", ~4 KB of legend down to one comment: the shape an agent's edit loop should run.", cwd=DIRTY)
+add(S8, f"{D} . --quality-delta --json", "The same findings as JSON (one of the CI/scripting verbs --json supports) — same exit 2 as the XML form.", cwd=DIRTY)
 add(S8, f"{D} . --quality-delta --quality-ack --ack-only=zzznope", "NEW FLAG: --ack-only matching nothing REFUSES rather than falling back to acking everything.", cwd=DIRTY)
 add(S8, f"{D} . --quality-delta --quality-ack --ack-only=api-surface", "NEW FLAG: ack only the api-surface findings — a per-finding ratchet instead of a rubber stamp.", cwd=DIRTY)
 add(S8, f"{D} . --quality-delta", "Re-run after the partial ack: acked=3, the rest still gate.", cwd=DIRTY)
 add(S8, f"{D} . --ack-only=gating", "--ack-only WITHOUT --quality-ack REFUSES loudly (exit 1, the pairing named) — it used to be silently ignored.", cwd=DIRTY)
-add(S8, f"{D} . --edit-check=nonNegativeFloatDescKey", "A real contract-change: was=1 now=2 params, with the call sites that are now provably incompatible.", cwd=DIRTY)
+add(S8, f"{D} . --edit-check=nonNegativeFloatDescKey", "A real contract-change: was=1 now=2 params, with the call sites that are now provably incompatible, and a pasteable next= (--uses=SYM) on the root.", cwd=DIRTY)
+add(S8, f"{D} . --edit-check=nonNegativeFloatDescKey --legend=compact", "The same verdict under --legend=compact: ~5.7 KB of legend becomes one comment, every <c incompatible=> row identical — the post-edit reflex at its cheapest.", cwd=DIRTY)
 add(S8, f"{D} . --pr-context", "The review-evidence bundle with an actual changed file.", cwd=DIRTY)
 add(S8, f"{D} . --map-diff --top-k=5", "The map re-ranked with a teleport toward the changed file (changed=1 here, not 0).", cwd=DIRTY)
 add(S8, f"{D} . --clones", "The duplicated helper the sandbox edit introduced shows up as a clone group.", cwd=DIRTY)
@@ -448,6 +455,7 @@ add(S9, mcp(MCP_INIT, mcp_call("find_symbol", symbol="DoesNotExist")), "MCP erro
 add(S9, mcp(MCP_INIT, mcp_call("batch", queries=[{"verb": "for", "task": "incremental cache invalidation"}, {"verb": "find_referencing_symbols", "symbol": "rankGraphTeleport"}, {"verb": "grep", "pattern": "DEGRADED_PATH_ALERT", "limit": 2}])), "MCP `batch`: three independent read queries answered in ONE round-trip — NOTE the sub-query grammar is {verb, ...args} objects with MCP verb names, not the CLI --batch file's verb:arg lines.")
 add(S9, mcp(MCP_INIT, mcp_call("batch", queries=["for:incremental cache invalidation", "callers:rankGraphTeleport"])), "The CLI --batch spelling handed to MCP `batch`: refused, with the accepted shape named.")
 add(S9, mcp(MCP_INIT, mcp_call("edit_check", symbol="rankGraphTeleport")), "MCP `edit_check` on " + TREE + ".")
+add(S9, mcp(MCP_INIT, mcp_call("edit_check", symbol="rankGraphTeleport", legend="compact")), "The same MCP `edit_check` with legend:\"compact\" — the CLI --legend=compact dialect on the MCP side (declared on the 16 XML verbs): ~5.5 KB of legend down to ~600 B, rows identical; an unknown or empty legend value is refused, never read as the default.")
 add(S9, mcp(MCP_INIT, '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"nosuchverb","arguments":{"path":"."}}}'), "An unknown verb name — the JSON-RPC error shape.")
 
 # --- build the sandbox clone (was hand-built in the 07-27 round; folded in so
