@@ -88,6 +88,13 @@ refuses_empty --doc-drift     "$MISS"
 refuses_empty --scope         "$MISS/**" --quality-delta   # a MODIFIER, so it is probed on its host verb
 refuses_empty --flags         "$MISS"
 CORPUS="$SFIX" refuses_empty --stray-content "$MISS"
+# wave-3 close (2026-09-05): --stray-content=SUBSTR is also the FILTER of two host verbs, --plan and --abi. Both
+# already refused a no-match filter (exit 1) but with the WRONG sentence — "more than 512 refs match — narrow it"
+# for a filter that matched ZERO refs (the zero-hit case fell into the else of a two-way ok/nonGitRoot split;
+# only the bare verb had H7's branch). Found by the close regen: `--stray-content=r27 --plan` on a tree with no
+# r27 ref. RED on 41d831b: B (the value is not echoed) and C (no "not a measurement" clause) for both hosts.
+CORPUS="$SFIX" refuses_empty --stray-content "$MISS" --plan
+CORPUS="$SFIX" refuses_empty --stray-content "$MISS" --abi
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 echo
@@ -109,6 +116,8 @@ lives --doc-drift     README
 lives --scope         'src/**' --quality-delta
 lives --flags         RIPWIRE
 CORPUS="$SFIX" lives --stray-content lane
+CORPUS="$SFIX" lives --stray-content lane --plan
+CORPUS="$SFIX" lives --stray-content lane --abi
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 echo

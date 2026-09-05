@@ -70,6 +70,7 @@ struct PlanResult
     bool                      ok          = true;
     bool                      nonGitRoot  = false;    // --stray-content's own refusal reasons, passed through
     bool                      tooManyRefs = false;    // verbatim — this verb adds no refusal of its own
+    bool                      filterMatchedNothing = false;   // H7: the filter selected no ref NAME — a refusal, never refs="0"
     crossref::StrayResult     stray;                  // the full sweep (headSha/refsScanned/mergedRefs/refs)
     std::vector<std::size_t>  scouted;                // indices into stray.refs: the landing set fed to merge-scout
     std::vector<std::size_t>  bounded;                // indices into stray.refs: unmerged, but cut by the size bound
@@ -113,6 +114,7 @@ inline PlanResult computePlan( const std::string& root, std::string_view filter,
         result.ok          = false;
         result.nonGitRoot   = result.stray.nonGitRoot;
         result.tooManyRefs  = result.stray.tooManyRefs;
+        result.filterMatchedNothing = result.stray.filterMatchedNothing;
         return result;
     }
 

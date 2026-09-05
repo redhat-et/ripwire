@@ -692,6 +692,17 @@ inline constexpr int           kRunTraceExitCommandFailed = 4;                  
 // the error-line marks the relevant-lines cut recognizes beyond frame-shaped lines: compiler/linker primary
 // diagnostics, test failures, sanitizer banners, shell spawn errors. Substring match over a fixed table —
 // deterministic; the legend names the classes rather than restating the spellings.
+
+// H7 (capture-audit 2026-09-04; hosts added at the wave-3 close): the ONE sentence for a --stray-content=SUBSTR
+// filter that selected no ref NAME — spoken by the bare verb ("" host) and by its two hosts ("--plan: ", "--abi: ").
+// refs="0" at exit 0 would read as "no branch carries stray work", the most reassuring answer these verbs give.
+inline void printStrayFilterNoMatch( const char* hostPrefix, std::string_view filter )
+{
+    std::fprintf( stderr, "ripwire: %s--stray-content=%.*s matches no local ref — a zero here would be a failure, not a "
+                          "measurement\n  (the filter is a substring match against refs/heads names; run bare "
+                          "--stray-content to list them, e.g. --stray-content=feat/)\n",
+                  hostPrefix, int( filter.size() ), filter.data() );
+}
 inline constexpr std::string_view kRunTraceErrorMarks[] =
 {
     "error", "Error", "ERROR", "fatal", "FAIL", "fail", "Assertion", "assert", "Traceback", "panic",
@@ -1402,6 +1413,10 @@ int runAbiCheck( const MainDispatch& d )
         {
             std::fprintf( stderr, "ripwire: --abi: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
         }
+        else if( result.filterMatchedNothing )
+        {
+            printStrayFilterNoMatch( "--abi: ", d.cfg.strayFilter );   // H7, the host's spelling (wave-3 close)
+        }
         else
         {
             std::fprintf( stderr, "ripwire: --abi: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
@@ -1464,6 +1479,10 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             {
                 std::fprintf( stderr, "ripwire: --plan: %s is not a git repository (or has no HEAD commit) — no refs to compare\n", root.c_str() );
             }
+            else if( result.filterMatchedNothing )
+            {
+                printStrayFilterNoMatch( "--plan: ", cfg.strayFilter );   // H7, the host's spelling (wave-3 close)
+            }
             else
             {
                 std::fprintf( stderr, "ripwire: --plan: more than %u refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
@@ -1496,10 +1515,7 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             {
                 // H7: refs="0" unknown="0" at exit 0 is the most reassuring answer this verb can give — "no
                 // branch carries stray work" — from a sweep that matched no branch NAME at all.
-                std::fprintf( stderr, "ripwire: --stray-content=%.*s matches no local ref — a zero here would be a failure, not a "
-                                      "measurement\n  (the filter is a substring match against refs/heads names; run bare "
-                                      "--stray-content to list them, e.g. --stray-content=feat/)\n",
-                              int( cfg.strayFilter.size() ), cfg.strayFilter.data() );
+                printStrayFilterNoMatch( "", cfg.strayFilter );
             }
             else
             {

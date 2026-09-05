@@ -237,6 +237,7 @@ struct AbiResult
     bool           ok          = true;
     bool           nonGitRoot  = false;
     bool           tooManyRefs = false;
+    bool           filterMatchedNothing = false;   // H7: the --stray-content=SUBSTR filter selected no ref NAME
     std::string    headSha;
     std::string    headRef;
     std::string    atStamp;           // M10: gitstamp::stampAt(root) — head= above stays a bare 9-hex sha
@@ -699,7 +700,12 @@ inline AbiResult computeAbiCheck( const std::string& root, const IngestResult& i
     result.atStamp = gitstamp::stampAt( root );   // M10: same anchor as every other repo-reading root, dirty bit included
     result.headRef = quality::gitOneLine( root, "rev-parse --abbrev-ref HEAD 2>/dev/null" );
 
-    const std::vector<crossref::RefInfo> refs = crossref::enumerateRefs( root, filter, result.headSha );
+    std::size_t                          filterNameHits = 0;
+    const std::vector<crossref::RefInfo> refs = crossref::enumerateRefs( root, filter, result.headSha, &filterNameHits );
+    // H7 (wave-3 close): a filter that matched no ref NAME is a refusal, never an empty measurement — the same
+    // rule computeStrayContent applies; before this the zero case fell through to the ">kMaxRefs" sentence.
+    result.filterMatchedNothing = !filter.empty() && filterNameHits == 0;
+    if( result.filterMatchedNothing ) { result.ok = false; return result; }
     if( refs.size() > crossref::kMaxRefs ) { result.ok = false; result.tooManyRefs = true; return result; }
     result.refsScanned = refs.size();
 
