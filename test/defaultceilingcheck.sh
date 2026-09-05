@@ -143,9 +143,14 @@ prrun --pr-context --max-tokens=1000000 >"$TMP/p3"
 # the ceiling is in TOKENS as the tool prices them (est_tokens <= 8000 above); in bytes that is the 8000-token
 # allowance at the densest-language rate (kMinBytesPerToken, ~2.36 B/tok = 18,880 B) plus the ~5 KB full legend
 [ "$( bytes "$TMP/p1" )" -le 24000 ] && ok "(5) default answer is $( bytes "$TMP/p1" ) B (<= 24,000: the 8000-token allowance + legend)" || no "(5) default answer is $( bytes "$TMP/p1" ) B (> 24,000)"
-run --pr-context=HEAD~1 >"$TMP/p4"
-[ "$( rootattr "$TMP/p4" pr-context budget_default )" = 1 ] && ok "(5) --pr-context=HEAD~1 on this repo carries budget_default=\"1\" ($( bytes "$TMP/p4" ) B, est_tokens=\"$( rootattr "$TMP/p4" pr-context est_tokens )\")" \
-                                                          || no "(5) --pr-context=HEAD~1 lacks budget_default="
+# wave-3 close (2026-09-05): HEAD~1 is whatever the operator committed last — an acks-only or docs-only commit diffs
+# NO indexed file, and the empty-diff root carries no budget tail at all (files="0", its own comment), so this arm went
+# red on the integration branch for a non-defect. The base is now the parent of the last commit that touched src/,
+# so the diff always holds an indexed change and the arm measures the budget, not the operator's commit history.
+SRCBASE="$( git -C "$ROOT" log -1 --format=%h -- src/ 2>/dev/null )~1"
+run --pr-context="$SRCBASE" >"$TMP/p4"
+[ "$( rootattr "$TMP/p4" pr-context budget_default )" = 1 ] && ok "(5) --pr-context=$SRCBASE (parent of the last src/ commit) carries budget_default=\"1\" ($( bytes "$TMP/p4" ) B, est_tokens=\"$( rootattr "$TMP/p4" pr-context est_tokens )\")" \
+                                                          || no "(5) --pr-context=$SRCBASE lacks budget_default= (the diff holds an indexed change, so the default budget must ride the root)"
 
 echo "=== (6) well-formed + deterministic ==="
 if command -v xmllint >/dev/null 2>&1; then
