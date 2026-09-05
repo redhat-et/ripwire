@@ -82,7 +82,7 @@ tags = re.findall( r"<[A-Za-z][^>]*>", b )
 for i, t in enumerate( tags ):
     m = re.search( r'\snext="([^"]*)"', t )
     if m:
-        v = m.group( 1 ).replace( "&quot;", '"' ).replace( "&lt;", "<" ).replace( "&gt;", ">" ).replace( "&amp;", "&" )
+        v = m.group( 1 ).replace( "&quot;", '"' ).replace( "&apos;", "'" ).replace( "&lt;", "<" ).replace( "&gt;", ">" ).replace( "&amp;", "&" )
         print( ( "root|" if i == 0 else "row|" ) + v )
 PY
 }
