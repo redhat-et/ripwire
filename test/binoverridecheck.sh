@@ -80,6 +80,7 @@ EXEMPT = {
     "agentloopfollowupcheck.sh": "pure-python test of bench/agentloop/followup_calls.py over a synthetic pilot json and the committed pilot-6run.json; BIN is bound for interface uniformity and never executed (verified by reading the gate)",
     "arisefollowupcheck.sh":     "pure-python test of bench/arise-h2h/followup_calls.py over synthetic SWE-agent .traj fixtures; BIN is bound for interface uniformity and never executed (verified by reading the gate)",
     "routingreportcheck.sh":     "pure-python test of bench/routing_ab_report.py over synthetic routing/substitution jsonl in a temp dir; BIN is bound (`: \"$BIN\"`) for interface uniformity and never executed (verified by reading the gate)",
+    "agentloopeditsuitecheck.sh": "pure-python test of bench/agentloop/run_editsuite.py — the task shape, the alternating arm order, the oracle comparison and the JSONL/meter-row accounting, all over fixture events; BIN is bound for interface uniformity (and existence-checked) but never executed — the gate imports no subprocess call at all",
     "agentloopcodexcheck.sh":    "pure-python test of bench/agentloop prompt-building; the path to build/ripwire is asserted as a STRING, never executed",
     "agentloopgradercheck.sh":   "pure-python test of the agentloop grader's circular-invocation detector; 'ripwire' appears only in fixture command strings, never executed",
     "agentlooplockcheck.sh":     "pure-python/schema test of tasks.lock partitioning; no CLI invocation",
@@ -137,7 +138,8 @@ else:
 #                          a usage comment, the shared BIN= convention line, and a `: "$BIN"` no-op whose
 #                          trailing comment says it is unused. There is no invocation to find.
 STATICALLY_UNREACHABLE = { "argvdiffcheck.sh", "nulbytecheck.sh",
-                           "codexinstallhonestycheck.sh", "meterdisclosurecheck.sh", "routingreportcheck.sh" }
+                           "codexinstallhonestycheck.sh", "meterdisclosurecheck.sh", "routingreportcheck.sh",
+                           "agentloopeditsuitecheck.sh" }
 grown = []
 for g in sorted( EXEMPT ):
     if g in STATICALLY_UNREACHABLE:
