@@ -73,4 +73,89 @@ $gateCountClaims
 EOF
 fi
 
+# ── I1 (capture-audit verify-wave1 2026-09-04): a gate that CALLS a shell function ABOVE its definition is
+# inert at that call. Bash resolves functions at run time, so `x="$( fnorm a )"` before `fnorm(){…}` expands
+# to the empty string with a "command not found" on stderr the battery never reads — shapingflagcheck.sh's
+# (B) byte-identity arm compared "" to "" and passed unconditionally (fnorm called at line 211, defined at
+# 395). The scan below: every function `name(){` / `name()\n{` / `function name` defined in a gate, every
+# COMMAND-POSITION use of that name on an earlier NON-COMMENT line OUTSIDE any function body (a body only
+# runs when its function is called, which may be later — that is legal and excluded). One line per finding.
+usedBeforeDef="$( python3 - "$ROOT/test" <<'PY'
+import os, re, sys
+testDir = sys.argv[ 1 ]
+defRe   = re.compile( r'^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*(\{?)\s*(.*)$' )
+funcRe  = re.compile( r'^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\{?)' )
+hereRe  = re.compile( r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?" )
+def strip( line ):
+    # drop the comment tail and SINGLE-quoted strings; double quotes stay, because `"$( fn x )"` is a real
+    # call (the shape the inert arm had) and a name in a message never sits in command position anyway
+    line = re.sub( r"'[^']*'", "''", line )
+    return re.sub( r'(^|\s)#.*$', '', line )
+def heredocLines( lines ):
+    # every line INSIDE a heredoc body (fixture content, python blocks): neither a definition nor a use
+    inside, tag = [ False ] * len( lines ), None
+    for i, raw in enumerate( lines ):
+        if tag is not None:
+            inside[ i ] = True
+            if raw.strip() == tag:
+                tag = None
+            continue
+        m = hereRe.search( re.sub( r'(^|\s)#.*$', '', raw ) )   # on the raw line: strip() would eat the quoted tag
+        if m:
+            tag = m.group( 1 )
+    return inside
+for name in sorted( os.listdir( testDir ) ):
+    if not name.endswith( ".sh" ):
+        continue
+    path  = os.path.join( testDir, name )
+    lines = open( path, encoding = "utf-8", errors = "replace" ).read().split( "\n" )
+    inHere = heredocLines( lines )
+    # pass 1: definitions (line index) and function-body spans by brace depth
+    defs, inBody = {}, [ False ] * len( lines )
+    i = 0
+    while i < len( lines ):
+        raw = lines[ i ]
+        m = defRe.match( raw ) or funcRe.match( raw )
+        if m and not raw.lstrip().startswith( "#" ) and not inHere[ i ]:
+            fname = m.group( 1 )
+            defs.setdefault( fname, i )
+            # body: from the first `{` (this line or the next) until depth returns to 0
+            depth, j = 0, i
+            started = False
+            while j < len( lines ):
+                body = strip( lines[ j ] )
+                for ch in body:
+                    if ch == "{":
+                        depth += 1; started = True
+                    elif ch == "}":
+                        depth -= 1
+                inBody[ j ] = True
+                if started and depth <= 0:
+                    break
+                if not started and j > i + 1:
+                    break            # no brace within two lines: not a body we can span
+                j += 1
+            i = j + 1
+            continue
+        i += 1
+    # pass 2: command-position uses above the definition, outside every body
+    for fname, defAt in defs.items():
+        useRe = re.compile( r'(?:^|[;|&(!{]|\$\(|\bthen\b|\bdo\b|\belse\b)\s*' + re.escape( fname ) + r'(?=\s|\)|;|$)' )
+        for k in range( defAt ):
+            if inBody[ k ] or inHere[ k ]:
+                continue
+            code = strip( lines[ k ] )
+            if not code.strip() or useRe.search( code ) is None:
+                continue
+            print( "test/%s: %s used at line %d, defined at line %d" % ( name, fname, k + 1, defAt + 1 ) )
+PY
+)"
+if [ -z "$usedBeforeDef" ]; then
+    printf 'PASS: no gate calls a shell function above its definition\n'
+else
+    printf 'FAIL: a gate calls a shell function before it is defined (the call expands EMPTY at run time — an inert arm):\n'
+    printf '%s\n' "$usedBeforeDef" | sed 's/^/        /'
+    fail=1
+fi
+
 exit "$fail"

@@ -41,6 +41,12 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*"; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+# fnorm FILE — stdout with --run-trace's MEASURED duration_ms= masked (verbs_change.h "Determinism, honestly
+# scoped"), the ONE documented non-determinism the (B) and (F) byte-identity arms may not blame on a knob.
+# Defined HERE, above every caller: verify-wave1 I1 found it defined below the (B) loop, where bash's
+# run-time resolution made both `$( fnorm … )` comparands expand EMPTY and the arm compare "" to "" — a
+# permanently green byte-identity assertion (manifestcheck.sh's used-before-definition arm now pins this).
+fnorm(){ sed -E 's/ duration_ms="[0-9]+"//g' "$1"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 cd "$ROOT"
@@ -392,7 +398,7 @@ fdeclared()
 # fresh corpus can leave state a second run reads (--doctor's cache-dir bytes=) — every probe is WARMED UP
 # once and the second plain run is the one measured. Anything still flipping after both is disclosed by name
 # through the tie-break in the notice branch, never asserted away and never counted as a knob read.
-fnorm(){ sed -E 's/ duration_ms="[0-9]+"//g' "$1"; }
+# (fnorm itself is defined beside ok/no at the top of this file — see I1 there.)
 REFUSEPAT='narrows only --graph-query|--max-tokens is honored by|--token-budget is honored by'
 NOTICEPAT='is not read by'
 MODIFIERPAT='modif|pass both|pass it too|pass them|only applies|narrows|requires|needs|is read by|read only|honored only by|— pass|pass one|composes with|applies only|selects|re-serializes'
