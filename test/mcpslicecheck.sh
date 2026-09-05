@@ -211,7 +211,12 @@ printf '%s' "$E12" | grep -q 'single' && printf '%s' "$E12" | grep -q 'error' \
     || { no "(12) expected the single-root refusal on a 2-root workspace"; printf '%s\n' "$E12" | head -c 300; echo; }
 
 # ── (13) CLI parity: same root, same spec, byte-identical payload ───────────────────────────────────
-CLI="$( cd "$REPO" && "$BIN" . --slice=pipeline:out --no-cache 2>/dev/null )"
+# M1 RE-PIN (terminality round A, 2026-09-05): the MCP legend DEFAULT is now compact, so the CLI side of
+# this comparison asks for the SAME posture — compact <-> compact — instead of full <-> full. That is a
+# stronger pin than the old one, not a weaker one: it is the path an agent actually gets on both surfaces,
+# and it is the pairing where the two compact spellings of the slice root (its native emitter's, and the
+# compactlegend.h layer's) would diverge if the server ever routed the default through the layer.
+CLI="$( cd "$REPO" && "$BIN" . --slice=pipeline:out --legend=compact --no-cache 2>/dev/null )"
 [ -n "$V1" ] && [ "$V1" = "$CLI" ] \
     && ok "(13) the MCP payload is byte-identical to the CLI --slice on the same root" \
     || no "(13) MCP and CLI slice payloads differ on the same root/spec"

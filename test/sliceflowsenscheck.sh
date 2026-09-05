@@ -212,7 +212,12 @@ mcp_call() { printf '%s\n' "$@" | ( cd "$FIX" && "$BIN" --mcp 2>/dev/null ); }
 MCP="$( mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
                  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"slice","arguments":{"path":".","symbol":"joins.cpp:cj11:y","flow":"back"}}}' \
         | tail -1 | python3 -c 'import sys,json; r=json.load(sys.stdin); print(r["result"]["content"][0]["text"] if "result" in r else "__ERROR__")' )"
-[ -n "$MCP" ] && [ "$MCP" = "$FB" ] \
+# M1 RE-PIN (terminality round A, 2026-09-05): the MCP legend default is compact, so the CLI operand of this
+# comparison is the compact one — compact <-> compact, the posture both surfaces actually serve. $FB (full)
+# stays exactly as it is for arms (5) and (6), which read the FULL legend's wording; only this arm's operand
+# moves, so nothing else in the file is re-calibrated.
+FBC="$( run --slice=joins.cpp:cj11:y --slice-flow=back --legend=compact )"
+[ -n "$MCP" ] && [ "$MCP" = "$FBC" ] \
     && ok '(7) the MCP slice payload is byte-identical to the CLI on the fixture (rd= and reach= included)' \
     || { no '(7) MCP and CLI slice payloads differ on the fixture'; printf '%s\n' "$MCP" | head -c 400; echo; }
 

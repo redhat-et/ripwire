@@ -98,17 +98,9 @@ inline constexpr McpVerbInfo kMcpVerbTable[] = {
     { "insert_after_symbol",     "insert text immediately after a symbol's definition",                    McpVerbGroup::Edit },
 };
 
-// P1 (L7): the compact-legend KEY for an MCP verb whose XML root is shared (`ctx`, `r`) — the twin of
-// main.cpp's compactLegendHint, keyed by verb name instead of by flag. Verbs with a unique root need none.
-inline std::string_view mcpCompactLegendHint( std::string_view verb ) noexcept
-{
-    if( verb == "analyze" )                            { return "map"; }
-    if( verb == "explore" || verb == "pack_task" )     { return "pack-task"; }
-    if( verb == "from_trace" )                         { return "from-trace"; }
-    if( verb == "lego" )                               { return "lego"; }
-    if( verb == "exemplar" )                           { return "exemplar"; }
-    return {};
-}
+// P1 (L7): mcpCompactLegendHint — the compact-legend KEY for an MCP verb whose XML root is shared
+// (`ctx`, `r`). M1 moved it DOWN into mcpverbs.h (unchanged, same signature): applyCompactToBatchSubs
+// needs it there, and mcpverbs.h is included BY this file, so the mapping has to live on the lower side.
 
 inline constexpr std::size_t kMcpVerbCount = 31;   // +1 lane/tc-sliceat: the `slice` read verb
 static_assert( sizeof( kMcpVerbTable ) / sizeof( kMcpVerbTable[0] ) == kMcpVerbCount,
@@ -873,11 +865,28 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const std::string trace   = strArg( "trace" );    // L4 from_trace: the raw trace TEXT
             const std::string var     = strArg( "var" );      // slice: the variable to slice (optional — bare = inventory)
             const std::string flow    = strArg( "flow" );     // slice: back|fwd|both (validated in sliceText, the CLI wording)
-            // §5a decision 3: the OPT-IN compact legend posture, the MCP twin of the CLI --legend=compact.
-            // "" and "full" are the default (byte-identical to what this surface always emitted); "compact"
-            // swaps the prose for the versioned schema id and leaves every row byte and every data /
-            // completeness attribute alone. A value outside the set is refused, never read as the default —
-            // the closed-set rule the `in` argument's own history (P6-2) established for this server.
+            // §5a decision 3: the compact legend posture, the MCP twin of the CLI --legend=compact. It swaps
+            // the prose for the versioned schema id and leaves every row byte and every data / completeness
+            // attribute alone. A value outside the set is refused, never read as the default — the closed-set
+            // rule the `in` argument's own history (P6-2) established for this server.
+            //
+            // M1 (terminality round A, 2026-09-05): COMPACT IS THE DEFAULT HERE, and `legend:"full"` is how
+            // you get the historic legend back. This is the registered follow-up #3 of capture-audit §5a
+            // decision 3, which landed the dialect OPT-IN — and opt-in made the right posture a feature an
+            // agent has to already know about. The bill it was leaving on the table, measured on the ten-verb
+            // edit loop (lane-L7.md's table, this repo): 32,684 B of full legend against 3,791 B of compact,
+            // ~7.2K tokens of prose re-read on every call of every session. A posture that is right for
+            // essentially every caller is a DEFAULT; the argument is how you ask for the other one.
+            //
+            // SCOPE, and why it is not "compact everywhere". The flip applies to exactly the verbs that
+            // DECLARE `legend` (kMcpVerbFields — analyze lego owners batch exemplar impact uses path_between
+            // connect explore from_trace edit_check whereis stray_content flags doc_drift slice). The other
+            // fourteen never declared it and are untouched: their payloads are JSON or plain text with no
+            // legend to compact (grep, cochange, find_*, the edit verbs' receipts…), or — `for` — carry a
+            // header that is already its own short legend and whose comments are DATA, not prose (A10). A
+            // default that silently rewrote those would be changing answers the argument was never offered
+            // for. The per-verb truth is in each tool's own `legend` field description (mcprefusal.h), which
+            // is the only place an MCP client can read an argument's semantics.
             const std::string legendArg = strArg( "legend" );
             // F9 (capture-audit verify-wave2 2026-09-05): ABSENT and PRESENT-BUT-EMPTY are two different
             // requests, and `legendArg.empty()` collapsed them — `legend:""` was read as the default and
@@ -886,6 +895,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // the field this wave added. The presence bit comes from the same raw reader every other MCP
             // argument's shape check uses.
             const bool legendIsPresent = mcpdetail::findRawValue( args, "legend" ).isPresent;
+            // M1: does THIS verb declare `legend`? Read from the same table the unknown-field refusal above
+            // dispatches from, never from a second list here — a verb that joins the family must not need an
+            // edit in two places to get the default (the kMcpVerbTable/kMcpVerbCount static_assert precedent).
+            // An undeclared `legend` has already been refused by mcpUnknownFieldRefusal, so on those verbs
+            // legendArg is necessarily empty and this bit is the whole decision.
+            const bool legendDeclaredHere = mcpVerbDeclaresLegend( name );
+            // ABSENT or "compact" ⇒ compact; only an explicit "full" restores the historic legend. Any other
+            // value never reaches here — it is refused below, before a byte is written.
+            const bool legendCompactPosture = legendDeclaredHere && legendArg != "full";
 
             // ── W3FIX H4/M5: every NUMERIC argument through the ONE guarded reader ─────────────────────────
             //
@@ -975,12 +993,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // means nothing alone; a cost means nothing without knowing a pass ran). `_fresh` is
                 // self-contained by construction, and it is placed after the stamp for the same sequencing
                 // reason — it reads the pass count that building the stamp may have moved.
-                // P1 (L7): the opt-in compact posture — one rewrite of the finished XML payload (compactlegend.h),
-                // the same layer the CLI applies; a JSON/text payload has no root and passes through untouched,
-                // a natively compact payload (slice) already carries schema= and is left alone.
+                // P1 (L7), default M1: the compact posture — one rewrite of the finished XML payload
+                // (compactlegend.h), the same layer the CLI applies; a JSON/text payload has no root and
+                // passes through untouched, a natively compact payload (slice) already carries schema= and is
+                // left alone. legendCompactPosture is the decision (declared-by-this-verb AND not "full").
                 std::string compacted;
                 const std::string* body = &text;
-                if( legendArg == "compact" )
+                if( legendCompactPosture )
                 {
                     compacted = text;
                     rw::applyCompactDialect( compacted, mcpCompactLegendHint( name ) );
@@ -1673,10 +1692,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 else if( name == "slice" && !path.empty() && !symbol.empty() )
                 {
                     // the legend VALUE was judged pre-dispatch with every other verb's (P1); slice compacts natively
-                    // (F9/F11: the present-but-empty `legend:""` is refused there too, with the unknown-value case)
+                    // (F9/F11: the present-but-empty `legend:""` is refused there too, with the unknown-value case).
+                    // M1: the POSTURE, not the literal spelling. slice is the one verb whose compact form is built
+                    // by its own emitter rather than by the textResult rewrite, so passing `legendArg == "compact"`
+                    // here while the default flipped produced TWO compact spellings that differ in root attribute
+                    // ORDER (`<slice schema= sym= …>` from the rewrite vs `<slice sym= … schema= …>` native) — the
+                    // default and the explicit argument answering differently, which compactlegendcheck (N) caught.
                     const SliceReply r = sliceText( path, symbol, var, flow,
                                                     sliceDepthArg.isPresent ? int( sliceDepthArg.value ) : 0, redactPtr,
-                                                    legendArg == "compact" );
+                                                    legendCompactPosture );
                     resp = r.payload.empty() ? errResultMsg( -32602, r.refusal ) : textResult( r.payload );
                 }
                 // EDIT verbs — `file` (optional) is the disambiguating file-path substring for a same-named
@@ -1804,7 +1828,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             subs.reserve( take );
                             for( std::size_t i = 0; i < take; ++i )
                             {
-                                subs.push_back( runBatchSub( path, objs[i], topK, stable, redactPtr ) );
+                                subs.push_back( runBatchSub( path, objs[i], topK, stable, redactPtr, legendCompactPosture ) );
+                            }
+                            // M1: the posture reaches INSIDE the CDATA — the rule, its measurement and the one
+                            // skipped verb live once, on applyCompactToBatchSubs (mcpverbs.h), because the CLI
+                            // --batch path needs exactly the same thing.
+                            if( legendCompactPosture )
+                            {
+                                applyCompactToBatchSubs( subs );
                             }
                             resp = textResult( batchText( subs, requested, kBatchCap ) );
                         }

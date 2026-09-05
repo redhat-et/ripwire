@@ -79,7 +79,20 @@ def cliAt( corpus, args ):
 def cli( args ):
     return cliAt( ROOT, args )
 
-def mcp( name, arguments ):
+# M1 RE-PIN (terminality round A, 2026-09-05): the MCP legend DEFAULT moved full -> compact. Every arm in
+# this file compares an MCP payload against the CLI's DEFAULT (full) output, so the server operand asks for
+# the posture it is being compared with — `legend:"full"`, injected here once rather than at twenty call
+# sites, and only for the seventeen verbs that DECLARE the argument (elsewhere it is an unknown field and is
+# refused). An arm that means to exercise the DEFAULT passes raw = True and gets the untouched request; the
+# slice block below is the one that does, and it is where the flip itself is pinned CLI-to-MCP.
+LEGEND_FAMILY = { "analyze", "lego", "owners", "batch", "exemplar", "impact", "uses", "path_between",
+                  "connect", "explore", "from_trace", "edit_check", "whereis", "stray_content", "flags",
+                  "doc_drift", "slice" }
+
+def mcp( name, arguments, raw = False ):
+    arguments = dict( arguments )
+    if not raw and name in LEGEND_FAMILY and "legend" not in arguments:
+        arguments[ "legend" ] = "full"
     req = "\n".join( [ json.dumps( { "jsonrpc": "2.0", "id": 1, "method": "initialize" } ),
                        json.dumps( { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
                                      "params": { "name": name, "arguments": arguments } } ) ] ) + "\n"
@@ -283,13 +296,17 @@ print( "=== LEGEND: legend=\"compact\" on MCP == --legend=compact on the CLI ===
 # else — so the assertion is exact: the two payloads are byte-identical once the root= each surface
 # legitimately spells differently is normalised away. Default (`legend` omitted) must stay byte-identical to
 # what this verb always emitted, which is what makes this opt-in rather than a behaviour change.
+# M1: the middle row is the FLIP, pinned across the two surfaces. `legend` omitted is no longer "what this
+# verb always emitted" — it is COMPACT, and it must equal the CLI's `--legend=compact` byte for byte. The
+# row is asked raw (no injected posture), which is what makes it a test of the default rather than of the
+# argument. The other two rows are unchanged and still pin both explicit spellings.
 sliceArgs = { "path": ROOT, "symbol": "escapeXml", "var": "out" }
-for label, extra, cliFlags in ( ( "compact", { "legend": "compact" }, [ "--legend=compact" ] ),
-                                ( "full",    {},                     [] ),
-                                ( "full (explicit)", { "legend": "full" }, [] ) ):
+for label, extra, cliFlags, rawCall in ( ( "compact", { "legend": "compact" }, [ "--legend=compact" ], False ),
+                                         ( "default (M1: compact)", {},        [ "--legend=compact" ], True  ),
+                                         ( "full (explicit)", { "legend": "full" }, [], False ) ):
     a = dict( sliceArgs ); a.update( extra )
     cx = cli( [ "--slice=escapeXml:out" ] + cliFlags )
-    mx = mcp( "slice", a )
+    mx = mcp( "slice", a, raw = rawCall )
     if mx.startswith( "__ERROR__" ):
         check( False, "slice legend=%s: MCP refused (%s)" % ( label, mx[ :120 ] ) )
         continue

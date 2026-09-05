@@ -87,6 +87,28 @@ elif op == "isxml":    # an XML document: a root element (not <html>) with an at
     print( "1" if m and m.group( 1 ) not in ( "html", "br" ) and re.match( r"\s*(<!--.*?-->\s*)*<[A-Za-z]", buf, re.S ) else "0" )
 PY
 leg(){ python3 "$TMP/leg.py" "$@"; }
+# M1: a batch document carries whole SUB-ANSWERS inside CDATA, and each of those has a legend of its own.
+# The splitter above calls a CDATA section payload (correct in general — CDATA is data), so a batch has to
+# be flattened before the legend/payload question means anything one level down. Removing only the section
+# MARKERS is exactly right here: batchText escapes any interior "]]>" as "]]]]><![CDATA[>", so the flattened
+# text is the concatenation of the sub-answers verbatim, which is what the comparison wants.
+# M1: a batch document carries whole SUB-ANSWERS inside CDATA, each with a legend of its own. The splitter
+# above calls a CDATA section payload (correct in general — CDATA is data), so a batch has to be flattened
+# before the legend/payload question means anything one level down. Removing only the section MARKERS is
+# exactly right: batchText escapes any interior "]]>" as "]]]]><![CDATA[>", so the flattened text is the
+# sub-answers verbatim. The two attributes normalised away are the SAME two leg.py's `payload` op normalises
+# on a single document root, applied to every root here because a flattened batch has one per sub-answer:
+# schema= is the compact dialect's own id, and est_tokens= prices the EMITTED bytes, so a smaller legend is
+# a smaller price rather than a row change. Everything else must match byte for byte.
+cat > "$TMP/unwrap.py" <<'PY'
+import sys, re
+t = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
+t = t.replace( "]]]]><![CDATA[>", "]]>" ).replace( "<![CDATA[", "" ).replace( "]]>", "" )
+t = re.sub( r'\sschema="[^"]*"', "", t )
+t = re.sub( r'\sest_tokens="[0-9]*"', "", t )
+sys.stdout.write( t )
+PY
+unwrapCdata(){ python3 "$TMP/unwrap.py" "$1" > "$2"; }
 
 # ── a tmp git fixture: test/fixture's files with three commits, so the git verbs answer too ─────────────
 REPO="$TMP/repo"; mkdir -p "$REPO"; cp -R "$FIX"/. "$REPO"/
@@ -287,7 +309,15 @@ while IFS="$( printf '\t' )" read -r flag kind example policy; do
     leg payload "$TMP/u.full" >"$TMP/u.fullpay"; leg payload "$TMP/u.c" >"$TMP/u.cpay"
     # --for's NATIVE compact dialect (pre-P1) also trims doc bodies and re-stamps <sigs shown= total= capped=>
     # — a payload change this layer never makes; recorded in lane-L7.md as found-not-fixed, exempt here by name.
-    if [ "$flag" != "--for=" ]; then
+    # M1 RE-PIN (terminality round A, 2026-09-05): --batch joins --for as a named exemption from the
+    # BYTE-IDENTICAL payload arm, and for a reason that is the opposite of --for's. This splitter calls a
+    # CDATA section payload — correctly, because CDATA is data — but a batch's CDATA holds whole SUB-ANSWERS,
+    # each with a legend of its own, and the compact posture now reaches them (mcpverbs.h
+    # applyCompactToBatchSubs: measured on this fixture, uses+slice, 8,840 B full -> 2,282 B compact, where
+    # compacting only the envelope reached 8,645 B). So the bytes that moved inside the CDATA are LEGEND at
+    # one level down, and no splitter that treats CDATA atomically can say so. The property is not dropped:
+    # the (B) arm below re-asserts it on the batch, comparing the sub-answers' own payloads after unwrapping.
+    if [ "$flag" != "--for=" ] && [ "$flag" != "--batch=" ]; then
         cmp -s "$TMP/u.fullpay" "$TMP/u.cpay" || no "(U) $probe rows are NOT byte-identical under compact: $( cmp "$TMP/u.fullpay" "$TMP/u.cpay" 2>&1 | head -c 120 )"
     fi
     # every completeness attribute the document carries is NAMED in the compact legend: the window names
@@ -355,7 +385,10 @@ elif [ "$mb" -le 900 ] && grep -q '<edit-check[^>]* schema="ripwire.edit-check/v
 else
     no "(M) MCP edit_check legend:compact = $mb B (want ≤ 900 with schema=\"ripwire.edit-check/v1\")"
 fi
-mcp_text edit_check '{"path":".","symbol":"total_area"}' >"$TMP/m.ecf"
+# M1 RE-PIN: this call is the FULL-legend reference the compact payload is compared against. It used to
+# rely on the default BEING full; the default is compact now, so it asks for the posture it means. The
+# assertion is unchanged and is still the one that matters — rows do not move between the two postures.
+mcp_text edit_check '{"path":".","symbol":"total_area","legend":"full"}' >"$TMP/m.ecf"
 leg payload "$TMP/m.ecf" >"$TMP/m.p1"; leg payload "$TMP/m.ec" >"$TMP/m.p2"
 cmp -s "$TMP/m.p1" "$TMP/m.p2" && ok "(M) MCP edit_check rows are byte-identical under legend:compact" \
                               || no "(M) MCP edit_check rows moved under legend:compact"
@@ -377,6 +410,101 @@ for pair in "impact:{\"path\":\".\",\"symbol\":\"distance\",\"legend\":\"compact
         no "(M) MCP $verb legend:compact: legend $( leg bytes "$TMP/m.v" ) B, schema '$( leg schema "$TMP/m.v" )'"
     fi
 done
+
+echo
+echo "=== (N) MCP: the legend DEFAULT is COMPACT; legend:\"full\" restores it; rows never move (M1) ==="
+# THE CONTRACT, and why the default moved (terminality round A, 2026-09-05; capture-audit §5a decision 3's
+# registered follow-up #3). The compact dialect landed OPT-IN, which made it a feature an agent has to know
+# about — and the ten-verb edit loop measured 32,684 B of full legend against 3,791 B of compact, i.e. the
+# opt-in default was billing every MCP session ~7.2K tokens of prose it re-reads on every single call. A
+# posture that is right for essentially every caller is a DEFAULT, not an argument; the argument is how you
+# get the other one back. So on this surface `legend` absent means COMPACT, `legend:"full"` restores the
+# historic full legend byte-for-byte, and `legend:"compact"` stays accepted (it is now a no-op spelling of
+# the default, kept because it is in the wild and because refusing a request for what you already do is
+# the worst kind of refusal).
+#
+# THE FAMILY, read from source, never listed here. The verbs are extracted from src/mcprefusal.h's
+# kMcpVerbFields rows that declare a `legend` field — the same source of truth the server dispatches from —
+# so a verb that JOINS the family without a call in this gate fails the arm rather than silently skipping
+# it. That is the mcpforparitycheck precedent (read the cap from source, never re-type it).
+#
+# FOUR ASSERTIONS PER VERB, in this order, because each one catches a different way to get this wrong:
+#   1. every posture ANSWERS (no refusal) — a default that refuses is not a default;
+#   2. the DEFAULT is byte-identical to legend:"compact" — the flip actually happened, on this verb;
+#   3. legend:"full" carries STRICTLY MORE legend bytes than the default — full is restorable, and is the
+#      big one (an arm asserting only "different" would pass a flip that broke full instead of moving it);
+#   4. the PAYLOAD is byte-identical between the two postures — the legend is the only thing that moved.
+#      This is the whole promise of the dialect (compactlegend.h: rows untouched) restated at the default.
+#
+# RED, MEASURED, on the pre-flip binary: assertion 2 fails on all seventeen verbs
+#   ("(N) analyze: the DEFAULT is not compact — default 1959 B of legend, compact 302 B" and sixteen more),
+# because the default was `full` there. Assertions 1/3/4 are green on both binaries by construction, which
+# is exactly why 2 is written separately rather than folded into a single "postures differ" check.
+LEGEND_VERBS="$( sed -n 's/^[[:space:]]*{ "\([a-z_]*\)", *"[^"]*legend[^"]*" },.*/\1/p' "$ROOT/src/mcprefusal.h" )"
+nArgs() {   # the call this gate makes for VERB, on the two-commit fixture repo above
+    case "$1" in
+        analyze)       printf '{"path":"."}' ;;
+        lego)          printf '{"path":".","type":"Point"}' ;;
+        owners)        printf '{"path":".","symbol":"distance"}' ;;
+        batch)         printf '{"path":".","queries":["callers: distance","uses: distance"]}' ;;
+        exemplar)      printf '{"path":".","kind":"fn","task":"distance"}' ;;
+        impact)        printf '{"path":".","symbol":"distance"}' ;;
+        uses)          printf '{"path":".","symbol":"distance"}' ;;
+        path_between)  printf '{"path":".","from":"total_area","to":"distance"}' ;;
+        connect)       printf '{"path":".","symbols":["total_area","distance"]}' ;;
+        explore)       printf '{"path":".","task":"geometry distance"}' ;;
+        from_trace)    printf '{"path":".","trace":"at distance (geometry.cpp:5)"}' ;;
+        edit_check)    printf '{"path":".","symbol":"total_area"}' ;;
+        whereis)       printf '{"path":".","symbol":"distance"}' ;;
+        stray_content) printf '{"path":"."}' ;;
+        flags)         printf '{"path":"."}' ;;
+        doc_drift)     printf '{"path":"."}' ;;
+        slice)         printf '{"path":".","symbol":"total_area"}' ;;   # 'distance' is ambiguous here, by design
+        *)             printf '' ;;
+    esac
+}
+withLegend() { printf '%s,"legend":"%s"}' "${1%\}}" "$2"; }
+nVerbs=0
+for verb in $LEGEND_VERBS; do
+    nVerbs=$(( nVerbs + 1 ))
+    a="$( nArgs "$verb" )"
+    if [ -z "$a" ]; then
+        no "(N) $verb declares legend in kMcpVerbFields but this gate has no call for it — a verb joined the family and the family arm cannot see it"
+        continue
+    fi
+    mcp_text "$verb" "$a"                          >"$TMP/n.def"
+    mcp_text "$verb" "$( withLegend "$a" compact )" >"$TMP/n.cmp"
+    mcp_text "$verb" "$( withLegend "$a" full )"    >"$TMP/n.full"
+    if grep -q '^__ERROR__' "$TMP/n.def" || grep -q '^__ERROR__' "$TMP/n.cmp" || grep -q '^__ERROR__' "$TMP/n.full"; then
+        no "(N) $verb: a posture refused — default: $( head -c 90 "$TMP/n.def" ) | compact: $( head -c 90 "$TMP/n.cmp" ) | full: $( head -c 90 "$TMP/n.full" )"
+        continue
+    fi
+    dLeg="$( leg bytes "$TMP/n.def" )"; cLeg="$( leg bytes "$TMP/n.cmp" )"; fLeg="$( leg bytes "$TMP/n.full" )"
+    if ! cmp -s "$TMP/n.def" "$TMP/n.cmp"; then
+        no "(N) $verb: the DEFAULT is not compact — default $dLeg B of legend, compact $cLeg B"
+        continue
+    fi
+    if [ "$fLeg" -le "$cLeg" ]; then
+        no "(N) $verb: legend:\"full\" carries $fLeg B against the default's $cLeg B — the full legend is not restorable"
+        continue
+    fi
+    # M1: for batch, flatten the CDATA first — its sub-answers are documents whose legends the posture also
+    # reaches (applyCompactToBatchSubs), so an atomic CDATA comparison would read a legend change as a row
+    # change. Flattened, the assertion is the real one: every sub-answer's ROWS are identical too.
+    nDef="$TMP/n.def"; nFull="$TMP/n.full"
+    if [ "$verb" = "batch" ]; then
+        unwrapCdata "$TMP/n.def" "$TMP/n.defu"; unwrapCdata "$TMP/n.full" "$TMP/n.fullu"
+        nDef="$TMP/n.defu"; nFull="$TMP/n.fullu"
+    fi
+    leg payload "$nDef" >"$TMP/n.pd"; leg payload "$nFull" >"$TMP/n.pf"
+    if ! cmp -s "$TMP/n.pd" "$TMP/n.pf"; then
+        no "(N) $verb: the PAYLOAD moved between the two postures — the dialect must change the legend and nothing else"
+        continue
+    fi
+    ok "(N) $verb: default == compact ($cLeg B legend), legend:\"full\" restores $fLeg B, payload byte-identical"
+done
+[ "$nVerbs" -ge 17 ] && ok "(N) the family was read from source: $nVerbs verbs declare legend" \
+                     || no "(N) only $nVerbs verbs were extracted from kMcpVerbFields — the family read is broken, so every PASS above means nothing"
 
 [ "$fail" -eq 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'
 exit "$fail"

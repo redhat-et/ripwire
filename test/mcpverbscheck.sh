@@ -303,7 +303,13 @@ L4_DDRIFT="$( l4_field '"doc_drift" in names' )"
 # ── explore round-trip: a pack-task-shaped bundle (same shape as CLI --pack-task) ────────────────
 EXPLORE_MSGS=(
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
-    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"explore","arguments":{"path":"'"$CORPUS"'","task":"engine scheduling run loop"}}}'
+# M1 RE-PIN (terminality round A, 2026-09-05): the MCP legend DEFAULT moved to compact, and the two shape
+# assertions below quote the FULL document's shape — explore's `<!-- ripwire task bundle for` header comment
+# and edit_check's `<edit-check sym="appMain"` root, which under compact opens `<edit-check schema="…" sym=`.
+# So these two calls ask for `legend:"full"`, the posture whose shape they describe. The DEFAULT (compact)
+# path is pinned per verb by compactlegendcheck (N), which asserts both that the default IS compact and that
+# its payload is byte-identical to the full one — so a shape assertion on full covers the default's rows too.
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"explore","arguments":{"path":"'"$CORPUS"'","task":"engine scheduling run loop","legend":"full"}}}'
 )
 mcp_call "${EXPLORE_MSGS[@]}" >"$TMP/explore_a"
 mcp_call "${EXPLORE_MSGS[@]}" >"$TMP/explore_b"
@@ -331,9 +337,12 @@ diff -q "$TMP/explore_a" "$TMP/explore_b" >/dev/null \
     || no "explore verb: non-deterministic response"
 
 # ── pack_task is the SAME handler as explore (dispatch-only alias) — byte-identical inner text ──
+# M1: same posture as the explore call above, so the two operands are comparable — and the alias
+# resolution of `legend` itself (declaredFieldsFor resolves pack_task to explore's row) is now part
+# of what this arm proves: an alias that lost the argument would answer compact against explore's full.
 PACKTASK_INNER="$( mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
-    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pack_task","arguments":{"path":"'"$CORPUS"'","task":"engine scheduling run loop"}}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pack_task","arguments":{"path":"'"$CORPUS"'","task":"engine scheduling run loop","legend":"full"}}}' \
     | tail -1 | python3 -c '
 import sys, json
 r = json.load(sys.stdin)
@@ -370,7 +379,7 @@ esac
 # ── edit_check round-trip: the contract shape (status= + callers=) ──────────────────────────────
 EDITCHECK_OUT="$( mcp_call \
     '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
-    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"edit_check","arguments":{"path":"'"$CORPUS"'","symbol":"appMain"}}}' | tail -1 )"
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"edit_check","arguments":{"path":"'"$CORPUS"'","symbol":"appMain","legend":"full"}}}' | tail -1 )"   # M1: see the re-pin note above
 EDITCHECK_INNER="$( printf '%s' "$EDITCHECK_OUT" | python3 -c '
 import sys, json
 r = json.loads(sys.stdin.read())

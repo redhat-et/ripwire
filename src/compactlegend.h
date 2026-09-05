@@ -198,6 +198,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "hits_capped",       "hits_capped=1: hits= is a floor" },
     { "est_tokens",        "est_tokens=: price as emitted (an upper bound under compact)" },
     { "over_ceiling",      "over_ceiling=1: budget not met" },
+    // M1 (terminality round A, 2026-09-05): the ranked head's own floor — how many rank>0 candidates the
+    // ceiling ladder cut. It rides the root on --for and (since M1) on --pack-task/explore too, so the
+    // compact dialect has to define it wherever it appears, or the default answer names a number with no
+    // reading. Present-only, like every term here: absent means nothing was dropped.
+    { "dropped_positive",  "dropped_positive=N: N ranked candidates cut by the ceiling" },
     { "withheld",          "withheld=: rows the budget cut" },
     { "at",                "at=: commit(+dirty)" },
     { "root",              "root=: p= relative to it" },

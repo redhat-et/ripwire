@@ -250,7 +250,12 @@ import json, subprocess, sys
 binPath, payloadPath = sys.argv[1], sys.argv[2]
 body = open( payloadPath ).read()
 req  = { "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-         "params": { "name": "edit_check", "arguments": { "path": ".", "symbol": "lib.h:scale", "new_body": body } } }
+         # M1 RE-PIN (terminality round A, 2026-09-05): the MCP legend default moved to compact, and this
+         # arm compares the server document against the CLI PREVIEW, which is the CLI default (full). The
+         # posture is named so both operands are the same dialect; the compact default equivalence
+         # (default == compact, payload byte-identical to full) is pinned per verb by compactlegendcheck (N).
+         "params": { "name": "edit_check",
+                     "arguments": { "path": ".", "symbol": "lib.h:scale", "new_body": body, "legend": "full" } } }
 p = subprocess.run( [ binPath, "--mcp" ], input = json.dumps( req ) + "\n",
                     capture_output = True, text = True )
 for line in p.stdout.splitlines():
