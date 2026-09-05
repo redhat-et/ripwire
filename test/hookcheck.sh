@@ -1786,6 +1786,14 @@ echo "-- edit-target rows --"; [ -f "$LV5" ] && cat "$LV5"
 #   e-j  MCP insert-before, Grep tool (pattern names no file)  -> sweep
 #   e-k  codex CLI replace, build                              -> TERMINAL
 #   e-l  codex CLI replace, Read of another file               -> sweep
+#   e-m  agent="" CLI replace (target src/m.cpp), build        -> TERMINAL, in its OWN (unknown) bucket
+#   e-n  agent="" CLI replace (no target), Read of some file   -> unattrib, same bucket
+# e-m/e-n are V1 I3+I4: a v3 row that CARRIES `agent` and leaves it EMPTY is a writer that failed to
+# identify itself, and folding it into claude files another runner's rows under Claude Code with no
+# trace (bench/substitution_report.py's row_agent used `row.get("agent") or "claude"`, which cannot
+# tell an ABSENT v2 field from an EMPTY v3 one). Together they also make one bucket where n=2 and
+# decidable=1, which is the I4 case: the small-n NOTE and the column headed `n` must not print two
+# different quantities under the same letter.
 EDITLOG="$TMP/editband.jsonl"
 # v3 rows through the same writer as the FIND fixture (termrow's nine-argument form), into their own log.
 editrow() { TERMLOG="$EDITLOG" termrow "$@"; }
@@ -1820,6 +1828,12 @@ ecli   1 e-k 'ripwire . --replace-symbol-body=foo --edit-target-file=src/a.cpp -
 ebuild 2 e-k codex
 ecli   1 e-l 'ripwire . --replace-symbol-body=bar --edit-target-file=src/b.cpp --edit-payload=-' codex src/b.cpp
 eread  2 e-l '/x/repo/src/other.cpp' codex
+# agent="" — passed through termrow's nine-argument form, which writes the field EMPTY rather than
+# omitting it (ecli/eread/ebuild all default an empty argument back to claude, which is the fold itself)
+editrow 1 e-m Bash ripwire-cli ripwire './build/ripwire . --replace-symbol-body=zed --edit-target-file=src/m.cpp --edit-payload=-' '' cli src/m.cpp
+editrow 2 e-m Bash build other 'cmake --build build -j' '' cli ''
+editrow 1 e-n Bash ripwire-cli ripwire './build/ripwire . --replace-symbol-body=zee --edit-payload=-' '' cli ''
+editrow 2 e-n Read read native '/x/repo/src/q.cpp' '' native ''
 
 if [ -f "$REPORT" ]; then
     python3 "$REPORT" "$EDITLOG" >"$TMP/edit.out" 2>&1; RCE=$?
@@ -1859,6 +1873,18 @@ if [ -f "$REPORT" ]; then
     edithas E7b "mcp:insert_before_symbol 1 0.0% 0 1 0 0" "a Grep-tool call (pattern only, names no file) is a sweep"
     # codex/cli: n=2 -> e-k terminal, e-l sweep.
     edithas E8 "--replace-symbol-body 2 50.0% 0 1 0 0" "codex/cli --replace-symbol-body: 2 calls, 1 terminal, 1 sweep"
+    # E10 (V1 I3): an EMPTY agent on a v3 row is its OWN bucket, never folded into claude. Two proofs,
+    # because either alone can pass for the wrong reason: the (unknown) block exists, AND claude/cli's
+    # --replace-symbol-body is still n=4 (a fold would have made it 6).
+    if grep -q 'agent=(unknown) surface=cli' "$TMP/edit.out"; then
+        edithas E10 "--replace-symbol-body 2 100.0% 0 0 0 1" \
+            "an EMPTY agent= on a v3 row gets its own (unknown) bucket (n=2: e-m terminal, e-n unattrib)"
+    else
+        no "E10 edit-band: no 'agent=(unknown) surface=cli' block — a v3 row with agent=\"\" was folded into another runner's bucket; see $TMP/edit.out"
+    fi
+    grep -Fqx " --replace-symbol-body 4 50.0% 1 1 1 0" "$TMP/edit.sq" \
+        && ok "E10b edit-band: claude/cli --replace-symbol-body is still n=4 — the two agent=\"\" rows did NOT fold into claude" \
+        || no "E10b edit-band: claude/cli --replace-symbol-body moved — the empty-agent rows were folded in; see $TMP/edit.out"
     # E9: THE MUTATION CONTROL. Move e-a's policy Read to another file: the row it feeds must change
     # (policy-read 1->0, sweep 1->2, terminal 50.0%->25.0%). A column that never moves is not a column.
     sed '/"session":"e-a".*"tool":"Read"/ s#"detail":"/x/repo/src/a.cpp"#"detail":"/x/repo/src/zzz.cpp"#' "$EDITLOG" >"$TMP/editmut.jsonl"
