@@ -41,7 +41,7 @@ echo "receiptpostcheck: BIN=$BIN"
 
 # ── the sandbox ────────────────────────────────────────────────────────────────────────────────────────
 # geo.py holds the edit target and two callers (one with TWO call sites, so sites is not degenerate);
-# test/check_geo.py is a third caller in a test path, and test/check_geo.sh gives it a derivable runner so
+# test/area_spec.py is a third caller in a test path, and test/area_spec.sh gives it a derivable runner so
 # the tests_to_run rows carry a real run= rather than only the not-derivable disclosure.
 SB="$TMP/sandbox"
 mkdir -p "$SB/test"
@@ -59,18 +59,18 @@ def report():
 def summarize():
     return area_of_triangle(1, 2)
 EOF
-cat > "$SB/test/check_geo.py" <<'EOF'
+cat > "$SB/test/area_spec.py" <<'EOF'
 from geo import area_of_triangle
 
 
 def test_area():
     assert area_of_triangle(2, 2) == 2.0
 EOF
-cat > "$SB/test/check_geo.sh" <<'EOF'
+cat > "$SB/test/area_spec.sh" <<'EOF'
 #!/usr/bin/env bash
-python3 -m pytest test/check_geo.py
+python3 -m pytest test/area_spec.py
 EOF
-chmod +x "$SB/test/check_geo.sh"
+chmod +x "$SB/test/area_spec.sh"
 ( cd "$SB" && git init -q && git config user.email t@t && git config user.name t \
   && git add -A && git commit -qm init >/dev/null 2>&1 )
 
@@ -118,9 +118,12 @@ fi
 
 # ── ARM 2 — edit_check is folded in, and it EQUALS the separate --edit-check ───────────────────────────
 EC_XML="$( cd "$TMP/w" && "$BIN" . --edit-check=geo.py:area_of_triangle 2>/dev/null | sed 's/.*-->//' )"
-EC_STATUS="$( printf '%s' "$EC_XML" | sed -nE 's/.* status="([^"]*)".*/\1/p' )"
-EC_CALLERS="$( printf '%s' "$EC_XML" | sed -nE 's/.* callers="([0-9]*)".*/\1/p' )"
-EC_INCOMP="$( printf '%s' "$EC_XML" | sed -nE 's/.* incompatible="([0-9]*)".*/\1/p' )"
+# the ROOT tag alone: the document is one line, so a greedy `.*incompatible="` reaches the LAST occurrence,
+# which is a <c> row's per-caller flag ("1") and not the root's count.
+EC_ROOT="$( printf '%s' "$EC_XML" | grep -oE '<edit-check [^>]*>' )"
+EC_STATUS="$( printf '%s' "$EC_ROOT" | sed -nE 's/.* status="([^"]*)".*/\1/p' )"
+EC_CALLERS="$( printf '%s' "$EC_ROOT" | sed -nE 's/.* callers="([0-9]*)".*/\1/p' )"
+EC_INCOMP="$( printf '%s' "$EC_ROOT" | sed -nE 's/.* incompatible="([0-9]*)".*/\1/p' )"
 [ "$EC_STATUS" = "contract-change" ] && [ "${EC_INCOMP:-0}" -ge 2 ] \
     || no "(2) fixture degenerate: the standalone --edit-check reads status=$EC_STATUS incompatible=$EC_INCOMP"
 GOT_EC="$( jq_field edit_check < "$TMP/r1.json" )"
@@ -252,8 +255,10 @@ print("OK")
 fresh
 mkdir -p "$TMP/w/plans"
 cp "$TMP/payload.py" "$TMP/w/plans/body.py"
+# `file` disambiguates: the payload itself lives under the plan's own directory and is INDEXED, so it
+# defines a second area_of_triangle and a bare target is honestly ambiguous.
 cat > "$TMP/w/plans/p.json" <<'EOF'
-{"version":1,"edits":[{"op":"replace_symbol_body","target":"geo.py:area_of_triangle","payload":"body.py"}]}
+{"version":1,"edits":[{"op":"replace_symbol_body","target":"area_of_triangle","file":"geo.py","payload":"body.py"}]}
 EOF
 DRY="$( cd "$TMP/w" && "$BIN" . --edit-plan=plans/p.json --dry-run 2>/dev/null )"
 printf '%s' "$DRY" | python3 -c '

@@ -114,6 +114,28 @@ inline McpStringArg mcpStringArg( const std::string& scope, const char* field )
     return { mcpdetail::decodeStringAt( scope, raw.valuePos ), {} };
 }
 
+// The BOOLEAN-typed twin (P9, capture-audit 2026-09-04). `post_check` is the first schema-typed boolean
+// argument in this server, and it gets a reader for exactly the reason the string and int twins have one:
+// absent must mean the verb's default, a present-but-wrong-shaped value must REFUSE naming the field, and
+// neither may collapse into the other. The two JSON literals are the whole vocabulary — a quoted "false" is
+// a string, not a boolean, and is refused rather than guessed at (the badValueRefusal wording every other
+// typed reader uses).
+struct McpBoolArg { bool value = false; bool isPresent = false; std::string refusal; };
+
+inline McpBoolArg mcpBoolArg( const std::string& scope, const char* field )
+{
+    const mcpdetail::RawValue raw = mcpdetail::findRawValue( scope, field );
+    if( !raw.isPresent )
+    {
+        return {};
+    }
+    if( raw.isQuoted || ( raw.text != "true" && raw.text != "false" ) )
+    {
+        return { false, true, mcprefuse::badValueRefusal( field, raw.text ) };
+    }
+    return { raw.text == "true", true, {} };
+}
+
 // The ARRAY-typed twin (W3FIX M8). `symbols` / `queries` / `paths` are the three schema-typed arrays, and a
 // present-but-wrong-shaped value (`connect symbols:5`, `batch queries:5`, `analyze paths:5`) read as absent
 // through findArray — so both arms answered "missing required field: X" for a field the caller DID send,

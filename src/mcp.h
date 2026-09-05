@@ -843,6 +843,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const std::string files   = strArg( "files" );    // N11: schema-typed STRING (comma-separated paths), never an array
             const std::string diff    = strArg( "diff" );     // H5: same class as `files` — an array here answered about the wrong tree
             const std::string newBody = strArg( "new_body" ); // replace_symbol_body
+            // P9: the edit verbs' post-check opt-out. Default TRUE — the receipt carries its own
+            // verification unless the caller says otherwise; a wrong-shaped value refuses like every other
+            // typed argument rather than reading as absent (mcpBoolArg).
+            const McpBoolArg postCheckArg = mcpBoolArg( args, "post_check" );
+            if( shapeRefusal.empty() && !postCheckArg.refusal.empty() )
+            {
+                shapeRefusal = postCheckArg.refusal;
+            }
+            const bool postCheck = !postCheckArg.isPresent || postCheckArg.value;
             const std::string text    = strArg( "text" );     // insert_before/after
             const std::string handle  = strArg( "handle" );   // T4 fetch_body
             const std::string kind    = strArg( "kind" );     // exemplar kind token; whereis/stray_content/flags/doc_drift name filter
@@ -1592,15 +1601,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // symbol; the PAYLOAD is non-empty by the §H2 write-verb gate above (see isMcpEditVerb).
                 else if( name == "replace_symbol_body" && !path.empty() && !symbol.empty() )
                 {
-                    resp = editResult( runEditVerb( path, mcpedit::Op::ReplaceBody, symbol, file, newBody ) );
+                    resp = editResult( runEditVerb( path, mcpedit::Op::ReplaceBody, symbol, file, newBody, postCheck ) );
                 }
                 else if( name == "insert_before_symbol" && !path.empty() && !symbol.empty() )
                 {
-                    resp = editResult( runEditVerb( path, mcpedit::Op::InsertBefore, symbol, file, text ) );
+                    resp = editResult( runEditVerb( path, mcpedit::Op::InsertBefore, symbol, file, text, postCheck ) );
                 }
                 else if( name == "insert_after_symbol" && !path.empty() && !symbol.empty() )
                 {
-                    resp = editResult( runEditVerb( path, mcpedit::Op::InsertAfter, symbol, file, text ) );
+                    resp = editResult( runEditVerb( path, mcpedit::Op::InsertAfter, symbol, file, text, postCheck ) );
                 // T4 lazy-body verb: return a def's full source by its stable handle (or a staleness/refusal message).
                 }
                 else if( name == "fetch_body" && !path.empty() && !handle.empty() )

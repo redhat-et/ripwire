@@ -122,6 +122,14 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
     { "insert_before_symbol",    "text",      "the text to insert",                                                 "text=\"// note\\n\"" },
     { "insert_after_symbol",     "symbol",    "the def name to insert after",                                       "symbol=\"parseArgs\"" },
     { "insert_after_symbol",     "text",      "the text to insert",                                                 "text=\"// note\\n\"" },
+    // P9 (capture-audit 2026-09-04): the folded post-edit verification, on all three write verbs. OPTIONAL
+    // and defaulting to TRUE — the receipt carries its own edit_check + tests_to_run unless the caller opts
+    // out (the CLI spelling is --no-post-check). Declared here rather than left undocumented because
+    // test/mcpcontractcheck.sh (A/M12) requires every DECLARED property to carry a description: a schema
+    // field a caller can see and cannot read about is the accept-and-ignore defect one step earlier.
+    { "replace_symbol_body",     "post_check", "OPTIONAL — false skips the receipt's folded edit_check + tests_to_run (default true)", "post_check=false", FieldRule::Optional },
+    { "insert_before_symbol",    "post_check", "OPTIONAL — false skips the receipt's folded edit_check + tests_to_run (default true)", "post_check=false", FieldRule::Optional },
+    { "insert_after_symbol",     "post_check", "OPTIONAL — false skips the receipt's folded edit_check + tests_to_run (default true)", "post_check=false", FieldRule::Optional },
 };
 
 // join a list of clauses with `sep`, no trailing separator (the three renderers below all need this once).
@@ -416,11 +424,15 @@ consteval bool mcpPayloadTablesAreComplete()
             return false; // no noun row ⇒ the generic fallback ⇒ incomplete
         }
 
-        // exactly ONE non-`symbol` required row per edit verb (else the ternary's replacement is ambiguous)
+        // exactly ONE non-`symbol` required row per edit verb (else the ternary's replacement is ambiguous).
+        // P9 (capture-audit 2026-09-04): the rule test is not decoration — post_check is the first OPTIONAL
+        // row an edit verb carries, and without it a documented optional field reads as a second payload and
+        // trips this assert. The sentence above already said "required"; this is the code saying it too.
         int payloadRows = 0;
         for( const McpFieldSpec& row : kMcpRequiredFields )
         {
-            if( verb == std::string_view( row.verb ) && std::string_view( row.field ) != "symbol" )
+            if( verb == std::string_view( row.verb ) && row.rule == FieldRule::Required
+                && std::string_view( row.field ) != "symbol" )
             {
                 ++payloadRows;
             }
@@ -970,9 +982,9 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     // --slice-depth knobs; single-root by kMcpSingleRootVerbs (a per-definition on-disk re-parse).
     { "slice",                    "path symbol var flow depth" },
     // ── edit verbs ──
-    { "replace_symbol_body",      "path paths symbol file new_body", McpVerbFields::Effect::Destructive },
-    { "insert_before_symbol",     "path paths symbol file text", McpVerbFields::Effect::Writes },
-    { "insert_after_symbol",      "path paths symbol file text", McpVerbFields::Effect::Writes },
+    { "replace_symbol_body",      "path paths symbol file new_body post_check", McpVerbFields::Effect::Destructive },
+    { "insert_before_symbol",     "path paths symbol file text post_check", McpVerbFields::Effect::Writes },
+    { "insert_after_symbol",      "path paths symbol file text post_check", McpVerbFields::Effect::Writes },
 };
 
 // Dispatch-only ALIASES of advertised tools: a name tools/call answers that gets no separate tools/list

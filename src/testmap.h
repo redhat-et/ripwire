@@ -390,6 +390,37 @@ inline constexpr std::string_view kRunHintLegendClause =
     "run= is the command that discharges a test row; run_unknown=\"1\" means none is derivable for that "
     "harness (a guess would be worse than none) — a row carries one or the other, never neither. ";
 
+// ── P9 (capture-audit 2026-09-04) — the tests_to_run FILE SET for ONE changed file ────────────────────
+// The seeds are that file's own symbols, the walk is transitiveCallers, the partition is isTestPath, and
+// the sort is path-ascending: BYTE FOR BYTE what verbs_change.h's runAffected does after
+// resolveAffectedSeeds took its file reading, lifted here so the edit receipt cannot answer a different
+// question from the verb its own stderr hint used to point at. Seeding from the fileId directly (rather
+// than re-running the path-PATTERN match) is deliberate: --affected=geo.py is a substring pattern that also
+// matches test/check_geo.py, and a receipt knows exactly which file it wrote.
+inline std::vector<std::uint32_t> testsReachingFile( const IngestResult& ing, const Graph& g, std::uint32_t fileId )
+{
+    std::vector<NodeId> seeds;
+    for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
+    {
+        if( ing.symbols[i].fileId == fileId )
+        {
+            seeds.push_back( i );
+        }
+    }
+    std::vector<char>          seen( ing.files.size(), 0 );
+    std::vector<std::uint32_t> testFiles;
+    for( NodeId n : transitiveCallers( g, seeds ) )
+    {
+        if( const std::uint32_t f = ing.symbols[n].fileId; !seen[f] && isTestPath( ing.files[f] ) )
+        {
+            seen[f] = 1;
+            testFiles.push_back( f );
+        }
+    }
+    std::sort( testFiles.begin(), testFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
+    return testFiles;
+}
+
 // ── §P9 N5 / §B7.3 — the blindness this whole map shares, counted ONCE ────────────────────────────────
 // Every verb built on the call-graph walk (--affected, --test-gate, --situ) is blind to the same thing: a
 // shell harness that runs the compiled BINARY as a subprocess is not a call edge, so those gates are
