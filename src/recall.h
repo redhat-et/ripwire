@@ -1023,22 +1023,33 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
 //
 // `field` includes its own leading space and trailing '=' (" shown=", " est_tokens="), which is what makes
 // the match unambiguous against a header whose task text is arbitrary user input.
-inline std::string withHeaderField( std::string_view fullHeaderLine, std::string_view field, std::size_t value )
+// The digit run belonging to `field` in a header line, as [start, end); {npos, npos} when the field is not
+// there. Both writers below need exactly this and nothing else — written twice first, and --quality-delta
+// called the second a 122-token clone of the first, which it was.
+inline std::pair<std::size_t, std::size_t> headerFieldDigits( const std::string& line, std::string_view field )
 {
-    std::string       line( fullHeaderLine );
     const std::size_t pos = line.find( field );
     if( pos == std::string::npos )
     {
-        return line; // defensive: header shape changed elsewhere — leave it be
+        return { std::string::npos, std::string::npos };   // defensive: header shape changed elsewhere
     }
-
-    const std::size_t digitsStart = pos + field.size();
-    std::size_t       digitsEnd   = digitsStart;
-    while( digitsEnd < line.size() && line[digitsEnd] >= '0' && line[digitsEnd] <= '9' )
+    const std::size_t start = pos + field.size();
+    std::size_t       end   = start;
+    while( end < line.size() && line[end] >= '0' && line[end] <= '9' )
     {
-        ++digitsEnd;
+        ++end;
     }
-    line.replace( digitsStart, digitsEnd - digitsStart, std::to_string( value ) );
+    return { start, end };
+}
+
+inline std::string withHeaderField( std::string_view fullHeaderLine, std::string_view field, std::size_t value )
+{
+    std::string line( fullHeaderLine );
+    const auto [ start, end ] = headerFieldDigits( line, field );
+    if( start != std::string::npos )
+    {
+        line.replace( start, end - start, std::to_string( value ) );
+    }
     return line;
 }
 
@@ -1057,18 +1068,12 @@ inline std::string withHeaderField( std::string_view fullHeaderLine, std::string
 // streamed — recallbudgetcheck §2, budgetpolicycheck (C)).
 inline std::string withHeaderAttrAfter( std::string_view fullHeaderLine, std::string_view afterField, std::string_view attr )
 {
-    std::string       line( fullHeaderLine );
-    const std::size_t pos = line.find( afterField );
-    if( pos == std::string::npos )
+    std::string line( fullHeaderLine );
+    const auto [ start, end ] = headerFieldDigits( line, afterField );
+    if( start != std::string::npos )
     {
-        return line;   // defensive: header shape changed elsewhere — leave it be
+        line.insert( end, attr );
     }
-    std::size_t at = pos + afterField.size();
-    while( at < line.size() && line[ at ] >= '0' && line[ at ] <= '9' )
-    {
-        ++at;
-    }
-    line.insert( at, attr );
     return line;
 }
 

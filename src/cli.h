@@ -3447,11 +3447,14 @@ inline bool sinceHostActive( const Config& c, std::string_view flag ) noexcept
     return false;
 }
 
-inline bool anySinceHostActive( const Config& c ) noexcept
+// The two questions asked of this table are the SAME walk over it with one predicate switched, so they are
+// one function: "is any host selected" and "is the selected host a baseline host". Written as two loops
+// first, and --quality-delta named the second a 37-token clone of the first the same afternoon.
+inline bool anySinceHostActive( const Config& c, bool baselineOnly = false ) noexcept
 {
     for( const SinceHost& h : kSinceHosts )
     {
-        if( sinceHostActive( c, h.flag ) ) { return true; }
+        if( ( !baselineOnly || h.needsBaseline ) && sinceHostActive( c, h.flag ) ) { return true; }
     }
     return false;
 }
@@ -3460,11 +3463,7 @@ inline bool anySinceHostActive( const Config& c ) noexcept
 // validation — the one place the no-baseline refusal is decided, now from the one place the class is stated.
 inline bool activeSinceHostNeedsBaseline( const Config& c ) noexcept
 {
-    for( const SinceHost& h : kSinceHosts )
-    {
-        if( h.needsBaseline && sinceHostActive( c, h.flag ) ) { return true; }
-    }
-    return false;
+    return anySinceHostActive( c, /*baselineOnly=*/true );
 }
 
 inline void validateModifierGuards( Config& c ) noexcept
