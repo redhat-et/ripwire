@@ -220,6 +220,20 @@ which is where the two goals meet.
    map was one, and the data said the budget flag does not make an answer more terminal — it trims a ranking from
    the tail and cannot know which row would have ended the search.
 
+   *The harness-policy exclusion (owner ruling, 2026-09-05, terminality round A).* Claude Code's harness reads a
+   file before it edits it — the Read-before-edit policy. On the EDIT verbs (`--replace-symbol-body`,
+   `--insert-*-symbol`, `--edit-plan`, `--safe-delete` and their MCP twins) that Read follows the receipt whatever
+   the receipt says, so counting it as a post-call sweep would measure the runner's policy and call it the verb's
+   terminality; other runners (codex, opencode, aider) carry no such policy, and Claude's may change. The metric
+   therefore NEVER charges a Read of the edit's own target file against an edit verb: it is reported as
+   `policy-read` beside the number and excluded from it (`bench/substitution_report.py` §5b, the EDIT band
+   registered in `docs/EVALS.md` "Terminality round A"). What the edit verbs are judged on is the sweep of some
+   OTHER file, a native edit of the same file, and the redundant `--edit-check` after a receipt that already
+   carried the check — and the primary arm for that number is a runner WITHOUT the policy (`bench/agentloop`
+   codex / opencode); the live meter's EDIT band is the uncontrolled, secondary reading. The edit verbs are
+   improved regardless of the policy. Do not "fix" the metric back to counting the policy Read: a number that
+   moves with the harness and not with the tool is not the objective in principle 1.
+
 2. **Cut at the content cliff, not at a byte count.** The ranker knows where relevance drops (`--adaptive`, the
    compact route that ships edges instead of bodies). A ceiling is the backstop for when no cliff is found. The
    ceiling bounds the tail, never the head: when a ceiling would cut something above the cliff, compress first,
