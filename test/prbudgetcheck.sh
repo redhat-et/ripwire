@@ -140,5 +140,50 @@ else
     printf '  SKIP  xmllint (not installed)\n'
 fi
 
+# ── #8 (F4, terminality round A 2026-09-05): the EMPTY-DIFF root carries the same budget tail ───────────
+# --pr-context has three root emitters (empty diff / no-budget sub-bundle / budgeted) and the empty one was
+# built inline from two attributes, so a clean tree answered
+#   <pr-context base="working-tree" … files="0" skipped_mode_only="0" at=… >
+# with NO budget_tokens=, est_tokens=, trim_level=, truncated= or budget_default= — the ledger every other
+# root carries, missing in the one case a caller cannot otherwise tell apart from a crash. "Three call sites
+# which must not drift on which disclosures they carry" is writePrRootOpen's own header sentence; this arm is
+# that sentence made mechanical. Derived, not hardcoded: the required set is the NON-EMPTY working-tree root's
+# own attribute names, minus a DECLARED exemption list of the ones that exist only when there is a cut.
+printf 'int probeEmptyRoot() { return 1; }\n' >> "$ROOT/src/mod4.cpp"
+"$BIN" "$ROOT" --pr-context --no-cache >"$TMP/wt_dirty" 2>/dev/null
+( cd "$ROOT" && git checkout -- src/mod4.cpp )
+"$BIN" "$ROOT" --pr-context --no-cache >"$TMP/wt_clean" 2>/dev/null
+
+rootattrs(){ grep -oE '<pr-context [^>]*>' "$1" | head -1 | grep -oE '[a-z_]+="' | sed 's/="$//' | LC_ALL=C sort -u; }
+EXEMPT='^(shown|capped|total|has_more|next_offset|offset|limit|next)$'   # the page window: only when a cut happened
+
+if [ "$( attr "$TMP/wt_dirty" files )" = "0" ] || [ "$( attr "$TMP/wt_clean" files )" != "0" ]; then
+    no "(F4) the fixture did not produce a dirty root (files>0) AND a clean root (files=0): dirty=$( attr "$TMP/wt_dirty" files ) clean=$( attr "$TMP/wt_clean" files )"
+else
+    ok "(F4 fixture) same base (working-tree): one root with a change, one on a clean tree"
+    MISSING="$( comm -23 <( rootattrs "$TMP/wt_dirty" ) <( rootattrs "$TMP/wt_clean" ) | grep -Ev "$EXEMPT" | tr '\n' ' ' )"
+    [ -z "$MISSING" ] \
+        && ok "(F4) the empty-diff root carries every attribute the non-empty root carries (bar the declared page-window set)" \
+        || no "(F4) the empty-diff root is MISSING attributes the non-empty root carries: $MISSING"
+    for a in budget_tokens est_tokens trim_level truncated budget_default; do
+        [ -n "$( attr "$TMP/wt_clean" "$a" )" ] \
+            && ok "(F4) empty-diff root carries $a=\"$( attr "$TMP/wt_clean" "$a" )\"" \
+            || no "(F4) empty-diff root carries no $a= — the ledger every other --pr-context root carries"
+    done
+    EB="$( attr "$TMP/wt_clean" budget_tokens )"; EE="$( attr "$TMP/wt_clean" est_tokens )"
+    { [ -n "$EB" ] && [ -n "$EE" ] && [ "$EE" -le "$EB" ]; } \
+        && ok "(F4) empty-diff est_tokens=$EE is inside its own budget_tokens=$EB" \
+        || no "(F4) empty-diff est_tokens='$EE' is not inside budget_tokens='$EB'"
+    { [ "$( attr "$TMP/wt_clean" truncated )" = "none" ] && [ "$( attr "$TMP/wt_clean" trim_level )" = "0" ]; } \
+        && ok "(F4) empty-diff root reports truncated=\"none\" trim_level=\"0\" (nothing was cut, and it says so)" \
+        || no "(F4) empty-diff root claims a trim it did not make (trim_level=$( attr "$TMP/wt_clean" trim_level ) truncated=$( attr "$TMP/wt_clean" truncated ))"
+    { [ -n "$EE" ] && [ "$EE" -gt 0 ]; } \
+        && ok "(F4) empty-diff est_tokens is PRICED, not zero (the document still costs its legend)" \
+        || no "(F4) empty-diff est_tokens is '$EE' — a document that ships a legend cannot cost nothing"
+    if command -v xmllint >/dev/null 2>&1; then
+        xmllint --noout "$TMP/wt_clean" 2>/dev/null && ok "(F4) empty-diff --pr-context well-formed XML" || no "(F4) empty-diff --pr-context malformed XML"
+    fi
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
