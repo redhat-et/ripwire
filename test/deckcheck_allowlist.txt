@@ -102,3 +102,5 @@
 --ignored	git's own ls-files option, same quoted command — not a ripwire flag
 --exclude-standard	git's own ls-files option, same quoted command — not a ripwire flag
 --directory	git's own ls-files option, same quoted command — not a ripwire flag
+--tag	bench/substitution_report.py's own filter flag ("--tag ripwire", the meter rows this report scopes to) — quoted where the FIND band's instrument is described, not a ripwire flag
+--exit-code	git's own flag ("git diff --exit-code") quoted as lane E1's byte-exactness oracle, not a ripwire flag
