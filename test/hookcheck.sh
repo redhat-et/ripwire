@@ -1885,6 +1885,11 @@ if [ -f "$REPORT" ]; then
     grep -Fqx " --replace-symbol-body 4 50.0% 1 1 1 0" "$TMP/edit.sq" \
         && ok "E10b edit-band: claude/cli --replace-symbol-body is still n=4 — the two agent=\"\" rows did NOT fold into claude" \
         || no "E10b edit-band: claude/cli --replace-symbol-body moved — the empty-agent rows were folded in; see $TMP/edit.out"
+    # E11 (V1 I4): the small-n NOTE prints the SAME n the row above it prints, and names the decidable
+    # subset separately. The (unknown) block is the case that separates them: n=2, decidable=1.
+    grep -Fq 'NOTE: n=2 (1 decidable, unattrib 1) is under the 10-call bar' "$TMP/edit.out" \
+        && ok "E11 edit-band: the small-n NOTE reports n=2 — the same n its own row prints — and names the 1 decidable call separately" \
+        || no "E11 edit-band: the NOTE and the n column still disagree — $( grep -m1 'NOTE: n=' "$TMP/edit.out" )"
     # E9: THE MUTATION CONTROL. Move e-a's policy Read to another file: the row it feeds must change
     # (policy-read 1->0, sweep 1->2, terminal 50.0%->25.0%). A column that never moves is not a column.
     sed '/"session":"e-a".*"tool":"Read"/ s#"detail":"/x/repo/src/a.cpp"#"detail":"/x/repo/src/zzz.cpp"#' "$EDITLOG" >"$TMP/editmut.jsonl"

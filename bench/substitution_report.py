@@ -324,8 +324,14 @@ def edit_row(verb, st):
     decidable = n - unattrib
     pct = "%.1f%%" % (100.0 * term / decidable) if decidable else "n/a"
     print("    %-24s %6d %10s %12d %6d %16d %9d" % (verb, n, pct, policy, sweep, redundant, unattrib))
-    if 0 < decidable < SMALL_N:
-        print("      NOTE: n=%d (<%d) -- too few calls to read as a rate" % (decidable, SMALL_N))
+    # V1 I4 (wave-1 verifier): the note used to print `n=` with the DECIDABLE count while the column
+    # headed `n` on the line above showed the call count — one letter for two quantities on adjacent
+    # lines. It now prints the same n the row prints, and names the decidable subset separately. The
+    # trigger is either being under the bar: the rate is computed on `decidable`, so a small decidable
+    # subset of a large n is still too few calls to read as a rate.
+    if 0 < n < SMALL_N or 0 < decidable < SMALL_N:
+        print("      NOTE: n=%d (%d decidable, unattrib %d) is under the %d-call bar -- too few calls to read as a rate"
+              % (n, decidable, unattrib, SMALL_N))
 
 
 def session_order(rows):
