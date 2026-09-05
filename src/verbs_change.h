@@ -136,7 +136,7 @@ std::optional<int> runAffected( const MainDispatch& d )
         const rw::TestRunnerIndex runners( ing );
         for( std::uint32_t f : testFiles )
         {
-            std::printf( "<test p=\"%s\"%s/>", ex( afPathRel( f ) ).c_str(), rw::runAttr( runners, f, ex ).c_str() );
+            std::printf( "<test p=\"%s\"%s/>", ex( afPathRel( f ) ).c_str(), rw::runAttrDisclosed( runners, f, ex ).c_str() );
         }
         std::printf( "</affected>" );
         return 0;
@@ -230,7 +230,7 @@ std::optional<int> runExercises( const MainDispatch& d )
     for( std::size_t i = 0; i < shownSeed; ++i )
     {
         const std::string_view rp = exSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ sel.testFiles[i] ], exRootPrefix ) : std::string_view( ing.files[ sel.testFiles[i] ] );
-        std::printf( "<t p=\"%s\"%s/>", ex( rp ).c_str(), rw::runAttr( runners, sel.testFiles[i], ex ).c_str() );
+        std::printf( "<t p=\"%s\"%s/>", ex( rp ).c_str(), rw::runAttrDisclosed( runners, sel.testFiles[i], ex ).c_str() );
     }
     for( std::size_t i = epw.begin; i < epw.end; ++i )
     {

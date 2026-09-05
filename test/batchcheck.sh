@@ -241,6 +241,65 @@ case "$BAD" in
     *)        no "(g) [1,\"x\",null] was accepted — the string grammar is too permissive" ;;
 esac
 
+echo "=== (h) P17 — slice and edit_check are batchable: ONE <batch n=\"5\"> for the edit-loop sweep ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# capture-audit 2026-09-04, finding P17 (lens 8 #17). batch served 14 verbs; slice (a per-definition on-disk
+# re-parse) and edit_check (ms warm off the qheadsnap cache) were excluded, and they are the two an agent
+# most wants in the SAME turn as callers/uses — "what did I just change, who calls it, where are the sites,
+# what does the body actually flow". Both are READ-ONLY; edit_check is batched WITHOUT new_body, so the
+# pre-apply preview (which builds a spliced tree) stays out of the fast sweep.
+#
+# The assertion is the whole five-verb sweep answering in one call, each sub-answer byte-identical to its
+# standalone verb — the same property arm (a) pins for the original four, so a batched slice can never
+# become a second, quietly-different slice.
+Q5='[{"verb":"for","task":"distance between two points"},{"verb":"callers","symbol":"distance"},{"verb":"uses","symbol":"distance"},{"verb":"slice","symbol":"geometry.cpp:distance"},{"verb":"edit_check","symbol":"geometry.cpp:distance"}]'
+BAT5="$( call_batch "$Q5" )"
+printf '%s' "$BAT5" > "$TMP/batch_g.xml"
+SLICE_STD="$( call_verb slice      '"symbol":"geometry.cpp:distance"' )"
+EC_STD="$(    call_verb edit_check '"symbol":"geometry.cpp:distance"' )"
+python3 - "$TMP/batch_g.xml" "$SLICE_STD" "$EC_STD" <<'PY2'
+import sys, re
+batch = open(sys.argv[1]).read()
+slice_std, ec_std = sys.argv[2], sys.argv[3]
+qs = re.findall(r'<q i="(\d+)" verb="([^"]*)" ok="([01])"(?:\s+err="([^"]*)")?\s*(?:/>|>(.*?)</q>)', batch, re.S)
+order = [(v, o) for (_i, v, o, _e, _b) in qs]
+expect = [("for","1"),("callers","1"),("uses","1"),("slice","1"),("edit_check","1")]
+assert order == expect, "order/ok mismatch: %r  (errs: %r)" % (order, [(v,e) for (_i,v,o,e,_b) in qs if o=="0"])
+m = re.search(r'<batch [^>]*n="(\d+)"', batch)
+assert m and m.group(1) == "5", "expected one <batch n=\"5\">, got: %r" % (batch[:200],)
+def cdata(body):
+    body = body.replace("]]]]><![CDATA[>", "]]>")
+    assert body.startswith("<![CDATA[") and body.endswith("]]>"), body[:60]
+    return body[len("<![CDATA["):-len("]]>")]
+payload = {v: cdata(b) for (_i, v, o, _e, b) in qs}
+assert payload["slice"]      == slice_std, "batched slice payload != standalone slice"
+assert payload["edit_check"] == ec_std,    "batched edit_check payload != standalone edit_check"
+print("G_OK")
+PY2
+if [ $? -eq 0 ]; then
+    ok "(h) one <batch n=\"5\"> answers for+callers+uses+slice+edit_check, slice/edit_check byte-identical to standalone"
+else
+    no "(h) slice/edit_check are not batchable (or answered differently inside the batch)"
+    printf '%s\n' "$BAT5" | head -c 900; echo
+fi
+# the WRITE half stays out: a batched edit_check carrying new_body is the pre-apply PREVIEW, which builds a
+# spliced tree — not a fast read. It must refuse as an undeclared field, inline, never silently ignored.
+BATNB="$( call_batch '[{"verb":"edit_check","symbol":"geometry.cpp:distance","new_body":"int distance(){return 0;}"}]' )"
+printf '%s' "$BATNB" | grep -q 'ok="0"' \
+    && ok "(h) a batched edit_check with new_body refuses inline — the preview stays out of the sweep" \
+    || { no "(h) new_body was accepted (or silently ignored) inside a batch"; printf '%s\n' "$BATNB" | head -c 500; }
+# and the served-set advertisement must name them, so an agent can learn the capability from tools/list.
+TOOLS="$( mcp_call "$INIT" '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | tail -1 )"
+printf '%s' "$TOOLS" | python3 -c '
+import sys, json
+tools = { t["name"]: t for t in json.load(sys.stdin)["result"]["tools"] }
+d = tools["batch"]["description"]
+served_ok  = "slice" in d.split("each verb is one of")[1].split("The other")[0] and "edit_check" in d.split("each verb is one of")[1].split("The other")[0]
+excluded   = d.split("are NOT batchable:")[1]
+still_excl = ("slice" in excluded) or ("edit_check" in excluded)
+sys.exit(0 if (served_ok and not still_excl) else 1)
+'     && ok "(h) tools/list names slice and edit_check as SERVED and no longer as excluded"     || { no "(h) the batch tools/list stanza still contradicts what batch dispatches"; }
+
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME CHECKS FAILED"
 exit "$fail"

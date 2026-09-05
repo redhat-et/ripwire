@@ -422,6 +422,60 @@ inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, st
     return callerIncompatible;
 }
 
+// P3/M21 (capture-audit 2026-09-04) — the CALL SITES behind the flagged rows, as (caller node, line) pairs
+// sorted by both.
+//
+// WHY: a `<c>` row's p= is the CALLER'S DEFINITION line. The lines an agent has to open and edit are the
+// call sites, and until this existed the only verb that printed them was `--uses` — so "the contract moved"
+// → "where do I fix it" cost a second call whose answer this document already held. The measured shape was
+// `<c n="benchScores" p="bench/bench_radix_ab.cpp:133" incompatible="1"/>` for an edit whose sites are 146
+// and 152.
+//
+// The FILTERS ARE `--uses`' OWN (verbs_navigate.h collectUseSites): role=="call", and never a HAS-A compose
+// edge, a markdown doc-mention or a wikilink. That is deliberate and is the whole reason the two verbs can
+// be asserted equal (test/editcheckcheck.sh arm (k)) without either knowing about the other — one question,
+// two documents, one answer. It deliberately does NOT filter on argCountKnown: a spread/splat call site
+// cannot be PROVEN incompatible, but it is still a site to open, and `--uses` prints it.
+//
+// ONE pass over ing.references plus one sort — never a per-row rescan (editCheckIncompatibleFlags' own
+// rule; a widely-shared name has hundreds of caller rows). Duplicate (node,line) pairs collapse: this is a
+// set of LINES TO OPEN, so two calls on one line are one site.
+inline std::vector<std::pair<NodeId, std::uint32_t>>
+editCheckCallSites( const IngestResult& ing, const std::string& symName, std::span<const char> callerIncompatible )
+{
+    std::vector<std::pair<NodeId, std::uint32_t>> sites;
+    for( const Reference& r : ing.references )
+    {
+        if( r.role != RefRole::Call || r.isCompose || r.isDocLink || r.lang == Lang::Markdown )
+        {
+            continue;
+        }
+        if( r.fromSymbol >= callerIncompatible.size() || !callerIncompatible[ r.fromSymbol ] || r.calleeName != symName )
+        {
+            continue;
+        }
+        sites.emplace_back( r.fromSymbol, r.line );
+    }
+    std::sort( sites.begin(), sites.end() );
+    sites.erase( std::unique( sites.begin(), sites.end() ), sites.end() );
+    return sites;
+}
+
+// The comma-joined, ascending site list for ONE caller, or "" when the pass above found none (a flagged
+// caller always has at least one, so "" only happens on a degraded reference table — and an empty
+// attribute is never printed; see the emitter).
+inline std::string editCheckSiteList( std::span<const std::pair<NodeId, std::uint32_t>> sites, NodeId caller )
+{
+    std::string list;
+    for( auto it = std::lower_bound( sites.begin(), sites.end(), std::make_pair( caller, std::uint32_t( 0 ) ) );
+         it != sites.end() && it->first == caller; ++it )
+    {
+        if( !list.empty() ) { list += ","; }
+        list += std::to_string( it->second );
+    }
+    return list;
+}
+
 // 1-hop callers of the overload set (the --callers in-edge walk, unioned), sorted (file, line, name), plus a
 // parallel per-node flag for call-sites PROVABLY incompatible with the CURRENT arity.
 inline std::pair<std::vector<NodeId>, std::vector<char>>
@@ -502,6 +556,11 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
         }
     }
     const EditCheckVerdict verdict = editCheckVerdict( contract, incompatibleCount );
+    // P3/M21: the call-site lines for the flagged rows. Paid for only when a row will carry them — an
+    // unchanged contract with no flagged caller does not scan the reference table at all.
+    const std::vector<std::pair<NodeId, std::uint32_t>> callSites =
+        incompatibleCount > 0 ? editCheckCallSites( ing, fsym.name, callerIncompatible )
+                              : std::vector<std::pair<NodeId, std::uint32_t>>{};
 
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -560,7 +619,12 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
                        "headline must not turn on it. RESIDUAL: an overload whose arity changes "
                        "BELOW the MAX while the COUNT stays the same moves none of the three. "
                        "The root's incompatible= is the COUNT of flagged callers (a c row's incompatible=\"1\" is the "
-                       "per-caller flag). p= is the definition the selector resolved to; when defs is above 1 EVERY folded "
+                       "per-caller flag). sites_l= rides on a flagged row only: a c row's p= is where that CALLER is "
+                       "DEFINED, and sites_l= is the ascending LINE list of its call-role reference sites to this name — "
+                       "the lines to open, the same rows the uses verb prints, including the ones whose argument count "
+                       "could not be counted (so sites_l= can be wider than the evidence the flag rests on). Two calls "
+                       "on one line are ONE site. "
+                       "p= is the definition the selector resolved to; when defs is above 1 EVERY folded "
                        "definition is listed as its own def row (p=, t=, params=), which is what tells a widened single "
                        "definition apart from an added overload. At defs=\"1\" no def row is emitted: the root's own p=/t= "
                        "is that definition, and params_now is its parameter count. ";
@@ -658,6 +722,11 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
         if( callerIncompatible[c] )
         {
             out += " incompatible=\"1\"";
+            // P3/M21: the lines to OPEN, beside the caller p= that only says where the caller is DEFINED.
+            if( const std::string siteList = editCheckSiteList( callSites, c ); !siteList.empty() )
+            {
+                out += " sites_l=\"";  out += siteList;  out += "\"";
+            }
         }
         out += "/>";
     }

@@ -56,10 +56,15 @@ inline bool isMarkdownPath( std::string_view p ) noexcept
 
 } // namespace handoff_detail
 
-inline constexpr const char* kHandoffLegend =
+// Split in two around the tests_to_run run-hint clause: that sentence is testmap.h's kRunHintLegendClause,
+// the ONE wording every emitter of a tests_to_run row splices (M21(b), lane L8) — so it is spliced at
+// assembly time between these two halves rather than paraphrased here (M4(b), lane L2, had its own sentence;
+// merged 2026-09-04 into the shared clause).
+inline constexpr const char* kHandoffLegendHead =
     "<!-- ripwire handoff: the continuation packet for the NEXT session. <verified> is disk truth "
     "(branch=/at=<sha>[+dirty]/subject=<commit subject text>, changed files+symbols via git numstat, "
-    "blast_files=transitive dependent files, tests-to-run); "
+    "blast_files=transitive dependent files, tests-to-run); ";
+inline constexpr const char* kHandoffLegendTail =
     "<heuristic> is labeled non-verified suggestion (cochange=usually-edited-together deg=degree, note=committed "
     ".ripwire_notes row, doc=plan/design pointer s=lexical score for the branch+commit-subject query). "
     "branch= is git's own answer, so on a DETACHED head it reads HEAD and detached=1 says so (the commit is at=); "
@@ -67,8 +72,6 @@ inline constexpr const char* kHandoffLegend =
     "&lt;heuristic n= candidates= capped=&gt;: n= is the rows in the packet, candidates= how many the three classes "
     "produced before their own per-class caps (cochange 8, notes 8, docs 4), capped=1 when a cap dropped one — so "
     "candidates - n - withheld_rows is what the caps removed and nothing is lost silently. "
-    "&lt;t&gt; carries run= wherever a runner is DERIVABLE from real evidence, the same hint situ/test-gate/pr-context print; "
-    "absent run= means not derivable, never a guess. "
     "budget= is the token-budget cap; withheld=1 when heuristic rows were dropped to fit it, withheld_rows= how many "
     "(the map's spelling: a boolean, the count beside it) — verified rows are never dropped; est_tokens= prices the "
     "delivered packet in tokens and over_ceiling= is 1 when even the verified floor exceeds budget= (the packet is then "
@@ -156,17 +159,23 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
         }
         v += "</f>";
     }
-    // M4(b) — the SAME run= hint --situ / --test-gate / --pr-context print for the same file. One spelling
-    // (testmap.h::runAttr): a packet whose whole audience is an agent about to resume was the one emitter
-    // making its recipient re-derive the command. Absent still means NOT DERIVABLE, never a guess.
-    const TestRunnerIndex runners( ing );
     v += "<tests n=\"" + std::to_string( facts.tests.size() ) + "\">";
+    // M4(b) (lane L2) + M21(b) (lane L8), merged 2026-09-04: the SAME run= hint --situ / --test-gate /
+    // --pr-context print for the same file, through testmap.h's ONE spelling (runAttrDisclosed: run= when a
+    // runner is derivable, run_unknown="1" when none is — a row carries one or the other, never neither).
+    // M21(b) / lens 2 L2 (capture-audit 2026-09-04): this section is titled "tests-to-run" and named files
+    // that are not commands, while --situ / --pr-context / --affected — which compute the SAME list from the
+    // SAME facts — carried run="bash test/…" for those same files. The packet whose whole purpose is to be
+    // read by the NEXT session was the one that said least. Built here, inside the section's scope, because
+    // TestRunnerIndex is lazy: a packet with no test row reads no runner script.
+    const rw::TestRunnerIndex hoRunners( ing );
+    const auto                hoEsc = [ & ]( std::string_view t ) { return std::string( escapeXml( t, esc ) ); };
     for( const std::uint32_t f : facts.tests )
     {
         v += "<t p=\"";
         v += escapeXml( hoPathRel( f ), esc );
         v += "\"";
-        v += runAttr( runners, f, [ & ]( std::string_view t ) { return std::string( escapeXml( t, esc ) ); } );
+        v += rw::runAttrDisclosed( hoRunners, f, hoEsc );
         v += "/>";
     }
     v += "</tests></verified>";
@@ -269,7 +278,9 @@ inline int writeHandoffPacket( std::FILE* out, const std::string& root, const In
     // ── budget: drop heuristic rows tail-first until the whole packet fits; disclose what was withheld ─
     const auto assemble = [ & ]( std::size_t keepRows, std::size_t withheld )
     {
-        std::string doc = kHandoffLegend;
+        std::string doc = kHandoffLegendHead;
+        doc += rw::kRunHintLegendClause;   // M21(b): the ONE wording, spliced — never a seventh paraphrase
+        doc += kHandoffLegendTail;
         doc += "<handoff";
         doc += at;
         // R-E (2026-08-17 harvest): single-root by construction — the crawl root every p= above is relative to.

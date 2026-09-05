@@ -272,7 +272,12 @@ private:
         const std::string& target = ing_->files[ fileId ];
         if( runnerVerb( target ) != nullptr )
         {
-            return {}; // a runner script IS the command; no hint to add
+            // M21(b) (capture-audit 2026-09-04): a runner script IS the command, and this used to return ""
+            // — which was harmless while "" meant only "nothing to ADD to p=". It stopped being harmless the
+            // moment "" acquired a MEANING: run_unknown="1" asserts no runner is derivable, and for a row
+            // whose own path is directly runnable that assertion is simply false. So the self-runnable case
+            // now spells its own command, exactly as commandForScript already does for a shell gate.
+            return spell( fileId );
         }
 
         for( std::uint32_t r : runners_ )
@@ -346,6 +351,75 @@ inline std::string runFieldJson( const TestRunnerIndex& idx, std::uint32_t fileI
 
 inline std::string runSuffixText( const TestRunnerIndex& idx, std::uint32_t fileId )
 { return runHint( idx, fileId, "   (run: ", ")", []( std::string_view s ) { return std::string( s ); } ); }
+
+// ── M21(b), capture-audit 2026-09-04 — the NOT-DERIVABLE case, SAID ───────────────────────────────────
+// The three shapes above return "" when no runner is derivable, and every emitter simply printed nothing.
+// The rule behind that ("a guessed command is worse than none") is right and is unchanged here; what was
+// wrong is that an ABSENCE is not a disclosure. A reader of `<t p="./test/verify_radix.cpp"/>` — a row the
+// verb that emits it calls an OBLIGATION and exits 4 over — cannot tell "this harness has no runner in the
+// corpus" from "this emitter never asked". It is the same class as counts_floor= and
+// script_gates_unmodelled=: the gap is stated where the number is consumed. So a tests_to_run row now says
+// one of two things and never neither, and test/testrowruncheck.sh asserts exactly that over every emitter
+// in the family — including --handoff and --flags --flip, which asked for no runner at all.
+//
+// These are WRAPPERS, not copies: the ""-means-not-derivable test stays in runHint alone, so a later edit
+// to what counts as derivable cannot fix one dialect and leave another fabricating.
+template<class EscapeFn>
+inline std::string runAttrDisclosed( const TestRunnerIndex& idx, std::uint32_t fileId, EscapeFn esc )
+{
+    std::string attr = runAttr( idx, fileId, esc );
+    return attr.empty() ? std::string( " run_unknown=\"1\"" ) : attr;
+}
+
+template<class EscapeFn>
+inline std::string runFieldJsonDisclosed( const TestRunnerIndex& idx, std::uint32_t fileId, EscapeFn esc )
+{
+    std::string field = runFieldJson( idx, fileId, esc );
+    return field.empty() ? std::string( ",\"run_unknown\":true" ) : field;
+}
+
+inline std::string runSuffixTextDisclosed( const TestRunnerIndex& idx, std::uint32_t fileId )
+{
+    std::string suffix = runSuffixText( idx, fileId );
+    return suffix.empty() ? std::string( "   (run: not derivable)" ) : suffix;
+}
+
+// The ONE sentence every legend that carries a tests_to_run row splices, so the seven cannot drift into
+// seven wordings of one rule. Deliberately short: it rides on --test-gate's own byte ratchets.
+inline constexpr std::string_view kRunHintLegendClause =
+    "run= is the command that discharges a test row; run_unknown=\"1\" means none is derivable for that "
+    "harness (a guess would be worse than none) — a row carries one or the other, never neither. ";
+
+// ── P9 (capture-audit 2026-09-04) — the tests_to_run FILE SET for ONE changed file ────────────────────
+// The seeds are that file's own symbols, the walk is transitiveCallers, the partition is isTestPath, and
+// the sort is path-ascending: BYTE FOR BYTE what verbs_change.h's runAffected does after
+// resolveAffectedSeeds took its file reading, lifted here so the edit receipt cannot answer a different
+// question from the verb its own stderr hint used to point at. Seeding from the fileId directly (rather
+// than re-running the path-PATTERN match) is deliberate: --affected=geo.py is a substring pattern that also
+// matches test/check_geo.py, and a receipt knows exactly which file it wrote.
+inline std::vector<std::uint32_t> testsReachingFile( const IngestResult& ing, const Graph& g, std::uint32_t fileId )
+{
+    std::vector<NodeId> seeds;
+    for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
+    {
+        if( ing.symbols[i].fileId == fileId )
+        {
+            seeds.push_back( i );
+        }
+    }
+    std::vector<char>          seen( ing.files.size(), 0 );
+    std::vector<std::uint32_t> testFiles;
+    for( NodeId n : transitiveCallers( g, seeds ) )
+    {
+        if( const std::uint32_t f = ing.symbols[n].fileId; !seen[f] && isTestPath( ing.files[f] ) )
+        {
+            seen[f] = 1;
+            testFiles.push_back( f );
+        }
+    }
+    std::sort( testFiles.begin(), testFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
+    return testFiles;
+}
 
 // ── §P9 N5 / §B7.3 — the blindness this whole map shares, counted ONCE ────────────────────────────────
 // Every verb built on the call-graph walk (--affected, --test-gate, --situ) is blind to the same thing: a

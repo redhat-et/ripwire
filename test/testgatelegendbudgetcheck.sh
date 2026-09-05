@@ -57,10 +57,19 @@ EOF
 # attribute so a zero-row report pays nothing (situ.h tgRootAttr). Measured on this fixture: 1752 B with
 # the gauge sentence trimmed to its shortest honest form and L4's M2 trio clause moved into the row legend
 # it is a rule about; 1900 leaves ~148 B for one more honest clause and still forbids the 1689 B essay.
-if [ "$legend" -le 1900 ]; then
-    ok "(a) --test-gate legend is $legend B (<= 1900 B budget; total=$total payload=$payload)"
+# RE-PINNED 1900 -> 2050 (2026-09-04, capture-audit wave-2, lane L8 M21(b)). TWO new FACTS, both row-gated
+# (the zero-row report still pays nothing — donelegendcheck.sh's tg_empty ratchet is untouched at 1297 B):
+#   +178 B  the run=/run_unknown= rule, spliced from testmap.h's ONE constant (kRunHintLegendClause) so the
+#           seven emitters of a tests_to_run row cannot drift into seven wordings. It is what makes the
+#           not-derivable case SAYABLE instead of an absence the reader has to notice.
+#   + 47 B  the <u> row's own shape, now that those rows carry l= (the line their --flags --flip siblings
+#           have always had) — legendcoveragecheck.sh forbids an attribute no legend defines.
+# Measured on this fixture: 1752 -> 2002 B. Both clauses were written long, measured, and cut to the
+# shortest honest form before the pin moved; 2050 leaves ~48 B and still forbids the 1689 B essay.
+if [ "$legend" -le 2050 ]; then
+    ok "(a) --test-gate legend is $legend B (<= 2050 B budget; total=$total payload=$payload)"
 else
-    no "(a) --test-gate legend is $legend B (> 1900 B budget) — the essay re-inflated"
+    no "(a) --test-gate legend is $legend B (> 2050 B budget) — the essay re-inflated"
 fi
 
 # (b) the honesty vocabulary + the §B12.5 cross-verb UNIT-collision anchors (test/testgatecheck.sh arm (g)

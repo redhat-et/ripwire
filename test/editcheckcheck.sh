@@ -479,6 +479,93 @@ OUTJ_PY2="$( xec pkg/y.py:dup )"; OUTJ_PX2="$( xec pkg/x.py:dup )"; OUTJ_C12="$(
     || { no "(j) an edit in one file moved a same-named contract in another file"; printf '%s\n' "$OUTJ_PX2"; }
 rm -rf "$XFIX"
 
+# ── (k) EVERY INCOMPATIBLE ROW NAMES ITS CALL SITES — sites= == the --uses role="call" lines ────────────
+# capture-audit 2026-09-04, finding P3/M21. A <c> row's p= is the CALLER'S DEFINITION line; the lines the
+# agent has to open and edit are the CALL SITES, which only --uses printed. This arm is the PROPERTY, not
+# one row's literal: for every row the document flags incompatible="1", sites= must equal — as a set, in
+# ascending order — the lines of the --uses role="call" rows whose in_id names that same caller. The two
+# verbs must agree because they are one question asked twice; a hand-written literal here would go stale
+# the moment the fixture moved a line.
+# The attribute is sites_l=, not sites=: `sites` is already the tool's spelling for a COUNT of reference
+# sites (--context-ratio's <s>/<f> rows, --uses' amb_sites=/call_sites_of_name=), and §P8's rule — the one
+# attrvocabcheck.sh enforces — is that a new meaning never takes an established spelling. `_l` is the
+# tool's line-number suffix (--hotspots' top_l=).
+SFIX="$( mktemp -d )"
+mkdir -p "$SFIX/src"
+cat > "$SFIX/src/sites.cpp" <<'EOF'
+int scored( int a ) { return a * 2; }
+
+int twice( int n )
+{
+    int p = scored( n );
+    int q = scored( n + 1 );
+    return p + q;
+}
+
+int once( int n )
+{
+    return scored( n );
+}
+EOF
+( cd "$SFIX" && git init -q && git config user.email t@t && git config user.name t \
+  && git add -A && git commit -qm init >/dev/null 2>&1 )
+# the arity widening: both callers become provably incompatible, one at two sites and one at a single site.
+cat > "$SFIX/src/sites.cpp" <<'EOF'
+int scored( int a, int b ) { return a * b; }
+
+int twice( int n )
+{
+    int p = scored( n );
+    int q = scored( n + 1 );
+    return p + q;
+}
+
+int once( int n )
+{
+    return scored( n );
+}
+EOF
+OUTK="$( cd "$SFIX" && "$BIN" . --edit-check=scored --no-cache 2>/dev/null )"
+USESK="$( cd "$SFIX" && "$BIN" . --uses=scored --no-cache 2>/dev/null )"
+# the expectation, DERIVED from --uses: the call-role lines enclosed by caller $1, ascending, comma-joined.
+# `sort -nu`, not `sort -n`: sites= is the set of LINES TO OPEN, so two calls on one line are one site while
+# --uses (which counts occurrences, one row per site) prints that line twice.
+uses_call_lines(){ printf '%s' "$USESK" | grep -oE '<u role="call" p="[^"]+:[0-9]+" in_id="'"$1"'"/>' \
+                   | sed -E 's/^.*:([0-9]+)" in_id.*$/\1/' | sort -nu | paste -sd, - | tr -d '\n'; }
+K_ROWS="$( printf '%s' "$OUTK" | grep -oE '<c [^>]*incompatible="1"[^>]*/>' )"
+if [ -z "$K_ROWS" ]; then
+    no "(k) fixture produced no incompatible rows — the arm cannot bite"; printf '%s\n' "$OUTK"
+else
+    k_fail=0; k_seen=0
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        k_seen=$(( k_seen + 1 ))
+        cname="$( printf '%s' "$row" | sed -E 's/^<c n="([^"]*)".*$/\1/' )"
+        got="$( printf '%s' "$row" | sed -nE 's/^.* sites_l="([^"]*)".*$/\1/p' )"
+        want="$( uses_call_lines "$cname" )"
+        if [ "$got" != "$want" ]; then
+            k_fail=1
+            printf '        caller %s: sites_l="%s" but --uses role=call lines are "%s"\n' "$cname" "$got" "$want"
+        fi
+    done <<EOF
+$K_ROWS
+EOF
+    # non-vacuous by construction: the fixture must exercise BOTH the multi-site and the single-site shape.
+    K_MULTI="$( uses_call_lines twice )"; K_ONE="$( uses_call_lines once )"
+    case "$K_MULTI" in *,*) ;; *) k_fail=1; printf '        fixture degenerate: twice() has no multi-site call set (%s)\n' "$K_MULTI" ;; esac
+    [ -n "$K_ONE" ] || { k_fail=1; printf '        fixture degenerate: once() has no call site\n'; }
+    [ "$k_seen" = 2 ] || { k_fail=1; printf '        expected 2 incompatible rows, saw %s\n' "$k_seen"; }
+    [ "$k_fail" = 0 ] \
+        && ok "(k) every incompatible row's sites_l= equals its --uses role=call lines ($k_seen rows, multi- and single-site)" \
+        || { no "(k) incompatible rows do not carry the call sites --uses prints"; printf '%s\n%s\n' "$OUTK" "$USESK"; }
+fi
+# the counterpart rule: a row NOT flagged incompatible carries no sites= — the attribute is the flagged
+# row's own evidence, not a fourth spelling of the caller list (grep the ELEMENT, never the legend prose).
+printf '%s' "$OUTK" | grep -oE '<c [^>]*/>' | grep -v 'incompatible="1"' | grep -q 'sites_l="' \
+    && no "(k) sites_l= leaked onto a row that is not flagged incompatible" \
+    || ok "(k) sites_l= rides only on the flagged rows"
+rm -rf "$SFIX"
+
 # ── WARM-TIME budget: <= 100 ms on ripwire's OWN src/, after the qheadsnap/qsnap cache is primed ────────
 # The 100 ms figure is a PLAIN-build budget. A sanitizer build runs this same path at 120-130 ms on the same
 # machine — measured on the pre-change BASE asan binary too, so it is the instrumentation, not a regression —

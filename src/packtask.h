@@ -1322,7 +1322,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             std::string row = "<test p=\"";
             row += ex( rp );
             row += "\"";
-            row += rw::runAttr( runners, f, ex );
+            row += rw::runAttrDisclosed( runners, f, ex );
             row += "/>";
             testRows.emplace_back( std::move( row ) );
         }
@@ -1551,7 +1551,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         for( std::size_t i = 0; i < testsShown; ++i )
         {
             j += std::string( i == 0 ? "" : "," ) + "{\"p\":\"" + jsonStr( std::string( jPathRel( testFiles[i] ) ) ) + "\""
-               + rw::runFieldJson( jsonRunners, testFiles[i], jrun ) + "}";
+               + rw::runFieldJsonDisclosed( jsonRunners, testFiles[i], jrun ) + "}";
         }
         j += "]";
 

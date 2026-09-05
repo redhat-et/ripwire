@@ -123,6 +123,52 @@ else
     no "(3) exit code changed from the no-stale run ($rcClean -> $rcFG) — disclosure must never gate"
 fi
 
+# ── (5) M21(a): a <sa> row NAMES the ack that went stale, wherever the tree can still name it ──────────
+# capture-audit 2026-09-04 (lens 0 M0-2). `<sa kind="complexity" key="4b309450f25c2b44" why="finding-gone"/>`
+# is a 16-hex hash of an identity the reader does not have: to act on it — retire the ack, or look at why
+# the finding stopped firing — the agent had to open .ripwire_quality_acks and then reverse a hash it
+# cannot reverse. On this repo's own ledger that was 10 rows and 10 dead ends.
+#
+# THE RULE, and it is exactly derivable rather than best-effort: why="finding-gone" means the oracle found
+# the key IN the current snapshot (that is how it told finding-gone from target-gone), so the symbol EXISTS
+# and must be named. why="target-gone" means it is not there, so there is nothing to name and the why=
+# already says so. The two CLONE kinds key on a member-SET hash that no live symbol carries, so they are
+# never nameable — a floor, stated in the legend rather than papered over with a guess. Asserted in all
+# three directions below, on the documents arms (2) and (3) already produced.
+FG_ROWS="$( grep -o '<sa [^>]*why="finding-gone"[^>]*/>' "$TMP/findinggone" | grep -vE 'kind="(duplication|new-clone-of-reused-helper)' )"
+if [ -z "$FG_ROWS" ]; then
+    no "(5) no non-clone finding-gone row in the fixture — the arm cannot bite"
+else
+    FG_BAD="$( printf '%s\n' "$FG_ROWS" | grep -v ' sym="' )"
+    [ -z "$FG_BAD" ] \
+        && ok "(5) every non-clone why=\"finding-gone\" row names its symbol ($( printf '%s\n' "$FG_ROWS" | grep -c . ) rows)" \
+        || { no "(5) a finding-gone <sa> row carries only a key hash — the reader cannot tell WHICH ack is stale"; printf '%s\n' "$FG_BAD"; }
+    # and the name must be the RIGHT one, not just present: the fixture's stale complexity ack is knotty().
+    printf '%s\n' "$FG_ROWS" | grep -q 'kind="complexity"[^>]*sym="[^"]*knotty"' \
+        && ok "(5) the stale complexity ack is named as knotty(), the symbol it was written for" \
+        || { no "(5) the finding-gone complexity row names the wrong symbol"; printf '%s\n' "$FG_ROWS"; }
+    # …and it carries the LOCATOR every other row family in this document carries, so it is one paste from
+    # --expand (the gating <r> rows' own p="path:line" shape).
+    printf '%s\n' "$FG_ROWS" | grep -q 'kind="complexity"[^>]*p="[^"]*src/lib\.cpp:[0-9]*"' \
+        && ok "(5) the named row carries p=\"path:line\", the locator the gating rows use" \
+        || { no "(5) the named row carries no p= locator"; printf '%s\n' "$FG_ROWS"; }
+fi
+# the counterpart: target-gone is unnameable BY CONSTRUCTION, so it must not fabricate a name.
+grep -o '<sa [^>]*why="target-gone"[^>]*/>' "$TMP/targetgone" | grep -q ' sym="' \
+    && { no "(5) a target-gone row names a symbol the current tree does not have"; grep -o '<sa [^>]*/>' "$TMP/targetgone"; } \
+    || ok "(5) target-gone rows name nothing — the tree cannot name what it no longer holds"
+# and the rule itself is stated where the attribute is emitted (legendcoveragecheck's rule, pinned here too).
+# the rule itself is stated where the attribute is emitted (legendcoveragecheck's rule, pinned here too).
+# The legend is everything BEFORE the root start tag — a greedy <!--…--> regex over a one-line document
+# would capture only the last comment.
+if grep -q '<sa [^>]*sym="' "$TMP/findinggone"; then
+    sed 's/<quality-delta.*//' "$TMP/findinggone" | grep -q 'sym=' \
+        && ok "(5) the sa sym= rule is defined in the document's own legend" \
+        || no "(5) sa sym= is emitted with no legend definition"
+else
+    no "(5) no sa row carried sym= — the legend arm cannot bite"
+fi
+
 # ── (4) a second, independent clean fixture also reports stale="0" — not a one-off on the first tree ────
 mkdir -p "$REPO2/src"
 cat > "$REPO2/src/other.cpp" <<'EOF'

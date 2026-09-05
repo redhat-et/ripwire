@@ -115,6 +115,28 @@ inline McpStringArg mcpStringArg( const std::string& scope, const char* field )
     return { mcpdetail::decodeStringAt( scope, raw.valuePos ), {} };
 }
 
+// The BOOLEAN-typed twin (P9, capture-audit 2026-09-04). `post_check` is the first schema-typed boolean
+// argument in this server, and it gets a reader for exactly the reason the string and int twins have one:
+// absent must mean the verb's default, a present-but-wrong-shaped value must REFUSE naming the field, and
+// neither may collapse into the other. The two JSON literals are the whole vocabulary — a quoted "false" is
+// a string, not a boolean, and is refused rather than guessed at (the badValueRefusal wording every other
+// typed reader uses).
+struct McpBoolArg { bool value = false; bool isPresent = false; std::string refusal; };
+
+inline McpBoolArg mcpBoolArg( const std::string& scope, const char* field )
+{
+    const mcpdetail::RawValue raw = mcpdetail::findRawValue( scope, field );
+    if( !raw.isPresent )
+    {
+        return {};
+    }
+    if( raw.isQuoted || ( raw.text != "true" && raw.text != "false" ) )
+    {
+        return { false, true, mcprefuse::badValueRefusal( field, raw.text ) };
+    }
+    return { raw.text == "true", true, {} };
+}
+
 // The ARRAY-typed twin (W3FIX M8). `symbols` / `queries` / `paths` are the three schema-typed arrays, and a
 // present-but-wrong-shaped value (`connect symbols:5`, `batch queries:5`, `analyze paths:5`) read as absent
 // through findArray — so both arms answered "missing required field: X" for a field the caller DID send,
@@ -1208,7 +1230,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
                 out += ",";
             }
             first = false;
-            out += "{\"test\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\"" + runFieldJson( runners, f, jsonEsc ) + "}";
+            out += "{\"test\":\"" + mcpdetail::jsonEscape( std::string( situJPathRel( f ) ) ) + "\"" + runFieldJsonDisclosed( runners, f, jsonEsc ) + "}";
         }
     }
 
@@ -2986,6 +3008,7 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     if( !acks.empty() )
     {
         oc.staleAcks = rw::quality::computeStaleAcks( acks, rw::quality::computeSnapshot( ing, g, root ) );
+        rw::quality::stampStaleAckIdentity( oc.staleAcks, ing, root );   // M21(a): the CLI twin's sym=/p=
     }
 
     // R3: the marker spelling table lives in selectBaseline, so CLI and MCP name the same state the same way;
@@ -3995,6 +4018,14 @@ inline constexpr std::size_t kBatchCap = 16;   // max sub-queries processed per 
 inline constexpr std::string_view kBatchServedVerbs[] = {
     "for", "grep", "find_symbol", "find_referencing_symbols", "impact", "uses", "mentions",
     "analyze", "lego", "owners", "cochange", "path_between", "exemplar", "fetch_body",
+    // P17 (capture-audit 2026-09-04, lens 8 #17): slice and edit_check. Both are READ-ONLY, and they are
+    // the two an agent most wants in the SAME turn as callers/uses — "what did I just change, who calls it,
+    // where does the value flow, did the contract move". slice was excluded as "a per-definition on-disk
+    // re-parse"; that is one file read, cheaper than the grep sub-query already in the set. edit_check is a
+    // qheadsnap cache read on a warm tree. The PREVIEW half of edit_check stays out: new_body is not in
+    // kBatchSubQueryFields, so a batched preview refuses as an undeclared field rather than quietly
+    // building a spliced tree inside a fast sweep.
+    "slice", "edit_check",
 };
 
 // Dispatch-only synonyms: `callers` == find_referencing_symbols, `callees` == find_symbol. They are NOT
@@ -4173,6 +4204,8 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
     const std::string handle  = strArg( "handle" );
     const std::string kind    = strArg( "kind" );
     const std::string grepInTyped = strArg( "in" );   // P3-4: the grep sub-query's span-tier hatch
+    const std::string var     = strArg( "var" );      // P17: the slice sub-query's variable half
+    const std::string flow    = strArg( "flow" );     // P17: back|fwd|both — validated inside sliceText
     const std::string from    = strArg( "from" );
     const std::string to      = strArg( "to" );
     const std::string file    = strArg( "file" );
@@ -4189,6 +4222,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         }
         return a;
     };
+    const McpIntArg depthArg  = intArg( "depth", 1, 32 );   // P17: the slice flow walk's bound (sliceText pairs it with flow)
     const McpIntArg startArg  = intArg( "start_line", 1, kMcpPageValueMax );
     const McpIntArg endArg    = intArg( "end_line",   1, kMcpPageValueMax );
     const long long startLine = startArg.value;
@@ -4414,6 +4448,35 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( "no matching exemplar (no symbol of that kind, or the task matched nothing)" );
         }
+    }
+    else if( r.verb == "slice" )
+    {
+        if( symbol.empty() )
+        {
+            return bad( missingField( "slice" ) );
+        }
+        // sliceText owns the WHOLE contract (resolution, the @FILE:LINE seed, flow/depth pairing, every
+        // refusal) — the same call the live arm makes, so a batched slice cannot become a second slice.
+        const SliceReply sr = sliceText( root, symbol, var, flow, depthArg.isPresent ? int( depthArg.value ) : 0, redactPtr );
+        if( sr.payload.empty() )
+        {
+            return bad( sr.refusal );
+        }
+        r.payload = sr.payload;
+    }
+    else if( r.verb == "edit_check" )
+    {
+        if( symbol.empty() )
+        {
+            return bad( missingField( "edit_check" ) );
+        }
+        // No new_body: the batched form is the post-hoc question only (see kBatchServedVerbs).
+        const EditCheckReply er = editCheckText( root, symbol );
+        if( er.payload.empty() )
+        {
+            return bad( er.refusal );
+        }
+        r.payload = er.payload;
     }
     else if( r.verb == "fetch_body" )
     {

@@ -891,7 +891,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                 std::fprintf( o, "<tests count=\"%zu\" shown=\"%zu\" capped=\"%u\">", testFiles.size(), tSc.shown, tSc.capped );
                 for( std::size_t i = 0; i < tSc.shown; ++i )
                 {
-                    std::fprintf( o, "<test p=\"%s\"%s/>", ex( prPathRel( testFiles[i] ) ).c_str(), runAttr( prRunners, testFiles[i], ex ).c_str() );   // §A9.5
+                    std::fprintf( o, "<test p=\"%s\"%s/>", ex( prPathRel( testFiles[i] ) ).c_str(), runAttrDisclosed( prRunners, testFiles[i], ex ).c_str() );   // §A9.5
                 }
                 std::fprintf( o, "</tests>" );
             }

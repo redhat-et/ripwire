@@ -2493,7 +2493,7 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     const std::string_view sym = !cfg.replaceSymbolBody.empty() ? cfg.replaceSymbolBody
                                  : !cfg.insertBeforeSymbol.empty() ? cfg.insertBeforeSymbol : cfg.insertAfterSymbol;
     const rw::mcpedit::Outcome outcome = rw::runEditVerb( std::string( cfg.rootPath ), op, std::string( sym ),
-                                                          std::string( cfg.editTargetFile ), payload );
+                                                          std::string( cfg.editTargetFile ), payload, !cfg.noPostCheck );
     if( !outcome.ok )
     {
         // M9 / lens 6 F8: name the VERB, not the family. All three CLI edit verbs printed "ripwire edit:",
@@ -2511,7 +2511,13 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     // --edit-check does not accept — so the printed command used to fail every time after a handle-addressed
     // edit — and a bare name narrowed by --edit-target-file would point --edit-check at a different
     // same-named definition. Both follow-ups are now spelled out concretely enough to paste.
-    std::fprintf( stderr, "ripwire edit: applied atomically; verify with --edit-check=%s:%s, then --affected=%s\n",
+    // P9 (capture-audit 2026-09-04): the two commands this line names are IN the receipt now, so the line
+    // says which world the caller is in. Both pasteable spellings STAY either way — a re-ask after a
+    // further edit needs the qualified `file:symbol` form, and this is the one place the tool teaches it
+    // (test/rootrelemitcheck.sh ARM7 asserts the printed --edit-check actually runs).
+    std::fprintf( stderr, "ripwire edit: applied atomically; %s --edit-check=%s:%s, then --affected=%s\n",
+                  cfg.noPostCheck ? "post-check skipped — verify with"
+                                  : "the receipt already carries edit_check and tests_to_run; re-ask with",
                   outcome.file.c_str(), outcome.symbol.c_str(), outcome.file.c_str() );
     return 0;
 }

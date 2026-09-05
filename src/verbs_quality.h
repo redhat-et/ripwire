@@ -585,6 +585,10 @@ inline constexpr const char* kQdSchemeLegend =
 inline constexpr const char* kQdStaleLegend =
     "Each sa row carries key= (the ack identity as stored) and why=, which is target-gone (the key names no "
     "symbol or group any more) or finding-gone (the target survived, this kind just does not fire on it). "
+    "sym= and p=path:line name WHICH ack it is, and are present exactly when the key still names a live "
+    "symbol: on every finding-gone row, on none of the target-gone rows (there is nothing left to name), "
+    "and on neither clone kind — a clone key hashes a member SET that no single symbol carries, so those "
+    "rows are unnameable by construction rather than guessed at. "
     "Hygiene disclosure only — the ledger file is never auto-edited. ";
 
 // Emitted only when the document actually has finding rows (in scope or disclosed out of scope).
@@ -1172,6 +1176,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // each; keeping the COUNTS apart keeps stale= meaning what it has always meant.
         std::vector<quality::StaleAck> saRows = staleAcks;
         saRows.insert( saRows.end(), foreignAcks.begin(), foreignAcks.end() );
+        // M21(a): name the rows the tree can still name, against the SAME tree computeStaleAcks judged
+        // (tree B in the ref-pair form) — naming a stale ack after the working tree would print an identity
+        // the verdict was never computed from. Costs one walk over ing.symbols, and only when there are rows.
+        quality::stampStaleAckIdentity( saRows, refPair ? refs.target().ing : ing,
+                                        refPair ? std::string_view( refs.target().root ) : std::string_view( cfg.rootPath ) );
 
         // r26 ORIGIN SPLIT — three counts over the VISIBLE (post-ack) findings, one pass:
         //   minorCount      — the materiality tier (unchanged axis).
@@ -1461,7 +1470,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             std::printf( "</out-of-scope>" );
         }
-        std::fputs( quality::staleAcksXml( saRows ).c_str(), stdout );   // L2 — one <sa> row per stale ack (quality::staleAcksXml)
+        {   // L2 — one <sa> row per stale ack (quality::staleAcksXml). M21(a): the escaper is passed in
+            // because sym= carries a canonical id (corpus text), unlike the closed-vocabulary kind=/why=.
+            std::vector<char> saEsc;
+            std::fputs( quality::staleAcksXml( saRows, [ & ]( std::string_view t ) { return std::string( escapeXml( t, saEsc ) ); } ).c_str(), stdout );
+        }
         std::printf( "</quality-delta>" );
         return gatingCount > 0 ? 2 : 0;   // r26: only a PREEXISTING-worse AND major regression gates (== gating=)
     }

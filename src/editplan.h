@@ -32,6 +32,13 @@ struct Edit
     std::size_t a = 0;
     std::size_t b = 0;
     std::size_t point = 0;
+    // P9 (capture-audit 2026-09-04, lens 8 §(4)): what a reviewer needs BEFORE --apply. The dry-run
+    // receipt named the target as the caller SPELLED it and the payload path it would read, and stopped —
+    // so "is this the definition I meant, and who breaks if it moves" was still one --edit-check per op
+    // after the fact. Resolved at prepare time, where the index is already open and the node already known.
+    std::string   symName;                 // the RESOLVED definition name (a seed/handle target says nothing)
+    std::uint32_t line = 0;                // its 1-based defining line — emitted with the file as at="file:line"
+    std::vector<NodeId> callers;           // its 1-hop callers, deduped and sorted (the union feeds the root)
 };
 
 struct FileStage
@@ -211,13 +218,21 @@ inline bool parseEdit( const McpIndex& ix, const std::string& object, const std:
     return true;
 }
 
-inline FileStage* ensureStage( const McpIndex& ix, const Edit& edit, std::vector<FileStage>& files, std::string& error )
+inline FileStage* ensureStage( const McpIndex& ix, const Edit& edit, std::vector<FileStage>& files,
+                               const std::string& root, std::string& error )
 {
     const auto staged = std::find_if( files.begin(), files.end(), [ & ]( const FileStage& file ) { return file.fileId == edit.fileId; } );
     if( staged != files.end() ) { return &*staged; }
     FileStage fresh;
     fresh.fileId = edit.fileId;
-    fresh.identity = ix.ing.files[edit.fileId];
+    // M12 (capture-audit 2026-09-04, lane L9) applied to the sibling it missed: the single-edit receipt's
+    // "file" is root-relative, and this one printed the raw ingest spelling ("./geo.py" on a relative root)
+    // in its own receipt, its refusals and its rollback message. One identity, one spelling — and P9's
+    // per-op post-check has to look the file up by it, so a second spelling here is not cosmetic.
+    // Single-root only (realPaths.empty()); a merged multi-root identity is already `<label>/<rel>`.
+    fresh.identity = ix.ing.realPaths.empty()
+                   ? std::string( rw::sarif::rootRelativeUri( ix.ing.files[edit.fileId], rw::sarif::rootPrefixOf( root ) ) )
+                   : ix.ing.files[edit.fileId];
     fresh.disk = diskPath( ix.ing, edit.fileId );
     struct stat link{};
     if( ::lstat( fresh.disk.c_str(), &link ) == 0 && S_ISLNK( link.st_mode ) ) { error = "refusing edit plan target symlink '" + fresh.identity + "'"; return nullptr; }
@@ -275,9 +290,22 @@ inline Outcome prepare( const std::string& root, const std::string& planPath, st
     {
         Edit edit;
         if( !parseEdit( ix, object, planPath, maxBytes, edit, out.message ) ) { return out; }
-        FileStage* file = ensureStage( ix, edit, files, out.message );
+        FileStage* file = ensureStage( ix, edit, files, root, out.message );
         if( file == nullptr ) { return out; }
         if( !( edit.a < edit.b && edit.b <= file->original.size() ) ) { out.message = "invalid definition span for '" + edit.target + "'"; return out; }
+        // P9: the resolved identity + its 1-hop callers, from the index this loop already holds open. The
+        // caller walk is editcheck.h's OWN (editCheckCallers over the overload set), so the number a
+        // dry-run shows and the number an --apply's per-op edit_check shows are one walk, not two.
+        if( edit.node < ix.ing.symbols.size() )
+        {
+            const Symbol& target = ix.ing.symbols[ edit.node ];
+            edit.symName = target.name;
+            edit.line    = target.line;
+            const auto [ callerIds, callerIncompatible ] =
+                editCheckCallers( ix.ing, ix.g, editCheckOverloadSet( ix.ing, ix.g, edit.node ), target.name );
+            (void) callerIncompatible;   // the FLAGS are an after-the-edit question; a dry-run has no edit yet
+            edit.callers = callerIds;
+        }
         file->edits.push_back( edits.size() );
         edits.push_back( std::move( edit ) );
     }
@@ -286,11 +314,60 @@ inline Outcome prepare( const std::string& root, const std::string& planPath, st
     return out;
 }
 
-inline std::string receipt( const std::vector<Edit>& edits, const std::vector<FileStage>& files, bool apply )
+// ONE operation's receipt object. Split out of receipt() rather than grown inside it: P9 took that body
+// from ccx 9 to 19, past the kCcxBar=15 --quality-delta gates on, and the split is the honest fix rather
+// than an ack — the loop above is "for each op, emit one object", and this is the object.
+inline std::string receiptOperation( const Edit& edit, const FileStage* file, bool apply, const std::string& root )
+{
+    // A5: the resolved payload path, so a human reviewing a --dry-run before --apply can see which bytes
+    // each operation will READ. The plan names a spelling; this is what that spelling resolved to.
+    // P9: `target` is what the CALLER SPELLED (possibly a seed or a handle); `sym` and `at` are what it
+    // RESOLVED TO, so a dry-run can be judged without a second --edit-check per op, and `callers` says who
+    // is downstream of this one op.
+    const std::string identity = file == nullptr ? std::string() : file->identity;
+    std::string out = "{\"op\":\"" + mcpdetail::jsonEscape( edit.opName )
+                    + "\",\"target\":\"" + mcpdetail::jsonEscape( edit.target )
+                    + "\",\"file\":\"" + mcpdetail::jsonEscape( identity )
+                    + "\",\"sym\":\"" + mcpdetail::jsonEscape( edit.symName )
+                    + "\",\"at\":\"" + mcpdetail::jsonEscape( identity ) + ":" + std::to_string( edit.line )
+                    + "\",\"callers\":" + std::to_string( edit.callers.size() )
+                    + ",\"payload_path\":\"" + mcpdetail::jsonEscape( edit.payloadPath ) + "\"";
+    // …and on an APPLY, the contract question answered against the tree as it now stands — the same fold
+    // the single-edit receipt carries, per op (mcpedit::postCheckJson, withTests=false: a plan's ops can
+    // touch several files, so the tests half would be one list repeated N times).
+    if( apply && !root.empty() && file != nullptr && !edit.symName.empty() )
+    {
+        if( const std::string postCheck = mcpedit::postCheckJson( root, file->identity, edit.symName, false );
+            !postCheck.empty() && postCheck.front() == ',' )
+        {
+            out += postCheck;
+        }
+    }
+    return out + "}";
+}
+
+// The DISTINCT 1-hop callers across every op — the blast radius of the whole transaction, which is the
+// number a reviewer judges an --apply by and which no per-op count adds up to (two ops on the same hot
+// helper share most of their callers).
+inline std::size_t callersUnionSize( const std::vector<Edit>& edits )
+{
+    std::vector<NodeId> union_;
+    for( const Edit& e : edits )
+    {
+        union_.insert( union_.end(), e.callers.begin(), e.callers.end() );
+    }
+    std::sort( union_.begin(), union_.end() );
+    union_.erase( std::unique( union_.begin(), union_.end() ), union_.end() );
+    return union_.size();
+}
+
+inline std::string receipt( const std::vector<Edit>& edits, const std::vector<FileStage>& files, bool apply,
+                            const std::string& root = {} )
 {
     std::string out = "{\"schema\":\"ripwire.edit-plan/v1\",\"mode\":\"";
     out += apply ? "apply" : "dry-run";
     out += "\",\"edits\":" + std::to_string( edits.size() ) + ",\"files\":" + std::to_string( files.size() );
+    out += ",\"callers_union\":" + std::to_string( callersUnionSize( edits ) );   // P9, see above
     if( apply ) { out += ",\"applied\":" + std::to_string( edits.size() ) + ",\"atomic_files\":" + std::to_string( files.size() ); }
     // recheck_before_each_write: every file's indexed byte-hash is re-verified immediately before ITS OWN
     // write, not once for all files up front (A6). It is the observable half of a contract whose race a
@@ -303,11 +380,7 @@ inline std::string receipt( const std::vector<Edit>& edits, const std::vector<Fi
         if( i ) { out += ','; }
         const auto staged = std::find_if( files.begin(), files.end(), [ & ]( const FileStage& file ) { return file.fileId == edits[i].fileId; } );
         const FileStage* file = staged == files.end() ? nullptr : &*staged;
-        // A5: the resolved payload path, so a human reviewing a --dry-run before --apply can see which bytes
-        // each operation will READ. The plan names a spelling; this is what that spelling resolved to.
-        out += "{\"op\":\"" + mcpdetail::jsonEscape( edits[i].opName ) + "\",\"target\":\"" + mcpdetail::jsonEscape( edits[i].target )
-             + "\",\"file\":\"" + mcpdetail::jsonEscape( file == nullptr ? std::string() : file->identity )
-             + "\",\"payload_path\":\"" + mcpdetail::jsonEscape( edits[i].payloadPath ) + "\"}";
+        out += receiptOperation( edits[i], file, apply, root );
     }
     return out + "]}";
 }
@@ -352,7 +425,7 @@ inline Outcome run( const std::string& root, const std::string& planPath, bool a
     std::vector<FileStage> files;
     Outcome out = prepare( root, planPath, maxBytes, edits, files );
     if( !out.ok ) { return out; }
-    if( !apply ) { out.receipt = receipt( edits, files, false ); return out; }
+    if( !apply ) { out.receipt = receipt( edits, files, false, root ); return out; }
 
     std::sort( files.begin(), files.end(), []( const FileStage& a, const FileStage& b ) { return a.disk < b.disk; } );
     std::vector<std::unique_ptr<mcpedit::EditLock>> locks;
@@ -391,7 +464,7 @@ inline Outcome run( const std::string& root, const std::string& planPath, bool a
         return out;
     }
     invalidateMcpIndex();
-    out.receipt = receipt( edits, files, true );
+    out.receipt = receipt( edits, files, true, root );
     return out;
 }
 

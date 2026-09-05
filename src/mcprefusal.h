@@ -122,6 +122,14 @@ inline constexpr McpFieldSpec kMcpRequiredFields[] = {
     { "insert_before_symbol",    "text",      "the text to insert",                                                 "text=\"// note\\n\"" },
     { "insert_after_symbol",     "symbol",    "the def name to insert after",                                       "symbol=\"parseArgs\"" },
     { "insert_after_symbol",     "text",      "the text to insert",                                                 "text=\"// note\\n\"" },
+    // P9 (capture-audit 2026-09-04): the folded post-edit verification, on all three write verbs. OPTIONAL
+    // and defaulting to TRUE — the receipt carries its own edit_check + tests_to_run unless the caller opts
+    // out (the CLI spelling is --no-post-check). Declared here rather than left undocumented because
+    // test/mcpcontractcheck.sh (A/M12) requires every DECLARED property to carry a description: a schema
+    // field a caller can see and cannot read about is the accept-and-ignore defect one step earlier.
+    { "replace_symbol_body",     "post_check", "OPTIONAL — false skips the receipt's folded edit_check + tests_to_run (default true)", "post_check=false", FieldRule::Optional },
+    { "insert_before_symbol",    "post_check", "OPTIONAL — false skips the receipt's folded edit_check + tests_to_run (default true)", "post_check=false", FieldRule::Optional },
+    { "insert_after_symbol",     "post_check", "OPTIONAL — false skips the receipt's folded edit_check + tests_to_run (default true)", "post_check=false", FieldRule::Optional },
 };
 
 // join a list of clauses with `sep`, no trailing separator (the three renderers below all need this once).
@@ -425,11 +433,15 @@ consteval bool mcpPayloadTablesAreComplete()
             return false; // no noun row ⇒ the generic fallback ⇒ incomplete
         }
 
-        // exactly ONE non-`symbol` required row per edit verb (else the ternary's replacement is ambiguous)
+        // exactly ONE non-`symbol` required row per edit verb (else the ternary's replacement is ambiguous).
+        // P9 (capture-audit 2026-09-04): the rule test is not decoration — post_check is the first OPTIONAL
+        // row an edit verb carries, and without it a documented optional field reads as a second payload and
+        // trips this assert. The sentence above already said "required"; this is the code saying it too.
         int payloadRows = 0;
         for( const McpFieldSpec& row : kMcpRequiredFields )
         {
-            if( verb == std::string_view( row.verb ) && std::string_view( row.field ) != "symbol" )
+            if( verb == std::string_view( row.verb ) && row.rule == FieldRule::Required
+                && std::string_view( row.field ) != "symbol" )
             {
                 ++payloadRows;
             }
@@ -990,9 +1002,9 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     // §5a decision 3: `legend` — the opt-in compact posture (the CLI --legend=compact), default full.
     { "slice",                    "path symbol var flow depth legend" },
     // ── edit verbs ──
-    { "replace_symbol_body",      "path paths symbol file new_body", McpVerbFields::Effect::Destructive },
-    { "insert_before_symbol",     "path paths symbol file text", McpVerbFields::Effect::Writes },
-    { "insert_after_symbol",      "path paths symbol file text", McpVerbFields::Effect::Writes },
+    { "replace_symbol_body",      "path paths symbol file new_body post_check", McpVerbFields::Effect::Destructive },
+    { "insert_before_symbol",     "path paths symbol file text post_check", McpVerbFields::Effect::Writes },
+    { "insert_after_symbol",      "path paths symbol file text post_check", McpVerbFields::Effect::Writes },
 };
 
 // Dispatch-only ALIASES of advertised tools: a name tools/call answers that gets no separate tools/list
@@ -1106,6 +1118,11 @@ inline std::string unknownFieldRefusal( std::string_view verb, std::string_view 
 inline constexpr std::string_view kBatchSubQueryFields[] = {
     "verb", "symbol", "pattern", "task", "type", "file", "from", "to",
     "handle", "kind", "start_line", "end_line", "limit", "offset",
+    // P17 (capture-audit 2026-09-04): the slice sub-query's own three. Declared rather than left out, so a
+    // batched slice is the SAME verb as the standalone one — an accepted-and-ignored `flow` would be the
+    // exact defect class this round exists to remove. `new_body` is deliberately NOT here: that field turns
+    // edit_check into the pre-apply preview, which builds a spliced tree and has no place in a fast sweep.
+    "var", "flow", "depth",
     // Wave-3 verifier P3-4/P6-1: `in` on the batch grep sub-query. R-H's own reason for putting the hatch
     // on the live MCP verb — an MCP-only agent that reads suppressed_comment= has no CLI to re-ask from —
     // applies verbatim here, and this was the surface that had NO fallback at all.

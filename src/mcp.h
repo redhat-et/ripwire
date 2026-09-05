@@ -139,11 +139,14 @@ inline constexpr std::string_view kAtSeedRebindClause =
 // verbs + slice, the lane/tc-sliceat per-definition read not yet in the sweep), which is the arithmetic
 // below and was never the number printed beside it.
 //
+// P17 (capture-audit 2026-09-04): slice and edit_check joined kBatchServedVerbs, so the count moves 17 → 15
+// by the SAME subtraction — nothing here is hand-recounted, the assert is what pins the prose to it.
+//
 // The static_assert is the build-time tripwire; test/mcptranchecheck.sh's M14 arm is the runtime one, and
 // it derives its expectation by ENUMERATION (it asks the live batch arm which verbs refuse and counts them)
 // rather than by re-running this formula — a gate that restates the formula cannot catch the formula.
 inline constexpr std::size_t kBatchExcludedCount = kMcpVerbCount - kBatchServedCount;
-static_assert( kBatchExcludedCount == 17,
+static_assert( kBatchExcludedCount == 15,
                "the batch tools/list stanza spells kBatchExcludedCount in prose — a verb joined or left "
                "kMcpVerbTable / kBatchServedVerbs; update the stanza's number and this assert together" );
 
@@ -767,7 +770,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    "{\"name\":\"slice\",\"description\":\"WHERE IS THIS VARIABLE DEFINED AND USED inside one function — NAME-BASED intra-procedural def-use rows of one variable inside ONE uniquely-resolved definition (the ARISE slicer, arXiv:2605.03117). symbol alone lists the sliceable locals to pick from; add var (or spell symbol as SYM:VAR / file:name:VAR) for the per-line rows. flow=back|fwd|both adds the TRANSITIVE data-flow slice over reaching-definition edges, bounded by depth (1..32, default 8; a cutting bound emits flow_truncated). @FILE:LINE seeds resolve here and complete the paper's (file, line[, variable]) seed. Reaching definitions are flow-sensitive for C-family and Python (reach=cfg), source-order elsewhere (reach=linear). Its LIMITS — name-based, intra-procedural, line-granular, DATA dependence only — are stated clause by clause in the answer's own legend. Served: C/C++/ObjC (+CUDA/Metal), Python, JS/TS, Go, Java, Rust; every other language refuses loudly. Single-root; read-only.\","
                    + mcprefuse::toolMetadataFor( "slice", pathIsRequired ) + "},"
                    // A4-R3 batch — one-turn context sweep: N read sub-queries in ONE round-trip, merged + deduped.
-                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array over the SAME path, in EITHER grammar: {verb, ...args} objects, or the CLI --batch file's own \\\"verb:arg\\\" strings (queries=[\\\"for:parse the config\\\",\\\"callers:escapeXml\\\"]) - one grammar, both front doors. Each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the ALIASES callers=find_referencing_symbols and callees=find_symbol) with that verb's own args. The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: side effects (the 3 edit verbs, quality_baseline), a heavy both-trees pass (quality_delta), no nesting (batch), a per-definition re-parse (slice), and whole-repo / cross-branch scope (situational_awareness, memory_recall, connect, explore — and its alias pack_task — from_trace, edit_check, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift). Result is one <batch> of <q i verb ok> elements IN ORDER, each sub-answer verbatim in CDATA; a failing sub-query is an inline ok=0 err= entry and never fails the batch; identical payloads dedup; over 16 caps honestly.\","
+                   "{\"name\":\"batch\",\"description\":\"ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent). queries = array over the SAME path, in EITHER grammar: {verb, ...args} objects, or the CLI --batch file's own \\\"verb:arg\\\" strings (queries=[\\\"for:parse the config\\\",\\\"callers:escapeXml\\\"]) - one grammar, both front doors; each verb is one of " + mcpBatchServedVerbsList( omitGitVerbs ) + " (plus the ALIASES callers=find_referencing_symbols and callees=find_symbol) with that verb's own args. The other " + std::to_string( batchExcluded ) + " advertised verbs are NOT batchable: side effects (the 3 edit verbs, quality_baseline), a heavy both-trees pass (quality_delta), no nesting (batch), and whole-repo / cross-branch scope (situational_awareness, memory_recall, connect, explore — and its alias pack_task — from_trace, " + mcprefuse::batchGitOnlyExcludedNames( omitGitVerbs ) + "flags, doc_drift). Result is one <batch> of <q i verb ok> elements IN ORDER, each sub-answer verbatim in CDATA; a failing sub-query is an inline ok=0 err= entry and never fails the batch; identical payloads dedup; over 16 caps honestly.\","
                    + mcprefuse::toolMetadataFor( "batch", pathIsRequired ) + "}"
                    "]}}";
             }
@@ -840,6 +843,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const std::string files   = strArg( "files" );    // N11: schema-typed STRING (comma-separated paths), never an array
             const std::string diff    = strArg( "diff" );     // H5: same class as `files` — an array here answered about the wrong tree
             const std::string newBody = strArg( "new_body" ); // replace_symbol_body
+            // P9: the edit verbs' post-check opt-out. Default TRUE — the receipt carries its own
+            // verification unless the caller says otherwise; a wrong-shaped value refuses like every other
+            // typed argument rather than reading as absent (mcpBoolArg).
+            const McpBoolArg postCheckArg = mcpBoolArg( args, "post_check" );
+            if( shapeRefusal.empty() && !postCheckArg.refusal.empty() )
+            {
+                shapeRefusal = postCheckArg.refusal;
+            }
+            const bool postCheck = !postCheckArg.isPresent || postCheckArg.value;
             const std::string text    = strArg( "text" );     // insert_before/after
             const std::string handle  = strArg( "handle" );   // T4 fetch_body
             const std::string kind    = strArg( "kind" );     // exemplar kind token; whereis/stray_content/flags/doc_drift name filter
@@ -1635,15 +1647,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // symbol; the PAYLOAD is non-empty by the §H2 write-verb gate above (see isMcpEditVerb).
                 else if( name == "replace_symbol_body" && !path.empty() && !symbol.empty() )
                 {
-                    resp = editResult( runEditVerb( path, mcpedit::Op::ReplaceBody, symbol, file, newBody ) );
+                    resp = editResult( runEditVerb( path, mcpedit::Op::ReplaceBody, symbol, file, newBody, postCheck ) );
                 }
                 else if( name == "insert_before_symbol" && !path.empty() && !symbol.empty() )
                 {
-                    resp = editResult( runEditVerb( path, mcpedit::Op::InsertBefore, symbol, file, text ) );
+                    resp = editResult( runEditVerb( path, mcpedit::Op::InsertBefore, symbol, file, text, postCheck ) );
                 }
                 else if( name == "insert_after_symbol" && !path.empty() && !symbol.empty() )
                 {
-                    resp = editResult( runEditVerb( path, mcpedit::Op::InsertAfter, symbol, file, text ) );
+                    resp = editResult( runEditVerb( path, mcpedit::Op::InsertAfter, symbol, file, text, postCheck ) );
                 // T4 lazy-body verb: return a def's full source by its stable handle (or a staleness/refusal message).
                 }
                 else if( name == "fetch_body" && !path.empty() && !handle.empty() )

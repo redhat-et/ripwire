@@ -8,6 +8,8 @@
 // included by mcp.h (runMcp dispatches here).
 
 #include "mcpindex.h"
+#include "editcheck.h"        // P9: the SAME four computations --edit-check renders as XML — folded into the receipt as JSON
+#include "testmap.h"          // P9: testsReachingFile + runFieldJsonDisclosed — the SAME rows --affected=FILE emits
 #include "didyoumean.h"       // M9: boundedEditDistance / nearestIndexedFileClause — ONE near-miss policy for read and edit
 #include "selectorrefuse.h"   // atSeedFaultClause + indexHasFileMatching — the @FILE:LINE at-diagnosis, ONE set of fault sentences on every surface
 #include "infra/hashutil.h"   // sanitizer-clean modulo-2^64 FNV multiplication
@@ -662,6 +664,164 @@ namespace mcpedit
         return out;
     }
 
+    // ── P9 (capture-audit 2026-09-04) — THE POST-EDIT VERIFICATION, FOLDED INTO THE RECEIPT ───────────
+    //
+    // The receipt used to end with a stderr line saying "verify with --edit-check=F:S, then --affected=F":
+    // two more calls the tool already knows it wants, on an index it has just invalidated and is about to
+    // rebuild for whoever calls next anyway. Claude Code's own policy makes an agent Read before it edits;
+    // other agents do not, and the receipt is the one document an editing agent is guaranteed to read.
+    //
+    // Both halves are the STANDALONE verbs' own computations, called directly rather than re-derived:
+    // editcheck.h's editCheckOverloadSet / editCheckContractVsHead / editCheckCallers / editCheckVerdict /
+    // editCheckCallSites are exactly what editCheckBundleText renders as XML, and testsReachingFile is what
+    // runAffected walks. That is what lets test/receiptpostcheck.sh assert the receipt EQUALS a separate
+    // --edit-check and a separate --affected: not a promise, a shared call.
+
+    // the post-edit LINE range of the applied text, from the NEW bytes. Every other verb in this tool
+    // speaks FILE:LINE; the receipt spoke only bytes. `end` is the line holding the applied text's LAST
+    // byte — a payload ending in "\n" therefore reports its last CONTENT line, not the empty one after it.
+    struct LineRange { std::uint32_t start; std::uint32_t end; };
+    inline LineRange lineRangeOf( std::string_view bytes, std::size_t startByte, std::size_t endByte )
+    {
+        const auto lineAt = [ & ]( std::size_t upto ) -> std::uint32_t
+        {
+            std::uint32_t line = 1;
+            for( std::size_t i = 0; i < upto && i < bytes.size(); ++i )
+            {
+                if( bytes[i] == '\n' ) { ++line; }
+            }
+            return line;
+        };
+        const std::uint32_t first = lineAt( startByte );
+        const std::size_t   last  = ( endByte > startByte ) ? endByte - 1 : startByte;
+        return { first, std::max( first, lineAt( last ) ) };
+    }
+
+    // `"edit_check":{...}` for a definition ALREADY RESOLVED in the post-edit tree, or "" when the edit
+    // left nothing of that name in that file to ask about (a replace whose payload defines something else).
+    // The empty case is why the caller emits a `post_check_unavailable` reason rather than a silent gap.
+    inline std::string editCheckReceiptJson( const IngestResult& ing, const Graph& g, const std::string& root,
+                                             NodeId focus, const std::string& pathRel )
+    {
+        const std::vector<NodeId> overloadNodes = editCheckOverloadSet( ing, g, focus );
+        const EditCheckContract   contract      = editCheckContractVsHead( ing, g, root, kDefaultMaxFileBytes, {}, focus, overloadNodes );
+        const auto [ callerIds, callerIncompatible ] = editCheckCallers( ing, g, overloadNodes, ing.symbols[ focus ].name );
+        std::size_t incompatibleCount = 0;
+        for( NodeId c : callerIds )
+        {
+            if( callerIncompatible[c] ) { ++incompatibleCount; }
+        }
+        const EditCheckVerdict verdict = editCheckVerdict( contract, incompatibleCount );
+        const std::vector<std::pair<NodeId, std::uint32_t>> callSites =
+            incompatibleCount > 0 ? editCheckCallSites( ing, ing.symbols[ focus ].name, callerIncompatible )
+                                  : std::vector<std::pair<NodeId, std::uint32_t>>{};
+
+        std::string out = std::string( ",\"edit_check\":{\"status\":\"" ) + verdict.status
+                        + "\",\"callers\":" + std::to_string( callerIds.size() )
+                        + ",\"incompatible\":" + std::to_string( incompatibleCount )
+                        + ",\"sites\":[";
+        bool first = true;
+        for( NodeId c : callerIds )
+        {
+            if( !callerIncompatible[c] )
+            {
+                continue;   // sites is the BROKEN set — the rows an agent must open, not the caller listing
+            }
+            const Symbol& cs = ing.symbols[c];
+            if( !first ) { out += ","; }
+            first = false;
+            out += "{\"n\":\"" + mcpdetail::jsonEscape( cs.name )
+                 + "\",\"p\":\"" + mcpdetail::jsonEscape( std::string( rw::sarif::rootRelativeUri( ing.files[ cs.fileId ], rw::sarif::rootPrefixOf( root ) ) ) )
+                 + ":" + std::to_string( cs.line ) + "\",\"l\":[";
+            bool firstLine = true;
+            for( auto it = std::lower_bound( callSites.begin(), callSites.end(), std::make_pair( c, std::uint32_t( 0 ) ) );
+                 it != callSites.end() && it->first == c; ++it )
+            {
+                if( !firstLine ) { out += ","; }
+                firstLine = false;
+                out += std::to_string( it->second );
+            }
+            out += "]}";
+        }
+        out += "]}";
+        (void) pathRel;
+        return out;
+    }
+
+    // `"tests_to_run":[{"p":…,"run":…|"run_unknown":true}]` — the SAME rows --affected=<that file> emits,
+    // through the SAME TestRunnerIndex and the SAME not-derivable disclosure the whole row family shares.
+    inline std::string testsToRunReceiptJson( const IngestResult& ing, const Graph& g, const std::string& root, std::uint32_t fileId )
+    {
+        const std::vector<std::uint32_t> testFiles = testsReachingFile( ing, g, fileId );
+        const TestRunnerIndex            runners( ing );
+        const auto                       jesc = []( std::string_view t ) { return mcpdetail::jsonEscape( std::string( t ) ); };
+        const std::string                prefix = rw::sarif::rootPrefixOf( root );
+        std::string                      out = ",\"tests_to_run\":[";
+        for( std::size_t i = 0; i < testFiles.size(); ++i )
+        {
+            if( i ) { out += ","; }
+            out += "{\"p\":\"" + mcpdetail::jsonEscape( std::string( rw::sarif::rootRelativeUri( ing.files[ testFiles[i] ], prefix ) ) ) + "\""
+                 + rw::runFieldJsonDisclosed( runners, testFiles[i], jesc ) + "}";
+        }
+        return out + "]";
+    }
+
+    // The whole post-check, for a file that has just been written: rebuild the index (the invalidation the
+    // edit already forced — this pays the cost the NEXT verb call would have paid), find the edited
+    // definition again, and render both halves. Returns "" when the caller opted out; returns a
+    // `post_check_unavailable` reason rather than silence when the target can no longer be resolved.
+    // `withTests=false` is the edit-plan's shape: a plan's ops can touch several files, so the CONTRACT
+    // half is per op while the tests half would be a per-file list repeated N times. The plan receipt
+    // carries the contract per op; --affected stays the caller's own call for the tests.
+    inline std::string postCheckJson( const std::string& root, const std::string& fileIdentity, const std::string& symbolName,
+                                      bool withTests = true )
+    {
+        const McpIndex&     ix  = getIndex( root );   // the edit invalidated it; this is the rebuild
+        const IngestResult& ing = ix.ing;
+        const Graph&        g   = ix.g;
+        const std::string   prefix = rw::sarif::rootPrefixOf( root );
+
+        NodeId focus  = kNoNode;
+        std::uint32_t editedFile = std::uint32_t( -1 );
+        for( NodeId i = 0; i < NodeId( ing.symbols.size() ); ++i )
+        {
+            const Symbol& s = ing.symbols[i];
+            const std::string rel = ing.realPaths.empty()
+                                  ? std::string( rw::sarif::rootRelativeUri( ing.files[ s.fileId ], prefix ) )
+                                  : ing.files[ s.fileId ];
+            if( rel != fileIdentity )
+            {
+                continue;
+            }
+            editedFile = s.fileId;
+            if( focus == kNoNode && s.name == symbolName && s.kind != SymKind::Section )
+            {
+                focus = i;
+            }
+        }
+        if( editedFile == std::uint32_t( -1 ) )
+        {
+            return ",\"post_check_unavailable\":\"the edited file is not in the refreshed index\"";
+        }
+        std::string out;
+        if( focus == kNoNode )
+        {
+            // Honest, and it happens: a replace whose payload defines a DIFFERENT name leaves no definition
+            // to ask the contract question about. Say which half is missing rather than omitting both.
+            out += ",\"post_check_unavailable\":\"'" + mcpdetail::jsonEscape( symbolName )
+                 + "' is no longer defined in the edited file — the contract check has no target\"";
+        }
+        else
+        {
+            out += editCheckReceiptJson( ing, g, root, focus, fileIdentity );
+        }
+        if( withTests )
+        {
+            out += testsToRunReceiptJson( ing, g, root, editedFile );
+        }
+        return out;
+    }
+
 }   // namespace mcpedit
 
 // perform an edit verb end-to-end (resolve → verify freshness → splice → atomic write → invalidate index).
@@ -669,7 +829,7 @@ namespace mcpedit
 // `text` = new_body (ReplaceBody) or the inserted text (InsertBefore/After). Never throws for expected
 // failures — returns an Outcome carrying either the success JSON or a JSON-RPC error {code,message}.
 inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, const std::string& symbol,
-                                     const std::string& pathHint, const std::string& text )
+                                     const std::string& pathHint, const std::string& text, bool postCheck = true )
 {
     mcpedit::Outcome oc;
 
@@ -821,6 +981,12 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     oc.ok     = true;
     oc.symbol = s.name;
     oc.file   = path;
+    // P9: copied out BEFORE the receipt is assembled, because the post-check below rebuilds the ONE cached
+    // McpIndex — every reference into `ing` (and therefore `s`) is dangling from that point on. The three
+    // values the post-check needs are plain strings, taken here while they are still valid.
+    const std::string pcFileIdentity = path;
+    const std::string pcSymbolName   = s.name;
+    const mcpedit::LineRange pcLines = mcpedit::lineRangeOf( newBytes, newStart, newEnd );
     oc.resultJson = std::string( "{\"applied\":\"" ) + opName
                   // resolved_from_handle / resolved_from_seed: "symbol" above reports the RESOLVED name, so an
                   // indirect target (handle or @FILE:LINE seed) survives as typed for the agent to audit the
@@ -834,6 +1000,9 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
                   // usually differ. replaced_bytes is that separate number: how many OLD bytes this op
                   // overwrote (b-a for ReplaceBody; 0 for the two insert ops, which overwrite nothing).
                   + "\",\"span\":{\"start\":" + std::to_string( newStart ) + ",\"end\":" + std::to_string( newEnd ) + "}"
+                  // P9: the same region as FILE:LINE. Free (one scan of the new bytes, no index work), so it
+                  // rides even under --no-post-check — every other verb in this tool speaks lines.
+                  + ",\"lines\":{\"start\":" + std::to_string( pcLines.start ) + ",\"end\":" + std::to_string( pcLines.end ) + "}"
                   + ",\"replaced_bytes\":" + std::to_string( op == mcpedit::Op::ReplaceBody ? ( b - a ) : 0 )
                   + ",\"old_file_bytes\":" + std::to_string( src.size() )
                   + ",\"new_file_bytes\":" + std::to_string( newBytes.size() )
@@ -843,7 +1012,13 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
                   + ",\"file_eol\":\"" + mcpedit::eolStyleName( fileEol )
                   + "\",\"eol_normalized\":" + ( eolNormalized ? "true" : "false" )
                   + ",\"stale_index\":\"" + mcpdetail::jsonEscape( oldStamp )
-                  + "\",\"note\":\"index invalidated; the next verb call rebuilds from disk\"}";
+                  + "\",\"note\":\"index invalidated; the next verb call rebuilds from disk\"";
+    // P9: the folded verification, LAST — it rebuilds the index, so nothing above may be read after it.
+    if( postCheck )
+    {
+        oc.resultJson += mcpedit::postCheckJson( root, pcFileIdentity, pcSymbolName );
+    }
+    oc.resultJson += "}";
     return oc;
 }
 

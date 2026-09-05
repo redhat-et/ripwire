@@ -89,9 +89,12 @@ echo "$OUT" | grep -q '<impact ' \
 echo "$OUT" | grep -q '<f p="[^"]*src/user\.cpp"' && ok "blast radius includes src/user.cpp" || no "blast radius missing src/user.cpp"
 
 # affected test file
-echo "$OUT" | grep -q '<test p="[^"]*test/test_core\.cpp"/>' \
-    && ok "affected test = test/test_core.cpp" \
-    || no "affected test missing test/test_core.cpp"
+# M21(b) re-pin (capture-audit 2026-09-04): a tests_to_run row now always carries a run recipe or the
+# explicit run_unknown="1" disclosure, so the row NEVER self-closes straight after p= (test/testrowruncheck.sh
+# is the family gate). Pinned to the NEW contract — the path AND a disclosure — not loosened to a prefix match.
+echo "$OUT" | grep -qE '<test p="[^"]*test/test_core\.cpp"( run="[^"]*"| run_unknown="1")/>' \
+    && ok "affected test = test/test_core.cpp, with its run recipe or run_unknown disclosure" \
+    || no "affected test missing test/test_core.cpp (or its run=/run_unknown= disclosure)"
 
 # owners block present (single author, bf=1). §B3: <owners> now also carries shown=/capped= (the nested
 # <author> row disclosure) after bf=, so this pin drops the trailing '>' and matches the attr PREFIX only —

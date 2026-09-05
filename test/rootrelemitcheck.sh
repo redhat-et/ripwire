@@ -365,8 +365,12 @@ for spelling in abs rel; do
   # the JSON twin carries "p" in BOTH arrays — narrow to tests_to_run so this compares like with like
   j_rows=$( cd "$CD" && "$BIN" "$RT" --test-gate=geometry.cpp --json 2>/dev/null \
             | sed -n 's/.*"tests_to_run":\[\([^]]*\)\].*/\1/p' | tr ',' '\n' | sed -n 's/.*"p":"\([^"]*\)".*/\1/p' )
+  # M21(b) re-pin (capture-audit 2026-09-04, lane L8): every --situ tests-to-run line now ends in a run
+  # recipe OR its "(run: not derivable)" disclosure, so the old "the line contains no '(' " extraction
+  # matched nothing and this arm read red while the SPELLING it exists to compare was correct. Re-pinned to
+  # the new contract: take the path FIELD off a row line, not the whole line.
   s_rows=$( cd "$CD" && "$BIN" "$RT" --situ=geometry.cpp 2>/dev/null \
-            | sed -n '/tests to run/,/^  \[3\]/p' | sed -n 's/^        \([^( ][^(]*\)$/\1/p' | sed 's/[[:space:]]*$//' )
+            | sed -n '/tests to run/,/^  \[3\]/p' | awk '/^        [^ (]/ { print $1 }' )
   if [ -z "$a_rows" ]; then
     no "ARM6/$spelling --affected emitted NO test row for distance — the arm would be a false green"
     continue
