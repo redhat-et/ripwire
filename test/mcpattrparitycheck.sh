@@ -252,6 +252,35 @@ for label, args, elem, mcpVerb, mcpArgs in (
     check( ma is not None and "filter" in ma,
            "%s (MCP, filtered): the root echoes filter= (%s)" % ( label, "yes" if ma and "filter" in ma else "NO" ) )
 
+# ═══ LEGEND posture: the opt-in compact form is the CLI's compact form ═════════════════════════════════
+print( "" )
+print( "=== LEGEND: legend=\"compact\" on MCP == --legend=compact on the CLI ===" )
+# §5a decision 3. The compact posture swaps explanatory prose for a versioned schema id and touches NOTHING
+# else — so the assertion is exact: the two payloads are byte-identical once the root= each surface
+# legitimately spells differently is normalised away. Default (`legend` omitted) must stay byte-identical to
+# what this verb always emitted, which is what makes this opt-in rather than a behaviour change.
+sliceArgs = { "path": ROOT, "symbol": "escapeXml", "var": "out" }
+for label, extra, cliFlags in ( ( "compact", { "legend": "compact" }, [ "--legend=compact" ] ),
+                                ( "full",    {},                     [] ),
+                                ( "full (explicit)", { "legend": "full" }, [] ) ):
+    a = dict( sliceArgs ); a.update( extra )
+    cx = cli( [ "--slice=escapeXml:out" ] + cliFlags )
+    mx = mcp( "slice", a )
+    if mx.startswith( "__ERROR__" ):
+        check( False, "slice legend=%s: MCP refused (%s)" % ( label, mx[ :120 ] ) )
+        continue
+    norm = lambda t: re.sub( r' root="[^"]*"', ' root="R"', t ).strip()
+    check( norm( cx ) == norm( mx ),
+           "slice legend=%s: the MCP payload is byte-identical to the CLI's, modulo root= (%d vs %d B)"
+           % ( label, len( cx ), len( mx ) ) )
+    if label == "compact":
+        check( 'schema="ripwire.slice/v1"' in mx and len( mx ) < len( cli( [ "--slice=escapeXml:out" ] ) ),
+               "slice legend=compact: carries the versioned schema id and is smaller than the full form" )
+# a value outside the closed set is refused, never read as the default (the `in` argument's own rule)
+bad = mcp( "slice", { "path": ROOT, "symbol": "escapeXml", "var": "out", "legend": "terse" } )
+check( bad.startswith( "__ERROR__" ) and "legend" in bad,
+       "slice legend=terse: refused by name, never silently read as full" )
+
 # ═══ SELECTOR parity: the same spellings resolve, and the same zero is explained ═══════════════════════
 print( "" )
 print( "=== SELECTOR: whereis answers the CLI's selector spellings on both surfaces ===" )
@@ -266,7 +295,11 @@ seedSpec = ( "@" + edp.group( 1 ) ) if edp else ""
 check( bool( seedSpec ),
        "whereis: derived an @FILE:LINE seed from escapeXml's own definition site (%s)"
        % ( seedSpec or "DERIVATION FAILED — fix this probe, do not pin a literal" ) )
-for label, sel in ( ( "@FILE:LINE seed", seedSpec ), ( "near-miss", "escapXml" ) ):
+# The near-miss probe's typo is BUILT, never written as a literal: whereis scans every ref's blobs, this
+# file is one of them, and a literal typo here would turn its own zero into a one-hit answer — the probe
+# poisoning the property it tests (measured: it did, the first time).
+nearMissSel = "escape" + "Xm"
+for label, sel in ( ( "@FILE:LINE seed", seedSpec ), ( "near-miss", nearMissSel ) ):
     if not sel:
         continue
     cx = cli( [ "--whereis=" + sel ] )

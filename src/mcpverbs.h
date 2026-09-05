@@ -3313,8 +3313,16 @@ inline EditCheckReply editCheckText( const std::string& root, const std::string&
 // which a merged multi-root graph cannot address unambiguously.
 struct SliceReply { std::string payload; std::string refusal; };
 
+// §5a decision 3 (capture-audit 2026-09-04): `legend` is the OPT-IN compact posture, the MCP twin of the
+// CLI's --legend=compact. `compact` swaps the explanatory prose for a versioned schema id
+// (ripwire.slice/v1) and leaves every DATA and COMPLETENESS attribute — and, for slice, every row byte —
+// untouched; "" or "full" is the default and byte-identical to what this verb always emitted, so nothing
+// changes for a caller who does not ask. The flip of the DEFAULT is deliberately NOT taken here: the
+// CLI==MCP byte-parity gates compare full<->full today, and a default flip means re-pinning those against
+// the compact form — registered as the follow-up, with this plumbing already in place for it.
 inline SliceReply sliceText( const std::string& root, const std::string& symbol, const std::string& var,
-                             const std::string& flow, int depth, RedactCounts* redact )
+                             const std::string& flow, int depth, RedactCounts* redact,
+                             bool compactLegend = false )
 {
     // argument-shape refusals first — they need no index
     if( !flow.empty() && flow != "back" && flow != "fwd" && flow != "both" )
@@ -3476,8 +3484,9 @@ inline SliceReply sliceText( const std::string& root, const std::string& symbol,
     }
 
     slicev::SliceEmitOpts emit;   // full legend always — the MCP payload stays byte-identical to the CLI default
-    emit.flow = flowActive ? &flowSpec : nullptr;
-    emit.seed = seededRun ? &seedInfo : nullptr;
+    emit.flow          = flowActive ? &flowSpec : nullptr;
+    emit.seed          = seededRun ? &seedInfo : nullptr;
+    emit.compactLegend = compactLegend;   // decision 3: the same posture flag the CLI --legend=compact sets
     return SliceReply{ slicev::sliceBundleText( ing, root, focus, varName, scan, src, redact, emit ), {} };
 }
 

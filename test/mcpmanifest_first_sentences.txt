@@ -1,0 +1,35 @@
+# mcpmanifest_first_sentences.txt — test/mcpmanifestcheck.sh's routing-sentence pin (P11).
+# One `name<TAB>first sentence` row per advertised MCP tool. The FIRST sentence is the routing text:
+# what an agent reads to choose a verb. Every other byte of a description may be trimmed; these may
+# not move without a deliberate rewrite, stated in the commit that moves them.
+analyze	Architecture map for a directory: signatures and the call graph for the top symbols.
+batch	ONE-TURN CONTEXT SWEEP: answer up to 16 heterogeneous READ sub-queries in a single call (the deterministic $0 counterpart of a parallel-search agent).
+cochange	Files that historically change together with this file — the co-edit partners.
+connect	When a task touches 2..16 named symbols, returns the minimal subgraph RELATING them - terminals, the fewest joining intermediaries (with signatures), and call edges in true direction - finding the shared-caller joins a directed path_between cannot; unrelated symbols are reported honestly in <unconnected>.
+doc_drift	WHICH OF THIS REPO'S DOC CLAIMS ARE NOW FALSE.
+edit_check	Just edited a symbol? Did its CONTRACT (param count + publicness) change vs git HEAD, and which 1-hop callers are NOW INCOMPATIBLE with the new arity by fixed-arity evidence (not a guess — every folded definition disagrees)? This is call sites worth OPENING, not a proof: call edges are matched by NAME, so a same-named callee this tool does not index can flag a caller that never touches the edited symbol at all, and a clean tree can carry a nonzero incompatible= with nothing edited.
+exemplar	BEFORE writing a function / method / class / struct / interface / variable, get the repo's single best-in-class instance of that kind to imitate — signature AND full body.
+explore	ONE-call task orientation: the routed+anchored ranking, full bodies of the top hits, their 1-hop callers, field notes, and tests_to_run — ALL under one deterministic byte budget, in a fixed section order (ranking > bodies > callers > notes > tests) that degrades gracefully and reports every truncation.
+fetch_body	Full (or partial-range) source of a symbol's definition, addressed by the stable `handle` a read verb attached to it (bodies on request, not by default).
+find_referencing_symbols	Direct (1-hop) callers of a symbol, each with a fetch_body handle.
+find_symbol	A symbol's 1-hop neighborhood: the symbol (with a fetch_body handle) plus direct callers (calledBy) and callees (calls).
+flags	WHAT IS BUILT BUT DARK here — the answer to 'why don't I see feature X?'.
+for	Task-lens ranked, signatures-only inventory of the building blocks most relevant to a task (cx=complexity, in=reuse-count).
+from_trace	Paste a stack trace / sanitizer report / compiler error and get it mapped onto indexed symbols, ranked INNERMOST-first: the parsed <trace> frame map, the ranked suspects' signatures, and the innermost in-corpus symbol's FULL body.
+grep	Trigram literal search; each hit annotated with its enclosing symbol (which function/class it is in).
+impact	IS IT SAFE TO CHANGE X? — the TRANSITIVE blast radius of a symbol via calls, ranked by PageRank.
+insert_after_symbol	Insert text immediately AFTER a symbol's definition (past its final byte, which is preserved exactly); a leading newline is added only if missing.
+insert_before_symbol	Insert text immediately BEFORE a symbol's definition (its first byte); a trailing newline is added only if missing.
+lego	Interface-to-impls view for ONE named interface/base: its method contract plus EVERY implementor (own-language only), each with file path.
+memory_recall	Most relevant memory notes / docs for a task, full text — the few that matter, not the whole corpus.
+mentions	Docs (markdown plans/designs) that name a code symbol in a backtick.
+owners	Bus-factor: recency-weighted (6-month half-life) author ownership per file.
+path_between	Does A REACH B, and HOW? — the shortest directed CALL path between two symbols, hop-by-hop.
+quality_baseline	PIN the quality floor: writes .ripwire_quality_baseline stamped with the current git HEAD sha, snapshotting complexity / duplication / dead-code / API surface.
+quality_delta	Your PR self-check, run every time you think a change is DONE — pairs with the CLI-only --test-gate (names the tests to run + the untested blast radius; not MCP-exposed) to form the two-step pre-PR gate.
+replace_symbol_body	Replace a symbol's ENTIRE definition (signature through closing brace) with new_body — splices over the full def span, preserving every byte outside it verbatim; new_body must be a complete, well-formed definition.
+situational_awareness	The 5 things to know about a diff, as JSON: blast_radius, tests_to_run, forgotten (usual co-change partners missing from this diff), hotspot_alert, modules_touched.
+slice	WHERE IS THIS VARIABLE DEFINED AND USED inside one function — NAME-BASED intra-procedural def-use rows of one variable inside ONE uniquely-resolved definition (the ARISE slicer, arXiv:2605.03117).
+stray_content	Per branch: the lines its own divergent work AUTHORED (vs its merge-base with HEAD) that the live line does NOT have.
+uses	The STATICALLY RESOLVABLE use-sites of a symbol, not just calls: role (call | read | write | import | extends), file:line, and enclosing symbol.
+whereis	WHERE DOES THIS CONTENT LIVE? Which branch's tree defines or mentions a symbol, HEAD first, with on-head=0 naming the case this verb exists for: content that lives only on a branch (a finished fix stranded on 1 of 30 refs).

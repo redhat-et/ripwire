@@ -273,10 +273,15 @@ struct McpValueSpec
 //     `batch queries:5`) reported "missing required field", i.e. exactly the absent-vs-wrong-shape collapse
 //     findRawValue exists to separate, and `connect symbols:["main"]` got a bespoke fourth-dialect sentence
 //     ("connect needs 2..16 symbols (got 1)") instead of the domain clause and a runnable example.
+// P11 (capture-audit 2026-09-04): `path`, `paths`, `limit` and `offset` are the four fields that repeat
+// across many tools — path/paths on all 31 — so every byte of THEIR sentences is paid 31 times in the
+// per-session manifest. They are spelled at the shortest length that still names the TYPE and the DOMAIN,
+// which is everything a bad-value refusal owes the caller. Every other row here appears once or twice and
+// keeps its full sentence: brevity is charged where the repetition is, not everywhere.
 inline constexpr McpValueSpec kMcpValueFields[] = {
     // ── numeric ──
-    { "limit",         "a positive integer (omit it for the verb's own default window)",             "limit=40", "integer" },
-    { "offset",        "a non-negative integer (omit it to start at the first row)",                  "offset=0", "integer" },
+    { "limit",         "a positive integer (omit for the default window)",                            "limit=40", "integer" },
+    { "offset",        "a non-negative integer (omit to start at row 1)",                             "offset=0", "integer" },
     { "radius",        "an integer in 1..12 (omit it for the default 6)",                             "radius=6", "integer" },
     { "partition",     "an integer in 2..16 (omit it for one un-split bundle; 1 IS the un-split one)", "partition=4", "integer" },
     { "top_k",         "an integer in 1..1000 (omit it for the verb's own default)",                  "top_k=4", "integer" },
@@ -285,7 +290,7 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     { "end_line",      "a positive integer, 1-based and body-relative (omit it to read to the end)",  "end_line=40", "integer" },
     { "depth",         "an integer in 1..32 (the slice flow's BFS bound; omit it for the disclosed default 8; needs flow)", "depth=4", "integer" },
     // ── string ──
-    { "path",          "a STRING directory path",                                                     "path=\".\"" },
+    { "path",          "a STRING repo directory",                                                     "path=\".\"" },
     { "files",         "a STRING of comma-separated paths, not an array",                             "files=\"src/a.cpp,src/b.h\"" },
     { "diff",          "a STRING of unified-diff TEXT (omit it to use the working-tree git diff)",     "diff=\"diff --git a/x b/x\"" },
     { "symbol",        "a STRING symbol name (the final name segment; add scope to disambiguate)",     "symbol=\"parseArgs\"" },
@@ -309,6 +314,10 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // @FILE:LINE seed line pre-pick), flow is a CLOSED direction set so the sentence names it.
     { "var",           "a STRING variable name inside the resolved definition (omit it to list the sliceable locals)", "var=\"out\"" },
     { "flow",          "a STRING flow direction: back, fwd or both (omit it for the flat per-line rows)", "flow=\"back\"" },
+    // §5a decision 3: a CLOSED set, so the sentence names it — an unknown value is refused, never read as
+    // the default (the rule the `in` row above records, for the same reason: a typo must not silently
+    // change the shape of the answer).
+    { "legend",        "a STRING legend posture: full (the default) or compact",                      "legend=\"compact\"" },
     // ── the ENVELOPE, outside `params` (§B6 M6/M7) ──
     // These four were read through the bare findString/findObject path, which collapses "absent" onto
     // "present but not the shape I read" — so `"method":5` became `-32700 "parse error"` (a JSON that parsed
@@ -327,7 +336,7 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // ── array ──
     { "symbols",       "an ARRAY (or comma-string) of 2..16 symbol names",                            "symbols=[\"main\",\"parseArgs\"]", "array", "string" },
     { "queries",       "an ARRAY of {verb, ...args} sub-query objects",                               "queries=[{\"verb\":\"grep\",\"pattern\":\"x\"}]", "array", "object" },
-    { "paths",         "an ARRAY of 1..16 workspace root directories",                                "paths=[\"svc\",\"web\"]", "array", "string" },
+    { "paths",         "an ARRAY of 1..16 repo roots",                                                "paths=[\"svc\",\"web\"]", "array", "string" },
 };
 
 // W3FIX NIT: the got-ECHO is CAPPED. The echo exists so a caller can see which of their values was rejected,
@@ -978,7 +987,8 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "doc_drift",                "path kind limit offset" },
     // lane/tc-sliceat: the ARISE def-use slice — var/flow/depth mirror the CLI's :VAR / --slice-flow /
     // --slice-depth knobs; single-root by kMcpSingleRootVerbs (a per-definition on-disk re-parse).
-    { "slice",                    "path symbol var flow depth" },
+    // §5a decision 3: `legend` — the opt-in compact posture (the CLI --legend=compact), default full.
+    { "slice",                    "path symbol var flow depth legend" },
     // ── edit verbs ──
     { "replace_symbol_body",      "path paths symbol file new_body", McpVerbFields::Effect::Destructive },
     { "insert_before_symbol",     "path paths symbol file text", McpVerbFields::Effect::Writes },
