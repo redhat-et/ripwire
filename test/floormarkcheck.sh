@@ -602,6 +602,37 @@ done
 grep -q 'counts_floor=1' "$TMP/situ9.txt" && grep -q "$BRIEF_ANCHOR" "$TMP/situ9.txt" \
     && ok "(9) situ (CLI text) states counts_floor=1 and: $BRIEF_ANCHOR" \
     || no "(9) situ (CLI text) reports a blast radius with no floor statement: $( grep -m1 'blast radius' "$TMP/situ9.txt" | cut -c1-120 )"
+
+# ── §L10b LOW tail: --situ's "nothing to analyze" line used ONE wording for two different reasons — a
+# clean working tree (nChanged==0) and changed-but-symbol-free files (nChanged>0) — and the shared wording
+# read as the latter even on the former, where "the changed files" names files that do not exist. The MCP
+# JSON twin (mcpverbs.h) already split these; the CLI text form did not.
+if command -v git >/dev/null 2>&1; then
+    SITUZ="$TMP/situzero"; mkdir -p "$SITUZ"
+    git -C "$SITUZ" init -q; git -C "$SITUZ" config user.email a@a.com; git -C "$SITUZ" config user.name a
+    printf 'def foo():\n    pass\n' > "$SITUZ/a.py"
+    printf '// just a comment\n' > "$SITUZ/b.c"
+    git -C "$SITUZ" add -A; git -C "$SITUZ" commit -qm init
+    # (a) a genuinely clean tree: zero changed files.
+    "$BIN" "$SITUZ" --situ >"$TMP/situzero.txt" 2>/dev/null
+    grep -q '0 changed files — working tree is clean' "$TMP/situzero.txt" \
+        && ok "(9b) situ on a clean tree names the CLEAN-TREE reason (0 changed files)" \
+        || { no "(9b) situ on a clean tree still reads as \"no indexed symbols in the changed files\""; cat "$TMP/situzero.txt"; }
+    grep -q 'no indexed symbols in the' "$TMP/situzero.txt" \
+        && no "(9b) situ on a clean tree still uses the changed-but-symbol-free wording" \
+        || ok "(9b) situ on a clean tree does not claim changed files exist"
+    # (b) a changed file that carries no indexed symbol (a comment-only .c edit).
+    printf '// just a comment\n// another\n' > "$SITUZ/b.c"
+    "$BIN" "$SITUZ" --situ >"$TMP/situdocsonly.txt" 2>/dev/null
+    grep -q 'no indexed symbols in the 1 changed file' "$TMP/situdocsonly.txt" \
+        && ok "(9b) situ on a changed-but-symbol-free file names the count and reason (1 changed file)" \
+        || { no "(9b) situ on a changed-but-symbol-free file lost its own reason"; cat "$TMP/situdocsonly.txt"; }
+    grep -q 'working tree is clean' "$TMP/situdocsonly.txt" \
+        && no "(9b) situ on a changed file falsely claims the working tree is clean" \
+        || ok "(9b) situ on a changed file does not claim the tree is clean"
+else
+    ok "(9b) git is NOT INSTALLED — the zero-diff wording arm could not run, skipped"
+fi
 # the MCP twins: situational_awareness (JSON key), path_between / connect / lego (XML marker)
 mcp_text situational_awareness "{\"path\":\"$ROOT\",\"files\":\"src/graph.h\"}" >"$TMP/mcp_situ9.json"
 python3 -c '
