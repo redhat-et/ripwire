@@ -43,12 +43,29 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
-echo "mcpattrparitycheck: BIN=$BIN  CORPUS=$ROOT"
 
-python3 - "$BIN" "$ROOT" <<'PY'
+# verify-wave2 F1 — the FILTER-echo block below used to name `lane` against the OPERATOR'S OWN branch
+# namespace (`--stray-content=lane` on this checkout, MCP `kind:"lane"` on this path). That is wave-1 R3
+# re-opened inside a gate this wave ADDED: with the round's lane/ca-* heads present every arm passed, and
+# from a fresh `git clone --local` whose only head is `work` the same binary gave
+#   FAIL stray_content (CLI, filtered): the root echoes filter= (NO)
+#   FAIL stray_content MCP probe: __ERROR__:not a git repository (or no HEAD commit) — no refs to compare
+# A probe about a ref-name filter must OWN its refs, so the two ref-filtered rows run against
+# test/lib/strayfixture.sh's throwaway repo (branch `main` + a divergent `lane/probe`) exactly as
+# precedencecheck / substrfiltercheck / mcpclidiffcheck now do. Presence-guarded: no ref, no assertion.
+. "$ROOT/test/lib/strayfixture.sh"
+SFIX="$( mktemp -d )"; trap 'rm -rf "$SFIX"' EXIT
+mkStrayFixture "$SFIX"
+strayFixtureHasRef "$SFIX" || {
+    echo "  FAIL  fixture: no lane/* ref in the throwaway repo — the filter rows would refuse for the wrong reason"
+    echo "1 CHECK(S) FAILED"; exit 1; }
+echo "  PASS  fixture: throwaway repo carries a lane/* ref for the kind=lane filter rows to select"
+echo "mcpattrparitycheck: BIN=$BIN  CORPUS=$ROOT  REFFIX=$SFIX"
+
+python3 - "$BIN" "$ROOT" "$SFIX" <<'PY'
 import json, re, subprocess, sys
 
-BIN, ROOT = sys.argv[1], sys.argv[2]
+BIN, ROOT, SFIX = sys.argv[1], sys.argv[2], sys.argv[3]
 fails = 0
 def check( cond, msg ):
     global fails
@@ -56,8 +73,11 @@ def check( cond, msg ):
     if not cond: fails += 1
 
 # ── the three surfaces ────────────────────────────────────────────────────────────────────────────────
+def cliAt( corpus, args ):
+    return subprocess.run( [ BIN, corpus ] + args, capture_output = True, text = True ).stdout
+
 def cli( args ):
-    return subprocess.run( [ BIN, ROOT ] + args, capture_output = True, text = True ).stdout
+    return cliAt( ROOT, args )
 
 def mcp( name, arguments ):
     req = "\n".join( [ json.dumps( { "jsonrpc": "2.0", "id": 1, "method": "initialize" } ),
@@ -231,15 +251,19 @@ except json.JSONDecodeError as e:
 # ═══ FILTER echo: a count under a filter is never mistaken for the repo total ═══════════════════════════
 print( "" )
 print( "=== FILTER: a verb that accepts a filter echoes it on the root ===" )
-for label, args, elem, mcpVerb, mcpArgs in (
-        ( "flags",         [ "--flags=RIPWIRE" ],  "flags",   "flags",     { "path": ROOT, "kind": "RIPWIRE" } ),
+# F1: the CORPUS is a column. `RIPWIRE` is a kind of flag, so `flags` reads this repo; `lane` is a REF NAME,
+# so the two ref-filtered rows read SFIX — the throwaway repo that owns a lane/probe head — never whatever
+# branches the operator happens to be carrying.
+for label, corpus, args, elem, mcpVerb, mcpArgs in (
+        ( "flags", ROOT, [ "--flags=RIPWIRE" ],  "flags",   "flags",     { "path": ROOT, "kind": "RIPWIRE" } ),
         # whereis: MCP-only. The CLI verb has NO ref-name filter argument of its own — cfg.strayFilter is
         # set solely by --stray-content=SUBSTR, and passing both selects --stray-content instead. So there
         # is no CLI shape to probe, and "" as the CLI args means the CLI half is skipped, not silently passed.
-        ( "whereis",       [], "whereis", "whereis",         { "path": ROOT, "symbol": "escapeXml", "kind": "lane" } ),
-        ( "stray_content", [ "--stray-content=lane" ], "stray", "stray_content", { "path": ROOT, "kind": "lane" } ) ):
+        ( "whereis", SFIX, [], "whereis", "whereis", { "path": SFIX, "symbol": "probeOne", "kind": "lane" } ),
+        ( "stray_content", SFIX, [ "--stray-content=lane" ], "stray", "stray_content",
+                                                             { "path": SFIX, "kind": "lane" } ) ):
     if args:
-        a = xmlRootAttrs( cli( args ), elem )
+        a = xmlRootAttrs( cliAt( corpus, args ), elem )
         check( a is not None and "filter" in a,
                "%s (CLI, filtered): the root echoes filter= (%s)" % ( label, "yes" if a and "filter" in a else "NO" ) )
     else:
