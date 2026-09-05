@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Derive expected/<task>/<file> from fixture/ and tasks.json with PLAIN STRING OPS — never ripwire.
+"""Derive expected/<task>/<file>.expected from fixture/ and tasks.json with PLAIN STRING OPS — never ripwire.
+
+The `.expected` suffix says what these are: byte-images of post-edit files, not translation units. Without it
+test/ripwirepubliccheck.sh's include-closure arm swept them as C++ (a `#include "geometry.h"` that resolves in
+fixture/ does not resolve beside a header-less copy). oracle.sh strips the suffix when it compares.
 
 The oracle must be independent of the tool under test, so the expected post-edit bytes are produced by
 str.replace over the committed fixture: a replace op swaps old_text for new_text once; an insert op puts
@@ -46,7 +50,7 @@ def main():
     bad = 0
     for task in tasks:
         for rel, text in expected_files( task ).items():
-            dest = EXPECTED / task["id"] / rel
+            dest = EXPECTED / task["id"] / ( rel + ".expected" )
             if check:
                 have = dest.read_text() if dest.exists() else None
                 if have != text:

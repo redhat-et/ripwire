@@ -212,6 +212,22 @@ def mentions_file( text, rel_files ):
             return rel
     return None
 
+def classify_ripwire_call( cmd, target_files, target_symbols ):
+    """The ripwire half of classify_call: which ripwire call this is, in the T2 vocabulary.
+       ripwire-preview     — an --edit-plan/--edit-check with --dry-run: writes nothing, the E3 preview an apply follows
+       ripwire-edit        — a write verb (the call the window hangs off)
+       ripwire-edit-check  — --edit-check on one of the task's OWN symbols after the receipt carried it (redundant)
+       ripwire-cli         — any other ripwire call"""
+    target = mentions_file( cmd, target_files ) or ""
+    if EDIT_VERB_RE.search( cmd ) and "--dry-run" in cmd:
+        return "ripwire-preview", "ripwire", target
+    if EDIT_VERB_RE.search( cmd ):
+        return "ripwire-edit", "ripwire", target
+    m = EDIT_CHECK_RE.search( cmd )
+    if m and m.group( 1 ).split( ":" )[-1] in target_symbols:
+        return "ripwire-edit-check", "ripwire", target
+    return "ripwire-cli", "ripwire", target if m else ""
+
 def classify_call( call, target_files, target_symbols ):
     """(class, family, target) for one tool call, in the meter's vocabulary plus EVALS T2's edit classes:
        ripwire-edit / ripwire-edit-check / ripwire-cli (family ripwire)
@@ -221,13 +237,7 @@ def classify_call( call, target_files, target_symbols ):
     tool, cmd, inp = call["tool"].lower(), call.get( "command" ) or "", call.get( "input" ) or {}
     path_text = " ".join( str( v ) for v in inp.values() if isinstance( v, str ) )
     if is_ripwire_command( cmd ):
-        if EDIT_VERB_RE.search( cmd ):
-            return "ripwire-edit", "ripwire", mentions_file( cmd, target_files ) or ""
-        m = EDIT_CHECK_RE.search( cmd )
-        if m:
-            sym = m.group( 1 ).split( ":" )[-1]
-            return ( "ripwire-edit-check" if sym in target_symbols else "ripwire-cli" ), "ripwire", mentions_file( cmd, target_files ) or ""
-        return "ripwire-cli", "ripwire", ""
+        return classify_ripwire_call( cmd, target_files, target_symbols )
     if tool in NATIVE_EDIT_TOOLS:
         return "native-edit", "native", mentions_file( path_text, target_files ) or ""
     if tool in ( "read", "grep", "glob", "list", "ls", "search", "find" ):

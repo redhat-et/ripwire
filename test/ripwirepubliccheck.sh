@@ -138,7 +138,7 @@ SECRET_RE='AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{3
 # its own per-path ruling, so scanning the copy can only double-report what the original already
 # answers for. The pack is regenerated only by make_snapshot.py --freeze and integrity-checked by
 # recallevalcheck's check #0, so nothing can hide in it that is not also at its source path.
-SECRET_OK='^(src/redact\.h|test/README\.md|test/redactfix/|test/redactcheck\.sh|test/jsonredactcheck\.sh|test/mcpredactcheck\.sh|test/bodydialectcheck\.sh|test/w3fixlegendcheck\.sh|bench/recalleval/snapshot\.mdpack)'
+SECRET_OK='^(src/redact\.h|test/README\.md|test/redactfix/|test/redactcheck\.sh|test/jsonredactcheck\.sh|test/mcpredactcheck\.sh|test/bodydialectcheck\.sh|test/w3fixlegendcheck\.sh|test/editroundtripcheck\.sh|bench/recalleval/snapshot\.mdpack)'
 hits="$( sweep "$SECRET_RE" | grep -vE "$SECRET_OK" || true )"
 if [ -n "$hits" ]; then
     no "arm 4 — credential-shaped literal outside the sanctioned redaction fixtures:"

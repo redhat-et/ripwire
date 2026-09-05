@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # oracle.sh TASK_ID REPO_DIR — the deterministic gate for one editsuite task.
-# exit 0 = every touched file is byte-identical to expected/TASK_ID/<file>
+# exit 0 = every touched file is byte-identical to expected/TASK_ID/<file>.expected (the suffix marks a byte-image
+#          of a post-edit file, not a source file — see gen_expected.py)
 # exit 2 = equal after collapsing runs of blank lines and trailing whitespace ("ws-only": the edit landed,
 #          the blank-line layout did not) — reported separately, never counted as a pass
 # exit 1 = the edit did not land
@@ -11,7 +12,7 @@ EXP="$HERE/expected/$TASK"
 [ -d "$EXP" ] || { echo "oracle: no expected tree for task $TASK"; exit 1; }
 rc=0
 while IFS= read -r f; do
-    rel="${f#"$EXP"/}"
+    rel="${f#"$EXP"/}"; rel="${rel%.expected}"
     if cmp -s "$f" "$REPO/$rel"; then
         continue
     fi

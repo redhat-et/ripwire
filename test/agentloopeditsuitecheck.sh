@@ -44,13 +44,13 @@ SUITE="$ROOT/bench/agentloop/editsuite"
 W="$TMP/w"; rm -rf "$W"; cp -R "$SUITE/fixture" "$W"
 bash "$SUITE/oracle.sh" r1 "$W" >/dev/null 2>&1; rc=$?
 [ "$rc" = 1 ] && ok "(1) oracle: the pristine fixture FAILS task r1 (rc=1)" || no "(1) oracle on the pristine fixture returned $rc, want 1"
-cp "$SUITE/expected/r1/geometry.cpp" "$W/geometry.cpp"
+cp "$SUITE/expected/r1/geometry.cpp.expected" "$W/geometry.cpp"
 bash "$SUITE/oracle.sh" r1 "$W" >/dev/null 2>&1; rc=$?
 [ "$rc" = 0 ] && ok "(1) oracle: the expected bytes PASS task r1 (rc=0)" || no "(1) oracle on the expected bytes returned $rc, want 0"
 printf '\n' >> "$W/geometry.cpp"
 bash "$SUITE/oracle.sh" r1 "$W" >/dev/null 2>&1; rc=$?
 [ "$rc" = 2 ] && ok "(1) oracle: one extra trailing newline is ws-only (rc=2), never a pass" || no "(1) oracle on a trailing-newline variant returned $rc, want 2"
-rm -rf "$W"; cp -R "$SUITE/fixture" "$W"; cp "$SUITE/expected/p2/stats.py" "$W/stats.py"
+rm -rf "$W"; cp -R "$SUITE/fixture" "$W"; cp "$SUITE/expected/p2/stats.py.expected" "$W/stats.py"
 bash "$SUITE/oracle.sh" p2 "$W" >/dev/null 2>&1; rc=$?
 [ "$rc" = 1 ] && ok "(1) oracle: a plan task with only one of its two files edited FAILS" || no "(1) oracle on a half-applied plan returned $rc, want 1"
 
@@ -116,7 +116,7 @@ def oc( tool, **inp ):
 def stream( events ):
     return "\n".join( json.dumps( e ) for e in events ) + "\n"
 files, syms = [ "geometry.cpp" ], [ "area_of_triangle" ]
-ev = [ oc( "bash", command="ls -la /Users/me/ripwire-wt-tr-E/" ),                                     # a PATH containing ripwire: not a call
+ev = [ oc( "bash", command="ls -la /home/me/ripwire-wt-x/" ),                                     # a PATH containing ripwire: not a call
        oc( "bash", command="printf 'x' | %s . --replace-symbol-body=area_of_triangle --edit-target-file=geometry.cpp --edit-payload=-" % SHIM ),
        oc( "read", filePath="/w/repos/r1/geometry.cpp" ),                                              # policy-read of the TARGET
        oc( "bash", command="%s . --edit-check=geometry.cpp:area_of_triangle" % SHIM ),                # redundant check
@@ -164,6 +164,10 @@ cl2op = E.classify_all( E.walk_tool_calls( "opencode", stream( [ oc( "edit", fil
     "(4) a 2-op task's window opens after the 2nd native edit: no self re-edit counted, the read after it is" )
 clpl = E.classify_all( E.walk_tool_calls( "opencode", stream( [ oc( "bash", command="%s . --edit-plan=/tmp/p/plan.json --apply" % SHIM ), oc( "read", filePath="/w/r/geometry.cpp" ) ] ) ), files, syms )
 ( ok if E.edit_call_index( clpl, "ripwire_edit", files, ops=3 ) == 0 else no )( "(4) one --edit-plan --apply is the whole N-op edit: the window opens right after it" )
+# a --dry-run before the --apply is the E3 PREVIEW, not the edit: the window hangs off the apply
+clpv = E.classify_all( E.walk_tool_calls( "opencode", stream( [ oc( "bash", command="%s . --edit-plan=/tmp/p/plan.json --dry-run" % SHIM ), oc( "bash", command="%s . --edit-plan=/tmp/p/plan.json --apply" % SHIM ) ] ) ), files, syms )
+( ok if [ c["class"] for c in clpv ] == [ "ripwire-preview", "ripwire-edit" ] and E.edit_call_index( clpv, "ripwire_edit", files, ops=2 ) == 1 else no )(
+    "(4) --edit-plan --dry-run is ripwire-preview; the window opens after the --apply (%s)" % ",".join( c["class"] for c in clpv ) )
 # codex stream: shell-only, cat/sed -n of the target is a read
 cx = [ { "type": "item.completed", "item": { "type": "command_execution", "command": "%s . --insert-after-symbol=trace --edit-target-file=matrix.cpp --edit-payload=/tmp/p" % SHIM } },
        { "type": "item.completed", "item": { "type": "command_execution", "command": [ "bash", "-lc", "sed -n '20,40p' matrix.cpp" ] } },
