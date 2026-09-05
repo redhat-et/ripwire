@@ -18,6 +18,8 @@
 #include <string>
 #include <string_view>
 
+#include "infra/jsonesc.h"   // utf8SeqLen — the one UTF-8 validator (escapeXml's scrub rule, mirrored here)
+
 namespace rw
 {
 
@@ -36,15 +38,30 @@ inline std::string nextAttrXml( std::string_view invocation )
     std::string a;
     a.reserve( invocation.size() + 12 );
     a += " next=\"";
-    for( const char c : invocation )
+    // serialize.h escapeXml's policy, byte for byte (w3fixbudgetcheck: a --grep pattern with a raw newline / C0 /
+    // invalid UTF-8 byte is echoed by grep's next= and MUST NOT reach markup — G4): the five XML escapes, the three
+    // legal control bytes as character references, every other C0 byte (and DEL) as '?', invalid UTF-8 as '?'.
+    const char*       d = invocation.data();
+    const std::size_t n = invocation.size();
+    for( std::size_t i = 0; i < n; )
     {
+        const char c = d[ i ];
         switch( c )
         {
-            case '&':  a += "&amp;";  break;
-            case '<':  a += "&lt;";   break;
-            case '>':  a += "&gt;";   break;
-            case '"':  a += "&quot;"; break;
-            default:   a += c;        break;
+            case '&':  a += "&amp;";  ++i; break;
+            case '<':  a += "&lt;";   ++i; break;
+            case '>':  a += "&gt;";   ++i; break;
+            case '"':  a += "&quot;"; ++i; break;
+            case '\'': a += "&apos;"; ++i; break;
+            case '\t': a += "&#9;";   ++i; break;
+            case '\n': a += "&#10;";  ++i; break;
+            case '\r': a += "&#13;";  ++i; break;
+            default:
+                if( static_cast<unsigned char>( c ) < 0x20 || c == 0x7f ) { a += '?'; ++i; }
+                else if( static_cast<unsigned char>( c ) < 0x80 ) { a += c; ++i; }
+                else if( const int len = rw::utf8SeqLen( d, i, n ); len == 0 ) { a += '?'; ++i; }
+                else { a.append( d + i, std::size_t( len ) ); i += std::size_t( len ); }
+                break;
         }
     }
     a += "\"";

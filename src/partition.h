@@ -468,13 +468,13 @@ inline constexpr const char* kPartitionLegend =
     // used to live here (why two overlap measures differ, why tokens==est_tokens) is in --help --pack-task and
     // docs/COMMANDS.md. Lens 8 table 1: the partitioned answer spent 28% of its bytes on legend (4 copies of the
     // bundle legend); the gate is partitioncheck's P10 arm — prose legend <= 1.3x a single bundle's.
-    "<!-- ripwire partitioned task bundle: ONE shared core plus N minimally overlapping per-agent slices along call-graph communities; "
-    "each <bundle> wraps one ctx for one agent. requested=N asked, partitions= carved; modules=/split= groups found / cuts forced; "
-    "core_symbols= the shared core, surface= core plus the assignable remainder; budget_per_agent_tokens= core plus ONE partition "
-    "(= core_budget_tokens + partition_budget_tokens), total_bytes= all bundles; overlap_mean=/overlap_max= pairwise Jaccard over the "
-    "ids partitions name, pre-trim; shared_symbols= ids two or more partitions name, union_symbols= ids any names; core_overlap= the "
-    "core surface a partition reaches anyway; a bundle's tokens= equals its est_tokens= (bytes / 2.36). Each ctx carries NO legend of "
-    "its own: the task-bundle legend follows once; a slice that dropped rows carries one data comment. -->";
+    "<!-- ripwire partitioned task bundle: ONE shared core plus N minimally overlapping slices along call-graph communities; each "
+    "<bundle> is one agent's ctx. requested=N asked, partitions= carved; modules=/split= groups found / cuts forced; core_symbols= the "
+    "shared core, surface= core plus the assignable remainder; budget_per_agent_tokens= core plus ONE partition (= core_budget_tokens + "
+    "partition_budget_tokens), total_bytes= all bundles; overlap_mean=/overlap_max= pairwise Jaccard over the ids partitions name, "
+    "pre-trim; shared_symbols= the ids TWO OR MORE partitions name, union_symbols= ids any names (their ratio and overlap_mean COINCIDE at "
+    "partitions=2 only); core_overlap= the core surface a partition reaches anyway; tokens= = est_tokens= (bytes / 2.36). Each ctx "
+    "carries NO legend of its own: the task-bundle legend follows once; a trimmed slice carries one data comment. -->";
 
 // THE verb: `--pack-task="TASK" --partition=N`. Returns the whole <ctx-partitions>…</ctx-partitions> document
 // (never touches stdout — the caller owns the sink, exactly like packTaskBundleText). `jsonOut`, when given,

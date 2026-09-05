@@ -204,7 +204,11 @@ fi
 # fixed ~640 B and the capped rung with it — swept 800..2000: empty <= 1205, shown="1" on 1210..1240,
 # shown="2" at 1245, fully fit from 1300. 1225 sits mid-window; the PROPERTY (one row admitted, two withheld,
 # no bytes spent on an uninformative shared="1") is unchanged.
-runB --pack-task="anchorSolo" --token-budget=1225 > "$TMP/b_tight.xml"
+# RE-PINNED 1225 -> 1235 (2026-09-05, capture-audit P3, lane L7): the r=1 <d> row now carries next="--expand=FILE:NAME"
+# (nextverb.h), 45 B the rank section spends first; at 1225 that pushed the callers quota under one row and the
+# SECTION was omitted (the pre-existing zeroed-section shape — recorded in lane-L7.md), at 1235 the pinned
+# shown="1"/total="3"/capped="1" row is back. Measured on this fixture: base 1225 -> shown=1; new 1225 -> none, 1235 -> shown=1.
+runB --pack-task="anchorSolo" --token-budget=1235 > "$TMP/b_tight.xml"
 TIGHT_TAG="$( grep -o '<callers[^>]*>' "$TMP/b_tight.xml" )"
 [ "$TIGHT_TAG" = '<callers of_top="1" shown="1" total="3" capped="1">' ] \
     && ok "arm (4b) capped-budget single-anchor callers: shown=\"1\"/total=\"3\"/capped=\"1\" unchanged from the pre-lane rendering" \

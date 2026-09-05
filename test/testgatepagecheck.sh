@@ -161,7 +161,9 @@ HELPTEXT="$( "$BIN" --help 2>&1 | tr '\n' ' ' )"
 HELPLIST="$( printf '%s' "$HELPTEXT" | sed -E 's/.*HONORED by: //; s/ Emit at most N rows.*//' )"
 [ -n "$HELPLIST" ] && ok "PC-2: --help's HONORED-by list extracted" || no "PC-2: could not find --help's HONORED-by list"
 
-REFUSEMSG="$( "$BIN" "$R" --pr-context --limit=1 2>&1 )"
+# RE-PINNED 2026-09-05 (capture-audit P4, lane L7): --pr-context HONORS --limit/--offset now (its changed-file window),
+# so it no longer refuses — the probe is --dmm, a verb outside the paging set, which still produces the refusal.
+REFUSEMSG="$( "$BIN" "$R" --dmm --limit=1 2>&1 )"
 REFUSELIST="$( printf '%s' "$REFUSEMSG" | sed -E 's/.*honored only by: //; s/\. The default map.*//' )"
 [ -n "$REFUSELIST" ] && ok "PC-2: the runtime refusal message's honored-set list extracted" || no "PC-2: could not find the runtime refusal's honored-set list (msg: $REFUSEMSG)"
 
