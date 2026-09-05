@@ -227,6 +227,20 @@ PY_EOF
 # tokenbudgetcheck asserts MONOTONICITY, which a floor satisfies trivially (5.3x over at every budget is
 # perfectly monotone). This is the absolute arm: for every (task length, budget) point, the delivered document
 # either fits ceiling*1.15 or says over_ceiling — never neither, never both.
+#
+# RE-PIN 2026-09-05 (capture-audit verify-wave2 F2, lane V2) — to the NEW contract stated precisely, not to a
+# loosened assertion. over_ceiling= used to be a statement about BYTES vs the 1.15-tolerance allowance, which
+# is why the reverse half could be written in bytes. It is now a statement about the two numbers the ROOT
+# ITSELF PRINTS, in the unit it prints them in: over_ceiling="1" exactly when est_tokens > budget_tokens, on
+# every rung (F2: `--for --token-budget=1600` shipped `budget_tokens="1600" est_tokens="1665"` and no label,
+# because the flag fired only on the ladder's last rung). The two halves are therefore asymmetric on purpose:
+#   FORWARD  (unchanged, still in bytes): delivered > allowance  =>  over_ceiling. Sound, because
+#            allowance = N x 2.36 x 1.15 and the emitter prices at 2.50 B/tok, so bytes past the allowance
+#            are >= 1.085 x N tokens — over the budget by construction.
+#   REVERSE  (re-pinned, now in tokens):  over_ceiling  =>  est_tokens > budget_tokens. The old byte form
+#            would now fire on every HONEST label inside the 15% tolerance band, which is precisely the
+#            window F2 lived in.
+# A label with no overshoot behind it still fails, so the arm cannot be satisfied by labelling everything.
 CEILING_ARM_POINTS=0
 CEILING_ARM_BAD=0
 for TASKFILE in mid long; do
@@ -238,13 +252,23 @@ for TASKFILE in mid long; do
             # the bar, in shell, from the same two constants the code uses (2.36 B/tok x 1.15 tolerance)
             ALLOW="$( python3 -c "print(int($B*2.36*1.15))" )"
             OVER=0;  saysOverCeiling "$TMP/c.out" && OVER=1
+            # the root's own price, in the unit budget_tokens= is stated in (comments stripped: the legend
+            # DEFINES est_tokens= and a definition is not a measurement)
+            EST="$( perl -0pe 's#<!--.*?-->##gs' "$TMP/c.out" | grep -oE '<ctx( [^>]*)?>' | head -1 \
+                    | grep -oE ' est_tokens="[0-9]+"' | head -1 | tr -dc '0-9' )"
             CEILING_ARM_POINTS=$(( CEILING_ARM_POINTS + 1 ))
             if [ "$BYTES" -gt "$ALLOW" ] && [ "$OVER" = "0" ]; then
                 CEILING_ARM_BAD=$(( CEILING_ARM_BAD + 1 ))
                 echo "    --$V task=$TASKFILE budget=$B: $BYTES B > allowance $ALLOW B and SILENT about it"
-            elif [ "$BYTES" -le "$ALLOW" ] && [ "$OVER" = "1" ]; then
+            elif [ -z "$EST" ]; then
                 CEILING_ARM_BAD=$(( CEILING_ARM_BAD + 1 ))
-                echo "    --$V task=$TASKFILE budget=$B: $BYTES B fits allowance $ALLOW B yet claims over_ceiling"
+                echo "    --$V task=$TASKFILE budget=$B: the <ctx> root carries no est_tokens= — the reverse half has no number to check"
+            elif [ "$OVER" = "1" ] && [ "$EST" -le "$B" ]; then
+                CEILING_ARM_BAD=$(( CEILING_ARM_BAD + 1 ))
+                echo "    --$V task=$TASKFILE budget=$B: claims over_ceiling but est_tokens=$EST is inside the $B-token budget"
+            elif [ "$OVER" = "0" ] && [ "$EST" -gt "$B" ]; then
+                CEILING_ARM_BAD=$(( CEILING_ARM_BAD + 1 ))
+                echo "    --$V task=$TASKFILE budget=$B: root prints budget_tokens=$B est_tokens=$EST and SILENT about the overshoot"
             fi
         done
     done
