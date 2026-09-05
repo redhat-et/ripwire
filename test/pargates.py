@@ -172,8 +172,26 @@ GATE_BUDGET_SEC = {
     # The binary is no longer the dominant cost of either gate -- the residual is the per-row shell/awk/
     # python glue of the universe sweeps. Another round of ingest-sharing buys nothing; only fewer
     # subprocesses per row would.
+    #
+    # 2026-09-05, LATER STILL (terminality round A wave-2 verifier, N1; lane V3): shapingflagcheck goes back
+    # UP to 1200 and compactlegendcheck STAYS at 900. Nothing about the gates changed -- the BASIS did. V2
+    # measured the pair with only their two siblings running; the verifier re-timed them at the same commit
+    # under a full parallel battery (load average 19), which is the contention shape a CI leg at -j actually
+    # has and closer to it than a three-gates-only run. Both ALL PASS; the walls are higher:
+    #     gate                V2 concurrent   V2 solo   verifier, LOADED   x6      x11     budget   margin
+    #     compactlegendcheck        53.9 s     49.4 s          69 s       414 s   759 s     900     141 s
+    #     shapingflagcheck          71.1 s     66.5 s          80 s       480 s   880 s     900      20 s
+    # At the 6-11x runner factor THIS FILE's own rows are derived from (see the header paragraph),
+    # compactlegendcheck projects to 759 s at the top of the range and clears 900 by 16%; shapingflagcheck
+    # projects to 880 s and clears it by 20 s, which is 2.2% -- less headroom than the round's own
+    # measurement noise, on the gate CI run 33978240573 went red on across four ubuntu legs. A budget here is
+    # a hang tripwire, never a perf bar (the house rule that build and CI cost never gate on wall clock), so
+    # the two errors are not symmetric: a too-generous budget costs nothing at all, and a thin one costs a
+    # red CI leg and the hour spent re-deciding whether it was a hang. 1200 is the tier
+    # cppbenchcheck/regexbombcheck already use for exactly this reason. compactlegendcheck's 141 s is real
+    # headroom and is left alone -- the row that needs the margin is the one that gets it.
     "compactlegendcheck.sh":      900,
-    "shapingflagcheck.sh":        900,
+    "shapingflagcheck.sh":       1200,
     "collectioncapcheck.sh":      900,
                                           # under -j6, rc=124 at the flat cap on both ubuntu PLAIN legs of run
                                           # 33762934972 (Release legs and macOS fit). Warm replay landed with this row.
