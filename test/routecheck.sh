@@ -96,6 +96,11 @@ CONCEPT="how does resolution work"
 # Verified before re-pinning: with r=, the <tail> element, the tail legend clause and est_tokens
 # normalized out, old and new documents are byte-identical — no ranking, body or route byte moved
 # (route-neutrality, this golden's purpose, untouched).
+# RE-PIN 2026-09-04 (capture-audit verify-wave1 N1, lane V1): 3283 -> 3324 B (+41 B), est_tokens="1239" -> "1256".
+# CAUSE: --for now prices its ROOT — est_tokens= moved from the header comment onto <ctx> (where --pack-task /
+# --from-trace / --handoff put theirs, M11) and the legend gained the 41-byte clause defining it; over_ceiling="1"
+# rides the root on the ladder's last rung (absent here: no --token-budget). Verified before re-pinning: with
+# est_tokens= and that one clause normalized out, old and new documents are byte-identical (gate: estchargecheck #15 d).
 "$BIN" routefix --no-cache --for="$CONCEPT" --no-route >"$TMP/concept_noroute.xml" 2>/dev/null
 diff -q "$TMP/concept_noroute.xml" "$ROOT/test/routefix/golden_for.xml" >/dev/null \
     && ok "safe fallback: conceptual --for --no-route byte-identical to the pre-routing golden" \

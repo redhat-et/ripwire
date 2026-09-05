@@ -23,6 +23,13 @@
 #   D  a path that DOES resolve still answers (the refusal must not swallow the working case)
 #   E  MCP situational_awareness with a bad `files` item returns a JSON-RPC error, not empty arrays
 #   F  MCP situational_awareness with a good `files` item still answers
+#   G  MULTI-ROOT (verify-wave1 N3): the refusal is evaluated over the UNION of roots while the answer is
+#      printed per root, so a root the selector matches nothing in printed "(no changed files in this root)"
+#      at exit 0 — the exact sentence H6 was opened to kill, one level down. The rule is one refusal-or-
+#      answer per SELECTOR: a selector that resolves in the workspace but names nothing under THIS root gets
+#      a selector sentence (which root(s) its matches live under), never the empty-diff sentence; a selector
+#      that resolves nowhere still refuses for the whole workspace (exit 1); the default git-diff form keeps
+#      its empty-diff sentence, because there it is a measurement.
 #
 # RED-FIRST (pre-fix binary): A/B/C fail on --situ, C fails on --test-gate/--affected/--exercises/--cochange,
 # E fails (result with empty arrays). Post-fix: ALL PASS.
@@ -121,6 +128,40 @@ if printf '%s' "$OUT" | python3 -c 'import sys,json; r=json.load(sys.stdin); sys
 else
     no "F MCP situational_awareness files=$GOOD → refused a resolvable path: $OUT"
 fi
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+echo
+echo "=== G: multi-root --situ — one refusal-or-answer per SELECTOR, never a per-root false zero ==="
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+FIX2="$( mktemp -d )/betaroot"; mkdir -p "$FIX2"
+printf 'int beta( int x ) { return x + 1; }\n' >"$FIX2/beta.cpp"
+LBL2="$( basename "$FIX2" )"
+"$BIN" "$FIX" "$FIX2" "--situ=$GOOD" --no-cache >"$FIX2.out" 2>"$FIX2.err"; rc=$?
+[ "$rc" -eq 0 ] && ok "G two roots, --situ=$GOOD (lives in root 1) → exit 0 (the selector resolves in the workspace)" \
+                || no "G two roots, --situ=$GOOD → exit $rc: $( head -c 200 "$FIX2.err" )"
+SEC2="$( awk -v lbl="=== root $LBL2 " 'index($0, lbl)==1 {on=1; next} /^=== root /{on=0} on' "$FIX2.out" )"
+if [ -z "$SEC2" ]; then
+    no "G presence guard — no section for root $LBL2 in the multi-root answer: $( head -c 300 "$FIX2.out" )"
+else
+    case "$SEC2" in
+        *"no changed files in this root"*) no "G root $LBL2 prints \"(no changed files in this root)\" for a selector that names nothing under it — a false zero (an empty diff is a measurement; a selector that does not name this root is not): $SEC2" ;;
+        *) ok "G root $LBL2 does not print the empty-diff sentence for a selector that names nothing under it" ;;
+    esac
+    printf '%s' "$SEC2" | grep -qF -- "--situ=$GOOD" && printf '%s' "$SEC2" | grep -q 'names no indexed file under this root' \
+        && ok "G root $LBL2 says the SELECTOR (--situ=$GOOD) names no indexed file under this root" \
+        || no "G root $LBL2 does not attribute the empty section to the selector: $SEC2"
+    printf '%s' "$SEC2" | grep -qF "$( basename "$FIX" )" \
+        && ok "G root $LBL2 names the root(s) the selector's matches live under ($( basename "$FIX" ))" \
+        || no "G root $LBL2 does not say where the selector's matches live: $SEC2"
+fi
+grep -q 'changed file(s)' "$FIX2.out" && ok "G root $( basename "$FIX" ) still answers for the file it holds" \
+                                       || no "G the root that holds $GOOD did not answer: $( head -c 300 "$FIX2.out" )"
+# the union miss keeps refusing for the whole workspace
+"$BIN" "$FIX" "$FIX2" "--situ=$BAD" --no-cache >/dev/null 2>"$FIX2.err2"; rc=$?
+[ "$rc" -ne 0 ] && grep -qF -- "--situ" "$FIX2.err2" && grep -qF "$BAD" "$FIX2.err2" \
+    && ok "G two roots, --situ=$BAD (nowhere) → exit $rc, refusal names the flag and the path" \
+    || no "G two roots, --situ=$BAD → exit $rc; the union refusal regressed: $( head -c 200 "$FIX2.err2" )"
+rm -rf "$( dirname "$FIX2" )"
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

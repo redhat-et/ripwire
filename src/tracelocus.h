@@ -767,6 +767,11 @@ inline std::string renderTraceBlock( const IngestResult& ing, tracein::FrameForm
 
 // optional Q3/redaction/notes inputs, same graceful-degrade contract as packtask.h's PackTaskInputs — every
 // field defaults to "not available" (attribute simply omitted downstream).
+// R1: the fixed width a MEASURED prelude value is priced at (FromTraceInputs::preludeMeasuredDigits). Six digits
+// covers every duration under 1000 s — a --run-trace that takes longer prices one token wider per extra digit, and
+// the 600 s default timeout makes that reachable only by an explicit --run-timeout.
+inline constexpr std::size_t kMeasuredDigitsPricedWidth = 6;
+
 struct FromTraceInputs
 {
     std::size_t                        bundleBudgetBytes    = kForPayloadBudgetBytes;   // overall <ctx> budget; caller resolves --token-budget/budget
@@ -795,6 +800,12 @@ struct FromTraceInputs
     // sigs budget exactly like the header's). Empty (the default, every existing caller) ⇒ byte-identical
     // output — the G5 inertness contract.
     std::string_view                   preludeXml;
+    // R1 (capture-audit verify-wave1 2026-09-04): how many digits of preludeXml are a MEASURED value — --run-trace's
+    // duration_ms=. est_tokens= and the ceiling ladder price those digits at kMeasuredDigitsPricedWidth instead of
+    // their live width, so the PRICE is a deterministic function of the fixed output while the VALUE stays the
+    // honest measurement (a 9 → 10 ms run moved est_tokens by one and made runtracecheck's determinism arm ~30%
+    // red). 0 (every other caller) ⇒ the document prices as-is, byte-identical.
+    std::size_t                        preludeMeasuredDigits = 0;
     // R-R (2026-08-24): the run's root argument, so this bundle's <sigs><f p=…> rows are root-relative like
     // every other lens's. Empty ⇒ multi-root (or a caller that has no single root), where ing.files already
     // carry the labeled identity — the same degrade every pathRel applies.
@@ -993,9 +1004,16 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         // and the map rate over-prices body text, so the number errs conservative), budget_tokens= when a
         // --token-budget was passed, over_ceiling="1" when the ladder's last rung fired. Priced INTO the
         // ladder at their widest spelling (see packtask.h's rootAttrsFor for the reasoning).
+        // R1: the priced size of a document — the caller's measured digits swapped for their fixed width, so the
+        // ladder's decision and the root's price are both independent of how long the subprocess happened to run.
+        const auto pricedBytesOf = [ & ]( std::size_t docBytes ) -> std::size_t
+        {
+            if( in.preludeMeasuredDigits == 0 ) { return docBytes; }
+            return docBytes - std::min( docBytes, in.preludeMeasuredDigits ) + kMeasuredDigitsPricedWidth;
+        };
         const auto rootAttrsFor = [ & ]( const std::string& doc, bool overCeiling ) -> std::string
         {
-            std::string attrs = pricedRootAttr( doc.size(), kBytesPerTokenDefault, 0, nullptr );
+            std::string attrs = pricedRootAttr( pricedBytesOf( doc.size() ), kBytesPerTokenDefault, 0, nullptr );
             if( in.budgetTokens > 0 ) { attrs += " budget_tokens=\"" + std::to_string( in.budgetTokens ) + "\""; }
             if( overCeiling )         { attrs += " over_ceiling=\"1\""; }
             return attrs;
@@ -1003,7 +1021,7 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         const std::size_t rootAttrsBound = rootAttrsFor( whole, /*overCeiling=*/true ).size();
         const std::string chosen = climbCeilingLadder( [ & ]( bool, bool withSrcEcho, std::string_view extra )
                                                        { return buildTraceHeader( withSrcEcho, extra ); },
-                                                       headerStr, whole.size() - headerStr.size() + rootAttrsBound,
+                                                       headerStr, pricedBytesOf( whole.size() ) - headerStr.size() + rootAttrsBound,
                                                        ceilingAllowanceFromBudgetBytes( bundleBudget ),
                                                        /*hasRouteAttr=*/false, kNotes );
         if( chosen != headerStr )

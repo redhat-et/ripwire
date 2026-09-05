@@ -541,22 +541,16 @@ inline Out compute( const std::string& root, const std::string& sinceSpec, const
     // REV|DATE, the same two spellings --since already takes elsewhere. A revision resolves directly; a
     // date resolves to the newest commit at or before it, and resolved= discloses WHICH — a comparison
     // against "some commit around then" that never says which one is not a measurement.
-    std::string sha = quality::gitResolveCommitSha( root, sinceSpec );
-    if( sha.empty() && looksLikeDate( sinceSpec ) )
-    {
-        // looksLikeDate is the SAME coarse allowlist --hotspots --since already screens with, and it is
-        // load-bearing here for the same reason it is there: git's approxidate answers "now" for anything
-        // it cannot parse, so `--since=zzqq9nope` would otherwise resolve to HEAD and print an all-zero
-        // diff of the tree against itself — a wrong answer wearing the shape of a right one.
-        const std::string byDate = quality::gitOneLine( root, "rev-list -1 --before=" + shSingleQuote( sinceSpec ) + " HEAD 2>/dev/null" );
-        sha                      = quality::gitResolveCommitSha( root, byDate );
-    }
+    // N4 (capture-audit verify-wave1 2026-09-04): resolved by THE ONE resolver every --since host shares
+    // (gitmine.h resolveSinceScope → SinceScope::baselineSha: rev-parse for a revision, `rev-list -1 --before`
+    // behind the looksLikeDate() gate for a date — the same two steps this function used to run itself). The
+    // CLI refuses a missing baseline in main.cpp beside the M8 validation; this check is the degrade path for
+    // any caller that reaches compute() without it, printing the same shared sentence.
+    const std::string sha = resolveSinceScope( root, sinceSpec ).baselineSha;
     if( sha.empty() )
     {
         out.ok  = false;
-        out.err = "ripwire: --since=" + sinceSpec + " resolves to no commit in '" + root
-                + "' — beside --slice it names the revision to compare this variable's def-use slice against "
-                  "(e.g. --since=HEAD~1, --since=<sha>, --since=\"2 weeks ago\")";
+        out.err = sinceNoBaselineRefusal( sinceSpec, root );
         return out;
     }
 

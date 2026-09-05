@@ -32,6 +32,16 @@ command -v python3 >/dev/null 2>&1 || { echo "precedencecheck: python3 is requir
 
 echo "precedencecheck: BIN=$BIN"
 
+# R3 (verify-wave1): the probes run against a THROWAWAY repo with a known `lane/probe` ref (test/strayfixture.sh),
+# never against this checkout — `--stray-content=lane` on the operator's own branches was green only where a
+# lane/* head happened to exist. Presence-guarded: no ref, nothing below asserts anything.
+. "$ROOT/test/strayfixture.sh"
+SFIX="$( mktemp -d )"; trap 'rm -rf "$SFIX"' EXIT
+mkStrayFixture "$SFIX"
+strayFixtureHasRef "$SFIX" \
+    && ok "fixture: throwaway repo carries a lane/* ref for --stray-content=lane to select" \
+    || { no "fixture: no lane/* ref in the throwaway repo — the probes below would refuse for the wrong reason"; echo "FAILURES ABOVE"; exit 1; }
+
 # firstTag OUTFILE — first real (non-comment) XML element name in OUTFILE.
 firstTag()
 {
@@ -40,7 +50,7 @@ firstTag()
 
 # ── (1) the direct regression: --stray-content=lane --abi ──────────────────────────────────────────────
 t1out="$( mktemp )"; t1err="$( mktemp )"
-"$BIN" "$ROOT" --stray-content=lane --abi --no-cache >"$t1out" 2>"$t1err"
+"$BIN" "$SFIX" --stray-content=lane --abi --no-cache >"$t1out" 2>"$t1err"
 tag1="$( firstTag "$t1out" )"
 if grep -q 'IGNORED this run' "$t1err"; then
     named="$( grep -oE 'IGNORED this run: [^.]+' "$t1err" | head -1 )"
@@ -60,7 +70,7 @@ fi
 # Baseline: --stray-content alone (no --abi) must still win as itself — the fix must not have collaterally
 # broken plain --stray-content dispatch or made it print a notice against nothing.
 t2out="$( mktemp )"; t2err="$( mktemp )"
-"$BIN" "$ROOT" --stray-content=lane --no-cache >"$t2out" 2>"$t2err"
+"$BIN" "$SFIX" --stray-content=lane --no-cache >"$t2out" 2>"$t2err"
 tag2="$( firstTag "$t2out" )"
 if [ "$tag2" = "stray-content" ] && ! grep -q 'IGNORED this run' "$t2err"; then
     ok "H12: bare --stray-content=lane still emits <stray-content> with no notice (unaffected by the --abi fix)"

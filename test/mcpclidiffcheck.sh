@@ -271,21 +271,32 @@ for t in d["result"]["tools"]:
 print("__NO_SUCH_TOOL__")
 ' "$TOOLS_JSON" "$1"; }
 
+# R3 (verify-wave1): the stray_content row ran `--stray-content=main` against THIS checkout and anchored on a
+# legend the verb only emits when it answers — green only where a `main` head existed. Each row now names its
+# corpus: `.` is this repo, `SFIX` a throwaway repo with a known lane/probe ref (test/strayfixture.sh).
+. "$ROOT/test/strayfixture.sh"
+SFIX="$TMP/strayfix"
+mkStrayFixture "$SFIX"
+strayFixtureHasRef "$SFIX" \
+    && ok "LENS4 fixture: throwaway repo carries a lane/* ref for --stray-content=lane to select" \
+    || no "LENS4 fixture: no lane/* ref in the throwaway repo — the stray_content row below would anchor on a refusal"
+
 echo
 echo "=== LENS 4 — hedges present in the CLI legend must appear (reworded) in the tools/list description ==="
-while IFS='|' read -r verb cliargs cliphrase descphrase; do
+while IFS='|' read -r verb corpus cliargs cliphrase descphrase; do
     [ -z "$verb" ] && continue
-    eval "\"$BIN\" \"$ROOT\" $cliargs" 2>/dev/null >"$TMP/l4.cli"
+    case "$corpus" in .) corpusDir="$ROOT" ;; SFIX) corpusDir="$SFIX" ;; *) no "LENS4 $verb: unknown corpus column '$corpus'"; continue ;; esac
+    eval "\"$BIN\" \"$corpusDir\" $cliargs" 2>/dev/null >"$TMP/l4.cli"
     grep -qF "$cliphrase" "$TMP/l4.cli" || { no "LENS4 $verb: the CLI itself no longer states \"$cliphrase\" — the gate's anchor moved, re-derive it"; continue; }
     D="$( desc_of "$verb" )"
     printf '%s' "$D" | grep -qF "$descphrase" \
         && ok "LENS4 $verb: tools/list description carries the CLI's hedge" \
         || { no "LENS4 $verb: CLI states \"$cliphrase\" but the tools/list description has no \"$descphrase\""; printf '%s\n' "$D"; }
 done <<EOF
-edit_check|--edit-check=escapeXml|call sites worth OPENING, not a verdict|not a proof
-stray_content|--stray-content=main|unmerged plus superseded plus merged plus unknown|unknown=refs
-for|--for="escape xml"|starting point, not an answer|starting point, not an answer
-memory_recall|--recall="escape xml"|max_tokens=8000|max_tokens
+edit_check|.|--edit-check=escapeXml|call sites worth OPENING, not a verdict|not a proof
+stray_content|SFIX|--stray-content=lane|unmerged plus superseded plus merged plus unknown|unknown=refs
+for|.|--for="escape xml"|starting point, not an answer|starting point, not an answer
+memory_recall|.|--recall="escape xml"|max_tokens=8000|max_tokens
 EOF
 
 echo

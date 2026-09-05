@@ -273,14 +273,21 @@ const char* grepTierLegend( const rw::GrepTierReport& tier )
            "suppressed_comment=/suppressed_string= are the classified hits held back: not in hits=, and the "
            "reason complete= cannot appear. Pass grep-in=any (dashes omitted) for every tier. Hit files are parsed on demand "
            "under a fixed budget: tier_parsed= how many were classified, tier_budget= which ceiling stopped it (files or bytes, "
-           "present only then), tier_unclassified= hits in files nothing classified — always EMITTED, never suppressed. ";
+           "present only then — and the root then also carries counts_floor=\"1\": the tier counts are floors while hits= stays "
+           "exact and every row is served), tier_unclassified= hits in files nothing classified — always EMITTED, never suppressed. ";
 }
 
 // Present only when this answer actually held something back or stopped short — absent-means-nothing-was-
 // tiered, the same convention corpus_excluded= follows. tier= is narrowed further to the NON-DEFAULT case:
 // naming the code tier on every answer would be ~12 bytes restating the default on the overwhelming
 // majority that serve it.
-std::string grepTierAttrs( const rw::GrepTierReport& tier )
+// `floorAlreadyEmitted` (N2, capture-audit verify-wave1 2026-09-04): tier_budget= means the span-tier classification
+// stopped under its file/byte budget, so suppressed_comment=/suppressed_string=/tier_parsed= are FLOORS — the root
+// carries counts_floor="1" (H8's enumeration named tier_budget=; the first implementation covered three of its five).
+// NOT through pageDisclosure's collectionCapped path: every hit row was served, only the classification is partial, so
+// forcing capped="1" there would claim rows no page holds. The caller says whether the disclosure already spelled the
+// floor (hits_capped fired), so the attribute is never spelled twice.
+std::string grepTierAttrs( const rw::GrepTierReport& tier, bool floorAlreadyEmitted )
 {
     if( !tier.hasDisclosure() )
     {
@@ -317,7 +324,7 @@ std::string grepTierAttrs( const rw::GrepTierReport& tier )
     }
     if( tier.budgetHit != nullptr )
     {
-        attrs += std::string( " tier_budget=\"" ) + tier.budgetHit + "\"";
+        attrs += std::string( " tier_budget=\"" ) + tier.budgetHit + "\"" + ( floorAlreadyEmitted ? "" : rw::kGraphCountFloorAttrXml );   // N2: the floor rides with its cause
     }
     return attrs;
 }
@@ -750,7 +757,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // was skipped" convention (model.h) — never a re-run hint (--skipped already itemizes the rows).
     const std::string corpusAttr = grepCorpusAttrs( ing );
     // R-H: the tier disclosure (helper above) — empty when nothing was held back.
-    const std::string tierAttr = grepTierAttrs( tierReport );
+    const std::string tierAttr = grepTierAttrs( tierReport, /*floorAlreadyEmitted=*/hitsCapped != 0 );   // N2: tier_budget= floors the root too
     // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= (helper above).
     const std::string auxAttr = grepUnindexedAttrs( aux );
     const char* schemaAttr = cfg.legend == "compact" ? " schema=\"ripwire.grep/v1\"" : "";

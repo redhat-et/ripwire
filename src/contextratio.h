@@ -110,6 +110,7 @@ struct Scan
 {
     std::vector<Row> symbols;
     std::vector<Row> files;
+    bool             defsCapFired = false;   // N2: Facts::defsCapFired, carried to the root emitter
 };
 
 // The printable ratio. An exact integer quotient rendered at three decimals; 0/0 prints 0.000, which the
@@ -152,6 +153,8 @@ struct Facts
     std::vector<std::uint64_t> symEnt,  fileEnt;    // (unit, entity id)
     std::vector<std::uint64_t> symExt,  fileExt;    // (unit, name id) for names with NO in-corpus definition
     std::vector<std::uint64_t> symAmb,  fileAmb;    // (unit, name id) for names that resolved to more than one
+    bool                       defsCapFired = false; // N2: some name had more definitions than kDefsPerNameCap — its
+                                                     //     extra candidates were never counted, so ents=/rtok= are floors
 };
 
 // The (unit, entity) fold, written ONCE for both rollups. `ownFileOf` is the only difference between them:
@@ -237,8 +240,11 @@ inline NameDefs buildNameDefs( const IngestResult& ing )
 // ONE reference site's candidates: same name, language-compatible (graph.h's own gate, never a second one),
 // capped at kDefsPerNameCap and in ascending id order. The referring symbol itself is NOT filtered here —
 // that is the caller's rule, because it applies to the symbol rollup and not to the file one.
+// `capFired` (N2, capture-audit verify-wave1 2026-09-04) is set — never cleared — when a name's definitions overran the
+// cap: defs_per_name_cap= on the root is a published CONSTANT and cannot say whether the cap bit, so the firing is its
+// own marker (defs_capped="1") and floors the root, like every other collection cap in the tool (pageview.h rule 4).
 inline void resolveCandidates( const IngestResult& ing, const NameDefs& byName, const Reference& r,
-                               std::vector<NodeId>& out )
+                               std::vector<NodeId>& out, bool& capFired )
 {
     out.clear();
     const auto it = byName.find( std::string_view( r.calleeName ) );
@@ -250,6 +256,7 @@ inline void resolveCandidates( const IngestResult& ing, const NameDefs& byName, 
     {
         if( out.size() >= kDefsPerNameCap )
         {
+            capFired = true;   // a candidate remained that this loop will not count
             break;
         }
         // langCompatible AND namespaceCompatible — the same pair buildGraph's candidate set is gated by.
@@ -329,7 +336,7 @@ inline Facts collectFacts( const IngestResult& ing, const NameDefs& byName,
             ++fileRows[r.fileId].sites;
         }
 
-        resolveCandidates( ing, byName, r, candidates );
+        resolveCandidates( ing, byName, r, candidates, facts.defsCapFired );
         const auto [ nameIt, inserted ] = nameIndex.try_emplace( std::string_view( r.calleeName ), std::uint32_t( nameIndex.size() ) );
         (void) inserted;
         const std::uint32_t nameId = nameIt->second;
@@ -423,6 +430,7 @@ inline Scan computeContextRatio( const IngestResult& ing )
     };
 
     Scan scan;
+    scan.defsCapFired = facts.defsCapFired;
     scan.symbols.reserve( symbolCount );
     for( std::size_t i = 0; i < symbolCount; ++i )
     {
@@ -499,7 +507,9 @@ inline constexpr const char* kContextRatioLegend =
     "level the uses verb works at, never the call graph's narrowed resolution, because four of the five "
     "reference roles carry no resolution at all. defs_per_name_cap=the most definitions ONE name may "
     "contribute (the first that many in symbol id order); a corpus-ubiquitous name would otherwise swamp "
-    "every row it appears in. body_bytes_per_token=the rate rtok= is converted at. "
+    "every row it appears in. defs_capped=\"1\" ⇒ some name HAD more than that and its extra definitions "
+    "were not counted, so the root also carries counts_floor=\"1\" (ents=/rtok= are floors); absent ⇒ "
+    "every name's definitions were all counted. body_bytes_per_token=the rate rtok= is converted at. "
     "ents= and files= are FLOORS: a name-based static scan cannot see dynamic dispatch, reflection, or a "
     "macro invocation whose #define is not indexed, so a zero means none FOUND, never none exists. "
     "units=symbols measured file_units=files measured. Rows come out most-outside-reading-first (rtok_out "
@@ -528,11 +538,13 @@ inline int writeContextRatioReport( const IngestResult& ing, int pageLimit, int 
     std::fputs( kContextRatioLegend, stdout );
     // R-E fix (2026-08-19): the shared root-relative clause, emitted exactly when root= is (graphlegend.h).
     std::fputs( rw::rootRelPathsLegend( !rootAttr.empty() ), stdout );
+    // N2: the fired marker and its floor in ONE statement (collectioncapcheck.sh arm (D) reads that from src/ alone).
+    const std::string defsCappedAttr = scan.defsCapFired ? std::string( " defs_capped=\"1\"" ) + rw::kGraphCountFloorAttrXml : std::string();
     std::printf( "<contextratio units=\"%zu\" file_units=\"%zu\" defs_per_name_cap=\"%u\" body_bytes_per_token=\"%.2f\""
-                 " shown_syms=\"%zu\" syms_capped=\"%s\" shown_files=\"%zu\" files_capped=\"%s\"%s%s>",
+                 " shown_syms=\"%zu\" syms_capped=\"%s\" shown_files=\"%zu\" files_capped=\"%s\"%s%s%s>",
                  total, scan.files.size(), unsigned( kDefsPerNameCap ), kBytesPerTokenBody,
                  shown, shown < total ? "1" : "0",
-                 fileShown, fileShown < scan.files.size() ? "1" : "0", paging, rootAttr.c_str() );
+                 fileShown, fileShown < scan.files.size() ? "1" : "0", paging, defsCappedAttr.c_str(), rootAttr.c_str() );
 
     // TWO scratch buffers, not one reused twice in the same call: escapeXml returns a VIEW into its `out`,
     // so a second call with the same buffer invalidates the first view (readability.h carries the same note).
