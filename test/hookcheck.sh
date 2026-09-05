@@ -1751,6 +1751,111 @@ echo "-- edit-target rows --"; [ -f "$LV5" ] && cat "$LV5"
     && ok "V5e target: an MCP edit twin without file= records an empty target and no post_check suffix" \
     || no "V5e target: target=[$( meterrowget "$LV5" 5 target )] detail=[$( meterrowget "$LV5" 5 detail )]"
 
+# ── E1-E9: §5b, terminality by EDIT verb, pinned on a SYNTHETIC v3 fixture ──────────────────────────
+#
+# The band's three columns, from docs/EVALS.md ("Terminality round A", EDIT band): (a) policy-read — a
+# Read/grep of the edit's TARGET FILE, reported and never counted; (b) sweep — a Read/grep of any OTHER
+# file, or a native edit of the SAME target, in the window; (c) redundant-check — an --edit-check /
+# edit_check on the same symbol right after an edit whose receipt carried the folded post-check.
+# TERMINAL = neither (b) nor (c). Printed per agent and per surface. An edit row that recorded no
+# target and was followed by a read cannot be told (a) from (b): it is counted under `unattrib`,
+# excluded from terminal%, never folded either way.
+#
+# The fixture, one session per case so each row of the table is traceable to one line here:
+#   e-a  CLI replace, Read of the TARGET, build                -> TERMINAL, policy-read
+#   e-b  CLI replace, Read of ANOTHER file                     -> sweep
+#   e-c  CLI replace, build, --edit-check on the SAME symbol   -> redundant-check
+#   e-d  CLI replace --no-post-check, --edit-check same symbol -> TERMINAL (no folded check to distrust)
+#   e-e  CLI insert-after, native Edit of the SAME target      -> sweep
+#   e-f  CLI --edit-plan (no target), Read of some file        -> unattrib
+#   e-g  CLI --safe-delete, build                              -> TERMINAL
+#   e-h  MCP replace (file=src/a.cpp), Read of the target      -> TERMINAL, policy-read
+#   e-i  MCP replace, MCP edit_check same symbol               -> redundant-check
+#   e-j  MCP insert-before, Grep tool (pattern names no file)  -> sweep
+#   e-k  codex CLI replace, build                              -> TERMINAL
+#   e-l  codex CLI replace, Read of another file               -> sweep
+EDITLOG="$TMP/editband.jsonl"
+# v3 rows through the same writer as the FIND fixture (termrow's nine-argument form), into their own log.
+editrow() { TERMLOG="$EDITLOG" termrow "$@"; }
+ecli()   { editrow "$1" "$2" Bash ripwire-cli ripwire "$3" "${4:-claude}" cli "${5:-}"; }
+emcp()   { editrow "$1" "$2" "mcp__ripwire__$3" ripwire-mcp ripwire "$4" claude mcp "${5:-}"; }
+eread()  { editrow "$1" "$2" Read read native "$3" "${4:-claude}" native ''; }
+ebuild() { editrow "$1" "$2" Bash build other 'cmake --build build -j' "${3:-claude}" cli ''; }
+: >"$EDITLOG"
+ecli   1 e-a './build/ripwire . --replace-symbol-body=foo --edit-target-file=src/a.cpp --edit-payload=-' claude src/a.cpp
+eread  2 e-a '/x/repo/src/a.cpp'
+ebuild 3 e-a
+ecli   1 e-b './build/ripwire . --replace-symbol-body=bar --edit-target-file=src/b.cpp --edit-payload=-' claude src/b.cpp
+eread  2 e-b '/x/repo/src/other.cpp'
+ecli   1 e-c './build/ripwire . --replace-symbol-body=baz --edit-target-file=src/c.cpp --edit-payload=-' claude src/c.cpp
+ebuild 2 e-c
+ecli   3 e-c './build/ripwire . --edit-check=baz'
+ecli   1 e-d './build/ripwire . --replace-symbol-body=qux --edit-target-file=src/d.cpp --edit-payload=- --no-post-check' claude src/d.cpp
+ecli   2 e-d './build/ripwire . --edit-check=src/d.cpp:qux'
+ecli   1 e-e './build/ripwire . --insert-after-symbol=foo --edit-target-file=src/a.cpp --edit-payload=-' claude src/a.cpp
+editrow 2 e-e Edit native-edit edit '/x/repo/src/a.cpp' claude native '/x/repo/src/a.cpp'
+ecli   1 e-f './build/ripwire . --edit-plan=plan.json --apply' claude ''
+eread  2 e-f '/x/repo/src/z.cpp'
+ecli   1 e-g './build/ripwire . --safe-delete=dead' claude ''
+ebuild 2 e-g
+emcp   1 e-h replace_symbol_body 'foo' src/a.cpp
+eread  2 e-h '/x/repo/src/a.cpp'
+emcp   1 e-i replace_symbol_body 'bar' src/b.cpp
+emcp   2 e-i edit_check 'bar'
+emcp   1 e-j insert_before_symbol 'foo' src/a.cpp
+editrow 2 e-j Grep grep native 'needle' claude native ''
+ecli   1 e-k 'ripwire . --replace-symbol-body=foo --edit-target-file=src/a.cpp --edit-payload=-' codex src/a.cpp
+ebuild 2 e-k codex
+ecli   1 e-l 'ripwire . --replace-symbol-body=bar --edit-target-file=src/b.cpp --edit-payload=-' codex src/b.cpp
+eread  2 e-l '/x/repo/src/other.cpp' codex
+
+if [ -f "$REPORT" ]; then
+    python3 "$REPORT" "$EDITLOG" >"$TMP/edit.out" 2>&1; RCE=$?
+    tr -s ' ' <"$TMP/edit.out" >"$TMP/edit.sq"
+    echo "-- substitution_report.py §5b on the EDIT-band fixture --"
+    sed -n '/^5b\./,$p' "$TMP/edit.out"
+    edithas()
+    {
+        # edithas ARMID EXPECTED-SQUEEZED-LINE DESCRIPTION
+        grep -Fqx " $2" "$TMP/edit.sq" \
+            && ok "$1 edit-band: $3" \
+            || no "$1 edit-band: expected the row [$2] — see $TMP/edit.out"
+    }
+    [ "$RCE" -eq 0 ] && grep -qi 'terminality by EDIT verb' "$TMP/edit.out" \
+        && ok "E1 edit-band: the report prints a §5b terminality-by-EDIT-verb section" \
+        || no "E1 edit-band: exit=$RCE and/or no §5b section — see $TMP/edit.out"
+    # The three columns are DEFINED above the table, by name, so a percentage is never read without them.
+    grep -q 'policy-read' "$TMP/edit.out" && grep -q 'redundant-check' "$TMP/edit.out" \
+        && grep -qi 'never counted' "$TMP/edit.out" && grep -q 'unattrib' "$TMP/edit.out" \
+        && ok "E2 edit-band: §5b defines policy-read (never counted), sweep, redundant-check and unattrib above the table" \
+        || no "E2 edit-band: §5b does not define its columns — see $TMP/edit.out"
+    grep -q 'agent=claude surface=cli' "$TMP/edit.out" && grep -q 'agent=claude surface=mcp' "$TMP/edit.out" \
+        && grep -q 'agent=codex surface=cli' "$TMP/edit.out" \
+        && ok "E3 edit-band: the table is printed per agent and per surface (claude/cli, claude/mcp, codex/cli)" \
+        || no "E3 edit-band: missing an agent/surface block — see $TMP/edit.out"
+    # claude/cli: --replace-symbol-body n=4 -> e-a terminal (policy-read), e-b sweep, e-c redundant, e-d terminal.
+    edithas E4 "--replace-symbol-body 4 50.0% 1 1 1 0" \
+        "claude/cli --replace-symbol-body: 4 calls, 2 terminal, policy-read 1 (reported, not counted), sweep 1, redundant-check 1"
+    edithas E5 "--insert-after-symbol 1 0.0% 0 1 0 0" \
+        "a native Edit of the SAME target inside the window is a sweep"
+    edithas E6 "--edit-plan 1 n/a 0 0 0 1" \
+        "an edit with no recorded target followed by a read is unattrib, excluded from terminal% (n/a), never folded"
+    edithas E6b "--safe-delete 1 100.0% 0 0 0 0" "--safe-delete followed by a build is terminal"
+    # claude/mcp: replace n=2 -> e-h terminal (policy-read), e-i redundant; insert-before -> e-j sweep.
+    edithas E7 "mcp:replace_symbol_body 2 50.0% 1 0 1 0" \
+        "claude/mcp replace_symbol_body: a Read of file= is policy-read; an edit_check on the same symbol is redundant"
+    edithas E7b "mcp:insert_before_symbol 1 0.0% 0 1 0 0" "a Grep-tool call (pattern only, names no file) is a sweep"
+    # codex/cli: n=2 -> e-k terminal, e-l sweep.
+    edithas E8 "--replace-symbol-body 2 50.0% 0 1 0 0" "codex/cli --replace-symbol-body: 2 calls, 1 terminal, 1 sweep"
+    # E9: THE MUTATION CONTROL. Move e-a's policy Read to another file: the row it feeds must change
+    # (policy-read 1->0, sweep 1->2, terminal 50.0%->25.0%). A column that never moves is not a column.
+    sed '/"session":"e-a".*"tool":"Read"/ s#"detail":"/x/repo/src/a.cpp"#"detail":"/x/repo/src/zzz.cpp"#' "$EDITLOG" >"$TMP/editmut.jsonl"
+    python3 "$REPORT" "$TMP/editmut.jsonl" 2>&1 | tr -s ' ' >"$TMP/editmut.sq"
+    grep -Fqx " --replace-symbol-body 4 25.0% 0 2 1 0" "$TMP/editmut.sq" \
+        && ok "E9 edit-band: MUTATION CONTROL — re-pointing the policy Read at another file moves the row (50.0% -> 25.0%, policy-read 1 -> 0, sweep 1 -> 2): the column is live" \
+        || no "E9 edit-band: the mutated fixture did not move the row — see $TMP/editmut.sq"
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 # (13) FIXTURE ISOLATION — the arms that prove a gate run cannot reach the operator's log
 #
