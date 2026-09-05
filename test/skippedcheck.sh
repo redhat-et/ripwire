@@ -30,7 +30,7 @@
 #       new header attribute; the verb is only reachable by asking for it
 #   (6) determinism — two runs, byte-identical
 #   (7) well-formedness (G4) — pipes clean through xmllint when xmllint is available
-#   (8) multi-root — a 2-root workspace lists the dropped file under its <label>/./<rel> spelling
+#   (8) multi-root — a 2-root workspace lists the dropped file under its <label>/<rel> spelling
 #
 # Usage:  bash test/skippedcheck.sh      [RIPWIRE_BIN=path/to/binary]
 # Exits non-zero on any failure.
@@ -124,7 +124,7 @@ else
     ok "(7) xmllint not available — skipped (regression.sh's own gate covers the toolchain that has it)"
 fi
 
-# ── (8) multi-root: the dropped file keeps its <label>/./<rel> spelling ──────────────────────────────────
+# ── (8) multi-root: the dropped file keeps its <label>/<rel> spelling ────────────────────────────────────
 mkdir -p "$TMP/alpha" "$TMP/beta"
 cp "$TMP/corpus/big.cpp" "$TMP/alpha/big.cpp"
 printf 'int beta_fn( void ) { return 2; }\n' > "$TMP/beta/lib.cpp"
@@ -132,7 +132,7 @@ printf 'int beta_fn( void ) { return 2; }\n' > "$TMP/beta/lib.cpp"
 # M12 (capture-audit-2026-09-04): the merged-root spelling lost its `/./` seam — workspace.h emits plain
 # `<label>/<rel>` now, and a SkippedOversize row is relabeled exactly like a file row, so it moves with it.
 grep -q "<f p=\"alpha/big.cpp\" why=\"oversize\" bytes=\"$bigBytes\" limit=\"1024\"/>" "$TMP/multi.xml" \
-    && ok "(8) multi-root row carries the labeled <label>/./<rel> spelling" \
+    && ok "(8) multi-root row carries the labeled <label>/<rel> spelling" \
     || { no "(8) multi-root row missing or unlabeled (want p=\"alpha/big.cpp\")"; head -c 400 "$TMP/multi.xml"; echo; }
 grep -q 'oversize="1"' "$TMP/multi.xml" && ok "(8) multi-root count sums across roots" || no "(8) multi-root count wrong (want oversize=\"1\")"
 
