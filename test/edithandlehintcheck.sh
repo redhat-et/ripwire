@@ -12,12 +12,19 @@
 # different same-named definition in another file. The advice's second half was vaguer still: "run
 # --affected on the receipt's file", i.e. go parse the JSON yourself.
 #
-# The advice now names the RESOLVED file:symbol the engine actually wrote to, for both follow-ups.
+# The advice now names the RESOLVED file:symbol the engine actually wrote to.
+#
+# E2 (terminality round A, 2026-09-05): the advice is ONE next= — the receipt's own `next` key, repeated on the
+# stderr line as `next: <cmd>` (METHODOLOGY §9 #3: never a second command). With the post-check on, the next is
+# derived from the fold (a contract-change with broken callers → --uses=FILE:SYM; else the first tests_to_run
+# run= recipe; else --test-gate=FILE) and the --affected answer is IN the receipt as tests_to_run; under
+# --no-post-check the next is the one call that shows the state, --edit-check=FILE:SYM — which is where this
+# gate's original property (the resolved FILE:SYM, never a handle) is asserted verbatim.
 #
 # ARMS — each one EXECUTES the printed command rather than pattern-matching it, which is the whole point:
-#   1. handle-addressed edit → the printed --edit-check runs and resolves the definition.
-#   2. the printed --affected runs and names the edited file.
-#   3. name-addressed edit narrowed by --edit-target-file → the advice points at THAT file's definition,
+#   1. handle-addressed edit (--no-post-check) → the printed next is --edit-check=<resolved file>:<sym>, runs.
+#   1b. the same edit with the post-check on → the printed next runs, and tests_to_run is in the receipt.
+#   3. name-addressed edit narrowed by --edit-target-file → the next points at THAT file's definition,
 #      not the same-named one in the other file.
 #   4. the advice never contains a sym# handle.
 #
@@ -50,8 +57,8 @@ PY
 printf 'def alpha( x ):\n    return 42\n' >"$TMP/pay"
 
 # pull the two follow-up commands back out of the advice line the binary printed.
-advice_editcheck(){ grep -o -- '--edit-check=[^, ]*' "$1" | head -1; }
-advice_affected(){  grep -o -- '--affected=[^, ]*'   "$1" | head -1; }
+advice_next(){ sed -n 's/.*next: //p' "$1" | head -1; }
+advice_editcheck(){ advice_next "$1" | grep -o -- '--edit-check=[^, ]*' | head -1; }
 : >"$TMP/1.ec.err"; : >"$TMP/1.af.err"     # so a skipped arm's diagnostic read is not a missing-file error
 
 echo
@@ -62,13 +69,17 @@ W1="$TMP/handle"; cp -R "$TMP/template" "$W1"
 H="$( "$BIN" "$W1" --grep=UNIQUE_ALPHA_MARKER --handles 2>/dev/null | grep -o 'sym#[0-9a-f]*@[0-9a-f]*' | head -1 )"
 [ -n "$H" ] && ok "minted an edit handle to address the edit with" \
              || { no "could not mint an edit handle — --grep --handles produced none"; H="sym#0@0"; }
-"$BIN" "$W1" --replace-symbol-body="$H" --edit-payload="$TMP/pay" >"$TMP/1.out" 2>"$TMP/1.err"
+"$BIN" "$W1" --replace-symbol-body="$H" --edit-payload="$TMP/pay" --no-post-check >"$TMP/1.out" 2>"$TMP/1.err"
 grep -q '"applied"' "$TMP/1.out" \
     && ok "the handle-addressed edit applied" \
     || no "the handle-addressed edit failed: $( head -1 "$TMP/1.err" )"
 
 EC="$( advice_editcheck "$TMP/1.err" )"
-AF="$( advice_affected  "$TMP/1.err" )"
+# the stderr's next is the receipt's next, verbatim
+RN="$( python3 -c 'import sys,json; print(json.load(open(sys.argv[1])).get("next",""))' "$TMP/1.out" 2>/dev/null )"
+[ -n "$RN" ] && [ "$RN" = "$( advice_next "$TMP/1.err" )" ] \
+    && ok "the stderr line repeats the receipt's own next= verbatim ($RN)" \
+    || no "the stderr next ('$( advice_next "$TMP/1.err" )') is not the receipt's next ('$RN')"
 case "$EC" in
     *'sym#'*)      no "the advice still echoes the sym# handle back: $EC";;
     '')            no "the advice printed no --edit-check follow-up";;
@@ -80,16 +91,33 @@ if [ -n "$EC" ] && "$BIN" "$W1" "$EC" 2>"$TMP/1.ec.err" | grep -q '<edit-check';
 else
     no "the printed --edit-check command fails: $( head -1 "$TMP/1.ec.err" )"
 fi
-if [ -n "$AF" ] && "$BIN" "$W1" "$AF" 2>"$TMP/1.af.err" | grep -q '<affected'; then
-    ok "the printed --affected command runs"
-else
-    no "the printed --affected command fails or was not printed: $( head -1 "$TMP/1.af.err" )"
+# 1b. the post-check on: the next is derived from the fold, RUNS, and the --affected answer is in the receipt
+W1b="$TMP/handle-pc"; cp -R "$TMP/template" "$W1b"
+H2="$( "$BIN" "$W1b" --grep=UNIQUE_ALPHA_MARKER --handles 2>/dev/null | grep -o 'sym#[0-9a-f]*@[0-9a-f]*' | head -1 )"
+"$BIN" "$W1b" --replace-symbol-body="${H2:-sym#0@0}" --edit-payload="$TMP/pay" >"$TMP/1b.out" 2>"$TMP/1b.err"
+NX="$( advice_next "$TMP/1b.err" )"
+case "$NX" in
+    '')       no "with the post-check on, no next was printed";;
+    *'sym#'*) no "the next echoes the sym# handle back: $NX";;
+    *a.py*)   ok "the post-checked next names the resolved file ($NX)";;
+    *)        # a run= recipe (a shell line) is the other legal form — it must then simply run
+              ok "the post-checked next is a run= recipe ($NX)";;
+esac
+if [ -n "$NX" ]; then
+    case "$NX" in
+        --*) "$BIN" "$W1b" $NX >/dev/null 2>"$TMP/1b.nx.err" && ok "the printed next runs" || no "the printed next fails: $( head -1 "$TMP/1b.nx.err" )";;
+        *)   ( cd "$W1b" && sh -c "$NX" >/dev/null 2>&1 ) && ok "the printed run= recipe runs" || no "the printed run= recipe fails: $NX";;
+    esac
 fi
+grep -q '"tests_to_run"' "$TMP/1b.out" \
+    && ok "the --affected answer is IN the receipt (tests_to_run), not a second command" \
+    || no "the receipt carries no tests_to_run"
+grep -q -- '--affected' "$TMP/1b.err" && no "the advice still names a second command (--affected)" || ok "the advice names no second command"
 
 echo
 echo "=== 3. a name narrowed by --edit-target-file points at THAT file's definition ==="
 W2="$TMP/narrow"; cp -R "$TMP/template" "$W2"
-"$BIN" "$W2" --replace-symbol-body=alpha --edit-target-file=b.py --edit-payload="$TMP/pay" \
+"$BIN" "$W2" --replace-symbol-body=alpha --edit-target-file=b.py --edit-payload="$TMP/pay" --no-post-check \
     >"$TMP/2.out" 2>"$TMP/2.err"
 EC2="$( advice_editcheck "$TMP/2.err" )"
 case "$EC2" in

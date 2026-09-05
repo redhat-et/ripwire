@@ -81,9 +81,13 @@ BASE="$WORK/base"; mkcorpus "$BASE"
 mkdir -p "$WORK/gen"
 printf 'int trim( int a, int b )\n{\n    return \000 a;\n}\n' > "$WORK/gen/nul.txt"
 
-# the three normalisations, and nothing else. The document is minified XML on ONE line, so the greedy
-# comment strip removes exactly the single leading legend.
-norm(){ printf '%s' "$1" | sed -e 's/<!--.*-->//' -e 's/ at="[^"]*"//g' -e 's/ preview="1"//g'; }
+# the FOUR normalisations, and nothing else. The document is minified XML on ONE line, so the greedy
+# comment strip removes exactly the single leading legend. The fourth (E3, terminality round A 2026-09-05):
+# the preview-only <overwrite> child — the CURRENT span an apply would replace, which the post-hoc document
+# cannot carry because after the apply that span no longer exists — is dropped before the comparison.
+# (perl -0 slurps the whole document: the overwrite CDATA carries the span's own newlines, which a per-line sed
+# could never match across.)
+norm(){ printf '%s' "$1" | perl -0pe 's/<overwrite [^>]*><!\[CDATA\[.*?\]\]><\/overwrite>//s' | sed -e 's/<!--.*-->//' -e 's/ at="[^"]*"//g' -e 's/ preview="1"//g'; }
 statusOf(){ printf '%s' "$1" | sed -e 's/<!--.*-->//' | grep -oE 'status="[a-z-]+"' | head -1; }
 
 preview(){ # $1 selector  $2 payload-path
@@ -304,6 +308,88 @@ fi
 [ ! -s "$WORK/dirty.txt" ] \
     && ok "(W) the corpus is still byte-clean after $total previews — nothing was written" \
     || { no "(W) the preview MODIFIED the working tree"; cat "$WORK/dirty.txt"; }
+
+# ── (O) E3 (terminality round A 2026-09-05, lane E) — THE PREVIEW ANSWERS THE READ-BEFORE-EDIT ────────
+# An agent that previews a payload and then applies it still Reads the target first to see what it is about to
+# overwrite. The preview document therefore carries an <overwrite> child: the CURRENT definition span an apply
+# would replace, as the bytes are on disk (CDATA; l=/end= its lines, bytes= its size), budgeted — over the budget
+# shown=/capped="1" and elided_lines= say so. Read→edit→Read collapses to preview→apply. --expand's body is
+# byte-exact by test/editroundtripcheck.sh, so it is the oracle for the span's bytes here.
+OW_DOC="$( preview lib.h:scale "$FIX/payloads/chg01.txt" )"
+python3 - "$OW_DOC" "$( cd "$BASE" && "$BIN" . --expand=lib.h:scale --top-k=0 --no-cache 2>/dev/null )" "$BASE/lib.h" <<'PY' >"$WORK/o.res" 2>&1
+import re, sys
+doc, expand, path = sys.argv[1], sys.argv[2], sys.argv[3]
+m = re.search( r'<overwrite ([^>]*)><!\[CDATA\[(.*?)\]\]></overwrite>', doc, re.S )
+assert m, "the preview carries no <overwrite> child — the agent still has to Read the span it is about to replace"
+attrs = dict( re.findall( r'([\w-]+)="([^"]*)"', m.group( 1 ) ) ); text = m.group( 2 ).replace( "]]]]><![CDATA[>", "]]>" )
+b = re.search( r'<b [^>]*n="scale"[^>]*><!\[CDATA\[(.*?)\]\]></b>', expand, re.S )
+assert b, "fixture: --expand served no body for lib.h:scale"
+body = b.group( 1 ).replace( "]]]]><![CDATA[>", "]]>" )
+assert text == body, "overwrite CDATA is not the span's bytes on disk:\n%r\n!=\n%r" % ( text, body )
+for k in ( "l", "end", "bytes" ): assert k in attrs, "overwrite lacks %s= (has %r)" % ( k, sorted( attrs ) )
+assert int( attrs["bytes"] ) == len( body.encode() ), "bytes=%s but the span is %d bytes" % ( attrs["bytes"], len( body.encode() ) )
+lines = open( path ).read().split( "\n" )
+assert "\n".join( lines[ int( attrs["l"] ) - 1 : int( attrs["end"] ) ] ) == body, "l=/end= do not bracket the span on disk"
+assert "capped" not in attrs, "a %d-byte span must not be capped" % len( body )
+print( "OK <overwrite l=%s end=%s bytes=%s> == the span on disk" % ( attrs["l"], attrs["end"], attrs["bytes"] ) )
+PY
+[ $? -eq 0 ] && ok "(O) $( cat "$WORK/o.res" )" || no "(O) $( tail -1 "$WORK/o.res" )"
+# (O3) the budget: a 400-line definition previews with head bytes only, disclosed
+OWB="$WORK/owbig"; mkcorpus "$OWB"
+python3 - "$OWB/big.cpp" <<'PY'
+import sys
+lines = [ "int huge( int x )", "{" ] + [ "    x += %d;" % i for i in range( 400 ) ] + [ "    return x;", "}", "" ]
+open( sys.argv[1], "w" ).write( "\n".join( lines ) )
+PY
+( cd "$OWB" && git add -A && git commit -qm big ) >/dev/null 2>&1
+printf 'int huge( int x )\n{\n    return x;\n}\n' > "$WORK/huge_pay.txt"
+OWB_DOC="$( cd "$OWB" && "$BIN" . --edit-check=big.cpp:huge --edit-payload="$WORK/huge_pay.txt" --dry-run --no-cache 2>/dev/null )"
+python3 - "$OWB_DOC" <<'PY' >"$WORK/o3.res" 2>&1
+import re, sys
+m = re.search( r'<overwrite ([^>]*)><!\[CDATA\[(.*?)\]\]></overwrite>', sys.argv[1], re.S )
+assert m, "no <overwrite> on the big preview"
+a = dict( re.findall( r'([\w-]+)="([^"]*)"', m.group( 1 ) ) )
+assert a.get( "capped" ) == "1", "a %s-byte span was not capped (attrs %r)" % ( a.get( "bytes" ), sorted( a ) )
+assert "shown" in a and int( a["shown"] ) < int( a["bytes"] ), "capped without shown= < bytes="
+assert int( a["shown"] ) == len( m.group( 2 ).encode() ), "shown=%s but the CDATA is %d bytes" % ( a["shown"], len( m.group( 2 ) ) )
+assert "elided_lines" in a and int( a["elided_lines"] ) > 0, "capped without elided_lines="
+assert m.group( 2 ).startswith( "int huge( int x )\n{" ), "the head is not the span's start"
+print( "OK capped: shown=%s of bytes=%s, elided_lines=%s" % ( a["shown"], a["bytes"], a["elided_lines"] ) )
+PY
+[ $? -eq 0 ] && ok "(O3) an oversize span is budgeted and disclosed: $( cat "$WORK/o3.res" )" || no "(O3) $( tail -1 "$WORK/o3.res" )"
+# (O4) compact <-> compact parity: the CLI preview under --legend=compact == MCP edit_check with legend:"compact"
+CLI_C="$( cd "$BASE" && "$BIN" . --edit-check=lib.h:scale --edit-payload="$FIX/payloads/chg01.txt" --dry-run --no-cache --legend=compact 2>/dev/null )"
+MCP_C="$( cd "$BASE" && python3 - "$BIN" "$FIX/payloads/chg01.txt" <<'PYEOF' 2>/dev/null
+import json, subprocess, sys
+body = open( sys.argv[2] ).read()
+req  = { "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+         "params": { "name": "edit_check", "arguments": { "path": ".", "symbol": "lib.h:scale", "new_body": body, "legend": "compact" } } }
+p = subprocess.run( [ sys.argv[1], "--mcp" ], input = json.dumps( req ) + "\n", capture_output = True, text = True )
+for line in p.stdout.splitlines():
+    try: d = json.loads( line )
+    except ValueError: continue
+    for c in d.get( "result", {} ).get( "content", [] ):
+        if c.get( "text" ): sys.stdout.write( c[ "text" ] )
+PYEOF
+)"
+strip_at(){ printf '%s' "$1" | sed -e 's/<!--.*-->//' -e 's/ at="[^"]*"//g'; }
+if [ -z "$MCP_C" ]; then
+    no "(O4) MCP edit_check legend:compact returned nothing"
+elif [ "$( strip_at "$CLI_C" )" = "$( strip_at "$MCP_C" )" ] && printf '%s' "$CLI_C" | grep -q '<overwrite '; then
+    ok "(O4) compact<->compact: the CLI preview == MCP edit_check legend:compact, <overwrite> included"
+else
+    no "(O4) the compact CLI preview and the compact MCP twin differ (or neither carries <overwrite>)"
+    printf '        cli: %s\n' "$( strip_at "$CLI_C" | cut -c1-200 )"; printf '        mcp: %s\n' "$( strip_at "$MCP_C" | cut -c1-200 )"
+fi
+# (O5) both legends define the child where the reader meets it
+printf '%s' "$OW_DOC" | sed -e 's/\(<!--.*-->\).*/\1/' | grep -q 'overwrite' \
+    && ok "(O5) the full preview legend defines the overwrite child" || no "(O5) the full preview legend never mentions overwrite"
+printf '%s' "$CLI_C" | sed -e 's/\(<!--.*-->\).*/\1/' | grep -q 'overwrite' \
+    && ok "(O5) the compact preview legend defines the overwrite child (present-only term)" || no "(O5) the compact preview legend never mentions overwrite"
+# (O6) the post-hoc --edit-check (no payload) carries NO overwrite child — it is the preview's, by construction
+( cd "$BASE" && "$BIN" . --edit-check=lib.h:scale --no-cache 2>/dev/null ) | grep -q '<overwrite ' \
+    && no "(O6) the post-hoc --edit-check carries an overwrite child — nothing is about to be overwritten there" \
+    || ok "(O6) the post-hoc --edit-check carries no overwrite child (preview-only, by construction)"
 
 echo
 [ "$fail" = 0 ] && echo "editpreviewcheck: OK" || echo "editpreviewcheck: FAILURES"

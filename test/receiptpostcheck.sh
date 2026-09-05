@@ -380,5 +380,113 @@ grep -q 'scale' "$TMP/w/geo.py" 2>/dev/null \
     && ok "(9) the receipts parse as JSON and the edits actually landed on disk" \
     || no "(9) the edit did not land — every assertion above described a write that did not happen"
 
+# ══ E2 (terminality round A 2026-09-05, lane E) — THE RECEIPT ANSWERS THE READ ═════════════════════════
+# Measured on bench/agentloop/run_editsuite.py: agents on runners without a Read-before-edit policy trust the
+# receipt and stop. So the receipt must carry what a Read would have shown, or a stop is a blind stop:
+#   region    — the post-edit lines with `context` lines each side (default 3), the bytes as they are on disk;
+#               budgeted: over kReceiptRegionBudgetBytes it carries head + tail + elided_lines and capped:true
+#   blob_sha  — the git blob id of the written bytes (== `git hash-object FILE`), so "what is on disk" is a
+#               fact the agent can check against `git ls-files -s` without reading the file
+#   next      — exactly ONE pasteable follow-up (METHODOLOGY §9 #3): contract-change with broken callers → the
+#               uses verb on FILE:SYM; else the first tests_to_run run= recipe; else --test-gate=FILE; under
+#               --no-post-check, --edit-check=FILE:SYM (the one call that shows the state)
+# The stderr line names that ONE next and nothing else. Same keys on the MCP twin (one engine).
+REGION_CTX=3
+fresh
+R10="$( cd "$TMP/w" && "$BIN" . --replace-symbol-body=area_of_triangle --edit-payload="$TMP/payload.py" 2>"$TMP/r10.err" )"
+printf '%s' "$R10" > "$TMP/r10.json"
+python3 - "$TMP/r10.json" "$TMP/w/geo.py" "$REGION_CTX" <<'PY' >"$TMP/e2a.res" 2>&1
+import sys, json
+r = json.load( open( sys.argv[1] ) ); ctx = int( sys.argv[3] )
+assert "region" in r, "the receipt carries no region — the agent still has to Read to see what landed"
+g = r["region"]
+for k in ( "start", "end", "context", "text" ):
+    assert k in g, "region lacks %r (has %r)" % ( k, sorted( g ) )
+assert g["context"] == ctx, "context=%r, default should be %d" % ( g["context"], ctx )
+lines = open( sys.argv[2], newline="" ).read().split( "\n" )
+total = len( lines ) if lines[-1] != "" else len( lines ) - 1
+want_start = max( 1, r["lines"]["start"] - ctx ); want_end = min( total, r["lines"]["end"] + ctx )
+assert ( g["start"], g["end"] ) == ( want_start, want_end ), "region %r..%r, want %r..%r (lines %r, total %r)" % ( g["start"], g["end"], want_start, want_end, r["lines"], total )
+disk = "\n".join( lines[ g["start"] - 1 : g["end"] ] )
+assert g["text"] == disk, "region.text is not the bytes on disk:\n%r\n!=\n%r" % ( g["text"], disk )
+assert g.get( "capped", False ) is False, "a 2-line edit's region must not be capped"
+print( "OK region %d..%d ctx=%d (%d bytes) == disk" % ( g["start"], g["end"], g["context"], len( g["text"] ) ) )
+PY
+[ $? -eq 0 ] && ok "(10) $( cat "$TMP/e2a.res" )" || no "(10) region: $( cat "$TMP/e2a.res" | tail -3 | tr '\n' ' ' )"
+WANT_SHA="$( cd "$TMP/w" && git hash-object geo.py )"
+GOT_SHA="$( jq_field blob_sha < "$TMP/r10.json" | tr -d '"' )"
+[ "$GOT_SHA" = "$WANT_SHA" ] && ok "(11) blob_sha == git hash-object of the written file ($GOT_SHA)" \
+                             || no "(11) blob_sha=$GOT_SHA, git hash-object says $WANT_SHA"
+NEXT="$( jq_field next < "$TMP/r10.json" | tr -d '"' )"
+python3 -c 'import sys,json; r=json.load(open(sys.argv[1])); assert list(r).count("next")==1' "$TMP/r10.json" 2>/dev/null \
+    && [ "$NEXT" != "__ABSENT__" ] && ok "(12) the receipt carries exactly ONE next ($NEXT)" || no "(12) the receipt carries no single next (got $NEXT)"
+case "$NEXT" in --uses=geo.py:area_of_triangle) ok "(12) on a contract-change with broken callers next= is the uses verb on FILE:SYM";;
+                *) no "(12) next=$NEXT — the fixture is a contract-change with $EC_INCOMP incompatible callers; the rule says --uses=geo.py:area_of_triangle";; esac
+( cd "$TMP/w" && "$BIN" . $NEXT >/dev/null 2>&1 ) && ok "(12) the receipt's next= runs from the repo root" || no "(12) the receipt's next= does not run: $NEXT"
+# the stderr line repeats the receipt's next and names NO other command: every --flag on it belongs to next=
+OTHER="$( grep -o -- ' --[a-z-]*' "$TMP/r10.err" | tr -d ' ' | grep -v -x -- "${NEXT%%=*}" | tr '\n' ' ' )"
+grep -q -- "$NEXT" "$TMP/r10.err" && [ -z "$OTHER" ] && ok "(12) the stderr line names that ONE next and no second command" \
+                  || no "(12) the stderr line names other commands (${OTHER:-none}) or not the next: $( head -c 200 "$TMP/r10.err" )"
+# (13) MCP twin — the SAME receipt keys (one engine); compared key set to key set, legend-independent
+fresh
+M13="$( MCP_IN '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"replace_symbol_body","arguments":{"path":"'"$TMP/w"'","symbol":"area_of_triangle","new_body":"def area_of_triangle(base, height, scale):\n    return 0.5 * base * height * scale\n"}}}' \
+      | "$BIN" --mcp 2>/dev/null | tail -1 )"
+printf '%s' "$M13" | python3 -c '
+import sys, json
+r = json.load( sys.stdin ); t = json.loads( r["result"]["content"][0]["text"] ); c = json.load( open( sys.argv[1] ) )
+missing = sorted( set( c ) - set( t ) ); extra = sorted( set( t ) - set( c ) )
+assert not missing and not extra, "MCP receipt keys differ from the CLI receipt: missing %r extra %r" % ( missing, extra )
+assert set( t["region"] ) == set( c["region"] ), "region sub-keys differ"
+print( "OK %d keys" % len( t ) )
+' "$TMP/r10.json" >"$TMP/e2m.res" 2>&1 && ok "(13) MCP replace_symbol_body receipt == CLI receipt, key for key ($( cat "$TMP/e2m.res" ))" \
+    || no "(13) $( cat "$TMP/e2m.res" | tail -1 )"
+# (14) the budget: a 300-line body → head + tail + elided_lines, capped, and the two halves are on disk
+fresh
+python3 -c '
+lines = ["def area_of_triangle(base, height):"] + ["    x%d = base * %d" % (i, i) for i in range(300)] + ["    return 0.5 * base * height"]
+open("'"$TMP"'/big.py", "w").write("\n".join(lines))'
+R14="$( cd "$TMP/w" && "$BIN" . --replace-symbol-body=area_of_triangle --edit-payload="$TMP/big.py" 2>/dev/null )"
+printf '%s' "$R14" | python3 -c '
+import sys, json
+r = json.load( sys.stdin ); g = r["region"]
+assert g.get( "capped" ) is True, "a 302-line region was not capped: %r" % sorted( g )
+for k in ( "head", "tail", "elided_lines" ): assert k in g, "capped region lacks %r" % k
+assert "text" not in g, "a capped region must not also carry text"
+assert g["elided_lines"] > 0
+lines = open( sys.argv[1], newline="" ).read().split( "\n" )
+assert g["head"] == "\n".join( lines[ g["start"] - 1 : g["start"] - 1 + g["head"].count( "\n" ) + 1 ] ), "head is not the bytes on disk"
+assert g["tail"] == "\n".join( lines[ g["end"] - g["tail"].count( "\n" ) - 1 : g["end"] ] ), "tail is not the bytes on disk"
+assert len( g["head"] ) + len( g["tail"] ) <= 2048 + 200, "budget overshot: %d bytes" % ( len( g["head"] ) + len( g["tail"] ) )
+print( "OK head %dB + tail %dB, %d lines elided" % ( len( g["head"] ), len( g["tail"] ), g["elided_lines"] ) )
+' "$TMP/w/geo.py" >"$TMP/e2b.res" 2>&1 && ok "(14) an oversize region is budgeted: $( cat "$TMP/e2b.res" )" || no "(14) region budget: $( tail -1 "$TMP/e2b.res" )"
+# (15) --no-post-check keeps the free half (region, blob_sha) and points at the one call that shows the state
+fresh
+R15="$( cd "$TMP/w" && "$BIN" . --replace-symbol-body=area_of_triangle --edit-payload="$TMP/payload.py" --no-post-check 2>"$TMP/r15.err" )"
+printf '%s' "$R15" | python3 -c '
+import sys, json
+r = json.load( sys.stdin )
+assert "region" in r and "blob_sha" in r, "--no-post-check dropped region/blob_sha — they need no index and are free"
+assert r.get( "next" ) == "--edit-check=geo.py:area_of_triangle", "next=%r under --no-post-check; want --edit-check=geo.py:area_of_triangle" % r.get( "next" )
+print( "OK" )
+' >"$TMP/e2c.res" 2>&1 && ok "(15) --no-post-check keeps region + blob_sha; next= is --edit-check=FILE:SYM" || no "(15) $( tail -1 "$TMP/e2c.res" )"
+# (16) the insert verbs carry the same keys (the family)
+fresh
+R16="$( cd "$TMP/w" && "$BIN" . --insert-before-symbol=report --edit-payload="$TMP/insert.py" 2>/dev/null )"
+printf '%s' "$R16" | python3 -c '
+import sys, json
+r = json.load( sys.stdin )
+for k in ( "region", "blob_sha", "next" ): assert k in r, "insert receipt lacks %r" % k
+print( "OK" )' >/dev/null 2>&1 && ok "(16) --insert-before-symbol carries region, blob_sha and one next=" || no "(16) an insert receipt lacks region/blob_sha/next"
+# (17) the wrap blurb no longer coaches the redundant check
+for agent in opencode codex claude; do
+    "$BIN" wrap "$agent" --force 2>/dev/null | sed -n '/--- paste into/,/--- end paste/p' > "$TMP/blurb.$agent"
+done
+if grep -q 'then `--edit-check' "$TMP"/blurb.*; then
+    no "(17) the wrap blurb still says 'then --edit-check=SYM' after an edit — it coaches the redundant check the receipt already answers"
+else
+    grep -q 'edit_check' "$TMP/blurb.opencode" && ok "(17) the wrap blurb says the receipt carries the post-check instead of prescribing --edit-check" \
+                                               || no "(17) the wrap blurb neither prescribes nor mentions the receipt's edit_check"
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"

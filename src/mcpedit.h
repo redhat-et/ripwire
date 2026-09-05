@@ -13,6 +13,8 @@
 #include "didyoumean.h"       // M9: boundedEditDistance / nearestIndexedFileClause — ONE near-miss policy for read and edit
 #include "selectorrefuse.h"   // atSeedFaultClause + indexHasFileMatching — the @FILE:LINE at-diagnosis, ONE set of fault sentences on every surface
 #include "infra/hashutil.h"   // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/gitblob.h"    // E2: the receipt's blob_sha — the git id of the bytes it wrote
+#include "nextverb.h"         // E2: ONE next= on the receipt (nextFlag / nextFieldJson)
 
 #include <climits>            // PATH_MAX — the AbsHintFrame realpath/getcwd buffers (A2)
 
@@ -50,6 +52,15 @@ namespace mcpedit
     inline constexpr std::string_view kBinaryPayloadRefusal =
         "contains a NUL byte; writing it would make the target unparseable and drop it from the index";
 
+    // E1 (terminality round A, 2026-09-05): a body served by --expand / fetch_body with a credential-shaped
+    // literal carries an inline redaction marker in place of the secret. Pasting that body back would write
+    // the marker into source — a silent corruption the receipt would then report as applied. Refused on every
+    // write surface (CLI ladder, engine, edit-plan) with ONE sentence; the marker spelling is redact.h's.
+    inline constexpr std::string_view kRedactionMarker        = "[REDACTED:";
+    inline constexpr std::string_view kRedactionMarkerRefusal =
+        "contains a redaction marker ('[REDACTED:…]') — the body it was copied from was served REDACTED; re-fetch it with "
+        "--no-redact (MCP: redact:false) and paste the real bytes. Nothing was written";
+
     // the outcome of an edit attempt: either a success JSON payload, or a JSON-RPC error {code,message}.
     struct Outcome
     {
@@ -67,6 +78,7 @@ namespace mcpedit
         // parse its own receipt back out to say something true.
         std::string symbol;       // on success — the resolved definition name
         std::string file;         // on success — the indexed identity of the file that was written
+        std::string next;         // on success — the receipt's ONE follow-up, for the stderr line to repeat verbatim (E2)
     };
 
     // The K symbol names closest to `name`, for the "0 matches" hint — by the SAME bounded edit distance
@@ -329,35 +341,96 @@ namespace mcpedit
         return kNoNode;
     }
 
-    // apply the edit. Pure over (span, op, text, srcBytes) → the new file bytes, plus the applied [a,b) span.
-    // Newline rule (documented in the schemas so agents can rely on it):
-    //   ReplaceBody   — the new bytes are EXACTLY new_body; every byte outside [sigStartByte, endByte) is
-    //                   preserved verbatim (no newline added or removed at either seam).
-    //   InsertBefore  — text is inserted starting at sigStartByte. If text does not END with '\n', one '\n'
-    //                   is appended so the inserted block and the existing definition stay on separate lines.
-    //   InsertAfter   — text is inserted at endByte (past the def's final byte). If text does not BEGIN with
-    //                   '\n', one leading '\n' is prepended so the existing def and the inserted block stay
-    //                   on separate lines. The byte at endByte (and everything after) is preserved verbatim.
-    inline std::string applyEdit( Op op, const std::string& src, std::size_t a, std::size_t b,
-                                  const std::string& text, std::size_t& outStart, std::size_t& outEnd )
+    // E1 (terminality round A, 2026-09-05): what the SEAM RULES below did to the payload, so the receipt can
+    // say it (test/editroundtripcheck.sh arms C/G/H). Both are disclosures of arithmetic, never a guess.
+    struct SeamInfo
     {
+        bool        trailingNewlineFolded = false;   // one trailing newline of the payload folded into the seam's own
+        std::size_t separatorPadded       = 0;       // newlines ADDED so the inserted block is separated like its neighbours
+    };
+
+    // the newline run at a seam: how many consecutive line terminators sit immediately BEFORE `pos`
+    // (newlineRunBefore) or FROM `pos` on (newlineRunAfter). Counts '\n' bytes; a '\r' that pairs with one is
+    // skipped, so a CRLF file measures its blank lines the same way an LF file does.
+    inline std::size_t newlineRunBefore( std::string_view src, std::size_t pos ) noexcept
+    {
+        std::size_t n = 0, i = pos;
+        while( i > 0 && src[i - 1] == '\n' )
+        {
+            ++n; --i;
+            if( i > 0 && src[i - 1] == '\r' ) { --i; }
+        }
+        return n;
+    }
+    inline std::size_t newlineRunAfter( std::string_view src, std::size_t pos ) noexcept
+    {
+        std::size_t n = 0, i = pos;
+        while( i < src.size() )
+        {
+            if( src[i] == '\r' && i + 1 < src.size() && src[i + 1] == '\n' ) { ++n; i += 2; }
+            else if( src[i] == '\n' ) { ++n; ++i; }
+            else { break; }
+        }
+        return n;
+    }
+
+    // the terminator this seam spells — "\r\n" when the seam's own run is CRLF, else "\n"
+    inline std::string_view seamEol( std::string_view src, std::size_t pos, bool backward ) noexcept
+    {
+        if( backward ) { return ( pos >= 2 && src[pos - 1] == '\n' && src[pos - 2] == '\r' ) ? "\r\n" : "\n"; }
+        return ( pos + 1 < src.size() && src[pos] == '\r' && src[pos + 1] == '\n' ) ? "\r\n" : "\n";
+    }
+
+    // apply the edit. Pure over (span, op, text, srcBytes) → the new file bytes, plus the applied [a,b) span
+    // and what the seam rules did (`seam`). The rules, documented in --help and the MCP schemas:
+    //   ReplaceBody   — the new bytes are new_body; every byte outside [sigStartByte, endByte) is preserved
+    //                   verbatim. ONE trailing newline on new_body is FOLDED into the newline already at
+    //                   endByte (a heredoc / echo / editor always appends one the span never contained), and the
+    //                   receipt says trailing_newline_folded:true; a second one — a deliberate blank line — stays.
+    //   InsertBefore  — text is inserted at sigStartByte, then PADDED with trailing newlines until it is
+    //                   separated from the existing definition by the same blank-line run the file has right
+    //                   before that definition (at least one newline, so the two never share a line). Padding
+    //                   only ever ADDS; a payload already carrying the separator is left alone. separator_padded=N.
+    //   InsertAfter   — text is inserted at endByte and PADDED with leading newlines to the blank-line run the
+    //                   file has right after the definition (at least one), same disclosure; its trailing
+    //                   newline folds like ReplaceBody's. The byte at endByte and everything after it is kept.
+    // Measured before these rules (bench/agentloop/run_editsuite.py baseline): 12/12 agent runs stopped on the
+    // receipt and 11/12 left wrong bytes — one blank line too many after every heredoc replace, an insert glued
+    // to its neighbour. A byte-exact contract an agent's shell cannot meet is not terminal.
+    inline std::string applyEdit( Op op, const std::string& src, std::size_t a, std::size_t b,
+                                  const std::string& text, std::size_t& outStart, std::size_t& outEnd, SeamInfo& seam )
+    {
+        seam = SeamInfo{};
+        std::string ins = text;
+        // the fold, shared by the two ops whose right seam is the file's own newline
+        const auto foldTrailing = [ & ]( std::size_t seamPos )
+        {
+            const std::string_view eol = seamEol( src, seamPos, false );
+            if( seamPos < src.size() && src.compare( seamPos, eol.size(), eol ) == 0
+                && ins.size() >= eol.size() && std::string_view( ins ).ends_with( eol ) )
+            {
+                ins.erase( ins.size() - eol.size() );
+                seam.trailingNewlineFolded = true;
+            }
+        };
         std::string out;
         if( op == Op::ReplaceBody )
         {
-            out.reserve( src.size() - ( b - a ) + text.size() );
+            foldTrailing( b );
+            out.reserve( src.size() - ( b - a ) + ins.size() );
             out.append( src, 0, a );
             outStart = a;
-            out += text;
+            out += ins;
             outEnd = out.size();
             out.append( src, b, src.size() - b );
         }
         else if( op == Op::InsertBefore )
         {
-            std::string ins = text;
-            if( ins.empty() || ins.back() != '\n' )
-            {
-                ins += '\n';
-            }
+            // the run before the anchor: N newlines = its line end + N-1 blank lines; the block gets the same
+            const std::size_t      want = std::max<std::size_t>( 1, newlineRunBefore( src, a ) );
+            const std::size_t      have = newlineRunBefore( ins, ins.size() );   // the payload's own trailing run
+            const std::string_view eol  = seamEol( src, a, true );
+            for( std::size_t i = have; i < want; ++i ) { ins += eol; ++seam.separatorPadded; }
             out.reserve( src.size() + ins.size() );
             out.append( src, 0, a );
             outStart = a;
@@ -367,11 +440,11 @@ namespace mcpedit
         }
         else   // InsertAfter — at endByte, preserving the byte at b exactly
         {
-            std::string ins = text;
-            if( ins.empty() || ins.front() != '\n' )
-            {
-                ins.insert( ins.begin(), '\n' );
-            }
+            const std::size_t      want = std::max<std::size_t>( 1, newlineRunAfter( src, b ) );
+            const std::size_t      have = newlineRunAfter( ins, 0 );   // the payload's own leading run
+            const std::string_view eol  = seamEol( src, b, false );
+            for( std::size_t i = have; i < want; ++i ) { ins.insert( 0, eol ); ++seam.separatorPadded; }
+            foldTrailing( b );
             out.reserve( src.size() + ins.size() );
             out.append( src, 0, b );
             outStart = b;
@@ -380,6 +453,13 @@ namespace mcpedit
             out.append( src, b, src.size() - b );
         }
         return out;
+    }
+
+    // the two receipt keys the seam rules owe, spelled ONCE for the single-edit receipt and the plan's per-op object
+    inline std::string seamDisclosureJson( const SeamInfo& seam )
+    {
+        return std::string( ",\"trailing_newline_folded\":" ) + ( seam.trailingNewlineFolded ? "true" : "false" )
+             + ",\"separator_padded\":" + std::to_string( seam.separatorPadded );
     }
 
     // F-07: the target file's dominant line ending, so a payload can be harmonized to match it before it is
@@ -697,6 +777,84 @@ namespace mcpedit
         return { first, std::max( first, lineAt( last ) ) };
     }
 
+    // E2 (terminality round A, 2026-09-05): the post-edit REGION — the applied lines plus `context` lines each
+    // side, as the bytes are on disk — so the receipt answers the Read an agent would otherwise make to see what
+    // landed (the suite's baseline: agents stopped on the receipt and 11/12 had wrong bytes they never saw).
+    // Budgeted: a region over kReceiptRegionBudgetBytes carries head + tail (whole lines, half the budget each)
+    // and elided_lines, with capped:true — never a silently truncated text.
+    inline constexpr std::uint32_t kReceiptRegionContextLines = 3;
+    inline constexpr std::size_t   kReceiptRegionBudgetBytes  = 2048;
+
+    // the file as lines without terminators; a trailing newline does not make an empty last line
+    inline std::vector<std::string_view> splitLinesView( std::string_view bytes )
+    {
+        std::vector<std::string_view> lines;
+        std::size_t start = 0;
+        for( std::size_t i = 0; i <= bytes.size(); ++i )
+        {
+            if( i == bytes.size() || bytes[i] == '\n' )
+            {
+                if( i < bytes.size() || start < bytes.size() ) { lines.push_back( bytes.substr( start, i - start ) ); }
+                start = i + 1;
+            }
+        }
+        return lines;
+    }
+
+    // lines [from, upto] (1-based, inclusive, clamped) joined with '\n' — no terminator after the last
+    inline std::string joinLines( const std::vector<std::string_view>& lines, std::uint32_t from, std::uint32_t upto )
+    {
+        std::string t;
+        for( std::uint32_t l = std::max<std::uint32_t>( from, 1 ); l <= upto && l <= lines.size(); ++l )
+        {
+            if( l > from ) { t += '\n'; }
+            t.append( lines[ l - 1 ].data(), lines[ l - 1 ].size() );
+        }
+        return t;
+    }
+
+    // the head/tail split of an oversize region: whole lines from `start` while under half the budget, whole lines
+    // back from `end` likewise. Returns (headEnd, tailStart); elided = tailStart - headEnd - 1 lines.
+    inline std::pair<std::uint32_t, std::uint32_t> regionHeadTail( const std::vector<std::string_view>& lines,
+                                                                   std::uint32_t start, std::uint32_t end, std::size_t half )
+    {
+        std::uint32_t headEnd = start - 1;
+        for( std::size_t used = 0; headEnd + 1 <= end; ++headEnd )
+        {
+            const std::size_t next = used + lines[ headEnd ].size() + ( used ? 1 : 0 );
+            if( next > half && headEnd >= start ) { break; }
+            used = next;
+        }
+        std::uint32_t tailStart = end + 1;
+        for( std::size_t used = 0; tailStart - 1 > headEnd; --tailStart )
+        {
+            const std::size_t next = used + lines[ tailStart - 2 ].size() + ( used ? 1 : 0 );
+            if( next > half && tailStart <= end ) { break; }
+            used = next;
+        }
+        return { headEnd, tailStart };
+    }
+
+    inline std::string receiptRegionJson( std::string_view bytes, LineRange applied )
+    {
+        const std::vector<std::string_view> lines = splitLinesView( bytes );
+        const std::uint32_t total = std::uint32_t( lines.size() );
+        const std::uint32_t start = applied.start > kReceiptRegionContextLines ? applied.start - kReceiptRegionContextLines : 1u;
+        const std::uint32_t end   = std::min<std::uint32_t>( total, applied.end + kReceiptRegionContextLines );
+        std::string out = ",\"region\":{\"start\":" + std::to_string( start ) + ",\"end\":" + std::to_string( end )
+                        + ",\"context\":" + std::to_string( kReceiptRegionContextLines );
+        const std::string whole = joinLines( lines, start, end );
+        if( whole.size() <= kReceiptRegionBudgetBytes )
+        {
+            return out + ",\"text\":\"" + mcpdetail::jsonEscape( whole ) + "\",\"capped\":false}";
+        }
+        const auto [ headEnd, tailStart ] = regionHeadTail( lines, start, end, kReceiptRegionBudgetBytes / 2 );
+        return out + ",\"head\":\"" + mcpdetail::jsonEscape( joinLines( lines, start, headEnd ) )
+                   + "\",\"tail\":\"" + mcpdetail::jsonEscape( joinLines( lines, tailStart, end ) )
+                   + "\",\"elided_lines\":" + std::to_string( tailStart > headEnd + 1 ? tailStart - headEnd - 1 : 0 )
+                   + ",\"capped\":true}";
+    }
+
     // `"edit_check":{...}` for a definition ALREADY RESOLVED in the post-edit tree, or "" when the edit
     // left nothing of that name in that file to ask about (a replace whose payload defines something else).
     // The empty case is why the caller emits a `post_check_unavailable` reason rather than a silent gap.
@@ -793,8 +951,29 @@ namespace mcpedit
     // `withTests=false` is the edit-plan's shape: a plan's ops can touch several files, so the CONTRACT
     // half is per op while the tests half would be a per-file list repeated N times. The plan receipt
     // carries the contract per op; --affected stays the caller's own call for the tests.
+    // E2: the receipt's ONE follow-up, read off the fold it has just rendered — a contract-change with broken
+    // callers wants the call SITES (--uses=FILE:SYM); otherwise the first tests_to_run run= recipe (nextverb.h's
+    // "shell line copied from a run= row"); otherwise the test gate on the file. The same rule --edit-check's own
+    // next= states, extended by the tests half the receipt also carries.
+    inline std::string receiptNextFor( const std::string& fileIdentity, const std::string& symbolName,
+                                       const std::string& foldJson, const std::string& firstTestRun )
+    {
+        if( foldJson.find( "\"status\":\"contract-change\"" ) != std::string::npos
+            && foldJson.find( "\"incompatible\":0" ) == std::string::npos )
+        {
+            return nextFlag( "--uses=", fileIdentity + ":" + symbolName );
+        }
+        if( !firstTestRun.empty() )
+        {
+            return firstTestRun;   // a shell line copied from a run= row (nextverb.h's second form)
+        }
+        return nextFlag( "--test-gate=", fileIdentity );
+    }
+
+    // `nextOut` (E2): when given, receives receiptNextFor()'s answer (the --test-gate fallback when the file left
+    // the index).
     inline std::string postCheckJson( const std::string& root, const std::string& fileIdentity, const std::string& symbolName,
-                                      bool withTests = true )
+                                      bool withTests = true, std::string* nextOut = nullptr )
     {
         const McpIndex&     ix  = getIndex( root );   // the edit invalidated it; this is the rebuild
         const IngestResult& ing = ix.ing;
@@ -821,6 +1000,7 @@ namespace mcpedit
         }
         if( editedFile == std::uint32_t( -1 ) )
         {
+            if( nextOut != nullptr ) { *nextOut = nextFlag( "--test-gate=", fileIdentity ); }
             return ",\"post_check_unavailable\":\"the edited file is not in the refreshed index\"";
         }
         std::string out;
@@ -838,6 +1018,12 @@ namespace mcpedit
         if( withTests )
         {
             out += testsToRunReceiptJson( ing, g, root, editedFile );
+        }
+        if( nextOut != nullptr )
+        {
+            const std::vector<std::uint32_t> testFiles = withTests ? testsReachingFile( ing, g, editedFile ) : std::vector<std::uint32_t>{};
+            *nextOut = receiptNextFor( fileIdentity, symbolName, out,
+                                       testFiles.empty() ? std::string() : TestRunnerIndex( ing ).commandFor( testFiles[0] ) );
         }
         return out;
     }
@@ -859,6 +1045,12 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     {
         oc.ok = false; oc.errCode = -32602;
         oc.message = "payload " + std::string( mcpedit::kBinaryPayloadRefusal );
+        return oc;
+    }
+    if( text.find( mcpedit::kRedactionMarker ) != std::string::npos )
+    {
+        oc.ok = false; oc.errCode = -32602;
+        oc.message = "payload " + std::string( mcpedit::kRedactionMarkerRefusal );
         return oc;
     }
 
@@ -958,8 +1150,9 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     const std::string       editText      = eolNormalized ? mcpedit::normalizeToCrlf( text ) : text;
 
     // 4. splice in memory, then ONE atomic temp-rename write (no partial write is possible).
-    std::size_t newStart = 0, newEnd = 0;
-    const std::string newBytes = mcpedit::applyEdit( op, src, a, b, editText, newStart, newEnd );
+    std::size_t        newStart = 0, newEnd = 0;
+    mcpedit::SeamInfo  seam;
+    const std::string  newBytes = mcpedit::applyEdit( op, src, a, b, editText, newStart, newEnd, seam );
 
     // F1: RE-CHECK FRESHNESS IMMEDIATELY BEFORE THE RENAME. The advisory lock serializes cooperating ripwire
     //     edits, but a NON-cooperating external writer (editor/formatter on save) won't take the lock. So right
@@ -1031,13 +1224,22 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
                   // just got silently rewritten reads this instead of re-hashing the file.
                   + ",\"file_eol\":\"" + mcpedit::eolStyleName( fileEol )
                   + "\",\"eol_normalized\":" + ( eolNormalized ? "true" : "false" )
+                  + mcpedit::seamDisclosureJson( seam )   // E1: what the seam rules did to the payload — never silent
+                  // E2: the post-edit region as it is on disk, and the git id of the written bytes — both free (no
+                  // index), so they ride under --no-post-check too; the agent has no Read left to make
+                  + mcpedit::receiptRegionJson( newBytes, pcLines )
+                  + ",\"blob_sha\":\"" + gitblob::blobOid( newBytes ) + "\""
                   + ",\"stale_index\":\"" + mcpdetail::jsonEscape( oldStamp )
                   + "\",\"note\":\"index invalidated; the next verb call rebuilds from disk\"";
     // P9: the folded verification, LAST — it rebuilds the index, so nothing above may be read after it.
+    // E2: ONE next= (METHODOLOGY §9 #3) — derived from the fold; under --no-post-check it is the one call that
+    // shows the state, --edit-check=FILE:SYM.
+    oc.next = nextFlag( "--edit-check=", pcFileIdentity + ":" + pcSymbolName );
     if( postCheck )
     {
-        oc.resultJson += mcpedit::postCheckJson( root, pcFileIdentity, pcSymbolName );
+        oc.resultJson += mcpedit::postCheckJson( root, pcFileIdentity, pcSymbolName, true, &oc.next );
     }
+    oc.resultJson += nextFieldJson( oc.next );
     oc.resultJson += "}";
     return oc;
 }

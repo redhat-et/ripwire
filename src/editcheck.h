@@ -580,7 +580,10 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
                "holds now. No byte of the working tree was written. Every other file, the git HEAD baseline, at= and any "
                "note child are the REAL tree's. A payload whose splice raises the file's ERROR/MISSING node count is "
                "refused rather than answered; a payload the grammar RECOVERS (a de-indented Python body) is not "
-               "detectably invalid and is answered on its recovered parse. ";
+               "detectably invalid and is answered on its recovered parse. The overwrite child is the CURRENT span the "
+               "apply would replace, as the bytes are on disk: l=/end= its lines, bytes= its size, the CDATA the bytes "
+               "(over the budget the CDATA is the head — shown= its size, capped=\"1\", elided_lines= the rest) — so "
+               "preview then apply needs no read of the region first. ";
     }
     out += "SYM's contract (param count + publicness) NOW vs git HEAD — unchanged/new-symbol/"
                        "contract-change — plus its 1-hop callers. A caller is flagged incompatible=\"1\" when its argument count "

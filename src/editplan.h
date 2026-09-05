@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mcpedit.h"
+#include "nextverb.h"   // E4: nextFlag — the shell-safe spelling of the rollback message's one next:
 
 #include <memory>
 
@@ -36,6 +37,7 @@ struct Edit
     // receipt named the target as the caller SPELLED it and the payload path it would read, and stopped —
     // so "is this the definition I meant, and who breaks if it moves" was still one --edit-check per op
     // after the fact. Resolved at prepare time, where the index is already open and the node already known.
+    mcpedit::SeamInfo seam;                // E1: what applyEdit's seam rules did to this op's payload
     std::string   symName;                 // the RESOLVED definition name (a seed/handle target says nothing)
     std::uint32_t line = 0;                // its 1-based defining line — emitted with the file as at="file:line"
     std::vector<NodeId> callers;           // its 1-hop callers, deduped and sorted (the union feeds the root)
@@ -207,6 +209,7 @@ inline bool parseEdit( const McpIndex& ix, const std::string& object, const std:
     // A1: the plan path does not route through runEditVerb, so it carries the same third payload arm itself.
     // Preflight, like every other plan refusal — no file in the plan is written when any one edit is bad.
     if( looksBinary( edit.payload ) ) { error = "payload '" + payloadPath + "' " + std::string( mcpedit::kBinaryPayloadRefusal ); return false; }
+    if( edit.payload.find( mcpedit::kRedactionMarker ) != std::string::npos ) { error = "payload '" + payloadPath + "' " + std::string( mcpedit::kRedactionMarkerRefusal ); return false; }
     const mcpedit::EditTarget target = mcpedit::resolveTarget( ix, edit.target, edit.fileHint );
     if( target.id == kNoNode || target.id >= ix.ing.symbols.size() ) { error = target.error; return false; }
     edit.node = target.id;
@@ -258,8 +261,8 @@ inline bool stageEdits( std::vector<Edit>& edits, std::vector<FileStage>& files,
         for( const std::size_t index : file.edits )
         {
             std::size_t start = 0, end = 0;
-            const Edit& edit = edits[index];
-            file.edited = mcpedit::applyEdit( edit.op, file.edited, edit.a, edit.b, edit.payload, start, end );
+            Edit&       edit  = edits[index];
+            file.edited = mcpedit::applyEdit( edit.op, file.edited, edit.a, edit.b, edit.payload, start, end, edit.seam );
         }
     }
     return true;
@@ -331,7 +334,8 @@ inline std::string receiptOperation( const Edit& edit, const FileStage* file, bo
                     + "\",\"sym\":\"" + mcpdetail::jsonEscape( edit.symName )
                     + "\",\"at\":\"" + mcpdetail::jsonEscape( identity ) + ":" + std::to_string( edit.line )
                     + "\",\"callers\":" + std::to_string( edit.callers.size() )
-                    + ",\"payload_path\":\"" + mcpdetail::jsonEscape( edit.payloadPath ) + "\"";
+                    + ",\"payload_path\":\"" + mcpdetail::jsonEscape( edit.payloadPath ) + "\""
+                    + mcpedit::seamDisclosureJson( edit.seam );   // E1: per op, the same two keys the single-edit receipt carries
     // …and on an APPLY, the contract question answered against the tree as it now stands — the same fold
     // the single-edit receipt carries, per op (mcpedit::postCheckJson, withTests=false: a plan's ops can
     // touch several files, so the tests half would be one list repeated N times).
@@ -408,7 +412,23 @@ inline std::string receipt( const std::vector<Edit>& edits, const std::vector<Fi
 //   failedAt > 0, rolled ok  → N prior files restored, N named as a number, not left to inference.
 //   rollback failed          → the loud one, unchanged: the tree is in a state only a human can judge.
 // `files` is in disk-path order (sorted just above), so failedAt indexes the file that failed.
-inline std::string rollbackMessage( const std::vector<FileStage>& files, std::size_t failedAt, std::string_view cause )
+//
+// E4 (terminality round A, 2026-09-05): each sentence ends with the ONE call that shows the state —
+// `git -C <root> diff --exit-code -- <every file the plan touches>` — whose exit 0 IS the claim ("no files were
+// written" / "N rolled back") checked against what git sees, so the agent does not go and diff by hand. The files
+// are spelled root-relative (every receipt's spelling) and -C <root> makes the line pasteable from wherever
+// ripwire was invoked. test/editplanrollbackmsgcheck.sh (2b) executes it.
+inline std::string rollbackNext( const std::vector<FileStage>& files, const std::string& root )
+{
+    std::string next = "git -C " + nextFlag( "", root ) + " diff --exit-code --";
+    for( const FileStage& file : files )
+    {
+        next += " " + nextFlag( "", file.identity );
+    }
+    return "; next: " + next;
+}
+
+inline std::string rollbackMessage( const std::vector<FileStage>& files, std::size_t failedAt, std::string_view cause, const std::string& root )
 {
     bool        rollbackOk = true;
     std::size_t undone     = failedAt;
@@ -419,15 +439,16 @@ inline std::string rollbackMessage( const std::vector<FileStage>& files, std::si
     }
     if( !rollbackOk )
     {
-        return std::string( cause ) + " and rollback failed; inspect files immediately";
+        // the loud one: the tree is in a state only a human can judge — and the same one call shows it
+        return std::string( cause ) + " and rollback failed; inspect files immediately" + rollbackNext( files, root );
     }
     const std::string at = failedAt < files.size() ? files[failedAt].identity : std::string( "?" );
     if( failedAt == 0 )
     {
-        return std::string( cause ) + " on the first file ('" + at + "'); no files were written";
+        return std::string( cause ) + " on the first file ('" + at + "'); no files were written" + rollbackNext( files, root );
     }
     return std::string( cause ) + " at '" + at + "'; " + std::to_string( failedAt ) + " prior file"
-         + ( failedAt == 1 ? "" : "s" ) + " rolled back";
+         + ( failedAt == 1 ? "" : "s" ) + " rolled back" + rollbackNext( files, root );
 }
 
 inline Outcome run( const std::string& root, const std::string& planPath, bool apply, std::size_t maxBytes )
@@ -466,12 +487,12 @@ inline Outcome run( const std::string& root, const std::string& planPath, bool a
         if( !stillFresh || mcpdetail::byteHash( current.data(), current.size() ) != files[written].baseHash )
         {
             out.ok      = false;
-            out.message = rollbackMessage( files, written, "edit-plan commit aborted (a concurrent write was detected)" );
+            out.message = rollbackMessage( files, written, "edit-plan commit aborted (a concurrent write was detected)", root );
             return out;
         }
         if( mcpedit::atomicWrite( files[written].disk, files[written].edited ) ) { continue; }
         out.ok      = false;
-        out.message = rollbackMessage( files, written, "edit-plan commit failed" );
+        out.message = rollbackMessage( files, written, "edit-plan commit failed", root );
         return out;
     }
     invalidateMcpIndex();
