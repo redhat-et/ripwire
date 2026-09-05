@@ -807,6 +807,7 @@ struct FlagsResult
     std::uint32_t     dark = 0;
     std::uint32_t     compileCount = 0, cmakeCount = 0, envCount = 0;
     std::size_t       filesScanned = 0;
+    std::string       filter;          // H14/M6: the --flags=SUBSTR this harvest was narrowed by ("" = none)
     // H7 (capture-audit 2026-09-04): true when --flags=SUBSTR names no DECLARED gate at all. `gates="0"`
     // beside `files="1550"` reads exactly like the true and interesting fact "this repo has no dark gates",
     // so a filter that owns nothing has to refuse instead — the ruling --dead-code / --doc-drift / --scope
@@ -1044,6 +1045,9 @@ inline FlagsResult computeFlags( const IngestResult& ing, const std::string& roo
         return a.name < b.name;
     } );
     res.filterMatchedNothing = !filter.empty() && filterNameHits == 0;
+    // H14/M6: the filter is what makes gates= a count for a NAME SET rather than for the repo, so it is
+    // carried on the result and echoed on the root.
+    res.filter = std::string( filter );
     return res;
 }
 
@@ -1102,8 +1106,14 @@ inline void writeFlags( std::FILE* out, const FlagsResult& res, std::size_t maxS
     // §P8 collision: `dark=` was a COUNT here and a BOOL on the <gate/> children beneath — indistinguishable
     // to a parser. The count is renamed (index-vs-count rule) and reads correctly beside its
     // gates=/compile=/cmake=/env= siblings; it had ZERO parsers, so the bool half keeps its name.
-    std::fprintf( out, "<flags gates=\"%zu\" dark_gates=\"%u\" compile=\"%u\" cmake=\"%u\" env=\"%u\" files=\"%zu\">",
-                  res.gates.size(), res.dark, res.compileCount, res.cmakeCount, res.envCount, res.filesScanned );
+    // H14/M6: gates="41" under a name filter is not gates="69" for the repo, and only the echoed filter
+    // separates the two. --doc-drift already carried filter=; this is the same attribute on its sibling.
+    std::vector<char> fgEsc;
+    const std::string fgFilterAttr = res.filter.empty() ? std::string()
+                                                        : ( " filter=\"" + std::string( rw::escapeXml( res.filter, fgEsc ) ) + "\"" );
+    std::fprintf( out, "<flags gates=\"%zu\" dark_gates=\"%u\" compile=\"%u\" cmake=\"%u\" env=\"%u\" files=\"%zu\"%s>",
+                  res.gates.size(), res.dark, res.compileCount, res.cmakeCount, res.envCount, res.filesScanned,
+                  fgFilterAttr.c_str() );
     for( const Gate& g : res.gates )
     {
         writeGate( out, g, ex, maxSites );

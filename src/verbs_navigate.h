@@ -1997,6 +1997,14 @@ int emitImpactColumnar( const ImpactView& v )
                                  + pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                                    v.pageLimit, v.pageOffset, true )
                                  + rw::graphCountFloorAttrXml( v.g )                              // §H4 §3.4
+                                 // H14 (capture-audit 2026-09-04): the omission this form makes on purpose,
+                                 // DECLARED. The reasoning in this function's header stands — a shown_/capped
+                                 // pair describing a listing that was never emitted is noise — but "the XML
+                                 // form has two attributes this form does not" was a fact a columnar reader
+                                 // could only learn by running the other dialect. Naming it costs 44 bytes
+                                 // and turns a silent difference into a stated one. Gate:
+                                 // test/mcpattrparitycheck.sh (which also fails if a name here IS emitted).
+                                 + " lens=\"shown_importers,importers_capped\""
                                  + rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs );  // W2-F
     emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix, v.testReach );
     return 0;

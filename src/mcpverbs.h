@@ -1448,6 +1448,14 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     auto [ flooredTopN, floorNote ] = relevanceFloorCut( lensRank, forTopN );
     forTopN = flooredTopN;
 
+    // H14 (capture-audit 2026-09-04): the ROUTING TRUST GAUGE. The CLI --for root carries
+    // confidence=/margin_pct= — "is this ranked head sharp, or is it flat and therefore a starting point
+    // rather than an answer" — and this twin carried neither, on the surface whose whole job is to route an
+    // agent. It is a pure function of the finished lensRank (lexical.h's adaptiveCut → deriveForConfidence,
+    // the CLI's own call with the CLI's own arguments), so there was never a cost reason for the omission.
+    const AdaptiveCut   mcpForCut = adaptiveCut( lensRank, 5, std::size_t( forTopN ), /*scanFullDistribution=*/true );
+    const ForConfidence mcpForConf = deriveForConfidence( mcpForCut, forTopN );
+
     const std::vector<char>  impure    = computeImpure( ing, ix.g );
 
     // fan-in counts: in-degree per node (how many symbols call this one — the "reuse" metric)
@@ -1498,16 +1506,33 @@ inline std::string forTaskText( const std::string& root, const std::string& task
     std::string rootOpenStr = ctxRootOpen( task, " [routed: " + rc.reason + shapeDemotionNote( shape ) + "]", flRootArg );   // §B1.7: same root attrs as the CLI twin
     if( !rootOpenStr.empty() && rootOpenStr.back() == '>' )
     {
+        // Attribute ORDER matches the CLI twin's: confidence/margin_pct, then at=, then this dialect's own
+        // bundle=/budget_tokens= — the §P8 "one element name, one attribute order, both surfaces" rule.
+        rootOpenStr.insert( rootOpenStr.size() - 1, mcpForConf.attrs );
+        rootOpenStr.insert( rootOpenStr.size() - 1, gitstamp::atAttr( root ) );
         rootOpenStr.insert( rootOpenStr.size() - 1, " bundle=\"sigs\"" );
         if( budgetTokens > 0 )   // M13/H9: the ceiling this bundle was shaped against, named where the CLI names it
         {
             rootOpenStr.insert( rootOpenStr.size() - 1, " budget_tokens=\"" + std::to_string( budgetTokens ) + "\"" );
         }
+        // H14: the DECLARED omission. This dialect serves no git pass (a per-request `git log` on a
+        // long-lived server is a cost the CLI does not pay) and no quality pass, so the three lens columns
+        // the CLI rows carry are absent here — which used to make this bundle serve MORE rows than the CLI
+        // under the same byte cap, with nothing on the screen saying why. Naming them is the contract:
+        // absent-and-declared is an answer, absent-and-silent is a hole. Gate: test/mcpattrparitycheck.sh,
+        // whose lens= arm ALSO fails if a name here is one this dialect does emit.
+        rootOpenStr.insert( rootOpenStr.size() - 1, " lens=\"churn,amp,tested\"" );
     }
     std::string headerStr = rootOpenStr
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + mentionNote + boostNote + docMentionNote + floorNote
                           + ": reusable building blocks (cx=complexity, in=reuse-count) — prefer composing/reusing these over reimplementing"
                             "; bundle=sigs: signatures only in this bundle, no inline bodies — fetch a symbol's full body with the fetch_body verb"
+                          + std::string( mcpForConf.note )
+                          // No "--" anywhere in this clause: it rides inside an XML comment, where a double
+                          // hyphen is ill-formed (G4), so the CLI verb is named without its dashes.
+                          + "; lens=\"churn,amp,tested\": the three per-row quality columns the CLI for lens carries and this dialect"
+                            " does NOT (they need a git and a quality pass this server does not run per request); an absent column"
+                            " here means NOT MEASURED, never measured-and-zero"
                           + std::string( rw::kForFileTailLegend )   // deep-tail: r= + <tail> definitions, the CLI twin's exact clause (sigs-charge-exempt below)
                           + " -->"
                           + rw::forRootRelPathsLegendShort( !flRootArg.empty() );   // W3-S item 5: closes the gap this comment used to record
@@ -2777,12 +2802,15 @@ struct QualityDeltaOutcome
     // R1 IDENTITY — the same disclosure the CLI root carries, so an MCP-only agent is told what an ack's
     // survival across a rename rested on. It has no CLI to re-ask from; a fact that exists on one surface and
     // not the other is the §B6 M5 divergence this file has paid for once already.
-    bool                              renamesAvailable = false;
-    std::size_t                       renamesRecorded  = 0;
+    // H14 (capture-audit 2026-09-04): ONE string, built by quality::identityDisclosure — the same call the
+    // CLI root makes, which returns the XML attrs and the JSON side by side precisely so the two cannot
+    // diverge. This used to be six extracted counts re-serialised by hand below, and the hand copy had
+    // forgotten `rename_window_commits` and `renames_window_truncated`. Losing the truncation flag is the
+    // expensive one: it says the 400-commit rename window was hit, so `renames` and every acked_by_rename
+    // verdict downstream is a FLOOR — and an MCP client had no way to learn that.
+    std::string                       identityJson;   // ",\"renames\":39,\"rename_window_commits\":400,…" (empty when git was unreadable)
     std::size_t                       ackedByRename    = 0;
     std::size_t                       ackedByContent   = 0;
-    std::size_t                       schemeRekeyed    = 0;   // the git-INDEPENDENT key-scheme replay
-    std::size_t                       schemeAmbiguous  = 0;
     std::size_t                       registerMacroExcluded = 0;   // P2.2: the CLI's disclosed dead-code exemption count — see quality.h
 };
 
@@ -2872,10 +2900,7 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     // signal-to-noise round: honor the per-finding ack ratchet exactly like the CLI — the acks sidecar is
     // root-qualified (same SIDECAR LOCATION discipline as the baseline), suppression is reported via `acked`.
     rw::quality::countAckRescues( oc.regs, acks, heal.ackRemap, oc.ackedByRename, oc.ackedByContent );
-    oc.renamesAvailable = heal.renames.available;
-    oc.renamesRecorded  = heal.renames.pairsRecorded;
-    oc.schemeRekeyed    = heal.ackRemap.schemeRekeyed;
-    oc.schemeAmbiguous  = heal.schemeAmbiguousAcks;
+    oc.identityJson     = rw::quality::identityDisclosure( heal ).second;   // H14: the CLI's own disclosure, verbatim
     oc.ackedCount   = rw::quality::applyAckRatchet( oc.regs, acks );
 
     // L2 — same stale-ack disclosure the CLI's --quality-delta reports (see quality.h's computeStaleAcks):
@@ -2947,12 +2972,7 @@ inline std::string qualityDeltaJson( const std::string& root, std::string& errOu
                     + ",\"register-macro-excluded\":" + std::to_string( oc.registerMacroExcluded )
                     // R1 IDENTITY — the CLI root's identity disclosure, spelled in JSON. Present only when
                     // git could be read at all, exactly like the CLI arm (absent ≠ zero — see the legend).
-                    + ( oc.schemeRekeyed ? ",\"acks_rekeyed_by_scheme\":" + std::to_string( oc.schemeRekeyed ) : std::string{} )
-                    + ( oc.schemeAmbiguous ? ",\"scheme_ambiguous\":" + std::to_string( oc.schemeAmbiguous ) : std::string{} )
-                    + ( oc.renamesAvailable ? ( ",\"renames\":" + std::to_string( oc.renamesRecorded )
-                                              + ",\"acked_by_rename\":" + std::to_string( oc.ackedByRename )
-                                              + ",\"acked_by_content\":" + std::to_string( oc.ackedByContent ) )
-                                            : std::string{} )
+                    + oc.identityJson
                     + ",\"at\":" + atJson + ",\"r\":[";
     bool first = true;
     for( const rw::quality::Regression& r : oc.regs )

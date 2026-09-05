@@ -1870,4 +1870,31 @@ inline AdaptiveCut adaptiveCut( const std::vector<float>& scores, std::size_t fl
     return cut;
 }
 
+struct ForConfidence
+{
+    std::string attrs;      // ` confidence="high|low" margin_pct="N"` — root facts, every ladder rung
+    std::string note;       // the legend clause defining both (legend-coverage contract)
+    const char* level = ""; // "high" | "low" — the JSON dialect's key value
+    int         marginPct = 0;
+};
+
+inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN )
+{
+    ForConfidence out;
+    const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
+    out.level     = ( !cut.hitCeiling || servedComplete ) ? "high" : "low";
+    out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;
+    char attrBuf[ 48 ];
+    std::snprintf( attrBuf, sizeof( attrBuf ), " confidence=\"%s\" margin_pct=\"%d\"", out.level, out.marginPct );
+    out.attrs = attrBuf;
+    // no "--" anywhere (rides inside an XML comment, where "--" is ill-formed — G4). TERSE on purpose:
+    // this rides EVERY --for header and its bytes are charged under an explicit budget, so each word
+    // competes with a sig row (the W3-S short-spelling precedent). The full mapping: the --for help text.
+    out.note = " [confidence= derives from the ranked head's largest relative score drop (margin_pct=, whole "
+               "percent, 0 = none; the same gap the adaptive flag cuts at). low = flat ranking: treat the set "
+               "as a starting point, not an answer]";
+    return out;
+}
+
+
 }   // namespace rw

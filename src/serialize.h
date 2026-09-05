@@ -2082,6 +2082,14 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         // the run's size, so it does not move between two runs over the same tree, and a byte-stable prefix
         // that hides "this ranking is unfinished" would be a cache optimisation buying silence.
         h += renderDisclosure( ann.prDisclosure, DiscloseAs::XmlAttrs );
+        // H14 (capture-audit 2026-09-04): --stable's omissions, DECLARED. Both are deliberate and both are
+        // argued for above — k= is globally volatile so dropping it is what buys the byte-stable prefix, and
+        // est_tokens= follows it for the same reason. But an agent reading a --stable map (which is what
+        // every MCP `analyze` call gets) saw 185 rows with no rank attribute and nothing saying the score
+        // exists elsewhere: membership is by PageRank, the emitted order is by file, and the score was
+        // simply gone. lens= names what is missing, so "absent" reads as "not served here", never as "not
+        // computed". Gate: test/mcpattrparitycheck.sh, whose lens= arm also fails on a stale name.
+        if( stable ) { h += " lens=\"k,est_tokens\""; }
         h += ">";
         return h;
     };

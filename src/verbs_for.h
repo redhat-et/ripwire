@@ -437,31 +437,11 @@ inline std::string rootOpenWithSchema( std::string rootOpen, std::string_view sc
 // far beyond the served head cannot justify trust in the head, and quoting it here would claim exactly
 // that. A free function over the cut rather than more lines in runForLens, which is already one of the
 // largest functions in this file (the forLensHeaderText precedent).
-struct ForConfidence
-{
-    std::string attrs;      // ` confidence="high|low" margin_pct="N"` — root facts, every ladder rung
-    std::string note;       // the legend clause defining both (legend-coverage contract)
-    const char* level = ""; // "high" | "low" — the JSON dialect's key value
-    int         marginPct = 0;
-};
-
-inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN )
-{
-    ForConfidence out;
-    const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
-    out.level     = ( !cut.hitCeiling || servedComplete ) ? "high" : "low";
-    out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;
-    char attrBuf[ 48 ];
-    std::snprintf( attrBuf, sizeof( attrBuf ), " confidence=\"%s\" margin_pct=\"%d\"", out.level, out.marginPct );
-    out.attrs = attrBuf;
-    // no "--" anywhere (rides inside an XML comment, where "--" is ill-formed — G4). TERSE on purpose:
-    // this rides EVERY --for header and its bytes are charged under an explicit budget, so each word
-    // competes with a sig row (the W3-S short-spelling precedent). The full mapping: the --for help text.
-    out.note = " [confidence= derives from the ranked head's largest relative score drop (margin_pct=, whole "
-               "percent, 0 = none; the same gap the adaptive flag cuts at). low = flat ranking: treat the set "
-               "as a starting point, not an answer]";
-    return out;
-}
+// A6/H14: ForConfidence + deriveForConfidence moved to lexical.h, beside the adaptiveCut they read — the
+// MCP `for` twin serves confidence=/margin_pct= from the SAME derivation now instead of omitting the
+// routing trust gauge entirely (capture-audit H14). Nothing about the numbers changed.
+using rw::ForConfidence;
+using rw::deriveForConfidence;
 
 inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p, std::string_view extraNotes )
 {
@@ -753,9 +733,19 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     // §B1.4: built once, used on both the degrade path below and the normal return — these three are plain
     // size_t values already computed by the caller (no rendering, no redaction seam), so unlike est_tokens
     // there is no "cannot compute it here" case that would justify omitting them on the degrade path too.
+    // H14 (capture-audit 2026-09-04): the three counts, and the DECLARATION of what they count. The XML
+    // form carries <compose>/<field> rows, <d>/<doc> doc-mention rows and a <routes> block; this dialect
+    // has always carried their COUNTS and none of their rows, under a --help sentence promising the "SAME
+    // content" — so `compose_total:10` beside no compose array read as a bug or as an empty result, and an
+    // agent using --json to pick a type to reuse got the number 10 and nothing to reuse. Emitting the rows
+    // is registered as follow-up work; the honesty half lands now, in the shape the lens itself proposed:
+    // the sections this dialect does not serve are NAMED on the root, so a reader knows to ask the XML form
+    // for them rather than concluding they are empty. Gate: test/mcpattrparitycheck.sh's --for --json arm,
+    // which fails both on an undeclared drop AND on a name here that IS served.
     const std::string surfaceCountsStanza = ",\"lego_total\":" + std::to_string( in.legoTotal )
                                            + ",\"compose_total\":" + std::to_string( in.composeTotal )
-                                           + ",\"routes_total\":" + std::to_string( in.routesTotal );
+                                           + ",\"routes_total\":" + std::to_string( in.routesTotal )
+                                           + ",\"lens\":\"compose,lego,routes,docs\"";
 
     // DEEP-TAIL d2, JSON dialect: always-present (B1.4: a total of 0 must mean genuinely none). Default
     // row cap here (the degrade path below needs a stanza before any budget is knowable); the normal path
