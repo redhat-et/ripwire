@@ -44,7 +44,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **zoom the detail ladder** — [`--detail`](#detail-n) · [`--pack-signatures`](#pack-signatures) · [`--outline`](#outline-a-b) · [`--expand`](#expand-a-b) · [`--compress`](#compress) · [`--pack-top-n`](#pack-top-n-n) · [`--no-redact`](#no-redact)
 
-**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--arch`](#arch-file-baseline) · [`--arch`](#arch-file-baseline-update) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--lint-select`](#lint-select-prefix) · [`--lint-ignore`](#lint-ignore-prefix) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--ack-only`](#ack-only-substr-substr) · [`--scope`](#scope-glob-glob) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-before-symbol`](#insert-before-symbol-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--edit-plan`](#edit-plan-file) · [`--dry-run`](#dry-run-apply) · [`--safe-delete`](#safe-delete-sym) · [`--slice`](#slice-sym-var) · [`--slice-flow`](#slice-flow-back-fwd-both) · [`--slice-depth`](#slice-depth-n) · [`--at`](#at-file-line) · [`--pr-context`](#pr-context-baseref) · [`--merge-scout`](#merge-scout-ref-ref) · [`--plan-lanes`](#plan-lanes-n-task-goal) · [`--plan-lanes`](#plan-lanes-brief-file) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--doc-drift`](#doc-drift-gateability) · [`--with-history`](#with-history) · [`--plan-lint`](#plan-lint-file) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--note-add`](#note-add-target-text) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
+**assess quality / structure** — [`--metrics`](#metrics) · [`--deps`](#deps) · [`--hotspots`](#hotspots) · [`--clones`](#clones) · [`--readability`](#readability) · [`--nonlocal-state`](#nonlocal-state) · [`--ensemble`](#ensemble) · [`--quality-panel`](#quality-panel-preset) · [`--context-ratio`](#context-ratio) · [`--naming-calibration`](#naming-calibration) · [`--naming-consistency`](#naming-consistency) · [`--naming-locals`](#naming-locals) · [`--comment-coherence`](#comment-coherence) · [`--cochange`](#cochange-file) · [`--cochange-recur`](#cochange-recur-k) · [`--cochange-groups`](#cochange-groups) · [`--since`](#since-rev-date) · [`--arch`](#arch-file) · [`--arch`](#arch-file-baseline) · [`--arch`](#arch-file-baseline-update) · [`--lint`](#lint) · [`--lint-catalog`](#lint-catalog) · [`--lint-rules`](#lint-rules-dir) · [`--lint-select`](#lint-select-prefix) · [`--lint-ignore`](#lint-ignore-prefix) · [`--sarif`](#sarif) · [`--with-profile`](#with-profile-file) · [`--communities`](#communities) · [`--community`](#community-id) · [`--zoom`](#zoom-depth) · [`--report`](#report) · [`--seams`](#seams) · [`--mermaid`](#mermaid) · [`--owners`](#owners-sym) · [`--dead-code`](#dead-code-dir) · [`--quality-baseline`](#quality-baseline) · [`--allow-dirty`](#allow-dirty) · [`--quality-delta`](#quality-delta) · [`--quality-delta`](#quality-delta-rev-a-b) · [`--dmm`](#dmm-rev-a-b) · [`--quality-ack`](#quality-ack-reason) · [`--ack-only`](#ack-only-substr-substr) · [`--scope`](#scope-glob-glob) · [`--edit-check`](#edit-check-sym) · [`--replace-symbol-body`](#replace-symbol-body-target) · [`--insert-before-symbol`](#insert-before-symbol-target) · [`--insert-after-symbol`](#insert-after-symbol-target) · [`--edit-payload`](#edit-payload-file) · [`--edit-target-file`](#edit-target-file-path) · [`--edit-plan`](#edit-plan-file) · [`--dry-run`](#dry-run-apply) · [`--safe-delete`](#safe-delete-sym) · [`--slice`](#slice-sym-var) · [`--slice-flow`](#slice-flow-back-fwd-both) · [`--slice-depth`](#slice-depth-n) · [`--at`](#at-file-line) · [`--pr-context`](#pr-context-baseref) · [`--merge-scout`](#merge-scout-ref-ref) · [`--plan-lanes`](#plan-lanes-n-task-goal) · [`--plan-lanes`](#plan-lanes-brief-file) · [`--stray-content`](#stray-content-substr) · [`--plan`](#plan) · [`--abi`](#abi) · [`--whereis`](#whereis-sym) · [`--flags`](#flags-substr) · [`--flip`](#flip-name) · [`--layout`](#layout-struct) · [`--field-affinity`](#field-affinity-struct) · [`--doc-drift`](#doc-drift-substr) · [`--doc-drift`](#doc-drift-gateability) · [`--with-history`](#with-history) · [`--plan-lint`](#plan-lint-file) · [`--from-trace`](#from-trace-file) · [`--run-trace`](#run-trace-cmd) · [`--run-timeout`](#run-timeout-seconds) · [`--note-add`](#note-add-target-text) · [`--notes`](#notes) · [`--pack-task`](#pack-task-task) · [`--partition`](#partition-n) · [`--with-graph`](#with-graph) · [`--export`](#export-cc-json-file) · [`--batch`](#batch-file)
 
 **self-diagnosis** — [`--doctor`](#doctor) · [`--agent`](#agent-codex-claude) · [`--skipped`](#skipped)
 
@@ -60,7 +60,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **Answers:** keep the N highest-ranked symbols (default 200) — applies to the default map, plain --query, and --format=candidates (incl.
 
-with --for). --for's OWN signature/lego/compose bundle self-limits via --pack-top-n instead — --top-k is INERT there (documented, not fixed — a real fix is a behavior change). --pack-task/--from-trace/--run-trace/--situ self-budget via --token-budget, not --top-k. --top-k=0 emits NO ranked map at all — ONLY the payload you asked for (--expand/--outline/--pack-signatures/--pack-top-n). Use it when you want the body and not the ~200-symbol map that otherwise rides along with it.
+with --for). --for's OWN signature/lego/compose bundle self-limits via --pack-top-n instead — --top-k is INERT there (documented, not fixed — a real fix is a behavior change). --pack-task/--from-trace/--run-trace/--situ self-budget via --token-budget, not --top-k. --top-k=0 emits NO ranked map at all — ONLY the payload you asked for (--expand/--outline/--pack-signatures/--pack-top-n). Use it when you want the body and not the ~200-symbol map that otherwise rides along with it; the <ctx> root then carries est_tokens= (the payload's price, the number --token-budget gates on), since no map header is there to carry it.
 
 **Try it**
 
@@ -174,7 +174,7 @@ $ ./build/ripwire . --help-task="write a cheerful release announcement"
 
 **Answers:** the task lens: ranked signatures + metrics framed for reuse.
 
-The bundle enforces a ~7.5KB default payload budget (tail entries trim first; <sigs capped="1"> marks it) — an explicit --token-budget=N overrides the default at the conservative byte rate (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens. TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance — whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6). The <ctx> root discloses it: bundle="auto" bodies="N" (bodies="0" reason="budget" when none fit) — on EVERY auto-mode run: a ceiling the signatures alone exhaust still carries the attribute (legend and empty <bodies> shell dropped there; only the attribute has reserved bytes), and --for --json, which serves no bodies by design, says so with "bundle":"sigs". Only the caller-chosen postures (--signatures-only, --detail=N) are attribute-free. ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own body or NO body — never a same-named doc section, type stub or re-export shim from another file standing in for it. If the anchor's own body does not fit, the bundle serves nothing and says so, and the per-item over-budget comment names what was dropped. COMPACT ON THE CONCEPTUAL ROUTE: a query that anchors nothing (subtoken+body) gets the ranked map plus a <hops> section — the same candidate head's ONE-HOP callee signatures, the <calls> block a body carries — and NO body CDATA, disclosed as bundle="compact" bodies="0" reason="compact-route". Read the map, then --expand=SYM the one you want. --auto-bodies restores the body walk there. That shape discloses on every run too: a ceiling the signatures alone exhaust carries bundle="compact" bodies="0" reason="budget" — three distinct reasons, never collapsed (compact-route = the route chose edges, no_candidates = nothing scored, budget = the ceiling was spent). An explicit --token-budget=N is a hard ceiling, split so a wider ceiling never buys less: the signature side's claim is capped at the DEFAULT ~7.5KB sig budget and every byte beyond it flows to the enrichment — at any ceiling at or above the default's effective total the <sigs> block is byte-identical to the default run's, so every body (or hop row) the default serves still fits. An explicit --pack-top-n is an explicit SIG posture and keeps the whole-ceiling sig claim. --compress composes: the served bodies (auto/anchor and --detail=N alike) go through the same comment-strip --expand uses, disclosed as compress="1" on the <bodies> element (nothing to strip on the compact route). RANKING CONFIDENCE, disclosed not scored: the <ctx> root always carries confidence="high|low" margin_pct="N" — derived from the SAME relevance-cliff gap statistic --adaptive cuts at (no new scorer, no behavior change; the --json dialect carries the same two keys). low means the ranking is FLAT (no material score cliff and more positive matches than the head shows) — treat the set as a starting point, not an answer; high means a material cliff inside the served head (margin_pct= is that drop as a whole percent) or every positive match already shown
+The bundle enforces a ~7.5KB default payload budget (tail entries trim first; <sigs shown=S total=T capped="1"> marks it: T rows handed to the trim, S printed) — an explicit --token-budget=N overrides the default at the conservative byte rate (SHAPES, exit 0; see --token-budget above) and the header reports the delivered est_tokens. TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance — whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6). The <ctx> root discloses it: bundle="auto" bodies="N" (bodies="0" reason="budget" when none fit) — on EVERY auto-mode run: a ceiling the signatures alone exhaust still carries the attribute (legend and empty <bodies> shell dropped there; only the attribute has reserved bytes), and --for --json, which serves no bodies by design, says so with "bundle":"sigs". Only the caller-chosen postures (--signatures-only, --detail=N) are attribute-free. ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own body or NO body — never a same-named doc section, type stub or re-export shim from another file standing in for it. If the anchor's own body does not fit, the bundle serves nothing and says so, and the per-item over-budget comment names what was dropped. COMPACT ON THE CONCEPTUAL ROUTE: a query that anchors nothing (subtoken+body) gets the ranked map plus a <hops> section — the same candidate head's ONE-HOP callee signatures, the <calls> block a body carries — and NO body CDATA, disclosed as bundle="compact" bodies="0" reason="compact-route". Read the map, then --expand=SYM the one you want. --auto-bodies restores the body walk there. That shape discloses on every run too: a ceiling the signatures alone exhaust carries bundle="compact" bodies="0" reason="budget" — three distinct reasons, never collapsed (compact-route = the route chose edges, no_candidates = nothing scored, budget = the ceiling was spent). An explicit --token-budget=N is a hard ceiling, split so a wider ceiling never buys less: the signature side's claim is capped at the DEFAULT ~7.5KB sig budget and every byte beyond it flows to the enrichment — at any ceiling at or above the default's effective total the <sigs> block is byte-identical to the default run's, so every body (or hop row) the default serves still fits. An explicit --pack-top-n is an explicit SIG posture and keeps the whole-ceiling sig claim. --compress composes: the served bodies (auto/anchor and --detail=N alike) go through the same comment-strip --expand uses, disclosed as compress="1" on the <bodies> element (nothing to strip on the compact route). RANKING CONFIDENCE, disclosed not scored: the <ctx> root always carries confidence="high|low" margin_pct="N" — derived from the SAME relevance-cliff gap statistic --adaptive cuts at (no new scorer, no behavior change; the --json dialect carries the same two keys). low means the ranking is FLAT (no material score cliff and more positive matches than the head shows) — treat the set as a starting point, not an answer; high means a material cliff inside the served head (margin_pct= is that drop as a whole percent) or every positive match already shown
 
 **Try it**
 
@@ -203,7 +203,7 @@ $ ./build/ripwire . --for="rankGraphTeleport"
 
 **Caveats (stated by the binary):**
 
-- <sigs capped="1"> marks it) — an explicit --token-budget=N overrides the default at the conservative byte rate (SHAPES, exit 0;
+- <sigs shown=S total=T capped="1"> marks it: T rows handed to the trim, S printed) — an explicit --token-budget=N overrides the default at the conservative byte rate (SHAPES, exit 0;
 - TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance — whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6).
 - ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own body or NO body — never a same-named doc section, type stub or re-export shim from another file standing in for it.
 
@@ -350,7 +350,7 @@ $ ./build/ripwire . --for="tree-sitter parse of a source file" --adaptive
 
 **Answers:** (with --for) disable the query-mention anchor.
 
-By DEFAULT, a file, dotted module, or Scope.symbol literally NAMED in the task text (a path, `pkg.module`, `Type.method` — even inside a URL) is lifted to just below the top hit; the header says what anchored. Inert (byte-identical) when the text names nothing indexed. RIPWIRE_NO_MENTION=1 disables it everywhere (incl. MCP `for`).
+By DEFAULT, a file, dotted module, or Scope.symbol literally NAMED in the task text (a path, `pkg.module`, `Type.method` — even inside a URL) has its SCORE lifted to within 5% of the top score; the header says what anchored. That is a score promise, not a rank one: on a flat/tied head the anchored hit can still land several ranks below #1. Inert (byte-identical) when the text names nothing indexed. RIPWIRE_NO_MENTION=1 disables it everywhere (incl. MCP `for`).
 
 **Try it**
 
@@ -376,6 +376,7 @@ $ ./build/ripwire . --for="why does src/lexical.h chooseForRanker pick name-exac
 
 **Caveats (stated by the binary):**
 
+- That is a score promise, not a rank one: on a flat/tied head the anchored hit can still land several ranks below #1.
 - Inert (byte-identical) when the text names nothing indexed.
 
 ### `--no-doc-mention`
@@ -483,7 +484,7 @@ It does not compare against a baseline and it cannot fail a commit. The gate for
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--max-tokens`, `--token-budget`, `--from-trace`, `--limit`
+**Shaped by:** `--max-tokens`, `--token-budget`, `--no-redact`, `--from-trace`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -578,9 +579,13 @@ $ ./build/ripwire . --order=stable --top-k=5
 ... [6 more line(s); run it to see the whole thing]
 ```
 
+**Shaped by:** `--no-stable`
+
 ### `--no-stable`
 
-**Answers:** opt out of the stable ordering that --mcp enables by default
+**Answers:** opt out of the stable ordering that --mcp/--listen enable by default.
+
+Read ONLY there: on the CLI it changes nothing and says so on stderr (the map is important-first unless you pass --order=stable)
 
 **Try it**
 
@@ -611,7 +616,7 @@ $ ./build/ripwire . --no-stable --top-k=3
 
 ### `--around=SYM`
 
-**Answers:** ego graph around SYM   [--around-depth=N] [--around-fanout=K]
+**Answers:** ego graph around SYM   [--around-depth=N, default 2] [--around-fanout=K, default 32] the root echoes all three (of= depth= fanout=), so the boundary of what could appear is readable
 
 **Try it**
 
@@ -843,7 +848,7 @@ $ ./build/ripwire . --connect=rankGraphTeleport,runEval,getIndex
 </connect>
 ```
 
-**Shaped by:** `--from-trace`, `--limit`
+**Shaped by:** `--no-redact`, `--from-trace`, `--limit`
 
 ### `--impact=SYM`
 
@@ -1395,9 +1400,9 @@ $ ./build/ripwire . --for="pagerank power iteration" --detail=2
 
 ### `--pack-signatures`
 
-**Answers:** body-elided decl skeletons — ~59-68% fewer element bytes than the same symbols' full --expand bodies (68% at the top-50 sigs payload cap — the sigs payload is top-50 whatever --top-k is set to, and --top-k's own default is 200), measured at top-10/50/100 on this repo with the corpus-root prefix subtracted from both sides: that prefix repeats inside every element, is charged in both forms, and is not what this elides — count it and the figure becomes a function of how deep your checkout sits (the same corpus reads 60% from a relative root and 41% from a 130-byte absolute one).
+**Answers:** body-elided decl skeletons — ~72-90% fewer element bytes than the same symbols' full --expand bodies (roughly 80% at the top-50 sigs payload cap — the sigs payload is top-50 whatever --top-k is set to, and --top-k's own default is 200), measured at top-10/50/100 on this repo with the corpus-root prefix subtracted from both sides: that prefix repeats inside every element, is charged in both forms, and is not what this elides — count it and the figure becomes a function of how deep your checkout sits.
 
-The share RISES with the result size. Like the --format=columnar sibling, a small result can invert it — a signature plus its doc comment can be bigger than a short body.
+test/showcasecapturecheck.sh (C) re-derives this range from the SAME repo every run and fails on drift. The share RISES with the result size. Like the --format=columnar sibling, a small result can invert it — a signature plus its doc comment can be bigger than a short body.
 
 **Try it**
 
@@ -1484,7 +1489,7 @@ $ ./build/ripwire . --top-k=0 --expand=rankGraphTeleport
 ... [18 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--for`, `--pack-signatures`, `--outline`, `--compress`, `--hotspots`, `--edit-check`, `--at`
+**Shaped by:** `--top-k`, `--for`, `--pack-signatures`, `--outline`, `--compress`, `--no-redact`, `--hotspots`, `--edit-check`
 
 **Caveats (stated by the binary):**
 
@@ -1558,9 +1563,9 @@ $ ./build/ripwire . --pack-top-n=3 --top-k=0
 
 ### `--no-redact`
 
-**Answers:** emit source/doc text VERBATIM, redacting nothing REDACTED by default (high-confidence credential SHAPES only, precision over recall): emitted symbol BODIES, doc/markdown bodies and doc-comment excerpts, the --outline skeleton, and SIGNATURES — a default argument carries whatever literal was written.
+**Answers:** emit source/doc text VERBATIM, redacting nothing.
 
-NOT redacted, and a deliberate residual: --grep/--regex/--match hit lines and their --grep-context neighbours, and --note-add/--notes text. --grep is the exception on purpose — auditing a repo FOR secrets needs the hit you searched for shown verbatim.
+Modifies the BODY-serving verbs (--expand, --for, --pack-task, --recall, --slice, --connect, --from-trace, --batch, --mcp); the default map carries no bodies (identifiers and signatures are never redacted), so bare on the map it is refused, naming one of them REDACTED by default (high-confidence credential SHAPES only, precision over recall): emitted symbol BODIES, doc/markdown bodies and doc-comment excerpts, the --outline skeleton, and SIGNATURES — a default argument carries whatever literal was written. NOT redacted, and a deliberate residual: --grep/--regex/--match hit lines and their --grep-context neighbours, and --note-add/--notes text. --grep is the exception on purpose — auditing a repo FOR secrets needs the hit you searched for shown verbatim.
 
 **Try it**
 
@@ -1618,7 +1623,7 @@ $ ./build/ripwire . --metrics --top-k=10
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--limit`, `--index-out`
+**Shaped by:** `--json`, `--limit`, `--index-out`
 
 **Caveats (stated by the binary):**
 
@@ -1966,7 +1971,7 @@ $ ./build/ripwire . --naming-consistency --limit=8
 
 **Answers:** OPT-IN --lint MODIFIER (requires --lint;
 
-a no-op alone), OFF by default: local-variable-indexing plan Phase 2 (docs/LOCALS_INDEXING.md). Runs the naming-short/naming-wordy/naming-underscore/naming-case predicates (same tags, same rule bodies as the existing Symbol-scoped checks) against LOCAL variable names too, C/C++ only, but ONLY inside a function that already clears an EXISTING size/complexity gate (loc>80 OR nest>4 OR ccx>=15 -- the shipped large-function/deep-nesting thresholds) AND has locals>=8 (measured floor: median locals=9 among this repo's own 377 gated functions) -- never a whole-corpus local-name sweep. naming-short additionally requires the local's own declDepth>=2 (nested, not the function's own outermost block). Deliberately breaks the lens's stated invariant that an un-indexed local can never be flagged -- read the WITHDRAWN note atop src/naminglens.h before relying on this. NOT default-enabled inside a plain --lint run and not a candidate for it yet: the plan's own hard blocker (a hand-curated fixture corpus AND a manual real-corpus audit for idiomatic-short-name skew -- i/j/k/buf/tmp/ err) has not run. Exit 0 always; findings ride the same naming-* tallies/floors as --lint
+refused alone), OFF by default: local-variable-indexing plan Phase 2 (docs/LOCALS_INDEXING.md). Runs the naming-short/naming-wordy/naming-underscore/naming-case predicates (same tags, same rule bodies as the existing Symbol-scoped checks) against LOCAL variable names too, C/C++ only, but ONLY inside a function that already clears an EXISTING size/complexity gate (loc>80 OR nest>4 OR ccx>=15 -- the shipped large-function/deep-nesting thresholds) AND has locals>=8 (measured floor: median locals=9 among this repo's own 377 gated functions) -- never a whole-corpus local-name sweep. naming-short additionally requires the local's own declDepth>=2 (nested, not the function's own outermost block). Deliberately breaks the lens's stated invariant that an un-indexed local can never be flagged -- read the WITHDRAWN note atop src/naminglens.h before relying on this. NOT default-enabled inside a plain --lint run and not a candidate for it yet: the plan's own hard blocker (a hand-curated fixture corpus AND a manual real-corpus audit for idiomatic-short-name skew -- i/j/k/buf/tmp/ err) has not run. Exit 0 always; findings ride the same naming-* tallies/floors as --lint
 
 **Try it**
 
@@ -1993,9 +1998,9 @@ $ ./build/ripwire . --lint --naming-locals
 
 **Caveats (stated by the binary):**
 
+- refused alone), OFF by default: local-variable-indexing plan Phase 2 (docs/LOCALS_INDEXING.md).
 - Deliberately breaks the lens's stated invariant that an un-indexed local can never be flagged -- read the WITHDRAWN note atop src/naminglens.h before relying on this.
 - NOT default-enabled inside a plain --lint run and not a candidate for it yet: the plan's own hard blocker (a hand-curated fixture corpus AND a manual real-corpus audit for idiomatic-short-name skew -- i/j/k/buf/tmp/ err) has not run.
-- findings ride the same naming-* tallies/floors as --lint
 
 ### `--comment-coherence`
 
@@ -2669,7 +2674,9 @@ $ ./build/ripwire . --dead-code=src
 
 ### `--quality-baseline`
 
-**Answers:** snapshot ccx/clones/dead-code to .ripwire_quality_baseline (run BEFORE a change)
+**Answers:** snapshot ccx/clones/dead-code to .ripwire_quality_baseline (run BEFORE a change, on a CLEAN tree).
+
+On a tree that DIFFERS from HEAD it computes the HEAD delta FIRST and REFUSES (exit 1) rather than pin the debt already in the tree as the floor — it names how many gating findings it would absorb and the first of them. Commit, or pass --allow-dirty.
 
 **Try it**
 
@@ -2680,7 +2687,23 @@ $ ./build/ripwire . --quality-baseline
 (empty)
 ```
 
-**Shaped by:** `--quality-delta`
+**Shaped by:** `--allow-dirty`, `--quality-delta`
+
+**Caveats (stated by the binary):**
+
+- On a tree that DIFFERS from HEAD it computes the HEAD delta FIRST and REFUSES (exit 1) rather than pin the debt already in the tree as the floor — it names how many gating findings it would absorb and the first of them.
+
+### `--allow-dirty`
+
+**Answers:** (with --quality-baseline) pin anyway: the sidecar is stamped with the dirty pin and the absorbed count, and every later --quality-delta against it carries baseline_absorbed="N" — so a green exit beside that attribute reads as "clean SINCE THE PIN", never "clean".
+
+Refused alone.
+
+**Shaped by:** `--quality-baseline`
+
+**Caveats (stated by the binary):**
+
+- (with --quality-baseline) pin anyway: the sidecar is stamped with the dirty pin and the absorbed count, and every later --quality-delta against it carries baseline_absorbed="N" — so a green exit beside that attribute reads as "clean SINCE THE PIN", never "clean".
 
 ### `--quality-delta`
 
@@ -2707,7 +2730,7 @@ $ ./build/ripwire . --quality-delta
 </quality-delta>
 ```
 
-**Shaped by:** `--affected`, `--test-gate`, `--dmm`, `--scope`, `--json`
+**Shaped by:** `--affected`, `--test-gate`, `--allow-dirty`, `--dmm`, `--quality-ack`, `--scope`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -2740,7 +2763,7 @@ $ ./build/ripwire . --quality-delta
 </quality-delta>
 ```
 
-**Shaped by:** `--affected`, `--test-gate`, `--dmm`, `--scope`, `--json`
+**Shaped by:** `--affected`, `--test-gate`, `--allow-dirty`, `--dmm`, `--quality-ack`, `--scope`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -2777,7 +2800,9 @@ $ ./build/ripwire . --dmm
 
 ### `--quality-ack[=REASON]`
 
-**Answers:** accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked="N") until one WORSENS past its acked size
+**Answers:** accept the current findings into .ripwire_quality_acks (per-finding ratchet): re-runs suppress them honestly (acked="N") until one WORSENS past its acked size.
+
+=REASON implies the --quality-delta report it acks; the reason-less spelling needs --quality-delta beside it (refused alone). An ack with 0 findings to accept writes nothing and says so.
 
 **Try it**
 
@@ -2789,6 +2814,10 @@ $ ./build/ripwire . --quality-delta --quality-ack --ack-only=zzznope
 ```
 
 **Shaped by:** `--ack-only`, `--scope`
+
+**Caveats (stated by the binary):**
+
+- the reason-less spelling needs --quality-delta beside it (refused alone).
 
 ### `--ack-only=SUBSTR[,SUBSTR]`
 
@@ -2966,7 +2995,7 @@ $ ./build/ripwire . --insert-before-symbol=nonNegativeFloatDescKey --edit-payloa
 
 **Answers:** versioned JSON multi-edit transaction: {version:1, edits:[{op,target,file?,payload}]};
 
-each target takes the same forms as TARGET above (a name, an @FILE:LINE seed, a handle)
+op is one of replace_symbol_body, insert_before_symbol, insert_after_symbol each target takes the same forms as TARGET above (a name, an @FILE:LINE seed, a handle)
 
 **Try it**
 
@@ -3050,7 +3079,7 @@ $ ./build/ripwire . --slice=rankGraphTeleport
 ... [3 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--since`, `--slice-flow`, `--slice-depth`, `--at`, `--legend`
+**Shaped by:** `--no-redact`, `--since`, `--slice-flow`, `--slice-depth`, `--at`, `--legend`
 
 **Caveats (stated by the binary):**
 
@@ -3213,6 +3242,8 @@ $ ./build/ripwire . --plan-lanes=99 --task=x
 (empty)
 ```
 
+**Shaped by:** `--json`
+
 **Caveats (stated by the binary):**
 
 - Exit 0 whenever a plan was produced, INCLUDING when conflicts are predicted (conflicts are data, and the landing order exists to handle them);
@@ -3235,6 +3266,8 @@ add a --since filter to the doc-drift verb
 add the CLI parse arm and help text for the new filter
 write regression tests for the new filter
 ```
+
+**Shaped by:** `--json`
 
 **Caveats (stated by the binary):**
 
@@ -3294,7 +3327,7 @@ $ ./build/ripwire . --stray-content=r27 --plan
 </landing-plan>
 ```
 
-**Shaped by:** `--stray-content`
+**Shaped by:** `--stray-content`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -3638,7 +3671,7 @@ AddressSanitizer:DEADLYSIGNAL
 ==41337==ABORTING
 ```
 
-**Shaped by:** `--top-k`, `--token-budget`, `--help-task`, `--compress`, `--plan-lint`, `--run-trace`, `--limit`
+**Shaped by:** `--top-k`, `--token-budget`, `--help-task`, `--compress`, `--no-redact`, `--plan-lint`, `--run-trace`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -3687,9 +3720,9 @@ $ ./build/ripwire . --run-timeout=5
 
 ### `--note-add="TARGET: text"`
 
-**Answers:** pin a field note (write-side memory) to TARGET — a canonical id (path::scope::name, as --for/--expand emit it) or a file path — in the committed, sorted .ripwire_notes at the repo root.
+**Answers:** pin a field note (write-side memory) to TARGET — a SYMBOL in any spelling the read verbs resolve (bare name, file:name, Scope::name, the canonical id path::scope::name, or @FILE:LINE) or a FILE PATH — in the committed, sorted .ripwire_notes at the repo root.
 
-The date is git's committer clock (HEAD), not wall time, so the line is deterministic; prints the exact written line. Also STAMPS the writing repo's HEAD sha + branch onto the note (a "done"/"fixed" claim is then anchored to the commit it was true at) — a non-git root or an unresolvable HEAD writes the plain unstamped line rather than a wrong sha. MUTATES one file; single-root only. text with no causal/decision marker ("because"/"chose"/"over"/"instead"/etc.) gets a gentle stderr tip toward the decision shape — never a refusal, the add always proceeds.
+A symbol is CANONICALISED to its canonical id on write (the id --for/--expand key notes by) and the rewrite is echoed on stderr; a name matching SEVERAL definitions is refused naming each, and a name matching NONE is refused with a did-you-mean. A path target is written even when nothing indexed matches it (a note on a file you are about to add is legal), with a loud stderr warning that it is stored dangling. The date is git's committer clock (HEAD), not wall time, so the line is deterministic; prints the exact written line. Also STAMPS the writing repo's HEAD sha + branch onto the note (a "done"/"fixed" claim is then anchored to the commit it was true at) — a non-git root or an unresolvable HEAD writes the plain unstamped line rather than a wrong sha. MUTATES one file; single-root only. text with no causal/decision marker ("because"/"chose"/"over"/"instead"/etc.) gets a gentle stderr tip toward the decision shape — never a refusal, the add always proceeds.
 
 **Try it**
 
@@ -3704,6 +3737,7 @@ lessByScoreDescId	2026-09-04	keep this branch-free — it sits inside the PageRa
 
 **Caveats (stated by the binary):**
 
+- a name matching SEVERAL definitions is refused naming each, and a name matching NONE is refused with a did-you-mean.
 - text with no causal/decision marker ("because"/"chose"/"over"/"instead"/etc.) gets a gentle stderr tip toward the decision shape — never a refusal, the add always proceeds.
 
 ### `--notes`
@@ -3761,7 +3795,7 @@ $ ./build/ripwire . --pack-task="add a new output format flag to the CLI"
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--token-budget`, `--for`, `--test-gate`, `--expand`, `--compress`, `--partition`, `--with-graph`
+**Shaped by:** `--top-k`, `--token-budget`, `--for`, `--test-gate`, `--expand`, `--compress`, `--no-redact`, `--partition`
 
 **Caveats (stated by the binary):**
 
@@ -3868,6 +3902,8 @@ grep:DEGRADED_PATH_ALERT
 lego:Vehicle
 ```
 
+**Shaped by:** `--no-redact`
+
 **Caveats (stated by the binary):**
 
 - one-turn context sweep: FILE ('-'=stdin) is newline-delimited `verb:arg` sub-queries (for/grep/callers/callees/impact/uses/mentions/analyze/lego/owners/cochange/exemplar, path_between:FROM,TO), answered in ONE deduped <batch>;
@@ -3881,7 +3917,7 @@ lego:Vehicle
 
 **Answers:** environment self-check: binary-vs-PATH staleness, grammar tags.scm compile, cache-dir health, git reachability, tree-sitter version, and TRACKED-BINARY staleness (a committed binary whose last commit is a git-history ANCESTOR of a same-directory/same-stem source's last commit — never mtime, which a fresh clone stamps at checkout time).
 
-"Dependent source" is a NAMING heuristic (same dir, same filename stem, e.g. tool <-> tool.cpp) — ripwire parses no build system, so a binary built from a differently-named or differently-located source is silently out of scope, neither flagged nor cleared. Single-root only. DIAGNOSTIC, not deterministic (env-dependent by design); exit 0 iff all ok, else 1. Root reports <doctor checks=N passed=M ...>; each <c/> child row carries the BOOLEAN ok="0|1". passed= is the root's count (it was spelled ok= until the vocabulary pass, which collided with the child bool). A FAILING row (ok="0") also carries hint=, the derived verdict (which of self=/which= is stale and the fix, which grammar(s) failed to compile, why the cache dir isn't writable, ...) — a passing row never carries hint=.
+"Dependent source" is a NAMING heuristic (same dir, same filename stem, e.g. tool <-> tool.cpp) — ripwire parses no build system, so a binary built from a differently-named or differently-located source is silently out of scope, neither flagged nor cleared. Single-root only. DIAGNOSTIC, not deterministic (env-dependent by design); exit 0 iff all ok, else 1. Root reports <doctor checks=N passed=M ...>; each <c/> child row carries the BOOLEAN ok="0|1". passed= is the root's count (it was spelled ok= until the vocabulary pass, which collided with the child bool). A FAILING row (ok="0") also carries hint=, the derived verdict (which of self=/which= is stale and the fix, which grammar(s) failed to compile, why the cache dir isn't writable, ...) — a passing row never carries hint=. The root carries TWO shas, and they answer different questions: at= is the TREE's HEAD (+dirty) right now, built_from= is the commit THIS BINARY was compiled from (byte-identical to --version's "git <sha>"). They differ from the moment you commit until the next build — normal, so a mismatch is reported, never gated; a stale PATH copy shadowing a fresh build is the binary-path row's job and is decided on inode/mtime/size, not on this sha.
 
 **Try it**
 
@@ -3905,6 +3941,7 @@ $ ./build/ripwire . --doctor
 
 - "Dependent source" is a NAMING heuristic (same dir, same filename stem, e.g.
 - A FAILING row (ok="0") also carries hint=, the derived verdict (which of self=/which= is stale and the fix, which grammar(s) failed to compile, why the cache dir isn't writable, ...) — a passing row never carries hint=.
+- They differ from the moment you commit until the next build — normal, so a mismatch is reported, never gated;
 
 ### `--agent=codex|claude`
 
@@ -3939,7 +3976,7 @@ $ ./build/ripwire . --doctor --agent=claude
 
 **Answers:** WHY the index does not contain a file, and which files it DOES contain but cannot vouch for.
 
-<f p= why= bytes=/> per DROPPED file: why=oversize (limit= names the ceiling — --max-file-size, or the fixed .json/.yaml config ceilings it does not raise), why=excluded (--exclude hit), why=unsupported-ext (ext= has no grammar in this build — the class that hides a whole LANGUAGE). <h p= why= err= err_ratio= ws_freq=/> per INDEXED-but-suspect file, nothing dropped: why=degraded-parse (the parse holds ERROR/MISSING nodes — a parser-state fact, never a syntax verdict) and/or why=minified-suspect (ws_freq under 0.070 over the leading 4KB). <e x= files=/> per unindexed extension — what the map header rolls up as unindexed=. <lang n= files= symbols=/> per LANGUAGE this build DID extract from — the mirror of unindexed= (which names what it could NOT read at all); sorted files DESC then name ASC, absent means the language contributed nothing, never a printed zero; files= is a floor (a file with zero extracted symbols is not attributed to any language), symbols= is exact. The root states the ACCOUNTING INVARIANT indexed= + oversize= + excluded= = the enumerated candidate population, plus unsupported_ext=, excluded_dirs= (SUBTREES --exclude pruned: contents UNKNOWN, not zero), pruned_dirs= (SUBTREES this build always prunes by policy — the committed noise/vendor/build denylist and any dir holding a CMakeCache.txt — contents likewise UNKNOWN), degraded_parse=, minified_suspect=, unmeasured= (indexed files this run never parsed) and the effective ceilings, so a zero-row report still states its bounds. rows_capped="1" ⇒ rows are a sample of an exact count. Rows sort by path; composes with --max-file-size/--exclude and multi-root (rows carry the <label>/./<rel> spelling). Read-only; exit 0 always: a report, not a gate.
+<f p= why= bytes=/> per DROPPED file: why=oversize (limit= names the ceiling — --max-file-size, or the fixed .json/.yaml config ceilings it does not raise), why=excluded (--exclude hit), why=unsupported-ext (ext= has no grammar in this build — the class that hides a whole LANGUAGE). <h p= why= err= err_ratio= ws_freq=/> per INDEXED-but-suspect file, nothing dropped: why=degraded-parse (the parse holds ERROR/MISSING nodes — a parser-state fact, never a syntax verdict) and/or why=minified-suspect (ws_freq under 0.070 over the leading 4KB). <e x= files=/> per unindexed extension — what the map header rolls up as unindexed=. <lang n= files= symbols=/> per LANGUAGE this build DID extract from — the mirror of unindexed= (which names what it could NOT read at all); sorted files DESC then name ASC, absent means the language contributed nothing, never a printed zero; files= is a floor (a file with zero extracted symbols is not attributed to any language), symbols= is exact. The root states the ACCOUNTING INVARIANT indexed= + oversize= + excluded= = the enumerated candidate population, plus unsupported_ext=, excluded_dirs= (SUBTREES --exclude pruned: contents UNKNOWN, not zero), pruned_dirs= (SUBTREES this build always prunes by policy — the committed noise/vendor/build denylist and any dir holding a CMakeCache.txt — contents likewise UNKNOWN), degraded_parse=, minified_suspect=, unmeasured= (indexed files this run never parsed) and the effective ceilings, so a zero-row report still states its bounds. rows_capped="1" ⇒ rows are a sample of an exact count. Rows sort by path; composes with --max-file-size/--exclude and multi-root (rows carry the <label>/<rel> spelling). Read-only; exit 0 always: a report, not a gate.
 
 **Try it**
 
@@ -4125,9 +4162,9 @@ $ ./build/ripwire . --grep=DEGRADED_PATH_ALERT --legend=compact
 
 ### `--json`
 
-**Answers:** machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr names 1:1 — supported for the default map, --for, --pack-task, --callers/--callees/ --impact, --quality-delta, --test-gate (the CI/scripting verbs).
+**Answers:** machine-parseable JSON instead of XML, SAME content, keys mirror the XML attr names 1:1 — supported for the default map, --for, --pack-task, --callers/--callees/ --impact, --quality-delta, --test-gate, --metrics (the CI/scripting verbs), plus --plan-lanes which is JSON-native.
 
-Every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML. Deterministic: same 2-run byte-diff + stable key order contract as the XML.
+That set is an ALLOW-list: every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML — a verb added tomorrow refuses by default. Deterministic: same 2-run byte-diff + stable key order contract as the XML.
 
 **Try it**
 
@@ -4142,13 +4179,13 @@ $ ./build/ripwire . --hotspots --json
 
 **Caveats (stated by the binary):**
 
-- Every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML.
+- That set is an ALLOW-list: every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML — a verb added tomorrow refuses by default.
 
 ### `--limit=N --offset=M`
 
 **Answers:** paginate a high-cardinality verb.
 
-HONORED by: --deps --callers --callees --tree --lint --hotspots --clones --cochange --owners --communities --community --doc-drift --whereis --grep/--regex --match --pattern --impact --uses --exercises --seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate --readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence --naming-consistency --safe-delete. Emit at most N rows, skipping the first M; N overrides the verb's own display cap (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40 impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio symbol rows, 40 nonlocal-state rows, 200 graph-query rows / --top-k). With --offset alone (no --limit) the verb's own default page size applies and the root discloses limit="0" — on OUTPUT that 0 means 'no explicit --limit', never a zero-row page (the flag itself refuses --limit=0). Deterministic seams (rows are already sorted) so --offset=N is the exact continuation of the previous --limit=N page. The root element then carries shown= capped= total= has_more= next_offset= offset= limit= — loop until has_more="0" — EXCEPT the verbs with TWO INDEPENDENT listings, which carry the noun-prefixed form instead (one shown= could only describe one): --test-gate shown_tests=/tests_capped= + shown_untested=/untested_capped=, --communities shown_modules=/modules_capped= + shown_bridges=/bridges_capped=, --ensemble and --context-ratio shown_syms=/syms_capped= + shown_files=/files_capped=; the window takes the PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every page, complete). Any verb NOT in that list REFUSES both flags (exit 1) rather than accepting and ignoring them: budget/top-k verbs (--for/--recall/--pack-task/--from-trace/ --expand/--outline/--pack-signatures/--format=candidates) are shaped by --top-k/--max-tokens/--token-budget, not a page; the rest (--path/--connect/ --around/--exemplar/--report/--mermaid/--map-diff/--metrics and the default map) answer with a single fixed-shape result that has no row list to window at all.
+HONORED by: --deps --callers --callees --tree --lint --hotspots --clones --cochange --owners --communities --community --doc-drift --whereis --grep/--regex --match --pattern --impact --uses --exercises --seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate --readability --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence --naming-consistency --safe-delete. Emit at most N rows, skipping the first M; N overrides the verb's own display cap (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40 impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio symbol rows, 40 nonlocal-state rows, 200 graph-query rows / --top-k). With --offset alone (no --limit) the verb's own default page size applies and the root discloses limit="0" — on OUTPUT that 0 means 'no explicit --limit', never a zero-row page (the flag itself refuses --limit=0). A BARE run whose default cap cut rows (capped="1") carries the same limit="0" and the whole paging block below, so you can page from the first answer without guessing. Deterministic seams (rows are already sorted) so --offset=N is the exact continuation of the previous --limit=N page. The root element then carries shown= capped= total= has_more= next_offset= offset= limit= — loop until has_more="0". capped= compares the PAGE to the total (1 ⇔ shown < total), so a page past the end reads shown="0" capped="1" has_more="0": nothing was cut, the offset skipped everything — EXCEPT the verbs with TWO INDEPENDENT listings, which carry the noun-prefixed form instead (one shown= could only describe one): --test-gate shown_tests=/tests_capped= + shown_untested=/untested_capped=, --communities shown_modules=/modules_capped= + shown_bridges=/bridges_capped=, --ensemble and --context-ratio shown_syms=/syms_capped= + shown_files=/files_capped=; the window takes the PRIMARY listing (--test-gate's <u> rows; its <t> rows repeat on every page, complete). Any verb NOT in that list REFUSES both flags (exit 1) rather than accepting and ignoring them: budget/top-k verbs (--for/--recall/--pack-task/--from-trace/ --expand/--outline/--pack-signatures/--format=candidates) are shaped by --top-k/--max-tokens/--token-budget, not a page; the rest (--path/--connect/ --around/--exemplar/--report/--mermaid/--map-diff/--metrics and the default map) answer with a single fixed-shape result that has no row list to window at all.
 
 **Try it**
 
@@ -4179,7 +4216,7 @@ $ ./build/ripwire . --ensemble --limit=8
 
 - Emit at most N rows, skipping the first M;
 - With --offset alone (no --limit) the verb's own default page size applies and the root discloses limit="0" — on OUTPUT that 0 means 'no explicit --limit', never a zero-row page (the flag itself refuses --limit=0).
-- Deterministic seams (rows are already sorted) so --offset=N is the exact continuation of the previous --limit=N page.
+- A BARE run whose default cap cut rows (capped="1") carries the same limit="0" and the whole paging block below, so you can page from the first answer without guessing.
 
 ### `--exclude=SUBSTR`
 
@@ -4473,7 +4510,7 @@ $ ./build/ripwire '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jso
 ... [30 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--no-stable`, `--agent`, `--listen`
+**Shaped by:** `--no-stable`, `--no-redact`, `--agent`, `--listen`
 
 ### `--listen=HOST:PORT`
 
@@ -4481,7 +4518,7 @@ $ ./build/ripwire '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jso
 
 Binds 127.0.0.1 by default (bare PORT = loopback); one listener serves ONE workspace fixed at startup. A non-loopback host (e.g. 0.0.0.0:8080) REQUIRES --mcp-token and refuses to start without it. No TLS — reverse-proxy it.
 
-**Shaped by:** `--allow-remote-edits`
+**Shaped by:** `--no-stable`, `--allow-remote-edits`
 
 **Caveats (stated by the binary):**
 
