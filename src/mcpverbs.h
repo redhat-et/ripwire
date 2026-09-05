@@ -653,7 +653,8 @@ inline std::string grepUnindexedKeys( const GrepAuxCollection& aux )
 // R-H span tiers: the CLI grepTierAttrs() twin (main.cpp), same conditions and same key names so the two
 // surfaces cannot report the same run differently (mcpclidiffcheck's LENS2 fact parity). Lifted out for the
 // same reason grepUnindexedKeys above was: a payload key fragment is a helper's job, not the verb body's.
-inline std::string grepTierKeys( const GrepTierReport& tier )
+// `floorAlreadyEmitted` (N2): the CLI grepTierAttrs twin — tier_budget floors the root unless hits_capped already did.
+inline std::string grepTierKeys( const GrepTierReport& tier, bool floorAlreadyEmitted )
 {
     if( !tier.hasDisclosure() )
     {
@@ -686,7 +687,7 @@ inline std::string grepTierKeys( const GrepTierReport& tier )
     }
     if( tier.budgetHit != nullptr )
     {
-        keys += std::string( ",\"tier_budget\":\"" ) + tier.budgetHit + "\"";
+        keys += std::string( ",\"tier_budget\":\"" ) + tier.budgetHit + "\"" + ( floorAlreadyEmitted ? "" : rw::kGraphCountFloorAttrJson );   // N2: the CLI twin's floor
     }
     return keys;
 }
@@ -826,7 +827,9 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     const bool nothingHeldBack = tierReport.suppressedComment == 0 && tierReport.suppressedString == 0;
 
     // R-H: the CLI tierAttr twin (helper above) — empty when nothing was held back.
-    const std::string tierKeys = grepTierKeys( tierReport );
+    // N2: hits_capped puts the floor on this root through the disclosure (L4's found-not-fixed MCP twin, closed here);
+    // tier_budget adds it when the disclosure did not — never both.
+    const std::string tierKeys = grepTierKeys( tierReport, /*floorAlreadyEmitted=*/collected.isBudgetReached );
 
     // G1 (2026-08-15 harvest, report-memgraph §F6): `file` is root-relative when this is a single-root
     // index (ing.realPaths empty — the same condition the CLI emitter gates on), reusing sarif.h's strip
@@ -846,7 +849,8 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
                     + ",\"files\":" + std::to_string( filesMatched )
                     + ( isPaging ? std::string{} : ( ",\"total\":" + std::to_string( collected.raw.size() ) ) )
                     + pageDisclosure( pagebuf, sizeof( pagebuf ), rowCount, collected.raw.size(), grepPage.end,
-                                      page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax )
+                                      page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax,
+                                      /*collectionCapped=*/collected.isBudgetReached )   // H8/N2: the cap hits_capped names floors this root (CLI parity)
                     + ",\"hits_capped\":" + ( collected.isBudgetReached ? "true" : "false" )
                     + ( scanExhaustive && windowWhole && nothingHeldBack ? ",\"complete\":true" : "" )
                     + tierKeys
