@@ -131,7 +131,7 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 #     tool descriptions would have cost ~680 B against 159 B of headroom and would have been prose, which the
 #     rule above forbids raising for. The owner may overrule toward ~33,650 (drop every property description,
 #     lose the refusals) or ~25,000 (that, plus 45% of the routing text, with the routing score as the
-#     receipt). Recorded in PLAN_TERMINALITY_2026-09-05.md §3a.
+#     receipt). Also recorded for the owner in the round's local plan notes, which are never tracked here.
 #
 CEILING = 41000
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
