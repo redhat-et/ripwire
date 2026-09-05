@@ -46,6 +46,10 @@
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
 #include "editplan.h"              // CLI-first versioned multi-edit transactions
 #include "wrap.h"
+
+// P8 (L7): the test-gate root's ccx_bar= (situ.h kTestGateCcxBarMirror) is quality.h's kCcxBar — one bar, two spellings,
+// pinned equal in the one TU that sees both (quality.h is also compiled standalone by the bench/probe targets).
+static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestGateCcxBarMirror must equal quality.h kCcxBar" );
 #include "infra/profileScope.h"    // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "arch.h"
 #include "search.h"

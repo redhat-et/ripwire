@@ -799,6 +799,7 @@ inline constexpr const char* kTestGateLegend =
     // locally honest and the three numbers are not comparable, which is exactly how a reader gets it wrong.
     // P3 (L7): next= defined where the reader meets it
     "next= is the one pasteable follow-up: the first <t> row's run= (a shell line), else a ripwire invocation. "
+    "ccx_bar= is the cognitive-complexity bar a <u> row's ccx= is read against (quality-delta's own). "
     "UNIT: untested= here counts impacted SYMBOLS. The seams verb spells untested= over cross-directory "
     "call EDGES and the flip verb over the defs a gate lights — three different things, never compared or "
     "summed across verbs. ";
@@ -837,6 +838,10 @@ inline const std::string kTestGateRunLegend{ rw::kRunHintLegendClause };
 // P3 (L7, nextverb.h): the test-gate root's one follow-up — the FIRST runnable test's command (the row's run=),
 // else the first registered shell gate's, else (an untested blast radius and no runner) the callers of its
 // worst untested symbol, else --situ. A shell line is what the gate exits 4 for; the agent pastes it.
+// P8 (L7): the cognitive-complexity bar the <u> rows' ccx= is read against — a MIRROR of quality.h's kCcxBar
+// (quality.h is included after this header; the static_assert beside kCcxBar keeps the two in step).
+inline constexpr std::uint32_t kTestGateCcxBarMirror = 15;
+
 inline std::string testGateNextInvocation( const IngestResult& ing, const TestGateResult& r, const TestRunnerIndex& runners )
 {
     for( const std::uint32_t f : r.tests )
@@ -892,11 +897,11 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     std::fprintf( out, "<test-gate changed=\"%u\" impacted=\"%zu\" tests=\"%zu\" untested=\"%zu\""
                        " shown_tests=\"%zu\" tests_capped=\"0\" shown_untested=\"%zu\" untested_capped=\"%d\""
                        " script_gates_unmodelled=\"%zu\" script_gates_registered=\"%zu\" script_gates_mapped=\"%zu\""
-                       " script_gates_unresolved_dynamic=\"%zu\"%s%s%s%s%s>",
+                       " script_gates_unresolved_dynamic=\"%zu\" ccx_bar=\"%u\"%s%s%s%s%s>",
                   r.changedFiles, r.impactedSymbols, testRows, r.untested.size(),
                   testRows, shownRows, shownRows < r.untested.size() ? 1 : 0,
                   scriptGatesUnmodelledCount( ing ),
-                  r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic,
+                  r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic, kTestGateCcxBarMirror,   // P8 (L7): ccx_bar=
                   graphCountFloorAttrXml( g ).c_str(),   // M15: gauge + counts_floor="1", the one splice every graph-floored root shares
                   pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
                   gitstamp::atAttr( root ).c_str(), tgRootAttr.c_str(),
@@ -961,10 +966,10 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     std::fprintf( out, "{\"changed\":%u,\"impacted\":%zu,\"tests\":%zu,\"untested\":%zu"
                        ",\"shown_tests\":%zu,\"tests_capped\":false,\"shown_untested\":%zu,\"untested_capped\":%s"
                        ",\"script_gates_unmodelled\":%zu,\"script_gates_registered\":%zu,\"script_gates_mapped\":%zu"
-                       ",\"script_gates_unresolved_dynamic\":%zu%s%s,\"at\":%s%s%s,\"tests_to_run\":[",
+                       ",\"script_gates_unresolved_dynamic\":%zu,\"ccx_bar\":%u%s%s,\"at\":%s%s%s,\"tests_to_run\":[",
                  r.changedFiles, r.impactedSymbols, testRows, r.untested.size(),
                  testRows, shownRows, shownRows < r.untested.size() ? "true" : "false",
-                 scriptGatesUnmodelledCount( ing ), r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic,
+                 scriptGatesUnmodelledCount( ing ), r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic, kTestGateCcxBarMirror,
                  graphCountFloorAttrJson( g ).c_str(),   // M15: the JSON twin's gauge + "counts_floor":true
                  pageJson, atJson.c_str(), tgJRootJson.c_str(),   // M12: root= rides only when the document has rows (same gate as the XML twin)
                  nextFieldJson( testGateNextInvocation( ing, r, gateRunnersJ ) ).c_str() );   // P3 (L7): the XML twin's next=

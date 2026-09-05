@@ -71,7 +71,10 @@ EOF
 #           where the reader meets it (legendcoveragecheck). Written long, measured, cut to the shortest honest
 #           form (nextverb.h owns the shared half; this is the verb's own reading).
 # Measured on this fixture: 2002 -> 2108 B. 2170 leaves ~62 B — the same posture as the 2050 pin.
-if [ "$legend" -le 2170 ]; then
+# RE-PINNED 2170 -> 2260 (2026-09-05, lane L7 P8): ONE more FACT on every test-gate root, ccx_bar= (the cognitive-
+# complexity bar a <u> row's ccx= is read against — quality-delta's own, mirrored from quality.h), defined where the
+# reader meets it: +97 B. Measured 2108 -> 2205 B; 2260 leaves ~55 B, the same posture again.
+if [ "$legend" -le 2260 ]; then
     ok "(a) --test-gate legend is $legend B (<= 2050 B budget; total=$total payload=$payload)"
 else
     no "(a) --test-gate legend is $legend B (> 2050 B budget) — the essay re-inflated"
