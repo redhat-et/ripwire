@@ -47,6 +47,18 @@ echo "substrfiltercheck: BIN=$BIN  CORPUS=$ROOT"
 
 MISS="zzzznosuchfilterxyz"
 
+# R3 (verify-wave1): the --stray-content probes run against a THROWAWAY repo with a known `lane/probe` ref
+# (test/strayfixture.sh), never against this checkout — `lives --stray-content lane` on the operator's own
+# branches was green only where a lane/* head happened to exist. refuses_empty/lives take the corpus from
+# $CORPUS, which defaults to this repo and is pointed at the fixture for that one flag.
+. "$ROOT/test/strayfixture.sh"
+SFIX="$( mktemp -d )"; trap 'rm -rf "$SFIX"' EXIT
+mkStrayFixture "$SFIX"
+strayFixtureHasRef "$SFIX" \
+    && ok "fixture: throwaway repo carries a lane/* ref for --stray-content=lane to select" \
+    || { no "fixture: no lane/* ref in the throwaway repo — the --stray-content arms below would prove nothing"; echo "FAILURES ABOVE"; exit 1; }
+CORPUS="$ROOT"
+
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 echo
 echo "=== A/B: a scoping filter that owns nothing REFUSES, naming the flag and the value ==="
@@ -54,7 +66,7 @@ echo "=== A/B: a scoping filter that owns nothing REFUSES, naming the flag and t
 refuses_empty(){ # $1 = flag, $2 = value, $3.. = the host verb, when the filter is a modifier rather than a verb
     local flag="$1" val="$2"; shift 2
     local out rc
-    out="$( "$BIN" "$ROOT" "$flag=$val" "$@" --no-cache 2>&1 1>/dev/null )"; rc=$?
+    out="$( "$BIN" "$CORPUS" "$flag=$val" "$@" --no-cache 2>&1 1>/dev/null )"; rc=$?
     if [ "$rc" -ne 0 ]; then
         ok "A $flag=$val → exit $rc"
     else
@@ -75,7 +87,7 @@ refuses_empty --dead-code     "$MISS"
 refuses_empty --doc-drift     "$MISS"
 refuses_empty --scope         "$MISS/**" --quality-delta   # a MODIFIER, so it is probed on its host verb
 refuses_empty --flags         "$MISS"
-refuses_empty --stray-content "$MISS"
+CORPUS="$SFIX" refuses_empty --stray-content "$MISS"
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 echo
@@ -84,7 +96,7 @@ echo "=== the negative: a filter that DOES own something still answers ==="
 lives(){ # $1 = flag, $2 = value, $3.. = host verb / expected-exit override
     local flag="$1" val="$2"; shift 2
     local rc
-    "$BIN" "$ROOT" "$flag=$val" "$@" --no-cache >/dev/null 2>&1; rc=$?
+    "$BIN" "$CORPUS" "$flag=$val" "$@" --no-cache >/dev/null 2>&1; rc=$?
     # --quality-delta's own exit code is its gate (2 = gating findings), so only the REFUSAL code is a failure
     if [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
         ok "$flag=$val → exit $rc (a real selection still answers)"
@@ -96,7 +108,7 @@ lives --dead-code     src
 lives --doc-drift     README
 lives --scope         'src/**' --quality-delta
 lives --flags         RIPWIRE
-lives --stray-content lane
+CORPUS="$SFIX" lives --stray-content lane
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 echo
