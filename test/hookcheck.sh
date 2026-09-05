@@ -1717,10 +1717,22 @@ printf '{"hooks":{"PreToolUse":[{"matcher":"Read|Glob|Grep|Bash|mcp__ripwire__",
 STALEOUT="$( HOME="$STALE_HOME" bash "$INSTALL" --hook 2>&1 )"; STALERC=$?
 STALEMATCH="$( jq -r '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher' "$STALE_HOME/.claude/settings.json" 2>/dev/null | head -n1 )"
 echo "-- --hook over a stale matcher: [$STALEMATCH] --"; echo "$STALEOUT" | head -n 3
-[ "$STALERC" -eq 0 ] && [ "$STALEMATCH" = "$INSTMATCH" ] \
-    && matcher_fires "$STALEMATCH" mcp__ripwire__whereis | grep -qx "mcp__ripwire__whereis fires" \
-    && ok "V3 refresh: re-running --hook rewrites the 2026-09-04 exact-list matcher to the current one (an operator who re-runs --hook is repaired)" \
-    || no "V3 refresh: exit=$STALERC matcher after re-run=[$STALEMATCH] expected [$INSTMATCH]"
+# I2 (V1, wave-1 verifier 2026-09-05): three &&-chained conditions used to share ONE failure message
+# that reported only the first two, so the third failing printed two IDENTICAL matcher strings beside a
+# FAIL and named no reason:
+#     FAIL  V3 refresh: exit=0 matcher after re-run=[Read|Glob|Grep|Bash|mcp__ripwire__] expected [Read|Glob|Grep|Bash|mcp__ripwire__]
+# Each condition now names itself and prints what it found against what it expected -- the same class F2
+# just fixed for pargates, applied inside the arm.
+V3FIRES="$( matcher_fires "$STALEMATCH" mcp__ripwire__whereis )"
+if [ "$STALERC" -ne 0 ]; then
+    no "V3 refresh: install.sh --hook exited $STALERC (expected 0) over a stale matcher — last line: $( printf '%s' "$STALEOUT" | tail -n 1 )"
+elif [ "$STALEMATCH" != "$INSTMATCH" ]; then
+    no "V3 refresh: --hook did NOT rewrite the stale entry — matcher after re-run=[$STALEMATCH], expected [$INSTMATCH]"
+elif [ "$V3FIRES" != "mcp__ripwire__whereis fires" ]; then
+    no "V3 refresh: the matcher was rewritten to [$STALEMATCH] but it does not MATCH a real MCP tool name — matcher_fires said [$V3FIRES], expected [mcp__ripwire__whereis fires] (a matcher made only of [A-Za-z0-9_ ,|-] is an exact-name list, so a bare prefix matches nothing)"
+else
+    ok "V3 refresh: re-running --hook rewrites the 2026-09-04 exact-list matcher to the current one (an operator who re-runs --hook is repaired)"
+fi
 STALECOUNT="$( jq '[(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge"))] | length' "$STALE_HOME/.claude/settings.json" 2>/dev/null )"
 [ "$STALECOUNT" = "1" ] \
     && ok "V3b refresh: the refresh edits the entry in place (still exactly one PreToolUse entry)" \
