@@ -159,9 +159,20 @@ def ripwire_verb(row):
 
 
 def row_agent(row):
-    """The runner that produced the row. v3 hook rows carry `agent`; every older row was written by the
-    Claude Code hook (no other runner ever had one), so absent reads as claude — a fact, not a guess."""
-    return str(row.get("agent") or "claude")
+    """The runner that produced the row.
+
+    An ABSENT `agent` key is a v2 row, and every row before 2026-09-05 was written by the Claude Code
+    hook (no other runner had one), so absent reads as claude — a fact, not a guess.
+
+    An EMPTY (or null) `agent` on a v3 row is a different thing: a writer that HAD the field and failed
+    to identify itself. Folding that into claude would file another runner's rows under Claude Code with
+    no trace, which is exactly the silent merge this report exists not to do (V1 I3, wave-1 verifier).
+    It gets its own bucket. Inert against the two hooks, which coerce the empty away
+    (`${RIPWIRE_METER_AGENT:-claude}` / `:-codex}`); live the moment anything else writes rows directly."""
+    if "agent" not in row:
+        return "claude"                       # v2: the only writer that existed
+    agent = str(row.get("agent") or "").strip()
+    return agent if agent else "(unknown)"
 
 
 def row_surface(row):
@@ -313,8 +324,14 @@ def edit_row(verb, st):
     decidable = n - unattrib
     pct = "%.1f%%" % (100.0 * term / decidable) if decidable else "n/a"
     print("    %-24s %6d %10s %12d %6d %16d %9d" % (verb, n, pct, policy, sweep, redundant, unattrib))
-    if 0 < decidable < SMALL_N:
-        print("      NOTE: n=%d (<%d) -- too few calls to read as a rate" % (decidable, SMALL_N))
+    # V1 I4 (wave-1 verifier): the note used to print `n=` with the DECIDABLE count while the column
+    # headed `n` on the line above showed the call count — one letter for two quantities on adjacent
+    # lines. It now prints the same n the row prints, and names the decidable subset separately. The
+    # trigger is either being under the bar: the rate is computed on `decidable`, so a small decidable
+    # subset of a large n is still too few calls to read as a rate.
+    if 0 < n < SMALL_N or 0 < decidable < SMALL_N:
+        print("      NOTE: n=%d (%d decidable, unattrib %d) is under the %d-call bar -- too few calls to read as a rate"
+              % (n, decidable, unattrib, SMALL_N))
 
 
 def session_order(rows):
@@ -581,7 +598,9 @@ def edit_section(rows):
     print("  TERMINAL = neither (b) nor (c).")
     print("  unattrib : the edit recorded no target file and a read/grep (or native edit) followed -- (a) and")
     print("             (b) cannot be told apart, so the row is EXCLUDED from terminal%, never folded either way")
-    print("  printed per agent (`agent`; rows without one are claude) and per surface (cli / mcp)")
+    print("  printed per agent (`agent`; a v2 row without the field is claude, the only writer that existed;")
+    print("             a v3 row whose field is EMPTY is (unknown) -- a writer that did not identify itself, never")
+    print("             folded into claude) and per surface (cli / mcp)")
     estats, eempty = edit_terminality(rows)
     if not estats:
         print("")

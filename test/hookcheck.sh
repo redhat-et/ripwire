@@ -1523,7 +1523,7 @@ if git -C "$WTMAIN" worktree add -q -b wtbranch "$WTLINK" >/dev/null 2>&1; then
     # falsify the path, which is the field that says where the row came from.
     GOTREPO="$( meterrowget "$LW1" 1 repo )"
     case "$GOTREPO" in
-        *vibrant-euler-dd516f) ok "TAG1b tag: `repo` still names the worktree the call happened in" ;;
+        *vibrant-euler-dd516f) ok "TAG1b tag: repo= still names the worktree the call happened in" ;;
         *) no "TAG1b tag: repo=[$GOTREPO] — folding the tag must not falsify the path" ;;
     esac
 else
@@ -1717,10 +1717,22 @@ printf '{"hooks":{"PreToolUse":[{"matcher":"Read|Glob|Grep|Bash|mcp__ripwire__",
 STALEOUT="$( HOME="$STALE_HOME" bash "$INSTALL" --hook 2>&1 )"; STALERC=$?
 STALEMATCH="$( jq -r '(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge")) | .matcher' "$STALE_HOME/.claude/settings.json" 2>/dev/null | head -n1 )"
 echo "-- --hook over a stale matcher: [$STALEMATCH] --"; echo "$STALEOUT" | head -n 3
-[ "$STALERC" -eq 0 ] && [ "$STALEMATCH" = "$INSTMATCH" ] \
-    && matcher_fires "$STALEMATCH" mcp__ripwire__whereis | grep -qx "mcp__ripwire__whereis fires" \
-    && ok "V3 refresh: re-running --hook rewrites the 2026-09-04 exact-list matcher to the current one (an operator who re-runs --hook is repaired)" \
-    || no "V3 refresh: exit=$STALERC matcher after re-run=[$STALEMATCH] expected [$INSTMATCH]"
+# I2 (V1, wave-1 verifier 2026-09-05): three &&-chained conditions used to share ONE failure message
+# that reported only the first two, so the third failing printed two IDENTICAL matcher strings beside a
+# FAIL and named no reason:
+#     FAIL  V3 refresh: exit=0 matcher after re-run=[Read|Glob|Grep|Bash|mcp__ripwire__] expected [Read|Glob|Grep|Bash|mcp__ripwire__]
+# Each condition now names itself and prints what it found against what it expected -- the same class F2
+# just fixed for pargates, applied inside the arm.
+V3FIRES="$( matcher_fires "$STALEMATCH" mcp__ripwire__whereis )"
+if [ "$STALERC" -ne 0 ]; then
+    no "V3 refresh: install.sh --hook exited $STALERC (expected 0) over a stale matcher — last line: $( printf '%s' "$STALEOUT" | tail -n 1 )"
+elif [ "$STALEMATCH" != "$INSTMATCH" ]; then
+    no "V3 refresh: --hook did NOT rewrite the stale entry — matcher after re-run=[$STALEMATCH], expected [$INSTMATCH]"
+elif [ "$V3FIRES" != "mcp__ripwire__whereis fires" ]; then
+    no "V3 refresh: the matcher was rewritten to [$STALEMATCH] but it does not MATCH a real MCP tool name — matcher_fires said [$V3FIRES], expected [mcp__ripwire__whereis fires] (a matcher made only of [A-Za-z0-9_ ,|-] is an exact-name list, so a bare prefix matches nothing)"
+else
+    ok "V3 refresh: re-running --hook rewrites the 2026-09-04 exact-list matcher to the current one (an operator who re-runs --hook is repaired)"
+fi
 STALECOUNT="$( jq '[(.hooks.PreToolUse // [])[] | select(.hooks[]?.command | test("ripwire-nudge"))] | length' "$STALE_HOME/.claude/settings.json" 2>/dev/null )"
 [ "$STALECOUNT" = "1" ] \
     && ok "V3b refresh: the refresh edits the entry in place (still exactly one PreToolUse entry)" \
@@ -1774,6 +1786,14 @@ echo "-- edit-target rows --"; [ -f "$LV5" ] && cat "$LV5"
 #   e-j  MCP insert-before, Grep tool (pattern names no file)  -> sweep
 #   e-k  codex CLI replace, build                              -> TERMINAL
 #   e-l  codex CLI replace, Read of another file               -> sweep
+#   e-m  agent="" CLI replace (target src/m.cpp), build        -> TERMINAL, in its OWN (unknown) bucket
+#   e-n  agent="" CLI replace (no target), Read of some file   -> unattrib, same bucket
+# e-m/e-n are V1 I3+I4: a v3 row that CARRIES `agent` and leaves it EMPTY is a writer that failed to
+# identify itself, and folding it into claude files another runner's rows under Claude Code with no
+# trace (bench/substitution_report.py's row_agent used `row.get("agent") or "claude"`, which cannot
+# tell an ABSENT v2 field from an EMPTY v3 one). Together they also make one bucket where n=2 and
+# decidable=1, which is the I4 case: the small-n NOTE and the column headed `n` must not print two
+# different quantities under the same letter.
 EDITLOG="$TMP/editband.jsonl"
 # v3 rows through the same writer as the FIND fixture (termrow's nine-argument form), into their own log.
 editrow() { TERMLOG="$EDITLOG" termrow "$@"; }
@@ -1808,6 +1828,12 @@ ecli   1 e-k 'ripwire . --replace-symbol-body=foo --edit-target-file=src/a.cpp -
 ebuild 2 e-k codex
 ecli   1 e-l 'ripwire . --replace-symbol-body=bar --edit-target-file=src/b.cpp --edit-payload=-' codex src/b.cpp
 eread  2 e-l '/x/repo/src/other.cpp' codex
+# agent="" — passed through termrow's nine-argument form, which writes the field EMPTY rather than
+# omitting it (ecli/eread/ebuild all default an empty argument back to claude, which is the fold itself)
+editrow 1 e-m Bash ripwire-cli ripwire './build/ripwire . --replace-symbol-body=zed --edit-target-file=src/m.cpp --edit-payload=-' '' cli src/m.cpp
+editrow 2 e-m Bash build other 'cmake --build build -j' '' cli ''
+editrow 1 e-n Bash ripwire-cli ripwire './build/ripwire . --replace-symbol-body=zee --edit-payload=-' '' cli ''
+editrow 2 e-n Read read native '/x/repo/src/q.cpp' '' native ''
 
 if [ -f "$REPORT" ]; then
     python3 "$REPORT" "$EDITLOG" >"$TMP/edit.out" 2>&1; RCE=$?
@@ -1847,6 +1873,23 @@ if [ -f "$REPORT" ]; then
     edithas E7b "mcp:insert_before_symbol 1 0.0% 0 1 0 0" "a Grep-tool call (pattern only, names no file) is a sweep"
     # codex/cli: n=2 -> e-k terminal, e-l sweep.
     edithas E8 "--replace-symbol-body 2 50.0% 0 1 0 0" "codex/cli --replace-symbol-body: 2 calls, 1 terminal, 1 sweep"
+    # E10 (V1 I3): an EMPTY agent on a v3 row is its OWN bucket, never folded into claude. Two proofs,
+    # because either alone can pass for the wrong reason: the (unknown) block exists, AND claude/cli's
+    # --replace-symbol-body is still n=4 (a fold would have made it 6).
+    if grep -q 'agent=(unknown) surface=cli' "$TMP/edit.out"; then
+        edithas E10 "--replace-symbol-body 2 100.0% 0 0 0 1" \
+            "an EMPTY agent= on a v3 row gets its own (unknown) bucket (n=2: e-m terminal, e-n unattrib)"
+    else
+        no "E10 edit-band: no 'agent=(unknown) surface=cli' block — a v3 row with agent=\"\" was folded into another runner's bucket; see $TMP/edit.out"
+    fi
+    grep -Fqx " --replace-symbol-body 4 50.0% 1 1 1 0" "$TMP/edit.sq" \
+        && ok "E10b edit-band: claude/cli --replace-symbol-body is still n=4 — the two agent=\"\" rows did NOT fold into claude" \
+        || no "E10b edit-band: claude/cli --replace-symbol-body moved — the empty-agent rows were folded in; see $TMP/edit.out"
+    # E11 (V1 I4): the small-n NOTE prints the SAME n the row above it prints, and names the decidable
+    # subset separately. The (unknown) block is the case that separates them: n=2, decidable=1.
+    grep -Fq 'NOTE: n=2 (1 decidable, unattrib 1) is under the 10-call bar' "$TMP/edit.out" \
+        && ok "E11 edit-band: the small-n NOTE reports n=2 — the same n its own row prints — and names the 1 decidable call separately" \
+        || no "E11 edit-band: the NOTE and the n column still disagree — $( grep -m1 'NOTE: n=' "$TMP/edit.out" )"
     # E9: THE MUTATION CONTROL. Move e-a's policy Read to another file: the row it feeds must change
     # (policy-read 1->0, sweep 1->2, terminal 50.0%->25.0%). A column that never moves is not a column.
     sed '/"session":"e-a".*"tool":"Read"/ s#"detail":"/x/repo/src/a.cpp"#"detail":"/x/repo/src/zzz.cpp"#' "$EDITLOG" >"$TMP/editmut.jsonl"

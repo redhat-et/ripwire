@@ -681,14 +681,16 @@ echo "=== (10) PROPERTY — every emitter of a CSR-derived root in src/ splices 
 python3 - "$ROOT/src" <<'PY10'
 import os, re, sys
 src = sys.argv[1]
-# ROOT openers only: `<impact of=` (not pr-context's nested per-file <impact dependents=>), `<pr-context%s` (not
-# the not-a-git-repo `<pr-context base= files="0"/>` stub), and `<community id=` with partition= (the drill root,
+# ROOT openers only: `<impact of=` (not pr-context's nested per-file <impact dependents=>), `"<pr-context" +` (not
+# the not-a-git-repo `<pr-context base= files="0"/>` stub; re-pinned 2026-09-05 from the pre-V1 `"<pr-context%s`
+# fprintf spelling, which became a string concatenation when prRootOpenText started RETURNING the root's bytes so
+# est_tokens could price them), and `<community id=` with partition= (the drill root,
 # not the member row the communities listing prints under the same tag).
 # `<uses` (fielduses.h / columnar.h) and `<edit-check` (editcheck.h) are 40-line `out +=` builders whose marker
 # lands far past any statement window; arm (1) pins them LIVE, so they are deliberately not re-derived here.
 PATTERNS = [ r'"<path ', r'"<connect ', r'"<affected ', r'"<exercises ', r'"<seams ', r'"<dead-code ', r'"<communities ',
              r'"<community id=', r'"<zoom ', r'"<lego', r'\\"dependent_symbols\\"', r'blast radius: %zu symbols',
-             r'"<impact of=', r'"<query ', r'"<pr-context%s', r'"<safe-delete ', r'"<test-gate' ]
+             r'"<impact of=', r'"<query ', r'"<pr-context" \+', r'"<safe-delete ', r'"<test-gate' ]
 fail, found = 0, { p: 0 for p in PATTERNS }
 for fn in sorted( os.listdir( src ) ):
     if not ( fn.endswith( ".h" ) or fn.endswith( ".cpp" ) ): continue

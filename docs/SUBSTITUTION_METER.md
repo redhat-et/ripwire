@@ -156,6 +156,10 @@ holds classes of call a v2 log dropped, and the substitution numerator gains its
 across the boundary only within one family and one surface, and read the `SCHEMA MIX` line the report
 prints. Older rows without the three fields read as `agent=claude` (no other runner ever had a hook),
 `surface` derived from the tool name, `target` re-read from a CLI row's own `--edit-target-file=`.
+A v3 row that CARRIES `agent` but leaves it **empty** is not the same case and is not folded into
+`claude`: it is a writer that had the field and did not identify itself, so it is reported under its own
+`agent=(unknown)` block. Both hooks coerce the empty away (`${RIPWIRE_METER_AGENT:-claude}` and
+`:-codex}`), so this is a contract for anything else that writes rows directly.
 
 **v1 → v2 (2026-08-12).** Added `post_sweep`, added the `sweep<N>` value of `nudge`, and widened the
 classifier (below). The widening means **row counts are not comparable across the boundary** — a v2

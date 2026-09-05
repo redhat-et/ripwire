@@ -146,7 +146,7 @@ fi
 #   <pr-context base="working-tree" … files="0" skipped_mode_only="0" at=… >
 # with NO budget_tokens=, est_tokens=, trim_level=, truncated= or budget_default= — the ledger every other
 # root carries, missing in the one case a caller cannot otherwise tell apart from a crash. "Three call sites
-# which must not drift on which disclosures they carry" is writePrRootOpen's own header sentence; this arm is
+# which must not drift on which disclosures they carry" is prRootOpenText's own header sentence; this arm is
 # that sentence made mechanical. Derived, not hardcoded: the required set is the NON-EMPTY working-tree root's
 # own attribute names, minus a DECLARED exemption list of the ones that exist only when there is a cut.
 printf 'int probeEmptyRoot() { return 1; }\n' >> "$ROOT/src/mod4.cpp"
@@ -183,6 +183,56 @@ else
     if command -v xmllint >/dev/null 2>&1; then
         xmllint --noout "$TMP/wt_clean" 2>/dev/null && ok "(F4) empty-diff --pr-context well-formed XML" || no "(F4) empty-diff --pr-context malformed XML"
     fi
+fi
+
+# ── #9 (V1 / wave-1 verifier R2+N4, 2026-09-05): est_tokens PRICES THE DOCUMENT --pr-context EMITS ──────
+# F4 gave the empty-diff root the budget ledger, but the number in it was MODELLED, not priced: est_tokens
+# came from ceil( (BODY bytes + a fixed 560-byte kPrHeaderOverheadBytes) / 2.36 ), and the ~4.7 KB legend
+# that IS the document on a clean tree was outside both terms. Measured on ripwire's own tree at 044d4d0d:
+#     empty-diff root      est_tokens=  278   emitted 4,808 B   = 17.3 B/tok   (7.3x UNDER)
+#     budgeted root        est_tokens=5,969   emitted 18,271 B  =  3.1 B/tok   (1.30x under, N4)
+# against --for, whose est_tokens x 2.50 recounts its delivered bytes exactly. A number that reads as the
+# document's price and is 7x under it is exactly what non-negotiable #3 forbids, and it is read against
+# budget_tokens="8000" by every caller that budgets the call.
+#
+# The property, family-wide over every --pr-context root that carries the attribute: est_tokens is the
+# EMITTED byte count converted at the tool's ONE markup rate, kBytesPerTokenDefault = 2.50 B/tok
+# (serialize.h tokensForEmittedBytes — the same conversion pricedRootAttr applies for --for, --pack-task,
+# --handoff and MCP for). Asserted as a RECOUNT of the bytes on disk, not as a pinned number, so a later
+# emitter that appends unpriced bytes reds this arm. Tolerance is 1 token: the conversion rounds to
+# nearest, and the shell recount below rounds the same way, so anything larger is a real divergence.
+RATE_LABEL='2.50 B/tok (kBytesPerTokenDefault)'
+priced(){   # $1 label, $2 file
+    local label="$1" f="$2" B E EXP D
+    B=$( wc -c < "$f" | tr -d ' ' )
+    E=$( attr "$f" est_tokens )
+    if [ -z "$E" ] || [ "$B" = 0 ]; then
+        no "(#9) $label: root carries no est_tokens= (or emitted nothing) — cannot recount its price"
+        return
+    fi
+    EXP=$(( ( 4 * B + 5 ) / 10 ))            # round( B / 2.50 ), integer-only
+    D=$(( E > EXP ? E - EXP : EXP - E ))
+    if [ "$D" -le 1 ]; then
+        ok "(#9) $label: est_tokens=$E prices the $B B it emitted at $RATE_LABEL (recount $EXP, delta $D)"
+    else
+        no "(#9) $label: est_tokens=$E but the document is $B B = $EXP tokens at $RATE_LABEL — off by $D (implied $(( B * 100 / E / 100 )).$(( B * 100 / E % 100 )) B/tok)"
+    fi
+}
+priced "empty-diff root (clean tree)"          "$TMP/wt_clean"
+priced "working-tree root (one changed file)"  "$TMP/wt_dirty"
+priced "default-budget root (8000)"            "$TMP/unc"
+priced "large-budget root (100000)"            "$TMP/big"
+for T in 20000 8000 4000 2000; do
+    priced "budgeted root (--max-tokens=$T)"   "$TMP/c_$T"
+done
+
+# and the legend must DEFINE the attribute the way the recount reads it — a definition that is true of the
+# budgeted root and false of the empty one is the drift prRootOpenText exists to prevent (§B7 class).
+if grep -q 'est_tokens= prices the WHOLE document this bundle emits' "$TMP/wt_clean" \
+   && grep -q 'est_tokens= prices the WHOLE document this bundle emits' "$TMP/unc"; then
+    ok "(#9) both roots' legends define est_tokens as the price of the emitted document"
+else
+    no "(#9) the legend does not define est_tokens as the price of the whole emitted document — the number and its definition disagree"
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

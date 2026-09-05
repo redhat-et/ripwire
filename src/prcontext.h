@@ -464,9 +464,9 @@ inline constexpr PrTrim kPrTrims[] = {
     {  0,  0,  0, false,  0, 0, "all-nested-lists-dropped(structural-counts-only)" },             // L4 = floor (counts survive for every file)
 };
 
-// Rough header/comment/wrapper overhead (bytes) folded into the est_tokens estimate so the budget decision
-// accounts for the non-per-file envelope, not just the <file> body.
-inline constexpr std::size_t kPrHeaderOverheadBytes = 560;
+// The document's closing tag — named because est_tokens prices every byte this emitter writes, this one
+// included, and because all four root forms end with it.
+inline constexpr std::string_view kPrCloseTag = "</pr-context>";
 
 // The <pr-context> header's anchoring attributes (r26), or "" for the working-tree default — which has no
 // anchoring question at all and therefore renders a byte-identical header to the pre-r26 output. Two states
@@ -543,19 +543,20 @@ struct PrTrimRender
 };
 
 // ONE estimator for every --pr-context root, never two counters (serialize.h's standing rule, the one
-// attrvocabcheck pins for the map's est_tokens). The trim ladder below and the empty-diff root (F4) both
-// price a rendered body through this, so the number on a clean tree means what it means on a 200-file diff.
-inline std::size_t prEstTokens( std::size_t bodyBytes ) noexcept
-{
-    return std::size_t( std::ceil( double( bodyBytes + kPrHeaderOverheadBytes ) / kMinBytesPerToken ) );
-}
-
-template< typename EmitFn >
-inline PrTrimRender pickPrTrimLevel( const EmitFn& emitFiles, std::size_t budgetTokens )
+// attrvocabcheck pins for the map's est_tokens). `price` is writePrContext's prPriceDocument — the WHOLE
+// document a level would emit (legend + anchoring note + this root's own start tag + body + closing tag),
+// converted at kBytesPerTokenDefault. It is passed in rather than computed here because only the emitter
+// knows its envelope; the ladder's job is to choose, not to invent a second rate.
+//
+// The floor-exceeded suffix feeds back into the price (it lengthens truncated=, hence the root tag), so it
+// is applied and RE-PRICED: monotone, since adding bytes to a document already over budget cannot bring it
+// under, so one re-price is the fixpoint and the printed number is the document's real price either way.
+template< typename EmitFn, typename PriceFn >
+inline PrTrimRender pickPrTrimLevel( const EmitFn& emitFiles, std::size_t budgetTokens, const PriceFn& price,
+                                     const std::string& windowAttrs )
 {
     constexpr std::size_t nLevels = sizeof( kPrTrims ) / sizeof( kPrTrims[0] );
     PrTrimRender out;
-    bool         isOverFloor = false;
     for( std::size_t li = 0; li < nLevels; ++li )
     {
         char*       buf = nullptr;
@@ -572,26 +573,19 @@ inline PrTrimRender pickPrTrimLevel( const EmitFn& emitFiles, std::size_t budget
             }
         }
         std::free( buf );
-        const std::size_t est = prEstTokens( rendered.size() );
         out.level     = li;
-        out.estTokens = est;
+        out.truncated = li > 0 ? std::string( kPrTrims[li].dropped ) : std::string( "none" );
         out.body      = std::move( rendered );
-        if( est <= budgetTokens )
+        out.estTokens = price( out.body.size(), li, out.truncated, windowAttrs );
+        if( out.estTokens <= budgetTokens )
         {
             break;
         }
         if( li + 1 == nLevels )
         {
-            isOverFloor = true; // even the floor render is over budget
+            out.truncated += ";budget-floor-exceeded";   // even the floor render is over budget
+            out.estTokens = price( out.body.size(), li, out.truncated, windowAttrs );
         }
-    }
-    if( out.level > 0 )
-    {
-        out.truncated = kPrTrims[out.level].dropped;
-    }
-    if( isOverFloor )
-    {
-        out.truncated += ";budget-floor-exceeded";
     }
     return out;
 }
@@ -611,18 +605,51 @@ inline std::string prBudgetTail( std::size_t changedFiles, std::uint32_t skipped
 //
 // This root used to be built inline from two attributes, so a clean tree was the ONE --pr-context answer with
 // no budget_tokens=, est_tokens=, trim_level= or truncated=: the ledger every other root carries, missing in
-// exactly the case a caller cannot tell apart from a crash, and against writePrRootOpen's own rule that the
+// exactly the case a caller cannot tell apart from a crash, and against prRootOpenText's own rule that the
 // three forms must not drift on which disclosures they carry. Nothing was cut here, so it reports
 // trim_level="0" truncated="none" — and it PRICES the document it actually emits through the ladder's own
-// estimator (prEstTokens) rather than declaring a number, because a document that ships a legend does not
+// estimator (the caller's prPriceDocument) rather than declaring a number, because a document that ships a legend does not
 // cost nothing.
+// The bundle's reader-facing legend. R2/N4 (V1, wave-1 verifier, 2026-09-05): BUILT and returned rather
+// than streamed, because est_tokens prices the WHOLE document writePrContext writes and on a clean tree
+// this comment IS ~91% of that document. Same bytes in the same order; they are simply measured before
+// they are written, the way every other priced root measures itself (serialize.h §H7). File scope, beside
+// kPrEmptyDiffBody, so the emitter reads as the decisions it makes rather than as the prose it ships.
+inline std::string prLegendText( const std::string& baseEscaped )
+{
+    return std::string(
+                 "<!-- ripwire pr-context: no-LLM review-evidence bundle per changed file — defined symbols, their callers, blast radius (transitive dependents), affected tests, co-change partners not in the diff, and owners. "
+                 "base=" ) + baseEscaped + ". skipped_mode_only=diffs that changed a file's MODE and nothing else (e.g. chmod) excluded from the changed set; a pure RENAME is content-identical too but is NOT excluded — it is a changed file, listed at its new path. files= means two different things by DEPTH here and is deliberately not renamed (15 consumers read the root one): "
+                 "on the ROOT it is the CHANGED file count; on each <impact/> child it is the distinct files dependents= reaches (changed + non-changed), so dependents=\"0\" implies files=\"0\" and vice versa — never an "
+                 "impossible-looking dependents>0/files=0. files_other= on the same <impact/> is the non-changed subset (a changed file's dependents inside OTHER changed files have no <f> row of their own — they are already shown "
+                 "as their own <file> section); it is NOT the <f> row count — see the row-cap sentence below. Files are ordered by BLAST RADIUS (transitive dependents descending, path breaking ties), not alphabetically. "
+                 "sections= on changed-symbols counts a doc file's headings, collapsed into that number instead of one callers-zero row each; count= still counts every INDEXED symbol, sections included, so count minus sections is the number of rows that follow. "
+                 "Every nested list below is a TOP-N subset of its element's own total, fixed per element (impact <f> at 20, per-symbol <caller> at 12, cochange <partner> at 12, tests <test> at 40, owners <author> at 5 — the L0 defaults; "
+                 "max-tokens only lowers these further via the trim ladder, nothing raises them past L0): each capped element carries its own shown=/capped= pair so the cut is never silent — for the untrimmed list use impact=SYM/callers=SYM "
+                 "(blast radius/callers), affected=FILE or situ (tests), cochange (partners), or owners (authors) instead. direction= names which SIDE this bundle reviews (worktree-since-head, head-since-fork, head-since-ref-tip); "
+                 "a no-ref-work row says the base ref's tip IS the merge base, i.e. it carries no divergent work of its own. deterministic. "
+                 // P4 (L7): the default budget and the file window, defined where the reader meets them
+                 "BUDGET: the bundle is budgeted by default — budget_tokens= is the ceiling in force (8000 unless token-budget/max-tokens set it; "
+                 "budget_default=1 says the default applied); est_tokens= prices the WHOLE document this bundle emits, this legend included, at the map's markup rate of 2.50 bytes per token, "
+                 "and IS the number the ladder fits, so recounting the delivered bytes reproduces it; trim_level=/truncated= what the ladder dropped. When even the "
+                 "structural floor of every changed file exceeds it, the FILES are windowed in blast-radius order: shown= of files=, "
+                 "capped=1 with total=/has_more=/next_offset=/offset=/limit= (limit=0 = the default window), and next= is the one pasteable "
+                 "follow-up (the next page). "
+                 // §H4 §3.4 / V4 MED-3: the SEVENTH graph-count surface. Every per-symbol callers= here is read
+                 // from the in-edge CSR --callers reads, and <impact dependents=> is the same transitive reach
+                 // --impact reports, so the same floor applies to hundreds of attributes in this one document.
+                 // The shared constants, never a pr-context wording — that is the §B4 echo-site rule.
+                 + rw::graphCountDisclosure() + "-->";
+}
+
 inline constexpr std::string_view kPrEmptyDiffBody =
     "<!-- no changed files in the index (clean tree, or the diff touched only non-indexed files) -->";
 
-inline std::string prEmptyRootTail( std::uint32_t skippedModeOnly, std::size_t budgetTokens, bool isDefaultBudget )
+inline std::string prEmptyRootTail( std::uint32_t skippedModeOnly, std::size_t budgetTokens, bool isDefaultBudget,
+                                    std::size_t estTokens )
 {
     PrTrimRender empty;                                        // level 0, truncated "none": nothing was cut
-    empty.estTokens = prEstTokens( kPrEmptyDiffBody.size() );
+    empty.estTokens = estTokens;                               // R2: the caller's prPriceDocument, never a second formula
     return prBudgetTail( 0, skippedModeOnly, budgetTokens, empty, empty.truncated )
            + ( isDefaultBudget ? " budget_default=\"1\"" : "" );
 }
@@ -632,34 +659,94 @@ inline std::string prEmptyRootTail( std::uint32_t skippedModeOnly, std::size_t b
 // which disclosures they carry — direction= and the no-ref-work row are exactly the kind of attribute that
 // otherwise lands on two of three. G4: attribute text may not contain a double hyphen, so the note names
 // the sibling verbs without their leading dashes.
-inline void writePrRootOpen( std::FILE* out, const Graph& g, const std::string& sharedAttrs, const std::string& tailAttrs,
-                             const PrContextMask& anchor, const std::string& baseLabelEscaped )
+// R2/N4: returns the bytes instead of writing them — the caller writes them unchanged, and prices them.
+inline std::string prRootOpenText( const Graph& g, const std::string& sharedAttrs, const std::string& tailAttrs,
+                                   const PrContextMask& anchor, const std::string& baseLabelEscaped )
 {
     // §H4 §3.4 / V4 MED-3: the marker rides here, on the ONE root emitter all three forms (empty diff /
     // plain / budgeted) share — which is exactly the drift this helper exists to prevent, and the reason it
     // is appended LAST, past every caller-supplied tail attribute (same placement rule as gitstamp::atAttr).
-    std::fprintf( out, "<pr-context%s%s%s>", sharedAttrs.c_str(), tailAttrs.c_str(), rw::graphCountFloorAttrXml( g ).c_str() );   // M15: gauge + marker
+    std::string text = "<pr-context" + sharedAttrs + tailAttrs + rw::graphCountFloorAttrXml( g ) + ">";   // M15: gauge + marker
     if( !anchor.refHasNoWork )
     {
-        return;
+        return text;
     }
-    std::fprintf( out, "<no-ref-work note=\"%s tip == merge-base, so that ref has no divergent work of its own; this "
-                       "bundle is HEAD's work since the fork. For the ref's OWN diff see merge-scout or stray-content\"/>",
-                  baseLabelEscaped.c_str() );
+    text += "<no-ref-work note=\"" + baseLabelEscaped
+            + " tip == merge-base, so that ref has no divergent work of its own; this "
+              "bundle is HEAD's work since the fork. For the ref's OWN diff see merge-scout or stray-content\"/>";
+    return text;
+}
+
+// R2/N4 (V1, wave-1 verifier, 2026-09-05) — everything the PRICE of a --pr-context document depends on
+// except the two things that vary per candidate: the body and the trim level. Held as one value so the
+// price is a named file-scope decision beside prBudgetTail/prEmptyRootTail rather than 30 lines of closure
+// inside a 400-line emitter. The pointers are non-owning views of writePrContext's own locals; the value
+// never outlives the call that builds it.
+struct PrPriceCtx
+{
+    const Graph*         g               = nullptr;
+    const std::string*   sharedAttrs     = nullptr;
+    const PrContextMask* anchor          = nullptr;
+    const std::string*   baseEscaped     = nullptr;
+    const std::string*   atAttrs         = nullptr;   // gitstamp::atAttr, appended past every tail attribute
+    std::size_t          envelopeBytes   = 0;         // legend + anchoring note + closing tag (never the root tag)
+    std::size_t          changedFiles    = 0;
+    std::uint32_t        skippedModeOnly = 0;
+    std::size_t          budgetTokens    = 0;
+    bool                 isDefaultBudget = false;
+};
+
+// THE price of a --pr-context document, and the ONE number its budget decision reads.
+//
+// The pre-V1 estimator modelled the BODY plus a fixed 560-byte kPrHeaderOverheadBytes at kMinBytesPerToken,
+// which left the ~4.6 KB legend — the whole document on a clean tree — outside both terms: the empty-diff
+// root priced 4,808 delivered bytes at est_tokens="278", 7.3x under, printed beside a budget_tokens="8000"
+// a caller reads it against; the budgeted root was 1.30x under from the same constant. This MEASURES the
+// bytes that are actually written (envelope + this root's own start tag + body) and converts them at the
+// tool's ONE markup rate through tokensForEmittedBytes — the same conversion pricedRootAttr applies for
+// --for, --pack-task, --handoff and MCP for — so recounting the delivered bytes reproduces the number, and
+// the legend's definition of est_tokens is true of every root that carries it.
+//
+// The attribute is part of the document it prices, so its own digits are converged in ≤4 passes exactly as
+// pricedRootAttr converges them.
+inline std::size_t prPriceDocument( const PrPriceCtx& c, std::size_t bodyBytes, std::size_t level,
+                                    const std::string& truncatedEscaped, const std::string& windowAttrs )
+{
+    std::size_t est = 0;
+    for( int pass = 0; pass < 4; ++pass )
+    {
+        PrTrimRender probe;
+        probe.estTokens        = est;
+        probe.level            = level;
+        const std::string tail = prBudgetTail( c.changedFiles, c.skippedModeOnly, c.budgetTokens, probe, truncatedEscaped )
+                                 + ( c.isDefaultBudget ? " budget_default=\"1\"" : "" ) + windowAttrs + *c.atAttrs;
+        const std::size_t next = rw::tokensForEmittedBytes(
+            c.envelopeBytes + prRootOpenText( *c.g, *c.sharedAttrs, tail, *c.anchor, *c.baseEscaped ).size() + bodyBytes,
+            rw::kBytesPerTokenDefault );
+        if( next == est )
+        {
+            break;
+        }
+        est = next;
+    }
+    return est;
 }
 
 // The reader-facing explanation of the anchoring attributes, emitted only when there ARE any (so the
 // working-tree default's document is unchanged). G4: an XML comment may not contain a double hyphen, so
 // this text names flags and attribute values WITHOUT their leading dashes — the same constraint crossref.h's
 // own comments call out. Keep it that way when editing.
-inline void writeAnchorNote( std::FILE* out, const std::string& anchorAttr )
+// R2/N4: returns the bytes instead of writing them, for the same reason prRootOpenText does — this note is
+// part of the document est_tokens prices, and "" (no base ref) is the working-tree default's byte-identical
+// no-op.
+inline std::string prAnchorNoteText( const std::string& anchorAttr )
 {
     if( anchorAttr.empty() )
     {
-        return;
+        return {};
     }
 
-    std::fprintf( out, "<!-- anchoring: a base ref was given, so this diff is anchored at merge base(BASEREF, HEAD), "
+    return "<!-- anchoring: a base ref was given, so this diff is anchored at merge base(BASEREF, HEAD), "
                        "NOT at the ref's tip — the bundle is what THIS work changed since it forked, not how the two "
                        "trees differ today. base_moved= counts paths the BASE REF moved since the fork that this work "
                        "never touched (excluded here, and the same row class the abi verb names head moved: the other "
@@ -669,7 +756,7 @@ inline void writeAnchorNote( std::FILE* out, const std::string& anchorAttr )
                        // bans the literal TWO-DASH run "--", never a lone "-" — "ref-tip-two-dot" has none), so the
                        // legend named a string the document never emits. Spelled to match.
                        "line moved, we did not author it). anchor=\"ref-tip-two-dot\" instead means there was no merge "
-                       "base at all (unrelated history) and the two dot view is what you are reading. -->" );
+                       "base at all (unrelated history) and the two dot view is what you are reading. -->";
 }
 
 // §P11.7 — the FLAGSHIP review bundle led with its least reviewable file. Sections were emitted in path
@@ -799,35 +886,34 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     }
     std::sort( changed.begin(), changed.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.files[a] < ing.files[b]; } );
 
-    std::fprintf( out, "<!-- ripwire pr-context: no-LLM review-evidence bundle per changed file — defined symbols, their callers, blast radius (transitive dependents), affected tests, co-change partners not in the diff, and owners. "
-                 "base=%s. skipped_mode_only=diffs that changed a file's MODE and nothing else (e.g. chmod) excluded from the changed set; a pure RENAME is content-identical too but is NOT excluded — it is a changed file, listed at its new path. files= means two different things by DEPTH here and is deliberately not renamed (15 consumers read the root one): "
-                 "on the ROOT it is the CHANGED file count; on each <impact/> child it is the distinct files dependents= reaches (changed + non-changed), so dependents=\"0\" implies files=\"0\" and vice versa — never an "
-                 "impossible-looking dependents>0/files=0. files_other= on the same <impact/> is the non-changed subset (a changed file's dependents inside OTHER changed files have no <f> row of their own — they are already shown "
-                 "as their own <file> section); it is NOT the <f> row count — see the row-cap sentence below. Files are ordered by BLAST RADIUS (transitive dependents descending, path breaking ties), not alphabetically. "
-                 "sections= on changed-symbols counts a doc file's headings, collapsed into that number instead of one callers-zero row each; count= still counts every INDEXED symbol, sections included, so count minus sections is the number of rows that follow. "
-                 "Every nested list below is a TOP-N subset of its element's own total, fixed per element (impact <f> at 20, per-symbol <caller> at 12, cochange <partner> at 12, tests <test> at 40, owners <author> at 5 — the L0 defaults; "
-                 "max-tokens only lowers these further via the trim ladder, nothing raises them past L0): each capped element carries its own shown=/capped= pair so the cut is never silent — for the untrimmed list use impact=SYM/callers=SYM "
-                 "(blast radius/callers), affected=FILE or situ (tests), cochange (partners), or owners (authors) instead. direction= names which SIDE this bundle reviews (worktree-since-head, head-since-fork, head-since-ref-tip); "
-                 "a no-ref-work row says the base ref's tip IS the merge base, i.e. it carries no divergent work of its own. deterministic. "
-                 // P4 (L7): the default budget and the file window, defined where the reader meets them
-                 "BUDGET: the bundle is budgeted by default — budget_tokens= is the ceiling in force (8000 unless token-budget/max-tokens set it; "
-                 "budget_default=1 says the default applied), est_tokens= the fit, trim_level=/truncated= what the ladder dropped. When even the "
-                 "structural floor of every changed file exceeds it, the FILES are windowed in blast-radius order: shown= of files=, "
-                 "capped=1 with total=/has_more=/next_offset=/offset=/limit= (limit=0 = the default window), and next= is the one pasteable "
-                 "follow-up (the next page). "
-                 // §H4 §3.4 / V4 MED-3: the SEVENTH graph-count surface. Every per-symbol callers= here is read
-                 // from the in-edge CSR --callers reads, and <impact dependents=> is the same transitive reach
-                 // --impact reports, so the same floor applies to hundreds of attributes in this one document.
-                 // The shared constants, never a pr-context wording — that is the §B4 echo-site rule.
-                 "%s-->", escBase.c_str(), rw::graphCountDisclosure().c_str() );
+    const std::string legendText = prLegendText( escBase );
+    std::fwrite( legendText.data(), 1, legendText.size(), out );
 
-    writeAnchorNote( out, anchorAttr );
+    const std::string anchorNoteText = prAnchorNoteText( anchorAttr );
+    std::fwrite( anchorNoteText.data(), 1, anchorNoteText.size(), out );
+
+    // R2/N4: the fixed, non-body envelope of every root this emitter writes — the legend, the anchoring
+    // note, and the closing tag. The root's OWN start tag varies with the tail it carries, so it is
+    // measured inside prPriceDocument below rather than folded in here.
+    const std::size_t envelopeBytes = legendText.size() + anchorNoteText.size() + kPrCloseTag.size();
+
+    // R2/N4: the price context (see prPriceDocument) — the envelope and every root attribute that does not
+    // vary per candidate trim level, gathered once.
+    const PrPriceCtx priceCtx{ .g = &g, .sharedAttrs = &sharedAttrs, .anchor = &anchor, .baseEscaped = &escBase, .atAttrs = &atAttrStr,
+                               .envelopeBytes = envelopeBytes, .changedFiles = changed.size(), .skippedModeOnly = skippedModeOnly,
+                               .budgetTokens = budgetTokens, .isDefaultBudget = budget.isDefault };
+    const auto priceOf = [ & ]( std::size_t bodyBytes, std::size_t level, const std::string& truncatedRaw, const std::string& windowAttrs )
+    { return prPriceDocument( priceCtx, bodyBytes, level, ex( truncatedRaw ), windowAttrs ); };
 
     if( changed.empty() )
     {
-        writePrRootOpen( out, g, sharedAttrs, prEmptyRootTail( skippedModeOnly, budgetTokens, budget.isDefault ) + atAttrStr, anchor, escBase );
+        const std::size_t emptyEst = priceOf( kPrEmptyDiffBody.size(), 0, "none", std::string() );
+        const std::string rootOpen = prRootOpenText( g, sharedAttrs,
+                                                     prEmptyRootTail( skippedModeOnly, budgetTokens, budget.isDefault, emptyEst ) + atAttrStr,
+                                                     anchor, escBase );
+        std::fwrite( rootOpen.data(), 1, rootOpen.size(), out );
         std::fwrite( kPrEmptyDiffBody.data(), 1, kPrEmptyDiffBody.size(), out );
-        std::fprintf( out, "</pr-context>" );
+        std::fwrite( kPrCloseTag.data(), 1, kPrCloseTag.size(), out );
         return 0;
     }
 
@@ -1077,9 +1163,10 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     // NO budget at all (only a multi-root sub-bundle handed 0): level 0, no budget attributes.
     if( budgetTokens == 0 )
     {
-        writePrRootOpen( out, g, sharedAttrs, " files=\"" + std::to_string( changed.size() ) + "\" skipped_mode_only=\"" + std::to_string( skippedModeOnly ) + "\"" + atAttrStr, anchor, escBase );
+        const std::string rootOpen = prRootOpenText( g, sharedAttrs, " files=\"" + std::to_string( changed.size() ) + "\" skipped_mode_only=\"" + std::to_string( skippedModeOnly ) + "\"" + atAttrStr, anchor, escBase );
+        std::fwrite( rootOpen.data(), 1, rootOpen.size(), out );
         emitFiles( out, kPrTrims[0] );
-        std::fprintf( out, "</pr-context>" );
+        std::fwrite( kPrCloseTag.data(), 1, kPrCloseTag.size(), out );
         return 0;
     }
 
@@ -1087,7 +1174,8 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     // keep the least-trimmed fit. P4: when even the FLOOR of the whole window is over, shrink the window to the
     // largest file prefix whose floor fits (binary search on the floor render; at least one file), then pick the
     // level for that prefix — the cut is disclosed below and next= pastes the page that starts where this one stopped.
-    PrTrimRender chosen = pickPrTrimLevel( emitFiles, budgetTokens );
+    const std::string noWindow;
+    PrTrimRender      chosen = pickPrTrimLevel( emitFiles, budgetTokens, priceOf, noWindow );
     if( chosen.truncated.find( "budget-floor-exceeded" ) != std::string::npos && fileEnd - filePw.begin > 1 )
     {
         std::size_t lo = 1, hi = fileEnd - filePw.begin;   // prefix lengths: lo fits (assumed for 1), hi does not
@@ -1095,11 +1183,10 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
         {
             const std::size_t mid = lo + ( hi - lo ) / 2;
             fileEnd = filePw.begin + mid;
-            const PrTrimRender probe = pickPrTrimLevel( emitFiles, budgetTokens );
+            const PrTrimRender probe = pickPrTrimLevel( emitFiles, budgetTokens, priceOf, noWindow );
             if( probe.truncated.find( "budget-floor-exceeded" ) == std::string::npos ) { lo = mid; } else { hi = mid; }
         }
         fileEnd = filePw.begin + lo;
-        chosen  = pickPrTrimLevel( emitFiles, budgetTokens );
     }
     // the changed files are this root's PRIMARY listing, so a cut speaks the plain quintet (shown=/capped=/total=/
     // has_more=/next_offset=/offset=/limit=, pageview.h) — never a noun-prefixed twin beside it (one fact, one name)
@@ -1112,12 +1199,17 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
         windowAttrs += nextAttrXml( std::string( "--pr-context" ) + ( baseLabel == "working-tree" ? std::string() : "=" + std::string( baseLabel ) )
                                     + " --offset=" + std::to_string( fileEnd ) );
     }
-    writePrRootOpen( out, g, sharedAttrs,
-                     prBudgetTail( changed.size(), skippedModeOnly, budgetTokens, chosen, ex( chosen.truncated ) )
-                         + ( budget.isDefault ? " budget_default=\"1\"" : "" ) + windowAttrs + atAttrStr,
-                     anchor, escBase );
+    // R2/N4: the window disclosure is itself ~100 bytes of the document est_tokens prices, so once it is
+    // known the level is chosen AGAIN with it in the price — otherwise the printed number would under-read
+    // its own root tag by exactly the disclosure that says the files were cut.
+    chosen = pickPrTrimLevel( emitFiles, budgetTokens, priceOf, windowAttrs );
+    const std::string rootOpen = prRootOpenText( g, sharedAttrs,
+                                                 prBudgetTail( changed.size(), skippedModeOnly, budgetTokens, chosen, ex( chosen.truncated ) )
+                                                     + ( budget.isDefault ? " budget_default=\"1\"" : "" ) + windowAttrs + atAttrStr,
+                                                 anchor, escBase );
+    std::fwrite( rootOpen.data(), 1, rootOpen.size(), out );
     std::fwrite( chosen.body.data(), 1, chosen.body.size(), out );
-    std::fprintf( out, "</pr-context>" );
+    std::fwrite( kPrCloseTag.data(), 1, kPrCloseTag.size(), out );
     return 0;
 }
 

@@ -45,20 +45,41 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 # ── the version pin, read out of the script under test (never hardcoded here) ────────────────────────
 WANT_MAJOR="$( sed -n 's/^WANT_MAJOR=\([0-9][0-9]*\).*$/\1/p' "$FC" | head -1 )"
 
-# ── resolve a clang-format: the caller's, then homebrew LLVM (not on PATH on macOS), then PATH ───────
-CF=""
-if [ -n "${CLANG_FORMAT:-}" ]; then
-    CF="$CLANG_FORMAT"
-elif [ -x /opt/homebrew/opt/llvm/bin/clang-format ]; then
-    CF=/opt/homebrew/opt/llvm/bin/clang-format
-elif command -v clang-format >/dev/null 2>&1; then
-    CF="$( command -v clang-format )"
-fi
+# ── resolve a clang-format (V1 I5, wave-1 verifier 2026-09-05) ───────────────────────────────────────
+# The order used to be CLANG_FORMAT -> /opt/homebrew/opt/llvm/bin/clang-format -> PATH, unconditionally,
+# so a machine carrying the PINNED major on PATH and a DIFFERENT major at the homebrew path SKIPped a
+# gate it could have run. The SKIP was honest either way, which is why this is a note and not a defect —
+# but the ordering was an accident, and it is now a decision: an explicitly named CLANG_FORMAT always
+# wins (right or wrong — naming one is a choice, and silently overriding it would be worse); otherwise
+# the candidate that can ACTUALLY RUN the gate wins; only then the historical macOS fallback.
+#
+# pick_cf is PURE — it takes the three candidates and their measured majors and never touches the
+# filesystem — so arm (F) below can exercise the ordering itself on synthetic triples, which is the only
+# way a resolution that depends on what a machine happens to have installed can be gated at all.
+pick_cf()
+{   # pick_cf ENV_PATH ENV_MAJOR PATH_PATH PATH_MAJOR BREW_PATH BREW_MAJOR WANT -> "<path>|<major>"
+    if [ -n "$1" ]; then         printf '%s|%s' "$1" "$2"          # named explicitly: always wins
+    elif [ -n "$4" ] && [ "$4" = "$7" ]; then printf '%s|%s' "$3" "$4"   # PATH has the pinned major: run
+    elif [ -n "$5" ]; then       printf '%s|%s' "$5" "$6"          # homebrew LLVM (not on PATH on macOS)
+    else                         printf '%s|%s' "$3" "$4"          # whatever PATH has, so the SKIP names it
+    fi
+}
 
-have=""
-if [ -n "$CF" ] && command -v "$CF" >/dev/null 2>&1; then
-    have="$( "$CF" --version 2>/dev/null | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p' | head -1 )"
-fi
+cf_major(){ [ -n "${1:-}" ] && command -v "$1" >/dev/null 2>&1 && "$1" --version 2>/dev/null | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p' | head -1; }
+
+CAND_ENV="${CLANG_FORMAT:-}"
+CAND_PATH="$( command -v clang-format 2>/dev/null || true )"
+CAND_BREW=""
+[ -x /opt/homebrew/opt/llvm/bin/clang-format ] && CAND_BREW=/opt/homebrew/opt/llvm/bin/clang-format
+MAJ_ENV="$( cf_major "$CAND_ENV" )"
+MAJ_PATH="$( cf_major "$CAND_PATH" )"
+MAJ_BREW="$( cf_major "$CAND_BREW" )"
+PICKED="$( pick_cf "$CAND_ENV" "$MAJ_ENV" "$CAND_PATH" "$MAJ_PATH" "$CAND_BREW" "$MAJ_BREW" "$WANT_MAJOR" )"
+CF="${PICKED%%|*}"
+have="${PICKED#*|}"
+
+# every candidate and the major found at it, so a SKIP says what the machine actually has and where
+CANDS="CLANG_FORMAT=[${CAND_ENV:-unset}${MAJ_ENV:+ major $MAJ_ENV}] PATH=[${CAND_PATH:-none}${MAJ_PATH:+ major $MAJ_PATH}] homebrew=[${CAND_BREW:-none}${MAJ_BREW:+ major $MAJ_BREW}]"
 
 # ── the SKIP, with the reason spelled out (pargates.py reads "SKIP" in the first 400 chars) ──────────
 if [ -z "$WANT_MAJOR" ]; then
@@ -66,11 +87,11 @@ if [ -z "$WANT_MAJOR" ]; then
     exit 1
 fi
 if [ -z "$have" ]; then
-    printf '  SKIP  formatgatecheck: needs clang-format major %s (the version .clang-format was produced and verified with); found NONE — looked at CLANG_FORMAT, /opt/homebrew/opt/llvm/bin/clang-format, then PATH. Install LLVM %s or set CLANG_FORMAT=/path/to/clang-format. NOTHING WAS CHECKED.\n' "$WANT_MAJOR" "$WANT_MAJOR"
+    printf '  SKIP  formatgatecheck: needs clang-format major %s (the version .clang-format was produced and verified with); found NONE — %s. Install LLVM %s or set CLANG_FORMAT=/path/to/clang-format. NOTHING WAS CHECKED.\n' "$WANT_MAJOR" "$CANDS" "$WANT_MAJOR"
     exit 0
 fi
 if [ "$have" != "$WANT_MAJOR" ]; then
-    printf '  SKIP  formatgatecheck: needs clang-format major %s (the version .clang-format was produced and verified with); found major %s at %s. Different majors format differently, so running anyway would report false drift. NOTHING WAS CHECKED.\n' "$WANT_MAJOR" "$have" "$CF"
+    printf '  SKIP  formatgatecheck: needs clang-format major %s (the version .clang-format was produced and verified with); found major %s at %s — %s. Different majors format differently, so running anyway would report false drift. NOTHING WAS CHECKED.\n' "$WANT_MAJOR" "$have" "$CF" "$CANDS"
     exit 0
 fi
 
@@ -157,5 +178,29 @@ EOF
         printf '%s\n' "$advOut" | sed 's/^/        /'
     fi
 fi
+
+# ── (F) the RESOLUTION ORDER itself (V1 I5) ──────────────────────────────────────────────────────────
+# pick_cf decides which clang-format this gate runs, and that decision used to be invisible: it depended
+# on what the machine happened to have installed, so it could be wrong on every machine but the one the
+# author was sitting at. It is pure, so it is gated here on synthetic triples — including the case that
+# motivated the change (PATH has the pinned major, homebrew has a different one) and its mirror.
+pickis()
+{   # pickis LABEL EXPECTED  ENV_P ENV_M PATH_P PATH_M BREW_P BREW_M
+    local label="$1" want="$2"; shift 2
+    local got; got="$( pick_cf "$1" "$2" "$3" "$4" "$5" "$6" "$WANT_MAJOR" )"
+    [ "$got" = "$want" ] && ok "(F) $label -> $got" \
+                         || no "(F) $label picked [$got], expected [$want]"
+}
+OLD=$(( WANT_MAJOR + 3 ))   # some other major, whatever the pin is
+pickis "PATH has the pinned major, homebrew has $OLD: PATH wins (the case the old order SKIPped on)" \
+       "/usr/bin/clang-format|$WANT_MAJOR"  ""  ""  /usr/bin/clang-format "$WANT_MAJOR" /brew/clang-format "$OLD"
+pickis "PATH has $OLD, homebrew has the pinned major: homebrew wins" \
+       "/brew/clang-format|$WANT_MAJOR"     ""  ""  /usr/bin/clang-format "$OLD"        /brew/clang-format "$WANT_MAJOR"
+pickis "CLANG_FORMAT is named: it wins even against a pinned-major PATH (naming one is a choice)" \
+       "/my/cf|$OLD"                        /my/cf "$OLD"  /usr/bin/clang-format "$WANT_MAJOR" /brew/clang-format "$WANT_MAJOR"
+pickis "neither has the pin and there is no homebrew: PATH's is reported so the SKIP can name it" \
+       "/usr/bin/clang-format|$OLD"         ""  ""  /usr/bin/clang-format "$OLD"        ""     ""
+pickis "nothing anywhere: an empty pick, which is the found-NONE skip" \
+       "|"                                  ""  ""  ""  ""  ""  ""
 
 [ "$fail" -eq 0 ] && echo "formatgatecheck: ALL PASS" || { echo "formatgatecheck: SOME CHECKS FAILED"; exit 1; }
