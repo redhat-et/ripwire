@@ -1820,7 +1820,14 @@ std::optional<int> runForLens( const MainDispatch& d )
         // same way, 9 bytes spliced in after the number that is supposed to describe them.
         constexpr std::size_t kEstTokensAttrReserve = 24;
         constexpr std::size_t kWeakAttrBytes        = 9;   // exactly ` weak="1"`
-        const std::size_t     headerSpliceReserve   = kEstTokensAttrReserve + ( forWeak ? kWeakAttrBytes : 0u );
+        // N1 (capture-audit verify-wave1 2026-09-04): est_tokens= moved from the header COMMENT onto the <ctx>
+        // root (a comment-stripping parser read no price at all — the flagship budgeted verb was the one M11
+        // outlier), so the legend now needs a clause defining it; the clause is fixed text, reserved here and
+        // exact-counted below. over_ceiling="1" rides the root only on the ladder's last rung, where the
+        // ceiling is already exceeded by the floor — its 17 bytes are not reserved (nothing is left to trim).
+        constexpr std::string_view kForEstTokensLegend = " est_tokens= prices this bundle in tokens";
+        const std::size_t     headerSpliceReserve   = kEstTokensAttrReserve + kForEstTokensLegend.size() + ( forWeak ? kWeakAttrBytes : 0u );
+        bool                  forOverCeiling        = false;   // N1: set when the ladder's last rung fired (root over_ceiling="1")
 
         // D10: --token-budget SHAPES this bundle (exit-0 trim) rather than gating it (exit-3 like the
         // default map/--query) — but the shaped result must still be checkable against the budget it shaped
@@ -2008,9 +2015,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         // BEFORE est_tokens so the estimate covers the disclosure; inert without an explicit --token-budget.
         if( cfg.tokenBudget > 0 && sigsPreRendered )
         {
+            // N1: the last rung's note DEFINES the root attribute it accompanies (over_ceiling= …), so the
+            // attribute is never on a document whose legend does not explain it; the bracket spelling stays.
             static constexpr rw::CeilingLadderNotes kNotes{
                 " [task_echo: dropped (ceiling)]", " [task_echo + route_attr: dropped (ceiling)]",
-                " [over_ceiling: the header floor (verbatim task echo + fixed legend) exceeds this budget"
+                " [over_ceiling= is 1 on the root: the header floor (verbatim task echo + fixed legend) exceeds this budget"
                 " - no payload left to trim]" };
             // §F1: the ladder prices what will actually be EMITTED, so the two sections charged above are in
             // this sum. headerSpliceReserve covers the est_tokens (and weak="1") attributes spliced in below —
@@ -2039,6 +2048,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             }
             headerStr = rw::climbCeilingLadder( buildForHeader, headerStr, ladderPayloadBytes, ladderCeiling,
                                                  /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
+            forOverCeiling = headerStr.find( kNotes.overCeiling ) != std::string::npos;
         }
 
         // T3: the bundle=auto disclosure attributes, spliced onto the <ctx> root AFTER the ladder (a rung
@@ -2113,17 +2123,28 @@ std::optional<int> runForLens( const MainDispatch& d )
             // its real shape is ~3.6.
             // enrich.markupBytes is the compact <hops> section, folded in HERE rather than charged
             // separately — one rate, one rounding (see ForEnrichmentPlan for the off-by-one that proves it).
+            // N1: the legend clause defining est_tokens= goes into the LAST comment first (the weak=/dropped_positive=
+            // splice point), so headerStr.size() below already counts it exactly.
+            {
+                const std::size_t legendAt = headerStr.rfind( " -->" );
+                if( legendAt != std::string::npos )
+                {
+                    headerStr.insert( legendAt, kForEstTokensLegend ); // else: unexpected shape, header left as-is
+                }
+            }
             const std::size_t markupBytes = headerStr.size() + sigsStr.size() + legoStr.size() + composeStr.size()
                                           + routeStr.size() + graphSection.xml.size() + enrich.markupBytes
                                           + tailStr.size() + 6;   // + "</ctx>" (deep-tail: the tail's bytes are measured at the markup rate)
             // T3: the auto bodies at the body rate — def-body text BPE-merges differently from markup, which
             // is why this sum splits by kind. enrich.bodyTokens is zero on the compact route (markup, above).
             const std::size_t bodyTokens  = detailSection.tokens + enrich.bodyTokens;
-            std::size_t estTokens = rw::tokensForEmittedBytes( markupBytes, kBytesPerTokenDefault ) + bodyTokens;
+            // N1: both root attributes are inside the number — over_ceiling="1" is a fixed 17 bytes on the last rung.
+            const std::string overAttr    = forOverCeiling ? std::string( " over_ceiling=\"1\"" ) : std::string();
+            std::size_t estTokens = rw::tokensForEmittedBytes( markupBytes + overAttr.size(), kBytesPerTokenDefault ) + bodyTokens;
             std::string attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
             for( int pass = 0; pass < 4; ++pass )
             {
-                const std::size_t next = rw::tokensForEmittedBytes( markupBytes + attr.size(), kBytesPerTokenDefault ) + bodyTokens;
+                const std::size_t next = rw::tokensForEmittedBytes( markupBytes + attr.size() + overAttr.size(), kBytesPerTokenDefault ) + bodyTokens;
                 if( next == estTokens )
                 {
                     break;
@@ -2131,10 +2152,12 @@ std::optional<int> runForLens( const MainDispatch& d )
                 estTokens = next;
                 attr      = " est_tokens=\"" + std::to_string( estTokens ) + "\"";
             }
-            const std::size_t closeAt = headerStr.rfind( " -->" );
-            if( closeAt != std::string::npos )
+            // N1: onto the <ctx> root — the same "><!--" boundary the bundle= attributes above use — where
+            // --pack-task / --from-trace / --handoff / --expand put theirs (M11), not inside the comment.
+            const std::size_t rootCloseAt = headerStr.find( "><!--" );
+            if( rootCloseAt != std::string::npos )
             {
-                headerStr.insert( closeAt, attr ); // else: unexpected shape, header left as-is
+                headerStr.insert( rootCloseAt, attr + overAttr ); // else: unexpected shape, header left as-is
             }
         }
 

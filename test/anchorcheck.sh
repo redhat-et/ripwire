@@ -91,6 +91,11 @@ QUERY="frobnicate widget cache"
 # re-pinning: with r=, the <tail> element, the tail legend clause and est_tokens normalized out, old and
 # new documents are byte-identical — every ranking and body byte is unmoved, which is the anchor-neutrality
 # property this golden exists for.
+# RE-PIN 2026-09-04 (capture-audit verify-wave1 N1, lane V1): 3046 -> 3087 B (+41 B), est_tokens="1149" -> "1165".
+# CAUSE: --for now prices its ROOT — est_tokens= moved from the header comment onto <ctx> (where --pack-task /
+# --from-trace / --handoff put theirs, M11) and the legend gained the 41-byte clause defining it; over_ceiling="1"
+# rides the root on the ladder's last rung (absent here: no --token-budget). Verified before re-pinning: with
+# est_tokens= and that one clause normalized out, old and new documents are byte-identical (gate: estchargecheck #15 d).
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route >"$TMP/plain_full.xml" 2>/dev/null
 diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \
     && ok "golden-neutral: plain --for --no-route byte-identical to the pre---anchor golden" \

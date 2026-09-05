@@ -911,6 +911,42 @@ band15 "--from-trace --token-budget=1500" "$TMP/p15_ft.xml" ctx 420
 [ "$( root_attr "$TMP/p15_ft50.xml" ctx over_ceiling )" = "1" ] \
     && ok "#15 --from-trace --token-budget=50: root over_ceiling=\"1\"" \
     || no "#15 --from-trace --token-budget=50: no over_ceiling=\"1\" on the root (the prose label alone is what a parser discards)"
+# (d) --for (verify-wave1 N1): after M11 the flagship budgeted verb was the ONE outlier — est_tokens="N" lived
+#     inside its header COMMENT (a comment-stripping parser reads nothing) and the ladder's over_ceiling verdict
+#     was a bracket note in the same comment, never an attribute: `--for … --token-budget=300` shipped 1,243
+#     tokens at exit 0 with a bare <ctx>. SWEPT across the usable range like arm #5 (the small end is where the
+#     fixed floor dominates): the root carries est_tokens=; delivered bytes sit inside the ladder's own
+#     allowance (N x kMinBytesPerToken x kCeilingFirstEntryTolerance = N x 2.36 x 1.15, serialize.h) OR the
+#     root says over_ceiling="1"; and a labelled root's est_tokens exceeds N (the label and the number agree).
+for N in 100 300 400 600 800 1200 1500 3000; do
+    "$BIN" src --for="$FOR_TASK" --token-budget=$N --no-cache >"$TMP/p15_for$N.xml" 2>/dev/null
+    FB="$( bytes_of "$TMP/p15_for$N.xml" )"
+    FE="$( root_est "$TMP/p15_for$N.xml" ctx )"
+    FO="$( root_attr "$TMP/p15_for$N.xml" ctx over_ceiling )"
+    FLIM="$( awk "BEGIN{printf \"%d\", $N*2.36*1.15}" )"
+    if [ -z "$FE" ]; then
+        no "#15 --for --token-budget=$N: <ctx> root carries no est_tokens= ($FB B delivered; the price is not where a parser reads it)"
+    else
+        ok "#15 --for --token-budget=$N: root est_tokens=\"$FE\" ($FB B)"
+    fi
+    if [ "$FB" -le "$FLIM" ] 2>/dev/null; then
+        ok "#15 --for --token-budget=$N: $FB B within the $FLIM B ladder allowance"
+    elif [ "$FO" = "1" ]; then
+        ok "#15 --for --token-budget=$N: $FB B over the $FLIM B allowance and the ROOT says so (over_ceiling=\"1\")"
+        { [ -n "$FE" ] && [ "$FE" -gt "$N" ]; } 2>/dev/null \
+            && ok "#15 --for --token-budget=$N: est_tokens=$FE > $N — the label and the number agree" \
+            || no "#15 --for --token-budget=$N: root over_ceiling=\"1\" but est_tokens='$FE' does not exceed the budget it is labelled over"
+    else
+        no "#15 --for --token-budget=$N: $FB B EXCEEDS the $FLIM B allowance with NO over_ceiling=\"1\" on the root (over_ceiling on root='$FO')"
+    fi
+done
+# the two root attributes must be DEFINED by the legend of the document that carries them (§B7 class)
+perl -0pe 's#<!--(.*?)-->#\1#gs' "$TMP/p15_for3000.xml" | grep -qE '(^|[^[:alnum:]_:.-])est_tokens\s*=' \
+    && ok "#15 --for: the legend defines est_tokens=" \
+    || no "#15 --for: est_tokens= rides the root but no legend clause defines it"
+grep -o '<!--.*-->' "$TMP/p15_for100.xml" | grep -qE '(^|[^[:alnum:]_:.-])over_ceiling\s*=' \
+    && ok "#15 --for --token-budget=100: the legend defines over_ceiling=" \
+    || no "#15 --for --token-budget=100: over_ceiling= rides the root but no legend clause defines it"
 # (c) --handoff: priced, labelled, and withheld= is a boolean with the count beside it
 "$BIN" . --handoff --token-budget=100 --no-cache >"$TMP/p15_ho100.xml" 2>/dev/null
 "$BIN" . --handoff --token-budget=100000 --no-cache >"$TMP/p15_hobig.xml" 2>/dev/null
